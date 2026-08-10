@@ -1,0 +1,6 @@
+node_modules
+employee_app
+.git
+*.log
+*.tmp
+generate-icons.js

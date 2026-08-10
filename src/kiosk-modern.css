@@ -1,0 +1,386 @@
+/* =========================================
+   Pharmacy Enterprise Modern Kiosk Design System
+   ========================================= */
+
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Tajawal:wght@400;500;700;800&display=swap');
+
+:root {
+  --kiosk-bg-start: #0f172a;
+  --kiosk-bg-end: #1e293b;
+  --kiosk-primary: #10b981;
+  --kiosk-primary-hover: #059669;
+  --kiosk-glass-bg: rgba(255, 255, 255, 0.95);
+  --kiosk-border: rgba(226, 232, 240, 0.8);
+  --kiosk-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.25);
+}
+
+.kiosk-modern-container {
+  min-height: 100vh !important;
+  width: 100vw !important;
+  background: linear-gradient(135deg, #0f172a 0%, #0d9488 50%, #0284c7 100%) !important;
+  background-attachment: fixed !important;
+  color: #0f172a !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 2rem 1rem !important;
+  font-family: 'Tajawal', 'Cairo', sans-serif !important;
+  position: relative !important;
+  overflow-x: hidden !important;
+  box-sizing: border-box !important;
+}
+
+/* Ambient Animated Glow Orbs */
+.kiosk-modern-container::before {
+  content: '';
+  position: absolute;
+  top: -10%;
+  right: -10%;
+  width: 500px;
+  height: 500px;
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.3) 0%, rgba(16, 185, 129, 0) 70%);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 0;
+  animation: pulseGlow 8s infinite alternate ease-in-out;
+}
+
+.kiosk-modern-container::after {
+  content: '';
+  position: absolute;
+  bottom: -10%;
+  left: -10%;
+  width: 500px;
+  height: 500px;
+  background: radial-gradient(circle, rgba(14, 165, 233, 0.25) 0%, rgba(14, 165, 233, 0) 70%);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 0;
+  animation: pulseGlow 10s infinite alternate-reverse ease-in-out;
+}
+
+@keyframes pulseGlow {
+  0% { transform: scale(1) translate(0, 0); }
+  100% { transform: scale(1.2) translate(30px, -20px); }
+}
+
+.kiosk-content-wrapper {
+  z-index: 10 !important;
+  width: 100% !important;
+  max-width: 580px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 1.5rem !important;
+  margin: 0 auto !important;
+}
+
+/* Glass Header Card */
+.kiosk-glass-header {
+  background: rgba(255, 255, 255, 0.92) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.6) !important;
+  border-radius: 28px !important;
+  padding: 1.75rem 1.5rem !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  text-align: center !important;
+  gap: 0.5rem !important;
+  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.2) !important;
+}
+
+.kiosk-clock-main {
+  font-family: 'Cairo', sans-serif !important;
+  font-size: clamp(2.8rem, 8vw, 4.2rem) !important;
+  font-weight: 900 !important;
+  letter-spacing: 1px !important;
+  background: linear-gradient(135deg, #0f172a 0%, #0d9488 100%) !important;
+  -webkit-background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  margin: 0 !important;
+  line-height: 1.1 !important;
+  direction: ltr !important;
+  display: inline-block !important;
+}
+
+.kiosk-date-sub {
+  font-size: clamp(1rem, 3.5vw, 1.25rem) !important;
+  color: #059669 !important;
+  font-weight: 700 !important;
+  font-family: 'Tajawal', sans-serif !important;
+}
+
+/* Glass Main Panel */
+.kiosk-glass-panel {
+  background: rgba(255, 255, 255, 0.95) !important;
+  backdrop-filter: blur(25px) !important;
+  -webkit-backdrop-filter: blur(25px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.8) !important;
+  border-radius: 32px !important;
+  padding: 2.5rem 2rem !important;
+  box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.25) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+.kiosk-form {
+  width: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 1.5rem !important;
+  box-sizing: border-box !important;
+}
+
+/* Modern Input */
+.kiosk-glass-input {
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+  background: #f8fafc !important;
+  border: 2px solid #cbd5e1 !important;
+  border-radius: 18px !important;
+  padding: 1.2rem 1.5rem !important;
+  font-size: 1.6rem !important;
+  font-weight: 700 !important;
+  color: #0f172a !important;
+  text-align: center !important;
+  letter-spacing: 6px !important;
+  transition: all 0.25s ease-in-out !important;
+  outline: none !important;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.03) !important;
+  direction: ltr !important;
+}
+
+.kiosk-glass-input:focus {
+  border-color: #10b981 !important;
+  background: #ffffff !important;
+  box-shadow: 0 0 0 5px rgba(16, 185, 129, 0.2), inset 0 2px 4px rgba(0, 0, 0, 0.02) !important;
+}
+
+.kiosk-glass-input::placeholder {
+  color: #94a3b8 !important;
+  letter-spacing: normal !important;
+  font-size: 1.15rem !important;
+  font-weight: 500 !important;
+  direction: rtl !important;
+}
+
+/* Modern Submit Button */
+.kiosk-glass-submit {
+  width: 100% !important;
+  background: linear-gradient(135deg, #059669 0%, #10b981 100%) !important;
+  color: #ffffff !important;
+  border: none !important;
+  border-radius: 18px !important;
+  padding: 1.25rem 1.5rem !important;
+  font-size: 1.35rem !important;
+  font-weight: 800 !important;
+  font-family: 'Cairo', 'Tajawal', sans-serif !important;
+  cursor: pointer !important;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  box-shadow: 0 10px 25px -5px rgba(16, 185, 129, 0.4) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0.75rem !important;
+}
+
+.kiosk-glass-submit:hover {
+  background: linear-gradient(135deg, #047857 0%, #059669 100%) !important;
+  transform: translateY(-3px) !important;
+  box-shadow: 0 15px 30px -5px rgba(16, 185, 129, 0.5) !important;
+}
+
+.kiosk-glass-submit:active {
+  transform: translateY(-1px) !important;
+  box-shadow: 0 5px 15px -3px rgba(16, 185, 129, 0.3) !important;
+}
+
+/* Employee Banner */
+.kiosk-user-banner {
+  display: flex !important;
+  align-items: center !important;
+  gap: 1.2rem !important;
+  width: 100% !important;
+  padding-bottom: 1.5rem !important;
+  border-bottom: 2px solid #e2e8f0 !important;
+  margin-bottom: 1.5rem !important;
+}
+
+.kiosk-user-avatar {
+  width: 75px !important;
+  height: 75px !important;
+  border-radius: 50% !important;
+  background: #f0fdf4 !important;
+  color: #16a34a !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 2.2rem !important;
+  box-shadow: 0 8px 20px rgba(16, 185, 129, 0.2) !important;
+  object-fit: cover !important;
+  border: 3px solid #10b981 !important;
+  flex-shrink: 0 !important;
+}
+
+.kiosk-user-info {
+  flex: 1 !important;
+}
+
+.kiosk-user-name {
+  font-size: 1.45rem !important;
+  font-weight: 800 !important;
+  font-family: 'Cairo', sans-serif !important;
+  margin: 0 !important;
+  color: #0f172a !important;
+}
+
+.kiosk-user-role {
+  font-size: 1rem !important;
+  color: #475569 !important;
+  margin: 4px 0 0 0 !important;
+  font-weight: 600 !important;
+}
+
+.kiosk-logout-btn {
+  background: #f1f5f9 !important;
+  border: 1px solid #cbd5e1 !important;
+  color: #475569 !important;
+  padding: 0.7rem 1.2rem !important;
+  border-radius: 12px !important;
+  font-size: 0.95rem !important;
+  font-weight: 700 !important;
+  font-family: 'Tajawal', sans-serif !important;
+  cursor: pointer !important;
+  transition: all 0.2s ease !important;
+}
+
+.kiosk-logout-btn:hover {
+  background: #fee2e2 !important;
+  border-color: #fca5a5 !important;
+  color: #ef4444 !important;
+}
+
+/* Actions Grid */
+.kiosk-action-grid {
+  display: grid !important;
+  grid-template-columns: 1fr 1fr !important;
+  gap: 1.2rem !important;
+  width: 100% !important;
+}
+
+.kiosk-action-card {
+  background: #ffffff !important;
+  border: 2px solid #e2e8f0 !important;
+  border-radius: 20px !important;
+  padding: 1.5rem 1rem !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0.8rem !important;
+  cursor: pointer !important;
+  transition: all 0.25s ease-in-out !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03) !important;
+}
+
+.kiosk-action-card:hover {
+  transform: translateY(-4px) !important;
+  box-shadow: 0 15px 30px -5px rgba(0, 0, 0, 0.1) !important;
+}
+
+.kiosk-action-card:active {
+  transform: translateY(-1px) !important;
+}
+
+.kiosk-action-icon {
+  font-size: 2.5rem !important;
+  transition: transform 0.25s ease !important;
+}
+
+.kiosk-action-card:hover .kiosk-action-icon {
+  transform: scale(1.15) !important;
+}
+
+.kiosk-action-title {
+  font-size: 1.25rem !important;
+  font-weight: 800 !important;
+  font-family: 'Cairo', sans-serif !important;
+  color: #1e293b !important;
+}
+
+.kiosk-action-sub {
+  font-size: 0.9rem !important;
+  color: #64748b !important;
+  text-align: center !important;
+}
+
+/* Color Themes for Action Cards */
+.kiosk-action-card.start:hover {
+  border-color: #10b981 !important;
+  background: #f0fdf4 !important;
+}
+.kiosk-action-card.start:hover .kiosk-action-title { color: #047857 !important; }
+
+.kiosk-action-card.end:hover {
+  border-color: #ef4444 !important;
+  background: #fef2f2 !important;
+}
+.kiosk-action-card.end:hover .kiosk-action-title { color: #b91c1c !important; }
+
+.kiosk-action-card.break-out:hover {
+  border-color: #f59e0b !important;
+  background: #fffbeb !important;
+}
+.kiosk-action-card.break-out:hover .kiosk-action-title { color: #b45309 !important; }
+
+.kiosk-action-card.break-in:hover {
+  border-color: #3b82f6 !important;
+  background: #eff6ff !important;
+}
+.kiosk-action-card.break-in:hover .kiosk-action-title { color: #1d4ed8 !important; }
+
+/* Mobile Adaptability */
+@media (max-width: 600px) {
+  .kiosk-modern-container {
+    padding: 1rem !important;
+  }
+  .kiosk-glass-panel {
+    padding: 1.75rem 1.25rem !important;
+    border-radius: 24px !important;
+  }
+  .kiosk-glass-input {
+    font-size: 1.35rem !important;
+    padding: 1rem !important;
+    letter-spacing: 4px !important;
+  }
+  .kiosk-action-grid {
+    grid-template-columns: 1fr !important;
+    gap: 1rem !important;
+  }
+  .kiosk-action-card {
+    padding: 1.2rem !important;
+    flex-direction: row !important;
+    justify-content: flex-start !important;
+    gap: 1.2rem !important;
+  }
+  .kiosk-action-icon {
+    font-size: 2rem !important;
+  }
+  .kiosk-action-sub {
+    text-align: right !important;
+    margin-right: auto !important;
+  }
+  .kiosk-user-banner {
+    flex-direction: column !important;
+    text-align: center !important;
+  }
+  .kiosk-logout-btn {
+    width: 100% !important;
+  }
+}

@@ -1,0 +1,107 @@
+
+/* ═══ EMPLOYEE PORTAL STYLES ═══ */
+.emp-month-bar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 22px;margin:18px 0;box-shadow:var(--shadow)}
+.emp-month-label-group{display:flex;flex-direction:column;gap:2px}
+.emp-month-label-text{font-size:.78rem;color:var(--muted);font-weight:500}
+.emp-month-name{font-family:Cairo,sans-serif;font-size:1.1rem;font-weight:700;color:var(--text);display:flex;align-items:center;gap:8px}
+.emp-month-num-badge{background:var(--primary);color:#fff;border-radius:8px;padding:1px 10px;font-size:.78rem;font-weight:600}
+.emp-month-nav{display:flex;align-items:center;gap:10px}
+.month-nav-btn{background:var(--primary-tint);border:1px solid var(--border);color:var(--primary-dark);border-radius:8px;width:34px;height:34px;font-size:1.3rem;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .2s}
+.month-nav-btn:hover:not(:disabled){background:var(--primary);color:#fff;transform:scale(1.08)}
+.month-nav-btn:disabled{cursor:not-allowed;opacity:.4}
+.month-nav-display{font-weight:600;font-size:.95rem;color:var(--muted);min-width:70px;text-align:center}
+.ep-summary-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;margin-bottom:18px}
+.ep-summary-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;display:flex;align-items:center;gap:14px;box-shadow:var(--shadow);transition:transform .2s ease}
+.ep-summary-card:hover{transform:translateY(-2px)}
+.ep-summary-icon{font-size:1.7rem;flex-shrink:0}
+.ep-summary-body{flex:1;min-width:0}
+.ep-summary-label{font-size:.78rem;color:var(--muted);margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ep-summary-value{font-size:1.15rem;font-weight:700;font-family:Cairo,sans-serif;color:var(--text)}
+.ep-summary-sub{font-size:.74rem;color:var(--muted);margin-top:2px}
+.ep-tabs{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+.ep-tab{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:9px 18px;font-family:Tajawal,sans-serif;font-size:.92rem;font-weight:600;color:var(--muted);cursor:pointer;display:flex;align-items:center;gap:6px;transition:all .2s ease}
+.ep-tab:hover{color:var(--primary);border-color:var(--primary)}
+.ep-tab.active{background:var(--primary);color:#fff;border-color:var(--primary);box-shadow:0 4px 12px rgba(13,148,136,.3)}
+.ep-tab-badge{background:rgba(255,255,255,.3);color:#fff;border-radius:20px;padding:0 7px;font-size:.75rem;font-weight:700}
+.ep-tab:not(.active) .ep-tab-badge{background:var(--primary-tint);color:var(--primary-dark)}
+.ep-tab-content{margin-top:0}
+.ep-section-header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.ep-section-header h3{font-size:1rem;font-weight:700;color:var(--text)}
+.ep-count-badge{background:var(--primary-tint);color:var(--primary-dark);border-radius:20px;padding:3px 12px;font-size:.82rem;font-weight:600}
+.ep-time-badge{border-radius:6px;padding:2px 8px;font-size:.9rem;font-weight:600;font-family:monospace}
+.ep-time-in{background:var(--success-tint);color:var(--success)}
+.ep-time-out{background:var(--danger-tint);color:var(--danger)}
+.ep-break-badge{background:var(--accent-tint);color:var(--accent);border-radius:6px;padding:2px 8px;font-size:.85rem;font-weight:600}
+.ep-salary-breakdown{display:flex;flex-direction:column;gap:16px;margin-top:16px}
+.ep-breakdown-section{background:var(--bg);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.ep-breakdown-title{background:var(--primary-tint);color:var(--primary-dark);padding:10px 18px;font-weight:700;font-size:.95rem;display:flex;align-items:center;gap:8px;font-family:Cairo,sans-serif}
+.ep-breakdown-rows{padding:10px 0}
+.ep-breakdown-row{display:flex;align-items:center;justify-content:space-between;padding:8px 18px;font-size:.9rem;border-bottom:1px solid var(--border)}
+.ep-breakdown-row:last-child{border-bottom:none}
+.ep-breakdown-label{color:var(--muted);flex:1}
+.ep-breakdown-value{font-weight:600;color:var(--text);text-align:left}
+.ep-breakdown-value.highlight{color:var(--primary);font-size:1.05rem}
+.ep-breakdown-total{background:var(--primary-tint)}
+.ep-breakdown-total .ep-breakdown-label{color:var(--primary-dark);font-weight:600}
+.ep-breakdown-total .ep-breakdown-value{color:var(--primary-dark)}
+.ep-breakdown-result{background:linear-gradient(90deg,var(--primary-tint),transparent)}
+.ep-breakdown-formula{padding:6px 18px;font-size:.8rem;color:var(--muted);font-style:italic;border-top:1px dashed var(--border);direction:ltr;text-align:left}
+.ep-breakdown-net-section{border:2px solid var(--primary)}
+.ep-breakdown-net-section .ep-breakdown-title{background:var(--primary);color:#fff}
+.ep-net-salary-box{margin:16px 18px;background:linear-gradient(135deg,var(--primary),var(--primary-dark));border-radius:14px;padding:20px 24px;text-align:center;color:#fff;box-shadow:0 6px 24px rgba(13,148,136,.35)}
+.ep-net-label{font-size:.88rem;opacity:.85;margin-bottom:2px}
+.ep-net-month{font-size:.92rem;font-weight:600;opacity:.9;margin-bottom:8px}
+.ep-net-amount{font-family:Cairo,sans-serif;font-size:2.4rem;font-weight:700;line-height:1.1}
+.ep-net-currency{font-size:1.1rem;font-weight:500;opacity:.85}
+.ep-adj-sub-title{font-weight:700;font-size:.98rem;margin-bottom:10px;padding-bottom:6px;border-bottom:2px solid var(--border);font-family:Cairo,sans-serif}
+.ep-empty-msg{color:var(--muted);font-style:italic;padding:14px 0;font-size:.9rem}
+.ep-header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px}
+:root{--warning:#D97706;--primary-ultra-light:#f0fdf9}
+[data-theme=dark]{--warning:#F59E0B;--primary-ultra-light:#0d2920}
+
+/* Employee Portal Responsive Enhancements */
+@media (max-width: 640px) {
+  .emp-month-bar {
+    padding: 12px 14px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .emp-month-nav {
+    justify-content: space-between;
+  }
+  .ep-summary-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .ep-summary-card {
+    padding: 12px 14px;
+    gap: 10px;
+  }
+  .ep-summary-icon {
+    font-size: 1.4rem;
+  }
+  .ep-summary-value {
+    font-size: 1.05rem;
+  }
+  .ep-tabs {
+    overflow-x: auto;
+    white-space: nowrap;
+    padding-bottom: 6px;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+  .ep-tab {
+    padding: 8px 14px;
+    font-size: 0.85rem;
+    flex-shrink: 0;
+  }
+  .ep-net-salary-box {
+    margin: 12px 10px;
+    padding: 16px;
+  }
+  .ep-net-amount {
+    font-size: 1.8rem;
+  }
+}
+

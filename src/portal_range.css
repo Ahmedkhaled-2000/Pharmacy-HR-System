@@ -1,0 +1,21 @@
+
+/* ═══ EP PERIOD SELECTOR BAR ═══ */
+.ep-period-bar{display:flex;flex-direction:column;gap:12px;padding:16px 20px;margin:16px 0}
+.ep-period-mode-toggle{display:flex;gap:8px;flex-wrap:wrap;direction:rtl}
+.ep-mode-btn{background:var(--bg);border:1.5px solid var(--border);border-radius:10px;padding:8px 18px;font-family:Tajawal,sans-serif;font-size:.9rem;font-weight:600;color:var(--muted);cursor:pointer;transition:all .2s ease;display:flex;align-items:center;gap:6px}
+.ep-mode-btn:hover{border-color:var(--primary);color:var(--primary)}
+.ep-mode-btn.active{background:var(--primary);color:#fff;border-color:var(--primary);box-shadow:0 4px 12px rgba(13,148,136,.28)}
+.ep-period-controls{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;direction:rtl}
+.ep-range-fields{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;direction:rtl;width:100%}
+.emp-month-input-wrap{display:flex;flex-direction:column;gap:3px}
+.emp-month-input-label{font-size:.75rem;color:var(--muted);font-weight:600;text-align:right}
+.emp-month-input{border:1.5px solid var(--border);border-radius:10px;padding:8px 12px;font-family:Tajawal,sans-serif;font-size:.92rem;font-weight:600;color:var(--text);background:var(--surface);cursor:pointer;outline:none;transition:border-color .2s,box-shadow .2s;min-width:140px;direction:ltr;text-align:center}
+.emp-month-input:hover,.emp-month-input:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(13,148,136,.12)}
+.ep-range-sep{font-size:1.2rem;color:var(--muted);padding-bottom:8px;flex-shrink:0;align-self:flex-end}
+.ep-range-error{font-size:.8rem;color:var(--danger);background:var(--danger-tint);border-radius:8px;padding:4px 10px;align-self:flex-end}
+.ep-range-clear-btn{background:var(--danger-tint);border:1.5px solid var(--danger);color:var(--danger);border-radius:10px;padding:8px 14px;font-family:Tajawal,sans-serif;font-size:.85rem;font-weight:700;cursor:pointer;transition:all .2s;align-self:flex-end;display:flex;align-items:center;gap:4px}
+.ep-range-clear-btn:hover{background:var(--danger);color:#fff}
+.ep-range-hint{font-size:.82rem;color:var(--muted);font-style:italic;margin:0;text-align:right}
+.ep-period-display{display:flex;align-items:center;gap:8px;padding-top:10px;border-top:1px dashed var(--border);direction:rtl}
+.ep-period-display-label{font-size:.82rem;color:var(--muted);font-weight:600}
+.ep-period-display-value{background:var(--primary-tint);color:var(--primary-dark);border-radius:20px;padding:4px 16px;font-size:.9rem;font-weight:700;font-family:Tajawal,sans-serif;letter-spacing:.5px}

@@ -1,0 +1,34 @@
+
+/* ═══ MONTH PICKER EXTENDED STYLES ═══ */
+.emp-month-picker-group{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.emp-month-input-wrap{display:flex;flex-direction:column;gap:3px}
+.emp-month-input-label{font-size:.72rem;color:var(--muted);font-weight:500}
+.emp-month-input{
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:7px 12px;
+  font-family:Tajawal,sans-serif;
+  font-size:.95rem;
+  font-weight:600;
+  color:var(--text);
+  background:var(--surface);
+  cursor:pointer;
+  outline:none;
+  transition:border-color .2s,box-shadow .2s;
+  min-width:160px;
+}
+.emp-month-input:hover,.emp-month-input:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(13,148,136,.12)}
+.emp-month-today-btn{
+  background:var(--accent-tint);
+  border:1px solid var(--accent);
+  color:var(--accent);
+  border-radius:10px;
+  padding:7px 14px;
+  font-family:Tajawal,sans-serif;
+  font-size:.85rem;
+  font-weight:600;
+  cursor:pointer;
+  transition:all .2s;
+  white-space:nowrap;
+}
+.emp-month-today-btn:hover{background:var(--accent);color:#fff}

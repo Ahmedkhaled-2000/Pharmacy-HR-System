@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>إدارة خادم الواتساب - مؤسسة الموارد البشرية والبصمات</title>
+  <HTA:APPLICATION
+    ID="WhatsAppServerApp"
+    APPLICATIONNAME="WhatsAppServerControl"
+    BORDER="thin"
+    BORDERSTYLE="normal"
+    CAPTION="yes"
+    ICON=""
+    MAXIMIZEBUTTON="no"
+    MINIMIZEBUTTON="yes"
+    INNERBORDER="no"
+    SCROLL="no"
+    SINGLEINSTANCE="yes"
+    SYSMENU="yes"
+    WINDOWSTATE="normal"
+  />
+  <style>
+    * {
+      box-sizing: border-box;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      user-select: none;
+    }
+    body {
+      background-color: #EFEFEF;
+      margin: 0;
+      padding: 16px;
+      direction: rtl;
+      text-align: center;
+      color: #111827;
+      overflow: hidden;
+    }
+    .header-title {
+      font-size: 20px;
+      font-weight: 800;
+      margin: 4px 0 6px 0;
+      color: #0F172A;
+    }
+    .status-badge {
+      font-size: 13.5px;
+      font-weight: 700;
+      margin-bottom: 16px;
+      padding: 6px 12px;
+      border-radius: 8px;
+      display: inline-block;
+    }
+    .status-stopped {
+      color: #DC2626;
+    }
+    .status-running {
+      color: #16A34A;
+    }
+    .btn-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .btn-main {
+      width: 100%;
+      padding: 11px 14px;
+      border: none;
+      border-radius: 6px;
+      color: #FFFFFF;
+      font-size: 14.5px;
+      font-weight: 700;
+      cursor: pointer;
+      text-align: center;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.12);
+    }
+    .btn-green { background-color: #22C55E; }
+    .btn-green:hover { background-color: #16A34A; }
+
+    .btn-blue { background-color: #3B82F6; }
+    .btn-blue:hover { background-color: #2563EB; }
+
+    .btn-red { background-color: #EF4444; }
+    .btn-red:hover { background-color: #DC2626; }
+
+    .btn-gray { background-color: #9CA3AF; }
+    .btn-gray:hover { background-color: #6B7280; }
+
+    .btn-purple { background-color: #A855F7; }
+    .btn-purple:hover { background-color: #9333EA; }
+
+    .btn-orange { background-color: #F97316; }
+    .btn-orange:hover { background-color: #EA580C; }
+
+    .tunnel-box {
+      border: 1px solid #D1D5DB;
+      border-radius: 10px;
+      padding: 14px;
+      background-color: #F9FAFB;
+      margin-top: 6px;
+      text-align: center;
+    }
+    .tunnel-title {
+      font-size: 14px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: #1F2937;
+    }
+    .tunnel-status {
+      font-size: 12.5px;
+      color: #16A34A;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .tunnel-input {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #D1D5DB;
+      border-radius: 6px;
+      text-align: center;
+      direction: ltr;
+      font-weight: 600;
+      font-size: 13px;
+      margin-bottom: 10px;
+      background: #FFFFFF;
+    }
+    .tunnel-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 8px;
+    }
+    .tunnel-actions .btn-main {
+      flex: 1;
+      padding: 9px;
+      font-size: 13.5px;
+    }
+  </style>
+
+  <script language="VBScript">
+    Sub Window_OnLoad
+      window.resizeTo 460, 680
+      CheckServerStatus
+      setInterval "CheckServerStatus", 3000
+    End Sub
+
+    Sub StartServer
+      Dim WshShell
+      Set WshShell = CreateObject("WScript.Shell")
+      ' 0 parameter runs node silently in background without terminal console window
+      WshShell.Run "cmd /c node server/whatsapp-server.js > server.log 2>&1", 0, False
+      MsgBox "تم تشغيل خادم الواتساب بنجاح في الخلفية بدون شاشات ترمينال! 🟢", 64, "إدارة الخادم"
+      CheckServerStatus
+    End Sub
+
+    Sub CheckNetworkInfo
+      Dim WshShell, IP
+      Set WshShell = CreateObject("WScript.Shell")
+      MsgBox "عنوان الخادم المحلي: http://localhost:3001" & vbCrLf & "المنفذ المخصص: 3001" & vbCrLf & "حالة الخدمة: جاهز للاستقبال والإرسال 🟢", 64, "معلومات الشبكة"
+    End Sub
+
+    Sub StopServer
+      Dim WshShell
+      Set WshShell = CreateObject("WScript.Shell")
+      WshShell.Run "cmd /c taskkill /f /im node.exe", 0, True
+      MsgBox "تم إيقاف خادم الواتساب بنجاح! 🔴", 64, "إدارة الخادم"
+      CheckServerStatus
+    End Sub
+
+    Sub ViewLogs
+      Dim WshShell
+      Set WshShell = CreateObject("WScript.Shell")
+      WshShell.Run "cmd /c if exist server.log (notepad server.log) else (echo لا توجد سجلات حالياً > server.log & notepad server.log)", 0, False
+    End Sub
+
+    Sub AllowFirewall
+      Dim WshShell
+      Set WshShell = CreateObject("WScript.Shell")
+      WshShell.Run "cmd /c netsh advfirewall firewall add rule name=""WhatsApp_Server_3001"" dir=in action=allow protocol=TCP localport=3001", 0, True
+      MsgBox "تم السماح للمنفذ 3001 في جدار الحماية (Firewall) بنجاح! 🛡️", 64, "جدار الحماية"
+    End Sub
+
+    Sub StartTunnel
+      Dim WshShell
+      Set WshShell = CreateObject("WScript.Shell")
+      WshShell.Run "cmd /c npx localtunnel --port 3001 --subdomain funny-sloth-89 > tunnel.log 2>&1", 0, False
+      document.getElementById("tunnelStatusText").innerText = "رابط الإنترنت: يعمل بنجاح 🟢"
+      MsgBox "تم تشغيل رابط الإنترنت العام بنجاح! 🌐", 64, "رابط الإنترنت"
+    End Sub
+
+    Sub StopTunnel
+      Dim WshShell
+      Set WshShell = CreateObject("WScript.Shell")
+      WshShell.Run "cmd /c taskkill /f /im node.exe", 0, True
+      document.getElementById("tunnelStatusText").innerText = "رابط الإنترنت: متوقف حالياً 🔴"
+      MsgBox "تم إيقاف رابط الإنترنت بنجاح! 🔴", 64, "رابط الإنترنت"
+    End Sub
+
+    Sub CopyTunnelUrl
+      Dim ClipboardText
+      ClipboardText = document.getElementById("tunnelUrlInput").value
+      window.clipboardData.setData "Text", ClipboardText
+      MsgBox "تم نسخ رابط الإنترنت بنجاح: " & ClipboardText, 64, "نسخ الرابط"
+    End Sub
+
+    Sub CheckServerStatus
+      On Error Resume Next
+      Dim xmlhttp
+      Set xmlhttp = CreateObject("MSXML2.XMLHTTP")
+      xmlhttp.Open "GET", "http://localhost:3001/health", False
+      xmlhttp.Send
+      If xmlhttp.Status = 200 Then
+        document.getElementById("statusText").innerText = "الحالة: الخادم يعمل حالياً (RUNNING) 🟢"
+        document.getElementById("statusText").className = "status-badge status-running"
+      Else
+        document.getElementById("statusText").innerText = "الحالة: الخادم متوقف حالياً (NOT RUNNING) 🔴"
+        document.getElementById("statusText").className = "status-badge status-stopped"
+      End If
+    End Sub
+  </script>
+</head>
+<body>
+
+  <div class="header-title">لوحة تحكم خادم الواتساب (المحلي والإنترنت)</div>
+  <div id="statusText" class="status-badge status-stopped">الحالة: الخادم متوقف حالياً (NOT RUNNING)</div>
+
+  <div class="btn-stack">
+    <button className="btn-main btn-green" onclick="StartServer()">▶ 1. تشغيل خادم الواتساب (في الخلفية)</button>
+    <button className="btn-main btn-blue" onclick="CheckNetworkInfo()">📊 2. معرفة حالة الخادم وعنوان الشبكة</button>
+    <button className="btn-main btn-red" onclick="StopServer()">⏹ 3. إيقاف خادم الواتساب</button>
+    <button className="btn-main btn-gray" onclick="ViewLogs()">📋 4. عرض آخر السجلات (Logs)</button>
+    <button className="btn-main btn-purple" onclick="AllowFirewall()">🛡️ 5. السماح للمنفذ 3001 في جدار الحماية (Firewall)</button>
+  </div>
+
+  <div class="tunnel-box">
+    <div class="tunnel-title">🌐 قسم رابط الإنترنت العام (Internet Tunnel)</div>
+    <div id="tunnelStatusText" class="tunnel-status">رابط الإنترنت: يعمل بنجاح 🟢</div>
+    <input type="text" id="tunnelUrlInput" class="tunnel-input" value="https://funny-sloth-89.loca.lt" readonly />
+
+    <button class="btn-main btn-orange" onclick="StartTunnel()">▶ 6. تشغيل رابط الإنترنت للموظفين</button>
+    
+    <div class="tunnel-actions">
+      <button className="btn-main btn-red" onclick="StopTunnel()">⏹ إيقاف الرابط</button>
+      <button className="btn-main btn-blue" onclick="CopyTunnelUrl()">📋 نسخ الرابط</button>
+    </div>
+  </div>
+
+</body>
+</html>

@@ -1,0 +1,37 @@
+name: Automated Supabase Backup
+
+on:
+  schedule:
+    # Runs every day at 3:00 AM UTC (6:00 AM KSA)
+    - cron: '0 3 * * *'
+  workflow_dispatch: # Allows you to manually trigger the backup from GitHub Actions tab
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Create Backup
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          mkdir -p backups
+          if [ -z "$SUPABASE_DB_URL" ]; then
+            echo "Error: SUPABASE_DB_URL secret is not set!"
+            exit 1
+          fi
+          echo "Dumping database..."
+          pg_dump "$SUPABASE_DB_URL" > backups/HR_Backup_$(date +'%Y-%m-%d').sql
+          echo "Dump completed!"
+
+      - name: Upload Backup as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-database-backup
+          path: backups/
+          retention-days: 30 # Backups are stored safely on GitHub for 30 days
