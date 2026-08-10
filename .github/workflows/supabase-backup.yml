@@ -33,7 +33,7 @@ jobs:
             exit 1
           fi
           echo "Dumping database..."
-          /usr/lib/postgresql/17/bin/pg_dump "$SUPABASE_DB_URL" > backups/HR_Backup_$(date +'%Y-%m-%d').sql
+          /usr/lib/postgresql/17/bin/pg_dump --schema=public --clean --if-exists --inserts "$SUPABASE_DB_URL" > backups/HR_Backup_$(date +'%Y-%m-%d').sql
           echo "Dump completed!"
 
       - name: Upload Backup as Artifact
