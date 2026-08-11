@@ -9,7 +9,8 @@ export default function PayslipPrintModal({
   shifts = [],
   adjustments = [],
   orgSettings = {},
-  computeEmpSummary
+  computeEmpSummary,
+  selectedBranchId = null
 }) {
   if (!isOpen || !emp) return null;
 
@@ -26,21 +27,23 @@ export default function PayslipPrintModal({
   const empShifts = shifts.filter((s) => s.employeeId === emp.id && s.date.startsWith(month));
   const empAdjs = adjustments.filter((a) => (a.employeeId === emp.id || a.employeeId === 'all') && a.date.startsWith(month));
 
-  const totalHours = Math.round(empShifts.reduce((acc, s) => acc + (s.hours || 0), 0) * 100) / 100;
+  // Use computeEmpSummary for accurate calculations including branch selection
+  const summary = computeEmpSummary 
+    ? computeEmpSummary(emp.id, (d) => d.startsWith(month), month, selectedBranchId)
+    : { hours: 0, dailyRate: 0, rate: 0, baseEarnings: 0, totalBonus: 0, totalDeduction: 0, absenceDeduction: 0, netSalary: 0 };
+
+  const totalHours = summary.hours || 0;
   const totalBreakHours = Math.round(empShifts.reduce((acc, s) => acc + (s.breakHours || 0), 0) * 100) / 100;
 
-  const baseSalary = emp.salary || 4000;
-  const workHoursPerDay = emp.workHoursPerDay || emp.workHours || 8;
-  const workDaysPerMonth = emp.workDaysPerMonth || emp.workDays || 26;
+  const dailyRate = summary.dailyRate || 0;
+  const hourlyRate = summary.rate || 0;
+  const baseEarnings = summary.baseEarnings || 0;
 
-  const dailyRate = Math.round((baseSalary / workDaysPerMonth) * 100) / 100;
-  const hourlyRate = Math.round((dailyRate / workHoursPerDay) * 100) / 100;
-  const baseEarnings = Math.round(totalHours * hourlyRate * 100) / 100;
+  const totalBonus = summary.totalBonus || 0;
+  const totalDeduction = summary.totalDeduction || 0;
+  const absenceDeduction = summary.absenceDeduction || 0;
 
-  const totalBonus = empAdjs.filter((a) => a.type === 'bonus').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
-  const totalDeduction = empAdjs.filter((a) => a.type === 'deduction' || a.type === 'penalty').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
-
-  const netSalary = Math.round((baseEarnings + totalBonus - totalDeduction) * 100) / 100;
+  const netSalary = summary.netSalary || 0;
 
   const handlePrint = () => {
     window.print();

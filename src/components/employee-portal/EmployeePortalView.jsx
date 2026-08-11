@@ -1148,6 +1148,8 @@ export default function EmployeePortalView({
                 shifts={state.shifts || []}
                 adjustments={state.adjustments || []}
                 orgSettings={orgSettings}
+                computeEmpSummary={computeEmpSummary}
+                selectedBranchId={selectedBranchId || null}
               />
 
               {!canViewSalary ? (
@@ -1163,9 +1165,9 @@ export default function EmployeePortalView({
                   <div className="ep-breakdown-section">
                     <div className="ep-breakdown-title"><span className="ep-breakdown-icon">⚙️</span>احتساب سعر الساعة اليومي</div>
                     <div className="ep-breakdown-rows">
-                      <div className="ep-breakdown-row"><span className="ep-breakdown-label">سعر الساعة الشهرية (الراتب الأساسي)</span><span className="ep-breakdown-value">{fmt(emp.salary)} ج.م</span></div>
-                      <div className="ep-breakdown-row"><span className="ep-breakdown-label">ساعات العمل اليومية المحددة</span><span className="ep-breakdown-value">{workHoursPerDay} ساعة / يوم</span></div>
-                      <div className="ep-breakdown-row"><span className="ep-breakdown-label">أيام العمل الشهرية المحددة</span><span className="ep-breakdown-value">{workDaysPerMonth} يوم / شهر</span></div>
+                      <div className="ep-breakdown-row"><span className="ep-breakdown-label">سعر الساعة الشهرية (الراتب الأساسي)</span><span className="ep-breakdown-value">{selectedBranchId ? fmt(emp.branchesDetails?.find(b => b.branchId === selectedBranchId)?.salary || emp.salary) : fmt(emp.salary)} ج.م</span></div>
+                      <div className="ep-breakdown-row"><span className="ep-breakdown-label">ساعات العمل اليومية المحددة</span><span className="ep-breakdown-value">{selectedBranchId ? (emp.branchesDetails?.find(b => b.branchId === selectedBranchId)?.workHoursPerDay || workHoursPerDay) : workHoursPerDay} ساعة / يوم</span></div>
+                      <div className="ep-breakdown-row"><span className="ep-breakdown-label">أيام العمل الشهرية المحددة</span><span className="ep-breakdown-value">{selectedBranchId ? (emp.branchesDetails?.find(b => b.branchId === selectedBranchId)?.workDaysPerMonth || workDaysPerMonth) : workDaysPerMonth} يوم / شهر</span></div>
                       <div className="ep-breakdown-row"><span className="ep-breakdown-label">سعر اليوم (المحسوب)</span><span className="ep-breakdown-value">{fmt(summary.dailyRate)} ج.م / يوم</span></div>
                       <div className="ep-breakdown-row ep-breakdown-result"><span className="ep-breakdown-label">✅ سعر الساعة اليومي المحسوب</span><span className="ep-breakdown-value highlight">{fmt(summary.rate)} ج.م / ساعة</span></div>
                     </div>

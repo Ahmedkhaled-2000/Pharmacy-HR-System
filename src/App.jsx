@@ -1352,7 +1352,7 @@ export default function App() {
       const workHoursPerDay = parseFloat(b.workHoursPerDay) || WORK_HOURS_PER_DAY;
       const workDaysPerMonth = parseFloat(b.workDaysPerMonth) || WORK_DAYS_PER_MONTH;
 
-      const dailyRate = workDaysPerMonth > 0 ? (workHoursPerDay * salary) / workDaysPerMonth : 0;
+      const dailyRate = workDaysPerMonth > 0 ? salary / workDaysPerMonth : 0;
       const rate = workHoursPerDay > 0 ? dailyRate / workHoursPerDay : 0;
 
       // shifts for this branch (fallback to true if shift has no branch and employee only has 1 branch)
