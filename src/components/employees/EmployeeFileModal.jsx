@@ -25,16 +25,16 @@ export default function EmployeeFileModal({
   const [code, setCode] = useState('');
   const [jobTitle, setJobTitle] = useState('');
   const [department, setDepartment] = useState('الصيدلية');
-  const [branchId, setBranchId] = useState('');
+  
+  // 3. Financial & Branches & Schedule (Multi-Branch Support)
+  const [branchesDetails, setBranchesDetails] = useState([
+    { id: Date.now().toString(), branchId: '', salary: '4000', workHours: '8', workDays: '26' }
+  ]);
+
   const [hireDate, setHireDate] = useState('');
   const [contractType, setContractType] = useState('دوام كامل');
   const [status, setStatus] = useState('على رأس العمل'); // 'على رأس العمل' | 'تم الاستقالة'
   const [password, setPassword] = useState('123');
-
-  // 3. Financial & Schedule
-  const [salary, setSalary] = useState('4000');
-  const [workHours, setWorkHours] = useState('8');
-  const [workDays, setWorkDays] = useState('26');
   const [annualLeaveBalance, setAnnualLeaveBalance] = useState('21');
 
   // 4. Documents Data (Array of { id, title, fileUrl, fileType, uploadedAt })
@@ -58,15 +58,33 @@ export default function EmployeeFileModal({
       setCode(editingEmp.code || '');
       setJobTitle(editingEmp.jobTitle || '');
       setDepartment(editingEmp.department || 'الصيدلية');
-      setBranchId(editingEmp.branchId || (branches[0]?.id || ''));
+      
+      // Load branchesDetails if they exist, otherwise fallback to legacy fields
+      if (editingEmp.branchesDetails && editingEmp.branchesDetails.length > 0) {
+        setBranchesDetails(editingEmp.branchesDetails.map(bd => ({
+          id: Math.random().toString(),
+          branchId: bd.branchId || '',
+          salary: String(bd.salary || '4000'),
+          workHours: String(bd.workHoursPerDay || bd.workHours || '8'),
+          workDays: String(bd.workDaysPerMonth || bd.workDays || '26')
+        })));
+      } else {
+        setBranchesDetails([
+          { 
+            id: Math.random().toString(),
+            branchId: editingEmp.branchId || (branches[0]?.id || ''),
+            salary: String(editingEmp.salary || '4000'),
+            workHours: String(editingEmp.workHoursPerDay || editingEmp.workHours || '8'),
+            workDays: String(editingEmp.workDaysPerMonth || editingEmp.workDays || '26')
+          }
+        ]);
+      }
+
       setHireDate(editingEmp.hireDate || '');
       setContractType(editingEmp.contractType || 'دوام كامل');
       setStatus(editingEmp.status || 'على رأس العمل');
       setPassword(editingEmp.password || '123');
 
-      setSalary(String(editingEmp.salary || '4000'));
-      setWorkHours(String(editingEmp.workHoursPerDay || editingEmp.workHours || '8'));
-      setWorkDays(String(editingEmp.workDaysPerMonth || editingEmp.workDays || '26'));
       setAnnualLeaveBalance(String(editingEmp.annualLeaveBalance !== undefined ? editingEmp.annualLeaveBalance : '21'));
 
       setDocuments(editingEmp.documents || [
@@ -89,15 +107,16 @@ export default function EmployeeFileModal({
       setCode(nextCode);
       setJobTitle('مساعد صيدلي');
       setDepartment('الصيدلية');
-      setBranchId(branches[0]?.id || '');
+      
+      setBranchesDetails([
+        { id: Math.random().toString(), branchId: branches[0]?.id || '', salary: '4000', workHours: '8', workDays: '26' }
+      ]);
+      
       setHireDate(new Date().toISOString().slice(0, 10));
       setContractType('دوام كامل');
       setStatus('على رأس العمل');
       setPassword('123');
 
-      setSalary('4000');
-      setWorkHours('8');
-      setWorkDays('26');
       setAnnualLeaveBalance('21');
 
       setDocuments([
@@ -168,6 +187,19 @@ export default function EmployeeFileModal({
       return;
     }
 
+    // Make sure we have valid data
+    const validBranchesDetails = branchesDetails.filter(b => b.branchId).map(b => ({
+      branchId: b.branchId,
+      salary: parseFloat(b.salary) || 4000,
+      workHoursPerDay: parseFloat(b.workHours) || 8,
+      workDaysPerMonth: parseFloat(b.workDays) || 26
+    }));
+
+    if (validBranchesDetails.length === 0) {
+      alert('يرجى تحديد فرع واحد على الأقل وتفاصيله المالية.');
+      return;
+    }
+
     const employeeData = {
       id: editingEmp ? editingEmp.id : `emp_${Date.now()}`,
       name: name.trim(),
@@ -183,14 +215,18 @@ export default function EmployeeFileModal({
       username: code,
       jobTitle,
       department,
-      branchId,
+      // For backwards compatibility and main branch logic, use the first branch's details
+      branchId: validBranchesDetails[0].branchId,
+      salary: validBranchesDetails[0].salary,
+      workHoursPerDay: validBranchesDetails[0].workHoursPerDay,
+      workDaysPerMonth: validBranchesDetails[0].workDaysPerMonth,
+      // Store all branches details here
+      branchesDetails: validBranchesDetails,
+      
       hireDate,
       contractType,
       status,
       password,
-      salary: parseFloat(salary) || 4000,
-      workHoursPerDay: parseFloat(workHours) || 8,
-      workDaysPerMonth: parseFloat(workDays) || 26,
       annualLeaveBalance: parseFloat(annualLeaveBalance) || 21,
       documents,
       createdAt: editingEmp ? editingEmp.createdAt : new Date().toISOString()
@@ -335,16 +371,54 @@ export default function EmployeeFileModal({
                 <input type="text" value={department} onChange={(e) => setDepartment(e.target.value)} placeholder="الصيدلية / الإدارة" />
               </div>
 
-              <div className="field">
-                <label>الفرع الذي يعمل به</label>
-                <select value={branchId} onChange={(e) => setBranchId(e.target.value)}>
-                  <option value="">-- اختر الفرع --</option>
-                  {branches.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name} ({b.branchCode})
-                    </option>
-                  ))}
-                </select>
+              <div className="field" style={{ gridColumn: 'span 2' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label>الفروع المعين بها (متعدد الفروع)</label>
+                  <button 
+                    type="button" 
+                    className="btn btn-ghost" 
+                    style={{ fontSize: '12px' }}
+                    onClick={() => {
+                      setBranchesDetails([...branchesDetails, { id: Math.random().toString(), branchId: '', salary: '4000', workHours: '8', workDays: '26' }]);
+                    }}
+                  >
+                    ➕ إضافة فرع آخر
+                  </button>
+                </div>
+                
+                {branchesDetails.map((bd, idx) => (
+                  <div key={bd.id} style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'center' }}>
+                    <select 
+                      value={bd.branchId} 
+                      onChange={(e) => {
+                        const newBd = [...branchesDetails];
+                        newBd[idx].branchId = e.target.value;
+                        setBranchesDetails(newBd);
+                      }}
+                      style={{ flex: 1 }}
+                    >
+                      <option value="">-- اختر الفرع --</option>
+                      {branches.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.name} ({b.branchCode})
+                        </option>
+                      ))}
+                    </select>
+                    {branchesDetails.length > 1 && (
+                      <button 
+                        type="button" 
+                        className="del-btn" 
+                        style={{ padding: '6px' }}
+                        onClick={() => {
+                          const newBd = branchesDetails.filter((_, i) => i !== idx);
+                          setBranchesDetails(newBd);
+                        }}
+                      >
+                        ❌
+                      </button>
+                    )}
+                  </div>
+                ))}
               </div>
 
               <div className="field">
@@ -426,25 +500,49 @@ export default function EmployeeFileModal({
 
           {/* TAB 3: Financial & Work Schedule */}
           {activeTab === 'financial' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div className="field">
-                <label>سعر الساعة الشهري / الراتب الأساسي (ج.م)</label>
-                <input type="number" value={salary} onChange={(e) => setSalary(e.target.value)} placeholder="4000" required />
-                <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
-                  * يتم حساب سعر الساعة في نظام الأجور بـ: الراتب الأساسي ÷ (عدد أيام العمل × عدد ساعات اليوم)
-                </span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div style={{ fontSize: '13px', color: 'var(--muted)', background: 'var(--surface)', padding: '10px', borderRadius: '8px' }}>
+                * يمكنك تحديد الراتب وساعات العمل لكل فرع تم تعيين الموظف به بشكل مستقل.
+                <br />
+                * يتم حساب سعر الساعة في نظام الأجور بـ: الراتب الأساسي ÷ (عدد أيام العمل × عدد ساعات اليوم).
               </div>
+              
+              {branchesDetails.map((bd, idx) => {
+                const branchName = branches.find(b => b.id === bd.branchId)?.name || `فرع غير محدد (${idx + 1})`;
+                return (
+                  <div key={bd.id} style={{ background: 'var(--primary-tint)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>
+                    <h4 style={{ margin: '0 0 12px 0', color: 'var(--primary-dark)', fontFamily: 'Cairo' }}>💰 بيانات: {branchName}</h4>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px' }}>
+                      <div className="field">
+                        <label>الراتب الأساسي الشهري (ج.م)</label>
+                        <input type="number" value={bd.salary} onChange={(e) => {
+                          const newBd = [...branchesDetails];
+                          newBd[idx].salary = e.target.value;
+                          setBranchesDetails(newBd);
+                        }} placeholder="4000" required />
+                      </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
-                <div className="field">
-                  <label>عدد أيام العمل الشهرية (يوم)</label>
-                  <input type="number" value={workDays} onChange={(e) => setWorkDays(e.target.value)} placeholder="26" required />
-                </div>
-                <div className="field">
-                  <label>عدد ساعات العمل اليومية (ساعة/شيفت)</label>
-                  <input type="number" value={workHours} onChange={(e) => setWorkHours(e.target.value)} placeholder="8" required />
-                </div>
-              </div>
+                      <div className="field">
+                        <label>أيام العمل الشهرية (يوم)</label>
+                        <input type="number" value={bd.workDays} onChange={(e) => {
+                          const newBd = [...branchesDetails];
+                          newBd[idx].workDays = e.target.value;
+                          setBranchesDetails(newBd);
+                        }} placeholder="26" required />
+                      </div>
+                      
+                      <div className="field">
+                        <label>ساعات العمل اليومية (ساعة)</label>
+                        <input type="number" value={bd.workHours} onChange={(e) => {
+                          const newBd = [...branchesDetails];
+                          newBd[idx].workHours = e.target.value;
+                          setBranchesDetails(newBd);
+                        }} placeholder="8" required />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
 

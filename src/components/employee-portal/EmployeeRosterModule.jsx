@@ -59,7 +59,8 @@ export default function EmployeeRosterModule({
   setState,
   saveState,
   showToast,
-  selectedMonth
+  selectedMonth,
+  selectedBranchId
 }) {
   const [showRosterModal, setShowRosterModal] = useState(false);
   const [viewMode, setViewMode] = useState('calendar'); // 'calendar' | 'week'
@@ -136,7 +137,7 @@ export default function EmployeeRosterModule({
       employeeId: emp.id,
       employeeName: emp.name,
       employeeCode: emp.code,
-      branchId: emp.branchId,
+      branchId: selectedBranchId || emp.branchId,
       type: 'roster_update',
       month: selectedMonth,
       fromDate,

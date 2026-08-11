@@ -6,7 +6,8 @@ export default function EmployeeLoansModule({
   state,
   setState,
   saveState,
-  showToast
+  showToast,
+  selectedBranchId
 }) {
   const [activeTab, setActiveTab] = useState('loans'); // 'loans' | 'medicines'
   const [showLoanForm, setShowLoanForm] = useState(false);
@@ -69,7 +70,7 @@ export default function EmployeeLoansModule({
       employeeId: emp.id,
       employeeName: emp.name,
       employeeCode: emp.code,
-      branchId: emp.branchId,
+      branchId: selectedBranchId || emp.branchId,
       type: 'loan',
       loanType, // 'monthly' or 'installment'
       amount,
@@ -108,7 +109,7 @@ export default function EmployeeLoansModule({
       employeeId: emp.id,
       employeeName: emp.name,
       employeeCode: emp.code,
-      branchId: emp.branchId,
+      branchId: selectedBranchId || emp.branchId,
       type: 'credit_medicine',
       medicines: validItems,
       totalAmount: totalCost,

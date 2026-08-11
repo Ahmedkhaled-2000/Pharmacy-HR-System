@@ -54,8 +54,9 @@ export const getFaceEmbedding = async (videoElement) => {
 
   // Basic lighting check (Brightness & Blur) can be done by drawing to a canvas,
   // but face-api detection score is a good proxy for clarity.
-  if (detection.detection.score < 0.8) {
-    return { error: 'الصورة غير واضحة أو الإضاءة ضعيفة. يرجى تحسين الإضاءة.' };
+  // Lowered threshold to 0.5 to allow for low light conditions.
+  if (detection.detection.score < 0.5) {
+    return { error: 'الصورة غير واضحة بشكل كبير. يرجى تحسين الإضاءة قليلاً.' };
   }
 
   return { descriptor: Array.from(detection.descriptor) };

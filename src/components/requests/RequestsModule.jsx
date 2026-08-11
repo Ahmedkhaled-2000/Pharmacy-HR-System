@@ -44,6 +44,7 @@ export default function RequestsModule({
     const updatedRequests = requests.map((r) => {
       if (r.id === reqId) {
         targetReq = { ...r, status: 'approved', adminApproved: true };
+        if (targetReq.photoUrl) delete targetReq.photoUrl; // delete photo to save space
         return targetReq;
       }
       return r;
@@ -54,7 +55,7 @@ export default function RequestsModule({
     if (saveState) await saveState(updatedState);
     showToast?.('✅ تم اعتماد الموافقة على الطلب بنجاح');
     
-    if (targetReq && targetReq.type === 'تأكيد بصمة الوجه') {
+    if (targetReq && (targetReq.type === 'تأكيد بصمة الوجه' || targetReq.type === 'تأكيد بصمة اليد')) {
       const empId = targetReq.employeeId;
       const actionType = targetReq.targetAction;
       
@@ -71,7 +72,9 @@ export default function RequestsModule({
   const handleReject = async (reqId) => {
     const updatedRequests = requests.map((r) => {
       if (r.id === reqId) {
-        return { ...r, status: 'rejected', adminApproved: false };
+        const rejectedReq = { ...r, status: 'rejected', adminApproved: false };
+        if (rejectedReq.photoUrl) delete rejectedReq.photoUrl; // delete photo to save space
+        return rejectedReq;
       }
       return r;
     });
@@ -159,7 +162,14 @@ export default function RequestsModule({
                     <td style={{ fontSize: '12.5px' }}>{req.createdAt ? req.createdAt.slice(0, 10) : req.startDate || '—'}</td>
                     <td style={{ fontWeight: '800' }}>{req.employeeName || 'موظف'}</td>
                     <td>{getFormattedRequestBadge(req.type, req.leaveType)}</td>
-                    <td style={{ fontSize: '13px' }}>{req.reason || req.details || '—'}</td>
+                    <td style={{ fontSize: '13px' }}>
+                      <div>{req.reason || req.details || req.notes || '—'}</div>
+                      {req.photoUrl && (
+                        <div style={{ marginTop: '8px' }}>
+                          <img src={req.photoUrl} alt="صورة توثيق" style={{ maxWidth: '120px', borderRadius: '8px', border: '1px solid var(--border)', cursor: 'pointer' }} onClick={() => window.open(req.photoUrl, '_blank')} />
+                        </div>
+                      )}
+                    </td>
                     <td>
                       {req.branchApproved ? (
                         <span style={{ color: '#16a34a', fontWeight: '700' }}>🟢 معتمد من الفرع</span>

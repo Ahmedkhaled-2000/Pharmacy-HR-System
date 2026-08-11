@@ -78,7 +78,7 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
       return () => clearInterval(checkInterval);
     }
 
-    // For Face tracking, use multi-stage liveness
+    // For Face tracking, use liveness check (blink or smile)
     const checkInterval = setInterval(async () => {
       try {
         const liveness = checkLiveness(videoRef.current, 0); 
@@ -86,14 +86,9 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
         if (!liveness || !liveness.hasFace) return;
 
         if (livenessStage === 1) {
-          setStatus('يرجى الالتفات قليلاً نحو اليسار ⬅️');
-          if (liveness.isLookingLeft) {
-            setLivenessStage(2);
-          }
-        } else if (livenessStage === 2) {
-          setStatus('يرجى الالتفات قليلاً نحو اليمين ➡️');
-          if (liveness.isLookingRight) {
-            setLivenessStage(3); // Liveness passed
+          setStatus('يرجى الابتسام أو الرمش بعينيك لإثبات الحيوية 😉');
+          if (liveness.isBlinking || liveness.isSmiling) {
+            setLivenessStage(2); // Liveness passed
             setStatus('تم التحقق من الحيوية بنجاح! جاري مطابقة الوجه...');
             clearInterval(checkInterval);
             performMatch();
@@ -170,14 +165,33 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
     setErrorMsg(`❌ ${msg}`);
     
     if (newFails >= 3) {
-      setStatus('فشل التحقق 3 مرات متتالية. سيتم إرسال طلب للمدير للتحقق...');
-      setTimeout(() => {
-        onVerifyFailed(actionType); // Parent will handle sending the request
-      }, 2000);
+      setStatus('فشل التحقق 3 مرات متتالية. يرجى التقاط صورة لإرسال طلب للمدير.');
+      setLivenessStage(-1); // Stop further checks
     } else {
       setStatus('يرجى المحاولة مرة أخرى...');
       setLivenessStage(1); // restart liveness / hand detection
     }
+  };
+
+  const captureAndSend = () => {
+    if (!videoRef.current) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = videoRef.current.videoWidth;
+    canvas.height = videoRef.current.videoHeight;
+    const ctx = canvas.getContext('2d');
+    
+    if (facingMode === 'user') {
+      ctx.translate(canvas.width, 0);
+      ctx.scale(-1, 1);
+    }
+    
+    ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+    const photoDataUrl = canvas.toDataURL('image/jpeg', 0.6); // medium quality
+    
+    setStatus('جاري إرسال الطلب للإدارة...');
+    setTimeout(() => {
+      onVerifyFailed(actionType, photoDataUrl);
+    }, 1000);
   };
 
   const actionName = {
@@ -229,8 +243,13 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
           </div>
 
         </div>
-        <div className="modal-footer" style={{ justifyContent: 'center' }}>
-          <button className="btn btn-secondary" style={{ width: '200px' }} onClick={onCancel}>
+        <div className="modal-footer" style={{ flexDirection: 'column', gap: '10px' }}>
+          {failedAttempts >= 3 && (
+            <button className="btn btn-primary" style={{ width: '100%' }} onClick={captureAndSend}>
+              📸 التقاط صورة وإرسال الطلب
+            </button>
+          )}
+          <button className="btn btn-secondary" style={{ width: '100%' }} onClick={onCancel}>
             إلغاء
           </button>
         </div>

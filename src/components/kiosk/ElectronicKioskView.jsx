@@ -20,6 +20,9 @@ export default function ElectronicKioskView({
   const [matchedEmp, setMatchedEmp] = useState(null);
   
   const [activeAction, setActiveAction] = useState(null);
+  const [selectedBranchId, setSelectedBranchId] = useState(null);
+  
+  const activeShift = matchedEmp ? state.activeShifts?.[matchedEmp.id] : null;
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -59,6 +62,12 @@ export default function ElectronicKioskView({
           return;
         }
       }
+      
+      let defaultBranchId = emp.branchId || '';
+      if (emp.branchesDetails && emp.branchesDetails.length > 0) {
+        defaultBranchId = emp.branchesDetails[0].branchId;
+      }
+      setSelectedBranchId(defaultBranchId);
       setMatchedEmp(emp);
     } else {
       alert('كود الموظف غير صحيح.');
@@ -67,6 +76,27 @@ export default function ElectronicKioskView({
   };
 
   const handleActionClick = (action) => {
+    if (action === 'shift_start' && activeShift) {
+      alert('لديك وردية مفتوحة بالفعل. يرجى تسجيل الانصراف أولاً.');
+      return;
+    }
+    if (action === 'shift_end' && !activeShift) {
+      alert('ليس لديك وردية مفتوحة لتسجيل الانصراف.');
+      return;
+    }
+    if (action === 'break_start' && (!activeShift || activeShift.isPaused)) {
+      alert('لا يمكنك بدء بريك الآن.');
+      return;
+    }
+    if (action === 'break_end' && (!activeShift || !activeShift.isPaused)) {
+      alert('أنت لست في فترة بريك.');
+      return;
+    }
+    
+    if ((matchedEmp?.branchesDetails?.length > 1) && !selectedBranchId) {
+       alert('يرجى اختيار الفرع أولاً.');
+       return;
+    }
     setActiveAction(action);
   };
 
@@ -75,7 +105,7 @@ export default function ElectronicKioskView({
     executeAction(actionType);
   };
 
-  const onVerifyFailed = (actionType) => {
+  const onVerifyFailed = (actionType, photoUrl) => {
     setActiveAction(null);
     const empBiometricType = matchedEmp?.preferred_biometric || orgSettings?.biometricType || 'face';
     const isHand = empBiometricType === 'hand';
@@ -93,7 +123,8 @@ export default function ElectronicKioskView({
         actionType === 'shift_start' ? 'بداية الوردية' : 
         actionType === 'shift_end' ? 'نهاية الوردية' : 
         actionType === 'break_start' ? 'بداية بريك' : 'نهاية بريك'
-      }`
+      }`,
+      photoUrl: photoUrl || null
     };
     if (submitRequest) {
       submitRequest(requestData);
@@ -105,7 +136,7 @@ export default function ElectronicKioskView({
 
   const executeAction = (actionType) => {
     const empId = matchedEmp.id;
-    if (actionType === 'shift_start') startShift(empId, 'kiosk');
+    if (actionType === 'shift_start') startShift(empId, 'kiosk', selectedBranchId);
     else if (actionType === 'break_start') pauseShift(empId, 'kiosk');
     else if (actionType === 'break_end') resumeShift(empId, 'kiosk');
     else if (actionType === 'shift_end') stopShift(empId, 'kiosk');
@@ -317,27 +348,59 @@ export default function ElectronicKioskView({
                 </button>
               </div>
 
+              {matchedEmp?.branchesDetails && matchedEmp.branchesDetails.length > 1 && (
+                <div style={{ marginBottom: '1.5rem', background: '#f8fafc', padding: '1rem', borderRadius: '16px', border: '1px solid #e2e8f0' }}>
+                  <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold', color: '#0f172a' }}>اختر الفرع الحالي:</label>
+                  <select 
+                    value={selectedBranchId || ''} 
+                    onChange={(e) => setSelectedBranchId(e.target.value)}
+                    style={{ width: '100%', padding: '0.8rem', borderRadius: '12px', border: '2px solid #cbd5e1', fontSize: '1.1rem', fontFamily: 'Cairo' }}
+                  >
+                    {matchedEmp.branchesDetails.map(bd => {
+                      const bInfo = state.branches?.find(b => b.id === bd.branchId);
+                      return <option key={bd.branchId} value={bd.branchId}>{bInfo?.name || 'فرع غير معروف'}</option>;
+                    })}
+                  </select>
+                </div>
+              )}
+
               {/* Actions Grid */}
               <div className="kiosk-action-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.2rem', width: '100%' }}>
-                <div className="kiosk-action-card start" onClick={() => handleActionClick('shift_start')} style={{ background: '#fff', border: '2px solid #e2e8f0', borderRadius: '20px', padding: '1.5rem 1rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.8rem', cursor: 'pointer' }}>
+                <div 
+                  className={`kiosk-action-card start ${activeShift ? 'disabled' : ''}`} 
+                  onClick={() => handleActionClick('shift_start')} 
+                  style={{ opacity: activeShift ? 0.5 : 1, pointerEvents: activeShift ? 'none' : 'auto', background: '#fff', border: '2px solid #e2e8f0', borderRadius: '20px', padding: '1.5rem 1rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.8rem', cursor: 'pointer' }}
+                >
                   <div className="kiosk-action-icon" style={{ fontSize: '2.5rem' }}>🟢</div>
                   <div className="kiosk-action-title" style={{ fontSize: '1.25rem', fontWeight: 800, fontFamily: 'Cairo, sans-serif', color: '#1e293b' }}>تسجيل حضور</div>
                   <div className="kiosk-action-sub" style={{ fontSize: '0.9rem', color: '#64748b', textAlign: 'center' }}>بدء وردية جديدة</div>
                 </div>
                 
-                <div className="kiosk-action-card end" onClick={() => handleActionClick('shift_end')} style={{ background: '#fff', border: '2px solid #e2e8f0', borderRadius: '20px', padding: '1.5rem 1rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.8rem', cursor: 'pointer' }}>
+                <div 
+                  className={`kiosk-action-card end ${!activeShift ? 'disabled' : ''}`} 
+                  onClick={() => handleActionClick('shift_end')} 
+                  style={{ opacity: !activeShift ? 0.5 : 1, pointerEvents: !activeShift ? 'none' : 'auto', background: '#fff', border: '2px solid #e2e8f0', borderRadius: '20px', padding: '1.5rem 1rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.8rem', cursor: 'pointer' }}
+                >
                   <div className="kiosk-action-icon" style={{ fontSize: '2.5rem' }}>🔴</div>
                   <div className="kiosk-action-title" style={{ fontSize: '1.25rem', fontWeight: 800, fontFamily: 'Cairo, sans-serif', color: '#1e293b' }}>تسجيل انصراف</div>
                   <div className="kiosk-action-sub" style={{ fontSize: '0.9rem', color: '#64748b', textAlign: 'center' }}>إنهاء الوردية الحالية</div>
                 </div>
 
-                <div className="kiosk-action-card break-out" onClick={() => handleActionClick('break_start')} style={{ background: '#fff', border: '2px solid #e2e8f0', borderRadius: '20px', padding: '1.5rem 1rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.8rem', cursor: 'pointer' }}>
+                <div 
+                  className={`kiosk-action-card break-out ${(!activeShift || activeShift.isPaused) ? 'disabled' : ''}`} 
+                  onClick={() => handleActionClick('break_start')} 
+                  style={{ opacity: (!activeShift || activeShift.isPaused) ? 0.5 : 1, pointerEvents: (!activeShift || activeShift.isPaused) ? 'none' : 'auto', background: '#fff', border: '2px solid #e2e8f0', borderRadius: '20px', padding: '1.5rem 1rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.8rem', cursor: 'pointer' }}
+                >
                   <div className="kiosk-action-icon" style={{ fontSize: '2.5rem' }}>☕</div>
                   <div className="kiosk-action-title" style={{ fontSize: '1.25rem', fontWeight: 800, fontFamily: 'Cairo, sans-serif', color: '#1e293b' }}>بدء بريك</div>
                   <div className="kiosk-action-sub" style={{ fontSize: '0.9rem', color: '#64748b', textAlign: 'center' }}>فترة استراحة</div>
                 </div>
 
-                <div className="kiosk-action-card break-in" onClick={() => handleActionClick('break_end')} style={{ background: '#fff', border: '2px solid #e2e8f0', borderRadius: '20px', padding: '1.5rem 1rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.8rem', cursor: 'pointer' }}>
+                <div 
+                  className={`kiosk-action-card break-in ${(!activeShift || !activeShift.isPaused) ? 'disabled' : ''}`} 
+                  onClick={() => handleActionClick('break_end')} 
+                  style={{ opacity: (!activeShift || !activeShift.isPaused) ? 0.5 : 1, pointerEvents: (!activeShift || !activeShift.isPaused) ? 'none' : 'auto', background: '#fff', border: '2px solid #e2e8f0', borderRadius: '20px', padding: '1.5rem 1rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.8rem', cursor: 'pointer' }}
+                >
                   <div className="kiosk-action-icon" style={{ fontSize: '2.5rem' }}>▶️</div>
                   <div className="kiosk-action-title" style={{ fontSize: '1.25rem', fontWeight: 800, fontFamily: 'Cairo, sans-serif', color: '#1e293b' }}>عودة من البريك</div>
                   <div className="kiosk-action-sub" style={{ fontSize: '0.9rem', color: '#64748b', textAlign: 'center' }}>استكمال الوردية</div>

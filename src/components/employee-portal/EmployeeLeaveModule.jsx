@@ -7,7 +7,8 @@ export default function EmployeeLeaveModule({
   setState,
   saveState,
   showToast,
-  selectedMonth
+  selectedMonth,
+  selectedBranchId
 }) {
   const annualQuota = emp.annualLeaveBalance !== undefined ? Number(emp.annualLeaveBalance) : 21;
   const [leaveType, setLeaveType] = useState(annualQuota > 0 ? 'annual' : 'unpaid'); // 'annual' | 'unpaid'
@@ -77,7 +78,7 @@ export default function EmployeeLeaveModule({
       employeeId: emp.id,
       employeeName: emp.name,
       employeeCode: emp.code,
-      branchId: emp.branchId,
+      branchId: selectedBranchId || emp.branchId,
       type: 'leave',
       leaveType, // 'annual' or 'unpaid'
       startDate,

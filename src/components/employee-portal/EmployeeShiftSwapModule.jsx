@@ -7,7 +7,8 @@ export default function EmployeeShiftSwapModule({
   setState,
   saveState,
   showToast,
-  selectedMonth
+  selectedMonth,
+  selectedBranchId
 }) {
   const [showSwapModal, setShowSwapModal] = useState(false);
   const [targetEmpId, setTargetEmpId] = useState('');
@@ -16,7 +17,8 @@ export default function EmployeeShiftSwapModule({
   const [swapNotes, setSwapNotes] = useState('');
 
   const employees = state.employees || [];
-  const colleagues = employees.filter((e) => e.id !== emp.id && e.branchId === emp.branchId);
+  const currentBranchId = selectedBranchId || emp.branchId;
+  const colleagues = employees.filter((e) => e.id !== emp.id && e.branchId === currentBranchId);
 
   // Swap Requests involving this employee
   const swapRequests = (state.shiftSwaps || state.requests || []).filter(
@@ -46,7 +48,7 @@ export default function EmployeeShiftSwapModule({
       requesterEmpName: emp.name,
       targetEmpId,
       targetEmpName: targetEmpObj ? targetEmpObj.name : '',
-      branchId: emp.branchId,
+      branchId: currentBranchId,
       requesterDate: swapDate,
       targetDate: targetSwapDate,
       notes: swapNotes.trim(),

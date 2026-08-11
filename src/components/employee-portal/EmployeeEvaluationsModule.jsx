@@ -7,7 +7,8 @@ export default function EmployeeEvaluationsModule({
   setState,
   saveState,
   showToast,
-  selectedMonth
+  selectedMonth,
+  selectedBranchId
 }) {
   const [activeTab, setActiveTab] = useState('evaluations'); // 'evaluations' | 'complaints'
   const [empComment, setEmpComment] = useState('');
@@ -72,7 +73,7 @@ export default function EmployeeEvaluationsModule({
       employeeId: emp.id,
       employeeName: emp.name,
       employeeCode: emp.code,
-      branchId: emp.branchId,
+      branchId: selectedBranchId || emp.branchId,
       subject: complaintSubject.trim(),
       details: complaintDetails.trim(),
       targetApproval: 'admin_only', // للإدارة العليا فقط

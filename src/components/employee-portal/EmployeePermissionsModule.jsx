@@ -6,7 +6,8 @@ export default function EmployeePermissionsModule({
   state,
   setState,
   saveState,
-  showToast
+  showToast,
+  selectedBranchId
 }) {
   const [permType, setPermType] = useState('late'); // 'late' | 'early'
   const [date, setDate] = useState(todayStr());
@@ -55,7 +56,7 @@ export default function EmployeePermissionsModule({
       employeeId: emp.id,
       employeeName: emp.name,
       employeeCode: emp.code,
-      branchId: emp.branchId,
+      branchId: selectedBranchId || emp.branchId,
       type: 'permission',
       permType, // 'late' or 'early'
       date,

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Routes, Route, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import QRCode from 'qrcode';
 
@@ -15,7 +15,7 @@ import {
   normalizeState
 } from './utils/formatters';
 import { loadExcelJS, mergedTitle, tableHeaderRow, dataRow } from './utils/excelExport';
-import { playFingerprintChime } from './hooks/useAudio';
+import { playFingerprintChime, playNotificationChime } from './hooks/useAudio';
 import { smartSaveState, smartLoadState, listenToConnectionChanges, syncNow } from './utils/offlineSync';
 import { getPendingCount } from './utils/offlineStorage';
 
@@ -1320,34 +1320,83 @@ export default function App() {
   };
 
   // Calculations per employee
-  const computeEmpSummary = (empId, filterFn, monthStr = null) => {
+  const computeEmpSummary = (empId, filterFn, monthStr = null, targetBranchId = null) => {
     const emp = getEmp(empId);
-    if (!emp) return { hours: 0, dailyRate: 0, rate: 0, baseEarnings: 0, totalBonus: 0, totalDeduction: 0, absenceDeduction: 0, netSalary: 0, absenceDaysCount: 0 };
+    if (!emp) return { hours: 0, dailyRate: 0, rate: 0, baseEarnings: 0, totalBonus: 0, totalDeduction: 0, absenceDeduction: 0, netSalary: 0, absenceDaysCount: 0, perBranch: {} };
 
-    const salary = emp.salary || 0;
-    const workHoursPerDay = emp.workHoursPerDay || WORK_HOURS_PER_DAY;
-    const workDaysPerMonth = emp.workDaysPerMonth || WORK_DAYS_PER_MONTH;
+    let branches = [];
+    if (emp.branchesDetails && emp.branchesDetails.length > 0) {
+      branches = emp.branchesDetails;
+    } else {
+      branches = [{
+        branchId: emp.branchId || 'main',
+        salary: emp.salary || 0,
+        workHoursPerDay: emp.workHoursPerDay || WORK_HOURS_PER_DAY,
+        workDaysPerMonth: emp.workDaysPerMonth || WORK_DAYS_PER_MONTH
+      }];
+    }
 
-    // 1. سعر اليوم = (ساعات العمل المدخلة * سعر الساعة الشهرية المدخلة) / عدد أيام العمل المدخلة
-    const dailyRate = workDaysPerMonth > 0 ? (workHoursPerDay * salary) / workDaysPerMonth : 0;
-    // 2. سعر الساعة اليومي = سعر اليوم / عدد ساعات العمل المدخلة
-    const rate = workHoursPerDay > 0 ? dailyRate / workHoursPerDay : 0;
+    if (targetBranchId) {
+      branches = branches.filter(b => b.branchId === targetBranchId);
+    }
 
-    const empShifts = state.shifts.filter((s) => s.employeeId === empId && filterFn(s.date));
-    const hours = empShifts.reduce((acc, s) => acc + s.hours, 0);
-    // 3. أجر اليوم / المستحقات = سعر الساعة اليومي * عدد ساعات العمل الفعلية
-    const baseEarnings = hours * rate;
+    let totalHours = 0;
+    let totalBaseEarnings = 0;
+    let totalAbsenceDeduction = 0;
+    let totalAbsenceDaysCount = 0;
+    const perBranch = {};
+
+    branches.forEach(b => {
+      const bId = b.branchId;
+      const salary = parseFloat(b.salary) || 0;
+      const workHoursPerDay = parseFloat(b.workHoursPerDay) || WORK_HOURS_PER_DAY;
+      const workDaysPerMonth = parseFloat(b.workDaysPerMonth) || WORK_DAYS_PER_MONTH;
+
+      const dailyRate = workDaysPerMonth > 0 ? (workHoursPerDay * salary) / workDaysPerMonth : 0;
+      const rate = workHoursPerDay > 0 ? dailyRate / workHoursPerDay : 0;
+
+      // shifts for this branch (fallback to true if shift has no branch and employee only has 1 branch)
+      const bShifts = state.shifts.filter(s => s.employeeId === empId && filterFn(s.date) && (s.branchId === bId || !s.branchId || branches.length === 1));
+      const hours = bShifts.reduce((acc, s) => acc + s.hours, 0);
+      const baseEarnings = hours * rate;
+
+      // Absences - currently global but assigned to the first branch if aggregated
+      let absenceDaysCount = 0;
+      let absenceDeduction = 0;
+      if (monthStr && bId === branches[0].branchId) {
+         absenceDaysCount = getAbsenceDaysCount(empId, monthStr);
+         absenceDeduction = absenceDaysCount * dailyRate;
+      }
+
+      perBranch[bId] = { hours, dailyRate, rate, baseEarnings, absenceDaysCount, absenceDeduction, salary, workHoursPerDay, workDaysPerMonth };
+      
+      totalHours += hours;
+      totalBaseEarnings += baseEarnings;
+      totalAbsenceDaysCount += absenceDaysCount;
+      totalAbsenceDeduction += absenceDeduction;
+    });
 
     const empAdjs = state.adjustments.filter((a) => (a.employeeId === empId || a.employeeId === 'all') && filterFn(a.date));
     const totalBonus = empAdjs.filter((a) => a.type === 'bonus').reduce((acc, a) => acc + a.amount, 0);
     const totalDeduction = empAdjs.filter((a) => a.type === 'deduction').reduce((acc, a) => acc + a.amount, 0);
 
-    const absenceDaysCount = monthStr ? getAbsenceDaysCount(empId, monthStr) : 0;
-    const absenceDeduction = absenceDaysCount * dailyRate;
+    const netSalary = totalBaseEarnings + totalBonus - totalDeduction - totalAbsenceDeduction;
 
-    const netSalary = baseEarnings + totalBonus - totalDeduction - absenceDeduction;
+    let rate = branches.length === 1 ? perBranch[branches[0].branchId].rate : (totalHours > 0 ? totalBaseEarnings / totalHours : 0);
+    let dailyRate = branches.length === 1 ? perBranch[branches[0].branchId].dailyRate : (totalAbsenceDaysCount > 0 ? totalAbsenceDeduction / totalAbsenceDaysCount : 0);
 
-    return { hours, dailyRate, rate, baseEarnings, totalBonus, totalDeduction, absenceDeduction, netSalary, absenceDaysCount };
+    return { 
+      hours: totalHours, 
+      dailyRate, 
+      rate, 
+      baseEarnings: totalBaseEarnings, 
+      totalBonus, 
+      totalDeduction, 
+      absenceDeduction: totalAbsenceDeduction, 
+      netSalary, 
+      absenceDaysCount: totalAbsenceDaysCount,
+      perBranch
+    };
   };
 
   // Grand summary across ALL employees
@@ -1449,6 +1498,19 @@ export default function App() {
       console.error('Load error:', err);
     });
   }, []);
+
+  // ── مستمع الإشعارات للطلبات الجديدة ───────────────
+  const prevRequestsLengthRef = useRef(0);
+  useEffect(() => {
+    const currentLength = state.requests ? state.requests.length : 0;
+    if (currentLength > prevRequestsLengthRef.current) {
+      if (authRole === 'admin' || authRole === 'branch') {
+        playNotificationChime();
+        showToast('🔔 يوجد طلب جديد يحتاج للمراجعة');
+      }
+    }
+    prevRequestsLengthRef.current = currentLength;
+  }, [state.requests, authRole]);
 
   // ── مستمع تغيرات الاتصال بالإنترنت ───────────────
   useEffect(() => {

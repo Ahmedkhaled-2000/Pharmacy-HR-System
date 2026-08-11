@@ -131,6 +131,18 @@ export default function EmployeePortalView({
   useEffect(() => { try { localStorage.setItem('emp_range_start', rangeStart); } catch {} }, [rangeStart]);
   useEffect(() => { try { localStorage.setItem('emp_range_end', rangeEnd); } catch {} }, [rangeEnd]);
 
+  const [selectedBranchId, setSelectedBranchId] = useState('');
+  useEffect(() => {
+    if (currentEmpUser) {
+      const emp = (state && state.employees && state.employees.find((e) => e.id === currentEmpUser?.id)) || currentEmpUser;
+      if (emp && emp.branchesDetails && emp.branchesDetails.length > 0) {
+        setSelectedBranchId(''); // Default to 'all branches' represented by empty string
+      } else {
+        setSelectedBranchId(emp?.branchId || '');
+      }
+    }
+  }, [currentEmpUser, state.employees]);
+
   // ── Form States for Employee Actions ───────────
   const [showManualForm, setShowManualForm] = useState(false);
   const [empManualDate, setEmpManualDate] = useState(todayStr());
@@ -178,7 +190,7 @@ export default function EmployeePortalView({
         fileNameStr = `كشف-مرتب-${emp.name}-${selectedMonth}.xlsx`;
       }
 
-      const summary = computeEmpSummary(emp.id, filterFn, rangeMode === 'month' ? selectedMonth : null);
+      const summary = computeEmpSummary(emp.id, filterFn, rangeMode === 'month' ? selectedMonth : null, selectedBranchId || null);
       const COLS = 9;
 
       const wb = new ExcelJS.Workbook();
@@ -435,10 +447,10 @@ export default function EmployeePortalView({
   const lbl = monthLabel(selectedMonth);
   const periodLabel = rangeFilterValid ? `من ${rangeStart} إلى ${rangeEnd}` : lbl.raw;
 
-  const summary = computeEmpSummary(emp.id, filterFn, filterMode === 'month' ? selectedMonth : null);
+  const summary = computeEmpSummary(emp.id, filterFn, filterMode === 'month' ? selectedMonth : null, selectedBranchId || null);
 
   const empShifts = state.shifts
-    .filter((s) => s.employeeId === emp.id && filterFn(s.date))
+    .filter((s) => s.employeeId === emp.id && filterFn(s.date) && (!selectedBranchId || s.branchId === selectedBranchId || !s.branchId))
     .sort((a, b) => (a.date === b.date ? a.timeIn.localeCompare(b.timeIn) : a.date.localeCompare(b.date)));
 
   const empAdjs = state.adjustments.filter(
@@ -697,6 +709,25 @@ export default function EmployeePortalView({
               <button className="emp-month-today-btn" onClick={() => setSelectedMonth(CURRENT_MONTH)}>⟳ الحالي</button>
             )}
           </div>
+          
+          {/* Branch selector if multiple branches exist */}
+          {emp.branchesDetails && emp.branchesDetails.length > 1 && (
+             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+               <select 
+                 value={selectedBranchId}
+                 onChange={(e) => setSelectedBranchId(e.target.value)}
+                 style={{ padding: '6px 12px', borderRadius: '8px', fontSize: '13px', border: '1px solid var(--primary)', background: 'var(--primary-tint)', color: 'var(--primary-dark)', cursor: 'pointer', fontWeight: 600 }}
+               >
+                 <option value="">جميع الفروع (ملخص شامل)</option>
+                 {emp.branchesDetails.map(bd => {
+                   const b = state.branches?.find(br => br.id === bd.branchId);
+                   const manager = state.employees?.find(e => e.id === b?.managerId);
+                   const label = b?.name ? `${b.name} (مدير الفرع: ${manager?.name || 'غير محدد'})` : 'فرع غير معروف';
+                   return <option key={bd.branchId} value={bd.branchId}>{label}</option>;
+                 })}
+               </select>
+             </div>
+          )}
         </div>
 
         {/* Scrollable content area */}
