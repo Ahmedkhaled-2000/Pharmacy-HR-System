@@ -889,6 +889,30 @@ export default function App() {
     showToast('❌ تم رفض الطلب');
   };
 
+  const handleSendEarlyExitEmail = async (reqId) => {
+    try {
+      const req = (state.requests || []).find((r) => r.id === reqId);
+      const emp = req ? (state.employees || []).find((e) => e.id === req.employeeId) : null;
+      showToast(`📧 تم إرسال تنبيه الانصراف المبكر ${emp ? `للموظف (${emp.name})` : ''}`);
+    } catch (err) {
+      showToast('❌ حدث خطأ أثناء إرسال التنبيه');
+    }
+  };
+
+  const handleWaiveEarlyExit = async (reqId) => {
+    try {
+      const updatedRequests = (state.requests || []).map((r) =>
+        r.id === reqId ? { ...r, earlyExitWaived: true, status: 'approved', adminApproved: true, branchApproved: true } : r
+      );
+      const updatedState = { ...state, requests: updatedRequests };
+      setState(updatedState);
+      await saveState(updatedState);
+      showToast('✅ تم التجاوز عن الانصراف المبكر واعتماد الطلب');
+    } catch (err) {
+      showToast('❌ حدث خطأ أثناء التجاوز عن الانصراف المبكر');
+    }
+  };
+
   const handleAddManualPunch = async ({ employeeId, type, date, time }) => {
     const newShift = {
       id: `shift_${Date.now()}`,
