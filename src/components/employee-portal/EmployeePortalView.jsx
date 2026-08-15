@@ -110,7 +110,9 @@ export default function EmployeePortalView({
   const [selectedMonth, setSelectedMonth] = useState(() => {
     try { return localStorage.getItem('emp_selected_month') || CURRENT_MONTH; } catch { return CURRENT_MONTH; }
   });
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState(() => {
+    try { return localStorage.getItem('emp_active_tab') || 'dashboard'; } catch { return 'dashboard'; }
+  });
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
@@ -128,6 +130,7 @@ export default function EmployeePortalView({
     try { return localStorage.getItem('emp_range_end') || ''; } catch { return ''; }
   });
 
+  useEffect(() => { try { localStorage.setItem('emp_active_tab', activeTab); } catch {} }, [activeTab]);
   useEffect(() => { try { localStorage.setItem('emp_selected_month', selectedMonth); } catch {} }, [selectedMonth]);
   useEffect(() => { try { localStorage.setItem('emp_filter_mode', filterMode); } catch {} }, [filterMode]);
   useEffect(() => { try { localStorage.setItem('emp_range_start', rangeStart); } catch {} }, [rangeStart]);

@@ -108,7 +108,18 @@ export default function App() {
 
   // Unified Role & Navigation States (with localStorage session restoration)
   const [authRole, setAuthRole] = useState(() => {
-    try { return localStorage.getItem('app_auth_role') || 'none'; } catch { return 'none'; }
+    try {
+      const saved = localStorage.getItem('app_auth_role');
+      if (saved && ['admin', 'branch', 'employee'].includes(saved)) {
+        return saved;
+      }
+      if (localStorage.getItem('app_current_emp_user')) return 'employee';
+      if (localStorage.getItem('app_current_branch')) return 'branch';
+      if (localStorage.getItem('app_is_admin') === 'true') return 'admin';
+      return 'none';
+    } catch {
+      return 'none';
+    }
   });
   const [currentBranch, setCurrentBranch] = useState(() => {
     try {
@@ -130,7 +141,13 @@ export default function App() {
 
   // Admin Auth State
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(() => {
-    try { return localStorage.getItem('app_is_admin') === 'true'; } catch { return false; }
+    try {
+      const savedRole = localStorage.getItem('app_auth_role');
+      const savedIsAdmin = localStorage.getItem('app_is_admin');
+      return savedRole === 'admin' || savedIsAdmin === 'true';
+    } catch {
+      return false;
+    }
   });
   const [adminInputUser, setAdminInputUser] = useState('');
   const [adminInputPass, setAdminInputPass] = useState('');
@@ -144,7 +161,7 @@ export default function App() {
       if (currentEmpUser) localStorage.setItem('app_current_emp_user', JSON.stringify(currentEmpUser));
       else localStorage.removeItem('app_current_emp_user');
       localStorage.setItem('app_active_nav_tab', activeNavTab);
-      localStorage.setItem('app_is_admin', isAdminLoggedIn ? 'true' : 'false');
+      localStorage.setItem('app_is_admin', (authRole === 'admin' || isAdminLoggedIn) ? 'true' : 'false');
     } catch {}
   }, [authRole, currentBranch, currentEmpUser, activeNavTab, isAdminLoggedIn]);
 
@@ -1870,6 +1887,29 @@ export default function App() {
       const normalized = normalizeState(data);
       setState(normalized);
       setLastSyncTime(nowTimeStr());
+
+      // Sync active session user/branch with fresh database objects
+      try {
+        const savedEmpStr = localStorage.getItem('app_current_emp_user');
+        if (savedEmpStr) {
+          const savedEmp = JSON.parse(savedEmpStr);
+          const freshEmp = (normalized.employees || []).find((e) => e.id === savedEmp?.id || (savedEmp?.code && e.code === savedEmp.code));
+          if (freshEmp) {
+            setCurrentEmpUser(freshEmp);
+            localStorage.setItem('app_current_emp_user', JSON.stringify(freshEmp));
+          }
+        }
+        const savedBranchStr = localStorage.getItem('app_current_branch');
+        if (savedBranchStr) {
+          const savedBranch = JSON.parse(savedBranchStr);
+          const freshBranch = (normalized.branches || []).find((b) => b.id === savedBranch?.id);
+          if (freshBranch) {
+            setCurrentBranch(freshBranch);
+            localStorage.setItem('app_current_branch', JSON.stringify(freshBranch));
+          }
+        }
+      } catch {}
+
       if (normalized.employees.length > 0) {
         setMEmpId(normalized.employees[0].id);
       }
