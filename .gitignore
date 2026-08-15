@@ -24,3 +24,7 @@ dist-ssr
 *.sw?
 
 .vercel
+.gradle
+build
+dev-dist
+

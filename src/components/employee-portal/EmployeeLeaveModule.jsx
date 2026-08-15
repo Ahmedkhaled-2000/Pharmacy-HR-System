@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { todayStr, fmt } from '../../utils/formatters';
+import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 
 export default function EmployeeLeaveModule({
   emp,
@@ -19,9 +20,27 @@ export default function EmployeeLeaveModule({
 
   // Calculate taken annual leaves for the current year
   const currentYear = (selectedMonth || todayStr()).slice(0, 4);
-  const employeeLeaveRequests = (state.leaveRequests || []).filter(
-    (r) => r.employeeId === emp.id
-  );
+  const employeeLeaveRequests = React.useMemo(() => {
+    const empIdStr = String(emp.id);
+    const fromRequests = (state.requests || []).filter(
+      (r) => String(r.employeeId) === empIdStr && (r.type === 'leave' || r.type === 'leave_request')
+    );
+    const fromLeaves = (state.leaveRequests || []).filter(
+      (r) => String(r.employeeId) === empIdStr
+    );
+
+    const map = new Map();
+    [...fromLeaves, ...fromRequests].forEach((r) => {
+      const existing = map.get(r.id);
+      if (!existing || r.status === 'approved' || r.adminApproved) {
+        map.set(r.id, {
+          ...r,
+          status: (r.status === 'approved' || r.adminApproved) ? 'approved' : r.status
+        });
+      }
+    });
+    return Array.from(map.values());
+  }, [state.requests, state.leaveRequests, emp.id]);
 
   const takenAnnualDays = employeeLeaveRequests
     .filter((r) => r.leaveType === 'annual' && r.status === 'approved' && r.startDate.startsWith(currentYear))
@@ -103,6 +122,7 @@ export default function EmployeeLeaveModule({
 
     setState(updatedState);
     if (saveState) await saveState(updatedState);
+    notifyAdminOnNewRequest({ state: updatedState, newRequest, empName: emp.name });
 
     setShowForm(false);
     setReason('');

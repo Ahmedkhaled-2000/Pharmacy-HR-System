@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { todayStr, fmt } from '../../utils/formatters';
+import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 
 export default function EmployeeLoansModule({
   emp,
@@ -25,9 +26,31 @@ export default function EmployeeLoansModule({
   ]);
   const [medNotes, setMedNotes] = useState('');
 
-  const employeeRequests = (state.requests || []).filter(
-    (r) => r.employeeId === emp.id && (r.type === 'loan' || r.type === 'credit_medicine')
-  );
+  const [viewingPaymentsReq, setViewingPaymentsReq] = useState(null);
+
+  // Combine state.requests and state.loans for this employee
+  const employeeRequests = React.useMemo(() => {
+    const reqs = (state.requests || []).filter(
+      (r) => String(r.employeeId) === String(emp.id) && (r.type === 'loan' || r.type === 'credit_medicine' || r.type === 'advance' || r.type === 'meds')
+    );
+    const directLoans = (state.loans || []).filter((l) => String(l.employeeId) === String(emp.id));
+
+    const map = new Map();
+    directLoans.forEach((item) => {
+      map.set(item.id, item);
+    });
+    reqs.forEach((r) => {
+      const direct = map.get(r.id);
+      const history = (direct?.paymentsHistory && direct.paymentsHistory.length > 0) ? direct.paymentsHistory : (r.paymentsHistory || r.payments || r.paidHistory || []);
+      const paidVal = direct?.paidAmount !== undefined ? direct.paidAmount : (r.paidAmount || 0);
+      map.set(r.id, {
+        ...r,
+        paidAmount: parseFloat(paidVal) || 0,
+        paymentsHistory: history
+      });
+    });
+    return Array.from(map.values());
+  }, [state.requests, state.loans, emp.id]);
 
   // Handle Medicine Item Row Add/Remove/Update
   const handleAddMedRow = () => {
@@ -87,6 +110,7 @@ export default function EmployeeLoansModule({
 
     setState(updatedState);
     if (saveState) await saveState(updatedState);
+    notifyAdminOnNewRequest({ state: updatedState, newRequest: newLoanReq, empName: emp.name });
 
     setShowLoanForm(false);
     setLoanAmount('');
@@ -113,6 +137,7 @@ export default function EmployeeLoansModule({
       type: 'credit_medicine',
       medicines: validItems,
       totalAmount: totalCost,
+      amount: totalCost,
       notes: medNotes.trim(),
       targetApproval: 'admin_only', // للإدارة العليا فقط
       status: 'pending',
@@ -124,6 +149,7 @@ export default function EmployeeLoansModule({
 
     setState(updatedState);
     if (saveState) await saveState(updatedState);
+    notifyAdminOnNewRequest({ state: updatedState, newRequest: newMedReq, empName: emp.name });
 
     setShowMedForm(false);
     setMedItems([{ id: 'med_1', name: '', price: '', qty: '1' }]);
@@ -327,18 +353,18 @@ export default function EmployeeLoansModule({
       )}
 
       {/* ── Table of Loan & Medicine Requests ── */}
-      <h4 style={{ margin: '20px 0 12px', fontSize: '15px' }}>📋 سجل الطلبات المالية السابقة</h4>
+      <h4 style={{ margin: '20px 0 12px', fontSize: '15px' }}>📋 سجل السلف والأدوية الآجل المسجلة للدفع والتحصيل</h4>
       <div className="table-responsive">
-        <table>
+        <table className="bylaws-table">
           <thead>
-            <tr>
+            <tr style={{ background: 'var(--surface-muted)' }}>
               <th>#</th>
               <th>نوع الطلب</th>
-              <th>تفاصيل المبلغ / الأدوية</th>
-              <th>نظام السداد</th>
-              <th>مسار الاعتماد</th>
-              <th>حالة الطلب</th>
-              <th>ملاحظات</th>
+              <th>المبلغ الكلي</th>
+              <th>المدفوع</th>
+              <th>المتبقي للسداد</th>
+              <th>حالة الاعتماد والسداد</th>
+              <th>تفاصيل الدفعات المسددة</th>
               <th>التاريخ</th>
             </tr>
           </thead>
@@ -348,53 +374,93 @@ export default function EmployeeLoansModule({
                 <td colSpan="8">لا توجد طلبات سلف أو أدوية آجل مسجلة سابقاً</td>
               </tr>
             ) : (
-              employeeRequests.map((r, idx) => (
-                <tr key={r.id}>
-                  <td>{idx + 1}</td>
-                  <td>
-                    {r.type === 'loan' ? (
-                      <span className="badge info">💳 سلفة مالية ({r.loanType === 'installment' ? 'مقسمة' : 'شهرية'})</span>
-                    ) : (
-                      <span className="badge success">💊 أدوية بالآجل</span>
-                    )}
-                  </td>
-                  <td style={{ fontWeight: 'bold' }}>
-                    {r.type === 'loan' ? (
-                      `${fmt(r.amount)} ج.م`
-                    ) : (
-                      <div>
-                        <div>إجمالي: {fmt(r.totalAmount)} ج.م</div>
-                        <div style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 'normal' }}>
-                          {(r.medicines || []).map((m) => `${m.name} (${m.qty}×${m.price}ج.م)`).join('، ')}
-                        </div>
-                      </div>
-                    )}
-                  </td>
-                  <td>
-                    {r.type === 'loan' ? (
-                      r.loanType === 'installment' ? `${fmt(r.monthlyDeduction)} ج.م × ${r.monthsCount} شهر` : 'تخصم بالكامل الشهر القادم'
-                    ) : (
-                      'خصم مباشر في المرتب'
-                    )}
-                  </td>
-                  <td>
-                    <span className="badge warning" style={{ fontSize: '11px' }}>🏢 الإدارة العليا فقط</span>
-                  </td>
-                  <td>
-                    {r.status === 'approved' && <span className="badge success">✅ معتمد</span>}
-                    {r.status === 'rejected' && <span className="badge danger">❌ مرفوض</span>}
-                    {r.status === 'pending' && <span className="badge warning">⏳ قيد الانتظار</span>}
-                  </td>
-                  <td style={{ color: 'var(--muted)', fontSize: '0.88rem' }}>{r.reason || r.notes || '—'}</td>
-                  <td style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>
-                    {r.createdAt ? r.createdAt.slice(0, 10) : '—'}
-                  </td>
-                </tr>
-              ))
+              employeeRequests.map((r, idx) => {
+                const total = parseFloat(r.amount || r.totalAmount) || 0;
+                const paid = parseFloat(r.paidAmount) || 0;
+                const rem = Math.max(0, total - paid);
+                const history = r.paymentsHistory || [];
+
+                return (
+                  <tr key={r.id}>
+                    <td>{idx + 1}</td>
+                    <td>
+                      {r.type === 'loan' || r.type === 'advance' ? (
+                        <span className="badge info">💳 سلفة مالية ({r.loanType === 'installment' ? 'مقسمة' : 'شهرية'})</span>
+                      ) : (
+                        <span className="badge success">💊 أدوية بالآجل</span>
+                      )}
+                    </td>
+                    <td style={{ fontWeight: '800' }}>{fmt(total)} ج.م</td>
+                    <td style={{ color: '#16a34a', fontWeight: 'bold' }}>{fmt(paid)} ج.م</td>
+                    <td style={{ color: rem > 0 ? '#dc2626' : '#16a34a', fontWeight: '900' }}>{fmt(rem)} ج.م</td>
+                    <td>
+                      {(r.status === 'approved' || r.adminApproved) && rem > 0 && <span className="badge warning">⏳ جاري سداد الأقساط</span>}
+                      {(r.status === 'approved' || r.adminApproved) && rem === 0 && <span className="badge success">✅ مسددة بالكامل</span>}
+                      {r.status === 'rejected' && <span className="badge danger">❌ مرفوضة</span>}
+                      {r.status === 'pending' && <span className="badge warning">⏳ قيد الانتظار</span>}
+                    </td>
+                    <td>
+                      <button
+                        className="btn btn-ghost"
+                        style={{ padding: '3px 8px', fontSize: '11.5px', color: '#0f766e', fontWeight: 'bold' }}
+                        onClick={() => setViewingPaymentsReq(r)}
+                      >
+                        📜 كشف الدفعات ({history.length})
+                      </button>
+                    </td>
+                    <td style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>
+                      {r.createdAt ? r.createdAt.slice(0, 10) : (r.date || '—')}
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
       </div>
+
+      {/* Employee Payments Detail Modal */}
+      {viewingPaymentsReq && (
+        <div className="modal-backdrop">
+          <div className="modal-content card" style={{ maxWidth: '600px', padding: '24px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0, color: '#0d9488', fontSize: '16px' }}>
+                📜 كشف وتفاصيل الدفعات المسددة للسلفة (المتبقي: {fmt(Math.max(0, (parseFloat(viewingPaymentsReq.amount || viewingPaymentsReq.totalAmount) || 0) - (parseFloat(viewingPaymentsReq.paidAmount) || 0)))} ج.م)
+              </h3>
+              <button className="btn btn-ghost" onClick={() => setViewingPaymentsReq(null)}>✕ إغلاق</button>
+            </div>
+
+            {(!viewingPaymentsReq.paymentsHistory || viewingPaymentsReq.paymentsHistory.length === 0) ? (
+              <div style={{ textAlign: 'center', padding: '24px', background: 'var(--surface-muted)', borderRadius: '10px', color: 'var(--muted)', fontSize: '13.5px' }}>
+                لم يتم خصم أو تسديد أي دفعات مالية لهذه السلفة بعد.
+              </div>
+            ) : (
+              <div className="table-responsive">
+                <table className="bylaws-table" style={{ fontSize: '12px', textAlign: 'center' }}>
+                  <thead>
+                    <tr style={{ background: 'var(--surface-muted)' }}>
+                      <th>#</th>
+                      <th>تاريخ الدفعة</th>
+                      <th>المبلغ المسدد</th>
+                      <th>البيان ونوع السداد</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {viewingPaymentsReq.paymentsHistory.map((p, pIdx) => (
+                      <tr key={p.id || pIdx}>
+                        <td>{pIdx + 1}</td>
+                        <td style={{ fontWeight: 'bold' }}>{p.date}</td>
+                        <td style={{ color: '#16a34a', fontWeight: 'bold' }}>+{fmt(p.amount)} ج.م</td>
+                        <td>{p.note || (p.type === 'auto_payroll' ? 'خصم شهري آلي مع الرواتب' : 'سداد مباشر')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

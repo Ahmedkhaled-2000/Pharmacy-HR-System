@@ -189,14 +189,23 @@ export default function ApprovalCenterModule({
                     </div>
 
                     {/* Dual Approval Status Indicators */}
-                    <div style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
-                      <div className={`approval-status-badge ${isBranchApproved ? 'approved' : 'pending'}`}>
-                        {isBranchApproved ? '✅ مدير الفرع: معتمد' : '⏳ مدير الفرع: بانتظار الموافقة'}
-                      </div>
-                      <div className={`approval-status-badge ${isAdminApproved ? 'approved' : 'pending'}`}>
-                        {isAdminApproved ? '✅ الإدارة العليا: معتمدة' : '⏳ الإدارة العليا: بانتظار الموافقة'}
-                      </div>
-                    </div>
+                    {(() => {
+                      const isBranchNotReq = req.targetApproval === 'admin_only' || req.targetApproval === 'admin' || ['loan', 'advance', 'credit_medicine', 'eval_edit_request', 'complaint'].includes(req.type) || req.branchNotRequired || req.isDirectToAdmin;
+                      return (
+                        <div style={{ display: 'flex', gap: '12px', marginTop: '8px', flexWrap: 'wrap' }}>
+                          <div className={`approval-status-badge ${isBranchNotReq ? 'na' : isBranchApproved ? 'approved' : 'pending'}`}>
+                            {isBranchNotReq
+                              ? '🔒 مدير الفرع: غير موجهة إليه'
+                              : isBranchApproved
+                                ? '✅ مدير الفرع: معتمد'
+                                : '⏳ مدير الفرع: بانتظار الموافقة'}
+                          </div>
+                          <div className={`approval-status-badge ${isAdminApproved ? 'approved' : 'pending'}`}>
+                            {isAdminApproved ? '✅ الإدارة العليا: معتمدة' : '⏳ الإدارة العليا: بانتظار الموافقة'}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {/* Actions based on role */}

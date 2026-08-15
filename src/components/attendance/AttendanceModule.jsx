@@ -14,15 +14,16 @@ export default function AttendanceModule({
   // Manual Punch Form State
   const [manualEmpId, setManualEmpId] = useState('');
   const [manualDate, setManualDate] = useState(new Date().toISOString().slice(0, 10));
-  const [manualInTime, setManualInTime] = useState('09:00');
-  const [manualOutTime, setManualOutTime] = useState('17:00');
+  const [manualInTime, setManualInTime] = useState('');
+  const [manualOutTime, setManualOutTime] = useState('');
   const [manualNotes, setManualNotes] = useState('');
+  const [manualBranchId, setManualBranchId] = useState('');
 
   const employees = state.employees || [];
   const branches = state.branches || [];
 
   const filteredEmployees = employees.filter((emp) => {
-    if (selectedBranch && emp.branchId !== selectedBranch) return false;
+    if (selectedBranch && emp.branchId !== selectedBranch && (!emp.branchesDetails || !emp.branchesDetails.some((bd) => bd.branchId === selectedBranch))) return false;
     if (searchQuery && !emp.name.toLowerCase().includes(searchQuery.toLowerCase()) && !emp.code.includes(searchQuery)) return false;
     return true;
   });
@@ -45,6 +46,7 @@ export default function AttendanceModule({
       employeeId: manualEmpId,
       employeeCode: empObj?.code || '',
       employeeName: empObj?.name || '',
+      branchId: manualBranchId || empObj?.branchId || '',
       date: manualDate,
       timeIn: manualInTime,
       timeOut: manualOutTime,
@@ -58,7 +60,10 @@ export default function AttendanceModule({
     const updatedState = { ...state, shifts: updatedShifts };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
-
+    setManualInTime('');
+    setManualOutTime('');
+    setManualNotes('');
+    setManualBranchId('');
     showToast?.('✅ تم إضافة البصمة اليدوية للموظف بنجاح!');
     setManualNotes('');
   };
@@ -91,6 +96,19 @@ export default function AttendanceModule({
               ))}
             </select>
           </div>
+
+          {manualEmpId && employees.find(e => e.id === manualEmpId)?.branchesDetails?.length > 1 && (
+            <div className="field">
+              <label>الفرع (للموظف متعدد الفروع)</label>
+              <select value={manualBranchId} onChange={(e) => setManualBranchId(e.target.value)} required>
+                <option value="">-- اختر الفرع --</option>
+                {employees.find(e => e.id === manualEmpId).branchesDetails.map(bd => {
+                  const b = state.branches?.find(br => br.id === bd.branchId);
+                  return <option key={bd.branchId} value={bd.branchId}>{b?.name || 'فرع غير معروف'}</option>;
+                })}
+              </select>
+            </div>
+          )}
 
           <div className="field">
             <label>تاريخ البصمة</label>

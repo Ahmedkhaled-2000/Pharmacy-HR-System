@@ -1,9 +1,12 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import EmployeeLeaveModule from '../employee-portal/EmployeeLeaveModule';
 import EmployeePermissionsModule from '../employee-portal/EmployeePermissionsModule';
 import EmployeeLoansModule from '../employee-portal/EmployeeLoansModule';
 import EmployeeEvaluationsModule from '../employee-portal/EmployeeEvaluationsModule';
 import PayslipPrintModal from '../payroll/PayslipPrintModal';
+import BylawsModule from '../bylaws/BylawsModule';
+import { getFormattedRequestBadge } from '../requests/RequestsModule';
+import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 
 const WEEKDAYS_AR = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
 
@@ -17,6 +20,65 @@ function formatMoney(num) {
   return (parseFloat(num) || 0).toFixed(2);
 }
 
+function getActiveElapsedStr(activeShift) {
+  if (!activeShift || !activeShift.timeIn) return '';
+  try {
+    const now = new Date();
+    const [h, m] = activeShift.timeIn.split(':').map(Number);
+    const start = new Date();
+    start.setHours(h, m, 0, 0);
+    let diffMs = now - start;
+    if (diffMs < 0) diffMs += 24 * 3600 * 1000;
+    const hrs = Math.floor(diffMs / 3600000);
+    const mins = Math.floor((diffMs % 3600000) / 60000);
+    return `${hrs}س و ${mins}د`;
+  } catch {
+    return '';
+  }
+}
+
+function getActiveBreakStr(activeShift) {
+  if (!activeShift || !activeShift.breakStartTime) return '';
+  try {
+    const now = new Date();
+    const [h, m] = activeShift.breakStartTime.split(':').map(Number);
+    const start = new Date();
+    start.setHours(h, m, 0, 0);
+    let diffMs = now - start;
+    if (diffMs < 0) diffMs += 24 * 3600 * 1000;
+    const mins = Math.floor(diffMs / 60000);
+    return `${mins}د`;
+  } catch {
+    return '';
+  }
+}
+
+export function getArabicStatusBadge(status, adminApproved, branchApproved) {
+  if (status === 'approved' || adminApproved) {
+    return <span className="approval-status-badge approved" style={{ background: '#dcfce7', color: '#15803d', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px' }}>🟢 معتمد نهائياً</span>;
+  }
+  if (status === 'rejected') {
+    return <span className="approval-status-badge rejected" style={{ background: '#fee2e2', color: '#b91c1c', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px' }}>🔴 مرفوض</span>;
+  }
+  if (status === 'pending_admin' || (branchApproved && !adminApproved)) {
+    return <span className="approval-status-badge pending" style={{ background: '#fef3c7', color: '#b45309', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px' }}>🟡 بانتظار الإدارة العليا</span>;
+  }
+  if (status === 'partial') {
+    return <span className="approval-status-badge pending" style={{ background: '#e0f2fe', color: '#0369a1', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px' }}>🔵 سداد جزئي</span>;
+  }
+  return <span className="approval-status-badge pending" style={{ background: '#fef9c3', color: '#a16207', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px' }}>⏳ قيد المراجعة</span>;
+}
+
+export function getArabicBranchApprovalBadge(branchApproved, status) {
+  if (branchApproved) {
+    return <span style={{ color: '#16a34a', fontWeight: 'bold', fontSize: '12.5px' }}>🟢 تم اعتمادك</span>;
+  }
+  if (status === 'rejected') {
+    return <span style={{ color: '#dc2626', fontWeight: 'bold', fontSize: '12.5px' }}>🔴 مرفوض</span>;
+  }
+  return <span style={{ color: '#d97706', fontWeight: 'bold', fontSize: '12.5px' }}>⏳ بانتظار موافقتك</span>;
+}
+
 export default function BranchManagerView({
   state,
   setState,
@@ -25,9 +87,12 @@ export default function BranchManagerView({
   activeTab = 'dashboard',
   setActiveTab,
   showToast,
-  onExportExcel
+  onExportExcel,
+  startShift,
+  pauseShift,
+  resumeShift,
+  stopShift
 }) {
-  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
   const [selectedPunchEmpId, setSelectedPunchEmpId] = useState('');
   const [showPrintModal, setShowPrintModal] = useState(false);
   
@@ -44,6 +109,80 @@ export default function BranchManagerView({
   const [showRosterEditModal, setShowRosterEditModal] = useState(false);
   const [rosterEditEmpId, setRosterEditEmpId] = useState('');
   const [rosterEditDetails, setRosterEditDetails] = useState('');
+
+  // Branch Manager Date Range & Month Filter State (Persistent in localStorage)
+  const [filterMode, setFilterMode] = useState(() => {
+    try { return localStorage.getItem('bm_filter_mode') || 'month'; } catch { return 'month'; }
+  });
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    try { return localStorage.getItem('bm_selected_month') || new Date().toISOString().slice(0, 7); } catch { return new Date().toISOString().slice(0, 7); }
+  });
+  const [customFromDate, setCustomFromDate] = useState(() => {
+    try { return localStorage.getItem('bm_custom_from') || ''; } catch { return ''; }
+  });
+  const [customToDate, setCustomToDate] = useState(() => {
+    try { return localStorage.getItem('bm_custom_to') || ''; } catch { return ''; }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('bm_filter_mode', filterMode);
+      localStorage.setItem('bm_selected_month', selectedMonth);
+      localStorage.setItem('bm_custom_from', customFromDate);
+      localStorage.setItem('bm_custom_to', customToDate);
+    } catch {}
+  }, [filterMode, selectedMonth, customFromDate, customToDate]);
+
+  const cutoffStartDay = state.orgSettings?.payrollPayoutStartDay || 27;
+  const cutoffEndDay = state.orgSettings?.payrollPayoutEndDay || (state.orgSettings?.payrollPayoutDay || 26);
+
+  const matchesDateRange = (dateStr) => {
+    if (!dateStr) return false;
+    if (filterMode === 'custom') {
+      if (customFromDate && dateStr < customFromDate) return false;
+      if (customToDate && dateStr > customToDate) return false;
+      return true;
+    }
+    if (!selectedMonth || selectedMonth.length !== 7) return true;
+    const [yStr, mStr] = selectedMonth.split('-');
+    const y = parseInt(yStr, 10);
+    const m = parseInt(mStr, 10);
+    const prevM = m === 1 ? 12 : m - 1;
+    const prevY = m === 1 ? y - 1 : y;
+    const fromDate = `${prevY}-${String(prevM).padStart(2, '0')}-${String(cutoffStartDay).padStart(2, '0')}`;
+    const toDate = `${y}-${String(m).padStart(2, '0')}-${String(cutoffEndDay).padStart(2, '0')}`;
+    return dateStr >= fromDate && dateStr <= toDate;
+  };
+
+  const renderDateFilterBar = () => (
+    <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap', background: 'var(--surface)', padding: '12px 16px', borderRadius: '12px', border: '1px solid var(--border)', marginBottom: '16px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <label style={{ fontSize: '13px', fontWeight: 'bold' }}>تصفية الفترة الزمنية:</label>
+        <select value={filterMode} onChange={(e) => setFilterMode(e.target.value)} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px', fontWeight: 'bold' }}>
+          <option value="month">📅 حسب الشهر (دورة تقفيل الـ 26)</option>
+          <option value="custom">📆 فترة مخصصة (من - إلى)</option>
+        </select>
+      </div>
+
+      {filterMode === 'month' ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <label style={{ fontSize: '13px', fontWeight: 'bold' }}>الشهر:</label>
+          <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px', fontWeight: 'bold' }} />
+        </div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <label style={{ fontSize: '13px', fontWeight: 'bold' }}>من:</label>
+            <input type="date" value={customFromDate} onChange={(e) => setCustomFromDate(e.target.value)} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px' }} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <label style={{ fontSize: '13px', fontWeight: 'bold' }}>إلى:</label>
+            <input type="date" value={customToDate} onChange={(e) => setCustomToDate(e.target.value)} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px' }} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
 
   // Branch Manager New Evaluation Form State
   const [evalEmpId, setEvalEmpId] = useState('');
@@ -73,42 +212,60 @@ export default function BranchManagerView({
       code: 'MGR',
       jobTitle: 'مدير فرع',
       branchId: currentBranch?.id,
-      salary: 8000,
+      salary: 650,
       annualLeaveBalance: 21,
       workHoursPerDay: 8,
       workDaysPerMonth: 26
     };
   }, [state.employees, currentBranch]);
 
-  // Branch Employees
+  // Branch Employees (matching primary branch OR listed in branchesDetails)
   const branchEmployees = useMemo(() => {
-    return (state.employees || []).filter((e) => e.branchId === currentBranch?.id);
+    if (!currentBranch?.id) return state.employees || [];
+    const cIdStr = String(currentBranch.id);
+    return (state.employees || []).filter((e) => {
+      if (e.branchId && String(e.branchId) === cIdStr) return true;
+      if (e.branchesDetails && e.branchesDetails.some((bd) => String(bd.branchId) === cIdStr)) return true;
+      return false;
+    });
   }, [state.employees, currentBranch]);
 
   // Branch Requests
   const branchRequests = useMemo(() => {
-    const branchEmpIds = new Set(branchEmployees.map((e) => e.id));
-    return (state.requests || []).filter(
-      (r) => branchEmpIds.has(r.employeeId) || r.branchId === currentBranch?.id
-    );
+    if (!currentBranch?.id) return state.requests || [];
+    const cIdStr = String(currentBranch.id);
+    const branchEmpIdSet = new Set(branchEmployees.map((e) => String(e.id)));
+
+    return (state.requests || []).filter((r) => {
+      // 1. Direct branch match on request
+      if (r.branchId && String(r.branchId) === cIdStr) return true;
+      // 2. Request employee belongs to this branch
+      if (r.employeeId && branchEmpIdSet.has(String(r.employeeId))) return true;
+      return false;
+    });
   }, [state.requests, branchEmployees, currentBranch]);
 
   // ── Calculate Manager Salary Metrics ──
   const managerSalaryMetrics = useMemo(() => {
-    const salary = managerEmp.salary || 8000;
-    const workHoursPerDay = managerEmp.workHoursPerDay || 8;
-    const workDaysPerMonth = managerEmp.workDaysPerMonth || 26;
-    const dailyRate = Math.round((salary / workDaysPerMonth) * 100) / 100;
-    const hourlyRate = Math.round((dailyRate / workHoursPerDay) * 100) / 100;
+    const hourlyBase = parseFloat(managerEmp?.salary) || 0;
+    const workHoursPerDay = parseFloat(managerEmp?.workHoursPerDay) || 8;
+    const workDaysPerMonth = parseFloat(managerEmp?.workDaysPerMonth) || 26;
+    
+    // 1. احتساب سعر اليوم = (سعر الساعة الشهري * ساعات العمل المدخلة) / أيام العمل المدخلة
+    const dailyRate = workDaysPerMonth > 0 ? (hourlyBase * workHoursPerDay) / workDaysPerMonth : 0;
+    // 2. احتساب سعر الساعة اليومي = سعر اليوم / ساعات العمل المدخلة
+    const rate = workHoursPerDay > 0 ? dailyRate / workHoursPerDay : (workDaysPerMonth > 0 ? hourlyBase / workDaysPerMonth : hourlyBase);
+    const monthlySalary = dailyRate * workDaysPerMonth;
 
     const managerShifts = (state.shifts || []).filter(
-      (s) => s.employeeId === managerEmp.id && s.date.startsWith(selectedMonth)
+      (s) => s && s.employeeId === managerEmp?.id && matchesDateRange(s.date)
     );
     const totalHours = Math.round(managerShifts.reduce((acc, s) => acc + (s.hours || 0), 0) * 100) / 100;
-    const baseEarnings = Math.round(totalHours * hourlyRate * 100) / 100;
+    // 3. أجر الساعات والمستحقات
+    const baseEarnings = Math.round(totalHours * rate * 100) / 100;
 
     const managerAdjs = (state.adjustments || []).filter(
-      (a) => (a.employeeId === managerEmp.id || a.employeeId === 'all') && a.date.startsWith(selectedMonth)
+      (a) => (a.employeeId === managerEmp.id || a.employeeId === 'all') && matchesDateRange(a.date)
     );
 
     const totalBonus = managerAdjs
@@ -122,11 +279,11 @@ export default function BranchManagerView({
     const netSalary = Math.round((baseEarnings + totalBonus - totalDeduction) * 100) / 100;
 
     return {
-      salary,
+      salary: hourlyBase,
       workHoursPerDay,
       workDaysPerMonth,
       dailyRate,
-      hourlyRate,
+      hourlyRate: rate,
       totalHours,
       baseEarnings,
       totalBonus,
@@ -136,62 +293,122 @@ export default function BranchManagerView({
       totalBreakHours: Math.round(managerShifts.reduce((acc, s) => acc + (s.breakHours || 0), 0) * 100) / 100,
       shiftsList: managerShifts
     };
-  }, [managerEmp, state.shifts, state.adjustments, selectedMonth]);
+  }, [managerEmp, state.shifts, state.adjustments, selectedMonth, filterMode, customFromDate, customToDate]);
 
   // ── Handlers ──
   const handleManagerApproveRequest = async (reqId) => {
+    let approvedTargetReq = null;
+    let updatedRosters = [...(state.rosters || [])];
+
     const updatedRequests = (state.requests || []).map((r) => {
       if (r.id === reqId) {
         const requiresAdmin = r.targetApproval !== 'branch_only';
         const isAdminApproved = r.adminApproved || r.status === 'pending_admin';
-        const finalStatus = requiresAdmin ? 'pending_admin' : 'approved';
-        return {
+        const isFullyApproved = !requiresAdmin || (r.branchApproved && isAdminApproved);
+        const updated = {
           ...r,
           branchApproved: true,
-          status: isAdminApproved && r.adminApproved ? 'approved' : finalStatus
+          status: isFullyApproved ? 'approved' : 'pending_admin'
         };
+        if (isFullyApproved) approvedTargetReq = updated;
+        return updated;
       }
       return r;
     });
 
-    const updatedState = { ...state, requests: updatedRequests };
+    if (approvedTargetReq && (approvedTargetReq.type === 'roster_update' || approvedTargetReq.type === 'roster_edit' || approvedTargetReq.type === 'roster_edit_request')) {
+      const existingIdx = updatedRosters.findIndex(
+        (ros) => ros.employeeId === approvedTargetReq.employeeId && ros.month === approvedTargetReq.month && (String(ros.branchId || '') === String(approvedTargetReq.branchId || ''))
+      );
+      const activeRosterObj = {
+        id: approvedTargetReq.id,
+        employeeId: approvedTargetReq.employeeId,
+        branchId: approvedTargetReq.branchId || null,
+        month: approvedTargetReq.month,
+        fromDate: approvedTargetReq.fromDate,
+        toDate: approvedTargetReq.toDate,
+        schedule: approvedTargetReq.schedule,
+        status: 'approved',
+        approvedAt: new Date().toISOString()
+      };
+      if (existingIdx >= 0) {
+        updatedRosters[existingIdx] = activeRosterObj;
+      } else {
+        updatedRosters.push(activeRosterObj);
+      }
+    }
+
+    let updatedLeaveRequests = [...(state.leaveRequests || [])];
+    if (approvedTargetReq && (approvedTargetReq.type === 'leave' || approvedTargetReq.type === 'leave_request')) {
+      updatedLeaveRequests = updatedLeaveRequests.map((lr) => {
+        if (lr.id === approvedTargetReq.id || (String(lr.employeeId) === String(approvedTargetReq.employeeId) && lr.startDate === approvedTargetReq.startDate)) {
+          return { ...lr, status: approvedTargetReq.status, branchApproved: true };
+        }
+        return lr;
+      });
+    }
+
+    const updatedState = { ...state, requests: updatedRequests, rosters: updatedRosters, leaveRequests: updatedLeaveRequests };
     setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.('✅ تم الموافقة المبدئية على الطلب وتحويله للإدارة العليا');
+    showToast?.(approvedTargetReq ? '✅ تم تفعيل الطلب المعتمد بنجاح' : '✅ تم الموافقة المبدئية على الطلب وتحويله للإدارة العليا');
   };
 
   const handleManagerRejectRequest = async (reqId) => {
+    let rejectedTargetReq = null;
     const updatedRequests = (state.requests || []).map((r) => {
       if (r.id === reqId) {
-        return { ...r, branchApproved: false, status: 'rejected' };
+        rejectedTargetReq = { ...r, branchApproved: false, status: 'rejected' };
+        return rejectedTargetReq;
       }
       return r;
     });
 
-    const updatedState = { ...state, requests: updatedRequests };
+    let updatedLeaveRequests = [...(state.leaveRequests || [])];
+    if (rejectedTargetReq && (rejectedTargetReq.type === 'leave' || rejectedTargetReq.type === 'leave_request')) {
+      updatedLeaveRequests = updatedLeaveRequests.map((lr) => {
+        if (lr.id === rejectedTargetReq.id || (String(lr.employeeId) === String(rejectedTargetReq.employeeId) && lr.startDate === rejectedTargetReq.startDate)) {
+          return { ...lr, status: 'rejected', branchApproved: false };
+        }
+        return lr;
+      });
+    }
+
+    const updatedState = { ...state, requests: updatedRequests, leaveRequests: updatedLeaveRequests };
     setState(updatedState);
     if (saveState) await saveState(updatedState);
     showToast?.('🔴 تم رفض الطلب');
   };
 
-  const handleApproveRoster = async (rosterId) => {
+  const handleApproveRoster = async (targetId) => {
     const updatedRosters = (state.rosters || []).map((r) => {
-      if (r.id === rosterId) {
-        const adminApproved = r.adminApproved;
-        const newStatus = adminApproved ? 'approved' : 'pending_admin';
+      if (r.id === targetId || String(r.employeeId) === String(targetId)) {
+        const adminApproved = r.adminApproved || r.status === 'approved';
         return {
           ...r,
           branchApproved: true,
-          status: newStatus
+          status: adminApproved ? 'approved' : 'pending_admin'
         };
       }
       return r;
     });
 
-    const updatedState = { ...state, rosters: updatedRosters };
+    const updatedRequests = (state.requests || []).map((r) => {
+      if (r.id === targetId || (r.employeeId === targetId && (r.type === 'roster_update' || r.type === 'roster_edit' || r.type === 'roster_edit_request'))) {
+        const isAdminApproved = r.adminApproved || r.status === 'approved';
+        return {
+          ...r,
+          branchApproved: true,
+          status: isAdminApproved ? 'approved' : 'pending_admin'
+        };
+      }
+      return r;
+    });
+
+    const updatedState = { ...state, rosters: updatedRosters, requests: updatedRequests };
     setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.('✅ تم التوقيع والموافقة على الجدول من مدير الفرع');
+    showToast?.('✅ تم التوقيع والموافقة على الجدول من مدير الفرع بنجاح');
   };
 
   const handleSubmitRosterEditRequest = async (e) => {
@@ -221,6 +438,8 @@ export default function BranchManagerView({
     const updatedState = { ...state, requests: updatedRequests };
     setState(updatedState);
     if (saveState) await saveState(updatedState);
+    notifyAdminOnNewRequest({ state: updatedState, newRequest: newReq, empName: emp?.name, branchName: currentBranch?.name });
+
     setShowRosterEditModal(false);
     setRosterEditDetails('');
     showToast?.('📤 تم إرسال طلب تعديل الجدول إلى الإدارة العليا بنجاح');
@@ -480,6 +699,9 @@ export default function BranchManagerView({
         </div>
       </div>
 
+      {/* Date Range & Month Filter Bar (Requirement 4) */}
+      {renderDateFilterBar()}
+
       {/* ───────────────────────────────────────────────────────────── */}
       {/* ── 1. DASHBOARD TAB ── */}
       {/* ───────────────────────────────────────────────────────────── */}
@@ -498,15 +720,50 @@ export default function BranchManagerView({
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '14px' }}>
                 {branchEmployees.map((emp) => {
                   const activeShift = state.activeShifts?.[emp.id];
-                  const statusLabel = activeShift
-                    ? (activeShift.isOnBreak ? '⏸️ في استراحة' : '🟢 على رأس العمل')
-                    : '🔴 لم يبصم / خارج الوردية';
-                  const statusBg = activeShift
-                    ? (activeShift.isOnBreak ? '#fef3c7' : '#dcfce7')
-                    : '#fef2f2';
-                  const statusColor = activeShift
-                    ? (activeShift.isOnBreak ? '#d97706' : '#15803d')
-                    : '#b91c1c';
+                  const cIdStr = String(currentBranch?.id || '');
+                  const activeInThisBranch = activeShift && (String(activeShift.branchId || emp.branchId) === cIdStr);
+                  const activeInOtherBranch = activeShift && !activeInThisBranch;
+
+                  const todayStrVal = new Date().toISOString().slice(0, 10);
+                  const todayShiftsInThisBranch = (state.shifts || []).filter(
+                    (s) => String(s.employeeId) === String(emp.id) && s.date === todayStrVal && (String(s.branchId || emp.branchId) === cIdStr)
+                  );
+                  const allLeaves = [...(state.leaveRequests || []), ...(state.requests || [])];
+                  const onLeaveToday = allLeaves.some(
+                    (r) => String(r.employeeId) === String(emp.id) && (r.status === 'approved' || r.adminApproved) && (r.type === 'leave' || r.type === 'leave_request') && r.startDate <= todayStrVal && r.endDate >= todayStrVal
+                  );
+
+                  let statusLabel = '🔴 لم يبصم بهذا الفرع / خارج الوردية';
+                  let statusBg = '#fef2f2';
+                  let statusColor = '#b91c1c';
+
+                  if (activeInThisBranch) {
+                    if (activeShift.isOnBreak || activeShift.isPaused) {
+                      const breakTime = getActiveBreakStr ? getActiveBreakStr(activeShift) : '';
+                      statusLabel = `⏸️ في استراحة ${breakTime ? `(منذ ${breakTime})` : ''}`;
+                      statusBg = '#fef3c7';
+                      statusColor = '#d97706';
+                    } else {
+                      const workTime = getActiveElapsedStr ? getActiveElapsedStr(activeShift) : '';
+                      statusLabel = `🟢 حاضر وعلى رأس العمل ${workTime ? `(${workTime})` : ''}`;
+                      statusBg = '#dcfce7';
+                      statusColor = '#15803d';
+                    }
+                  } else if (activeInOtherBranch) {
+                    const otherBranch = (state.branches || []).find((b) => String(b.id) === String(activeShift.branchId));
+                    statusLabel = `🏢 في وردية بفرع آخر (${otherBranch ? otherBranch.name : 'فرع آخر'})`;
+                    statusBg = '#f1f5f9';
+                    statusColor = '#475569';
+                  } else if (todayShiftsInThisBranch.length > 0) {
+                    const totalHrs = todayShiftsInThisBranch.reduce((acc, s) => acc + (s.hours || 0), 0);
+                    statusLabel = `🟢 تم الحضور بهذا الفرع (انتهى الشيفت - ${totalHrs.toFixed(2)} س)`;
+                    statusBg = '#e0f2fe';
+                    statusColor = '#0369a1';
+                  } else if (onLeaveToday) {
+                    statusLabel = '🏖️ في إجازة معتمدة';
+                    statusBg = '#f0fdf4';
+                    statusColor = '#16a34a';
+                  }
 
                   return (
                     <div
@@ -572,21 +829,10 @@ export default function BranchManagerView({
                     branchRequests.slice(0, 5).map((r) => (
                       <tr key={r.id}>
                         <td style={{ fontWeight: '700' }}>{r.employeeName || 'موظف'}</td>
-                        <td><span className="badge badge-primary">{r.typeLabel || r.type}</span></td>
+                        <td>{getFormattedRequestBadge(r.type, r.leaveType)}</td>
                         <td style={{ fontSize: '13px' }}>{r.reason || r.details || '—'}</td>
-                        <td>
-                          {r.branchApproved ? (
-                            <span style={{ color: '#16a34a', fontWeight: '700' }}>🟢 تم اعتمادك</span>
-                          ) : (
-                            <span style={{ color: '#d97706', fontWeight: '700' }}>⏳ بانتظار موافقتك</span>
-                          )}
-                        </td>
-                        <td>
-                          {r.status === 'approved' && <span className="approval-status-badge approved">🟢 معتمد نهائياً</span>}
-                          {r.status === 'pending_admin' && <span className="approval-status-badge pending">🟡 بانتظار الإدارة العليا</span>}
-                          {r.status === 'pending' && <span className="approval-status-badge pending">⏳ قيد المراجعة</span>}
-                          {r.status === 'rejected' && <span className="approval-status-badge rejected">🔴 مرفوض</span>}
-                        </td>
+                        <td>{getArabicBranchApprovalBadge(r.branchApproved, r.status)}</td>
+                        <td>{getArabicStatusBadge(r.status, r.adminApproved, r.branchApproved)}</td>
                       </tr>
                     ))
                   )}
@@ -613,7 +859,7 @@ export default function BranchManagerView({
                   <th>التاريخ</th>
                   <th>الموظف</th>
                   <th>نوع الطلب</th>
-                  <th>التفاصيل والسبب</th>
+                  <th>التفاصيل<br />والسبب</th>
                   <th>موافقتك (مدير الفرع)</th>
                   <th>حالة الإدارة العليا</th>
                   <th>الإجراء</th>
@@ -631,23 +877,10 @@ export default function BranchManagerView({
                     <tr key={r.id}>
                       <td style={{ fontSize: '12.5px' }}>{r.createdAt ? r.createdAt.slice(0, 10) : r.startDate || '—'}</td>
                       <td style={{ fontWeight: '700' }}>{r.employeeName || 'موظف'}</td>
-                      <td><span className="badge badge-primary">{r.typeLabel || r.leaveType || r.type}</span></td>
+                      <td>{getFormattedRequestBadge(r.type, r.leaveType)}</td>
                       <td style={{ fontSize: '13px' }}>{r.reason || r.details || '—'}</td>
-                      <td>
-                        {r.branchApproved ? (
-                          <span style={{ color: '#16a34a', fontWeight: '700' }}>🟢 تم الاعتماد</span>
-                        ) : r.status === 'rejected' ? (
-                          <span style={{ color: '#dc2626', fontWeight: '700' }}>🔴 مرفوض</span>
-                        ) : (
-                          <span style={{ color: '#d97706', fontWeight: '700' }}>⏳ مطلوب موافقتك</span>
-                        )}
-                      </td>
-                      <td>
-                        {r.status === 'approved' && <span className="approval-status-badge approved">🟢 معتمد نهائياً</span>}
-                        {r.status === 'pending_admin' && <span className="approval-status-badge pending">🟡 قيد اعتماد الإدارة العليا</span>}
-                        {r.status === 'pending' && <span className="approval-status-badge pending">⏳ قيد المراجعة</span>}
-                        {r.status === 'rejected' && <span className="approval-status-badge rejected">🔴 مرفوض</span>}
-                      </td>
+                      <td>{getArabicBranchApprovalBadge(r.branchApproved, r.status)}</td>
+                      <td>{getArabicStatusBadge(r.status, r.adminApproved, r.branchApproved)}</td>
                       <td>
                         {(!r.branchApproved && r.status !== 'rejected') ? (
                           <div style={{ display: 'flex', gap: '6px' }}>
@@ -686,9 +919,20 @@ export default function BranchManagerView({
         <div className="card settings-card fade-in" style={{ padding: '20px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
             <h3 style={{ margin: 0, fontSize: '17px', color: '#1e293b' }}>📅 الجدول الشهري لموظفي الفرع والموافقات</h3>
-            <button className="btn btn-start" onClick={() => setShowRosterEditModal(true)}>
-              ✏️ طلب من الإدارة العليا تعديل جدول موظف
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <label style={{ fontSize: '13px', fontWeight: 'bold' }}>تحديد الشهر:</label>
+                <input
+                  type="month"
+                  value={selectedMonth}
+                  onChange={(e) => e.target.value && setSelectedMonth(e.target.value)}
+                  style={{ padding: '5px 10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px', fontWeight: 'bold' }}
+                />
+              </div>
+              <button className="btn btn-start" onClick={() => setShowRosterEditModal(true)}>
+                ✏️ طلب من الإدارة العليا تعديل جدول موظف
+              </button>
+            </div>
           </div>
 
           <p style={{ fontSize: '13px', color: 'var(--muted)', marginBottom: '16px' }}>
@@ -712,33 +956,55 @@ export default function BranchManagerView({
                   <tr><td colSpan="6" style={{ textAlign: 'center', padding: '20px' }}>لا يوجد موظفين بالفرع.</td></tr>
                 ) : (
                   branchEmployees.map((emp) => {
-                    const roster = (state.rosters || []).find((r) => r.employeeId === emp.id && r.month === selectedMonth);
+                    const empIdStr = String(emp.id);
+
+                    // 1. Check in state.rosters
+                    const roster = (state.rosters || []).find(
+                      (r) => String(r.employeeId) === empIdStr && (r.month === selectedMonth || !r.month)
+                    );
+
+                    // 2. Check in state.requests
+                    const req = (state.requests || []).find(
+                      (r) =>
+                        String(r.employeeId) === empIdStr &&
+                        (r.type === 'roster_update' || r.type === 'roster_edit' || r.type === 'roster_edit_request') &&
+                        (r.month === selectedMonth || !r.month)
+                    );
+
+                    const hasData = !!(roster || req);
+                    const isApprovedReq = req?.status === 'approved' || req?.adminApproved;
+                    const isApprovedRoster = roster?.status === 'approved' || roster?.adminApproved;
+
+                    const isBranchApproved = roster?.branchApproved || req?.branchApproved || isApprovedReq || isApprovedRoster;
+                    const isAdminApproved = roster?.adminApproved || req?.adminApproved || req?.status === 'approved' || roster?.status === 'approved';
+                    const isFullyApproved = isApprovedReq || isApprovedRoster || (isBranchApproved && isAdminApproved);
+
                     return (
                       <tr key={emp.id}>
                         <td style={{ fontWeight: '700' }}>{emp.name} ({emp.code})</td>
                         <td>{selectedMonth}</td>
                         <td>
-                          {roster?.branchApproved ? (
+                          {isBranchApproved ? (
                             <span style={{ color: '#16a34a', fontWeight: '700' }}>🟢 معتمد من مدير الفرع</span>
-                          ) : roster ? (
+                          ) : hasData ? (
                             <span style={{ color: '#d97706', fontWeight: '700' }}>⏳ يحتاج توقيعك</span>
                           ) : (
                             <span style={{ color: 'var(--muted)' }}>لم يتم إنشاء جدول</span>
                           )}
                         </td>
                         <td>
-                          {roster?.adminApproved ? (
+                          {isAdminApproved || isFullyApproved ? (
                             <span style={{ color: '#16a34a', fontWeight: '700' }}>🟢 معتمد من الإدارة العليا</span>
-                          ) : roster ? (
+                          ) : hasData ? (
                             <span style={{ color: '#d97706', fontWeight: '700' }}>⏳ بانتظار الإدارة العليا</span>
                           ) : (
                             <span style={{ color: 'var(--muted)' }}>—</span>
                           )}
                         </td>
                         <td>
-                          {roster?.status === 'approved' ? (
+                          {isFullyApproved ? (
                             <span className="approval-status-badge approved">🟢 معتمد ونشط</span>
-                          ) : roster ? (
+                          ) : hasData ? (
                             <span className="approval-status-badge pending">🟡 قيد الاعتماد الثنائي</span>
                           ) : (
                             <span style={{ color: 'var(--muted)' }}>غير مدخل</span>
@@ -753,8 +1019,8 @@ export default function BranchManagerView({
                             >
                               👁️ معاينة الجدول
                             </button>
-                            {roster && !roster.branchApproved && (
-                              <button className="btn btn-start" style={{ padding: '4px 10px', fontSize: '12px' }} onClick={() => handleApproveRoster(roster.id)}>
+                            {hasData && !isBranchApproved && (
+                              <button className="btn btn-start" style={{ padding: '4px 10px', fontSize: '12px' }} onClick={() => handleApproveRoster(roster?.id || req?.id || emp.id)}>
                                 ✓ توقيع بالموافقة
                               </button>
                             )}
@@ -975,8 +1241,10 @@ export default function BranchManagerView({
                       <td style={{ fontWeight: '700' }}>{r.amount} ج.م</td>
                       <td>{r.reason || r.details || '—'}</td>
                       <td>
-                        {r.status === 'approved' && <span className="approval-status-badge approved">🟢 معتمد وتم تطبيقه على الأجر</span>}
+                        {(r.status === 'approved' || r.adminApproved) && <span className="approval-status-badge approved">🟢 معتمد وتم تطبيقه على الأجر</span>}
                         {r.status === 'pending_admin' && <span className="approval-status-badge pending">🟡 بانتظار موافقة الإدارة العليا</span>}
+                        {r.status === 'pending_branch' && <span className="approval-status-badge pending">🟡 بانتظار موافقة مدير الفرع</span>}
+                        {r.status === 'pending' && <span className="approval-status-badge pending">🟡 قيد الاعتماد والمراجعة</span>}
                         {r.status === 'rejected' && <span className="approval-status-badge rejected">🔴 مرفوض من الإدارة العليا</span>}
                       </td>
                     </tr>
@@ -1022,12 +1290,18 @@ export default function BranchManagerView({
           </div>
 
           {(() => {
+            const allEmps = state.employees || [];
+            const cIdStr = String(currentBranch?.id || '');
             const filteredShifts = (state.shifts || []).filter((s) => {
-              const empObj = branchEmployees.find((e) => e.id === s.employeeId);
+              if (!s || !s.date) return false;
+              const empObj = allEmps.find((e) => String(e.id) === String(s.employeeId)) || branchEmployees.find((e) => String(e.id) === String(s.employeeId));
               if (!empObj) return false;
-              if (selectedPunchEmpId && s.employeeId !== selectedPunchEmpId) return false;
-              return s.date.startsWith(selectedMonth);
-            }).sort((a, b) => a.date.localeCompare(b.date));
+              if (selectedPunchEmpId && String(s.employeeId) !== String(selectedPunchEmpId)) return false;
+              // Check if shift strictly belongs to this branch
+              const isThisBranchShift = String(s.branchId) === cIdStr || (!s.branchId && String(empObj.branchId) === cIdStr);
+              if (!isThisBranchShift) return false;
+              return matchesDateRange(s.date);
+            }).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
             const totalBreak = filteredShifts.reduce((acc, s) => acc + (s.breakHours || 0), 0);
             const totalHours = filteredShifts.reduce((acc, s) => acc + (s.hours || 0), 0);
@@ -1038,6 +1312,7 @@ export default function BranchManagerView({
                   <thead>
                     <tr style={{ background: '#f0fdf4', color: '#166534' }}>
                       <th>#</th>
+                      <th>اسم الموظف</th>
                       <th>التاريخ</th>
                       <th>اليوم</th>
                       <th>وقت الدخول</th>
@@ -1050,47 +1325,59 @@ export default function BranchManagerView({
                   </thead>
                   <tbody>
                     {filteredShifts.length === 0 ? (
-                      <tr><td colSpan="9" style={{ textAlign: 'center', padding: '24px', color: 'var(--muted)' }}>لا توجد بصمات مسجلة لهؤلاء الموظفين لهذا الشهر.</td></tr>
+                      <tr><td colSpan="10" style={{ textAlign: 'center', padding: '24px', color: 'var(--muted)' }}>لا توجد بصمات مسجلة لهؤلاء الموظفين بهذا الفرع لهذه الفترة.</td></tr>
                     ) : (
-                      filteredShifts.map((s, idx) => (
-                        <tr key={s.id}>
-                          <td style={{ color: 'var(--muted)', fontWeight: 'bold' }}>{idx + 1}</td>
-                          <td style={{ fontWeight: '700' }}>{s.date}</td>
-                          <td>{getArabicWeekday(s.date)}</td>
-                          <td>
-                            <span style={{ background: '#dcfce7', color: '#15803d', padding: '3px 8px', borderRadius: '6px', fontWeight: '700' }}>
-                              {s.timeIn || '—'}
-                            </span>
-                          </td>
-                          <td>
-                            <span style={{ background: '#fee2e2', color: '#b91c1c', padding: '3px 8px', borderRadius: '6px', fontWeight: '700' }}>
-                              {s.timeOut || '—'}
-                            </span>
-                          </td>
-                          <td>
-                            {(s.breakHours || 0) > 0 ? (
-                              <span style={{ background: '#fef3c7', color: '#b45309', padding: '3px 8px', borderRadius: '6px', fontWeight: '700' }}>
-                                {formatMoney(s.breakHours)} س
+                      filteredShifts.map((s, idx) => {
+                        const empObj = allEmps.find((e) => String(e.id) === String(s.employeeId)) || branchEmployees.find((e) => String(e.id) === String(s.employeeId));
+                        const bd = empObj?.branchesDetails?.find((b) => String(b.branchId) === cIdStr) || empObj?.branchesDetails?.[0];
+                        const empSalary = parseFloat(bd?.salary || empObj?.salary) || 0;
+                        const empWorkHours = parseFloat(bd?.workHoursPerDay || empObj?.workHoursPerDay) || 8;
+                        const empWorkDays = parseFloat(bd?.workDaysPerMonth || empObj?.workDaysPerMonth) || 26;
+                        const empDailyRate = empWorkDays > 0 ? (empSalary * empWorkHours) / empWorkDays : 0;
+                        const empDailyHourlyRate = empWorkHours > 0 ? empDailyRate / empWorkHours : (empWorkDays > 0 ? empSalary / empWorkDays : empSalary);
+                        return (
+                          <tr key={s.id}>
+                            <td style={{ color: 'var(--muted)', fontWeight: 'bold' }}>{idx + 1}</td>
+                            <td style={{ fontWeight: '800', color: 'var(--primary-dark)' }}>
+                              {empObj ? `${empObj.name} (${empObj.code})` : (s.employeeName || 'موظف')}
+                            </td>
+                            <td style={{ fontWeight: '700' }}>{s.date}</td>
+                            <td>{getArabicWeekday(s.date)}</td>
+                            <td>
+                              <span style={{ background: '#dcfce7', color: '#15803d', padding: '3px 8px', borderRadius: '6px', fontWeight: '700' }}>
+                                {s.timeIn || '—'}
                               </span>
-                            ) : (
-                              <span style={{ color: 'var(--muted)' }}>—</span>
-                            )}
-                          </td>
-                          <td style={{ fontWeight: '700', color: '#0d9488' }}>
-                            {formatMoney(s.hours)} ساعة
-                          </td>
-                          <td>
-                            <span style={{ color: '#0d9488', fontWeight: '700' }}>🔒 مقيد</span>
-                          </td>
-                          <td style={{ fontSize: '12px', color: 'var(--muted)' }}>{s.note || 'تسجيل بصمة عادية'}</td>
-                        </tr>
-                      ))
+                            </td>
+                            <td>
+                              <span style={{ background: '#fee2e2', color: '#b91c1c', padding: '3px 8px', borderRadius: '6px', fontWeight: '700' }}>
+                                {s.timeOut || '—'}
+                              </span>
+                            </td>
+                            <td>
+                              {(s.breakHours || 0) > 0 ? (
+                                <span style={{ background: '#fef3c7', color: '#b45309', padding: '3px 8px', borderRadius: '6px', fontWeight: '700' }}>
+                                  {formatMoney(s.breakHours)} س
+                                </span>
+                              ) : (
+                                <span style={{ color: 'var(--muted)' }}>—</span>
+                              )}
+                            </td>
+                            <td style={{ fontWeight: '700', color: '#0d9488' }}>
+                              {formatMoney(s.hours)} ساعة
+                            </td>
+                            <td style={{ fontWeight: '700', color: '#16a34a' }}>
+                              {formatMoney(s.hours * empDailyHourlyRate)} ج.م
+                            </td>
+                            <td style={{ fontSize: '12px', color: 'var(--muted)' }}>{s.note || 'تسجيل بصمة عادية'}</td>
+                          </tr>
+                        );
+                      })
                     )}
                   </tbody>
                   {filteredShifts.length > 0 && (
                     <tfoot>
                       <tr style={{ fontWeight: '800', background: '#f8fafc' }}>
-                        <td colSpan="5" style={{ textAlign: 'right', paddingRight: '12px' }}>
+                        <td colSpan="6" style={{ textAlign: 'right', paddingRight: '12px' }}>
                           الإجمالي ({filteredShifts.length} وردية)
                         </td>
                         <td>
@@ -1232,6 +1519,7 @@ export default function BranchManagerView({
             shifts={state.shifts}
             adjustments={state.adjustments}
             orgSettings={state.orgSettings}
+            state={state}
           />
 
           {/* 1. احتساب سعر الساعة اليومي */}
@@ -1241,23 +1529,23 @@ export default function BranchManagerView({
             </div>
             <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px dashed #e2e8f0', fontSize: '13.5px' }}>
-                <span style={{ color: 'var(--muted)' }}>سعر الساعة الشهرية (الراتب الأساسي)</span>
-                <span style={{ fontWeight: '700' }}>{formatMoney(managerSalaryMetrics.salary)} ج.م</span>
+                <span style={{ color: 'var(--muted)' }}>1. سعر الساعة الشهري (الراتب الأساسي المدخل)</span>
+                <span style={{ fontWeight: '700' }}>{formatMoney(managerEmp?.salary || 0)} ج.م</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px dashed #e2e8f0', fontSize: '13.5px' }}>
-                <span style={{ color: 'var(--muted)' }}>ساعات العمل اليومية المحددة</span>
+                <span style={{ color: 'var(--muted)' }}>2. ساعات العمل اليومية المدخلة</span>
                 <span style={{ fontWeight: '700' }}>{managerSalaryMetrics.workHoursPerDay} ساعة / يوم</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px dashed #e2e8f0', fontSize: '13.5px' }}>
-                <span style={{ color: 'var(--muted)' }}>أيام العمل الشهرية المحددة</span>
+                <span style={{ color: 'var(--muted)' }}>3. أيام العمل الشهرية المدخلة</span>
                 <span style={{ fontWeight: '700' }}>{managerSalaryMetrics.workDaysPerMonth} يوم / شهر</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px dashed #e2e8f0', fontSize: '13.5px' }}>
-                <span style={{ color: 'var(--muted)' }}>سعر اليوم (المحسوب)</span>
-                <span style={{ fontWeight: '700' }}>{formatMoney(managerSalaryMetrics.dailyRate)} ج.م / يوم</span>
+                <span style={{ color: 'var(--muted)' }}>4. سعر اليوم = ({formatMoney(managerEmp?.salary || 0)} × {managerSalaryMetrics.workHoursPerDay}) ÷ {managerSalaryMetrics.workDaysPerMonth}</span>
+                <span style={{ fontWeight: '700', color: 'var(--primary-dark)' }}>{formatMoney(managerSalaryMetrics.dailyRate)} ج.م / يوم</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '4px', fontSize: '14px', color: '#16a34a', fontWeight: '800' }}>
-                <span>✅ سعر الساعة اليومي المحسوب</span>
+                <span>✅ 5. سعر الساعة اليومي = {formatMoney(managerSalaryMetrics.dailyRate)} ÷ {managerSalaryMetrics.workHoursPerDay}</span>
                 <span>{formatMoney(managerSalaryMetrics.hourlyRate)} ج.م / ساعة</span>
               </div>
             </div>
@@ -1589,6 +1877,17 @@ export default function BranchManagerView({
             </div>
           )}
         </div>
+      )}
+
+      {/* ── 9. BYLAWS TAB ── */}
+      {activeTab === 'bylaws' && (
+        <BylawsModule
+          state={state}
+          setState={setState}
+          saveState={saveState}
+          showToast={showToast}
+          userRole="branch"
+        />
       )}
 
     </div>

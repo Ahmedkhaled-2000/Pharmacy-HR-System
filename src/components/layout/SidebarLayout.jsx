@@ -8,10 +8,19 @@ export default function SidebarLayout({
   setActiveTab,
   onLogout,
   pendingCount = 0,
+  notifications = [],
   themeMode,
   toggleTheme,
   customItems,
   onExportExcel,
+  adminFilterMode = 'month',
+  setAdminFilterMode,
+  monthPicker,
+  setMonthPicker,
+  adminCustomFrom,
+  setAdminCustomFrom,
+  adminCustomTo,
+  setAdminCustomTo,
   children
 }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -32,6 +41,7 @@ export default function SidebarLayout({
     { id: 'evaluations', label: 'التقييمات', icon: '⭐️' },
     { id: 'loans-meds', label: 'السلف والأجل', icon: '💳' },
     { id: 'income-expenses', label: 'المصروفات والإيرادات', icon: '📈' },
+    { id: 'notifications', label: 'الإشعارات والتنبيهات', icon: '🔔', badge: (notifications || []).filter(n => !n.read).length },
     { id: 'settings', label: 'الإعدادات', icon: '⚙️' },
   ];
 
@@ -250,6 +260,57 @@ export default function SidebarLayout({
             <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: 'var(--text)' }}>
               {currentLabel}
             </h2>
+
+            {/* Topbar Date Range & Month Filter (Persistent in localStorage) */}
+            {setAdminFilterMode && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--surface-muted)', padding: '4px 10px', borderRadius: '10px', border: '1px solid var(--border)' }}>
+                <select value={adminFilterMode} onChange={(e) => setAdminFilterMode(e.target.value)} style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px', fontWeight: 'bold' }}>
+                  <option value="month">📅 شهر الـ 26</option>
+                  <option value="custom">📆 فترة مخصصة</option>
+                </select>
+
+                {adminFilterMode === 'month' ? (
+                  setMonthPicker && (
+                    <input type="month" value={monthPicker} onChange={(e) => setMonthPicker(e.target.value)} style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px', fontWeight: 'bold' }} />
+                  )
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}>
+                    <input type="date" value={adminCustomFrom} onChange={(e) => setAdminCustomFrom?.(e.target.value)} style={{ padding: '3px 6px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '11px' }} />
+                    <span>إلى</span>
+                    <input type="date" value={adminCustomTo} onChange={(e) => setAdminCustomTo?.(e.target.value)} style={{ padding: '3px 6px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '11px' }} />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Bell Icon Notification Button */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('notifications')}
+              title="الإشعارات والتنبيهات"
+              style={{
+                position: 'relative',
+                border: '1px solid var(--border)',
+                background: 'var(--background)',
+                padding: '6px 12px',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontWeight: '700',
+                color: 'var(--text)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+            >
+              <span>🔔</span>
+              {(notifications || []).filter(n => !n.read).length > 0 && (
+                <span className="badge danger" style={{ padding: '1px 6px', borderRadius: '10px', fontSize: '11px' }}>
+                  {(notifications || []).filter(n => !n.read).length}
+                </span>
+              )}
+            </button>
+
             <button
               type="button"
               onClick={toggleTheme}

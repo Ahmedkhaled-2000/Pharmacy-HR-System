@@ -1,13 +1,14 @@
 /**
  * offlineStorage.js
- * قاعدة بيانات محلية IndexedDB لحفظ بيانات التطبيق أوف لاين
+ * قاعدة بيانات محلية IndexedDB لحفظ بيانات التطبيق وسجل اللقطات الاحتياطية أوف لاين
  */
 
 const DB_NAME = 'pharmacy-offline-db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORES = {
-  APP_STATE: 'app_state',      // الحالة الكاملة للتطبيق
-  PENDING_QUEUE: 'pending_queue' // العمليات المنتظرة للمزامنة
+  APP_STATE: 'app_state',          // الحالة الكاملة للتطبيق
+  PENDING_QUEUE: 'pending_queue',    // العمليات المنتظرة للمزامنة
+  SNAPSHOTS: 'backup_snapshots'      // سجل النسخ واللقطات الاحتياطية التلقائية
 };
 
 // ── فتح قاعدة البيانات ────────────────────────────────────────────────────
@@ -30,6 +31,14 @@ function openDB() {
           autoIncrement: true
         });
         store.createIndex('timestamp', 'timestamp', { unique: false });
+      }
+
+      // جدول اللقطات الاحتياطية التلقائية
+      if (!db.objectStoreNames.contains(STORES.SNAPSHOTS)) {
+        const snapStore = db.createObjectStore(STORES.SNAPSHOTS, {
+          keyPath: 'id'
+        });
+        snapStore.createIndex('timestamp', 'timestamp', { unique: false });
       }
     };
 
@@ -69,6 +78,62 @@ export async function loadStateLocally() {
   } catch (e) {
     console.error('[OfflineDB] Error loading state:', e);
     return null;
+  }
+}
+
+// ── إضافة لقطة احتياطية تلقائية ─────────────────────────────────────────
+export async function saveBackupSnapshot(snapshot) {
+  try {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORES.SNAPSHOTS, 'readwrite');
+      const store = tx.objectStore(STORES.SNAPSHOTS);
+      store.put(snapshot);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (e) {
+    console.error('[OfflineDB] Error saving snapshot:', e);
+    return false;
+  }
+}
+
+// ── جلب جميع اللقطات الاحتياطية التلقائية ───────────────────────────────
+export async function getBackupSnapshots() {
+  try {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORES.SNAPSHOTS, 'readonly');
+      const store = tx.objectStore(STORES.SNAPSHOTS);
+      const request = store.getAll();
+      request.onsuccess = () => {
+        const results = request.result || [];
+        // ترتيب من الأحدث إلى الأقدم
+        results.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        resolve(results.slice(0, 20)); // الاحتفاظ بآخر 20 لقطة
+      };
+      request.onerror = () => reject(request.error);
+    });
+  } catch (e) {
+    console.error('[OfflineDB] Error getting snapshots:', e);
+    return [];
+  }
+}
+
+// ── حذف لقطة احتياطية قديمة ─────────────────────────────────────────────
+export async function deleteBackupSnapshot(id) {
+  try {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORES.SNAPSHOTS, 'readwrite');
+      const store = tx.objectStore(STORES.SNAPSHOTS);
+      store.delete(id);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (e) {
+    console.error('[OfflineDB] Error deleting snapshot:', e);
+    return false;
   }
 }
 

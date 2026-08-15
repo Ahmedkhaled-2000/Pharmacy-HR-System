@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { todayStr, fmt } from '../../utils/formatters';
+import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 
 export default function EmployeePermissionsModule({
   emp,
@@ -75,6 +76,7 @@ export default function EmployeePermissionsModule({
 
     setState(updatedState);
     if (saveState) await saveState(updatedState);
+    notifyAdminOnNewRequest({ state: updatedState, newRequest: newPermReq, empName: emp.name });
 
     setShowForm(false);
     setReason('');

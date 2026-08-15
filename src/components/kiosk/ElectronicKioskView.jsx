@@ -9,7 +9,8 @@ export default function ElectronicKioskView({
   pauseShift,
   resumeShift,
   stopShift,
-  submitRequest
+  submitRequest,
+  kioskBranchId
 }) {
   const { orgSettings, employees, ipRestrictions } = state;
   const [now, setNow] = useState(Date.now());
@@ -48,6 +49,16 @@ export default function ElectronicKioskView({
     if (!inputCode) return;
     const emp = employees.find(e => e.code === inputCode.trim());
     if (emp) {
+      if (kioskBranchId) {
+        const belongsToBranch = emp.branchId === kioskBranchId || (emp.branchesDetails && emp.branchesDetails.some(b => b.branchId === kioskBranchId));
+        if (!belongsToBranch) {
+          alert('هذا الموظف غير مسموح له بالدخول إلى هذا الفرع.');
+          setMatchedEmp(null);
+          setInputCode('');
+          return;
+        }
+      }
+
       const empBiometricType = emp.preferred_biometric || orgSettings?.biometricType || 'face';
       const isHand = empBiometricType === 'hand';
 
@@ -66,6 +77,9 @@ export default function ElectronicKioskView({
       let defaultBranchId = emp.branchId || '';
       if (emp.branchesDetails && emp.branchesDetails.length > 0) {
         defaultBranchId = emp.branchesDetails[0].branchId;
+      }
+      if (kioskBranchId) {
+        defaultBranchId = kioskBranchId;
       }
       setSelectedBranchId(defaultBranchId);
       setMatchedEmp(emp);

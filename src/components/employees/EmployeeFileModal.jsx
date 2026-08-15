@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { compressImage } from '../../utils/imageCompressor';
 
 export default function EmployeeFileModal({
   isOpen,
@@ -14,6 +15,7 @@ export default function EmployeeFileModal({
   // 1. Personal Data
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
   const [relativePhone, setRelativePhone] = useState('');
   const [nationalId, setNationalId] = useState('');
   const [dob, setDob] = useState('');
@@ -48,6 +50,7 @@ export default function EmployeeFileModal({
     if (editingEmp) {
       setName(editingEmp.name || '');
       setPhone(editingEmp.phone || '');
+      setEmail(editingEmp.email || '');
       setRelativePhone(editingEmp.relativePhone || editingEmp.emergencyPhone || '');
       setNationalId(editingEmp.nationalId || '');
       setDob(editingEmp.dob || '');
@@ -157,14 +160,13 @@ export default function EmployeeFileModal({
     setNewDocTitle('');
   };
 
-  const handleDocFileUpload = (e, docId) => {
+  const handleDocFileUpload = async (e, docId) => {
     const file = e.target.files[0];
     if (!file) return;
 
     const isPdf = file.type === 'application/pdf';
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const dataUrl = event.target.result;
+    try {
+      const dataUrl = await compressImage(file, 1000, 0.75);
       setDocuments((prevDocs) =>
         prevDocs.map((doc) =>
           doc.id === docId
@@ -172,8 +174,9 @@ export default function EmployeeFileModal({
             : doc
         )
       );
-    };
-    reader.readAsDataURL(file);
+    } catch (err) {
+      console.error('Doc upload compression error:', err);
+    }
   };
 
   const handleSubmit = (e) => {
@@ -204,6 +207,7 @@ export default function EmployeeFileModal({
       id: editingEmp ? editingEmp.id : `emp_${Date.now()}`,
       name: name.trim(),
       phone: phone.trim(),
+      email: email.trim(),
       relativePhone: relativePhone.trim(),
       emergencyPhone: relativePhone.trim(),
       nationalId: nationalId.trim(),
@@ -317,6 +321,10 @@ export default function EmployeeFileModal({
                 <div className="field">
                   <label>رقم الهاتف الشخصي</label>
                   <input type="text" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="01012345678" />
+                </div>
+                <div className="field">
+                  <label>البريد الإلكتروني الشخصي (Gmail التنبيهات)</label>
+                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="employee@gmail.com" />
                 </div>
                 <div className="field">
                   <label>رقم هاتف قريب من الدرجة الأولى (للطوارئ)</label>
@@ -501,44 +509,61 @@ export default function EmployeeFileModal({
           {/* TAB 3: Financial & Work Schedule */}
           {activeTab === 'financial' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div style={{ fontSize: '13px', color: 'var(--muted)', background: 'var(--surface)', padding: '10px', borderRadius: '8px' }}>
-                * يمكنك تحديد الراتب وساعات العمل لكل فرع تم تعيين الموظف به بشكل مستقل.
+              <div style={{ fontSize: '13px', color: 'var(--muted)', background: 'var(--surface)', padding: '12px 14px', borderRadius: '10px', lineHeight: '1.7', border: '1px solid var(--border)' }}>
+                ✨ <strong>معادلة احتساب أجر الموظف وسعر اليوم المعتمدة:</strong>
                 <br />
-                * يتم حساب سعر الساعة في نظام الأجور بـ: الراتب الأساسي ÷ (عدد أيام العمل × عدد ساعات اليوم).
+                1. <strong>سعر اليوم</strong> = (سعر الساعة الشهري × عدد ساعات العمل المدخلة) ÷ عدد أيام العمل المدخلة.
+                <br />
+                2. <strong>سعر الساعة اليومي</strong> = سعر اليوم ÷ عدد ساعات العمل المدخلة.
+                <br />
+                3. <strong>احتساب أجر اليوم / الوردية</strong> = سعر الساعة اليومي × عدد الساعات الموضوعة في الجدول الشهري / الفعلية.
               </div>
               
               {branchesDetails.map((bd, idx) => {
                 const branchName = branches.find(b => b.id === bd.branchId)?.name || `فرع غير محدد (${idx + 1})`;
+                const rateVal = parseFloat(bd.salary) || 0;
+                const daysVal = parseFloat(bd.workDays) || 26;
+                const hoursVal = parseFloat(bd.workHours) || 8;
+                const calcDailyRate = daysVal > 0 ? (rateVal * hoursVal) / daysVal : 0;
+                const calcDailyHourlyRate = hoursVal > 0 ? calcDailyRate / hoursVal : (daysVal > 0 ? rateVal / daysVal : rateVal);
+                const calcMonthlySalary = calcDailyRate * daysVal;
+
                 return (
                   <div key={bd.id} style={{ background: 'var(--primary-tint)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>
-                    <h4 style={{ margin: '0 0 12px 0', color: 'var(--primary-dark)', fontFamily: 'Cairo' }}>💰 بيانات: {branchName}</h4>
+                    <h4 style={{ margin: '0 0 12px 0', color: 'var(--primary-dark)', fontFamily: 'Cairo' }}>💰 بيانات وأجور: {branchName}</h4>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px' }}>
                       <div className="field">
-                        <label>الراتب الأساسي الشهري (ج.م)</label>
+                        <label>سعر الساعة الشهري (الراتب الأساسي)</label>
                         <input type="number" value={bd.salary} onChange={(e) => {
                           const newBd = [...branchesDetails];
                           newBd[idx].salary = e.target.value;
                           setBranchesDetails(newBd);
-                        }} placeholder="4000" required />
+                        }} placeholder="650" required />
                       </div>
 
                       <div className="field">
-                        <label>أيام العمل الشهرية (يوم)</label>
+                        <label>ساعات العمل اليومية المدخلة</label>
+                        <input type="number" value={bd.workHours} onChange={(e) => {
+                          const newBd = [...branchesDetails];
+                          newBd[idx].workHours = e.target.value;
+                          setBranchesDetails(newBd);
+                        }} placeholder="10" required />
+                      </div>
+
+                      <div className="field">
+                        <label>أيام العمل الشهرية المدخلة</label>
                         <input type="number" value={bd.workDays} onChange={(e) => {
                           const newBd = [...branchesDetails];
                           newBd[idx].workDays = e.target.value;
                           setBranchesDetails(newBd);
                         }} placeholder="26" required />
                       </div>
-                      
-                      <div className="field">
-                        <label>ساعات العمل اليومية (ساعة)</label>
-                        <input type="number" value={bd.workHours} onChange={(e) => {
-                          const newBd = [...branchesDetails];
-                          newBd[idx].workHours = e.target.value;
-                          setBranchesDetails(newBd);
-                        }} placeholder="8" required />
-                      </div>
+                    </div>
+
+                    <div style={{ marginTop: '10px', padding: '8px 12px', background: '#fff', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '12.5px', color: '#166534', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                      <span>📅 سعر اليوم: <strong>{calcDailyRate.toLocaleString()} ج.م / يوم</strong> (({rateVal} × {hoursVal}) ÷ {daysVal})</span>
+                      <span>💵 سعر الساعة اليومي: <strong>{calcDailyHourlyRate.toLocaleString()} ج.م / ساعة</strong></span>
+                      <span>💰 الراتب الأساسي الشهري: <strong>{calcMonthlySalary.toLocaleString()} ج.م</strong></span>
                     </div>
                   </div>
                 );

@@ -17,6 +17,7 @@ export default function AdjustmentsModule({
   // Form Modal for Adding Bonus/Deduction
   const [showAddModal, setShowAddModal] = useState(false);
   const [targetEmpId, setTargetEmpId] = useState('');
+  const [adjBranchId, setAdjBranchId] = useState('');
   const [adjType, setAdjType] = useState('bonus'); // 'bonus' | 'deduction' | 'penalty'
   const [adjAmount, setAdjAmount] = useState('');
   const [adjDate, setAdjDate] = useState(new Date().toISOString().slice(0, 10));
@@ -28,7 +29,7 @@ export default function AdjustmentsModule({
 
   // Filtered employees list
   const filteredEmployees = employees.filter((emp) => {
-    if (selectedBranchId && emp.branchId !== selectedBranchId) return false;
+    if (selectedBranchId && emp.branchId !== selectedBranchId && (!emp.branchesDetails || !emp.branchesDetails.some(bd => bd.branchId === selectedBranchId))) return false;
     if (searchTerm.trim()) {
       const q = searchTerm.trim().toLowerCase();
       const matchName = (emp.name || '').toLowerCase().includes(q);
@@ -57,6 +58,7 @@ export default function AdjustmentsModule({
       employeeId: targetEmpId,
       employeeName: empObj?.name || '',
       employeeCode: empObj?.code || '',
+      branchId: adjBranchId || null,
       type: adjType,
       amount,
       date: adjDate,
@@ -269,13 +271,44 @@ export default function AdjustmentsModule({
             <form onSubmit={handleAddAdjustment}>
               <div className="field" style={{ marginBottom: '14px' }}>
                 <label>اختر الموظف</label>
-                <select value={targetEmpId} onChange={(e) => setTargetEmpId(e.target.value)} required>
+                <select
+                  value={targetEmpId}
+                  onChange={(e) => {
+                    setTargetEmpId(e.target.value);
+                    setAdjBranchId('');
+                  }}
+                  required
+                >
                   <option value="">-- اختر الموظف --</option>
                   {employees.map((e) => (
                     <option key={e.id} value={e.id}>{e.name} ({e.code})</option>
                   ))}
                 </select>
               </div>
+
+              {/* Branch selection dropdown for multi-branch employees */}
+              {(() => {
+                const empObj = employees.find((item) => item.id === targetEmpId);
+                if (empObj && empObj.branchesDetails && empObj.branchesDetails.length > 1) {
+                  return (
+                    <div className="field" style={{ marginBottom: '14px' }}>
+                      <label>تخصيص للفرع (أو الإدارة العليا)</label>
+                      <select value={adjBranchId} onChange={(e) => setAdjBranchId(e.target.value)}>
+                        <option value="">🏢 الإدارة العليا / جميع الفروع (كلي)</option>
+                        {empObj.branchesDetails.map((bd) => {
+                          const bObj = branches.find((b) => b.id === bd.branchId);
+                          return (
+                            <option key={bd.branchId} value={bd.branchId}>
+                              فرع: {bObj ? bObj.name : bd.branchId}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
                 <div className="field">

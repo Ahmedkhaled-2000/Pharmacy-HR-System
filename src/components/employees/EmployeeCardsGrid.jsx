@@ -29,9 +29,17 @@ export default function EmployeeCardsGrid({
   // Grouping map
   const groupedEmployees = {};
   employees.forEach((emp) => {
-    const key = emp.branchId || 'main';
-    if (!groupedEmployees[key]) groupedEmployees[key] = [];
-    groupedEmployees[key].push(emp);
+    if (emp.branchesDetails && emp.branchesDetails.length > 0) {
+      emp.branchesDetails.forEach((bd) => {
+        const key = bd.branchId || 'main';
+        if (!groupedEmployees[key]) groupedEmployees[key] = [];
+        groupedEmployees[key].push(emp);
+      });
+    } else {
+      const key = emp.branchId || 'main';
+      if (!groupedEmployees[key]) groupedEmployees[key] = [];
+      groupedEmployees[key].push(emp);
+    }
   });
 
   return (
@@ -181,11 +189,20 @@ export default function EmployeeCardsGrid({
                       </div>
 
                       {/* Right-Middle Block: Financial Summary */}
-                      <div style={{ display: 'flex', gap: '16px', fontSize: '13px', background: 'var(--surface)', padding: '10px 16px', borderRadius: '10px', border: '1px solid var(--border)' }}>
-                        <div>الساعة الشهرية: <strong style={{ color: 'var(--primary-dark)' }}>{fmt(emp.salary)} ج.م</strong></div>
-                        <div>الساعات: <strong>{fmt(empSum.hours)} س</strong></div>
-                        <div>الصافي: <strong style={{ color: '#0d9488' }}>{fmt(empSum.netSalary)} ج.م</strong></div>
-                      </div>
+                      {(() => {
+                        const bdObj = emp.branchesDetails?.find((b) => String(b.branchId) === String(branchKey));
+                        const branchHourlyRate = bdObj ? parseFloat(bdObj.salary) || 0 : (parseFloat(emp.salary) || 0);
+                        const branchSum = empSum.perBranch?.[branchKey] || empSum;
+                        const branchMonthlySalary = branchSum.monthlySalary || (branchHourlyRate * (parseFloat(bdObj?.workHoursPerDay) || 8) * (parseFloat(bdObj?.workDaysPerMonth) || 26));
+                        return (
+                          <div style={{ display: 'flex', gap: '16px', fontSize: '13px', background: 'var(--surface)', padding: '10px 16px', borderRadius: '10px', border: '1px solid var(--border)' }}>
+                            <div>سعر الساعة: <strong style={{ color: 'var(--primary-dark)' }}>{fmt(branchHourlyRate)} ج.م</strong></div>
+                            <div>الراتب الأساسي: <strong style={{ color: 'var(--primary-dark)' }}>{fmt(branchMonthlySalary)} ج.م</strong></div>
+                            <div>الساعات: <strong>{fmt(branchSum.hours)} س</strong></div>
+                            <div>الصافي: <strong style={{ color: '#0d9488' }}>{fmt(branchSum.baseEarnings || empSum.netSalary)} ج.م</strong></div>
+                          </div>
+                        );
+                      })()}
 
                       {/* Action Buttons (QR & Edit/Delete) */}
                       <div style={{ display: 'flex', gap: '6px' }}>

@@ -33,6 +33,13 @@ export default function EvaluationsModule({
   const [noteContent, setNoteContent] = useState('');
   const [replyTextMap, setReplyTextMap] = useState({});
 
+  // Complaint Filters State
+  const [complaintFilterStatus, setComplaintFilterStatus] = useState('all'); // 'all' | 'pending' | 'resolved' | 'closed'
+  const [complaintBranchFilter, setComplaintBranchFilter] = useState('all');
+  const [complaintSearch, setComplaintSearch] = useState('');
+  const [complaintReplyText, setComplaintReplyText] = useState({});
+  const [complaintStatusChoice, setComplaintStatusChoice] = useState({});
+
   const employees = state.employees || [];
   const evaluations = state.evaluations || [];
   const notes = state.employeeNotes || [];
@@ -262,7 +269,14 @@ export default function EvaluationsModule({
             className={`btn ${activeTab === 'notes' ? 'btn-start' : 'btn-ghost'}`}
             onClick={() => setActiveTab('notes')}
           >
-            💬 ملاحظات الموظفين والردود ({notes.length})
+            💬 ملاحظات الفروع والردود ({notes.length})
+          </button>
+          <button
+            type="button"
+            className={`btn ${activeTab === 'complaints' ? 'btn-start' : 'btn-ghost'}`}
+            onClick={() => setActiveTab('complaints')}
+          >
+            📋 شكاوى الموظفين والردود ({ (state.requests || []).filter(r => r.type === 'complaint').length })
           </button>
           <button
             type="button"
@@ -382,6 +396,351 @@ export default function EvaluationsModule({
           </div>
         </div>
       )}
+
+      {/* TAB: Employee Complaints & Top Management Replies (Requirement 15) */}
+      {activeTab === 'complaints' && (() => {
+        const allComplaints = (state.requests || []).filter(r => r.type === 'complaint' || r.type === 'eval_edit_request');
+        const branches = state.branches || [];
+
+        // Metrics
+        const pendingComplaintsCount = allComplaints.filter(c => c.status === 'pending' || c.status === 'pending_admin' || !c.adminApproved).length;
+        const resolvedComplaintsCount = allComplaints.filter(c => c.status === 'resolved').length;
+        const closedComplaintsCount = allComplaints.filter(c => c.status === 'closed').length;
+
+        // Filtering
+        const filteredComplaints = allComplaints.filter((comp) => {
+          const empObj = employees.find(e => String(e.id) === String(comp.employeeId));
+          // Status filter
+          if (complaintFilterStatus === 'pending' && (comp.status === 'resolved' || comp.status === 'closed')) return false;
+          if (complaintFilterStatus === 'resolved' && comp.status !== 'resolved') return false;
+          if (complaintFilterStatus === 'closed' && comp.status !== 'closed') return false;
+
+          // Branch filter
+          if (complaintBranchFilter !== 'all') {
+            const compBranchId = comp.branchId || empObj?.branchId;
+            if (String(compBranchId) !== String(complaintBranchFilter)) return false;
+          }
+
+          // Search text
+          if (complaintSearch.trim()) {
+            const q = complaintSearch.toLowerCase();
+            const name = (comp.employeeName || empObj?.name || '').toLowerCase();
+            const subject = (comp.subject || '').toLowerCase();
+            const details = (comp.details || comp.reason || '').toLowerCase();
+            if (!name.includes(q) && !subject.includes(q) && !details.includes(q)) return false;
+          }
+
+          return true;
+        });
+
+        const handleSendAdminReply = async (comp) => {
+          const text = (complaintReplyText[comp.id] || '').trim();
+          if (!text) {
+            showToast?.('يرجى كتابة نص الرد أولاً');
+            return;
+          }
+
+          const chosenStatus = complaintStatusChoice[comp.id] || 'resolved';
+
+          const newReply = {
+            id: `rep_${Date.now()}`,
+            authorRole: 'الإدارة العليا',
+            authorId: 'admin',
+            content: text,
+            createdAt: new Date().toISOString()
+          };
+
+          const updatedRequests = (state.requests || []).map((r) => {
+            if (r.id === comp.id) {
+              const curReplies = r.replies || (r.adminReply ? [{ authorRole: 'الإدارة العليا', content: r.adminReply, createdAt: r.adminRepliedAt }] : []);
+              return {
+                ...r,
+                status: chosenStatus,
+                adminApproved: true,
+                adminRepliedAt: new Date().toISOString(),
+                replies: [...curReplies, newReply]
+              };
+            }
+            return r;
+          });
+
+          // Create notification for employee
+          const newNotif = {
+            id: `notif_rep_${comp.id}_${Date.now()}`,
+            type: 'admin_complaint_reply',
+            title: `🏥 رد جديد من الإدارة العليا بخصوص: ${comp.subject || 'شكواك'}`,
+            message: `قامت الإدارة العليا بالرد على شكواك/ملاحظتك: "${text.slice(0, 80)}${text.length > 80 ? '...' : ''}"`,
+            timestamp: new Date().toISOString(),
+            read: false,
+            targetRole: 'employee',
+            employeeId: comp.employeeId
+          };
+
+          const updatedNotifications = [newNotif, ...(state.notifications || [])];
+          const updatedState = { ...state, requests: updatedRequests, notifications: updatedNotifications };
+
+          if (setState) setState(updatedState);
+          if (saveState) await saveState(updatedState);
+
+          setComplaintReplyText((prev) => ({ ...prev, [comp.id]: '' }));
+          showToast?.('✅ تم إرسال رد الإدارة العليا الرسمي وتنبيه الموظف بنجاح');
+        };
+
+        const handleChangeComplaintStatus = async (compId, newStatus) => {
+          const updatedRequests = (state.requests || []).map((r) =>
+            r.id === compId ? { ...r, status: newStatus } : r
+          );
+          const updatedState = { ...state, requests: updatedRequests };
+          if (setState) setState(updatedState);
+          if (saveState) await saveState(updatedState);
+          showToast?.('✅ تم تحديث حالة الشكوى');
+        };
+
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            {/* KPI Cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+              <div style={{ background: 'var(--surface)', padding: '14px 18px', borderRadius: '12px', border: '1px solid var(--border)' }}>
+                <span style={{ fontSize: '12.5px', color: 'var(--muted)' }}>📋 إجمالي الشكاوى والملاحظات</span>
+                <h3 style={{ margin: '6px 0 0', fontSize: '22px', fontWeight: '900', color: 'var(--text)' }}>
+                  {allComplaints.length} شكوى
+                </h3>
+              </div>
+
+              <div style={{ background: '#fef3c7', padding: '14px 18px', borderRadius: '12px', border: '1px solid #fde68a' }}>
+                <span style={{ fontSize: '12.5px', color: '#92400e', fontWeight: 'bold' }}>⏳ شكاوى بحاجة لرد / تعقيب</span>
+                <h3 style={{ margin: '6px 0 0', fontSize: '22px', fontWeight: '900', color: '#b45309' }}>
+                  {pendingComplaintsCount} بانتظار الرد
+                </h3>
+              </div>
+
+              <div style={{ background: '#dcfce7', padding: '14px 18px', borderRadius: '12px', border: '1px solid #bbf7d0' }}>
+                <span style={{ fontSize: '12.5px', color: '#166534', fontWeight: 'bold' }}>💬 تم الرد والمتابعة</span>
+                <h3 style={{ margin: '6px 0 0', fontSize: '22px', fontWeight: '900', color: '#15803d' }}>
+                  {resolvedComplaintsCount} شكوى
+                </h3>
+              </div>
+
+              <div style={{ background: '#f1f5f9', padding: '14px 18px', borderRadius: '12px', border: '1px solid #cbd5e1' }}>
+                <span style={{ fontSize: '12.5px', color: '#475569' }}>🔒 شكاوى مغلقة ومحسومة</span>
+                <h3 style={{ margin: '6px 0 0', fontSize: '22px', fontWeight: '900', color: '#334155' }}>
+                  {closedComplaintsCount} شكوى
+                </h3>
+              </div>
+            </div>
+
+            {/* Filter and Search Bar */}
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', background: 'var(--surface)', padding: '14px', borderRadius: '12px', border: '1px solid var(--border)' }}>
+              <input
+                type="text"
+                placeholder="🔍 بحث باسم الموظف أو موضوع الشكوى..."
+                value={complaintSearch}
+                onChange={(e) => setComplaintSearch(e.target.value)}
+                style={{ flex: '1 1 200px', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13.5px' }}
+              />
+
+              <select
+                value={complaintFilterStatus}
+                onChange={(e) => setComplaintFilterStatus(e.target.value)}
+                style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontWeight: 'bold', fontSize: '13px' }}
+              >
+                <option value="all">📂 جميع الحالات</option>
+                <option value="pending">⏳ بحاجة لرد (جديدة / تعقيب)</option>
+                <option value="resolved">✅ تم الرد والمتابعة</option>
+                <option value="closed">🔒 مغلقة ومحسومة</option>
+              </select>
+
+              <select
+                value={complaintBranchFilter}
+                onChange={(e) => setComplaintBranchFilter(e.target.value)}
+                style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontWeight: 'bold', fontSize: '13px' }}
+              >
+                <option value="all">🏢 جميع الفروع</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Complaints List */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {filteredComplaints.length === 0 ? (
+                <div style={{ padding: '40px', textAlign: 'center', color: 'var(--muted)', background: 'var(--surface)', borderRadius: '12px', border: '1px solid var(--border)' }}>
+                  🎉 لا توجد شكاوى مطابقة للبحث أو التصفية الحالية.
+                </div>
+              ) : (
+                filteredComplaints.map((comp) => {
+                  const empObj = employees.find(e => String(e.id) === String(comp.employeeId));
+                  const branchObj = branches.find(b => b.id === (comp.branchId || empObj?.branchId));
+                  const replies = comp.replies || (comp.adminReply ? [{ authorRole: 'الإدارة العليا', content: comp.adminReply, createdAt: comp.adminRepliedAt }] : []);
+
+                  const isPending = comp.status === 'pending' || comp.status === 'pending_admin' || !comp.adminApproved;
+                  const isResolved = comp.status === 'resolved';
+                  const isClosed = comp.status === 'closed';
+
+                  return (
+                    <div key={comp.id} className="card" style={{ padding: '20px', borderRadius: '14px', border: isPending ? '2px solid #fdba74' : '1px solid var(--border)', background: '#fff', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                      {/* Complaint Header */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <div style={{ width: '42px', height: '42px', borderRadius: '50%', background: '#fee2e2', color: '#b91c1c', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '16px' }}>
+                            {empObj?.name?.charAt(0) || 'م'}
+                          </div>
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <strong style={{ fontSize: '15px', color: '#1e293b' }}>
+                                {comp.employeeName || empObj?.name || 'موظف'}
+                              </strong>
+                              <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                                ({comp.employeeCode || empObj?.code || '—'})
+                              </span>
+                            </div>
+                            <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '2px' }}>
+                              💼 {empObj?.jobTitle || 'كادر'} • 📍 {branchObj?.name ? `فرع ${branchObj.name}` : 'الفرع الرئيسي'}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          {isPending ? (
+                            <span className="badge badge-warning" style={{ background: '#fef3c7', color: '#b45309', padding: '4px 12px', borderRadius: '8px', fontWeight: 'bold' }}>
+                              ⏳ بانتظار رد الإدارة
+                            </span>
+                          ) : isResolved ? (
+                            <span className="badge badge-success" style={{ background: '#dcfce7', color: '#15803d', padding: '4px 12px', borderRadius: '8px', fontWeight: 'bold' }}>
+                              ✅ تم الرد والمتابعة
+                            </span>
+                          ) : (
+                            <span className="badge badge-secondary" style={{ background: '#f1f5f9', color: '#475569', padding: '4px 12px', borderRadius: '8px', fontWeight: 'bold' }}>
+                              🔒 شكوى مغلقة
+                            </span>
+                          )}
+
+                          <span style={{ fontSize: '12px', color: 'var(--muted)', background: '#f8fafc', padding: '4px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                            🕒 {comp.createdAt ? new Date(comp.createdAt).toLocaleString('ar-EG', { dateStyle: 'medium', timeStyle: 'short' }) : (comp.date || '—')}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Complaint Subject & Original Details */}
+                      <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', padding: '14px 16px', borderRadius: '10px', marginBottom: '14px' }}>
+                        <h4 style={{ margin: '0 0 6px', color: '#9a3412', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          📌 موضوع الشكوى: {comp.subject || 'شكوى عامة'}
+                        </h4>
+                        <div style={{ color: '#334155', fontSize: '14px', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
+                          {comp.details || comp.reason || 'لا تفاصيل مضافة'}
+                        </div>
+                      </div>
+
+                      {/* Interactive Conversation Stream (Threaded Replies) */}
+                      {replies.length > 0 && (
+                        <div style={{ marginBottom: '16px', background: '#f8fafc', padding: '14px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                          <h5 style={{ margin: '0 0 10px', color: '#334155', fontSize: '13.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            💬 سلسلة الردود والمحادثة المتبادلة ({replies.length}):
+                          </h5>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                            {replies.map((rep, rIdx) => {
+                              const isAdmin = rep.authorRole === 'الإدارة العليا' || rep.authorId === 'admin';
+                              return (
+                                <div
+                                  key={rIdx}
+                                  style={{
+                                    alignSelf: isAdmin ? 'flex-start' : 'flex-end',
+                                    maxWidth: '85%',
+                                    background: isAdmin ? '#f0fdf4' : '#eff6ff',
+                                    border: `1px solid ${isAdmin ? '#bbf7d0' : '#bfdbfe'}`,
+                                    padding: '12px 14px',
+                                    borderRadius: '10px',
+                                    boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', marginBottom: '4px' }}>
+                                    <strong style={{ fontSize: '12.5px', color: isAdmin ? '#166534' : '#1e40af' }}>
+                                      {isAdmin ? '🏥 رد الإدارة العليا الرسمي' : `👤 تعقيب الموظف (${rep.authorRole || comp.employeeName})`}
+                                    </strong>
+                                    <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
+                                      {rep.createdAt ? new Date(rep.createdAt).toLocaleString('ar-EG', { dateStyle: 'short', timeStyle: 'short' }) : ''}
+                                    </span>
+                                  </div>
+                                  <div style={{ fontSize: '13.5px', color: '#1e293b', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                                    {rep.content}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Admin Reply & Action Box */}
+                      <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+                          <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#334155' }}>
+                            ✍️ كتابة رد رسمي من الإدارة العليا للموظف:
+                          </label>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontSize: '12px', color: 'var(--muted)' }}>الحالة بعد الرد:</span>
+                            <select
+                              value={complaintStatusChoice[comp.id] || 'resolved'}
+                              onChange={(e) => setComplaintStatusChoice((prev) => ({ ...prev, [comp.id]: e.target.value }))}
+                              style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12.5px', fontWeight: 'bold' }}
+                            >
+                              <option value="resolved">✅ تم الرد والمتابعة</option>
+                              <option value="pending_admin">🟡 قيد المتابعة</option>
+                              <option value="closed">🔒 إغلاق الشكوى</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <textarea
+                          rows={2}
+                          placeholder="اكتب رد وتوجيهات الإدارة العليا الرسمية..."
+                          value={complaintReplyText[comp.id] || ''}
+                          onChange={(e) => setComplaintReplyText((prev) => ({ ...prev, [comp.id]: e.target.value }))}
+                          style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13.5px', fontFamily: 'inherit', resize: 'vertical' }}
+                        />
+
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '10px' }}>
+                          {!isClosed && (
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              style={{ fontSize: '12.5px', padding: '6px 12px', border: '1px solid #cbd5e1' }}
+                              onClick={() => handleChangeComplaintStatus(comp.id, 'closed')}
+                            >
+                              🔒 إغلاق الشكوى
+                            </button>
+                          )}
+                          {isClosed && (
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              style={{ fontSize: '12.5px', padding: '6px 12px', border: '1px solid #cbd5e1' }}
+                              onClick={() => handleChangeComplaintStatus(comp.id, 'resolved')}
+                            >
+                              🔓 إعادة فتح الشكوى
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="btn btn-start"
+                            style={{ padding: '7px 18px', fontSize: '13px' }}
+                            onClick={() => handleSendAdminReply(comp)}
+                          >
+                            💬 إرسال الرد للموظف وتحديث الحالة
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* TAB 2: Performance Evaluation Creation and Display */}
       {activeTab === 'evaluations' && (

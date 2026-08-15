@@ -12,6 +12,8 @@ export default function EmployeeModal({
   setEmpCode,
   empPhone,
   setEmpPhone,
+  empEmail,
+  setEmpEmail,
   empRelativePhone,
   setEmpRelativePhone,
   empJobTitle,
@@ -82,6 +84,10 @@ export default function EmployeeModal({
               <input type="text" value={empCode} onChange={(e) => setEmpCode(e.target.value)} placeholder="101" />
             </div>
             <div className="field">
+              <label>البريد الإلكتروني الشخصي (Gmail التنبيهات)</label>
+              <input type="email" value={empEmail || ''} onChange={(e) => setEmpEmail?.(e.target.value)} placeholder="employee@gmail.com" />
+            </div>
+            <div className="field">
               <label>رقم الهاتف الشخصي / الجوال</label>
               <input type="text" value={empPhone} onChange={(e) => setEmpPhone(e.target.value)} placeholder="01012345678" />
             </div>
@@ -94,15 +100,15 @@ export default function EmployeeModal({
               <input type="text" value={empJobTitle} onChange={(e) => setEmpJobTitle(e.target.value)} placeholder="مساعد صيدلي / مدخل بيانات" />
             </div>
             <div className="field">
-              <label>سعر الساعة الشهرية / الراتب (ج.م)</label>
-              <input type="text" inputMode="decimal" value={empSalary} onChange={(e) => setEmpSalary(e.target.value)} placeholder="4000" />
+              <label>سعر الساعة الشهري (الراتب الأساسي)</label>
+              <input type="text" inputMode="decimal" value={empSalary} onChange={(e) => setEmpSalary(e.target.value)} placeholder="650" />
             </div>
             <div className="field">
-              <label>عدد ساعات العمل اليومية / الوردية (ساعة)</label>
-              <input type="text" inputMode="decimal" value={empWorkHours} onChange={(e) => setEmpWorkHours(e.target.value)} placeholder="8" />
+              <label>عدد ساعات العمل اليومية المدخلة (ساعة)</label>
+              <input type="text" inputMode="decimal" value={empWorkHours} onChange={(e) => setEmpWorkHours(e.target.value)} placeholder="10" />
             </div>
             <div className="field">
-              <label>عدد أيام العمل في الشهر (يوم)</label>
+              <label>عدد أيام العمل الشهرية المدخلة (يوم)</label>
               <input type="text" inputMode="decimal" value={empWorkDays} onChange={(e) => setEmpWorkDays(e.target.value)} placeholder="26" />
             </div>
             <div className="field">

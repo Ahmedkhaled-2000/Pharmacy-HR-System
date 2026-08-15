@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { todayStr } from '../../utils/formatters';
+import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 
 export default function EmployeeShiftSwapModule({
   emp,
@@ -18,7 +19,7 @@ export default function EmployeeShiftSwapModule({
 
   const employees = state.employees || [];
   const currentBranchId = selectedBranchId || emp.branchId;
-  const colleagues = employees.filter((e) => e.id !== emp.id && e.branchId === currentBranchId);
+  const colleagues = employees.filter((e) => e.id !== emp.id && (e.branchId === currentBranchId || (e.branchesDetails && e.branchesDetails.some(bd => bd.branchId === currentBranchId))));
 
   // Swap Requests involving this employee
   const swapRequests = (state.shiftSwaps || state.requests || []).filter(
@@ -62,6 +63,7 @@ export default function EmployeeShiftSwapModule({
 
     setState(updatedState);
     if (saveState) await saveState(updatedState);
+    notifyAdminOnNewRequest({ state: updatedState, newRequest: newSwapReq, empName: emp.name });
 
     setShowSwapModal(false);
     setSwapNotes('');
@@ -83,6 +85,11 @@ export default function EmployeeShiftSwapModule({
     const updatedState = { ...state, shiftSwaps: updatedSwaps, requests: updatedRequests };
     setState(updatedState);
     if (saveState) await saveState(updatedState);
+
+    const targetSwapReq = (state.shiftSwaps || []).find(s => s.id === swapId);
+    if (action === 'accept' && targetSwapReq) {
+      notifyAdminOnNewRequest({ state: updatedState, newRequest: targetSwapReq, empName: emp.name });
+    }
 
     showToast(
       action === 'accept'

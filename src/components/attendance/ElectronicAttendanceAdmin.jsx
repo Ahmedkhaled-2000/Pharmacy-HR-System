@@ -10,8 +10,8 @@ export default function ElectronicAttendanceAdmin({ state, setState, saveState }
   const employees = state.employees || [];
   const globalBiometricType = state.orgSettings?.biometricType || 'face';
 
-  const copyAttendanceLink = () => {
-    const link = `${window.location.origin}/kiosk`;
+  const copyAttendanceLink = (branchId) => {
+    const link = branchId ? `${window.location.origin}/kiosk/${branchId}` : `${window.location.origin}/kiosk`;
     navigator.clipboard.writeText(link);
     alert('تم نسخ رابط البصمة بنجاح: ' + link);
   };
@@ -109,10 +109,15 @@ export default function ElectronicAttendanceAdmin({ state, setState, saveState }
           <h2>📸 البصمة الإلكترونية</h2>
           <p>إدارة البصمات (الوجه/اليد) للموظفين</p>
         </div>
-        <div className="module-actions">
-          <button className="btn btn-primary" onClick={copyAttendanceLink}>
-            🔗 نسخ رابط البصمة
+        <div className="module-actions" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button className="btn btn-primary" onClick={() => copyAttendanceLink()}>
+            🔗 نسخ الرابط العام
           </button>
+          {state.branches && state.branches.map(b => (
+            <button key={b.id} className="btn btn-ghost" style={{ border: '1px solid var(--border)' }} onClick={() => copyAttendanceLink(b.id)}>
+              🔗 رابط {b.name}
+            </button>
+          ))}
         </div>
       </div>
 

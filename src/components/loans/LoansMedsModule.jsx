@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { fmt } from '../../utils/formatters';
 
 export default function LoansMedsModule({
   state,
@@ -18,7 +19,60 @@ export default function LoansMedsModule({
 
   const employees = state.employees || [];
   const branches = state.branches || [];
-  const loansList = state.loans || [];
+
+  const loansList = React.useMemo(() => {
+    const directLoans = state.loans || [];
+    const allLoanRequests = (state.requests || [])
+      .filter(
+        (r) =>
+          (r.type === 'loan' || r.type === 'advance' || r.type === 'meds' || r.type === 'credit_medicine')
+      )
+      .map((r) => {
+        const directLoan = directLoans.find((l) => String(l.id) === String(r.id));
+        const history = directLoan?.paymentsHistory || r.paymentsHistory || r.payments || r.paidHistory || [];
+        const paidAmount = directLoan?.paidAmount !== undefined ? directLoan.paidAmount : (r.paidAmount || 0);
+
+        const isMeds = r.type === 'meds' || r.type === 'credit_medicine';
+
+        return {
+          id: r.id,
+          employeeId: r.employeeId,
+          employeeName: r.employeeName || (employees.find((e) => e.id === r.employeeId)?.name || 'موظف'),
+          employeeCode: r.employeeCode || (employees.find((e) => e.id === r.employeeId)?.code || 'CODE'),
+          type: isMeds ? 'meds' : 'loan',
+          typeLabel: isMeds
+            ? (r.status === 'approved' ? 'أدوية ومشتريات آجل معتمدة' : 'طلب أدوية آجل')
+            : (r.status === 'approved' ? 'سلفة مالية معتمدة' : 'طلب سلفة مالية'),
+          amount: parseFloat(r.amount || r.totalAmount) || 0,
+          paidAmount: parseFloat(paidAmount) || 0,
+          paymentsHistory: history,
+          medsItems: r.medsItems || r.items || r.medsDetails || [],
+          monthlyDeduction: r.monthlyDeduction || r.installmentAmount || null,
+          status: r.status || 'pending',
+          notes: r.reason || r.details || r.notes || (isMeds ? 'طلب أدوية آجل' : 'طلب سلفة مالية'),
+          date: r.date || (r.createdAt ? r.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10)),
+          createdAt: r.createdAt || new Date().toISOString()
+        };
+      });
+
+    const map = new Map();
+    directLoans.forEach((item) => {
+      map.set(item.id, item);
+    });
+    allLoanRequests.forEach((item) => {
+      const existing = map.get(item.id);
+      if (existing) {
+        map.set(item.id, {
+          ...existing,
+          ...item,
+          paymentsHistory: (existing.paymentsHistory && existing.paymentsHistory.length > 0) ? existing.paymentsHistory : item.paymentsHistory
+        });
+      } else {
+        map.set(item.id, item);
+      }
+    });
+    return Array.from(map.values());
+  }, [state.loans, state.requests, employees]);
 
   const filteredEmployees = employees.filter((emp) => {
     if (filterBranch && emp.branchId !== filterBranch) return false;
@@ -76,27 +130,154 @@ export default function LoansMedsModule({
     setNotes('');
   };
 
-  const handleRecordPayment = async (loanId, payAmount) => {
-    const parsedPay = parseFloat(payAmount);
-    if (!parsedPay || parsedPay <= 0) return;
+  // Form State for Payment Modal
+  const [payingLoanId, setPayingLoanId] = useState(null);
+  const [payInputAmount, setPayInputAmount] = useState('');
+  const [payInputNotes, setPayInputNotes] = useState('');
+  const [expandedPaymentsLoanId, setExpandedPaymentsLoanId] = useState(null);
 
-    const updatedLoans = loansList.map((l) => {
-      if (l.id === loanId) {
-        const newPaid = (parseFloat(l.paidAmount) || 0) + parsedPay;
+  const handleRecordPayment = async (targetLoanId, payAmountStr, noteStr = '') => {
+    const parsedPay = parseFloat(payAmountStr);
+    if (!targetLoanId || !parsedPay || parsedPay <= 0) {
+      showToast?.('يرجى إدخال مبلغ دفع صحيح أكبر من صفر');
+      return;
+    }
+
+    const payRecord = {
+      id: 'pay_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+      date: new Date().toISOString().slice(0, 10),
+      amount: parsedPay,
+      note: noteStr.trim() || 'سداد دفعة سلفة مالية/آجل',
+      type: 'manual'
+    };
+
+    // Update in state.loans
+    let loansArr = [...(state.loans || [])];
+    let foundInLoans = false;
+    loansArr = loansArr.map((l) => {
+      if (String(l.id) === String(targetLoanId)) {
+        foundInLoans = true;
         const total = parseFloat(l.amount) || 0;
+        const newPaid = (parseFloat(l.paidAmount) || 0) + parsedPay;
+        const history = [...(l.paymentsHistory || []), payRecord];
         return {
           ...l,
           paidAmount: newPaid,
+          paymentsHistory: history,
           status: newPaid >= total ? 'paid' : 'partial'
         };
       }
       return l;
     });
 
-    const updatedState = { ...state, loans: updatedLoans };
+    // Update in state.requests
+    let reqsArr = [...(state.requests || [])];
+    let foundInRequests = false;
+    reqsArr = reqsArr.map((r) => {
+      if (String(r.id) === String(targetLoanId)) {
+        foundInRequests = true;
+        const total = parseFloat(r.amount) || 0;
+        const newPaid = (parseFloat(r.paidAmount) || 0) + parsedPay;
+        const history = [...(r.paymentsHistory || []), payRecord];
+        return {
+          ...r,
+          paidAmount: newPaid,
+          paymentsHistory: history,
+          status: newPaid >= total ? 'paid' : 'partial'
+        };
+      }
+      return r;
+    });
+
+    // If item was an approved request not yet in state.loans, add it to state.loans
+    if (!foundInLoans && foundInRequests) {
+      const targetReq = reqsArr.find((r) => String(r.id) === String(targetLoanId));
+      if (targetReq) {
+        loansArr.unshift({
+          ...targetReq,
+          id: targetReq.id,
+          employeeId: targetReq.employeeId,
+          amount: parseFloat(targetReq.amount) || 0,
+          paidAmount: parseFloat(targetReq.paidAmount) || 0,
+          paymentsHistory: targetReq.paymentsHistory || [payRecord]
+        });
+      }
+    }
+
+    const updatedState = { ...state, loans: loansArr, requests: reqsArr };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.('✅ تم تسجيل مبلغ الدفع وتحديث مديونية الموظف');
+
+    showToast?.(`✅ تم تسجيل سداد مبلغ ${parsedPay} ج.م بنجاح وتحديث مديونية الموظف!`);
+    setPayingLoanId(null);
+    setPayInputAmount('');
+    setPayInputNotes('');
+  };
+
+  const handleAutoCloseMonthlyInstallments = async () => {
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    const sDay = state.orgSettings?.payrollPayoutStartDay || 26;
+    const eDay = state.orgSettings?.payrollPayoutEndDay || 25;
+    const [y, m] = currentMonth.split('-').map(Number);
+    const endDate = `${y}-${String(m).padStart(2, '0')}-${String(eDay).padStart(2, '0')}`;
+    const startDate = `${m === 1 ? y - 1 : y}-${String(m === 1 ? 12 : m - 1).padStart(2, '0')}-${String(sDay).padStart(2, '0')}`;
+
+    if (!window.confirm(`هل ترغب في تطبيق الخصم التلقائي لأقساط السلف في نهاية فترة الرواتب المحددة (${startDate} إلى ${endDate})؟`)) {
+      return;
+    }
+
+    let processedCount = 0;
+    let loansArr = [...(state.loans || [])];
+    let reqsArr = [...(state.requests || [])];
+
+    const processItem = (item) => {
+      const total = parseFloat(item.amount || item.totalAmount) || 0;
+      const paid = parseFloat(item.paidAmount) || 0;
+      const rem = Math.max(0, total - paid);
+      if (rem <= 0) return item;
+
+      const history = item.paymentsHistory || item.payments || item.paidHistory || [];
+      const alreadyPaidThisMonth = history.some((p) => p.month === currentMonth || p.date === endDate || p.note?.includes(currentMonth));
+      if (alreadyPaidThisMonth) return item;
+
+      const installmentVal = Math.min(rem, parseFloat(item.monthlyDeduction || item.installmentAmount) || rem);
+      const roundedInstallment = Math.round(installmentVal * 100) / 100;
+      const autoPayRecord = {
+        id: `auto_pay_${currentMonth}_${item.id}_${Date.now()}`,
+        month: currentMonth,
+        date: endDate,
+        amount: roundedInstallment,
+        note: `خصم قسط شهري تلقائي في نهاية فترة الرواتب (${startDate} إلى ${endDate})`,
+        type: 'auto_payroll'
+      };
+
+      processedCount++;
+      const newPaid = Math.round((paid + roundedInstallment) * 100) / 100;
+      return {
+        ...item,
+        paidAmount: newPaid,
+        paymentsHistory: [...history, autoPayRecord],
+        status: newPaid >= total ? 'paid' : 'partial'
+      };
+    };
+
+    loansArr = loansArr.map(processItem);
+    reqsArr = reqsArr.map((r) => {
+      if (r.status === 'approved' || r.adminApproved || r.status === 'partial') {
+        return processItem(r);
+      }
+      return r;
+    });
+
+    const updatedState = { ...state, loans: loansArr, requests: reqsArr };
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+
+    if (processedCount > 0) {
+      showToast?.(`✅ تم خصم وتأكيد سداد الأقساط التلقائية لعدد ${processedCount} سلفة عن دورة ${currentMonth} (${endDate})!`);
+    } else {
+      showToast?.(`ℹ️ جميع الأقساط لسلف هذه الدورة (${currentMonth}) مخصومة ومسددة بالكامل مسبقاً.`);
+    }
   };
 
   return (
@@ -128,6 +309,12 @@ export default function LoansMedsModule({
           <span style={{ fontSize: '13px', opacity: 0.9 }}>⚠️ إجمالي الرصيد المتبقي للتحصيل</span>
           <h3 style={{ margin: '6px 0 0 0', fontSize: '24px', fontWeight: '900' }}>{totalRemaining.toLocaleString()} ج.م</h3>
         </div>
+      </div>
+
+      <div style={{ marginBottom: '18px', display: 'flex', justifyContent: 'flex-end' }}>
+        <button className="btn btn-start" onClick={handleAutoCloseMonthlyInstallments} style={{ background: '#0f766e', padding: '8px 16px', fontSize: '13.5px' }}>
+          ⚡ تطبيق الخصم وسداد الأقساط الشهري التلقائي
+        </button>
       </div>
 
       {/* Add New Loan / Meds Entry */}
@@ -290,38 +477,139 @@ export default function LoansMedsModule({
                         const total = parseFloat(l.amount) || 0;
                         const paid = parseFloat(l.paidAmount) || 0;
                         const rem = Math.max(0, total - paid);
+                        const history = l.paymentsHistory || [];
 
                         return (
-                          <tr key={l.id}>
-                            <td>{l.date || '—'}</td>
-                            <td>
-                              {l.type === 'meds' ? (
-                                <span className="badge badge-warning">💊 أدوية آجل</span>
-                              ) : (
-                                <span className="badge badge-primary">💰 سلفة مادية</span>
-                              )}
-                            </td>
-                            <td style={{ fontWeight: '800' }}>{total} ج.م</td>
-                            <td style={{ color: '#16a34a' }}>{paid} ج.م</td>
-                            <td style={{ color: rem > 0 ? '#dc2626' : '#16a34a', fontWeight: '900' }}>{rem} ج.م</td>
-                            <td style={{ fontSize: '12px' }}>{l.notes || '—'}</td>
-                            <td>
-                              {rem > 0 ? (
-                                <button
-                                  className="btn btn-ghost"
-                                  style={{ padding: '2px 8px', fontSize: '11.5px', color: '#0d9488' }}
-                                  onClick={() => {
-                                    const val = prompt(`أدخل مبلغ الدفع المخصوم لصالح السلفة (المتبقي ${rem} ج.م):`);
-                                    if (val) handleRecordPayment(l.id, val);
-                                  }}
-                                >
-                                  💵 سداد مبلغ
-                                </button>
-                              ) : (
-                                <span style={{ color: '#16a34a', fontSize: '12px' }}>✓ تم السداد</span>
-                              )}
-                            </td>
-                          </tr>
+                          <React.Fragment key={l.id}>
+                            <tr style={{ background: payingLoanId === l.id ? '#f0fdf4' : 'transparent' }}>
+                              <td>{l.date || '—'}</td>
+                              <td>
+                                {l.type === 'meds' ? (
+                                  <span className="badge badge-warning">💊 أدوية آجل</span>
+                                ) : (
+                                  <span className="badge badge-primary">💰 سلفة مادية</span>
+                                )}
+                              </td>
+                              <td style={{ fontWeight: '800' }}>{fmt(total)} ج.م</td>
+                              <td style={{ color: '#16a34a', fontWeight: 'bold' }}>{fmt(paid)} ج.م</td>
+                              <td style={{ color: rem > 0 ? '#dc2626' : '#16a34a', fontWeight: '900' }}>{fmt(rem)} ج.م</td>
+                              <td style={{ fontSize: '12px' }}>
+                                <div>{l.notes || l.reason || '—'}</div>
+                                {(l.medsItems || l.medicines || []).length > 0 && (
+                                  <div style={{ marginTop: '6px', background: '#fff', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
+                                    <div style={{ fontWeight: 'bold', color: '#0d9488', fontSize: '11px', marginBottom: '4px' }}>💊 تفاصيل الأصناف والأدوية:</div>
+                                    {(l.medsItems || l.medicines).map((item, idx) => (
+                                      <div key={idx} style={{ fontSize: '11px', display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                                        <span>• {item.name || item.title} (كمية: {item.qty || 1})</span>
+                                        <strong style={{ color: '#0f766e' }}>{fmt((parseFloat(item.price) || 0) * (parseFloat(item.qty) || 1))} ج.م</strong>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </td>
+                              <td>
+                                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                                  {rem > 0 && (
+                                    <button
+                                      className="btn btn-start"
+                                      style={{ padding: '3px 8px', fontSize: '11.5px' }}
+                                      onClick={() => {
+                                        setPayingLoanId(payingLoanId === l.id ? null : l.id);
+                                        setPayInputAmount(rem.toString());
+                                      }}
+                                    >
+                                      💵 سداد مبلغ
+                                    </button>
+                                  )}
+                                  <button
+                                    className="btn btn-ghost"
+                                    style={{ padding: '3px 8px', fontSize: '11.5px', color: '#0f766e', fontWeight: 'bold' }}
+                                    onClick={() => setExpandedPaymentsLoanId(expandedPaymentsLoanId === l.id ? null : l.id)}
+                                  >
+                                    📜 الدفعات ({history.length})
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+
+                            {/* Inline Payment Form */}
+                            {payingLoanId === l.id && (
+                              <tr>
+                                <td colSpan="7" style={{ background: '#f0fdf4', padding: '12px 16px', border: '1px solid #86efac', borderRadius: '8px' }}>
+                                  <div style={{ fontWeight: 'bold', color: '#166534', marginBottom: '8px', fontSize: '13px' }}>
+                                    💵 إدخال دفعة جديدة لسداد السلفة (الرصيد المتبقي: {rem} ج.م)
+                                  </div>
+                                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      max={rem}
+                                      placeholder="مبلغ السداد (ج.م)"
+                                      value={payInputAmount}
+                                      onChange={(e) => setPayInputAmount(e.target.value)}
+                                      style={{ width: '140px', padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                                    />
+                                    <input
+                                      type="text"
+                                      placeholder="ملاحظات البيان..."
+                                      value={payInputNotes}
+                                      onChange={(e) => setPayInputNotes(e.target.value)}
+                                      style={{ flex: 1, minWidth: '160px', padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                                    />
+                                    <button
+                                      className="btn btn-start"
+                                      style={{ padding: '6px 14px', fontSize: '12.5px' }}
+                                      onClick={() => handleRecordPayment(l.id, payInputAmount, payInputNotes)}
+                                    >
+                                      💾 تأكيد الحفظ والسداد
+                                    </button>
+                                    <button
+                                      className="btn btn-ghost"
+                                      style={{ padding: '6px 10px', fontSize: '12px' }}
+                                      onClick={() => setPayingLoanId(null)}
+                                    >
+                                      إلغاء
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+
+                            {/* Payment History Breakdown Table */}
+                            {expandedPaymentsLoanId === l.id && (
+                              <tr>
+                                <td colSpan="7" style={{ background: '#f8fafc', padding: '12px 16px', border: '1px solid #cbd5e1' }}>
+                                  <div style={{ fontWeight: 'bold', color: '#0f766e', marginBottom: '6px', fontSize: '12.5px' }}>
+                                    📜 سجل الدفعات المسددة لهذه السلفة ({history.length} دفعة):
+                                  </div>
+                                  {history.length === 0 ? (
+                                    <span style={{ fontSize: '12px', color: '#94a3b8' }}>لم يتم تسجيل أي دفعات مسددة لهذه السلفة بعد.</span>
+                                  ) : (
+                                    <table style={{ width: '100%', fontSize: '11.5px', background: '#fff', borderCollapse: 'collapse', textAlign: 'center' }}>
+                                      <thead>
+                                        <tr style={{ background: '#e2e8f0', color: '#334155' }}>
+                                          <th style={{ padding: '4px', border: '1px solid #cbd5e1' }}>#</th>
+                                          <th style={{ padding: '4px', border: '1px solid #cbd5e1' }}>تاريخ الدفعة</th>
+                                          <th style={{ padding: '4px', border: '1px solid #cbd5e1' }}>المبلغ المسدد</th>
+                                          <th style={{ padding: '4px', border: '1px solid #cbd5e1' }}>نوع الدفعة والبيان</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {history.map((p, pIdx) => (
+                                          <tr key={p.id || pIdx}>
+                                            <td style={{ padding: '4px', border: '1px solid #cbd5e1' }}>{pIdx + 1}</td>
+                                            <td style={{ padding: '4px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>{p.date}</td>
+                                            <td style={{ padding: '4px', border: '1px solid #cbd5e1', color: '#16a34a', fontWeight: 'bold' }}>+{p.amount} ج.م</td>
+                                            <td style={{ padding: '4px', border: '1px solid #cbd5e1' }}>{p.note || (p.type === 'auto_payroll' ? 'خصم شهري آلي مع تقفيل الرواتب' : 'سداد مباشر')}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  )}
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
                         );
                       })}
                   </tbody>

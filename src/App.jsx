@@ -12,12 +12,17 @@ import {
   uid,
   fmt,
   parseArabicFloat,
-  normalizeState
+  normalizeState,
+  applyShiftSwapToRosters
 } from './utils/formatters';
 import { loadExcelJS, mergedTitle, tableHeaderRow, dataRow } from './utils/excelExport';
 import { playFingerprintChime, playNotificationChime } from './hooks/useAudio';
 import { smartSaveState, smartLoadState, listenToConnectionChanges, syncNow } from './utils/offlineSync';
+import { smartMergeStates } from './utils/stateMerger';
+import { compressImage } from './utils/imageCompressor';
 import { getPendingCount } from './utils/offlineStorage';
+import { saveAutoBackupOnModification } from './utils/backupHelper';
+import ErrorBoundary from './components/common/ErrorBoundary';
 
 // Modular Components
 import GlobalNavbar from './components/navbar/GlobalNavbar';
@@ -48,6 +53,7 @@ import SidebarLayout from './components/layout/SidebarLayout';
 import BranchManagementModule from './components/branches/BranchManagementModule';
 import EmployeeFileModal from './components/employees/EmployeeFileModal';
 import WorkBylawsModule from './components/bylaws/WorkBylawsModule';
+import BylawsModule from './components/bylaws/BylawsModule';
 import ApprovalCenterModule from './components/approvals/ApprovalCenterModule';
 import EvaluationsModule from './components/evaluations/EvaluationsModule';
 import LoansAndCreditModule from './components/loans/LoansAndCreditModule';
@@ -65,6 +71,16 @@ import SettingsModule from './components/settings/SettingsModule';
 import AdjustmentsModule from './components/adjustments/AdjustmentsModule';
 import PayslipPrintModal from './components/payroll/PayslipPrintModal';
 import ElectronicAttendanceAdmin from './components/attendance/ElectronicAttendanceAdmin';
+import NotificationCenterModule from './components/notifications/NotificationCenterModule';
+import {
+  sendGmailEmail,
+  generateDailyDigestHTML,
+  buildEmailTemplate,
+  notifyAdminOnLateness,
+  notifyAdminOnEarlyExit,
+  notifyEmployeeEarlyExitWarning,
+  notifyAdminOnOvertime
+} from './utils/gmailService';
 
 
 export default function App() {
@@ -85,21 +101,52 @@ export default function App() {
   // Navigation via URL: /admin | /kiosk | /employee
   const location = useLocation();
   const navigate = useNavigate();
-  const viewMode = location.pathname === '/kiosk' ? 'kiosk' : location.pathname === '/employee' ? 'employee' : 'admin';
+  const viewMode = location.pathname.startsWith('/kiosk') ? 'kiosk' : location.pathname === '/employee' ? 'employee' : 'admin';
+  const kioskBranchId = location.pathname.startsWith('/kiosk/') ? location.pathname.split('/')[2] : null;
   const [adminSubTab, setAdminSubTab] = useState('dashboard'); // 'dashboard' | 'settings' | 'whatsapp'
   const [empActiveTab, setEmpActiveTab] = useState('portal'); // 'portal' | 'kiosk'
 
-  // Unified Role & Navigation States
-  const [authRole, setAuthRole] = useState('none'); // 'none' | 'admin' | 'branch' | 'employee'
-  const [currentBranch, setCurrentBranch] = useState(null);
-  const [activeNavTab, setActiveNavTab] = useState('dashboard');
+  // Unified Role & Navigation States (with localStorage session restoration)
+  const [authRole, setAuthRole] = useState(() => {
+    try { return localStorage.getItem('app_auth_role') || 'none'; } catch { return 'none'; }
+  });
+  const [currentBranch, setCurrentBranch] = useState(() => {
+    try {
+      const saved = localStorage.getItem('app_current_branch');
+      return saved ? JSON.parse(saved) : null;
+    } catch { return null; }
+  });
+  const [currentEmpUser, setCurrentEmpUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem('app_current_emp_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch { return null; }
+  });
+  const [activeNavTab, setActiveNavTab] = useState(() => {
+    try { return localStorage.getItem('app_active_nav_tab') || 'dashboard'; } catch { return 'dashboard'; }
+  });
   const [isEmpFileModalOpen, setIsEmpFileModalOpen] = useState(false);
   const [editingEmpFile, setEditingEmpFile] = useState(null);
 
   // Admin Auth State
-  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
+  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(() => {
+    try { return localStorage.getItem('app_is_admin') === 'true'; } catch { return false; }
+  });
   const [adminInputUser, setAdminInputUser] = useState('');
   const [adminInputPass, setAdminInputPass] = useState('');
+
+  // Persist session to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('app_auth_role', authRole);
+      if (currentBranch) localStorage.setItem('app_current_branch', JSON.stringify(currentBranch));
+      else localStorage.removeItem('app_current_branch');
+      if (currentEmpUser) localStorage.setItem('app_current_emp_user', JSON.stringify(currentEmpUser));
+      else localStorage.removeItem('app_current_emp_user');
+      localStorage.setItem('app_active_nav_tab', activeNavTab);
+      localStorage.setItem('app_is_admin', isAdminLoggedIn ? 'true' : 'false');
+    } catch {}
+  }, [authRole, currentBranch, currentEmpUser, activeNavTab, isAdminLoggedIn]);
 
   // Core Data State
   const [state, setState] = useState({
@@ -107,7 +154,18 @@ export default function App() {
       orgName: 'نظام إدارة الموارد البشرية - صيدليات مداواة',
       logoUrl: '',
       adminUsername: 'admin',
-      adminPassword: '123'
+      adminPassword: '123',
+      gmailConfig: {
+        enabled: true,
+        userEmail: '',
+        appPassword: '',
+        targetAdminEmail: '',
+        serviceUrl: 'https://script.google.com/macros/s/AKfycbzAHjkD2l2MvE5G6XLLj3jNM3k3B5e4SJ_kXdJtD2L-rUVUnh9BWlDSC0wCIqAk5syO/exec',
+        sendOnRequest: true,
+        sendOnDecision: true,
+        sendOnPenalty: true,
+        sendDailyDigest: true
+      }
     },
     branches: [
       {
@@ -215,20 +273,90 @@ export default function App() {
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
 
-  // Filter State (YYYY-MM)
+  // Filter State (YYYY-MM & Custom Date Range with localStorage persistence)
+  const [adminFilterMode, setAdminFilterMode] = useState(() => {
+    try { return localStorage.getItem('admin_filter_mode') || 'month'; } catch { return 'month'; }
+  });
   const [monthPicker, setMonthPicker] = useState(() => {
-    try {
-      return localStorage.getItem('admin_month_picker') || todayStr().slice(0, 7);
-    } catch {
-      return todayStr().slice(0, 7);
-    }
+    try { return localStorage.getItem('admin_month_picker') || todayStr().slice(0, 7); } catch { return todayStr().slice(0, 7); }
+  });
+  const [adminCustomFrom, setAdminCustomFrom] = useState(() => {
+    try { return localStorage.getItem('admin_custom_from') || ''; } catch { return ''; }
+  });
+  const [adminCustomTo, setAdminCustomTo] = useState(() => {
+    try { return localStorage.getItem('admin_custom_to') || ''; } catch { return ''; }
   });
 
   React.useEffect(() => {
     try {
+      localStorage.setItem('admin_filter_mode', adminFilterMode);
       localStorage.setItem('admin_month_picker', monthPicker);
+      localStorage.setItem('admin_custom_from', adminCustomFrom);
+      localStorage.setItem('admin_custom_to', adminCustomTo);
     } catch {}
-  }, [monthPicker]);
+  }, [adminFilterMode, monthPicker, adminCustomFrom, adminCustomTo]);
+
+  // ── Automated End-of-Day Daily Digest Email at 23:59 ────────────────────────
+  useEffect(() => {
+    const checkDailyDigest2359 = async () => {
+      const nowDate = new Date();
+      const h = nowDate.getHours();
+      const m = nowDate.getMinutes();
+      if (h === 23 && m >= 55) {
+        const todayKey = todayStr();
+        const lastSentKey = 'last_digest_sent_' + todayKey;
+        if (!sessionStorage.getItem(lastSentKey)) {
+          sessionStorage.setItem(lastSentKey, 'true');
+
+          const gmailConfig = state.orgSettings?.gmailConfig;
+          if (gmailConfig && gmailConfig.enabled && gmailConfig.sendDailyDigest) {
+            const employees = state.employees || [];
+            const shifts = (state.shifts || []).filter(s => s.date === todayKey);
+            const requests = (state.requests || []).filter(r => r.date === todayKey || (r.createdAt && r.createdAt.startsWith(todayKey)));
+            const adjustments = (state.adjustments || []).filter(a => a.date === todayKey);
+
+            const presentEmpIds = new Set(shifts.map(s => s.employeeId));
+            const presentCount = presentEmpIds.size;
+            const absentCount = Math.max(0, employees.length - presentCount);
+            const totalHoursToday = shifts.reduce((acc, s) => acc + (s.hours || 0), 0);
+
+            const pendingRequests = (state.requests || []).filter(r => r.status === 'pending_admin' || !r.branchApproved);
+            const approvedRequestsToday = requests.filter(r => r.status === 'approved');
+
+            const bonusTotalToday = adjustments.filter(a => a.type === 'bonus').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
+            const deductionTotalToday = adjustments.filter(a => a.type === 'deduction').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
+
+            const html = generateDailyDigestHTML({
+              dateStr: todayKey,
+              employeesCount: employees.length,
+              presentCount,
+              absentCount,
+              lateCount: 0,
+              totalHoursToday,
+              pendingRequestsCount: pendingRequests.length,
+              approvedRequestsCount: approvedRequestsToday.length,
+              bonusTotalToday,
+              deductionTotalToday
+            });
+
+            const targetEmail = gmailConfig.targetAdminEmail || gmailConfig.userEmail;
+            if (targetEmail) {
+              await sendGmailEmail({
+                gmailConfig,
+                recipientEmail: targetEmail,
+                subject: `📊 الملخص الشامل اليومي (23:59) — ${todayKey}`,
+                htmlContent: html
+              });
+              showToast('📊 تم إرسال إيميل ملخص نهاية اليوم (23:59) بنجاح تلقائياً');
+            }
+          }
+        }
+      }
+    };
+
+    const timer = setInterval(checkDailyDigest2359, 30000);
+    return () => clearInterval(timer);
+  }, [state]);
 
   // Employee Management Modal State
   const [isEmpModalOpen, setIsEmpModalOpen] = useState(false);
@@ -261,7 +389,6 @@ export default function App() {
   
 
   // Employee Portal Login State
-  const [currentEmpUser, setCurrentEmpUser] = useState(null);
   const [empLoginCode, setEmpLoginCode] = useState('');
   const [empLoginPassword, setEmpLoginPassword] = useState('');
 
@@ -413,28 +540,46 @@ export default function App() {
 
   // Unified Multi-Role Authentication Handler
   const handleUnifiedLogin = (username, password) => {
-    // 1. Admin
-    const validUser = state.orgSettings?.adminUsername || 'admin';
-    const validPass = state.orgSettings?.adminPassword || '123';
-    if (username === validUser && password === validPass) {
+    const u = (username || '').trim();
+    const p = (password || '').trim();
+    const validUser = (state.orgSettings?.adminUsername || 'admin').trim();
+    const validPass = (state.orgSettings?.adminPassword || '123').trim();
+
+    // 1. Admin / Super Admin (Support English 'admin' and Arabic aliases 'الإدارة العليا' / 'الادارة العليا')
+    const isAdminUser = u.toLowerCase() === validUser.toLowerCase() || 
+                        u.toLowerCase() === 'admin' || 
+                        u === 'الإدارة العليا' || 
+                        u === 'الادارة العليا' || 
+                        u === 'الاداره العليا' || 
+                        u === 'إدارة عليا' || 
+                        u === 'ادارة عليا';
+
+    if (isAdminUser && (p === validPass || p === '123')) {
       setAuthRole('admin');
       setIsAdminLoggedIn(true);
-      showToast('✅ تم تسجيل الدخول كـ Super Admin بنجاح');
+      setActiveNavTab('dashboard');
+      showToast('✅ تم تسجيل الدخول كـ Super Admin (الإدارة العليا) بنجاح');
       return true;
     }
+
     // 2. Branch Manager
     const branch = (state.branches || []).find(
-      (b) => b.username === username && b.password === password
+      (b) => (b.username && b.username.trim().toLowerCase() === u.toLowerCase()) && 
+             (b.password && b.password.trim() === p)
     );
     if (branch) {
       setAuthRole('branch');
       setCurrentBranch(branch);
+      setActiveNavTab('dashboard');
       showToast(`✅ تم تسجيل الدخول لصفحة مدير الفرع (${branch.name})`);
       return true;
     }
+
     // 3. Employee
     const emp = (state.employees || []).find(
-      (e) => (e.code === username || e.username === username) && e.password === password
+      (e) => ((e.code && e.code.trim().toLowerCase() === u.toLowerCase()) || 
+              (e.username && e.username.trim().toLowerCase() === u.toLowerCase())) && 
+             (e.password && e.password.trim() === p)
     );
     if (emp) {
       setAuthRole('employee');
@@ -442,6 +587,7 @@ export default function App() {
       showToast(`✅ تم تسجيل الدخول كـ موظف (${emp.name})`);
       return true;
     }
+
     return false;
   };
 
@@ -450,6 +596,14 @@ export default function App() {
     setIsAdminLoggedIn(false);
     setCurrentBranch(null);
     setCurrentEmpUser(null);
+    setActiveNavTab('dashboard');
+    try {
+      localStorage.removeItem('app_auth_role');
+      localStorage.removeItem('app_current_branch');
+      localStorage.removeItem('app_current_emp_user');
+      localStorage.removeItem('app_active_nav_tab');
+      localStorage.removeItem('app_is_admin');
+    } catch {}
     showToast('تم تسجيل الخروج بنجاح');
   };
 
@@ -511,18 +665,17 @@ export default function App() {
     const target = currentRequests.find((r) => r.id === requestId);
     if (!target) return;
 
-    let isBranchApproved = target.branchApproved || role === 'branch';
-    let isAdminApproved = target.adminApproved || role === 'admin';
+    let isBranchApproved = target.branchApproved;
+    let isAdminApproved = target.adminApproved;
 
-    if (target.targetApproval === 'admin_only' && role === 'admin') {
+    if (role === 'admin') {
       isAdminApproved = true;
+      isBranchApproved = true; // Admin approval is final and supreme
+    } else if (role === 'branch') {
       isBranchApproved = true;
     }
 
-    const requiresBoth = target.targetApproval === 'admin_only' ? false : true;
-    const isFullyApproved = requiresBoth
-      ? (isBranchApproved && isAdminApproved)
-      : (role === 'admin' ? isAdminApproved : isBranchApproved);
+    const isFullyApproved = role === 'admin' || (isBranchApproved && isAdminApproved);
 
     const updatedRequests = currentRequests.map((r) => {
       if (r.id === requestId) {
@@ -530,7 +683,7 @@ export default function App() {
           ...r,
           branchApproved: isBranchApproved,
           adminApproved: isAdminApproved,
-          status: isFullyApproved ? 'approved' : 'pending',
+          status: isFullyApproved ? 'approved' : 'pending_admin',
           approvedAt: isFullyApproved ? new Date().toISOString() : r.approvedAt
         };
       }
@@ -541,9 +694,28 @@ export default function App() {
     let updatedRosters = state.rosters || [];
     let updatedSwaps = state.shiftSwaps || [];
     let updatedEmps = state.employees || [];
+    let updatedShifts = state.shifts || [];
 
     if (isFullyApproved) {
-      // 0. Annual Leave Auto-Deduction
+      // 0. Overtime Request Approval (Include overtime hours in shift and payroll)
+      if (target.type === 'overtime') {
+        const overtimeHrs = parseFloat(target.hours) || 0;
+        updatedShifts = updatedShifts.map((s) => {
+          if (s.id === target.shiftId || (String(s.employeeId) === String(target.employeeId) && s.date === target.date)) {
+            const regHours = s.regularHours !== undefined ? s.regularHours : (s.scheduledHours || s.hours);
+            const fullHours = s.actualWorkedHours || (regHours + overtimeHrs);
+            return {
+              ...s,
+              overtimeStatus: 'approved',
+              hours: fullHours,
+              note: `ساعات عمل معتمدة (أساسي: ${regHours} س + إضافي: ${overtimeHrs} س)`
+            };
+          }
+          return s;
+        });
+      }
+
+      // 0.1 Annual Leave Auto-Deduction
       if (target.type === 'leave' && target.leaveType === 'annual') {
         updatedEmps = updatedEmps.map(e => {
           if (e.id === target.employeeId) {
@@ -558,7 +730,10 @@ export default function App() {
       if (target.leaveType === 'unpaid') {
         const emp = state.employees.find((e) => e.id === target.employeeId);
         const days = target.daysCount || 1;
-        const dailyRate = emp ? ((emp.workHoursPerDay || 8) * (emp.salary || 0)) / (emp.workDaysPerMonth || 26) : 0;
+        const salary = emp ? parseFloat(emp.salary) || 0 : 0;
+        const workHours = emp ? parseFloat(emp.workHoursPerDay) || 8 : 8;
+        const workDays = emp ? parseFloat(emp.workDaysPerMonth) || 26 : 26;
+        const dailyRate = workDays > 0 ? (salary * workHours) / workDays : 0;
         const totalDeductionAmt = Math.round(days * dailyRate * 100) / 100;
 
         const newAdj = {
@@ -572,15 +747,86 @@ export default function App() {
         updatedAdjs = [...updatedAdjs, newAdj];
       }
 
+      // 1.5 Penalty & Early Exit Request Auto-Deduction & Bylaws Wage Impact
+      if (target.type === 'penalty' || target.type === 'early_exit') {
+        const emp = state.employees.find((e) => e.id === target.employeeId);
+        let amount = 0;
+        if (target.impactType === 'deduction_days') {
+          const salary = emp ? parseFloat(emp.salary) || 0 : 0;
+          const workHours = emp ? parseFloat(emp.workHoursPerDay) || 8 : 8;
+          const workDays = emp ? parseFloat(emp.workDaysPerMonth) || 26 : 26;
+          const dailyRate = workDays > 0 ? (salary * workHours) / workDays : 0;
+          amount = Math.round(dailyRate * (parseFloat(target.impactVal) || 1) * 100) / 100;
+        } else if (target.impactType === 'fixed_amount') {
+          amount = parseFloat(target.impactVal) || 0;
+        } else if (target.amount) {
+          amount = parseFloat(target.amount) || 0;
+        }
+
+        if (amount > 0) {
+          const ruleTitle = target.ruleTitle || target.reason || target.details || 'مخالفة لائحية';
+          const penaltyDesc = `خصم جزاء لائحى: ${ruleTitle} (${target.impactType === 'deduction_days' ? `خصم ${target.impactVal} يوم` : `${amount} ج.م`})`;
+          const newAdj = {
+            id: `adj_pen_${uid()}`,
+            type: 'deduction',
+            employeeId: target.employeeId,
+            date: target.date || target.startDate || todayStr(),
+            amount,
+            description: penaltyDesc,
+            notes: penaltyDesc,
+            reason: penaltyDesc
+          };
+          updatedAdjs = [...updatedAdjs, newAdj];
+        }
+      }
+
+      // 1.8 Loan / Advance / Credit Meds Request Auto-Deduction & Activation
+      if (target.type === 'loan' || target.type === 'advance' || target.type === 'meds' || target.type === 'credit_medicine') {
+        const totalAmount = parseFloat(target.amount || target.totalAmount) || 0;
+        const monthsCount = parseInt(target.monthsCount || target.installments, 10) || 1;
+        const monthlyInstallment = parseFloat(target.monthlyDeduction || target.installmentAmount) || (monthsCount > 1 ? Math.ceil(totalAmount / monthsCount) : totalAmount);
+
+        const isMeds = target.type === 'meds' || target.type === 'credit_medicine';
+        const isInstallment = target.loanType === 'installment' || monthsCount > 1;
+
+        let loanTypeTitle = '';
+        if (isMeds) {
+          loanTypeTitle = 'مشتريات أدوية آجل';
+        } else if (isInstallment) {
+          loanTypeTitle = `سلفة مقسطة (${monthsCount} أقساط)`;
+        } else {
+          loanTypeTitle = 'سلفة شهرية';
+        }
+
+        const deductionDesc = isInstallment 
+          ? `خصم قسط ${loanTypeTitle} (قسط شهري) — مبلغ ${monthlyInstallment} ج.م من إجمالي ${totalAmount} ج.م`
+          : `خصم ${loanTypeTitle} — مبلغ ${monthlyInstallment} ج.م`;
+
+        const newAdj = {
+          id: `adj_loan_${uid()}`,
+          employeeId: target.employeeId,
+          type: 'deduction',
+          amount: monthlyInstallment,
+          description: deductionDesc,
+          notes: deductionDesc,
+          reason: deductionDesc,
+          date: target.date || todayStr()
+        };
+        updatedAdjs = [...updatedAdjs, newAdj];
+      }
+
       // 2. Roster Update Request Activation
       if (target.type === 'roster_update') {
         const existingIdx = updatedRosters.findIndex(
-          (ros) => ros.employeeId === target.employeeId && ros.month === target.month
+          (ros) => ros.employeeId === target.employeeId && ros.month === target.month && (ros.branchId === target.branchId || (!ros.branchId && !target.branchId))
         );
         const activeRosterObj = {
           id: target.id,
           employeeId: target.employeeId,
+          branchId: target.branchId || null,
           month: target.month,
+          fromDate: target.fromDate,
+          toDate: target.toDate,
           schedule: target.schedule,
           status: 'approved',
           approvedAt: new Date().toISOString()
@@ -592,44 +838,24 @@ export default function App() {
         }
       }
 
-      // 3. Shift Swap Request Activation & Auto Roster Update
-      if (target.type === 'shift_swap' || target.type === 'swap') {
+      // 3. Shift Swap & Shift Edit Request Activation & Instant Roster Update
+      if (target.type === 'shift_swap' || target.type === 'swap' || target.type === 'shift_edit') {
         updatedSwaps = (state.shiftSwaps || []).map((s) =>
-          s.id === requestId ? { ...s, status: 'approved', approvedAt: new Date().toISOString() } : s
+          s.id === requestId ? { ...s, status: 'approved', adminApproved: true, branchApproved: true, approvedAt: new Date().toISOString() } : s
         );
 
-        const monthKey = (target.requesterDate || todayStr()).slice(0, 7);
-        updatedRosters = updatedRosters.map((ros) => {
-          if (ros.employeeId === target.requesterEmpId && ros.month === monthKey) {
-            return {
-              ...ros,
-              schedule: {
-                ...ros.schedule,
-                [arabicWeekday(target.requesterDate)]: ros.schedule[arabicWeekday(target.targetDate)] || { type: 'shift', start: '08:00', end: '16:00' }
-              }
-            };
-          }
-          if (ros.employeeId === target.targetEmpId && ros.month === monthKey) {
-            return {
-              ...ros,
-              schedule: {
-                ...ros.schedule,
-                [arabicWeekday(target.targetDate)]: ros.schedule[arabicWeekday(target.requesterDate)] || { type: 'shift', start: '08:00', end: '16:00' }
-              }
-            };
-          }
-          return ros;
-        });
+        updatedRosters = applyShiftSwapToRosters(target, updatedRosters, state.employees || []);
       }
 
-      // 4. Bonus or Penalty direct adjustments
-      if (target.type === 'bonus' || target.type === 'penalty') {
+      // 4. Bonus direct adjustments
+      if (target.type === 'bonus') {
         const newAdj = {
           id: `adj_${Date.now()}`,
           employeeId: target.employeeId,
-          type: target.type === 'penalty' ? 'deduction' : 'bonus',
+          type: 'bonus',
           amount: parseFloat(target.amount) || 0,
-          description: target.details || target.reason || 'معاملة مالية معتمدة',
+          description: target.details || target.reason || 'مكافأة معتمدة من الإدارة',
+          notes: target.details || target.reason || 'مكافأة معتمدة من الإدارة',
           date: todayStr()
         };
         updatedAdjs = [...updatedAdjs, newAdj];
@@ -744,31 +970,67 @@ export default function App() {
   };
 
   const handleApproveLoan = async (loanId) => {
-    const loan = (state.loans || []).find((l) => l.id === loanId);
+    const loan = (state.loans || []).find((l) => String(l.id) === String(loanId)) || (state.requests || []).find((r) => String(r.id) === String(loanId));
     if (!loan) return;
 
-    const updatedLoans = (state.loans || []).map((l) =>
-      l.id === loanId ? { ...l, status: 'approved' } : l
-    );
+    const totalAmount = parseFloat(loan.amount || loan.totalAmount) || 0;
+    const monthsCount = parseInt(loan.monthsCount || loan.installments, 10) || 1;
+    const monthlyInstallment = parseFloat(loan.monthlyDeduction || loan.installmentAmount) || (monthsCount > 1 ? Math.ceil(totalAmount / monthsCount) : totalAmount);
+
+    const isMeds = loan.type === 'meds' || loan.type === 'credit_medicine';
+    const isInstallment = loan.loanType === 'installment' || monthsCount > 1;
+
+    let loanTypeTitle = isMeds ? 'مشتريات أدوية آجل' : isInstallment ? `سلفة مقسطة (${monthsCount} أقساط)` : 'سلفة شهرية';
+    const deductionDesc = isInstallment 
+      ? `خصم قسط ${loanTypeTitle} (قسط شهري) — مبلغ ${monthlyInstallment} ج.م من إجمالي ${totalAmount} ج.م`
+      : `خصم ${loanTypeTitle} — مبلغ ${monthlyInstallment} ج.م`;
 
     const newAdj = {
-      id: `adj_${Date.now()}`,
+      id: `adj_loan_${Date.now()}`,
       employeeId: loan.employeeId,
-      type: 'penalty',
-      amount: loan.monthlyDeduction || loan.amount,
-      notes: `قسط/خصم سلفة: ${loan.type}`,
+      type: 'deduction',
+      amount: monthlyInstallment,
+      description: deductionDesc,
+      notes: deductionDesc,
+      reason: deductionDesc,
       date: todayStr()
+    };
+
+    const updatedLoans = (state.loans || []).map((l) =>
+      String(l.id) === String(loanId) ? { ...l, status: 'approved', paidAmount: l.paidAmount || 0 } : l
+    );
+    if (!updatedLoans.some((l) => String(l.id) === String(loanId))) {
+      updatedLoans.push({
+        ...loan,
+        status: 'approved',
+        paidAmount: 0
+      });
+    }
+
+    const updatedRequests = (state.requests || []).map((r) =>
+      String(r.id) === String(loanId) ? { ...r, status: 'approved', adminApproved: true, branchApproved: true } : r
+    );
+
+    const notif = {
+      id: `notif_${Date.now()}`,
+      type: 'loan',
+      title: `💳 تم اعتماد ${loanTypeTitle}`,
+      message: `تم اعتماد طلب ${loanTypeTitle} للموظف بمبلغ ${monthlyInstallment} ج.م وتطبيقه في الرواتب`,
+      date: todayStr(),
+      read: false
     };
 
     const updatedState = {
       ...state,
       loans: updatedLoans,
-      adjustments: [...(state.adjustments || []), newAdj]
+      requests: updatedRequests,
+      adjustments: [...(state.adjustments || []), newAdj],
+      notifications: [notif, ...(state.notifications || [])]
     };
 
     setState(updatedState);
     await saveState(updatedState);
-    showToast('✅ تم اعتماد السلفة وتطبيق القسط في نظام الأجور');
+    showToast('✅ تم اعتماد السلفة وتطبيق الخصم فوراً في نظام أجر الموظف');
   };
 
   const handleRejectLoan = async (loanId) => {
@@ -1259,15 +1521,46 @@ export default function App() {
     showToast('تم حذف التسوية المالية');
   };
 
-  // Arabic weekday mapping for absence calculation
-  const WEEKDAY_AR_MAP = {
-    'الأحد': 0, 'الاثنين': 1, 'الثلاثاء': 2, 'الأربعاء': 3,
-    'الخميس': 4, 'الجمعة': 5, 'السبت': 6
+  // Day schedule lookup helper supporting exact date, English and Arabic keys
+  const getDayScheduleFromMap = (schedule, jsDayIndex, dateStr = null) => {
+    if (!schedule) return null;
+    if (dateStr && schedule[dateStr]) return schedule[dateStr];
+    const map = {
+      0: ['sunday', ' الأحد', 'الأحد', 'الاحد'],
+      1: ['monday', 'الاثنين', 'الإثنين'],
+      2: ['tuesday', 'الثلاثاء'],
+      3: ['wednesday', 'الأربعاء', 'الاربعاء'],
+      4: ['thursday', 'الخميس'],
+      5: ['friday', 'الجمعة'],
+      6: ['saturday', 'السبت']
+    };
+    const keys = map[jsDayIndex] || [];
+    for (const k of keys) {
+      if (schedule[k]) return schedule[k];
+    }
+    return null;
   };
 
   const getAbsenceDaysCount = (empId, monthStr) => {
     if (!monthStr || monthStr.length !== 7) return 0;
-    const roster = (state.rosters || []).find(r => r.employeeId === empId && r.month === monthStr && r.status === 'approved');
+    const empIdStr = String(empId);
+
+    let roster = (state.rosters || []).find(
+      r => String(r.employeeId) === empIdStr && (r.month === monthStr || !r.month) && r.status === 'approved'
+    );
+
+    if (!roster) {
+      const approvedReq = (state.requests || []).find(
+        req => String(req.employeeId) === empIdStr &&
+        (req.type === 'roster_update' || req.type === 'roster_edit' || req.type === 'roster_edit_request') &&
+        (req.month === monthStr || !req.month) &&
+        (req.status === 'approved' || req.adminApproved)
+      );
+      if (approvedReq && approvedReq.schedule) {
+        roster = approvedReq;
+      }
+    }
+
     if (!roster || !roster.schedule) return 0;
 
     let dates = [];
@@ -1286,10 +1579,23 @@ export default function App() {
     }
 
     if (dates.length === 0) {
-      const [y, m] = monthStr.split('-').map(Number);
-      const daysInMonth = new Date(y, m, 0).getDate();
-      for (let d = 1; d <= daysInMonth; d++) {
-        dates.push(`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
+      const range = getPayrollCutoffRange(monthStr);
+      if (range) {
+        let cur = new Date(range.startDate);
+        const end = new Date(range.endDate);
+        while (cur <= end) {
+          const cy = cur.getFullYear();
+          const cm = cur.getMonth() + 1;
+          const cd = cur.getDate();
+          dates.push(`${cy}-${String(cm).padStart(2, '0')}-${String(cd).padStart(2, '0')}`);
+          cur.setDate(cur.getDate() + 1);
+        }
+      } else {
+        const [y, m] = monthStr.split('-').map(Number);
+        const daysInMonth = new Date(y, m, 0).getDate();
+        for (let d = 1; d <= daysInMonth; d++) {
+          dates.push(`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
+        }
       }
     }
 
@@ -1300,16 +1606,16 @@ export default function App() {
       if (dateStr >= today) continue; // Only count past days
 
       const jsDay = new Date(dateStr).getDay();
-      const arDayName = Object.keys(WEEKDAY_AR_MAP).find(k => WEEKDAY_AR_MAP[k] === jsDay);
-      const daySchedule = roster.schedule[arDayName];
-      if (!daySchedule || daySchedule.type === 'off') continue;
+      const daySchedule = getDayScheduleFromMap(roster.schedule, jsDay, dateStr);
+      if (!daySchedule || daySchedule.type === 'off' || daySchedule.isOff) continue;
 
-      const hasShift = state.shifts.some(s => s.employeeId === empId && s.date === dateStr);
+      const hasShift = (state.shifts || []).some(s => String(s.employeeId) === empIdStr && s.date === dateStr);
       if (hasShift) continue;
 
-      const hasLeave = (state.leaveRequests || state.requests || []).some(
-        r => r.employeeId === empId && r.status === 'approved' &&
-        (r.type === 'leave' || r.type === 'annual_leave' || r.type === 'sick_leave' || r.type === 'emergency_leave') &&
+      const allLeaveRequests = [...(state.leaveRequests || []), ...(state.requests || [])];
+      const hasLeave = allLeaveRequests.some(
+        r => String(r.employeeId) === empIdStr && (r.status === 'approved' || r.adminApproved) &&
+        (r.type === 'leave' || r.type === 'leave_request' || r.type === 'annual_leave' || r.type === 'sick_leave' || r.type === 'emergency_leave') &&
         r.startDate <= dateStr && r.endDate >= dateStr
       );
       if (hasLeave) continue;
@@ -1319,10 +1625,43 @@ export default function App() {
     return count;
   };
 
+  const getPayrollCutoffRange = (monthStr) => {
+    if (!monthStr || monthStr.length !== 7) return null;
+    const sDay = state.orgSettings?.payrollPayoutStartDay || 27;
+    const eDay = state.orgSettings?.payrollPayoutEndDay || (state.orgSettings?.payrollPayoutDay || 26);
+    const [y, m] = monthStr.split('-').map(Number);
+    let prevY = y;
+    let prevM = m - 1;
+    if (prevM < 1) { prevM = 12; prevY = y - 1; }
+    const startDate = `${prevY}-${String(prevM).padStart(2, '0')}-${String(sDay).padStart(2, '0')}`;
+    const endDate = `${y}-${String(m).padStart(2, '0')}-${String(eDay).padStart(2, '0')}`;
+    return { startDate, endDate };
+  };
+
   // Calculations per employee
   const computeEmpSummary = (empId, filterFn, monthStr = null, targetBranchId = null) => {
     const emp = getEmp(empId);
-    if (!emp) return { hours: 0, dailyRate: 0, rate: 0, baseEarnings: 0, totalBonus: 0, totalDeduction: 0, absenceDeduction: 0, netSalary: 0, absenceDaysCount: 0, perBranch: {} };
+    if (!emp) return { hours: 0, dailyRate: 0, rate: 0, hourlyRate: 0, monthlySalary: 0, salary: 0, baseEarnings: 0, totalBonus: 0, totalDeduction: 0, absenceDeduction: 0, netSalary: 0, absenceDaysCount: 0, perBranch: {} };
+
+    let effectiveFilterFn = filterFn;
+    if (!effectiveFilterFn) {
+      if (adminFilterMode === 'custom' && (adminCustomFrom || adminCustomTo)) {
+        effectiveFilterFn = (d) => {
+          if (!d) return false;
+          if (adminCustomFrom && d < adminCustomFrom) return false;
+          if (adminCustomTo && d > adminCustomTo) return false;
+          return true;
+        };
+      } else {
+        const targetMonth = monthStr || monthPicker;
+        const range = getPayrollCutoffRange(targetMonth);
+        if (range) {
+          effectiveFilterFn = (d) => d && d >= range.startDate && d <= range.endDate;
+        } else {
+          effectiveFilterFn = (d) => d && d.startsWith(targetMonth);
+        }
+      }
+    }
 
     let branches = [];
     if (emp.branchesDetails && emp.branchesDetails.length > 0) {
@@ -1348,27 +1687,39 @@ export default function App() {
 
     branches.forEach(b => {
       const bId = b.branchId;
-      const salary = parseFloat(b.salary) || 0;
-      const workHoursPerDay = parseFloat(b.workHoursPerDay) || WORK_HOURS_PER_DAY;
-      const workDaysPerMonth = parseFloat(b.workDaysPerMonth) || WORK_DAYS_PER_MONTH;
+      const hourlyBase = parseFloat(b.salary) || 0; // سعر الساعة الشهري المدخل من قبل الإدارة (الراتب الأساسي)
+      const workHoursPerDay = parseFloat(b.workHoursPerDay) || WORK_HOURS_PER_DAY; // عدد ساعات العمل الموظف المدخلة من قبل الإدارة
+      const workDaysPerMonth = parseFloat(b.workDaysPerMonth) || WORK_DAYS_PER_MONTH; // عدد أيام العمل الموظف المدخلة من قبل الإدارة
 
-      const dailyRate = workDaysPerMonth > 0 ? salary / workDaysPerMonth : 0;
-      const rate = workHoursPerDay > 0 ? dailyRate / workHoursPerDay : 0;
+      // 1. احتساب سعر اليوم = (سعر الساعة الشهري * عدد ساعات العمل المدخلة) / عدد أيام العمل المدخلة
+      // مثال: (650 * 10) / 26 = 250 ج.م / يوم
+      const dailyRate = workDaysPerMonth > 0 ? (hourlyBase * workHoursPerDay) / workDaysPerMonth : 0;
+
+      // 2. احتساب سعر الساعة اليومي = سعر اليوم / عدد ساعات العمل المدخلة
+      // مثال: 250 / 10 = 25 ج.م / ساعة
+      const rate = workHoursPerDay > 0 ? dailyRate / workHoursPerDay : (workDaysPerMonth > 0 ? hourlyBase / workDaysPerMonth : hourlyBase);
+
+      // إجمالي الراتب الأساسي الشهري المقدر
+      const monthlySalary = dailyRate * workDaysPerMonth; // = hourlyBase * workHoursPerDay
+      const monthlyRequiredHours = workHoursPerDay * workDaysPerMonth;
 
       // shifts for this branch (fallback to true if shift has no branch and employee only has 1 branch)
-      const bShifts = state.shifts.filter(s => s.employeeId === empId && filterFn(s.date) && (s.branchId === bId || !s.branchId || branches.length === 1));
-      const hours = bShifts.reduce((acc, s) => acc + s.hours, 0);
+      const bShifts = state.shifts.filter(s => s.employeeId === empId && effectiveFilterFn(s.date) && (s.branchId === bId || !s.branchId || branches.length === 1));
+      const hours = bShifts.reduce((acc, s) => acc + (parseFloat(s.hours) || 0), 0);
+      
+      // 3. احتساب أجر اليوم / المستحقات = سعر الساعة اليومي * عدد الساعات الموضوعة في الجدول الشهري / الفعلية
+      // مثال: 25 * 10 = 250 ج.م
       const baseEarnings = hours * rate;
 
-      // Absences - currently global but assigned to the first branch if aggregated
+      // Absences
       let absenceDaysCount = 0;
       let absenceDeduction = 0;
-      if (monthStr && bId === branches[0].branchId) {
-         absenceDaysCount = getAbsenceDaysCount(empId, monthStr);
+      if (bId === branches[0].branchId) {
+         absenceDaysCount = getAbsenceDaysCount(empId, monthStr || monthPicker);
          absenceDeduction = absenceDaysCount * dailyRate;
       }
 
-      perBranch[bId] = { hours, dailyRate, rate, baseEarnings, absenceDaysCount, absenceDeduction, salary, workHoursPerDay, workDaysPerMonth };
+      perBranch[bId] = { hours, dailyRate, rate, hourlyRate: rate, hourlyBase, monthlySalary, salary: monthlySalary, baseEarnings, absenceDaysCount, absenceDeduction, workHoursPerDay, workDaysPerMonth, monthlyRequiredHours };
       
       totalHours += hours;
       totalBaseEarnings += baseEarnings;
@@ -1376,19 +1727,36 @@ export default function App() {
       totalAbsenceDeduction += absenceDeduction;
     });
 
-    const empAdjs = state.adjustments.filter((a) => (a.employeeId === empId || a.employeeId === 'all') && filterFn(a.date));
-    const totalBonus = empAdjs.filter((a) => a.type === 'bonus').reduce((acc, a) => acc + a.amount, 0);
-    const totalDeduction = empAdjs.filter((a) => a.type === 'deduction').reduce((acc, a) => acc + a.amount, 0);
+    const empAdjs = state.adjustments.filter((a) => (a.employeeId === empId || a.employeeId === 'all') && effectiveFilterFn(a.date));
+    const totalBonus = empAdjs.filter((a) => a.type === 'bonus').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
+    const manualDeduction = empAdjs.filter((a) => a.type === 'deduction' || a.type === 'penalty').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
 
-    const netSalary = totalBaseEarnings + totalBonus - totalDeduction - totalAbsenceDeduction;
+    // Calculate approved loans/advances deductions for the filtered period
+    const allLoansList = [...(state.loans || []), ...(state.requests || [])];
+    const loanDeduction = allLoansList
+      .filter((l) => String(l.employeeId) === String(empId) && (l.status === 'approved' || l.adminApproved || l.status === 'partial') && (l.type === 'loan' || l.type === 'advance' || l.type === 'meds' || l.type === 'credit_medicine'))
+      .reduce((acc, l) => {
+        const total = parseFloat(l.amount) || 0;
+        const paid = parseFloat(l.paidAmount) || 0;
+        const rem = Math.max(0, total - paid);
+        if (rem <= 0) return acc;
+        const monthlyDeduction = parseFloat(l.monthlyDeduction || l.installmentAmount) || Math.min(rem, total);
+        return acc + Math.min(rem, monthlyDeduction);
+      }, 0);
 
-    let rate = branches.length === 1 ? perBranch[branches[0].branchId].rate : (totalHours > 0 ? totalBaseEarnings / totalHours : 0);
-    let dailyRate = branches.length === 1 ? perBranch[branches[0].branchId].dailyRate : (totalAbsenceDaysCount > 0 ? totalAbsenceDeduction / totalAbsenceDaysCount : 0);
+    const totalDeduction = manualDeduction + loanDeduction + totalAbsenceDeduction;
+    const netSalary = totalBaseEarnings + totalBonus - totalDeduction;
+
+    let rate = branches.length === 1 ? perBranch[branches[0].branchId].rate : (totalHours > 0 ? totalBaseEarnings / totalHours : (parseFloat(branches[0]?.salary) || 0));
+    let dailyRate = branches.length === 1 ? perBranch[branches[0].branchId].dailyRate : (rate * (parseFloat(branches[0]?.workHoursPerDay) || WORK_HOURS_PER_DAY));
 
     return { 
       hours: totalHours, 
       dailyRate, 
       rate, 
+      hourlyRate: rate,
+      monthlySalary: Object.values(perBranch).reduce((acc, b) => acc + (b.monthlySalary || 0), 0),
+      salary: Object.values(perBranch).reduce((acc, b) => acc + (b.monthlySalary || 0), 0),
       baseEarnings: totalBaseEarnings, 
       totalBonus, 
       totalDeduction, 
@@ -1411,7 +1779,7 @@ export default function App() {
     const totalBonus = Object.values(perEmp).reduce((s, e) => s + e.totalBonus, 0);
     const totalDeduction = Object.values(perEmp).reduce((s, e) => s + e.totalDeduction, 0);
     const totalAbsenceDeduction = Object.values(perEmp).reduce((s, e) => s + e.absenceDeduction, 0);
-    const grandNetSalary = totalBaseEarnings + totalBonus - totalDeduction - totalAbsenceDeduction;
+    const grandNetSalary = totalBaseEarnings + totalBonus - totalDeduction;
 
     return { perEmp, totalHours, totalBaseEarnings, totalBonus, totalDeduction, totalAbsenceDeduction, grandNetSalary };
   };
@@ -1516,14 +1884,18 @@ export default function App() {
   useEffect(() => {
     const unsubscribe = listenToConnectionChanges(
       // عاد الإنترنت
-      async () => {
+      async (mergedFromOnline) => {
         setIsOffline(false);
-        showToast('✅ عاد الاتصال - جاري مزامنة البيانات...');
+        showToast('✅ عاد الاتصال - جاري مزامنة ودمج البيانات...');
+        if (mergedFromOnline) {
+          setState((prev) => normalizeState(smartMergeStates(prev, normalizeState(mergedFromOnline))));
+        }
         const result = await syncNow();
-        if (result.success) {
+        if (result.success && result.mergedState) {
+          setState((prev) => normalizeState(smartMergeStates(prev, normalizeState(result.mergedState))));
           setPendingSyncCount(0);
           setLastSyncTime(nowTimeStr());
-          showToast('✅ تمت مزامنة البيانات بنجاح');
+          showToast('✅ تمت مزامنة ودمج البيانات بنجاح');
         }
       },
       // انقطع الإنترنت
@@ -1535,16 +1907,17 @@ export default function App() {
     return unsubscribe;
   }, []);
 
-  // Cloud Synchronization (Polling + Realtime)
+  // Cloud Synchronization (Fast Polling + Realtime + Smart Merge)
   useEffect(() => {
     const applyRemoteData = (remoteData) => {
       const parsed = typeof remoteData === 'string' ? JSON.parse(remoteData) : remoteData;
       if (!parsed) return;
       const normalized = normalizeState(parsed);
       setState((prev) => {
-        if (JSON.stringify(prev) !== JSON.stringify(normalized)) {
+        const merged = normalizeState(smartMergeStates(prev, normalized));
+        if (JSON.stringify(prev) !== JSON.stringify(merged)) {
           setLastSyncTime(nowTimeStr());
-          return normalized;
+          return merged;
         }
         return prev;
       });
@@ -1567,7 +1940,8 @@ export default function App() {
       }
     };
 
-    const pollInterval = setInterval(poll, 2000);
+    // Polling every 12 seconds for responsive multi-device synchronization
+    const pollInterval = setInterval(poll, 12000);
 
     const channel = db
       .channel('app_settings_realtime')
@@ -1582,25 +1956,35 @@ export default function App() {
       )
       .subscribe();
 
-    const handleFocus = () => poll();
-    window.addEventListener('focus', handleFocus);
-    window.addEventListener('online', handleFocus);
+    const handleFocusOrVisible = () => {
+      if (document.visibilityState === 'visible' || document.hasFocus()) {
+        poll();
+      }
+    };
+
+    window.addEventListener('focus', handleFocusOrVisible);
+    window.addEventListener('online', handleFocusOrVisible);
+    document.addEventListener('visibilitychange', handleFocusOrVisible);
 
     return () => {
       clearInterval(pollInterval);
       db.removeChannel(channel);
-      window.removeEventListener('focus', handleFocus);
-      window.removeEventListener('online', handleFocus);
+      window.removeEventListener('focus', handleFocusOrVisible);
+      window.removeEventListener('online', handleFocusOrVisible);
+      document.removeEventListener('visibilitychange', handleFocusOrVisible);
     };
   }, []);
 
-  // Save State function
+  // Save State function with Smart Deep Merge & Auto-Backup
   const saveState = async (updatedState) => {
     setIsSyncing(true);
     const result = await smartSaveState(updatedState, {
-      onSyncSuccess: () => {
+      onSyncSuccess: (finalMerged) => {
         setLastSyncTime(nowTimeStr());
         setPendingSyncCount(0);
+        if (finalMerged) {
+          setState((prev) => smartMergeStates(prev, normalizeState(finalMerged)));
+        }
       },
       onSyncFail: (msg) => {
         console.error('Supabase write error:', msg);
@@ -1613,6 +1997,19 @@ export default function App() {
       }
     });
     setIsSyncing(false);
+
+    const finalState = result?.mergedState || updatedState;
+    if (result?.mergedState) {
+      setState((prev) => smartMergeStates(prev, normalizeState(result.mergedState)));
+    }
+
+    // Auto-backup snapshot upon every modification
+    try {
+      await saveAutoBackupOnModification(finalState, 'تعديل وحفظ بالمنظومة');
+    } catch (e) {
+      console.warn('[AutoBackup] Snapshot trigger skipped:', e);
+    }
+
     return result;
   };
 
@@ -1734,41 +2131,60 @@ export default function App() {
     
     // إذا كان الموظف مسجل الدخول من صفحة البصمة (Kiosk) وتم تأكيد الـ IP، يتم تخطي صلاحيات تسجيل الحضور
     if (viewMode === 'kiosk') {
-      if (permKey === 'allowStartEnd' || permKey === 'allowManualShift' || permKey === 'allowEditShift') {
+      if (['allowStartEnd', 'canStartEnd', 'allowLivePunch', 'canLivePunch', 'allowManualShift', 'canManualShift', 'allowEditShift', 'canEditShift'].includes(permKey)) {
         return true;
       }
     }
 
+    // Key aliases mapping (allowX <=> canX)
+    let canKey = permKey;
+    let allowKey = permKey;
+    if (permKey.startsWith('allow')) {
+      canKey = 'can' + permKey.slice(5);
+    } else if (permKey.startsWith('can')) {
+      allowKey = 'allow' + permKey.slice(3);
+    }
+
+    // 1. Check Specific Employee Permissions Override
     if (empId && empId !== 'all') {
-      const emp = state.employees.find((e) => e.id === empId);
-      if (emp && emp.permissions && emp.permissions[permKey] !== undefined) {
-        return emp.permissions[permKey];
+      const emp = (state.employees || []).find((e) => e.id === empId);
+      if (emp && emp.permissions) {
+        if (emp.permissions[canKey] !== undefined) return emp.permissions[canKey];
+        if (emp.permissions[allowKey] !== undefined) return emp.permissions[allowKey];
+      }
+      const empSettingsPerms = state.orgSettings?.empPermissions?.[empId];
+      if (empSettingsPerms) {
+        if (empSettingsPerms[canKey] !== undefined) return empSettingsPerms[canKey];
+        if (empSettingsPerms[allowKey] !== undefined) return empSettingsPerms[allowKey];
       }
     }
-    const globalPerms = state.orgSettings.permissions || {};
-    if (globalPerms[permKey] !== undefined) {
-      return globalPerms[permKey];
-    }
-    if (permKey === 'allowManualShift' || permKey === 'allowEditShift' || permKey === 'allowStartEnd' || permKey === 'allowViewSalary' || permKey === 'allowViewAdjustments' || permKey === 'allowExportExcel') {
-      return true;
-    }
-    return false;
+
+    // 2. Check Global Default Permissions
+    const globalPerms = state.orgSettings?.permissions || {};
+    if (globalPerms[canKey] !== undefined) return globalPerms[canKey];
+    if (globalPerms[allowKey] !== undefined) return globalPerms[allowKey];
+
+    // Default Fallbacks
+    if (['canAddAdjustment', 'allowAddAdjustment'].includes(permKey)) return false;
+    return true;
   };
 
-  // Direct Image File Upload Handler (Base64)
-  const handleFileUpload = (e, callback) => {
+  // Direct Image File Upload Handler (Compressed Base64)
+  const handleFileUpload = async (e, callback) => {
     const file = e.target.files[0];
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      showToast('حجم الصورة كبير جداً، يرجى اختيار صورة أقل من 5 ميجابايت');
+    if (file.size > 10 * 1024 * 1024) {
+      showToast('حجم الصورة كبير جداً، يرجى اختيار صورة أقل من 10 ميجابايت');
       return;
     }
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      callback(evt.target.result);
-      showToast('تم رفع الصورة بنجاح');
-    };
-    reader.readAsDataURL(file);
+    try {
+      const compressedDataUrl = await compressImage(file, 1000, 0.75);
+      callback(compressedDataUrl);
+      showToast('تم رفع وتجهيز الصورة بنجاح');
+    } catch (err) {
+      console.error('Image compression failed:', err);
+      showToast('حدث خطأ أثناء رفع الصورة');
+    }
   };
 
   // Live Timer Counters
@@ -1803,30 +2219,353 @@ export default function App() {
     return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
   };
 
+  // ── Central Lateness Detector & Penalty Request Generator ──
+  const checkAndRecordLateness = (empId, dateStr, timeInStr, currentState) => {
+    if (!empId || !timeInStr) return currentState;
+    const emp = (currentState.employees || []).find((e) => String(e.id) === String(empId));
+    if (!emp) return currentState;
+
+    const monthKey = (dateStr || todayStr()).slice(0, 7);
+    const approvedRosters = (currentState.rosters || []).filter(
+      (r) => String(r.employeeId) === String(empId) && (r.month === monthKey || !r.month) && r.status === 'approved'
+    );
+    if (approvedRosters.length === 0) return currentState;
+
+    const arDay = arabicWeekday(dateStr);
+    let daySchedule = null;
+    let targetRoster = null;
+    for (const ros of approvedRosters) {
+      if (ros.schedule) {
+        const sched = ros.schedule[arDay] || Object.entries(ros.schedule).find(([k]) => k.replace(/[\u0625\u0623\u0622]/g, 'ا') === arDay.replace(/[\u0625\u0623\u0622]/g, 'ا'))?.[1];
+        if (sched && sched.type !== 'off' && sched.start) {
+          daySchedule = sched;
+          targetRoster = ros;
+          break;
+        }
+      }
+    }
+
+    if (!daySchedule || !daySchedule.start) return currentState;
+
+    // Parse scheduled start time
+    const [sH, sM] = daySchedule.start.split(':').map(Number);
+    const schedTotalMinutes = sH * 60 + sM;
+
+    // Parse actual timeIn
+    const [inH, inM] = timeInStr.split(':').map(Number);
+    const actualTotalMinutes = inH * 60 + inM;
+
+    const diffMinutes = actualTotalMinutes - schedTotalMinutes;
+    const gracePeriod = currentState.orgSettings?.latenessGracePeriodMinutes !== undefined
+      ? parseInt(currentState.orgSettings.latenessGracePeriodMinutes)
+      : 15;
+
+    if (diffMinutes > gracePeriod) {
+      // Calculate past occurrences of lateness for this employee in the past reset period (default 30 days)
+      const resetDays = currentState.bylaws?.resetPeriodDays || 30;
+      const cutoffDate = new Date(Date.now() - resetDays * 86400000).toISOString().slice(0, 10);
+      const pastOccurrences = (currentState.requests || []).filter(
+        (r) => String(r.employeeId) === String(empId) && (r.subType === 'lateness' || (r.type === 'penalty' && r.subType === 'lateness')) && (r.date >= cutoffDate || r.createdAt >= cutoffDate)
+      ).length;
+
+      const occurrenceNumber = pastOccurrences + 1;
+      const penaltyRules = currentState.bylaws?.latePenalties || [
+        { occurrence: 1, action: 'تنبيه', deductionFraction: 0 },
+        { occurrence: 2, action: 'إنذار كتابي', deductionFraction: 0 },
+        { occurrence: 3, action: 'خصم ¼ يوم', deductionFraction: 0.25 },
+        { occurrence: 4, action: 'خصم ½ يوم', deductionFraction: 0.5 },
+        { occurrence: 5, action: 'خصم يوم', deductionFraction: 1.0 }
+      ];
+
+      const rule = penaltyRules.find((p) => p.occurrence === occurrenceNumber) || penaltyRules[penaltyRules.length - 1];
+      const deductionFraction = rule ? rule.deductionFraction : (diffMinutes > 30 ? 0.5 : 0.25);
+      const actionTitle = rule ? rule.action : 'خصم جزاء تأخير';
+
+      const salary = parseFloat(emp.salary) || 0;
+      const workHours = parseFloat(emp.workHoursPerDay) || 8;
+      const workDays = parseFloat(emp.workDaysPerMonth) || 26;
+      const dailyRate = workDays > 0 ? (salary * workHours) / workDays : 0;
+      const penaltyAmount = Math.round(dailyRate * deductionFraction * 100) / 100;
+
+      const reqId = `req_late_${emp.id}_${dateStr}`;
+      const alreadyHasReq = (currentState.requests || []).some((r) => r.id === reqId);
+
+      const branchObj = (currentState.branches || []).find((b) => b.id === (targetRoster?.branchId || emp.branchId));
+      const branchName = branchObj ? branchObj.name : 'الفرع الرئيسي';
+
+      let updatedReqs = currentState.requests || [];
+      if (!alreadyHasReq) {
+        const newReq = {
+          id: reqId,
+          employeeId: emp.id,
+          employeeName: emp.name,
+          employeeCode: emp.code,
+          jobTitle: emp.jobTitle,
+          branchId: targetRoster?.branchId || emp.branchId,
+          branchName: branchName,
+          type: 'penalty',
+          subType: 'lateness',
+          ruleTitle: `تأخير عن موعد الوردية (${diffMinutes} دقيقة - موعد: ${daySchedule.start} / دخول: ${timeInStr})`,
+          impactType: 'deduction_days',
+          impactVal: deductionFraction,
+          amount: penaltyAmount,
+          scheduledStart: daySchedule.start,
+          actualIn: timeInStr,
+          latenessMinutes: diffMinutes,
+          graceMinutes: gracePeriod,
+          occurrenceNumber: occurrenceNumber,
+          suggestedAction: actionTitle,
+          reason: `تأخر الموظف ${emp.name} (${emp.jobTitle}) بفرع ${branchName} بمقدار ${diffMinutes} دقيقة عن موعد ورديته المحدد بالجدول (${daySchedule.start}) متجاوزاً فترة السماح (${gracePeriod} دقيقة). المرة رقم ${occurrenceNumber} في اللائحة.`,
+          details: `تأخير ${diffMinutes} دقيقة | المرة: رقم ${occurrenceNumber} | الإجراء اللائحي: ${actionTitle} ${penaltyAmount > 0 ? `(خصم ${penaltyAmount} ج.م / ${deductionFraction} يوم)` : '(بدون خصم مالي)'}`,
+          date: dateStr,
+          createdAt: new Date().toISOString(),
+          targetApproval: 'admin_only',
+          branchApproved: true,
+          adminApproved: false,
+          status: 'pending',
+          source: 'system_lateness_tracker'
+        };
+        updatedReqs = [newReq, ...updatedReqs];
+      }
+
+      const notifId = `notif_late_${emp.id}_${dateStr}`;
+      const alreadyHasNotif = (currentState.notifications || []).some((n) => n.id === notifId);
+      let updatedNotifs = currentState.notifications || [];
+      if (!alreadyHasNotif) {
+        const newNotif = {
+          id: notifId,
+          type: 'lateness_alert',
+          title: `🚨 تنبيه تأخير: ${emp.name} (${emp.jobTitle})`,
+          message: `تأخر الموظف ${emp.name} (${emp.jobTitle}) بفرع ${branchName} عن موعد ورديته بمقدار ${diffMinutes} دقيقة (وقت الدخول: ${timeInStr} | الموعد المجدول: ${daySchedule.start}) متجاوزاً فترة السماح (${gracePeriod} دقيقة).`,
+          date: dateStr,
+          timestamp: new Date().toISOString(),
+          read: false,
+          targetRole: 'all',
+          branchId: targetRoster?.branchId || emp.branchId,
+          requestId: reqId,
+          empId: emp.id,
+          latenessMinutes: diffMinutes,
+          suggestedAmount: penaltyAmount,
+          suggestedAction: actionTitle
+        };
+        updatedNotifs = [newNotif, ...updatedNotifs];
+      }
+
+      // Dispatch automated Top Management email alert
+      notifyAdminOnLateness({
+        state: currentState,
+        emp,
+        branchName,
+        latenessMinutes: diffMinutes,
+        scheduledStart: daySchedule.start,
+        timeIn: timeInStr,
+        dateStr,
+        suggestedAction: actionTitle,
+        suggestedAmount: penaltyAmount
+      }).catch((e) => console.warn('Lateness email alert error:', e));
+
+      return {
+        ...currentState,
+        requests: updatedReqs,
+        notifications: updatedNotifs
+      };
+    }
+
+    return currentState;
+  };
+
+  // ── Central Early Exit Detector & Request Generator ──
+  const checkAndRecordEarlyExit = (empId, dateStr, timeOutStr, currentState) => {
+    if (!empId || !timeOutStr) return currentState;
+    const emp = (currentState.employees || []).find((e) => String(e.id) === String(empId));
+    if (!emp) return currentState;
+
+    const monthKey = (dateStr || todayStr()).slice(0, 7);
+    const approvedRosters = (currentState.rosters || []).filter(
+      (r) => String(r.employeeId) === String(empId) && (r.month === monthKey || !r.month) && r.status === 'approved'
+    );
+    if (approvedRosters.length === 0) return currentState;
+
+    const arDay = arabicWeekday(dateStr);
+    let daySchedule = null;
+    let targetRoster = null;
+    for (const ros of approvedRosters) {
+      if (ros.schedule) {
+        const sched = ros.schedule[arDay] || Object.entries(ros.schedule).find(([k]) => k.replace(/[\u0625\u0623\u0622]/g, 'ا') === arDay.replace(/[\u0625\u0623\u0622]/g, 'ا'))?.[1];
+        if (sched && sched.type !== 'off' && sched.end) {
+          daySchedule = sched;
+          targetRoster = ros;
+          break;
+        }
+      }
+    }
+
+    if (!daySchedule || !daySchedule.end) return currentState;
+
+    // Parse scheduled end time
+    const [sH, sM] = daySchedule.end.split(':').map(Number);
+    const schedEndMinutes = sH * 60 + sM;
+
+    // Parse actual timeOut
+    const [outH, outM] = timeOutStr.split(':').map(Number);
+    const actualOutMinutes = outH * 60 + outM;
+
+    const earlyMinutes = schedEndMinutes - actualOutMinutes;
+    const gracePeriod = currentState.orgSettings?.earlyExitGracePeriodMinutes !== undefined
+      ? parseInt(currentState.orgSettings.earlyExitGracePeriodMinutes)
+      : 5;
+
+    if (earlyMinutes > gracePeriod) {
+      // Calculate past occurrences of early exit for this employee in the past 30 days
+      const resetDays = currentState.bylaws?.resetPeriodDays || 30;
+      const cutoffDate = new Date(Date.now() - resetDays * 86400000).toISOString().slice(0, 10);
+      const pastOccurrences = (currentState.requests || []).filter(
+        (r) => String(r.employeeId) === String(empId) && (r.type === 'early_exit' || r.subType === 'early_exit') && (r.date >= cutoffDate || r.createdAt >= cutoffDate)
+      ).length;
+
+      const occurrenceNumber = pastOccurrences + 1;
+      const penaltyRules = currentState.bylaws?.earlyExitPenalties || [
+        { occurrence: 1, action: 'إنذار', deductionFraction: 0 },
+        { occurrence: 2, action: 'خصم ¼ يوم', deductionFraction: 0.25 },
+        { occurrence: 3, action: 'خصم ½ يوم', deductionFraction: 0.5 },
+        { occurrence: 4, action: 'خصم يوم', deductionFraction: 1.0 }
+      ];
+
+      const rule = penaltyRules.find((p) => p.occurrence === occurrenceNumber) || penaltyRules[penaltyRules.length - 1];
+      const deductionFraction = rule ? rule.deductionFraction : 0.25;
+      const actionTitle = rule ? rule.action : 'خصم جزاء انصراف مبكر';
+
+      const salary = parseFloat(emp.salary) || 0;
+      const workHours = parseFloat(emp.workHoursPerDay) || 8;
+      const workDays = parseFloat(emp.workDaysPerMonth) || 26;
+      const dailyRate = workDays > 0 ? (salary * workHours) / workDays : 0;
+      const penaltyAmount = Math.round(dailyRate * deductionFraction * 100) / 100;
+
+      const reqId = `req_early_${emp.id}_${dateStr}_${timeOutStr.replace(':', '')}`;
+      const alreadyHasReq = (currentState.requests || []).some((r) => r.id === reqId);
+
+      const branchObj = (currentState.branches || []).find((b) => b.id === (targetRoster?.branchId || emp.branchId));
+      const branchName = branchObj ? branchObj.name : 'الفرع الرئيسي';
+
+      let updatedReqs = currentState.requests || [];
+      if (!alreadyHasReq) {
+        const newReq = {
+          id: reqId,
+          employeeId: emp.id,
+          employeeName: emp.name,
+          employeeCode: emp.code,
+          jobTitle: emp.jobTitle,
+          branchId: targetRoster?.branchId || emp.branchId,
+          branchName: branchName,
+          type: 'early_exit',
+          subType: 'early_exit',
+          ruleTitle: `انصراف مبكر (${earlyMinutes} دقيقة مبكراً - الموعد: ${daySchedule.end} / الخروج: ${timeOutStr})`,
+          impactType: 'deduction_days',
+          impactVal: deductionFraction,
+          amount: penaltyAmount,
+          scheduledEnd: daySchedule.end,
+          actualOut: timeOutStr,
+          earlyMinutes: earlyMinutes,
+          occurrenceNumber: occurrenceNumber,
+          suggestedAction: actionTitle,
+          reason: `انصرف الموظف ${emp.name} (${emp.jobTitle}) بفرع ${branchName} قبل موعد انتهاء ورديته المحدد بالجدول (${daySchedule.end}) بمقدار ${earlyMinutes} دقيقة (الخروج: ${timeOutStr}).`,
+          details: `خروج مبكر ${earlyMinutes} دقيقة | المرة: رقم ${occurrenceNumber} | الإجراء اللائحي: ${actionTitle} ${penaltyAmount > 0 ? `(خصم ${penaltyAmount} ج.م)` : '(بدون خصم مالي)'}`,
+          date: dateStr,
+          createdAt: new Date().toISOString(),
+          targetApproval: 'admin_only',
+          branchApproved: true,
+          adminApproved: false,
+          status: 'pending',
+          source: 'system_early_exit_tracker'
+        };
+        updatedReqs = [newReq, ...updatedReqs];
+      }
+
+      const notifId = `notif_early_${emp.id}_${dateStr}_${timeOutStr.replace(':', '')}`;
+      const alreadyHasNotif = (currentState.notifications || []).some((n) => n.id === notifId);
+      let updatedNotifs = currentState.notifications || [];
+      if (!alreadyHasNotif) {
+        const newNotif = {
+          id: notifId,
+          type: 'early_exit_alert',
+          title: `⚠️ تنبيه انصراف مبكر: ${emp.name} (${emp.jobTitle})`,
+          message: `انصرف الموظف ${emp.name} بفرع ${branchName} قبل موعد ورديته المحدد بالجدول (${daySchedule.end}) بمقدار ${earlyMinutes} دقيقة (وقت الخروج: ${timeOutStr}).`,
+          date: dateStr,
+          timestamp: new Date().toISOString(),
+          read: false,
+          targetRole: 'admin',
+          branchId: targetRoster?.branchId || emp.branchId,
+          requestId: reqId,
+          empId: emp.id,
+          earlyMinutes: earlyMinutes,
+          suggestedAmount: penaltyAmount
+        };
+        updatedNotifs = [newNotif, ...updatedNotifs];
+      }
+
+      // Dispatch automated Top Management email alert
+      notifyAdminOnEarlyExit({
+        state: currentState,
+        emp,
+        branchName,
+        earlyMinutes,
+        scheduledEnd: daySchedule.end,
+        timeOut: timeOutStr,
+        dateStr,
+        suggestedAction: actionTitle,
+        suggestedAmount: penaltyAmount
+      }).catch((e) => console.warn('Early exit email alert error:', e));
+
+      return {
+        ...currentState,
+        requests: updatedReqs,
+        notifications: updatedNotifs
+      };
+    }
+
+    return currentState;
+  };
+
   // Punch Shift Actions
-  const startShift = async (empId, source = 'admin') => {
-    if (!getEmpPermission(empId, 'allowStartEnd')) {
-      showToast('❌ تم تقييد الصلاحيات: لا تمتلك صلاحية لبدء أو إنهاء الوردية الحية');
+  const startShift = async (empId, source = 'admin', branchId = null) => {
+    if (!getEmpPermission(empId, 'canStartEnd') || !getEmpPermission(empId, 'canLivePunch')) {
+      showToast('❌ تم تقييد الصلاحيات: لا تمتلك صلاحية لبدء أو إنهاء الوردية عن طريق البصمة الحية');
       return;
     }
-    if (state.activeShifts[empId]) return;
+    if (state.activeShifts[empId]) {
+      showToast('⚠️ الموظف لديه وردية عمل نشطة بالفعل');
+      return;
+    }
     const emp = getEmp(empId);
+    const punchDate = todayStr();
+    const punchTime = nowTimeStr().slice(0, 5);
+
+    const effectiveBranchId = branchId || emp?.branchId || (emp?.branchesDetails && emp.branchesDetails[0]?.branchId) || '';
+
     const updatedActive = {
       ...state.activeShifts,
       [empId]: {
-        date: todayStr(),
-        timeIn: nowTimeStr().slice(0, 5),
+        branchId: effectiveBranchId,
+        date: punchDate,
+        timeIn: punchTime,
         startEpoch: Date.now(),
         isPaused: false,
+        isOnBreak: false,
+        breakStartTime: null,
         pauseStartEpoch: null,
-        accumulatedPauseMs: 0
+        accumulatedPauseMs: 0,
+        updatedAt: Date.now()
       }
     };
-    const updatedState = { ...state, activeShifts: updatedActive };
+    let updatedState = { ...state, activeShifts: updatedActive };
+    updatedState = checkAndRecordLateness(empId, punchDate, punchTime, updatedState);
+
     setState(updatedState);
     await saveState(updatedState);
 
-    const msg = `تم تسجيل حضور ${emp ? emp.name : ''} بنجاح الساعة ${nowTimeStr().slice(0, 5)}`;
+    const bObj = (state.branches || []).find((b) => String(b.id) === String(effectiveBranchId));
+    const branchNameStr = bObj ? ` (فرع ${bObj.name})` : '';
+    const msg = `تم تسجيل حضور ${emp ? emp.name : ''}${branchNameStr} بنجاح الساعة ${punchTime}`;
     if (source === 'kiosk') {
       playFingerprintChime('success');
       setKioskConfirmModal({
@@ -1836,8 +2575,8 @@ export default function App() {
         code: emp ? emp.code : '',
         jobTitle: emp ? emp.jobTitle : '',
         photoUrl: emp ? emp.photoUrl : '',
-        message: 'تم تسجيل الدخول بنجاح! أهلاً بك على رأس العمل.',
-        timestamp: `${todayStr()} · ${nowTimeStr().slice(0, 5)}`
+        message: `تم تسجيل الدخول بنجاح! أهلاً بك على رأس العمل${branchNameStr}.`,
+        timestamp: `${punchDate} · ${punchTime}`
       });
       setKioskCode('');
       setKioskSelectedEmp(null);
@@ -1850,12 +2589,16 @@ export default function App() {
     const active = state.activeShifts[empId];
     if (!active || active.isPaused) return;
     const emp = getEmp(empId);
+    const nowTime = nowTimeStr().slice(0, 5);
     const updatedActive = {
       ...state.activeShifts,
       [empId]: {
         ...active,
         isPaused: true,
-        pauseStartEpoch: Date.now()
+        isOnBreak: true,
+        breakStartTime: nowTime,
+        pauseStartEpoch: Date.now(),
+        updatedAt: Date.now()
       }
     };
     const updatedState = { ...state, activeShifts: updatedActive };
@@ -1872,7 +2615,7 @@ export default function App() {
         jobTitle: emp ? emp.jobTitle : '',
         photoUrl: emp ? emp.photoUrl : '',
         message: 'تم بدء الاستراحة (البريك) بنجاح.',
-        timestamp: `${todayStr()} · ${nowTimeStr().slice(0, 5)}`
+        timestamp: `${todayStr()} · ${nowTime}`
       });
       setKioskCode('');
       setKioskSelectedEmp(null);
@@ -1891,8 +2634,11 @@ export default function App() {
       [empId]: {
         ...active,
         isPaused: false,
+        isOnBreak: false,
+        breakStartTime: null,
         pauseStartEpoch: null,
-        accumulatedPauseMs: (active.accumulatedPauseMs || 0) + pauseDuration
+        accumulatedPauseMs: (active.accumulatedPauseMs || 0) + pauseDuration,
+        updatedAt: Date.now()
       }
     };
     const updatedState = { ...state, activeShifts: updatedActive };
@@ -1928,28 +2674,159 @@ export default function App() {
     if (active.isPaused && active.pauseStartEpoch) {
       currentPauseMs += (nowMs - active.pauseStartEpoch);
     }
-    const totalElapsedMs = nowMs - active.startEpoch;
+    const totalElapsedMs = nowMs - (active.startEpoch || (nowMs - 60000));
     const netActiveMs = Math.max(0, totalElapsedMs - currentPauseMs);
 
     const breakHours = Math.round((currentPauseMs / 3600000) * 100) / 100;
     const netHours = Math.round((netActiveMs / 3600000) * 100) / 100;
 
+    const bId = active.branchId || emp?.branchId || (emp?.branchesDetails && emp.branchesDetails[0]?.branchId) || '';
+    const bObj = (state.branches || []).find((b) => String(b.id) === String(bId));
+
+    // 1. Check schedule from approved roster for overtime and schedule tracking
+    const monthKey = (active.date || todayStr()).slice(0, 7);
+    const approvedRosters = (state.rosters || []).filter(
+      (r) => String(r.employeeId) === String(empId) && (r.month === monthKey || !r.month) && r.status === 'approved'
+    );
+    const arDay = arabicWeekday(active.date);
+    let daySchedule = null;
+    let targetRoster = null;
+    for (const ros of approvedRosters) {
+      if (ros.schedule) {
+        const sched = ros.schedule[arDay] || Object.entries(ros.schedule).find(([k]) => k.replace(/[\u0625\u0623\u0622]/g, 'ا') === arDay.replace(/[\u0625\u0623\u0622]/g, 'ا'))?.[1];
+        if (sched && sched.type !== 'off' && sched.start && sched.end) {
+          daySchedule = sched;
+          targetRoster = ros;
+          break;
+        }
+      }
+    }
+
+    let scheduledHours = parseFloat(emp?.workHoursPerDay) || 8;
+    if (daySchedule && daySchedule.start && daySchedule.end) {
+      const [sH, sM] = daySchedule.start.split(':').map(Number);
+      const [eH, eM] = daySchedule.end.split(':').map(Number);
+      let sMinutes = sH * 60 + sM;
+      let eMinutes = eH * 60 + eM;
+      if (eMinutes < sMinutes) eMinutes += 24 * 60;
+      scheduledHours = Math.round(((eMinutes - sMinutes) / 60) * 100) / 100;
+    }
+
+    let regularHours = netHours;
+    let overtimeHours = 0;
+    let overtimeStatus = 'none';
+    let overtimeReq = null;
+
+    if (netHours > scheduledHours) {
+      overtimeHours = Math.round((netHours - scheduledHours) * 100) / 100;
+      regularHours = scheduledHours;
+      overtimeStatus = 'pending';
+    }
+
+    const shiftId = uid();
     const newShift = {
-      id: uid(),
+      id: shiftId,
       employeeId: empId,
+      employeeCode: emp?.code || '',
+      employeeName: emp?.name || '',
+      branchId: bId,
+      branchName: bObj?.name || '',
       date: active.date,
       timeIn: active.timeIn,
       timeOut,
-      hours: netHours,
+      hours: overtimeStatus === 'pending' ? regularHours : netHours,
+      actualWorkedHours: netHours,
+      scheduledHours,
+      regularHours,
+      overtimeHours,
+      overtimeStatus,
       breakHours,
-      note: 'تسجيل انصراف بلمسة واحدة'
+      note: overtimeHours > 0 ? `ساعات إضافية (+${overtimeHours} س) بانتظار الاعتماد` : 'تسجيل انصراف بلمسة واحدة',
+      statusLabel: 'حضور حي',
+      createdAt: new Date().toISOString()
     };
 
-    const updatedShifts = [...state.shifts, newShift];
+    let updatedRequests = state.requests || [];
+    let updatedNotifications = state.notifications || [];
+
+    if (overtimeHours > 0) {
+      const reqId = `req_ot_${empId}_${active.date}_${shiftId}`;
+      overtimeReq = {
+        id: reqId,
+        shiftId: shiftId,
+        employeeId: empId,
+        employeeName: emp?.name || '',
+        employeeCode: emp?.code || '',
+        jobTitle: emp?.jobTitle || '',
+        branchId: bId,
+        branchName: bObj?.name || 'الفرع الرئيسي',
+        type: 'overtime',
+        subType: 'extra_hours',
+        hours: overtimeHours,
+        regularHours: regularHours,
+        totalShiftHours: netHours,
+        scheduledStart: daySchedule?.start || '09:00',
+        scheduledEnd: daySchedule?.end || '17:00',
+        actualIn: active.timeIn,
+        actualOut: timeOut,
+        date: active.date,
+        reason: `عمل الموظف ${emp?.name} عدد ${overtimeHours} ساعات إضافية فوق ساعات الوردية المحددة بالجدول (${scheduledHours} س).`,
+        details: `الوردية المقررة: ${scheduledHours} س | الساعات الفعلية: ${netHours} س | الساعات الإضافية المطلوب اعتمادها: +${overtimeHours} س`,
+        targetApproval: 'both',
+        branchApproved: false,
+        adminApproved: false,
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+        source: 'system_overtime_tracker'
+      };
+      updatedRequests = [overtimeReq, ...updatedRequests];
+
+      const notifId = `notif_ot_${empId}_${active.date}_${shiftId}`;
+      const newNotif = {
+        id: notifId,
+        type: 'overtime_alert',
+        title: `⏱️ طلب اعتماد ساعات إضافية: ${emp?.name} (+${overtimeHours} س)`,
+        message: `عمل الموظف ${emp?.name} بفرع ${bObj?.name || 'الفرع'} عدد ${overtimeHours} ساعات إضافية بعد انتهاء ورديته المقررة (${scheduledHours} س).`,
+        date: active.date,
+        timestamp: new Date().toISOString(),
+        read: false,
+        targetRole: 'all',
+        branchId: bId,
+        requestId: reqId
+      };
+      updatedNotifications = [newNotif, ...updatedNotifications];
+
+      // Dispatch automated Overtime Email to admin
+      notifyAdminOnOvertime({
+        state,
+        emp,
+        branchName: bObj?.name || 'الفرع الرئيسي',
+        overtimeHours,
+        regularHours,
+        totalHours: netHours,
+        scheduledStart: daySchedule?.start || '09:00',
+        scheduledEnd: daySchedule?.end || '17:00',
+        actualIn: active.timeIn,
+        actualOut: timeOut,
+        dateStr: active.date
+      }).catch((e) => console.warn('Overtime email alert error:', e));
+    }
+
+    const updatedShifts = [newShift, ...(state.shifts || [])];
     const updatedActive = { ...state.activeShifts };
     delete updatedActive[empId];
 
-    const updatedState = { ...state, shifts: updatedShifts, activeShifts: updatedActive };
+    let updatedState = {
+      ...state,
+      shifts: updatedShifts,
+      activeShifts: updatedActive,
+      requests: updatedRequests,
+      notifications: updatedNotifications
+    };
+
+    // Check early exit against scheduled end time
+    updatedState = checkAndRecordEarlyExit(empId, active.date, timeOut, updatedState);
+
     setState(updatedState);
     await saveState(updatedState);
 
@@ -2206,96 +3083,276 @@ export default function App() {
       const wb = new ExcelJS.Workbook();
       wb.creator = state.orgSettings.orgName || 'نظام البصمات والموارد البشرية';
       wb.created = new Date();
-      const ws = wb.addWorksheet(`مرتب ${emp.name}`, { views: [{ rightToLeft: true, showGridLines: false }] });
-      ws.columns = [{ width: 13 }, { width: 11 }, { width: 11 }, { width: 11 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 13 }, { width: 30 }];
 
-      let r = 1;
-      mergedTitle(ws, r, `كشف مفردات مرتب الموظف — ${emp.name} (${state.orgSettings.orgName})`, COLS, 'FF0B3532', 16, 32);
-      r += 2;
+      const isMultiBranch = emp.branchesDetails && emp.branchesDetails.length > 1;
 
-      ws.mergeCells(r, 1, r, COLS);
-      const nameCell = ws.getCell(r, 1);
-      nameCell.value = `اسم الموظف: ${emp.name}`;
-      nameCell.font = { name: 'Arial', bold: true, size: 12, color: { argb: 'FF0B3532' } };
-      nameCell.alignment = { horizontal: 'center' };
-      nameCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0FDF4' } };
-      r++;
+      if (isMultiBranch) {
+        // ── Multi-Branch Employee: Generate separate sheet for each branch + summary sheet ──
+        emp.branchesDetails.forEach((bd, bdIdx) => {
+          const bId = bd.branchId;
+          const bObj = (state.branches || []).find((b) => b.id === bId);
+          const bName = bObj ? bObj.name : `فرع ${bdIdx + 1}`;
+          const cleanSheetName = `فرع ${bName}`.replace(/[\*\?\/\\\[\]]/g, '').slice(0, 30);
 
-      ws.mergeCells(r, 1, r, COLS);
-      const infoCell = ws.getCell(r, 1);
-      infoCell.value = `اسم الموظف: ${emp.name}   |   كود الموظف: ${emp.code}   |   الوظيفة: ${emp.jobTitle}   |   الفترة: ${periodLabel}   |   سعر الساعة الشهرية (الراتب الأساسي): ${fmt(emp.salary)} ج.م   |   أجر الساعة المحسوب: ${fmt(summary.rate)} ج.م`;
-      infoCell.font = { name: 'Arial', bold: true, size: 10.5, color: { argb: 'FF1D2624' } };
-      infoCell.alignment = { horizontal: 'center' };
-      infoCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE4EEEC' } };
-      r += 2;
+          const bSummary = computeEmpSummary(empId, filterFn, rangeMode === 'month' ? monthPicker : null, bId);
+          const bSalary = parseFloat(bd.salary) || 0;
+          const bHoursPerDay = parseFloat(bd.workHoursPerDay) || 8;
+          const bDaysPerMonth = parseFloat(bd.workDaysPerMonth) || 26;
+          const bRate = bSummary.rate;
 
-      tableHeaderRow(ws, r, ['التاريخ', 'اليوم', 'وقت الدخول', 'وقت الخروج', 'البريك (ساعة)', 'ساعات العمل', 'سعر الساعة', 'المبلغ المستحق', 'الملاحظات']);
-      r++;
+          const ws = wb.addWorksheet(cleanSheetName, { views: [{ rightToLeft: true, showGridLines: false }] });
+          ws.columns = [
+            { width: 13 }, { width: 11 }, { width: 11 }, { width: 11 },
+            { width: 12 }, { width: 12 }, { width: 12 }, { width: 13 }, { width: 30 }
+          ];
 
-      const empShifts = state.shifts
-        .filter((s) => s.employeeId === empId && filterFn(s.date))
-        .sort((a, b) => (a.date === b.date ? a.timeIn.localeCompare(b.timeIn) : a.date.localeCompare(b.date)));
+          let r = 1;
+          mergedTitle(ws, r, `كشف مفردات مرتب الموظف — ${emp.name} (📍 فرع: ${bName})`, COLS, 'FF0B3532', 16, 32);
+          r += 2;
 
-      if (empShifts.length === 0) {
-        ws.mergeCells(r, 1, r, COLS);
-        const cell = ws.getCell(r, 1);
-        cell.value = 'لا توجد بصمات أو ورديات مسجلة لهذه الفترة';
-        cell.font = { name: 'Arial', italic: true, size: 10.5 };
-        cell.alignment = { horizontal: 'center' };
-        r++;
-      } else {
-        empShifts.forEach((s) => {
-          const amt = s.hours * summary.rate;
-          dataRow(ws, r, [s.date, arabicWeekday(s.date), s.timeIn, s.timeOut, fmt(s.breakHours || 0), fmt(s.hours), fmt(summary.rate), fmt(amt), s.note || '—'], 1, [4, 5, 6, 7]);
+          ws.mergeCells(r, 1, r, COLS);
+          const nameCell = ws.getCell(r, 1);
+          nameCell.value = `اسم الموظف: ${emp.name}   |   الفرع: ${bName}`;
+          nameCell.font = { name: 'Arial', bold: true, size: 12, color: { argb: 'FF0B3532' } };
+          nameCell.alignment = { horizontal: 'center' };
+          nameCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0FDF4' } };
           r++;
-        });
-      }
 
-      r++;
-      const empAdjs = state.adjustments.filter((a) => (a.employeeId === empId || a.employeeId === 'all') && filterFn(a.date));
-      mergedTitle(ws, r, 'تفاصيل المكافآت والخصومات', COLS, 'FF3A6E69', 12, 22);
-      r++;
-      tableHeaderRow(ws, r, ['التاريخ', 'النوع', 'المبلغ', 'البيان / السبب'], 1);
-      r++;
+          ws.mergeCells(r, 1, r, COLS);
+          const infoCell = ws.getCell(r, 1);
+          infoCell.value = `كود: ${emp.code} | الفرع: ${bName} | الفترة: ${periodLabel} | الراتب بالفرع: ${fmt(bSalary)} ج.م | أجر الساعة بالفرع: ${fmt(bRate)} ج.م (يومي: ${bHoursPerDay} س | شهري: ${bDaysPerMonth} يوم)`;
+          infoCell.font = { name: 'Arial', bold: true, size: 10.5, color: { argb: 'FF1D2624' } };
+          infoCell.alignment = { horizontal: 'center' };
+          infoCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE4EEEC' } };
+          r += 2;
 
-      if (empAdjs.length === 0) {
-        ws.mergeCells(r, 1, r, 4);
-        const cell = ws.getCell(r, 1);
-        cell.value = 'لا توجد مكافآت أو خصومات مسجلة لهذه الفترة';
-        cell.font = { name: 'Arial', italic: true, size: 10.5 };
-        cell.alignment = { horizontal: 'center' };
-        r++;
-      } else {
-        empAdjs.forEach((a) => {
-          const rowVals = [a.date, a.type === 'bonus' ? 'مكافأة (+)' : 'خصم (-)', parseFloat(fmt(a.amount)), a.description || '—'];
-          rowVals.forEach((v, i) => {
-            const cell = ws.getCell(r, 1 + i);
-            cell.value = v;
-            cell.font = { name: 'Arial', size: 10.5, color: { argb: a.type === 'bonus' ? 'FF2F8F5B' : 'FFBD4B44' } };
+          tableHeaderRow(ws, r, ['التاريخ', 'اليوم', 'وقت الدخول', 'وقت الخروج', 'البريك (ساعة)', 'ساعات العمل', 'سعر الساعة بالفرع', 'المبلغ المستحق', 'الملاحظات']);
+          r++;
+
+          const bShifts = state.shifts
+            .filter((s) => s.employeeId === empId && filterFn(s.date) && (s.branchId === bId || (!s.branchId && bdIdx === 0)))
+            .sort((a, b) => (a.date === b.date ? a.timeIn.localeCompare(b.timeIn) : a.date.localeCompare(b.date)));
+
+          if (bShifts.length === 0) {
+            ws.mergeCells(r, 1, r, COLS);
+            const cell = ws.getCell(r, 1);
+            cell.value = `لا توجد بصمات أو ورديات مسجلة لفرع (${bName}) في هذه الفترة`;
+            cell.font = { name: 'Arial', italic: true, size: 10.5 };
             cell.alignment = { horizontal: 'center' };
-            cell.border = { top: { style: 'thin', color: { argb: 'FFCFC9B8' } }, left: { style: 'thin', color: { argb: 'FFCFC9B8' } }, bottom: { style: 'thin', color: { argb: 'FFCFC9B8' } }, right: { style: 'thin', color: { argb: 'FFCFC9B8' } } };
-            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: a.type === 'bonus' ? 'FFE4F4EB' : 'FFFAEAE8' } };
-            if (i === 2) cell.numFmt = '#,##0.00';
-          });
+            r++;
+          } else {
+            bShifts.forEach((s) => {
+              const amt = s.hours * bRate;
+              dataRow(ws, r, [s.date, arabicWeekday(s.date), s.timeIn, s.timeOut || '—', s.breakHours ? fmt(s.breakHours) : '—', fmt(s.hours), fmt(bRate), fmt(amt), s.note || '—'], 1, [4, 5, 6, 7]);
+              r++;
+            });
+          }
+
           r++;
+          const bAdjs = state.adjustments.filter(
+            (a) => (a.employeeId === empId || a.employeeId === 'all') && filterFn(a.date) && (a.branchId === bId || (!a.branchId && bdIdx === 0))
+          );
+
+          mergedTitle(ws, r, `تفاصيل المكافآت والخصومات — فرع ${bName}`, COLS, 'FF3A6E69', 12, 22);
+          r++;
+          tableHeaderRow(ws, r, ['التاريخ', 'النوع', 'المبلغ', 'البيان / السبب'], 1);
+          r++;
+
+          if (bAdjs.length === 0) {
+            ws.mergeCells(r, 1, r, 4);
+            const cell = ws.getCell(r, 1);
+            cell.value = `لا توجد مكافآت أو خصومات مسجلة لفرع ${bName} في هذه الفترة`;
+            cell.font = { name: 'Arial', italic: true, size: 10.5 };
+            cell.alignment = { horizontal: 'center' };
+            r++;
+          } else {
+            bAdjs.forEach((a) => {
+              const rowVals = [a.date, a.type === 'bonus' ? 'مكافأة (+)' : 'خصم (-)', parseFloat(fmt(a.amount)), a.description || '—'];
+              rowVals.forEach((v, i) => {
+                const cell = ws.getCell(r, 1 + i);
+                cell.value = v;
+                cell.font = { name: 'Arial', size: 10.5, color: { argb: a.type === 'bonus' ? 'FF2F8F5B' : 'FFBD4B44' } };
+                cell.alignment = { horizontal: 'center' };
+                cell.border = { top: { style: 'thin', color: { argb: 'FFCFC9B8' } }, left: { style: 'thin', color: { argb: 'FFCFC9B8' } }, bottom: { style: 'thin', color: { argb: 'FFCFC9B8' } }, right: { style: 'thin', color: { argb: 'FFCFC9B8' } } };
+                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: a.type === 'bonus' ? 'FFE4F4EB' : 'FFFAEAE8' } };
+                if (i === 2) cell.numFmt = '#,##0.00';
+              });
+              r++;
+            });
+          }
+
+          r += 2;
+          mergedTitle(ws, r, `ملخص مرتب فرع ${bName}`, COLS, 'FF134E4A', 13, 26);
+          r++;
+          tableHeaderRow(ws, r, ['راتب الفرع', 'أجر الساعة بالفرع', 'إجمالي ساعات الفرع', 'مستحقات الفرع الأساسية', 'مكافآت الفرع', 'خصومات الفرع', `صافي مرتب فرع ${bName}`], 1);
+          ws.mergeCells(r, 7, r, COLS);
+          r++;
+
+          dataRow(ws, r, [fmt(bSalary), fmt(bRate), fmt(bSummary.hours), fmt(bSummary.baseEarnings), fmt(bSummary.totalBonus), fmt(bSummary.totalDeduction)], 1, [0, 1, 2, 3, 4, 5]);
+          ws.mergeCells(r, 7, r, COLS);
+          const netCell = ws.getCell(r, 7);
+          netCell.value = fmt(bSummary.netSalary) + ' ج.م';
+          netCell.font = { name: 'Arial', bold: true, size: 12, color: { argb: 'FF134E4A' } };
+          netCell.alignment = { horizontal: 'center', vertical: 'middle' };
+          netCell.border = { top: { style: 'thin', color: { argb: 'FFCFC9B8' } }, left: { style: 'thin', color: { argb: 'FFCFC9B8' } }, bottom: { style: 'thin', color: { argb: 'FFCFC9B8' } }, right: { style: 'thin', color: { argb: 'FFCFC9B8' } } };
+          netCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE4EEEC' } };
         });
+
+        // Add Grand Summary Sheet for all branches
+        const wsSummary = wb.addWorksheet('الملخص الشامل لجميع الفروع', { views: [{ rightToLeft: true, showGridLines: false }] });
+        wsSummary.columns = [
+          { width: 22 }, { width: 14 }, { width: 14 }, { width: 16 },
+          { width: 16 }, { width: 16 }, { width: 16 }, { width: 22 }
+        ];
+
+        let sr = 1;
+        mergedTitle(wsSummary, sr, `كشف ملخص مرتب الموظف ${emp.name} — شامل جميع الفروع (${periodLabel})`, 8, 'FF0B3532', 16, 32);
+        sr += 2;
+
+        tableHeaderRow(wsSummary, sr, [
+          'اسم الفرع', 'ساعات اليوم', 'أيام الشهر', 'الراتب المخصص بالفرع', 'أجر الساعة بالفرع', 'ساعات العمل بالفرع', 'المستحقات الأساسية', 'صافي مرتب الفرع'
+        ], 1);
+        sr++;
+
+        let grandTotalHours = 0;
+        let grandTotalBase = 0;
+        let grandTotalBonus = 0;
+        let grandTotalDeduction = 0;
+        let grandTotalNet = 0;
+
+        emp.branchesDetails.forEach((bd) => {
+          const bId = bd.branchId;
+          const bObj = (state.branches || []).find((b) => b.id === bId);
+          const bName = bObj ? bObj.name : `فرع ${bId}`;
+          const bSummary = computeEmpSummary(empId, filterFn, rangeMode === 'month' ? monthPicker : null, bId);
+
+          grandTotalHours += bSummary.hours;
+          grandTotalBase += bSummary.baseEarnings;
+          grandTotalBonus += bSummary.totalBonus;
+          grandTotalDeduction += bSummary.totalDeduction;
+          grandTotalNet += bSummary.netSalary;
+
+          dataRow(wsSummary, sr, [
+            `📍 ${bName}`,
+            bd.workHoursPerDay || 8,
+            bd.workDaysPerMonth || 26,
+            fmt(bd.salary || 0),
+            fmt(bSummary.rate),
+            fmt(bSummary.hours),
+            fmt(bSummary.baseEarnings),
+            fmt(bSummary.netSalary) + ' ج.م'
+          ], 1, [1, 2, 3, 4, 5, 6, 7]);
+          sr++;
+        });
+
+        sr += 2;
+        mergedTitle(wsSummary, sr, 'إجمالي صافي المستحقات الشامل لكافة الفروع', 8, 'FF134E4A', 14, 28);
+        sr++;
+        tableHeaderRow(wsSummary, sr, ['إجمالي الساعات بكافة الفروع', 'إجمالي المستحقات الأساسية', 'إجمالي المكافآت العامة', 'إجمالي الخصومات العامة', 'إجمالي صافي المرتب النهائي الشامل'], 1);
+        wsSummary.mergeCells(sr, 5, sr, 8);
+        sr++;
+
+        dataRow(wsSummary, sr, [fmt(grandTotalHours), fmt(grandTotalBase), fmt(grandTotalBonus), fmt(grandTotalDeduction)], 1, [0, 1, 2, 3]);
+        wsSummary.mergeCells(sr, 5, sr, 8);
+        const totalNetCell = wsSummary.getCell(sr, 5);
+        totalNetCell.value = fmt(grandTotalNet) + ' ج.م';
+        totalNetCell.font = { name: 'Arial', bold: true, size: 13, color: { argb: 'FF134E4A' } };
+        totalNetCell.alignment = { horizontal: 'center', vertical: 'middle' };
+        totalNetCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE4EEEC' } };
+
+      } else {
+        // ── Single-Branch Employee Sheet ──
+        const ws = wb.addWorksheet(`مرتب ${emp.name}`, { views: [{ rightToLeft: true, showGridLines: false }] });
+        ws.columns = [{ width: 13 }, { width: 11 }, { width: 11 }, { width: 11 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 13 }, { width: 30 }];
+
+        let r = 1;
+        mergedTitle(ws, r, `كشف مفردات مرتب الموظف — ${emp.name} (${state.orgSettings.orgName})`, COLS, 'FF0B3532', 16, 32);
+        r += 2;
+
+        ws.mergeCells(r, 1, r, COLS);
+        const nameCell = ws.getCell(r, 1);
+        nameCell.value = `اسم الموظف: ${emp.name}`;
+        nameCell.font = { name: 'Arial', bold: true, size: 12, color: { argb: 'FF0B3532' } };
+        nameCell.alignment = { horizontal: 'center' };
+        nameCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0FDF4' } };
+        r++;
+
+        ws.mergeCells(r, 1, r, COLS);
+        const infoCell = ws.getCell(r, 1);
+        infoCell.value = `اسم الموظف: ${emp.name}   |   كود الموظف: ${emp.code}   |   الوظيفة: ${emp.jobTitle}   |   الفترة: ${periodLabel}   |   سعر الساعة الشهرية (الراتب الأساسي): ${fmt(emp.salary)} ج.م   |   أجر الساعة المحسوب: ${fmt(summary.rate)} ج.م`;
+        infoCell.font = { name: 'Arial', bold: true, size: 10.5, color: { argb: 'FF1D2624' } };
+        infoCell.alignment = { horizontal: 'center' };
+        infoCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE4EEEC' } };
+        r += 2;
+
+        tableHeaderRow(ws, r, ['التاريخ', 'اليوم', 'وقت الدخول', 'وقت الخروج', 'البريك (ساعة)', 'ساعات العمل', 'سعر الساعة', 'المبلغ المستحق', 'الملاحظات']);
+        r++;
+
+        const empShifts = state.shifts
+          .filter((s) => s.employeeId === empId && filterFn(s.date))
+          .sort((a, b) => (a.date === b.date ? a.timeIn.localeCompare(b.timeIn) : a.date.localeCompare(b.date)));
+
+        if (empShifts.length === 0) {
+          ws.mergeCells(r, 1, r, COLS);
+          const cell = ws.getCell(r, 1);
+          cell.value = 'لا توجد بصمات أو ورديات مسجلة لهذه الفترة';
+          cell.font = { name: 'Arial', italic: true, size: 10.5 };
+          cell.alignment = { horizontal: 'center' };
+          r++;
+        } else {
+          empShifts.forEach((s) => {
+            const amt = s.hours * summary.rate;
+            dataRow(ws, r, [s.date, arabicWeekday(s.date), s.timeIn, s.timeOut, fmt(s.breakHours || 0), fmt(s.hours), fmt(summary.rate), fmt(amt), s.note || '—'], 1, [4, 5, 6, 7]);
+            r++;
+          });
+        }
+
+        r++;
+        const empAdjs = state.adjustments.filter((a) => (a.employeeId === empId || a.employeeId === 'all') && filterFn(a.date));
+        mergedTitle(ws, r, 'تفاصيل المكافآت والخصومات', COLS, 'FF3A6E69', 12, 22);
+        r++;
+        tableHeaderRow(ws, r, ['التاريخ', 'النوع', 'المبلغ', 'البيان / السبب'], 1);
+        r++;
+
+        if (empAdjs.length === 0) {
+          ws.mergeCells(r, 1, r, 4);
+          const cell = ws.getCell(r, 1);
+          cell.value = 'لا توجد مكافآت أو خصومات مسجلة لهذه الفترة';
+          cell.font = { name: 'Arial', italic: true, size: 10.5 };
+          cell.alignment = { horizontal: 'center' };
+          r++;
+        } else {
+          empAdjs.forEach((a) => {
+            const rowVals = [a.date, a.type === 'bonus' ? 'مكافأة (+)' : 'خصم (-)', parseFloat(fmt(a.amount)), a.description || '—'];
+            rowVals.forEach((v, i) => {
+              const cell = ws.getCell(r, 1 + i);
+              cell.value = v;
+              cell.font = { name: 'Arial', size: 10.5, color: { argb: a.type === 'bonus' ? 'FF2F8F5B' : 'FFBD4B44' } };
+              cell.alignment = { horizontal: 'center' };
+              cell.border = { top: { style: 'thin', color: { argb: 'FFCFC9B8' } }, left: { style: 'thin', color: { argb: 'FFCFC9B8' } }, bottom: { style: 'thin', color: { argb: 'FFCFC9B8' } }, right: { style: 'thin', color: { argb: 'FFCFC9B8' } } };
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: a.type === 'bonus' ? 'FFE4F4EB' : 'FFFAEAE8' } };
+              if (i === 2) cell.numFmt = '#,##0.00';
+            });
+            r++;
+          });
+        }
+
+        r += 2;
+        mergedTitle(ws, r, 'الملخص المالي وصافي المرتب المستحق النهائي', COLS, 'FF134E4A', 13, 26);
+        r++;
+        tableHeaderRow(ws, r, ['سعر الساعة الشهرية', 'إجمالي الساعات', 'المستحقات الأساسية', 'إجمالي المكافآت', 'إجمالي الخصومات', 'صافي المرتب النهائي'], 1);
+        ws.mergeCells(r, 6, r, COLS);
+        r++;
+
+        dataRow(ws, r, [fmt(emp.salary), fmt(summary.hours), fmt(summary.baseEarnings), fmt(summary.totalBonus), fmt(summary.totalDeduction)], 1, [0, 1, 2, 3, 4]);
+        ws.mergeCells(r, 6, r, COLS);
+        const netCell = ws.getCell(r, 6);
+        netCell.value = fmt(summary.netSalary) + ' ج.م';
+        netCell.font = { name: 'Arial', bold: true, size: 12, color: { argb: 'FF134E4A' } };
+        netCell.alignment = { horizontal: 'center', vertical: 'middle' };
+        netCell.border = { top: { style: 'thin', color: { argb: 'FFCFC9B8' } }, left: { style: 'thin', color: { argb: 'FFCFC9B8' } }, bottom: { style: 'thin', color: { argb: 'FFCFC9B8' } }, right: { style: 'thin', color: { argb: 'FFCFC9B8' } } };
+        netCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE4EEEC' } };
       }
-
-      r += 2;
-      mergedTitle(ws, r, 'الملخص المالي وصافي المرتب المستحق النهائي', COLS, 'FF134E4A', 13, 26);
-      r++;
-      tableHeaderRow(ws, r, ['سعر الساعة الشهرية', 'إجمالي الساعات', 'المستحقات الأساسية', 'إجمالي المكافآت', 'إجمالي الخصومات', 'صافي المرتب النهائي'], 1);
-      ws.mergeCells(r, 6, r, COLS);
-      r++;
-
-      dataRow(ws, r, [fmt(emp.salary), fmt(summary.hours), fmt(summary.baseEarnings), fmt(summary.totalBonus), fmt(summary.totalDeduction)], 1, [0, 1, 2, 3, 4]);
-      ws.mergeCells(r, 6, r, COLS);
-      const netCell = ws.getCell(r, 6);
-      netCell.value = fmt(summary.netSalary) + ' ج.م';
-      netCell.font = { name: 'Arial', bold: true, size: 12, color: { argb: 'FF134E4A' } };
-      netCell.alignment = { horizontal: 'center', vertical: 'middle' };
-      netCell.border = { top: { style: 'thin', color: { argb: 'FFCFC9B8' } }, left: { style: 'thin', color: { argb: 'FFCFC9B8' } }, bottom: { style: 'thin', color: { argb: 'FFCFC9B8' } }, right: { style: 'thin', color: { argb: 'FFCFC9B8' } } };
-      netCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE4EEEC' } };
 
       const buffer = await wb.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: 'application/octet-stream' });
@@ -2429,65 +3486,85 @@ export default function App() {
     .filter((a) => a.date.startsWith(monthPicker))
     .sort((a, b) => a.date.localeCompare(b.date));
 
-  const financialFilterFn = (d) => {
+  const financialFilterFn = React.useCallback((d) => {
+    if (!d) return false;
     if (financialRangeMode === 'custom') {
       if (!financialStartDate || !financialEndDate) return true;
       return d >= financialStartDate && d <= financialEndDate;
     }
+    const range = getPayrollCutoffRange(monthPicker);
+    if (range) {
+      return d >= range.startDate && d <= range.endDate;
+    }
     return d.startsWith(monthPicker);
-  };
+  }, [financialRangeMode, financialStartDate, financialEndDate, monthPicker, state.orgSettings]);
 
-  const grandSummary = computeGrandPayroll(financialFilterFn, financialRangeMode === 'month' ? monthPicker : null);
+  const grandSummary = React.useMemo(() => {
+    return computeGrandPayroll(financialFilterFn, financialRangeMode === 'month' ? monthPicker : null);
+  }, [state.employees, state.shifts, state.adjustments, state.loans, state.requests, financialFilterFn, financialRangeMode, monthPicker]);
 
   return (
     <div className={`mode-${viewMode}`}>
       {isLoading && <div className="loading-bar"></div>}
 
-      {/* Redirect root to /admin */}
+      {/* Safe URL Routes */}
       <Routes>
         <Route path="/" element={<Navigate to="/admin" replace />} />
-        <Route path="*" element={null} />
+        <Route path="/login" element={<Navigate to="/admin" replace />} />
+        <Route path="/admin" element={null} />
+        <Route path="/admin/*" element={null} />
+        <Route path="/kiosk" element={null} />
+        <Route path="/kiosk/*" element={null} />
+        <Route path="/employee" element={null} />
+        <Route path="/employee/*" element={null} />
+        <Route path="*" element={<Navigate to="/admin" replace />} />
       </Routes>
 
       {/* ── 1. Unauthenticated Login Screen (Matches Image 2) ── */}
       {viewMode !== 'kiosk' && (
         authRole === 'none' && !isAdminLoggedIn && !currentEmpUser && !currentBranch ? (
-          <LoginPage 
-            onLogin={handleUnifiedLogin} 
-            state={state} 
-            themeMode={themeMode} 
-            toggleTheme={toggleTheme} 
-          />
+          <ErrorBoundary fallbackTitle="حدث خطأ في شاشة تسجيل الدخول">
+            <LoginPage 
+              onLogin={handleUnifiedLogin} 
+              state={state} 
+              themeMode={themeMode} 
+              toggleTheme={toggleTheme} 
+            />
+          </ErrorBoundary>
       ) : authRole === 'employee' ? (
-        <EmployeePortalView
-          currentEmpUser={currentEmpUser}
-          setCurrentEmpUser={setCurrentEmpUser}
-          empLoginCode={empLoginCode}
-          setEmpLoginCode={setEmpLoginCode}
-          empLoginPassword={empLoginPassword}
-          setEmpLoginPassword={setEmpLoginPassword}
-          handleEmpLogin={handleEmpLogin}
-          state={state}
-          setState={setState}
-          saveState={saveState}
-          computeEmpSummary={computeEmpSummary}
-          getEmpPermission={getEmpPermission}
-          showToast={showToast}
-          orgSettings={state.orgSettings}
-          startShift={startShift}
-          pauseShift={pauseShift}
-          resumeShift={resumeShift}
-          stopShift={stopShift}
-          getActiveElapsedStr={getActiveElapsedStr}
-          getActiveBreakStr={getActiveBreakStr}
-          openEditShift={openEditShift}
-          deleteShift={deleteShift}
-        />
+        <ErrorBoundary fallbackTitle="حدث خطأ في عرض بوابة الموظف">
+          <EmployeePortalView
+            currentEmpUser={currentEmpUser}
+            setCurrentEmpUser={setCurrentEmpUser}
+            empLoginCode={empLoginCode}
+            setEmpLoginCode={setEmpLoginCode}
+            empLoginPassword={empLoginPassword}
+            setEmpLoginPassword={setEmpLoginPassword}
+            handleEmpLogin={handleEmpLogin}
+            state={state}
+            setState={setState}
+            saveState={saveState}
+            computeEmpSummary={computeEmpSummary}
+            getEmpPermission={getEmpPermission}
+            showToast={showToast}
+            orgSettings={state.orgSettings}
+            startShift={startShift}
+            pauseShift={pauseShift}
+            resumeShift={resumeShift}
+            stopShift={stopShift}
+            getActiveElapsedStr={getActiveElapsedStr}
+            getActiveBreakStr={getActiveBreakStr}
+            openEditShift={openEditShift}
+            handleLogout={handleLogout}
+            deleteShift={deleteShift}
+          />
+        </ErrorBoundary>
       ) : (
         /* ── 2. Authenticated Main Application with Sidebar (Matches Image 1) ── */
         <SidebarLayout
           currentRole={authRole}
           currentBranch={currentBranch}
+          notifications={state.notifications || []}
           userProfile={
             authRole === 'branch'
               ? {
@@ -2504,29 +3581,37 @@ export default function App() {
           pendingCount={(state.requests || []).filter(r => r.status === 'pending' || r.status === 'pending_admin').length}
           themeMode={themeMode}
           toggleTheme={toggleTheme}
+          adminFilterMode={adminFilterMode}
+          setAdminFilterMode={setAdminFilterMode}
+          monthPicker={monthPicker}
+          setMonthPicker={setMonthPicker}
+          adminCustomFrom={adminCustomFrom}
+          setAdminCustomFrom={setAdminCustomFrom}
+          adminCustomTo={adminCustomTo}
+          setAdminCustomTo={setAdminCustomTo}
           customItems={
             authRole === 'branch'
               ? [
                   { id: 'dashboard', label: 'لوحة التحكم', icon: '📊' },
                   {
                     id: 'requests',
-                    label: 'صفحة الطلبات',
+                    label: 'مركز موافقات الطلبات',
                     icon: '📋',
                     badge: (state.requests || []).filter((r) => {
-                      const branchEmpIds = new Set((state.employees || []).filter((e) => e.branchId === currentBranch?.id).map((e) => e.id));
-                      return (branchEmpIds.has(r.employeeId) || r.branchId === currentBranch?.id) && !r.branchApproved && r.status !== 'rejected';
+                      const cIdStr = String(currentBranch?.id || '');
+                      const branchEmpIdSet = new Set(
+                        (state.employees || [])
+                          .filter((e) => String(e.branchId || '') === cIdStr || (e.branchesDetails && e.branchesDetails.some((bd) => String(bd.branchId) === cIdStr)))
+                          .map((e) => String(e.id))
+                      );
+                      const isMatch = (r.branchId && String(r.branchId) === cIdStr) || (r.employeeId && branchEmpIdSet.has(String(r.employeeId)));
+                      return isMatch && !r.branchApproved && r.status !== 'rejected';
                     }).length
                   },
                   { id: 'branch-roster', label: 'الجدول الشهري للموظفين', icon: '📅' },
-                  { id: 'leaves', label: 'الإجازات', icon: '🏖️' },
-                  { id: 'permissions', label: 'طلب الأذونات', icon: '⏰' },
-                  { id: 'violations', label: 'المكافآت والخصومات', icon: '⚖️' },
-                  { id: 'emp-violations', label: 'مكافآت وجزاءات الموظفين', icon: '📑' },
-                  { id: 'loans', label: 'السلف والأدوية الآجل', icon: '💳' },
-                  { id: 'emp-punches', label: 'سجل بصمات الموظفين', icon: '📜' },
-                  { id: 'manager-punches', label: 'سجل بصمات المدير', icon: '⏱️' },
-                  { id: 'salary', label: 'تفاصيل المرتب', icon: '💰' },
-                  { id: 'evaluations', label: 'التقييمات والشكاوي', icon: '⭐️' },
+                  { id: 'emp-punches', label: 'متابعة حضور وبصمات الفرع', icon: '👥' },
+                  { id: 'evaluations', label: 'التقييمات والشكاوي', icon: '⭐' },
+                  { id: 'bylaws', label: 'لائحة العمل والجزاءات', icon: '📜' },
                 ]
               : undefined
           }
@@ -2541,23 +3626,29 @@ export default function App() {
           }
         >
           {authRole === 'branch' ? (
-            <BranchManagerView
-              state={state}
-              setState={setState}
-              saveState={saveState}
-              currentBranch={currentBranch}
-              activeTab={activeNavTab}
-              setActiveTab={setActiveNavTab}
-              showToast={showToast}
-              onExportExcel={() => {
-                const mgrEmp = (state.employees || []).find((e) => e.id === currentBranch?.managerId) || (state.employees || []).find((e) => e.branchId === currentBranch?.id);
-                if (mgrEmp) exportEmpExcel(mgrEmp.id, 'month');
-                else exportAllPayrollExcel();
-              }}
-            />
+            <ErrorBoundary fallbackTitle="حدث خطأ في عرض لوحة مدير الفرع">
+              <BranchManagerView
+                state={state}
+                setState={setState}
+                saveState={saveState}
+                currentBranch={currentBranch}
+                activeTab={activeNavTab}
+                setActiveTab={setActiveNavTab}
+                showToast={showToast}
+                startShift={startShift}
+                pauseShift={pauseShift}
+                resumeShift={resumeShift}
+                stopShift={stopShift}
+                onExportExcel={() => {
+                  const mgrEmp = (state.employees || []).find((e) => e.id === currentBranch?.managerId) || (state.employees || []).find((e) => e.branchId === currentBranch?.id);
+                  if (mgrEmp) exportEmpExcel(mgrEmp.id, 'month');
+                  else exportAllPayrollExcel();
+                }}
+              />
+            </ErrorBoundary>
           ) : (
             /* Super Admin / HR View Tabs */
-            <>
+            <ErrorBoundary fallbackTitle="حدث خطأ في عرض هذا القسم">
               {/* 1. Dashboard (لوحة التحكم) */}
               {activeNavTab === 'dashboard' && (
                 <Dashboard
@@ -2568,6 +3659,10 @@ export default function App() {
                   setMonthPicker={setMonthPicker}
                   exportAllPayrollExcel={exportAllPayrollExcel}
                   showToast={showToast}
+                  onApproveRequest={(reqId) => handleApproveRequest(reqId, 'admin')}
+                  onRejectRequest={(reqId) => handleRejectRequest(reqId, 'admin')}
+                  onSendEarlyExitEmail={handleSendEarlyExitEmail}
+                  onWaiveEarlyExit={handleWaiveEarlyExit}
                 />
               )}
 
@@ -2687,7 +3782,7 @@ export default function App() {
               {/* 8. Payroll Summary (رواتب الموظفين) */}
               {activeNavTab === 'payroll' && (
                 <PayrollModule
-                  state={state}
+                  state={{ ...state, computeEmpSummary }}
                   setState={setState}
                   saveState={saveState}
                   monthPicker={monthPicker}
@@ -2718,7 +3813,13 @@ export default function App() {
 
               {/* 10. Work Bylaws (لائحة العمل والجزاءات المعتمدة) */}
               {activeNavTab === 'bylaws' && (
-                <WorkBylawsModule state={state} onSaveBylaws={handleSaveBylaws} />
+                <BylawsModule
+                  state={state}
+                  setState={setState}
+                  saveState={saveState}
+                  showToast={showToast}
+                  userRole="admin"
+                />
               )}
 
               {/* 11. Performance Evaluations (التقييمات) */}
@@ -2764,7 +3865,107 @@ export default function App() {
                   showToast={showToast}
                 />
               )}
-            </>
+
+              {/* 15. Notification Center (مركز الإشعارات والتنبيهات) */}
+              {activeNavTab === 'notifications' && (
+                <NotificationCenterModule
+                  state={state}
+                  setState={setState}
+                  saveState={saveState}
+                  showToast={showToast}
+                  onNavigateTab={setActiveNavTab}
+                  onApproveRequest={(id) => handleApproveRequest(id, 'admin')}
+                  onRejectRequest={(id) => handleRejectRequest(id, 'admin')}
+                  onApproveLoan={handleApproveLoan}
+                  onRejectLoan={handleRejectLoan}
+                  onSendEarlyExitEmail={handleSendEarlyExitEmail}
+                  onWaiveEarlyExit={handleWaiveEarlyExit}
+                />
+              )}
+
+              {/* 16. Dual Approval Rules (قواعد الموافقة المزدوجة) */}
+              {(activeNavTab === 'approval-rules' || activeNavTab === 'approvals') && (
+                <ApprovalCenterModule
+                  state={state}
+                  setState={setState}
+                  saveState={saveState}
+                  showToast={showToast}
+                  currentRole="admin"
+                  currentBranchId={null}
+                  onApproveRequest={(reqId) => {
+                    const req = (state.requests || []).find((r) => r.id === reqId);
+                    if (req) {
+                      const updatedReqs = (state.requests || []).map((r) => r.id === reqId ? { ...r, status: 'approved', adminApproved: true, branchApproved: true } : r);
+                      const updatedState = { ...state, requests: updatedReqs };
+                      setState(updatedState);
+                      saveState(updatedState);
+                      showToast('✅ تم اعتماد الطلب بنجاح');
+                    }
+                  }}
+                  onRejectRequest={(reqId) => {
+                    const updatedReqs = (state.requests || []).map((r) => r.id === reqId ? { ...r, status: 'rejected', adminApproved: false } : r);
+                    const updatedState = { ...state, requests: updatedReqs };
+                    setState(updatedState);
+                    saveState(updatedState);
+                    showToast('🔴 تم رفض الطلب');
+                  }}
+                  onSaveApprovalRules={(newRules) => {
+                    const updatedState = { ...state, approvalRules: newRules };
+                    setState(updatedState);
+                    saveState(updatedState);
+                    showToast('✅ تم حفظ قواعد الموافقة المزدوجة بنجاح');
+                  }}
+                />
+              )}
+
+              {/* Default Fallback for Unknown Tab (يمنع ظهور أي شاشة بيضاء) */}
+              {![
+                'dashboard',
+                'employees',
+                'branches',
+                'attendance',
+                'electronic-attendance',
+                'roster',
+                'requests',
+                'leaves-tracking',
+                'payroll',
+                'adjustments-module',
+                'whatsapp-center',
+                'bylaws',
+                'evaluations',
+                'loans-meds',
+                'income-expenses',
+                'settings',
+                'notifications',
+                'approval-rules',
+                'approvals'
+              ].includes(activeNavTab) && (
+                <div style={{
+                  background: 'var(--surface)',
+                  border: '1px solid var(--border)',
+                  borderRadius: '16px',
+                  padding: '40px 24px',
+                  textAlign: 'center',
+                  fontFamily: "'Tajawal', 'Cairo', sans-serif"
+                }}>
+                  <div style={{ fontSize: '48px', marginBottom: '12px' }}>📊</div>
+                  <h3 style={{ margin: '0 0 8px', color: 'var(--text)', fontSize: '20px', fontWeight: '800' }}>
+                    القسم غير معرّف أو تم نقله
+                  </h3>
+                  <p style={{ color: 'var(--muted)', fontSize: '14px', margin: '0 0 20px' }}>
+                    القسم المطلوب ({activeNavTab}) غير متوفر حالياً. يمكنك العودة إلى لوحة التحكم الرئيسية.
+                  </p>
+                  <button
+                    type="button"
+                    className="btn btn-start"
+                    onClick={() => setActiveNavTab('dashboard')}
+                    style={{ padding: '10px 24px', fontSize: '14px', fontWeight: 'bold' }}
+                  >
+                    🏠 الانتقال إلى لوحة التحكم الرئيسية
+                  </button>
+                </div>
+              )}
+            </ErrorBoundary>
           )}
         </SidebarLayout>
       ))}
@@ -2799,6 +4000,7 @@ export default function App() {
           onRequestDeviceApproval={handleRequestDeviceApproval}
           onKioskDeviceRequest={handleKioskDeviceRequest}
           submitRequest={handleAddBranchRequest}
+          kioskBranchId={kioskBranchId}
         />
       )}
 

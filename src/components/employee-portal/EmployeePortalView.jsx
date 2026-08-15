@@ -9,6 +9,7 @@ import EmployeeRosterModule from './EmployeeRosterModule';
 import EmployeeShiftSwapModule from './EmployeeShiftSwapModule';
 import EmployeeEvaluationsModule from './EmployeeEvaluationsModule';
 import PayslipPrintModal from '../payroll/PayslipPrintModal';
+import BylawsModule from '../bylaws/BylawsModule';
 
 // ─────────────────────────────────────────
 //  Month navigation helpers
@@ -76,6 +77,7 @@ const NAV_ITEMS = [
   { id: 'roster',      icon: '🗓️', label: 'الجدول الشهري' },
   { id: 'swaps',       icon: '🔄', label: 'تبديل الشيفتات' },
   { id: 'evaluations', icon: '⭐', label: 'التقييمات والشكاوي' },
+  { id: 'bylaws',      icon: '📜', label: 'لائحة العمل والجزاءات' },
 ];
 
 // ─────────────────────────────────────────
@@ -133,18 +135,20 @@ export default function EmployeePortalView({
 
   const [selectedBranchId, setSelectedBranchId] = useState('');
   const [isBranchSelected, setIsBranchSelected] = useState(false);
+  const [punchTargetBranchId, setPunchTargetBranchId] = useState('');
 
   useEffect(() => {
     if (currentEmpUser) {
       const emp = (state && state.employees && state.employees.find((e) => e.id === currentEmpUser?.id)) || currentEmpUser;
-      if (emp && emp.branchesDetails && emp.branchesDetails.length > 1) {
-        setIsBranchSelected(false); // Force them to select when they first enter
-      } else {
+      if (!emp || !emp.branchesDetails || emp.branchesDetails.length <= 1) {
         setSelectedBranchId(emp?.branchId || '');
         setIsBranchSelected(true);
+        setPunchTargetBranchId(emp?.branchId || '');
+      } else {
+        setPunchTargetBranchId(emp.branchesDetails[0]?.branchId || emp.branchId || '');
       }
     }
-  }, [currentEmpUser, state.employees]);
+  }, [currentEmpUser?.id]);
 
   // ── Form States for Employee Actions ───────────
   const [showManualForm, setShowManualForm] = useState(false);
@@ -199,105 +203,285 @@ export default function EmployeePortalView({
       const wb = new ExcelJS.Workbook();
       wb.creator = (orgSettings && orgSettings.orgName) || 'نظام البصمات';
       wb.created = new Date();
-      const ws = wb.addWorksheet(`مرتب ${emp.name}`, { views: [{ rightToLeft: true, showGridLines: false }] });
-      ws.columns = [
-        { width: 13 }, { width: 11 }, { width: 11 }, { width: 11 },
-        { width: 12 }, { width: 12 }, { width: 12 }, { width: 13 }, { width: 30 }
-      ];
 
-      let r = 1;
-      mergedTitle(ws, r, `كشف مفردات مرتب الموظف — ${emp.name} (${(orgSettings && orgSettings.orgName) || ''})`, COLS, 'FF0B3532', 16, 32);
-      r += 2;
+      const isMultiBranch = emp.branchesDetails && emp.branchesDetails.length > 1;
 
-      ws.mergeCells(r, 1, r, COLS);
-      const nameCell = ws.getCell(r, 1);
-      nameCell.value = `اسم الموظف: ${emp.name}`;
-      nameCell.font = { name: 'Arial', bold: true, size: 12, color: { argb: 'FF0B3532' } };
-      nameCell.alignment = { horizontal: 'center' };
-      nameCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0FDF4' } };
-      r++;
+      if (isMultiBranch) {
+        // ── Multi-Branch Employee: Generate separate sheet for each branch + summary sheet ──
+        emp.branchesDetails.forEach((bd, bdIdx) => {
+          const bId = bd.branchId;
+          const bObj = (state.branches || []).find((b) => b.id === bId);
+          const bName = bObj ? bObj.name : `فرع ${bdIdx + 1}`;
+          const cleanSheetName = `فرع ${bName}`.replace(/[\*\?\/\\\[\]]/g, '').slice(0, 30);
 
-      ws.mergeCells(r, 1, r, COLS);
-      const infoCell = ws.getCell(r, 1);
-      infoCell.value = `اسم الموظف: ${emp.name}   |   كود الموظف: ${emp.code}   |   الوظيفة: ${emp.jobTitle}   |   الفترة: ${periodLabel}   |   الراتب الأساسي: ${fmt(emp.salary)} ج.م   |   أجر الساعة المحسوب: ${fmt(summary.rate)} ج.م`;
-      infoCell.font = { name: 'Arial', bold: true, size: 10.5, color: { argb: 'FF1D2624' } };
-      infoCell.alignment = { horizontal: 'center' };
-      infoCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE4EEEC' } };
-      r += 2;
+          const bSummary = computeEmpSummary(emp.id, filterFn, rangeMode === 'month' ? selectedMonth : null, bId);
+          const bSalary = parseFloat(bd.salary) || 0;
+          const bHoursPerDay = parseFloat(bd.workHoursPerDay) || 8;
+          const bDaysPerMonth = parseFloat(bd.workDaysPerMonth) || 26;
+          const bRate = bSummary.rate;
 
-      tableHeaderRow(ws, r, ['التاريخ', 'اليوم', 'وقت الدخول', 'وقت الخروج', 'البريك (ساعة)', 'ساعات العمل', 'سعر الساعة', 'المبلغ المستحق', 'الملاحظات']);
-      r++;
+          const ws = wb.addWorksheet(cleanSheetName, { views: [{ rightToLeft: true, showGridLines: false }] });
+          ws.columns = [
+            { width: 13 }, { width: 11 }, { width: 11 }, { width: 11 },
+            { width: 12 }, { width: 12 }, { width: 12 }, { width: 13 }, { width: 30 }
+          ];
 
-      const empShifts = state.shifts
-        .filter((s) => s.employeeId === emp.id && filterFn(s.date))
-        .sort((a, b) => (a.date === b.date ? a.timeIn.localeCompare(b.timeIn) : a.date.localeCompare(b.date)));
+          let r = 1;
+          mergedTitle(ws, r, `كشف تفاصيل مفردات مرتب الموظف — ${emp.name} (📍 فرع: ${bName})`, COLS, 'FF0B3532', 16, 32);
+          r += 2;
 
-      if (empShifts.length === 0) {
-        ws.mergeCells(r, 1, r, COLS);
-        const cell = ws.getCell(r, 1);
-        cell.value = 'لا توجد بصمات أو ورديات مسجلة لهذه الفترة';
-        cell.font = { name: 'Arial', italic: true, size: 10.5 };
-        cell.alignment = { horizontal: 'center' };
-        r++;
-      } else {
-        empShifts.forEach((s) => {
-          dataRow(ws, r, [
-            s.date, arabicWeekday(s.date), s.timeIn, s.timeOut || '—',
-            s.breakHours ? fmt(s.breakHours) : '—', fmt(s.hours),
-            fmt(summary.rate), fmt(s.hours * summary.rate), s.note || '—'
-          ], 1, [4, 5, 6, 7]);
+          ws.mergeCells(r, 1, r, COLS);
+          const nameCell = ws.getCell(r, 1);
+          nameCell.value = `اسم الموظف: ${emp.name}   |   الفرع: ${bName}`;
+          nameCell.font = { name: 'Arial', bold: true, size: 12, color: { argb: 'FF0B3532' } };
+          nameCell.alignment = { horizontal: 'center' };
+          nameCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0FDF4' } };
           r++;
-        });
-      }
 
-      r += 1;
-      const empAdjs = state.adjustments.filter(
-        (a) => (a.employeeId === emp.id || a.employeeId === 'all') && filterFn(a.date)
-      );
+          ws.mergeCells(r, 1, r, COLS);
+          const infoCell = ws.getCell(r, 1);
+          infoCell.value = `كود: ${emp.code} | الفرع: ${bName} | الفترة: ${periodLabel} | الراتب بالفرع: ${fmt(bSalary)} ج.م | أجر الساعة بالفرع: ${fmt(bRate)} ج.م (يومي: ${bHoursPerDay} س | شهري: ${bDaysPerMonth} يوم)`;
+          infoCell.font = { name: 'Arial', bold: true, size: 10.5, color: { argb: 'FF1D2624' } };
+          infoCell.alignment = { horizontal: 'center' };
+          infoCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE4EEEC' } };
+          r += 2;
 
-      mergedTitle(ws, r, 'تفاصيل المكافآت والخصومات', COLS, 'FF3A6E69', 12, 22);
-      r++;
-      tableHeaderRow(ws, r, ['التاريخ', 'النوع', 'المبلغ', 'البيان / السبب'], 1);
-      r++;
+          tableHeaderRow(ws, r, ['التاريخ', 'اليوم', 'وقت الدخول', 'وقت الخروج', 'البريك (ساعة)', 'ساعات العمل', 'سعر الساعة بالفرع', 'المبلغ المستحق', 'الملاحظات']);
+          r++;
 
-      if (empAdjs.length === 0) {
-        ws.mergeCells(r, 1, r, COLS);
-        const cell = ws.getCell(r, 1);
-        cell.value = 'لا توجد مكافآت أو خصومات مسجلة لهذه الفترة';
-        cell.font = { name: 'Arial', italic: true, size: 10.5 };
-        cell.alignment = { horizontal: 'center' };
-        r++;
-      } else {
-        empAdjs.forEach((a) => {
-          const rowVals = [a.date, a.type === 'bonus' ? 'مكافأة (+)' : 'خصم (-)', parseFloat(fmt(a.amount)), a.description || '—'];
-          rowVals.forEach((v, i) => {
-            const cell = ws.getCell(r, 1 + i);
-            cell.value = v;
-            cell.font = { name: 'Arial', size: 10.5, color: { argb: a.type === 'bonus' ? 'FF2F8F5B' : 'FFBD4B44' } };
+          const bShifts = state.shifts
+            .filter((s) => s.employeeId === emp.id && filterFn(s.date) && (s.branchId === bId || (!s.branchId && bdIdx === 0)))
+            .sort((a, b) => (a.date === b.date ? a.timeIn.localeCompare(b.timeIn) : a.date.localeCompare(b.date)));
+
+          if (bShifts.length === 0) {
+            ws.mergeCells(r, 1, r, COLS);
+            const cell = ws.getCell(r, 1);
+            cell.value = `لا توجد بصمات أو ورديات مسجلة لفرع (${bName}) في هذه الفترة`;
+            cell.font = { name: 'Arial', italic: true, size: 10.5 };
             cell.alignment = { horizontal: 'center' };
-            cell.border = { top: { style: 'thin', color: { argb: 'FFCFC9B8' } }, left: { style: 'thin', color: { argb: 'FFCFC9B8' } }, bottom: { style: 'thin', color: { argb: 'FFCFC9B8' } }, right: { style: 'thin', color: { argb: 'FFCFC9B8' } } };
-            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: a.type === 'bonus' ? 'FFE4F4EB' : 'FFFAEAE8' } };
-            if (i === 2) cell.numFmt = '#,##0.00';
-          });
+            r++;
+          } else {
+            bShifts.forEach((s) => {
+              const amt = s.hours * bRate;
+              dataRow(ws, r, [s.date, arabicWeekday(s.date), s.timeIn, s.timeOut || '—', s.breakHours ? fmt(s.breakHours) : '—', fmt(s.hours), fmt(bRate), fmt(amt), s.note || '—'], 1, [4, 5, 6, 7]);
+              r++;
+            });
+          }
+
           r++;
+          const bAdjs = state.adjustments.filter(
+            (a) => (a.employeeId === emp.id || a.employeeId === 'all') && filterFn(a.date) && (a.branchId === bId || (!a.branchId && bdIdx === 0))
+          );
+
+          mergedTitle(ws, r, `تفاصيل المكافآت والخصومات — فرع ${bName}`, COLS, 'FF3A6E69', 12, 22);
+          r++;
+          tableHeaderRow(ws, r, ['التاريخ', 'النوع', 'المبلغ', 'البيان / السبب'], 1);
+          r++;
+
+          if (bAdjs.length === 0) {
+            ws.mergeCells(r, 1, r, 4);
+            const cell = ws.getCell(r, 1);
+            cell.value = `لا توجد مكافآت أو خصومات مسجلة لفرع ${bName} في هذه الفترة`;
+            cell.font = { name: 'Arial', italic: true, size: 10.5 };
+            cell.alignment = { horizontal: 'center' };
+            r++;
+          } else {
+            bAdjs.forEach((a) => {
+              const rowVals = [a.date, a.type === 'bonus' ? 'مكافأة (+)' : 'خصم (-)', parseFloat(fmt(a.amount)), a.description || '—'];
+              rowVals.forEach((v, i) => {
+                const cell = ws.getCell(r, 1 + i);
+                cell.value = v;
+                cell.font = { name: 'Arial', size: 10.5, color: { argb: a.type === 'bonus' ? 'FF2F8F5B' : 'FFBD4B44' } };
+                cell.alignment = { horizontal: 'center' };
+                cell.border = { top: { style: 'thin', color: { argb: 'FFCFC9B8' } }, left: { style: 'thin', color: { argb: 'FFCFC9B8' } }, bottom: { style: 'thin', color: { argb: 'FFCFC9B8' } }, right: { style: 'thin', color: { argb: 'FFCFC9B8' } } };
+                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: a.type === 'bonus' ? 'FFE4F4EB' : 'FFFAEAE8' } };
+                if (i === 2) cell.numFmt = '#,##0.00';
+              });
+              r++;
+            });
+          }
+
+          r += 2;
+          mergedTitle(ws, r, `ملخص مرتب فرع ${bName}`, COLS, 'FF134E4A', 13, 26);
+          r++;
+          tableHeaderRow(ws, r, ['راتب الفرع', 'أجر الساعة بالفرع', 'إجمالي ساعات الفرع', 'مستحقات الفرع الأساسية', 'مكافآت الفرع', 'خصومات الفرع', `صافي مرتب فرع ${bName}`], 1);
+          ws.mergeCells(r, 7, r, COLS);
+          r++;
+
+          dataRow(ws, r, [fmt(bSalary), fmt(bRate), fmt(bSummary.hours), fmt(bSummary.baseEarnings), fmt(bSummary.totalBonus), fmt(bSummary.totalDeduction)], 1, [0, 1, 2, 3, 4, 5]);
+          ws.mergeCells(r, 7, r, COLS);
+          const netCell = ws.getCell(r, 7);
+          netCell.value = fmt(bSummary.netSalary) + ' ج.م';
+          netCell.font = { name: 'Arial', bold: true, size: 12, color: { argb: 'FF134E4A' } };
+          netCell.alignment = { horizontal: 'center', vertical: 'middle' };
+          netCell.border = { top: { style: 'thin', color: { argb: 'FFCFC9B8' } }, left: { style: 'thin', color: { argb: 'FFCFC9B8' } }, bottom: { style: 'thin', color: { argb: 'FFCFC9B8' } }, right: { style: 'thin', color: { argb: 'FFCFC9B8' } } };
+          netCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE4EEEC' } };
         });
+
+        // Add Grand Summary Sheet for all branches
+        const wsSummary = wb.addWorksheet('الملخص الشامل لجميع الفروع', { views: [{ rightToLeft: true, showGridLines: false }] });
+        wsSummary.columns = [
+          { width: 22 }, { width: 14 }, { width: 14 }, { width: 16 },
+          { width: 16 }, { width: 16 }, { width: 16 }, { width: 22 }
+        ];
+
+        let sr = 1;
+        mergedTitle(wsSummary, sr, `كشف ملخص مرتب الموظف ${emp.name} — شامل جميع الفروع (${periodLabel})`, 8, 'FF0B3532', 16, 32);
+        sr += 2;
+
+        tableHeaderRow(wsSummary, sr, [
+          'اسم الفرع', 'ساعات اليوم', 'أيام الشهر', 'الراتب المخصص بالفرع', 'أجر الساعة بالفرع', 'ساعات العمل بالفرع', 'المستحقات الأساسية', 'صافي مرتب الفرع'
+        ], 1);
+        sr++;
+
+        let grandTotalHours = 0;
+        let grandTotalBase = 0;
+        let grandTotalBonus = 0;
+        let grandTotalDeduction = 0;
+        let grandTotalNet = 0;
+
+        emp.branchesDetails.forEach((bd) => {
+          const bId = bd.branchId;
+          const bObj = (state.branches || []).find((b) => b.id === bId);
+          const bName = bObj ? bObj.name : `فرع ${bId}`;
+          const bSummary = computeEmpSummary(emp.id, filterFn, rangeMode === 'month' ? selectedMonth : null, bId);
+
+          grandTotalHours += bSummary.hours;
+          grandTotalBase += bSummary.baseEarnings;
+          grandTotalBonus += bSummary.totalBonus;
+          grandTotalDeduction += bSummary.totalDeduction;
+          grandTotalNet += bSummary.netSalary;
+
+          dataRow(wsSummary, sr, [
+            `📍 ${bName}`,
+            bd.workHoursPerDay || 8,
+            bd.workDaysPerMonth || 26,
+            fmt(bd.salary || 0),
+            fmt(bSummary.rate),
+            fmt(bSummary.hours),
+            fmt(bSummary.baseEarnings),
+            fmt(bSummary.netSalary) + ' ج.م'
+          ], 1, [1, 2, 3, 4, 5, 6, 7]);
+          sr++;
+        });
+
+        sr += 2;
+        mergedTitle(wsSummary, sr, 'إجمالي صافي المستحقات الشامل لكافة الفروع', 8, 'FF134E4A', 14, 28);
+        sr++;
+        tableHeaderRow(wsSummary, sr, ['إجمالي الساعات بكافة الفروع', 'إجمالي المستحقات الأساسية', 'إجمالي المكافآت العامة', 'إجمالي الخصومات العامة', 'إجمالي صافي المرتب النهائي الشامل'], 1);
+        wsSummary.mergeCells(sr, 5, sr, 8);
+        sr++;
+
+        dataRow(wsSummary, sr, [fmt(grandTotalHours), fmt(grandTotalBase), fmt(grandTotalBonus), fmt(grandTotalDeduction)], 1, [0, 1, 2, 3]);
+        wsSummary.mergeCells(sr, 5, sr, 8);
+        const totalNetCell = wsSummary.getCell(sr, 5);
+        totalNetCell.value = fmt(grandTotalNet) + ' ج.م';
+        totalNetCell.font = { name: 'Arial', bold: true, size: 13, color: { argb: 'FF134E4A' } };
+        totalNetCell.alignment = { horizontal: 'center', vertical: 'middle' };
+        totalNetCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE4EEEC' } };
+
+      } else {
+        // Single Branch sheet
+        const ws = wb.addWorksheet(`مرتب ${emp.name}`, { views: [{ rightToLeft: true, showGridLines: false }] });
+        ws.columns = [
+          { width: 13 }, { width: 11 }, { width: 11 }, { width: 11 },
+          { width: 12 }, { width: 12 }, { width: 12 }, { width: 13 }, { width: 30 }
+        ];
+
+        let r = 1;
+        mergedTitle(ws, r, `كشف مفردات مرتب الموظف — ${emp.name} (${(orgSettings && orgSettings.orgName) || ''})`, COLS, 'FF0B3532', 16, 32);
+        r += 2;
+
+        ws.mergeCells(r, 1, r, COLS);
+        const nameCell = ws.getCell(r, 1);
+        nameCell.value = `اسم الموظف: ${emp.name}`;
+        nameCell.font = { name: 'Arial', bold: true, size: 12, color: { argb: 'FF0B3532' } };
+        nameCell.alignment = { horizontal: 'center' };
+        nameCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0FDF4' } };
+        r++;
+
+        ws.mergeCells(r, 1, r, COLS);
+        const infoCell = ws.getCell(r, 1);
+        infoCell.value = `اسم الموظف: ${emp.name}   |   كود الموظف: ${emp.code}   |   الوظيفة: ${emp.jobTitle}   |   الفترة: ${periodLabel}   |   الراتب الأساسي: ${fmt(emp.salary)} ج.م   |   أجر الساعة المحسوب: ${fmt(summary.rate)} ج.م`;
+        infoCell.font = { name: 'Arial', bold: true, size: 10.5, color: { argb: 'FF1D2624' } };
+        infoCell.alignment = { horizontal: 'center' };
+        infoCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE4EEEC' } };
+        r += 2;
+
+        tableHeaderRow(ws, r, ['التاريخ', 'اليوم', 'وقت الدخول', 'وقت الخروج', 'البريك (ساعة)', 'ساعات العمل', 'سعر الساعة', 'المبلغ المستحق', 'الملاحظات']);
+        r++;
+
+        const empShifts = state.shifts
+          .filter((s) => s.employeeId === emp.id && filterFn(s.date))
+          .sort((a, b) => (a.date === b.date ? a.timeIn.localeCompare(b.timeIn) : a.date.localeCompare(b.date)));
+
+        if (empShifts.length === 0) {
+          ws.mergeCells(r, 1, r, COLS);
+          const cell = ws.getCell(r, 1);
+          cell.value = 'لا توجد بصمات أو ورديات مسجلة لهذه الفترة';
+          cell.font = { name: 'Arial', italic: true, size: 10.5 };
+          cell.alignment = { horizontal: 'center' };
+          r++;
+        } else {
+          empShifts.forEach((s) => {
+            dataRow(ws, r, [
+              s.date, arabicWeekday(s.date), s.timeIn, s.timeOut || '—',
+              s.breakHours ? fmt(s.breakHours) : '—', fmt(s.hours),
+              fmt(summary.rate), fmt(s.hours * summary.rate), s.note || '—'
+            ], 1, [4, 5, 6, 7]);
+            r++;
+          });
+        }
+
+        r += 1;
+        const empAdjs = state.adjustments.filter(
+          (a) => (a.employeeId === emp.id || a.employeeId === 'all') && filterFn(a.date)
+        );
+
+        mergedTitle(ws, r, 'تفاصيل المكافآت والخصومات', COLS, 'FF3A6E69', 12, 22);
+        r++;
+        tableHeaderRow(ws, r, ['التاريخ', 'النوع', 'المبلغ', 'البيان / السبب'], 1);
+        r++;
+
+        if (empAdjs.length === 0) {
+          ws.mergeCells(r, 1, r, COLS);
+          const cell = ws.getCell(r, 1);
+          cell.value = 'لا توجد مكافآت أو خصومات مسجلة لهذه الفترة';
+          cell.font = { name: 'Arial', italic: true, size: 10.5 };
+          cell.alignment = { horizontal: 'center' };
+          r++;
+        } else {
+          empAdjs.forEach((a) => {
+            const rowVals = [a.date, a.type === 'bonus' ? 'مكافأة (+)' : 'خصم (-)', parseFloat(fmt(a.amount)), a.description || '—'];
+            rowVals.forEach((v, i) => {
+              const cell = ws.getCell(r, 1 + i);
+              cell.value = v;
+              cell.font = { name: 'Arial', size: 10.5, color: { argb: a.type === 'bonus' ? 'FF2F8F5B' : 'FFBD4B44' } };
+              cell.alignment = { horizontal: 'center' };
+              cell.border = { top: { style: 'thin', color: { argb: 'FFCFC9B8' } }, left: { style: 'thin', color: { argb: 'FFCFC9B8' } }, bottom: { style: 'thin', color: { argb: 'FFCFC9B8' } }, right: { style: 'thin', color: { argb: 'FFCFC9B8' } } };
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: a.type === 'bonus' ? 'FFE4F4EB' : 'FFFAEAE8' } };
+              if (i === 2) cell.numFmt = '#,##0.00';
+            });
+            r++;
+          });
+        }
+
+        r += 2;
+        mergedTitle(ws, r, 'الملخص المالي وصافي المرتب المستحق النهائي', COLS, 'FF134E4A', 13, 26);
+        r++;
+        tableHeaderRow(ws, r, ['سعر الساعة الشهرية', 'إجمالي الساعات', 'مستحقات الأساسي', 'إجمالي المكافآت', 'إجمالي الخصومات', 'صافي المرتب النهائي'], 1);
+        ws.mergeCells(r, 6, r, COLS);
+        r++;
+
+        dataRow(ws, r, [fmt(emp.salary), fmt(summary.hours), fmt(summary.baseEarnings), fmt(summary.totalBonus), fmt(summary.totalDeduction)], 1, [0, 1, 2, 3, 4]);
+        ws.mergeCells(r, 6, r, COLS);
+        const netCell = ws.getCell(r, 6);
+        netCell.value = fmt(summary.netSalary) + ' ج.م';
+        netCell.font = { name: 'Arial', bold: true, size: 12, color: { argb: 'FF134E4A' } };
+        netCell.alignment = { horizontal: 'center', vertical: 'middle' };
+        netCell.border = { top: { style: 'thin', color: { argb: 'FFCFC9B8' } }, left: { style: 'thin', color: { argb: 'FFCFC9B8' } }, bottom: { style: 'thin', color: { argb: 'FFCFC9B8' } }, right: { style: 'thin', color: { argb: 'FFCFC9B8' } } };
+        netCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE4EEEC' } };
       }
-
-      r += 2;
-      mergedTitle(ws, r, 'الملخص المالي وصافي المرتب المستحق النهائي', COLS, 'FF134E4A', 13, 26);
-      r++;
-      tableHeaderRow(ws, r, ['سعر الساعة الشهرية', 'إجمالي الساعات', 'مستحقات الأساسي', 'إجمالي المكافآت', 'إجمالي الخصومات', 'صافي المرتب النهائي'], 1);
-      ws.mergeCells(r, 6, r, COLS);
-      r++;
-
-      dataRow(ws, r, [fmt(emp.salary), fmt(summary.hours), fmt(summary.baseEarnings), fmt(summary.totalBonus), fmt(summary.totalDeduction)], 1, [0, 1, 2, 3, 4]);
-      ws.mergeCells(r, 6, r, COLS);
-      const netCell = ws.getCell(r, 6);
-      netCell.value = fmt(summary.netSalary) + ' ج.م';
-      netCell.font = { name: 'Arial', bold: true, size: 12, color: { argb: 'FF134E4A' } };
-      netCell.alignment = { horizontal: 'center', vertical: 'middle' };
-      netCell.border = { top: { style: 'thin', color: { argb: 'FFCFC9B8' } }, left: { style: 'thin', color: { argb: 'FFCFC9B8' } }, bottom: { style: 'thin', color: { argb: 'FFCFC9B8' } }, right: { style: 'thin', color: { argb: 'FFCFC9B8' } } };
-      netCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE4EEEC' } };
 
       const buffer = await wb.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -387,9 +571,179 @@ export default function EmployeePortalView({
   };
 
   // ─────────────────────────────────────────
-  //  Unauthenticated Login Form
+  //  Core Calculations & Hooks (MUST BE UNCONDITIONAL)
   // ─────────────────────────────────────────
-  if (!currentEmpUser) {
+  const getPayrollCutoffRange = (monthStr) => {
+    if (!monthStr || monthStr.length !== 7) return null;
+    const sDay = orgSettings?.payrollPayoutStartDay || state?.orgSettings?.payrollPayoutStartDay || 27;
+    const eDay = orgSettings?.payrollPayoutEndDay || state?.orgSettings?.payrollPayoutEndDay || (state?.orgSettings?.payrollPayoutDay || 26);
+    const [y, m] = monthStr.split('-').map(Number);
+    let prevY = y;
+    let prevM = m - 1;
+    if (prevM < 1) { prevM = 12; prevY = y - 1; }
+    const startDate = `${prevY}-${String(prevM).padStart(2, '0')}-${String(sDay).padStart(2, '0')}`;
+    const endDate = `${y}-${String(m).padStart(2, '0')}-${String(eDay).padStart(2, '0')}`;
+    return { startDate, endDate };
+  };
+
+  const emp = currentEmpUser ? ((state && state.employees && state.employees.find((e) => e.id === currentEmpUser?.id)) || currentEmpUser) : null;
+
+  const canViewSalary = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canViewSalary') && getEmpPermission(emp.id, 'allowViewSalary')) : true;
+  const canStartEnd = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canStartEnd') && getEmpPermission(emp.id, 'allowStartEnd')) : true;
+  const canLivePunch = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canLivePunch') && getEmpPermission(emp.id, 'allowLivePunch')) : true;
+  const canManualShift = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canManualShift') && getEmpPermission(emp.id, 'allowManualShift')) : true;
+  const canEditShift = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canEditShift') && getEmpPermission(emp.id, 'allowEditShift')) : true;
+  const canAddAdjustment = emp && getEmpPermission ? getEmpPermission(emp.id, 'canAddAdjustment') : false;
+  const canViewAdjustments = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canViewAdjustments') && getEmpPermission(emp.id, 'allowViewAdjustments')) : true;
+  const canExportExcel = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canExportExcel') && getEmpPermission(emp.id, 'allowExportExcel')) : true;
+
+  const rangeFilterValid = filterMode === 'range' && rangeStart && rangeEnd && rangeStart <= rangeEnd;
+  const filterFn = rangeFilterValid
+    ? (d) => d && d >= rangeStart && d <= rangeEnd
+    : (d) => {
+        const range = getPayrollCutoffRange(selectedMonth);
+        if (range) return d && d >= range.startDate && d <= range.endDate;
+        return d && d.startsWith(selectedMonth);
+      };
+
+  const lbl = monthLabel(selectedMonth);
+  const cutoffInfo = getPayrollCutoffRange(selectedMonth);
+  const periodLabel = rangeFilterValid 
+    ? `من ${rangeStart} إلى ${rangeEnd}` 
+    : (cutoffInfo ? `من ${cutoffInfo.startDate} إلى ${cutoffInfo.endDate} (${lbl.arabic})` : lbl.raw);
+
+  const summary = emp 
+    ? computeEmpSummary(emp.id, filterFn, filterMode === 'month' ? selectedMonth : null, selectedBranchId || null)
+    : { hours: 0, dailyRate: 0, rate: 0, hourlyRate: 0, monthlySalary: 0, salary: 0, baseEarnings: 0, totalBonus: 0, totalDeduction: 0, absenceDeduction: 0, netSalary: 0, absenceDaysCount: 0, perBranch: {} };
+
+  const empShifts = emp
+    ? (state.shifts || [])
+        .filter((s) => s.employeeId === emp.id && filterFn(s.date) && (!selectedBranchId || s.branchId === selectedBranchId || !s.branchId))
+        .sort((a, b) => (a.date === b.date ? a.timeIn.localeCompare(b.timeIn) : a.date.localeCompare(b.date)))
+    : [];
+
+  const empAdjs = emp
+    ? (state.adjustments || []).filter(
+        (a) => (a.employeeId === emp.id || a.employeeId === 'all') && filterFn(a.date)
+      )
+    : [];
+
+  const bonuses = empAdjs.filter((a) => a.type === 'bonus');
+  const deductions = empAdjs.filter((a) => a.type === 'deduction');
+
+  const branchDetail = emp && selectedBranchId
+    ? emp.branchesDetails?.find((b) => String(b.branchId) === String(selectedBranchId))
+    : (emp?.branchesDetails && emp.branchesDetails.length === 1 ? emp.branchesDetails[0] : null);
+
+  const currentHourlyRate = branchDetail
+    ? (parseFloat(branchDetail.salary) || 0)
+    : (parseFloat(emp?.salary) || 0);
+
+  const workHoursPerDay = branchDetail
+    ? (parseFloat(branchDetail.workHoursPerDay) || 8)
+    : (parseFloat(emp?.workHoursPerDay) || 8);
+
+  const workDaysPerMonth = branchDetail
+    ? (parseFloat(branchDetail.workDaysPerMonth) || 26)
+    : (parseFloat(emp?.workDaysPerMonth) || 26);
+
+  const monthlyRequiredHours = workHoursPerDay * workDaysPerMonth;
+  const currentMonthlySalary = summary.monthlySalary || (currentHourlyRate * monthlyRequiredHours);
+
+  // ── Active Month Roster Status Check ──
+  const activeMonthStr = todayStr().slice(0, 7);
+  const activeMonthLabel = monthLabel(activeMonthStr).arabic;
+
+  const hasApprovedRosterForActiveMonth = useMemo(() => {
+    if (!emp) return true;
+    const empIdStr = String(emp.id);
+    const targetBId = selectedBranchId || emp.branchId;
+
+    // Check state.rosters
+    const inRosters = (state.rosters || []).some(
+      (r) => String(r.employeeId) === empIdStr && (r.month === activeMonthStr || !r.month) && r.status === 'approved' && (String(r.branchId || '') === String(targetBId || '') || !r.branchId)
+    );
+    if (inRosters) return true;
+
+    // Check state.requests
+    const inRequests = (state.requests || []).some(
+      (r) =>
+        String(r.employeeId) === empIdStr &&
+        (r.type === 'roster_update' || r.type === 'roster_edit' || r.type === 'roster_edit_request') &&
+        (r.month === activeMonthStr || !r.month) &&
+        (r.status === 'approved' || r.adminApproved) &&
+        (String(r.branchId || '') === String(targetBId || '') || !r.branchId)
+    );
+    return inRequests;
+  }, [emp, state.rosters, state.requests, selectedBranchId, activeMonthStr]);
+
+  // ── Compute automatic absence shifts for the selected month ──
+  const approvedRoster = (state.rosters || []).find(
+    (r) => emp && String(r.employeeId) === String(emp.id) && (r.month === selectedMonth || !r.month) && r.status === 'approved'
+  );
+
+  // Build list of absence days (work day in roster, no punch recorded, not a leave day)
+  const absenceDays = useMemo(() => {
+    if (!emp || !approvedRoster?.schedule) return [];
+    const cutoff = getPayrollCutoffRange(selectedMonth);
+    const today = todayStr();
+    const results = [];
+    const dates = [];
+
+    if (cutoff) {
+      let cur = new Date(cutoff.startDate);
+      const end = new Date(cutoff.endDate);
+      while (cur <= end) {
+        const cy = cur.getFullYear();
+        const cm = cur.getMonth() + 1;
+        const cd = cur.getDate();
+        dates.push(`${cy}-${String(cm).padStart(2, '0')}-${String(cd).padStart(2, '0')}`);
+        cur.setDate(cur.getDate() + 1);
+      }
+    } else {
+      const [y, mo] = selectedMonth.split('-').map(Number);
+      const daysInMonth = new Date(y, mo, 0).getDate();
+      for (let d = 1; d <= daysInMonth; d++) {
+        dates.push(`${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
+      }
+    }
+
+    for (const dateStr of dates) {
+      if (dateStr >= today) continue; // future/today days
+
+      const jsDay = new Date(dateStr).getDay();
+      const arDayName = Object.keys(WEEKDAY_AR_MAP).find(k => WEEKDAY_AR_MAP[k] === jsDay) || '';
+      const daySchedule = approvedRoster.schedule[dateStr] || approvedRoster.schedule[arDayName] || Object.entries(approvedRoster.schedule).find(([k]) => k.replace(/[\u0625\u0623\u0622]/g, 'ا') === arDayName.replace(/[\u0625\u0623\u0622]/g, 'ا'))?.[1];
+
+      if (!daySchedule || daySchedule.type === 'off' || daySchedule.isOff) continue; // rest day
+
+      // Check if there's a punch for this day
+      const hasPunch = (state.shifts || []).some(s => s.employeeId === emp.id && s.date === dateStr);
+      if (hasPunch) continue;
+
+      // Check if there's an approved leave for this day
+      const allLeaveRequests = [...(state.leaveRequests || []), ...(state.requests || [])];
+      const hasLeave = allLeaveRequests.some(
+        r => String(r.employeeId) === String(emp.id)
+          && (r.status === 'approved' || r.adminApproved)
+          && (r.type === 'leave' || r.type === 'leave_request' || r.type === 'annual_leave' || r.type === 'sick_leave' || r.type === 'emergency_leave')
+          && r.startDate <= dateStr && r.endDate >= dateStr
+      );
+      if (hasLeave) continue;
+
+      results.push({ date: dateStr, arDayName, daySchedule });
+    }
+    return results;
+  }, [emp, approvedRoster, state.shifts, state.leaveRequests, state.requests, selectedMonth]);
+
+  // Absence deduction from computeEmpSummary
+  const dailyRate = summary.dailyRate || 0;
+  const absenceDeduction = summary.absenceDeduction || 0;
+
+  // ─────────────────────────────────────────
+  //  Conditional Renders
+  // ─────────────────────────────────────────
+  if (!currentEmpUser || !emp) {
     return (
       <div className="employee-view fade-in">
         <div className="emp-login-container card">
@@ -428,90 +782,6 @@ export default function EmployeePortalView({
       </div>
     );
   }
-
-  // ─────────────────────────────────────────
-  //  Logged-in Portal
-  // ─────────────────────────────────────────
-  const emp = (state && state.employees && state.employees.find((e) => e.id === currentEmpUser?.id)) || currentEmpUser;
-
-  const canViewSalary = getEmpPermission ? getEmpPermission(emp.id, 'allowViewSalary') : true;
-  const canStartEnd = getEmpPermission ? getEmpPermission(emp.id, 'allowStartEnd') : true;
-  const canManualShift = getEmpPermission ? getEmpPermission(emp.id, 'allowManualShift') : true;
-  const canEditShift = getEmpPermission ? getEmpPermission(emp.id, 'allowEditShift') : true;
-  const canAddAdjustment = getEmpPermission ? getEmpPermission(emp.id, 'allowAddAdjustment') : false;
-  const canViewAdjustments = getEmpPermission ? getEmpPermission(emp.id, 'allowViewAdjustments') : true;
-  const canExportExcel = getEmpPermission ? getEmpPermission(emp.id, 'allowExportExcel') : true;
-
-  const rangeFilterValid = filterMode === 'range' && rangeStart && rangeEnd && rangeStart <= rangeEnd;
-  const filterFn = rangeFilterValid
-    ? (d) => d >= rangeStart && d <= rangeEnd
-    : (d) => d.startsWith(selectedMonth);
-
-  const lbl = monthLabel(selectedMonth);
-  const periodLabel = rangeFilterValid ? `من ${rangeStart} إلى ${rangeEnd}` : lbl.raw;
-
-  const summary = computeEmpSummary(emp.id, filterFn, filterMode === 'month' ? selectedMonth : null, selectedBranchId || null);
-
-  const empShifts = state.shifts
-    .filter((s) => s.employeeId === emp.id && filterFn(s.date) && (!selectedBranchId || s.branchId === selectedBranchId || !s.branchId))
-    .sort((a, b) => (a.date === b.date ? a.timeIn.localeCompare(b.timeIn) : a.date.localeCompare(b.date)));
-
-  const empAdjs = state.adjustments.filter(
-    (a) => (a.employeeId === emp.id || a.employeeId === 'all') && filterFn(a.date)
-  );
-
-  const bonuses = empAdjs.filter((a) => a.type === 'bonus');
-  const deductions = empAdjs.filter((a) => a.type === 'deduction');
-
-  const workHoursPerDay = emp.workHoursPerDay || 8;
-  const workDaysPerMonth = emp.workDaysPerMonth || 26;
-  const monthlyRequiredHours = workHoursPerDay * workDaysPerMonth;
-
-  // ── Compute automatic absence shifts for the selected month ──
-  // Find approved roster to detect work days
-  const approvedRoster = (state.rosters || []).find(
-    (r) => r.employeeId === emp.id && r.month === selectedMonth && r.status === 'approved'
-  );
-
-  // Build list of absence days (work day in roster, no punch recorded, not a leave day)
-  const absenceDays = useMemo(() => {
-    if (!approvedRoster?.schedule) return [];
-    const [y, mo] = selectedMonth.split('-').map(Number);
-    const daysInMonth = new Date(y, mo, 0).getDate();
-    const today = todayStr();
-    const results = [];
-
-    for (let d = 1; d <= daysInMonth; d++) {
-      const dateStr = `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-      if (dateStr > today) continue; // future days
-
-      const jsDay = new Date(dateStr).getDay();
-      const arDayName = Object.keys(WEEKDAY_AR_MAP).find(k => WEEKDAY_AR_MAP[k] === jsDay) || '';
-      const daySchedule = approvedRoster.schedule[arDayName];
-
-      if (!daySchedule || daySchedule.type === 'off') continue; // rest day
-
-      // Check if there's a punch for this day
-      const hasPunch = state.shifts.some(s => s.employeeId === emp.id && s.date === dateStr);
-      if (hasPunch) continue;
-
-      // Check if there's an approved leave for this day
-      const hasLeave = (state.leaveRequests || state.requests || []).some(
-        r => r.employeeId === emp.id
-          && r.status === 'approved'
-          && (r.type === 'leave' || r.type === 'annual_leave' || r.type === 'sick_leave' || r.type === 'emergency_leave')
-          && r.startDate <= dateStr && r.endDate >= dateStr
-      );
-      if (hasLeave) continue;
-
-      results.push({ date: dateStr, arDayName, daySchedule });
-    }
-    return results;
-  }, [approvedRoster, state.shifts, state.leaveRequests, state.requests, selectedMonth, emp.id]);
-
-  // Absence deduction from computeEmpSummary
-  const dailyRate = summary.dailyRate || 0;
-  const absenceDeduction = summary.absenceDeduction || 0;
 
   // ── Pre-entry Branch Selection Screen ──
   if (emp.branchesDetails && emp.branchesDetails.length > 1 && !isBranchSelected) {
@@ -615,7 +885,14 @@ export default function EmployeePortalView({
 
         {/* Nav Items */}
         <nav style={{ flex: 1, padding: '10px 0', overflowY: 'auto' }}>
-          {NAV_ITEMS.map((item) => {
+          {NAV_ITEMS.filter((item) => {
+            if (emp.branchesDetails && emp.branchesDetails.length > 1 && !selectedBranchId) {
+              if (!['dashboard', 'salary', 'roster', 'shifts'].includes(item.id)) return false;
+            }
+            if (item.id === 'salary' && !canViewSalary) return false;
+            if (item.id === 'adjustments' && !canViewAdjustments) return false;
+            return true;
+          }).map((item) => {
             const isActive = activeTab === item.id;
             // Badge count
             let badge = 0;
@@ -689,7 +966,13 @@ export default function EmployeePortalView({
 
           {/* Logout button */}
           <button
-            onClick={() => setCurrentEmpUser(null)}
+            onClick={() => {
+              if (typeof handleLogout === 'function') {
+                handleLogout();
+              } else {
+                setCurrentEmpUser(null);
+              }
+            }}
             title="تسجيل الخروج"
             style={{
               display: 'flex', alignItems: 'center', gap: '8px',
@@ -775,6 +1058,54 @@ export default function EmployeePortalView({
         {/* Scrollable content area */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
 
+          {/* ── Active Month New Roster Alert Banner ── */}
+          {!hasApprovedRosterForActiveMonth && (
+            <div
+              style={{
+                background: 'linear-gradient(135deg, #fff7ed, #ffedd5)',
+                border: '2px solid #f97316',
+                borderRadius: '16px',
+                padding: '16px 22px',
+                marginBottom: '20px',
+                display: 'flex',
+                alignItems: 'center',
+                justify: 'space-between',
+                flexWrap: 'wrap',
+                gap: '14px',
+                boxShadow: '0 4px 12px rgba(249, 115, 22, 0.15)'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                <span style={{ fontSize: '32px' }}>🔔</span>
+                <div>
+                  <div style={{ fontWeight: '900', fontSize: '15px', color: '#c2410c' }}>
+                    تنبيه نظام الصيدليات: مطلوب إنشاء وتقديم جدول شهري جديد لشهر ({activeMonthLabel})!
+                  </div>
+                  <div style={{ fontSize: '13px', color: '#9a3412', marginTop: '3px', lineHeight: '1.5' }}>
+                    لقد انتصف/بدأ شهر جديد ولا يوجد جدول شهري معتمد لك لشهر الحالي. يرجى إعداد وتصميم جدول الشيفتات للاعتماد المزدوج.
+                  </div>
+                </div>
+              </div>
+              <button
+                className="btn"
+                style={{
+                  background: '#ea580c',
+                  color: '#ffffff',
+                  padding: '10px 20px',
+                  fontSize: '13px',
+                  fontWeight: 'bold',
+                  border: 'none',
+                  borderRadius: '10px',
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 8px rgba(234, 88, 12, 0.3)'
+                }}
+                onClick={() => setActiveTab('roster')}
+              >
+                📅 إنشاء وحفظ الجدول الشهري الآن 🔗
+              </button>
+            </div>
+          )}
+
           {/* ── 1. Tab: Dashboard ── */}
           {activeTab === 'dashboard' && (
             <div className="fade-in">
@@ -828,65 +1159,101 @@ export default function EmployeePortalView({
               </div>
 
               {/* ── Live Punch Clock Widget (always shown, button hidden if permission revoked) ── */}
-              <div
-                className="card live-clock-widget fade-in"
-                style={{
-                  marginBottom: '20px',
-                  background: 'linear-gradient(135deg, var(--surface), var(--background))',
-                  border: '1px solid var(--border)',
-                  padding: '18px 22px'
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
-                  <div>
-                    <h3 style={{ margin: 0, fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      ⏱️ البصمة الحية للموظف (الحالية)
-                      {state.activeShifts[emp.id] ? (
-                        state.activeShifts[emp.id].isPaused ? (
-                          <span className="badge warning">في استراحة بريك</span>
-                        ) : (
-                          <span className="badge success">على رأس العمل</span>
-                        )
-                      ) : (
-                        <span className="badge secondary">خارج الشيفت</span>
-                      )}
-                    </h3>
-                    <p style={{ margin: '6px 0 0', fontSize: '0.88rem', color: 'var(--text-muted)' }}>
-                      {state.activeShifts[emp.id]
-                        ? `زمن الوردية الحالي: ${getActiveElapsedStr ? getActiveElapsedStr(emp.id) : '—'} ${state.activeShifts[emp.id].isPaused ? `(استراحة: ${getActiveBreakStr ? getActiveBreakStr(emp.id) : '0'})` : ''}`
-                        : canStartEnd
-                          ? 'يمكنك بدء وردية عملك وتوثيق الحضور والانصراف المباشر بنقرة واحدة'
-                          : '🔒 صلاحية بدء الوردية من هذه الصفحة مقيدة — استخدم صفحة البصمة الإلكترونية'}
-                    </p>
-                  </div>
+              {(() => {
+                const activeShift = state.activeShifts[emp.id];
+                const isMultiBranch = emp.branchesDetails && emp.branchesDetails.length > 1;
+                const activeBranchObj = activeShift ? (state.branches || []).find((b) => String(b.id) === String(activeShift.branchId)) : null;
+                const activeBranchName = activeBranchObj ? activeBranchObj.name : (emp.branchName || 'الفرع الرئيسي');
 
-                  {/* Show shift buttons only when canStartEnd is true */}
-                  {canStartEnd && (
-                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                      {!state.activeShifts[emp.id] ? (
-                        <button className="btn btn-start" onClick={() => startShift && startShift(emp.id)}>
-                          ▶ بدء الوردية الآن
-                        </button>
-                      ) : (
-                        <>
-                          {state.activeShifts[emp.id].isPaused ? (
-                            <button className="btn btn-start" onClick={() => resumeShift && resumeShift(emp.id)}>
-                              ▶ استئناف العمل
-                            </button>
+                return (
+                  <div
+                    className="card live-clock-widget fade-in"
+                    style={{
+                      marginBottom: '20px',
+                      background: 'linear-gradient(135deg, var(--surface), var(--background))',
+                      border: '1px solid var(--border)',
+                      padding: '18px 22px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
+                      <div>
+                        <h3 style={{ margin: 0, fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          ⏱️ البصمة الحية للموظف (الحالية)
+                          {activeShift ? (
+                            activeShift.isPaused || activeShift.isOnBreak ? (
+                              <span className="badge warning">في استراحة بريك {isMultiBranch ? `(فرع ${activeBranchName})` : ''}</span>
+                            ) : (
+                              <span className="badge success">على رأس العمل {isMultiBranch ? `(فرع ${activeBranchName})` : ''}</span>
+                            )
                           ) : (
-                            <button className="btn btn-pause" onClick={() => pauseShift && pauseShift(emp.id)}>
-                              ☕ بريك
-                            </button>
+                            <span className="badge secondary">خارج الشيفت</span>
                           )}
-                          <button className="btn btn-stop" onClick={() => stopShift && stopShift(emp.id)}>
-                            ⏹ إنهاء الوردية
-                          </button>
-                        </>
+                        </h3>
+                        <p style={{ margin: '6px 0 0', fontSize: '0.88rem', color: 'var(--text-muted)' }}>
+                          {activeShift
+                            ? `زمن الوردية الحالي: ${getActiveElapsedStr ? getActiveElapsedStr(emp.id) : '—'} ${(activeShift.isPaused || activeShift.isOnBreak) ? `(استراحة: ${getActiveBreakStr ? getActiveBreakStr(emp.id) : '0'})` : ''}`
+                            : canStartEnd
+                              ? 'يمكنك بدء وردية عملك وتوثيق الحضور والانصراف المباشر بنقرة واحدة'
+                              : '🔒 صلاحية بدء الوردية من هذه الصفحة مقيدة — استخدم صفحة البصمة الإلكترونية'}
+                        </p>
+                      </div>
+
+                      {/* Show shift buttons only when canStartEnd is true */}
+                      {canStartEnd && (
+                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                          {!activeShift ? (
+                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                              {isMultiBranch && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <label style={{ fontSize: '12.5px', fontWeight: 'bold' }}>📍 اختر الفرع:</label>
+                                  <select
+                                    value={punchTargetBranchId || emp.branchesDetails[0]?.branchId || ''}
+                                    onChange={(e) => setPunchTargetBranchId(e.target.value)}
+                                    style={{ padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '12.5px', fontWeight: 'bold' }}
+                                  >
+                                    {emp.branchesDetails.map((bd) => {
+                                      const b = (state.branches || []).find((br) => String(br.id) === String(bd.branchId));
+                                      return <option key={bd.branchId} value={bd.branchId}>فرع {b?.name || bd.branchId}</option>;
+                                    })}
+                                  </select>
+                                </div>
+                              )}
+                              <button
+                                className="btn btn-start"
+                                onClick={() => {
+                                  if (!canStartEnd || !canLivePunch) {
+                                    showToast('❌ تم تقييد الصلاحيات: ليس لديك صلاحية لبدء الوردية عبر البصمة الحية');
+                                    return;
+                                  }
+                                  const targetBId = punchTargetBranchId || (isMultiBranch ? emp.branchesDetails[0]?.branchId : emp.branchId);
+                                  startShift && startShift(emp.id, 'employee', targetBId);
+                                }}
+                              >
+                                ▶ بدء الوردية الآن
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              {activeShift.isPaused || activeShift.isOnBreak ? (
+                                <button className="btn btn-start" onClick={() => resumeShift && resumeShift(emp.id)}>
+                                  ▶ استئناف العمل
+                                </button>
+                              ) : (
+                                <button className="btn btn-pause" onClick={() => pauseShift && pauseShift(emp.id)}>
+                                  ☕ بريك
+                                </button>
+                              )}
+                              <button className="btn btn-stop" onClick={() => stopShift && stopShift(emp.id)}>
+                                ⏹ إنهاء الوردية {isMultiBranch ? `(فرع ${activeBranchName})` : ''}
+                              </button>
+                            </>
+                          )}
+                        </div>
                       )}
                     </div>
-                  )}
-                </div>
-              </div>
+                  </div>
+                );
+              })()}
 
               {/* Absence Alert */}
               {absenceDays.length > 0 && (
@@ -953,18 +1320,95 @@ export default function EmployeePortalView({
               </div>
 
               {/* Summary Cards Grid */}
-              <div className="ep-summary-grid">
-                <SummaryCard icon="⏱️" label="إجمالي ساعات العمل" value={`${fmt(summary.hours)} ساعة`} sub={`من أصل ${monthlyRequiredHours} ساعة مطلوبة`} />
-                <SummaryCard icon="💰" label="سعر الساعة الشهري" value={`${fmt(emp.salary || 0)} ج.م`} sub="سعر الساعة المُدخل من الأدمن" />
-                <SummaryCard icon="💵" label="سعر الساعة المحسوب" value={`${fmt(summary.rate)} ج.م`} sub={canViewSalary ? `الراتب الأساسي: ${fmt(emp.salary)} ج.م` : 'أجر الساعة اليومي'} />
-                <SummaryCard icon="💰" label="المستحقات الأساسية" value={canViewSalary ? `${fmt(summary.baseEarnings)} ج.م` : '🔒 مقيد'} />
-                <SummaryCard icon="🎁" label="إجمالي المكافآت" value={canViewAdjustments ? `+${fmt(summary.totalBonus)} ج.م` : '🔒 مقيد'} colorVar="--success" />
-                <SummaryCard icon="✂️" label="إجمالي الخصومات" value={canViewAdjustments ? `-${fmt(summary.totalDeduction)} ج.م` : '🔒 مقيد'} colorVar="--danger" />
-                {absenceDays.length > 0 && (
-                  <SummaryCard icon="🚫" label={`خصم الغياب (${absenceDays.length} يوم)`} value={canViewSalary ? `-${fmt(absenceDeduction)} ج.م` : '🔒 مقيد'} colorVar="--danger" sub="يُلغى عند اعتماد إجازة" />
-                )}
-                <SummaryCard icon="🏆" label={`صافي المرتب — ${lbl.arabic}`} value={canViewSalary ? `${fmt(summary.netSalary)} ج.م` : '🔒 مقيد'} colorVar="--primary" />
-              </div>
+              {emp.branchesDetails && emp.branchesDetails.length > 1 && !selectedBranchId ? (
+                <div>
+                  <h4 style={{ margin: '16px 0 12px 0', fontSize: '16px', color: 'var(--primary-dark)' }}>
+                    🏢 تفاصيل رواتب وساعات العمل لكل فرع على حدة
+                  </h4>
+                  {emp.branchesDetails.map((bd) => {
+                    const bId = bd.branchId;
+                    const bObj = (state.branches || []).find((b) => String(b.id) === String(bId));
+                    const bName = bObj ? bObj.name : `فرع ${bId}`;
+                    const bSummary = computeEmpSummary(emp.id, filterFn, filterMode === 'month' ? selectedMonth : null, bId);
+                    const bSalary = parseFloat(bd.salary) || 0; // سعر الساعة الشهرية بالفرع
+                    const bHoursPerDay = parseFloat(bd.workHoursPerDay) || 8;
+                    const bDaysPerMonth = parseFloat(bd.workDaysPerMonth) || 26;
+                    const bReqHours = bDaysPerMonth * bHoursPerDay;
+                    const bMonthlySalary = bSummary.monthlySalary || (bSalary * bReqHours);
+
+                    const activeShift = state.activeShifts[emp.id];
+                    const isThisBranchActive = activeShift && String(activeShift.branchId || emp.branchId) === String(bId);
+                    const isOtherBranchActive = activeShift && !isThisBranchActive;
+
+                    return (
+                      <div key={bId} style={{ marginBottom: '24px', background: 'var(--surface)', border: isThisBranchActive ? '2px solid #10b981' : '1px solid var(--border)', borderRadius: '14px', padding: '18px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', borderBottom: '2px solid var(--primary)', paddingBottom: '6px', flexWrap: 'wrap', gap: '10px' }}>
+                          <h4 style={{ margin: 0, color: 'var(--primary-dark)', fontSize: '16px' }}>📍 فرع {bName}</h4>
+                          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                            {isThisBranchActive ? (
+                              <span className="badge success" style={{ background: '#dcfce7', color: '#15803d', fontWeight: 'bold' }}>
+                                🟢 البصمة الحية نشطة حالياً بهذا الفرع {activeShift.isPaused ? '(بريك)' : ''}
+                              </span>
+                            ) : isOtherBranchActive ? (
+                              <span className="badge secondary" style={{ background: '#f1f5f9', color: '#64748b' }}>
+                                ⚪ خارج الشيفت بهذا الفرع (نشط بفرع آخر)
+                              </span>
+                            ) : (
+                              <span className="badge secondary" style={{ background: '#f8fafc', color: '#64748b' }}>
+                                ⚪ خارج الشيفت بهذا الفرع
+                              </span>
+                            )}
+
+                            {canStartEnd && (
+                              <div>
+                                {isThisBranchActive ? (
+                                  <div style={{ display: 'flex', gap: '6px' }}>
+                                    {activeShift.isPaused ? (
+                                      <button className="btn btn-start" style={{ padding: '4px 10px', fontSize: '12px' }} onClick={() => resumeShift && resumeShift(emp.id)}>▶ استئناف</button>
+                                    ) : (
+                                      <button className="btn btn-pause" style={{ padding: '4px 10px', fontSize: '12px' }} onClick={() => pauseShift && pauseShift(emp.id)}>☕ بريك</button>
+                                    )}
+                                    <button className="btn btn-stop" style={{ padding: '4px 10px', fontSize: '12px' }} onClick={() => stopShift && stopShift(emp.id)}>⏹ إنهاء الوردية</button>
+                                  </div>
+                                ) : !activeShift && (
+                                  <button className="btn btn-start" style={{ padding: '4px 10px', fontSize: '12px' }} onClick={() => startShift && startShift(emp.id, 'employee', bId)}>
+                                    ▶ بدء الوردية بهذا الفرع
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="ep-summary-grid">
+                          <SummaryCard icon="⏱️" label="إجمالي ساعات العمل" value={`${fmt(bSummary.hours)} ساعة`} sub={`من أصل ${bReqHours} ساعة مطلوبة بالفرع`} />
+                          <SummaryCard icon="💰" label="سعر الساعة الشهرية (المدخل)" value={`${fmt(bSalary)} ج.م / س`} sub={`الراتب الشهري: ${fmt(bMonthlySalary)} ج.م`} />
+                          <SummaryCard icon="📅" label="سعر اليوم (المحسوب)" value={`${fmt(bSummary.dailyRate)} ج.م / يوم`} sub={`(الراتب الشهري ÷ ${bDaysPerMonth} يوم)`} />
+                          <SummaryCard icon="💵" label="سعر الساعة اليومي" value={`${fmt(bSummary.rate || bSalary)} ج.م / س`} sub="المُدخل من الإدارة العليا" />
+                          <SummaryCard icon="💰" label="المستحقات الأساسية (أجر الساعات)" value={canViewSalary ? `${fmt(bSummary.baseEarnings)} ج.م` : '🔒 مقيد'} sub={`${fmt(bSummary.hours)} س × ${fmt(bSummary.rate || bSalary)} ج.م`} />
+                          <SummaryCard icon="🎁" label="إجمالي المكافآت" value={canViewAdjustments ? `+${fmt(bSummary.totalBonus)} ج.م` : '🔒 مقيد'} colorVar="--success" />
+                          <SummaryCard icon="✂️" label="إجمالي الخصومات" value={canViewAdjustments ? `-${fmt(bSummary.totalDeduction)} ج.م` : '🔒 مقيد'} colorVar="--danger" />
+                          <SummaryCard icon="🏆" label={`صافي المرتب — فرع ${bName}`} value={canViewSalary ? `${fmt(bSummary.netSalary)} ج.م` : '🔒 مقيد'} colorVar="--primary" />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="ep-summary-grid">
+                  <SummaryCard icon="⏱️" label="إجمالي ساعات العمل" value={`${fmt(summary.hours)} ساعة`} sub={`من أصل ${monthlyRequiredHours} ساعة مطلوبة شهرياً`} />
+                  <SummaryCard icon="💰" label="سعر الساعة الشهرية (المدخل)" value={`${fmt(currentHourlyRate)} ج.م / س`} sub={`الراتب الشهري: ${fmt(currentMonthlySalary)} ج.م`} />
+                  <SummaryCard icon="📅" label="سعر اليوم (المحسوب)" value={`${fmt(summary.dailyRate)} ج.م / يوم`} sub={`(الراتب الشهري ÷ ${workDaysPerMonth || 26} يوم)`} />
+                  <SummaryCard icon="💵" label="سعر الساعة اليومي" value={`${fmt(summary.rate || currentHourlyRate)} ج.م / س`} sub="المُدخل من الإدارة العليا" />
+                  <SummaryCard icon="💰" label="المستحقات الأساسية (أجر الساعات)" value={canViewSalary ? `${fmt(summary.baseEarnings)} ج.م` : '🔒 مقيد'} sub={`${fmt(summary.hours)} س × ${fmt(summary.rate || currentHourlyRate)} ج.م`} />
+                  <SummaryCard icon="🎁" label="إجمالي المكافآت" value={canViewAdjustments ? `+${fmt(summary.totalBonus)} ج.م` : '🔒 مقيد'} colorVar="--success" />
+                  <SummaryCard icon="✂️" label="إجمالي الخصومات" value={canViewAdjustments ? `-${fmt(summary.totalDeduction)} ج.م` : '🔒 مقيد'} colorVar="--danger" />
+                  {absenceDays.length > 0 && (
+                    <SummaryCard icon="🚫" label={`خصم الغياب (${absenceDays.length} يوم)`} value={canViewSalary ? `-${fmt(absenceDeduction)} ج.م` : '🔒 مقيد'} colorVar="--danger" sub="يُلغى عند اعتماد إجازة" />
+                  )}
+                  <SummaryCard icon="🏆" label={`صافي المرتب — ${lbl.arabic}`} value={canViewSalary ? `${fmt(summary.netSalary)} ج.م` : '🔒 مقيد'} colorVar="--primary" />
+                </div>
+              )}
             </div>
           )}
 
@@ -1055,76 +1499,143 @@ export default function EmployeePortalView({
                 </div>
               )}
 
-              <div className="table-responsive" style={{ marginTop: '14px' }}>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>#</th>
-                      <th>التاريخ</th>
-                      <th>اليوم</th>
-                      <th>وقت الدخول</th>
-                      <th>وقت الخروج</th>
-                      <th>ساعات البريك</th>
-                      <th>صافي ساعات العمل</th>
-                      <th>المبلغ المستحق</th>
-                      <th>الملاحظات</th>
-                      {canEditShift && <th>الإجراءات</th>}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {empShifts.length === 0 ? (
-                      <tr className="empty-row">
-                        <td colSpan={canEditShift ? 10 : 9}>لا توجد ورديات مسجلة لهذا الشهر</td>
+              {emp.branchesDetails && emp.branchesDetails.length > 1 && !selectedBranchId ? (
+                <div>
+                  {emp.branchesDetails.map((bd) => {
+                    const bId = bd.branchId;
+                    const bObj = (state.branches || []).find((b) => b.id === bId);
+                    const bName = bObj ? bObj.name : `فرع ${bId}`;
+                    const bShifts = empShifts.filter((s) => s.branchId === bId || (!s.branchId && emp.branchesDetails[0].branchId === bId));
+                    const bRate = (summary.perBranch?.[bId]?.rate) || 0;
+
+                    return (
+                      <div key={bId} style={{ marginTop: '18px', padding: '16px', background: 'var(--surface-muted)', border: '1px solid var(--border)', borderRadius: '12px' }}>
+                        <h4 style={{ margin: '0 0 10px 0', color: 'var(--primary-dark)', fontSize: '15px' }}>
+                          📋 بصمات فرع {bName} ({bShifts.length} وردية)
+                        </h4>
+                        <div className="table-responsive">
+                          <table>
+                            <thead>
+                              <tr>
+                                <th>#</th>
+                                <th>التاريخ</th>
+                                <th>اليوم</th>
+                                <th>وقت الدخول</th>
+                                <th>وقت الخروج</th>
+                                <th>ساعات البريك</th>
+                                <th>صافي ساعات العمل</th>
+                                <th>المبلغ المستحق</th>
+                                <th>الملاحظات</th>
+                                {canEditShift && <th>الإجراءات</th>}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {bShifts.length === 0 ? (
+                                <tr className="empty-row">
+                                  <td colSpan={canEditShift ? 10 : 9}>لا توجد ورديات مسجلة لهذا الفرع في هذا الشهر</td>
+                                </tr>
+                              ) : (
+                                bShifts.map((s, idx) => (
+                                  <tr key={s.id}>
+                                    <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{idx + 1}</td>
+                                    <td style={{ fontWeight: 600 }}>{s.date}</td>
+                                    <td>{arabicWeekday(s.date)}</td>
+                                    <td><span className="ep-time-badge ep-time-in">{s.timeIn}</span></td>
+                                    <td><span className="ep-time-badge ep-time-out">{s.timeOut || '—'}</span></td>
+                                    <td>{(s.breakHours || 0) > 0 ? <span className="ep-break-badge">{fmt(s.breakHours)} س</span> : <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
+                                    <td className="money" style={{ color: 'var(--primary-dark)', fontWeight: 700 }}>{fmt(s.hours)} ساعة</td>
+                                    <td className="money" style={{ color: 'var(--success)', fontWeight: 600 }}>{canViewSalary ? `${fmt(s.hours * bRate)} ج.م` : '🔒 مقيد'}</td>
+                                    <td style={{ color: 'var(--text-muted)', fontSize: '0.88rem' }}>{s.note || '—'}</td>
+                                    {canEditShift && (
+                                      <td>
+                                        <div style={{ display: 'flex', gap: '6px' }}>
+                                          <button className="btn btn-ghost" style={{ padding: '3px 8px', fontSize: '12px' }} onClick={() => openEditShift && openEditShift(s)} title="تعديل الوردية">✏️</button>
+                                          <button className="btn btn-ghost" style={{ padding: '3px 8px', fontSize: '12px', color: 'var(--danger)' }} onClick={() => deleteShift && deleteShift(s.id)} title="حذف الوردية">🗑️</button>
+                                        </div>
+                                      </td>
+                                    )}
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="table-responsive" style={{ marginTop: '14px' }}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>التاريخ</th>
+                        <th>اليوم</th>
+                        <th>وقت الدخول</th>
+                        <th>وقت الخروج</th>
+                        <th>ساعات البريك</th>
+                        <th>صافي ساعات العمل</th>
+                        <th>المبلغ المستحق</th>
+                        <th>الملاحظات</th>
+                        {canEditShift && <th>الإجراءات</th>}
                       </tr>
-                    ) : (
-                      empShifts.map((s, idx) => (
-                        <tr key={s.id}>
-                          <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{idx + 1}</td>
-                          <td style={{ fontWeight: 600 }}>{s.date}</td>
-                          <td>{arabicWeekday(s.date)}</td>
-                          <td><span className="ep-time-badge ep-time-in">{s.timeIn}</span></td>
-                          <td><span className="ep-time-badge ep-time-out">{s.timeOut || '—'}</span></td>
-                          <td>
-                            {(s.breakHours || 0) > 0
-                              ? <span className="ep-break-badge">{fmt(s.breakHours)} س</span>
-                              : <span style={{ color: 'var(--text-muted)' }}>—</span>
-                            }
-                          </td>
-                          <td className="money" style={{ color: 'var(--primary-dark)', fontWeight: 700 }}>
-                            {fmt(s.hours)} ساعة
-                          </td>
-                          <td className="money" style={{ color: 'var(--success)', fontWeight: 600 }}>
-                            {canViewSalary ? `${fmt(s.hours * summary.rate)} ج.م` : '🔒 مقيد'}
-                          </td>
-                          <td style={{ color: 'var(--text-muted)', fontSize: '0.88rem' }}>{s.note || '—'}</td>
-                          {canEditShift && (
-                            <td>
-                              <div style={{ display: 'flex', gap: '6px' }}>
-                                <button className="btn btn-ghost" style={{ padding: '3px 8px', fontSize: '12px' }} onClick={() => openEditShift && openEditShift(s)} title="تعديل الوردية">✏️</button>
-                                <button className="btn btn-ghost" style={{ padding: '3px 8px', fontSize: '12px', color: 'var(--danger)' }} onClick={() => deleteShift && deleteShift(s.id)} title="حذف الوردية">🗑️</button>
-                              </div>
-                            </td>
-                          )}
+                    </thead>
+                    <tbody>
+                      {empShifts.length === 0 ? (
+                        <tr className="empty-row">
+                          <td colSpan={canEditShift ? 10 : 9}>لا توجد ورديات مسجلة لهذا الشهر</td>
                         </tr>
-                      ))
+                      ) : (
+                        empShifts.map((s, idx) => (
+                          <tr key={s.id}>
+                            <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{idx + 1}</td>
+                            <td style={{ fontWeight: 600 }}>{s.date}</td>
+                            <td>{arabicWeekday(s.date)}</td>
+                            <td><span className="ep-time-badge ep-time-in">{s.timeIn}</span></td>
+                            <td><span className="ep-time-badge ep-time-out">{s.timeOut || '—'}</span></td>
+                            <td>
+                              {(s.breakHours || 0) > 0
+                                ? <span className="ep-break-badge">{fmt(s.breakHours)} س</span>
+                                : <span style={{ color: 'var(--text-muted)' }}>—</span>
+                              }
+                            </td>
+                            <td className="money" style={{ color: 'var(--primary-dark)', fontWeight: 700 }}>
+                              {fmt(s.hours)} ساعة
+                            </td>
+                            <td className="money" style={{ color: 'var(--success)', fontWeight: 600 }}>
+                              {canViewSalary ? `${fmt(s.hours * (summary.perBranch?.[s.branchId]?.rate || summary.rate))} ج.م` : '🔒 مقيد'}
+                            </td>
+                            <td style={{ color: 'var(--text-muted)', fontSize: '0.88rem' }}>{s.note || '—'}</td>
+                            {canEditShift && (
+                              <td>
+                                <div style={{ display: 'flex', gap: '6px' }}>
+                                  <button className="btn btn-ghost" style={{ padding: '3px 8px', fontSize: '12px' }} onClick={() => openEditShift && openEditShift(s)} title="تعديل الوردية">✏️</button>
+                                  <button className="btn btn-ghost" style={{ padding: '3px 8px', fontSize: '12px', color: 'var(--danger)' }} onClick={() => deleteShift && deleteShift(s.id)} title="حذف الوردية">🗑️</button>
+                                </div>
+                              </td>
+                            )}
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                    {empShifts.length > 0 && (
+                      <tfoot>
+                        <tr style={{ fontWeight: 700 }}>
+                          <td colSpan="5" style={{ textAlign: 'right', paddingRight: '12px', color: 'var(--text-muted)' }}>
+                            الإجمالي ({empShifts.length} وردية)
+                          </td>
+                          <td><span className="ep-break-badge">{fmt(empShifts.reduce((acc, s) => acc + (s.breakHours || 0), 0))} س</span></td>
+                          <td style={{ color: 'var(--primary-dark)', fontWeight: 700 }}>{fmt(summary.hours)} ساعة</td>
+                          <td style={{ color: 'var(--success)', fontWeight: 700 }}>{canViewSalary ? `${fmt(summary.baseEarnings)} ج.م` : '🔒 مقيد'}</td>
+                          <td></td>
+                          {canEditShift && <td></td>}
+                        </tr>
+                      </tfoot>
                     )}
-                  </tbody>
-                  {empShifts.length > 0 && (
-                    <tfoot>
-                      <tr style={{ fontWeight: 700 }}>
-                        <td colSpan="5" style={{ textAlign: 'right', paddingRight: '12px', color: 'var(--text-muted)' }}>
-                          الإجمالي ({empShifts.length} وردية)
-                        </td>
-                        <td><span className="ep-break-badge">{fmt(empShifts.reduce((acc, s) => acc + (s.breakHours || 0), 0))} س</span></td>
-                        <td style={{ color: 'var(--primary-dark)', fontWeight: 700 }}>{fmt(summary.hours)} ساعة</td>
-                        <td style={{ color: 'var(--success)', fontWeight: 700 }}>{canViewSalary ? `${fmt(summary.baseEarnings)} ج.م` : '🔒 مقيد'}</td>
-                        <td></td>
-                        {canEditShift && <td></td>}
-                      </tr>
-                    </tfoot>
-                  )}
-                </table>
-              </div>
+                  </table>
+                </div>
+              )}
             </div>
           )}
 
@@ -1147,9 +1658,11 @@ export default function EmployeePortalView({
                 month={selectedMonth}
                 shifts={state.shifts || []}
                 adjustments={state.adjustments || []}
+                branches={state.branches || []}
                 orgSettings={orgSettings}
                 computeEmpSummary={computeEmpSummary}
                 selectedBranchId={selectedBranchId || null}
+                state={state}
               />
 
               {!canViewSalary ? (
@@ -1160,24 +1673,79 @@ export default function EmployeePortalView({
                     تم تقييد إمكانية مشاهدة التفاصيل المالية والرواتب لهذا الحساب من قِبل إدارة المؤسسة.
                   </p>
                 </div>
+              ) : emp.branchesDetails && emp.branchesDetails.length > 1 && !selectedBranchId ? (
+                /* Multi-branch breakdown when All Branches selected */
+                <div className="ep-salary-breakdown">
+                  {emp.branchesDetails.map((bd) => {
+                    const bId = bd.branchId;
+                    const bObj = (state.branches || []).find((b) => b.id === bId);
+                    const bName = bObj ? bObj.name : `فرع ${bId}`;
+                    const bSummary = summary.perBranch?.[bId] || { salary: bd.salary || 0, workHoursPerDay: bd.workHoursPerDay || 8, workDaysPerMonth: bd.workDaysPerMonth || 26, dailyRate: 0, rate: 0, hours: 0, baseEarnings: 0 };
+
+                    return (
+                      <div key={bId} style={{ marginBottom: '24px', border: '1px solid var(--border)', borderRadius: '12px', padding: '16px', background: 'var(--surface-muted)' }}>
+                        <h4 style={{ margin: '0 0 12px 0', color: 'var(--primary-dark)', fontSize: '16px' }}>
+                          📍 تفاصيل راتب فرع {bName}
+                        </h4>
+                        <div className="ep-breakdown-section">
+                          <div className="ep-breakdown-title"><span className="ep-breakdown-icon">⚙️</span>احتساب سعر الساعة وأجر اليوم بالفرع</div>
+                          <div className="ep-breakdown-rows">
+                            <div className="ep-breakdown-row"><span className="ep-breakdown-label">1. سعر الساعة الشهري بالفرع (المدخل من الإدارة)</span><span className="ep-breakdown-value">{fmt(bd.salary)} ج.م</span></div>
+                            <div className="ep-breakdown-row"><span className="ep-breakdown-label">2. عدد ساعات عمل الموظف بالفرع</span><span className="ep-breakdown-value">{bd.workHoursPerDay || 8} ساعة / يوم</span></div>
+                            <div className="ep-breakdown-row"><span className="ep-breakdown-label">3. عدد أيام عمل الموظف بالفرع</span><span className="ep-breakdown-value">{bd.workDaysPerMonth || 26} يوم / شهر</span></div>
+                            <div className="ep-breakdown-row ep-breakdown-result"><span className="ep-breakdown-label">4. سعر اليوم = ({fmt(bd.salary)} × {bd.workHoursPerDay || 8}) ÷ {bd.workDaysPerMonth || 26}</span><span className="ep-breakdown-value highlight">{fmt(bSummary.dailyRate)} ج.م / يوم</span></div>
+                            <div className="ep-breakdown-row ep-breakdown-result"><span className="ep-breakdown-label">5. سعر الساعة اليومي = {fmt(bSummary.dailyRate)} ÷ {bd.workHoursPerDay || 8}</span><span className="ep-breakdown-value highlight">{fmt(bSummary.rate || bd.salary)} ج.م / ساعة</span></div>
+                            <div className="ep-breakdown-row"><span className="ep-breakdown-label">الراتب الأساسي الشهري بالفرع ({fmt(bSummary.dailyRate)} × {bd.workDaysPerMonth || 26} يوم)</span><span className="ep-breakdown-value">{fmt(bSummary.monthlySalary || ((parseFloat(bd.salary) || 0) * (parseFloat(bd.workHoursPerDay) || 8)))} ج.م</span></div>
+                          </div>
+                        </div>
+
+                        <div className="ep-breakdown-section" style={{ marginTop: '12px' }}>
+                          <div className="ep-breakdown-title"><span className="ep-breakdown-icon">⏱️</span>ساعات العمل والمستحقات بالفرع</div>
+                          <div className="ep-breakdown-rows">
+                            <div className="ep-breakdown-row"><span className="ep-breakdown-label">عدد ساعات العمل الفعلية بالفرع</span><span className="ep-breakdown-value">{fmt(bSummary.hours)} ساعة</span></div>
+                            <div className="ep-breakdown-row ep-breakdown-result"><span className="ep-breakdown-label">✅ المستحقات الأساسية للفرع</span><span className="ep-breakdown-value highlight">{fmt(bSummary.baseEarnings)} ج.م</span></div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  <div className="ep-breakdown-section ep-breakdown-net-section">
+                    <div className="ep-breakdown-title"><span className="ep-breakdown-icon">🏆</span>الملخص المالي الكلي لجميع الفروع</div>
+                    <div className="ep-breakdown-rows">
+                      <div className="ep-breakdown-row"><span className="ep-breakdown-label">إجمالي المستحقات الأساسية لكافة الفروع</span><span className="ep-breakdown-value">{fmt(summary.baseEarnings)} ج.م</span></div>
+                      <div className="ep-breakdown-row" style={{ color: 'var(--success)' }}><span className="ep-breakdown-label">+ إجمالي المكافآت ({bonuses.length} بند)</span><span className="ep-breakdown-value">+{fmt(summary.totalBonus)} ج.م</span></div>
+                      <div className="ep-breakdown-row" style={{ color: 'var(--danger)' }}><span className="ep-breakdown-label">- إجمالي الخصومات ({deductions.length} بند)</span><span className="ep-breakdown-value">-{fmt(summary.totalDeduction)} ج.م</span></div>
+                      {absenceDays.length > 0 && (
+                        <div className="ep-breakdown-row" style={{ color: 'var(--danger)' }}><span className="ep-breakdown-label">- خصم الغياب الكلي ({absenceDays.length} يوم)</span><span className="ep-breakdown-value">-{fmt(absenceDeduction)} ج.م</span></div>
+                      )}
+                      <div className="ep-net-salary-box">
+                        <div className="ep-net-label">إجمالي صافي المرتب المستحق لكافة الفروع</div>
+                        <div className="ep-net-month">{lbl.arabic}</div>
+                        <div className="ep-net-amount">{fmt(summary.netSalary)}<span className="ep-net-currency"> ج.م</span></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               ) : (
                 <div className="ep-salary-breakdown">
                   <div className="ep-breakdown-section">
-                    <div className="ep-breakdown-title"><span className="ep-breakdown-icon">⚙️</span>احتساب سعر الساعة اليومي</div>
+                    <div className="ep-breakdown-title"><span className="ep-breakdown-icon">⚙️</span>احتساب سعر الساعة وأجر اليوم وفق المعادلة المعتمدة</div>
                     <div className="ep-breakdown-rows">
-                      <div className="ep-breakdown-row"><span className="ep-breakdown-label">سعر الساعة الشهرية (الراتب الأساسي)</span><span className="ep-breakdown-value">{selectedBranchId ? fmt(emp.branchesDetails?.find(b => b.branchId === selectedBranchId)?.salary || emp.salary) : fmt(emp.salary)} ج.م</span></div>
-                      <div className="ep-breakdown-row"><span className="ep-breakdown-label">ساعات العمل اليومية المحددة</span><span className="ep-breakdown-value">{selectedBranchId ? (emp.branchesDetails?.find(b => b.branchId === selectedBranchId)?.workHoursPerDay || workHoursPerDay) : workHoursPerDay} ساعة / يوم</span></div>
-                      <div className="ep-breakdown-row"><span className="ep-breakdown-label">أيام العمل الشهرية المحددة</span><span className="ep-breakdown-value">{selectedBranchId ? (emp.branchesDetails?.find(b => b.branchId === selectedBranchId)?.workDaysPerMonth || workDaysPerMonth) : workDaysPerMonth} يوم / شهر</span></div>
-                      <div className="ep-breakdown-row"><span className="ep-breakdown-label">سعر اليوم (المحسوب)</span><span className="ep-breakdown-value">{fmt(summary.dailyRate)} ج.م / يوم</span></div>
-                      <div className="ep-breakdown-row ep-breakdown-result"><span className="ep-breakdown-label">✅ سعر الساعة اليومي المحسوب</span><span className="ep-breakdown-value highlight">{fmt(summary.rate)} ج.م / ساعة</span></div>
+                      <div className="ep-breakdown-row"><span className="ep-breakdown-label">1. سعر الساعة الشهري (الراتب الأساسي المدخل من الإدارة)</span><span className="ep-breakdown-value">{fmt(currentHourlyRate)} ج.م</span></div>
+                      <div className="ep-breakdown-row"><span className="ep-breakdown-label">2. عدد ساعات عمل الموظف المدخلة من الإدارة</span><span className="ep-breakdown-value">{workHoursPerDay} ساعة / يوم</span></div>
+                      <div className="ep-breakdown-row"><span className="ep-breakdown-label">3. عدد أيام عمل الموظف المدخلة من الإدارة</span><span className="ep-breakdown-value">{workDaysPerMonth || 26} يوم / شهر</span></div>
+                      <div className="ep-breakdown-row ep-breakdown-result"><span className="ep-breakdown-label">4. سعر اليوم = ({fmt(currentHourlyRate)} × {workHoursPerDay}) ÷ {workDaysPerMonth || 26}</span><span className="ep-breakdown-value highlight">{fmt(summary.dailyRate)} ج.م / يوم</span></div>
+                      <div className="ep-breakdown-row ep-breakdown-result"><span className="ep-breakdown-label">5. سعر الساعة اليومي = {fmt(summary.dailyRate)} ÷ {workHoursPerDay}</span><span className="ep-breakdown-value highlight">{fmt(summary.rate || currentHourlyRate)} ج.م / ساعة</span></div>
+                      <div className="ep-breakdown-row"><span className="ep-breakdown-label">الراتب الأساسي الشهري المقدر ({fmt(summary.dailyRate)} × {workDaysPerMonth || 26} يوم)</span><span className="ep-breakdown-value">{fmt(currentMonthlySalary)} ج.م</span></div>
                     </div>
                   </div>
 
                   <div className="ep-breakdown-section">
-                    <div className="ep-breakdown-title"><span className="ep-breakdown-icon">⏱️</span>ساعات العمل والمستحقات</div>
+                    <div className="ep-breakdown-title"><span className="ep-breakdown-icon">⏱️</span>احتساب أجر اليوم / المستحقات الفعلية</div>
                     <div className="ep-breakdown-rows">
-                      <div className="ep-breakdown-row"><span className="ep-breakdown-label">عدد ساعات العمل الفعلية</span><span className="ep-breakdown-value">{fmt(summary.hours)} ساعة</span></div>
-                      <div className="ep-breakdown-row ep-breakdown-result"><span className="ep-breakdown-label">✅ المستحقات الأساسية للفترة</span><span className="ep-breakdown-value highlight">{fmt(summary.baseEarnings)} ج.م</span></div>
+                      <div className="ep-breakdown-row"><span className="ep-breakdown-label">عدد الساعات الموضوعة في الجدول الشهري / المسجلة</span><span className="ep-breakdown-value">{fmt(summary.hours)} ساعة</span></div>
+                      <div className="ep-breakdown-row ep-breakdown-result"><span className="ep-breakdown-label">✅ أجر اليوم / المستحقات المعتمدة ({fmt(summary.rate || currentHourlyRate)} ج.م × {fmt(summary.hours)} ساعة)</span><span className="ep-breakdown-value highlight">{fmt(summary.baseEarnings)} ج.م</span></div>
                     </div>
                   </div>
 
@@ -1337,6 +1905,7 @@ export default function EmployeePortalView({
               saveState={saveState}
               showToast={showToast}
               selectedMonth={selectedMonth}
+              selectedBranchId={selectedBranchId || null}
             />
           )}
 
@@ -1348,6 +1917,7 @@ export default function EmployeePortalView({
               setState={setState}
               saveState={saveState}
               showToast={showToast}
+              selectedBranchId={selectedBranchId || null}
             />
           )}
 
@@ -1359,6 +1929,7 @@ export default function EmployeePortalView({
               setState={setState}
               saveState={saveState}
               showToast={showToast}
+              selectedBranchId={selectedBranchId || null}
             />
           )}
 
@@ -1371,6 +1942,7 @@ export default function EmployeePortalView({
               saveState={saveState}
               showToast={showToast}
               selectedMonth={selectedMonth}
+              selectedBranchId={selectedBranchId || null}
             />
           )}
 
@@ -1383,6 +1955,7 @@ export default function EmployeePortalView({
               saveState={saveState}
               showToast={showToast}
               selectedMonth={selectedMonth}
+              selectedBranchId={selectedBranchId || null}
             />
           )}
 
@@ -1395,6 +1968,18 @@ export default function EmployeePortalView({
               saveState={saveState}
               showToast={showToast}
               selectedMonth={selectedMonth}
+            />
+          )}
+
+          {/* ── 11. Tab: Work Bylaws ── */}
+          {activeTab === 'bylaws' && (
+            <BylawsModule
+              state={state}
+              setState={setState}
+              saveState={saveState}
+              showToast={showToast}
+              userRole="employee"
+              currentEmpId={emp.id}
             />
           )}
         </div>
