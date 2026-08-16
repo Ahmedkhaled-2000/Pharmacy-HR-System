@@ -96,8 +96,9 @@ export default function BranchManagerView({
   const [selectedPunchEmpId, setSelectedPunchEmpId] = useState('');
   const [showPrintModal, setShowPrintModal] = useState(false);
   
-  // Roster Modal Preview state
+  // Roster & Request Modal Preview states
   const [previewRosterEmp, setPreviewRosterEmp] = useState(null);
+  const [previewModalReq, setPreviewModalReq] = useState(null);
 
   // Propose Employee Adjustment Form state
   const [adjEmpId, setAdjEmpId] = useState('');
@@ -859,16 +860,15 @@ export default function BranchManagerView({
                   <th>التاريخ</th>
                   <th>الموظف</th>
                   <th>نوع الطلب</th>
-                  <th>التفاصيل<br />والسبب</th>
                   <th>موافقتك (مدير الفرع)</th>
                   <th>حالة الإدارة العليا</th>
-                  <th>الإجراء</th>
+                  <th>الإجراءات والمعاينة</th>
                 </tr>
               </thead>
               <tbody>
                 {branchRequests.length === 0 ? (
                   <tr>
-                    <td colSpan="7" style={{ textAlign: 'center', color: 'var(--muted)', padding: '24px' }}>
+                    <td colSpan="6" style={{ textAlign: 'center', color: 'var(--muted)', padding: '24px' }}>
                       لا توجد طلبات لموظفي الفرع في الوقت الحالي.
                     </td>
                   </tr>
@@ -878,30 +878,39 @@ export default function BranchManagerView({
                       <td style={{ fontSize: '12.5px' }}>{r.createdAt ? r.createdAt.slice(0, 10) : r.startDate || '—'}</td>
                       <td style={{ fontWeight: '700' }}>{r.employeeName || 'موظف'}</td>
                       <td>{getFormattedRequestBadge(r.type, r.leaveType)}</td>
-                      <td style={{ fontSize: '13px' }}>{r.reason || r.details || '—'}</td>
                       <td>{getArabicBranchApprovalBadge(r.branchApproved, r.status)}</td>
                       <td>{getArabicStatusBadge(r.status, r.adminApproved, r.branchApproved)}</td>
                       <td>
-                        {(!r.branchApproved && r.status !== 'rejected') ? (
-                          <div style={{ display: 'flex', gap: '6px' }}>
-                            <button
-                              className="btn btn-start"
-                              style={{ padding: '4px 10px', fontSize: '12px' }}
-                              onClick={() => handleManagerApproveRequest(r.id)}
-                            >
-                              ✓ موافقة
-                            </button>
-                            <button
-                              className="btn btn-ghost"
-                              style={{ padding: '4px 10px', fontSize: '12px', color: 'var(--danger)' }}
-                              onClick={() => handleManagerRejectRequest(r.id)}
-                            >
-                              ✕ رفض
-                            </button>
-                          </div>
-                        ) : (
-                          <span style={{ fontSize: '12px', color: 'var(--muted)' }}>—</span>
-                        )}
+                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            style={{ padding: '4px 10px', fontSize: '12px', border: '1px solid var(--border)' }}
+                            onClick={() => setPreviewModalReq(r)}
+                          >
+                            👁️ معاينة الطلب
+                          </button>
+                          {(!r.branchApproved && r.status !== 'rejected') && (
+                            <>
+                              <button
+                                type="button"
+                                className="btn btn-start"
+                                style={{ padding: '4px 10px', fontSize: '12px' }}
+                                onClick={() => handleManagerApproveRequest(r.id)}
+                              >
+                                ✓ موافقة
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-ghost"
+                                style={{ padding: '4px 10px', fontSize: '12px', color: 'var(--danger)' }}
+                                onClick={() => handleManagerRejectRequest(r.id)}
+                              >
+                                ✕ رفض
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -911,6 +920,383 @@ export default function BranchManagerView({
           </div>
         </div>
       )}
+
+      {/* ── Request Details & Preview Modal for Branch Manager ── */}
+      {previewModalReq && (() => {
+        const empObj = (state.employees || []).find(e => String(e.id) === String(previewModalReq.employeeId));
+        const branchObj = (state.branches || []).find(b => b.id === (previewModalReq.branchId || empObj?.branchId));
+        const targetEmpObj = (state.employees || []).find(e => String(e.id) === String(previewModalReq.targetEmpId || previewModalReq.targetEmployeeId || previewModalReq.peerEmployeeId));
+
+        const calculateLeaveDays = () => {
+          if (previewModalReq.daysCount) return previewModalReq.daysCount;
+          if (previewModalReq.days) return previewModalReq.days;
+          if (previewModalReq.startDate && previewModalReq.endDate) {
+            const s = new Date(previewModalReq.startDate);
+            const e = new Date(previewModalReq.endDate);
+            if (!isNaN(s.getTime()) && !isNaN(e.getTime())) {
+              const diff = Math.round((e - s) / (1000 * 60 * 60 * 24)) + 1;
+              return diff > 0 ? diff : 1;
+            }
+          }
+          return 1;
+        };
+
+        const isLeave = ['leave', 'leave_request', 'annual_leave', 'sick_leave', 'emergency_leave', 'unpaid_leave'].includes(previewModalReq.type);
+        const isLoan = ['loan', 'advance', 'meds', 'credit_medicine'].includes(previewModalReq.type);
+        const isPermission = previewModalReq.type === 'permission';
+        const isSwap = ['swap', 'shift_swap', 'shift_edit'].includes(previewModalReq.type);
+        const isPunch = ['punch_correction', 'تأكيد بصمة الوجه', 'تأكيد بصمة اليد'].includes(previewModalReq.type);
+        const isPenalty = previewModalReq.type === 'penalty';
+        const isRoster = ['roster_update', 'roster_edit', 'roster_edit_request'].includes(previewModalReq.type);
+
+        const totalAmount = parseFloat(previewModalReq.amount) || 0;
+        const monthlyDed = parseFloat(previewModalReq.monthlyDeduction || previewModalReq.installmentAmount) || 0;
+        const isInstallment = previewModalReq.loanType === 'installments' || previewModalReq.isInstallment || (monthlyDed > 0 && monthlyDed < totalAmount) || (parseInt(previewModalReq.installmentsCount, 10) > 1);
+        const installmentsCount = previewModalReq.installmentsCount || previewModalReq.monthsCount || (monthlyDed > 0 ? Math.ceil(totalAmount / monthlyDed) : 1);
+        const isBranchNotReq = previewModalReq.targetApproval === 'admin_only' || previewModalReq.targetApproval === 'admin' || isLoan || previewModalReq.branchNotRequired || previewModalReq.isDirectToAdmin;
+
+        return (
+          <div className="modal-overlay" onClick={() => setPreviewModalReq(null)} style={{ zIndex: 1100 }}>
+            <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '750px', width: '92%', maxHeight: '90vh', overflowY: 'auto', padding: '24px', borderRadius: '16px', border: '1px solid var(--border)' }}>
+              
+              {/* Modal Top Header */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', borderBottom: '2px solid var(--border)', paddingBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ fontSize: '24px' }}>👁️</span>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '18px', color: 'var(--primary-dark)', fontWeight: 'bold' }}>
+                      تفاصيل ومعاينة الطلب الكاملة
+                    </h3>
+                    <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                      معرف الطلب: #{previewModalReq.id}
+                    </span>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {getFormattedRequestBadge(previewModalReq.type, previewModalReq.leaveType)}
+                  <button className="btn btn-ghost" style={{ padding: '6px 12px', fontSize: '14px' }} onClick={() => setPreviewModalReq(null)}>✕ إغلاق</button>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', fontSize: '13.5px' }}>
+                
+                {/* 1. Employee Info Card */}
+                <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                  <h4 style={{ margin: '0 0 12px', color: '#1e293b', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    👤 بيانات الموظف ومقدم الطلب:
+                  </h4>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' }}>
+                    <div>
+                      <span style={{ color: 'var(--muted)', fontSize: '12px' }}>اسم الموظف:</span>
+                      <div style={{ fontWeight: 'bold', color: 'var(--text)', fontSize: '14px' }}>
+                        {previewModalReq.employeeName || empObj?.name || 'غير معروف'}
+                      </div>
+                    </div>
+                    <div>
+                      <span style={{ color: 'var(--muted)', fontSize: '12px' }}>الكود الوظيفي:</span>
+                      <div style={{ fontWeight: 'bold', color: 'var(--text)' }}>
+                        {previewModalReq.employeeCode || empObj?.code || '—'}
+                      </div>
+                    </div>
+                    <div>
+                      <span style={{ color: 'var(--muted)', fontSize: '12px' }}>الفرع:</span>
+                      <div style={{ fontWeight: 'bold', color: 'var(--text)' }}>
+                        🏢 {branchObj?.name ? `فرع ${branchObj.name}` : (currentBranch?.name ? `فرع ${currentBranch.name}` : 'الفرع')}
+                      </div>
+                    </div>
+                    <div>
+                      <span style={{ color: 'var(--muted)', fontSize: '12px' }}>المسمى الوظيفي:</span>
+                      <div style={{ fontWeight: 'bold', color: 'var(--text)' }}>
+                        💼 {empObj?.jobTitle || 'كادر وظيفي'}
+                      </div>
+                    </div>
+                    <div>
+                      <span style={{ color: 'var(--muted)', fontSize: '12px' }}>تاريخ ووقت الإرسال:</span>
+                      <div style={{ fontWeight: 'bold', color: 'var(--primary-dark)' }}>
+                        📅 {previewModalReq.createdAt ? previewModalReq.createdAt.slice(0, 10) : previewModalReq.date || '—'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. Approvals Status Bar */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px' }}>
+                  <div style={{ background: '#fff', padding: '12px 16px', borderRadius: '10px', border: '1px solid var(--border)' }}>
+                    <span style={{ fontSize: '12px', color: 'var(--muted)' }}>موقف موافقتك (مدير الفرع):</span>
+                    <div style={{ marginTop: '4px', fontWeight: 'bold', fontSize: '13.5px' }}>
+                      {isBranchNotReq ? (
+                        <span style={{ color: '#475569' }}>🔒 موجهة للإدارة العليا مباشرة</span>
+                      ) : previewModalReq.branchApproved ? (
+                        <span style={{ color: '#16a34a' }}>🟢 معتمد وموافق عليه من طرفك</span>
+                      ) : (
+                        <span style={{ color: '#d97706' }}>⏳ بانتظار قرارك واعتمادك</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={{ background: '#fff', padding: '12px 16px', borderRadius: '10px', border: '1px solid var(--border)' }}>
+                    <span style={{ fontSize: '12px', color: 'var(--muted)' }}>موقف اعتماد الإدارة العليا:</span>
+                    <div style={{ marginTop: '4px', fontWeight: 'bold', fontSize: '13.5px' }}>
+                      {previewModalReq.status === 'approved' ? (
+                        <span style={{ color: '#16a34a' }}>🟢 معتمد نهائياً ومطبق بالنظام</span>
+                      ) : previewModalReq.status === 'rejected' ? (
+                        <span style={{ color: '#dc2626' }}>🔴 مرفوض من الإدارة</span>
+                      ) : (
+                        <span style={{ color: '#d97706' }}>🟡 بانتظار قرار واعتماد الإدارة العليا</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. Type-Specific Details */}
+                {/* ── LEAVE DETAILS ── */}
+                {isLeave && (
+                  <div style={{ background: '#f0fdf4', padding: '16px', borderRadius: '12px', border: '1px solid #bbf7d0' }}>
+                    <h4 style={{ margin: '0 0 10px', color: '#166534', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      🏖️ تفاصيل الإجازة المطلوبة:
+                    </h4>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#166534' }}>نوع الإجازة:</span>
+                        <div style={{ fontWeight: 'bold', color: '#14532d', fontSize: '14px' }}>
+                          {previewModalReq.leaveType === 'annual' ? 'إجازة سنوية اعتيادية' : previewModalReq.leaveType === 'sick' ? 'إجازة مرضية' : previewModalReq.leaveType === 'unpaid' ? 'إجازة بدون أجر' : 'إجازة رسمية'}
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#166534' }}>تاريخ البدء:</span>
+                        <div style={{ fontWeight: 'bold', color: '#14532d' }}>
+                          📅 {previewModalReq.startDate || '—'} {previewModalReq.startDate && `(${getArabicWeekday(previewModalReq.startDate)})`}
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#166534' }}>تاريخ الانتهاء:</span>
+                        <div style={{ fontWeight: 'bold', color: '#14532d' }}>
+                          📅 {previewModalReq.endDate || '—'} {previewModalReq.endDate && `(${getArabicWeekday(previewModalReq.endDate)})`}
+                        </div>
+                      </div>
+                      <div style={{ background: '#dcfce7', padding: '8px 12px', borderRadius: '8px', border: '1px solid #86efac' }}>
+                        <span style={{ fontSize: '12px', color: '#166534', fontWeight: 'bold' }}>إجمالي عدد أيام الإجازة:</span>
+                        <div style={{ fontWeight: '900', color: '#15803d', fontSize: '16px' }}>
+                          ⏱️ {calculateLeaveDays()} أيام
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── LOAN / ADVANCE / MEDS DETAILS ── */}
+                {isLoan && (
+                  <div style={{ background: '#eff6ff', padding: '16px', borderRadius: '12px', border: '1px solid #bfdbfe' }}>
+                    <h4 style={{ margin: '0 0 10px', color: '#1e40af', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      💳 تفاصيل السلفة / الدواء الآجل:
+                    </h4>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+                      <div style={{ background: '#dbeafe', padding: '10px 14px', borderRadius: '8px', border: '1px solid #93c5fd' }}>
+                        <span style={{ fontSize: '12px', color: '#1e40af', fontWeight: 'bold' }}>إجمالي المبلغ المطلوب:</span>
+                        <div style={{ fontWeight: '900', color: '#1d4ed8', fontSize: '17px' }}>
+                          💰 {totalAmount} ج.م
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#1e40af' }}>نظام السداد والخصم:</span>
+                        <div style={{ fontWeight: 'bold', color: '#1e3a8a', fontSize: '13.5px' }}>
+                          {isInstallment ? '📆 سلفة مقسطة على عدة شهور' : '💵 سلفة شهرية (خصم دفعة واحدة)'}
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#1e40af' }}>عدد الأقساط الشهرية:</span>
+                        <div style={{ fontWeight: 'bold', color: '#1e3a8a' }}>
+                          {installmentsCount} شهر / قسط
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#1e40af' }}>قيمة الخصم الشهري (القسط):</span>
+                        <div style={{ fontWeight: 'bold', color: '#1d4ed8', fontSize: '14px' }}>
+                          {monthlyDed > 0 ? `${monthlyDed} ج.م / شهر` : `${totalAmount} ج.م`}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── PERMISSION DETAILS ── */}
+                {isPermission && (
+                  <div style={{ background: '#fffbeb', padding: '16px', borderRadius: '12px', border: '1px solid #fde68a' }}>
+                    <h4 style={{ margin: '0 0 10px', color: '#92400e', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      ⏰ تفاصيل إذن الخروج / التأخير:
+                    </h4>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#92400e' }}>يوم وتاريخ الإذن:</span>
+                        <div style={{ fontWeight: 'bold', color: '#78350f' }}>
+                          📅 {previewModalReq.date || previewModalReq.startDate || '—'} { (previewModalReq.date || previewModalReq.startDate) && `(${getArabicWeekday(previewModalReq.date || previewModalReq.startDate)})` }
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#92400e' }}>فترة الإذن بالساعات:</span>
+                        <div style={{ fontWeight: 'bold', color: '#78350f', fontSize: '14px' }}>
+                          من <strong>{previewModalReq.startTime || previewModalReq.fromTime || '09:00'}</strong> إلى <strong>{previewModalReq.endTime || previewModalReq.toTime || '17:00'}</strong>
+                        </div>
+                      </div>
+                      <div style={{ background: '#fef3c7', padding: '8px 12px', borderRadius: '8px', border: '1px solid #fcd34d' }}>
+                        <span style={{ fontSize: '12px', color: '#92400e', fontWeight: 'bold' }}>إجمالي عدد الساعات:</span>
+                        <div style={{ fontWeight: '900', color: '#b45309', fontSize: '16px' }}>
+                          ⏱️ {previewModalReq.hours || '—'} ساعة
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── SHIFT SWAP DETAILS ── */}
+                {isSwap && (
+                  <div style={{ background: '#f5f3ff', padding: '16px', borderRadius: '12px', border: '1px solid #ddd6fe' }}>
+                    <h4 style={{ margin: '0 0 10px', color: '#5b21b6', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      🔄 تفاصيل تبديل الشيفت والراحات بين الموظفين:
+                    </h4>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px' }}>
+                      <div style={{ background: '#fff', padding: '12px', borderRadius: '10px', border: '1px solid #c4b5fd' }}>
+                        <span style={{ fontSize: '12px', color: '#5b21b6', fontWeight: 'bold' }}>1. الموظف الطالب (الطرف الأول):</span>
+                        <div style={{ fontWeight: 'bold', color: '#4c1d95', marginTop: '2px' }}>
+                          {previewModalReq.employeeName || empObj?.name || 'مقدم الطلب'} {empObj?.code ? `(كود: ${empObj.code})` : ''}
+                        </div>
+                        <div style={{ fontSize: '13px', color: '#6d28d9', marginTop: '4px' }}>
+                          📅 تاريخ شيفت الموظف: <strong>{previewModalReq.requesterDate || previewModalReq.startDate || previewModalReq.date || '—'}</strong> { (previewModalReq.requesterDate || previewModalReq.startDate || previewModalReq.date) && `(${getArabicWeekday(previewModalReq.requesterDate || previewModalReq.startDate || previewModalReq.date)})` }
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#fff', padding: '12px', borderRadius: '10px', border: '1px solid #c4b5fd' }}>
+                        <span style={{ fontSize: '12px', color: '#5b21b6', fontWeight: 'bold' }}>2. الزميل البديل (الطرف الثاني):</span>
+                        <div style={{ fontWeight: 'bold', color: '#4c1d95', marginTop: '2px' }}>
+                          {previewModalReq.targetEmpName || targetEmpObj?.name || 'الزميل البديل'} {targetEmpObj?.code ? `(كود: ${targetEmpObj.code})` : ''}
+                        </div>
+                        <div style={{ fontSize: '13px', color: '#6d28d9', marginTop: '4px' }}>
+                          📅 تاريخ شيفت الزميل: <strong>{previewModalReq.targetDate || previewModalReq.peerDate || '—'}</strong> { (previewModalReq.targetDate || previewModalReq.peerDate) && `(${getArabicWeekday(previewModalReq.targetDate || previewModalReq.peerDate)})` }
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── PUNCH CORRECTION DETAILS ── */}
+                {isPunch && (
+                  <div style={{ background: '#fdf2f8', padding: '16px', borderRadius: '12px', border: '1px solid #fbcfe8' }}>
+                    <h4 style={{ margin: '0 0 10px', color: '#9d174d', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      📸 تفاصيل بصمة الوجه / الحضور:
+                    </h4>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#9d174d' }}>نوع العملية:</span>
+                        <div style={{ fontWeight: 'bold', color: '#831843' }}>
+                          {previewModalReq.targetAction === 'shift_start' ? 'تسجيل بداية وردية (حضور)' : previewModalReq.targetAction === 'shift_end' ? 'تسجيل نهاية وردية (انصراف)' : previewModalReq.targetAction === 'break_start' ? 'بدء استراحة' : previewModalReq.targetAction === 'break_end' ? 'عودة من استراحة' : 'بصمة حضور وانصراف'}
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#9d174d' }}>توقيت التقاط البصمة:</span>
+                        <div style={{ fontWeight: 'bold', color: '#831843' }}>
+                          ⏰ {previewModalReq.time || (previewModalReq.createdAt ? previewModalReq.createdAt.slice(11, 16) : '—')}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── PENALTY DETAILS ── */}
+                {isPenalty && (
+                  <div style={{ background: '#fef2f2', padding: '16px', borderRadius: '12px', border: '1px solid #fecaca' }}>
+                    <h4 style={{ margin: '0 0 10px', color: '#991b1b', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      ⚠️ تفاصيل الخصم / الجزاء الإداري:
+                    </h4>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#991b1b' }}>نوع البند:</span>
+                        <div style={{ fontWeight: 'bold', color: '#7f1d1d' }}>
+                          {previewModalReq.subType === 'lateness' ? '🏃‍♂️ تأخير عن موعد العمل المجدول' : 'مخالفة لائحة'}
+                        </div>
+                      </div>
+                      {previewModalReq.latenessMinutes && (
+                        <div>
+                          <span style={{ fontSize: '12px', color: '#991b1b' }}>مدة التأخير:</span>
+                          <div style={{ fontWeight: 'bold', color: '#7f1d1d' }}>
+                            ⏱️ {previewModalReq.latenessMinutes} دقيقة
+                          </div>
+                        </div>
+                      )}
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#991b1b' }}>مبلغ الخصم المقترح:</span>
+                        <div style={{ fontWeight: '900', color: '#b91c1c', fontSize: '16px' }}>
+                          💸 {previewModalReq.amount || '0'} ج.م
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 4. Reason & Notes Card */}
+                <div style={{ background: '#fff', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>
+                  <h4 style={{ margin: '0 0 8px', color: 'var(--primary-dark)', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    📝 شرح الطلب والسبب المذكور:
+                  </h4>
+                  <div style={{ lineHeight: 1.7, color: '#334155', background: '#f8fafc', padding: '12px 14px', borderRadius: '8px', border: '1px solid #e2e8f0', whiteSpace: 'pre-wrap' }}>
+                    {previewModalReq.reason || previewModalReq.details || previewModalReq.notes || previewModalReq.subject || 'لا يوجد شرح أو سبب إضافي مذكور'}
+                  </div>
+
+                  {previewModalReq.photoUrl && (
+                    <div style={{ marginTop: '14px' }}>
+                      <h5 style={{ margin: '0 0 8px', fontSize: '13px', color: 'var(--primary)' }}>📷 المرفقات والصور المسجلة:</h5>
+                      <div style={{ textAlign: 'center', background: '#000', padding: '8px', borderRadius: '8px' }}>
+                        <img src={previewModalReq.photoUrl} alt="صورة المرفق" style={{ maxWidth: '100%', maxHeight: '280px', objectFit: 'contain', borderRadius: '6px' }} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Modal Actions */}
+              <div style={{ marginTop: '22px', display: 'flex', justifyContent: 'flex-end', gap: '10px', borderTop: '1px solid var(--border)', paddingTop: '16px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ padding: '8px 18px', fontSize: '13px' }}
+                  onClick={() => setPreviewModalReq(null)}
+                >
+                  إغلاق النافذة
+                </button>
+
+                {(!previewModalReq.branchApproved && previewModalReq.status !== 'rejected') && (
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="btn btn-start"
+                      style={{ padding: '8px 20px', fontSize: '13.5px' }}
+                      onClick={async () => {
+                        const id = previewModalReq.id;
+                        setPreviewModalReq(null);
+                        await handleManagerApproveRequest(id);
+                      }}
+                    >
+                      ✓ موافقة واعتماد مدير الفرع
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      style={{ padding: '8px 18px', fontSize: '13.5px', color: 'var(--danger)', border: '1px solid var(--danger)' }}
+                      onClick={async () => {
+                        const id = previewModalReq.id;
+                        setPreviewModalReq(null);
+                        await handleManagerRejectRequest(id);
+                      }}
+                    >
+                      ✕ رفض الطلب
+                    </button>
+                  </div>
+                )}
+              </div>
+
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ───────────────────────────────────────────────────────────── */}
       {/* ── 3. BRANCH ROSTER TAB (With Preview Modal) ── */}
