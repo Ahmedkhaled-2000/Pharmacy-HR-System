@@ -1,40 +1,37 @@
 /**
  * offlineSync.js
- * مزامنة ودمج البيانات بذكاء مع Supabase لحماية البيانات من التداخل والمسح بين الأجهزة
+ * مزامنة ودمج البيانات بذكاء مع MariaDB & PHP API لحماية البيانات من التداخل والمسح بين الأجهزة
  */
 
-import { db, STORAGE_KEY } from './supabaseClient';
+import {
+  STORAGE_KEY,
+  apiFetchSettings,
+  apiSaveSettings,
+} from './apiClient';
 import {
   saveStateLocally,
   loadStateLocally,
   addToPendingQueue,
-  getPendingQueue,
-  removePendingItem,
-  clearPendingQueue
+  clearPendingQueue,
 } from './offlineStorage';
 import { smartMergeStates } from './stateMerger';
 import { normalizeState } from './formatters';
 
 // ── حالة الاتصال ─────────────────────────────────────────────────────────
 export function isOnline() {
-  return navigator.onLine;
+  return typeof navigator !== 'undefined' ? navigator.onLine : true;
 }
 
-// ── جلب أحدث نسخة سحابية من Supabase ──────────────────────────────────────
+// ── جلب أحدث نسخة سحابية من MariaDB عبر PHP API ──────────────────────────
 export async function fetchRemoteState() {
   try {
-    const { data, error } = await db
-      .from('app_settings')
-      .select('value')
-      .eq('key', STORAGE_KEY)
-      .single();
-
-    if (!error && data?.value) {
-      const raw = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
-      return normalizeState(raw);
+    const rawData = await apiFetchSettings(STORAGE_KEY);
+    if (rawData) {
+      const parsed = typeof rawData === 'string' ? JSON.parse(rawData) : rawData;
+      return normalizeState(parsed);
     }
   } catch (e) {
-    console.warn('[Sync] Failed to fetch remote state:', e);
+    console.warn('[Sync] Failed to fetch remote state from MariaDB API:', e);
   }
   return null;
 }
@@ -42,7 +39,6 @@ export async function fetchRemoteState() {
 // ── حفظ الحالة بدمج ذكي يمنع مسح طلبات الأجهزة الأخرى ───────────────────
 export async function smartSaveState(updatedState, options = {}) {
   const { onSyncSuccess, onSyncFail, onQueuedOffline } = options;
-
   const cleanUpdated = normalizeState(updatedState);
 
   // 1. حفظ محلي فوري دائماً للنسخ الاحتياطي
@@ -52,20 +48,17 @@ export async function smartSaveState(updatedState, options = {}) {
     try {
       // 2. جلب أحدث نسخة سحابية حالياً لدمجها قبل الكتابة
       const remoteState = await fetchRemoteState();
-      
+
       // 3. تطبيق خوارزمية الدمج الذكي لحفظ كل بيانات الأجهزة الأخرى
-      const finalStateToSave = remoteState ? normalizeState(smartMergeStates(cleanUpdated, remoteState)) : cleanUpdated;
+      const finalStateToSave = remoteState
+        ? normalizeState(smartMergeStates(cleanUpdated, remoteState))
+        : cleanUpdated;
 
-      // 4. حفظ النسخة المدمجة في Supabase
-      const { error } = await db
-        .from('app_settings')
-        .upsert({ key: STORAGE_KEY, value: finalStateToSave });
+      // 4. حفظ النسخة المدمجة في MariaDB
+      const res = await apiSaveSettings(STORAGE_KEY, finalStateToSave);
 
-      if (error) {
-        console.error('[Sync] Supabase upsert error:', error);
-        await addToPendingQueue({ type: 'SAVE_STATE', state: updatedState });
-        onSyncFail?.(error.message);
-        return { success: false, queued: false, error: error.message, mergedState: updatedState };
+      if (!res?.success) {
+        throw new Error(res?.error || 'Failed to save to MariaDB');
       }
 
       // 5. تحديث النسخة المحلية بالنسخة المدمجة
@@ -73,7 +66,7 @@ export async function smartSaveState(updatedState, options = {}) {
       onSyncSuccess?.(finalStateToSave);
       return { success: true, queued: false, mergedState: finalStateToSave };
     } catch (e) {
-      console.error('[Sync] Network error during save:', e);
+      console.error('[Sync] Network/Server error during save:', e);
       await addToPendingQueue({ type: 'SAVE_STATE', state: updatedState });
       onSyncFail?.(e.message);
       return { success: false, queued: false, error: e.message, mergedState: updatedState };
@@ -83,7 +76,7 @@ export async function smartSaveState(updatedState, options = {}) {
     console.log('[Sync] Offline - state saved locally, will merge & sync when online');
     await addToPendingQueue({ type: 'SAVE_STATE', state: updatedState });
     onQueuedOffline?.();
-    
+
     if ('serviceWorker' in navigator && 'SyncManager' in window) {
       try {
         const registration = await navigator.serviceWorker.ready;
@@ -104,7 +97,7 @@ export async function syncNow(onProgress) {
   }
 
   try {
-    onProgress?.('جاري المزامنة والدمج الذكي...');
+    onProgress?.('جاري المزامنة والدمج الذكي مع قاعدة البيانات...');
     const localState = await loadStateLocally();
 
     if (!localState) {
@@ -115,13 +108,9 @@ export async function syncNow(onProgress) {
     const remoteState = await fetchRemoteState();
     const mergedState = remoteState ? smartMergeStates(localState, remoteState) : localState;
 
-    const { error } = await db
-      .from('app_settings')
-      .upsert({ key: STORAGE_KEY, value: mergedState });
-
-    if (error) {
-      console.error('[Sync] Manual sync error:', error);
-      return { success: false, reason: error.message };
+    const res = await apiSaveSettings(STORAGE_KEY, mergedState);
+    if (!res?.success) {
+      throw new Error(res?.error || 'Manual sync save failed');
     }
 
     await saveStateLocally(mergedState);

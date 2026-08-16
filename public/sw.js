@@ -39,11 +39,11 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Skip non-GET, chrome-extension, supabase API, and non-same-origin
+  // Skip non-GET, chrome-extension, API endpoints, and external services
   if (
     request.method !== 'GET' ||
     url.protocol === 'chrome-extension:' ||
-    url.hostname.includes('supabase.co') ||
+    url.pathname.startsWith('/api') ||
     url.hostname.includes('googleapis.com') ||
     url.hostname.includes('fonts.gstatic.com')
   ) {

@@ -747,43 +747,7 @@ export default function EmployeePortalView({
   //  Conditional Renders
   // ─────────────────────────────────────────
   if (!currentEmpUser || !emp) {
-    return (
-      <div className="employee-view fade-in">
-        <div className="emp-login-container card">
-          <div className="emp-login-head">
-            <div className="user-icon">👤</div>
-            <h2>بوابة الموظف الذاتية</h2>
-            <p>أدخل كود الموظف وكلمة السر الخاصة بك لمتابعة البصمات والرواتب</p>
-          </div>
-
-          <form onSubmit={handleEmpLogin} className="emp-login-form">
-            <div className="field">
-              <label>كود الموظف أو اسم المستخدم</label>
-              <input
-                type="text"
-                placeholder="مثال: 101"
-                value={empLoginCode}
-                onChange={(e) => setEmpLoginCode(e.target.value)}
-                required
-              />
-            </div>
-            <div className="field">
-              <label>كلمة السر</label>
-              <input
-                type="password"
-                placeholder="••••••••"
-                value={empLoginPassword}
-                onChange={(e) => setEmpLoginPassword(e.target.value)}
-                required
-              />
-            </div>
-            <button type="submit" className="btn btn-start" style={{ width: '100%', marginTop: '10px' }}>
-              تسجيل الدخول لبوابة الموظف
-            </button>
-          </form>
-        </div>
-      </div>
-    );
+    return null;
   }
 
   // ── Pre-entry Branch Selection Screen ──

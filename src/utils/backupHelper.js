@@ -1,4 +1,4 @@
-import { db } from './supabaseClient';
+import { apiFetchFaces, apiSaveFace } from './apiClient';
 import { saveBackupSnapshot, getBackupSnapshots, deleteBackupSnapshot } from './offlineStorage';
 
 // Directory handle stored in memory for the active browser session
@@ -112,17 +112,18 @@ export const saveAutoBackupOnModification = async (currentState, trigger = 'تع
 // تصدير نسخة احتياطية يدوية كاملة كملف JSON
 export const exportFullBackup = async (currentState) => {
   try {
-    // 1. Fetch employee faces/hands
+    // 1. Fetch employee faces/hands from MariaDB API
     let facesData = [];
     try {
-      const { data, error } = await db.from('employee_faces').select('*');
-      if (!error && data) facesData = data;
+      const data = await apiFetchFaces();
+      if (Array.isArray(data)) facesData = data;
     } catch {}
 
     // 2. Create the backup object
     const backupObj = {
       timestamp: new Date().toISOString(),
       version: '2.0',
+      database: 'MariaDB 10.11',
       appState: currentState,
       employeeFaces: facesData || []
     };
@@ -159,15 +160,18 @@ export const restoreFullBackup = async (fileContent, setState, saveState) => {
     if (setState) setState(targetState);
     if (saveState) await saveState(targetState);
 
-    // 2. Restore Employee Faces (Biometrics)
+    // 2. Restore Employee Faces (Biometrics) to MariaDB
     if (backupObj.employeeFaces && backupObj.employeeFaces.length > 0) {
       for (const faceRec of backupObj.employeeFaces) {
-        const payload = { employee_id: faceRec.employee_id };
-        if (faceRec.descriptor) payload.descriptor = faceRec.descriptor;
-        if (faceRec.hand_descriptor) payload.hand_descriptor = faceRec.hand_descriptor;
+        if (!faceRec.employee_id) continue;
+        const payload = {
+          descriptor: faceRec.descriptor || null,
+          hand_descriptor: faceRec.hand_descriptor || null,
+          biometric_type: faceRec.biometric_type || 'face',
+        };
         
         try {
-          await db.from('employee_faces').upsert(payload, { onConflict: 'employee_id' });
+          await apiSaveFace(faceRec.employee_id, payload);
         } catch {}
       }
     }

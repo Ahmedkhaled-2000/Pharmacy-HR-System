@@ -1,29 +1,26 @@
-import { db } from './supabaseClient';
+/**
+ * faceStorage.js
+ * تخزين وإدارة بصمات الوجه واليد الحيوية في MariaDB عبر PHP API
+ */
+
+import { apiFetchFaces, apiSaveFace, apiDeleteFace } from './apiClient';
 
 /**
- * حفظ بصمة وجه الموظف في الجدول المخصص مع استخدام upsert بدلاً من update/insert التكيفي
+ * حفظ بصمة وجه الموظف في MariaDB
  * @param {string} employeeId - معرّف الموظف
  * @param {Float32Array|Array} descriptorArray - مصفوفة بصمة الوجه
  */
 export async function saveFaceDescriptor(employeeId, descriptorArray) {
   try {
-    const descriptor = Array.from(descriptorArray); 
-    
-    // Supabase upsert: تحديث إذا كان موجوداً وإلا إدراج سجل جديد بأمان
-    const { error } = await db
-      .from('employee_faces')
-      .upsert(
-        { 
-          employee_id: employeeId, 
-          descriptor: descriptor, 
-          updated_at: new Date().toISOString() 
-        },
-        { onConflict: 'employee_id' }
-      );
+    const descriptor = Array.from(descriptorArray);
+    const res = await apiSaveFace(employeeId, {
+      descriptor,
+      biometric_type: 'face',
+    });
 
-    if (error) {
-      console.warn('[FaceStorage] Supabase upsert error for face descriptor:', error);
-      return { success: false, error: error.message };
+    if (!res?.success) {
+      console.warn('[FaceStorage] API error for face descriptor:', res?.error);
+      return { success: false, error: res?.error };
     }
 
     return { success: true };
@@ -34,26 +31,13 @@ export async function saveFaceDescriptor(employeeId, descriptorArray) {
 }
 
 /**
- * جلب بصمة وجه الموظف من الجدول المخصص
+ * جلب بصمة وجه الموظف من MariaDB
  * @param {string} employeeId - معرّف الموظف
  * @returns {Float32Array|null} - مصفوفة بصمة الوجه أو null
  */
 export async function loadFaceDescriptor(employeeId) {
   try {
-    const { data, error } = await db
-      .from('employee_faces')
-      .select('descriptor')
-      .eq('employee_id', employeeId)
-      .single();
-
-    if (error) {
-      if (error.code === 'PGRST116') {
-        return null;
-      }
-      console.error('[FaceStorage] Error loading face descriptor:', error);
-      return null;
-    }
-
+    const data = await apiFetchFaces(employeeId);
     if (data && data.descriptor) {
       return new Float32Array(data.descriptor);
     }
@@ -65,29 +49,21 @@ export async function loadFaceDescriptor(employeeId) {
 }
 
 /**
- * حفظ بصمة يد الموظف في الجدول المخصص مع استخدام upsert
+ * حفظ بصمة يد الموظف في MariaDB
  * @param {string} employeeId - معرّف الموظف
  * @param {Array} descriptorArray - مصفوفة بصمة اليد
  */
 export async function saveHandDescriptor(employeeId, descriptorArray) {
   try {
-    const descriptor = Array.from(descriptorArray); 
-    
-    // Supabase upsert: تحديث أو إدراج تلقائي في كويري واحد
-    const { error } = await db
-      .from('employee_faces')
-      .upsert(
-        { 
-          employee_id: employeeId, 
-          hand_descriptor: descriptor, 
-          updated_at: new Date().toISOString() 
-        },
-        { onConflict: 'employee_id' }
-      );
+    const descriptor = Array.from(descriptorArray);
+    const res = await apiSaveFace(employeeId, {
+      hand_descriptor: descriptor,
+      biometric_type: 'hand',
+    });
 
-    if (error) {
-      console.warn('[FaceStorage] Supabase upsert error for hand descriptor:', error);
-      return { success: false, error: error.message };
+    if (!res?.success) {
+      console.warn('[FaceStorage] API error for hand descriptor:', res?.error);
+      return { success: false, error: res?.error };
     }
 
     return { success: true };
@@ -98,22 +74,11 @@ export async function saveHandDescriptor(employeeId, descriptorArray) {
 }
 
 /**
- * جلب بصمة يد الموظف
+ * جلب بصمة يد الموظف من MariaDB
  */
 export async function loadHandDescriptor(employeeId) {
   try {
-    const { data, error } = await db
-      .from('employee_faces')
-      .select('hand_descriptor')
-      .eq('employee_id', employeeId)
-      .single();
-
-    if (error) {
-      if (error.code === 'PGRST116') return null;
-      console.error('[FaceStorage] Error loading hand descriptor:', error);
-      return null;
-    }
-
+    const data = await apiFetchFaces(employeeId);
     if (data && data.hand_descriptor) {
       return data.hand_descriptor;
     }
@@ -125,18 +90,16 @@ export async function loadHandDescriptor(employeeId) {
 }
 
 /**
- * حذف بصمة وجه الموظف من الجدول المخصص
+ * حذف بصمة وجه الموظف
  */
 export async function deleteFaceDescriptor(employeeId) {
   try {
-    const { error } = await db
-      .from('employee_faces')
-      .update({ descriptor: null })
-      .eq('employee_id', employeeId);
-
-    if (error) {
-      console.error('[FaceStorage] Error deleting face descriptor:', error);
-      return { success: false, error: error.message };
+    const existing = await apiFetchFaces(employeeId);
+    if (existing) {
+      await apiSaveFace(employeeId, {
+        descriptor: null,
+        hand_descriptor: existing.hand_descriptor || null,
+      });
     }
     return { success: true };
   } catch (err) {
@@ -146,22 +109,33 @@ export async function deleteFaceDescriptor(employeeId) {
 }
 
 /**
- * حذف بصمة يد الموظف من الجدول المخصص
+ * حذف بصمة يد الموظف
  */
 export async function deleteHandDescriptor(employeeId) {
   try {
-    const { error } = await db
-      .from('employee_faces')
-      .update({ hand_descriptor: null })
-      .eq('employee_id', employeeId);
-
-    if (error) {
-      console.error('[FaceStorage] Error deleting hand descriptor:', error);
-      return { success: false, error: error.message };
+    const existing = await apiFetchFaces(employeeId);
+    if (existing) {
+      await apiSaveFace(employeeId, {
+        descriptor: existing.descriptor || null,
+        hand_descriptor: null,
+      });
     }
     return { success: true };
   } catch (err) {
     console.error('[FaceStorage] Exception deleting hand descriptor:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * حذف كافة البيانات الحيوية للموظف (وجه + يد)
+ */
+export async function deleteBiometricData(employeeId) {
+  try {
+    await apiDeleteFace(employeeId);
+    return { success: true };
+  } catch (err) {
+    console.error('[FaceStorage] Exception deleting biometrics:', err);
     return { success: false, error: err.message };
   }
 }

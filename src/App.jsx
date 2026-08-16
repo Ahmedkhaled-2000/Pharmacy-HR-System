@@ -3,7 +3,13 @@ import { Routes, Route, useLocation, useNavigate, Navigate } from 'react-router-
 import QRCode from 'qrcode';
 
 // Utilities & Hooks
-import { db, STORAGE_KEY, WORK_DAYS_PER_MONTH, WORK_HOURS_PER_DAY } from './utils/supabaseClient';
+import {
+  STORAGE_KEY,
+  WORK_DAYS_PER_MONTH,
+  WORK_HOURS_PER_DAY,
+  apiFetchSettings,
+  apiFetchVersion,
+} from './utils/apiClient';
 import {
   arabicMonthLabel,
   arabicWeekday,
@@ -1971,7 +1977,7 @@ export default function App() {
     return unsubscribe;
   }, []);
 
-  // Cloud Synchronization (Fast Polling + Realtime + Smart Merge)
+  // Cloud Synchronization with MariaDB (Smart Version Polling & Smart Merge)
   useEffect(() => {
     const applyRemoteData = (remoteData) => {
       const parsed = typeof remoteData === 'string' ? JSON.parse(remoteData) : remoteData;
@@ -1987,38 +1993,29 @@ export default function App() {
       });
     };
 
+    let lastKnownVersion = 0;
+
     const poll = async () => {
       try {
-        setIsSyncing(true);
-        const { data, error } = await db
-          .from('app_settings')
-          .select('value')
-          .eq('key', STORAGE_KEY)
-          .single();
-        setIsSyncing(false);
-        if (!error && data && data.value) {
-          applyRemoteData(data.value);
+        const versionRes = await apiFetchVersion(STORAGE_KEY);
+        if (versionRes && typeof versionRes.version === 'number') {
+          if (versionRes.version !== lastKnownVersion || lastKnownVersion === 0) {
+            lastKnownVersion = versionRes.version;
+            setIsSyncing(true);
+            const remoteData = await apiFetchSettings(STORAGE_KEY);
+            setIsSyncing(false);
+            if (remoteData) {
+              applyRemoteData(remoteData);
+            }
+          }
         }
       } catch {
         setIsSyncing(false);
       }
     };
 
-    // Polling every 12 seconds for responsive multi-device synchronization
-    const pollInterval = setInterval(poll, 12000);
-
-    const channel = db
-      .channel('app_settings_realtime')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'app_settings', filter: `key=eq.${STORAGE_KEY}` },
-        (payload) => {
-          if (payload.new && payload.new.value) {
-            applyRemoteData(payload.new.value);
-          }
-        }
-      )
-      .subscribe();
+    // Polling every 8 seconds for responsive multi-device synchronization with MariaDB API
+    const pollInterval = setInterval(poll, 8000);
 
     const handleFocusOrVisible = () => {
       if (document.visibilityState === 'visible' || document.hasFocus()) {
@@ -2032,7 +2029,6 @@ export default function App() {
 
     return () => {
       clearInterval(pollInterval);
-      db.removeChannel(channel);
       window.removeEventListener('focus', handleFocusOrVisible);
       window.removeEventListener('online', handleFocusOrVisible);
       document.removeEventListener('visibilitychange', handleFocusOrVisible);
@@ -2051,8 +2047,8 @@ export default function App() {
         }
       },
       onSyncFail: (msg) => {
-        console.error('Supabase write error:', msg);
-        showToast('⚠️ تعذر الحفظ في السحابة، تم الحفظ محلياً');
+        console.error('Database write error:', msg);
+        showToast('⚠️ تعذر الحفظ في قاعدة البيانات السحابية، تم الحفظ محلياً');
       },
       onQueuedOffline: async () => {
         const count = await getPendingCount();
@@ -3584,9 +3580,9 @@ export default function App() {
         <Route path="*" element={<Navigate to="/admin" replace />} />
       </Routes>
 
-      {/* ── 1. Unauthenticated Login Screen (Matches Image 2) ── */}
+      {/* ── 1. Unauthenticated Login Screen (Modern Unified LoginPage) ── */}
       {viewMode !== 'kiosk' && (
-        authRole === 'none' && !isAdminLoggedIn && !currentEmpUser && !currentBranch ? (
+        (!isAdminLoggedIn && !currentEmpUser && !currentBranch) || authRole === 'none' ? (
           <ErrorBoundary fallbackTitle="حدث خطأ في شاشة تسجيل الدخول">
             <LoginPage 
               onLogin={handleUnifiedLogin} 
@@ -3595,7 +3591,7 @@ export default function App() {
               toggleTheme={toggleTheme} 
             />
           </ErrorBoundary>
-      ) : authRole === 'employee' ? (
+      ) : (authRole === 'employee' && currentEmpUser) ? (
         <ErrorBoundary fallbackTitle="حدث خطأ في عرض بوابة الموظف">
           <EmployeePortalView
             currentEmpUser={currentEmpUser}
@@ -3624,7 +3620,7 @@ export default function App() {
           />
         </ErrorBoundary>
       ) : (
-        /* ── 2. Authenticated Main Application with Sidebar (Matches Image 1) ── */
+        /* ── 2. Authenticated Main Application with Sidebar ── */
         <SidebarLayout
           currentRole={authRole}
           currentBranch={currentBranch}
