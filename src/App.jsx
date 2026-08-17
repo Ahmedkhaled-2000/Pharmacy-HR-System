@@ -2305,7 +2305,8 @@ export default function App() {
 
   // Check Permissions Helper
   const getEmpPermission = (empOrId, permKey) => {
-    if (isAdminLoggedIn && viewMode === 'admin') return true; // Admin view mode has full unrestricted access
+    // Admin management screens only bypass permissions when actively in Admin role and not evaluating an employee profile
+    if (authRole === 'admin' && !empOrId) return true;
     
     // إذا كان الموظف مسجل الدخول من صفحة البصمة (Kiosk) وتم تأكيد الـ IP، يتم تخطي صلاحيات تسجيل الحضور
     if (viewMode === 'kiosk') {
@@ -2327,9 +2328,14 @@ export default function App() {
     // Resolve employee object and identifiers
     let empId = null;
     let empCode = null;
+    let empUsername = null;
+    let empObject = null;
+
     if (typeof empOrId === 'object' && empOrId !== null) {
+      empObject = empOrId;
       empId = empOrId.id !== undefined && empOrId.id !== null ? String(empOrId.id) : null;
       empCode = empOrId.code !== undefined && empOrId.code !== null ? String(empOrId.code) : null;
+      empUsername = empOrId.username !== undefined && empOrId.username !== null ? String(empOrId.username) : null;
     } else if (empOrId && empOrId !== 'all') {
       empId = String(empOrId);
     }
@@ -2337,11 +2343,12 @@ export default function App() {
     // Always find fresh employee in state.employees
     const freshEmp = (state.employees || []).find((e) =>
       (empId && (String(e.id) === empId || String(e.code) === empId)) ||
-      (empCode && (String(e.id) === empCode || String(e.code) === empCode))
-    );
+      (empCode && (String(e.id) === empCode || String(e.code) === empCode)) ||
+      (empUsername && (String(e.username) === empUsername || String(e.code) === empUsername))
+    ) || empObject;
 
-    const targetId = freshEmp ? String(freshEmp.id) : empId;
-    const targetCode = freshEmp ? String(freshEmp.code) : empCode;
+    const targetId = freshEmp?.id !== undefined ? String(freshEmp.id) : empId;
+    const targetCode = freshEmp?.code !== undefined ? String(freshEmp.code) : empCode;
 
     // 1. Check Specific Individual Employee Permission Override in state.orgSettings.empPermissions
     const empOverrides = state.orgSettings?.empPermissions;
@@ -2359,7 +2366,7 @@ export default function App() {
     }
 
     // 2. Check Fresh Employee's permissions object
-    const empPerms = freshEmp?.permissions || (typeof empOrId === 'object' && empOrId?.permissions);
+    const empPerms = freshEmp?.permissions || empObject?.permissions;
     if (empPerms && typeof empPerms === 'object' && Object.keys(empPerms).length > 0) {
       if (empPerms[canKey] !== undefined) return Boolean(empPerms[canKey]);
       if (empPerms[allowKey] !== undefined) return Boolean(empPerms[allowKey]);
