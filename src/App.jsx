@@ -2347,6 +2347,7 @@ export default function App() {
       if (specificPerms && typeof specificPerms === 'object') {
         if (specificPerms[canKey] !== undefined) return Boolean(specificPerms[canKey]);
         if (specificPerms[allowKey] !== undefined) return Boolean(specificPerms[allowKey]);
+        if (specificPerms[actionName] !== undefined) return Boolean(specificPerms[actionName]);
         if (specificPerms[permKey] !== undefined) return Boolean(specificPerms[permKey]);
       }
     }
@@ -2356,6 +2357,7 @@ export default function App() {
     if (empPerms && typeof empPerms === 'object' && Object.keys(empPerms).length > 0) {
       if (empPerms[canKey] !== undefined) return Boolean(empPerms[canKey]);
       if (empPerms[allowKey] !== undefined) return Boolean(empPerms[allowKey]);
+      if (empPerms[actionName] !== undefined) return Boolean(empPerms[actionName]);
       if (empPerms[permKey] !== undefined) return Boolean(empPerms[permKey]);
     }
 
@@ -2364,6 +2366,7 @@ export default function App() {
     if (globalPerms && typeof globalPerms === 'object') {
       if (globalPerms[canKey] !== undefined) return Boolean(globalPerms[canKey]);
       if (globalPerms[allowKey] !== undefined) return Boolean(globalPerms[allowKey]);
+      if (globalPerms[actionName] !== undefined) return Boolean(globalPerms[actionName]);
       if (globalPerms[permKey] !== undefined) return Boolean(globalPerms[permKey]);
     }
 

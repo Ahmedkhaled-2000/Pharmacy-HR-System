@@ -180,38 +180,61 @@ export default function SettingsModule({
   const [customPermKey, setCustomPermKey] = useState('');
   const [customPermLabel, setCustomPermLabel] = useState('');
 
-  // Synchronize permissions state when selecting an employee or when state updates
-  useEffect(() => {
-    if (selectedEmpForPerm === 'all') {
-      const currentGlobal = state.orgSettings?.permissions || defaultPerms;
-      setPermState({ ...defaultPerms, ...currentGlobal });
+  const normalizePermObject = (rawObj) => {
+    if (!rawObj || typeof rawObj !== 'object') return {};
+    const out = {};
+    Object.entries(rawObj).forEach(([k, v]) => {
+      let action = k;
+      if (k.startsWith('can')) action = k.slice(3);
+      else if (k.startsWith('allow')) action = k.slice(5);
+      out['can' + action] = Boolean(v);
+      out['allow' + action] = Boolean(v);
+      out[k] = Boolean(v);
+    });
+    return out;
+  };
+
+  const getResolvedPerms = (empIdOrAll) => {
+    const merged = { ...defaultPerms };
+    if (empIdOrAll === 'all') {
+      const globalNorm = normalizePermObject(state.orgSettings?.permissions);
+      SYSTEM_PERMISSION_CATALOG.forEach((p) => {
+        let action = p.key.startsWith('can') ? p.key.slice(3) : p.key;
+        if (globalNorm['can' + action] !== undefined) merged[p.key] = globalNorm['can' + action];
+        else if (globalNorm[p.key] !== undefined) merged[p.key] = globalNorm[p.key];
+      });
     } else {
-      const emp = (state.employees || []).find((e) => e.id === selectedEmpForPerm);
-      const empCustom = state.orgSettings?.empPermissions?.[selectedEmpForPerm] || emp?.permissions;
+      const emp = (state.employees || []).find((e) => String(e.id) === String(empIdOrAll) || String(e.code) === String(empIdOrAll));
+      const targetId = emp ? String(emp.id) : String(empIdOrAll);
+      const targetCode = emp ? String(emp.code) : String(empIdOrAll);
+      const empCustom = state.orgSettings?.empPermissions?.[targetId] || state.orgSettings?.empPermissions?.[targetCode] || emp?.permissions;
       if (empCustom) {
-        setPermState({ ...defaultPerms, ...empCustom });
+        const customNorm = normalizePermObject(empCustom);
+        SYSTEM_PERMISSION_CATALOG.forEach((p) => {
+          let action = p.key.startsWith('can') ? p.key.slice(3) : p.key;
+          if (customNorm['can' + action] !== undefined) merged[p.key] = customNorm['can' + action];
+          else if (customNorm[p.key] !== undefined) merged[p.key] = customNorm[p.key];
+        });
       } else {
-        const currentGlobal = state.orgSettings?.permissions || defaultPerms;
-        setPermState({ ...defaultPerms, ...currentGlobal });
+        const globalNorm = normalizePermObject(state.orgSettings?.permissions);
+        SYSTEM_PERMISSION_CATALOG.forEach((p) => {
+          let action = p.key.startsWith('can') ? p.key.slice(3) : p.key;
+          if (globalNorm['can' + action] !== undefined) merged[p.key] = globalNorm['can' + action];
+          else if (globalNorm[p.key] !== undefined) merged[p.key] = globalNorm[p.key];
+        });
       }
     }
-  }, [selectedEmpForPerm, state.orgSettings?.permissions, state.orgSettings?.empPermissions]);
+    return merged;
+  };
+
+  // Synchronize permissions state when selecting an employee or when state updates
+  useEffect(() => {
+    setPermState(getResolvedPerms(selectedEmpForPerm));
+  }, [selectedEmpForPerm, state.orgSettings?.permissions, state.orgSettings?.empPermissions, state.employees]);
 
   const handleSelectEmpForPerm = (empId) => {
     setSelectedEmpForPerm(empId);
-    if (empId === 'all') {
-      const currentGlobal = state.orgSettings?.permissions || defaultPerms;
-      setPermState({ ...defaultPerms, ...currentGlobal });
-    } else {
-      const emp = (state.employees || []).find((e) => e.id === empId);
-      const empCustom = state.orgSettings?.empPermissions?.[empId] || emp?.permissions;
-      if (empCustom) {
-        setPermState({ ...defaultPerms, ...empCustom });
-      } else {
-        const currentGlobal = state.orgSettings?.permissions || defaultPerms;
-        setPermState({ ...defaultPerms, ...currentGlobal });
-      }
-    }
+    setPermState(getResolvedPerms(empId));
   };
 
   const handleAddPermissionToActive = () => {

@@ -100,11 +100,27 @@ export function normalizeState(parsed) {
     ];
   }
 
-  // Ensure existing employees have a devices array
-  employees = employees.map(emp => ({
-    ...emp,
-    devices: toSafeArray(emp.devices)
-  }));
+  // Ensure existing employees have devices array and normalized permissions
+  const empPermOverrides = parsed.orgSettings?.empPermissions || {};
+  employees = employees.map(emp => {
+    const customPerms = empPermOverrides[String(emp.id)] || empPermOverrides[String(emp.code)] || emp.permissions;
+    let normalizedPerms = undefined;
+    if (customPerms && typeof customPerms === 'object') {
+      normalizedPerms = { ...customPerms };
+      Object.entries(customPerms).forEach(([k, v]) => {
+        let action = k;
+        if (k.startsWith('can')) action = k.slice(3);
+        else if (k.startsWith('allow')) action = k.slice(5);
+        normalizedPerms['can' + action] = Boolean(v);
+        normalizedPerms['allow' + action] = Boolean(v);
+      });
+    }
+    return {
+      ...emp,
+      permissions: normalizedPerms || emp.permissions,
+      devices: toSafeArray(emp.devices)
+    };
+  });
 
   const savedStartDay = (() => {
     try {
