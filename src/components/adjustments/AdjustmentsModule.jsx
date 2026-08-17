@@ -5,11 +5,28 @@ export default function AdjustmentsModule({
   state,
   setState,
   saveState,
-  showToast
+  showToast,
+  filterFn,
+  monthPicker,
+  filterMode,
+  customFrom,
+  customTo
 }) {
   const [selectedBranchId, setSelectedBranchId] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [selectedMonth, setSelectedMonth] = useState(monthPicker || new Date().toISOString().slice(0, 7));
+
+  useEffect(() => {
+    if (monthPicker) {
+      setSelectedMonth(monthPicker);
+    }
+  }, [monthPicker]);
+
+  const effectiveFilterFn = React.useCallback((d) => {
+    if (!d) return false;
+    if (filterFn) return filterFn(d);
+    return d.startsWith(selectedMonth);
+  }, [filterFn, selectedMonth]);
 
   // Modal for Viewing Employee Adjustments
   const [inspectEmp, setInspectEmp] = useState(null);
@@ -82,10 +99,10 @@ export default function AdjustmentsModule({
     return true;
   });
 
-  // Calculate totals for month
-  const monthAdjs = adjustments.filter((a) => a.date && a.date.startsWith(selectedMonth));
-  const totalBonuses = monthAdjs.filter((a) => a.type === 'bonus').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
-  const totalDeductions = monthAdjs.filter((a) => a.type === 'deduction' || a.type === 'penalty').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
+  // Calculate totals for the filtered period
+  const periodAdjs = adjustments.filter((a) => a.date && effectiveFilterFn(a.date));
+  const totalBonuses = periodAdjs.filter((a) => a.type === 'bonus').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
+  const totalDeductions = periodAdjs.filter((a) => a.type === 'deduction' || a.type === 'penalty').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
 
   const handleAddAdjustment = async (e) => {
     e.preventDefault();
@@ -213,7 +230,7 @@ export default function AdjustmentsModule({
       {/* Employees Grid List */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '14px' }}>
         {filteredEmployees.map((emp) => {
-          const empAdjs = adjustments.filter((a) => (a.employeeId === emp.id || a.employeeId === 'all') && a.date && a.date.startsWith(selectedMonth));
+          const empAdjs = adjustments.filter((a) => (String(a.employeeId) === String(emp.id) || a.employeeId === 'all') && a.date && effectiveFilterFn(a.date));
           const empBonuses = empAdjs.filter((a) => a.type === 'bonus').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
           const empDeductions = empAdjs.filter((a) => a.type === 'deduction' || a.type === 'penalty').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
 
@@ -268,7 +285,7 @@ export default function AdjustmentsModule({
             </div>
 
             {(() => {
-              const empAdjs = adjustments.filter((a) => a.employeeId === inspectEmp.id || a.employeeId === 'all');
+              const empAdjs = adjustments.filter((a) => (String(a.employeeId) === String(inspectEmp.id) || a.employeeId === 'all') && a.date && effectiveFilterFn(a.date));
               return (
                 <div>
                   <div className="table-responsive">

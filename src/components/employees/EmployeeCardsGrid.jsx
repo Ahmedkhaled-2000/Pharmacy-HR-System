@@ -4,6 +4,7 @@ import { fmt } from '../../utils/formatters';
 export default function EmployeeCardsGrid({
   state,
   monthPicker,
+  filterFn,
   computeEmpSummary,
   openEmpCard,
   openEditEmpModal,
@@ -94,7 +95,7 @@ export default function EmployeeCardsGrid({
               <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                 {branchEmps.map((emp) => {
                   const active = state.activeShifts[emp.id];
-                  const empSum = computeEmpSummary(emp.id, (d) => d.startsWith(monthPicker));
+                  const empSum = computeEmpSummary(emp.id, filterFn);
 
                   return (
                     <div

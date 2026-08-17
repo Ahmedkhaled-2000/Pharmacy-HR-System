@@ -1591,10 +1591,10 @@ export default function BranchManagerView({
                 </tr>
               </thead>
               <tbody>
-                {(state.adjustments || []).filter((a) => a.employeeId === managerEmp.id).length === 0 ? (
-                  <tr><td colSpan="4" style={{ textAlign: 'center', color: 'var(--muted)', padding: '20px' }}>لا توجد مكافآت أو خصومات مسجلة باسمك حتى الآن.</td></tr>
+                {(state.adjustments || []).filter((a) => a.employeeId === managerEmp.id && matchesDateRange(a.date)).length === 0 ? (
+                  <tr><td colSpan="4" style={{ textAlign: 'center', color: 'var(--muted)', padding: '20px' }}>لا توجد مكافآت أو خصومات مسجلة باسمك في هذه الفترة.</td></tr>
                 ) : (
-                  (state.adjustments || []).filter((a) => a.employeeId === managerEmp.id).map((a) => (
+                  (state.adjustments || []).filter((a) => a.employeeId === managerEmp.id && matchesDateRange(a.date)).map((a) => (
                     <tr key={a.id}>
                       <td>{a.date}</td>
                       <td><span className={`badge ${a.type === 'bonus' ? 'badge-success' : 'badge-danger'}`}>{a.type === 'bonus' ? 'مكافأة' : 'خصم'}</span></td>
@@ -1661,10 +1661,10 @@ export default function BranchManagerView({
                 </tr>
               </thead>
               <tbody>
-                {branchRequests.filter((r) => r.type === 'bonus' || r.type === 'penalty').length === 0 ? (
-                  <tr><td colSpan="6" style={{ textAlign: 'center', padding: '20px' }}>لا توجد طلبات مكافآت أو خصومات مسجلة.</td></tr>
+                {branchRequests.filter((r) => (r.type === 'bonus' || r.type === 'penalty' || r.type === 'adjustment') && matchesDateRange(r.date || r.createdAt)).length === 0 ? (
+                  <tr><td colSpan="6" style={{ textAlign: 'center', padding: '20px' }}>لا توجد طلبات مكافآت أو خصومات مسجلة في هذه الفترة.</td></tr>
                 ) : (
-                  branchRequests.filter((r) => r.type === 'bonus' || r.type === 'penalty').map((r) => (
+                  branchRequests.filter((r) => (r.type === 'bonus' || r.type === 'penalty' || r.type === 'adjustment') && matchesDateRange(r.date || r.createdAt)).map((r) => (
                     <tr key={r.id}>
                       <td>{r.createdAt ? r.createdAt.slice(0, 10) : '—'}</td>
                       <td style={{ fontWeight: '700' }}>{r.employeeName || 'موظف'}</td>
@@ -2318,6 +2318,11 @@ export default function BranchManagerView({
           saveState={saveState}
           showToast={showToast}
           userRole="branch"
+          filterFn={matchesDateRange}
+          monthPicker={selectedMonth}
+          filterMode={filterMode}
+          customFrom={customFromDate}
+          customTo={customToDate}
         />
       )}
 
@@ -2330,6 +2335,11 @@ export default function BranchManagerView({
           showToast={showToast}
           currentBranch={currentBranch}
           userRole="branch"
+          filterFn={matchesDateRange}
+          monthPicker={selectedMonth}
+          filterMode={filterMode}
+          customFrom={customFromDate}
+          customTo={customToDate}
         />
       )}
 

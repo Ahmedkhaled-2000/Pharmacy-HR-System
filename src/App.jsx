@@ -1685,30 +1685,28 @@ export default function App() {
     return { startDate, endDate };
   };
 
+  const currentFilterFn = React.useCallback((dateStr) => {
+    if (!dateStr) return false;
+    const d = String(dateStr).slice(0, 10);
+    if (adminFilterMode === 'custom') {
+      if (adminCustomFrom && d < adminCustomFrom) return false;
+      if (adminCustomTo && d > adminCustomTo) return false;
+      return true;
+    }
+    const targetMonth = monthPicker || todayStr().slice(0, 7);
+    const range = getPayrollCutoffRange(targetMonth);
+    if (range) {
+      return d >= range.startDate && d <= range.endDate;
+    }
+    return d.startsWith(targetMonth);
+  }, [adminFilterMode, adminCustomFrom, adminCustomTo, monthPicker, state.orgSettings]);
+
   // Calculations per employee
   const computeEmpSummary = (empId, filterFn, monthStr = null, targetBranchId = null) => {
     const emp = getEmp(empId);
     if (!emp) return { hours: 0, dailyRate: 0, rate: 0, hourlyRate: 0, monthlySalary: 0, salary: 0, baseEarnings: 0, totalBonus: 0, totalDeduction: 0, absenceDeduction: 0, netSalary: 0, absenceDaysCount: 0, perBranch: {} };
 
-    let effectiveFilterFn = filterFn;
-    if (!effectiveFilterFn) {
-      if (adminFilterMode === 'custom' && (adminCustomFrom || adminCustomTo)) {
-        effectiveFilterFn = (d) => {
-          if (!d) return false;
-          if (adminCustomFrom && d < adminCustomFrom) return false;
-          if (adminCustomTo && d > adminCustomTo) return false;
-          return true;
-        };
-      } else {
-        const targetMonth = monthStr || monthPicker;
-        const range = getPayrollCutoffRange(targetMonth);
-        if (range) {
-          effectiveFilterFn = (d) => d && d >= range.startDate && d <= range.endDate;
-        } else {
-          effectiveFilterFn = (d) => d && d.startsWith(targetMonth);
-        }
-      }
-    }
+    let effectiveFilterFn = filterFn || currentFilterFn;
 
     let branches = [];
     if (emp.branchesDetails && emp.branchesDetails.length > 0) {
@@ -3751,6 +3749,13 @@ export default function App() {
                   saveState={saveState}
                   monthPicker={monthPicker}
                   setMonthPicker={setMonthPicker}
+                  filterMode={adminFilterMode}
+                  setFilterMode={setAdminFilterMode}
+                  customFrom={adminCustomFrom}
+                  setCustomFrom={setAdminCustomFrom}
+                  customTo={adminCustomTo}
+                  setCustomTo={setAdminCustomTo}
+                  filterFn={currentFilterFn}
                   exportAllPayrollExcel={exportAllPayrollExcel}
                   showToast={showToast}
                   onApproveRequest={(reqId) => handleApproveRequest(reqId, 'admin')}
@@ -3785,6 +3790,7 @@ export default function App() {
                   <EmployeeCardsGrid
                     state={state}
                     monthPicker={monthPicker}
+                    filterFn={currentFilterFn}
                     computeEmpSummary={computeEmpSummary}
                     openEmpCard={openEmpCard}
                     openEditEmpModal={(emp) => {
@@ -3827,6 +3833,11 @@ export default function App() {
                   setState={setState}
                   saveState={saveState}
                   showToast={showToast}
+                  filterFn={currentFilterFn}
+                  monthPicker={monthPicker}
+                  filterMode={adminFilterMode}
+                  customFrom={adminCustomFrom}
+                  customTo={adminCustomTo}
                 />
               )}
 
@@ -3860,6 +3871,11 @@ export default function App() {
                   pauseShift={pauseShift}
                   resumeShift={resumeShift}
                   stopShift={stopShift}
+                  filterFn={currentFilterFn}
+                  monthPicker={monthPicker}
+                  filterMode={adminFilterMode}
+                  customFrom={adminCustomFrom}
+                  customTo={adminCustomTo}
                 />
               )}
 
@@ -3881,6 +3897,13 @@ export default function App() {
                   saveState={saveState}
                   monthPicker={monthPicker}
                   setMonthPicker={setMonthPicker}
+                  filterMode={adminFilterMode}
+                  setFilterMode={setAdminFilterMode}
+                  customFrom={adminCustomFrom}
+                  setCustomFrom={setAdminCustomFrom}
+                  customTo={adminCustomTo}
+                  setCustomTo={setAdminCustomTo}
+                  filterFn={currentFilterFn}
                   exportAllPayrollExcel={exportAllPayrollExcel}
                   exportEmpExcel={exportEmpExcel}
                   showToast={showToast}
@@ -3894,6 +3917,11 @@ export default function App() {
                   setState={setState}
                   saveState={saveState}
                   showToast={showToast}
+                  filterFn={currentFilterFn}
+                  monthPicker={monthPicker}
+                  filterMode={adminFilterMode}
+                  customFrom={adminCustomFrom}
+                  customTo={adminCustomTo}
                 />
               )}
 
@@ -3913,6 +3941,11 @@ export default function App() {
                   saveState={saveState}
                   showToast={showToast}
                   userRole="admin"
+                  filterFn={currentFilterFn}
+                  monthPicker={monthPicker}
+                  filterMode={adminFilterMode}
+                  customFrom={adminCustomFrom}
+                  customTo={adminCustomTo}
                 />
               )}
 
@@ -3947,6 +3980,11 @@ export default function App() {
                   setState={setState}
                   saveState={saveState}
                   showToast={showToast}
+                  filterFn={currentFilterFn}
+                  monthPicker={monthPicker}
+                  filterMode={adminFilterMode}
+                  customFrom={adminCustomFrom}
+                  customTo={adminCustomTo}
                 />
               )}
 

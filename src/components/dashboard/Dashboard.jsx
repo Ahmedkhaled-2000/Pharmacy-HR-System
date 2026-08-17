@@ -7,6 +7,13 @@ export default function Dashboard({
   saveState,
   monthPicker,
   setMonthPicker,
+  filterMode = 'month',
+  setFilterMode,
+  customFrom = '',
+  setCustomFrom,
+  customTo = '',
+  setCustomTo,
+  filterFn,
   exportAllPayrollExcel,
   showToast,
   onApproveRequest,
@@ -14,38 +21,9 @@ export default function Dashboard({
   onSendEarlyExitEmail,
   onWaiveEarlyExit
 }) {
-  // Filter Period State (Persisted in localStorage)
-  const [filterPeriod, setFilterPeriod] = useState(() => {
-    try {
-      return localStorage.getItem('dash_filter_period') || 'current';
-    } catch {
-      return 'current';
-    }
-  });
-
-  const [customStartDate, setCustomStartDate] = useState(() => {
-    try {
-      return localStorage.getItem('dash_custom_start') || new Date().toISOString().slice(0, 8) + '01';
-    } catch {
-      return new Date().toISOString().slice(0, 8) + '01';
-    }
-  });
-
-  const [customEndDate, setCustomEndDate] = useState(() => {
-    try {
-      return localStorage.getItem('dash_custom_end') || new Date().toISOString().slice(0, 10);
-    } catch {
-      return new Date().toISOString().slice(0, 10);
-    }
-  });
-
-  React.useEffect(() => {
-    try {
-      localStorage.setItem('dash_filter_period', filterPeriod);
-      localStorage.setItem('dash_custom_start', customStartDate);
-      localStorage.setItem('dash_custom_end', customEndDate);
-    } catch {}
-  }, [filterPeriod, customStartDate, customEndDate]);
+  const activeFilterPeriod = filterMode === 'custom' ? 'custom' : 'current';
+  const customStartDate = customFrom;
+  const customEndDate = customTo;
 
   const orgSettings = state.orgSettings || {};
   const employees = state.employees || [];
@@ -82,8 +60,9 @@ export default function Dashboard({
   // Date Range Matcher for Financial Summary
   const matchesFilterDate = (dateStr) => {
     if (!dateStr) return false;
+    if (filterFn) return filterFn(dateStr);
     const d = String(dateStr).slice(0, 10);
-    if (filterPeriod === 'custom') {
+    if (filterMode === 'custom') {
       if (customStartDate && d < customStartDate) return false;
       if (customEndDate && d > customEndDate) return false;
       return true;
@@ -736,31 +715,31 @@ export default function Dashboard({
             إجمالي الرواتب والتقارير المالية لجميع الموظفين بالشركة
           </h3>
           <span style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '4px', display: 'block' }}>
-            {filterPeriod === 'custom' 
-              ? `📊 الفترة المخصصة المحددة: من ${customStartDate || '...'} إلى ${customEndDate || '...'}`
+            {filterMode === 'custom' 
+              ? `📊 الفترة المخصصة المحددة: من ${customFrom || '...'} إلى ${customTo || '...'}`
               : `📊 دورة تقفيل شهر (${monthPicker})`}
           </span>
         </div>
 
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-          <select value={filterPeriod} onChange={(e) => setFilterPeriod(e.target.value)} style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontWeight: 'bold' }}>
-            <option value="current">📅 الشهر الحالي ({monthPicker})</option>
+          <select value={filterMode === 'custom' ? 'custom' : 'month'} onChange={(e) => setFilterMode?.(e.target.value)} style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontWeight: 'bold' }}>
+            <option value="month">📅 الشهر الحالي ({monthPicker})</option>
             <option value="custom">📅 تصفية الفترة المخصصة</option>
           </select>
 
-          {filterPeriod === 'custom' && (
+          {filterMode === 'custom' && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--surface-muted)', padding: '4px 10px', borderRadius: '8px', border: '1px solid var(--border)' }}>
               <input
                 type="date"
-                value={customStartDate}
-                onChange={(e) => setCustomStartDate(e.target.value)}
+                value={customFrom}
+                onChange={(e) => setCustomFrom?.(e.target.value)}
                 style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px' }}
               />
               <span style={{ fontSize: '12px', fontWeight: 'bold' }}>إلى</span>
               <input
                 type="date"
-                value={customEndDate}
-                onChange={(e) => setCustomEndDate(e.target.value)}
+                value={customTo}
+                onChange={(e) => setCustomTo?.(e.target.value)}
                 style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px' }}
               />
             </div>

@@ -13,7 +13,8 @@ export default function BylawsModule({
   saveState,
   showToast,
   userRole = 'admin',
-  currentEmpId = null
+  currentEmpId = null,
+  filterFn = null
 }) {
   const [activeTab, setActiveTab] = useState('text'); // 'text' | 'rules' | 'records'
   const isManagerOrAdmin = userRole === 'admin' || userRole === 'branch';
@@ -287,7 +288,11 @@ export default function BylawsModule({
     return `تنبيه شفهي`;
   };
 
-  const appliedPenalties = (state.requests || []).filter(r => r.type === 'penalty' && (!currentEmpId || r.employeeId === currentEmpId));
+  const appliedPenalties = (state.requests || []).filter(r => 
+    r.type === 'penalty' && 
+    (!currentEmpId || String(r.employeeId) === String(currentEmpId)) &&
+    (!filterFn || filterFn(r.date || (r.createdAt ? r.createdAt.slice(0, 10) : '')))
+  );
 
   return (
     <div className="bylaws-card" style={{ fontFamily: "'Tajawal', sans-serif" }}>

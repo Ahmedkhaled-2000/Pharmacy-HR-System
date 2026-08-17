@@ -6,7 +6,12 @@ export default function IncomeExpensesModule({
   saveState,
   showToast,
   currentBranch,
-  userRole
+  userRole,
+  filterFn = null,
+  monthPicker,
+  filterMode,
+  customFrom,
+  customTo
 }) {
   const isBranchRole = userRole === 'branch' || !!currentBranch;
   const [activeTab, setActiveTab] = useState('all'); // 'all' | 'expense' | 'income'
@@ -25,6 +30,7 @@ export default function IncomeExpensesModule({
 
   const filteredList = transactions.filter((t) => {
     if (activeTab !== 'all' && t.type !== activeTab) return false;
+    if (filterFn && !filterFn(t.date || (t.createdAt ? t.createdAt.slice(0, 10) : ''))) return false;
     if (isBranchRole) {
       return String(t.branchId) === String(currentBranch?.id);
     }
@@ -32,11 +38,11 @@ export default function IncomeExpensesModule({
     return true;
   });
 
-  const totalIncome = (isBranchRole ? filteredList : transactions)
+  const totalIncome = filteredList
     .filter((t) => t.type === 'income')
     .reduce((acc, t) => acc + (parseFloat(t.amount) || 0), 0);
 
-  const totalExpenses = (isBranchRole ? filteredList : transactions)
+  const totalExpenses = filteredList
     .filter((t) => t.type === 'expense')
     .reduce((acc, t) => acc + (parseFloat(t.amount) || 0), 0);
 

@@ -610,7 +610,7 @@ export default function EmployeePortalView({
   const canViewAdjustments = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canViewAdjustments') !== false && getEmpPermission(emp.id, 'allowViewAdjustments') !== false) : true;
   const canExportExcel = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canExportExcel') !== false && getEmpPermission(emp.id, 'allowExportExcel') !== false) : true;
 
-  const rangeFilterValid = filterMode === 'range' && rangeStart && rangeEnd && rangeStart <= rangeEnd;
+  const rangeFilterValid = (filterMode === 'range' || filterMode === 'custom') && rangeStart && rangeEnd && rangeStart <= rangeEnd;
   const filterFn = rangeFilterValid
     ? (d) => d && d >= rangeStart && d <= rangeEnd
     : (d) => {
