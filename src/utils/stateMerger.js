@@ -78,9 +78,22 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
 
   // 0. معالجة وحسم الموظفين والصلاحيات الصارمة
   if (options.prefix === 'emp') {
-    const mergedEmp = { ...remoteItem, ...localItem };
-    if (localItem.permissions !== undefined) {
-      mergedEmp.permissions = localItem.permissions;
+    const localTime = getItemTime(localItem);
+    const remoteTime = getItemTime(remoteItem);
+    let mergedEmp = {};
+    if (remoteTime > localTime) {
+      mergedEmp = { ...localItem, ...remoteItem };
+    } else if (localTime > remoteTime) {
+      mergedEmp = { ...remoteItem, ...localItem };
+    } else {
+      // If timestamps are equal (or both 0), we trust the remote data for permissions
+      // because the remote represents the central source of truth for admin updates.
+      mergedEmp = { ...localItem, ...remoteItem };
+      if (remoteItem.permissions !== undefined) {
+        mergedEmp.permissions = remoteItem.permissions;
+      } else if (localItem.permissions !== undefined) {
+        mergedEmp.permissions = localItem.permissions;
+      }
     }
     return mergedEmp;
   }
@@ -262,12 +275,34 @@ export function smartMergeStates(localState, remoteState) {
     ...localState,
 
     // 1. الإعدادات واللائحة
-    orgSettings: {
-      ...(remoteState.orgSettings || {}),
-      ...(localState.orgSettings || {}),
-      permissions: localState.orgSettings?.permissions !== undefined ? localState.orgSettings.permissions : (remoteState.orgSettings?.permissions || {}),
-      empPermissions: localState.orgSettings?.empPermissions !== undefined ? localState.orgSettings.empPermissions : (remoteState.orgSettings?.empPermissions || {})
-    },
+    orgSettings: (() => {
+      const localSettings = localState.orgSettings || {};
+      const remoteSettings = remoteState.orgSettings || {};
+      const localTime = getItemTime(localSettings);
+      const remoteTime = getItemTime(remoteSettings);
+      
+      let mergedSettings = {};
+      if (remoteTime > localTime) {
+        mergedSettings = { ...localSettings, ...remoteSettings };
+      } else if (localTime > remoteTime) {
+        mergedSettings = { ...remoteSettings, ...localSettings };
+      } else {
+        // Equal times, trust remote as truth if permissions exist
+        mergedSettings = { ...localSettings, ...remoteSettings };
+        if (remoteSettings.permissions !== undefined) {
+          mergedSettings.permissions = remoteSettings.permissions;
+        } else if (localSettings.permissions !== undefined) {
+          mergedSettings.permissions = localSettings.permissions;
+        }
+        
+        if (remoteSettings.empPermissions !== undefined) {
+          mergedSettings.empPermissions = remoteSettings.empPermissions;
+        } else if (localSettings.empPermissions !== undefined) {
+          mergedSettings.empPermissions = localSettings.empPermissions;
+        }
+      }
+      return mergedSettings;
+    })(),
     bylaws: {
       ...(remoteState.bylaws || {}),
       ...(localState.bylaws || {})

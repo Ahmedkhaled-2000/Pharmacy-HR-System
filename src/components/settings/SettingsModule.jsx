@@ -106,7 +106,8 @@ export default function SettingsModule({
       loanRequestStartDay: parseInt(loanRequestStartDay, 10) || 1,
       loanRequestEndDay: parseInt(loanRequestEndDay, 10) || 10,
       maxMonthlyLoanSalaryPercent: parseFloat(maxMonthlyLoanSalaryPercent) || 50,
-      approvedIPs // keeping this for legacy components
+      approvedIPs, // keeping this for legacy components
+      updatedAt: Date.now()
     };
     const updatedIpRestrictions = {
       enabled: ipEnabled,
@@ -297,7 +298,8 @@ export default function SettingsModule({
       expandedPerms[actionName] = isChecked;
     });
 
-    let updatedOrgSettings = { ...(state.orgSettings || orgSettings) };
+    const nowTime = Date.now();
+    let updatedOrgSettings = { ...(state.orgSettings || orgSettings), updatedAt: nowTime };
     let updatedEmployees = [...(state.employees || [])];
 
     if (selectedEmpForPerm === 'all') {
@@ -308,7 +310,8 @@ export default function SettingsModule({
       };
       updatedEmployees = updatedEmployees.map((e) => ({
         ...e,
-        permissions: { ...expandedPerms }
+        permissions: { ...expandedPerms },
+        updatedAt: nowTime
       }));
       showToast?.('💾 تم حفظ وتطبيق الصلاحيات بنجاح على جميع الموظفين بالنظام');
     } else {
@@ -326,7 +329,7 @@ export default function SettingsModule({
         empPermissions: updatedEmpPerms
       };
       updatedEmployees = updatedEmployees.map((e) =>
-        (String(e.id) === targetId || String(e.code) === targetCode) ? { ...e, permissions: { ...expandedPerms } } : e
+        (String(e.id) === targetId || String(e.code) === targetCode) ? { ...e, permissions: { ...expandedPerms }, updatedAt: nowTime } : e
       );
       showToast?.(`💾 تم حفظ وتطبيق الصلاحيات للموظف (${targetEmp?.name || selectedEmpForPerm}) بنجاح`);
     }
