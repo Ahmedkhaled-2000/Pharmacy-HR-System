@@ -171,6 +171,12 @@ export default function BranchManagerView({
       if (effectiveCustomTo && cleanDate > effectiveCustomTo) return false;
       return true;
     }
+    const pType = state.orgSettings?.payrollPeriodType || 'cycle';
+    if (pType === 'custom' && state.orgSettings?.payrollCustomFrom && state.orgSettings?.payrollCustomTo) {
+      const from = state.orgSettings.payrollCustomFrom <= state.orgSettings.payrollCustomTo ? state.orgSettings.payrollCustomFrom : state.orgSettings.payrollCustomTo;
+      const to = state.orgSettings.payrollCustomFrom <= state.orgSettings.payrollCustomTo ? state.orgSettings.payrollCustomTo : state.orgSettings.payrollCustomFrom;
+      return cleanDate >= from && cleanDate <= to;
+    }
     if (!selectedMonth || selectedMonth.length !== 7) return true;
     const [yStr, mStr] = selectedMonth.split('-');
     const y = parseInt(yStr, 10);

@@ -17,7 +17,13 @@ export default function PayrollModule({
   const [searchQuery, setSearchQuery] = useState('');
   const [filterBranch, setFilterBranch] = useState('');
 
-  // Monthly Payout Cutoff Start/End Days
+  // Monthly Payout Cutoff Period Settings
+  const [periodType, setPeriodType] = useState(() => {
+    try {
+      return localStorage.getItem('payroll_period_type') || state.orgSettings?.payrollPeriodType || 'cycle';
+    } catch { return 'cycle'; }
+  });
+
   const [payoutStartDay, setPayoutStartDay] = useState(() => {
     try {
       const v = localStorage.getItem('payroll_payout_start_day');
@@ -34,20 +40,35 @@ export default function PayrollModule({
     return state.orgSettings?.payrollPayoutEndDay !== undefined ? state.orgSettings.payrollPayoutEndDay : 25;
   });
 
+  const [customFrom, setCustomFrom] = useState(() => {
+    try {
+      return localStorage.getItem('payroll_custom_from') || state.orgSettings?.payrollCustomFrom || '';
+    } catch { return ''; }
+  });
+
+  const [customTo, setCustomTo] = useState(() => {
+    try {
+      return localStorage.getItem('payroll_custom_to') || state.orgSettings?.payrollCustomTo || '';
+    } catch { return ''; }
+  });
+
   useEffect(() => {
+    if (state.orgSettings?.payrollPeriodType) {
+      setPeriodType(state.orgSettings.payrollPeriodType);
+    }
     if (state.orgSettings?.payrollPayoutStartDay !== undefined) {
       setPayoutStartDay(state.orgSettings.payrollPayoutStartDay);
-      try {
-        localStorage.setItem('payroll_payout_start_day', String(state.orgSettings.payrollPayoutStartDay));
-      } catch {}
     }
     if (state.orgSettings?.payrollPayoutEndDay !== undefined) {
       setPayoutEndDay(state.orgSettings.payrollPayoutEndDay);
-      try {
-        localStorage.setItem('payroll_payout_end_day', String(state.orgSettings.payrollPayoutEndDay));
-      } catch {}
     }
-  }, [state.orgSettings?.payrollPayoutStartDay, state.orgSettings?.payrollPayoutEndDay]);
+    if (state.orgSettings?.payrollCustomFrom) {
+      setCustomFrom(state.orgSettings.payrollCustomFrom);
+    }
+    if (state.orgSettings?.payrollCustomTo) {
+      setCustomTo(state.orgSettings.payrollCustomTo);
+    }
+  }, [state.orgSettings]);
 
   const employees = state.employees || [];
   const branches = state.branches || [];
@@ -58,34 +79,49 @@ export default function PayrollModule({
     return true;
   });
 
-  const handleSavePayoutPeriod = async (startD, endD) => {
-    const sVal = parseInt(startD, 10);
-    const eVal = parseInt(endD, 10);
-    if (!sVal || !eVal || sVal < 1 || sVal > 31 || eVal < 1 || eVal > 31) return;
-    setPayoutStartDay(sVal);
-    setPayoutEndDay(eVal);
+  const handleSavePeriodSettings = async (newType, sVal, eVal, fromVal, toVal) => {
+    const updatedSettings = {
+      ...(state.orgSettings || {}),
+      payrollPeriodType: newType,
+      payrollPayoutStartDay: parseInt(sVal, 10) || 26,
+      payrollPayoutEndDay: parseInt(eVal, 10) || 25,
+      payrollPayoutDay: parseInt(eVal, 10) || 25,
+      payrollCustomFrom: fromVal || '',
+      payrollCustomTo: toVal || ''
+    };
+
+    setPeriodType(newType);
+    setPayoutStartDay(parseInt(sVal, 10) || 26);
+    setPayoutEndDay(parseInt(eVal, 10) || 25);
+    setCustomFrom(fromVal || '');
+    setCustomTo(toVal || '');
 
     try {
+      localStorage.setItem('payroll_period_type', newType);
       localStorage.setItem('payroll_payout_start_day', String(sVal));
       localStorage.setItem('payroll_payout_end_day', String(eVal));
+      if (fromVal) localStorage.setItem('payroll_custom_from', fromVal);
+      if (toVal) localStorage.setItem('payroll_custom_to', toVal);
     } catch (e) {
       console.warn('Could not save payroll cutoff to localStorage:', e);
     }
 
-    const updatedSettings = {
-      ...(state.orgSettings || {}),
-      payrollPayoutStartDay: sVal,
-      payrollPayoutEndDay: eVal,
-      payrollPayoutDay: eVal
-    };
     const updatedState = { ...state, orgSettings: updatedSettings };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.(`✅ تم حفظ وتثبيت فترة تقفيل الرواتب من يوم ${sVal} للشهر السابق حتى يوم ${eVal} للشهر الحالي بنجاح`);
+    
+    if (newType === 'custom') {
+      showToast?.(`✅ تم حفظ وتطبيق الفترة اليدوية المخصصة (من ${fromVal} إلى ${toVal}) على رواتب المنظومة وصفحة الموظف بنجاح`);
+    } else {
+      showToast?.(`✅ تم حفظ وتثبيت الدورة الشهرية (من يوم ${sVal} للشهر السابق حتى يوم ${eVal} للشهر الحالي) وتطبيقها تلقائياً على صفحة الموظف بنجاح`);
+    }
   };
 
-  // Helper to compute date range description for monthPicker
+  // Helper to compute date range description for active settings
   const getPeriodDesc = () => {
+    if (periodType === 'custom' && customFrom && customTo) {
+      return `فترة مخصصة يدوياً: من ${customFrom} إلى ${customTo}`;
+    }
     if (!monthPicker || monthPicker.length !== 7) return '';
     const [y, m] = monthPicker.split('-').map(Number);
     let prevY = y;
@@ -93,7 +129,7 @@ export default function PayrollModule({
     if (prevM < 1) { prevM = 12; prevY = y - 1; }
     const startStr = `${prevY}-${String(prevM).padStart(2, '0')}-${String(payoutStartDay).padStart(2, '0')}`;
     const endStr = `${y}-${String(m).padStart(2, '0')}-${String(payoutEndDay).padStart(2, '0')}`;
-    return `من ${startStr} إلى ${endStr}`;
+    return `دورة الشهر (${monthPicker}): من ${startStr} إلى ${endStr}`;
   };
 
   return (
@@ -116,41 +152,123 @@ export default function PayrollModule({
       </div>
 
       {/* Payout Period Cutoff Setting Card */}
-      <div style={{ background: 'linear-gradient(135deg, #0d9488, #0f766e)', color: '#fff', padding: '18px 22px', borderRadius: '14px', marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
-        <div>
-          <h4 style={{ margin: '0 0 4px 0', fontSize: '16px' }}>🗓️ تحديد فترة إصدار وتقفيل الرواتب الشهري الثابت</h4>
-          <span style={{ fontSize: '13px', opacity: 0.95 }}>
-            يتم تقفيل واحتساب خصومات ومكافآت وساعات شهر ({monthPicker}) بناءً على الفترة: <strong style={{ textDecoration: 'underline' }}>{getPeriodDesc()}</strong>
-          </span>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <label style={{ fontSize: '12.5px', fontWeight: 'bold' }}>من يوم (الشهر السابق):</label>
-            <select
-              value={payoutStartDay}
-              onChange={(e) => handleSavePayoutPeriod(e.target.value, payoutEndDay)}
-              style={{ padding: '5px 10px', borderRadius: '8px', border: 'none', background: '#fff', color: '#0f766e', fontWeight: 'bold' }}
-            >
-              {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
-                <option key={d} value={d}>يوم {d}</option>
-              ))}
-            </select>
+      <div style={{ background: 'linear-gradient(135deg, #0d9488, #0f766e)', color: '#fff', padding: '18px 22px', borderRadius: '14px', marginBottom: '24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+          <div>
+            <h4 style={{ margin: '0 0 4px 0', fontSize: '16px' }}>🗓️ تحديد فترة إصدار وتقفيل الرواتب الشهري الثابت واليدوي</h4>
+            <span style={{ fontSize: '13px', opacity: 0.95 }}>
+              الفترة النشطة المعتمدة للرواتب وصفحة الموظف: <strong style={{ textDecoration: 'underline', color: '#fef08a' }}>{getPeriodDesc()}</strong>
+            </span>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <label style={{ fontSize: '12.5px', fontWeight: 'bold' }}>إلى يوم (الشهر الحالي):</label>
-            <select
-              value={payoutEndDay}
-              onChange={(e) => handleSavePayoutPeriod(payoutStartDay, e.target.value)}
-              style={{ padding: '5px 10px', borderRadius: '8px', border: 'none', background: '#fff', color: '#0f766e', fontWeight: 'bold' }}
+          <div style={{ display: 'flex', background: 'rgba(0,0,0,0.2)', padding: '4px', borderRadius: '10px', gap: '4px' }}>
+            <button
+              type="button"
+              onClick={() => handleSavePeriodSettings('cycle', payoutStartDay, payoutEndDay, customFrom, customTo)}
+              style={{
+                border: 'none',
+                background: periodType === 'cycle' ? '#fff' : 'transparent',
+                color: periodType === 'cycle' ? '#0f766e' : '#fff',
+                fontWeight: 'bold',
+                padding: '6px 12px',
+                borderRadius: '8px',
+                fontSize: '12.5px',
+                cursor: 'pointer'
+              }}
             >
-              {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
-                <option key={d} value={d}>يوم {d}</option>
-              ))}
-            </select>
+              📅 دورة شهرية بالأيام
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSavePeriodSettings('custom', payoutStartDay, payoutEndDay, customFrom || `${monthPicker}-01`, customTo || `${monthPicker}-30`)}
+              style={{
+                border: 'none',
+                background: periodType === 'custom' ? '#fff' : 'transparent',
+                color: periodType === 'custom' ? '#0f766e' : '#fff',
+                fontWeight: 'bold',
+                padding: '6px 12px',
+                borderRadius: '8px',
+                fontSize: '12.5px',
+                cursor: 'pointer'
+              }}
+            >
+              📆 فترة مخصصة يدوياً (من - إلى)
+            </button>
           </div>
         </div>
+
+        {periodType === 'cycle' ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap', background: 'rgba(255,255,255,0.1)', padding: '12px 16px', borderRadius: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <label style={{ fontSize: '13px', fontWeight: 'bold' }}>من يوم (الشهر السابق):</label>
+              <select
+                value={payoutStartDay}
+                onChange={(e) => handleSavePeriodSettings('cycle', e.target.value, payoutEndDay, customFrom, customTo)}
+                style={{ padding: '6px 12px', borderRadius: '8px', border: 'none', background: '#fff', color: '#0f766e', fontWeight: 'bold', fontSize: '13px' }}
+              >
+                {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
+                  <option key={d} value={d}>يوم {d}</option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <label style={{ fontSize: '13px', fontWeight: 'bold' }}>إلى يوم (الشهر الحالي):</label>
+              <select
+                value={payoutEndDay}
+                onChange={(e) => handleSavePeriodSettings('cycle', payoutStartDay, e.target.value, customFrom, customTo)}
+                style={{ padding: '6px 12px', borderRadius: '8px', border: 'none', background: '#fff', color: '#0f766e', fontWeight: 'bold', fontSize: '13px' }}
+              >
+                {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
+                  <option key={d} value={d}>يوم {d}</option>
+                ))}
+              </select>
+            </div>
+
+            <span style={{ fontSize: '12px', opacity: 0.9 }}>
+              (مثال: من 26 للشهر السابق حتى 25 للشهر الحالي يتم احتساب رواتب شهر {monthPicker})
+            </span>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap', background: 'rgba(255,255,255,0.1)', padding: '12px 16px', borderRadius: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <label style={{ fontSize: '13px', fontWeight: 'bold' }}>من تاريخ:</label>
+              <input
+                type="date"
+                value={customFrom}
+                onChange={(e) => setCustomFrom(e.target.value)}
+                style={{ padding: '6px 12px', borderRadius: '8px', border: 'none', background: '#fff', color: '#0f766e', fontWeight: 'bold', fontSize: '13px' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <label style={{ fontSize: '13px', fontWeight: 'bold' }}>إلى تاريخ:</label>
+              <input
+                type="date"
+                value={customTo}
+                onChange={(e) => setCustomTo(e.target.value)}
+                style={{ padding: '6px 12px', borderRadius: '8px', border: 'none', background: '#fff', color: '#0f766e', fontWeight: 'bold', fontSize: '13px' }}
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={() => handleSavePeriodSettings('custom', payoutStartDay, payoutEndDay, customFrom, customTo)}
+              style={{
+                border: 'none',
+                background: '#fef08a',
+                color: '#854d0e',
+                fontWeight: '900',
+                padding: '7px 16px',
+                borderRadius: '8px',
+                fontSize: '13px',
+                cursor: 'pointer'
+              }}
+            >
+              💾 تطبيق وحفظ الفترة يدوياً
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Filter and Search Toolbar */}

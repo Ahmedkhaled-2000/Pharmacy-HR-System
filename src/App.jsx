@@ -1741,6 +1741,16 @@ export default function App() {
   };
 
   const getPayrollCutoffRange = (monthStr) => {
+    const pType = state.orgSettings?.payrollPeriodType || (() => { try { return localStorage.getItem('payroll_period_type') || 'cycle'; } catch { return 'cycle'; } })();
+    const customFrom = state.orgSettings?.payrollCustomFrom || (() => { try { return localStorage.getItem('payroll_custom_from') || ''; } catch { return ''; } })();
+    const customTo = state.orgSettings?.payrollCustomTo || (() => { try { return localStorage.getItem('payroll_custom_to') || ''; } catch { return ''; } })();
+
+    if (pType === 'custom' && customFrom && customTo) {
+      const from = customFrom <= customTo ? customFrom : customTo;
+      const to = customFrom <= customTo ? customTo : customFrom;
+      return { startDate: from, endDate: to };
+    }
+
     if (!monthStr || monthStr.length !== 7) return null;
     const sDay = state.orgSettings?.payrollPayoutStartDay !== undefined 
       ? parseInt(state.orgSettings.payrollPayoutStartDay, 10) 

@@ -589,9 +589,19 @@ export default function EmployeePortalView({
   //  Core Calculations & Hooks (MUST BE UNCONDITIONAL)
   // ─────────────────────────────────────────
   const getPayrollCutoffRange = (monthStr) => {
+    const pType = orgSettings?.payrollPeriodType || state?.orgSettings?.payrollPeriodType || (() => { try { return localStorage.getItem('payroll_period_type') || 'cycle'; } catch { return 'cycle'; } })();
+    const customFrom = orgSettings?.payrollCustomFrom || state?.orgSettings?.payrollCustomFrom || (() => { try { return localStorage.getItem('payroll_custom_from') || ''; } catch { return ''; } })();
+    const customTo = orgSettings?.payrollCustomTo || state?.orgSettings?.payrollCustomTo || (() => { try { return localStorage.getItem('payroll_custom_to') || ''; } catch { return ''; } })();
+
+    if (pType === 'custom' && customFrom && customTo) {
+      const from = customFrom <= customTo ? customFrom : customTo;
+      const to = customFrom <= customTo ? customTo : customFrom;
+      return { startDate: from, endDate: to };
+    }
+
     if (!monthStr || monthStr.length !== 7) return null;
-    const sDay = orgSettings?.payrollPayoutStartDay !== undefined ? parseInt(orgSettings.payrollPayoutStartDay, 10) : (state?.orgSettings?.payrollPayoutStartDay !== undefined ? parseInt(state.orgSettings.payrollPayoutStartDay, 10) : 26);
-    const eDay = orgSettings?.payrollPayoutEndDay !== undefined ? parseInt(orgSettings.payrollPayoutEndDay, 10) : (state?.orgSettings?.payrollPayoutEndDay !== undefined ? parseInt(state.orgSettings.payrollPayoutEndDay, 10) : 25);
+    const sDay = orgSettings?.payrollPayoutStartDay !== undefined ? parseInt(orgSettings.payrollPayoutStartDay, 10) : (state?.orgSettings?.payrollPayoutStartDay !== undefined ? parseInt(state.orgSettings.payrollPayoutStartDay, 10) : (() => { try { const v = localStorage.getItem('payroll_payout_start_day'); return v ? parseInt(v, 10) : 26; } catch { return 26; } })());
+    const eDay = orgSettings?.payrollPayoutEndDay !== undefined ? parseInt(orgSettings.payrollPayoutEndDay, 10) : (state?.orgSettings?.payrollPayoutEndDay !== undefined ? parseInt(state.orgSettings.payrollPayoutEndDay, 10) : (() => { try { const v = localStorage.getItem('payroll_payout_end_day'); return v ? parseInt(v, 10) : 25; } catch { return 25; } })());
     const [y, m] = monthStr.split('-').map(Number);
     let prevY = y;
     let prevM = m - 1;
@@ -1325,21 +1335,26 @@ export default function EmployeePortalView({
                 </div>
               )}
 
-              {/* Period filter */}
-              <div className="ep-period-bar card" style={{ marginBottom: '20px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'var(--surface)', padding: '6px 14px', borderRadius: '99px', border: '1px solid var(--border)', flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: '13px', fontWeight: '700', color: 'var(--muted)' }}>📅 تصفية الفترة:</span>
+              {/* Period filter & Active Payroll Cutoff Badge */}
+              <div className="ep-period-bar card" style={{ marginBottom: '20px', padding: '12px 18px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '13px', fontWeight: '800', color: 'var(--primary-dark)' }}>🗓️ فترة احتساب وتفاصيل الراتب:</span>
+                  <span style={{ fontSize: '13px', background: '#dcfce7', color: '#166534', padding: '4px 12px', borderRadius: '99px', fontWeight: 'bold', border: '1px solid #86efac' }}>
+                    {periodLabel}
+                  </span>
+                </div>
 
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                   <select
                     value={filterMode}
                     onChange={(e) => {
                       setFilterMode(e.target.value);
                       if (e.target.value === 'month') { setRangeStart(''); setRangeEnd(''); }
                     }}
-                    style={{ padding: '6px 12px', borderRadius: '99px', fontSize: '13px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer' }}
+                    style={{ padding: '6px 12px', borderRadius: '8px', fontSize: '13px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer', fontWeight: 'bold' }}
                   >
-                    <option value="month">الشهر الحالي ({selectedMonth})</option>
-                    <option value="range">فترة مخصصة</option>
+                    <option value="month">📅 الفترة المعتمدة للرواتب ({selectedMonth})</option>
+                    <option value="range">📆 تصفية فترة مخصصة</option>
                   </select>
 
                   {filterMode === 'range' && (

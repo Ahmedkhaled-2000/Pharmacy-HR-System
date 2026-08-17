@@ -67,6 +67,12 @@ export default function Dashboard({
       if (customEndDate && d > customEndDate) return false;
       return true;
     }
+    const pType = orgSettings.payrollPeriodType || 'cycle';
+    if (pType === 'custom' && orgSettings.payrollCustomFrom && orgSettings.payrollCustomTo) {
+      const from = orgSettings.payrollCustomFrom <= orgSettings.payrollCustomTo ? orgSettings.payrollCustomFrom : orgSettings.payrollCustomTo;
+      const to = orgSettings.payrollCustomFrom <= orgSettings.payrollCustomTo ? orgSettings.payrollCustomTo : orgSettings.payrollCustomFrom;
+      return d >= from && d <= to;
+    }
     // Monthly cutoff calculation
     const sDay = orgSettings.payrollPayoutStartDay !== undefined ? parseInt(orgSettings.payrollPayoutStartDay, 10) : 26;
     const eDay = orgSettings.payrollPayoutEndDay !== undefined ? parseInt(orgSettings.payrollPayoutEndDay, 10) : (orgSettings.payrollPayoutDay || 25);

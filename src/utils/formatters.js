@@ -118,6 +118,21 @@ export function normalizeState(parsed) {
       return v !== null ? parseInt(v, 10) : 25;
     } catch { return 25; }
   })();
+  const localPeriodType = (() => {
+    try {
+      return localStorage.getItem('payroll_period_type') || 'cycle';
+    } catch { return 'cycle'; }
+  })();
+  const localCustomFrom = (() => {
+    try {
+      return localStorage.getItem('payroll_custom_from') || '';
+    } catch { return ''; }
+  })();
+  const localCustomTo = (() => {
+    try {
+      return localStorage.getItem('payroll_custom_to') || '';
+    } catch { return ''; }
+  })();
 
   const orgSettings = {
     orgName: 'مؤسسة الموارد البشرية والبصمات',
@@ -125,6 +140,9 @@ export function normalizeState(parsed) {
     waServerUrl: 'https://funny-sloth-89.loca.lt',
     adminUsername: 'admin',
     adminPassword: '123',
+    payrollPeriodType: localPeriodType,
+    payrollCustomFrom: localCustomFrom,
+    payrollCustomTo: localCustomTo,
     payrollPayoutStartDay: localStartDay,
     payrollPayoutEndDay: localEndDay,
     payrollPayoutDay: localEndDay,
@@ -136,6 +154,15 @@ export function normalizeState(parsed) {
   }
   if (parsed.orgSettings?.payrollPayoutEndDay !== undefined) {
     try { localStorage.setItem('payroll_payout_end_day', String(parsed.orgSettings.payrollPayoutEndDay)); } catch {}
+  }
+  if (parsed.orgSettings?.payrollPeriodType) {
+    try { localStorage.setItem('payroll_period_type', parsed.orgSettings.payrollPeriodType); } catch {}
+  }
+  if (parsed.orgSettings?.payrollCustomFrom) {
+    try { localStorage.setItem('payroll_custom_from', parsed.orgSettings.payrollCustomFrom); } catch {}
+  }
+  if (parsed.orgSettings?.payrollCustomTo) {
+    try { localStorage.setItem('payroll_custom_to', parsed.orgSettings.payrollCustomTo); } catch {}
   }
 
   const shifts = toSafeArray(parsed.shifts).map((s) => ({
