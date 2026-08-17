@@ -758,12 +758,18 @@ export default function EmployeePortalView({
   // Build list of absence days (work day in roster, no punch recorded, not a leave day)
   const absenceDays = useMemo(() => {
     if (!emp || !approvedRoster?.schedule) return [];
-    const cutoff = getPayrollCutoffRange(selectedMonth);
     const today = todayStr();
     const results = [];
     const dates = [];
 
-    if (cutoff) {
+    const isCustom = filterMode === 'range' || filterMode === 'custom';
+    const effStart = (rangeStart && rangeEnd) ? (rangeStart <= rangeEnd ? rangeStart : rangeEnd) : (rangeStart || rangeEnd);
+    const effEnd = (rangeStart && rangeEnd) ? (rangeStart <= rangeEnd ? rangeEnd : rangeStart) : (rangeEnd || rangeStart);
+    const cutoff = isCustom && (effStart || effEnd)
+      ? { startDate: effStart || effEnd, endDate: effEnd || effStart }
+      : getPayrollCutoffRange(selectedMonth);
+
+    if (cutoff && cutoff.startDate && cutoff.endDate) {
       let cur = new Date(cutoff.startDate);
       const end = new Date(cutoff.endDate);
       while (cur <= end) {

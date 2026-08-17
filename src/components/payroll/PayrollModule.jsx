@@ -132,6 +132,32 @@ export default function PayrollModule({
     return `دورة الشهر (${monthPicker}): من ${startStr} إلى ${endStr}`;
   };
 
+  const getPayrollRangeObj = () => {
+    if (periodType === 'custom' && customFrom && customTo) {
+      const from = customFrom <= customTo ? customFrom : customTo;
+      const to = customFrom <= customTo ? customTo : customFrom;
+      return { startDate: from, endDate: to };
+    }
+    if (!monthPicker || monthPicker.length !== 7) return null;
+    const [y, m] = monthPicker.split('-').map(Number);
+    let prevY = y;
+    let prevM = m - 1;
+    if (prevM < 1) { prevM = 12; prevY = y - 1; }
+    const startStr = `${prevY}-${String(prevM).padStart(2, '0')}-${String(payoutStartDay).padStart(2, '0')}`;
+    const endStr = `${y}-${String(m).padStart(2, '0')}-${String(payoutEndDay).padStart(2, '0')}`;
+    return { startDate: startStr, endDate: endStr };
+  };
+
+  const payrollFilterFn = (d) => {
+    if (!d) return false;
+    const cleanDate = String(d).slice(0, 10);
+    const range = getPayrollRangeObj();
+    if (range) {
+      return cleanDate >= range.startDate && cleanDate <= range.endDate;
+    }
+    return cleanDate.startsWith(monthPicker);
+  };
+
   return (
     <div className="bylaws-card" style={{ fontFamily: "'Tajawal', sans-serif" }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
@@ -279,13 +305,13 @@ export default function PayrollModule({
             placeholder="🔍 بحث بالاسم أو الكود..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', width: '220px' }}
+            style={{ padding: '8px 14px', borderRadius: '8px', border: '1px solid var(--border)', width: '220px' }}
           />
 
           <select
             value={filterBranch}
             onChange={(e) => setFilterBranch(e.target.value)}
-            style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+            style={{ padding: '8px 14px', borderRadius: '8px', border: '1px solid var(--border)' }}
           >
             <option value="">🏢 جميع الفروع</option>
             {branches.map((b) => (
@@ -341,7 +367,7 @@ export default function PayrollModule({
                 }
 
                 const empSum = state.computeEmpSummary
-                  ? state.computeEmpSummary(emp.id, null, monthPicker, filterBranch || null)
+                  ? state.computeEmpSummary(emp.id, payrollFilterFn, monthPicker, filterBranch || null)
                   : { hours: 0, baseEarnings: 0, totalBonus: 0, totalDeduction: 0, absenceDeduction: 0, netSalary: 0 };
 
                 const totalDed = (empSum.totalDeduction || 0) + (empSum.absenceDeduction || 0);
@@ -385,7 +411,7 @@ export default function PayrollModule({
       {selectedEmpModal && (() => {
         const empSalary = parseFloat(selectedEmpModal.salary) || 0;
         const empSum = state.computeEmpSummary
-          ? state.computeEmpSummary(selectedEmpModal.id, null, monthPicker, filterBranch || null)
+          ? state.computeEmpSummary(selectedEmpModal.id, payrollFilterFn, monthPicker, filterBranch || null)
           : { hours: 0, baseEarnings: 0, totalBonus: 0, totalDeduction: 0, absenceDeduction: 0, netSalary: 0, absenceDaysCount: 0 };
 
         const totalDed = (empSum.totalDeduction || 0) + (empSum.absenceDeduction || 0);

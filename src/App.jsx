@@ -1678,8 +1678,22 @@ export default function App() {
 
     if (!roster || !roster.schedule) return 0;
 
+    const range = getPayrollCutoffRange(monthStr);
     let dates = [];
-    if (roster.fromDate && roster.toDate) {
+
+    if (range && range.startDate && range.endDate) {
+      let cur = new Date(range.startDate);
+      const end = new Date(range.endDate);
+      if (!isNaN(cur) && !isNaN(end) && cur <= end) {
+        while (cur <= end) {
+          const cy = cur.getFullYear();
+          const cm = cur.getMonth() + 1;
+          const cd = cur.getDate();
+          dates.push(`${cy}-${String(cm).padStart(2, '0')}-${String(cd).padStart(2, '0')}`);
+          cur.setDate(cur.getDate() + 1);
+        }
+      }
+    } else if (roster.fromDate && roster.toDate) {
       let current = new Date(roster.fromDate);
       const end = new Date(roster.toDate);
       if (!isNaN(current) && !isNaN(end) && current <= end) {
@@ -1691,26 +1705,11 @@ export default function App() {
           current.setDate(current.getDate() + 1);
         }
       }
-    }
-
-    if (dates.length === 0) {
-      const range = getPayrollCutoffRange(monthStr);
-      if (range) {
-        let cur = new Date(range.startDate);
-        const end = new Date(range.endDate);
-        while (cur <= end) {
-          const cy = cur.getFullYear();
-          const cm = cur.getMonth() + 1;
-          const cd = cur.getDate();
-          dates.push(`${cy}-${String(cm).padStart(2, '0')}-${String(cd).padStart(2, '0')}`);
-          cur.setDate(cur.getDate() + 1);
-        }
-      } else {
-        const [y, m] = monthStr.split('-').map(Number);
-        const daysInMonth = new Date(y, m, 0).getDate();
-        for (let d = 1; d <= daysInMonth; d++) {
-          dates.push(`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
-        }
+    } else if (monthStr && monthStr.length === 7) {
+      const [y, m] = monthStr.split('-').map(Number);
+      const daysInMonth = new Date(y, m, 0).getDate();
+      for (let d = 1; d <= daysInMonth; d++) {
+        dates.push(`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
       }
     }
 
