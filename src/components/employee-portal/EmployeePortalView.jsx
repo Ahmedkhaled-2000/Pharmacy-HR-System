@@ -618,21 +618,69 @@ export default function EmployeePortalView({
     return { startDate, endDate };
   };
 
-  const canViewSalary = Boolean(getEmpPermission ? getEmpPermission(emp || currentEmpUser, 'canViewSalary') : true);
-  const canStartEnd = Boolean(getEmpPermission ? getEmpPermission(emp || currentEmpUser, 'canStartEnd') : true);
-  const canLivePunch = Boolean(getEmpPermission ? getEmpPermission(emp || currentEmpUser, 'canLivePunch') : true);
-  const canManualShift = Boolean(getEmpPermission ? getEmpPermission(emp || currentEmpUser, 'canManualShift') : false);
-  const canEditShift = Boolean(getEmpPermission ? getEmpPermission(emp || currentEmpUser, 'canEditShift') : false);
-  const canAddAdjustment = Boolean(getEmpPermission ? getEmpPermission(emp || currentEmpUser, 'canAddAdjustment') : false);
-  const canViewAdjustments = Boolean(getEmpPermission ? getEmpPermission(emp || currentEmpUser, 'canViewAdjustments') : true);
-  const canExportExcel = Boolean(getEmpPermission ? getEmpPermission(emp || currentEmpUser, 'canExportExcel') : true);
-  const canApplyLoan = Boolean(getEmpPermission ? getEmpPermission(emp || currentEmpUser, 'canApplyLoan') : true);
-  const canApplyLeave = Boolean(getEmpPermission ? getEmpPermission(emp || currentEmpUser, 'canApplyLeave') : true);
-  const canApplyPermission = Boolean(getEmpPermission ? getEmpPermission(emp || currentEmpUser, 'canApplyPermission') : true);
-  const canApplySwap = Boolean(getEmpPermission ? getEmpPermission(emp || currentEmpUser, 'canApplySwap') : true);
-  const canViewBylaws = Boolean(getEmpPermission ? getEmpPermission(emp || currentEmpUser, 'canViewBylaws') : true);
-  const canSubmitComplaint = Boolean(getEmpPermission ? getEmpPermission(emp || currentEmpUser, 'canSubmitComplaint') : true);
-  const canViewRoster = Boolean(getEmpPermission ? getEmpPermission(emp || currentEmpUser, 'canViewRoster') : true);
+  const isPermActive = (permKey, defaultVal = true) => {
+    let actionName = permKey;
+    if (permKey.startsWith('can')) actionName = permKey.slice(3);
+    else if (permKey.startsWith('allow')) actionName = permKey.slice(5);
+    const canKey = 'can' + actionName;
+    const allowKey = 'allow' + actionName;
+
+    const targetId = emp ? String(emp.id) : (currentEmpUser ? String(currentEmpUser.id) : null);
+    const targetCode = emp ? String(emp.code) : (currentEmpUser ? String(currentEmpUser.code) : null);
+
+    // 1. فحص الصلاحيات المخصصة للموظف المحدد في empPermissions
+    const empOverrides = state?.orgSettings?.empPermissions || orgSettings?.empPermissions;
+    if (empOverrides && typeof empOverrides === 'object') {
+      const specific = (targetId && empOverrides[targetId]) || (targetCode && empOverrides[targetCode]);
+      if (specific && typeof specific === 'object') {
+        if (specific[canKey] !== undefined) return Boolean(specific[canKey]);
+        if (specific[allowKey] !== undefined) return Boolean(specific[allowKey]);
+        if (specific[actionName] !== undefined) return Boolean(specific[actionName]);
+        if (specific[permKey] !== undefined) return Boolean(specific[permKey]);
+      }
+    }
+
+    // 2. فحص الصلاحيات المسجلة داخل كائن الموظف نفسه emp.permissions
+    const empPerms = emp?.permissions || currentEmpUser?.permissions;
+    if (empPerms && typeof empPerms === 'object' && Object.keys(empPerms).length > 0) {
+      if (empPerms[canKey] !== undefined) return Boolean(empPerms[canKey]);
+      if (empPerms[allowKey] !== undefined) return Boolean(empPerms[allowKey]);
+      if (empPerms[actionName] !== undefined) return Boolean(empPerms[actionName]);
+      if (empPerms[permKey] !== undefined) return Boolean(empPerms[permKey]);
+    }
+
+    // 3. فحص الصلاحيات العامة للمؤسسة في orgSettings.permissions
+    const globalPerms = state?.orgSettings?.permissions || orgSettings?.permissions;
+    if (globalPerms && typeof globalPerms === 'object') {
+      if (globalPerms[canKey] !== undefined) return Boolean(globalPerms[canKey]);
+      if (globalPerms[allowKey] !== undefined) return Boolean(globalPerms[allowKey]);
+      if (globalPerms[actionName] !== undefined) return Boolean(globalPerms[actionName]);
+      if (globalPerms[permKey] !== undefined) return Boolean(globalPerms[permKey]);
+    }
+
+    // 4. استدعاء دالة getEmpPermission الممررة
+    if (typeof getEmpPermission === 'function') {
+      return Boolean(getEmpPermission(emp || currentEmpUser, permKey));
+    }
+
+    return defaultVal;
+  };
+
+  const canViewSalary = isPermActive('canViewSalary', true);
+  const canStartEnd = isPermActive('canStartEnd', true);
+  const canLivePunch = isPermActive('canLivePunch', true);
+  const canManualShift = isPermActive('canManualShift', false);
+  const canEditShift = isPermActive('canEditShift', false);
+  const canAddAdjustment = isPermActive('canAddAdjustment', false);
+  const canViewAdjustments = isPermActive('canViewAdjustments', true);
+  const canExportExcel = isPermActive('canExportExcel', true);
+  const canApplyLoan = isPermActive('canApplyLoan', true);
+  const canApplyLeave = isPermActive('canApplyLeave', true);
+  const canApplyPermission = isPermActive('canApplyPermission', true);
+  const canApplySwap = isPermActive('canApplySwap', true);
+  const canViewBylaws = isPermActive('canViewBylaws', true);
+  const canSubmitComplaint = isPermActive('canSubmitComplaint', true);
+  const canViewRoster = isPermActive('canViewRoster', true);
 
   const isCustomMode = filterMode === 'range' || filterMode === 'custom';
   const effectiveStart = (rangeStart && rangeEnd) ? (rangeStart <= rangeEnd ? rangeStart : rangeEnd) : (rangeStart || rangeEnd);
@@ -1446,10 +1494,10 @@ export default function EmployeePortalView({
 
                         <div className="ep-summary-grid">
                           <SummaryCard icon="⏱️" label="إجمالي ساعات العمل" value={`${fmt(bSummary.hours)} ساعة`} sub={`من أصل ${bReqHours} ساعة مطلوبة بالفرع`} />
-                          <SummaryCard icon="💰" label="سعر الساعة الشهرية (المدخل)" value={`${fmt(bSalary)} ج.م / س`} sub={`الراتب الشهري: ${fmt(bMonthlySalary)} ج.م`} />
-                          <SummaryCard icon="📅" label="سعر اليوم (المحسوب)" value={`${fmt(bSummary.dailyRate)} ج.م / يوم`} sub={`(الراتب الشهري ÷ ${bDaysPerMonth} يوم)`} />
-                          <SummaryCard icon="💵" label="سعر الساعة اليومي" value={`${fmt(bSummary.rate || bSalary)} ج.م / س`} sub="المُدخل من الإدارة العليا" />
-                          <SummaryCard icon="💰" label="المستحقات الأساسية (أجر الساعات)" value={canViewSalary ? `${fmt(bSummary.baseEarnings)} ج.م` : '🔒 مقيد'} sub={`${fmt(bSummary.hours)} س × ${fmt(bSummary.rate || bSalary)} ج.م`} />
+                          <SummaryCard icon="💰" label="سعر الساعة الشهرية (المدخل)" value={canViewSalary ? `${fmt(bSalary)} ج.م / س` : '🔒 مقيد'} sub={canViewSalary ? `الراتب الشهري: ${fmt(bMonthlySalary)} ج.م` : '🔒 مقيد'} />
+                          <SummaryCard icon="📅" label="سعر اليوم (المحسوب)" value={canViewSalary ? `${fmt(bSummary.dailyRate)} ج.م / يوم` : '🔒 مقيد'} sub={canViewSalary ? `(الراتب الشهري ÷ ${bDaysPerMonth} يوم)` : '🔒 مقيد'} />
+                          <SummaryCard icon="💵" label="سعر الساعة اليومي" value={canViewSalary ? `${fmt(bSummary.rate || bSalary)} ج.م / س` : '🔒 مقيد'} sub={canViewSalary ? "المُدخل من الإدارة العليا" : '🔒 مقيد'} />
+                          <SummaryCard icon="💰" label="المستحقات الأساسية (أجر الساعات)" value={canViewSalary ? `${fmt(bSummary.baseEarnings)} ج.م` : '🔒 مقيد'} sub={canViewSalary ? `${fmt(bSummary.hours)} س × ${fmt(bSummary.rate || bSalary)} ج.م` : '🔒 مقيد'} />
                           <SummaryCard icon="🎁" label="إجمالي المكافآت" value={canViewAdjustments ? `+${fmt(bSummary.totalBonus)} ج.م` : '🔒 مقيد'} colorVar="--success" />
                           <SummaryCard icon="✂️" label="إجمالي الخصومات" value={canViewAdjustments ? `-${fmt(bSummary.totalDeduction)} ج.م` : '🔒 مقيد'} colorVar="--danger" />
                           <SummaryCard icon="🏆" label={`صافي المرتب — فرع ${bName}`} value={canViewSalary ? `${fmt(bSummary.netSalary)} ج.م` : '🔒 مقيد'} colorVar="--primary" />
@@ -1461,10 +1509,10 @@ export default function EmployeePortalView({
               ) : (
                 <div className="ep-summary-grid">
                   <SummaryCard icon="⏱️" label="إجمالي ساعات العمل" value={`${fmt(summary.hours)} ساعة`} sub={`من أصل ${monthlyRequiredHours} ساعة مطلوبة شهرياً`} />
-                  <SummaryCard icon="💰" label="سعر الساعة الشهرية (المدخل)" value={`${fmt(currentHourlyRate)} ج.م / س`} sub={`الراتب الشهري: ${fmt(currentMonthlySalary)} ج.م`} />
-                  <SummaryCard icon="📅" label="سعر اليوم (المحسوب)" value={`${fmt(summary.dailyRate)} ج.م / يوم`} sub={`(الراتب الشهري ÷ ${workDaysPerMonth || 26} يوم)`} />
-                  <SummaryCard icon="💵" label="سعر الساعة اليومي" value={`${fmt(summary.rate || currentHourlyRate)} ج.م / س`} sub="المُدخل من الإدارة العليا" />
-                  <SummaryCard icon="💰" label="المستحقات الأساسية (أجر الساعات)" value={canViewSalary ? `${fmt(summary.baseEarnings)} ج.م` : '🔒 مقيد'} sub={`${fmt(summary.hours)} س × ${fmt(summary.rate || currentHourlyRate)} ج.م`} />
+                  <SummaryCard icon="💰" label="سعر الساعة الشهرية (المدخل)" value={canViewSalary ? `${fmt(currentHourlyRate)} ج.م / س` : '🔒 مقيد'} sub={canViewSalary ? `الراتب الشهري: ${fmt(currentMonthlySalary)} ج.م` : '🔒 مقيد'} />
+                  <SummaryCard icon="📅" label="سعر اليوم (المحسوب)" value={canViewSalary ? `${fmt(summary.dailyRate)} ج.م / يوم` : '🔒 مقيد'} sub={canViewSalary ? `(الراتب الشهري ÷ ${workDaysPerMonth || 26} يوم)` : '🔒 مقيد'} />
+                  <SummaryCard icon="💵" label="سعر الساعة اليومي" value={canViewSalary ? `${fmt(summary.rate || currentHourlyRate)} ج.م / س` : '🔒 مقيد'} sub={canViewSalary ? "المُدخل من الإدارة العليا" : '🔒 مقيد'} />
+                  <SummaryCard icon="💰" label="المستحقات الأساسية (أجر الساعات)" value={canViewSalary ? `${fmt(summary.baseEarnings)} ج.م` : '🔒 مقيد'} sub={canViewSalary ? `${fmt(summary.hours)} س × ${fmt(summary.rate || currentHourlyRate)} ج.م` : '🔒 مقيد'} />
                   <SummaryCard icon="🎁" label="إجمالي المكافآت" value={canViewAdjustments ? `+${fmt(summary.totalBonus)} ج.م` : '🔒 مقيد'} colorVar="--success" />
                   <SummaryCard icon="✂️" label="إجمالي الخصومات" value={canViewAdjustments ? `-${fmt(summary.totalDeduction)} ج.م` : '🔒 مقيد'} colorVar="--danger" />
                   {absenceDays.length > 0 && (
