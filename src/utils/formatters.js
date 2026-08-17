@@ -106,14 +106,37 @@ export function normalizeState(parsed) {
     devices: toSafeArray(emp.devices)
   }));
 
+  const localStartDay = (() => {
+    try {
+      const v = localStorage.getItem('payroll_payout_start_day');
+      return v !== null ? parseInt(v, 10) : 26;
+    } catch { return 26; }
+  })();
+  const localEndDay = (() => {
+    try {
+      const v = localStorage.getItem('payroll_payout_end_day');
+      return v !== null ? parseInt(v, 10) : 25;
+    } catch { return 25; }
+  })();
+
   const orgSettings = {
     orgName: 'مؤسسة الموارد البشرية والبصمات',
     logoUrl: '',
     waServerUrl: 'https://funny-sloth-89.loca.lt',
     adminUsername: 'admin',
     adminPassword: '123',
+    payrollPayoutStartDay: localStartDay,
+    payrollPayoutEndDay: localEndDay,
+    payrollPayoutDay: localEndDay,
     ...(parsed.orgSettings || {})
   };
+
+  if (parsed.orgSettings?.payrollPayoutStartDay !== undefined) {
+    try { localStorage.setItem('payroll_payout_start_day', String(parsed.orgSettings.payrollPayoutStartDay)); } catch {}
+  }
+  if (parsed.orgSettings?.payrollPayoutEndDay !== undefined) {
+    try { localStorage.setItem('payroll_payout_end_day', String(parsed.orgSettings.payrollPayoutEndDay)); } catch {}
+  }
 
   const shifts = toSafeArray(parsed.shifts).map((s) => ({
     ...s,

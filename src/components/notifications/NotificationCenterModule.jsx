@@ -198,7 +198,7 @@ export default function NotificationCenterModule({
   // 3. Pending Requests of All Types
   const pendingRequests = useMemo(() => {
     return requests
-      .filter((r) => r.status === 'pending' || r.status === 'pending_admin' || !r.adminApproved)
+      .filter((r) => (r.status === 'pending' || r.status === 'pending_admin') && r.status !== 'rejected' && r.status !== 'cancelled')
       .map((r) => {
         const emp = employees.find((e) => String(e.id) === String(r.employeeId));
         const branchObj = branches.find((b) => String(b.id) === String(r.branchId || emp?.branchId));
@@ -831,13 +831,17 @@ export default function NotificationCenterModule({
                 .filter((p) => branchFilter === 'all' || String(p.branchId) === String(branchFilter))
                 .map((p) => {
                   const isApproved = p.status === 'approved' || p.adminApproved;
+                  const isRejected = p.status === 'rejected';
+                  const isCancelled = p.status === 'cancelled';
+                  const isPending = !isApproved && !isRejected && !isCancelled;
+
                   return (
                     <div
                       key={p.id}
                       style={{
                         background: 'var(--surface)',
-                        border: isApproved ? '1px solid #e9d5ff' : '1px solid #fbcfe8',
-                        borderRight: isApproved ? '4px solid #a855f7' : '4px solid #ec4899',
+                        border: isApproved ? '1px solid #e9d5ff' : isRejected ? '1px solid #fed7aa' : '1px solid #fbcfe8',
+                        borderRight: isApproved ? '4px solid #a855f7' : isRejected ? '4px solid #f97316' : '4px solid #ec4899',
                         padding: '14px 18px',
                         borderRadius: '10px',
                         display: 'flex',
@@ -858,6 +862,14 @@ export default function NotificationCenterModule({
                             <span style={{ background: '#dcfce7', color: '#15803d', padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold' }}>
                               🟢 معتمد ومخصوم من الأجر
                             </span>
+                          ) : isRejected ? (
+                            <span style={{ background: '#fef2f2', color: '#dc2626', padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold' }}>
+                              🔴 تم رفض الجزاء (بدون خصم)
+                            </span>
+                          ) : isCancelled ? (
+                            <span style={{ background: '#f1f5f9', color: '#64748b', padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold' }}>
+                              ⚪ ملغي (معفى)
+                            </span>
                           ) : (
                             <span style={{ background: '#fee2e2', color: '#b91c1c', padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold' }}>
                               ⏳ بانتظار موافقة الإدارة العليا
@@ -872,7 +884,7 @@ export default function NotificationCenterModule({
                         </span>
                       </div>
 
-                      {!isApproved && (
+                      {isPending && (
                         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                           {onApproveRequest && (
                             <button

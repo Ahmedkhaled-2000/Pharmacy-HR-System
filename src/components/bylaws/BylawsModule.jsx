@@ -283,18 +283,146 @@ export default function BylawsModule({
     showToast?.('❌ تم رفض الاعتراض وتثبيت الجزاء المالي');
   };
 
-  const getImpactDesc = (rule) => {
-    if (rule.impactType === 'deduction_days') return `خصم ${rule.impactVal} يوم من الراتب`;
-    if (rule.impactType === 'fixed_amount') return `خصم مبلغ ${rule.impactVal} ج.م`;
-    if (rule.impactType === 'warning') return `إنذار كتابي رسمي`;
-    return `تنبيه شفهي`;
-  };
+  // Penalty Records Filter State
+  const [recordsSearch, setRecordsSearch] = useState('');
+  const [recordsBranch, setRecordsBranch] = useState('');
+  const [recordsStatus, setRecordsStatus] = useState('all'); // 'all' | 'approved' | 'pending' | 'rejected' | 'objection'
+  const [recordsPeriodMode, setRecordsPeriodMode] = useState('all'); // 'all' | 'current' | 'custom'
+  const [recordsCustomFrom, setRecordsCustomFrom] = useState('');
+  const [recordsCustomTo, setRecordsCustomTo] = useState('');
 
-  const appliedPenalties = (state.requests || []).filter(r => 
-    r.type === 'penalty' && 
-    (!currentEmpId || String(r.employeeId) === String(currentEmpId)) &&
-    (!filterFn || filterFn(r.date || (r.createdAt ? r.createdAt.slice(0, 10) : '')))
-  );
+  const employees = state.employees || [];
+  const branches = state.branches || [];
+
+  // Aggregated penalties from requests and adjustments
+  const allPenalties = useMemo(() => {
+    const list = [];
+    const seenReqIds = new Set();
+
+    // 1. From requests
+    (state.requests || []).forEach((r) => {
+      if (r.type === 'penalty' || r.type === 'early_exit' || r.subType === 'lateness' || (r.type === 'adjustment' && r.subType === 'penalty') || r.ruleTitle) {
+        seenReqIds.add(String(r.id));
+        const emp = employees.find((e) => String(e.id) === String(r.employeeId));
+        const bObj = branches.find((b) => String(b.id) === String(r.branchId || emp?.branchId));
+        
+        let amount = parseFloat(r.amount) || 0;
+        if (!amount && (r.impactType || r.impactVal)) {
+          if (r.impactType === 'deduction_days') {
+            const salary = emp ? parseFloat(emp.salary) || 0 : 0;
+            const workHours = emp ? parseFloat(emp.workHoursPerDay) || 8 : 8;
+            const workDays = emp ? parseFloat(emp.workDaysPerMonth) || 26 : 26;
+            const dailyRate = workDays > 0 ? (salary * workHours) / workDays : (salary * workHours);
+            amount = Math.round(dailyRate * (parseFloat(r.impactVal) || 1) * 100) / 100;
+          } else if (r.impactType === 'fixed_amount') {
+            amount = parseFloat(r.impactVal) || 0;
+          }
+        }
+
+        list.push({
+          id: r.id,
+          employeeId: r.employeeId,
+          employeeName: emp?.name || r.employeeName || 'موظف',
+          employeeCode: emp?.code || r.employeeCode || '—',
+          branchId: r.branchId || emp?.branchId,
+          branchName: bObj?.name || 'الفرع الرئيسي',
+          ruleTitle: r.ruleTitle || (r.subType === 'lateness' ? `تأخير عن الشيفت (${r.latenessMinutes || ''} د)` : r.reason) || 'مخالفة لائحية',
+          category: r.category || 'انضباط ولائحة',
+          impactType: r.impactType || (r.impactVal ? 'deduction_days' : 'fixed_amount'),
+          impactVal: r.impactVal || 0,
+          amount: amount,
+          date: r.date || (r.createdAt ? r.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10)),
+          createdAt: r.createdAt || new Date().toISOString(),
+          reason: r.reason || r.ruleTitle || r.details || 'مخالفة لائحية',
+          details: r.details || r.reason || 'مخالفة لائحية',
+          status: r.status || (r.adminApproved ? 'approved' : 'pending'),
+          adminApproved: r.adminApproved,
+          objection: r.objection || null,
+          sourceType: 'request'
+        });
+      }
+    });
+
+    // 2. From adjustments (direct deductions/penalties)
+    (state.adjustments || []).forEach((a) => {
+      const isLinkedToReq = Array.from(seenReqIds).some((reqId) => a.id === `adj_pen_${reqId}` || a.id === reqId || a.id === `adj_${reqId}`);
+      if (!isLinkedToReq && (a.type === 'deduction' || a.type === 'penalty')) {
+        const emp = employees.find((e) => String(e.id) === String(a.employeeId));
+        const bObj = branches.find((b) => String(b.id) === String(a.branchId || emp?.branchId));
+        
+        list.push({
+          id: a.id,
+          employeeId: a.employeeId,
+          employeeName: emp?.name || a.employeeName || 'موظف',
+          employeeCode: emp?.code || a.employeeCode || '—',
+          branchId: a.branchId || emp?.branchId,
+          branchName: bObj?.name || 'الفرع الرئيسي',
+          ruleTitle: a.reason || a.description || 'خصم مالي مباشر',
+          category: 'ماليات وخصومات',
+          impactType: 'fixed_amount',
+          impactVal: parseFloat(a.amount) || 0,
+          amount: parseFloat(a.amount) || 0,
+          date: a.date || (a.createdAt ? a.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10)),
+          createdAt: a.createdAt || new Date().toISOString(),
+          reason: a.reason || a.description || 'خصم مباشر',
+          details: a.description || a.reason || 'خصم مباشر',
+          status: 'approved',
+          adminApproved: true,
+          objection: null,
+          sourceType: 'adjustment'
+        });
+      }
+    });
+
+    return list.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  }, [state.requests, state.adjustments, employees, branches]);
+
+  // Filtered penalties list according to active UI controls
+  const filteredPenalties = useMemo(() => {
+    return allPenalties.filter((p) => {
+      if (currentEmpId && String(p.employeeId) !== String(currentEmpId)) return false;
+      if (recordsBranch && String(p.branchId) !== String(recordsBranch)) return false;
+      if (recordsStatus !== 'all') {
+        if (recordsStatus === 'objection') {
+          if (!p.objection) return false;
+        } else if (recordsStatus === 'approved') {
+          if (p.status !== 'approved' && !p.adminApproved) return false;
+        } else if (recordsStatus === 'pending') {
+          if (p.status !== 'pending' && p.status !== 'pending_admin') return false;
+        } else if (recordsStatus === 'rejected') {
+          if (p.status !== 'rejected') return false;
+        }
+      }
+      if (recordsSearch.trim()) {
+        const q = recordsSearch.trim().toLowerCase();
+        const matchName = (p.employeeName || '').toLowerCase().includes(q);
+        const matchCode = (p.employeeCode || '').toLowerCase().includes(q);
+        const matchBranch = (p.branchName || '').toLowerCase().includes(q);
+        const matchRule = (p.ruleTitle || '').toLowerCase().includes(q);
+        const matchReason = (p.reason || '').toLowerCase().includes(q);
+        if (!matchName && !matchCode && !matchBranch && !matchRule && !matchReason) return false;
+      }
+      if (recordsPeriodMode === 'current') {
+        if (filterFn) {
+          if (!filterFn(p.date)) return false;
+        } else if (monthPicker) {
+          if (!p.date.startsWith(monthPicker)) return false;
+        }
+      } else if (recordsPeriodMode === 'custom') {
+        if (recordsCustomFrom && p.date < recordsCustomFrom) return false;
+        if (recordsCustomTo && p.date > recordsCustomTo) return false;
+      }
+      return true;
+    });
+  }, [allPenalties, currentEmpId, recordsBranch, recordsStatus, recordsSearch, recordsPeriodMode, recordsCustomFrom, recordsCustomTo, filterFn, monthPicker]);
+
+  const totalFilteredDeduction = filteredPenalties
+    .filter((p) => p.status === 'approved' || p.adminApproved)
+    .reduce((acc, p) => acc + (parseFloat(p.amount) || 0), 0);
+
+  const pendingCount = filteredPenalties.filter((p) => p.status === 'pending' || p.status === 'pending_admin').length;
+  const approvedCount = filteredPenalties.filter((p) => p.status === 'approved' || p.adminApproved).length;
+  const objectionCount = filteredPenalties.filter((p) => p.objection && p.objection.status === 'pending_admin').length;
 
   return (
     <div className="bylaws-card" style={{ fontFamily: "'Tajawal', sans-serif" }}>
@@ -456,114 +584,237 @@ export default function BylawsModule({
       {/* Tab 3: Applied Penalty Records */}
       {activeTab === 'records' && (
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', padding: '20px', borderRadius: '14px' }}>
-          <h3 style={{ fontFamily: 'Cairo', margin: '0 0 16px', color: 'var(--primary-dark)' }}>
-            📋 سجل الجزاءات والمخالفات الموثقة
-          </h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+            <div>
+              <h3 style={{ fontFamily: 'Cairo', margin: 0, color: 'var(--primary-dark)' }}>
+                📋 سجل الجزاءات والمخالفات اللائحية الموثقة
+              </h3>
+              <p style={{ margin: '4px 0 0', fontSize: '13px', color: 'var(--muted)' }}>
+                استعراض كافة الخصومات والجزاءات لجميع الموظفين بالفروع مع إمكانية التصفية المباشرة
+              </p>
+            </div>
 
+            {isManagerOrAdmin && (
+              <button className="btn btn-start" style={{ background: '#dc2626' }} onClick={() => setShowRecordModal(true)}>
+                {isAdmin ? '⚖️ توثيق وتطبيق جزاء لائحي' : '⚠️ توثيق مخالفة لائحية جديدة'}
+              </button>
+            )}
+          </div>
+
+          {/* Metric Summary Cards */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+            <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', padding: '12px 16px', borderRadius: '10px' }}>
+              <span style={{ fontSize: '12px', color: '#64748b' }}>إجمالي الجزاءات بالسجل</span>
+              <h4 style={{ margin: '4px 0 0', fontSize: '20px', color: '#1e293b' }}>{filteredPenalties.length} مخالفة</h4>
+            </div>
+            <div style={{ background: '#f0fdf4', border: '1px solid #86efac', padding: '12px 16px', borderRadius: '10px' }}>
+              <span style={{ fontSize: '12px', color: '#166534' }}>مطبقة ومخصومة بالراتب</span>
+              <h4 style={{ margin: '4px 0 0', fontSize: '20px', color: '#15803d' }}>{approvedCount} معتمدة</h4>
+            </div>
+            <div style={{ background: '#fef2f2', border: '1px solid #fca5a5', padding: '12px 16px', borderRadius: '10px' }}>
+              <span style={{ fontSize: '12px', color: '#991b1b' }}>بانتظار قرار الإدارة</span>
+              <h4 style={{ margin: '4px 0 0', fontSize: '20px', color: '#dc2626' }}>{pendingCount} معلقة</h4>
+            </div>
+            <div style={{ background: '#fffbeb', border: '1px solid #fde68a', padding: '12px 16px', borderRadius: '10px' }}>
+              <span style={{ fontSize: '12px', color: '#92400e' }}>إجمالي مبالغ الخصومات</span>
+              <h4 style={{ margin: '4px 0 0', fontSize: '20px', color: '#b45309' }}>{totalFilteredDeduction.toFixed(2)} ج.م</h4>
+            </div>
+          </div>
+
+          {/* Advanced Filter Bar */}
+          <div style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)', padding: '14px 16px', borderRadius: '12px', marginBottom: '20px', display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center' }}>
+            <div style={{ flex: '1 1 200px' }}>
+              <input
+                type="text"
+                placeholder="🔍 بحث بالاسم، الكود، نوع الجزاء..."
+                value={recordsSearch}
+                onChange={(e) => setRecordsSearch(e.target.value)}
+                style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px' }}
+              />
+            </div>
+
+            {!currentEmpId && (
+              <div>
+                <select value={recordsBranch} onChange={(e) => setRecordsBranch(e.target.value)} style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px' }}>
+                  <option value="">🏢 جميع الفروع</option>
+                  {branches.map((b) => (
+                    <option key={b.id} value={b.id}>{b.name} ({b.branchCode})</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div>
+              <select value={recordsStatus} onChange={(e) => setRecordsStatus(e.target.value)} style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px' }}>
+                <option value="all">📋 جميع الحالات</option>
+                <option value="approved">🟢 المعتمدة والمخصومة</option>
+                <option value="pending">⏳ المعلقة بانتظار الإدارة</option>
+                <option value="rejected">🔴 المرفوعة المرفوضة</option>
+                <option value="objection">✋ بها اعتراضات موظفين</option>
+              </select>
+            </div>
+
+            <div>
+              <select value={recordsPeriodMode} onChange={(e) => setRecordsPeriodMode(e.target.value)} style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px', fontWeight: 'bold' }}>
+                <option value="all">📅 كل الفترات (شامل)</option>
+                <option value="current">📅 حسب فترة النظام الحالية</option>
+                <option value="custom">📆 فترة مخصصة (من - إلى)</option>
+              </select>
+            </div>
+
+            {recordsPeriodMode === 'custom' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <input type="date" value={recordsCustomFrom} onChange={(e) => setRecordsCustomFrom(e.target.value)} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px' }} />
+                <span style={{ fontSize: '12px', fontWeight: 'bold' }}>إلى</span>
+                <input type="date" value={recordsCustomTo} onChange={(e) => setRecordsCustomTo(e.target.value)} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px' }} />
+              </div>
+            )}
+
+            {(recordsSearch || recordsBranch || recordsStatus !== 'all' || recordsPeriodMode !== 'all') && (
+              <button
+                className="btn btn-ghost"
+                style={{ fontSize: '12px', padding: '6px 12px' }}
+                onClick={() => {
+                  setRecordsSearch('');
+                  setRecordsBranch('');
+                  setRecordsStatus('all');
+                  setRecordsPeriodMode('all');
+                  setRecordsCustomFrom('');
+                  setRecordsCustomTo('');
+                }}
+              >
+                🔄 إعادة ضبط الفلاتر
+              </button>
+            )}
+          </div>
+
+          {/* Table */}
           <div className="table-responsive">
-            <table className="bylaws-table">
+            <table className="bylaws-table" style={{ fontSize: '13px' }}>
               <thead>
                 <tr>
                   <th>تاريخ المخالفة</th>
-                  <th>الموظف</th>
+                  <th>الموظف والفرع</th>
                   <th>نوع المخالفة اللائحية</th>
-                  <th>سبب وتفاصيل الخصم</th>
+                  <th>مقدار الخصم / الأثر المالي</th>
+                  <th>السبب والتفاصيل</th>
                   <th>حالة الاعتماد</th>
-                  <th>الاعتراض / الإجراءات</th>
+                  <th>الإجراءات / الاعتراض</th>
                 </tr>
               </thead>
               <tbody>
-                {appliedPenalties.length === 0 ? (
-                  <tr><td colSpan="6" style={{ textAlign: 'center', color: 'var(--muted)', padding: '24px' }}>لا توجد مخالفات مسجلة حالياً.</td></tr>
+                {filteredPenalties.length === 0 ? (
+                  <tr><td colSpan="7" style={{ textAlign: 'center', color: 'var(--muted)', padding: '30px' }}>لا توجد جزاءات أو مخالفات مطابقة للفلاتر المحددة.</td></tr>
                 ) : (
-                  appliedPenalties.map((req) => (
-                    <tr key={req.id}>
-                      <td style={{ fontSize: '13px' }}>
-                        📅 {new Date(req.createdAt).toLocaleDateString('ar-EG')}
-                      </td>
-                      <td style={{ fontWeight: '800' }}>{req.employeeName} ({req.employeeCode})</td>
-                      <td><span className="badge badge-danger">⚠️ {req.ruleTitle || 'مخالفة لائحية'}</span></td>
-                      <td style={{ fontSize: '13px' }}>{req.reason || req.details}</td>
-                      <td>
-                        {req.status === 'cancelled' ? (
-                          <span className="badge badge-secondary" style={{ background: '#f1f5f9', color: '#64748b' }}>⚪ ملغي (تم قبول الاعتراض)</span>
-                        ) : req.status === 'approved' ? (
-                          <span className="badge badge-success">🟢 معتمد وتم تطبيق الخصم بالراتب</span>
-                        ) : req.status === 'rejected' ? (
-                          <span className="badge badge-danger">🔴 مرفوض من الإدارة العليا</span>
-                        ) : (
-                          <span className="badge badge-warning">⏳ بانتظار موافقة الإدارة العليا</span>
-                        )}
-                      </td>
-                      <td>
-                        {/* Employee View */}
-                        {!isAdmin && userRole === 'employee' ? (
-                          req.objection ? (
-                            req.objection.status === 'pending' ? (
-                              <div style={{ fontSize: '12px', color: '#b45309', background: '#fef3c7', padding: '6px 10px', borderRadius: '8px', border: '1px solid #fde68a' }}>
-                                ⏳ <strong>اعتراضك قيد المراجعة:</strong> "{req.objection.reason}"
-                              </div>
-                            ) : req.objection.status === 'approved' ? (
-                              <div style={{ fontSize: '12px', color: '#15803d', background: '#f0fdf4', padding: '6px 10px', borderRadius: '8px', border: '1px solid #bbf7d0' }}>
-                                ✅ <strong>تم قبول اعتراضك وإلغاء الخصم بنجاح</strong>
-                              </div>
-                            ) : (
-                              <div style={{ fontSize: '12px', color: '#b91c1c', background: '#fef2f2', padding: '6px 10px', borderRadius: '8px', border: '1px solid #fecaca' }}>
-                                ❌ <strong>تم رفض الاعتراض:</strong> {req.objection.adminReply || 'تم تثبيت الجزاء وفق اللائحة'}
-                              </div>
-                            )
-                          ) : req.status !== 'cancelled' ? (
-                            <button
-                              className="btn btn-outline"
-                              style={{ color: '#dc2626', borderColor: '#dc2626', fontSize: '12px', padding: '5px 12px', fontWeight: 'bold' }}
-                              onClick={() => { setObjectionTargetReq(req); setObjectionReason(''); }}
-                            >
-                              ✋ تقديم اعتراض للإدارة العليا
-                            </button>
+                  filteredPenalties.map((p) => {
+                    const isApproved = p.status === 'approved' || p.adminApproved;
+                    const isRejected = p.status === 'rejected';
+                    const isCancelled = p.status === 'cancelled';
+                    const isPending = !isApproved && !isRejected && !isCancelled;
+
+                    return (
+                      <tr key={p.id}>
+                        <td>
+                          📅 {p.date || (p.createdAt ? p.createdAt.slice(0, 10) : '—')}
+                        </td>
+                        <td>
+                          <div style={{ fontWeight: '800', color: 'var(--text)' }}>{p.employeeName}</div>
+                          <div style={{ fontSize: '11.5px', color: 'var(--muted)' }}>كود: {p.employeeCode} • {p.branchName}</div>
+                        </td>
+                        <td>
+                          <span className="badge badge-danger">⚠️ {p.ruleTitle}</span>
+                          {p.category && <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '2px' }}>{p.category}</div>}
+                        </td>
+                        <td style={{ fontWeight: '900', color: '#b91c1c' }}>
+                          {p.impactType === 'deduction_days' && p.impactVal ? (
+                            `خصم ${p.impactVal} يوم (${p.amount ? `${p.amount} ج.م` : ''})`
+                          ) : p.amount > 0 ? (
+                            `خصم ${p.amount} ج.م`
                           ) : (
-                            <span style={{ color: 'var(--muted)', fontSize: '12px' }}>—</span>
-                          )
-                        ) : (
-                          /* Admin / Branch Manager View */
-                          req.objection ? (
-                            req.objection.status === 'pending' ? (
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                <div style={{ fontSize: '12px', color: '#b45309', background: '#fef3c7', padding: '6px 10px', borderRadius: '8px', border: '1px solid #fde68a' }}>
-                                  ⚠️ <strong>اعتراض الموظف:</strong> "{req.objection.reason}"
+                            'إنذار / بدون خصم'
+                          )}
+                        </td>
+                        <td style={{ maxWidth: '220px', whiteSpace: 'normal', lineHeight: '1.5' }}>
+                          {p.reason || p.details || '—'}
+                        </td>
+                        <td>
+                          {isCancelled ? (
+                            <span className="badge badge-secondary" style={{ background: '#f1f5f9', color: '#64748b' }}>⚪ ملغي (معفى)</span>
+                          ) : isApproved ? (
+                            <span className="badge badge-success">🟢 معتمد ومخصوم</span>
+                          ) : isRejected ? (
+                            <span className="badge badge-danger">🔴 مرفوض من الإدارة</span>
+                          ) : (
+                            <span className="badge badge-warning">⏳ بانتظار موافقة الإدارة</span>
+                          )}
+                        </td>
+                        <td>
+                          {/* Admin Actions */}
+                          {isAdmin ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                              {isPending && (
+                                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                                  <button
+                                    className="btn btn-start"
+                                    style={{ padding: '4px 10px', fontSize: '11.5px', background: '#dc2626' }}
+                                    onClick={() => handleAdminApprovePenalty(p.id)}
+                                    title="تطبيق الخصم فوراً"
+                                  >
+                                    ⚖️ تطبيق الخصم
+                                  </button>
+                                  <button
+                                    className="btn btn-ghost"
+                                    style={{ padding: '4px 10px', fontSize: '11.5px', border: '1px solid #cbd5e1' }}
+                                    onClick={() => handleAdminRejectPenalty(p.id)}
+                                    title="رفض وتجاهل الجزاء"
+                                  >
+                                    ❌ رفض
+                                  </button>
                                 </div>
-                                {isAdmin && (
-                                  <div style={{ display: 'flex', gap: '6px' }}>
-                                    <button
-                                      className="btn btn-start"
-                                      style={{ background: '#16a34a', fontSize: '11.5px', padding: '4px 10px' }}
-                                      onClick={() => handleAdminApproveObjection(req.id)}
-                                    >
-                                      ✅ قبول الاعتراض وإلغاء الخصم
-                                    </button>
-                                    <button
-                                      className="btn btn-start"
-                                      style={{ background: '#dc2626', fontSize: '11.5px', padding: '4px 10px' }}
-                                      onClick={() => { setAdminRejectReplyReq(req); setAdminRejectReplyText(''); }}
-                                    >
-                                      ❌ رفض الاعتراض
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                            ) : req.objection.status === 'approved' ? (
-                              <span className="badge badge-success">✅ تم قبول الاعتراض وإلغاء الجزاء</span>
-                            ) : (
-                              <div style={{ fontSize: '12px', color: '#b91c1c' }}>
-                                ❌ تم رفض الاعتراض ({req.objection.adminReply || 'مثبت'})
-                              </div>
-                            )
+                              )}
+
+                              {p.objection && (
+                                <div style={{ background: '#fef3c7', padding: '6px 8px', borderRadius: '6px', border: '1px solid #fde68a', fontSize: '11.5px' }}>
+                                  <div style={{ color: '#92400e', fontWeight: 'bold' }}>✋ اعتراض الموظف: "{p.objection.reason}"</div>
+                                  {p.objection.status === 'pending_admin' && (
+                                    <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
+                                      <button className="btn btn-start" style={{ background: '#16a34a', padding: '2px 8px', fontSize: '11px' }} onClick={() => handleAdminApproveObjection(p.id)}>
+                                        ✓ قبول وإلغاء الخصم
+                                      </button>
+                                      <button className="btn btn-start" style={{ background: '#dc2626', padding: '2px 8px', fontSize: '11px' }} onClick={() => { setAdminRejectReplyReq(p); setAdminRejectReplyText(''); }}>
+                                        ✕ رفض الاعتراض
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
                           ) : (
-                            <span style={{ color: 'var(--muted)', fontSize: '12px' }}>لا يوجد اعتراض</span>
-                          )
-                        )}
-                      </td>
-                    </tr>
-                  ))
+                            /* Employee / Branch Manager View */
+                            userRole === 'employee' ? (
+                              p.objection ? (
+                                <div style={{ fontSize: '11.5px', color: '#b45309', background: '#fef3c7', padding: '4px 8px', borderRadius: '6px' }}>
+                                  {p.objection.status === 'pending_admin' ? '⏳ اعتراضك قيد مراجعة الإدارة' : p.objection.status === 'approved' ? '✅ تم قبول اعتراضك وإلغاء الجزاء' : '❌ تم رفض الاعتراض'}
+                                </div>
+                              ) : !isCancelled ? (
+                                <button
+                                  className="btn btn-outline"
+                                  style={{ color: '#dc2626', borderColor: '#dc2626', fontSize: '11.5px', padding: '4px 8px' }}
+                                  onClick={() => { setObjectionTargetReq(p); setObjectionReason(''); }}
+                                >
+                                  ✋ تقديم اعتراض
+                                </button>
+                              ) : (
+                                <span style={{ color: 'var(--muted)', fontSize: '12px' }}>—</span>
+                              )
+                            ) : (
+                              <span style={{ color: 'var(--muted)', fontSize: '12px' }}>{isApproved ? 'معتمد' : isRejected ? 'مرفوض' : 'معلق'}</span>
+                            )
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>

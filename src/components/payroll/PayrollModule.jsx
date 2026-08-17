@@ -18,15 +18,34 @@ export default function PayrollModule({
   const [filterBranch, setFilterBranch] = useState('');
 
   // Monthly Payout Cutoff Start/End Days
-  const [payoutStartDay, setPayoutStartDay] = useState(state.orgSettings?.payrollPayoutStartDay || 26);
-  const [payoutEndDay, setPayoutEndDay] = useState(state.orgSettings?.payrollPayoutEndDay || 25);
+  const [payoutStartDay, setPayoutStartDay] = useState(() => {
+    try {
+      const v = localStorage.getItem('payroll_payout_start_day');
+      if (v !== null) return parseInt(v, 10);
+    } catch {}
+    return state.orgSettings?.payrollPayoutStartDay !== undefined ? state.orgSettings.payrollPayoutStartDay : 26;
+  });
+
+  const [payoutEndDay, setPayoutEndDay] = useState(() => {
+    try {
+      const v = localStorage.getItem('payroll_payout_end_day');
+      if (v !== null) return parseInt(v, 10);
+    } catch {}
+    return state.orgSettings?.payrollPayoutEndDay !== undefined ? state.orgSettings.payrollPayoutEndDay : 25;
+  });
 
   useEffect(() => {
     if (state.orgSettings?.payrollPayoutStartDay !== undefined) {
       setPayoutStartDay(state.orgSettings.payrollPayoutStartDay);
+      try {
+        localStorage.setItem('payroll_payout_start_day', String(state.orgSettings.payrollPayoutStartDay));
+      } catch {}
     }
     if (state.orgSettings?.payrollPayoutEndDay !== undefined) {
       setPayoutEndDay(state.orgSettings.payrollPayoutEndDay);
+      try {
+        localStorage.setItem('payroll_payout_end_day', String(state.orgSettings.payrollPayoutEndDay));
+      } catch {}
     }
   }, [state.orgSettings?.payrollPayoutStartDay, state.orgSettings?.payrollPayoutEndDay]);
 
@@ -45,6 +64,13 @@ export default function PayrollModule({
     if (!sVal || !eVal || sVal < 1 || sVal > 31 || eVal < 1 || eVal > 31) return;
     setPayoutStartDay(sVal);
     setPayoutEndDay(eVal);
+
+    try {
+      localStorage.setItem('payroll_payout_start_day', String(sVal));
+      localStorage.setItem('payroll_payout_end_day', String(eVal));
+    } catch (e) {
+      console.warn('Could not save payroll cutoff to localStorage:', e);
+    }
 
     const updatedSettings = {
       ...(state.orgSettings || {}),

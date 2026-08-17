@@ -178,6 +178,24 @@ export default function App() {
       logoUrl: '',
       adminUsername: 'admin',
       adminPassword: '123',
+      payrollPayoutStartDay: (() => {
+        try {
+          const v = localStorage.getItem('payroll_payout_start_day');
+          return v !== null ? parseInt(v, 10) : 26;
+        } catch { return 26; }
+      })(),
+      payrollPayoutEndDay: (() => {
+        try {
+          const v = localStorage.getItem('payroll_payout_end_day');
+          return v !== null ? parseInt(v, 10) : 25;
+        } catch { return 25; }
+      })(),
+      payrollPayoutDay: (() => {
+        try {
+          const v = localStorage.getItem('payroll_payout_end_day');
+          return v !== null ? parseInt(v, 10) : 25;
+        } catch { return 25; }
+      })(),
       gmailConfig: {
         enabled: true,
         userEmail: '',
@@ -899,17 +917,67 @@ export default function App() {
     showToast(isFullyApproved ? '🎉 تم اعتماد الطلب وتحديث الرواتب والسجلات بنجاح!' : '✅ تم قبول خطوتك في انتظار الاعتماد المكتمل');
   };
 
-  const handleRejectRequest = async (requestId, role) => {
-    const updatedRequests = (state.requests || []).map((r) =>
-      r.id === requestId ? { ...r, status: 'rejected' } : r
-    );
+  const handleRejectRequest = async (requestId, role = 'admin') => {
+    let targetReq = null;
+    const updatedRequests = (state.requests || []).map((r) => {
+      if (r.id === requestId) {
+        targetReq = {
+          ...r,
+          status: 'rejected',
+          adminApproved: false,
+          rejectedAt: new Date().toISOString()
+        };
+        return targetReq;
+      }
+      return r;
+    });
+
+    let updatedShifts = [...(state.shifts || [])];
+    if (targetReq && targetReq.type === 'overtime') {
+      updatedShifts = updatedShifts.map((s) => {
+        if (s.id === targetReq.shiftId || (String(s.employeeId) === String(targetReq.employeeId) && s.date === targetReq.date)) {
+          const regHours = s.regularHours !== undefined ? s.regularHours : (s.scheduledHours || 8);
+          return {
+            ...s,
+            overtimeStatus: 'rejected',
+            hours: regHours,
+            note: `ساعات الوردية الأساسية (${regHours} س) — تم استبعاد الإضافي (${targetReq.hours} س)`
+          };
+        }
+        return s;
+      });
+    }
+
     const updatedSwaps = (state.shiftSwaps || []).map((s) =>
-      s.id === requestId ? { ...s, status: 'rejected' } : s
+      s.id === requestId ? { ...s, status: 'rejected', adminApproved: false } : s
     );
-    const updatedState = { ...state, requests: updatedRequests, shiftSwaps: updatedSwaps };
+
+    const updatedLeaveRequests = (state.leaveRequests || []).map((lr) =>
+      lr.id === requestId || (targetReq && String(lr.employeeId) === String(targetReq.employeeId) && lr.startDate === targetReq.startDate)
+        ? { ...lr, status: 'rejected', adminApproved: false }
+        : lr
+    );
+
+    const updatedLoans = (state.loans || []).map((l) =>
+      l.id === requestId || l.requestId === requestId ? { ...l, status: 'rejected', adminApproved: false } : l
+    );
+
+    const updatedNotifications = (state.notifications || []).map((n) =>
+      n.requestId === requestId ? { ...n, read: true } : n
+    );
+
+    const updatedState = {
+      ...state,
+      requests: updatedRequests,
+      shifts: updatedShifts,
+      leaveRequests: updatedLeaveRequests,
+      loans: updatedLoans,
+      shiftSwaps: updatedSwaps,
+      notifications: updatedNotifications
+    };
     setState(updatedState);
     await saveState(updatedState);
-    showToast('❌ تم رفض الطلب');
+    showToast('❌ تم رفض الطلب وتحديث السجلات بنجاح');
   };
 
   const handleSendEarlyExitEmail = async (reqId) => {
@@ -1674,8 +1742,12 @@ export default function App() {
 
   const getPayrollCutoffRange = (monthStr) => {
     if (!monthStr || monthStr.length !== 7) return null;
-    const sDay = state.orgSettings?.payrollPayoutStartDay !== undefined ? parseInt(state.orgSettings.payrollPayoutStartDay, 10) : 26;
-    const eDay = state.orgSettings?.payrollPayoutEndDay !== undefined ? parseInt(state.orgSettings.payrollPayoutEndDay, 10) : (state.orgSettings?.payrollPayoutDay || 25);
+    const sDay = state.orgSettings?.payrollPayoutStartDay !== undefined 
+      ? parseInt(state.orgSettings.payrollPayoutStartDay, 10) 
+      : (() => { try { const v = localStorage.getItem('payroll_payout_start_day'); return v ? parseInt(v, 10) : 26; } catch { return 26; } })();
+    const eDay = state.orgSettings?.payrollPayoutEndDay !== undefined 
+      ? parseInt(state.orgSettings.payrollPayoutEndDay, 10) 
+      : (() => { try { const v = localStorage.getItem('payroll_payout_end_day'); return v ? parseInt(v, 10) : 25; } catch { return 25; } })();
     const [y, m] = monthStr.split('-').map(Number);
     let prevY = y;
     let prevM = m - 1;
@@ -2935,8 +3007,6 @@ export default function App() {
         timestamp: `${todayStr()} · ${timeOut}`
       });
       setKioskCode('');
-      setKioskSelectedEmp(null);
-    } else {
       showToast(msg);
     }
   };
