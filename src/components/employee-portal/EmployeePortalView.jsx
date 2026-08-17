@@ -105,8 +105,9 @@ export default function EmployeePortalView({
   getActiveElapsedStr,
   getActiveBreakStr,
   openEditShift,
-  deleteShift
 }) {
+  const emp = currentEmpUser ? ((state && state.employees && state.employees.find((e) => e.id === currentEmpUser?.id)) || currentEmpUser) : null;
+
   const [selectedMonth, setSelectedMonth] = useState(() => {
     try { return localStorage.getItem('emp_selected_month') || CURRENT_MONTH; } catch { return CURRENT_MONTH; }
   });
@@ -599,8 +600,6 @@ export default function EmployeePortalView({
     const endDate = `${y}-${String(m).padStart(2, '0')}-${String(eDay).padStart(2, '0')}`;
     return { startDate, endDate };
   };
-
-  const emp = currentEmpUser ? ((state && state.employees && state.employees.find((e) => e.id === currentEmpUser?.id)) || currentEmpUser) : null;
 
   const canViewSalary = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canViewSalary') !== false && getEmpPermission(emp.id, 'allowViewSalary') !== false) : true;
   const canStartEnd = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canStartEnd') !== false && getEmpPermission(emp.id, 'allowStartEnd') !== false) : true;
