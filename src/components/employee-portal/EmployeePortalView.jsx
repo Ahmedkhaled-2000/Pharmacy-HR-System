@@ -642,16 +642,30 @@ export default function EmployeePortalView({
     );
     const penaltyReqs = (state.requests || [])
       .filter((r) => String(r.employeeId) === String(emp.id) && (r.type === 'penalty' || r.type === 'adjustment') && r.status !== 'cancelled' && r.status !== 'rejected' && r.objection?.status !== 'approved' && !r.isCancelled && filterFn(r.date || r.createdAt?.slice(0, 10)))
-      .map((r) => ({
-        id: r.id,
-        employeeId: r.employeeId,
-        type: r.subType === 'bonus' ? 'bonus' : 'deduction',
-        amount: parseFloat(r.amount) || 0,
-        date: r.date || r.createdAt?.slice(0, 10),
-        reason: r.reason || r.details || r.notes || 'جزاء إداري',
-        details: r.reason || r.details || r.notes || 'جزاء إداري',
-        createdAt: r.createdAt
-      }));
+      .map((r) => {
+        let amt = parseFloat(r.amount) || 0;
+        if (!amt && (r.impactType || r.impactVal)) {
+          if (r.impactType === 'fixed_amount') {
+            amt = parseFloat(r.impactVal) || 0;
+          } else if (r.impactType === 'deduction_days') {
+            const salary = parseFloat(emp.salary) || 0;
+            const workHours = parseFloat(emp.workHoursPerDay) || 8;
+            const workDays = parseFloat(emp.workDaysPerMonth) || 26;
+            const dailyRate = workDays > 0 ? (salary * workHours) / workDays : (salary * workHours);
+            amt = Math.round(dailyRate * (parseFloat(r.impactVal) || 1) * 100) / 100;
+          }
+        }
+        return {
+          id: r.id,
+          employeeId: r.employeeId,
+          type: r.subType === 'bonus' ? 'bonus' : 'deduction',
+          amount: amt,
+          date: r.date || r.createdAt?.slice(0, 10),
+          reason: r.reason || r.ruleTitle || r.details || r.notes || 'جزاء إداري',
+          details: r.reason || r.ruleTitle || r.details || r.notes || 'جزاء إداري',
+          createdAt: r.createdAt
+        };
+      });
 
     const map = new Map();
     directAdjs.forEach((a) => map.set(String(a.id), a));

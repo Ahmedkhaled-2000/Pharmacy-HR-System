@@ -29,9 +29,21 @@ export default function AdjustmentsModule({
   const adjustments = React.useMemo(() => {
     const list = [...(state.adjustments || [])];
     const penaltyReqs = (state.requests || [])
-      .filter((r) => r.type === 'penalty' || r.type === 'adjustment')
+      .filter((r) => (r.type === 'penalty' || r.type === 'adjustment') && r.status !== 'cancelled' && r.status !== 'rejected' && r.objection?.status !== 'approved' && !r.isCancelled)
       .map((r) => {
         const emp = employees.find((e) => String(e.id) === String(r.employeeId));
+        let amount = parseFloat(r.amount) || 0;
+        if (!amount && (r.impactType || r.impactVal)) {
+          if (r.impactType === 'fixed_amount') {
+            amount = parseFloat(r.impactVal) || 0;
+          } else if (r.impactType === 'deduction_days') {
+            const salary = emp ? parseFloat(emp.salary) || 0 : 0;
+            const workHours = emp ? parseFloat(emp.workHoursPerDay) || 8 : 8;
+            const workDays = emp ? parseFloat(emp.workDaysPerMonth) || 26 : 26;
+            const dailyRate = workDays > 0 ? (salary * workHours) / workDays : (salary * workHours);
+            amount = Math.round(dailyRate * (parseFloat(r.impactVal) || 1) * 100) / 100;
+          }
+        }
         return {
           id: r.id,
           employeeId: r.employeeId,
@@ -39,10 +51,10 @@ export default function AdjustmentsModule({
           employeeCode: r.employeeCode || emp?.code || '',
           branchId: r.branchId || emp?.branchId || null,
           type: r.subType === 'bonus' ? 'bonus' : 'penalty',
-          amount: parseFloat(r.amount) || 0,
+          amount: amount,
           date: r.date || (r.createdAt ? r.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10)),
-          reason: r.reason || r.details || r.notes || 'جزاء إداري',
-          details: r.reason || r.details || r.notes || 'جزاء إداري',
+          reason: r.reason || r.ruleTitle || r.details || r.notes || 'جزاء إداري',
+          details: r.reason || r.ruleTitle || r.details || r.notes || 'جزاء إداري',
           status: r.status,
           createdAt: r.createdAt || new Date().toISOString()
         };

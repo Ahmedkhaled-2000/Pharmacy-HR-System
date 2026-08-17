@@ -1774,9 +1774,42 @@ export default function App() {
       totalAbsenceDeduction += absenceDeduction;
     });
 
-    const empAdjs = state.adjustments.filter((a) => (a.employeeId === empId || a.employeeId === 'all') && effectiveFilterFn(a.date));
-    const totalBonus = empAdjs.filter((a) => a.type === 'bonus').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
-    const manualDeduction = empAdjs.filter((a) => a.type === 'deduction' || a.type === 'penalty').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
+    const penaltyReqs = (state.requests || [])
+      .filter((r) => String(r.employeeId) === String(empId) && (r.type === 'penalty' || r.type === 'adjustment') && (r.status === 'approved' || r.adminApproved || !r.status) && r.status !== 'cancelled' && r.status !== 'rejected' && r.objection?.status !== 'approved' && !r.isCancelled && effectiveFilterFn(r.date || (r.createdAt ? r.createdAt.slice(0, 10) : '')))
+      .map((r) => {
+        let amt = parseFloat(r.amount) || 0;
+        if (!amt && (r.impactType || r.impactVal)) {
+          if (r.impactType === 'fixed_amount') {
+            amt = parseFloat(r.impactVal) || 0;
+          } else if (r.impactType === 'deduction_days') {
+            const salary = parseFloat(emp.salary) || 0;
+            const workHours = parseFloat(emp.workHoursPerDay) || 8;
+            const workDays = parseFloat(emp.workDaysPerMonth) || 26;
+            const dailyRate = workDays > 0 ? (salary * workHours) / workDays : (salary * workHours);
+            amt = Math.round(dailyRate * (parseFloat(r.impactVal) || 1) * 100) / 100;
+          }
+        }
+        return {
+          id: r.id,
+          employeeId: r.employeeId,
+          type: r.subType === 'bonus' ? 'bonus' : 'deduction',
+          amount: amt,
+          date: r.date || (r.createdAt ? r.createdAt.slice(0, 10) : '')
+        };
+      });
+
+    const directAdjs = (state.adjustments || []).filter((a) => (String(a.employeeId) === String(empId) || a.employeeId === 'all') && effectiveFilterFn(a.date));
+    const mergedAdjsMap = new Map();
+    directAdjs.forEach((a) => mergedAdjsMap.set(String(a.id), a));
+    penaltyReqs.forEach((p) => {
+      if (!mergedAdjsMap.has(String(p.id)) && !mergedAdjsMap.has(`adj_pen_${p.id}`)) {
+        mergedAdjsMap.set(String(p.id), p);
+      }
+    });
+    const allEmpAdjs = Array.from(mergedAdjsMap.values());
+
+    const totalBonus = allEmpAdjs.filter((a) => a.type === 'bonus').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
+    const manualDeduction = allEmpAdjs.filter((a) => a.type === 'deduction' || a.type === 'penalty').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
 
     // Calculate approved loans/advances deductions for the filtered period
     const allLoansList = [...(state.loans || []), ...(state.requests || [])];
