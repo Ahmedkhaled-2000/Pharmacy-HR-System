@@ -396,6 +396,68 @@ export default function RequestsModule({
     showToast?.('🗑️ تم حذف الطلب القديم بنجاح');
   };
 
+  const handleApprovePenaltyObjection = async (reqId) => {
+    let empId = null;
+    let ruleTitle = '';
+    const updatedRequests = requests.map((r) => {
+      if (r.id === reqId) {
+        empId = r.employeeId;
+        ruleTitle = r.ruleTitle;
+        return {
+          ...r,
+          status: 'cancelled',
+          isCancelled: true,
+          cancelledAt: new Date().toISOString(),
+          objection: {
+            ...(r.objection || {}),
+            status: 'approved',
+            resolvedAt: new Date().toISOString()
+          }
+        };
+      }
+      return r;
+    });
+
+    const updatedAdjustments = (state.adjustments || []).filter((a) => {
+      if (a.id === reqId || a.id === `adj_${reqId}` || a.id === `adj_penalty_${reqId}`) return false;
+      if (empId && String(a.employeeId) === String(empId) && (a.type === 'penalty' || a.type === 'deduction') && (a.reason === ruleTitle || a.details === ruleTitle)) return false;
+      return true;
+    });
+
+    const updatedState = { ...state, requests: updatedRequests, adjustments: updatedAdjustments };
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+    if (previewModalReq?.id === reqId) {
+      setPreviewModalReq(prev => ({ ...prev, status: 'cancelled', isCancelled: true, objection: { ...prev.objection, status: 'approved' } }));
+    }
+    showToast?.('✅ تم قبول اعتراض الموظف وإلغاء الجزاء والخصم المالي تلقائياً');
+  };
+
+  const handleRejectPenaltyObjection = async (reqId, reply = '') => {
+    const updatedRequests = requests.map((r) => {
+      if (r.id === reqId) {
+        return {
+          ...r,
+          objection: {
+            ...(r.objection || {}),
+            status: 'rejected',
+            adminReply: reply || 'تمت دراسة مبررات الاعتراض وتثبيت الجزاء المالي',
+            resolvedAt: new Date().toISOString()
+          }
+        };
+      }
+      return r;
+    });
+
+    const updatedState = { ...state, requests: updatedRequests };
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+    if (previewModalReq?.id === reqId) {
+      setPreviewModalReq(prev => ({ ...prev, objection: { ...prev.objection, status: 'rejected', adminReply: reply } }));
+    }
+    showToast?.('❌ تم رفض الاعتراض وتثبيت الجزاء المالي');
+  };
+
   return (
     <div className="bylaws-card fade-in">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
@@ -444,6 +506,7 @@ export default function RequestsModule({
             <option value="swap">🔄 تبديل شفتات</option>
             <option value="roster_edit">📅 تعديل جدول شهري</option>
             <option value="complaint">📋 شكاوي وملاحظات</option>
+            <option value="penalty">⚠️ جزاءات ومخالفات لائحية</option>
           </select>
         </div>
 
@@ -849,7 +912,7 @@ export default function RequestsModule({
                     <h4 style={{ margin: '0 0 10px', color: '#991b1b', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                       ⚠️ تفاصيل الخصم / الجزاء الإداري:
                     </h4>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: previewModalReq.objection ? '14px' : '0' }}>
                       <div>
                         <span style={{ fontSize: '12px', color: '#991b1b' }}>نوع البند:</span>
                         <div style={{ fontWeight: 'bold', color: '#7f1d1d' }}>
@@ -865,12 +928,47 @@ export default function RequestsModule({
                         </div>
                       )}
                       <div>
-                        <span style={{ fontSize: '12px', color: '#991b1b' }}>مبلغ الخصم المقترح:</span>
+                        <span style={{ fontSize: '12px', color: '#991b1b' }}>مبلغ الخصم:</span>
                         <div style={{ fontWeight: '900', color: '#b91c1c', fontSize: '16px' }}>
                           💸 {previewModalReq.amount || '0'} ج.م
                         </div>
                       </div>
                     </div>
+
+                    {previewModalReq.objection && (
+                      <div style={{ background: '#fff', border: '1px solid #f59e0b', borderRadius: '10px', padding: '12px', marginTop: '10px' }}>
+                        <div style={{ fontWeight: 'bold', color: '#b45309', marginBottom: '6px', fontSize: '13.5px' }}>
+                          ✋ اعتراض مقدم من الموظف:
+                        </div>
+                        <div style={{ fontSize: '13px', color: '#1e293b', background: '#fef3c7', padding: '8px 12px', borderRadius: '6px', marginBottom: '10px' }}>
+                          "{previewModalReq.objection.reason}"
+                        </div>
+                        {previewModalReq.objection.status === 'pending' ? (
+                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                            <button
+                              type="button"
+                              className="btn btn-start"
+                              style={{ background: '#16a34a', fontSize: '12px', padding: '5px 12px' }}
+                              onClick={() => handleApprovePenaltyObjection(previewModalReq.id)}
+                            >
+                              ✅ قبول الاعتراض وإلغاء الجزاء والخصم
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-start"
+                              style={{ background: '#dc2626', fontSize: '12px', padding: '5px 12px' }}
+                              onClick={() => handleRejectPenaltyObjection(previewModalReq.id)}
+                            >
+                              ❌ رفض الاعتراض وتثبيت الجزاء
+                            </button>
+                          </div>
+                        ) : previewModalReq.objection.status === 'approved' ? (
+                          <span className="badge badge-success">✅ تم قبول الاعتراض وإلغاء الخصم</span>
+                        ) : (
+                          <span className="badge badge-danger">❌ تم رفض الاعتراض ({previewModalReq.objection.adminReply || 'مثبت'})</span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 

@@ -58,6 +58,12 @@ export default function BylawsModule({
   const [newRuleImpactVal, setNewRuleImpactVal] = useState('0.25');
   const [showAddRuleModal, setShowAddRuleModal] = useState(false);
 
+  // Penalty Objection State
+  const [objectionTargetReq, setObjectionTargetReq] = useState(null);
+  const [objectionReason, setObjectionReason] = useState('');
+  const [adminRejectReplyReq, setAdminRejectReplyReq] = useState(null);
+  const [adminRejectReplyText, setAdminRejectReplyText] = useState('');
+
   const handleSaveBylawsText = async () => {
     const updatedState = { ...state, bylawsText };
     if (setState) setState(updatedState);
@@ -134,6 +140,97 @@ export default function BylawsModule({
     setTargetEmpId('');
     setCustomReason('');
     showToast?.('✅ تم تسجيل المخالفة وإرسال طلب الجزاء فوراً للإدارة العليا للاعتماد والخصم');
+  };
+
+  const handleSubmitObjection = async (e) => {
+    e.preventDefault();
+    if (!objectionTargetReq || !objectionReason.trim()) {
+      showToast?.('يرجى كتابة أسباب ومبررات الاعتراض');
+      return;
+    }
+
+    const updatedRequests = (state.requests || []).map((r) => {
+      if (r.id === objectionTargetReq.id) {
+        return {
+          ...r,
+          objection: {
+            status: 'pending',
+            reason: objectionReason.trim(),
+            submittedAt: new Date().toISOString()
+          }
+        };
+      }
+      return r;
+    });
+
+    const updatedState = { ...state, requests: updatedRequests };
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+
+    setObjectionTargetReq(null);
+    setObjectionReason('');
+    showToast?.('✅ تم إرسال اعتراضك إلى الإدارة العليا بنجاح وجاري مراجعته');
+  };
+
+  const handleAdminApproveObjection = async (reqId) => {
+    let empId = null;
+    let ruleTitle = '';
+    const updatedRequests = (state.requests || []).map((r) => {
+      if (r.id === reqId) {
+        empId = r.employeeId;
+        ruleTitle = r.ruleTitle;
+        return {
+          ...r,
+          status: 'cancelled',
+          isCancelled: true,
+          cancelledAt: new Date().toISOString(),
+          objection: {
+            ...(r.objection || {}),
+            status: 'approved',
+            resolvedAt: new Date().toISOString()
+          }
+        };
+      }
+      return r;
+    });
+
+    // Automatically remove any corresponding deduction from adjustments
+    const updatedAdjustments = (state.adjustments || []).filter((a) => {
+      if (a.id === reqId || a.id === `adj_${reqId}` || a.id === `adj_penalty_${reqId}`) return false;
+      if (empId && String(a.employeeId) === String(empId) && (a.type === 'penalty' || a.type === 'deduction') && (a.reason === ruleTitle || a.details === ruleTitle)) return false;
+      return true;
+    });
+
+    const updatedState = { ...state, requests: updatedRequests, adjustments: updatedAdjustments };
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+
+    showToast?.('✅ تم قبول الاعتراض وإلغاء الخصم والجزاء اللائحي تلقائياً');
+  };
+
+  const handleAdminRejectObjection = async (reqId, reply = '') => {
+    const updatedRequests = (state.requests || []).map((r) => {
+      if (r.id === reqId) {
+        return {
+          ...r,
+          objection: {
+            ...(r.objection || {}),
+            status: 'rejected',
+            adminReply: reply || 'تمت مراجعة ودراسة الاعتراض وتثبيت الجزاء المالي وفق اللائحة',
+            resolvedAt: new Date().toISOString()
+          }
+        };
+      }
+      return r;
+    });
+
+    const updatedState = { ...state, requests: updatedRequests };
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+
+    setAdminRejectReplyReq(null);
+    setAdminRejectReplyText('');
+    showToast?.('❌ تم رفض الاعتراض وتثبيت الجزاء المالي');
   };
 
   const getImpactDesc = (rule) => {
@@ -317,12 +414,13 @@ export default function BylawsModule({
                   <th>الموظف</th>
                   <th>نوع المخالفة اللائحية</th>
                   <th>سبب وتفاصيل الخصم</th>
-                  <th>حالة الاعتماد وتطبيق الخصم</th>
+                  <th>حالة الاعتماد</th>
+                  <th>الاعتراض / الإجراءات</th>
                 </tr>
               </thead>
               <tbody>
                 {appliedPenalties.length === 0 ? (
-                  <tr><td colSpan="5" style={{ textAlign: 'center', color: 'var(--muted)', padding: '24px' }}>لا توجد مخالفات مسجلة حالياً.</td></tr>
+                  <tr><td colSpan="6" style={{ textAlign: 'center', color: 'var(--muted)', padding: '24px' }}>لا توجد مخالفات مسجلة حالياً.</td></tr>
                 ) : (
                   appliedPenalties.map((req) => (
                     <tr key={req.id}>
@@ -333,12 +431,81 @@ export default function BylawsModule({
                       <td><span className="badge badge-danger">⚠️ {req.ruleTitle || 'مخالفة لائحية'}</span></td>
                       <td style={{ fontSize: '13px' }}>{req.reason || req.details}</td>
                       <td>
-                        {req.status === 'approved' ? (
+                        {req.status === 'cancelled' ? (
+                          <span className="badge badge-secondary" style={{ background: '#f1f5f9', color: '#64748b' }}>⚪ ملغي (تم قبول الاعتراض)</span>
+                        ) : req.status === 'approved' ? (
                           <span className="badge badge-success">🟢 معتمد وتم تطبيق الخصم بالراتب</span>
                         ) : req.status === 'rejected' ? (
                           <span className="badge badge-danger">🔴 مرفوض من الإدارة العليا</span>
                         ) : (
                           <span className="badge badge-warning">⏳ بانتظار موافقة الإدارة العليا</span>
+                        )}
+                      </td>
+                      <td>
+                        {/* Employee View */}
+                        {!isAdmin && userRole === 'employee' ? (
+                          req.objection ? (
+                            req.objection.status === 'pending' ? (
+                              <div style={{ fontSize: '12px', color: '#b45309', background: '#fef3c7', padding: '6px 10px', borderRadius: '8px', border: '1px solid #fde68a' }}>
+                                ⏳ <strong>اعتراضك قيد المراجعة:</strong> "{req.objection.reason}"
+                              </div>
+                            ) : req.objection.status === 'approved' ? (
+                              <div style={{ fontSize: '12px', color: '#15803d', background: '#f0fdf4', padding: '6px 10px', borderRadius: '8px', border: '1px solid #bbf7d0' }}>
+                                ✅ <strong>تم قبول اعتراضك وإلغاء الخصم بنجاح</strong>
+                              </div>
+                            ) : (
+                              <div style={{ fontSize: '12px', color: '#b91c1c', background: '#fef2f2', padding: '6px 10px', borderRadius: '8px', border: '1px solid #fecaca' }}>
+                                ❌ <strong>تم رفض الاعتراض:</strong> {req.objection.adminReply || 'تم تثبيت الجزاء وفق اللائحة'}
+                              </div>
+                            )
+                          ) : req.status !== 'cancelled' ? (
+                            <button
+                              className="btn btn-outline"
+                              style={{ color: '#dc2626', borderColor: '#dc2626', fontSize: '12px', padding: '5px 12px', fontWeight: 'bold' }}
+                              onClick={() => { setObjectionTargetReq(req); setObjectionReason(''); }}
+                            >
+                              ✋ تقديم اعتراض للإدارة العليا
+                            </button>
+                          ) : (
+                            <span style={{ color: 'var(--muted)', fontSize: '12px' }}>—</span>
+                          )
+                        ) : (
+                          /* Admin / Branch Manager View */
+                          req.objection ? (
+                            req.objection.status === 'pending' ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                <div style={{ fontSize: '12px', color: '#b45309', background: '#fef3c7', padding: '6px 10px', borderRadius: '8px', border: '1px solid #fde68a' }}>
+                                  ⚠️ <strong>اعتراض الموظف:</strong> "{req.objection.reason}"
+                                </div>
+                                {isAdmin && (
+                                  <div style={{ display: 'flex', gap: '6px' }}>
+                                    <button
+                                      className="btn btn-start"
+                                      style={{ background: '#16a34a', fontSize: '11.5px', padding: '4px 10px' }}
+                                      onClick={() => handleAdminApproveObjection(req.id)}
+                                    >
+                                      ✅ قبول الاعتراض وإلغاء الخصم
+                                    </button>
+                                    <button
+                                      className="btn btn-start"
+                                      style={{ background: '#dc2626', fontSize: '11.5px', padding: '4px 10px' }}
+                                      onClick={() => { setAdminRejectReplyReq(req); setAdminRejectReplyText(''); }}
+                                    >
+                                      ❌ رفض الاعتراض
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            ) : req.objection.status === 'approved' ? (
+                              <span className="badge badge-success">✅ تم قبول الاعتراض وإلغاء الجزاء</span>
+                            ) : (
+                              <div style={{ fontSize: '12px', color: '#b91c1c' }}>
+                                ❌ تم رفض الاعتراض ({req.objection.adminReply || 'مثبت'})
+                              </div>
+                            )
+                          ) : (
+                            <span style={{ color: 'var(--muted)', fontSize: '12px' }}>لا يوجد اعتراض</span>
+                          )
                         )}
                       </td>
                     </tr>
@@ -455,6 +622,87 @@ export default function BylawsModule({
             <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
               <button type="button" className="btn btn-ghost" onClick={() => setShowAddRuleModal(false)}>إلغاء</button>
               <button type="button" className="btn btn-start" onClick={handleAddRule}>💾 حفظ البند</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Employee Submit Objection */}
+      {objectionTargetReq && (
+        <div className="modal-backdrop" onClick={() => setObjectionTargetReq(null)}>
+          <div className="modal-card" style={{ maxWidth: '750px', width: '96%', padding: '28px' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ fontFamily: 'Cairo', margin: 0, color: '#dc2626' }}>
+                ✋ تقديم اعتراض للإدارة العليا على الجزاء اللائحي
+              </h3>
+              <button className="btn btn-ghost" onClick={() => setObjectionTargetReq(null)}>✕ إغلاق</button>
+            </div>
+
+            <div style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)', borderRadius: '10px', padding: '14px', marginBottom: '16px', fontSize: '13.5px', lineHeight: '1.7' }}>
+              <div><strong>بند المخالفة:</strong> {objectionTargetReq.ruleTitle || 'جزاء لائحي'}</div>
+              <div><strong>البيان والسبب:</strong> {objectionTargetReq.reason || objectionTargetReq.details}</div>
+              <div><strong>تاريخ المخالفة:</strong> {new Date(objectionTargetReq.createdAt).toLocaleDateString('ar-EG')}</div>
+            </div>
+
+            <form onSubmit={handleSubmitObjection}>
+              <div className="field" style={{ marginBottom: '20px' }}>
+                <label style={{ fontWeight: '700', marginBottom: '8px', display: 'block' }}>
+                  أسباب ومبررات الاعتراض على هذا الجزاء بالتفصيل:
+                </label>
+                <textarea
+                  value={objectionReason}
+                  onChange={(e) => setObjectionReason(e.target.value)}
+                  placeholder="يرجى كتابة أسباب الاعتراض والمبررات أو الظروف التي حالت دون الالتزام..."
+                  rows={4}
+                  required
+                  style={{ width: '100%', padding: '12px', borderRadius: '10px', border: '1px solid var(--border)', fontSize: '13.5px', fontFamily: 'inherit' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                <button type="button" className="btn btn-ghost" onClick={() => setObjectionTargetReq(null)}>إلغاء</button>
+                <button type="submit" className="btn btn-start" style={{ background: '#dc2626' }}>
+                  📤 إرسال الاعتراض للإدارة العليا
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Admin Reject Objection with Note */}
+      {adminRejectReplyReq && (
+        <div className="modal-backdrop" onClick={() => setAdminRejectReplyReq(null)}>
+          <div className="modal-card" style={{ maxWidth: '650px', width: '96%', padding: '24px' }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ fontFamily: 'Cairo', margin: '0 0 16px', color: '#dc2626' }}>
+              ❌ رفض الاعتراض وتثبيت الجزاء
+            </h3>
+
+            <div style={{ background: '#fef3c7', border: '1px solid #fde68a', borderRadius: '8px', padding: '12px', marginBottom: '16px', fontSize: '13px' }}>
+              <strong>اعتراض الموظف:</strong> "{adminRejectReplyReq.objection?.reason}"
+            </div>
+
+            <div className="field" style={{ marginBottom: '20px' }}>
+              <label style={{ fontWeight: '700', marginBottom: '8px', display: 'block' }}>سبب رفض الاعتراض وملاحظات الإدارة العليا:</label>
+              <textarea
+                value={adminRejectReplyText}
+                onChange={(e) => setAdminRejectReplyText(e.target.value)}
+                placeholder="مثال: تمت دراسة المبررات ورؤي عدم كفايتها وتثبيت الجزاء المالي وفق لائحة العمل..."
+                rows={3}
+                style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button type="button" className="btn btn-ghost" onClick={() => setAdminRejectReplyReq(null)}>إلغاء</button>
+              <button
+                type="button"
+                className="btn btn-start"
+                style={{ background: '#dc2626' }}
+                onClick={() => handleAdminRejectObjection(adminRejectReplyReq.id, adminRejectReplyText)}
+              >
+                تأكيد الرفض وتثبيت الجزاء
+              </button>
             </div>
           </div>
         </div>

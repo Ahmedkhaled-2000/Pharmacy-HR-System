@@ -153,6 +153,17 @@ export default function EmployeePortalView({
     }
   }, [currentEmpUser?.id]);
 
+  // When multi-branch employee is on "All Branches" (selectedBranchId === ''), only allowed tabs are accessible
+  useEffect(() => {
+    const isMultiBranchEmp = emp?.branchesDetails && emp.branchesDetails.length > 1;
+    if (isMultiBranchEmp && !selectedBranchId) {
+      const allowedAllBranchTabs = ['dashboard', 'salary', 'evaluations', 'bylaws'];
+      if (!allowedAllBranchTabs.includes(activeTab)) {
+        setActiveTab('dashboard');
+      }
+    }
+  }, [selectedBranchId, emp?.branchesDetails, activeTab]);
+
   // ── Form States for Employee Actions ───────────
   const [showManualForm, setShowManualForm] = useState(false);
   const [empManualDate, setEmpManualDate] = useState(todayStr());
@@ -631,7 +642,7 @@ export default function EmployeePortalView({
       (a) => (String(a.employeeId) === String(emp.id) || a.employeeId === 'all') && filterFn(a.date)
     );
     const penaltyReqs = (state.requests || [])
-      .filter((r) => String(r.employeeId) === String(emp.id) && (r.type === 'penalty' || r.type === 'adjustment') && filterFn(r.date || r.createdAt?.slice(0, 10)))
+      .filter((r) => String(r.employeeId) === String(emp.id) && (r.type === 'penalty' || r.type === 'adjustment') && r.status !== 'cancelled' && r.status !== 'rejected' && r.objection?.status !== 'approved' && !r.isCancelled && filterFn(r.date || r.createdAt?.slice(0, 10)))
       .map((r) => ({
         id: r.id,
         employeeId: r.employeeId,
@@ -873,8 +884,12 @@ export default function EmployeePortalView({
         {/* Nav Items */}
         <nav style={{ flex: 1, padding: '10px 0', overflowY: 'auto' }}>
           {NAV_ITEMS.filter((item) => {
+            const isMultiBranchEmp = emp?.branchesDetails && emp.branchesDetails.length > 1;
+            // Requirement 3: When All Branches is selected, ONLY show dashboard, salary, evaluations, bylaws
+            if (isMultiBranchEmp && !selectedBranchId) {
+              return ['dashboard', 'salary', 'evaluations', 'bylaws'].includes(item.id);
+            }
             if (item.id === 'salary' && canViewSalary === false) return false;
-            if (item.id === 'adjustments' && canViewAdjustments === false) return false;
             return true;
           }).map((item) => {
             const isActive = activeTab === item.id;
