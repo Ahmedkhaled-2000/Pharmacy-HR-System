@@ -107,13 +107,24 @@ export default function BylawsModule({
       return;
     }
 
-    const emp = (state.employees || []).find(e => e.id === targetEmpId);
+    const emp = (state.employees || []).find(e => String(e.id) === String(targetEmpId));
     const rule = bylawsRules.find(r => r.id === selectedRuleId);
     if (!emp || !rule) return;
 
-    // Construct Penalty Request for Top Management Approval
+    let amount = 0;
+    if (rule.impactType === 'deduction_days') {
+      const salary = parseFloat(emp.salary) || 0;
+      const workHours = parseFloat(emp.workHoursPerDay) || 8;
+      const workDays = parseFloat(emp.workDaysPerMonth) || 26;
+      const dailyRate = workDays > 0 ? (salary * workHours) / workDays : (salary * workHours);
+      amount = Math.round(dailyRate * (parseFloat(rule.impactVal) || 1) * 100) / 100;
+    } else if (rule.impactType === 'fixed_amount') {
+      amount = parseFloat(rule.impactVal) || 0;
+    }
+
+    const reqId = 'pen_' + Date.now();
     const newReq = {
-      id: 'pen_' + Date.now(),
+      id: reqId,
       employeeId: emp.id,
       employeeName: emp.name,
       employeeCode: emp.code,
@@ -123,23 +134,49 @@ export default function BylawsModule({
       ruleTitle: rule.title,
       impactType: rule.impactType,
       impactVal: rule.impactVal,
+      amount: amount,
       reason: customReason || rule.title,
       details: `مخالفة لائحية: ${rule.title} | التأثير: ${getImpactDesc(rule)}`,
       createdAt: new Date().toISOString(),
       targetApproval: 'admin_only',
       branchApproved: true,
-      status: 'pending'
+      status: isAdmin ? 'approved' : 'pending',
+      adminApproved: isAdmin ? true : false,
+      approvedAt: isAdmin ? new Date().toISOString() : undefined
     };
 
+    let updatedAdjustments = state.adjustments || [];
+    if (isAdmin && amount > 0) {
+      const penaltyDesc = `خصم جزاء لائحى: ${rule.title} (${rule.impactType === 'deduction_days' ? `خصم ${rule.impactVal} يوم` : `${amount} ج.م`})`;
+      const newAdj = {
+        id: `adj_pen_${reqId}`,
+        employeeId: emp.id,
+        employeeName: emp.name,
+        type: 'deduction',
+        amount: amount,
+        description: penaltyDesc,
+        notes: penaltyDesc,
+        reason: penaltyDesc,
+        date: new Date().toISOString().slice(0, 10),
+        createdAt: new Date().toISOString()
+      };
+      updatedAdjustments = [newAdj, ...updatedAdjustments];
+    }
+
     const updatedRequests = [newReq, ...(state.requests || [])];
-    const updatedState = { ...state, requests: updatedRequests };
+    const updatedState = { ...state, requests: updatedRequests, adjustments: updatedAdjustments };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
 
     setShowRecordModal(false);
     setTargetEmpId('');
     setCustomReason('');
-    showToast?.('✅ تم تسجيل المخالفة وإرسال طلب الجزاء فوراً للإدارة العليا للاعتماد والخصم');
+    
+    if (isAdmin) {
+      showToast?.('⚖️ تم توثيق وتطبيق الجزاء المالي وخصمه من الراتب فوراً بنجاح');
+    } else {
+      showToast?.('✅ تم تسجيل المخالفة وإرسال طلب الجزاء فوراً للإدارة العليا للاعتماد والخصم');
+    }
   };
 
   const handleSubmitObjection = async (e) => {
@@ -267,7 +304,7 @@ export default function BylawsModule({
           </button>
           {isManagerOrAdmin && (
             <button className="btn btn-start" style={{ background: '#dc2626' }} onClick={() => setShowRecordModal(true)}>
-              ⚠️ توثيق مخالفة لائحية جديدة
+              {isAdmin ? '⚖️ توثيق وتطبيق جزاء لائحي' : '⚠️ توثيق مخالفة لائحية جديدة'}
             </button>
           )}
         </div>
@@ -522,7 +559,7 @@ export default function BylawsModule({
         <div className="modal-backdrop" onClick={() => setShowRecordModal(false)}>
           <div className="modal-card" style={{ maxWidth: '750px', width: '96%' }} onClick={(e) => e.stopPropagation()}>
             <h3 style={{ fontFamily: 'Cairo', margin: '0 0 16px', color: 'var(--danger)' }}>
-              ⚠️ توثيق مخالفة لائحية جديدة وإرسال طلب الخصم
+              {isAdmin ? '⚖️ توثيق وتطبيق جزاء لائحي مباشر على الموظف' : '⚠️ توثيق مخالفة لائحية جديدة وإرسال طلب الخصم'}
             </h3>
 
             <form onSubmit={handleSubmitViolation}>
@@ -571,8 +608,8 @@ export default function BylawsModule({
 
               <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
                 <button type="button" className="btn btn-ghost" onClick={() => setShowRecordModal(false)}>إلغاء</button>
-                <button type="submit" className="btn btn-start" style={{ background: '#dc2626' }}>
-                  📤 إرسال طلب الجزاء للإدارة العليا
+                <button type="submit" className="btn btn-start" style={{ background: '#dc2626', fontWeight: 'bold' }}>
+                  {isAdmin ? '⚖️ تطبيق الجزاء فوراً' : '📤 إرسال طلب الجزاء للإدارة العليا'}
                 </button>
               </div>
             </form>
