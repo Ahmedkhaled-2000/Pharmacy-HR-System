@@ -609,20 +609,36 @@ export default function EmployeePortalView({
   const canAddAdjustment = emp && getEmpPermission ? getEmpPermission(emp.id, 'canAddAdjustment') === true : false;
   const canViewAdjustments = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canViewAdjustments') !== false && getEmpPermission(emp.id, 'allowViewAdjustments') !== false) : true;
   const canExportExcel = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canExportExcel') !== false && getEmpPermission(emp.id, 'allowExportExcel') !== false) : true;
+  const canApplyLoan = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canApplyLoan') !== false && getEmpPermission(emp.id, 'allowApplyLoan') !== false) : true;
+  const canApplyLeave = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canApplyLeave') !== false && getEmpPermission(emp.id, 'allowApplyLeave') !== false) : true;
+  const canApplyPermission = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canApplyPermission') !== false && getEmpPermission(emp.id, 'allowApplyPermission') !== false) : true;
+  const canApplySwap = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canApplySwap') !== false && getEmpPermission(emp.id, 'allowApplySwap') !== false) : true;
+  const canViewBylaws = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canViewBylaws') !== false && getEmpPermission(emp.id, 'allowViewBylaws') !== false) : true;
+  const canSubmitComplaint = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canSubmitComplaint') !== false && getEmpPermission(emp.id, 'allowSubmitComplaint') !== false) : true;
+  const canViewRoster = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canViewRoster') !== false && getEmpPermission(emp.id, 'allowViewRoster') !== false) : true;
 
-  const rangeFilterValid = (filterMode === 'range' || filterMode === 'custom') && rangeStart && rangeEnd && rangeStart <= rangeEnd;
-  const filterFn = rangeFilterValid
-    ? (d) => d && d >= rangeStart && d <= rangeEnd
-    : (d) => {
-        const range = getPayrollCutoffRange(selectedMonth);
-        if (range) return d && d >= range.startDate && d <= range.endDate;
-        return d && d.startsWith(selectedMonth);
-      };
+  const isCustomMode = filterMode === 'range' || filterMode === 'custom';
+  const effectiveStart = (rangeStart && rangeEnd) ? (rangeStart <= rangeEnd ? rangeStart : rangeEnd) : (rangeStart || rangeEnd);
+  const effectiveEnd = (rangeStart && rangeEnd) ? (rangeStart <= rangeEnd ? rangeEnd : rangeStart) : (rangeEnd || rangeStart);
+  const rangeFilterValid = isCustomMode && Boolean(effectiveStart || effectiveEnd);
+
+  const filterFn = (d) => {
+    if (!d) return false;
+    const dateOnly = String(d).slice(0, 10);
+    if (isCustomMode) {
+      if (effectiveStart && dateOnly < effectiveStart) return false;
+      if (effectiveEnd && dateOnly > effectiveEnd) return false;
+      return true;
+    }
+    const range = getPayrollCutoffRange(selectedMonth);
+    if (range) return dateOnly >= range.startDate && dateOnly <= range.endDate;
+    return dateOnly.startsWith(selectedMonth);
+  };
 
   const lbl = monthLabel(selectedMonth);
   const cutoffInfo = getPayrollCutoffRange(selectedMonth);
   const periodLabel = rangeFilterValid 
-    ? `من ${rangeStart} إلى ${rangeEnd}` 
+    ? `من ${effectiveStart || '—'} إلى ${effectiveEnd || '—'}` 
     : (cutoffInfo ? `من ${cutoffInfo.startDate} إلى ${cutoffInfo.endDate} (${lbl.arabic})` : lbl.raw);
 
   const summary = emp 
@@ -903,6 +919,14 @@ export default function EmployeePortalView({
               return ['dashboard', 'salary', 'evaluations', 'bylaws'].includes(item.id);
             }
             if (item.id === 'salary' && canViewSalary === false) return false;
+            if (item.id === 'adjustments' && canViewAdjustments === false) return false;
+            if (item.id === 'loans' && canApplyLoan === false) return false;
+            if (item.id === 'leaves' && canApplyLeave === false) return false;
+            if (item.id === 'permissions' && canApplyPermission === false) return false;
+            if (item.id === 'swap' && canApplySwap === false) return false;
+            if (item.id === 'bylaws' && canViewBylaws === false) return false;
+            if (item.id === 'evaluations' && canSubmitComplaint === false) return false;
+            if (item.id === 'roster' && canViewRoster === false) return false;
             return true;
           }).map((item) => {
             const isActive = activeTab === item.id;

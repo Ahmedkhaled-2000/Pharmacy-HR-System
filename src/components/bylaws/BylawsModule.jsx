@@ -283,23 +283,20 @@ export default function BylawsModule({
     showToast?.('❌ تم رفض الاعتراض وتثبيت الجزاء المالي');
   };
 
-  // Penalty Records Filter State
   const [recordsSearch, setRecordsSearch] = useState('');
-  const [recordsBranch, setRecordsBranch] = useState('');
-  const [recordsStatus, setRecordsStatus] = useState('all'); // 'all' | 'approved' | 'pending' | 'rejected' | 'objection'
-  const [recordsPeriodMode, setRecordsPeriodMode] = useState('all'); // 'all' | 'current' | 'custom'
-  const [recordsCustomFrom, setRecordsCustomFrom] = useState('');
-  const [recordsCustomTo, setRecordsCustomTo] = useState('');
+  const [recordsBranch, setRecordsBranch] = useState(currentBranchId ? String(currentBranchId) : '');
+  const [recordsStatus, setRecordsStatus] = useState('all');
+  const [recordsPeriodMode, setRecordsPeriodMode] = useState('all');
+  const [recordsCustomFrom, setRecordsCustomFrom] = useState(customFrom || '');
+  const [recordsCustomTo, setRecordsCustomTo] = useState(customTo || '');
 
   const employees = state.employees || [];
   const branches = state.branches || [];
 
-  // Aggregated penalties from requests and adjustments
   const allPenalties = useMemo(() => {
     const list = [];
     const seenReqIds = new Set();
 
-    // 1. From requests
     (state.requests || []).forEach((r) => {
       if (r.type === 'penalty' || r.type === 'early_exit' || r.subType === 'lateness' || (r.type === 'adjustment' && r.subType === 'penalty') || r.ruleTitle) {
         seenReqIds.add(String(r.id));
@@ -343,7 +340,6 @@ export default function BylawsModule({
       }
     });
 
-    // 2. From adjustments (direct deductions/penalties)
     (state.adjustments || []).forEach((a) => {
       const isLinkedToReq = Array.from(seenReqIds).some((reqId) => a.id === `adj_pen_${reqId}` || a.id === reqId || a.id === `adj_${reqId}`);
       if (!isLinkedToReq && (a.type === 'deduction' || a.type === 'penalty')) {
@@ -377,11 +373,24 @@ export default function BylawsModule({
     return list.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   }, [state.requests, state.adjustments, employees, branches]);
 
-  // Filtered penalties list according to active UI controls
   const filteredPenalties = useMemo(() => {
+    const targetBranchStr = currentBranchId ? String(currentBranchId) : null;
+
     return allPenalties.filter((p) => {
       if (currentEmpId && String(p.employeeId) !== String(currentEmpId)) return false;
-      if (recordsBranch && String(p.branchId) !== String(recordsBranch)) return false;
+
+      if (targetBranchStr) {
+        const emp = employees.find((e) => String(e.id) === String(p.employeeId));
+        const isEmpInBranch = emp && (
+          String(emp.branchId) === targetBranchStr ||
+          (emp.branchesDetails && emp.branchesDetails.some((bd) => String(bd.branchId) === targetBranchStr))
+        );
+        const isDirectBranch = p.branchId && String(p.branchId) === targetBranchStr;
+        if (!isEmpInBranch && !isDirectBranch) return false;
+      } else if (recordsBranch && String(p.branchId) !== String(recordsBranch)) {
+        return false;
+      }
+
       if (recordsStatus !== 'all') {
         if (recordsStatus === 'objection') {
           if (!p.objection) return false;
@@ -393,6 +402,7 @@ export default function BylawsModule({
           if (p.status !== 'rejected') return false;
         }
       }
+
       if (recordsSearch.trim()) {
         const q = recordsSearch.trim().toLowerCase();
         const matchName = (p.employeeName || '').toLowerCase().includes(q);

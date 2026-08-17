@@ -3801,6 +3801,16 @@ export default function App() {
                 pauseShift={pauseShift}
                 resumeShift={resumeShift}
                 stopShift={stopShift}
+                monthPicker={monthPicker}
+                setMonthPicker={setMonthPicker}
+                filterMode={adminFilterMode}
+                setFilterMode={setAdminFilterMode}
+                customFrom={adminCustomFrom}
+                setCustomFrom={setAdminCustomFrom}
+                customTo={adminCustomTo}
+                setCustomTo={setAdminCustomTo}
+                filterFn={currentFilterFn}
+                getEmpPermission={getEmpPermission}
                 onExportExcel={() => {
                   const mgrEmp = (state.employees || []).find((e) => e.id === currentBranch?.managerId) || (state.employees || []).find((e) => e.branchId === currentBranch?.id);
                   if (mgrEmp) exportEmpExcel(mgrEmp.id, 'month');

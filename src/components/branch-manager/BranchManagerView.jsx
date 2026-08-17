@@ -92,7 +92,17 @@ export default function BranchManagerView({
   startShift,
   pauseShift,
   resumeShift,
-  stopShift
+  stopShift,
+  monthPicker: propMonthPicker,
+  setMonthPicker: propSetMonthPicker,
+  filterMode: propFilterMode,
+  setFilterMode: propSetFilterMode,
+  customFrom: propCustomFrom,
+  setCustomFrom: propSetCustomFrom,
+  customTo: propCustomTo,
+  setCustomTo: propSetCustomTo,
+  filterFn: propFilterFn,
+  getEmpPermission
 }) {
   const [selectedPunchEmpId, setSelectedPunchEmpId] = useState('');
   const [showPrintModal, setShowPrintModal] = useState(false);
@@ -114,19 +124,28 @@ export default function BranchManagerView({
   const [rosterEditEmpId, setRosterEditEmpId] = useState('');
   const [rosterEditDetails, setRosterEditDetails] = useState('');
 
-  // Branch Manager Date Range & Month Filter State (Persistent in localStorage)
-  const [filterMode, setFilterMode] = useState(() => {
+  // Branch Manager Date Range & Month Filter State (Persistent & Synchronized with App header)
+  const [internalFilterMode, setInternalFilterMode] = useState(() => {
     try { return localStorage.getItem('bm_filter_mode') || 'month'; } catch { return 'month'; }
   });
-  const [selectedMonth, setSelectedMonth] = useState(() => {
+  const [internalSelectedMonth, setInternalSelectedMonth] = useState(() => {
     try { return localStorage.getItem('bm_selected_month') || new Date().toISOString().slice(0, 7); } catch { return new Date().toISOString().slice(0, 7); }
   });
-  const [customFromDate, setCustomFromDate] = useState(() => {
+  const [internalCustomFromDate, setInternalCustomFromDate] = useState(() => {
     try { return localStorage.getItem('bm_custom_from') || ''; } catch { return ''; }
   });
-  const [customToDate, setCustomToDate] = useState(() => {
+  const [internalCustomToDate, setInternalCustomToDate] = useState(() => {
     try { return localStorage.getItem('bm_custom_to') || ''; } catch { return ''; }
   });
+
+  const filterMode = propFilterMode || internalFilterMode;
+  const setFilterMode = propSetFilterMode || setInternalFilterMode;
+  const selectedMonth = propMonthPicker || internalSelectedMonth;
+  const setSelectedMonth = propSetMonthPicker || setInternalSelectedMonth;
+  const customFromDate = propCustomFrom !== undefined ? propCustomFrom : internalCustomFromDate;
+  const setCustomFromDate = propSetCustomFrom || setInternalCustomFromDate;
+  const customToDate = propCustomTo !== undefined ? propCustomTo : internalCustomToDate;
+  const setCustomToDate = propSetCustomTo || setInternalCustomToDate;
 
   useEffect(() => {
     try {
@@ -140,11 +159,16 @@ export default function BranchManagerView({
   const cutoffStartDay = state.orgSettings?.payrollPayoutStartDay !== undefined ? parseInt(state.orgSettings.payrollPayoutStartDay, 10) : 26;
   const cutoffEndDay = state.orgSettings?.payrollPayoutEndDay !== undefined ? parseInt(state.orgSettings.payrollPayoutEndDay, 10) : (state.orgSettings?.payrollPayoutDay || 25);
 
+  const isCustomFilter = filterMode === 'custom' || filterMode === 'range';
+  const effectiveCustomFrom = (customFromDate && customToDate) ? (customFromDate <= customToDate ? customFromDate : customToDate) : (customFromDate || customToDate);
+  const effectiveCustomTo = (customFromDate && customToDate) ? (customFromDate <= customToDate ? customToDate : customFromDate) : (customToDate || customFromDate);
+
   const matchesDateRange = (dateStr) => {
     if (!dateStr) return false;
-    if (filterMode === 'custom') {
-      if (customFromDate && dateStr < customFromDate) return false;
-      if (customToDate && dateStr > customToDate) return false;
+    const cleanDate = String(dateStr).slice(0, 10);
+    if (isCustomFilter) {
+      if (effectiveCustomFrom && cleanDate < effectiveCustomFrom) return false;
+      if (effectiveCustomTo && cleanDate > effectiveCustomTo) return false;
       return true;
     }
     if (!selectedMonth || selectedMonth.length !== 7) return true;
@@ -155,7 +179,7 @@ export default function BranchManagerView({
     const prevY = m === 1 ? y - 1 : y;
     const fromDate = `${prevY}-${String(prevM).padStart(2, '0')}-${String(cutoffStartDay).padStart(2, '0')}`;
     const toDate = `${y}-${String(m).padStart(2, '0')}-${String(cutoffEndDay).padStart(2, '0')}`;
-    return dateStr >= fromDate && dateStr <= toDate;
+    return cleanDate >= fromDate && cleanDate <= toDate;
   };
 
   const renderDateFilterBar = () => (
@@ -314,16 +338,22 @@ export default function BranchManagerView({
   const handleManagerApproveRequest = async (reqId) => {
     let approvedTargetReq = null;
     let updatedRosters = [...(state.rosters || [])];
+    let updatedShifts = [...(state.shifts || [])];
+    let updatedLeaveRequests = [...(state.leaveRequests || [])];
+    let updatedSwaps = [...(state.shiftSwaps || [])];
 
     const updatedRequests = (state.requests || []).map((r) => {
       if (r.id === reqId) {
-        const requiresAdmin = r.targetApproval !== 'branch_only';
-        const isAdminApproved = r.adminApproved || r.status === 'pending_admin';
-        const isFullyApproved = !requiresAdmin || (r.branchApproved && isAdminApproved);
+        const rule = (state.approvalRules || []).find((ru) => ru.requestType === r.type || ru.id === r.type);
+        const requiresAdmin = rule ? (rule.reqAdmin !== false) : (r.targetApproval === 'admin_only' || ['loan', 'advance', 'penalty'].includes(r.type));
+        const isAdminApproved = Boolean(r.adminApproved);
+        const isFullyApproved = !requiresAdmin || isAdminApproved;
+
         const updated = {
           ...r,
           branchApproved: true,
-          status: isFullyApproved ? 'approved' : 'pending_admin'
+          status: isFullyApproved ? 'approved' : 'pending_admin',
+          approvedAt: isFullyApproved ? new Date().toISOString() : r.approvedAt
         };
         if (isFullyApproved) approvedTargetReq = updated;
         return updated;
@@ -331,6 +361,7 @@ export default function BranchManagerView({
       return r;
     });
 
+    // 1. If fully approved roster edit/update
     if (approvedTargetReq && (approvedTargetReq.type === 'roster_update' || approvedTargetReq.type === 'roster_edit' || approvedTargetReq.type === 'roster_edit_request')) {
       const existingIdx = updatedRosters.findIndex(
         (ros) => ros.employeeId === approvedTargetReq.employeeId && ros.month === approvedTargetReq.month && (String(ros.branchId || '') === String(approvedTargetReq.branchId || ''))
@@ -338,7 +369,7 @@ export default function BranchManagerView({
       const activeRosterObj = {
         id: approvedTargetReq.id,
         employeeId: approvedTargetReq.employeeId,
-        branchId: approvedTargetReq.branchId || null,
+        branchId: approvedTargetReq.branchId || currentBranch?.id || null,
         month: approvedTargetReq.month,
         fromDate: approvedTargetReq.fromDate,
         toDate: approvedTargetReq.toDate,
@@ -353,34 +384,73 @@ export default function BranchManagerView({
       }
     }
 
-    let updatedLeaveRequests = [...(state.leaveRequests || [])];
-    if (approvedTargetReq && (approvedTargetReq.type === 'leave' || approvedTargetReq.type === 'leave_request')) {
+    // 2. If fully approved leave
+    if (approvedTargetReq && (approvedTargetReq.type === 'leave' || approvedTargetReq.type === 'leave_request' || approvedTargetReq.leaveType)) {
       updatedLeaveRequests = updatedLeaveRequests.map((lr) => {
         if (lr.id === approvedTargetReq.id || (String(lr.employeeId) === String(approvedTargetReq.employeeId) && lr.startDate === approvedTargetReq.startDate)) {
-          return { ...lr, status: approvedTargetReq.status, branchApproved: true };
+          return { ...lr, status: 'approved', branchApproved: true, adminApproved: true };
         }
         return lr;
       });
     }
 
-    const updatedState = { ...state, requests: updatedRequests, rosters: updatedRosters, leaveRequests: updatedLeaveRequests };
+    // 3. If overtime request
+    if (approvedTargetReq && approvedTargetReq.type === 'overtime') {
+      const targetDate = approvedTargetReq.date || approvedTargetReq.startDate;
+      const extraHours = parseFloat(approvedTargetReq.hours) || parseFloat(approvedTargetReq.amount) || 0;
+      const existingShiftIdx = updatedShifts.findIndex(s => s.employeeId === approvedTargetReq.employeeId && s.date === targetDate);
+      if (existingShiftIdx >= 0 && extraHours > 0) {
+        updatedShifts[existingShiftIdx] = {
+          ...updatedShifts[existingShiftIdx],
+          hours: Math.round(((updatedShifts[existingShiftIdx].hours || 0) + extraHours) * 100) / 100,
+          overtimeHours: extraHours
+        };
+      }
+    }
+
+    // 4. If shift swap request
+    if (approvedTargetReq && (approvedTargetReq.type === 'swap' || approvedTargetReq.type === 'shift_swap')) {
+      updatedSwaps = updatedSwaps.map((s) => {
+        if (s.id === approvedTargetReq.id) {
+          return { ...s, status: 'approved', branchApproved: true };
+        }
+        return s;
+      });
+    }
+
+    // Dismiss or update notification
+    const updatedNotifications = (state.notifications || []).map((n) => {
+      if (n.requestId === reqId) return { ...n, isRead: true, status: 'approved' };
+      return n;
+    });
+
+    const updatedState = {
+      ...state,
+      requests: updatedRequests,
+      rosters: updatedRosters,
+      shifts: updatedShifts,
+      leaveRequests: updatedLeaveRequests,
+      shiftSwaps: updatedSwaps,
+      notifications: updatedNotifications
+    };
+
     setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.(approvedTargetReq ? '✅ تم تفعيل الطلب المعتمد بنجاح' : '✅ تم الموافقة المبدئية على الطلب وتحويله للإدارة العليا');
+    showToast?.(approvedTargetReq ? '✅ تم اعتماد وقبول الطلب بنجاح وتطبيقه بالنظام' : '✅ تم توقيع وموافقة مدير الفرع وتحويل الطلب للاعتماد النهائي من الإدارة العليا');
   };
 
   const handleManagerRejectRequest = async (reqId) => {
     let rejectedTargetReq = null;
     const updatedRequests = (state.requests || []).map((r) => {
       if (r.id === reqId) {
-        rejectedTargetReq = { ...r, branchApproved: false, status: 'rejected' };
+        rejectedTargetReq = { ...r, branchApproved: false, status: 'rejected', isRejected: true, rejectedAt: new Date().toISOString() };
         return rejectedTargetReq;
       }
       return r;
     });
 
     let updatedLeaveRequests = [...(state.leaveRequests || [])];
-    if (rejectedTargetReq && (rejectedTargetReq.type === 'leave' || rejectedTargetReq.type === 'leave_request')) {
+    if (rejectedTargetReq && (rejectedTargetReq.type === 'leave' || rejectedTargetReq.type === 'leave_request' || rejectedTargetReq.leaveType)) {
       updatedLeaveRequests = updatedLeaveRequests.map((lr) => {
         if (lr.id === rejectedTargetReq.id || (String(lr.employeeId) === String(rejectedTargetReq.employeeId) && lr.startDate === rejectedTargetReq.startDate)) {
           return { ...lr, status: 'rejected', branchApproved: false };
@@ -389,10 +459,32 @@ export default function BranchManagerView({
       });
     }
 
-    const updatedState = { ...state, requests: updatedRequests, leaveRequests: updatedLeaveRequests };
+    let updatedSwaps = [...(state.shiftSwaps || [])];
+    if (rejectedTargetReq && (rejectedTargetReq.type === 'swap' || rejectedTargetReq.type === 'shift_swap')) {
+      updatedSwaps = updatedSwaps.map((s) => {
+        if (s.id === rejectedTargetReq.id) {
+          return { ...s, status: 'rejected', branchApproved: false };
+        }
+        return s;
+      });
+    }
+
+    const updatedNotifications = (state.notifications || []).map((n) => {
+      if (n.requestId === reqId) return { ...n, isRead: true, status: 'rejected' };
+      return n;
+    });
+
+    const updatedState = {
+      ...state,
+      requests: updatedRequests,
+      leaveRequests: updatedLeaveRequests,
+      shiftSwaps: updatedSwaps,
+      notifications: updatedNotifications
+    };
+
     setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.('🔴 تم رفض الطلب');
+    showToast?.('🔴 تم رفض الطلب من مدير الفرع');
   };
 
   const handleApproveRoster = async (targetId) => {
@@ -2318,6 +2410,7 @@ export default function BranchManagerView({
           saveState={saveState}
           showToast={showToast}
           userRole="branch"
+          currentBranchId={currentBranch?.id}
           filterFn={matchesDateRange}
           monthPicker={selectedMonth}
           filterMode={filterMode}
