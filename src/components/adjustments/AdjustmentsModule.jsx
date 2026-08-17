@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { fmt } from '../../utils/formatters';
 
 export default function AdjustmentsModule({

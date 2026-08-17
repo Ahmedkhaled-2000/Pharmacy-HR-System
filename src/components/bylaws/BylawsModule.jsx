@@ -1,3 +1,5 @@
+import React, { useState, useMemo, useEffect } from 'react';
+
 const DEFAULT_BYLAWS_RULES = [
   { id: 'b1', title: 'التأخير عن موعد الشيفت من 15 إلى 30 دقيقة', impactType: 'deduction_days', impactVal: 0.25, category: 'حضور وانصراف' },
   { id: 'b2', title: 'التأخير عن موعد الشيفت أكثر من 30 دقيقة', impactType: 'deduction_days', impactVal: 0.5, category: 'حضور وانصراف' },
