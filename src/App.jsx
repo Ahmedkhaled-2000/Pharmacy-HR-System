@@ -2322,23 +2322,26 @@ export default function App() {
     if (empId && empId !== 'all') {
       const emp = (state.employees || []).find((e) => e.id === empId);
       if (emp && emp.permissions) {
-        if (emp.permissions[canKey] !== undefined) return emp.permissions[canKey];
-        if (emp.permissions[allowKey] !== undefined) return emp.permissions[allowKey];
+        if (emp.permissions[canKey] !== undefined) return Boolean(emp.permissions[canKey]);
+        if (emp.permissions[allowKey] !== undefined) return Boolean(emp.permissions[allowKey]);
+        if (emp.permissions[permKey] !== undefined) return Boolean(emp.permissions[permKey]);
       }
       const empSettingsPerms = state.orgSettings?.empPermissions?.[empId];
       if (empSettingsPerms) {
-        if (empSettingsPerms[canKey] !== undefined) return empSettingsPerms[canKey];
-        if (empSettingsPerms[allowKey] !== undefined) return empSettingsPerms[allowKey];
+        if (empSettingsPerms[canKey] !== undefined) return Boolean(empSettingsPerms[canKey]);
+        if (empSettingsPerms[allowKey] !== undefined) return Boolean(empSettingsPerms[allowKey]);
+        if (empSettingsPerms[permKey] !== undefined) return Boolean(empSettingsPerms[permKey]);
       }
     }
 
     // 2. Check Global Default Permissions
     const globalPerms = state.orgSettings?.permissions || {};
-    if (globalPerms[canKey] !== undefined) return globalPerms[canKey];
-    if (globalPerms[allowKey] !== undefined) return globalPerms[allowKey];
+    if (globalPerms[canKey] !== undefined) return Boolean(globalPerms[canKey]);
+    if (globalPerms[allowKey] !== undefined) return Boolean(globalPerms[allowKey]);
+    if (globalPerms[permKey] !== undefined) return Boolean(globalPerms[permKey]);
 
     // Default Fallbacks
-    if (['canAddAdjustment', 'allowAddAdjustment'].includes(permKey)) return false;
+    if (['canAddAdjustment', 'allowAddAdjustment', 'canManualShift', 'allowManualShift', 'canEditShift', 'allowEditShift'].includes(permKey)) return false;
     return true;
   };
 

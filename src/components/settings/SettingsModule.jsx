@@ -172,24 +172,43 @@ export default function SettingsModule({
   const defaultPerms = SYSTEM_PERMISSION_CATALOG.reduce((acc, p) => ({ ...acc, [p.key]: p.defaultVal }), {});
 
   const [selectedEmpForPerm, setSelectedEmpForPerm] = useState('all'); // 'all' or empId
-  const [permState, setPermState] = useState(orgSettings.permissions || defaultPerms);
+  const [permState, setPermState] = useState(() => {
+    return { ...defaultPerms, ...(orgSettings.permissions || {}) };
+  });
   const [showAddPermModal, setShowAddPermModal] = useState(false);
   const [selectedCatalogPermKey, setSelectedCatalogPermKey] = useState('');
   const [customPermKey, setCustomPermKey] = useState('');
   const [customPermLabel, setCustomPermLabel] = useState('');
 
-  const handleSelectEmpForPerm = (empId) => {
-    setSelectedEmpForPerm(empId);
-    if (empId === 'all') {
-      const currentGlobal = orgSettings.permissions || defaultPerms;
+  // Synchronize permissions state when selecting an employee or when state updates
+  useEffect(() => {
+    if (selectedEmpForPerm === 'all') {
+      const currentGlobal = state.orgSettings?.permissions || defaultPerms;
       setPermState({ ...defaultPerms, ...currentGlobal });
     } else {
-      const emp = (state.employees || []).find((e) => e.id === empId);
-      const empCustom = orgSettings.empPermissions?.[empId] || emp?.permissions;
+      const emp = (state.employees || []).find((e) => e.id === selectedEmpForPerm);
+      const empCustom = state.orgSettings?.empPermissions?.[selectedEmpForPerm] || emp?.permissions;
       if (empCustom) {
         setPermState({ ...defaultPerms, ...empCustom });
       } else {
-        const currentGlobal = orgSettings.permissions || defaultPerms;
+        const currentGlobal = state.orgSettings?.permissions || defaultPerms;
+        setPermState({ ...defaultPerms, ...currentGlobal });
+      }
+    }
+  }, [selectedEmpForPerm, state.orgSettings?.permissions, state.orgSettings?.empPermissions]);
+
+  const handleSelectEmpForPerm = (empId) => {
+    setSelectedEmpForPerm(empId);
+    if (empId === 'all') {
+      const currentGlobal = state.orgSettings?.permissions || defaultPerms;
+      setPermState({ ...defaultPerms, ...currentGlobal });
+    } else {
+      const emp = (state.employees || []).find((e) => e.id === empId);
+      const empCustom = state.orgSettings?.empPermissions?.[empId] || emp?.permissions;
+      if (empCustom) {
+        setPermState({ ...defaultPerms, ...empCustom });
+      } else {
+        const currentGlobal = state.orgSettings?.permissions || defaultPerms;
         setPermState({ ...defaultPerms, ...currentGlobal });
       }
     }
@@ -200,12 +219,12 @@ export default function SettingsModule({
       const catalogItem = SYSTEM_PERMISSION_CATALOG.find((p) => p.key === selectedCatalogPermKey);
       if (catalogItem) {
         setPermState({ ...permState, [catalogItem.key]: true });
-        showToast?.(`✅ تمت إضافة صلاحية (${catalogItem.label}) إلى القائمة`);
+        showToast?.(`✅ تمت إضافة وتفعيل صلاحية (${catalogItem.label}) في القائمة`);
       }
     } else if (customPermKey.trim() && customPermLabel.trim()) {
       const cleanKey = customPermKey.trim().replace(/\s+/g, '_');
       setPermState({ ...permState, [cleanKey]: true });
-      showToast?.(`✅ تمت إضافة الصلاحية المخصصة (${customPermLabel}) إلى القائمة`);
+      showToast?.(`✅ تمت إضافة وتفعيل الصلاحية المخصصة (${customPermLabel}) في القائمة`);
     }
     setShowAddPermModal(false);
     setSelectedCatalogPermKey('');
@@ -225,33 +244,38 @@ export default function SettingsModule({
     Object.keys(permState).forEach((k) => { allTrue[k] = true; });
     SYSTEM_PERMISSION_CATALOG.forEach((p) => { allTrue[p.key] = true; });
     setPermState(allTrue);
-    showToast?.('🔓 تم تفعيل ومنح كافة الصلاحيات');
+    showToast?.('🔓 تم منح وتفعيل كافة الصلاحيات — اضغط حفظ لتطبيقها فوراً');
   };
 
   const handleSavePermissions = async () => {
-    let updatedOrgSettings = { ...orgSettings };
+    let updatedOrgSettings = { ...(state.orgSettings || orgSettings) };
     let updatedEmployees = [...(state.employees || [])];
 
     if (selectedEmpForPerm === 'all') {
       updatedOrgSettings = {
         ...updatedOrgSettings,
-        permissions: permState
+        permissions: { ...permState },
+        empPermissions: {}
       };
-      showToast?.('💾 تم حفظ وتطبيق الصلاحيات الافتراضية الصارمة على جميع الموظفين بنجاح');
+      updatedEmployees = updatedEmployees.map((e) => ({
+        ...e,
+        permissions: { ...permState }
+      }));
+      showToast?.('💾 تم حفظ ومنح وتطبيق الصلاحيات بنجاح على جميع الموظفين بالنظام');
     } else {
       const updatedEmpPerms = {
         ...(updatedOrgSettings.empPermissions || {}),
-        [selectedEmpForPerm]: permState
+        [selectedEmpForPerm]: { ...permState }
       };
       updatedOrgSettings = {
         ...updatedOrgSettings,
         empPermissions: updatedEmpPerms
       };
       updatedEmployees = updatedEmployees.map((e) =>
-        e.id === selectedEmpForPerm ? { ...e, permissions: permState } : e
+        e.id === selectedEmpForPerm ? { ...e, permissions: { ...permState } } : e
       );
       const targetEmp = updatedEmployees.find((e) => e.id === selectedEmpForPerm);
-      showToast?.(`💾 تم حفظ وتطبيق الصلاحيات الصارمة للموظف (${targetEmp?.name || selectedEmpForPerm}) بنجاح`);
+      showToast?.(`💾 تم حفظ ومنح وتطبيق الصلاحيات للموظف (${targetEmp?.name || selectedEmpForPerm}) بنجاح`);
     }
 
     const updatedState = { ...state, orgSettings: updatedOrgSettings, employees: updatedEmployees };

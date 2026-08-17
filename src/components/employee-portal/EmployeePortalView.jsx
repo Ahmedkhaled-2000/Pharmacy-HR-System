@@ -611,21 +611,21 @@ export default function EmployeePortalView({
     return { startDate, endDate };
   };
 
-  const canViewSalary = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canViewSalary') !== false && getEmpPermission(emp.id, 'allowViewSalary') !== false) : true;
-  const canStartEnd = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canStartEnd') !== false && getEmpPermission(emp.id, 'allowStartEnd') !== false) : true;
-  const canLivePunch = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canLivePunch') !== false && getEmpPermission(emp.id, 'allowLivePunch') !== false) : true;
-  const canManualShift = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canManualShift') !== false && getEmpPermission(emp.id, 'allowManualShift') !== false) : true;
-  const canEditShift = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canEditShift') !== false && getEmpPermission(emp.id, 'allowEditShift') !== false) : true;
-  const canAddAdjustment = emp && getEmpPermission ? getEmpPermission(emp.id, 'canAddAdjustment') === true : false;
-  const canViewAdjustments = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canViewAdjustments') !== false && getEmpPermission(emp.id, 'allowViewAdjustments') !== false) : true;
-  const canExportExcel = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canExportExcel') !== false && getEmpPermission(emp.id, 'allowExportExcel') !== false) : true;
-  const canApplyLoan = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canApplyLoan') !== false && getEmpPermission(emp.id, 'allowApplyLoan') !== false) : true;
-  const canApplyLeave = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canApplyLeave') !== false && getEmpPermission(emp.id, 'allowApplyLeave') !== false) : true;
-  const canApplyPermission = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canApplyPermission') !== false && getEmpPermission(emp.id, 'allowApplyPermission') !== false) : true;
-  const canApplySwap = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canApplySwap') !== false && getEmpPermission(emp.id, 'allowApplySwap') !== false) : true;
-  const canViewBylaws = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canViewBylaws') !== false && getEmpPermission(emp.id, 'allowViewBylaws') !== false) : true;
-  const canSubmitComplaint = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canSubmitComplaint') !== false && getEmpPermission(emp.id, 'allowSubmitComplaint') !== false) : true;
-  const canViewRoster = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canViewRoster') !== false && getEmpPermission(emp.id, 'allowViewRoster') !== false) : true;
+  const canViewSalary = emp && getEmpPermission ? Boolean(getEmpPermission(emp.id, 'canViewSalary')) : true;
+  const canStartEnd = emp && getEmpPermission ? Boolean(getEmpPermission(emp.id, 'canStartEnd')) : true;
+  const canLivePunch = emp && getEmpPermission ? Boolean(getEmpPermission(emp.id, 'canLivePunch')) : true;
+  const canManualShift = emp && getEmpPermission ? Boolean(getEmpPermission(emp.id, 'canManualShift')) : false;
+  const canEditShift = emp && getEmpPermission ? Boolean(getEmpPermission(emp.id, 'canEditShift')) : false;
+  const canAddAdjustment = emp && getEmpPermission ? Boolean(getEmpPermission(emp.id, 'canAddAdjustment')) : false;
+  const canViewAdjustments = emp && getEmpPermission ? Boolean(getEmpPermission(emp.id, 'canViewAdjustments')) : true;
+  const canExportExcel = emp && getEmpPermission ? Boolean(getEmpPermission(emp.id, 'canExportExcel')) : true;
+  const canApplyLoan = emp && getEmpPermission ? Boolean(getEmpPermission(emp.id, 'canApplyLoan')) : true;
+  const canApplyLeave = emp && getEmpPermission ? Boolean(getEmpPermission(emp.id, 'canApplyLeave')) : true;
+  const canApplyPermission = emp && getEmpPermission ? Boolean(getEmpPermission(emp.id, 'canApplyPermission')) : true;
+  const canApplySwap = emp && getEmpPermission ? Boolean(getEmpPermission(emp.id, 'canApplySwap')) : true;
+  const canViewBylaws = emp && getEmpPermission ? Boolean(getEmpPermission(emp.id, 'canViewBylaws')) : true;
+  const canSubmitComplaint = emp && getEmpPermission ? Boolean(getEmpPermission(emp.id, 'canSubmitComplaint')) : true;
+  const canViewRoster = emp && getEmpPermission ? Boolean(getEmpPermission(emp.id, 'canViewRoster')) : true;
 
   const isCustomMode = filterMode === 'range' || filterMode === 'custom';
   const effectiveStart = (rangeStart && rangeEnd) ? (rangeStart <= rangeEnd ? rangeStart : rangeEnd) : (rangeStart || rangeEnd);
