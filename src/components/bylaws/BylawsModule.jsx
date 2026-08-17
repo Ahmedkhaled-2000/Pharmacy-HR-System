@@ -1,4 +1,11 @@
-import React, { useState } from 'react';
+const DEFAULT_BYLAWS_RULES = [
+  { id: 'b1', title: 'التأخير عن موعد الشيفت من 15 إلى 30 دقيقة', impactType: 'deduction_days', impactVal: 0.25, category: 'حضور وانصراف' },
+  { id: 'b2', title: 'التأخير عن موعد الشيفت أكثر من 30 دقيقة', impactType: 'deduction_days', impactVal: 0.5, category: 'حضور وانصراف' },
+  { id: 'b3', title: 'الغياب عن الوردية بدون إذن مسبق', impactType: 'deduction_days', impactVal: 1.0, category: 'حضور وانصراف' },
+  { id: 'b4', title: 'عدم الالتزام بالزي الرسمي للصيدلية', impactType: 'fixed_amount', impactVal: 50, category: 'سلوك وانضباط' },
+  { id: 'b5', title: 'عدم الالتزام بنظافة وترتيب الصيدلية والرفوف', impactType: 'warning', impactVal: 0, category: 'نظافة وجودة' },
+  { id: 'b6', title: 'خطأ أو عجز في تسليم الكاشير نهاية الوردية', impactType: 'fixed_amount', impactVal: 100, category: 'ماليات وخزينة' }
+];
 
 export default function BylawsModule({
   state,
@@ -11,6 +18,14 @@ export default function BylawsModule({
   const [activeTab, setActiveTab] = useState('text'); // 'text' | 'rules' | 'records'
   const isManagerOrAdmin = userRole === 'admin' || userRole === 'branch';
   const isAdmin = userRole === 'admin';
+
+  // Dynamic bylaws rules from central state with default fallback
+  const bylawsRules = React.useMemo(() => {
+    if (state.bylawsRules && Array.isArray(state.bylawsRules) && state.bylawsRules.length > 0) {
+      return state.bylawsRules;
+    }
+    return DEFAULT_BYLAWS_RULES;
+  }, [state.bylawsRules]);
 
   // State for official bylaws text
   const [bylawsText, setBylawsText] = useState(
@@ -31,18 +46,6 @@ export default function BylawsModule({
 1. دقة تسليم الكاشير وجرد الخزينة نهاية كل وردية.
 2. يمنع سحب أدوية بالآجل إلا وفق الإجراءات الرسمية والطلبات المعتمدة.
     `.trim()
-  );
-
-  // State for Penalty Rules
-  const [bylawsRules, setBylawsRules] = useState(
-    state.bylawsRules || [
-      { id: 'b1', title: 'التأخير عن موعد الشيفت من 15 إلى 30 دقيقة', impactType: 'deduction_days', impactVal: 0.25, category: 'حضور وانصراف' },
-      { id: 'b2', title: 'التأخير عن موعد الشيفت أكثر من 30 دقيقة', impactType: 'deduction_days', impactVal: 0.5, category: 'حضور وانصراف' },
-      { id: 'b3', title: 'الغياب عن الوردية بدون إذن مسبق', impactType: 'deduction_days', impactVal: 1.0, category: 'حضور وانصراف' },
-      { id: 'b4', title: 'عدم الالتزام بالزي الرسمي للصيدلية', impactType: 'fixed_amount', impactVal: 50, category: 'سلوك وانضباط' },
-      { id: 'b5', title: 'عدم الالتزام بنظافة وترتيب الصيدلية والرفوف', impactType: 'warning', impactVal: 0, category: 'نظافة وجودة' },
-      { id: 'b6', title: 'خطأ أو عجز في تسليم الكاشير نهاية الوردية', impactType: 'fixed_amount', impactVal: 100, category: 'ماليات وخزينة' }
-    ]
   );
 
   // Record Violation Form State
@@ -80,20 +83,27 @@ export default function BylawsModule({
       impactType: newRuleImpactType,
       impactVal: parseFloat(newRuleImpactVal) || 0
     };
-    const updated = [...bylawsRules, newRule];
-    setBylawsRules(updated);
-    setShowAddRuleModal(false);
-    setNewRuleTitle('');
-
+    const currentList = (state.bylawsRules && Array.isArray(state.bylawsRules) && state.bylawsRules.length > 0)
+      ? state.bylawsRules
+      : DEFAULT_BYLAWS_RULES;
+    const updated = [...currentList, newRule];
+    
     const updatedState = { ...state, bylawsRules: updated };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
+
+    setShowAddRuleModal(false);
+    setNewRuleTitle('');
+    setNewRuleImpactVal('0.25');
     showToast?.('✅ تم إضافة بند جزاء جديد إلى لائحة العمل');
   };
 
   const handleDeleteRule = async (id) => {
-    const updated = bylawsRules.filter(r => r.id !== id);
-    setBylawsRules(updated);
+    const currentList = (state.bylawsRules && Array.isArray(state.bylawsRules) && state.bylawsRules.length > 0)
+      ? state.bylawsRules
+      : DEFAULT_BYLAWS_RULES;
+    const updated = currentList.filter(r => String(r.id) !== String(id));
+    
     const updatedState = { ...state, bylawsRules: updated };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
