@@ -106,7 +106,15 @@ export default function EmployeePortalView({
   getActiveBreakStr,
   openEditShift,
 }) {
-  const emp = currentEmpUser ? ((state && state.employees && state.employees.find((e) => e.id === currentEmpUser?.id)) || currentEmpUser) : null;
+  const emp = useMemo(() => {
+    if (!currentEmpUser) return null;
+    const found = (state?.employees || []).find((e) =>
+      (currentEmpUser.id && (String(e.id) === String(currentEmpUser.id) || String(e.code) === String(currentEmpUser.id))) ||
+      (currentEmpUser.code && (String(e.code) === String(currentEmpUser.code) || String(e.id) === String(currentEmpUser.code))) ||
+      (currentEmpUser.username && (String(e.username) === String(currentEmpUser.username) || String(e.code) === String(currentEmpUser.username)))
+    );
+    return found || currentEmpUser;
+  }, [state?.employees, currentEmpUser]);
 
   const [selectedMonth, setSelectedMonth] = useState(() => {
     try { return localStorage.getItem('emp_selected_month') || CURRENT_MONTH; } catch { return CURRENT_MONTH; }
@@ -181,9 +189,8 @@ export default function EmployeePortalView({
 
   // ── Export Excel ──────────────────────────────
   const exportToExcel = async (rangeMode = 'month', customStart = '', customEnd = '') => {
-    if (!currentEmpUser) return;
-    const empObj = (state && state.employees && state.employees.find((e) => e.id === currentEmpUser?.id)) || currentEmpUser;
-    const canExport = getEmpPermission ? getEmpPermission(empObj.id, 'allowExportExcel') : true;
+    if (!currentEmpUser || !emp) return;
+    const canExport = getEmpPermission ? getEmpPermission(emp, 'allowExportExcel') : true;
     if (!canExport) {
       showToast('❌ تم تقييد الصلاحيات: ليس لديك صلاحية لتصدير شيت الإكسل');
       return;

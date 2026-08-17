@@ -111,7 +111,7 @@ export function normalizeState(parsed) {
       const v = localStorage.getItem('payroll_payout_start_day');
       if (v !== null && v !== '') return parseInt(v, 10);
     } catch {}
-    return parsed.orgSettings?.payrollPayoutStartDay !== undefined ? parseInt(parsed.orgSettings.payrollPayoutStartDay, 10) : 26;
+    return null;
   })();
 
   const savedEndDay = (() => {
@@ -119,7 +119,7 @@ export function normalizeState(parsed) {
       const v = localStorage.getItem('payroll_payout_end_day');
       if (v !== null && v !== '') return parseInt(v, 10);
     } catch {}
-    return parsed.orgSettings?.payrollPayoutEndDay !== undefined ? parseInt(parsed.orgSettings.payrollPayoutEndDay, 10) : 25;
+    return null;
   })();
 
   const savedPeriodType = (() => {
@@ -127,7 +127,7 @@ export function normalizeState(parsed) {
       const v = localStorage.getItem('payroll_period_type');
       if (v) return v;
     } catch {}
-    return parsed.orgSettings?.payrollPeriodType || 'cycle';
+    return null;
   })();
 
   const savedCustomFrom = (() => {
@@ -135,7 +135,7 @@ export function normalizeState(parsed) {
       const v = localStorage.getItem('payroll_custom_from');
       if (v) return v;
     } catch {}
-    return parsed.orgSettings?.payrollCustomFrom || '';
+    return null;
   })();
 
   const savedCustomTo = (() => {
@@ -143,14 +143,20 @@ export function normalizeState(parsed) {
       const v = localStorage.getItem('payroll_custom_to');
       if (v) return v;
     } catch {}
-    return parsed.orgSettings?.payrollCustomTo || '';
+    return null;
   })();
 
-  const effectiveStartDay = parsed.orgSettings?.payrollPayoutStartDay !== undefined ? parseInt(parsed.orgSettings.payrollPayoutStartDay, 10) : savedStartDay;
-  const effectiveEndDay = parsed.orgSettings?.payrollPayoutEndDay !== undefined ? parseInt(parsed.orgSettings.payrollPayoutEndDay, 10) : savedEndDay;
-  const effectivePeriodType = parsed.orgSettings?.payrollPeriodType || savedPeriodType;
-  const effectiveCustomFrom = parsed.orgSettings?.payrollCustomFrom !== undefined ? parsed.orgSettings.payrollCustomFrom : savedCustomFrom;
-  const effectiveCustomTo = parsed.orgSettings?.payrollCustomTo !== undefined ? parsed.orgSettings.payrollCustomTo : savedCustomTo;
+  const effectiveStartDay = (savedStartDay !== null && savedStartDay !== undefined) 
+    ? savedStartDay 
+    : (parsed.orgSettings?.payrollPayoutStartDay !== undefined ? parseInt(parsed.orgSettings.payrollPayoutStartDay, 10) : 26);
+
+  const effectiveEndDay = (savedEndDay !== null && savedEndDay !== undefined) 
+    ? savedEndDay 
+    : (parsed.orgSettings?.payrollPayoutEndDay !== undefined ? parseInt(parsed.orgSettings.payrollPayoutEndDay, 10) : 25);
+
+  const effectivePeriodType = savedPeriodType || parsed.orgSettings?.payrollPeriodType || 'cycle';
+  const effectiveCustomFrom = (savedCustomFrom !== null && savedCustomFrom !== undefined) ? savedCustomFrom : (parsed.orgSettings?.payrollCustomFrom || '');
+  const effectiveCustomTo = (savedCustomTo !== null && savedCustomTo !== undefined) ? savedCustomTo : (parsed.orgSettings?.payrollCustomTo || '');
 
   const orgSettings = {
     orgName: 'مؤسسة الموارد البشرية والبصمات',
@@ -158,6 +164,8 @@ export function normalizeState(parsed) {
     waServerUrl: 'https://funny-sloth-89.loca.lt',
     adminUsername: 'admin',
     adminPassword: '123',
+    permissions: {},
+    empPermissions: {},
     ...(parsed.orgSettings || {}),
     payrollPeriodType: effectivePeriodType,
     payrollPayoutStartDay: effectiveStartDay,

@@ -248,18 +248,28 @@ export default function SettingsModule({
   };
 
   const handleSavePermissions = async () => {
+    // Generate full expanded permissions map with both canX and allowX
+    const expandedPerms = { ...permState };
+    Object.keys(permState).forEach((k) => {
+      let actionName = k;
+      if (k.startsWith('can')) actionName = k.slice(3);
+      else if (k.startsWith('allow')) actionName = k.slice(5);
+      expandedPerms['can' + actionName] = Boolean(permState[k]);
+      expandedPerms['allow' + actionName] = Boolean(permState[k]);
+    });
+
     let updatedOrgSettings = { ...(state.orgSettings || orgSettings) };
     let updatedEmployees = [...(state.employees || [])];
 
     if (selectedEmpForPerm === 'all') {
       updatedOrgSettings = {
         ...updatedOrgSettings,
-        permissions: { ...permState },
+        permissions: { ...expandedPerms },
         empPermissions: {}
       };
       updatedEmployees = updatedEmployees.map((e) => ({
         ...e,
-        permissions: { ...permState }
+        permissions: { ...expandedPerms }
       }));
       showToast?.('💾 تم حفظ ومنح وتطبيق الصلاحيات بنجاح على جميع الموظفين بالنظام');
     } else {
@@ -269,15 +279,15 @@ export default function SettingsModule({
 
       const updatedEmpPerms = {
         ...(updatedOrgSettings.empPermissions || {}),
-        [targetId]: { ...permState },
-        [targetCode]: { ...permState }
+        [targetId]: { ...expandedPerms },
+        [targetCode]: { ...expandedPerms }
       };
       updatedOrgSettings = {
         ...updatedOrgSettings,
         empPermissions: updatedEmpPerms
       };
       updatedEmployees = updatedEmployees.map((e) =>
-        (String(e.id) === targetId || String(e.code) === targetCode) ? { ...e, permissions: { ...permState } } : e
+        (String(e.id) === targetId || String(e.code) === targetCode) ? { ...e, permissions: { ...expandedPerms } } : e
       );
       showToast?.(`💾 تم حفظ ومنح وتطبيق الصلاحيات للموظف (${targetEmp?.name || selectedEmpForPerm}) بنجاح`);
     }
