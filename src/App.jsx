@@ -2099,6 +2099,12 @@ export default function App() {
         const merged = normalizeState(smartMergeStates(prev, normalized));
         if (JSON.stringify(prev) !== JSON.stringify(merged)) {
           setLastSyncTime(nowTimeStr());
+          // Sync current logged-in employee session with fresh database permissions
+          setCurrentEmpUser((prevEmp) => {
+            if (!prevEmp) return prevEmp;
+            const fresh = (merged.employees || []).find((e) => e.id === prevEmp.id || (prevEmp.code && e.code === prevEmp.code));
+            return fresh || prevEmp;
+          });
           return merged;
         }
         return prev;
@@ -2129,9 +2135,13 @@ export default function App() {
     // Fast polling every 2.5 seconds for instant multi-device synchronization without page reload
     const pollInterval = setInterval(poll, 2500);
 
-    // Instant local broadcast synchronization across tabs and windows
-    const unsubBroadcast = listenToLiveBroadcasts(() => {
-      poll();
+    // Instant local broadcast synchronization across tabs and windows (0ms immediate update)
+    const unsubBroadcast = listenToLiveBroadcasts((liveState) => {
+      if (liveState) {
+        applyRemoteData(liveState);
+      } else {
+        poll();
+      }
     });
 
     const handleFocusOrVisible = () => {

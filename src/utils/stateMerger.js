@@ -76,6 +76,15 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
   if (!localItem) return remoteItem;
   if (!remoteItem) return localItem;
 
+  // 0. معالجة وحسم الموظفين والصلاحيات الصارمة
+  if (options.prefix === 'emp') {
+    const mergedEmp = { ...remoteItem, ...localItem };
+    if (localItem.permissions !== undefined) {
+      mergedEmp.permissions = localItem.permissions;
+    }
+    return mergedEmp;
+  }
+
   // 1. معالجة وحسم سجلات السداد والمدفوعات للسلف
   let mergedPaymentsHistory = undefined;
   let mergedPaidAmount = undefined;
@@ -255,7 +264,9 @@ export function smartMergeStates(localState, remoteState) {
     // 1. الإعدادات واللائحة
     orgSettings: {
       ...(remoteState.orgSettings || {}),
-      ...(localState.orgSettings || {})
+      ...(localState.orgSettings || {}),
+      permissions: localState.orgSettings?.permissions !== undefined ? localState.orgSettings.permissions : (remoteState.orgSettings?.permissions || {}),
+      empPermissions: localState.orgSettings?.empPermissions !== undefined ? localState.orgSettings.empPermissions : (remoteState.orgSettings?.empPermissions || {})
     },
     bylaws: {
       ...(remoteState.bylaws || {}),

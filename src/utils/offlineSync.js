@@ -25,7 +25,7 @@ const syncChannel = typeof window !== 'undefined' && 'BroadcastChannel' in windo
 export function broadcastStateChange(state) {
   try {
     if (syncChannel && state) {
-      syncChannel.postMessage({ type: 'STATE_UPDATED', timestamp: Date.now() });
+      syncChannel.postMessage({ type: 'STATE_UPDATED', state, timestamp: Date.now() });
     }
   } catch {}
 }
@@ -34,7 +34,7 @@ export function listenToLiveBroadcasts(callback) {
   if (!syncChannel || typeof callback !== 'function') return () => {};
   const handler = (event) => {
     if (event.data && event.data.type === 'STATE_UPDATED') {
-      callback();
+      callback(event.data.state);
     }
   };
   syncChannel.addEventListener('message', handler);
