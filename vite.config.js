@@ -78,15 +78,16 @@ export default defineConfig({
         skipWaiting: true,
         clientsClaim: true,
         cleanupOutdatedCaches: true,
-        globPatterns: [], // Disable precaching entirely so it never serves old cached files
+        globPatterns: [],
+        navigateFallback: null,
         runtimeCaching: [
           {
-            urlPattern: ({ request }) => true, // Match all requests
-            handler: 'NetworkFirst', // Always fetch from network first, fallback to cache if offline
-            options: {
-              cacheName: 'app-network-first-cache',
-              expiration: { maxEntries: 200, maxAgeSeconds: 24 * 60 * 60 } // Cache for 1 day max
-            }
+            urlPattern: ({ url }) => url.pathname.includes('/api/'),
+            handler: 'NetworkOnly'
+          },
+          {
+            urlPattern: ({ request }) => request.mode === 'navigate',
+            handler: 'NetworkOnly'
           }
         ]
       },

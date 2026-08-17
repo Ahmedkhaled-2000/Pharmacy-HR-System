@@ -264,21 +264,37 @@ export default function SettingsModule({
 
   const handleGrantAllPermissions = () => {
     const allTrue = {};
-    Object.keys(permState).forEach((k) => { allTrue[k] = true; });
-    SYSTEM_PERMISSION_CATALOG.forEach((p) => { allTrue[p.key] = true; });
+    SYSTEM_PERMISSION_CATALOG.forEach((p) => {
+      allTrue[p.key] = true;
+      let actionName = p.key.startsWith('can') ? p.key.slice(3) : p.key;
+      allTrue['can' + actionName] = true;
+      allTrue['allow' + actionName] = true;
+    });
     setPermState(allTrue);
-    showToast?.('🔓 تم منح وتفعيل كافة الصلاحيات — اضغط حفظ لتطبيقها فوراً');
+    showToast?.('🔓 تم تفعيل وتحديد كافة الصلاحيات — اضغط حفظ لتطبيقها فوراً');
   };
 
   const handleSavePermissions = async () => {
     // Generate full expanded permissions map with both canX and allowX
-    const expandedPerms = { ...permState };
+    const expandedPerms = {};
+    SYSTEM_PERMISSION_CATALOG.forEach((p) => {
+      const isChecked = permState[p.key] !== false;
+      let actionName = p.key.startsWith('can') ? p.key.slice(3) : p.key;
+      expandedPerms['can' + actionName] = isChecked;
+      expandedPerms['allow' + actionName] = isChecked;
+      expandedPerms[p.key] = isChecked;
+      expandedPerms[actionName] = isChecked;
+    });
+
     Object.keys(permState).forEach((k) => {
       let actionName = k;
       if (k.startsWith('can')) actionName = k.slice(3);
       else if (k.startsWith('allow')) actionName = k.slice(5);
-      expandedPerms['can' + actionName] = Boolean(permState[k]);
-      expandedPerms['allow' + actionName] = Boolean(permState[k]);
+      const isChecked = Boolean(permState[k]);
+      expandedPerms['can' + actionName] = isChecked;
+      expandedPerms['allow' + actionName] = isChecked;
+      expandedPerms[k] = isChecked;
+      expandedPerms[actionName] = isChecked;
     });
 
     let updatedOrgSettings = { ...(state.orgSettings || orgSettings) };
@@ -294,7 +310,7 @@ export default function SettingsModule({
         ...e,
         permissions: { ...expandedPerms }
       }));
-      showToast?.('💾 تم حفظ ومنح وتطبيق الصلاحيات بنجاح على جميع الموظفين بالنظام');
+      showToast?.('💾 تم حفظ وتطبيق الصلاحيات بنجاح على جميع الموظفين بالنظام');
     } else {
       const targetEmp = updatedEmployees.find((e) => String(e.id) === String(selectedEmpForPerm) || String(e.code) === String(selectedEmpForPerm));
       const targetId = targetEmp ? String(targetEmp.id) : String(selectedEmpForPerm);
@@ -312,7 +328,7 @@ export default function SettingsModule({
       updatedEmployees = updatedEmployees.map((e) =>
         (String(e.id) === targetId || String(e.code) === targetCode) ? { ...e, permissions: { ...expandedPerms } } : e
       );
-      showToast?.(`💾 تم حفظ ومنح وتطبيق الصلاحيات للموظف (${targetEmp?.name || selectedEmpForPerm}) بنجاح`);
+      showToast?.(`💾 تم حفظ وتطبيق الصلاحيات للموظف (${targetEmp?.name || selectedEmpForPerm}) بنجاح`);
     }
 
     const updatedState = { ...state, orgSettings: updatedOrgSettings, employees: updatedEmployees };
@@ -321,44 +337,104 @@ export default function SettingsModule({
   };
 
   const handleRevokeAllPermissions = async () => {
-    if (!window.confirm('🚨 هل أنت متأكد من رغبتك في إزالة وتجريد جميع الصلاحيات من كافة الموظفين بالنظام؟')) return;
+    if (!window.confirm('🚨 هل أنت متأكد من رغبتك في إيقاف وتعطيل جميع الصلاحيات لنطاق الموظفين المحدد؟')) return;
 
     const allFalse = {};
-    Object.keys(permState).forEach((k) => { allFalse[k] = false; });
-    SYSTEM_PERMISSION_CATALOG.forEach((p) => { allFalse[p.key] = false; });
-
-    const updatedOrgSettings = {
-      ...orgSettings,
-      permissions: allFalse,
-      empPermissions: {}
-    };
-
-    const updatedEmployees = (state.employees || []).map((e) => ({
-      ...e,
-      permissions: allFalse
-    }));
-
+    SYSTEM_PERMISSION_CATALOG.forEach((p) => {
+      let actionName = p.key.startsWith('can') ? p.key.slice(3) : p.key;
+      allFalse['can' + actionName] = false;
+      allFalse['allow' + actionName] = false;
+      allFalse[p.key] = false;
+      allFalse[actionName] = false;
+    });
     setPermState(allFalse);
+
+    let updatedOrgSettings = { ...(state.orgSettings || orgSettings) };
+    let updatedEmployees = [...(state.employees || [])];
+
+    if (selectedEmpForPerm === 'all') {
+      updatedOrgSettings = {
+        ...updatedOrgSettings,
+        permissions: { ...allFalse },
+        empPermissions: {}
+      };
+      updatedEmployees = updatedEmployees.map((e) => ({
+        ...e,
+        permissions: { ...allFalse }
+      }));
+      showToast?.('🚫 تم إيقاف وتعطيل جميع الصلاحيات لجميع الموظفين بالنظام');
+    } else {
+      const targetEmp = updatedEmployees.find((e) => String(e.id) === String(selectedEmpForPerm) || String(e.code) === String(selectedEmpForPerm));
+      const targetId = targetEmp ? String(targetEmp.id) : String(selectedEmpForPerm);
+      const targetCode = targetEmp ? String(targetEmp.code) : String(selectedEmpForPerm);
+
+      const updatedEmpPerms = {
+        ...(updatedOrgSettings.empPermissions || {}),
+        [targetId]: { ...allFalse },
+        [targetCode]: { ...allFalse }
+      };
+      updatedOrgSettings = {
+        ...updatedOrgSettings,
+        empPermissions: updatedEmpPerms
+      };
+      updatedEmployees = updatedEmployees.map((e) =>
+        (String(e.id) === targetId || String(e.code) === targetCode) ? { ...e, permissions: { ...allFalse } } : e
+      );
+      showToast?.(`🚫 تم إيقاف وتعطيل جميع الصلاحيات للموظف (${targetEmp?.name || selectedEmpForPerm}) بنجاح`);
+    }
 
     const updatedState = { ...state, orgSettings: updatedOrgSettings, employees: updatedEmployees };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.('🚫 تم سحب وإزالة جميع الصلاحيات من كافة الموظفين بنجاح');
   };
 
   const handleResetDefaultPermissions = async () => {
-    const updatedOrgSettings = {
-      ...orgSettings,
-      permissions: defaultPerms,
-      empPermissions: {}
-    };
-
-    const updatedEmployees = (state.employees || []).map((e) => {
-      const { permissions, ...rest } = e;
-      return rest;
+    const standardPerms = {};
+    SYSTEM_PERMISSION_CATALOG.forEach((p) => {
+      let actionName = p.key.startsWith('can') ? p.key.slice(3) : p.key;
+      standardPerms['can' + actionName] = p.defaultVal;
+      standardPerms['allow' + actionName] = p.defaultVal;
+      standardPerms[p.key] = p.defaultVal;
+      standardPerms[actionName] = p.defaultVal;
     });
+    setPermState(standardPerms);
 
-    setPermState(defaultPerms);
+    let updatedOrgSettings = { ...(state.orgSettings || orgSettings) };
+    let updatedEmployees = [...(state.employees || [])];
+
+    if (selectedEmpForPerm === 'all') {
+      updatedOrgSettings = {
+        ...updatedOrgSettings,
+        permissions: { ...standardPerms },
+        empPermissions: {}
+      };
+      updatedEmployees = updatedEmployees.map((e) => {
+        const { permissions, ...rest } = e;
+        return { ...rest, permissions: { ...standardPerms } };
+      });
+      showToast?.('🔄 تمت استعادة الصلاحيات القياسية لجميع الموظفين');
+    } else {
+      const targetEmp = updatedEmployees.find((e) => String(e.id) === String(selectedEmpForPerm) || String(e.code) === String(selectedEmpForPerm));
+      const targetId = targetEmp ? String(targetEmp.id) : String(selectedEmpForPerm);
+      const targetCode = targetEmp ? String(targetEmp.code) : String(selectedEmpForPerm);
+
+      const updatedEmpPerms = { ...(updatedOrgSettings.empPermissions || {}) };
+      delete updatedEmpPerms[targetId];
+      delete updatedEmpPerms[targetCode];
+
+      updatedOrgSettings = {
+        ...updatedOrgSettings,
+        empPermissions: updatedEmpPerms
+      };
+      updatedEmployees = updatedEmployees.map((e) => {
+        if (String(e.id) === targetId || String(e.code) === targetCode) {
+          const { permissions, ...rest } = e;
+          return rest;
+        }
+        return e;
+      });
+      showToast?.(`🔄 تمت استعادة الصلاحيات الافتراضية للموظف (${targetEmp?.name || selectedEmpForPerm})`);
+    }
 
     const updatedState = { ...state, orgSettings: updatedOrgSettings, employees: updatedEmployees };
     if (setState) setState(updatedState);

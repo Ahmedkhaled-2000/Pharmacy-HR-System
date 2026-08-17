@@ -16,7 +16,12 @@ export default function BylawsModule({
   showToast,
   userRole = 'admin',
   currentEmpId = null,
-  filterFn = null
+  currentBranchId = null,
+  filterFn = null,
+  monthPicker = null,
+  filterMode = 'all',
+  customFrom = '',
+  customTo = ''
 }) {
   const [activeTab, setActiveTab] = useState('text'); // 'text' | 'rules' | 'records'
   const isManagerOrAdmin = userRole === 'admin' || userRole === 'branch';

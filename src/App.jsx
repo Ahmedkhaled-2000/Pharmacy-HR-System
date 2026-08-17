@@ -23,7 +23,7 @@ import {
 } from './utils/formatters';
 import { loadExcelJS, mergedTitle, tableHeaderRow, dataRow } from './utils/excelExport';
 import { playFingerprintChime, playNotificationChime } from './hooks/useAudio';
-import { smartSaveState, smartLoadState, listenToConnectionChanges, syncNow } from './utils/offlineSync';
+import { smartSaveState, smartLoadState, listenToConnectionChanges, syncNow, listenToLiveBroadcasts } from './utils/offlineSync';
 import { smartMergeStates } from './utils/stateMerger';
 import { compressImage } from './utils/imageCompressor';
 import { getPendingCount } from './utils/offlineStorage';
@@ -2089,7 +2089,7 @@ export default function App() {
     return unsubscribe;
   }, []);
 
-  // Cloud Synchronization with MariaDB (Smart Version Polling & Smart Merge)
+  // Cloud Synchronization with MariaDB (Ultra-Fast Smart Version Polling & Instant Live Broadcast)
   useEffect(() => {
     const applyRemoteData = (remoteData) => {
       const parsed = typeof remoteData === 'string' ? JSON.parse(remoteData) : remoteData;
@@ -2126,8 +2126,13 @@ export default function App() {
       }
     };
 
-    // Polling every 8 seconds for responsive multi-device synchronization with MariaDB API
-    const pollInterval = setInterval(poll, 8000);
+    // Fast polling every 2.5 seconds for instant multi-device synchronization without page reload
+    const pollInterval = setInterval(poll, 2500);
+
+    // Instant local broadcast synchronization across tabs and windows
+    const unsubBroadcast = listenToLiveBroadcasts(() => {
+      poll();
+    });
 
     const handleFocusOrVisible = () => {
       if (document.visibilityState === 'visible' || document.hasFocus()) {
@@ -2141,6 +2146,7 @@ export default function App() {
 
     return () => {
       clearInterval(pollInterval);
+      unsubBroadcast();
       window.removeEventListener('focus', handleFocusOrVisible);
       window.removeEventListener('online', handleFocusOrVisible);
       document.removeEventListener('visibilitychange', handleFocusOrVisible);

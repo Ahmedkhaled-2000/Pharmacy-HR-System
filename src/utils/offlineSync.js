@@ -17,6 +17,30 @@ import {
 import { smartMergeStates } from './stateMerger';
 import { normalizeState } from './formatters';
 
+// ── قناة البث للمزامنة الفورية بين التبويبات والأجهزة ─────────────────────
+const syncChannel = typeof window !== 'undefined' && 'BroadcastChannel' in window
+  ? new BroadcastChannel('pharmacy-hr-live-sync')
+  : null;
+
+export function broadcastStateChange(state) {
+  try {
+    if (syncChannel && state) {
+      syncChannel.postMessage({ type: 'STATE_UPDATED', timestamp: Date.now() });
+    }
+  } catch {}
+}
+
+export function listenToLiveBroadcasts(callback) {
+  if (!syncChannel || typeof callback !== 'function') return () => {};
+  const handler = (event) => {
+    if (event.data && event.data.type === 'STATE_UPDATED') {
+      callback();
+    }
+  };
+  syncChannel.addEventListener('message', handler);
+  return () => syncChannel.removeEventListener('message', handler);
+}
+
 // ── حالة الاتصال ─────────────────────────────────────────────────────────
 export function isOnline() {
   return typeof navigator !== 'undefined' ? navigator.onLine : true;
@@ -63,6 +87,7 @@ export async function smartSaveState(updatedState, options = {}) {
 
       // 5. تحديث النسخة المحلية بالنسخة المدمجة
       await saveStateLocally(finalStateToSave);
+      broadcastStateChange(finalStateToSave);
       onSyncSuccess?.(finalStateToSave);
       return { success: true, queued: false, mergedState: finalStateToSave };
     } catch (e) {
