@@ -53,22 +53,22 @@ export default function PayrollModule({
   });
 
   useEffect(() => {
-    if (state.orgSettings?.payrollPeriodType) {
-      setPeriodType(state.orgSettings.payrollPeriodType);
-    }
-    if (state.orgSettings?.payrollPayoutStartDay !== undefined) {
-      setPayoutStartDay(state.orgSettings.payrollPayoutStartDay);
-    }
-    if (state.orgSettings?.payrollPayoutEndDay !== undefined) {
-      setPayoutEndDay(state.orgSettings.payrollPayoutEndDay);
-    }
-    if (state.orgSettings?.payrollCustomFrom) {
-      setCustomFrom(state.orgSettings.payrollCustomFrom);
-    }
-    if (state.orgSettings?.payrollCustomTo) {
-      setCustomTo(state.orgSettings.payrollCustomTo);
-    }
-  }, [state.orgSettings]);
+    const sDay = state.orgSettings?.payrollPayoutStartDay !== undefined 
+      ? state.orgSettings.payrollPayoutStartDay 
+      : (() => { try { const v = localStorage.getItem('payroll_payout_start_day'); return v !== null && v !== '' ? parseInt(v, 10) : 26; } catch { return 26; } })();
+    const eDay = state.orgSettings?.payrollPayoutEndDay !== undefined 
+      ? state.orgSettings.payrollPayoutEndDay 
+      : (() => { try { const v = localStorage.getItem('payroll_payout_end_day'); return v !== null && v !== '' ? parseInt(v, 10) : 25; } catch { return 25; } })();
+    const pType = state.orgSettings?.payrollPeriodType || (() => { try { return localStorage.getItem('payroll_period_type') || 'cycle'; } catch { return 'cycle'; } })();
+    const cFrom = state.orgSettings?.payrollCustomFrom || (() => { try { return localStorage.getItem('payroll_custom_from') || ''; } catch { return ''; } })();
+    const cTo = state.orgSettings?.payrollCustomTo || (() => { try { return localStorage.getItem('payroll_custom_to') || ''; } catch { return ''; } })();
+
+    setPayoutStartDay(sDay);
+    setPayoutEndDay(eDay);
+    setPeriodType(pType);
+    setCustomFrom(cFrom);
+    setCustomTo(cTo);
+  }, [state.orgSettings?.payrollPayoutStartDay, state.orgSettings?.payrollPayoutEndDay, state.orgSettings?.payrollPeriodType, state.orgSettings?.payrollCustomFrom, state.orgSettings?.payrollCustomTo]);
 
   const employees = state.employees || [];
   const branches = state.branches || [];

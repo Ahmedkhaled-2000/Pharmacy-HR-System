@@ -106,33 +106,51 @@ export function normalizeState(parsed) {
     devices: toSafeArray(emp.devices)
   }));
 
-  const localStartDay = (() => {
+  const savedStartDay = (() => {
     try {
       const v = localStorage.getItem('payroll_payout_start_day');
-      return v !== null ? parseInt(v, 10) : 26;
-    } catch { return 26; }
+      if (v !== null && v !== '') return parseInt(v, 10);
+    } catch {}
+    return parsed.orgSettings?.payrollPayoutStartDay !== undefined ? parseInt(parsed.orgSettings.payrollPayoutStartDay, 10) : 26;
   })();
-  const localEndDay = (() => {
+
+  const savedEndDay = (() => {
     try {
       const v = localStorage.getItem('payroll_payout_end_day');
-      return v !== null ? parseInt(v, 10) : 25;
-    } catch { return 25; }
+      if (v !== null && v !== '') return parseInt(v, 10);
+    } catch {}
+    return parsed.orgSettings?.payrollPayoutEndDay !== undefined ? parseInt(parsed.orgSettings.payrollPayoutEndDay, 10) : 25;
   })();
-  const localPeriodType = (() => {
+
+  const savedPeriodType = (() => {
     try {
-      return localStorage.getItem('payroll_period_type') || 'cycle';
-    } catch { return 'cycle'; }
+      const v = localStorage.getItem('payroll_period_type');
+      if (v) return v;
+    } catch {}
+    return parsed.orgSettings?.payrollPeriodType || 'cycle';
   })();
-  const localCustomFrom = (() => {
+
+  const savedCustomFrom = (() => {
     try {
-      return localStorage.getItem('payroll_custom_from') || '';
-    } catch { return ''; }
+      const v = localStorage.getItem('payroll_custom_from');
+      if (v) return v;
+    } catch {}
+    return parsed.orgSettings?.payrollCustomFrom || '';
   })();
-  const localCustomTo = (() => {
+
+  const savedCustomTo = (() => {
     try {
-      return localStorage.getItem('payroll_custom_to') || '';
-    } catch { return ''; }
+      const v = localStorage.getItem('payroll_custom_to');
+      if (v) return v;
+    } catch {}
+    return parsed.orgSettings?.payrollCustomTo || '';
   })();
+
+  const effectiveStartDay = parsed.orgSettings?.payrollPayoutStartDay !== undefined ? parseInt(parsed.orgSettings.payrollPayoutStartDay, 10) : savedStartDay;
+  const effectiveEndDay = parsed.orgSettings?.payrollPayoutEndDay !== undefined ? parseInt(parsed.orgSettings.payrollPayoutEndDay, 10) : savedEndDay;
+  const effectivePeriodType = parsed.orgSettings?.payrollPeriodType || savedPeriodType;
+  const effectiveCustomFrom = parsed.orgSettings?.payrollCustomFrom !== undefined ? parsed.orgSettings.payrollCustomFrom : savedCustomFrom;
+  const effectiveCustomTo = parsed.orgSettings?.payrollCustomTo !== undefined ? parsed.orgSettings.payrollCustomTo : savedCustomTo;
 
   const orgSettings = {
     orgName: 'مؤسسة الموارد البشرية والبصمات',
@@ -140,30 +158,22 @@ export function normalizeState(parsed) {
     waServerUrl: 'https://funny-sloth-89.loca.lt',
     adminUsername: 'admin',
     adminPassword: '123',
-    payrollPeriodType: localPeriodType,
-    payrollCustomFrom: localCustomFrom,
-    payrollCustomTo: localCustomTo,
-    payrollPayoutStartDay: localStartDay,
-    payrollPayoutEndDay: localEndDay,
-    payrollPayoutDay: localEndDay,
-    ...(parsed.orgSettings || {})
+    ...(parsed.orgSettings || {}),
+    payrollPeriodType: effectivePeriodType,
+    payrollPayoutStartDay: effectiveStartDay,
+    payrollPayoutEndDay: effectiveEndDay,
+    payrollPayoutDay: effectiveEndDay,
+    payrollCustomFrom: effectiveCustomFrom,
+    payrollCustomTo: effectiveCustomTo
   };
 
-  if (parsed.orgSettings?.payrollPayoutStartDay !== undefined) {
-    try { localStorage.setItem('payroll_payout_start_day', String(parsed.orgSettings.payrollPayoutStartDay)); } catch {}
-  }
-  if (parsed.orgSettings?.payrollPayoutEndDay !== undefined) {
-    try { localStorage.setItem('payroll_payout_end_day', String(parsed.orgSettings.payrollPayoutEndDay)); } catch {}
-  }
-  if (parsed.orgSettings?.payrollPeriodType) {
-    try { localStorage.setItem('payroll_period_type', parsed.orgSettings.payrollPeriodType); } catch {}
-  }
-  if (parsed.orgSettings?.payrollCustomFrom) {
-    try { localStorage.setItem('payroll_custom_from', parsed.orgSettings.payrollCustomFrom); } catch {}
-  }
-  if (parsed.orgSettings?.payrollCustomTo) {
-    try { localStorage.setItem('payroll_custom_to', parsed.orgSettings.payrollCustomTo); } catch {}
-  }
+  try {
+    localStorage.setItem('payroll_payout_start_day', String(orgSettings.payrollPayoutStartDay));
+    localStorage.setItem('payroll_payout_end_day', String(orgSettings.payrollPayoutEndDay));
+    localStorage.setItem('payroll_period_type', orgSettings.payrollPeriodType);
+    if (orgSettings.payrollCustomFrom) localStorage.setItem('payroll_custom_from', orgSettings.payrollCustomFrom);
+    if (orgSettings.payrollCustomTo) localStorage.setItem('payroll_custom_to', orgSettings.payrollCustomTo);
+  } catch {}
 
   const shifts = toSafeArray(parsed.shifts).map((s) => ({
     ...s,
