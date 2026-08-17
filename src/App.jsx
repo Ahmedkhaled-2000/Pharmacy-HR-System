@@ -2308,54 +2308,69 @@ export default function App() {
       }
     }
 
-    // Key aliases mapping (allowX <=> canX)
-    let canKey = permKey;
-    let allowKey = permKey;
-    if (permKey.startsWith('allow')) {
-      canKey = 'can' + permKey.slice(5);
-    } else if (permKey.startsWith('can')) {
-      allowKey = 'allow' + permKey.slice(3);
+    // Normalize key aliases: strip 'can' or 'allow' to get the core action name
+    let actionName = permKey;
+    if (permKey.startsWith('can')) {
+      actionName = permKey.slice(3);
+    } else if (permKey.startsWith('allow')) {
+      actionName = permKey.slice(5);
     }
+    const canKey = 'can' + actionName;
+    const allowKey = 'allow' + actionName;
 
-    // Resolve target employee and identifiers
-    let targetEmp = null;
+    // Resolve employee object and identifiers
     let empId = null;
+    let empCode = null;
     if (typeof empOrId === 'object' && empOrId !== null) {
-      targetEmp = empOrId;
-      empId = empOrId.id || empOrId.code;
+      empId = empOrId.id !== undefined && empOrId.id !== null ? String(empOrId.id) : null;
+      empCode = empOrId.code !== undefined && empOrId.code !== null ? String(empOrId.code) : null;
     } else if (empOrId && empOrId !== 'all') {
       empId = String(empOrId);
-      targetEmp = (state.employees || []).find((e) => String(e.id) === empId || String(e.code) === empId);
     }
 
-    // 1. Check Specific Individual Employee Permission Override in orgSettings.empPermissions
-    if (empId) {
-      const empSettingsPerms = state.orgSettings?.empPermissions?.[empId] 
-        || (targetEmp && (state.orgSettings?.empPermissions?.[targetEmp.id] || state.orgSettings?.empPermissions?.[targetEmp.code]));
-      if (empSettingsPerms) {
-        if (empSettingsPerms[canKey] !== undefined) return Boolean(empSettingsPerms[canKey]);
-        if (empSettingsPerms[allowKey] !== undefined) return Boolean(empSettingsPerms[allowKey]);
-        if (empSettingsPerms[permKey] !== undefined) return Boolean(empSettingsPerms[permKey]);
+    // Always find fresh employee in state.employees
+    const freshEmp = (state.employees || []).find((e) =>
+      (empId && (String(e.id) === empId || String(e.code) === empId)) ||
+      (empCode && (String(e.id) === empCode || String(e.code) === empCode))
+    );
+
+    const targetId = freshEmp ? String(freshEmp.id) : empId;
+    const targetCode = freshEmp ? String(freshEmp.code) : empCode;
+
+    // 1. Check Specific Individual Employee Permission Override in state.orgSettings.empPermissions
+    const empOverrides = state.orgSettings?.empPermissions;
+    if (empOverrides && typeof empOverrides === 'object') {
+      const specificPerms = (targetId && empOverrides[targetId]) || 
+                            (targetCode && empOverrides[targetCode]) || 
+                            (empId && empOverrides[empId]) ||
+                            (empCode && empOverrides[empCode]);
+      if (specificPerms && typeof specificPerms === 'object') {
+        if (specificPerms[canKey] !== undefined) return Boolean(specificPerms[canKey]);
+        if (specificPerms[allowKey] !== undefined) return Boolean(specificPerms[allowKey]);
+        if (specificPerms[permKey] !== undefined) return Boolean(specificPerms[permKey]);
       }
     }
 
-    // 2. Check Employee's own permissions object
-    if (targetEmp && targetEmp.permissions) {
-      if (targetEmp.permissions[canKey] !== undefined) return Boolean(targetEmp.permissions[canKey]);
-      if (targetEmp.permissions[allowKey] !== undefined) return Boolean(targetEmp.permissions[allowKey]);
-      if (targetEmp.permissions[permKey] !== undefined) return Boolean(targetEmp.permissions[permKey]);
+    // 2. Check Fresh Employee's permissions object
+    const empPerms = freshEmp?.permissions || (typeof empOrId === 'object' && empOrId?.permissions);
+    if (empPerms && typeof empPerms === 'object' && Object.keys(empPerms).length > 0) {
+      if (empPerms[canKey] !== undefined) return Boolean(empPerms[canKey]);
+      if (empPerms[allowKey] !== undefined) return Boolean(empPerms[allowKey]);
+      if (empPerms[permKey] !== undefined) return Boolean(empPerms[permKey]);
     }
 
     // 3. Check Global Default Organization Permissions
     const globalPerms = state.orgSettings?.permissions;
-    if (globalPerms) {
+    if (globalPerms && typeof globalPerms === 'object') {
       if (globalPerms[canKey] !== undefined) return Boolean(globalPerms[canKey]);
       if (globalPerms[allowKey] !== undefined) return Boolean(globalPerms[allowKey]);
       if (globalPerms[permKey] !== undefined) return Boolean(globalPerms[permKey]);
     }
 
     // 4. Default Standard System Fallbacks (Allowed by default unless explicitly restricted)
-    if (['canAddAdjustment', 'allowAddAdjustment', 'canManualShift', 'allowManualShift', 'canEditShift', 'allowEditShift'].includes(permKey)) return false;
+    if (['canAddAdjustment', 'allowAddAdjustment', 'canManualShift', 'allowManualShift', 'canEditShift', 'allowEditShift'].includes(canKey) || ['canAddAdjustment', 'allowAddAdjustment', 'canManualShift', 'allowManualShift', 'canEditShift', 'allowEditShift'].includes(allowKey)) {
+      return false;
+    }
     return true;
   };
 

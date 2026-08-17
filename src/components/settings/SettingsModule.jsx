@@ -263,18 +263,22 @@ export default function SettingsModule({
       }));
       showToast?.('💾 تم حفظ ومنح وتطبيق الصلاحيات بنجاح على جميع الموظفين بالنظام');
     } else {
+      const targetEmp = updatedEmployees.find((e) => String(e.id) === String(selectedEmpForPerm) || String(e.code) === String(selectedEmpForPerm));
+      const targetId = targetEmp ? String(targetEmp.id) : String(selectedEmpForPerm);
+      const targetCode = targetEmp ? String(targetEmp.code) : String(selectedEmpForPerm);
+
       const updatedEmpPerms = {
         ...(updatedOrgSettings.empPermissions || {}),
-        [selectedEmpForPerm]: { ...permState }
+        [targetId]: { ...permState },
+        [targetCode]: { ...permState }
       };
       updatedOrgSettings = {
         ...updatedOrgSettings,
         empPermissions: updatedEmpPerms
       };
       updatedEmployees = updatedEmployees.map((e) =>
-        e.id === selectedEmpForPerm ? { ...e, permissions: { ...permState } } : e
+        (String(e.id) === targetId || String(e.code) === targetCode) ? { ...e, permissions: { ...permState } } : e
       );
-      const targetEmp = updatedEmployees.find((e) => e.id === selectedEmpForPerm);
       showToast?.(`💾 تم حفظ ومنح وتطبيق الصلاحيات للموظف (${targetEmp?.name || selectedEmpForPerm}) بنجاح`);
     }
 

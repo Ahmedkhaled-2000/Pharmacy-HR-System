@@ -611,21 +611,21 @@ export default function EmployeePortalView({
     return { startDate, endDate };
   };
 
-  const canViewSalary = Boolean(getEmpPermission ? getEmpPermission(emp, 'canViewSalary') : true);
-  const canStartEnd = Boolean(getEmpPermission ? getEmpPermission(emp, 'canStartEnd') : true);
-  const canLivePunch = Boolean(getEmpPermission ? getEmpPermission(emp, 'canLivePunch') : true);
-  const canManualShift = Boolean(getEmpPermission ? getEmpPermission(emp, 'canManualShift') : false);
-  const canEditShift = Boolean(getEmpPermission ? getEmpPermission(emp, 'canEditShift') : false);
-  const canAddAdjustment = Boolean(getEmpPermission ? getEmpPermission(emp, 'canAddAdjustment') : false);
-  const canViewAdjustments = Boolean(getEmpPermission ? getEmpPermission(emp, 'canViewAdjustments') : true);
-  const canExportExcel = Boolean(getEmpPermission ? getEmpPermission(emp, 'canExportExcel') : true);
-  const canApplyLoan = Boolean(getEmpPermission ? getEmpPermission(emp, 'canApplyLoan') : true);
-  const canApplyLeave = Boolean(getEmpPermission ? getEmpPermission(emp, 'canApplyLeave') : true);
-  const canApplyPermission = Boolean(getEmpPermission ? getEmpPermission(emp, 'canApplyPermission') : true);
-  const canApplySwap = Boolean(getEmpPermission ? getEmpPermission(emp, 'canApplySwap') : true);
-  const canViewBylaws = Boolean(getEmpPermission ? getEmpPermission(emp, 'canViewBylaws') : true);
-  const canSubmitComplaint = Boolean(getEmpPermission ? getEmpPermission(emp, 'canSubmitComplaint') : true);
-  const canViewRoster = Boolean(getEmpPermission ? getEmpPermission(emp, 'canViewRoster') : true);
+  const canViewSalary = Boolean(getEmpPermission ? getEmpPermission(emp || currentEmpUser, 'canViewSalary') : true);
+  const canStartEnd = Boolean(getEmpPermission ? getEmpPermission(emp || currentEmpUser, 'canStartEnd') : true);
+  const canLivePunch = Boolean(getEmpPermission ? getEmpPermission(emp || currentEmpUser, 'canLivePunch') : true);
+  const canManualShift = Boolean(getEmpPermission ? getEmpPermission(emp || currentEmpUser, 'canManualShift') : false);
+  const canEditShift = Boolean(getEmpPermission ? getEmpPermission(emp || currentEmpUser, 'canEditShift') : false);
+  const canAddAdjustment = Boolean(getEmpPermission ? getEmpPermission(emp || currentEmpUser, 'canAddAdjustment') : false);
+  const canViewAdjustments = Boolean(getEmpPermission ? getEmpPermission(emp || currentEmpUser, 'canViewAdjustments') : true);
+  const canExportExcel = Boolean(getEmpPermission ? getEmpPermission(emp || currentEmpUser, 'canExportExcel') : true);
+  const canApplyLoan = Boolean(getEmpPermission ? getEmpPermission(emp || currentEmpUser, 'canApplyLoan') : true);
+  const canApplyLeave = Boolean(getEmpPermission ? getEmpPermission(emp || currentEmpUser, 'canApplyLeave') : true);
+  const canApplyPermission = Boolean(getEmpPermission ? getEmpPermission(emp || currentEmpUser, 'canApplyPermission') : true);
+  const canApplySwap = Boolean(getEmpPermission ? getEmpPermission(emp || currentEmpUser, 'canApplySwap') : true);
+  const canViewBylaws = Boolean(getEmpPermission ? getEmpPermission(emp || currentEmpUser, 'canViewBylaws') : true);
+  const canSubmitComplaint = Boolean(getEmpPermission ? getEmpPermission(emp || currentEmpUser, 'canSubmitComplaint') : true);
+  const canViewRoster = Boolean(getEmpPermission ? getEmpPermission(emp || currentEmpUser, 'canViewRoster') : true);
 
   const isCustomMode = filterMode === 'range' || filterMode === 'custom';
   const effectiveStart = (rangeStart && rangeEnd) ? (rangeStart <= rangeEnd ? rangeStart : rangeEnd) : (rangeStart || rangeEnd);
@@ -939,7 +939,7 @@ export default function EmployeePortalView({
             if (item.id === 'loans' && canApplyLoan === false) return false;
             if (item.id === 'leaves' && canApplyLeave === false) return false;
             if (item.id === 'permissions' && canApplyPermission === false) return false;
-            if (item.id === 'swap' && canApplySwap === false) return false;
+            if ((item.id === 'swap' || item.id === 'swaps') && canApplySwap === false) return false;
             if (item.id === 'bylaws' && canViewBylaws === false) return false;
             if (item.id === 'evaluations' && canSubmitComplaint === false) return false;
             if (item.id === 'roster' && canViewRoster === false) return false;
