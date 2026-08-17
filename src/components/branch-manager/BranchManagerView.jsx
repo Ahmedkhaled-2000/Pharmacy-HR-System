@@ -1468,7 +1468,7 @@ export default function BranchManagerView({
           {/* Roster Preview Modal */}
           {previewRosterEmp && (
             <div className="modal-backdrop">
-              <div className="modal-content card" style={{ maxWidth: '650px', padding: '24px', maxHeight: '85vh', overflowY: 'auto' }}>
+              <div className="modal-content card" style={{ maxWidth: '1050px', width: '96%', padding: '28px', maxHeight: '90vh', overflowY: 'auto' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                   <h3 style={{ margin: 0, fontSize: '16px' }}>📅 معاينة جدول الموظف: {previewRosterEmp.name} ({selectedMonth})</h3>
                   <button className="btn btn-ghost" style={{ padding: '4px 8px' }} onClick={() => setPreviewRosterEmp(null)}>✕ إغلاق</button>
@@ -1517,7 +1517,7 @@ export default function BranchManagerView({
           {/* Roster Edit Modal */}
           {showRosterEditModal && (
             <div className="modal-backdrop">
-              <div className="modal-content card" style={{ maxWidth: '500px', padding: '24px' }}>
+              <div className="modal-content card" style={{ maxWidth: '850px', width: '96%', padding: '28px', maxHeight: '90vh', overflowY: 'auto' }}>
                 <h3 style={{ margin: '0 0 16px' }}>✏️ طلب تعديل جدول موظف من الإدارة العليا</h3>
                 <form onSubmit={handleSubmitRosterEditRequest}>
                   <div className="field" style={{ marginBottom: '14px' }}>
@@ -2235,7 +2235,7 @@ export default function BranchManagerView({
           {/* Branch Manager Evaluation Edit Modal */}
           {mgrEditingEval && (
             <div className="modal-backdrop">
-              <div className="modal-content card" style={{ maxWidth: '600px', padding: '24px', maxHeight: '85vh', overflowY: 'auto' }}>
+              <div className="modal-content card" style={{ maxWidth: '1000px', width: '96%', padding: '28px', maxHeight: '90vh', overflowY: 'auto' }}>
                 <h3 style={{ margin: '0 0 12px', color: '#0d9488' }}>
                   ✏️ تعديل التقييم للموظف: {mgrEditingEval.employeeName}
                 </h3>

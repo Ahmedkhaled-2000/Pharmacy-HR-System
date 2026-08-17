@@ -295,17 +295,18 @@ export default function PayrollModule({
                 </h2>
               </div>
 
-            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-              <button className="btn btn-ghost" onClick={() => exportEmpExcel(selectedEmpModal.id, 'month')}>
-                📊 تصدير شيت إكسيل فردي
-              </button>
-              <button className="btn btn-start" onClick={() => setShowPrintModal(true)}>
-                🖨️ تصدير وطباعة كشف المرتب (PDF)
-              </button>
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                <button className="btn btn-ghost" onClick={() => exportEmpExcel(selectedEmpModal.id, 'month')}>
+                  📊 تصدير شيت إكسيل فردي
+                </button>
+                <button className="btn btn-start" onClick={() => setShowPrintModal(true)}>
+                  🖨️ تصدير وطباعة كشف المرتب (PDF)
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      );})()}
+        );
+      })()}
 
       {/* Official PDF Print Modal */}
       <PayslipPrintModal

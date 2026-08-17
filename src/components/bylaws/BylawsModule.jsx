@@ -353,7 +353,7 @@ export default function BylawsModule({
       {/* Modal: Record Violation */}
       {showRecordModal && (
         <div className="modal-backdrop" onClick={() => setShowRecordModal(false)}>
-          <div className="modal-card" style={{ maxWidth: '520px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal-card" style={{ maxWidth: '750px', width: '96%' }} onClick={(e) => e.stopPropagation()}>
             <h3 style={{ fontFamily: 'Cairo', margin: '0 0 16px', color: 'var(--danger)' }}>
               ⚠️ توثيق مخالفة لائحية جديدة وإرسال طلب الخصم
             </h3>
@@ -416,7 +416,7 @@ export default function BylawsModule({
       {/* Modal: Add Rule */}
       {showAddRuleModal && (
         <div className="modal-backdrop" onClick={() => setShowAddRuleModal(false)}>
-          <div className="modal-card" style={{ maxWidth: '480px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal-card" style={{ maxWidth: '750px', width: '96%' }} onClick={(e) => e.stopPropagation()}>
             <h3 style={{ fontFamily: 'Cairo', margin: '0 0 16px', color: 'var(--primary-dark)' }}>
               ➕ إضافة بند جديد لجدول المخالفات والجزاءات
             </h3>

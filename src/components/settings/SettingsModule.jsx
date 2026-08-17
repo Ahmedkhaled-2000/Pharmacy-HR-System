@@ -569,7 +569,7 @@ export default function SettingsModule({
           {/* Modal for adding rule */}
           {showAddRuleModal && (
             <div className="modal-backdrop" onClick={() => setShowAddRuleModal(false)}>
-              <div className="modal-card" style={{ maxWidth: '480px' }} onClick={(e) => e.stopPropagation()}>
+              <div className="modal-card" style={{ maxWidth: '750px', width: '96%' }} onClick={(e) => e.stopPropagation()}>
                 <h3 style={{ fontFamily: 'Cairo', margin: '0 0 16px', color: 'var(--primary-dark)' }}>
                   ➕ إضافة قاعدة موافقة جديدة للطلبات
                 </h3>

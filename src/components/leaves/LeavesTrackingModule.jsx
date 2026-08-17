@@ -83,8 +83,8 @@ export default function LeavesTrackingModule({
                 // Taken approved leave requests
                 const takenLeaves = requests.filter(
                   (r) => (r.employeeId === emp.id || r.employeeCode === emp.code) &&
-                         r.type === 'leave' &&
-                         r.status === 'approved'
+                    r.type === 'leave' &&
+                    r.status === 'approved'
                 );
 
                 const takenDaysCount = takenLeaves.reduce((acc, r) => acc + (parseInt(r.daysCount || r.days || 1)), 0);

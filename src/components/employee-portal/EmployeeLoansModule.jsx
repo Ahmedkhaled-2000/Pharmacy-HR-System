@@ -551,7 +551,7 @@ export default function EmployeeLoansModule({
       {/* Employee Payments Detail Modal */}
       {viewingPaymentsReq && (
         <div className="modal-backdrop">
-          <div className="modal-content card" style={{ maxWidth: '600px', padding: '24px' }}>
+          <div className="modal-content card" style={{ maxWidth: '950px', width: '96%', padding: '28px', maxHeight: '90vh', overflowY: 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <h3 style={{ margin: 0, color: '#0d9488', fontSize: '16px' }}>
                 📜 كشف وتفاصيل الدفعات المسددة للسلفة (المتبقي: {fmt(Math.max(0, (parseFloat(viewingPaymentsReq.amount || viewingPaymentsReq.totalAmount) || 0) - (parseFloat(viewingPaymentsReq.paidAmount) || 0)))} ج.م)

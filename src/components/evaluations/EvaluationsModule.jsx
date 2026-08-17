@@ -970,7 +970,7 @@ export default function EvaluationsModule({
       {/* Super Admin Direct Evaluation Edit Modal */}
       {editingEval && (
         <div className="modal-backdrop">
-          <div className="modal-content card" style={{ maxWidth: '600px', padding: '24px', maxHeight: '85vh', overflowY: 'auto' }}>
+          <div className="modal-content card" style={{ maxWidth: '1050px', width: '96%', padding: '28px', maxHeight: '90vh', overflowY: 'auto' }}>
             <h3 style={{ margin: '0 0 16px', color: '#0d9488' }}>
               ✏️ تعديل التقييم للموظف: {editingEval.employeeName} (الإدارة العليا)
             </h3>

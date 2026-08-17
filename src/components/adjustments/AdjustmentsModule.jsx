@@ -247,7 +247,7 @@ export default function AdjustmentsModule({
       {/* Modal 1: Employee Details Modal */}
       {inspectEmp && (
         <div className="modal-backdrop">
-          <div className="modal-content card" style={{ maxWidth: '700px', width: '95%' }}>
+          <div className="modal-content card" style={{ maxWidth: '1050px', width: '96%', padding: '28px', maxHeight: '90vh', overflowY: 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <h3 style={{ margin: 0, fontFamily: 'Cairo' }}>
                 📝 سجل مكافآت وخصومات: {inspectEmp.name} ({inspectEmp.code})
@@ -305,7 +305,7 @@ export default function AdjustmentsModule({
       {/* Modal 2: Add New Adjustment Form */}
       {showAddModal && (
         <div className="modal-backdrop">
-          <div className="modal-content card" style={{ maxWidth: '520px', width: '95%' }}>
+          <div className="modal-content card" style={{ maxWidth: '750px', width: '96%', padding: '28px' }}>
             <h3 style={{ margin: '0 0 16px', fontFamily: 'Cairo' }}>➕ إضافة مكافأة أو خصم لموظف</h3>
 
             <form onSubmit={handleAddAdjustment}>
