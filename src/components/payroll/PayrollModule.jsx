@@ -144,55 +144,29 @@ export default function PayrollModule({
               <th>كود الموظف</th>
               <th>اسم الموظف</th>
               <th>الفرع</th>
-              <th>الراتب الأساسي</th>
               <th>أيام العمل</th>
               <th>المكافآت</th>
               <th>الخصومات</th>
-              <th>صافي المرتب المستحق</th>
               <th>العمليات والطباعة</th>
             </tr>
           </thead>
           <tbody>
             {filteredEmployees.length === 0 ? (
-              <tr><td colSpan="9" style={{ textAlign: 'center', color: 'var(--muted)', padding: '24px' }}>لا يوجد موظفين يطابقون خيارات البحث.</td></tr>
+              <tr><td colSpan="7" style={{ textAlign: 'center', color: 'var(--muted)', padding: '24px' }}>لا يوجد موظفين يطابقون خيارات البحث.</td></tr>
             ) : (
               filteredEmployees.map((emp) => {
                 const isMultiBranch = emp.branchesDetails && emp.branchesDetails.length > 1;
                 let branchNameDisplay = branches.find((br) => br.id === emp.branchId)?.name || 'المركز الرئيسي';
-                const defaultSalary = parseFloat(emp.salary) || 0;
-                const defaultDays = parseFloat(emp.workDaysPerMonth) || 26;
-                const defaultHours = parseFloat(emp.workHoursPerDay) || 8;
-                const defaultDailyRate = defaultDays > 0 ? (defaultSalary * defaultHours) / defaultDays : 0;
-                const defaultDailyHourly = defaultHours > 0 ? defaultDailyRate / defaultHours : (defaultDays > 0 ? defaultSalary / defaultDays : defaultSalary);
-                const defaultMonthly = defaultDailyRate * defaultDays;
-                let salaryDisplay = `${defaultSalary.toLocaleString()} ج.م (اليومي: ${defaultDailyRate.toLocaleString()} ج.م | الساعي: ${defaultDailyHourly.toLocaleString()} ج.م)`;
 
                 if (isMultiBranch) {
                   if (filterBranch) {
-                    const bd = emp.branchesDetails.find((item) => item.branchId === filterBranch);
                     const targetB = branches.find((br) => br.id === filterBranch);
                     branchNameDisplay = targetB?.name || 'فرع مخصص';
-                    const bSalary = parseFloat(bd?.salary || emp.salary || 0);
-                    const bDays = parseFloat(bd?.workDaysPerMonth || defaultDays);
-                    const bHours = parseFloat(bd?.workHoursPerDay || defaultHours);
-                    const bDailyRate = bDays > 0 ? (bSalary * bHours) / bDays : 0;
-                    const bDailyHourly = bHours > 0 ? bDailyRate / bHours : (bDays > 0 ? bSalary / bDays : bSalary);
-                    const bMonthly = bDailyRate * bDays;
-                    salaryDisplay = `${bSalary.toLocaleString()} ج.م (اليومي: ${bDailyRate.toLocaleString()} ج.م | الساعي: ${bDailyHourly.toLocaleString()} ج.م)`;
                   } else {
                     branchNameDisplay = emp.branchesDetails.map((bd) => {
                       const brObj = branches.find((br) => br.id === bd.branchId);
                       return brObj?.name || bd.branchId;
                     }).join(' + ');
-                    salaryDisplay = emp.branchesDetails.map((bd) => {
-                      const brObj = branches.find((br) => br.id === bd.branchId);
-                      const bSalary = parseFloat(bd.salary) || 0;
-                      const bDays = parseFloat(bd.workDaysPerMonth) || 26;
-                      const bHours = parseFloat(bd.workHoursPerDay) || 8;
-                      const bDailyRate = bDays > 0 ? (bSalary * bHours) / bDays : 0;
-                      const bDailyHourly = bHours > 0 ? bDailyRate / bHours : (bDays > 0 ? bSalary / bDays : bSalary);
-                      return `${brObj?.name || 'فرع'}: ${bSalary.toLocaleString()} ج.م (اليومي: ${bDailyRate.toLocaleString()} ج.م | الساعي: ${bDailyHourly.toLocaleString()} ج.م)`;
-                    }).join(' | ');
                   }
                 }
 
@@ -201,11 +175,9 @@ export default function PayrollModule({
                     <td style={{ fontWeight: '700' }}>{emp.code}</td>
                     <td style={{ fontWeight: '800' }}>{emp.name}</td>
                     <td>{branchNameDisplay}</td>
-                    <td style={{ fontWeight: '700' }}>{salaryDisplay}</td>
                     <td>{emp.workDaysPerMonth || 26} يوم</td>
                     <td style={{ color: '#16a34a', fontWeight: '700' }}>0 ج.م</td>
                     <td style={{ color: '#dc2626', fontWeight: '700' }}>0 ج.م</td>
-                    <td style={{ color: '#0d9488', fontWeight: '900', fontSize: '15px' }}>{salaryDisplay}</td>
                     <td>
                       <button
                         className="btn btn-start"

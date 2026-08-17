@@ -14,6 +14,8 @@ export default function LoansMedsModule({
   // Form State for Adding New Loan/Meds Debt
   const [targetEmpId, setTargetEmpId] = useState('');
   const [entryType, setEntryType] = useState('loan'); // 'loan' | 'meds'
+  const [loanRepayPlan, setLoanRepayPlan] = useState('single'); // 'single' | 'installment'
+  const [loanMonthsCount, setLoanMonthsCount] = useState('2');
   const [amount, setAmount] = useState('');
   const [notes, setNotes] = useState('');
 
@@ -40,9 +42,10 @@ export default function LoansMedsModule({
           employeeName: r.employeeName || (employees.find((e) => e.id === r.employeeId)?.name || 'موظف'),
           employeeCode: r.employeeCode || (employees.find((e) => e.id === r.employeeId)?.code || 'CODE'),
           type: isMeds ? 'meds' : 'loan',
+          loanType: r.loanType || 'monthly',
           typeLabel: isMeds
             ? (r.status === 'approved' ? 'أدوية ومشتريات آجل معتمدة' : 'طلب أدوية آجل')
-            : (r.status === 'approved' ? 'سلفة مالية معتمدة' : 'طلب سلفة مالية'),
+            : (r.status === 'approved' ? (r.loanType === 'installment' ? 'سلفة مقسطة معتمدة' : 'سلفة مالية معتمدة') : 'طلب سلفة مالية'),
           amount: parseFloat(r.amount || r.totalAmount) || 0,
           paidAmount: parseFloat(paidAmount) || 0,
           paymentsHistory: history,
@@ -104,28 +107,40 @@ export default function LoansMedsModule({
     }
 
     const empObj = employees.find((e) => e.id === targetEmpId);
+    const months = (entryType === 'loan' && loanRepayPlan === 'installment') ? Math.max(2, parseInt(loanMonthsCount, 10) || 2) : 1;
+    const monthlyDeduction = (entryType === 'loan' && loanRepayPlan === 'installment') ? Math.round((parsed / months) * 100) / 100 : parsed;
+    const entryId = `loan_${Date.now()}`;
 
     const newLoan = {
-      id: `loan_${Date.now()}`,
+      id: entryId,
       employeeId: targetEmpId,
       employeeName: empObj?.name || '',
       employeeCode: empObj?.code || '',
+      branchId: empObj?.branchId || '',
       type: entryType,
-      typeLabel: entryType === 'loan' ? 'سلفة مالية شخصية' : 'أدوية ومشتريات آجل',
+      loanType: entryType === 'loan' ? (loanRepayPlan === 'installment' ? 'installment' : 'monthly') : 'monthly',
+      typeLabel: entryType === 'loan' ? (loanRepayPlan === 'installment' ? 'سلفة مقسطة معتمدة' : 'سلفة مالية معتمدة') : 'أدوية ومشتريات آجل معتمدة',
       amount: parsed,
       paidAmount: 0,
-      status: 'pending',
-      notes: notes.trim(),
+      monthsCount: months,
+      monthlyDeduction: monthlyDeduction,
+      status: 'approved',
+      adminApproved: true,
+      branchApproved: true,
+      notes: notes.trim() || (entryType === 'loan' ? 'سلفة مالية مسجلة من الإدارة العليا' : 'مشتريات أدوية آجل'),
+      reason: notes.trim() || (entryType === 'loan' ? 'سلفة مالية مسجلة من الإدارة العليا' : 'مشتريات أدوية آجل'),
       date: new Date().toISOString().slice(0, 10),
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      paymentsHistory: []
     };
 
-    const updatedLoans = [newLoan, ...loansList];
-    const updatedState = { ...state, loans: updatedLoans };
+    const updatedLoans = [newLoan, ...(state.loans || [])];
+    const updatedRequests = [newLoan, ...(state.requests || [])];
+    const updatedState = { ...state, loans: updatedLoans, requests: updatedRequests };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
 
-    showToast?.('✅ تم إضافة المعاملة بنجاح وتحديث مديونية الموظف!');
+    showToast?.(`✅ تم تسجيل واعتماد ${entryType === 'loan' ? 'السلفة' : 'الأدوية الآجل'} للموظف ${empObj?.name} بنجاح!`);
     setAmount('');
     setNotes('');
   };
@@ -322,7 +337,7 @@ export default function LoansMedsModule({
         <h4 style={{ margin: '0 0 14px 0', fontFamily: 'Cairo', color: 'var(--primary-dark)' }}>
           ➕ إدراج سلفة أو مشتريات أدوية آجل لموظف
         </h4>
-        <form onSubmit={handleAddEntry} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px' }}>
+        <form onSubmit={handleAddEntry} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px', alignItems: 'end' }}>
           <div className="field">
             <label>اختر الموظف</label>
             <select value={targetEmpId} onChange={(e) => setTargetEmpId(e.target.value)} required>
@@ -341,18 +356,47 @@ export default function LoansMedsModule({
             </select>
           </div>
 
+          {entryType === 'loan' && (
+            <>
+              <div className="field">
+                <label>نظام الخصم والسداد</label>
+                <select value={loanRepayPlan} onChange={(e) => setLoanRepayPlan(e.target.value)}>
+                  <option value="single">💵 سلفة شهرية (دفعة واحدة مع أقرب راتب)</option>
+                  <option value="installment">📅 سلفة مقسطة على عدة شهور</option>
+                </select>
+              </div>
+
+              {loanRepayPlan === 'installment' && (
+                <div className="field">
+                  <label>عدد شهور التقسيط</label>
+                  <select value={loanMonthsCount} onChange={(e) => setLoanMonthsCount(e.target.value)}>
+                    <option value="2">شهرين (2 شهور)</option>
+                    <option value="3">3 شهور</option>
+                    <option value="4">4 شهور</option>
+                    <option value="5">5 شهور</option>
+                    <option value="6">6 شهور</option>
+                    <option value="10">10 شهور</option>
+                    <option value="12">سنة كاملة (12 شهر)</option>
+                  </select>
+                </div>
+              )}
+            </>
+          )}
+
           <div className="field">
-            <label>المبلغ (ج.م)</label>
+            <label>المبلغ الإجمالي (ج.م)</label>
             <input type="number" min="1" placeholder="أدخل المبلغ..." value={amount} onChange={(e) => setAmount(e.target.value)} required />
           </div>
 
           <div className="field">
-            <label>ملاحظات البيان</label>
+            <label>ملاحظات البيان والسبب</label>
             <input type="text" placeholder="سبب السلفة أو أصناف الأدوية..." value={notes} onChange={(e) => setNotes(e.target.value)} />
           </div>
 
-          <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end' }}>
-            <button type="submit" className="btn btn-start">💾 تسجيل المديونية وتأكيد الإدراج</button>
+          <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end', marginTop: '6px' }}>
+            <button type="submit" className="btn btn-start" style={{ padding: '8px 20px', fontSize: '14px' }}>
+              💾 تسجيل واعتماد المديونية فوراً
+            </button>
           </div>
         </form>
       </div>

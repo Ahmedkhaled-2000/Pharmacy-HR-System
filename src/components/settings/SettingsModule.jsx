@@ -41,6 +41,11 @@ export default function SettingsModule({
   const [adminPass, setAdminPass] = useState(orgSettings.adminPass || 'admin123');
   const [biometricType, setBiometricType] = useState(orgSettings.biometricType || 'face');
 
+  // Monthly Loan Rules Settings
+  const [loanRequestStartDay, setLoanRequestStartDay] = useState(orgSettings.loanRequestStartDay !== undefined ? orgSettings.loanRequestStartDay : 1);
+  const [loanRequestEndDay, setLoanRequestEndDay] = useState(orgSettings.loanRequestEndDay !== undefined ? orgSettings.loanRequestEndDay : 10);
+  const [maxMonthlyLoanSalaryPercent, setMaxMonthlyLoanSalaryPercent] = useState(orgSettings.maxMonthlyLoanSalaryPercent !== undefined ? orgSettings.maxMonthlyLoanSalaryPercent : 50);
+
   // Router IP Restrictions
   const ipRestrictions = state.ipRestrictions || { enabled: false, allowedIps: [] };
   const [ipEnabled, setIpEnabled] = useState(ipRestrictions.enabled);
@@ -98,6 +103,9 @@ export default function SettingsModule({
       adminUser: adminUser.trim(),
       adminPass: adminPass.trim(),
       biometricType,
+      loanRequestStartDay: parseInt(loanRequestStartDay, 10) || 1,
+      loanRequestEndDay: parseInt(loanRequestEndDay, 10) || 10,
+      maxMonthlyLoanSalaryPercent: parseFloat(maxMonthlyLoanSalaryPercent) || 50,
       approvedIPs // keeping this for legacy components
     };
     const updatedIpRestrictions = {
@@ -107,7 +115,7 @@ export default function SettingsModule({
     const updatedState = { ...state, orgSettings: updatedSettings, ipRestrictions: updatedIpRestrictions };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.('✅ تم حفظ إعدادات المؤسسة وحماية النظام بنجاح');
+    showToast?.('✅ تم حفظ إعدادات المؤسسة وضوابط السلف وحماية النظام بنجاح');
   };
 
   const handleToggleRule = async (ruleId, field) => {
@@ -384,6 +392,54 @@ export default function SettingsModule({
             <div className="field">
               <label>رابط الشعار (Logo URL)</label>
               <input type="text" value={logoUrl} onChange={(e) => setLogoUrl(e.target.value)} placeholder="https://example.com/logo.png" />
+            </div>
+          </div>
+
+          <h4 style={{ margin: '24px 0 14px', fontFamily: 'Cairo', color: 'var(--primary-dark)' }}>
+            💳 ضوابط وشروط تقديم السلف الشهرية للموظفين
+          </h4>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px', marginBottom: '20px', background: 'var(--surface-muted)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>
+            <div className="field">
+              <label>يوم بداية فترة طلب السلف الشهرية (من يوم)</label>
+              <input
+                type="number"
+                min="1"
+                max="31"
+                value={loanRequestStartDay}
+                onChange={(e) => setLoanRequestStartDay(e.target.value)}
+                placeholder="مثال: 1"
+                required
+              />
+              <span style={{ fontSize: '11.5px', color: 'var(--muted)', marginTop: '3px' }}>اليوم من الشهر الميلادي الذي يفتح فيه باب التقديم</span>
+            </div>
+
+            <div className="field">
+              <label>يوم نهاية فترة طلب السلف الشهرية (إلى يوم)</label>
+              <input
+                type="number"
+                min="1"
+                max="31"
+                value={loanRequestEndDay}
+                onChange={(e) => setLoanRequestEndDay(e.target.value)}
+                placeholder="مثال: 10"
+                required
+              />
+              <span style={{ fontSize: '11.5px', color: 'var(--muted)', marginTop: '3px' }}>اليوم من الشهر الميلادي الذي يغلق بعده التقديم</span>
+            </div>
+
+            <div className="field">
+              <label>الحد الأقصى للسلفة الشهرية (% من الراتب الأساسي)</label>
+              <input
+                type="number"
+                min="1"
+                max="100"
+                value={maxMonthlyLoanSalaryPercent}
+                onChange={(e) => setMaxMonthlyLoanSalaryPercent(e.target.value)}
+                placeholder="مثال: 50%"
+                required
+              />
+              <span style={{ fontSize: '11.5px', color: 'var(--muted)', marginTop: '3px' }}>النسبة المسموح بها من الراتب الأساسي الشهري (مثال: 50%)</span>
             </div>
           </div>
 

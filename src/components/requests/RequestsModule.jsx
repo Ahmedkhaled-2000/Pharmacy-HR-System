@@ -35,6 +35,8 @@ export default function RequestsModule({
 }) {
   const [filterType, setFilterType] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
+  const [filterEmp, setFilterEmp] = useState('all');
+  const [filterDate, setFilterDate] = useState('');
   const [previewModalReq, setPreviewModalReq] = useState(null);
 
   const requests = state.requests || [];
@@ -80,6 +82,13 @@ export default function RequestsModule({
       }
     }
     if (filterStatus !== 'all' && r.status !== filterStatus) return false;
+    if (filterEmp !== 'all') {
+      if (String(r.employeeId) !== String(filterEmp)) return false;
+    }
+    if (filterDate) {
+      const rDate = (r.createdAt ? r.createdAt.slice(0, 10) : (r.date || r.startDate || ''));
+      if (!rDate.startsWith(filterDate)) return false;
+    }
     return true;
   });
 
@@ -402,7 +411,30 @@ export default function RequestsModule({
 
       <div style={{ display: 'flex', gap: '14px', marginBottom: '20px', flexWrap: 'wrap', alignItems: 'center', background: 'var(--surface)', padding: '14px', borderRadius: '12px', border: '1px solid var(--border)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <label style={{ fontSize: '13px', fontWeight: 'bold' }}>تصفية نوع الطلب:</label>
+          <label style={{ fontSize: '13px', fontWeight: 'bold' }}>👤 الموظف:</label>
+          <select value={filterEmp} onChange={(e) => setFilterEmp(e.target.value)} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px' }}>
+            <option value="all">-- جميع الموظفين --</option>
+            {employees.map((e) => (
+              <option key={e.id} value={e.id}>{e.name} ({e.code})</option>
+            ))}
+          </select>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <label style={{ fontSize: '13px', fontWeight: 'bold' }}>📅 التاريخ:</label>
+          <input
+            type="date"
+            value={filterDate}
+            onChange={(e) => setFilterDate(e.target.value)}
+            style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px' }}
+          />
+          {filterDate && (
+            <button className="btn btn-ghost" style={{ padding: '2px 8px', fontSize: '11px', color: 'var(--danger)' }} onClick={() => setFilterDate('')}>✕ مسح</button>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <label style={{ fontSize: '13px', fontWeight: 'bold' }}>نوع الطلب:</label>
           <select value={filterType} onChange={(e) => setFilterType(e.target.value)} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)' }}>
             <option value="all">-- جميع أنواع الطلبات --</option>
             <option value="leave">🏖️ إجازات</option>

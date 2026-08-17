@@ -27,12 +27,13 @@ export default function SidebarLayout({
 
   const defaultAdminItems = [
     { id: 'dashboard', label: 'لوحة التحكم', icon: '📊' },
+    { id: 'notifications', label: 'الإشعارات والتنبيهات', icon: '🔔', badge: (notifications || []).filter(n => !n.read).length },
+    { id: 'requests', label: 'الطلبات', icon: '📋', badge: pendingCount },
     { id: 'employees', label: 'الموظفين', icon: '👥' },
     { id: 'branches', label: 'الفروع', icon: '🏢' },
     { id: 'attendance', label: 'الحضور والانصراف', icon: '⏱️' },
     { id: 'electronic-attendance', label: 'البصمة الإلكترونية', icon: '📸' },
     { id: 'roster', label: 'الجداول الشهرية', icon: '📅' },
-    { id: 'requests', label: 'الطلبات', icon: '📋' },
     { id: 'leaves-tracking', label: 'الإجازات', icon: '🏖️' },
     { id: 'payroll', label: 'رواتب الموظفين', icon: '💰' },
     { id: 'adjustments-module', label: 'المكافآت والخصومات', icon: '📝' },
@@ -41,7 +42,6 @@ export default function SidebarLayout({
     { id: 'evaluations', label: 'التقييمات', icon: '⭐️' },
     { id: 'loans-meds', label: 'السلف والأجل', icon: '💳' },
     { id: 'income-expenses', label: 'المصروفات والإيرادات', icon: '📈' },
-    { id: 'notifications', label: 'الإشعارات والتنبيهات', icon: '🔔', badge: (notifications || []).filter(n => !n.read).length },
     { id: 'settings', label: 'الإعدادات', icon: '⚙️' },
   ];
 

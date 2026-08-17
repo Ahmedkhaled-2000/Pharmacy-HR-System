@@ -16,8 +16,11 @@ export default function NotificationCenterModule({
 }) {
   const [filterType, setFilterType] = useState('all'); // 'all' | 'today_punches' | 'today_absences' | 'requests' | 'penalties' | 'unread'
   const [branchFilter, setBranchFilter] = useState('all');
+  const [empFilter, setEmpFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('');
 
   const todayDate = todayStr();
+  const effectiveDate = dateFilter || todayDate;
   const employees = state.employees || [];
   const branches = state.branches || [];
   const shifts = state.shifts || [];
@@ -45,10 +48,14 @@ export default function NotificationCenterModule({
   };
   const todayDayName = getArabicDayName(todayDate);
 
-  // 1. Live Attendance & Punches Today
+  // 1. Live Attendance & Punches
   const todayPunches = useMemo(() => {
     return shifts
-      .filter((s) => (s.date || '').startsWith(todayDate))
+      .filter((s) => {
+        if (!(s.date || '').startsWith(effectiveDate)) return false;
+        if (empFilter !== 'all' && String(s.employeeId) !== String(empFilter)) return false;
+        return true;
+      })
       .map((s) => {
         const emp = employees.find((e) => String(e.id) === String(s.employeeId));
         const branchObj = branches.find((b) => String(b.id) === String(s.branchId || emp?.branchId));
@@ -92,7 +99,7 @@ export default function NotificationCenterModule({
           note: s.note || ''
         };
       });
-  }, [shifts, employees, branches, activeShifts, todayDate]);
+  }, [shifts, employees, branches, activeShifts, effectiveDate, empFilter]);
 
   // 2. Absences & Delays Today
   const todayAbsencesAndDelays = useMemo(() => {
@@ -240,13 +247,21 @@ export default function NotificationCenterModule({
           typeLabel,
           icon
         };
+      })
+      .filter((r) => {
+        if (empFilter !== 'all' && String(r.employeeId) !== String(empFilter)) return false;
+        if (dateFilter) {
+          const rDate = (r.createdAt ? r.createdAt.slice(0, 10) : (r.date || r.startDate || ''));
+          if (!rDate.startsWith(dateFilter)) return false;
+        }
+        return true;
       });
-  }, [requests, employees, branches]);
+  }, [requests, employees, branches, empFilter, dateFilter]);
 
   // 4. Branch Manager Submitted Penalties (Bylaws)
   const branchPenalties = useMemo(() => {
     return requests
-      .filter((r) => r.type === 'penalty')
+      .filter((r) => r.type === 'penalty' || r.type === 'early_exit' || r.type === 'overtime')
       .map((r) => {
         const emp = employees.find((e) => String(e.id) === String(r.employeeId));
         const branchObj = branches.find((b) => String(b.id) === String(r.branchId || emp?.branchId));
@@ -259,20 +274,35 @@ export default function NotificationCenterModule({
           ruleTitle: r.ruleTitle || r.reason || 'مخالفة لائحية',
           impactDesc: r.impactType === 'deduction_days' ? `خصم ${r.impactVal} يوم من الراتب` : (r.amount ? `خصم مبلغ ${r.amount} ج.م` : `خصم مبلغ ${r.impactVal || 50} ج.م`)
         };
+      })
+      .filter((r) => {
+        if (empFilter !== 'all' && String(r.employeeId) !== String(empFilter)) return false;
+        if (dateFilter) {
+          const rDate = (r.createdAt ? r.createdAt.slice(0, 10) : (r.date || ''));
+          if (!rDate.startsWith(dateFilter)) return false;
+        }
+        return true;
       });
-  }, [requests, employees, branches]);
+  }, [requests, employees, branches, empFilter, dateFilter]);
 
   // General Notification Handlers
-  const notifications = state.notifications || [];
+  const notifications = (state.notifications || []).filter((n) => {
+    if (empFilter !== 'all' && String(n.empId || n.employeeId) !== String(empFilter)) return false;
+    if (dateFilter) {
+      const nDate = (n.date || (n.timestamp ? n.timestamp.slice(0, 10) : ''));
+      if (!nDate.startsWith(dateFilter)) return false;
+    }
+    return true;
+  });
   const handleMarkAsRead = async (id) => {
-    const updated = notifications.map((n) => (n.id === id ? { ...n, read: true } : n));
+    const updated = (state.notifications || []).map((n) => (n.id === id ? { ...n, read: true } : n));
     const updatedState = { ...state, notifications: updated };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
   };
 
   const handleMarkAllRead = async () => {
-    const updated = notifications.map((n) => ({ ...n, read: true }));
+    const updated = (state.notifications || []).map((n) => ({ ...n, read: true }));
     const updatedState = { ...state, notifications: updated };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
@@ -309,7 +339,7 @@ export default function NotificationCenterModule({
             )}
           </h2>
           <p style={{ margin: '4px 0 0', color: 'var(--muted)', fontSize: '14px' }}>
-            متابعة فورية للحضور والانصراف، الغيابات، طلبات الموظفين، والجزاءات المرفوعة من الفروع اليوم ({todayDate})
+            متابعة فورية للحضور والانصراف، الغيابات، طلبات الموظفين، والجزاءات ({effectiveDate})
           </p>
         </div>
 
@@ -324,6 +354,29 @@ export default function NotificationCenterModule({
               <option key={b.id} value={b.id}>🏢 فرع {b.name}</option>
             ))}
           </select>
+
+          <select
+            value={empFilter}
+            onChange={(e) => setEmpFilter(e.target.value)}
+            style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontWeight: 'bold' }}
+          >
+            <option value="all">👤 جميع الموظفين</option>
+            {employees.map((e) => (
+              <option key={e.id} value={e.id}>{e.name} ({e.code})</option>
+            ))}
+          </select>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <input
+              type="date"
+              value={dateFilter}
+              onChange={(e) => setDateFilter(e.target.value)}
+              style={{ padding: '5px 10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px' }}
+            />
+            {dateFilter && (
+              <button className="btn btn-ghost" style={{ padding: '2px 8px', fontSize: '11px', color: 'var(--danger)' }} onClick={() => setDateFilter('')}>✕ اليوم</button>
+            )}
+          </div>
 
           {unreadCount > 0 && (
             <button className="btn btn-ghost" style={{ fontSize: '13px' }} onClick={handleMarkAllRead}>

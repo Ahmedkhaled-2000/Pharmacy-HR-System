@@ -80,12 +80,13 @@ export default function AdjustmentsModule({
   };
 
   const handleDeleteAdjustment = async (adjId) => {
-    if (!window.confirm('هل أنت تأكد من رغبتك في حذف هذا البند الإداري؟')) return;
+    if (!window.confirm('هل أنت متأكد من رغبتك في حذف هذا البند الإداري؟')) return;
     const updatedAdjs = adjustments.filter((a) => a.id !== adjId);
-    const updatedState = { ...state, adjustments: updatedAdjs };
+    const updatedDeleted = [...(state._deletedIds || []), String(adjId)];
+    const updatedState = { ...state, adjustments: updatedAdjs, _deletedIds: updatedDeleted };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.('🗑️ تم حذف البند المالي بنجاح');
+    showToast?.('🗑️ تم حذف البند المالي بنجاح نهائياً');
   };
 
   return (

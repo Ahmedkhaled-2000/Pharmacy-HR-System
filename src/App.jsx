@@ -3671,6 +3671,7 @@ export default function App() {
                   { id: 'branch-roster', label: 'الجدول الشهري للموظفين', icon: '📅' },
                   { id: 'emp-punches', label: 'متابعة حضور وبصمات الفرع', icon: '👥' },
                   { id: 'evaluations', label: 'التقييمات والشكاوي', icon: '⭐' },
+                  { id: 'income-expenses', label: 'المصروفات والإيرادات', icon: '📈' },
                   { id: 'bylaws', label: 'لائحة العمل والجزاءات', icon: '📜' },
                 ]
               : undefined

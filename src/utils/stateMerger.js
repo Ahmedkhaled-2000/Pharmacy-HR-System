@@ -34,18 +34,19 @@ function toSafeArray(val) {
   return [];
 }
 
-// دمج مصفوفتين حسب المفتاح الفريد وحسم التعارضات
+// دمج مصفوفتين حسب المفتاح الفريد وحسم التعارضات مع مراعاة العناصر المحذوفة نهائياً
 export function mergeArrays(localArr = [], remoteArr = [], options = {}) {
   const localList = toSafeArray(localArr);
   const remoteList = toSafeArray(remoteArr);
+  const deletedIds = options.deletedIds instanceof Set ? options.deletedIds : new Set(options.deletedIds || []);
 
   const map = new Map();
 
-  // 1. إضافة كل عناصر السحابة (Remote)
+  // 1. إضافة كل عناصر السحابة (Remote) ما لم تكن محذوفة
   for (const item of remoteList) {
     if (!item || typeof item !== 'object') continue;
     const key = getItemKey(item, options.prefix || 'rem');
-    if (key) {
+    if (key && !deletedIds.has(key) && !deletedIds.has(String(item.id))) {
       map.set(key, item);
     }
   }
@@ -54,7 +55,7 @@ export function mergeArrays(localArr = [], remoteArr = [], options = {}) {
   for (const item of localList) {
     if (!item || typeof item !== 'object') continue;
     const key = getItemKey(item, options.prefix || 'loc');
-    if (!key) continue;
+    if (!key || deletedIds.has(key) || deletedIds.has(String(item.id))) continue;
 
     if (!map.has(key)) {
       // عنصر جديد غير موجود في السحابة أضيف محلياً -> الحفاظ عليه
@@ -204,7 +205,12 @@ export function smartMergeStates(localState, remoteState) {
   if (!remoteState || typeof remoteState !== 'object') return localState;
   if (!localState || typeof localState !== 'object') return remoteState;
 
-  const mergedShifts = mergeArrays(localState.shifts, remoteState.shifts, { prefix: 'shift' });
+  const deletedIds = new Set([
+    ...toSafeArray(localState._deletedIds || []),
+    ...toSafeArray(remoteState._deletedIds || [])
+  ]);
+
+  const mergedShifts = mergeArrays(localState.shifts, remoteState.shifts, { prefix: 'shift', deletedIds });
 
   return {
     ...remoteState,
@@ -225,25 +231,28 @@ export function smartMergeStates(localState, remoteState) {
     },
 
     // 2. الكيانات والمصفوفات الأساسية
-    branches: mergeArrays(localState.branches, remoteState.branches, { prefix: 'branch' }),
-    employees: mergeArrays(localState.employees, remoteState.employees, { prefix: 'emp' }),
+    branches: mergeArrays(localState.branches, remoteState.branches, { prefix: 'branch', deletedIds }),
+    employees: mergeArrays(localState.employees, remoteState.employees, { prefix: 'emp', deletedIds }),
     shifts: mergedShifts,
-    approvalRules: mergeArrays(localState.approvalRules, remoteState.approvalRules, { prefix: 'rule' }),
-    authorizedDevices: mergeArrays(localState.authorizedDevices, remoteState.authorizedDevices, { prefix: 'dev' }),
+    approvalRules: mergeArrays(localState.approvalRules, remoteState.approvalRules, { prefix: 'rule', deletedIds }),
+    authorizedDevices: mergeArrays(localState.authorizedDevices, remoteState.authorizedDevices, { prefix: 'dev', deletedIds }),
 
-    // 3. المعاملات والطلبات والحضور (التي يكثر حدوث تعارض فيها بين الأجهزة)
-    requests: mergeArrays(localState.requests, remoteState.requests, { prefix: 'req' }),
-    leaveRequests: mergeArrays(localState.leaveRequests, remoteState.leaveRequests, { prefix: 'leave' }),
-    shiftSwaps: mergeArrays(localState.shiftSwaps, remoteState.shiftSwaps, { prefix: 'swap' }),
-    loans: mergeArrays(localState.loans, remoteState.loans, { prefix: 'loan' }),
-    logs: mergeArrays(localState.logs, remoteState.logs, { prefix: 'log' }),
-    evaluations: mergeArrays(localState.evaluations, remoteState.evaluations, { prefix: 'eval' }),
-    notifications: mergeArrays(localState.notifications, remoteState.notifications, { prefix: 'notif' }),
-    adjustments: mergeArrays(localState.adjustments, remoteState.adjustments, { prefix: 'adj' }),
-    employeeNotes: mergeArrays(localState.employeeNotes, remoteState.employeeNotes, { prefix: 'note' }),
+    // 3. المعاملات والطلبات والحضور
+    requests: mergeArrays(localState.requests, remoteState.requests, { prefix: 'req', deletedIds }),
+    leaveRequests: mergeArrays(localState.leaveRequests, remoteState.leaveRequests, { prefix: 'leave', deletedIds }),
+    shiftSwaps: mergeArrays(localState.shiftSwaps, remoteState.shiftSwaps, { prefix: 'swap', deletedIds }),
+    loans: mergeArrays(localState.loans, remoteState.loans, { prefix: 'loan', deletedIds }),
+    logs: mergeArrays(localState.logs, remoteState.logs, { prefix: 'log', deletedIds }),
+    evaluations: mergeArrays(localState.evaluations, remoteState.evaluations, { prefix: 'eval', deletedIds }),
+    notifications: mergeArrays(localState.notifications, remoteState.notifications, { prefix: 'notif', deletedIds }),
+    adjustments: mergeArrays(localState.adjustments, remoteState.adjustments, { prefix: 'adj', deletedIds }),
+    employeeNotes: mergeArrays(localState.employeeNotes, remoteState.employeeNotes, { prefix: 'note', deletedIds }),
+    finances: mergeArrays(localState.finances, remoteState.finances, { prefix: 'fin', deletedIds }),
+    transactions: mergeArrays(localState.transactions, remoteState.transactions, { prefix: 'tx', deletedIds }),
 
-    // 4. الجداول والشفتات
+    // 4. الجداول والشفتات وقائمة المحذوفات
     rosters: mergeRosters(localState.rosters, remoteState.rosters),
-    activeShifts: mergeActiveShifts(localState.activeShifts, remoteState.activeShifts, mergedShifts)
+    activeShifts: mergeActiveShifts(localState.activeShifts, remoteState.activeShifts, mergedShifts),
+    _deletedIds: Array.from(deletedIds).slice(-1000)
   };
 }

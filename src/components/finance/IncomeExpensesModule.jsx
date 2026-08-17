@@ -4,16 +4,19 @@ export default function IncomeExpensesModule({
   state,
   setState,
   saveState,
-  showToast
+  showToast,
+  currentBranch,
+  userRole
 }) {
+  const isBranchRole = userRole === 'branch' || !!currentBranch;
   const [activeTab, setActiveTab] = useState('all'); // 'all' | 'expense' | 'income'
-  const [selectedBranch, setSelectedBranch] = useState('');
+  const [selectedBranch, setSelectedBranch] = useState(currentBranch?.id || '');
   
   // New Entry Form State
   const [type, setType] = useState('expense'); // 'expense' | 'income'
   const [category, setCategory] = useState('');
   const [amount, setAmount] = useState('');
-  const [branchId, setBranchId] = useState('');
+  const [branchId, setBranchId] = useState(currentBranch?.id || '');
   const [notes, setNotes] = useState('');
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
 
@@ -22,15 +25,16 @@ export default function IncomeExpensesModule({
 
   const filteredList = transactions.filter((t) => {
     if (activeTab !== 'all' && t.type !== activeTab) return false;
-    if (selectedBranch && t.branchId !== selectedBranch) return false;
+    const activeBranchFilter = currentBranch?.id || selectedBranch;
+    if (activeBranchFilter && t.branchId !== activeBranchFilter) return false;
     return true;
   });
 
-  const totalIncome = transactions
+  const totalIncome = (isBranchRole ? filteredList : transactions)
     .filter((t) => t.type === 'income')
     .reduce((acc, t) => acc + (parseFloat(t.amount) || 0), 0);
 
-  const totalExpenses = transactions
+  const totalExpenses = (isBranchRole ? filteredList : transactions)
     .filter((t) => t.type === 'expense')
     .reduce((acc, t) => acc + (parseFloat(t.amount) || 0), 0);
 
@@ -44,35 +48,56 @@ export default function IncomeExpensesModule({
       return;
     }
 
-    const branchObj = branches.find((b) => b.id === branchId);
+    const targetBranchId = currentBranch?.id || branchId || '';
+    const branchObj = branches.find((b) => b.id === targetBranchId) || currentBranch;
+    const branchName = branchObj?.name || 'المركز الرئيسي / عام';
 
     const newTransaction = {
       id: `tx_${Date.now()}`,
       type,
       category: category.trim(),
       amount: parsedAmount,
-      branchId: branchId || '',
-      branchName: branchObj?.name || 'المركز الرئيسي / عام',
+      branchId: targetBranchId,
+      branchName: branchName,
+      createdBy: isBranchRole ? `مدير فرع ${branchName}` : 'admin',
       notes: notes.trim(),
       date,
       createdAt: new Date().toISOString()
     };
 
+    // If added by branch manager, also create an alert/notification for Top Management!
+    let updatedNotifs = state.notifications || [];
+    if (isBranchRole) {
+      const newNotif = {
+        id: `notif_fin_${Date.now()}`,
+        type: 'financial_alert',
+        title: `📈 قيد مالي جديد: فرع ${branchName}`,
+        message: `قام مدير فرع ${branchName} بإدراج ${type === 'expense' ? 'مصروف' : 'إيراد'} بقيمة ${parsedAmount} ج.م (البند: ${category.trim()})`,
+        date,
+        timestamp: new Date().toISOString(),
+        read: false,
+        targetRole: 'admin',
+        branchId: targetBranchId
+      };
+      updatedNotifs = [newNotif, ...updatedNotifs];
+    }
+
     const updated = [newTransaction, ...transactions];
-    const updatedState = { ...state, finances: updated, transactions: updated };
+    const updatedState = { ...state, finances: updated, transactions: updated, notifications: updatedNotifs };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
 
-    showToast?.('✅ تم إضافة البند وتعديل الإجماليات بنجاح!');
+    showToast?.('✅ تم إضافة البند وتعديل الإجماليات وإشعار الإدارة العليا بنجاح!');
     setCategory('');
     setAmount('');
     setNotes('');
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('هل أنت تأكد من حذف هذا البند المالي؟')) return;
+    if (!window.confirm('هل أنت متأكد من حذف هذا البند المالي؟')) return;
     const updated = transactions.filter((t) => t.id !== id);
-    const updatedState = { ...state, finances: updated, transactions: updated };
+    const updatedDeleted = [...(state._deletedIds || []), String(id)];
+    const updatedState = { ...state, finances: updated, transactions: updated, _deletedIds: updatedDeleted };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
     showToast?.('🗑️ تم حذف البند المالي بنجاح');

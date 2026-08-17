@@ -5,6 +5,7 @@ import EmployeeLoansModule from '../employee-portal/EmployeeLoansModule';
 import EmployeeEvaluationsModule from '../employee-portal/EmployeeEvaluationsModule';
 import PayslipPrintModal from '../payroll/PayslipPrintModal';
 import BylawsModule from '../bylaws/BylawsModule';
+import IncomeExpensesModule from '../finance/IncomeExpensesModule';
 import { getFormattedRequestBadge } from '../requests/RequestsModule';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 
@@ -99,6 +100,8 @@ export default function BranchManagerView({
   // Roster & Request Modal Preview states
   const [previewRosterEmp, setPreviewRosterEmp] = useState(null);
   const [previewModalReq, setPreviewModalReq] = useState(null);
+  const [branchReqEmpFilter, setBranchReqEmpFilter] = useState('all');
+  const [branchReqDateFilter, setBranchReqDateFilter] = useState('');
 
   // Propose Employee Adjustment Form state
   const [adjEmpId, setAdjEmpId] = useState('');
@@ -245,6 +248,17 @@ export default function BranchManagerView({
       return false;
     });
   }, [state.requests, branchEmployees, currentBranch]);
+
+  const filteredBranchRequests = useMemo(() => {
+    return branchRequests.filter((r) => {
+      if (branchReqEmpFilter !== 'all' && String(r.employeeId) !== String(branchReqEmpFilter)) return false;
+      if (branchReqDateFilter) {
+        const rDate = (r.createdAt ? r.createdAt.slice(0, 10) : (r.startDate || r.date || ''));
+        if (!rDate.startsWith(branchReqDateFilter)) return false;
+      }
+      return true;
+    });
+  }, [branchRequests, branchReqEmpFilter, branchReqDateFilter]);
 
   // ── Calculate Manager Salary Metrics ──
   const managerSalaryMetrics = useMemo(() => {
@@ -849,9 +863,40 @@ export default function BranchManagerView({
       {/* ───────────────────────────────────────────────────────────── */}
       {activeTab === 'requests' && (
         <div className="card settings-card fade-in" style={{ padding: '20px' }}>
-          <h3 style={{ margin: '0 0 16px', fontSize: '17px', color: '#1e293b' }}>
-            📋 جميع طلبات موظفي الفرع (إجازات - سلف - أذونات - تبديل شفتات)
-          </h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+            <h3 style={{ margin: 0, fontSize: '17px', color: '#1e293b' }}>
+              📋 جميع طلبات موظفي الفرع (إجازات - سلف - أذونات - تبديل شفتات)
+            </h3>
+
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <label style={{ fontSize: '13px', fontWeight: 'bold' }}>👤 الموظف:</label>
+                <select
+                  value={branchReqEmpFilter}
+                  onChange={(e) => setBranchReqEmpFilter(e.target.value)}
+                  style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px' }}
+                >
+                  <option value="all">-- جميع موظفي الفرع --</option>
+                  {branchEmployees.map((e) => (
+                    <option key={e.id} value={e.id}>{e.name} ({e.code})</option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <label style={{ fontSize: '13px', fontWeight: 'bold' }}>📅 التاريخ:</label>
+                <input
+                  type="date"
+                  value={branchReqDateFilter}
+                  onChange={(e) => setBranchReqDateFilter(e.target.value)}
+                  style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px' }}
+                />
+                {branchReqDateFilter && (
+                  <button className="btn btn-ghost" style={{ padding: '2px 8px', fontSize: '11px', color: 'var(--danger)' }} onClick={() => setBranchReqDateFilter('')}>✕ مسح</button>
+                )}
+              </div>
+            </div>
+          </div>
 
           <div className="table-responsive">
             <table className="bylaws-table">
@@ -866,14 +911,14 @@ export default function BranchManagerView({
                 </tr>
               </thead>
               <tbody>
-                {branchRequests.length === 0 ? (
+                {filteredBranchRequests.length === 0 ? (
                   <tr>
                     <td colSpan="6" style={{ textAlign: 'center', color: 'var(--muted)', padding: '24px' }}>
-                      لا توجد طلبات لموظفي الفرع في الوقت الحالي.
+                      لا توجد طلبات لموظفي الفرع تطابق خيارات البحث.
                     </td>
                   </tr>
                 ) : (
-                  branchRequests.map((r) => (
+                  filteredBranchRequests.map((r) => (
                     <tr key={r.id}>
                       <td style={{ fontSize: '12.5px' }}>{r.createdAt ? r.createdAt.slice(0, 10) : r.startDate || '—'}</td>
                       <td style={{ fontWeight: '700' }}>{r.employeeName || 'موظف'}</td>
@@ -2272,6 +2317,18 @@ export default function BranchManagerView({
           setState={setState}
           saveState={saveState}
           showToast={showToast}
+          userRole="branch"
+        />
+      )}
+
+      {/* ── 10. INCOME & EXPENSES TAB ── */}
+      {activeTab === 'income-expenses' && (
+        <IncomeExpensesModule
+          state={state}
+          setState={setState}
+          saveState={saveState}
+          showToast={showToast}
+          currentBranch={currentBranch}
           userRole="branch"
         />
       )}

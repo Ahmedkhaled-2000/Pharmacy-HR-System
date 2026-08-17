@@ -79,12 +79,36 @@ export default function EmployeeLoansModule({
     }, 0);
   };
 
+  // Monthly Loan Rule Calculations from Settings
+  const currentDay = new Date().getDate();
+  const startDay = state.orgSettings?.loanRequestStartDay !== undefined ? parseInt(state.orgSettings.loanRequestStartDay, 10) : 1;
+  const endDay = state.orgSettings?.loanRequestEndDay !== undefined ? parseInt(state.orgSettings.loanRequestEndDay, 10) : 10;
+  
+  const isWithinLoanWindow = (startDay <= endDay) 
+    ? (currentDay >= startDay && currentDay <= endDay)
+    : (currentDay >= startDay || currentDay <= endDay);
+
+  const maxSalaryPercent = state.orgSettings?.maxMonthlyLoanSalaryPercent !== undefined ? parseFloat(state.orgSettings.maxMonthlyLoanSalaryPercent) : 50;
+  const basicSalary = parseFloat(emp?.salary) || 0;
+  const maxAllowedMonthlyLoan = Math.round((basicSalary * maxSalaryPercent) / 100);
+
   // Submit Loan Request
   const handleSubmitLoan = async (e) => {
     e.preventDefault();
+
+    if (!isWithinLoanWindow) {
+      showToast(`⚠️ لا يمكن إرسال طلب سلفة الآن! فترة التقديم المسموح بها هي من يوم ${startDay} إلى يوم ${endDay} من كل شهر.`);
+      return;
+    }
+
     const amount = parseFloat(loanAmount);
     if (!amount || amount <= 0) {
       showToast('يرجى إدخال مبلغ سلفة صحيح');
+      return;
+    }
+
+    if (loanType === 'monthly' && maxAllowedMonthlyLoan > 0 && amount > maxAllowedMonthlyLoan) {
+      showToast(`⚠️ المبلغ المطلوب (${amount} ج.م) يتجاوز الحد الأقصى المسموح به (${maxAllowedMonthlyLoan} ج.م - نسبة ${maxSalaryPercent}% من الراتب الأساسي). يرجى طلب مبلغ في حدود النسبة المسموحة.`);
       return;
     }
 
@@ -189,9 +213,39 @@ export default function EmployeeLoansModule({
       {/* ── SubTab 1: Loans ── */}
       {activeTab === 'loans' && (
         <div style={{ marginTop: '16px' }}>
+          {/* Loan Window Notice */}
+          {!isWithinLoanWindow ? (
+            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', padding: '12px 16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ fontSize: '20px' }}>⚠️</span>
+              <div>
+                <strong style={{ color: '#991b1b', fontSize: '13.5px' }}>باب التقديم على السلف مغلق حالياً:</strong>
+                <p style={{ margin: '2px 0 0', color: '#b91c1c', fontSize: '12.5px' }}>
+                  فترة التقديم على السلف المسموح بها هي من يوم <strong>{startDay}</strong> إلى يوم <strong>{endDay}</strong> من كل شهر ميلادي (تاريخ اليوم: {currentDay} من الشهر).
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '10px 14px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ fontSize: '18px' }}>🟢</span>
+              <span style={{ color: '#166534', fontSize: '13px', fontWeight: 'bold' }}>
+                باب التقديم على السلف مفتوح حالياً (من يوم {startDay} حتى يوم {endDay} من الشهر).
+              </span>
+            </div>
+          )}
+
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
             <h4 style={{ margin: 0, fontSize: '15px' }}>طلب سلفة مالية (شهرية / مقسمة)</h4>
-            <button className="btn btn-start" onClick={() => setShowLoanForm(!showLoanForm)} style={{ fontSize: '13px', padding: '6px 14px' }}>
+            <button
+              className={`btn ${isWithinLoanWindow ? 'btn-start' : 'btn-ghost'}`}
+              onClick={() => {
+                if (!isWithinLoanWindow) {
+                  showToast(`⚠️ التقديم متاح فقط من يوم ${startDay} إلى يوم ${endDay} من كل شهر.`);
+                  return;
+                }
+                setShowLoanForm(!showLoanForm);
+              }}
+              style={{ fontSize: '13px', padding: '6px 14px' }}
+            >
               {showLoanForm ? '✕ إغلاق' : '+ طلب سلفة جديد'}
             </button>
           </div>
@@ -199,6 +253,14 @@ export default function EmployeeLoansModule({
           {showLoanForm && (
             <form onSubmit={handleSubmitLoan} className="card settings-card fade-in" style={{ padding: '16px', background: 'var(--surface-muted)', border: '1px solid var(--primary-tint)', marginBottom: '20px' }}>
               <h5 style={{ margin: '0 0 12px', fontSize: '14px', color: 'var(--primary)' }}>💳 تقديم طلب سلفة جديد</h5>
+
+              {loanType === 'monthly' && (
+                <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '10px 14px', marginBottom: '14px', fontSize: '13px', color: '#1e40af' }}>
+                  💵 <strong>الحد الأقصى المسموح به للسلفة الشهرية:</strong>{' '}
+                  <span style={{ color: '#1d4ed8', fontWeight: '900', fontSize: '14px' }}>{maxAllowedMonthlyLoan} ج.م</span>{' '}
+                  (يمثل نسبة {maxSalaryPercent}% من راتبك الأساسي {basicSalary} ج.م). يمكنك طلب هذا المبلغ أو أقل.
+                </div>
+              )}
 
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
                 <div className="field" style={{ flex: '1 1 180px' }}>
@@ -214,8 +276,9 @@ export default function EmployeeLoansModule({
                   <input
                     type="number"
                     min="50"
+                    max={loanType === 'monthly' && maxAllowedMonthlyLoan > 0 ? maxAllowedMonthlyLoan : undefined}
                     step="50"
-                    placeholder="مثال: 1000"
+                    placeholder={`مثال: ${loanType === 'monthly' && maxAllowedMonthlyLoan > 0 ? Math.min(1000, maxAllowedMonthlyLoan) : 1000}`}
                     value={loanAmount}
                     onChange={(e) => setLoanAmount(e.target.value)}
                     required
