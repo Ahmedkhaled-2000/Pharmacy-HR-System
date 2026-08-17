@@ -27,7 +27,7 @@ export default function SidebarLayout({
 
   const defaultAdminItems = [
     { id: 'dashboard', label: 'لوحة التحكم', icon: '📊' },
-    { id: 'notifications', label: 'الإشعارات والتنبيهات', icon: '🔔', badge: (notifications || []).filter(n => !n.read).length },
+    { id: 'notifications', label: 'الإشعارات والتنبيهات', icon: '🔔', badge: ((notifications || []).filter(n => !n.read).length) + pendingCount },
     { id: 'requests', label: 'الطلبات', icon: '📋', badge: pendingCount },
     { id: 'employees', label: 'الموظفين', icon: '👥' },
     { id: 'branches', label: 'الفروع', icon: '🏢' },
