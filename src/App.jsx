@@ -2298,7 +2298,7 @@ export default function App() {
   };
 
   // Check Permissions Helper
-  const getEmpPermission = (empId, permKey) => {
+  const getEmpPermission = (empOrId, permKey) => {
     if (isAdminLoggedIn && viewMode === 'admin') return true; // Admin view mode has full unrestricted access
     
     // إذا كان الموظف مسجل الدخول من صفحة البصمة (Kiosk) وتم تأكيد الـ IP، يتم تخطي صلاحيات تسجيل الحضور
@@ -2317,15 +2317,21 @@ export default function App() {
       allowKey = 'allow' + permKey.slice(3);
     }
 
-    // 1. Check Specific Employee Permissions Override
-    if (empId && empId !== 'all') {
-      const emp = (state.employees || []).find((e) => e.id === empId);
-      if (emp && emp.permissions) {
-        if (emp.permissions[canKey] !== undefined) return Boolean(emp.permissions[canKey]);
-        if (emp.permissions[allowKey] !== undefined) return Boolean(emp.permissions[allowKey]);
-        if (emp.permissions[permKey] !== undefined) return Boolean(emp.permissions[permKey]);
-      }
-      const empSettingsPerms = state.orgSettings?.empPermissions?.[empId];
+    // Resolve target employee and identifiers
+    let targetEmp = null;
+    let empId = null;
+    if (typeof empOrId === 'object' && empOrId !== null) {
+      targetEmp = empOrId;
+      empId = empOrId.id || empOrId.code;
+    } else if (empOrId && empOrId !== 'all') {
+      empId = String(empOrId);
+      targetEmp = (state.employees || []).find((e) => String(e.id) === empId || String(e.code) === empId);
+    }
+
+    // 1. Check Specific Individual Employee Permission Override in orgSettings.empPermissions
+    if (empId) {
+      const empSettingsPerms = state.orgSettings?.empPermissions?.[empId] 
+        || (targetEmp && (state.orgSettings?.empPermissions?.[targetEmp.id] || state.orgSettings?.empPermissions?.[targetEmp.code]));
       if (empSettingsPerms) {
         if (empSettingsPerms[canKey] !== undefined) return Boolean(empSettingsPerms[canKey]);
         if (empSettingsPerms[allowKey] !== undefined) return Boolean(empSettingsPerms[allowKey]);
@@ -2333,13 +2339,22 @@ export default function App() {
       }
     }
 
-    // 2. Check Global Default Permissions
-    const globalPerms = state.orgSettings?.permissions || {};
-    if (globalPerms[canKey] !== undefined) return Boolean(globalPerms[canKey]);
-    if (globalPerms[allowKey] !== undefined) return Boolean(globalPerms[allowKey]);
-    if (globalPerms[permKey] !== undefined) return Boolean(globalPerms[permKey]);
+    // 2. Check Employee's own permissions object
+    if (targetEmp && targetEmp.permissions) {
+      if (targetEmp.permissions[canKey] !== undefined) return Boolean(targetEmp.permissions[canKey]);
+      if (targetEmp.permissions[allowKey] !== undefined) return Boolean(targetEmp.permissions[allowKey]);
+      if (targetEmp.permissions[permKey] !== undefined) return Boolean(targetEmp.permissions[permKey]);
+    }
 
-    // Default Fallbacks
+    // 3. Check Global Default Organization Permissions
+    const globalPerms = state.orgSettings?.permissions;
+    if (globalPerms) {
+      if (globalPerms[canKey] !== undefined) return Boolean(globalPerms[canKey]);
+      if (globalPerms[allowKey] !== undefined) return Boolean(globalPerms[allowKey]);
+      if (globalPerms[permKey] !== undefined) return Boolean(globalPerms[permKey]);
+    }
+
+    // 4. Default Standard System Fallbacks (Allowed by default unless explicitly restricted)
     if (['canAddAdjustment', 'allowAddAdjustment', 'canManualShift', 'allowManualShift', 'canEditShift', 'allowEditShift'].includes(permKey)) return false;
     return true;
   };

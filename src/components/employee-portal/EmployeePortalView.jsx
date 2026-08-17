@@ -611,21 +611,21 @@ export default function EmployeePortalView({
     return { startDate, endDate };
   };
 
-  const canViewSalary = emp && getEmpPermission ? Boolean(getEmpPermission(emp.id, 'canViewSalary')) : true;
-  const canStartEnd = emp && getEmpPermission ? Boolean(getEmpPermission(emp.id, 'canStartEnd')) : true;
-  const canLivePunch = emp && getEmpPermission ? Boolean(getEmpPermission(emp.id, 'canLivePunch')) : true;
-  const canManualShift = emp && getEmpPermission ? Boolean(getEmpPermission(emp.id, 'canManualShift')) : false;
-  const canEditShift = emp && getEmpPermission ? Boolean(getEmpPermission(emp.id, 'canEditShift')) : false;
-  const canAddAdjustment = emp && getEmpPermission ? Boolean(getEmpPermission(emp.id, 'canAddAdjustment')) : false;
-  const canViewAdjustments = emp && getEmpPermission ? Boolean(getEmpPermission(emp.id, 'canViewAdjustments')) : true;
-  const canExportExcel = emp && getEmpPermission ? Boolean(getEmpPermission(emp.id, 'canExportExcel')) : true;
-  const canApplyLoan = emp && getEmpPermission ? Boolean(getEmpPermission(emp.id, 'canApplyLoan')) : true;
-  const canApplyLeave = emp && getEmpPermission ? Boolean(getEmpPermission(emp.id, 'canApplyLeave')) : true;
-  const canApplyPermission = emp && getEmpPermission ? Boolean(getEmpPermission(emp.id, 'canApplyPermission')) : true;
-  const canApplySwap = emp && getEmpPermission ? Boolean(getEmpPermission(emp.id, 'canApplySwap')) : true;
-  const canViewBylaws = emp && getEmpPermission ? Boolean(getEmpPermission(emp.id, 'canViewBylaws')) : true;
-  const canSubmitComplaint = emp && getEmpPermission ? Boolean(getEmpPermission(emp.id, 'canSubmitComplaint')) : true;
-  const canViewRoster = emp && getEmpPermission ? Boolean(getEmpPermission(emp.id, 'canViewRoster')) : true;
+  const canViewSalary = Boolean(getEmpPermission ? getEmpPermission(emp, 'canViewSalary') : true);
+  const canStartEnd = Boolean(getEmpPermission ? getEmpPermission(emp, 'canStartEnd') : true);
+  const canLivePunch = Boolean(getEmpPermission ? getEmpPermission(emp, 'canLivePunch') : true);
+  const canManualShift = Boolean(getEmpPermission ? getEmpPermission(emp, 'canManualShift') : false);
+  const canEditShift = Boolean(getEmpPermission ? getEmpPermission(emp, 'canEditShift') : false);
+  const canAddAdjustment = Boolean(getEmpPermission ? getEmpPermission(emp, 'canAddAdjustment') : false);
+  const canViewAdjustments = Boolean(getEmpPermission ? getEmpPermission(emp, 'canViewAdjustments') : true);
+  const canExportExcel = Boolean(getEmpPermission ? getEmpPermission(emp, 'canExportExcel') : true);
+  const canApplyLoan = Boolean(getEmpPermission ? getEmpPermission(emp, 'canApplyLoan') : true);
+  const canApplyLeave = Boolean(getEmpPermission ? getEmpPermission(emp, 'canApplyLeave') : true);
+  const canApplyPermission = Boolean(getEmpPermission ? getEmpPermission(emp, 'canApplyPermission') : true);
+  const canApplySwap = Boolean(getEmpPermission ? getEmpPermission(emp, 'canApplySwap') : true);
+  const canViewBylaws = Boolean(getEmpPermission ? getEmpPermission(emp, 'canViewBylaws') : true);
+  const canSubmitComplaint = Boolean(getEmpPermission ? getEmpPermission(emp, 'canSubmitComplaint') : true);
+  const canViewRoster = Boolean(getEmpPermission ? getEmpPermission(emp, 'canViewRoster') : true);
 
   const isCustomMode = filterMode === 'range' || filterMode === 'custom';
   const effectiveStart = (rangeStart && rangeEnd) ? (rangeStart <= rangeEnd ? rangeStart : rangeEnd) : (rangeStart || rangeEnd);
