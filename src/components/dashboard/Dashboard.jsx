@@ -89,8 +89,8 @@ export default function Dashboard({
       return true;
     }
     // Monthly cutoff calculation
-    const sDay = orgSettings.payrollPayoutStartDay || 27;
-    const eDay = orgSettings.payrollPayoutEndDay || (orgSettings.payrollPayoutDay || 26);
+    const sDay = orgSettings.payrollPayoutStartDay !== undefined ? parseInt(orgSettings.payrollPayoutStartDay, 10) : 26;
+    const eDay = orgSettings.payrollPayoutEndDay !== undefined ? parseInt(orgSettings.payrollPayoutEndDay, 10) : (orgSettings.payrollPayoutDay || 25);
     if (!monthPicker || monthPicker.length !== 7) return d.startsWith(todayDate.slice(0, 7));
     const [y, m] = monthPicker.split('-').map(Number);
     let prevY = y;

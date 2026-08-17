@@ -1674,8 +1674,8 @@ export default function App() {
 
   const getPayrollCutoffRange = (monthStr) => {
     if (!monthStr || monthStr.length !== 7) return null;
-    const sDay = state.orgSettings?.payrollPayoutStartDay || 27;
-    const eDay = state.orgSettings?.payrollPayoutEndDay || (state.orgSettings?.payrollPayoutDay || 26);
+    const sDay = state.orgSettings?.payrollPayoutStartDay !== undefined ? parseInt(state.orgSettings.payrollPayoutStartDay, 10) : 26;
+    const eDay = state.orgSettings?.payrollPayoutEndDay !== undefined ? parseInt(state.orgSettings.payrollPayoutEndDay, 10) : (state.orgSettings?.payrollPayoutDay || 25);
     const [y, m] = monthStr.split('-').map(Number);
     let prevY = y;
     let prevM = m - 1;

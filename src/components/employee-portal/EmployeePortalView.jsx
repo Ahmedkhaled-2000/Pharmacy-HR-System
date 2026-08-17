@@ -578,8 +578,8 @@ export default function EmployeePortalView({
   // ─────────────────────────────────────────
   const getPayrollCutoffRange = (monthStr) => {
     if (!monthStr || monthStr.length !== 7) return null;
-    const sDay = orgSettings?.payrollPayoutStartDay || state?.orgSettings?.payrollPayoutStartDay || 27;
-    const eDay = orgSettings?.payrollPayoutEndDay || state?.orgSettings?.payrollPayoutEndDay || (state?.orgSettings?.payrollPayoutDay || 26);
+    const sDay = orgSettings?.payrollPayoutStartDay !== undefined ? parseInt(orgSettings.payrollPayoutStartDay, 10) : (state?.orgSettings?.payrollPayoutStartDay !== undefined ? parseInt(state.orgSettings.payrollPayoutStartDay, 10) : 26);
+    const eDay = orgSettings?.payrollPayoutEndDay !== undefined ? parseInt(orgSettings.payrollPayoutEndDay, 10) : (state?.orgSettings?.payrollPayoutEndDay !== undefined ? parseInt(state.orgSettings.payrollPayoutEndDay, 10) : 25);
     const [y, m] = monthStr.split('-').map(Number);
     let prevY = y;
     let prevM = m - 1;
@@ -625,14 +625,34 @@ export default function EmployeePortalView({
         .sort((a, b) => (a.date === b.date ? a.timeIn.localeCompare(b.timeIn) : a.date.localeCompare(b.date)))
     : [];
 
-  const empAdjs = emp
-    ? (state.adjustments || []).filter(
-        (a) => (a.employeeId === emp.id || a.employeeId === 'all') && filterFn(a.date)
-      )
-    : [];
+  const empAdjs = useMemo(() => {
+    if (!emp) return [];
+    const directAdjs = (state.adjustments || []).filter(
+      (a) => (String(a.employeeId) === String(emp.id) || a.employeeId === 'all') && filterFn(a.date)
+    );
+    const penaltyReqs = (state.requests || [])
+      .filter((r) => String(r.employeeId) === String(emp.id) && (r.type === 'penalty' || r.type === 'adjustment') && filterFn(r.date || r.createdAt?.slice(0, 10)))
+      .map((r) => ({
+        id: r.id,
+        employeeId: r.employeeId,
+        type: r.subType === 'bonus' ? 'bonus' : 'deduction',
+        amount: parseFloat(r.amount) || 0,
+        date: r.date || r.createdAt?.slice(0, 10),
+        reason: r.reason || r.details || r.notes || 'جزاء إداري',
+        details: r.reason || r.details || r.notes || 'جزاء إداري',
+        createdAt: r.createdAt
+      }));
+
+    const map = new Map();
+    directAdjs.forEach((a) => map.set(String(a.id), a));
+    penaltyReqs.forEach((p) => {
+      if (!map.has(String(p.id))) map.set(String(p.id), p);
+    });
+    return Array.from(map.values());
+  }, [emp, state.adjustments, state.requests, filterFn]);
 
   const bonuses = empAdjs.filter((a) => a.type === 'bonus');
-  const deductions = empAdjs.filter((a) => a.type === 'deduction');
+  const deductions = empAdjs.filter((a) => a.type === 'deduction' || a.type === 'penalty');
 
   const branchDetail = emp && selectedBranchId
     ? emp.branchesDetails?.find((b) => String(b.branchId) === String(selectedBranchId))
@@ -853,11 +873,8 @@ export default function EmployeePortalView({
         {/* Nav Items */}
         <nav style={{ flex: 1, padding: '10px 0', overflowY: 'auto' }}>
           {NAV_ITEMS.filter((item) => {
-            if (emp.branchesDetails && emp.branchesDetails.length > 1 && !selectedBranchId) {
-              if (!['dashboard', 'salary', 'roster', 'shifts'].includes(item.id)) return false;
-            }
-            if (item.id === 'salary' && !canViewSalary) return false;
-            if (item.id === 'adjustments' && !canViewAdjustments) return false;
+            if (item.id === 'salary' && canViewSalary === false) return false;
+            if (item.id === 'adjustments' && canViewAdjustments === false) return false;
             return true;
           }).map((item) => {
             const isActive = activeTab === item.id;

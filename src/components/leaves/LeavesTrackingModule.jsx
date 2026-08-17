@@ -129,7 +129,7 @@ export default function LeavesTrackingModule({
       {/* Detailed Leaves Modal for Employee */}
       {selectedEmpModal && (
         <div className="modal-backdrop">
-          <div className="modal-content card" style={{ maxWidth: '750px', padding: '24px', maxHeight: '85vh', overflowY: 'auto' }}>
+          <div className="modal-content card" style={{ maxWidth: '1050px', width: '96%', padding: '28px', maxHeight: '90vh', overflowY: 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <div>
                 <h3 style={{ margin: 0, color: '#0d9488' }}>

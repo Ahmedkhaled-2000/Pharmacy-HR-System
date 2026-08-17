@@ -35,13 +35,23 @@ export default function PayslipPrintModal({
   const workHoursPerDay = targetBranchDetails ? (parseFloat(targetBranchDetails.workHoursPerDay) || 8) : (parseFloat(emp.workHoursPerDay) || 8);
   const workDaysPerMonth = targetBranchDetails ? (parseFloat(targetBranchDetails.workDaysPerMonth) || 26) : (parseFloat(emp.workDaysPerMonth) || 26);
 
-  // Filter shifts for this month
-  const empShifts = shifts.filter((s) => s.employeeId === emp.id && s.date.startsWith(month));
-  const empAdjs = adjustments.filter((a) => (a.employeeId === emp.id || a.employeeId === 'all') && a.date.startsWith(month));
+  // Calculate cutoff range for this month
+  const sDay = orgSettings?.payrollPayoutStartDay || state?.orgSettings?.payrollPayoutStartDay || 26;
+  const eDay = orgSettings?.payrollPayoutEndDay || state?.orgSettings?.payrollPayoutEndDay || 25;
+  const [cutoffY, cutoffM] = (month || new Date().toISOString().slice(0, 7)).split('-').map(Number);
+  let prevY = cutoffY;
+  let prevM = cutoffM - 1;
+  if (prevM < 1) { prevM = 12; prevY = cutoffY - 1; }
+  const startCutoff = `${prevY}-${String(prevM).padStart(2, '0')}-${String(sDay).padStart(2, '0')}`;
+  const endCutoff = `${cutoffY}-${String(cutoffM).padStart(2, '0')}-${String(eDay).padStart(2, '0')}`;
+
+  // Filter shifts and adjustments for this cutoff period
+  const empShifts = shifts.filter((s) => s.employeeId === emp.id && s.date >= startCutoff && s.date <= endCutoff);
+  const empAdjs = adjustments.filter((a) => (a.employeeId === emp.id || a.employeeId === 'all') && a.date >= startCutoff && a.date <= endCutoff);
 
   // Use computeEmpSummary for accurate calculations including branch selection
   const summary = computeEmpSummary 
-    ? computeEmpSummary(emp.id, (d) => d.startsWith(month), month, selectedBranchId)
+    ? computeEmpSummary(emp.id, null, month, selectedBranchId)
     : { hours: 0, dailyRate: 0, rate: 0, baseEarnings: 0, totalBonus: 0, totalDeduction: 0, absenceDeduction: 0, netSalary: 0, perBranch: {} };
 
   const totalHours = summary.hours || 0;
@@ -127,8 +137,11 @@ export default function PayslipPrintModal({
               <div style={{ background: '#0d9488', color: '#fff', padding: '6px 16px', borderRadius: '8px', fontWeight: 'bold', fontSize: '15px', fontFamily: 'Cairo' }}>
                 كشف مرتب شهر {fullMonthLabel}
               </div>
-              <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
-                تاريخ الإصدار: {new Date().toISOString().slice(0, 10)}
+              <div style={{ fontSize: '12px', color: '#0f766e', marginTop: '4px', fontWeight: 'bold' }}>
+                الفترة: من {startCutoff} إلى {endCutoff}
+              </div>
+              <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                تاريخ الطباعة: {new Date().toISOString().slice(0, 10)}
               </div>
             </div>
           </div>

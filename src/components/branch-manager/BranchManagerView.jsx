@@ -137,8 +137,8 @@ export default function BranchManagerView({
     } catch {}
   }, [filterMode, selectedMonth, customFromDate, customToDate]);
 
-  const cutoffStartDay = state.orgSettings?.payrollPayoutStartDay || 27;
-  const cutoffEndDay = state.orgSettings?.payrollPayoutEndDay || (state.orgSettings?.payrollPayoutDay || 26);
+  const cutoffStartDay = state.orgSettings?.payrollPayoutStartDay !== undefined ? parseInt(state.orgSettings.payrollPayoutStartDay, 10) : 26;
+  const cutoffEndDay = state.orgSettings?.payrollPayoutEndDay !== undefined ? parseInt(state.orgSettings.payrollPayoutEndDay, 10) : (state.orgSettings?.payrollPayoutDay || 25);
 
   const matchesDateRange = (dateStr) => {
     if (!dateStr) return false;

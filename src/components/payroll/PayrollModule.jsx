@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import PayslipPrintModal from './PayslipPrintModal';
+import { fmt } from '../../utils/formatters';
 
 export default function PayrollModule({
   state,
@@ -20,6 +21,15 @@ export default function PayrollModule({
   const [payoutStartDay, setPayoutStartDay] = useState(state.orgSettings?.payrollPayoutStartDay || 26);
   const [payoutEndDay, setPayoutEndDay] = useState(state.orgSettings?.payrollPayoutEndDay || 25);
 
+  useEffect(() => {
+    if (state.orgSettings?.payrollPayoutStartDay !== undefined) {
+      setPayoutStartDay(state.orgSettings.payrollPayoutStartDay);
+    }
+    if (state.orgSettings?.payrollPayoutEndDay !== undefined) {
+      setPayoutEndDay(state.orgSettings.payrollPayoutEndDay);
+    }
+  }, [state.orgSettings?.payrollPayoutStartDay, state.orgSettings?.payrollPayoutEndDay]);
+
   const employees = state.employees || [];
   const branches = state.branches || [];
 
@@ -37,7 +47,7 @@ export default function PayrollModule({
     setPayoutEndDay(eVal);
 
     const updatedSettings = {
-      ...state.orgSettings,
+      ...(state.orgSettings || {}),
       payrollPayoutStartDay: sVal,
       payrollPayoutEndDay: eVal,
       payrollPayoutDay: eVal
@@ -45,7 +55,7 @@ export default function PayrollModule({
     const updatedState = { ...state, orgSettings: updatedSettings };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.(`✅ تم تحديد فترة تقفيل الرواتب من يوم ${sVal} للشهر السابق حتى يوم ${eVal} للشهر الحالي`);
+    showToast?.(`✅ تم حفظ وتثبيت فترة تقفيل الرواتب من يوم ${sVal} للشهر السابق حتى يوم ${eVal} للشهر الحالي بنجاح`);
   };
 
   // Helper to compute date range description for monthPicker
@@ -117,26 +127,41 @@ export default function PayrollModule({
         </div>
       </div>
 
-      {/* Search and Filters */}
+      {/* Filter and Search Toolbar */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
-        <h4 style={{ margin: 0, fontSize: '16px' }}>👥 جميع كشوف رواتب الموظفين (اضغط لمعاينة مفردات المرتب)</h4>
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
           <input
             type="text"
-            placeholder="🔍 بحث باسم الموظف أو الكود..."
+            placeholder="🔍 بحث بالاسم أو الكود..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+            style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', width: '220px' }}
           />
-          <select value={filterBranch} onChange={(e) => setFilterBranch(e.target.value)} style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}>
-            <option value="">-- جميع الفروع --</option>
+
+          <select
+            value={filterBranch}
+            onChange={(e) => setFilterBranch(e.target.value)}
+            style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+          >
+            <option value="">🏢 جميع الفروع</option>
             {branches.map((b) => (
               <option key={b.id} value={b.id}>{b.name}</option>
             ))}
           </select>
         </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <label style={{ fontSize: '13px', fontWeight: 'bold' }}>شهر التقرير:</label>
+          <input
+            type="month"
+            value={monthPicker}
+            onChange={(e) => setMonthPicker(e.target.value)}
+            style={{ padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border)' }}
+          />
+        </div>
       </div>
 
+      {/* Employees Payroll Table */}
       <div className="table-responsive">
         <table className="bylaws-table">
           <thead>
@@ -144,15 +169,16 @@ export default function PayrollModule({
               <th>كود الموظف</th>
               <th>اسم الموظف</th>
               <th>الفرع</th>
-              <th>أيام العمل</th>
+              <th>ساعات العمل بالفترة</th>
               <th>المكافآت</th>
-              <th>الخصومات</th>
+              <th>الخصومات والغيابات</th>
+              <th>صافي المرتب المستحق للفترة</th>
               <th>العمليات والطباعة</th>
             </tr>
           </thead>
           <tbody>
             {filteredEmployees.length === 0 ? (
-              <tr><td colSpan="7" style={{ textAlign: 'center', color: 'var(--muted)', padding: '24px' }}>لا يوجد موظفين يطابقون خيارات البحث.</td></tr>
+              <tr><td colSpan="8" style={{ textAlign: 'center', color: 'var(--muted)', padding: '24px' }}>لا يوجد موظفين يطابقون خيارات البحث.</td></tr>
             ) : (
               filteredEmployees.map((emp) => {
                 const isMultiBranch = emp.branchesDetails && emp.branchesDetails.length > 1;
@@ -170,14 +196,30 @@ export default function PayrollModule({
                   }
                 }
 
+                const empSum = state.computeEmpSummary
+                  ? state.computeEmpSummary(emp.id, null, monthPicker, filterBranch || null)
+                  : { hours: 0, baseEarnings: 0, totalBonus: 0, totalDeduction: 0, absenceDeduction: 0, netSalary: 0 };
+
+                const totalDed = (empSum.totalDeduction || 0) + (empSum.absenceDeduction || 0);
+
                 return (
                   <tr key={emp.id}>
                     <td style={{ fontWeight: '700' }}>{emp.code}</td>
                     <td style={{ fontWeight: '800' }}>{emp.name}</td>
                     <td>{branchNameDisplay}</td>
-                    <td>{emp.workDaysPerMonth || 26} يوم</td>
-                    <td style={{ color: '#16a34a', fontWeight: '700' }}>0 ج.م</td>
-                    <td style={{ color: '#dc2626', fontWeight: '700' }}>0 ج.م</td>
+                    <td>
+                      <strong style={{ color: '#0f766e' }}>{empSum.hours || 0} ساعة</strong>
+                      <div style={{ fontSize: '11.5px', color: 'var(--muted)' }}>({fmt(empSum.baseEarnings)} ج.م)</div>
+                    </td>
+                    <td style={{ color: '#16a34a', fontWeight: '700' }}>
+                      {empSum.totalBonus > 0 ? `+${fmt(empSum.totalBonus)} ج.م` : '0 ج.م'}
+                    </td>
+                    <td style={{ color: '#dc2626', fontWeight: '700' }}>
+                      {totalDed > 0 ? `-${fmt(totalDed)} ج.م` : '0 ج.م'}
+                    </td>
+                    <td style={{ color: '#0d9488', fontWeight: '900', fontSize: '15px' }}>
+                      {fmt(empSum.netSalary)} ج.م
+                    </td>
                     <td>
                       <button
                         className="btn btn-start"
@@ -198,22 +240,22 @@ export default function PayrollModule({
       {/* Salary Detail & PDF Modal */}
       {selectedEmpModal && (() => {
         const empSalary = parseFloat(selectedEmpModal.salary) || 0;
-        const empDays = parseFloat(selectedEmpModal.workDaysPerMonth) || 26;
-        const empHours = parseFloat(selectedEmpModal.workHoursPerDay) || 8;
-        const empDailyRate = empDays > 0 ? (empSalary * empHours) / empDays : 0;
-        const empDailyHourly = empHours > 0 ? empDailyRate / empHours : (empDays > 0 ? empSalary / empDays : empSalary);
-        const empMonthly = empDailyRate * empDays;
+        const empSum = state.computeEmpSummary
+          ? state.computeEmpSummary(selectedEmpModal.id, null, monthPicker, filterBranch || null)
+          : { hours: 0, baseEarnings: 0, totalBonus: 0, totalDeduction: 0, absenceDeduction: 0, netSalary: 0, absenceDaysCount: 0 };
+
+        const totalDed = (empSum.totalDeduction || 0) + (empSum.absenceDeduction || 0);
 
         return (
           <div className="modal-backdrop">
-            <div className="modal-content card" style={{ maxWidth: '750px', padding: '24px', maxHeight: '88vh', overflowY: 'auto' }}>
+            <div className="modal-content card" style={{ maxWidth: '1100px', width: '96%', padding: '28px', maxHeight: '90vh', overflowY: 'auto' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <div>
                   <h3 style={{ margin: 0, color: '#0d9488' }}>
                     💵 كشف مفردات راتب الموظف: {selectedEmpModal.name}
                   </h3>
                   <span style={{ fontSize: '13px', color: 'var(--muted)' }}>
-                    كود الموظف: {selectedEmpModal.code} | المسمى الوظيفي: {selectedEmpModal.jobTitle}
+                    كود الموظف: {selectedEmpModal.code} | المسمى الوظيفي: {selectedEmpModal.jobTitle} | الفترة: <strong style={{ color: '#0f766e' }}>{getPeriodDesc()}</strong>
                   </span>
                 </div>
                 <button className="btn btn-ghost" onClick={() => setSelectedEmpModal(null)}>✕ إغلاق</button>
@@ -222,27 +264,34 @@ export default function PayrollModule({
               {/* Salary Breakdown */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px', marginBottom: '20px' }}>
                 <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '10px', border: '1px solid var(--border)' }}>
-                  <span style={{ fontSize: '12px', color: 'var(--muted)' }}>1. سعر الساعة الشهري (المدخل)</span>
+                  <span style={{ fontSize: '12px', color: 'var(--muted)' }}>1. سعر الساعة الشهري</span>
                   <h4 style={{ margin: '4px 0 0 0', color: 'var(--primary-dark)' }}>{empSalary.toLocaleString()} ج.م</h4>
                 </div>
 
                 <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '10px', border: '1px solid var(--border)' }}>
-                  <span style={{ fontSize: '12px', color: 'var(--muted)' }}>2. سعر اليوم = ({empSalary} × {empHours}) ÷ {empDays}</span>
-                  <h4 style={{ margin: '4px 0 0 0', color: 'var(--primary-dark)' }}>{empDailyRate.toLocaleString()} ج.م / يوم</h4>
+                  <span style={{ fontSize: '12px', color: 'var(--muted)' }}>2. ساعات العمل بالفترة</span>
+                  <h4 style={{ margin: '4px 0 0 0', color: 'var(--primary-dark)' }}>{empSum.hours || 0} ساعة ({fmt(empSum.baseEarnings)} ج.م)</h4>
                 </div>
 
                 <div style={{ background: '#f0fdf4', padding: '14px', borderRadius: '10px', border: '1px solid #bbf7d0' }}>
-                  <span style={{ fontSize: '12px', color: '#166534' }}>3. سعر الساعة اليومي = {empDailyRate} ÷ {empHours}</span>
+                  <span style={{ fontSize: '12px', color: '#166534' }}>3. المكافآت والحوافز</span>
                   <h4 style={{ margin: '4px 0 0 0', color: '#15803d' }}>
-                    {empDailyHourly.toLocaleString()} ج.م / ساعة
+                    +{fmt(empSum.totalBonus)} ج.م
+                  </h4>
+                </div>
+
+                <div style={{ background: '#fef2f2', padding: '14px', borderRadius: '10px', border: '1px solid #fecaca' }}>
+                  <span style={{ fontSize: '12px', color: '#991b1b' }}>4. إجمالي الخصومات والغيابات</span>
+                  <h4 style={{ margin: '4px 0 0 0', color: '#dc2626' }}>
+                    -{fmt(totalDed)} ج.م
                   </h4>
                 </div>
               </div>
 
               <div style={{ background: 'linear-gradient(135deg, #0d9488, #0f766e)', color: '#fff', padding: '18px', borderRadius: '12px', textAlign: 'center', marginBottom: '20px' }}>
-                <span style={{ fontSize: '13px', opacity: 0.9 }}>صافي الراتب الأساسي الشهري المقدر ({empDailyRate.toLocaleString()} × {empDays} يوم)</span>
+                <span style={{ fontSize: '13px', opacity: 0.9 }}>صافي الراتب النهائي المستحق للفترة ({getPeriodDesc()})</span>
                 <h2 style={{ margin: '6px 0 0 0', fontSize: '28px', fontWeight: '900' }}>
-                  {empMonthly.toLocaleString()} ج.م
+                  {fmt(empSum.netSalary)} ج.م
                 </h2>
               </div>
 

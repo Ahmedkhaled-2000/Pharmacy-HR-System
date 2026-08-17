@@ -80,6 +80,13 @@ export default function EmployeeLoansModule({
   };
 
   // Monthly & Installment Loan Rule Calculations from Settings
+  const isMultiBranch = emp?.branchesDetails && emp.branchesDetails.length > 1;
+  const [loanTargetBranchId, setLoanTargetBranchId] = useState(() => {
+    if (selectedBranchId) return selectedBranchId;
+    if (emp?.branchesDetails && emp.branchesDetails.length > 0) return emp.branchesDetails[0].branchId;
+    return emp?.branchId || '';
+  });
+
   const currentDay = new Date().getDate();
   const startDay = state.orgSettings?.loanRequestStartDay !== undefined ? parseInt(state.orgSettings.loanRequestStartDay, 10) : 1;
   const endDay = state.orgSettings?.loanRequestEndDay !== undefined ? parseInt(state.orgSettings.loanRequestEndDay, 10) : 10;
@@ -88,16 +95,17 @@ export default function EmployeeLoansModule({
     ? (currentDay >= startDay && currentDay <= endDay)
     : (currentDay >= startDay || currentDay <= endDay);
 
-  // Full monthly salary calculation: (سعر الساعة × عدد ساعات العمل)
-  const hourlyRate = parseFloat(emp?.salary) || 0;
-  const workHours = parseFloat(emp?.workHoursPerDay) || 8;
-  const fullMonthlySalary = (emp?.branchesDetails && emp.branchesDetails.length > 0)
-    ? emp.branchesDetails.reduce((acc, bd) => {
-        const bRate = parseFloat(bd.salary || emp.salary || 0);
-        const bHours = parseFloat(bd.workHoursPerDay || workHours);
-        return acc + (bRate * bHours);
-      }, 0)
-    : (hourlyRate * workHours);
+  // Full monthly salary calculation based on the selected target branch: (سعر الساعة للفرع × عدد ساعات العمل للفرع)
+  const activeBranchDetail = (emp?.branchesDetails && emp.branchesDetails.length > 0)
+    ? (emp.branchesDetails.find((bd) => String(bd.branchId) === String(loanTargetBranchId)) || emp.branchesDetails[0])
+    : null;
+
+  const hourlyRate = activeBranchDetail ? (parseFloat(activeBranchDetail.salary) || 0) : (parseFloat(emp?.salary) || 0);
+  const workHours = activeBranchDetail ? (parseFloat(activeBranchDetail.workHoursPerDay) || 8) : (parseFloat(emp?.workHoursPerDay) || 8);
+  const fullMonthlySalary = hourlyRate * workHours;
+
+  const targetBranchObj = (state.branches || []).find((b) => String(b.id) === String(loanTargetBranchId || emp?.branchId));
+  const branchNameDisplay = targetBranchObj ? targetBranchObj.name : (activeBranchDetail?.branchName || 'الفرع الرئيسي');
 
   const maxSalaryPercent = state.orgSettings?.maxMonthlyLoanSalaryPercent !== undefined ? parseFloat(state.orgSettings.maxMonthlyLoanSalaryPercent) : 50;
   const maxAllowedMonthlyLoan = Math.round((fullMonthlySalary * maxSalaryPercent) / 100);
@@ -121,29 +129,40 @@ export default function EmployeeLoansModule({
     }
 
     if (loanType === 'monthly' && maxAllowedMonthlyLoan > 0 && amount > maxAllowedMonthlyLoan) {
-      showToast(`⚠️ المبلغ المطلوب (${amount} ج.م) يتجاوز الحد الأقصى المسموح به للسلفة الشهرية (${maxAllowedMonthlyLoan} ج.م - نسبة ${maxSalaryPercent}% من الراتب الشهري الكامل ${fullMonthlySalary} ج.م). يرجى طلب مبلغ في حدود النسبة المسموحة.`);
+      showToast(`⚠️ المبلغ المطلوب (${amount} ج.م) يتجاوز الحد الأقصى المسموح به للسلفة الشهرية (${maxAllowedMonthlyLoan} ج.م - نسبة ${maxSalaryPercent}% من الراتب الشهري للفرع ${fullMonthlySalary} ج.م). يرجى طلب مبلغ في حدود النسبة المسموحة.`);
       return;
     }
 
     if (loanType === 'installment' && maxAllowedInstallmentLoan > 0 && amount > maxAllowedInstallmentLoan) {
-      showToast(`⚠️ المبلغ المطلوب (${amount} ج.م) يتجاوز الحد الأقصى المسموح به للسلفة المقسطة (${maxAllowedInstallmentLoan} ج.م - يمثل ${maxInstallmentMultiplier} أضعاف الراتب الشهري الكامل ${fullMonthlySalary} ج.م). يرجى طلب مبلغ في حدود الحد الأقصى.`);
+      showToast(`⚠️ المبلغ المطلوب (${amount} ج.م) يتجاوز الحد الأقصى المسموح به للسلفة المقسطة (${maxAllowedInstallmentLoan} ج.م - يمثل ${maxInstallmentMultiplier} أضعاف الراتب الشهري للفرع ${fullMonthlySalary} ج.م). يرجى طلب مبلغ في حدود الحد الأقصى.`);
       return;
     }
+
+    const effectiveBranchId = loanTargetBranchId || selectedBranchId || emp.branchId;
 
     const newLoanReq = {
       id: 'loan_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
       employeeId: emp.id,
       employeeName: emp.name,
       employeeCode: emp.code,
-      branchId: selectedBranchId || emp.branchId,
+      branchId: effectiveBranchId,
+      branchName: branchNameDisplay,
+      hourlyRate,
+      workHours,
+      fullMonthlySalary,
       type: 'loan',
       loanType, // 'monthly' or 'installment'
       amount,
       monthsCount: loanType === 'installment' ? Math.max(2, parseInt(monthsCount, 10) || 2) : 1,
       monthlyDeduction: loanType === 'installment' ? Math.round((amount / (parseInt(monthsCount, 10) || 2)) * 100) / 100 : amount,
-      reason: loanReason.trim(),
+      reason: loanReason.trim() || 'طلب سلفة',
+      details: loanReason.trim() || 'طلب سلفة',
       targetApproval: 'admin_only', // للإدارة العليا فقط
       status: 'pending',
+      adminApproved: false,
+      paidAmount: 0,
+      paymentsHistory: [],
+      date: todayStr(),
       createdAt: new Date().toISOString()
     };
 
@@ -274,19 +293,42 @@ export default function EmployeeLoansModule({
 
               {loanType === 'monthly' ? (
                 <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '10px 14px', marginBottom: '14px', fontSize: '13px', color: '#1e40af' }}>
-                  💵 <strong>الحد الأقصى المسموح به للسلفة الشهرية:</strong>{' '}
+                  💵 <strong>الحد الأقصى المسموح به للسلفة الشهرية {isMultiBranch ? `(لفرع ${branchNameDisplay})` : ''}:</strong>{' '}
                   <span style={{ color: '#1d4ed8', fontWeight: '900', fontSize: '14px' }}>{maxAllowedMonthlyLoan.toLocaleString()} ج.م</span>{' '}
-                  (يمثل نسبة {maxSalaryPercent}% من راتبك الشهري الكامل {fullMonthlySalary.toLocaleString()} ج.م [سعر الساعة {hourlyRate} ج.م × {workHours} س]). يمكنك طلب هذا المبلغ أو أقل.
+                  (يمثل نسبة {maxSalaryPercent}% من راتبك الشهري للفرع {fullMonthlySalary.toLocaleString()} ج.م [سعر الساعة {hourlyRate} ج.م × {workHours} س]). يمكنك طلب هذا المبلغ أو أقل.
                 </div>
               ) : (
                 <div style={{ background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: '8px', padding: '10px 14px', marginBottom: '14px', fontSize: '13px', color: '#0f766e' }}>
-                  💰 <strong>الحد الأقصى المسموح به للسلفة المقسطة:</strong>{' '}
+                  💰 <strong>الحد الأقصى المسموح به للسلفة المقسطة {isMultiBranch ? `(لفرع ${branchNameDisplay})` : ''}:</strong>{' '}
                   <span style={{ color: '#0d9488', fontWeight: '900', fontSize: '14px' }}>{maxAllowedInstallmentLoan.toLocaleString()} ج.م</span>{' '}
-                  (يمثل {maxInstallmentMultiplier} أضعاف راتبك الشهري الكامل {fullMonthlySalary.toLocaleString()} ج.م). يمكنك طلب هذا المبلغ أو أقل.
+                  (يمثل {maxInstallmentMultiplier} أضعاف راتبك الشهري للفرع {fullMonthlySalary.toLocaleString()} ج.م). يمكنك طلب هذا المبلغ أو أقل.
                 </div>
               )}
 
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
+                {isMultiBranch && (
+                  <div className="field" style={{ flex: '1 1 200px' }}>
+                    <label style={{ fontWeight: '700' }}>📍 الفرع المعني بطلب السلفة</label>
+                    <select
+                      value={loanTargetBranchId}
+                      onChange={(e) => setLoanTargetBranchId(e.target.value)}
+                      style={{ fontWeight: 'bold', color: 'var(--primary-dark)' }}
+                    >
+                      {emp.branchesDetails.map((bd) => {
+                        const brObj = (state.branches || []).find((b) => String(b.id) === String(bd.branchId));
+                        const bName = brObj ? brObj.name : (bd.branchName || `فرع ${bd.branchId}`);
+                        const bRate = parseFloat(bd.salary) || 0;
+                        const bHours = parseFloat(bd.workHoursPerDay) || 8;
+                        return (
+                          <option key={bd.branchId} value={bd.branchId}>
+                            {bName} (سعر الساعة: {bRate} ج.م | {bHours} س)
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                )}
+
                 <div className="field" style={{ flex: '1 1 180px' }}>
                   <label style={{ fontWeight: '700' }}>نظام السلفة</label>
                   <select value={loanType} onChange={(e) => setLoanType(e.target.value)}>
