@@ -395,54 +395,6 @@ export default function SettingsModule({
             </div>
           </div>
 
-          <h4 style={{ margin: '24px 0 14px', fontFamily: 'Cairo', color: 'var(--primary-dark)' }}>
-            💳 ضوابط وشروط تقديم السلف الشهرية للموظفين
-          </h4>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px', marginBottom: '20px', background: 'var(--surface-muted)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>
-            <div className="field">
-              <label>يوم بداية فترة طلب السلف الشهرية (من يوم)</label>
-              <input
-                type="number"
-                min="1"
-                max="31"
-                value={loanRequestStartDay}
-                onChange={(e) => setLoanRequestStartDay(e.target.value)}
-                placeholder="مثال: 1"
-                required
-              />
-              <span style={{ fontSize: '11.5px', color: 'var(--muted)', marginTop: '3px' }}>اليوم من الشهر الميلادي الذي يفتح فيه باب التقديم</span>
-            </div>
-
-            <div className="field">
-              <label>يوم نهاية فترة طلب السلف الشهرية (إلى يوم)</label>
-              <input
-                type="number"
-                min="1"
-                max="31"
-                value={loanRequestEndDay}
-                onChange={(e) => setLoanRequestEndDay(e.target.value)}
-                placeholder="مثال: 10"
-                required
-              />
-              <span style={{ fontSize: '11.5px', color: 'var(--muted)', marginTop: '3px' }}>اليوم من الشهر الميلادي الذي يغلق بعده التقديم</span>
-            </div>
-
-            <div className="field">
-              <label>الحد الأقصى للسلفة الشهرية (% من الراتب الأساسي)</label>
-              <input
-                type="number"
-                min="1"
-                max="100"
-                value={maxMonthlyLoanSalaryPercent}
-                onChange={(e) => setMaxMonthlyLoanSalaryPercent(e.target.value)}
-                placeholder="مثال: 50%"
-                required
-              />
-              <span style={{ fontSize: '11.5px', color: 'var(--muted)', marginTop: '3px' }}>النسبة المسموح بها من الراتب الأساسي الشهري (مثال: 50%)</span>
-            </div>
-          </div>
-
           <h4 style={{ margin: '20px 0 16px', fontFamily: 'Cairo', color: 'var(--primary-dark)' }}>
             🔐 بيانات دخول المدير العام وحماية اللوحة
           </h4>

@@ -591,14 +591,14 @@ export default function EmployeePortalView({
 
   const emp = currentEmpUser ? ((state && state.employees && state.employees.find((e) => e.id === currentEmpUser?.id)) || currentEmpUser) : null;
 
-  const canViewSalary = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canViewSalary') && getEmpPermission(emp.id, 'allowViewSalary')) : true;
-  const canStartEnd = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canStartEnd') && getEmpPermission(emp.id, 'allowStartEnd')) : true;
-  const canLivePunch = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canLivePunch') && getEmpPermission(emp.id, 'allowLivePunch')) : true;
-  const canManualShift = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canManualShift') && getEmpPermission(emp.id, 'allowManualShift')) : true;
-  const canEditShift = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canEditShift') && getEmpPermission(emp.id, 'allowEditShift')) : true;
-  const canAddAdjustment = emp && getEmpPermission ? getEmpPermission(emp.id, 'canAddAdjustment') : false;
-  const canViewAdjustments = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canViewAdjustments') && getEmpPermission(emp.id, 'allowViewAdjustments')) : true;
-  const canExportExcel = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canExportExcel') && getEmpPermission(emp.id, 'allowExportExcel')) : true;
+  const canViewSalary = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canViewSalary') !== false && getEmpPermission(emp.id, 'allowViewSalary') !== false) : true;
+  const canStartEnd = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canStartEnd') !== false && getEmpPermission(emp.id, 'allowStartEnd') !== false) : true;
+  const canLivePunch = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canLivePunch') !== false && getEmpPermission(emp.id, 'allowLivePunch') !== false) : true;
+  const canManualShift = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canManualShift') !== false && getEmpPermission(emp.id, 'allowManualShift') !== false) : true;
+  const canEditShift = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canEditShift') !== false && getEmpPermission(emp.id, 'allowEditShift') !== false) : true;
+  const canAddAdjustment = emp && getEmpPermission ? getEmpPermission(emp.id, 'canAddAdjustment') === true : false;
+  const canViewAdjustments = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canViewAdjustments') !== false && getEmpPermission(emp.id, 'allowViewAdjustments') !== false) : true;
+  const canExportExcel = emp && getEmpPermission ? (getEmpPermission(emp.id, 'canExportExcel') !== false && getEmpPermission(emp.id, 'allowExportExcel') !== false) : true;
 
   const rangeFilterValid = filterMode === 'range' && rangeStart && rangeEnd && rangeStart <= rangeEnd;
   const filterFn = rangeFilterValid
@@ -1814,7 +1814,7 @@ export default function EmployeePortalView({
                               <tr key={a.id}>
                                 <td>{a.date}</td>
                                 <td className="money" style={{ color: 'var(--success)', fontWeight: 700 }}>+{fmt(a.amount)} ج.م</td>
-                                <td>{a.description || '—'}</td>
+                                <td>{a.reason || a.description || a.notes || a.details || '—'}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -1843,7 +1843,7 @@ export default function EmployeePortalView({
                               <tr key={a.id}>
                                 <td>{a.date}</td>
                                 <td className="money" style={{ color: 'var(--danger)', fontWeight: 700 }}>-{fmt(a.amount)} ج.م</td>
-                                <td>{a.description || '—'}</td>
+                                <td>{a.reason || a.description || a.notes || a.details || '—'}</td>
                               </tr>
                             ))}
                           </tbody>

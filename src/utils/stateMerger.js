@@ -76,13 +76,15 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
   if (!localItem) return remoteItem;
   if (!remoteItem) return localItem;
 
-  // 1. أولوية حالة الاعتماد/الرفض: إذا تغيرت الحالة من pending إلى approved/rejected
-  const finalStatuses = ['approved', 'rejected', 'cancelled', 'canceled', 'completed', 'resolved', 'closed'];
-  const localIsFinal = finalStatuses.includes(localItem.status);
-  const remoteIsFinal = finalStatuses.includes(remoteItem.status);
-
-  if (localIsFinal && !remoteIsFinal) return { ...remoteItem, ...localItem };
-  if (remoteIsFinal && !localIsFinal) return { ...localItem, ...remoteItem };
+  // 1. معالجة وحسم سجلات السداد والمدفوعات للسلف
+  let mergedPaymentsHistory = undefined;
+  let mergedPaidAmount = undefined;
+  if (Array.isArray(localItem.paymentsHistory) || Array.isArray(remoteItem.paymentsHistory) || localItem.paidAmount !== undefined || remoteItem.paidAmount !== undefined) {
+    mergedPaymentsHistory = mergeArrays(localItem.paymentsHistory || [], remoteItem.paymentsHistory || [], { prefix: 'pay' });
+    const localPaid = parseFloat(localItem.paidAmount) || 0;
+    const remotePaid = parseFloat(remoteItem.paidAmount) || 0;
+    mergedPaidAmount = Math.max(localPaid, remotePaid);
+  }
 
   // 2. دمج الرسائل والردود الفرعية في حالة الشكاوى أو الملاحظات (replies / comments)
   let mergedReplies = undefined;
@@ -90,14 +92,48 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
     mergedReplies = mergeArrays(localItem.replies || [], remoteItem.replies || [], { prefix: 'rep' });
   }
 
-  // 3. مقارنة التوقيت الزمني للأحدث
+  // 3. أولوية حالة الاعتماد/الرفض والسداد:
+  const statusRanks = {
+    pending: 10,
+    pending_admin: 15,
+    rejected: 30,
+    cancelled: 30,
+    canceled: 30,
+    approved: 40,
+    partial: 50,
+    paid: 60,
+    completed: 60,
+    closed: 60
+  };
+
+  const localRank = statusRanks[localItem.status] || 0;
+  const remoteRank = statusRanks[remoteItem.status] || 0;
+
+  // 4. مقارنة التوقيت الزمني للأحدث
   const localTime = getItemTime(localItem);
   const remoteTime = getItemTime(remoteItem);
 
-  let baseWinner = remoteTime > localTime ? { ...localItem, ...remoteItem } : { ...remoteItem, ...localItem };
+  let baseWinner;
+  if (localRank !== remoteRank && (localRank >= 30 || remoteRank >= 30)) {
+    baseWinner = localRank >= remoteRank ? { ...remoteItem, ...localItem } : { ...localItem, ...remoteItem };
+  } else {
+    baseWinner = remoteTime > localTime ? { ...localItem, ...remoteItem } : { ...remoteItem, ...localItem };
+  }
 
   if (mergedReplies) {
     baseWinner.replies = mergedReplies;
+  }
+  if (mergedPaymentsHistory) {
+    baseWinner.paymentsHistory = mergedPaymentsHistory;
+  }
+  if (mergedPaidAmount !== undefined) {
+    baseWinner.paidAmount = mergedPaidAmount;
+    const totalAmount = parseFloat(baseWinner.amount || baseWinner.totalAmount) || 0;
+    if (mergedPaidAmount >= totalAmount && totalAmount > 0) {
+      baseWinner.status = 'paid';
+    } else if (mergedPaidAmount > 0) {
+      baseWinner.status = 'partial';
+    }
   }
 
   return baseWinner;

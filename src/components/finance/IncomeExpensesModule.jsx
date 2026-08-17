@@ -25,8 +25,10 @@ export default function IncomeExpensesModule({
 
   const filteredList = transactions.filter((t) => {
     if (activeTab !== 'all' && t.type !== activeTab) return false;
-    const activeBranchFilter = currentBranch?.id || selectedBranch;
-    if (activeBranchFilter && t.branchId !== activeBranchFilter) return false;
+    if (isBranchRole) {
+      return String(t.branchId) === String(currentBranch?.id);
+    }
+    if (selectedBranch && String(t.branchId) !== String(selectedBranch)) return false;
     return true;
   });
 
@@ -87,7 +89,7 @@ export default function IncomeExpensesModule({
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
 
-    showToast?.('✅ تم إضافة البند وتعديل الإجماليات وإشعار الإدارة العليا بنجاح!');
+    showToast?.('✅ تم إضافة البند وتعديل الإجماليات بنجاح!');
     setCategory('');
     setAmount('');
     setNotes('');
@@ -108,10 +110,14 @@ export default function IncomeExpensesModule({
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
         <div>
           <h2 style={{ fontFamily: 'Cairo', margin: 0, color: 'var(--text)' }}>
-            📈 إدارة المصروفات والإيرادات للشركة
+            {isBranchRole
+              ? `📈 إدارة المصروفات والإيرادات — فرع ${currentBranch?.name || ''}`
+              : '📈 إدارة المصروفات والإيرادات للشركة'}
           </h2>
           <p style={{ margin: '4px 0 0 0', color: 'var(--muted)', fontSize: '14px' }}>
-            تسجيل وإدارة حركة المصروفات والإيرادات اليومية وتأثيرها المباشر على الحسابات العامة
+            {isBranchRole
+              ? `تسجيل وإدارة حركة المصروفات والإيرادات اليومية الخاصة بفرع ${currentBranch?.name || ''}`
+              : 'تسجيل وإدارة حركة المصروفات والإيرادات اليومية وتأثيرها المباشر على الحسابات العامة'}
           </p>
         </div>
 
@@ -120,7 +126,7 @@ export default function IncomeExpensesModule({
             className={`btn ${activeTab === 'all' ? 'btn-start' : 'btn-ghost'}`}
             onClick={() => setActiveTab('all')}
           >
-            📋 الكشف الشامل ({transactions.length})
+            📋 الكشف الشامل ({filteredList.length})
           </button>
           <button
             className={`btn ${activeTab === 'income' ? 'btn-start' : 'btn-ghost'}`}
@@ -158,7 +164,7 @@ export default function IncomeExpensesModule({
       {/* Add New Transaction Form */}
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', padding: '20px', borderRadius: '14px', marginBottom: '24px' }}>
         <h4 style={{ margin: '0 0 14px 0', fontFamily: 'Cairo', color: 'var(--primary-dark)' }}>
-          ➕ تسجيل حركة مالية جديدة (إيراد / مصروف)
+          ➕ تسجيل حركة مالية جديدة ({isBranchRole ? `فرع ${currentBranch?.name || ''}` : 'إيراد / مصروف'})
         </h4>
 
         <form onSubmit={handleSubmit} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px' }}>
@@ -196,12 +202,21 @@ export default function IncomeExpensesModule({
 
           <div className="field">
             <label>الفرع المعني</label>
-            <select value={branchId} onChange={(e) => setBranchId(e.target.value)}>
-              <option value="">-- عام / المركز الرئيسي --</option>
-              {branches.map((b) => (
-                <option key={b.id} value={b.id}>{b.name}</option>
-              ))}
-            </select>
+            {isBranchRole ? (
+              <input
+                type="text"
+                value={`📍 فرع ${currentBranch?.name || ''}`}
+                disabled
+                style={{ background: 'var(--surface-muted)', fontWeight: 'bold', border: '1px solid var(--border)', color: 'var(--primary-dark)' }}
+              />
+            ) : (
+              <select value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+                <option value="">-- عام / المركز الرئيسي --</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            )}
           </div>
 
           <div className="field">
@@ -222,16 +237,20 @@ export default function IncomeExpensesModule({
 
       {/* Filter and Table */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
-        <h4 style={{ margin: 0, fontSize: '16px' }}>📋 سجل الحركة المالية الحالية</h4>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          <label style={{ fontSize: '13px', fontWeight: 'bold' }}>تصفية بالفرع:</label>
-          <select value={selectedBranch} onChange={(e) => setSelectedBranch(e.target.value)} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)' }}>
-            <option value="">-- جميع الفروع --</option>
-            {branches.map((b) => (
-              <option key={b.id} value={b.id}>{b.name}</option>
-            ))}
-          </select>
-        </div>
+        <h4 style={{ margin: 0, fontSize: '16px' }}>
+          📋 سجل الحركة المالية الحالية {isBranchRole ? `(فرع ${currentBranch?.name || ''})` : ''}
+        </h4>
+        {!isBranchRole && (
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <label style={{ fontSize: '13px', fontWeight: 'bold' }}>تصفية بالفرع:</label>
+            <select value={selectedBranch} onChange={(e) => setSelectedBranch(e.target.value)} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)' }}>
+              <option value="">-- جميع الفروع --</option>
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       <div className="table-responsive">

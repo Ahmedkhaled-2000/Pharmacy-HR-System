@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { fmt } from '../../utils/formatters';
 
 export default function LoansMedsModule({
@@ -19,6 +19,38 @@ export default function LoansMedsModule({
   const [amount, setAmount] = useState('');
   const [notes, setNotes] = useState('');
 
+  // Loan Rules & Thresholds State
+  const orgSettings = state.orgSettings || {};
+  const [ruleStartDay, setRuleStartDay] = useState(orgSettings.loanRequestStartDay || 1);
+  const [ruleEndDay, setRuleEndDay] = useState(orgSettings.loanRequestEndDay || 10);
+  const [ruleMaxMonthlyPercent, setRuleMaxMonthlyPercent] = useState(orgSettings.maxMonthlyLoanSalaryPercent || 50);
+  const [ruleMaxInstallmentMultiplier, setRuleMaxInstallmentMultiplier] = useState(
+    orgSettings.maxInstallmentLoanSalaryMultiplier !== undefined ? orgSettings.maxInstallmentLoanSalaryMultiplier : 2
+  );
+
+  useEffect(() => {
+    if (state.orgSettings) {
+      if (state.orgSettings.loanRequestStartDay !== undefined) setRuleStartDay(state.orgSettings.loanRequestStartDay);
+      if (state.orgSettings.loanRequestEndDay !== undefined) setRuleEndDay(state.orgSettings.loanRequestEndDay);
+      if (state.orgSettings.maxMonthlyLoanSalaryPercent !== undefined) setRuleMaxMonthlyPercent(state.orgSettings.maxMonthlyLoanSalaryPercent);
+      if (state.orgSettings.maxInstallmentLoanSalaryMultiplier !== undefined) setRuleMaxInstallmentMultiplier(state.orgSettings.maxInstallmentLoanSalaryMultiplier);
+    }
+  }, [state.orgSettings]);
+
+  const handleSaveLoanSettings = async () => {
+    const updatedSettings = {
+      ...(state.orgSettings || {}),
+      loanRequestStartDay: parseInt(ruleStartDay) || 1,
+      loanRequestEndDay: parseInt(ruleEndDay) || 10,
+      maxMonthlyLoanSalaryPercent: parseFloat(ruleMaxMonthlyPercent) || 50,
+      maxInstallmentLoanSalaryMultiplier: parseFloat(ruleMaxInstallmentMultiplier) || 2
+    };
+    const updatedState = { ...state, orgSettings: updatedSettings };
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+    showToast?.('✅ تم حفظ ضوابط وشروط السلف للموظفين وتطبيقها فوراً!');
+  };
+
   const employees = state.employees || [];
   const branches = state.branches || [];
 
@@ -31,8 +63,12 @@ export default function LoansMedsModule({
       )
       .map((r) => {
         const directLoan = directLoans.find((l) => String(l.id) === String(r.id));
-        const history = directLoan?.paymentsHistory || r.paymentsHistory || r.payments || r.paidHistory || [];
-        const paidAmount = directLoan?.paidAmount !== undefined ? directLoan.paidAmount : (r.paidAmount || 0);
+        const history = (directLoan?.paymentsHistory && directLoan.paymentsHistory.length > 0)
+          ? directLoan.paymentsHistory
+          : (r.paymentsHistory || r.payments || r.paidHistory || []);
+        const paidAmount = directLoan?.paidAmount !== undefined
+          ? Math.max(parseFloat(directLoan.paidAmount) || 0, parseFloat(r.paidAmount) || 0)
+          : (parseFloat(r.paidAmount) || 0);
 
         const isMeds = r.type === 'meds' || r.type === 'credit_medicine';
 
@@ -59,20 +95,22 @@ export default function LoansMedsModule({
       });
 
     const map = new Map();
-    directLoans.forEach((item) => {
-      map.set(item.id, item);
-    });
     allLoanRequests.forEach((item) => {
-      const existing = map.get(item.id);
-      if (existing) {
-        map.set(item.id, {
-          ...existing,
-          ...item,
-          paymentsHistory: (existing.paymentsHistory && existing.paymentsHistory.length > 0) ? existing.paymentsHistory : item.paymentsHistory
-        });
-      } else {
-        map.set(item.id, item);
-      }
+      map.set(String(item.id), item);
+    });
+    directLoans.forEach((l) => {
+      const idStr = String(l.id);
+      const existing = map.get(idStr);
+      const paid = Math.max(parseFloat(l.paidAmount) || 0, parseFloat(existing?.paidAmount) || 0);
+      const history = (l.paymentsHistory && l.paymentsHistory.length > 0) ? l.paymentsHistory : (existing?.paymentsHistory || []);
+      const total = parseFloat(l.amount || existing?.amount) || 0;
+      map.set(idStr, {
+        ...(existing || {}),
+        ...l,
+        paidAmount: paid,
+        paymentsHistory: history,
+        status: paid >= total && total > 0 ? 'paid' : (paid > 0 ? 'partial' : (l.status || existing?.status || 'approved'))
+      });
     });
     return Array.from(map.values());
   }, [state.loans, state.requests, employees]);
@@ -131,6 +169,7 @@ export default function LoansMedsModule({
       reason: notes.trim() || (entryType === 'loan' ? 'سلفة مالية مسجلة من الإدارة العليا' : 'مشتريات أدوية آجل'),
       date: new Date().toISOString().slice(0, 10),
       createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
       paymentsHistory: []
     };
 
@@ -163,7 +202,8 @@ export default function LoansMedsModule({
       date: new Date().toISOString().slice(0, 10),
       amount: parsedPay,
       note: noteStr.trim() || 'سداد دفعة سلفة مالية/آجل',
-      type: 'manual'
+      type: 'manual',
+      createdAt: new Date().toISOString()
     };
 
     // Update in state.loans
@@ -179,7 +219,8 @@ export default function LoansMedsModule({
           ...l,
           paidAmount: newPaid,
           paymentsHistory: history,
-          status: newPaid >= total ? 'paid' : 'partial'
+          status: newPaid >= total ? 'paid' : 'partial',
+          updatedAt: new Date().toISOString()
         };
       }
       return l;
@@ -198,7 +239,8 @@ export default function LoansMedsModule({
           ...r,
           paidAmount: newPaid,
           paymentsHistory: history,
-          status: newPaid >= total ? 'paid' : 'partial'
+          status: newPaid >= total ? 'paid' : 'partial',
+          updatedAt: new Date().toISOString()
         };
       }
       return r;
@@ -214,7 +256,9 @@ export default function LoansMedsModule({
           employeeId: targetReq.employeeId,
           amount: parseFloat(targetReq.amount) || 0,
           paidAmount: parseFloat(targetReq.paidAmount) || 0,
-          paymentsHistory: targetReq.paymentsHistory || [payRecord]
+          paymentsHistory: targetReq.paymentsHistory || [payRecord],
+          status: (parseFloat(targetReq.paidAmount) || 0) >= (parseFloat(targetReq.amount) || 0) ? 'paid' : 'partial',
+          updatedAt: new Date().toISOString()
         });
       }
     }
@@ -330,6 +374,83 @@ export default function LoansMedsModule({
         <button className="btn btn-start" onClick={handleAutoCloseMonthlyInstallments} style={{ background: '#0f766e', padding: '8px 16px', fontSize: '13.5px' }}>
           ⚡ تطبيق الخصم وسداد الأقساط الشهري التلقائي
         </button>
+      </div>
+
+      {/* ── Loan Application Rules & Thresholds ── */}
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', padding: '20px', borderRadius: '14px', marginBottom: '24px', boxShadow: '0 2px 10px rgba(0,0,0,0.03)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+          <div>
+            <h4 style={{ margin: 0, fontFamily: 'Cairo', color: 'var(--primary-dark)', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '15px' }}>
+              💳 ضوابط وشروط تقديم السلف للموظفين
+            </h4>
+            <p style={{ margin: '4px 0 0', color: 'var(--muted)', fontSize: '13px' }}>
+              تحديد نافذة التقديم الشهرية، والنسبة القصوى للسلف الشهرية، ومضاعف الراتب المسموح به للسلف المقسطة.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="btn btn-start"
+            style={{ padding: '8px 20px', fontSize: '13.5px' }}
+            onClick={handleSaveLoanSettings}
+          >
+            💾 حفظ وتطبيق الضوابط
+          </button>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '14px' }}>
+          <div className="field">
+            <label style={{ fontSize: '12.5px', fontWeight: 'bold' }}>📅 بداية فترة السلف الشهرية (يوم)</label>
+            <input
+              type="number"
+              min="1"
+              max="31"
+              value={ruleStartDay}
+              onChange={(e) => setRuleStartDay(e.target.value)}
+              placeholder="1"
+            />
+            <small style={{ color: 'var(--muted)', fontSize: '11px' }}>يوم الشهر الذي يفتح فيه باب التقديم</small>
+          </div>
+
+          <div className="field">
+            <label style={{ fontSize: '12.5px', fontWeight: 'bold' }}>📅 نهاية فترة السلف الشهرية (يوم)</label>
+            <input
+              type="number"
+              min="1"
+              max="31"
+              value={ruleEndDay}
+              onChange={(e) => setRuleEndDay(e.target.value)}
+              placeholder="10"
+            />
+            <small style={{ color: 'var(--muted)', fontSize: '11px' }}>يوم الشهر الذي يغلق بعده التقديم</small>
+          </div>
+
+          <div className="field">
+            <label style={{ fontSize: '12.5px', fontWeight: 'bold' }}>📊 نسبة السلفة الشهرية (% من الراتب الكامل)</label>
+            <input
+              type="number"
+              min="1"
+              max="100"
+              value={ruleMaxMonthlyPercent}
+              onChange={(e) => setRuleMaxMonthlyPercent(e.target.value)}
+              placeholder="50"
+            />
+            <small style={{ color: 'var(--muted)', fontSize: '11px' }}>نسبة من الراتب الشهري (سعر الساعة × ساعات العمل)</small>
+          </div>
+
+          <div className="field">
+            <label style={{ fontSize: '12.5px', fontWeight: 'bold' }}>💰 الحد الأقصى للسلفة المقسطة (أضعاف الراتب)</label>
+            <input
+              type="number"
+              min="1"
+              max="20"
+              step="0.5"
+              value={ruleMaxInstallmentMultiplier}
+              onChange={(e) => setRuleMaxInstallmentMultiplier(e.target.value)}
+              placeholder="2"
+            />
+            <small style={{ color: 'var(--muted)', fontSize: '11px' }}>عدد أضعاف الراتب الشهري الكامل (مثال: 2 أو 3 أضعاف)</small>
+          </div>
+        </div>
       </div>
 
       {/* Add New Loan / Meds Entry */}

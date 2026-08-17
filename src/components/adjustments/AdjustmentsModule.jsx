@@ -25,7 +25,38 @@ export default function AdjustmentsModule({
 
   const employees = state.employees || [];
   const branches = state.branches || [];
-  const adjustments = state.adjustments || [];
+
+  const adjustments = React.useMemo(() => {
+    const list = [...(state.adjustments || [])];
+    const penaltyReqs = (state.requests || [])
+      .filter((r) => r.type === 'penalty' || r.type === 'adjustment')
+      .map((r) => {
+        const emp = employees.find((e) => String(e.id) === String(r.employeeId));
+        return {
+          id: r.id,
+          employeeId: r.employeeId,
+          employeeName: r.employeeName || emp?.name || '',
+          employeeCode: r.employeeCode || emp?.code || '',
+          branchId: r.branchId || emp?.branchId || null,
+          type: r.subType === 'bonus' ? 'bonus' : 'penalty',
+          amount: parseFloat(r.amount) || 0,
+          date: r.date || (r.createdAt ? r.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10)),
+          reason: r.reason || r.details || r.notes || 'جزاء إداري',
+          details: r.reason || r.details || r.notes || 'جزاء إداري',
+          status: r.status,
+          createdAt: r.createdAt || new Date().toISOString()
+        };
+      });
+
+    const map = new Map();
+    list.forEach((a) => map.set(String(a.id), a));
+    penaltyReqs.forEach((p) => {
+      if (!map.has(String(p.id))) {
+        map.set(String(p.id), p);
+      }
+    });
+    return Array.from(map.values());
+  }, [state.adjustments, state.requests, employees]);
 
   // Filtered employees list
   const filteredEmployees = employees.filter((emp) => {
@@ -68,7 +99,7 @@ export default function AdjustmentsModule({
       createdAt: new Date().toISOString()
     };
 
-    const updatedAdjs = [newAdj, ...adjustments];
+    const updatedAdjs = [newAdj, ...(state.adjustments || [])];
     const updatedState = { ...state, adjustments: updatedAdjs };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
@@ -80,13 +111,21 @@ export default function AdjustmentsModule({
   };
 
   const handleDeleteAdjustment = async (adjId) => {
-    if (!window.confirm('هل أنت متأكد من رغبتك في حذف هذا البند الإداري؟')) return;
-    const updatedAdjs = adjustments.filter((a) => a.id !== adjId);
+    if (!window.confirm('هل أنت متأكد من رغبتك في حذف وإلغاء هذا الجزاء / البند الإداري نهائياً؟')) return;
+    const updatedAdjs = (state.adjustments || []).filter((a) => String(a.id) !== String(adjId));
+    const updatedReqs = (state.requests || []).filter((r) => String(r.id) !== String(adjId));
+    const updatedNotifs = (state.notifications || []).filter((n) => String(n.requestId) !== String(adjId) && String(n.id) !== String(adjId));
     const updatedDeleted = [...(state._deletedIds || []), String(adjId)];
-    const updatedState = { ...state, adjustments: updatedAdjs, _deletedIds: updatedDeleted };
+    const updatedState = {
+      ...state,
+      adjustments: updatedAdjs,
+      requests: updatedReqs,
+      notifications: updatedNotifs,
+      _deletedIds: updatedDeleted
+    };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.('🗑️ تم حذف البند المالي بنجاح نهائياً');
+    showToast?.('🗑️ تم حذف وإلغاء الجزاء / البند المالي بنجاح نهائياً');
   };
 
   return (

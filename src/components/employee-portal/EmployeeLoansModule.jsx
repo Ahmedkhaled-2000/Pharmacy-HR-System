@@ -79,7 +79,7 @@ export default function EmployeeLoansModule({
     }, 0);
   };
 
-  // Monthly Loan Rule Calculations from Settings
+  // Monthly & Installment Loan Rule Calculations from Settings
   const currentDay = new Date().getDate();
   const startDay = state.orgSettings?.loanRequestStartDay !== undefined ? parseInt(state.orgSettings.loanRequestStartDay, 10) : 1;
   const endDay = state.orgSettings?.loanRequestEndDay !== undefined ? parseInt(state.orgSettings.loanRequestEndDay, 10) : 10;
@@ -88,9 +88,22 @@ export default function EmployeeLoansModule({
     ? (currentDay >= startDay && currentDay <= endDay)
     : (currentDay >= startDay || currentDay <= endDay);
 
+  // Full monthly salary calculation: (سعر الساعة × عدد ساعات العمل)
+  const hourlyRate = parseFloat(emp?.salary) || 0;
+  const workHours = parseFloat(emp?.workHoursPerDay) || 8;
+  const fullMonthlySalary = (emp?.branchesDetails && emp.branchesDetails.length > 0)
+    ? emp.branchesDetails.reduce((acc, bd) => {
+        const bRate = parseFloat(bd.salary || emp.salary || 0);
+        const bHours = parseFloat(bd.workHoursPerDay || workHours);
+        return acc + (bRate * bHours);
+      }, 0)
+    : (hourlyRate * workHours);
+
   const maxSalaryPercent = state.orgSettings?.maxMonthlyLoanSalaryPercent !== undefined ? parseFloat(state.orgSettings.maxMonthlyLoanSalaryPercent) : 50;
-  const basicSalary = parseFloat(emp?.salary) || 0;
-  const maxAllowedMonthlyLoan = Math.round((basicSalary * maxSalaryPercent) / 100);
+  const maxAllowedMonthlyLoan = Math.round((fullMonthlySalary * maxSalaryPercent) / 100);
+
+  const maxInstallmentMultiplier = state.orgSettings?.maxInstallmentLoanSalaryMultiplier !== undefined ? parseFloat(state.orgSettings.maxInstallmentLoanSalaryMultiplier) : 2;
+  const maxAllowedInstallmentLoan = Math.round(fullMonthlySalary * maxInstallmentMultiplier);
 
   // Submit Loan Request
   const handleSubmitLoan = async (e) => {
@@ -108,7 +121,12 @@ export default function EmployeeLoansModule({
     }
 
     if (loanType === 'monthly' && maxAllowedMonthlyLoan > 0 && amount > maxAllowedMonthlyLoan) {
-      showToast(`⚠️ المبلغ المطلوب (${amount} ج.م) يتجاوز الحد الأقصى المسموح به (${maxAllowedMonthlyLoan} ج.م - نسبة ${maxSalaryPercent}% من الراتب الأساسي). يرجى طلب مبلغ في حدود النسبة المسموحة.`);
+      showToast(`⚠️ المبلغ المطلوب (${amount} ج.م) يتجاوز الحد الأقصى المسموح به للسلفة الشهرية (${maxAllowedMonthlyLoan} ج.م - نسبة ${maxSalaryPercent}% من الراتب الشهري الكامل ${fullMonthlySalary} ج.م). يرجى طلب مبلغ في حدود النسبة المسموحة.`);
+      return;
+    }
+
+    if (loanType === 'installment' && maxAllowedInstallmentLoan > 0 && amount > maxAllowedInstallmentLoan) {
+      showToast(`⚠️ المبلغ المطلوب (${amount} ج.م) يتجاوز الحد الأقصى المسموح به للسلفة المقسطة (${maxAllowedInstallmentLoan} ج.م - يمثل ${maxInstallmentMultiplier} أضعاف الراتب الشهري الكامل ${fullMonthlySalary} ج.م). يرجى طلب مبلغ في حدود الحد الأقصى.`);
       return;
     }
 
@@ -254,11 +272,17 @@ export default function EmployeeLoansModule({
             <form onSubmit={handleSubmitLoan} className="card settings-card fade-in" style={{ padding: '16px', background: 'var(--surface-muted)', border: '1px solid var(--primary-tint)', marginBottom: '20px' }}>
               <h5 style={{ margin: '0 0 12px', fontSize: '14px', color: 'var(--primary)' }}>💳 تقديم طلب سلفة جديد</h5>
 
-              {loanType === 'monthly' && (
+              {loanType === 'monthly' ? (
                 <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '10px 14px', marginBottom: '14px', fontSize: '13px', color: '#1e40af' }}>
                   💵 <strong>الحد الأقصى المسموح به للسلفة الشهرية:</strong>{' '}
-                  <span style={{ color: '#1d4ed8', fontWeight: '900', fontSize: '14px' }}>{maxAllowedMonthlyLoan} ج.م</span>{' '}
-                  (يمثل نسبة {maxSalaryPercent}% من راتبك الأساسي {basicSalary} ج.م). يمكنك طلب هذا المبلغ أو أقل.
+                  <span style={{ color: '#1d4ed8', fontWeight: '900', fontSize: '14px' }}>{maxAllowedMonthlyLoan.toLocaleString()} ج.م</span>{' '}
+                  (يمثل نسبة {maxSalaryPercent}% من راتبك الشهري الكامل {fullMonthlySalary.toLocaleString()} ج.م [سعر الساعة {hourlyRate} ج.م × {workHours} س]). يمكنك طلب هذا المبلغ أو أقل.
+                </div>
+              ) : (
+                <div style={{ background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: '8px', padding: '10px 14px', marginBottom: '14px', fontSize: '13px', color: '#0f766e' }}>
+                  💰 <strong>الحد الأقصى المسموح به للسلفة المقسطة:</strong>{' '}
+                  <span style={{ color: '#0d9488', fontWeight: '900', fontSize: '14px' }}>{maxAllowedInstallmentLoan.toLocaleString()} ج.م</span>{' '}
+                  (يمثل {maxInstallmentMultiplier} أضعاف راتبك الشهري الكامل {fullMonthlySalary.toLocaleString()} ج.م). يمكنك طلب هذا المبلغ أو أقل.
                 </div>
               )}
 
@@ -276,7 +300,7 @@ export default function EmployeeLoansModule({
                   <input
                     type="number"
                     min="50"
-                    max={loanType === 'monthly' && maxAllowedMonthlyLoan > 0 ? maxAllowedMonthlyLoan : undefined}
+                    max={loanType === 'monthly' ? (maxAllowedMonthlyLoan > 0 ? maxAllowedMonthlyLoan : undefined) : (maxAllowedInstallmentLoan > 0 ? maxAllowedInstallmentLoan : undefined)}
                     step="50"
                     placeholder={`مثال: ${loanType === 'monthly' && maxAllowedMonthlyLoan > 0 ? Math.min(1000, maxAllowedMonthlyLoan) : 1000}`}
                     value={loanAmount}
