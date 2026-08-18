@@ -21,9 +21,12 @@ export default function AdminResignationModule({
     noticeStart: todayStr()
   });
 
-  const allRequests = state.resignationRequests || [];
+  // Filter: Only show requests that have been reviewed by the branch manager (or created manually)
+  const allRequests = (state.resignationRequests || []).filter(r => 
+    r.managerStatus === 'approved' || r.managerStatus === 'rejected'
+  );
   // Sort descending by date
-  allRequests.sort((a, b) => b.requestDate.localeCompare(a.requestDate));
+  allRequests.sort((a, b) => (b.requestDate || '').localeCompare(a.requestDate || ''));
 
   const handleAction = async (reqId, status) => {
     const comment = adminComment[reqId] || '';
@@ -177,8 +180,13 @@ export default function AdminResignationModule({
                   required
                 >
                   <option value="">-- اختر موظف --</option>
-                  {(state.employees || []).filter(e => e.is_active).map(e => (
-                    <option key={e.id} value={e.id}>{e.name} - {state.branches?.find(b=>b.id===e.branchId)?.name || 'بدون فرع'} (كود: {e.code})</option>
+                  {(state.employees || [])
+                    .filter(e => e.is_active !== false && e.status !== 'تم الاستقالة')
+                    .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+                    .map(e => (
+                      <option key={e.id} value={e.id}>
+                        {e.name} - {state.branches?.find(b => b.id === e.branchId)?.name || 'بدون فرع'} (كود: {e.code || '-'})
+                      </option>
                   ))}
                 </select>
               </div>
@@ -241,7 +249,7 @@ export default function AdminResignationModule({
       {allRequests.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '40px', background: 'var(--surface-muted)', borderRadius: '12px', color: 'var(--muted)' }}>
           <div style={{ fontSize: '40px', marginBottom: '10px' }}>📁</div>
-          لا توجد أي طلبات استقالة مسجلة في النظام.
+          لا توجد أي طلبات استقالة جاهزة للبت من قبل الإدارة العليا حالياً (يتم استقبال الطلبات بعد رد مدير الفرع أولاً).
         </div>
       ) : (
         <div style={{ display: 'grid', gap: '20px' }}>

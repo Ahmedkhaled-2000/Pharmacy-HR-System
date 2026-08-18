@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { arabicWeekday } from '../../utils/formatters';
+import { arabicWeekday, todayStr } from '../../utils/formatters';
+import { notifyAdminOnResignationRequest } from '../../utils/gmailService';
 
 export default function BranchResignationModule({
   state,
@@ -23,6 +24,9 @@ export default function BranchResignationModule({
       return;
     }
 
+    const targetReq = state.resignationRequests.find(r => r.id === reqId);
+    const emp = state.employees.find(e => e.id === targetReq?.employeeId);
+
     const updatedReqs = state.resignationRequests.map(r => {
       if (r.id === reqId) {
         return { ...r, managerStatus: status, managerComment: comment };
@@ -30,11 +34,40 @@ export default function BranchResignationModule({
       return r;
     });
 
-    const updatedState = { ...state, resignationRequests: updatedReqs };
+    const newNotif = {
+      id: 'notif_mgr_' + reqId + '_' + Date.now(),
+      type: 'resignation',
+      title: `👔 تم رد مدير الفرع على طلب ${targetReq?.type === 'resignation' ? 'الاستقالة' : 'التراجع'}`,
+      message: `قام مدير فرع ${currentBranch?.name || ''} بالرد (${status === 'approved' ? 'موافق' : 'مرفوض'}) على طلب ${emp?.name || 'الموظف'}. تم تحويل الطلب للإدارة العليا.`,
+      date: todayStr(),
+      timestamp: new Date().toISOString(),
+      read: false,
+      targetRole: 'admin',
+      branchId: currentBranch?.id
+    };
+
+    const updatedState = { 
+      ...state, 
+      resignationRequests: updatedReqs,
+      notifications: [newNotif, ...(state.notifications || [])]
+    };
+
     setState(updatedState);
     if (saveState) await saveState(updatedState);
 
-    showToast(status === 'approved' ? 'تمت الموافقة على الطلب من قبل الفرع' : 'تم رفض الطلب من قبل الفرع');
+    // Send email to admin
+    notifyAdminOnResignationRequest({
+      state,
+      emp,
+      branchName: currentBranch?.name,
+      requestType: targetReq?.type,
+      reason: targetReq?.employeeReason,
+      managerStatus: status,
+      managerComment: comment,
+      dateStr: todayStr()
+    }).catch(err => console.error("Error sending email to admin:", err));
+
+    showToast(status === 'approved' ? 'تمت الموافقة وتم إرسال الطلب للإدارة العليا للبت' : 'تم تسجيل الرفض وإحالة الطلب للإدارة العليا');
   };
 
   const handleCommentChange = (id, value) => {

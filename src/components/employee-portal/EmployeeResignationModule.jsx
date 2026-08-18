@@ -47,11 +47,11 @@ export default function EmployeeResignationModule({
       id: 'notif_' + newReq.id,
       type: 'resignation',
       title: `📝 طلب ${requestType === 'resignation' ? 'استقالة' : 'تراجع عن استقالة'} جديد`,
-      message: `قام الموظف ${emp.name} بتقديم طلب ${requestType === 'resignation' ? 'استقالة' : 'تراجع عن استقالة'}.`,
+      message: `قام الموظف ${emp.name} بتقديم طلب ${requestType === 'resignation' ? 'استقالة' : 'تراجع عن استقالة'} وبانتظار رد مدير الفرع.`,
       date: todayStr(),
       timestamp: new Date().toISOString(),
       read: false,
-      targetRole: 'admin',
+      targetRole: 'branch',
       branchId: selectedBranchId || emp.branchId,
     };
 
@@ -62,18 +62,8 @@ export default function EmployeeResignationModule({
     };
     setState(updatedState);
     if (saveState) await saveState(updatedState);
-    
-    // Send email notification to admin
-    notifyAdminOnResignationRequest({
-      state,
-      emp,
-      branchName: state.branches?.find(b => b.id === (selectedBranchId || emp.branchId))?.name,
-      requestType,
-      reason,
-      dateStr: todayStr()
-    }).catch(err => console.error("Error sending email:", err));
 
-    showToast('تم إرسال الطلب بنجاح ✅');
+    showToast('تم إرسال الطلب لمدير الفرع للمراجعة أولاً ✅');
     setShowForm(false);
     setReason('');
   };

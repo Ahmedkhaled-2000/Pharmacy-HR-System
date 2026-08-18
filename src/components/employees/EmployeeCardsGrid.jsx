@@ -110,7 +110,13 @@ export default function EmployeeCardsGrid({
                   const activeResignation = empResignations.length > 0 ? empResignations.sort((a,b) => b.requestDate.localeCompare(a.requestDate))[0] : null;
                   
                   let resStatusBadge = null;
-                  if (activeResignation) {
+                  if (emp.status === 'تم الاستقالة' || emp.is_active === false) {
+                    resStatusBadge = (
+                      <div style={{ background: 'var(--danger-light, #fee2e2)', color: 'var(--danger-dark, #991b1b)', padding: '4px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', marginTop: '6px', display: 'inline-block' }}>
+                        🔴 تم إنهاء الخدمة / مستقيل {emp.suspension_reason ? `(${emp.suspension_reason})` : ''}
+                      </div>
+                    );
+                  } else if (activeResignation) {
                     if (activeResignation.employeeConditionStatus === 'rejected') {
                       resStatusBadge = <div style={{ background: 'var(--danger-light)', color: 'var(--danger-dark)', padding: '4px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', marginTop: '6px', display: 'inline-block' }}>❌ استقالة مرفوضة من الموظف (تم الإيقاف)</div>;
                     } else if (activeResignation.adminStatus === 'rejected' || activeResignation.managerStatus === 'rejected') {

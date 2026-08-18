@@ -86,7 +86,7 @@ export default function EmployeeFileModal({
 
       setHireDate(editingEmp.hireDate || '');
       setContractType(editingEmp.contractType || 'دوام كامل');
-      setStatus(editingEmp.status || 'على رأس العمل');
+      setStatus(editingEmp.status || (editingEmp.is_active === false ? 'تم الاستقالة' : 'على رأس العمل'));
       setTerminationReason(editingEmp.suspension_reason || '');
       setPassword(editingEmp.password || '123');
 
@@ -141,13 +141,35 @@ export default function EmployeeFileModal({
   const handleCodeChange = (val) => {
     setCode(val);
     const exists = allEmployees.some(
-      (e) => e.code.trim() === val.trim() && e.id !== editingEmp?.id
+      (e) => (e.code.trim() === val.trim() || (e.username && e.username.trim() === val.trim())) && 
+             e.id !== (editingEmp ? editingEmp.id : null)
     );
-    if (exists) {
-      setCodeError('❌ كود الموظف مستخدم بالفعل لملف آخر. يرجى إدخال كود فريد.');
+    if (exists && val.trim() !== '') {
+      setCodeError('⚠️ هذا الكود مستخدم بالفعل لموظف آخر');
     } else {
       setCodeError('');
     }
+  };
+
+  const handleBranchDetailChange = (index, field, value) => {
+    const updated = [...branchesDetails];
+    updated[index][field] = value;
+    setBranchesDetails(updated);
+  };
+
+  const handleAddBranchDetail = () => {
+    setBranchesDetails([
+      ...branchesDetails,
+      { id: Date.now().toString(), branchId: '', salary: '4000', workHours: '8', workDays: '26' }
+    ]);
+  };
+
+  const handleRemoveBranchDetail = (index) => {
+    if (branchesDetails.length === 1) {
+      alert('يجب أن يحتوي الموظف على فرع واحد على الأقل.');
+      return;
+    }
+    setBranchesDetails(branchesDetails.filter((_, i) => i !== index));
   };
 
   const handleAddCustomDocument = () => {
@@ -206,7 +228,8 @@ export default function EmployeeFileModal({
       return;
     }
 
-    if (status === 'تم الاستقالة' && !terminationReason.trim()) {
+    const isTerminated = status === 'تم الاستقالة';
+    if (isTerminated && !terminationReason.trim()) {
       alert('يرجى إدخال سبب الاستقالة / إنهاء الخدمة');
       return;
     }
@@ -237,17 +260,10 @@ export default function EmployeeFileModal({
       
       hireDate,
       contractType,
-      status,
-      // override is_active and fingerprint_active if terminated
-      ...(status === 'تم الاستقالة' ? {
-        is_active: false,
-        fingerprint_active: false,
-        suspension_reason: terminationReason
-      } : {
-        is_active: editingEmp ? editingEmp.is_active : true,
-        fingerprint_active: editingEmp ? editingEmp.fingerprint_active : true,
-        suspension_reason: editingEmp ? editingEmp.suspension_reason : ''
-      }),
+      status: isTerminated ? 'تم الاستقالة' : 'على رأس العمل',
+      is_active: !isTerminated,
+      fingerprint_active: !isTerminated,
+      suspension_reason: isTerminated ? terminationReason.trim() : '',
       password,
       annualLeaveBalance: parseFloat(annualLeaveBalance) || 21,
       documents,

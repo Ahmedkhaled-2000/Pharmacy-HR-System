@@ -95,9 +95,9 @@ export async function sendGmailEmail({ gmailConfig, recipientEmail, subject, htm
 }
 
 /**
- * Send Email Notification to Admin when a new Resignation or Retraction request is made
+ * Send Email Notification to Admin when a Resignation or Retraction request is forwarded after Branch Manager review
  */
-export async function notifyAdminOnResignationRequest({ state, emp, branchName, requestType, reason, dateStr }) {
+export async function notifyAdminOnResignationRequest({ state, emp, branchName, requestType, reason, managerStatus, managerComment, dateStr }) {
   const gmailConfig = state?.orgSettings?.gmailConfig;
   if (!gmailConfig || !gmailConfig.enabled) return { success: false, reason: 'خدمة البريد غير مفعلة' };
 
@@ -109,7 +109,7 @@ export async function notifyAdminOnResignationRequest({ state, emp, branchName, 
   const typeLabel = requestType === 'resignation' ? 'استقالة' : 'تراجع عن استقالة';
 
   const content = `
-    <p>قام الموظف <strong>${empName}</strong> بتقديم طلب <strong>${typeLabel}</strong> جديد وهو بانتظار مراجعتكم وقراركم:</p>
+    <p>تم إحالة طلب <strong>${typeLabel}</strong> الخاص بالموظف <strong>${empName}</strong> إلى الإدارة العليا بعد مراجعة مدير الفرع:</p>
     
     <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 12px; padding: 16px; margin: 16px 0;">
       <h3 style="margin: 0 0 10px; color: #334155; font-size: 16px;">📝 تفاصيل الطلب:</h3>
@@ -117,7 +117,9 @@ export async function notifyAdminOnResignationRequest({ state, emp, branchName, 
         <tr><td style="padding: 6px 0; font-weight: bold; width: 140px;">👤 الموظف:</td><td>${empName} (كود: ${emp?.code || '—'})</td></tr>
         <tr><td style="padding: 6px 0; font-weight: bold;">🏢 الفرع:</td><td>${resolvedBranch}</td></tr>
         <tr><td style="padding: 6px 0; font-weight: bold;">📅 تاريخ التقديم:</td><td>${dateStr || todayStr()}</td></tr>
-        <tr><td style="padding: 6px 0; font-weight: bold;">نوع الطلب:</td><td>${typeLabel}</td></tr>
+        <tr><td style="padding: 6px 0; font-weight: bold;">نوع الطلب:</td><td><strong>${typeLabel}</strong></td></tr>
+        ${managerStatus ? `<tr><td style="padding: 6px 0; font-weight: bold;">👔 رأي مدير الفرع:</td><td><strong style="color: ${managerStatus === 'approved' ? '#16a34a' : '#dc2626'}">${managerStatus === 'approved' ? 'موافق' : 'مرفوض'}</strong></td></tr>` : ''}
+        ${managerComment ? `<tr><td style="padding: 6px 0; font-weight: bold;">📌 تعليق مدير الفرع:</td><td>${managerComment}</td></tr>` : ''}
       </table>
       <div style="margin-top: 15px; background: #ffffff; padding: 10px; border-radius: 8px; border: 1px dashed #94a3b8;">
         <strong style="display: block; margin-bottom: 5px; color: #475569;">سبب الطلب المقدم من الموظف:</strong>
@@ -127,24 +129,24 @@ export async function notifyAdminOnResignationRequest({ state, emp, branchName, 
 
     <p style="text-align: center; margin-top: 20px;">
       <a href="https://pharmacy-time-tracker.vercel.app" style="display: inline-block; background: #0f766e; color: #ffffff; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: bold;">
-        🔗 الدخول لمراجعة الطلب من صفحة الاستقالات
+        🔗 الدخول لمراجعة الطلب والبت النهائي من صفحة الاستقالات
       </a>
     </p>
   `;
 
   const html = buildEmailTemplate({
-    title: `📝 إشعار طلب ${typeLabel} جديد: ${empName}`,
-    subtitle: `طلب ${typeLabel} للمراجعة والاعتماد`,
+    title: `🚪 طلب ${typeLabel}: ${empName}`,
+    subtitle: `تمت مراجعة الطلب بواسطة مدير الفرع وبانتظار قرار الإدارة العليا`,
     badgeText: `طلب ${typeLabel}`,
     badgeColor: requestType === 'resignation' ? '#dc2626' : '#2563eb',
     bodyContent: content,
-    footerText: 'برجاء مراجعة الطلب والرد بالقبول، الرفض، أو وضع شروط للإشعار'
+    footerText: 'برجاء الدخول للنظام لتحديد الشروط وفترة الإشعار أو الاعتماد المباشر'
   });
 
   return sendGmailEmail({
     gmailConfig,
     recipientEmail: targetEmail,
-    subject: `📝 إشعار طلب ${typeLabel} جديد: ${empName} — فرع ${resolvedBranch}`,
+    subject: `🚪 طلب ${typeLabel} محال للإدارة العليا: ${empName} — فرع ${resolvedBranch}`,
     htmlContent: html
   });
 }
