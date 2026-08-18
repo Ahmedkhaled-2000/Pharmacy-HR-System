@@ -20,6 +20,15 @@ export default function EmployeeCardsGrid({
 }) {
   const branches = state.branches || [];
   const employees = state.employees || [];
+  const empRequests = state.resignationRequests || [];
+
+  // Helper for resignation end date
+  const calculateEndDate = (start, days) => {
+    if (!start || !days) return '';
+    const d = new Date(start);
+    d.setDate(d.getDate() + parseInt(days, 10));
+    return d.toISOString().split('T')[0];
+  };
 
   // Group employees by branch
   const getBranchName = (bId) => {
@@ -96,6 +105,25 @@ export default function EmployeeCardsGrid({
                 {branchEmps.map((emp) => {
                   const active = state.activeShifts[emp.id];
                   const empSum = computeEmpSummary(emp.id, filterFn);
+                  
+                  const empResignations = empRequests.filter(r => r.employeeId === emp.id && r.type === 'resignation');
+                  const activeResignation = empResignations.length > 0 ? empResignations.sort((a,b) => b.requestDate.localeCompare(a.requestDate))[0] : null;
+                  
+                  let resStatusBadge = null;
+                  if (activeResignation) {
+                    if (activeResignation.employeeConditionStatus === 'rejected') {
+                      resStatusBadge = <div style={{ background: 'var(--danger-light)', color: 'var(--danger-dark)', padding: '4px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', marginTop: '6px', display: 'inline-block' }}>❌ استقالة مرفوضة من الموظف (تم الإيقاف)</div>;
+                    } else if (activeResignation.adminStatus === 'rejected' || activeResignation.managerStatus === 'rejected') {
+                      resStatusBadge = <div style={{ background: 'var(--danger-light)', color: 'var(--danger-dark)', padding: '4px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', marginTop: '6px', display: 'inline-block' }}>❌ استقالة مرفوضة إدارياً</div>;
+                    } else if (activeResignation.adminStatus === 'approved' && activeResignation.conditionsDaysRemaining > 0) {
+                      const endDate = calculateEndDate(activeResignation.conditionsStartDate, activeResignation.conditionsDaysRemaining);
+                      resStatusBadge = <div style={{ background: 'var(--warning-light)', color: 'var(--warning-dark)', padding: '4px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', marginTop: '6px', display: 'inline-block' }}>⏳ استقالة مقبولة بفترة إشعار (متبقي {activeResignation.conditionsDaysRemaining} أيام) - تنتهي في {endDate}</div>;
+                    } else if (activeResignation.adminStatus === 'approved' && activeResignation.conditionsDaysRemaining === 0) {
+                      resStatusBadge = <div style={{ background: 'var(--danger-light)', color: 'var(--danger-dark)', padding: '4px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', marginTop: '6px', display: 'inline-block' }}>🔴 استقالة سارية (منفذة فورا)</div>;
+                    } else {
+                      resStatusBadge = <div style={{ background: 'var(--primary-light)', color: 'var(--primary-dark)', padding: '4px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', marginTop: '6px', display: 'inline-block' }}>📝 استقالة قيد المراجعة</div>;
+                    }
+                  }
 
                   return (
                     <div
@@ -143,9 +171,10 @@ export default function EmployeeCardsGrid({
                               ></span>
                             )}
                           </div>
-                          <span style={{ color: 'var(--muted)', fontSize: '13px' }}>
+                          <span style={{ color: 'var(--muted)', fontSize: '13px', display: 'block' }}>
                             {emp.jobTitle} {emp.phone ? ` · 📞 ${emp.phone}` : ''}
                           </span>
+                          {resStatusBadge}
                         </div>
                       </div>
 

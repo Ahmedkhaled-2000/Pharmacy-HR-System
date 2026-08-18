@@ -78,6 +78,7 @@ import AdjustmentsModule from './components/adjustments/AdjustmentsModule';
 import PayslipPrintModal from './components/payroll/PayslipPrintModal';
 import ElectronicAttendanceAdmin from './components/attendance/ElectronicAttendanceAdmin';
 import NotificationCenterModule from './components/notifications/NotificationCenterModule';
+import AdminResignationModule from './components/resignation/AdminResignationModule';
 import {
   sendGmailEmail,
   generateDailyDigestHTML,
@@ -298,6 +299,7 @@ export default function App() {
     activeShifts: {},
     adjustments: [],
     requests: [],
+    resignationRequests: [],
     evaluations: [],
     employeeNotes: [],
     loans: [],
@@ -3841,6 +3843,7 @@ export default function App() {
                   { id: 'emp-punches', label: 'متابعة حضور وبصمات الفرع', icon: '👥' },
                   { id: 'evaluations', label: 'التقييمات والشكاوي', icon: '⭐' },
                   { id: 'income-expenses', label: 'المصروفات والإيرادات', icon: '📈' },
+                  { id: 'resignation', label: 'طلبات استقالة الموظفين', icon: '📝' },
                   { id: 'bylaws', label: 'لائحة العمل والجزاءات', icon: '📜' },
                 ]
               : undefined
@@ -4097,6 +4100,16 @@ export default function App() {
                 />
               )}
 
+              {/* Resignation Module (طلبات الاستقالة) */}
+              {activeNavTab === 'resignation' && (
+                <AdminResignationModule
+                  state={state}
+                  setState={setState}
+                  saveState={saveState}
+                  showToast={showToast}
+                />
+              )}
+
               {/* 11. Performance Evaluations (التقييمات) */}
               {activeNavTab === 'evaluations' && (
                 <EvaluationsModule
@@ -4218,7 +4231,8 @@ export default function App() {
                 'settings',
                 'notifications',
                 'approval-rules',
-                'approvals'
+                'approvals',
+                'resignation'
               ].includes(activeNavTab) && (
                 <div style={{
                   background: 'var(--surface)',

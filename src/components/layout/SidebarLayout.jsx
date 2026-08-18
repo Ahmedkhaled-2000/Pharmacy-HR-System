@@ -37,6 +37,7 @@ export default function SidebarLayout({
     { id: 'leaves-tracking', label: 'الإجازات', icon: '🏖️' },
     { id: 'payroll', label: 'رواتب الموظفين', icon: '💰' },
     { id: 'adjustments-module', label: 'المكافآت والخصومات', icon: '📝' },
+    { id: 'resignation', label: 'طلبات استقالة الموظفين', icon: '📝' },
     { id: 'whatsapp-center', label: 'مركز مراسلات الواتساب', icon: '💬' },
     { id: 'bylaws', label: 'لائحة العمل والجزاءات', icon: '📜' },
     { id: 'evaluations', label: 'التقييمات', icon: '⭐️' },

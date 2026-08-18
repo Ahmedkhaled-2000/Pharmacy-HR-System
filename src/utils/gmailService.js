@@ -95,6 +95,61 @@ export async function sendGmailEmail({ gmailConfig, recipientEmail, subject, htm
 }
 
 /**
+ * Send Email Notification to Admin when a new Resignation or Retraction request is made
+ */
+export async function notifyAdminOnResignationRequest({ state, emp, branchName, requestType, reason, dateStr }) {
+  const gmailConfig = state?.orgSettings?.gmailConfig;
+  if (!gmailConfig || !gmailConfig.enabled) return { success: false, reason: 'خدمة البريد غير مفعلة' };
+
+  const targetEmail = gmailConfig.targetAdminEmail || gmailConfig.userEmail;
+  if (!targetEmail) return { success: false, reason: 'لم يتم تحديد بريد الإدارة' };
+
+  const empName = emp?.name || 'موظف';
+  const resolvedBranch = branchName || emp?.branchName || 'الفرع الرئيسي';
+  const typeLabel = requestType === 'resignation' ? 'استقالة' : 'تراجع عن استقالة';
+
+  const content = `
+    <p>قام الموظف <strong>${empName}</strong> بتقديم طلب <strong>${typeLabel}</strong> جديد وهو بانتظار مراجعتكم وقراركم:</p>
+    
+    <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 12px; padding: 16px; margin: 16px 0;">
+      <h3 style="margin: 0 0 10px; color: #334155; font-size: 16px;">📝 تفاصيل الطلب:</h3>
+      <table style="width: 100%; border-collapse: collapse; font-size: 13.5px;">
+        <tr><td style="padding: 6px 0; font-weight: bold; width: 140px;">👤 الموظف:</td><td>${empName} (كود: ${emp?.code || '—'})</td></tr>
+        <tr><td style="padding: 6px 0; font-weight: bold;">🏢 الفرع:</td><td>${resolvedBranch}</td></tr>
+        <tr><td style="padding: 6px 0; font-weight: bold;">📅 تاريخ التقديم:</td><td>${dateStr || todayStr()}</td></tr>
+        <tr><td style="padding: 6px 0; font-weight: bold;">نوع الطلب:</td><td>${typeLabel}</td></tr>
+      </table>
+      <div style="margin-top: 15px; background: #ffffff; padding: 10px; border-radius: 8px; border: 1px dashed #94a3b8;">
+        <strong style="display: block; margin-bottom: 5px; color: #475569;">سبب الطلب المقدم من الموظف:</strong>
+        <p style="margin: 0; color: #0f172a; line-height: 1.5;">${reason}</p>
+      </div>
+    </div>
+
+    <p style="text-align: center; margin-top: 20px;">
+      <a href="https://pharmacy-time-tracker.vercel.app" style="display: inline-block; background: #0f766e; color: #ffffff; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: bold;">
+        🔗 الدخول لمراجعة الطلب من صفحة الاستقالات
+      </a>
+    </p>
+  `;
+
+  const html = buildEmailTemplate({
+    title: `📝 إشعار طلب ${typeLabel} جديد: ${empName}`,
+    subtitle: `طلب ${typeLabel} للمراجعة والاعتماد`,
+    badgeText: `طلب ${typeLabel}`,
+    badgeColor: requestType === 'resignation' ? '#dc2626' : '#2563eb',
+    bodyContent: content,
+    footerText: 'برجاء مراجعة الطلب والرد بالقبول، الرفض، أو وضع شروط للإشعار'
+  });
+
+  return sendGmailEmail({
+    gmailConfig,
+    recipientEmail: targetEmail,
+    subject: `📝 إشعار طلب ${typeLabel} جديد: ${empName} — فرع ${resolvedBranch}`,
+    htmlContent: html
+  });
+}
+
+/**
  * Generate End-of-Day Daily Digest Email (00:00 to 23:59 summary)
  */
 export function generateDailyDigestHTML({ dateStr, employeesCount, presentCount, absentCount, lateCount, totalHoursToday, pendingRequestsCount, approvedRequestsCount, bonusTotalToday, deductionTotalToday }) {

@@ -10,6 +10,7 @@ import EmployeeShiftSwapModule from './EmployeeShiftSwapModule';
 import EmployeeEvaluationsModule from './EmployeeEvaluationsModule';
 import PayslipPrintModal from '../payroll/PayslipPrintModal';
 import BylawsModule from '../bylaws/BylawsModule';
+import EmployeeResignationModule from './EmployeeResignationModule';
 
 // ─────────────────────────────────────────
 //  Month navigation helpers
@@ -78,6 +79,7 @@ const NAV_ITEMS = [
   { id: 'swaps',       icon: '🔄', label: 'تبديل الشيفتات' },
   { id: 'evaluations', icon: '⭐', label: 'التقييمات والشكاوي' },
   { id: 'bylaws',      icon: '📜', label: 'لائحة العمل والجزاءات' },
+  { id: 'resignations',icon: '🚪', label: 'طلبات الاستقالة' },
 ];
 
 // ─────────────────────────────────────────
@@ -2092,6 +2094,18 @@ export default function EmployeePortalView({
               showToast={showToast}
               userRole="employee"
               currentEmpId={emp.id}
+            />
+          )}
+
+          {/* ── 12. Tab: Resignations ── */}
+          {activeTab === 'resignations' && (
+            <EmployeeResignationModule
+              emp={emp}
+              state={state}
+              setState={setState}
+              saveState={saveState}
+              showToast={showToast}
+              selectedBranchId={selectedBranchId || null}
             />
           )}
         </div>

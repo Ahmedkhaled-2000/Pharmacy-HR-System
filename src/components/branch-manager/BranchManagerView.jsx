@@ -8,6 +8,7 @@ import BylawsModule from '../bylaws/BylawsModule';
 import IncomeExpensesModule from '../finance/IncomeExpensesModule';
 import { getFormattedRequestBadge } from '../requests/RequestsModule';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
+import BranchResignationModule from '../resignation/BranchResignationModule';
 
 const WEEKDAYS_AR = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
 
@@ -2439,6 +2440,17 @@ export default function BranchManagerView({
           filterMode={filterMode}
           customFrom={customFromDate}
           customTo={customToDate}
+        />
+      )}
+
+      {/* ── 11. RESIGNATION TAB ── */}
+      {activeTab === 'resignation' && (
+        <BranchResignationModule
+          state={state}
+          setState={setState}
+          saveState={saveState}
+          showToast={showToast}
+          currentBranch={currentBranch}
         />
       )}
 
