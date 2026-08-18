@@ -3885,7 +3885,7 @@ export default function App() {
           setActiveTab={setActiveNavTab}
           onLogout={handleLogout}
           pendingCount={(state.requests || []).filter(r => r.status === 'pending' || r.status === 'pending_admin').length}
-          resignationCount={(state.resignationRequests || []).filter(r => (r.managerStatus === 'approved' || r.managerStatus === 'rejected') && !r.isAdminCreated && r.adminStatus === 'pending').length}
+          resignationCount={(state.resignationRequests || []).filter(r => (r.managerStatus === 'approved' || r.managerStatus === 'rejected') && !r.isAdminCreated && (!r.adminStatus || r.adminStatus === 'pending')).length}
           themeMode={themeMode}
           toggleTheme={toggleTheme}
           adminFilterMode={adminFilterMode}

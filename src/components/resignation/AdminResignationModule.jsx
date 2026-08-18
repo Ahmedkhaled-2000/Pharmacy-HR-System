@@ -24,10 +24,18 @@ export default function AdminResignationModule({
 
   // Filter requests based on selected tab
   const allRequests = (state.resignationRequests || []).filter(r => {
+    // 1. طلبات محالة من الفرع: فقط الطلبات التي رد عليها مدير الفرع وما زالت بانتظار قرار الإدارة العليا
     if (filterTab === 'ready') {
-      return (r.managerStatus === 'approved' || r.managerStatus === 'rejected') && !r.isAdminCreated;
+      const isForwardedFromBranch = r.managerStatus === 'approved' || r.managerStatus === 'rejected';
+      const isPendingAdmin = !r.adminStatus || r.adminStatus === 'pending';
+      return isForwardedFromBranch && isPendingAdmin && !r.isAdminCreated;
     }
-    return true; // 'all'
+    // 2. كافة الطلبات: الطلبات التي اتخذت فيها الإدارة العليا قراراً (معتمدة أو مرفوضة) بالإضافة إلى الإجراءات اليدوية من الإدارة
+    if (filterTab === 'all') {
+      const isAdminDecided = r.adminStatus === 'approved' || r.adminStatus === 'rejected';
+      return isAdminDecided || r.isAdminCreated;
+    }
+    return true;
   });
   // Sort descending by date
   allRequests.sort((a, b) => (b.requestDate || '').localeCompare(a.requestDate || ''));
@@ -169,8 +177,14 @@ export default function AdminResignationModule({
     setManualData({ employeeId: '', type: 'resignation', reason: '', noticeDays: '0', noticeStart: todayStr() });
   };
 
-  const readyCount = (state.resignationRequests || []).filter(r => (r.managerStatus === 'approved' || r.managerStatus === 'rejected') && !r.isAdminCreated).length;
-  const totalCount = (state.resignationRequests || []).length;
+  const readyCount = (state.resignationRequests || []).filter(r => 
+    (r.managerStatus === 'approved' || r.managerStatus === 'rejected') && 
+    (!r.adminStatus || r.adminStatus === 'pending') && 
+    !r.isAdminCreated
+  ).length;
+  const totalCount = (state.resignationRequests || []).filter(r => 
+    r.adminStatus === 'approved' || r.adminStatus === 'rejected' || r.isAdminCreated
+  ).length;
 
   return (
     <div style={{ padding: '20px', background: 'var(--surface)', borderRadius: '12px' }}>
@@ -307,8 +321,8 @@ export default function AdminResignationModule({
       {allRequests.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '40px', background: 'var(--surface-muted)', borderRadius: '12px', color: 'var(--muted)' }}>
           <div style={{ fontSize: '40px', marginBottom: '10px' }}>📁</div>
-          {filterTab === 'ready' && 'لا توجد طلبات استقالة محالة من مديري الفروع حالياً.'}
-          {filterTab === 'all' && 'لا توجد أي طلبات استقالة مسجلة بالنظام.'}
+          {filterTab === 'ready' && 'لا توجد طلبات محالة من الفرع بانتظار قرار الإدارة حالياً.'}
+          {filterTab === 'all' && 'لا توجد طلبات منتهية أو سابقة في السجل.'}
         </div>
       ) : (
         <div style={{ display: 'grid', gap: '20px' }}>
