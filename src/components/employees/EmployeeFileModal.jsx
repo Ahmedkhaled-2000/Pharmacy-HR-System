@@ -36,6 +36,7 @@ export default function EmployeeFileModal({
   const [hireDate, setHireDate] = useState('');
   const [contractType, setContractType] = useState('دوام كامل');
   const [status, setStatus] = useState('على رأس العمل'); // 'على رأس العمل' | 'تم الاستقالة'
+  const [terminationReason, setTerminationReason] = useState('');
   const [password, setPassword] = useState('123');
   const [annualLeaveBalance, setAnnualLeaveBalance] = useState('21');
 
@@ -86,6 +87,7 @@ export default function EmployeeFileModal({
       setHireDate(editingEmp.hireDate || '');
       setContractType(editingEmp.contractType || 'دوام كامل');
       setStatus(editingEmp.status || 'على رأس العمل');
+      setTerminationReason(editingEmp.suspension_reason || '');
       setPassword(editingEmp.password || '123');
 
       setAnnualLeaveBalance(String(editingEmp.annualLeaveBalance !== undefined ? editingEmp.annualLeaveBalance : '21'));
@@ -118,6 +120,7 @@ export default function EmployeeFileModal({
       setHireDate(new Date().toISOString().slice(0, 10));
       setContractType('دوام كامل');
       setStatus('على رأس العمل');
+      setTerminationReason('');
       setPassword('123');
 
       setAnnualLeaveBalance('21');
@@ -203,6 +206,11 @@ export default function EmployeeFileModal({
       return;
     }
 
+    if (status === 'تم الاستقالة' && !terminationReason.trim()) {
+      alert('يرجى إدخال سبب الاستقالة / إنهاء الخدمة');
+      return;
+    }
+
     const employeeData = {
       id: editingEmp ? editingEmp.id : `emp_${Date.now()}`,
       name: name.trim(),
@@ -230,6 +238,16 @@ export default function EmployeeFileModal({
       hireDate,
       contractType,
       status,
+      // override is_active and fingerprint_active if terminated
+      ...(status === 'تم الاستقالة' ? {
+        is_active: false,
+        fingerprint_active: false,
+        suspension_reason: terminationReason
+      } : {
+        is_active: editingEmp ? editingEmp.is_active : true,
+        fingerprint_active: editingEmp ? editingEmp.fingerprint_active : true,
+        suspension_reason: editingEmp ? editingEmp.suspension_reason : ''
+      }),
       password,
       annualLeaveBalance: parseFloat(annualLeaveBalance) || 21,
       documents,
@@ -450,6 +468,19 @@ export default function EmployeeFileModal({
                   <option value="تم الاستقالة">🔴 تم الاستقالة / إنهاء الخدمة</option>
                 </select>
               </div>
+
+              {status === 'تم الاستقالة' && (
+                <div className="field" style={{ gridColumn: 'span 2' }}>
+                  <label style={{ color: 'var(--danger-dark)', fontWeight: 'bold' }}>سبب الإيقاف / إنهاء الخدمة</label>
+                  <textarea
+                    value={terminationReason}
+                    onChange={(e) => setTerminationReason(e.target.value)}
+                    placeholder="اكتب سبب تغيير الحالة وإيقاف الحساب"
+                    required
+                    style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid var(--danger-light)', minHeight: '60px' }}
+                  />
+                </div>
+              )}
 
               <div className="field">
                 <label>رصيد الإجازات السنوية (يوم)</label>

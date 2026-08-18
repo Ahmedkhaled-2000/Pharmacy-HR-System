@@ -11,6 +11,16 @@ export default function AdminResignationModule({
   const [noticeDays, setNoticeDays] = useState({});
   const [noticeStart, setNoticeStart] = useState({});
 
+  // Manual Form State
+  const [showManualForm, setShowManualForm] = useState(false);
+  const [manualData, setManualData] = useState({
+    employeeId: '',
+    type: 'resignation',
+    reason: '',
+    noticeDays: '0',
+    noticeStart: todayStr()
+  });
+
   const allRequests = state.resignationRequests || [];
   // Sort descending by date
   allRequests.sort((a, b) => b.requestDate.localeCompare(a.requestDate));
@@ -72,13 +82,161 @@ export default function AdminResignationModule({
     if (field === 'start') setNoticeStart(prev => ({ ...prev, [id]: value }));
   };
 
+  const handleManualSubmit = async (e) => {
+    e.preventDefault();
+    if (!manualData.employeeId || !manualData.reason.trim()) {
+      showToast('يرجى اختيار الموظف وكتابة السبب');
+      return;
+    }
+
+    const nDays = parseInt(manualData.noticeDays, 10) || 0;
+    const nStart = manualData.noticeStart || todayStr();
+
+    const emp = state.employees.find(e => e.id === manualData.employeeId);
+    if (!emp) return;
+    
+    const newReq = {
+      id: 'res_manual_' + Date.now(),
+      employeeId: emp.id,
+      branchId: emp.branchId,
+      type: manualData.type,
+      employeeReason: 'تم الإنشاء يدوياً بواسطة الإدارة: ' + manualData.reason,
+      requestDate: todayStr(),
+      managerStatus: 'approved',
+      managerComment: 'إجراء إداري مباشر',
+      adminStatus: 'approved',
+      adminComment: 'إجراء إداري مباشر',
+      conditionsDaysRemaining: nDays,
+      conditionsStartDate: nDays > 0 ? nStart : '',
+      employeeConditionStatus: 'accepted' // Forced accepted
+    };
+
+    let updatedEmployees = state.employees;
+    
+    // If immediate (nDays === 0) -> stop account and fingerprint
+    // If with notice -> stop fingerprint immediately (as they accepted)
+    updatedEmployees = state.employees.map(e => {
+      if (e.id === emp.id) {
+        if (nDays === 0) {
+          return {
+            ...e,
+            is_active: false,
+            suspension_reason: `تم ${manualData.type === 'resignation' ? 'قبول الاستقالة' : 'إنهاء الخدمة'} يدوياً: ${manualData.reason}`,
+            fingerprint_active: false
+          };
+        } else {
+          return {
+            ...e,
+            fingerprint_active: false // Disable fingerprint during notice
+          };
+        }
+      }
+      return e;
+    });
+
+    const updatedState = { 
+      ...state, 
+      resignationRequests: [newReq, ...(state.resignationRequests || [])],
+      employees: updatedEmployees 
+    };
+
+    setState(updatedState);
+    if (saveState) await saveState(updatedState);
+    showToast('تم تطبيق الإجراء اليدوي بنجاح');
+    setShowManualForm(false);
+    setManualData({ employeeId: '', type: 'resignation', reason: '', noticeDays: '0', noticeStart: todayStr() });
+  };
+
   return (
     <div style={{ padding: '20px', background: 'var(--surface)', borderRadius: '12px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
         <h2 style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: 0 }}>
           <span>🏢</span> طلبات استقالة الموظفين (الإدارة العليا)
         </h2>
+        <button 
+          onClick={() => setShowManualForm(!showManualForm)}
+          className="btn btn-start"
+          style={{ padding: '8px 16px', background: showManualForm ? 'var(--danger)' : 'var(--primary)', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 'bold' }}
+        >
+          {showManualForm ? 'إلغاء' : '➕ إضافة إجراء يدوي (استقالة/رفد)'}
+        </button>
       </div>
+
+      {showManualForm && (
+        <div style={{ background: 'var(--surface-muted)', padding: '20px', borderRadius: '12px', marginBottom: '20px', border: '1px solid var(--border)' }}>
+          <h3 style={{ marginTop: 0, marginBottom: '15px', color: 'var(--text)' }}>إنشاء إجراء استقالة أو إنهاء خدمة</h3>
+          <form onSubmit={handleManualSubmit} style={{ display: 'grid', gap: '15px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+              <div>
+                <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '14px' }}>اختيار الموظف</label>
+                <select 
+                  className="ep-input"
+                  style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid var(--border)' }}
+                  value={manualData.employeeId}
+                  onChange={(e) => setManualData({...manualData, employeeId: e.target.value})}
+                  required
+                >
+                  <option value="">-- اختر موظف --</option>
+                  {(state.employees || []).filter(e => e.is_active).map(e => (
+                    <option key={e.id} value={e.id}>{e.name} - {state.branches?.find(b=>b.id===e.branchId)?.name || 'بدون فرع'} (كود: {e.code})</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '14px' }}>نوع الإجراء</label>
+                <select 
+                  className="ep-input"
+                  style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid var(--border)' }}
+                  value={manualData.type}
+                  onChange={(e) => setManualData({...manualData, type: e.target.value})}
+                >
+                  <option value="resignation">استقالة</option>
+                  <option value="termination">إنهاء خدمة (رفد)</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '14px' }}>السبب / المبرر (يظهر في السجل وعند الإيقاف)</label>
+              <textarea 
+                className="ep-input"
+                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid var(--border)', minHeight: '60px' }}
+                value={manualData.reason}
+                onChange={(e) => setManualData({...manualData, reason: e.target.value})}
+                required
+              />
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+              <div>
+                <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '14px' }}>فترة الإشعار (بالأيام - صفر للإيقاف الفوري)</label>
+                <input 
+                  type="number"
+                  min="0"
+                  className="ep-input"
+                  style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid var(--border)' }}
+                  value={manualData.noticeDays}
+                  onChange={(e) => setManualData({...manualData, noticeDays: e.target.value})}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '14px' }}>تاريخ البدء</label>
+                <input 
+                  type="date"
+                  className="ep-input"
+                  style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid var(--border)' }}
+                  value={manualData.noticeStart}
+                  onChange={(e) => setManualData({...manualData, noticeStart: e.target.value})}
+                />
+              </div>
+            </div>
+
+            <button type="submit" className="btn btn-start" style={{ background: 'var(--danger)', color: 'white', padding: '12px', border: 'none', borderRadius: '6px', fontWeight: 'bold', marginTop: '10px' }}>
+              تنفيذ الإجراء وإيقاف البصمة/الحساب
+            </button>
+          </form>
+        </div>
+      )}
 
       {allRequests.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '40px', background: 'var(--surface-muted)', borderRadius: '12px', color: 'var(--muted)' }}>

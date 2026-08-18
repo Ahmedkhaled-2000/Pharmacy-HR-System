@@ -57,7 +57,7 @@ export default function EmployeeResignationModule({
 
     const updatedState = { 
       ...state, 
-      resignationRequests: [...(state.resignationRequests || []), newReq],
+      resignationRequests: [newReq, ...(state.resignationRequests || [])],
       notifications: [newNotif, ...(state.notifications || [])]
     };
     setState(updatedState);
@@ -73,7 +73,7 @@ export default function EmployeeResignationModule({
       dateStr: todayStr()
     }).catch(err => console.error("Error sending email:", err));
 
-    showToast('تم إرسال الطلب بنجاح');
+    showToast('تم إرسال الطلب بنجاح ✅');
     setShowForm(false);
     setReason('');
   };
@@ -134,150 +134,199 @@ export default function EmployeeResignationModule({
   };
 
   return (
-    <div className="ep-card" style={{ padding: '1.5rem', background: 'var(--bg-color)', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
-      <div className="ep-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border-color)' }}>
-        <h3 className="ep-card-title" style={{ margin: 0, fontSize: '1.25rem', color: 'var(--text-primary)' }}>طلبات الاستقالة</h3>
+    <div className="card ep-tab-content fade-in" style={{ padding: '20px' }}>
+      <div className="ep-section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid var(--border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ fontSize: '26px' }}>🚪</span>
+          <div>
+            <h3 style={{ margin: 0, fontSize: '1.25rem' }}>طلبات الاستقالة والتراجع</h3>
+            <p style={{ margin: '2px 0 0', color: 'var(--muted)', fontSize: '0.88rem' }}>
+              تقديم طلب استقالة رسمي أو طلب تراجع ومتابعة قرارات الإدارة
+            </p>
+          </div>
+        </div>
+
         {!hasPendingAction && (
-          <button className="ep-button" onClick={() => setShowForm(!showForm)} style={{ background: showForm ? 'var(--danger-color, #dc3545)' : 'var(--primary-color)', color: '#fff', border: 'none', padding: '0.5rem 1rem', borderRadius: '6px', cursor: 'pointer' }}>
-            {showForm ? 'إلغاء' : 'تقديم طلب جديد'}
+          <button
+            type="button"
+            className="btn btn-start"
+            onClick={() => setShowForm(!showForm)}
+            style={{
+              fontSize: '13px',
+              padding: '8px 18px',
+              background: showForm ? '#dc2626' : 'var(--primary)',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+              boxShadow: '0 2px 6px rgba(0,0,0,0.1)'
+            }}
+          >
+            {showForm ? '✕ إلغاء' : '➕ تقديم طلب استقالة / تراجع'}
           </button>
         )}
       </div>
 
       {showForm && (
-        <form className="ep-form" onSubmit={handleSubmit} style={{ marginBottom: '1.5rem', background: 'var(--bg-secondary)', padding: '1.5rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
-            <div className="ep-form-group">
-              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>نوع الطلب</label>
-              <select className="ep-input" value={requestType} onChange={(e) => setRequestType(e.target.value)} style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #ccc' }}>
-                <option value="resignation">طلب استقالة</option>
-                <option value="withdraw">تراجع عن استقالة</option>
+        <form onSubmit={handleSubmit} className="card settings-card fade-in" style={{ padding: '18px', background: 'var(--surface-muted)', border: '1px solid var(--primary-tint)', borderRadius: '12px', marginTop: '10px', marginBottom: '20px' }}>
+          <h4 style={{ margin: '0 0 14px', fontSize: '15px', color: 'var(--primary)', fontWeight: 'bold' }}>
+            📝 نموذج تقديم طلب جديد
+          </h4>
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '14px', marginBottom: '14px' }}>
+            <div className="field" style={{ flex: '1 1 200px' }}>
+              <label style={{ fontWeight: '700', display: 'block', marginBottom: '6px' }}>نوع الطلب</label>
+              <select
+                value={requestType}
+                onChange={(e) => setRequestType(e.target.value)}
+                style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)', fontFamily: 'Cairo, sans-serif' }}
+              >
+                <option value="resignation">🚪 طلب تقديم استقالة</option>
+                <option value="withdraw">↩️ طلب تراجع عن الاستقالة</option>
               </select>
             </div>
-            
-            <div className="ep-form-group">
-              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>تاريخ الطلب</label>
-              <input type="date" className="ep-input" value={todayStr()} disabled style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #ccc', background: '#f5f5f5' }} />
+
+            <div className="field" style={{ flex: '1 1 160px' }}>
+              <label style={{ fontWeight: '700', display: 'block', marginBottom: '6px' }}>تاريخ تقديم الطلب</label>
+              <input
+                type="date"
+                value={todayStr()}
+                disabled
+                style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface-muted)', cursor: 'not-allowed', color: 'var(--muted)', fontFamily: 'Cairo, sans-serif' }}
+              />
             </div>
           </div>
 
-          <div className="ep-form-group" style={{ marginBottom: '1rem' }}>
-            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>السبب بالتفصيل</label>
+          <div className="field" style={{ marginBottom: '14px' }}>
+            <label style={{ fontWeight: '700', display: 'block', marginBottom: '6px' }}>
+              السبب بالتفصيل (يرجى توضيح الأسباب للإدارة) <span style={{ color: 'red' }}>*</span>
+            </label>
             <textarea
-              className="ep-input"
               rows="4"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              placeholder="اكتب أسبابك هنا بالتفصيل..."
+              placeholder="اكتب أسباب تقديم الاستقالة أو التراجع بالتفصيل..."
               required
-              style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #ccc' }}
-            ></textarea>
+              style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)', fontFamily: 'Cairo, sans-serif', resize: 'vertical' }}
+            />
           </div>
-          
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <button type="submit" className="ep-button" style={{ background: 'var(--primary-color)', color: '#fff', border: 'none', padding: '0.5rem 1.5rem', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>
-              إرسال الطلب
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => setShowForm(false)}
+              style={{ padding: '8px 16px', borderRadius: '8px', cursor: 'pointer' }}
+            >
+              إلغاء
+            </button>
+            <button
+              type="submit"
+              className="btn btn-start"
+              style={{ padding: '8px 20px', background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
+            >
+              🚀 إرسال الطلب
             </button>
           </div>
         </form>
       )}
 
       {empRequests.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)', background: 'var(--bg-secondary)', borderRadius: '8px' }}>
-          <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>📝</div>
-          لا توجد طلبات استقالة أو تراجع مسجلة.
+        <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--muted)', background: 'var(--surface-muted)', borderRadius: '12px', marginTop: '10px', border: '1px dashed var(--border)' }}>
+          <div style={{ fontSize: '42px', marginBottom: '10px' }}>📄</div>
+          <p style={{ margin: 0, fontWeight: 'bold', fontSize: '15px', color: 'var(--text)' }}>لا توجد طلبات استقالة أو تراجع مسجلة</p>
+          <p style={{ margin: '6px 0 0', fontSize: '13px' }}>يمكنك الضغط على الزر الأخضر بالأعلى <strong>"➕ تقديم طلب استقالة / تراجع"</strong> لتقديم طلبك مباشرة.</p>
         </div>
       ) : (
-        <div style={{ display: 'grid', gap: '1rem' }}>
+        <div style={{ display: 'grid', gap: '14px', marginTop: '10px' }}>
           {empRequests.map(req => (
-            <div key={req.id} style={{ border: '1px solid var(--border-color)', borderRadius: '8px', padding: '1.5rem', background: 'var(--bg-secondary)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
-                <strong style={{ fontSize: '1.1rem', color: req.type === 'resignation' ? 'var(--danger-color, #dc3545)' : 'var(--primary-color)' }}>
-                  {req.type === 'resignation' ? 'طلب استقالة' : 'تراجع عن الاستقالة'}
+            <div key={req.id} style={{ border: '1px solid var(--border)', borderRadius: '12px', padding: '16px', background: 'var(--surface)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', borderBottom: '1px solid var(--border)', paddingBottom: '10px' }}>
+                <strong style={{ fontSize: '1.05rem', color: req.type === 'resignation' ? 'var(--danger, #dc2626)' : 'var(--primary)' }}>
+                  {req.type === 'resignation' ? '🚪 طلب استقالة' : '↩️ طلب تراجع عن الاستقالة'}
                 </strong>
-                <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', background: '#eee', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
-                  {req.requestDate}
+                <span style={{ fontSize: '0.85rem', color: 'var(--muted)', background: 'var(--surface-muted)', padding: '3px 8px', borderRadius: '6px', border: '1px solid var(--border)' }}>
+                  📅 تاريخ التقديم: {req.requestDate}
                 </span>
               </div>
               
-              <div style={{ marginBottom: '1rem', lineHeight: '1.5' }}>
-                <strong style={{ display: 'block', color: 'var(--text-primary)' }}>السبب:</strong> 
-                <span style={{ color: 'var(--text-secondary)' }}>{req.employeeReason}</span>
+              <div style={{ marginBottom: '14px', lineHeight: '1.6' }}>
+                <strong style={{ display: 'block', color: 'var(--text)', fontSize: '13px' }}>سبب الطلب:</strong> 
+                <span style={{ color: 'var(--muted)', fontSize: '14px' }}>{req.employeeReason}</span>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', background: 'rgba(0,0,0,0.02)', padding: '1rem', borderRadius: '6px', fontSize: '0.95rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px', background: 'var(--surface-muted)', padding: '12px', borderRadius: '8px', fontSize: '0.92rem' }}>
                 <div>
-                  <strong style={{ display: 'block', marginBottom: '0.25rem' }}>رأي مدير الفرع: </strong> 
+                  <strong style={{ display: 'block', marginBottom: '4px' }}>رأي مدير الفرع: </strong> 
                   <span style={{
                     display: 'inline-block',
-                    padding: '0.25rem 0.5rem',
-                    borderRadius: '4px',
+                    padding: '3px 8px',
+                    borderRadius: '6px',
                     fontWeight: 'bold',
-                    background: req.managerStatus === 'approved' ? '#d1e7dd' : req.managerStatus === 'rejected' ? '#f8d7da' : '#fff3cd',
-                    color: req.managerStatus === 'approved' ? '#0f5132' : req.managerStatus === 'rejected' ? '#842029' : '#664d03'
+                    fontSize: '12px',
+                    background: req.managerStatus === 'approved' ? 'var(--success-light, #d1e7dd)' : req.managerStatus === 'rejected' ? 'var(--danger-light, #f8d7da)' : '#fff3cd',
+                    color: req.managerStatus === 'approved' ? 'var(--success-dark, #0f5132)' : req.managerStatus === 'rejected' ? 'var(--danger-dark, #842029)' : '#664d03'
                   }}>
-                    {req.managerStatus === 'approved' ? 'موافق' : req.managerStatus === 'rejected' ? 'مرفوض' : 'قيد الانتظار'}
+                    {req.managerStatus === 'approved' ? '✅ موافق' : req.managerStatus === 'rejected' ? '❌ مرفوض' : '⏳ قيد الانتظار'}
                   </span>
-                  {req.managerComment && <div style={{ marginTop: '0.5rem', color: 'var(--text-secondary)', fontSize: '0.9rem', padding: '0.5rem', background: '#fff', borderRadius: '4px', border: '1px dashed #ccc' }}><strong>تعليق المدير:</strong> {req.managerComment}</div>}
+                  {req.managerComment && <div style={{ marginTop: '6px', color: 'var(--text)', fontSize: '0.88rem', padding: '6px 10px', background: 'var(--surface)', borderRadius: '6px', border: '1px dashed var(--border)' }}><strong>تعليق المدير:</strong> {req.managerComment}</div>}
                 </div>
                 
                 {req.managerStatus !== 'pending' && (
                   <div>
-                    <strong style={{ display: 'block', marginBottom: '0.25rem' }}>قرار الإدارة العليا: </strong>
+                    <strong style={{ display: 'block', marginBottom: '4px' }}>قرار الإدارة العليا: </strong>
                     <span style={{
                       display: 'inline-block',
-                      padding: '0.25rem 0.5rem',
-                      borderRadius: '4px',
+                      padding: '3px 8px',
+                      borderRadius: '6px',
                       fontWeight: 'bold',
-                      background: req.adminStatus === 'approved' ? '#d1e7dd' : req.adminStatus === 'rejected' ? '#f8d7da' : '#fff3cd',
-                      color: req.adminStatus === 'approved' ? '#0f5132' : req.adminStatus === 'rejected' ? '#842029' : '#664d03'
+                      fontSize: '12px',
+                      background: req.adminStatus === 'approved' ? 'var(--success-light, #d1e7dd)' : req.adminStatus === 'rejected' ? 'var(--danger-light, #f8d7da)' : '#fff3cd',
+                      color: req.adminStatus === 'approved' ? 'var(--success-dark, #0f5132)' : req.adminStatus === 'rejected' ? 'var(--danger-dark, #842029)' : '#664d03'
                     }}>
-                      {req.adminStatus === 'approved' ? 'موافق' : req.adminStatus === 'rejected' ? 'مرفوض' : 'قيد الانتظار'}
+                      {req.adminStatus === 'approved' ? '✅ موافق' : req.adminStatus === 'rejected' ? '❌ مرفوض' : '⏳ قيد الانتظار'}
                     </span>
-                    {req.adminComment && <div style={{ marginTop: '0.5rem', color: 'var(--text-secondary)', fontSize: '0.9rem', padding: '0.5rem', background: '#fff', borderRadius: '4px', border: '1px dashed #ccc' }}><strong>تعليق الإدارة:</strong> {req.adminComment}</div>}
+                    {req.adminComment && <div style={{ marginTop: '6px', color: 'var(--text)', fontSize: '0.88rem', padding: '6px 10px', background: 'var(--surface)', borderRadius: '6px', border: '1px dashed var(--border)' }}><strong>تعليق الإدارة:</strong> {req.adminComment}</div>}
                   </div>
                 )}
               </div>
 
               {/* Conditions Block */}
               {req.adminStatus === 'approved' && req.conditionsDaysRemaining > 0 && req.employeeConditionStatus === 'pending' && (
-                <div style={{ marginTop: '1.5rem', padding: '1.5rem', background: '#fff3cd', border: '1px solid #ffe69c', borderRadius: '8px', color: '#664d03' }}>
-                  <h4 style={{ margin: '0 0 1rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}><span>⚠️</span> شروط الإدارة للموافقة</h4>
-                  <ul style={{ paddingInlineStart: '1.5rem', marginBottom: '1.5rem', lineHeight: '1.8' }}>
+                <div style={{ marginTop: '14px', padding: '14px', background: '#fff3cd', border: '1px solid #ffe69c', borderRadius: '8px', color: '#664d03' }}>
+                  <h4 style={{ margin: '0 0 8px 0', display: 'flex', alignItems: 'center', gap: '6px' }}><span>⚠️</span> شروط الإدارة للموافقة</h4>
+                  <ul style={{ paddingInlineStart: '20px', marginBottom: '12px', lineHeight: '1.8' }}>
                     <li>تاريخ بداية الاستقالة: <strong>{req.conditionsStartDate}</strong></li>
                     <li>عدد الأيام المتبقية للعمل (فترة الإشعار): <strong>{req.conditionsDaysRemaining} أيام</strong></li>
                   </ul>
-                  <p style={{ marginBottom: '1.5rem', fontSize: '0.95rem', fontWeight: 'bold' }}>يرجى قبول الشروط لبدء التنفيذ، وفي حال الرفض سيتم إيقاف الحساب فوراً.</p>
+                  <p style={{ marginBottom: '12px', fontSize: '0.9rem', fontWeight: 'bold' }}>يرجى قبول الشروط لبدء التنفيذ، وفي حال الرفض سيتم إيقاف الحساب فوراً.</p>
                   
-                  <div style={{ display: 'flex', gap: '1rem' }}>
+                  <div style={{ display: 'flex', gap: '10px' }}>
                     <button 
                       onClick={() => handleConditionAction(req.id, 'accepted')}
-                      style={{ flex: 1, background: '#198754', color: 'white', border: 'none', padding: '0.75rem 1rem', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '1rem', transition: 'opacity 0.2s' }}
-                      onMouseOver={e => e.currentTarget.style.opacity = 0.9}
-                      onMouseOut={e => e.currentTarget.style.opacity = 1}
+                      style={{ flex: 1, background: '#198754', color: 'white', border: 'none', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.95rem' }}
                     >
-                      موافق على الشروط
+                      ✅ موافق على الشروط
                     </button>
                     <button 
                       onClick={() => handleConditionAction(req.id, 'rejected')}
-                      style={{ flex: 1, background: '#dc3545', color: 'white', border: 'none', padding: '0.75rem 1rem', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '1rem', transition: 'opacity 0.2s' }}
-                      onMouseOver={e => e.currentTarget.style.opacity = 0.9}
-                      onMouseOut={e => e.currentTarget.style.opacity = 1}
+                      style={{ flex: 1, background: '#dc3545', color: 'white', border: 'none', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.95rem' }}
                     >
-                      رفض وإيقاف الحساب
+                      ❌ رفض وإيقاف الحساب
                     </button>
                   </div>
                 </div>
               )}
               
               {req.adminStatus === 'approved' && req.employeeConditionStatus === 'accepted' && (
-                <div style={{ marginTop: '1.5rem', padding: '1rem', background: '#d1e7dd', color: '#0f5132', borderRadius: '8px', textAlign: 'center', fontWeight: 'bold', border: '1px solid #badbcc' }}>
+                <div style={{ marginTop: '12px', padding: '10px', background: 'var(--success-light, #d1e7dd)', color: 'var(--success-dark, #0f5132)', borderRadius: '8px', textAlign: 'center', fontWeight: 'bold', border: '1px solid var(--border)' }}>
                   لقد وافقت على الشروط. يبدأ السريان من {req.conditionsStartDate} المتبقي {req.conditionsDaysRemaining} أيام.
                 </div>
               )}
 
               {req.adminStatus === 'rejected' && (
-                <div style={{ marginTop: '1.5rem', padding: '1rem', background: '#f8d7da', color: '#842029', borderRadius: '8px', textAlign: 'center', fontWeight: 'bold', border: '1px solid #f5c2c7' }}>
+                <div style={{ marginTop: '12px', padding: '10px', background: 'var(--danger-light, #f8d7da)', color: 'var(--danger-dark, #842029)', borderRadius: '8px', textAlign: 'center', fontWeight: 'bold', border: '1px solid var(--border)' }}>
                   تم رفض الطلب من قبل الإدارة.
                 </div>
               )}
@@ -289,3 +338,4 @@ export default function EmployeeResignationModule({
     </div>
   );
 }
+
