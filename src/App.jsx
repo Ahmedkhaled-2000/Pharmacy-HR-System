@@ -625,6 +625,10 @@ export default function App() {
              (e.password && e.password.trim() === p)
     );
     if (emp) {
+      if (emp.is_active === false || emp.status === 'تم الاستقالة') {
+        showToast(`❌ تم إيقاف هذا الحساب بسبب الاستقالة / إنهاء الخدمة${emp.suspension_reason ? `: ${emp.suspension_reason}` : ''}`);
+        return false;
+      }
       setAuthRole('employee');
       setCurrentEmpUser(emp);
       showToast(`✅ تم تسجيل الدخول كـ موظف (${emp.name})`);
@@ -676,17 +680,82 @@ export default function App() {
 
   const handleSaveEmployeeFile = async (empData) => {
     const currentEmps = state.employees || [];
-    const exists = currentEmps.some((e) => e.id === empData.id);
+    const empIdStr = String(empData.id);
+    const empCodeStr = String(empData.code || '');
+
+    const exists = currentEmps.some(
+      (e) => String(e.id) === empIdStr || (e.code && String(e.code) === empCodeStr)
+    );
+
+    const isTerminated = empData.status === 'تم الاستقالة' || empData.is_active === false;
+
+    const normalizedEmpData = {
+      ...empData,
+      status: isTerminated ? 'تم الاستقالة' : 'على رأس العمل',
+      is_active: !isTerminated,
+      fingerprint_active: !isTerminated,
+      suspension_reason: isTerminated ? (empData.suspension_reason || 'تم إنهاء الخدمة') : ''
+    };
+
     let updatedEmps;
     if (exists) {
-      updatedEmps = currentEmps.map((e) => (e.id === empData.id ? empData : e));
+      updatedEmps = currentEmps.map((e) =>
+        String(e.id) === empIdStr || (e.code && String(e.code) === empCodeStr)
+          ? { ...e, ...normalizedEmpData, id: e.id }
+          : e
+      );
     } else {
-      updatedEmps = [...currentEmps, empData];
+      updatedEmps = [...currentEmps, normalizedEmpData];
     }
-    const updatedState = { ...state, employees: updatedEmps };
+
+    let updatedActiveShifts = { ...(state.activeShifts || {}) };
+    let updatedResignations = [...(state.resignationRequests || [])];
+
+    if (isTerminated) {
+      // 1. Immediately terminate active shift if running
+      delete updatedActiveShifts[empData.id];
+      if (empIdStr) delete updatedActiveShifts[empIdStr];
+
+      // 2. Add or update resignation tracking record
+      const hasRecord = updatedResignations.some(
+        (r) => String(r.employeeId) === empIdStr && r.adminStatus === 'approved'
+      );
+      if (!hasRecord) {
+        const newReq = {
+          id: 'res_file_' + Date.now(),
+          employeeId: empData.id,
+          branchId: empData.branchId,
+          type: 'resignation',
+          employeeReason: 'تغيير الحالة يدوياً من ملف الموظف: ' + (normalizedEmpData.suspension_reason || 'تم إنهاء الخدمة'),
+          requestDate: todayStr(),
+          managerStatus: 'approved',
+          managerComment: 'إجراء إداري مباشر من ملف الموظف',
+          adminStatus: 'approved',
+          adminComment: 'إجراء إداري مباشر: ' + (normalizedEmpData.suspension_reason || 'تم إنهاء الخدمة'),
+          conditionsDaysRemaining: 0,
+          conditionsStartDate: '',
+          employeeConditionStatus: 'accepted'
+        };
+        updatedResignations = [newReq, ...updatedResignations];
+      }
+    } else {
+      // Returned to active duty
+      updatedResignations = updatedResignations.filter(
+        (r) => !(String(r.employeeId) === empIdStr && r.adminStatus === 'approved' && r.conditionsDaysRemaining === 0)
+      );
+    }
+
+    const updatedState = {
+      ...state,
+      employees: updatedEmps,
+      activeShifts: updatedActiveShifts,
+      resignationRequests: updatedResignations
+    };
+
     setState(updatedState);
-    await saveState(updatedState);
-    showToast('💾 تم حفظ وتحديث ملف الموظف في قاعدة البيانات');
+    if (saveState) await saveState(updatedState);
+    setEditingEmpFile(null);
+    showToast(isTerminated ? '🔒 تم حفظ الحالة وإيقاف الحساب والبصمة بنجاح' : '💾 تم حفظ وتحديث ملف الموظف بنجاح');
   };
 
   const handleSaveBylaws = async (bylawsData) => {
@@ -2761,6 +2830,11 @@ export default function App() {
 
   // Punch Shift Actions
   const startShift = async (empId, source = 'admin', branchId = null) => {
+    const emp = getEmp(empId);
+    if (emp && (emp.is_active === false || emp.fingerprint_active === false || emp.status === 'تم الاستقالة')) {
+      showToast(`❌ تم إيقاف بصمة وحساب هذا الموظف (تم إنهاء الخدمة / الاستقالة${emp.suspension_reason ? `: ${emp.suspension_reason}` : ''})`);
+      return;
+    }
     if (!getEmpPermission(empId, 'canStartEnd') || !getEmpPermission(empId, 'canLivePunch')) {
       showToast('❌ تم تقييد الصلاحيات: لا تمتلك صلاحية لبدء أو إنهاء الوردية عن طريق البصمة الحية');
       return;
@@ -2769,7 +2843,6 @@ export default function App() {
       showToast('⚠️ الموظف لديه وردية عمل نشطة بالفعل');
       return;
     }
-    const emp = getEmp(empId);
     const punchDate = todayStr();
     const punchTime = nowTimeStr().slice(0, 5);
 

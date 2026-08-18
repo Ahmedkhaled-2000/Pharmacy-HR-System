@@ -10,6 +10,7 @@ export default function AdminResignationModule({
   const [adminComment, setAdminComment] = useState({});
   const [noticeDays, setNoticeDays] = useState({});
   const [noticeStart, setNoticeStart] = useState({});
+  const [filterTab, setFilterTab] = useState('ready'); // 'ready' | 'pending_branch' | 'all'
 
   // Manual Form State
   const [showManualForm, setShowManualForm] = useState(false);
@@ -21,10 +22,16 @@ export default function AdminResignationModule({
     noticeStart: todayStr()
   });
 
-  // Filter: Only show requests that have been reviewed by the branch manager (or created manually)
-  const allRequests = (state.resignationRequests || []).filter(r => 
-    r.managerStatus === 'approved' || r.managerStatus === 'rejected'
-  );
+  // Filter requests based on selected tab
+  const allRequests = (state.resignationRequests || []).filter(r => {
+    if (filterTab === 'ready') {
+      return r.managerStatus === 'approved' || r.managerStatus === 'rejected';
+    }
+    if (filterTab === 'pending_branch') {
+      return !r.managerStatus || r.managerStatus === 'pending';
+    }
+    return true; // 'all'
+  });
   // Sort descending by date
   allRequests.sort((a, b) => (b.requestDate || '').localeCompare(a.requestDate || ''));
 
@@ -40,7 +47,7 @@ export default function AdminResignationModule({
 
     let reqObj = null;
 
-    const updatedReqs = state.resignationRequests.map(r => {
+    const updatedReqs = (state.resignationRequests || []).map(r => {
       if (r.id === reqId) {
         reqObj = { 
           ...r, 
@@ -55,16 +62,19 @@ export default function AdminResignationModule({
       return r;
     });
 
-    let updatedEmployees = state.employees;
+    let updatedEmployees = state.employees || [];
+    let updatedActiveShifts = { ...(state.activeShifts || {}) };
     
-    // If approved and NO notice days (immediate effect), deactivate the employee right away
+    // If approved and NO notice days (immediate effect), deactivate the employee and stop fingerprint & active shift right away
     if (status === 'approved' && nDays === 0 && reqObj) {
-      updatedEmployees = state.employees.map(e => {
-        if (e.id === reqObj.employeeId) {
+      delete updatedActiveShifts[reqObj.employeeId];
+      updatedEmployees = updatedEmployees.map(e => {
+        if (String(e.id) === String(reqObj.employeeId)) {
           return {
             ...e,
+            status: 'تم الاستقالة',
             is_active: false,
-            suspension_reason: 'تم قبول الاستقالة فوراً',
+            suspension_reason: `تم قبول الاستقالة فوراً: ${comment}`,
             fingerprint_active: false
           };
         }
@@ -72,11 +82,16 @@ export default function AdminResignationModule({
       });
     }
 
-    const updatedState = { ...state, resignationRequests: updatedReqs, employees: updatedEmployees };
+    const updatedState = { 
+      ...state, 
+      resignationRequests: updatedReqs, 
+      employees: updatedEmployees,
+      activeShifts: updatedActiveShifts
+    };
     setState(updatedState);
     if (saveState) await saveState(updatedState);
 
-    showToast(status === 'approved' ? 'تم اعتماد الاستقالة من الإدارة' : 'تم رفض الاستقالة من الإدارة');
+    showToast(status === 'approved' ? '✅ تم اعتماد القرار من الإدارة العليا وتحديث سجلات الموظف' : '❌ تم رفض الطلب من الإدارة العليا');
   };
 
   const handleInputChange = (id, field, value) => {
@@ -95,7 +110,7 @@ export default function AdminResignationModule({
     const nDays = parseInt(manualData.noticeDays, 10) || 0;
     const nStart = manualData.noticeStart || todayStr();
 
-    const emp = state.employees.find(e => e.id === manualData.employeeId);
+    const emp = (state.employees || []).find(e => String(e.id) === String(manualData.employeeId));
     if (!emp) return;
     
     const newReq = {
@@ -103,26 +118,31 @@ export default function AdminResignationModule({
       employeeId: emp.id,
       branchId: emp.branchId,
       type: manualData.type,
-      employeeReason: 'تم الإنشاء يدوياً بواسطة الإدارة: ' + manualData.reason,
+      employeeReason: 'تم الإنشاء يدوياً بواسطة الإدارة العليا: ' + manualData.reason,
       requestDate: todayStr(),
       managerStatus: 'approved',
-      managerComment: 'إجراء إداري مباشر',
+      managerComment: 'إجراء إداري مباشر من الإدارة العليا',
       adminStatus: 'approved',
-      adminComment: 'إجراء إداري مباشر',
+      adminComment: 'إجراء إداري مباشر: ' + manualData.reason,
       conditionsDaysRemaining: nDays,
       conditionsStartDate: nDays > 0 ? nStart : '',
-      employeeConditionStatus: 'accepted' // Forced accepted
+      employeeConditionStatus: 'accepted'
     };
 
-    let updatedEmployees = state.employees;
+    let updatedEmployees = state.employees || [];
+    let updatedActiveShifts = { ...(state.activeShifts || {}) };
     
-    // If immediate (nDays === 0) -> stop account and fingerprint
-    // If with notice -> stop fingerprint immediately (as they accepted)
-    updatedEmployees = state.employees.map(e => {
-      if (e.id === emp.id) {
+    // If immediate (nDays === 0) -> stop account and fingerprint and shift
+    if (nDays === 0) {
+      delete updatedActiveShifts[emp.id];
+    }
+
+    updatedEmployees = updatedEmployees.map(e => {
+      if (String(e.id) === String(emp.id)) {
         if (nDays === 0) {
           return {
             ...e,
+            status: 'تم الاستقالة',
             is_active: false,
             suspension_reason: `تم ${manualData.type === 'resignation' ? 'قبول الاستقالة' : 'إنهاء الخدمة'} يدوياً: ${manualData.reason}`,
             fingerprint_active: false
@@ -140,7 +160,8 @@ export default function AdminResignationModule({
     const updatedState = { 
       ...state, 
       resignationRequests: [newReq, ...(state.resignationRequests || [])],
-      employees: updatedEmployees 
+      employees: updatedEmployees,
+      activeShifts: updatedActiveShifts
     };
 
     setState(updatedState);
@@ -150,9 +171,13 @@ export default function AdminResignationModule({
     setManualData({ employeeId: '', type: 'resignation', reason: '', noticeDays: '0', noticeStart: todayStr() });
   };
 
+  const readyCount = (state.resignationRequests || []).filter(r => r.managerStatus === 'approved' || r.managerStatus === 'rejected').length;
+  const pendingBranchCount = (state.resignationRequests || []).filter(r => !r.managerStatus || r.managerStatus === 'pending').length;
+  const totalCount = (state.resignationRequests || []).length;
+
   return (
     <div style={{ padding: '20px', background: 'var(--surface)', borderRadius: '12px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '10px' }}>
         <h2 style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: 0 }}>
           <span>🏢</span> طلبات استقالة الموظفين (الإدارة العليا)
         </h2>
@@ -162,6 +187,58 @@ export default function AdminResignationModule({
           style={{ padding: '8px 16px', background: showManualForm ? 'var(--danger)' : 'var(--primary)', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 'bold' }}
         >
           {showManualForm ? 'إلغاء' : '➕ إضافة إجراء يدوي (استقالة/رفد)'}
+        </button>
+      </div>
+
+      {/* ── Tabs for filtering requests ── */}
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', borderBottom: '1px solid var(--border)', paddingBottom: '10px' }}>
+        <button
+          type="button"
+          onClick={() => setFilterTab('ready')}
+          style={{
+            padding: '8px 16px',
+            borderRadius: '8px',
+            border: 'none',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+            fontSize: '13.5px',
+            background: filterTab === 'ready' ? 'var(--primary)' : 'var(--surface-muted)',
+            color: filterTab === 'ready' ? '#ffffff' : 'var(--text)'
+          }}
+        >
+          📥 طلبات محالة من الفرع ({readyCount})
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilterTab('pending_branch')}
+          style={{
+            padding: '8px 16px',
+            borderRadius: '8px',
+            border: 'none',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+            fontSize: '13.5px',
+            background: filterTab === 'pending_branch' ? 'var(--primary)' : 'var(--surface-muted)',
+            color: filterTab === 'pending_branch' ? '#ffffff' : 'var(--text)'
+          }}
+        >
+          ⏳ بانتظار رد مدير الفرع ({pendingBranchCount})
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilterTab('all')}
+          style={{
+            padding: '8px 16px',
+            borderRadius: '8px',
+            border: 'none',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+            fontSize: '13.5px',
+            background: filterTab === 'all' ? 'var(--primary)' : 'var(--surface-muted)',
+            color: filterTab === 'all' ? '#ffffff' : 'var(--text)'
+          }}
+        >
+          📋 كافة الطلبات ({totalCount})
         </button>
       </div>
 
@@ -240,7 +317,7 @@ export default function AdminResignationModule({
             </div>
 
             <button type="submit" className="btn btn-start" style={{ background: 'var(--danger)', color: 'white', padding: '12px', border: 'none', borderRadius: '6px', fontWeight: 'bold', marginTop: '10px' }}>
-              تنفيذ الإجراء وإيقاف البصمة/الحساب
+              تنفيذ الإجراء وإيقاف البصمة/الحساب فوراً
             </button>
           </form>
         </div>
@@ -249,7 +326,9 @@ export default function AdminResignationModule({
       {allRequests.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '40px', background: 'var(--surface-muted)', borderRadius: '12px', color: 'var(--muted)' }}>
           <div style={{ fontSize: '40px', marginBottom: '10px' }}>📁</div>
-          لا توجد أي طلبات استقالة جاهزة للبت من قبل الإدارة العليا حالياً (يتم استقبال الطلبات بعد رد مدير الفرع أولاً).
+          {filterTab === 'ready' && 'لا توجد طلبات استقالة محالة من مديري الفروع حالياً.'}
+          {filterTab === 'pending_branch' && 'لا توجد طلبات معلقة بانتظار رد مدير الفرع.'}
+          {filterTab === 'all' && 'لا توجد أي طلبات استقالة مسجلة بالنظام.'}
         </div>
       ) : (
         <div style={{ display: 'grid', gap: '20px' }}>
