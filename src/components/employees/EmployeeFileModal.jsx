@@ -15,6 +15,9 @@ export default function EmployeeFileModal({
   // 1. Personal Data
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [phones, setPhones] = useState([
+    { id: '1', number: '', type: 'mobile' }
+  ]);
   const [email, setEmail] = useState('');
   const [relativePhone, setRelativePhone] = useState('');
   const [nationalId, setNationalId] = useState('');
@@ -22,6 +25,36 @@ export default function EmployeeFileModal({
   const [address, setAddress] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
   const [maritalStatus, setMaritalStatus] = useState('أعزب');
+
+  // Phone list handlers
+  const handleAddPhoneField = () => {
+    setPhones([
+      ...phones,
+      { id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 4), number: '', type: 'mobile' }
+    ]);
+  };
+
+  const handlePhoneChange = (id, field, value) => {
+    setPhones(phones.map(p => {
+      if (p.id === id) {
+        if (field === 'number') {
+          // Numbers only validation
+          const numericOnly = value.replace(/\D/g, '');
+          return { ...p, number: numericOnly };
+        }
+        return { ...p, [field]: value };
+      }
+      return p;
+    }));
+  };
+
+  const handleRemovePhoneField = (id) => {
+    if (phones.length <= 1) {
+      setPhones([{ id: '1', number: '', type: 'mobile' }]);
+      return;
+    }
+    setPhones(phones.filter(p => p.id !== id));
+  };
 
   // 2. Job Data
   const [code, setCode] = useState('');
@@ -49,11 +82,27 @@ export default function EmployeeFileModal({
 
   useEffect(() => {
     if (editingEmp) {
+      if (Array.isArray(editingEmp.phones) && editingEmp.phones.length > 0) {
+        setPhones(editingEmp.phones.map(p => ({
+          id: p.id || Math.random().toString(),
+          number: p.number ? String(p.number).replace(/\D/g, '') : '',
+          type: p.type || 'mobile'
+        })));
+      } else if (editingEmp.phone && String(editingEmp.phone).trim()) {
+        setPhones([
+          { id: '1', number: String(editingEmp.phone).replace(/\D/g, ''), type: 'mobile' }
+        ]);
+      } else {
+        setPhones([
+          { id: '1', number: '', type: 'mobile' }
+        ]);
+      }
+
       setName(editingEmp.name || '');
       setPhone(editingEmp.phone || '');
       setEmail(editingEmp.email || '');
-      setRelativePhone(editingEmp.relativePhone || editingEmp.emergencyPhone || '');
-      setNationalId(editingEmp.nationalId || '');
+      setRelativePhone(String(editingEmp.relativePhone || editingEmp.emergencyPhone || '').replace(/\D/g, ''));
+      setNationalId(String(editingEmp.nationalId || '').replace(/\D/g, ''));
       setDob(editingEmp.dob || '');
       setAddress(editingEmp.address || '');
       setPhotoUrl(editingEmp.photoUrl || '');
@@ -103,6 +152,9 @@ export default function EmployeeFileModal({
     } else {
       setName('');
       setPhone('');
+      setPhones([
+        { id: '1', number: '', type: 'mobile' }
+      ]);
       setRelativePhone('');
       setNationalId('');
       setDob('');
@@ -153,80 +205,34 @@ export default function EmployeeFileModal({
     }
   };
 
-  const handleBranchDetailChange = (index, field, value) => {
-    const updated = [...branchesDetails];
-    updated[index][field] = value;
-    setBranchesDetails(updated);
-  };
-
-  const handleAddBranchDetail = () => {
-    setBranchesDetails([
-      ...branchesDetails,
-      { id: Date.now().toString(), branchId: '', salary: '4000', workHours: '8', workDays: '26' }
-    ]);
-  };
-
-  const handleRemoveBranchDetail = (index) => {
-    if (branchesDetails.length === 1) {
-      alert('يجب أن يحتوي الموظف على فرع واحد على الأقل.');
-      return;
-    }
-    setBranchesDetails(branchesDetails.filter((_, i) => i !== index));
-  };
-
-  const handleAddCustomDocument = () => {
-    const title = newDocTitle.trim() || selectedDocType;
-    if (!title) return;
-    const newDoc = {
-      id: `doc_${Date.now()}`,
-      title,
-      fileUrl: '',
-      fileType: 'image'
-    };
-    setDocuments([...documents, newDoc]);
-    setNewDocTitle('');
-  };
-
-  const handleDocFileUpload = async (e, docId) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const isPdf = file.type === 'application/pdf';
-    try {
-      const dataUrl = await compressImage(file, 1000, 0.75);
-      setDocuments((prevDocs) =>
-        prevDocs.map((doc) =>
-          doc.id === docId
-            ? { ...doc, fileUrl: dataUrl, fileType: isPdf ? 'pdf' : 'image', fileName: file.name }
-            : doc
-        )
-      );
-    } catch (err) {
-      console.error('Doc upload compression error:', err);
-    }
-  };
-
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (codeError) {
-      alert('لا يمكن الحفظ: كود الموظف مكرر!');
-      return;
-    }
     if (!name.trim()) {
       alert('يرجى إدخال اسم الموظف');
       return;
     }
+    if (!code.trim()) {
+      alert('يرجى إدخال كود الموظف');
+      return;
+    }
 
-    // Make sure we have valid data
-    const validBranchesDetails = branchesDetails.filter(b => b.branchId).map(b => ({
-      branchId: b.branchId,
-      salary: parseFloat(b.salary) || 4000,
-      workHoursPerDay: parseFloat(b.workHours) || 8,
-      workDaysPerMonth: parseFloat(b.workDays) || 26
-    }));
+    if (codeError) {
+      alert('لا يمكن الحفظ: ' + codeError);
+      return;
+    }
+
+    // Filter valid branches details
+    const validBranchesDetails = branchesDetails
+      .filter((bd) => bd.branchId)
+      .map((bd) => ({
+        branchId: bd.branchId,
+        salary: parseFloat(bd.salary) || 0,
+        workHoursPerDay: parseFloat(bd.workHours) || 8,
+        workDaysPerMonth: parseFloat(bd.workDays) || 26
+      }));
 
     if (validBranchesDetails.length === 0) {
-      alert('يرجى تحديد فرع واحد على الأقل وتفاصيله المالية.');
+      alert('يرجى اختيار فرع واحد على الأقل للموظف وتحديد بيانات الراتب وساعات العمل');
       return;
     }
 
@@ -236,10 +242,14 @@ export default function EmployeeFileModal({
       return;
     }
 
+    const validPhones = phones.filter(p => p.number && p.number.trim());
+    const primaryPhone = validPhones[0]?.number || '';
+
     const employeeData = {
       id: editingEmp ? editingEmp.id : `emp_${Date.now()}`,
       name: name.trim(),
-      phone: phone.trim(),
+      phone: primaryPhone,
+      phones: validPhones,
       email: email.trim(),
       relativePhone: relativePhone.trim(),
       emergencyPhone: relativePhone.trim(),
@@ -355,30 +365,91 @@ export default function EmployeeFileModal({
                   <label>الاسم بالكامل</label>
                   <input type="text" value={name} onChange={(e) => setName(e.target.value)} required placeholder="اسم الموظف الثلاثي" />
                 </div>
-                <div className="field">
-                  <label>رقم الهاتف الشخصي</label>
-                  <input type="text" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="01012345678" />
-                </div>
+
                 <div className="field">
                   <label>البريد الإلكتروني الشخصي (Gmail التنبيهات)</label>
                   <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="employee@gmail.com" />
                 </div>
+
+                {/* Multiple Phone Numbers Section */}
+                <div className="field" style={{ gridColumn: 'span 2', background: 'var(--surface-muted)', padding: '14px', borderRadius: '10px', border: '1px solid var(--border)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                    <label style={{ fontWeight: 800, margin: 0 }}>📞 أرقام الهواتف الشخصية والتواصل</label>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={handleAddPhoneField}
+                      style={{ fontSize: '12px', padding: '4px 10px', background: 'var(--primary-light)', color: 'var(--primary-dark)', fontWeight: 'bold' }}
+                    >
+                      ➕ إضافة رقم هاتف آخر
+                    </button>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {phones.map((p, idx) => (
+                      <div key={p.id || idx} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        <select
+                          value={p.type || 'mobile'}
+                          onChange={(e) => handlePhoneChange(p.id, 'type', e.target.value)}
+                          style={{ width: '130px', padding: '8px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface)', fontSize: '12.5px', fontWeight: 'bold' }}
+                        >
+                          <option value="mobile">📱 محمول</option>
+                          <option value="whatsapp">💬 واتساب</option>
+                          <option value="landline">☎️ خط أرضي</option>
+                        </select>
+
+                        <input
+                          type="text"
+                          placeholder="أرقام فقط (مثال: 01012345678)"
+                          value={p.number}
+                          onChange={(e) => handlePhoneChange(p.id, 'number', e.target.value)}
+                          style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface)', fontSize: '13px', direction: 'ltr', textAlign: 'right' }}
+                        />
+
+                        {phones.length > 1 && (
+                          <button
+                            type="button"
+                            className="del-btn"
+                            onClick={() => handleRemovePhoneField(p.id)}
+                            style={{ padding: '6px 10px', fontSize: '12px' }}
+                            title="حذف هذا الرقم"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '6px' }}>
+                    * تقبل أرقام الهواتف الأرقام فقط (0-9). يمكنك تحديد نوع الرقم (محمول / واتساب / أرضي).
+                  </div>
+                </div>
+
                 <div className="field">
                   <label>رقم هاتف قريب من الدرجة الأولى (للطوارئ)</label>
-                  <input type="text" value={relativePhone} onChange={(e) => setRelativePhone(e.target.value)} placeholder="01112345678 (الأب / الزوجة / الأخ)" />
+                  <input
+                    type="text"
+                    value={relativePhone}
+                    onChange={(e) => setRelativePhone(e.target.value.replace(/\D/g, ''))}
+                    placeholder="01112345678 (أرقام فقط)"
+                  />
                 </div>
+
                 <div className="field">
                   <label>الرقم القومي (14 رقم)</label>
-                  <input type="text" value={nationalId} onChange={(e) => setNationalId(e.target.value)} placeholder="29901010123456" />
+                  <input
+                    type="text"
+                    value={nationalId}
+                    onChange={(e) => setNationalId(e.target.value.replace(/\D/g, ''))}
+                    placeholder="29901010123456 (أرقام فقط)"
+                  />
                 </div>
+
                 <div className="field">
                   <label>تاريخ الميلاد</label>
                   <input type="date" value={dob} onChange={(e) => setDob(e.target.value)} />
                 </div>
-                <div className="field" style={{ gridColumn: 'span 2' }}>
-                  <label>العنوان السكني</label>
-                  <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="المدينة - الشارع - رقم المبنى" />
-                </div>
+
                 <div className="field">
                   <label>الحالة الاجتماعية</label>
                   <select value={maritalStatus} onChange={(e) => setMaritalStatus(e.target.value)}>
@@ -386,6 +457,11 @@ export default function EmployeeFileModal({
                     <option value="متزوج">متزوج</option>
                     <option value="غير ذلك">غير ذلك</option>
                   </select>
+                </div>
+
+                <div className="field" style={{ gridColumn: 'span 2' }}>
+                  <label>العنوان السكني</label>
+                  <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="المدينة - الشارع - رقم المبنى" />
                 </div>
               </div>
             </div>

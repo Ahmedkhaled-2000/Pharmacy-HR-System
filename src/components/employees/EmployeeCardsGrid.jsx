@@ -16,7 +16,8 @@ export default function EmployeeCardsGrid({
   stopShift,
   importEmployeesFromExcel,
   exportEmployeesToExcel,
-  openAddEmpModal
+  openAddEmpModal,
+  openEmpPhonesModal
 }) {
   const branches = state.branches || [];
   const employees = state.employees || [];
@@ -58,6 +59,23 @@ export default function EmployeeCardsGrid({
       <div className="section-head" style={{ marginBottom: '20px' }}>
         <h2>👥 قائمة الموظفين الشاملة حسب الفروع ({employees.length} موظف)</h2>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={openEmpPhonesModal}
+            style={{
+              background: 'var(--primary-light)',
+              color: 'var(--primary-dark)',
+              border: '1px solid var(--primary-tint)',
+              fontWeight: 800,
+              fontSize: '13.5px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            <span>📞</span> أرقام الموظفين
+          </button>
           <label className="btn btn-ghost" style={{ cursor: 'pointer', margin: 0 }}>
             📤 استيراد الموظفين من Excel
             <input type="file" accept=".xlsx, .xls" onChange={importEmployeesFromExcel} style={{ display: 'none' }} />

@@ -58,6 +58,7 @@ import LoginPage from './components/auth/LoginPage';
 import SidebarLayout from './components/layout/SidebarLayout';
 import BranchManagementModule from './components/branches/BranchManagementModule';
 import EmployeeFileModal from './components/employees/EmployeeFileModal';
+import EmployeePhonesDirectoryModal from './components/employees/EmployeePhonesDirectoryModal';
 import WorkBylawsModule from './components/bylaws/WorkBylawsModule';
 import BylawsModule from './components/bylaws/BylawsModule';
 import ApprovalCenterModule from './components/approvals/ApprovalCenterModule';
@@ -144,6 +145,7 @@ export default function App() {
     try { return localStorage.getItem('app_active_nav_tab') || 'dashboard'; } catch { return 'dashboard'; }
   });
   const [isEmpFileModalOpen, setIsEmpFileModalOpen] = useState(false);
+  const [isEmpPhonesModalOpen, setIsEmpPhonesModalOpen] = useState(false);
   const [editingEmpFile, setEditingEmpFile] = useState(null);
 
   // Admin Auth State
@@ -4022,19 +4024,38 @@ export default function App() {
                     <div>
                       <h2 style={{ fontFamily: 'Cairo', margin: 0 }}>👥 قاعدة بيانات وملفات الموظفين الشاملة</h2>
                       <p style={{ margin: '4px 0 0 0', color: 'var(--muted)', fontSize: '14px' }}>
-                        إدارة الفروع، المسميات الوظيفية، رقم قريب الطوارئ، ورصيد الإجازات السنوية
+                        إدارة الفروع، المسميات الوظيفية، أرقام الهواتف الشخصية، رقم قريب الطوارئ، ورصيد الإجازات
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      className="btn btn-start"
-                      onClick={() => {
-                        setEditingEmpFile(null);
-                        setIsEmpFileModalOpen(true);
-                      }}
-                    >
-                      👤 إضافة ملف موظف جديد
-                    </button>
+                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        onClick={() => setIsEmpPhonesModalOpen(true)}
+                        style={{
+                          background: 'var(--primary-light)',
+                          color: 'var(--primary-dark)',
+                          border: '1px solid var(--primary-tint)',
+                          fontWeight: 800,
+                          fontSize: '13.5px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        <span>📞</span> أرقام الموظفين
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-start"
+                        onClick={() => {
+                          setEditingEmpFile(null);
+                          setIsEmpFileModalOpen(true);
+                        }}
+                      >
+                        👤 إضافة ملف موظف جديد
+                      </button>
+                    </div>
                   </div>
 
                   <EmployeeCardsGrid
@@ -4063,6 +4084,7 @@ export default function App() {
                       setEditingEmpFile(null);
                       setIsEmpFileModalOpen(true);
                     }}
+                    openEmpPhonesModal={() => setIsEmpPhonesModalOpen(true)}
                   />
                 </div>
               )}
@@ -4372,6 +4394,14 @@ export default function App() {
         allEmployees={state.employees || []}
         onSave={handleSaveEmployeeFile}
         handleFileUpload={handleFileUpload}
+      />
+
+      {/* Employee Phones Directory Modal */}
+      <EmployeePhonesDirectoryModal
+        isOpen={isEmpPhonesModalOpen}
+        onClose={() => setIsEmpPhonesModalOpen(false)}
+        employees={state.employees || []}
+        branches={state.branches || []}
       />
 
 
