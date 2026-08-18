@@ -22,8 +22,32 @@ export default function BranchResignationModule({
     }
     return false;
   });
-  // Sort descending by date
-  branchRequests.sort((a, b) => (b.requestDate || '').localeCompare(a.requestDate || ''));
+  // Helper to extract numeric timestamp for accurate descending sort
+  const getReqSortTime = (r) => {
+    if (r.createdAt) {
+      const t = new Date(r.createdAt).getTime();
+      if (!isNaN(t) && t > 0) return t;
+    }
+    if (r.updatedAt) {
+      const t = new Date(r.updatedAt).getTime();
+      if (!isNaN(t) && t > 0) return t;
+    }
+    if (r.id) {
+      const parts = String(r.id).split('_');
+      for (const p of parts) {
+        const num = parseInt(p, 10);
+        if (!isNaN(num) && num > 1000000000000) return num;
+      }
+    }
+    if (r.requestDate) {
+      const t = new Date(r.requestDate).getTime();
+      if (!isNaN(t) && t > 0) return t;
+    }
+    return 0;
+  };
+
+  // Sort descending by newest time first
+  branchRequests.sort((a, b) => getReqSortTime(b) - getReqSortTime(a));
 
   const handleAction = async (reqId, status) => {
     const comment = managerComment[reqId] || '';
@@ -38,7 +62,12 @@ export default function BranchResignationModule({
 
     const updatedReqs = (state.resignationRequests || []).map(r => {
       if (r.id === reqId) {
-        return { ...r, managerStatus: status, managerComment: comment };
+        return { 
+          ...r, 
+          managerStatus: status, 
+          managerComment: comment,
+          updatedAt: new Date().toISOString()
+        };
       }
       return r;
     });

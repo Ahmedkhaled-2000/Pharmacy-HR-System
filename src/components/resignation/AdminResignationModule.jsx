@@ -35,10 +35,35 @@ export default function AdminResignationModule({
       const isAdminDecided = r.adminStatus === 'approved' || r.adminStatus === 'rejected';
       return isAdminDecided || r.isAdminCreated;
     }
-    return true;
+    return false;
   });
-  // Sort descending by date
-  allRequests.sort((a, b) => (b.requestDate || '').localeCompare(a.requestDate || ''));
+
+  // Helper to extract numeric timestamp for accurate descending sort
+  const getReqSortTime = (r) => {
+    if (r.createdAt) {
+      const t = new Date(r.createdAt).getTime();
+      if (!isNaN(t) && t > 0) return t;
+    }
+    if (r.updatedAt) {
+      const t = new Date(r.updatedAt).getTime();
+      if (!isNaN(t) && t > 0) return t;
+    }
+    if (r.id) {
+      const parts = String(r.id).split('_');
+      for (const p of parts) {
+        const num = parseInt(p, 10);
+        if (!isNaN(num) && num > 1000000000000) return num;
+      }
+    }
+    if (r.requestDate) {
+      const t = new Date(r.requestDate).getTime();
+      if (!isNaN(t) && t > 0) return t;
+    }
+    return 0;
+  };
+
+  // Sort descending by newest time first
+  allRequests.sort((a, b) => getReqSortTime(b) - getReqSortTime(a));
 
   const handleAction = async (reqId, status) => {
     const comment = adminComment[reqId] || '';
@@ -60,7 +85,8 @@ export default function AdminResignationModule({
           adminComment: comment,
           conditionsDaysRemaining: status === 'approved' ? nDays : 0,
           conditionsStartDate: status === 'approved' && nDays > 0 ? nStart : '',
-          employeeConditionStatus: (status === 'approved' && nDays > 0) ? 'pending' : 'accepted' // auto accept if no conditions
+          employeeConditionStatus: (status === 'approved' && nDays > 0) ? 'pending' : 'accepted', // auto accept if no conditions
+          updatedAt: new Date().toISOString()
         };
         return reqObj;
       }

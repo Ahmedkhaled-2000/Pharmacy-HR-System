@@ -41,6 +41,8 @@ export default function EmployeeResignationModule({
       conditionsDaysRemaining: 0,
       conditionsStartDate: '',
       employeeConditionStatus: 'pending', // Will only be active if admin sets conditions
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     };
 
     const newNotif = {

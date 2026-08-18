@@ -97,6 +97,23 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
     return mergedEmp;
   }
 
+  // 0.1 معالجة طلبات الاستقالة وحسم قرارات مدير الفرع والإدارة العليا
+  if (options.prefix === 'res') {
+    const localTime = getItemTime(localItem);
+    const remoteTime = getItemTime(remoteItem);
+
+    const mRank = (s) => (s === 'approved' || s === 'rejected' ? 20 : 10);
+    const aRank = (s) => (s === 'approved' || s === 'rejected' ? 30 : 10);
+
+    const localScore = mRank(localItem.managerStatus) + aRank(localItem.adminStatus);
+    const remoteScore = mRank(remoteItem.managerStatus) + aRank(remoteItem.adminStatus);
+
+    if (localScore > remoteScore) return { ...remoteItem, ...localItem };
+    if (remoteScore > localScore) return { ...localItem, ...remoteItem };
+
+    return localTime >= remoteTime ? { ...remoteItem, ...localItem } : { ...localItem, ...remoteItem };
+  }
+
   // 1. معالجة وحسم سجلات السداد والمدفوعات للسلف
   let mergedPaymentsHistory = undefined;
   let mergedPaidAmount = undefined;
