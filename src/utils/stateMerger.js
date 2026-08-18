@@ -86,13 +86,12 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
     } else if (localTime > remoteTime) {
       mergedEmp = { ...remoteItem, ...localItem };
     } else {
-      // If timestamps are equal (or both 0), we trust the remote data for permissions
-      // because the remote represents the central source of truth for admin updates.
-      mergedEmp = { ...localItem, ...remoteItem };
-      if (remoteItem.permissions !== undefined) {
-        mergedEmp.permissions = remoteItem.permissions;
-      } else if (localItem.permissions !== undefined) {
+      // If timestamps are equal (or both 0), local edits take precedence
+      mergedEmp = { ...remoteItem, ...localItem };
+      if (localItem.permissions !== undefined) {
         mergedEmp.permissions = localItem.permissions;
+      } else if (remoteItem.permissions !== undefined) {
+        mergedEmp.permissions = remoteItem.permissions;
       }
     }
     return mergedEmp;
@@ -321,6 +320,7 @@ export function smartMergeStates(localState, remoteState) {
 
     // 3. المعاملات والطلبات والحضور
     requests: mergeArrays(localState.requests, remoteState.requests, { prefix: 'req', deletedIds }),
+    resignationRequests: mergeArrays(localState.resignationRequests, remoteState.resignationRequests, { prefix: 'res', deletedIds }),
     leaveRequests: mergeArrays(localState.leaveRequests, remoteState.leaveRequests, { prefix: 'leave', deletedIds }),
     shiftSwaps: mergeArrays(localState.shiftSwaps, remoteState.shiftSwaps, { prefix: 'swap', deletedIds }),
     loans: mergeArrays(localState.loans, remoteState.loans, { prefix: 'loan', deletedIds }),

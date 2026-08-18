@@ -602,7 +602,7 @@ export default function App() {
       setIsAdminLoggedIn(true);
       setActiveNavTab('dashboard');
       showToast('✅ تم تسجيل الدخول كـ Super Admin (الإدارة العليا) بنجاح');
-      return true;
+      return { success: true };
     }
 
     // 2. Branch Manager
@@ -615,7 +615,7 @@ export default function App() {
       setCurrentBranch(branch);
       setActiveNavTab('dashboard');
       showToast(`✅ تم تسجيل الدخول لصفحة مدير الفرع (${branch.name})`);
-      return true;
+      return { success: true };
     }
 
     // 3. Employee
@@ -626,16 +626,16 @@ export default function App() {
     );
     if (emp) {
       if (emp.is_active === false || emp.status === 'تم الاستقالة') {
-        showToast(`❌ تم إيقاف هذا الحساب بسبب الاستقالة / إنهاء الخدمة${emp.suspension_reason ? `: ${emp.suspension_reason}` : ''}`);
-        return false;
+        const suspensionMsg = `تم إيقاف هذا الحساب بسبب الاستقالة / إنهاء الخدمة${emp.suspension_reason ? `: ${emp.suspension_reason}` : ''}`;
+        return { success: false, error: suspensionMsg, isSuspended: true };
       }
       setAuthRole('employee');
       setCurrentEmpUser(emp);
       showToast(`✅ تم تسجيل الدخول كـ موظف (${emp.name})`);
-      return true;
+      return { success: true };
     }
 
-    return false;
+    return { success: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة' };
   };
 
   const handleLogout = () => {
@@ -694,7 +694,8 @@ export default function App() {
       status: isTerminated ? 'تم الاستقالة' : 'على رأس العمل',
       is_active: !isTerminated,
       fingerprint_active: !isTerminated,
-      suspension_reason: isTerminated ? (empData.suspension_reason || 'تم إنهاء الخدمة') : ''
+      suspension_reason: isTerminated ? (empData.suspension_reason || 'تم إنهاء الخدمة') : '',
+      updatedAt: new Date().toISOString()
     };
 
     let updatedEmps;
@@ -726,6 +727,7 @@ export default function App() {
           employeeId: empData.id,
           branchId: empData.branchId,
           type: 'resignation',
+          isAdminCreated: true,
           employeeReason: 'تغيير الحالة يدوياً من ملف الموظف: ' + (normalizedEmpData.suspension_reason || 'تم إنهاء الخدمة'),
           requestDate: todayStr(),
           managerStatus: 'approved',
@@ -739,9 +741,9 @@ export default function App() {
         updatedResignations = [newReq, ...updatedResignations];
       }
     } else {
-      // Returned to active duty
+      // Returned to active duty: clean up all old resignation records for this employee
       updatedResignations = updatedResignations.filter(
-        (r) => !(String(r.employeeId) === empIdStr && r.adminStatus === 'approved' && r.conditionsDaysRemaining === 0)
+        (r) => String(r.employeeId) !== empIdStr
       );
     }
 

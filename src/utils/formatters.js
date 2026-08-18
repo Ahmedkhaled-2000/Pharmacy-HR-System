@@ -211,6 +211,7 @@ export function normalizeState(parsed) {
 
   const branches = toSafeArray(parsed.branches);
   const requests = toSafeArray(parsed.requests);
+  const resignationRequests = toSafeArray(parsed.resignationRequests);
   const leaveRequests = toSafeArray(parsed.leaveRequests);
   const shiftSwaps = toSafeArray(parsed.shiftSwaps);
   const loans = toSafeArray(parsed.loans);
@@ -243,6 +244,7 @@ export function normalizeState(parsed) {
     activeShifts,
     adjustments,
     requests,
+    resignationRequests,
     leaveRequests,
     shiftSwaps,
     loans,

@@ -15,8 +15,12 @@ export default function LoginPage({ onLogin, state, themeMode, toggleTheme }) {
       setErrorMsg('يرجى إدخال اسم المستخدم وكلمة المرور');
       return;
     }
-    const success = onLogin(username.trim(), password.trim());
-    if (!success) {
+    const res = onLogin(username.trim(), password.trim());
+    if (res && typeof res === 'object') {
+      if (!res.success) {
+        setErrorMsg(res.error || 'اسم المستخدم أو كلمة المرور غير صحيحة');
+      }
+    } else if (!res) {
       setErrorMsg('اسم المستخدم أو كلمة المرور غير صحيحة');
     }
   };

@@ -269,6 +269,7 @@ export default function EmployeeFileModal({
       password,
       annualLeaveBalance: parseFloat(annualLeaveBalance) || 21,
       documents,
+      updatedAt: new Date().toISOString(),
       createdAt: editingEmp ? editingEmp.createdAt : new Date().toISOString()
     };
 
