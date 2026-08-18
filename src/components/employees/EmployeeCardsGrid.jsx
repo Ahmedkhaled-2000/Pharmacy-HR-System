@@ -124,11 +124,16 @@ export default function EmployeeCardsGrid({
                   const active = state.activeShifts[emp.id];
                   const empSum = computeEmpSummary(emp.id, filterFn);
                   
-                  const empResignations = empRequests.filter(r => r.employeeId === emp.id && r.type === 'resignation');
+                  const isEmpTarget = (r) => String(r.employeeId) === String(emp.id) || (emp.code && String(r.employeeId) === String(emp.code));
+                  const hasApprovedWithdraw = empRequests.some(r => isEmpTarget(r) && r.type === 'withdraw' && (r.adminStatus === 'approved' || r.managerStatus === 'approved'));
+                  
+                  const empResignations = empRequests.filter(r => isEmpTarget(r) && r.type === 'resignation' && !r.isCancelled && r.adminStatus !== 'cancelled');
                   const activeResignation = empResignations.length > 0 ? empResignations.sort((a,b) => b.requestDate.localeCompare(a.requestDate))[0] : null;
                   
                   let resStatusBadge = null;
-                  if (emp.status === 'تم الاستقالة' || emp.is_active === false) {
+                  if (hasApprovedWithdraw) {
+                    resStatusBadge = null;
+                  } else if (emp.status === 'تم الاستقالة' || emp.is_active === false) {
                     resStatusBadge = (
                       <div style={{ background: 'var(--danger-light, #fee2e2)', color: 'var(--danger-dark, #991b1b)', padding: '4px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', marginTop: '6px', display: 'inline-block' }}>
                         🔴 تم إنهاء الخدمة / مستقيل {emp.suspension_reason ? `(${emp.suspension_reason})` : ''}

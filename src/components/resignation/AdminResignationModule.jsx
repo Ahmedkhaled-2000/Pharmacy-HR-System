@@ -72,23 +72,24 @@ export default function AdminResignationModule({
       return;
     }
 
-    const nDays = parseInt(noticeDays[reqId], 10) || 0;
-    const nStart = noticeStart[reqId] || todayStr();
+    const targetReq = (state.resignationRequests || []).find(r => r.id === reqId);
+    if (!targetReq) return;
+    const isWithdraw = targetReq.type === 'withdraw';
 
-    let reqObj = null;
+    const nDays = isWithdraw ? 0 : (parseInt(noticeDays[reqId], 10) || 0);
+    const nStart = noticeStart[reqId] || todayStr();
 
     let updatedReqs = (state.resignationRequests || []).map(r => {
       if (r.id === reqId) {
-        reqObj = { 
+        return { 
           ...r, 
           adminStatus: status, 
           adminComment: comment,
-          conditionsDaysRemaining: status === 'approved' ? nDays : 0,
-          conditionsStartDate: status === 'approved' && nDays > 0 ? nStart : '',
-          employeeConditionStatus: (status === 'approved' && nDays > 0) ? 'pending' : 'accepted', // auto accept if no conditions
+          conditionsDaysRemaining: (!isWithdraw && status === 'approved') ? nDays : 0,
+          conditionsStartDate: (!isWithdraw && status === 'approved' && nDays > 0) ? nStart : '',
+          employeeConditionStatus: (!isWithdraw && status === 'approved' && nDays > 0) ? 'pending' : 'accepted',
           updatedAt: new Date().toISOString()
         };
-        return reqObj;
       }
       return r;
     });
@@ -96,17 +97,21 @@ export default function AdminResignationModule({
     let updatedEmployees = state.employees || [];
     let updatedActiveShifts = { ...(state.activeShifts || {}) };
     
-    // If approved and it is a WITHDRAW request:
-    // 1. Cancel previous resignation requests for this employee
-    // 2. Reactivate employee back to "على رأس العمل"
-    if (status === 'approved' && reqObj && reqObj.type === 'withdraw') {
+    // Case 1: If approved and it is a WITHDRAW request:
+    // 1. Cancel ALL previous resignation requests for this employee and reset their remaining days/conditions to 0/empty
+    // 2. Reactivate employee back to "على رأس العمل" and enable fingerprint and clear suspension reason
+    if (status === 'approved' && isWithdraw) {
       updatedReqs = updatedReqs.map(r => {
-        if (String(r.employeeId) === String(reqObj.employeeId) && r.type === 'resignation' && r.id !== reqObj.id) {
+        const isSameEmp = String(r.employeeId) === String(targetReq.employeeId);
+        if (isSameEmp && r.type === 'resignation') {
           return {
             ...r,
             isCancelled: true,
             cancelledReason: `تم إلغاء الاستقالة بسبب قبول طلب التراجع عن الاستقالة: ${comment}`,
             adminStatus: 'cancelled',
+            conditionsDaysRemaining: 0,
+            conditionsStartDate: '',
+            employeeConditionStatus: 'cancelled',
             updatedAt: new Date().toISOString()
           };
         }
@@ -114,7 +119,8 @@ export default function AdminResignationModule({
       });
 
       updatedEmployees = updatedEmployees.map(e => {
-        if (String(e.id) === String(reqObj.employeeId)) {
+        const isTarget = String(e.id) === String(targetReq.employeeId) || (e.code && String(e.code) === String(targetReq.employeeId));
+        if (isTarget) {
           return {
             ...e,
             status: 'على رأس العمل',
@@ -128,11 +134,15 @@ export default function AdminResignationModule({
       });
     }
 
-    // If approved resignation with NO notice days (immediate effect), deactivate the employee and stop fingerprint & active shift right away
-    if (status === 'approved' && reqObj && reqObj.type === 'resignation' && nDays === 0) {
-      delete updatedActiveShifts[reqObj.employeeId];
+    // Case 2: ONLY for resignation requests with 0 notice days (immediate effect):
+    // -> Deactivate employee, stop fingerprint & remove active shift
+    if (status === 'approved' && !isWithdraw && nDays === 0) {
+      delete updatedActiveShifts[targetReq.employeeId];
+      if (targetReq.employeeId) delete updatedActiveShifts[String(targetReq.employeeId)];
+
       updatedEmployees = updatedEmployees.map(e => {
-        if (String(e.id) === String(reqObj.employeeId)) {
+        const isTarget = String(e.id) === String(targetReq.employeeId) || (e.code && String(e.code) === String(targetReq.employeeId));
+        if (isTarget) {
           return {
             ...e,
             status: 'تم الاستقالة',
@@ -155,7 +165,10 @@ export default function AdminResignationModule({
     setState(updatedState);
     if (saveState) await saveState(updatedState);
 
-    showToast(status === 'approved' ? '✅ تم اعتماد القرار من الإدارة العليا وتحديث سجلات الموظف' : '❌ تم رفض الطلب من الإدارة العليا');
+    showToast(status === 'approved' 
+      ? (isWithdraw ? '✅ تم قبول طلب التراجع وإعادة الموظف على رأس العمل' : '✅ تم اعتماد الاستقالة وتحديث سجلات الموظف') 
+      : '❌ تم رفض الطلب من الإدارة العليا'
+    );
   };
 
   const handleInputChange = (id, field, value) => {
@@ -451,45 +464,50 @@ export default function AdminResignationModule({
 
                 {/* Admin Action Area */}
                 {req.adminStatus === 'pending' ? (
-                  <div style={{ background: 'var(--primary-light)', padding: '15px', borderRadius: '8px', border: '1px solid var(--primary)' }}>
-                    <h4 style={{ margin: '0 0 15px 0', color: 'var(--primary-dark)' }}>قرار الإدارة العليا والشروط</h4>
+                  <div style={{ background: req.type === 'withdraw' ? 'var(--surface-muted)' : 'var(--primary-light)', padding: '15px', borderRadius: '8px', border: req.type === 'withdraw' ? '1px solid var(--border)' : '1px solid var(--primary)' }}>
+                    <h4 style={{ margin: '0 0 15px 0', color: 'var(--primary-dark)' }}>
+                      {req.type === 'withdraw' ? '↩️ قرار الإدارة العليا بشأن طلب التراجع والعودة للعمل' : '🚪 قرار الإدارة العليا والشروط'}
+                    </h4>
                     
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '15px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: req.type === 'withdraw' ? '1fr' : '1fr 1fr', gap: '15px', marginBottom: '15px' }}>
                       <div>
                         <label style={{ display: 'block', marginBottom: '5px', fontSize: '13px', fontWeight: 'bold' }}>تعليق الإدارة (مطلوب)</label>
                         <input 
                           type="text" 
                           className="ep-input"
                           style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--border)' }}
-                          placeholder="ملاحظات الإدارة..."
+                          placeholder={req.type === 'withdraw' ? 'أدخل ملاحظات قبول أو رفض التراجع...' : 'ملاحظات الإدارة...'}
                           value={adminComment[req.id] || ''}
                           onChange={(e) => handleInputChange(req.id, 'comment', e.target.value)}
                         />
                       </div>
-                      <div style={{ display: 'flex', gap: '10px' }}>
-                        <div style={{ flex: 1 }}>
-                          <label style={{ display: 'block', marginBottom: '5px', fontSize: '13px', fontWeight: 'bold' }}>فترة الإشعار (بالأيام)</label>
-                          <input 
-                            type="number" 
-                            className="ep-input"
-                            min="0"
-                            style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--border)' }}
-                            placeholder="0 للتنفيذ الفوري"
-                            value={noticeDays[req.id] || ''}
-                            onChange={(e) => handleInputChange(req.id, 'days', e.target.value)}
-                          />
+
+                      {req.type === 'resignation' && (
+                        <div style={{ display: 'flex', gap: '10px' }}>
+                          <div style={{ flex: 1 }}>
+                            <label style={{ display: 'block', marginBottom: '5px', fontSize: '13px', fontWeight: 'bold' }}>فترة الإشعار (بالأيام)</label>
+                            <input 
+                              type="number" 
+                              className="ep-input"
+                              min="0"
+                              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--border)' }}
+                              placeholder="0 للتنفيذ الفوري"
+                              value={noticeDays[req.id] || ''}
+                              onChange={(e) => handleInputChange(req.id, 'days', e.target.value)}
+                            />
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <label style={{ display: 'block', marginBottom: '5px', fontSize: '13px', fontWeight: 'bold' }}>تاريخ بدء الإشعار</label>
+                            <input 
+                              type="date" 
+                              className="ep-input"
+                              style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--border)' }}
+                              value={noticeStart[req.id] || todayStr()}
+                              onChange={(e) => handleInputChange(req.id, 'start', e.target.value)}
+                            />
+                          </div>
                         </div>
-                        <div style={{ flex: 1 }}>
-                          <label style={{ display: 'block', marginBottom: '5px', fontSize: '13px', fontWeight: 'bold' }}>تاريخ بدء الإشعار</label>
-                          <input 
-                            type="date" 
-                            className="ep-input"
-                            style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--border)' }}
-                            value={noticeStart[req.id] || todayStr()}
-                            onChange={(e) => handleInputChange(req.id, 'start', e.target.value)}
-                          />
-                        </div>
-                      </div>
+                      )}
                     </div>
 
                     <div style={{ display: 'flex', gap: '10px' }}>
@@ -498,19 +516,21 @@ export default function AdminResignationModule({
                         className="btn btn-start" 
                         style={{ flex: 1, padding: '10px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', background: 'var(--success)', color: 'white' }}
                       >
-                        ✅ اعتماد الاستقالة
+                        {req.type === 'withdraw' ? '✅ قبول التراجع وإعادة الموظف للعمل' : '✅ اعتماد الاستقالة'}
                       </button>
                       <button 
                         onClick={() => handleAction(req.id, 'rejected')}
                         className="btn btn-start" 
                         style={{ flex: 1, padding: '10px', background: 'var(--danger)', color: 'white', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px' }}
                       >
-                        ❌ رفض الاستقالة
+                        {req.type === 'withdraw' ? '❌ رفض طلب التراجع' : '❌ رفض الاستقالة'}
                       </button>
                     </div>
-                    <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '10px', textAlign: 'center' }}>
-                      ملاحظة: عند وضع أيام في فترة الإشعار سيتم إرسال الشروط للموظف للموافقة، وسيتم إيقاف بصمته الإلكترونية خلال تلك الفترة تلقائياً فور قبوله.
-                    </div>
+                    {req.type === 'resignation' && (
+                      <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '10px', textAlign: 'center' }}>
+                        ملاحظة: عند وضع أيام في فترة الإشعار سيتم إرسال الشروط للموظف للموافقة، وسيتم إيقاف بصمته الإلكترونية خلال تلك الفترة تلقائياً فور قبوله.
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div style={{ background: 'var(--surface)', padding: '15px', borderRadius: '8px', border: '1px solid var(--border)' }}>

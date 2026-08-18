@@ -879,12 +879,24 @@ export default function EmployeePortalView({
   // Resignation Notice Period Calculation for top banner across all pages
   const activeResignationNotice = useMemo(() => {
     if (!emp) return null;
+    const empIdStr = String(emp.id || '');
+    const empCodeStr = String(emp.code || '');
+
+    // Check if there is any approved withdraw request (which immediately cancels the countdown timer)
+    const hasApprovedWithdraw = (state?.resignationRequests || []).some(r => 
+      (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeId) === empCodeStr)) &&
+      r.type === 'withdraw' &&
+      (r.adminStatus === 'approved' || r.managerStatus === 'approved')
+    );
+    if (hasApprovedWithdraw) return null;
+
     const activeReq = (state?.resignationRequests || []).find(r => 
-      String(r.employeeId) === String(emp.id) &&
+      (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeId) === empCodeStr)) &&
       r.type === 'resignation' &&
       r.adminStatus === 'approved' &&
       r.employeeConditionStatus === 'accepted' &&
-      !r.isCancelled
+      !r.isCancelled &&
+      r.adminStatus !== 'cancelled'
     );
     if (!activeReq) return null;
 
@@ -902,6 +914,8 @@ export default function EmployeePortalView({
     const endD = new Date(endDateStr);
     const diffTime = endD.getTime() - today.getTime();
     const remainingDays = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+
+    if (remainingDays <= 0) return null;
 
     return {
       startDate,
