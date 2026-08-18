@@ -654,6 +654,20 @@ export default function App() {
     showToast('تم تسجيل الخروج بنجاح');
   };
 
+  // Auto-logout suspended / resigned employee immediately across any active browser session
+  useEffect(() => {
+    if (authRole === 'employee' && currentEmpUser) {
+      const liveEmp = (state.employees || []).find(e => 
+        (e.id && String(e.id) === String(currentEmpUser.id)) || 
+        (e.code && String(e.code) === String(currentEmpUser.code))
+      );
+      if (liveEmp && (liveEmp.is_active === false || liveEmp.status === 'تم الاستقالة')) {
+        handleLogout();
+        showToast('⚠️ تم إيقاف الحساب وتسجيل الخروج تلقائياً');
+      }
+    }
+  }, [state.employees, authRole, currentEmpUser]);
+
   // Domain Handlers
   const handleSaveBranch = async (branchData) => {
     const currentBranches = state.branches || [];

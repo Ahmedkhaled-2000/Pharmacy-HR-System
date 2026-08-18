@@ -71,7 +71,6 @@ export default function EmployeeResignationModule({
   };
 
   const handleConditionAction = async (reqId, action) => {
-    // action: 'accepted' | 'rejected'
     const target = empRequests.find(r => r.id === reqId);
     if (!target) return;
 
@@ -80,23 +79,41 @@ export default function EmployeeResignationModule({
         if (e.id === emp.id) {
           return {
             ...e,
+            status: 'تم الاستقالة',
             is_active: false,
             suspension_reason: 'تم إيقاف الحساب بسبب رفض شروط الاستقالة',
-            fingerprint_active: false
+            fingerprint_active: false,
+            updatedAt: new Date().toISOString()
           };
         }
         return e;
       });
       
+      const updatedActiveShifts = { ...(state.activeShifts || {}) };
+      delete updatedActiveShifts[emp.id];
+
       const updatedReqs = state.resignationRequests.map(r => 
-        r.id === reqId ? { ...r, employeeConditionStatus: 'rejected' } : r
+        r.id === reqId ? { ...r, employeeConditionStatus: 'rejected', updatedAt: new Date().toISOString() } : r
       );
 
-      const updatedState = { ...state, employees: updatedEmployees, resignationRequests: updatedReqs };
+      const updatedState = { 
+        ...state, 
+        employees: updatedEmployees, 
+        activeShifts: updatedActiveShifts,
+        resignationRequests: updatedReqs 
+      };
       setState(updatedState);
       if (saveState) await saveState(updatedState);
       
-      showToast('تم رفض الشروط وتم إيقاف الحساب');
+      try {
+        localStorage.removeItem('app_auth_role');
+        localStorage.removeItem('app_current_branch');
+        localStorage.removeItem('app_current_emp_user');
+        localStorage.removeItem('app_active_nav_tab');
+        localStorage.removeItem('app_is_admin');
+      } catch {}
+
+      showToast('تم رفض الشروط وتم إيقاف الحساب وتسجيل الخروج');
       setTimeout(() => {
         window.location.reload();
       }, 1000);
@@ -108,14 +125,15 @@ export default function EmployeeResignationModule({
         if (e.id === emp.id) {
           return {
             ...e,
-            fingerprint_active: false // إيقاف البصمة خلال فترة الإشعار
+            fingerprint_active: false, // إيقاف البصمة خلال فترة الإشعار
+            updatedAt: new Date().toISOString()
           };
         }
         return e;
       });
 
       const updatedReqs = state.resignationRequests.map(r => 
-        r.id === reqId ? { ...r, employeeConditionStatus: 'accepted' } : r
+        r.id === reqId ? { ...r, employeeConditionStatus: 'accepted', updatedAt: new Date().toISOString() } : r
       );
       
       const updatedState = { ...state, employees: updatedEmployees, resignationRequests: updatedReqs };
@@ -320,6 +338,16 @@ export default function EmployeeResignationModule({
               {req.adminStatus === 'rejected' && (
                 <div style={{ marginTop: '12px', padding: '10px', background: 'var(--danger-light, #f8d7da)', color: 'var(--danger-dark, #842029)', borderRadius: '8px', textAlign: 'center', fontWeight: 'bold', border: '1px solid var(--border)' }}>
                   تم رفض الطلب من قبل الإدارة.
+                </div>
+              )}
+
+              {(req.isCancelled || req.adminStatus === 'cancelled') && (
+                <div style={{ marginTop: '12px', padding: '12px 14px', background: 'rgba(239, 68, 68, 0.08)', color: 'var(--danger, #dc2626)', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.2)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ fontSize: '20px' }}>🚫</span>
+                  <div>
+                    <div style={{ fontWeight: 'bold', fontSize: '13.5px' }}>تم إلغاء هذا الطلب</div>
+                    <div style={{ fontSize: '12.5px', marginTop: '2px', color: 'var(--text)' }}>{req.cancelledReason || 'تم إلغاء الاستقالة بناءً على قبول طلب التراجع عن الاستقالة.'}</div>
+                  </div>
                 </div>
               )}
 

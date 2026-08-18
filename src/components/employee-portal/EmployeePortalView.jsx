@@ -876,6 +876,54 @@ export default function EmployeePortalView({
   const dailyRate = summary.dailyRate || 0;
   const absenceDeduction = summary.absenceDeduction || 0;
 
+  // Resignation Notice Period Calculation for top banner across all pages
+  const activeResignationNotice = useMemo(() => {
+    if (!emp) return null;
+    const activeReq = (state?.resignationRequests || []).find(r => 
+      String(r.employeeId) === String(emp.id) &&
+      r.type === 'resignation' &&
+      r.adminStatus === 'approved' &&
+      r.employeeConditionStatus === 'accepted' &&
+      !r.isCancelled
+    );
+    if (!activeReq) return null;
+
+    const startDate = activeReq.conditionsStartDate || activeReq.requestDate || todayStr();
+    const noticeDays = parseInt(activeReq.conditionsDaysRemaining, 10) || 0;
+    if (noticeDays <= 0) return null;
+
+    // Calculate end date (startDate + noticeDays)
+    const d = new Date(startDate);
+    d.setDate(d.getDate() + noticeDays);
+    const endDateStr = d.toISOString().split('T')[0];
+
+    // Calculate remaining days from today
+    const today = new Date(todayStr());
+    const endD = new Date(endDateStr);
+    const diffTime = endD.getTime() - today.getTime();
+    const remainingDays = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+
+    return {
+      startDate,
+      endDate: endDateStr,
+      remainingDays,
+      totalDays: noticeDays,
+      adminComment: activeReq.adminComment
+    };
+  }, [emp, state?.resignationRequests]);
+
+  // Resignation badge count for sidebar
+  const resignationBadgeCount = useMemo(() => {
+    if (!emp) return 0;
+    const myRes = (state?.resignationRequests || []).filter(r => String(r.employeeId) === String(emp.id));
+    // Count any request where branch manager or admin replied
+    return myRes.filter(r => 
+      (r.managerStatus === 'approved' || r.managerStatus === 'rejected') ||
+      (r.adminStatus === 'approved' || r.adminStatus === 'rejected') ||
+      r.employeeConditionStatus === 'pending'
+    ).length;
+  }, [emp, state?.resignationRequests]);
+
   // ─────────────────────────────────────────
   //  Conditional Renders
   // ─────────────────────────────────────────
@@ -1007,6 +1055,7 @@ export default function EmployeePortalView({
             let badge = 0;
             if (item.id === 'adjustments') badge = empAdjs.length;
             if (item.id === 'shifts') badge = empShifts.length;
+            if (item.id === 'resignations') badge = resignationBadgeCount;
 
             return (
               <button
@@ -1166,6 +1215,50 @@ export default function EmployeePortalView({
 
         {/* Scrollable content area */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
+
+          {/* ── Active Resignation Notice Period Banner ── */}
+          {activeResignationNotice && activeResignationNotice.remainingDays > 0 && (
+            <div
+              style={{
+                background: 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)',
+                border: '2px solid #f59e0b',
+                borderRadius: '16px',
+                padding: '16px 22px',
+                marginBottom: '20px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '14px',
+                boxShadow: '0 4px 12px rgba(245, 158, 11, 0.15)'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                <span style={{ fontSize: '32px' }}>⏳</span>
+                <div>
+                  <div style={{ fontWeight: '900', fontSize: '15px', color: '#92400e' }}>
+                    تنبيه: فترة إشعار الاستقالة سارية المفعول
+                  </div>
+                  <div style={{ fontSize: '13px', color: '#b45309', marginTop: '3px', lineHeight: '1.6' }}>
+                    أنت حالياً في فترة إشعار الاستقالة المعتمدة من الإدارة.
+                    المتبقي: <strong style={{ color: '#92400e', fontSize: '14px' }}>{activeResignationNotice.remainingDays} يوم عمل</strong>
+                    {' '}· تاريخ نهاية المدة: <strong style={{ color: '#92400e', fontSize: '14px' }}>{activeResignationNotice.endDate}</strong>
+                  </div>
+                </div>
+              </div>
+              <div style={{
+                background: '#f59e0b',
+                color: '#ffffff',
+                padding: '8px 16px',
+                borderRadius: '10px',
+                fontWeight: '900',
+                fontSize: '13.5px',
+                boxShadow: '0 2px 6px rgba(245, 158, 11, 0.3)'
+              }}>
+                متبقي {activeResignationNotice.remainingDays} يوم
+              </div>
+            </div>
+          )}
 
           {/* ── Active Month New Roster Alert Banner ── */}
           {!hasApprovedRosterForActiveMonth && (

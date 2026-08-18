@@ -28,11 +28,11 @@ export default function AdminResignationModule({
     if (filterTab === 'ready') {
       const isForwardedFromBranch = r.managerStatus === 'approved' || r.managerStatus === 'rejected';
       const isPendingAdmin = !r.adminStatus || r.adminStatus === 'pending';
-      return isForwardedFromBranch && isPendingAdmin && !r.isAdminCreated;
+      return isForwardedFromBranch && isPendingAdmin && !r.isAdminCreated && !r.isCancelled;
     }
-    // 2. كافة الطلبات: الطلبات التي اتخذت فيها الإدارة العليا قراراً (معتمدة أو مرفوضة) بالإضافة إلى الإجراءات اليدوية من الإدارة
+    // 2. كافة الطلبات: الطلبات التي اتخذت فيها الإدارة العليا قراراً (معتمدة، مرفوضة، أو ملغاة) بالإضافة إلى الإجراءات اليدوية من الإدارة
     if (filterTab === 'all') {
-      const isAdminDecided = r.adminStatus === 'approved' || r.adminStatus === 'rejected';
+      const isAdminDecided = r.adminStatus === 'approved' || r.adminStatus === 'rejected' || r.adminStatus === 'cancelled' || r.isCancelled;
       return isAdminDecided || r.isAdminCreated;
     }
     return false;
@@ -77,7 +77,7 @@ export default function AdminResignationModule({
 
     let reqObj = null;
 
-    const updatedReqs = (state.resignationRequests || []).map(r => {
+    let updatedReqs = (state.resignationRequests || []).map(r => {
       if (r.id === reqId) {
         reqObj = { 
           ...r, 
@@ -96,8 +96,40 @@ export default function AdminResignationModule({
     let updatedEmployees = state.employees || [];
     let updatedActiveShifts = { ...(state.activeShifts || {}) };
     
-    // If approved and NO notice days (immediate effect), deactivate the employee and stop fingerprint & active shift right away
-    if (status === 'approved' && nDays === 0 && reqObj) {
+    // If approved and it is a WITHDRAW request:
+    // 1. Cancel previous resignation requests for this employee
+    // 2. Reactivate employee back to "على رأس العمل"
+    if (status === 'approved' && reqObj && reqObj.type === 'withdraw') {
+      updatedReqs = updatedReqs.map(r => {
+        if (String(r.employeeId) === String(reqObj.employeeId) && r.type === 'resignation' && r.id !== reqObj.id) {
+          return {
+            ...r,
+            isCancelled: true,
+            cancelledReason: `تم إلغاء الاستقالة بسبب قبول طلب التراجع عن الاستقالة: ${comment}`,
+            adminStatus: 'cancelled',
+            updatedAt: new Date().toISOString()
+          };
+        }
+        return r;
+      });
+
+      updatedEmployees = updatedEmployees.map(e => {
+        if (String(e.id) === String(reqObj.employeeId)) {
+          return {
+            ...e,
+            status: 'على رأس العمل',
+            is_active: true,
+            fingerprint_active: true,
+            suspension_reason: '',
+            updatedAt: new Date().toISOString()
+          };
+        }
+        return e;
+      });
+    }
+
+    // If approved resignation with NO notice days (immediate effect), deactivate the employee and stop fingerprint & active shift right away
+    if (status === 'approved' && reqObj && reqObj.type === 'resignation' && nDays === 0) {
       delete updatedActiveShifts[reqObj.employeeId];
       updatedEmployees = updatedEmployees.map(e => {
         if (String(e.id) === String(reqObj.employeeId)) {
@@ -106,7 +138,8 @@ export default function AdminResignationModule({
             status: 'تم الاستقالة',
             is_active: false,
             suspension_reason: `تم قبول الاستقالة فوراً: ${comment}`,
-            fingerprint_active: false
+            fingerprint_active: false,
+            updatedAt: new Date().toISOString()
           };
         }
         return e;
@@ -209,7 +242,7 @@ export default function AdminResignationModule({
     !r.isAdminCreated
   ).length;
   const totalCount = (state.resignationRequests || []).filter(r => 
-    r.adminStatus === 'approved' || r.adminStatus === 'rejected' || r.isAdminCreated
+    r.adminStatus === 'approved' || r.adminStatus === 'rejected' || r.adminStatus === 'cancelled' || r.isCancelled || r.isAdminCreated
   ).length;
 
   return (
