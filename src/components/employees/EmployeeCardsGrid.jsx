@@ -23,12 +23,27 @@ export default function EmployeeCardsGrid({
   const employees = state.employees || [];
   const empRequests = state.resignationRequests || [];
 
-  // Helper for resignation end date
-  const calculateEndDate = (start, days) => {
-    if (!start || !days) return '';
-    const d = new Date(start);
-    d.setDate(d.getDate() + parseInt(days, 10));
-    return d.toISOString().split('T')[0];
+  const parseDateStr = (s) => {
+    if (!s) return new Date();
+    const c = String(s).slice(0, 10);
+    const p = c.split('-');
+    if (p.length === 3) return new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+    return new Date(s);
+  };
+
+  // Helper for resignation notice end date & remaining days calculation
+  const getResignationNoticeDetails = (start, days) => {
+    const nDays = parseInt(days, 10) || 0;
+    if (nDays <= 0) return { endDate: '', remainingDays: 0 };
+    const sDate = parseDateStr(start || todayStr());
+    const eDate = new Date(sDate);
+    eDate.setDate(eDate.getDate() + nDays);
+    const endDate = `${eDate.getFullYear()}-${String(eDate.getMonth() + 1).padStart(2, '0')}-${String(eDate.getDate()).padStart(2, '0')}`;
+    
+    const today = parseDateStr(todayStr());
+    const diffMs = eDate.getTime() - today.getTime();
+    const remainingDays = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+    return { endDate, remainingDays };
   };
 
   // Group employees by branch
@@ -124,33 +139,74 @@ export default function EmployeeCardsGrid({
                   const active = state.activeShifts[emp.id];
                   const empSum = computeEmpSummary(emp.id, filterFn);
                   
-                  const isEmpTarget = (r) => String(r.employeeId) === String(emp.id) || (emp.code && String(r.employeeId) === String(emp.code));
-                  const hasApprovedWithdraw = empRequests.some(r => isEmpTarget(r) && r.type === 'withdraw' && (r.adminStatus === 'approved' || r.managerStatus === 'approved'));
-                  
-                  const empResignations = empRequests.filter(r => isEmpTarget(r) && r.type === 'resignation' && !r.isCancelled && r.adminStatus !== 'cancelled');
-                  const activeResignation = empResignations.length > 0 ? empResignations.sort((a,b) => b.requestDate.localeCompare(a.requestDate))[0] : null;
-                  
+                  const empIdStr = String(emp.id || '').trim();
+                  const empCodeStr = String(emp.code || '').trim();
+                  const empUserStr = String(emp.username || '').trim();
+
+                  // Get all resignation/withdraw requests for this employee sorted newest first
+                  const empReqs = empRequests
+                    .filter(r => {
+                      const rId = String(r.employeeId || '').trim();
+                      return rId === empIdStr || (empCodeStr && rId === empCodeStr) || (empUserStr && rId === empUserStr);
+                    })
+                    .sort((a, b) => {
+                      const tB = new Date(b.createdAt || b.updatedAt || b.requestDate || 0).getTime();
+                      const tA = new Date(a.createdAt || a.updatedAt || a.requestDate || 0).getTime();
+                      return tB - tA;
+                    });
+
+                  const latestReq = empReqs[0];
+                  const hasApprovedWithdraw = latestReq && latestReq.type === 'withdraw' && (latestReq.adminStatus === 'approved' || latestReq.managerStatus === 'approved');
+
                   let resStatusBadge = null;
+
                   if (hasApprovedWithdraw) {
+                    // Withdrawn from resignation -> clean employee card without badges
                     resStatusBadge = null;
                   } else if (emp.status === 'تم الاستقالة' || emp.is_active === false) {
+                    const reasonText = emp.suspension_reason ? ` (${emp.suspension_reason})` : '';
                     resStatusBadge = (
-                      <div style={{ background: 'var(--danger-light, #fee2e2)', color: 'var(--danger-dark, #991b1b)', padding: '4px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', marginTop: '6px', display: 'inline-block' }}>
-                        🔴 تم إنهاء الخدمة / مستقيل {emp.suspension_reason ? `(${emp.suspension_reason})` : ''}
+                      <div style={{ background: 'var(--danger-light, #fee2e2)', color: 'var(--danger-dark, #991b1b)', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', marginTop: '6px', display: 'inline-block', border: '1px solid #fecaca' }}>
+                        🔴 تم إنهاء الخدمة{reasonText}
                       </div>
                     );
-                  } else if (activeResignation) {
-                    if (activeResignation.employeeConditionStatus === 'rejected') {
-                      resStatusBadge = <div style={{ background: 'var(--danger-light)', color: 'var(--danger-dark)', padding: '4px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', marginTop: '6px', display: 'inline-block' }}>❌ استقالة مرفوضة من الموظف (تم الإيقاف)</div>;
-                    } else if (activeResignation.adminStatus === 'rejected' || activeResignation.managerStatus === 'rejected') {
-                      resStatusBadge = <div style={{ background: 'var(--danger-light)', color: 'var(--danger-dark)', padding: '4px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', marginTop: '6px', display: 'inline-block' }}>❌ استقالة مرفوضة إدارياً</div>;
-                    } else if (activeResignation.adminStatus === 'approved' && activeResignation.conditionsDaysRemaining > 0) {
-                      const endDate = calculateEndDate(activeResignation.conditionsStartDate, activeResignation.conditionsDaysRemaining);
-                      resStatusBadge = <div style={{ background: 'var(--warning-light)', color: 'var(--warning-dark)', padding: '4px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', marginTop: '6px', display: 'inline-block' }}>⏳ استقالة مقبولة بفترة إشعار (متبقي {activeResignation.conditionsDaysRemaining} أيام) - تنتهي في {endDate}</div>;
-                    } else if (activeResignation.adminStatus === 'approved' && activeResignation.conditionsDaysRemaining === 0) {
-                      resStatusBadge = <div style={{ background: 'var(--danger-light)', color: 'var(--danger-dark)', padding: '4px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', marginTop: '6px', display: 'inline-block' }}>🔴 استقالة سارية (منفذة فورا)</div>;
-                    } else {
-                      resStatusBadge = <div style={{ background: 'var(--primary-light)', color: 'var(--primary-dark)', padding: '4px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', marginTop: '6px', display: 'inline-block' }}>📝 استقالة قيد المراجعة</div>;
+                  } else if (empReqs.length > 0) {
+                    const activeRes = empReqs.find(r => r.type === 'resignation' && !r.isCancelled && r.adminStatus !== 'cancelled');
+                    if (activeRes) {
+                      if (activeRes.employeeConditionStatus === 'rejected') {
+                        resStatusBadge = (
+                          <div style={{ background: 'var(--danger-light, #fee2e2)', color: 'var(--danger-dark, #991b1b)', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', marginTop: '6px', display: 'inline-block', border: '1px solid #fecaca' }}>
+                            🔴 تم إنهاء الخدمة (تم رفض شروط الاستقالة من الموظف)
+                          </div>
+                        );
+                      } else if (activeRes.adminStatus === 'rejected' || activeRes.managerStatus === 'rejected') {
+                        resStatusBadge = (
+                          <div style={{ background: 'var(--danger-light, #fee2e2)', color: 'var(--danger-dark, #991b1b)', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', marginTop: '6px', display: 'inline-block', border: '1px solid #fecaca' }}>
+                            ❌ استقالة مرفوضة إدارياً
+                          </div>
+                        );
+                      } else if (activeRes.adminStatus === 'approved') {
+                        const { endDate, remainingDays } = getResignationNoticeDetails(activeRes.conditionsStartDate || activeRes.requestDate, activeRes.conditionsDaysRemaining);
+                        if (remainingDays > 0) {
+                          resStatusBadge = (
+                            <div style={{ background: 'var(--warning-light, #fef3c7)', color: 'var(--warning-dark, #92400e)', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', marginTop: '6px', display: 'inline-block', border: '1px solid #fde68a' }}>
+                              ⏳ متبقي على إنهاء الخدمة: {remainingDays} يوم عمل (تاريخ الانتهاء: {endDate})
+                            </div>
+                          );
+                        } else {
+                          resStatusBadge = (
+                            <div style={{ background: 'var(--danger-light, #fee2e2)', color: 'var(--danger-dark, #991b1b)', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', marginTop: '6px', display: 'inline-block', border: '1px solid #fecaca' }}>
+                              🔴 تم إنهاء الخدمة (انتهاء فترة الإشعار / استقالة فورية: {activeRes.adminComment || ''})
+                            </div>
+                          );
+                        }
+                      } else {
+                        resStatusBadge = (
+                          <div style={{ background: 'var(--primary-light, #e0f2fe)', color: 'var(--primary-dark, #0369a1)', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', marginTop: '6px', display: 'inline-block', border: '1px solid #bae6fd' }}>
+                            📝 استقالة قيد المراجعة
+                          </div>
+                        );
+                      }
                     }
                   }
 

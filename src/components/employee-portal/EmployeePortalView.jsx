@@ -879,50 +879,70 @@ export default function EmployeePortalView({
   // Resignation Notice Period Calculation for top banner across all pages
   const activeResignationNotice = useMemo(() => {
     if (!emp) return null;
-    const empIdStr = String(emp.id || '');
-    const empCodeStr = String(emp.code || '');
+    const empIdStr = String(emp.id || '').trim();
+    const empCodeStr = String(emp.code || '').trim();
+    const empUserStr = String(emp.username || '').trim();
 
-    // Check if there is any approved withdraw request (which immediately cancels the countdown timer)
-    const hasApprovedWithdraw = (state?.resignationRequests || []).some(r => 
-      (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeId) === empCodeStr)) &&
-      r.type === 'withdraw' &&
-      (r.adminStatus === 'approved' || r.managerStatus === 'approved')
-    );
-    if (hasApprovedWithdraw) return null;
+    const parseDateStr = (s) => {
+      if (!s) return new Date();
+      const c = String(s).slice(0, 10);
+      const p = c.split('-');
+      if (p.length === 3) return new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+      return new Date(s);
+    };
 
-    const activeReq = (state?.resignationRequests || []).find(r => 
-      (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeId) === empCodeStr)) &&
+    // Get all requests for this employee sorted newest first
+    const empReqs = (state?.resignationRequests || [])
+      .filter(r => {
+        const rEmpId = String(r.employeeId || '').trim();
+        return rEmpId === empIdStr || (empCodeStr && rEmpId === empCodeStr) || (empUserStr && rEmpId === empUserStr);
+      })
+      .sort((a, b) => {
+        const tB = new Date(b.createdAt || b.updatedAt || b.requestDate || 0).getTime();
+        const tA = new Date(a.createdAt || a.updatedAt || a.requestDate || 0).getTime();
+        return tB - tA;
+      });
+
+    if (empReqs.length === 0) return null;
+
+    // If the newest request is an approved withdraw request, do NOT show resignation notice
+    const latestReq = empReqs[0];
+    if (latestReq && latestReq.type === 'withdraw' && (latestReq.adminStatus === 'approved' || latestReq.managerStatus === 'approved')) {
+      return null;
+    }
+
+    // Find the latest active resignation request approved by admin
+    const activeReq = empReqs.find(r => 
       r.type === 'resignation' &&
       r.adminStatus === 'approved' &&
-      r.employeeConditionStatus === 'accepted' &&
       !r.isCancelled &&
-      r.adminStatus !== 'cancelled'
+      r.adminStatus !== 'cancelled' &&
+      r.employeeConditionStatus !== 'rejected'
     );
     if (!activeReq) return null;
 
-    const startDate = activeReq.conditionsStartDate || activeReq.requestDate || todayStr();
     const noticeDays = parseInt(activeReq.conditionsDaysRemaining, 10) || 0;
     if (noticeDays <= 0) return null;
 
-    // Calculate end date (startDate + noticeDays)
-    const d = new Date(startDate);
-    d.setDate(d.getDate() + noticeDays);
-    const endDateStr = d.toISOString().split('T')[0];
+    const startDateStr = activeReq.conditionsStartDate || activeReq.requestDate || todayStr();
+    const sDate = parseDateStr(startDateStr);
+    const eDate = new Date(sDate);
+    eDate.setDate(eDate.getDate() + noticeDays);
+    const endDateStr = `${eDate.getFullYear()}-${String(eDate.getMonth() + 1).padStart(2, '0')}-${String(eDate.getDate()).padStart(2, '0')}`;
 
-    // Calculate remaining days from today
-    const today = new Date(todayStr());
-    const endD = new Date(endDateStr);
-    const diffTime = endD.getTime() - today.getTime();
-    const remainingDays = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+    const today = parseDateStr(todayStr());
+    const diffMs = eDate.getTime() - today.getTime();
+    const remainingDays = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
 
     if (remainingDays <= 0) return null;
 
     return {
-      startDate,
+      startDate: startDateStr,
       endDate: endDateStr,
       remainingDays,
       totalDays: noticeDays,
-      adminComment: activeReq.adminComment
+      adminComment: activeReq.adminComment,
+      conditionStatus: activeReq.employeeConditionStatus
     };
   }, [emp, state?.resignationRequests]);
 
