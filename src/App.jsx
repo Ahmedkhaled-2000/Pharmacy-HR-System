@@ -687,7 +687,7 @@ export default function App() {
       (e) => String(e.id) === empIdStr || (e.code && String(e.code) === empCodeStr)
     );
 
-    const isTerminated = empData.status === 'تم الاستقالة' || empData.is_active === false;
+    const isTerminated = empData.status === 'تم الاستقالة';
 
     const normalizedEmpData = {
       ...empData,
@@ -3883,6 +3883,7 @@ export default function App() {
           setActiveTab={setActiveNavTab}
           onLogout={handleLogout}
           pendingCount={(state.requests || []).filter(r => r.status === 'pending' || r.status === 'pending_admin').length}
+          resignationCount={(state.resignationRequests || []).filter(r => (r.managerStatus === 'approved' || r.managerStatus === 'rejected') && !r.isAdminCreated && r.adminStatus === 'pending').length}
           themeMode={themeMode}
           toggleTheme={toggleTheme}
           adminFilterMode={adminFilterMode}
@@ -3916,7 +3917,16 @@ export default function App() {
                   { id: 'emp-punches', label: 'متابعة حضور وبصمات الفرع', icon: '👥' },
                   { id: 'evaluations', label: 'التقييمات والشكاوي', icon: '⭐' },
                   { id: 'income-expenses', label: 'المصروفات والإيرادات', icon: '📈' },
-                  { id: 'resignation', label: 'طلبات استقالة الموظفين', icon: '📝' },
+                  {
+                    id: 'resignation',
+                    label: 'طلبات استقالة الموظفين',
+                    icon: '📝',
+                    badge: (state.resignationRequests || []).filter((r) => {
+                      const cIdStr = String(currentBranch?.id || '');
+                      const isBranchMatch = String(r.branchId || '') === cIdStr;
+                      return isBranchMatch && (!r.managerStatus || r.managerStatus === 'pending');
+                    }).length
+                  },
                   { id: 'bylaws', label: 'لائحة العمل والجزاءات', icon: '📜' },
                 ]
               : undefined

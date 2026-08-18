@@ -10,7 +10,7 @@ export default function AdminResignationModule({
   const [adminComment, setAdminComment] = useState({});
   const [noticeDays, setNoticeDays] = useState({});
   const [noticeStart, setNoticeStart] = useState({});
-  const [filterTab, setFilterTab] = useState('ready'); // 'ready' | 'pending_branch' | 'all'
+  const [filterTab, setFilterTab] = useState('ready'); // 'ready' | 'all'
 
   // Manual Form State
   const [showManualForm, setShowManualForm] = useState(false);
@@ -25,10 +25,7 @@ export default function AdminResignationModule({
   // Filter requests based on selected tab
   const allRequests = (state.resignationRequests || []).filter(r => {
     if (filterTab === 'ready') {
-      return r.managerStatus === 'approved' || r.managerStatus === 'rejected';
-    }
-    if (filterTab === 'pending_branch') {
-      return !r.managerStatus || r.managerStatus === 'pending';
+      return (r.managerStatus === 'approved' || r.managerStatus === 'rejected') && !r.isAdminCreated;
     }
     return true; // 'all'
   });
@@ -118,6 +115,7 @@ export default function AdminResignationModule({
       employeeId: emp.id,
       branchId: emp.branchId,
       type: manualData.type,
+      isAdminCreated: true,
       employeeReason: 'تم الإنشاء يدوياً بواسطة الإدارة العليا: ' + manualData.reason,
       requestDate: todayStr(),
       managerStatus: 'approved',
@@ -171,8 +169,7 @@ export default function AdminResignationModule({
     setManualData({ employeeId: '', type: 'resignation', reason: '', noticeDays: '0', noticeStart: todayStr() });
   };
 
-  const readyCount = (state.resignationRequests || []).filter(r => r.managerStatus === 'approved' || r.managerStatus === 'rejected').length;
-  const pendingBranchCount = (state.resignationRequests || []).filter(r => !r.managerStatus || r.managerStatus === 'pending').length;
+  const readyCount = (state.resignationRequests || []).filter(r => (r.managerStatus === 'approved' || r.managerStatus === 'rejected') && !r.isAdminCreated).length;
   const totalCount = (state.resignationRequests || []).length;
 
   return (
@@ -207,22 +204,6 @@ export default function AdminResignationModule({
           }}
         >
           📥 طلبات محالة من الفرع ({readyCount})
-        </button>
-        <button
-          type="button"
-          onClick={() => setFilterTab('pending_branch')}
-          style={{
-            padding: '8px 16px',
-            borderRadius: '8px',
-            border: 'none',
-            cursor: 'pointer',
-            fontWeight: 'bold',
-            fontSize: '13.5px',
-            background: filterTab === 'pending_branch' ? 'var(--primary)' : 'var(--surface-muted)',
-            color: filterTab === 'pending_branch' ? '#ffffff' : 'var(--text)'
-          }}
-        >
-          ⏳ بانتظار رد مدير الفرع ({pendingBranchCount})
         </button>
         <button
           type="button"
@@ -327,7 +308,6 @@ export default function AdminResignationModule({
         <div style={{ textAlign: 'center', padding: '40px', background: 'var(--surface-muted)', borderRadius: '12px', color: 'var(--muted)' }}>
           <div style={{ fontSize: '40px', marginBottom: '10px' }}>📁</div>
           {filterTab === 'ready' && 'لا توجد طلبات استقالة محالة من مديري الفروع حالياً.'}
-          {filterTab === 'pending_branch' && 'لا توجد طلبات معلقة بانتظار رد مدير الفرع.'}
           {filterTab === 'all' && 'لا توجد أي طلبات استقالة مسجلة بالنظام.'}
         </div>
       ) : (

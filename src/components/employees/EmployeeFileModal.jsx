@@ -86,7 +86,9 @@ export default function EmployeeFileModal({
 
       setHireDate(editingEmp.hireDate || '');
       setContractType(editingEmp.contractType || 'دوام كامل');
-      setStatus(editingEmp.status || (editingEmp.is_active === false ? 'تم الاستقالة' : 'على رأس العمل'));
+      const rawStatus = editingEmp.status || (editingEmp.is_active === false ? 'تم الاستقالة' : 'على رأس العمل');
+      const isActuallyActive = editingEmp.is_active !== false && rawStatus === 'على رأس العمل';
+      setStatus(isActuallyActive ? 'على رأس العمل' : 'تم الاستقالة');
       setTerminationReason(editingEmp.suspension_reason || '');
       setPassword(editingEmp.password || '123');
 
