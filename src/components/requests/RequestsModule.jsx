@@ -479,6 +479,28 @@ export default function RequestsModule({
     showToast?.('❌ تم رفض الاعتراض وتثبيت الجزاء المالي');
   };
 
+  // Clear / Delete All Requests
+  const handleClearAllRequests = async () => {
+    if (!requests || requests.length === 0) {
+      alert('لا توجد أي طلبات حالياً لمسحها');
+      return;
+    }
+    const isConfirmed = window.confirm(
+      `⚠️ تحذير أمني من الإدارة العليا:\n\nهل أنت متأكد تماماً من رغبتك في حذف ومسح جميع الطلبات المسجلة في النظام (${requests.length} طلب) نهائياً؟\n\n⚠️ لن يمكن التراجع أو استعادة الطلبات بعد هذا الإجراء.`
+    );
+    if (!isConfirmed) return;
+
+    const updatedState = {
+      ...state,
+      requests: [],
+      leaveRequests: []
+    };
+
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+    showToast?.('🗑️ تم مسح وحذف جميع الطلبات بنجاح!');
+  };
+
   return (
     <div className="bylaws-card fade-in">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
@@ -489,6 +511,41 @@ export default function RequestsModule({
           <p style={{ margin: '4px 0 0 0', color: 'var(--muted)', fontSize: '14px' }}>
             معاينة كافة الطلبات، الإجازات، الأذون، السلف، الأدوية، وتبديل الورديات واتخاذ قرارات الموافقة المزدوجة
           </p>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button
+            type="button"
+            className="btn"
+            onClick={handleClearAllRequests}
+            disabled={requests.length === 0}
+            style={{
+              background: requests.length > 0 ? '#ef4444' : 'var(--surface-muted)',
+              color: requests.length > 0 ? '#ffffff' : 'var(--muted)',
+              border: '1px solid ' + (requests.length > 0 ? '#dc2626' : 'var(--border)'),
+              padding: '8px 16px',
+              fontSize: '13.5px',
+              fontWeight: '800',
+              borderRadius: '8px',
+              cursor: requests.length > 0 ? 'pointer' : 'not-allowed',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: requests.length > 0 ? '0 2px 8px rgba(239, 68, 68, 0.25)' : 'none',
+              transition: 'all 0.2s ease'
+            }}
+            title="حذف ومسح جميع الطلبات من النظام نهائياً"
+          >
+            <span>🗑️ مسح جميع الطلبات</span>
+            <span style={{
+              background: requests.length > 0 ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.05)',
+              padding: '2px 8px',
+              borderRadius: '99px',
+              fontSize: '12px'
+            }}>
+              {requests.length}
+            </span>
+          </button>
         </div>
       </div>
 
