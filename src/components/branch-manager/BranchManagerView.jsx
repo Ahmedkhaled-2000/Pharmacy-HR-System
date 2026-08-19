@@ -1849,22 +1849,15 @@ export default function BranchManagerView({
                       <th>وقت الخروج</th>
                       <th>ساعات البريك</th>
                       <th>صافي ساعات العمل</th>
-                      <th>المبلغ المستحق</th>
                       <th>الملاحظات</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredShifts.length === 0 ? (
-                      <tr><td colSpan="10" style={{ textAlign: 'center', padding: '24px', color: 'var(--muted)' }}>لا توجد بصمات مسجلة لهؤلاء الموظفين بهذا الفرع لهذه الفترة.</td></tr>
+                      <tr><td colSpan="9" style={{ textAlign: 'center', padding: '24px', color: 'var(--muted)' }}>لا توجد بصمات مسجلة لهؤلاء الموظفين بهذا الفرع لهذه الفترة.</td></tr>
                     ) : (
                       filteredShifts.map((s, idx) => {
                         const empObj = allEmps.find((e) => String(e.id) === String(s.employeeId)) || branchEmployees.find((e) => String(e.id) === String(s.employeeId));
-                        const bd = empObj?.branchesDetails?.find((b) => String(b.branchId) === cIdStr) || empObj?.branchesDetails?.[0];
-                        const empSalary = parseFloat(bd?.salary || empObj?.salary) || 0;
-                        const empWorkHours = parseFloat(bd?.workHoursPerDay || empObj?.workHoursPerDay) || 8;
-                        const empWorkDays = parseFloat(bd?.workDaysPerMonth || empObj?.workDaysPerMonth) || 26;
-                        const empDailyRate = empWorkDays > 0 ? (empSalary * empWorkHours) / empWorkDays : 0;
-                        const empDailyHourlyRate = empWorkHours > 0 ? empDailyRate / empWorkHours : (empWorkDays > 0 ? empSalary / empWorkDays : empSalary);
                         return (
                           <tr key={s.id}>
                             <td style={{ color: 'var(--muted)', fontWeight: 'bold' }}>{idx + 1}</td>
@@ -1895,9 +1888,6 @@ export default function BranchManagerView({
                             <td style={{ fontWeight: '700', color: '#0d9488' }}>
                               {formatMoney(s.hours)} ساعة
                             </td>
-                            <td style={{ fontWeight: '700', color: '#16a34a' }}>
-                              {formatMoney(s.hours * empDailyHourlyRate)} ج.م
-                            </td>
                             <td style={{ fontSize: '12px', color: 'var(--muted)' }}>{s.note || 'تسجيل بصمة عادية'}</td>
                           </tr>
                         );
@@ -1915,8 +1905,7 @@ export default function BranchManagerView({
                             {formatMoney(totalBreak)} س
                           </span>
                         </td>
-                        <td style={{ color: '#0d9488' }}>{formatMoney(totalHours)} ساعة</td>
-                        <td><span style={{ color: '#0d9488' }}>🔒 مقيد</span></td>
+                        <td style={{ color: '#0d9488', fontWeight: '800' }}>{formatMoney(totalHours)} ساعة</td>
                         <td></td>
                       </tr>
                     </tfoot>

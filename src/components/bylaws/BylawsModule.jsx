@@ -9,6 +9,20 @@ const DEFAULT_BYLAWS_RULES = [
   { id: 'b6', title: 'خطأ أو عجز في تسليم الكاشير نهاية الوردية', impactType: 'fixed_amount', impactVal: 100, category: 'ماليات وخزينة' }
 ];
 
+export function getImpactDesc(rule) {
+  if (!rule) return '';
+  if (rule.impactType === 'deduction_days') {
+    return `خصم ${rule.impactVal} يوم من الراتب`;
+  }
+  if (rule.impactType === 'fixed_amount') {
+    return `خصم ${rule.impactVal} ج.م`;
+  }
+  if (rule.impactType === 'warning') {
+    return 'إنذار كتابي';
+  }
+  return rule.impactDesc || 'جزاء إداري';
+}
+
 export default function BylawsModule({
   state,
   setState,
