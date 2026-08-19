@@ -23,6 +23,7 @@ import {
   shouldShowRequestToBranch
 } from './utils/formatters';
 import { loadExcelJS, mergedTitle, tableHeaderRow, dataRow } from './utils/excelExport';
+import { exportComprehensiveCompanyPayrollExcel } from './utils/grandPayrollExcelExporter';
 import { playFingerprintChime, playNotificationChime } from './hooks/useAudio';
 import { smartSaveState, smartLoadState, listenToConnectionChanges, syncNow, listenToLiveBroadcasts } from './utils/offlineSync';
 import { smartMergeStates } from './utils/stateMerger';
@@ -4009,133 +4010,41 @@ export default function App() {
     }
   };
 
-  // Export All Employees Payroll Excel Sheet
+  // Export All Employees Payroll Excel Sheet (Professional Multi-Tab Master Payroll & Financial Workbook)
   const exportAllPayrollExcel = async (mode = exportType, customStart = exportStartDate, customEnd = exportEndDate) => {
     try {
       let filterFn;
-      let periodLabel;
-      let isMonthMode;
-      let fileNameStr;
+      const isCustomMode = (mode === 'all_range' || mode === 'custom' || adminFilterMode === 'custom');
+      const effectiveMode = isCustomMode ? 'all_range' : 'month';
+      const effectiveStart = customStart || (adminFilterMode === 'custom' ? adminCustomFrom : exportStartDate);
+      const effectiveEnd = customEnd || (adminFilterMode === 'custom' ? adminCustomTo : exportEndDate);
 
-      if (mode === 'all_range') {
-        if (!customStart || !customEnd) {
+      if (effectiveMode === 'all_range') {
+        if (!effectiveStart || !effectiveEnd) {
           showToast('يرجى تحديد تاريخ البداية والنهاية');
           return;
         }
-        filterFn = (d) => d >= customStart && d <= customEnd;
-        periodLabel = `من ${customStart} إلى ${customEnd}`;
-        isMonthMode = false;
-        fileNameStr = `تقرير-رواتب-جميع-الموظفين-من-${customStart}-إلى-${customEnd}.xlsx`;
+        filterFn = (d) => d >= effectiveStart && d <= effectiveEnd;
       } else {
         filterFn = (d) => d.startsWith(monthPicker);
-        periodLabel = arabicMonthLabel(monthPicker);
-        isMonthMode = true;
-        fileNameStr = `تقرير-رواتب-جميع-الموظفين-${monthPicker}.xlsx`;
       }
 
-      const ExcelJS = await loadExcelJS(showToast);
-      const grandPayroll = computeGrandPayroll(filterFn, mode === 'month' ? monthPicker : null);
-      const COLS = 14;
-
-      const wb = new ExcelJS.Workbook();
-      wb.creator = state.orgSettings.orgName || 'نظام الموارد البشرية';
-      const ws = wb.addWorksheet('رواتب جميع الموظفين', { views: [{ rightToLeft: true, showGridLines: false }] });
-      ws.columns = [
-        { width: 10 }, { width: 22 }, { width: 16 }, { width: 13 },
-        { width: 14 }, { width: 13 }, { width: 13 }, { width: 13 },
-        { width: 14 }, { width: 13 }, { width: 14 }, { width: 14 },
-        { width: 14 }, { width: 18 }
-      ];
-
-      let r = 1;
-      mergedTitle(ws, r, isMonthMode ? `كشف رواتب جميع الموظفين وإجمالي الأجور — ${periodLabel}` : `كشف رواتب الموظفين للفترة — ${periodLabel}`, COLS, 'FF0B3532', 16, 32);
-      r += 2;
-
-      tableHeaderRow(ws, r, [
-        'كود الموظف', 'اسم الموظف', 'الوظيفة', 'عدد الساعات', 'المستحقات الأساسية',
-        'بدل الإدارة (+)', 'بدل الانتقال (+)', 'أجر إضافي (+)', 'إجمالي البدلات (+)',
-        'المكافآت (+)', 'خصومات التأخير (-)', 'خصومات الغياب (-)', 'الخصومات الأخرى والسلف (-)', 'صافي المرتب النهائي'
-      ]);
-      r++;
-
-      state.employees.forEach((emp) => {
-        const s = grandPayroll.perEmp[emp.id] || {
-          hours: 0, baseEarnings: 0, managementAllowance: 0, transportAllowance: 0, extraAllowance: 0,
-          totalAllowances: 0, totalBonus: 0, lateDeduction: 0, absenceDeduction: 0, manualDeduction: 0, loanDeduction: 0,
-          totalDeduction: 0, netSalary: 0
-        };
-        const otherDed = (s.manualDeduction || 0) + (s.loanDeduction || 0);
-        dataRow(
-          ws,
-          r,
-          [
-            emp.code,
-            emp.name,
-            emp.jobTitle,
-            fmt(getEffectiveShiftHours(s, state)),
-            fmt(s.baseEarnings),
-            fmt(s.managementAllowance || 0),
-            fmt(s.transportAllowance || 0),
-            fmt(s.extraAllowance || 0),
-            fmt(s.totalAllowances || 0),
-            fmt(s.totalBonus),
-            fmt(s.lateDeduction || 0),
-            fmt(s.absenceDeduction || 0),
-            fmt(otherDed),
-            fmt(s.netSalary)
-          ],
-          1,
-          [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
-        );
-        r++;
+      await exportComprehensiveCompanyPayrollExcel({
+        state,
+        filterFn,
+        mode: effectiveMode,
+        monthPicker,
+        customStart: effectiveStart,
+        customEnd: effectiveEnd,
+        computeEmpSummary,
+        computeGrandPayroll,
+        showToast
       });
 
-      r++;
-      mergedTitle(ws, r, 'الإجمالي الكلي لأجور الشركة والرواتب والبدلات والخصومات', COLS, 'FF134E4A', 14, 28);
-      r++;
-
-      ws.mergeCells(r, 1, r, 3);
-      const grandLabel = ws.getCell(r, 1);
-      grandLabel.value = 'مجموع الأجور والرواتب والبدلات المدفوعة كافة';
-      grandLabel.font = { name: 'Arial', bold: true, size: 12 };
-      grandLabel.alignment = { horizontal: 'center' };
-      grandLabel.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE4EEEC' } };
-      grandLabel.border = { top: { style: 'thin', color: { argb: 'FFCFC9B8' } }, left: { style: 'thin', color: { argb: 'FFCFC9B8' } }, bottom: { style: 'thin', color: { argb: 'FFCFC9B8' } }, right: { style: 'thin', color: { argb: 'FFCFC9B8' } } };
-
-      const hCell = ws.getCell(r, 4); hCell.value = parseFloat(fmt(grandPayroll.totalHours)); hCell.numFmt = '#,##0.00';
-      const bCell = ws.getCell(r, 5); bCell.value = parseFloat(fmt(grandPayroll.totalBaseEarnings)); bCell.numFmt = '#,##0.00';
-      const mgmtCell = ws.getCell(r, 6); mgmtCell.value = parseFloat(fmt(grandPayroll.totalManagementAllowance || 0)); mgmtCell.numFmt = '#,##0.00';
-      const transCell = ws.getCell(r, 7); transCell.value = parseFloat(fmt(grandPayroll.totalTransportAllowance || 0)); transCell.numFmt = '#,##0.00';
-      const extCell = ws.getCell(r, 8); extCell.value = parseFloat(fmt(grandPayroll.totalExtraAllowance || 0)); extCell.numFmt = '#,##0.00';
-      const allCell = ws.getCell(r, 9); allCell.value = parseFloat(fmt(grandPayroll.totalAllowances || 0)); allCell.numFmt = '#,##0.00';
-      const boCell = ws.getCell(r, 10); boCell.value = parseFloat(fmt(grandPayroll.totalBonus)); boCell.numFmt = '#,##0.00';
-      const lateCell = ws.getCell(r, 11); lateCell.value = parseFloat(fmt(grandPayroll.totalLateDeduction || 0)); lateCell.numFmt = '#,##0.00';
-      const absCell = ws.getCell(r, 12); absCell.value = parseFloat(fmt(grandPayroll.totalAbsenceDeduction || 0)); absCell.numFmt = '#,##0.00';
-      const otherCell = ws.getCell(r, 13); otherCell.value = parseFloat(fmt(grandPayroll.totalOtherDeduction || 0)); otherCell.numFmt = '#,##0.00';
-      const gCell = ws.getCell(r, 14); gCell.value = parseFloat(fmt(grandPayroll.grandNetSalary)); gCell.numFmt = '#,##0.00';
-
-      [hCell, bCell, mgmtCell, transCell, extCell, allCell, boCell, lateCell, absCell, otherCell, gCell].forEach((c) => {
-        c.font = { name: 'Arial', bold: true, size: 11, color: { argb: 'FF134E4A' } };
-        c.alignment = { horizontal: 'center', vertical: 'middle' };
-        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE4EEEC' } };
-        c.border = { top: { style: 'thin', color: { argb: 'FFCFC9B8' } }, left: { style: 'thin', color: { argb: 'FFCFC9B8' } }, bottom: { style: 'thin', color: { argb: 'FFCFC9B8' } }, right: { style: 'thin', color: { argb: 'FFCFC9B8' } } };
-      });
-
-      const buffer = await wb.xlsx.writeBuffer();
-      const blob = new Blob([buffer], { type: 'application/octet-stream' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileNameStr;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      showToast('تم تصدير تقرير رواتب جميع الموظفين بنجاح');
       setIsExportModalOpen(false);
     } catch (e) {
       console.error('Export all payroll excel error:', e);
-      showToast('حدث خطأ أثناء تصدير تقرير الشركة الكلي');
+      showToast('حدث خطأ أثناء تصدير تقرير الشركة الشامل');
     }
   };
 
