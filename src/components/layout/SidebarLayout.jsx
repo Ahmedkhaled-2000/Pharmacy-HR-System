@@ -113,112 +113,123 @@ export default function SidebarLayout({
           )}
         </div>
 
-        {/* Nav Items */}
-        <nav style={{ flex: 1, padding: '10px 0', overflowY: 'auto', overflowX: 'hidden' }}>
-          {menuItems.map((item) => {
-            const isActive = activeTab === item.id;
-            let badgeCount = 0;
-            if ((item.id === 'requests' || item.id === 'approval-rules') && pendingCount > 0) badgeCount = pendingCount;
-            if (item.badge !== undefined && item.badge > 0) badgeCount = item.badge;
+        {/* Nav Items & Direct Actions */}
+        <nav style={{ flex: 1, padding: '10px 0', overflowY: 'auto', overflowX: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {menuItems.map((item) => {
+              const isActive = activeTab === item.id;
+              let badgeCount = 0;
+              if ((item.id === 'requests' || item.id === 'approval-rules') && pendingCount > 0) badgeCount = pendingCount;
+              if (item.badge !== undefined && item.badge > 0) badgeCount = item.badge;
 
-            return (
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setActiveTab(item.id)}
+                  title={item.label}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    width: '100%',
+                    padding: sidebarOpen ? '10px 16px' : '10px',
+                    justifyContent: sidebarOpen ? 'flex-start' : 'center',
+                    background: isActive ? 'var(--primary)' : 'transparent',
+                    color: isActive ? '#fff' : 'var(--text)',
+                    border: 'none',
+                    borderRadius: '0',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                    fontWeight: isActive ? 700 : 600,
+                    transition: 'all 0.2s ease',
+                    textAlign: 'right',
+                    position: 'relative',
+                    borderRight: isActive ? '3px solid var(--primary-dark)' : '3px solid transparent',
+                  }}
+                  onMouseEnter={(e) => { if (!isActive) { e.currentTarget.style.background = 'var(--hover)'; e.currentTarget.style.color = 'var(--primary)'; } }}
+                  onMouseLeave={(e) => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text)'; } }}
+                >
+                  <span style={{ fontSize: '17px', flexShrink: 0, filter: isActive ? 'brightness(1.5)' : 'none' }}>{item.icon}</span>
+                  {sidebarOpen && (
+                    <>
+                      <span style={{ flex: 1, textAlign: 'right', whiteSpace: 'nowrap' }}>{item.label}</span>
+                      {badgeCount > 0 && (
+                        <span className="ep-nav-badge" style={{
+                          background: isActive ? 'rgba(255,255,255,0.2)' : 'var(--danger)',
+                          color: '#fff',
+                          fontSize: '11px',
+                          padding: '2px 6px',
+                          borderRadius: '99px',
+                          fontWeight: 700
+                        }}>{badgeCount}</span>
+                      )}
+                    </>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Action Buttons directly below menu items */}
+          <div style={{
+            padding: sidebarOpen ? '14px 12px 10px' : '12px 6px 10px',
+            marginTop: '8px',
+            borderTop: '1px solid var(--border)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '6px'
+          }}>
+            {onExportExcel && (
               <button
-                key={item.id}
-                onClick={() => setActiveTab(item.id)}
-                title={item.label}
+                onClick={onExportExcel}
+                title="تصدير كشف المرتب"
                 style={{
+                  width: '100%',
+                  background: 'var(--success-light)',
+                  color: 'var(--success-dark)',
+                  border: '1px solid var(--success-border)',
+                  padding: sidebarOpen ? '8px 12px' : '8px',
+                  borderRadius: '8px',
+                  fontSize: '12.5px',
+                  fontWeight: 700,
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '10px',
-                  width: '100%',
-                  padding: sidebarOpen ? '10px 16px' : '10px',
                   justifyContent: sidebarOpen ? 'flex-start' : 'center',
-                  background: isActive ? 'var(--primary)' : 'transparent',
-                  color: isActive ? '#fff' : 'var(--text)',
-                  border: 'none',
-                  borderRadius: '0',
+                  gap: '8px',
                   cursor: 'pointer',
-                  fontSize: '13px',
-                  fontWeight: isActive ? 700 : 600,
-                  transition: 'all 0.2s ease',
-                  textAlign: 'right',
-                  position: 'relative',
-                  borderRight: isActive ? '3px solid var(--primary-dark)' : '3px solid transparent',
+                  transition: 'all 0.15s'
                 }}
-                onMouseEnter={(e) => { if (!isActive) { e.currentTarget.style.background = 'var(--hover)'; e.currentTarget.style.color = 'var(--primary)'; } }}
-                onMouseLeave={(e) => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text)'; } }}
               >
-                <span style={{ fontSize: '17px', flexShrink: 0, filter: isActive ? 'brightness(1.5)' : 'none' }}>{item.icon}</span>
-                {sidebarOpen && (
-                  <>
-                    <span style={{ flex: 1, textAlign: 'right', whiteSpace: 'nowrap' }}>{item.label}</span>
-                    {badgeCount > 0 && (
-                      <span className="ep-nav-badge" style={{
-                        background: isActive ? 'rgba(255,255,255,0.2)' : 'var(--danger)',
-                        color: '#fff',
-                        fontSize: '11px',
-                        padding: '2px 6px',
-                        borderRadius: '99px',
-                        fontWeight: 700
-                      }}>{badgeCount}</span>
-                    )}
-                  </>
-                )}
+                <span>📥</span>
+                {sidebarOpen && <span>تصدير Excel</span>}
               </button>
-            );
-          })}
-        </nav>
+            )}
 
-        {/* Action Buttons */}
-        <div style={{ padding: '16px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {onExportExcel && (
             <button
-              onClick={onExportExcel}
-              title="تصدير كشف المرتب"
+              onClick={onLogout}
+              title="تسجيل الخروج"
               style={{
                 width: '100%',
-                background: 'var(--success-light)',
-                color: 'var(--success-dark)',
-                border: '1px solid var(--success-border)',
-                padding: '8px',
+                background: 'var(--danger-light)',
+                color: 'var(--danger-dark)',
+                border: '1px solid var(--danger-border)',
+                padding: sidebarOpen ? '8px 12px' : '8px',
                 borderRadius: '8px',
-                fontSize: '13px',
+                fontSize: '12.5px',
                 fontWeight: 700,
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'center',
+                justifyContent: sidebarOpen ? 'flex-start' : 'center',
                 gap: '8px',
-                cursor: 'pointer'
+                cursor: 'pointer',
+                transition: 'all 0.15s'
               }}
             >
-              <span>📥</span>
-              {sidebarOpen && <span>تصدير Excel</span>}
+              <span>🚪</span>
+              {sidebarOpen && <span>خروج</span>}
             </button>
-          )}
-
-          <button
-            onClick={onLogout}
-            title="تسجيل الخروج"
-            style={{
-              width: '100%',
-              background: 'var(--danger-light)',
-              color: 'var(--danger-dark)',
-              border: '1px solid var(--danger-border)',
-              padding: '8px',
-              borderRadius: '8px',
-              fontSize: '13px',
-              fontWeight: 700,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '8px',
-              cursor: 'pointer'
-            }}
-          >
-            <span>🚪</span>
-            {sidebarOpen && <span>خروج</span>}
-          </button>
-        </div>
+          </div>
+        </nav>
       </aside>
 
       {/* ── Main Content Area ── */}

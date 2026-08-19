@@ -1429,8 +1429,10 @@ export default function SettingsModule({
                                 const updatedJobs = jobsList.filter(item => item.id !== j.id && item.title !== j.title);
                                 const updatedState = { ...state, jobs: updatedJobs };
                                 setState(updatedState);
-                                if (saveState) await saveState(updatedState);
                                 showToast?.(`🗑️ تم حذف وظيفة (${j.title}) بنجاح`);
+                                if (saveState) {
+                                  saveState(updatedState).catch(err => console.error('Delete job error:', err));
+                                }
                               }}
                               title="حذف الوظيفة"
                             >
@@ -1457,7 +1459,7 @@ export default function SettingsModule({
                 </div>
 
                 <form
-                  onSubmit={async (e) => {
+                  onSubmit={(e) => {
                     e.preventDefault();
                     if (!jobTitleInput.trim()) {
                       showToast?.('⚠️ يرجى إدخال اسم المسمى الوظيفي');
@@ -1512,10 +1514,12 @@ export default function SettingsModule({
 
                     const updatedState = { ...state, jobs: updatedJobs, employees: updatedEmployees };
                     setState(updatedState);
-                    if (saveState) await saveState(updatedState);
-
                     setShowJobModal(false);
                     showToast?.(editingJob ? `✅ تم تعديل وظيفة (${cleanTitle}) بنجاح` : `✅ تمت إضافة وظيفة (${cleanTitle}) بنجاح`);
+
+                    if (saveState) {
+                      saveState(updatedState).catch(err => console.error('Save job error:', err));
+                    }
                   }}
                   style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}
                 >
