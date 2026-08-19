@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import LatePenaltyPolicyModule from './LatePenaltyPolicyModule';
 
 const DEFAULT_BYLAWS_RULES = [
   { id: 'b1', title: 'التأخير عن موعد الشيفت من 15 إلى 30 دقيقة', impactType: 'deduction_days', impactVal: 0.25, category: 'حضور وانصراف' },
@@ -564,6 +565,9 @@ export default function BylawsModule({
           <button className={`btn ${activeTab === 'records' ? 'btn-start' : 'btn-ghost'}`} onClick={() => setActiveTab('records')}>
             📋 سجل الجزاءات والخصومات
           </button>
+          <button className={`btn ${activeTab === 'late_penalties' ? 'btn-start' : 'btn-ghost'}`} onClick={() => setActiveTab('late_penalties')} style={{ borderColor: 'var(--primary)', color: activeTab === 'late_penalties' ? '#fff' : 'var(--primary-dark)', fontWeight: 700 }}>
+            ⏱️ جزاءات التأخير
+          </button>
           {isManagerOrAdmin && (
             <button className="btn btn-start" style={{ background: '#dc2626' }} onClick={() => setShowRecordModal(true)}>
               {isAdmin ? '⚖️ توثيق وتطبيق جزاء لائحي' : '⚠️ توثيق مخالفة لائحية جديدة'}
@@ -998,6 +1002,23 @@ export default function BylawsModule({
             </table>
           </div>
         </div>
+      )}
+
+      {/* Tab 4: Late Penalties Module */}
+      {activeTab === 'late_penalties' && (
+        <LatePenaltyPolicyModule
+          state={state}
+          setState={setState}
+          saveState={saveState}
+          showToast={showToast}
+          userRole={userRole}
+          currentEmpId={currentEmpId}
+          currentBranchId={currentBranchId}
+          filterFn={filterFn}
+          monthPicker={monthPicker}
+          customFrom={customFrom}
+          customTo={customTo}
+        />
       )}
 
       {/* Modal: Record Violation */}

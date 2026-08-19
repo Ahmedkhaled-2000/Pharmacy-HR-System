@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import AttendancePunchesModal from './AttendancePunchesModal';
+import { recalculateEmployeeCycleLateness } from '../../utils/latePenaltyEngine';
 
 export default function AttendanceModule({
   state,
@@ -57,7 +58,20 @@ export default function AttendanceModule({
     };
 
     const updatedShifts = [newPunch, ...(state.shifts || [])];
-    const updatedState = { ...state, shifts: updatedShifts };
+    let updatedState = { ...state, shifts: updatedShifts };
+    
+    // Auto-recalculate employee lateness occurrences in current cycle
+    const recRes = recalculateEmployeeCycleLateness({
+      employeeId: manualEmpId,
+      state: updatedState,
+      payrollCycleId: manualDate.slice(0, 7)
+    });
+    updatedState = {
+      ...updatedState,
+      lateIncidents: recRes.incidents,
+      requests: recRes.updatedRequests
+    };
+
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
     setManualInTime('');

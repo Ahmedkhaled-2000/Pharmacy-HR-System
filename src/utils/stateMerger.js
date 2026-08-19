@@ -345,6 +345,7 @@ export function smartMergeStates(localState, remoteState) {
     evaluations: mergeArrays(localState.evaluations, remoteState.evaluations, { prefix: 'eval', deletedIds }),
     notifications: mergeArrays(localState.notifications, remoteState.notifications, { prefix: 'notif', deletedIds }),
     adjustments: mergeArrays(localState.adjustments, remoteState.adjustments, { prefix: 'adj', deletedIds }),
+    lateIncidents: mergeArrays(localState.lateIncidents, remoteState.lateIncidents, { prefix: 'late_inc', deletedIds }),
     employeeNotes: mergeArrays(localState.employeeNotes, remoteState.employeeNotes, { prefix: 'note', deletedIds }),
     finances: mergeArrays(localState.finances, remoteState.finances, { prefix: 'fin', deletedIds }),
     transactions: mergeArrays(localState.transactions, remoteState.transactions, { prefix: 'tx', deletedIds }),

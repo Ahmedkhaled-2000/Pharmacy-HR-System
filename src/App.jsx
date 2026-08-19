@@ -93,6 +93,17 @@ import {
   notifyEmployeeEarlyExitWarning,
   notifyAdminOnOvertime
 } from './utils/gmailService';
+import {
+  DEFAULT_LATE_PENALTY_POLICY,
+  getEffectiveLatePolicy,
+  classifyLateTier,
+  getPenaltyForOccurrence,
+  computeLatenessFinancialAmount,
+  getScheduledShiftForDate,
+  calculateLatenessMinutes,
+  recalculateEmployeeCycleLateness,
+  countEmployeeTierOccurrences
+} from './utils/latePenaltyEngine';
 
 
 export default function App() {
@@ -1651,7 +1662,18 @@ export default function App() {
       note: mNote.trim()
     };
     const updatedShifts = [...state.shifts, newShift];
-    const updatedState = { ...state, shifts: updatedShifts };
+    let updatedState = { ...state, shifts: updatedShifts };
+    const recRes = recalculateEmployeeCycleLateness({
+      employeeId: mEmpId,
+      cycleFilterFn: currentFilterFn,
+      state: updatedState,
+      payrollCycleId: mDate.slice(0, 7)
+    });
+    updatedState = {
+      ...updatedState,
+      lateIncidents: recRes.incidents,
+      requests: recRes.updatedRequests
+    };
     setState(updatedState);
     await saveState(updatedState);
     setMIn('');
@@ -1702,11 +1724,22 @@ export default function App() {
       return s;
     });
 
-    const updatedState = { ...state, shifts: updatedShifts };
+    let updatedState = { ...state, shifts: updatedShifts };
+    const recRes = recalculateEmployeeCycleLateness({
+      employeeId,
+      cycleFilterFn: currentFilterFn,
+      state: updatedState,
+      payrollCycleId: date.slice(0, 7)
+    });
+    updatedState = {
+      ...updatedState,
+      lateIncidents: recRes.incidents,
+      requests: recRes.updatedRequests
+    };
     setState(updatedState);
     await saveState(updatedState);
     setEditingShift(null);
-    showToast('تم تعديل الوردية بنجاح');
+    showToast('تم تعديل الوردية بنجاح وتحديث وقائع التأخير');
   };
 
   const deleteShift = async (id) => {
@@ -1716,10 +1749,23 @@ export default function App() {
       return;
     }
     const updatedShifts = state.shifts.filter((s) => s.id !== id);
-    const updatedState = { ...state, shifts: updatedShifts };
+    let updatedState = { ...state, shifts: updatedShifts };
+    if (shift?.employeeId) {
+      const recRes = recalculateEmployeeCycleLateness({
+        employeeId: shift.employeeId,
+        cycleFilterFn: currentFilterFn,
+        state: updatedState,
+        payrollCycleId: shift.date?.slice(0, 7)
+      });
+      updatedState = {
+        ...updatedState,
+        lateIncidents: recRes.incidents,
+        requests: recRes.updatedRequests
+      };
+    }
     setState(updatedState);
     await saveState(updatedState);
-    showToast('تم حذف الوردية');
+    showToast('تم حذف الوردية وتحديث وقائع التأخير');
   };
 
   // Adjustments (Bonuses & Deductions)
@@ -1979,9 +2025,17 @@ export default function App() {
       .filter((r) => String(r.employeeId) === String(empId) && (r.type === 'penalty' || r.type === 'adjustment') && (r.status === 'approved' || r.adminApproved || !r.status) && r.status !== 'cancelled' && r.status !== 'rejected' && r.objection?.status !== 'approved' && !r.isCancelled && effectiveFilterFn(r.date || (r.createdAt ? r.createdAt.slice(0, 10) : '')))
       .map((r) => {
         let amt = parseFloat(r.amount) || 0;
-        if (!amt && (r.impactType || r.impactVal)) {
+        if (!amt && (r.impactType || r.impactVal || r.deductionMinutes)) {
           if (r.impactType === 'fixed_amount') {
             amt = parseFloat(r.impactVal) || 0;
+          } else if (r.impactType === 'time_deduction' || r.deductionMinutes) {
+            const deductionMins = parseFloat(r.deductionMinutes !== undefined ? r.deductionMinutes : r.impactVal) || 0;
+            const salary = parseFloat(emp.salary) || 0;
+            const workHours = parseFloat(emp.workHoursPerDay) || 8;
+            const workDays = parseFloat(emp.workDaysPerMonth) || 26;
+            const totalHours = (workDays * workHours) > 0 ? (workDays * workHours) : 208;
+            const hourlyRate = salary > 0 ? salary / totalHours : 0;
+            amt = Math.round((deductionMins / 60) * hourlyRate * 100) / 100;
           } else if (r.impactType === 'deduction_days') {
             const salary = parseFloat(emp.salary) || 0;
             const workHours = parseFloat(emp.workHoursPerDay) || 8;
@@ -2608,159 +2662,82 @@ export default function App() {
     return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
   };
 
-  // ── Central Lateness Detector & Penalty Request Generator ──
+  // ── Central Lateness Detector & Penalty Request Generator (5-Tier Independent Counters) ──
   const checkAndRecordLateness = (empId, dateStr, timeInStr, currentState) => {
     if (!empId || !timeInStr) return currentState;
     const emp = (currentState.employees || []).find((e) => String(e.id) === String(empId));
     if (!emp) return currentState;
 
-    const monthKey = (dateStr || todayStr()).slice(0, 7);
-    const approvedRosters = (currentState.rosters || []).filter(
-      (r) => String(r.employeeId) === String(empId) && (r.month === monthKey || !r.month) && r.status === 'approved'
-    );
-    if (approvedRosters.length === 0) return currentState;
+    const sched = getScheduledShiftForDate(empId, dateStr, currentState);
+    if (!sched || !sched.start) return currentState;
 
-    const arDay = arabicWeekday(dateStr);
-    let daySchedule = null;
-    let targetRoster = null;
-    for (const ros of approvedRosters) {
-      if (ros.schedule) {
-        const sched = ros.schedule[arDay] || Object.entries(ros.schedule).find(([k]) => k.replace(/[\u0625\u0623\u0622]/g, 'ا') === arDay.replace(/[\u0625\u0623\u0622]/g, 'ا'))?.[1];
-        if (sched && sched.type !== 'off' && sched.start) {
-          daySchedule = sched;
-          targetRoster = ros;
-          break;
-        }
-      }
-    }
+    const diffMinutes = calculateLatenessMinutes(sched.start, timeInStr);
+    if (diffMinutes <= 0) return currentState;
 
-    if (!daySchedule || !daySchedule.start) return currentState;
+    const policy = getEffectiveLatePolicy(currentState);
+    if (!policy.enabled) return currentState;
 
-    // Parse scheduled start time
-    const [sH, sM] = daySchedule.start.split(':').map(Number);
-    const schedTotalMinutes = sH * 60 + sM;
+    const tier = classifyLateTier(diffMinutes, policy);
 
-    // Parse actual timeIn
-    const [inH, inM] = timeInStr.split(':').map(Number);
-    const actualTotalMinutes = inH * 60 + inM;
+    // Run dynamic recalculation for this employee's cycle
+    const { incidents, updatedRequests } = recalculateEmployeeCycleLateness({
+      employeeId: empId,
+      cycleFilterFn: currentFilterFn,
+      state: currentState,
+      payrollCycleId: (dateStr || todayStr()).slice(0, 7)
+    });
 
-    const diffMinutes = actualTotalMinutes - schedTotalMinutes;
-    const gracePeriod = currentState.orgSettings?.latenessGracePeriodMinutes !== undefined
-      ? parseInt(currentState.orgSettings.latenessGracePeriodMinutes)
-      : 15;
+    const currentIncident = incidents.find((i) => i.date === dateStr) || incidents[incidents.length - 1];
+    const occurrenceNumber = currentIncident ? currentIncident.occurrenceNumber : 1;
+    const rule = getPenaltyForOccurrence(tier, occurrenceNumber);
+    const penaltyAmount = computeLatenessFinancialAmount(rule.deductionMinutes || 0, emp);
+    const actionTitle = rule.label || 'سماح';
 
-    if (diffMinutes > gracePeriod) {
-      // Calculate past occurrences of lateness for this employee in the past reset period (default 30 days)
-      const resetDays = currentState.bylaws?.resetPeriodDays || 30;
-      const cutoffDate = new Date(Date.now() - resetDays * 86400000).toISOString().slice(0, 10);
-      const pastOccurrences = (currentState.requests || []).filter(
-        (r) => String(r.employeeId) === String(empId) && (r.subType === 'lateness' || (r.type === 'penalty' && r.subType === 'lateness')) && (r.date >= cutoffDate || r.createdAt >= cutoffDate)
-      ).length;
+    const branchObj = (currentState.branches || []).find((b) => b.id === (sched.branchId || emp.branchId));
+    const branchName = branchObj ? branchObj.name : 'الفرع الرئيسي';
 
-      const occurrenceNumber = pastOccurrences + 1;
-      const penaltyRules = currentState.bylaws?.latePenalties || [
-        { occurrence: 1, action: 'تنبيه', deductionFraction: 0 },
-        { occurrence: 2, action: 'إنذار كتابي', deductionFraction: 0 },
-        { occurrence: 3, action: 'خصم ¼ يوم', deductionFraction: 0.25 },
-        { occurrence: 4, action: 'خصم ½ يوم', deductionFraction: 0.5 },
-        { occurrence: 5, action: 'خصم يوم', deductionFraction: 1.0 }
-      ];
-
-      const rule = penaltyRules.find((p) => p.occurrence === occurrenceNumber) || penaltyRules[penaltyRules.length - 1];
-      const deductionFraction = rule ? rule.deductionFraction : (diffMinutes > 30 ? 0.5 : 0.25);
-      const actionTitle = rule ? rule.action : 'خصم جزاء تأخير';
-
-      const salary = parseFloat(emp.salary) || 0;
-      const workHours = parseFloat(emp.workHoursPerDay) || 8;
-      const workDays = parseFloat(emp.workDaysPerMonth) || 26;
-      const dailyRate = workDays > 0 ? (salary * workHours) / workDays : 0;
-      const penaltyAmount = Math.round(dailyRate * deductionFraction * 100) / 100;
-
-      const reqId = `req_late_${emp.id}_${dateStr}`;
-      const alreadyHasReq = (currentState.requests || []).some((r) => r.id === reqId);
-
-      const branchObj = (currentState.branches || []).find((b) => b.id === (targetRoster?.branchId || emp.branchId));
-      const branchName = branchObj ? branchObj.name : 'الفرع الرئيسي';
-
-      let updatedReqs = currentState.requests || [];
-      if (!alreadyHasReq) {
-        const newReq = {
-          id: reqId,
-          employeeId: emp.id,
-          employeeName: emp.name,
-          employeeCode: emp.code,
-          jobTitle: emp.jobTitle,
-          branchId: targetRoster?.branchId || emp.branchId,
-          branchName: branchName,
-          type: 'penalty',
-          subType: 'lateness',
-          ruleTitle: `تأخير عن موعد الوردية (${diffMinutes} دقيقة - موعد: ${daySchedule.start} / دخول: ${timeInStr})`,
-          impactType: 'deduction_days',
-          impactVal: deductionFraction,
-          amount: penaltyAmount,
-          scheduledStart: daySchedule.start,
-          actualIn: timeInStr,
-          latenessMinutes: diffMinutes,
-          graceMinutes: gracePeriod,
-          occurrenceNumber: occurrenceNumber,
-          suggestedAction: actionTitle,
-          reason: `تأخر الموظف ${emp.name} (${emp.jobTitle}) بفرع ${branchName} بمقدار ${diffMinutes} دقيقة عن موعد ورديته المحدد بالجدول (${daySchedule.start}) متجاوزاً فترة السماح (${gracePeriod} دقيقة). المرة رقم ${occurrenceNumber} في اللائحة.`,
-          details: `تأخير ${diffMinutes} دقيقة | المرة: رقم ${occurrenceNumber} | الإجراء اللائحي: ${actionTitle} ${penaltyAmount > 0 ? `(خصم ${penaltyAmount} ج.م / ${deductionFraction} يوم)` : '(بدون خصم مالي)'}`,
-          date: dateStr,
-          createdAt: new Date().toISOString(),
-          targetApproval: 'admin_only',
-          branchApproved: true,
-          adminApproved: false,
-          status: 'pending',
-          source: 'system_lateness_tracker'
-        };
-        updatedReqs = [newReq, ...updatedReqs];
-      }
-
-      const notifId = `notif_late_${emp.id}_${dateStr}`;
-      const alreadyHasNotif = (currentState.notifications || []).some((n) => n.id === notifId);
-      let updatedNotifs = currentState.notifications || [];
-      if (!alreadyHasNotif) {
-        const newNotif = {
-          id: notifId,
-          type: 'lateness_alert',
-          title: `🚨 تنبيه تأخير: ${emp.name} (${emp.jobTitle})`,
-          message: `تأخر الموظف ${emp.name} (${emp.jobTitle}) بفرع ${branchName} عن موعد ورديته بمقدار ${diffMinutes} دقيقة (وقت الدخول: ${timeInStr} | الموعد المجدول: ${daySchedule.start}) متجاوزاً فترة السماح (${gracePeriod} دقيقة).`,
-          date: dateStr,
-          timestamp: new Date().toISOString(),
-          read: false,
-          targetRole: 'all',
-          branchId: targetRoster?.branchId || emp.branchId,
-          requestId: reqId,
-          empId: emp.id,
-          latenessMinutes: diffMinutes,
-          suggestedAmount: penaltyAmount,
-          suggestedAction: actionTitle
-        };
-        updatedNotifs = [newNotif, ...updatedNotifs];
-      }
-
-      // Dispatch automated Top Management email alert
-      notifyAdminOnLateness({
-        state: currentState,
-        emp,
-        branchName,
+    const notifId = `notif_late_${emp.id}_${dateStr}`;
+    const alreadyHasNotif = (currentState.notifications || []).some((n) => n.id === notifId);
+    let updatedNotifs = currentState.notifications || [];
+    if (!alreadyHasNotif) {
+      const newNotif = {
+        id: notifId,
+        type: 'lateness_alert',
+        title: `🚨 تنبيه تأخير: ${emp.name} (${emp.jobTitle})`,
+        message: `تأخر الموظف ${emp.name} (${emp.jobTitle}) بفرع ${branchName} بمقدار ${diffMinutes} دقيقة عن موعد ورديته (${sched.start}) - [${tier.name} / المرة #${occurrenceNumber}] - الجزاء: ${actionTitle}`,
+        date: dateStr,
+        timestamp: new Date().toISOString(),
+        read: false,
+        targetRole: 'all',
+        branchId: sched.branchId || emp.branchId,
+        requestId: `req_late_inc_${emp.id}_${dateStr}_${timeInStr.replace(':', '')}`,
+        empId: emp.id,
         latenessMinutes: diffMinutes,
-        scheduledStart: daySchedule.start,
-        timeIn: timeInStr,
-        dateStr,
-        suggestedAction: actionTitle,
-        suggestedAmount: penaltyAmount
-      }).catch((e) => console.warn('Lateness email alert error:', e));
-
-      return {
-        ...currentState,
-        requests: updatedReqs,
-        notifications: updatedNotifs
+        suggestedAmount: penaltyAmount,
+        suggestedAction: actionTitle
       };
+      updatedNotifs = [newNotif, ...updatedNotifs];
     }
 
-    return currentState;
+    // Dispatch automated Top Management email alert
+    notifyAdminOnLateness({
+      state: currentState,
+      emp,
+      branchName,
+      latenessMinutes: diffMinutes,
+      scheduledStart: sched.start,
+      timeIn: timeInStr,
+      dateStr,
+      suggestedAction: actionTitle,
+      suggestedAmount: penaltyAmount
+    }).catch((e) => console.warn('Lateness email alert error:', e));
+
+    return {
+      ...currentState,
+      lateIncidents: incidents,
+      requests: updatedRequests,
+      notifications: updatedNotifs
+    };
   };
 
   // ── Central Early Exit Detector & Request Generator ──
