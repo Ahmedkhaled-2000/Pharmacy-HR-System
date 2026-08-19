@@ -178,23 +178,35 @@ export function computeLatenessFinancialAmount(deductionMinutes, employee, branc
   if (mins === 0 || !employee) return 0;
 
   let hourlyBase = parseFloat(employee.salary) || 0;
-  let workDays = parseFloat(employee.workDaysPerMonth) || 26;
-  let workHours = parseFloat(employee.workHoursPerDay) || 8;
+  let workDays = parseFloat(employee.workDaysPerMonth) || parseFloat(employee.workDays) || 26;
+  let workHours = parseFloat(employee.workHoursPerDay) || parseFloat(employee.workHours) || 8;
 
   if (branchId && employee.branchesDetails && employee.branchesDetails.length > 0) {
     const bd = employee.branchesDetails.find((b) => String(b.branchId) === String(branchId));
     if (bd) {
       hourlyBase = parseFloat(bd.salary) || hourlyBase;
-      workDays = parseFloat(bd.workDaysPerMonth) || workDays;
-      workHours = parseFloat(bd.workHoursPerDay) || workHours;
+      workDays = parseFloat(bd.workDaysPerMonth) || parseFloat(bd.workDays) || workDays;
+      workHours = parseFloat(bd.workHoursPerDay) || parseFloat(bd.workHours) || workHours;
     }
   }
 
   // 1. سعر اليوم = (سعر الساعة الشهري * ساعات اليوم) / أيام الشهر
   const dailyRate = workDays > 0 ? (hourlyBase * workHours) / workDays : (hourlyBase * workHours);
 
-  // 2. سعر الساعة اليومي = سعر اليوم / ساعات اليوم = سعر الساعة الشهري / أيام الشهر
-  const hourlyRate = workHours > 0 ? (dailyRate / workHours) : (workDays > 0 ? hourlyBase / workDays : hourlyBase);
+  // 2. سعر الساعة اليومي (أجر الساعة):
+  // إذا كان hourlyBase مدخل كسعر ساعة (مثلاً 75) أو سعر شهري مدخل (مثلاً 600 أو 650):
+  // - إذا كان hourlyBase >= 200: سعر الساعة اليومي = hourlyBase / workDays (مثال: 600 / 26 = 23.08 ج.م / ساعة)
+  // - إذا كان hourlyBase < 200: سعر الساعة اليومي = (hourlyBase * workHours) / workDays (مثال: (75 * 8) / 26 = 23.08 ج.م / ساعة)
+  let hourlyRate = 0;
+  if (hourlyBase > 0 && workDays > 0) {
+    if (hourlyBase >= 200) {
+      hourlyRate = hourlyBase / workDays;
+    } else {
+      hourlyRate = (hourlyBase * workHours) / workDays;
+    }
+  } else {
+    hourlyRate = dailyRate > 0 ? dailyRate : hourlyBase;
+  }
 
   // 3. سعر الدقيقة
   const minuteRate = hourlyRate / 60;

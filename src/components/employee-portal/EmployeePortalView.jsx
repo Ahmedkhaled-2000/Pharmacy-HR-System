@@ -11,6 +11,7 @@ import EmployeeEvaluationsModule from './EmployeeEvaluationsModule';
 import PayslipPrintModal from '../payroll/PayslipPrintModal';
 import BylawsModule from '../bylaws/BylawsModule';
 import EmployeeResignationModule from './EmployeeResignationModule';
+import { computeLatenessFinancialAmount } from '../../utils/latePenaltyEngine';
 
 // ─────────────────────────────────────────
 //  Month navigation helpers
@@ -292,6 +293,43 @@ export default function EmployeePortalView({
           }
 
           r++;
+          // ── Late Penalty Incidents Table for this Branch ──
+          const bLateIncidents = (state.lateIncidents || []).filter(
+            (inc) =>
+              String(inc.employeeId) === String(emp.id) &&
+              inc.status !== 'cancelled' &&
+              inc.status !== 'approved_permission_exempt' &&
+              inc.actionType !== 'grace' &&
+              (inc.deductionMinutes > 0 || inc.penaltyAmount > 0) &&
+              filterFn(inc.date) &&
+              (inc.branchId === bId || (!inc.branchId && bdIdx === 0))
+          );
+
+          if (bLateIncidents.length > 0) {
+            mergedTitle(ws, r, `تفاصيل وقائع التأخير وخصم لائحة الجزاءات (${bLateIncidents.length} واقعة تأخير) — فرع ${bName}`, COLS, 'FFC2410C', 12, 24);
+            r++;
+            tableHeaderRow(ws, r, ['التاريخ', 'اليوم', 'الشيفت المجدول', 'الحضور الفعلي', 'دقائق التأخير', 'فئة التأخير', 'التكرار', 'الجزاء اللائحي', 'دقائق الخصم', 'مبلغ الخصم لليوم (ج.م)'], 1);
+            r++;
+            bLateIncidents.forEach((inc) => {
+              const dayAmt = computeLatenessFinancialAmount(inc.deductionMinutes || 0, emp, inc.branchId || bId);
+              const penaltyVal = dayAmt > 0 ? dayAmt : (parseFloat(inc.penaltyAmount) || 0);
+              dataRow(ws, r, [
+                inc.date,
+                arabicWeekday(inc.date),
+                inc.scheduledStartTime,
+                inc.actualPunchInTime,
+                `${inc.lateMinutes} دقيقة`,
+                inc.tierName,
+                `المرة #${inc.occurrenceNumber}`,
+                inc.actionLabel,
+                inc.deductionMinutes > 0 ? `${inc.deductionMinutes} دقيقة` : '—',
+                fmt(penaltyVal)
+              ], 1, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+              r++;
+            });
+            r++;
+          }
+
           const bAdjs = state.adjustments.filter(
             (a) => (a.employeeId === emp.id || a.employeeId === 'all') && filterFn(a.date) && (a.branchId === bId || (!a.branchId && bdIdx === 0))
           );
@@ -546,6 +584,43 @@ export default function EmployeePortalView({
             cellAmt.alignment = { horizontal: 'center' };
             cellAmt.border = { top: { style: 'thin', color: { argb: 'FFCFC9B8' } }, left: { style: 'thin', color: { argb: 'FFCFC9B8' } }, bottom: { style: 'thin', color: { argb: 'FFCFC9B8' } }, right: { style: 'thin', color: { argb: 'FFCFC9B8' } } };
             cellAmt.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE4F4EB' } };
+            r++;
+          });
+          r++;
+        }
+
+        // ── Late Penalty Incidents Table ──
+        const empLateIncidents = (state.lateIncidents || []).filter(
+          (inc) =>
+            String(inc.employeeId) === String(emp.id) &&
+            inc.status !== 'cancelled' &&
+            inc.status !== 'approved_permission_exempt' &&
+            inc.actionType !== 'grace' &&
+            (inc.deductionMinutes > 0 || inc.penaltyAmount > 0) &&
+            filterFn(inc.date) &&
+            (!selectedBranchId || String(inc.branchId) === String(selectedBranchId))
+        );
+
+        if (empLateIncidents.length > 0) {
+          mergedTitle(ws, r, `تفاصيل وقائع التأخير وخصم لائحة الجزاءات (${empLateIncidents.length} واقعة تأخير)`, COLS, 'FFC2410C', 12, 24);
+          r++;
+          tableHeaderRow(ws, r, ['التاريخ', 'اليوم', 'الشيفت المجدول', 'الحضور الفعلي', 'دقائق التأخير', 'فئة التأخير', 'التكرار', 'الجزاء اللائحي', 'دقائق الخصم', 'مبلغ الخصم لليوم (ج.م)'], 1);
+          r++;
+          empLateIncidents.forEach((inc) => {
+            const dayAmt = computeLatenessFinancialAmount(inc.deductionMinutes || 0, emp, inc.branchId || selectedBranchId);
+            const penaltyVal = dayAmt > 0 ? dayAmt : (parseFloat(inc.penaltyAmount) || 0);
+            dataRow(ws, r, [
+              inc.date,
+              arabicWeekday(inc.date),
+              inc.scheduledStartTime,
+              inc.actualPunchInTime,
+              `${inc.lateMinutes} دقيقة`,
+              inc.tierName,
+              `المرة #${inc.occurrenceNumber}`,
+              inc.actionLabel,
+              inc.deductionMinutes > 0 ? `${inc.deductionMinutes} دقيقة` : '—',
+              fmt(penaltyVal)
+            ], 1, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
             r++;
           });
           r++;

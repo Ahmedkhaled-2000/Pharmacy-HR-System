@@ -1986,19 +1986,19 @@ export default function App() {
     branches.forEach(b => {
       const bId = b.branchId;
       const hourlyBase = parseFloat(b.salary) || 0; // سعر الساعة الشهري المدخل من قبل الإدارة (الراتب الأساسي)
-      const workHoursPerDay = parseFloat(b.workHoursPerDay) || WORK_HOURS_PER_DAY; // عدد ساعات العمل الموظف المدخلة من قبل الإدارة
-      const workDaysPerMonth = parseFloat(b.workDaysPerMonth) || WORK_DAYS_PER_MONTH; // عدد أيام العمل الموظف المدخلة من قبل الإدارة
+      const workHoursPerDay = parseFloat(b.workHoursPerDay) || parseFloat(b.workHours) || WORK_HOURS_PER_DAY; // عدد ساعات العمل الموظف المدخلة من قبل الإدارة
+      const workDaysPerMonth = parseFloat(b.workDaysPerMonth) || parseFloat(b.workDays) || WORK_DAYS_PER_MONTH; // عدد أيام العمل الموظف المدخلة من قبل الإدارة
 
       // 1. احتساب سعر اليوم = (سعر الساعة الشهري * عدد ساعات العمل المدخلة) / عدد أيام العمل المدخلة
-      // مثال: (650 * 10) / 26 = 250 ج.م / يوم
       const dailyRate = workDaysPerMonth > 0 ? (hourlyBase * workHoursPerDay) / workDaysPerMonth : 0;
 
-      // 2. احتساب سعر الساعة اليومي = سعر اليوم / عدد ساعات العمل المدخلة
-      // مثال: 250 / 10 = 25 ج.م / ساعة
-      const rate = workHoursPerDay > 0 ? dailyRate / workHoursPerDay : (workDaysPerMonth > 0 ? hourlyBase / workDaysPerMonth : hourlyBase);
+      // 2. احتساب سعر الساعة اليومي (أجر الساعة)
+      const rate = (hourlyBase > 0 && workDaysPerMonth > 0)
+        ? (hourlyBase >= 200 ? (hourlyBase / workDaysPerMonth) : ((hourlyBase * workHoursPerDay) / workDaysPerMonth))
+        : (workHoursPerDay > 0 ? dailyRate / workHoursPerDay : hourlyBase);
 
       // إجمالي الراتب الأساسي الشهري المقدر
-      const monthlySalary = dailyRate * workDaysPerMonth; // = hourlyBase * workHoursPerDay
+      const monthlySalary = rate * workHoursPerDay * workDaysPerMonth;
       const monthlyRequiredHours = workHoursPerDay * workDaysPerMonth;
 
       // shifts for this branch (fallback to true if shift has no branch and employee only has 1 branch)
@@ -3551,15 +3551,20 @@ export default function App() {
               String(inc.employeeId) === String(empId) &&
               filterFn(inc.date) &&
               inc.status !== 'cancelled' &&
+              inc.status !== 'approved_permission_exempt' &&
+              inc.actionType !== 'grace' &&
+              (inc.deductionMinutes > 0 || inc.penaltyAmount > 0) &&
               (inc.branchId === bId || (!inc.branchId && bdIdx === 0))
           );
 
           if (bLateIncidents.length > 0) {
-            mergedTitle(ws, r, `تفاصيل وقائع وأيام التأخيرات والخصم اليومي — فرع ${bName}`, COLS, 'FFD97706', 12, 22);
+            mergedTitle(ws, r, `تفاصيل وقائع وأيام التأخيرات والخصم اليومي — فرع ${bName}`, COLS, 'FFC2410C', 12, 22);
             r++;
             tableHeaderRow(ws, r, ['التاريخ', 'اليوم', 'الشيفت المجدول', 'الحضور الفعلي', 'دقائق التأخير', 'فئة التأخير', 'التكرار', 'الجزاء اللائحي', 'دقائق الخصم', 'مبلغ الخصم لليوم (ج.م)'], 1);
             r++;
             bLateIncidents.forEach((inc) => {
+              const dayAmt = computeLatenessFinancialAmount(inc.deductionMinutes || 0, emp, inc.branchId || bId);
+              const penaltyVal = dayAmt > 0 ? dayAmt : (parseFloat(inc.penaltyAmount) || 0);
               dataRow(ws, r, [
                 inc.date,
                 arabicWeekday(inc.date),
@@ -3570,7 +3575,7 @@ export default function App() {
                 `المرة #${inc.occurrenceNumber}`,
                 inc.actionLabel,
                 inc.deductionMinutes > 0 ? `${inc.deductionMinutes} دقيقة` : '—',
-                fmt(inc.penaltyAmount)
+                fmt(penaltyVal)
               ], 1, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
               r++;
             });
@@ -3833,15 +3838,23 @@ export default function App() {
         r++;
         // ── Late Penalties Breakdown Table ──
         const empLateIncidents = (state.lateIncidents || []).filter(
-          (inc) => String(inc.employeeId) === String(empId) && filterFn(inc.date) && inc.status !== 'cancelled'
+          (inc) =>
+            String(inc.employeeId) === String(empId) &&
+            filterFn(inc.date) &&
+            inc.status !== 'cancelled' &&
+            inc.status !== 'approved_permission_exempt' &&
+            inc.actionType !== 'grace' &&
+            (inc.deductionMinutes > 0 || inc.penaltyAmount > 0)
         );
 
         if (empLateIncidents.length > 0) {
-          mergedTitle(ws, r, 'تفاصيل وقائع وجزاءات التأخير اللائحي', COLS, 'FFD97706', 12, 22);
+          mergedTitle(ws, r, 'تفاصيل وقائع وجزاءات التأخير اللائحي', COLS, 'FFC2410C', 12, 22);
           r++;
           tableHeaderRow(ws, r, ['التاريخ', 'الشيفت المجدول', 'الحضور الفعلي', 'دقائق التأخير', 'فئة التأخير', 'التكرار بالدورة', 'الجزاء اللائحي', 'دقائق الخصم', 'مبلغ الخصم (ج.م)'], 1);
           r++;
           empLateIncidents.forEach((inc) => {
+            const dayAmt = computeLatenessFinancialAmount(inc.deductionMinutes || 0, emp, inc.branchId || null);
+            const penaltyVal = dayAmt > 0 ? dayAmt : (parseFloat(inc.penaltyAmount) || 0);
             dataRow(ws, r, [
               inc.date,
               inc.scheduledStartTime,
@@ -3851,7 +3864,7 @@ export default function App() {
               `المرة #${inc.occurrenceNumber}`,
               inc.actionLabel,
               inc.deductionMinutes > 0 ? `${inc.deductionMinutes} دقيقة` : '—',
-              fmt(inc.penaltyAmount)
+              fmt(penaltyVal)
             ], 1, [0, 1, 2, 3, 4, 5, 6, 7, 8]);
             r++;
           });
