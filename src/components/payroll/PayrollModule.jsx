@@ -464,8 +464,32 @@ export default function PayrollModule({
                   </h4>
                 </div>
 
+                {empSum.lateDeduction > 0 && (
+                  <div style={{ background: '#fff7ed', padding: '14px', borderRadius: '10px', border: '1px solid #fed7aa' }}>
+                    <span style={{ fontSize: '12px', color: '#c2410c' }}>⏱️ خصومات التأخير اللائحي</span>
+                    <h4 style={{ margin: '4px 0 0 0', color: '#ea580c' }}>
+                      -{fmt(empSum.lateDeduction)} ج.م
+                    </h4>
+                    <div style={{ fontSize: '11px', color: '#9a3412', marginTop: '2px' }}>
+                      خصم {empSum.lateDeductionMinutes} دقيقة ({empSum.lateIncidentsCount} واقعة تأخير)
+                    </div>
+                  </div>
+                )}
+
+                {empSum.absenceDeduction > 0 && (
+                  <div style={{ background: '#fef2f2', padding: '14px', borderRadius: '10px', border: '1px solid #fecaca' }}>
+                    <span style={{ fontSize: '12px', color: '#991b1b' }}>🚫 خصومات الغياب بدون إذن</span>
+                    <h4 style={{ margin: '4px 0 0 0', color: '#dc2626' }}>
+                      -{fmt(empSum.absenceDeduction)} ج.م
+                    </h4>
+                    <div style={{ fontSize: '11px', color: '#7f1d1d', marginTop: '2px' }}>
+                      عدد {empSum.absenceDaysCount} يوم غياب
+                    </div>
+                  </div>
+                )}
+
                 <div style={{ background: '#fef2f2', padding: '14px', borderRadius: '10px', border: '1px solid #fecaca' }}>
-                  <span style={{ fontSize: '12px', color: '#991b1b' }}>{empSum.totalAllowances > 0 ? '5.' : '4.'} إجمالي الخصومات والغيابات</span>
+                  <span style={{ fontSize: '12px', color: '#991b1b' }}>إجمالي الخصومات الشاملة</span>
                   <h4 style={{ margin: '4px 0 0 0', color: '#dc2626' }}>
                     -{fmt(totalDed)} ج.م
                   </h4>

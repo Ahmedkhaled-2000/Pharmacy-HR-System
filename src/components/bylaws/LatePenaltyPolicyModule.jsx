@@ -284,37 +284,83 @@ export default function LatePenaltyPolicyModule({
 
   // Handler: Save Policy Configuration
   const handleSavePolicy = async () => {
-    const updatedState = {
-      ...state,
-      latePenaltyPolicy: policyDraft,
-      bylaws: {
-        ...(state.bylaws || {}),
-        latePenaltyPolicy: policyDraft
-      }
-    };
+    try {
+      let updatedRequests = [...(state.requests || [])];
+      const allNewIncidents = [];
 
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    showToast?.('✅ تم حفظ وتحديث سياسة لائحة التأخير بنجاح في النظام السحابي');
+      employees.forEach((emp) => {
+        const res = recalculateEmployeeCycleLateness({
+          employeeId: emp.id,
+          cycleFilterFn: filterFn,
+          state: { ...state, latePenaltyPolicy: policyDraft },
+          payrollCycleId: monthPicker || 'current'
+        });
+        allNewIncidents.push(...res.incidents);
+        updatedRequests = res.updatedRequests;
+      });
+
+      const updatedState = {
+        ...state,
+        latePenaltyPolicy: policyDraft,
+        bylaws: {
+          ...(state.bylaws || {}),
+          latePenaltyPolicy: policyDraft
+        },
+        lateIncidents: allNewIncidents,
+        requests: updatedRequests
+      };
+
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+
+      setSubTab('review');
+      showToast?.('✅ تم حفظ التعديلات اللائحية وإعادة احتساب وتطبيق التأخيرات فورياً!');
+    } catch (err) {
+      console.error('Error saving policy:', err);
+      showToast?.('❌ حدث خطأ أثناء حفظ السياسة');
+    }
   };
 
   // Handler: Restore Policy to Standard Defaults
   const handleRestoreDefaultPolicy = async () => {
     if (!window.confirm('هل ترغب بالتأكيد في استعادة اللائحة القياسية الافتراضية لجزاءات التأخير؟')) return;
 
-    setPolicyDraft(JSON.parse(JSON.stringify(DEFAULT_LATE_PENALTY_POLICY)));
-    const updatedState = {
-      ...state,
-      latePenaltyPolicy: DEFAULT_LATE_PENALTY_POLICY,
-      bylaws: {
-        ...(state.bylaws || {}),
-        latePenaltyPolicy: DEFAULT_LATE_PENALTY_POLICY
-      }
-    };
+    try {
+      setPolicyDraft(JSON.parse(JSON.stringify(DEFAULT_LATE_PENALTY_POLICY)));
+      let updatedRequests = [...(state.requests || [])];
+      const allNewIncidents = [];
 
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    showToast?.('🔄 تم استعادة سياسة جزاءات التأخير القياسية بنجاح');
+      employees.forEach((emp) => {
+        const res = recalculateEmployeeCycleLateness({
+          employeeId: emp.id,
+          cycleFilterFn: filterFn,
+          state: { ...state, latePenaltyPolicy: DEFAULT_LATE_PENALTY_POLICY },
+          payrollCycleId: monthPicker || 'current'
+        });
+        allNewIncidents.push(...res.incidents);
+        updatedRequests = res.updatedRequests;
+      });
+
+      const updatedState = {
+        ...state,
+        latePenaltyPolicy: DEFAULT_LATE_PENALTY_POLICY,
+        bylaws: {
+          ...(state.bylaws || {}),
+          latePenaltyPolicy: DEFAULT_LATE_PENALTY_POLICY
+        },
+        lateIncidents: allNewIncidents,
+        requests: updatedRequests
+      };
+
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+
+      setSubTab('review');
+      showToast?.('🔄 تم استعادة سياسة جزاءات التأخير القياسية وإعادة احتساب السجلات بنجاح');
+    } catch (err) {
+      console.error('Error restoring default policy:', err);
+      showToast?.('❌ حدث خطأ أثناء استعادة اللائحة');
+    }
   };
 
   // Branch name for display

@@ -570,20 +570,26 @@ export default function PayslipPrintModal({
               <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', fontFamily: 'Cairo', color: '#fff' }}>
                 🏆 الملخص المالي النهائي لشهر {fullMonthLabel} {isMultiBranch && !selectedBranchId ? '(شامل لكافة الفروع)' : ''}
               </h4>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '8px', marginBottom: '10px', fontSize: '12.5px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px', marginBottom: '10px', fontSize: '12px' }}>
                 <div>المستحقات الأساسية: <strong>{fmt(baseEarnings)} ج.م</strong></div>
                 {totalAllowances > 0 && (
                   <div>+ إجمالي البدلات الثابتة: <strong>+{fmt(totalAllowances)} ج.م</strong></div>
                 )}
                 <div>+ المكافآت والحوافز: <strong>+{fmt(totalBonus)} ج.م</strong></div>
-                <div>- الخصومات والجزاءات: <strong>-{fmt(totalDeduction)} ج.م</strong></div>
+                {summary.lateDeduction > 0 && (
+                  <div style={{ color: '#fed7aa' }}>- خصم التأخيرات: <strong>-{fmt(summary.lateDeduction)} ج.م ({summary.lateDeductionMinutes} دقيقة)</strong></div>
+                )}
+                {summary.absenceDeduction > 0 && (
+                  <div style={{ color: '#fecaca' }}>- خصم الغياب: <strong>-{fmt(summary.absenceDeduction)} ج.م ({summary.absenceDaysCount} يوم)</strong></div>
+                )}
+                <div>- إجمالي الخصومات الشاملة: <strong>-{fmt(totalDeduction)} ج.م</strong></div>
               </div>
               <div style={{ background: 'rgba(255,255,255,0.2)', padding: '8px', borderRadius: '6px', textAlign: 'center', fontSize: '16px', fontWeight: 'bold' }}>
                 صافي المرتب المستحق: {fmt(netSalary)} ج.م
               </div>
             </div>
 
-            {/* Construct Full Breakdown of Allowances, Bonuses, Loans, and Absence Deductions */}
+            {/* Construct Full Breakdown of Allowances, Bonuses, Late Penalties, Loans, and Absence Deductions */}
             {(() => {
               const allowanceItems = [];
               if (mgmtAllowance > 0) {
@@ -626,6 +632,24 @@ export default function PayslipPrintModal({
                 color: a.type === 'bonus' ? '#16a34a' : '#dc2626'
               }));
 
+              // Late Penalty Incidents
+              const empLateIncidents = (state?.lateIncidents || []).filter(
+                (inc) =>
+                  String(inc.employeeId) === String(emp.id) &&
+                  inc.status !== 'cancelled' &&
+                  (!selectedBranchId || String(inc.branchId) === String(selectedBranchId)) &&
+                  (inc.date >= startCutoff && inc.date <= endCutoff)
+              );
+
+              const latePenaltyItems = empLateIncidents.map((inc) => ({
+                id: inc.id,
+                date: inc.date,
+                typeLabel: `⏱️ جزاء تأخير (${inc.tierName} - المرة #${inc.occurrenceNumber})`,
+                amount: parseFloat(inc.penaltyAmount) || 0,
+                details: `تأخير ${inc.lateMinutes} دقيقة عن الوردية (${inc.scheduledStartTime}) - ${inc.actionLabel} ${inc.deductionMinutes > 0 ? `(خصم ${inc.deductionMinutes} دقيقة)` : ''} ${inc.overrideReason ? `[ملاحظة: ${inc.overrideReason}]` : ''}`,
+                color: '#ea580c'
+              }));
+
               const allLoansAndRequests = [...(state?.loans || []), ...(state?.requests || [])];
               const empLoans = allLoansAndRequests.filter(
                 (r) =>
@@ -655,7 +679,7 @@ export default function PayslipPrintModal({
                 color: '#b91c1c'
               }] : [];
 
-              const allBreakdownItems = [...allowanceItems, ...manualItems, ...loanItems, ...absenceItem];
+              const allBreakdownItems = [...allowanceItems, ...manualItems, ...latePenaltyItems, ...loanItems, ...absenceItem];
 
               if (allBreakdownItems.length === 0) return null;
 

@@ -2021,8 +2021,21 @@ export default function App() {
       totalAbsenceDeduction += absenceDeduction;
     });
 
+    // 4. Calculate Late Penalty Incidents & Deductions
+    const empLateIncidents = (state.lateIncidents || []).filter(
+      (inc) =>
+        String(inc.employeeId) === String(empId) &&
+        inc.status !== 'cancelled' &&
+        (!targetBranchId || String(inc.branchId) === String(targetBranchId)) &&
+        effectiveFilterFn(inc.date)
+    );
+    const lateDeduction = empLateIncidents.reduce((acc, inc) => acc + (parseFloat(inc.penaltyAmount) || 0), 0);
+    const lateDeductionMinutes = empLateIncidents.reduce((acc, inc) => acc + (parseFloat(inc.deductionMinutes) || 0), 0);
+    const lateIncidentsCount = empLateIncidents.length;
+
     const penaltyReqs = (state.requests || [])
       .filter((r) => String(r.employeeId) === String(empId) && (r.type === 'penalty' || r.type === 'adjustment') && (r.status === 'approved' || r.adminApproved || !r.status) && r.status !== 'cancelled' && r.status !== 'rejected' && r.objection?.status !== 'approved' && !r.isCancelled && effectiveFilterFn(r.date || (r.createdAt ? r.createdAt.slice(0, 10) : '')))
+      .filter((r) => !String(r.id).startsWith('req_late_inc_') && !String(r.id).startsWith('req_late_'))
       .map((r) => {
         let amt = parseFloat(r.amount) || 0;
         if (!amt && (r.impactType || r.impactVal || r.deductionMinutes)) {
@@ -2079,7 +2092,7 @@ export default function App() {
         return acc + Math.min(rem, monthlyDeduction);
       }, 0);
 
-    const totalDeduction = manualDeduction + loanDeduction + totalAbsenceDeduction;
+    const totalDeduction = manualDeduction + loanDeduction + totalAbsenceDeduction + lateDeduction;
 
     // Allowances calculation:
     // 1. Management Allowance: Calculated if set or if employee is in a management role
@@ -2115,6 +2128,11 @@ export default function App() {
       extraAllowanceTitle,
       isManagement: isMgmt,
       totalDeduction, 
+      lateDeduction,
+      lateDeductionMinutes,
+      lateIncidentsCount,
+      manualDeduction,
+      loanDeduction,
       absenceDeduction: totalAbsenceDeduction, 
       netSalary, 
       absenceDaysCount: totalAbsenceDaysCount,
@@ -2137,6 +2155,8 @@ export default function App() {
     const totalExtraAllowance = Object.values(perEmp).reduce((s, e) => s + (e.extraAllowance || 0), 0);
     const totalAllowances = Object.values(perEmp).reduce((s, e) => s + (e.totalAllowances || 0), 0);
     const totalDeduction = Object.values(perEmp).reduce((s, e) => s + e.totalDeduction, 0);
+    const totalLateDeduction = Object.values(perEmp).reduce((s, e) => s + (e.lateDeduction || 0), 0);
+    const totalLateDeductionMinutes = Object.values(perEmp).reduce((s, e) => s + (e.lateDeductionMinutes || 0), 0);
     const totalAbsenceDeduction = Object.values(perEmp).reduce((s, e) => s + e.absenceDeduction, 0);
     const grandNetSalary = totalBaseEarnings + totalBonus + totalAllowances - totalDeduction;
 
@@ -2150,6 +2170,8 @@ export default function App() {
       totalExtraAllowance,
       totalAllowances,
       totalDeduction,
+      totalLateDeduction,
+      totalLateDeductionMinutes,
       totalAbsenceDeduction,
       grandNetSalary
     };
@@ -3770,8 +3792,36 @@ export default function App() {
           r++;
         }
 
+        r++;
+        // ── Late Penalties Breakdown Table ──
+        const empLateIncidents = (state.lateIncidents || []).filter(
+          (inc) => String(inc.employeeId) === String(empId) && filterFn(inc.date) && inc.status !== 'cancelled'
+        );
+
+        if (empLateIncidents.length > 0) {
+          mergedTitle(ws, r, 'تفاصيل وقائع وجزاءات التأخير اللائحي', COLS, 'FFD97706', 12, 22);
+          r++;
+          tableHeaderRow(ws, r, ['التاريخ', 'الشيفت المجدول', 'الحضور الفعلي', 'دقائق التأخير', 'فئة التأخير', 'التكرار بالدورة', 'الجزاء اللائحي', 'دقائق الخصم', 'مبلغ الخصم (ج.م)'], 1);
+          r++;
+          empLateIncidents.forEach((inc) => {
+            dataRow(ws, r, [
+              inc.date,
+              inc.scheduledStartTime,
+              inc.actualPunchInTime,
+              `${inc.lateMinutes} دقيقة`,
+              inc.tierName,
+              `المرة #${inc.occurrenceNumber}`,
+              inc.actionLabel,
+              inc.deductionMinutes > 0 ? `${inc.deductionMinutes} دقيقة` : '—',
+              fmt(inc.penaltyAmount)
+            ], 1, [0, 1, 2, 3, 4, 5, 6, 7, 8]);
+            r++;
+          });
+          r++;
+        }
+
         const empAdjs = state.adjustments.filter((a) => (a.employeeId === empId || a.employeeId === 'all') && filterFn(a.date));
-        mergedTitle(ws, r, 'تفاصيل المكافآت والخصومات', COLS, 'FF3A6E69', 12, 22);
+        mergedTitle(ws, r, 'تفاصيل المكافآت والخصومات الأخرى', COLS, 'FF3A6E69', 12, 22);
         r++;
         tableHeaderRow(ws, r, ['التاريخ', 'النوع', 'المبلغ', 'البيان / السبب'], 1);
         r++;
@@ -3779,7 +3829,7 @@ export default function App() {
         if (empAdjs.length === 0) {
           ws.mergeCells(r, 1, r, 4);
           const cell = ws.getCell(r, 1);
-          cell.value = 'لا توجد مكافآت أو خصومات مسجلة لهذه الفترة';
+          cell.value = 'لا توجد مكافآت أو تسويات أخرى مسجلة لهذه الفترة';
           cell.font = { name: 'Arial', italic: true, size: 10.5 };
           cell.alignment = { horizontal: 'center' };
           r++;
@@ -3802,13 +3852,23 @@ export default function App() {
         r += 2;
         mergedTitle(ws, r, 'الملخص المالي وصافي المرتب المستحق النهائي', COLS, 'FF134E4A', 13, 26);
         r++;
-        tableHeaderRow(ws, r, ['سعر الساعة الشهرية', 'إجمالي الساعات', 'المستحقات الأساسية', 'إجمالي البدلات (+)', 'إجمالي المكافآت (+)', 'إجمالي الخصومات (-)', 'صافي المرتب النهائي'], 1);
-        ws.mergeCells(r, 7, r, COLS);
+        tableHeaderRow(ws, r, ['سعر الساعة الشهري', 'إجمالي الساعات', 'المستحقات الأساسية', 'إجمالي البدلات (+)', 'المكافآت (+)', 'خصومات التأخير (-)', 'خصومات الغياب (-)', 'الخصومات والسلف (-)', 'صافي المرتب النهائي'], 1);
+        ws.mergeCells(r, 9, r, COLS);
         r++;
 
-        dataRow(ws, r, [fmt(emp.salary), fmt(summary.hours), fmt(summary.baseEarnings), fmt(summary.totalAllowances || 0), fmt(summary.totalBonus), fmt(summary.totalDeduction)], 1, [0, 1, 2, 3, 4, 5]);
-        ws.mergeCells(r, 7, r, COLS);
-        const netCell = ws.getCell(r, 7);
+        dataRow(ws, r, [
+          fmt(emp.salary),
+          fmt(summary.hours),
+          fmt(summary.baseEarnings),
+          fmt(summary.totalAllowances || 0),
+          fmt(summary.totalBonus),
+          fmt(summary.lateDeduction || 0),
+          fmt(summary.absenceDeduction || 0),
+          fmt((summary.manualDeduction || 0) + (summary.loanDeduction || 0)),
+          fmt(summary.netSalary)
+        ], 1, [0, 1, 2, 3, 4, 5, 6, 7, 8]);
+        ws.mergeCells(r, 9, r, COLS);
+        const netCell = ws.getCell(r, 9);
         netCell.value = fmt(summary.netSalary) + ' ج.م';
         netCell.font = { name: 'Arial', bold: true, size: 12, color: { argb: 'FF134E4A' } };
         netCell.alignment = { horizontal: 'center', vertical: 'middle' };
@@ -3860,26 +3920,36 @@ export default function App() {
 
       const ExcelJS = await loadExcelJS(showToast);
       const grandPayroll = computeGrandPayroll(filterFn, mode === 'month' ? monthPicker : null);
-      const COLS = 12;
+      const COLS = 14;
 
       const wb = new ExcelJS.Workbook();
       wb.creator = state.orgSettings.orgName || 'نظام الموارد البشرية';
       const ws = wb.addWorksheet('رواتب جميع الموظفين', { views: [{ rightToLeft: true, showGridLines: false }] });
       ws.columns = [
-        { width: 10 }, { width: 22 }, { width: 16 }, { width: 14 },
+        { width: 10 }, { width: 22 }, { width: 16 }, { width: 13 },
         { width: 14 }, { width: 13 }, { width: 13 }, { width: 13 },
-        { width: 14 }, { width: 14 }, { width: 14 }, { width: 18 }
+        { width: 14 }, { width: 13 }, { width: 14 }, { width: 14 },
+        { width: 14 }, { width: 18 }
       ];
 
       let r = 1;
       mergedTitle(ws, r, isMonthMode ? `كشف رواتب جميع الموظفين وإجمالي الأجور — ${periodLabel}` : `كشف رواتب الموظفين للفترة — ${periodLabel}`, COLS, 'FF0B3532', 16, 32);
       r += 2;
 
-      tableHeaderRow(ws, r, ['كود الموظف', 'اسم الموظف', 'الوظيفة', 'عدد الساعات', 'المستحقات الأساسية', 'بدل الإدارة (+)', 'بدل الانتقال (+)', 'أجر إضافي (+)', 'إجمالي البدلات (+)', 'المكافآت (+)', 'الخصومات والغيابات (-)', 'صافي المرتب النهائي']);
+      tableHeaderRow(ws, r, [
+        'كود الموظف', 'اسم الموظف', 'الوظيفة', 'عدد الساعات', 'المستحقات الأساسية',
+        'بدل الإدارة (+)', 'بدل الانتقال (+)', 'أجر إضافي (+)', 'إجمالي البدلات (+)',
+        'المكافآت (+)', 'خصومات التأخير (-)', 'خصومات الغياب (-)', 'الخصومات الأخرى والسلف (-)', 'صافي المرتب النهائي'
+      ]);
       r++;
 
       state.employees.forEach((emp) => {
-        const s = grandPayroll.perEmp[emp.id] || { hours: 0, baseEarnings: 0, managementAllowance: 0, transportAllowance: 0, extraAllowance: 0, totalAllowances: 0, totalBonus: 0, totalDeduction: 0, absenceDeduction: 0, netSalary: 0 };
+        const s = grandPayroll.perEmp[emp.id] || {
+          hours: 0, baseEarnings: 0, managementAllowance: 0, transportAllowance: 0, extraAllowance: 0,
+          totalAllowances: 0, totalBonus: 0, lateDeduction: 0, absenceDeduction: 0, manualDeduction: 0, loanDeduction: 0,
+          totalDeduction: 0, netSalary: 0
+        };
+        const otherDed = (s.manualDeduction || 0) + (s.loanDeduction || 0);
         dataRow(
           ws,
           r,
@@ -3894,17 +3964,19 @@ export default function App() {
             fmt(s.extraAllowance || 0),
             fmt(s.totalAllowances || 0),
             fmt(s.totalBonus),
-            fmt((s.totalDeduction || 0) + (s.absenceDeduction || 0)),
+            fmt(s.lateDeduction || 0),
+            fmt(s.absenceDeduction || 0),
+            fmt(otherDed),
             fmt(s.netSalary)
           ],
           1,
-          [3, 4, 5, 6, 7, 8, 9, 10, 11]
+          [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
         );
         r++;
       });
 
       r++;
-      mergedTitle(ws, r, 'الإجمالي الكلي لأجور الشركة والرواتب والبدلات المدفوعة', COLS, 'FF134E4A', 14, 28);
+      mergedTitle(ws, r, 'الإجمالي الكلي لأجور الشركة والرواتب والبدلات والخصومات', COLS, 'FF134E4A', 14, 28);
       r++;
 
       ws.mergeCells(r, 1, r, 3);
@@ -3922,10 +3994,12 @@ export default function App() {
       const extCell = ws.getCell(r, 8); extCell.value = parseFloat(fmt(grandPayroll.totalExtraAllowance || 0)); extCell.numFmt = '#,##0.00';
       const allCell = ws.getCell(r, 9); allCell.value = parseFloat(fmt(grandPayroll.totalAllowances || 0)); allCell.numFmt = '#,##0.00';
       const boCell = ws.getCell(r, 10); boCell.value = parseFloat(fmt(grandPayroll.totalBonus)); boCell.numFmt = '#,##0.00';
-      const dCell = ws.getCell(r, 11); dCell.value = parseFloat(fmt((grandPayroll.totalDeduction || 0) + (grandPayroll.totalAbsenceDeduction || 0))); dCell.numFmt = '#,##0.00';
-      const gCell = ws.getCell(r, 12); gCell.value = parseFloat(fmt(grandPayroll.grandNetSalary)); gCell.numFmt = '#,##0.00';
+      const lateCell = ws.getCell(r, 11); lateCell.value = parseFloat(fmt(grandPayroll.totalLateDeduction || 0)); lateCell.numFmt = '#,##0.00';
+      const absCell = ws.getCell(r, 12); absCell.value = parseFloat(fmt(grandPayroll.totalAbsenceDeduction || 0)); absCell.numFmt = '#,##0.00';
+      const otherCell = ws.getCell(r, 13); otherCell.value = parseFloat(fmt(grandPayroll.totalOtherDeduction || 0)); otherCell.numFmt = '#,##0.00';
+      const gCell = ws.getCell(r, 14); gCell.value = parseFloat(fmt(grandPayroll.grandNetSalary)); gCell.numFmt = '#,##0.00';
 
-      [hCell, bCell, mgmtCell, transCell, extCell, allCell, boCell, dCell, gCell].forEach((c) => {
+      [hCell, bCell, mgmtCell, transCell, extCell, allCell, boCell, lateCell, absCell, otherCell, gCell].forEach((c) => {
         c.font = { name: 'Arial', bold: true, size: 11, color: { argb: 'FF134E4A' } };
         c.alignment = { horizontal: 'center', vertical: 'middle' };
         c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE4EEEC' } };
