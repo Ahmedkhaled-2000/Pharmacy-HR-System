@@ -11,7 +11,7 @@ import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import BranchResignationModule from '../resignation/BranchResignationModule';
 import { normalizeSchedule } from '../roster/RosterModule';
 import { shouldShowRequestToBranch } from '../../utils/formatters';
-import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
+import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
 import EmployeePermissionsManagementModule from '../permissions/EmployeePermissionsManagementModule';
 
 const WEEKDAYS_AR = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
@@ -2077,7 +2077,7 @@ export default function BranchManagerView({
             }).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
             const totalBreak = filteredShifts.reduce((acc, s) => acc + (s.breakHours || 0), 0);
-            const totalHours = filteredShifts.reduce((acc, s) => acc + (s.hours || 0), 0);
+            const totalHours = filteredShifts.reduce((acc, s) => acc + getEffectiveShiftHours(s, state), 0);
 
             return (
               <div className="table-responsive">
@@ -2104,6 +2104,7 @@ export default function BranchManagerView({
                         const perm = isApprovedPermissionForDate(s.employeeId, s.date, state);
                         const hasPerm = s.hasApprovedPermission || !!perm;
                         const permHours = s.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
+                        const effHours = getEffectiveShiftHours(s, state);
 
                         return (
                           <tr key={s.id} style={{ background: hasPerm ? 'rgba(254, 243, 199, 0.25)' : 'transparent' }}>
@@ -2140,7 +2141,7 @@ export default function BranchManagerView({
                               )}
                             </td>
                             <td style={{ fontWeight: '700', color: '#0d9488' }}>
-                              {formatMoney(s.hours)} ساعة
+                              {formatMoney(effHours)} ساعة
                             </td>
                             <td style={{ fontSize: '12px', color: hasPerm ? '#047857' : 'var(--muted)' }}>
                               {hasPerm ? (
@@ -2240,10 +2241,10 @@ export default function BranchManagerView({
                         )}
                       </td>
                       <td style={{ fontWeight: '700', color: '#0d9488' }}>
-                        {formatMoney(s.hours)} ساعة
+                        {formatMoney(getEffectiveShiftHours(s, state))} ساعة
                       </td>
                       <td style={{ fontWeight: '700', color: '#16a34a' }}>
-                        {formatMoney(s.hours * managerSalaryMetrics.hourlyRate)} ج.م
+                        {formatMoney(getEffectiveShiftHours(s, state) * managerSalaryMetrics.hourlyRate)} ج.م
                       </td>
                       <td style={{ fontSize: '12px', color: 'var(--muted)' }}>{s.note || 'تسجيل بصمة حية'}</td>
                     </tr>

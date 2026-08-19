@@ -101,6 +101,7 @@ import {
   applyApprovedPermissionsToShifts,
   syncAllEmployeesPermissionsAndLateness,
   isApprovedPermissionForDate,
+  getEffectiveShiftHours,
   getEffectiveLatePolicy,
   classifyLateTier,
   getPenaltyForOccurrence,
@@ -2061,9 +2062,9 @@ export default function App() {
 
       // shifts for this branch (fallback to true if shift has no branch and employee only has 1 branch)
       const bShifts = state.shifts.filter(s => s.employeeId === empId && effectiveFilterFn(s.date) && (s.branchId === bId || !s.branchId || branches.length === 1));
-      const hours = bShifts.reduce((acc, s) => acc + (parseFloat(s.hours) || 0), 0);
+      const hours = bShifts.reduce((acc, s) => acc + getEffectiveShiftHours(s, state), 0);
       
-      // 3. احتساب أجر اليوم / المستحقات = سعر الساعة اليومي * عدد الساعات الموضوعة في الجدول الشهري / الفعلية
+      // 3. احتساب أجر اليوم / المستحقات = سعر الساعة اليومي * عدد الساعات الموضوعة في الجدول الشهري / الفعلية (بما فيها ساعات الإذن المعتمد)
       // مثال: 25 * 10 = 250 ج.م
       const baseEarnings = hours * rate;
 
@@ -3597,8 +3598,9 @@ export default function App() {
             r++;
           } else {
             bShifts.forEach((s) => {
-              const amt = s.hours * bRate;
-              dataRow(ws, r, [s.date, arabicWeekday(s.date), s.timeIn, s.timeOut || '—', s.breakHours ? fmt(s.breakHours) : '—', fmt(s.hours), fmt(bRate), fmt(amt), s.note || '—'], 1, [4, 5, 6, 7]);
+              const effHours = getEffectiveShiftHours(s, state);
+              const amt = effHours * bRate;
+              dataRow(ws, r, [s.date, arabicWeekday(s.date), s.timeIn, s.timeOut || '—', s.breakHours ? fmt(s.breakHours) : '—', fmt(effHours), fmt(bRate), fmt(amt), s.note || '—'], 1, [4, 5, 6, 7]);
               r++;
             });
           }
@@ -3841,8 +3843,9 @@ export default function App() {
           r++;
         } else {
           empShifts.forEach((s) => {
-            const amt = s.hours * summary.rate;
-            dataRow(ws, r, [s.date, arabicWeekday(s.date), s.timeIn, s.timeOut, fmt(s.breakHours || 0), fmt(s.hours), fmt(summary.rate), fmt(amt), s.note || '—'], 1, [4, 5, 6, 7]);
+            const effHours = getEffectiveShiftHours(s, state);
+            const amt = effHours * summary.rate;
+            dataRow(ws, r, [s.date, arabicWeekday(s.date), s.timeIn, s.timeOut, fmt(s.breakHours || 0), fmt(effHours), fmt(summary.rate), fmt(amt), s.note || '—'], 1, [4, 5, 6, 7]);
             r++;
           });
         }
@@ -4069,7 +4072,7 @@ export default function App() {
             emp.code,
             emp.name,
             emp.jobTitle,
-            fmt(s.hours),
+            fmt(getEffectiveShiftHours(s, state)),
             fmt(s.baseEarnings),
             fmt(s.managementAllowance || 0),
             fmt(s.transportAllowance || 0),
@@ -4877,7 +4880,7 @@ export default function App() {
                               <td>{s.timeIn}</td>
                               <td>{s.timeOut}</td>
                               <td>{fmt(s.breakHours || 0)} س</td>
-                              <td className="money" style={{ color: 'var(--primary-dark)' }}>{fmt(s.hours)} س</td>
+                              <td className="money" style={{ color: 'var(--primary-dark)' }}>{fmt(getEffectiveShiftHours(s, state))} س</td>
                               <td>{s.note || '—'}</td>
                               <td>
                                 <button className="del-btn" style={{ color: 'var(--primary)', marginLeft: '6px' }} onClick={() => openEditShift(s)}>✏️ تعديل</button>

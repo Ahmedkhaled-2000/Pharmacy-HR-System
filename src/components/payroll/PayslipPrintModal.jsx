@@ -1,6 +1,6 @@
 import React from 'react';
 import { fmt, arabicWeekday, AR_MONTHS } from '../../utils/formatters';
-import { computeLatenessFinancialAmount, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
+import { computeLatenessFinancialAmount, isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
 
 export default function PayslipPrintModal({
   isOpen,
@@ -439,18 +439,25 @@ export default function PayslipPrintModal({
                               </td>
                             </tr>
                           ) : (
-                            bShifts.map((s, idx) => (
-                              <tr key={s.id || idx}>
-                                <td style={{ padding: '3px', border: '1px solid #cbd5e1' }}>{idx + 1}</td>
-                                <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>{s.date}</td>
-                                <td style={{ padding: '3px', border: '1px solid #cbd5e1' }}>{arabicWeekday(s.date)}</td>
-                                <td style={{ padding: '3px', border: '1px solid #cbd5e1', color: '#16a34a' }}>{s.timeIn || '—'}</td>
-                                <td style={{ padding: '3px', border: '1px solid #cbd5e1', color: '#dc2626' }}>{s.timeOut || '—'}</td>
-                                <td style={{ padding: '3px', border: '1px solid #cbd5e1' }}>{fmt(s.breakHours)} س</td>
-                                <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>{fmt(s.hours)} س</td>
-                                <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold', color: '#0d9488' }}>{fmt(s.hours * (bSummary.rate || 0))} ج.م</td>
-                              </tr>
-                            ))
+                            bShifts.map((s, idx) => {
+                              const effHours = getEffectiveShiftHours(s, state);
+                              const hasPerm = isApprovedPermissionForDate(emp.id, s.date, state);
+                              return (
+                                <tr key={s.id || idx} style={{ background: hasPerm ? '#fefce8' : 'transparent' }}>
+                                  <td style={{ padding: '3px', border: '1px solid #cbd5e1' }}>{idx + 1}</td>
+                                  <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>
+                                    {s.date}
+                                    {hasPerm && <span style={{ display: 'block', color: '#b45309', fontSize: '9.5px' }}>⏰ إذن معتمد</span>}
+                                  </td>
+                                  <td style={{ padding: '3px', border: '1px solid #cbd5e1' }}>{arabicWeekday(s.date)}</td>
+                                  <td style={{ padding: '3px', border: '1px solid #cbd5e1', color: '#16a34a' }}>{s.timeIn || '—'}</td>
+                                  <td style={{ padding: '3px', border: '1px solid #cbd5e1', color: '#dc2626' }}>{s.timeOut || '—'}</td>
+                                  <td style={{ padding: '3px', border: '1px solid #cbd5e1' }}>{fmt(s.breakHours)} س</td>
+                                  <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>{fmt(effHours)} س</td>
+                                  <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold', color: '#0d9488' }}>{fmt(effHours * (bSummary.rate || 0))} ج.م</td>
+                                </tr>
+                              );
+                            })
                           )}
                         </tbody>
                       </table>
@@ -537,16 +544,21 @@ export default function PayslipPrintModal({
                     ) : (
                       empShifts.map((s, idx) => {
                         const shiftRate = (summary.perBranch?.[s.branchId]?.rate) || hourlyRate;
+                        const effHours = getEffectiveShiftHours(s, state);
+                        const hasPerm = isApprovedPermissionForDate(emp.id, s.date, state);
                         return (
-                          <tr key={s.id || idx} style={{ background: idx % 2 === 0 ? '#fff' : '#f8fafc' }}>
+                          <tr key={s.id || idx} style={{ background: hasPerm ? '#fefce8' : (idx % 2 === 0 ? '#fff' : '#f8fafc') }}>
                             <td style={{ padding: '4px', border: '1px solid #cbd5e1' }}>{idx + 1}</td>
-                            <td style={{ padding: '4px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>{s.date}</td>
+                            <td style={{ padding: '4px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>
+                              {s.date}
+                              {hasPerm && <span style={{ display: 'block', color: '#b45309', fontSize: '9.5px' }}>⏰ إذن معتمد</span>}
+                            </td>
                             <td style={{ padding: '4px', border: '1px solid #cbd5e1' }}>{arabicWeekday(s.date)}</td>
                             <td style={{ padding: '4px', border: '1px solid #cbd5e1', color: '#16a34a' }}>{s.timeIn || '—'}</td>
                             <td style={{ padding: '4px', border: '1px solid #cbd5e1', color: '#dc2626' }}>{s.timeOut || '—'}</td>
                             <td style={{ padding: '4px', border: '1px solid #cbd5e1' }}>{fmt(s.breakHours)} س</td>
-                            <td style={{ padding: '4px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>{fmt(s.hours)} س</td>
-                            <td style={{ padding: '4px', border: '1px solid #cbd5e1', fontWeight: 'bold', color: '#0d9488' }}>{fmt(s.hours * shiftRate)} ج.م</td>
+                            <td style={{ padding: '4px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>{fmt(effHours)} س</td>
+                            <td style={{ padding: '4px', border: '1px solid #cbd5e1', fontWeight: 'bold', color: '#0d9488' }}>{fmt(effHours * shiftRate)} ج.م</td>
                           </tr>
                         );
                       })

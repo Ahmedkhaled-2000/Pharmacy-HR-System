@@ -619,6 +619,59 @@ export const DEFAULT_PERMISSION_POLICY = {
 };
 
 /**
+ * حساب صافي الساعات الفعلية المستحقة للوردية مع تعويض ساعات الإذن المعتمد بالكامل
+ */
+export function getEffectiveShiftHours(shift, state) {
+  if (!shift) return 0;
+  
+  // 1. حساب الساعات الفعلية المجردة من أوقات الدخول والخروج
+  let rawHours = 0;
+  if (shift.timeIn && shift.timeOut && String(shift.timeOut).trim() !== '' && String(shift.timeOut).trim() !== '—') {
+    const [inH, inM] = String(shift.timeIn).split(':').map(Number);
+    const [outH, outM] = String(shift.timeOut).split(':').map(Number);
+    if (!isNaN(inH) && !isNaN(outH)) {
+      let start = inH * 60 + (inM || 0);
+      let end = outH * 60 + (outM || 0);
+      if (end <= start) end += 24 * 60;
+      const totalHours = (end - start) / 60;
+      const parsedBreak = Math.max(0, parseFloat(shift.breakHours) || 0);
+      rawHours = Math.max(0, totalHours - parsedBreak);
+    }
+  }
+  
+  if (rawHours <= 0) {
+    rawHours = parseFloat(shift._baseRawHours !== undefined ? shift._baseRawHours : (shift.hours || shift.workHours || 0)) || 0;
+  }
+
+  // 2. فحص الإذن المعتمد لهذا اليوم
+  const perm = isApprovedPermissionForDate(shift.employeeId, shift.date, state);
+  let permHours = 0;
+  if (perm) {
+    permHours = parseFloat(perm.hours) || 0;
+    if (!permHours && perm.durationMinutes) {
+      permHours = Math.round((perm.durationMinutes / 60) * 100) / 100;
+    }
+    if (!permHours && perm.startTime && perm.endTime) {
+      const [h1, m1] = perm.startTime.split(':').map(Number);
+      const [h2, m2] = perm.endTime.split(':').map(Number);
+      let diff = (h2 * 60 + (m2 || 0)) - (h1 * 60 + (m1 || 0));
+      if (diff <= 0) diff += 24 * 60;
+      permHours = Math.round((diff / 60) * 100) / 100;
+    }
+  } else if (shift.permissionHours) {
+    permHours = parseFloat(shift.permissionHours) || 0;
+  }
+
+  if (permHours > 0) {
+    // تعويض ساعات الإذن المعتمد فوق ساعات العمل الفعلية لاكتمال اليوم
+    return Math.round((rawHours + permHours) * 100) / 100;
+  }
+
+  const currentStored = parseFloat(shift.hours !== undefined ? shift.hours : shift.workHours);
+  return !isNaN(currentStored) && currentStored > 0 ? currentStored : Math.round(rawHours * 100) / 100;
+}
+
+/**
  * يقوم بمزامنة الأذونات المعتمدة مع سجل البصمات (shifts):
  * 1. تعويض ساعات الإذن المعتمدة في صافي ساعات العمل لليوم المعني.
  * 2. وضع إشعار وملاحظة واضحة على البصمة بأنها معدلة بإذن معتمد.
@@ -648,14 +701,13 @@ export function applyApprovedPermissionsToShifts(state) {
     const permTypeLabel = perm.permType === 'early' ? 'إذن انصراف مبكر' : (perm.isExceptional ? 'إذن استثنائي معتمد' : 'إذن تأخير عن الوردية');
     const noteText = `⏰ تم تعديل البصمة واحتساب ساعات ${permTypeLabel} المعتمد (${perm.startTime || '—'} إلى ${perm.endTime || '—'}) [${permHours} س]${perm.reason ? ' - ' + perm.reason : ''}`;
 
-    const baseRawHours = shift._baseRawHours !== undefined ? shift._baseRawHours : parseFloat(shift.hours || shift.workHours || 0);
-    const updatedNetHours = Math.round((baseRawHours + (shift.hasApprovedPermission ? 0 : permHours)) * 100) / 100;
+    const effectiveHours = getEffectiveShiftHours(shift, state);
 
     return {
       ...shift,
-      _baseRawHours: baseRawHours,
-      hours: updatedNetHours > 0 ? updatedNetHours : (parseFloat(shift.hours) || baseRawHours),
-      workHours: updatedNetHours > 0 ? updatedNetHours : (parseFloat(shift.workHours) || baseRawHours),
+      hours: effectiveHours,
+      workHours: effectiveHours,
+      netHours: effectiveHours,
       hasApprovedPermission: true,
       permissionId: perm.id,
       permissionType: perm.permType || 'late',

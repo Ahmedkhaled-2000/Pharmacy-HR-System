@@ -11,7 +11,7 @@ import EmployeeEvaluationsModule from './EmployeeEvaluationsModule';
 import PayslipPrintModal from '../payroll/PayslipPrintModal';
 import BylawsModule from '../bylaws/BylawsModule';
 import EmployeeResignationModule from './EmployeeResignationModule';
-import { computeLatenessFinancialAmount, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
+import { computeLatenessFinancialAmount, isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
 
 // ─────────────────────────────────────────
 //  Month navigation helpers
@@ -286,8 +286,9 @@ export default function EmployeePortalView({
             r++;
           } else {
             bShifts.forEach((s) => {
-              const amt = s.hours * bRate;
-              dataRow(ws, r, [s.date, arabicWeekday(s.date), s.timeIn, s.timeOut || '—', s.breakHours ? fmt(s.breakHours) : '—', fmt(s.hours), fmt(bRate), fmt(amt), s.note || '—'], 1, [4, 5, 6, 7]);
+              const effHours = getEffectiveShiftHours(s, state);
+              const amt = effHours * bRate;
+              dataRow(ws, r, [s.date, arabicWeekday(s.date), s.timeIn, s.timeOut || '—', s.breakHours ? fmt(s.breakHours) : '—', fmt(effHours), fmt(bRate), fmt(amt), s.note || '—'], 1, [4, 5, 6, 7]);
               r++;
             });
           }
@@ -533,10 +534,11 @@ export default function EmployeePortalView({
           r++;
         } else {
           empShifts.forEach((s) => {
+            const effHours = getEffectiveShiftHours(s, state);
             dataRow(ws, r, [
               s.date, arabicWeekday(s.date), s.timeIn, s.timeOut || '—',
-              s.breakHours ? fmt(s.breakHours) : '—', fmt(s.hours),
-              fmt(summary.rate), fmt(s.hours * summary.rate), s.note || '—'
+              s.breakHours ? fmt(s.breakHours) : '—', fmt(effHours),
+              fmt(summary.rate), fmt(effHours * summary.rate), s.note || '—'
             ], 1, [4, 5, 6, 7]);
             r++;
           });
@@ -1984,6 +1986,8 @@ export default function EmployeePortalView({
                                   const hasPerm = s.hasApprovedPermission || !!perm;
                                   const permHours = s.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
 
+                                  const effHours = getEffectiveShiftHours(s, state);
+
                                   return (
                                     <tr key={s.id} style={{ background: hasPerm ? 'rgba(254, 243, 199, 0.25)' : 'transparent' }}>
                                       <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{idx + 1}</td>
@@ -1999,8 +2003,8 @@ export default function EmployeePortalView({
                                       <td><span className="ep-time-badge ep-time-in">{s.timeIn}</span></td>
                                       <td><span className="ep-time-badge ep-time-out">{s.timeOut || '—'}</span></td>
                                       <td>{(s.breakHours || 0) > 0 ? <span className="ep-break-badge">{fmt(s.breakHours)} س</span> : <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
-                                      <td className="money" style={{ color: 'var(--primary-dark)', fontWeight: 700 }}>{fmt(s.hours)} ساعة</td>
-                                      <td className="money" style={{ color: 'var(--success)', fontWeight: 600 }}>{canViewSalary ? `${fmt(s.hours * bRate)} ج.م` : '🔒 مقيد'}</td>
+                                      <td className="money" style={{ color: 'var(--primary-dark)', fontWeight: 700 }}>{fmt(effHours)} ساعة</td>
+                                      <td className="money" style={{ color: 'var(--success)', fontWeight: 600 }}>{canViewSalary ? `${fmt(effHours * bRate)} ج.م` : '🔒 مقيد'}</td>
                                       <td style={{ color: hasPerm ? '#047857' : 'var(--text-muted)', fontSize: '0.88rem' }}>
                                         {hasPerm ? (
                                           <div>
@@ -2058,6 +2062,8 @@ export default function EmployeePortalView({
                           const hasPerm = s.hasApprovedPermission || !!perm;
                           const permHours = s.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
 
+                          const effHours = getEffectiveShiftHours(s, state);
+
                           return (
                             <tr key={s.id} style={{ background: hasPerm ? 'rgba(254, 243, 199, 0.25)' : 'transparent' }}>
                               <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{idx + 1}</td>
@@ -2079,10 +2085,10 @@ export default function EmployeePortalView({
                                 }
                               </td>
                               <td className="money" style={{ color: 'var(--primary-dark)', fontWeight: 700 }}>
-                                {fmt(s.hours)} ساعة
+                                {fmt(effHours)} ساعة
                               </td>
                               <td className="money" style={{ color: 'var(--success)', fontWeight: 600 }}>
-                                {canViewSalary ? `${fmt(s.hours * (summary.perBranch?.[s.branchId]?.rate || summary.rate))} ج.م` : '🔒 مقيد'}
+                                {canViewSalary ? `${fmt(effHours * (summary.perBranch?.[s.branchId]?.rate || summary.rate))} ج.م` : '🔒 مقيد'}
                               </td>
                               <td style={{ color: hasPerm ? '#047857' : 'var(--text-muted)', fontSize: '0.88rem' }}>
                                 {hasPerm ? (

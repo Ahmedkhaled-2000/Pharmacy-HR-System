@@ -1,5 +1,5 @@
 import React from 'react';
-import { isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
+import { isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
 
 export default function AttendancePunchesModal({
   employee,
@@ -20,7 +20,7 @@ export default function AttendancePunchesModal({
     .toFixed(2);
 
   const totalWorkHours = monthPunches
-    .reduce((acc, p) => acc + (parseFloat(p.hours) || parseFloat(p.workHours) || parseFloat(p.netHours) || 8), 0)
+    .reduce((acc, p) => acc + getEffectiveShiftHours(p, state), 0)
     .toFixed(2);
 
   const isMultiBranch = employee.branchesDetails && employee.branchesDetails.length > 1;
@@ -121,7 +121,7 @@ export default function AttendancePunchesModal({
                             const pDate = new Date(p.date || p.timestamp || Date.now());
                             const dayName = pDate.toLocaleDateString('ar-EG', { weekday: 'long' });
                             const dateStr = p.date || pDate.toISOString().slice(0, 10);
-                            const netH = parseFloat(p.hours || p.workHours || p.netHours || 8).toFixed(2);
+                            const netH = getEffectiveShiftHours(p, state).toFixed(2);
                             const breakH = p.breakHours ? parseFloat(p.breakHours).toFixed(2) : null;
                             const shiftEarned = (parseFloat(netH) * bRate).toFixed(2);
 
@@ -223,7 +223,7 @@ export default function AttendancePunchesModal({
                     const pDate = new Date(p.date || p.timestamp || Date.now());
                     const dayName = pDate.toLocaleDateString('ar-EG', { weekday: 'long' });
                     const dateStr = p.date || pDate.toISOString().slice(0, 10);
-                    const netH = parseFloat(p.hours || p.workHours || p.netHours || 8).toFixed(2);
+                    const netH = getEffectiveShiftHours(p, state).toFixed(2);
                     const breakH = p.breakHours ? parseFloat(p.breakHours).toFixed(2) : null;
                     const shiftRate = getBranchRate(p.branchId || employee.branchId);
                     const shiftEarned = (parseFloat(netH) * shiftRate).toFixed(2);
