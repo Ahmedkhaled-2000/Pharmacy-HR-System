@@ -11,6 +11,7 @@ import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import BranchResignationModule from '../resignation/BranchResignationModule';
 import { normalizeSchedule } from '../roster/RosterModule';
 import { shouldShowRequestToBranch } from '../../utils/formatters';
+import { recalculateEmployeeCycleLateness } from '../../utils/latePenaltyEngine';
 
 const WEEKDAYS_AR = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
 
@@ -485,6 +486,25 @@ export default function BranchManagerView({
       return n;
     });
 
+    let updatedLateIncidents = [...(state.lateIncidents || [])];
+    if (targetReq && targetReq.employeeId) {
+      try {
+        const { incidents } = recalculateEmployeeCycleLateness({
+          employeeId: targetReq.employeeId,
+          cycleFilterFn: null,
+          state: { ...state, requests: updatedRequests, shifts: updatedShifts },
+          payrollCycleId: (targetReq.date || new Date().toISOString()).slice(0, 7)
+        });
+        const incidentIds = new Set(incidents.map((i) => i.id));
+        updatedLateIncidents = [
+          ...updatedLateIncidents.filter((i) => !incidentIds.has(i.id) && String(i.employeeId) !== String(targetReq.employeeId)),
+          ...incidents
+        ];
+      } catch (e) {
+        console.error('Error auto-syncing late incidents upon manager request approval:', e);
+      }
+    }
+
     const updatedState = {
       ...state,
       requests: updatedRequests,
@@ -492,7 +512,8 @@ export default function BranchManagerView({
       shifts: updatedShifts,
       leaveRequests: updatedLeaveRequests,
       shiftSwaps: updatedSwaps,
-      notifications: updatedNotifications
+      notifications: updatedNotifications,
+      lateIncidents: updatedLateIncidents
     };
 
     setState(updatedState);

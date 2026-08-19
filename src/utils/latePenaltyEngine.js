@@ -391,6 +391,16 @@ export function recalculateEmployeeCycleLateness({
   const newIncidents = [];
   const existingIncidentsMap = new Map((state.lateIncidents || []).map((inc) => [inc.id, inc]));
 
+  // جلب كافة طلبات الأذونات المعتمدة للموظف (إذن تأخير / إذن خروج مبكر / إذن عام)
+  const approvedPermissions = (state.requests || []).filter(
+    (r) =>
+      String(r.employeeId) === empIdStr &&
+      (r.type === 'permission' || r.type === 'إذن' || r.type === 'late_permission' || r.type === 'early_leave') &&
+      (r.status === 'approved' || r.adminApproved === true || (r.branchApproved && r.status !== 'rejected' && !r.isRejected)) &&
+      r.status !== 'rejected' &&
+      r.status !== 'cancelled'
+  );
+
   for (const shift of empShifts) {
     if (!shift.date || !shift.timeIn) continue;
 
@@ -405,9 +415,10 @@ export function recalculateEmployeeCycleLateness({
     const tier = classifyLateTier(diffMinutes, policy);
     const tierKey = tier.id;
 
-    // زيادة عداد الفئة وتحديد رقم التكرار
-    tierCounters[tierKey] = (tierCounters[tierKey] || 0) + 1;
-    const occurrenceNumber = tierCounters[tierKey];
+    // فحص ما إذا كان هناك إذن معتمد للموظف في هذا التاريخ
+    const approvedPerm = approvedPermissions.find(
+      (p) => (p.date === shift.date || p.startDate === shift.date)
+    );
 
     const incId = `late_inc_${emp.id}_${shift.date}_${shift.timeIn.replace(':', '')}`;
     const prevInc = existingIncidentsMap.get(incId);
@@ -416,11 +427,39 @@ export function recalculateEmployeeCycleLateness({
     const branchObj = (state.branches || []).find((b) => b.id === effectiveShiftBranchId);
     const branchName = branchObj ? branchObj.name : 'الفرع الرئيسي';
 
-    const isOverridden = prevInc && (prevInc.status === 'overridden' || prevInc.overrideReason);
-    const actionType = isOverridden ? prevInc.actionType : rule.action;
-    const actionLabel = isOverridden ? prevInc.actionLabel : rule.label;
-    const deductionMins = isOverridden ? (parseFloat(prevInc.deductionMinutes) || 0) : (rule.deductionMinutes || 0);
-    const penaltyAmount = computeLatenessFinancialAmount(deductionMins, emp, effectiveShiftBranchId);
+    let occurrenceNumber = 0;
+    let actionType = 'grace';
+    let actionLabel = 'سماح';
+    let deductionMins = 0;
+    let penaltyAmount = 0;
+    let status = 'approved';
+    let overrideReason = '';
+
+    if (approvedPerm) {
+      // ✅ تم إلغاء الخصم والجزاء لوجود إذن معتمد رسمي
+      actionType = 'grace';
+      actionLabel = `سماح (${approvedPerm.permType === 'early' ? 'إذن خروج مبكر معتمد' : 'إذن تأخير معتمد'})`;
+      deductionMins = 0;
+      penaltyAmount = 0;
+      status = 'approved_permission_exempt';
+      overrideReason = `تم إلغاء الجزاء والخصم تلقائياً لوجود إذن معتمد (${approvedPerm.permType === 'early' ? 'إذن خروج مبكر' : 'إذن تأخير'} من ${approvedPerm.startTime || '—'} إلى ${approvedPerm.endTime || '—'})${approvedPerm.reason ? ' - سبب الإذن: ' + approvedPerm.reason : ''}`;
+      occurrenceNumber = 0; // لا يتم احتسابها كواقعة جزائية غير مبررة
+    } else {
+      // زيادة عداد الفئة وتحديد رقم التكرار للوقائع غير المأذونة
+      tierCounters[tierKey] = (tierCounters[tierKey] || 0) + 1;
+      occurrenceNumber = tierCounters[tierKey];
+
+      // جلب قاعدة الجزاء المقابلة
+      const rule = getPenaltyForOccurrence(tier, occurrenceNumber);
+
+      const isOverridden = prevInc && (prevInc.status === 'overridden' || prevInc.overrideReason);
+      actionType = isOverridden ? prevInc.actionType : rule.action;
+      actionLabel = isOverridden ? prevInc.actionLabel : rule.label;
+      deductionMins = isOverridden ? (parseFloat(prevInc.deductionMinutes) || 0) : (rule.deductionMinutes || 0);
+      penaltyAmount = computeLatenessFinancialAmount(deductionMins, emp, effectiveShiftBranchId);
+      status = prevInc?.status && prevInc.status !== 'pending' ? prevInc.status : 'approved';
+      overrideReason = prevInc?.overrideReason || '';
+    }
 
     const incident = {
       id: incId,
@@ -446,8 +485,9 @@ export function recalculateEmployeeCycleLateness({
       deductionHours: Math.round((deductionMins / 60) * 100) / 100,
       penaltyAmount: penaltyAmount,
       payrollCycleId: payrollCycleId || shift.date.slice(0, 7),
-      status: prevInc?.status && prevInc.status !== 'pending' ? prevInc.status : 'approved',
-      overrideReason: prevInc?.overrideReason || '',
+      status: status,
+      overrideReason: overrideReason,
+      permissionRequestId: approvedPerm ? approvedPerm.id : null,
       modifiedBy: prevInc?.modifiedBy || null,
       modifiedAt: prevInc?.modifiedAt || null,
       createdAt: prevInc?.createdAt || new Date().toISOString(),
@@ -463,21 +503,23 @@ export function recalculateEmployeeCycleLateness({
     (r) => !(String(r.employeeId) === empIdStr && (r.subType === 'lateness' || r.type === 'late_penalty') && (!cycleFilterFn || cycleFilterFn(r.date)))
   );
 
-  const newLateRequests = newIncidents.map((inc) => ({
-    id: `req_${inc.id}`,
-    employeeId: inc.employeeId,
-    employeeName: inc.employeeName,
-    employeeCode: inc.employeeCode,
-    jobTitle: inc.jobTitle,
-    branchId: inc.branchId,
-    branchName: inc.branchName,
-    type: 'penalty',
-    subType: 'lateness',
-    ruleTitle: `جزاء تأخير: ${inc.tierName} (${inc.lateMinutes} دقيقة - المرة ${inc.occurrenceNumber})`,
-    impactType: 'time_deduction',
-    deductionMinutes: inc.deductionMinutes,
-    impactVal: inc.deductionMinutes,
-    amount: inc.penaltyAmount,
+  const newLateRequests = newIncidents
+    .filter((inc) => inc.status !== 'approved_permission_exempt' && inc.actionType !== 'grace' && (inc.deductionMinutes > 0 || inc.penaltyAmount > 0))
+    .map((inc) => ({
+      id: `req_${inc.id}`,
+      employeeId: inc.employeeId,
+      employeeName: inc.employeeName,
+      employeeCode: inc.employeeCode,
+      jobTitle: inc.jobTitle,
+      branchId: inc.branchId,
+      branchName: inc.branchName,
+      type: 'penalty',
+      subType: 'lateness',
+      ruleTitle: `جزاء تأخير: ${inc.tierName} (${inc.lateMinutes} دقيقة - المرة ${inc.occurrenceNumber})`,
+      impactType: 'time_deduction',
+      deductionMinutes: inc.deductionMinutes,
+      impactVal: inc.deductionMinutes,
+      amount: inc.penaltyAmount,
     scheduledStart: inc.scheduledStartTime,
     actualIn: inc.actualPunchInTime,
     latenessMinutes: inc.lateMinutes,

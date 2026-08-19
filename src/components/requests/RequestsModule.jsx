@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { applyShiftSwapToRosters, arabicWeekday } from '../../utils/formatters';
 import { notifyEmployeeEarlyExitWarning } from '../../utils/gmailService';
 import { normalizeSchedule } from '../roster/RosterModule';
+import { recalculateEmployeeCycleLateness } from '../../utils/latePenaltyEngine';
 
 export function getFormattedRequestBadge(type, leaveType) {
   if (type === 'leave') {
@@ -385,6 +386,25 @@ export default function RequestsModule({
       s.id === reqId ? { ...s, status: 'approved', adminApproved: true, branchApproved: true, approvedAt: new Date().toISOString() } : s
     );
 
+    let updatedLateIncidents = [...(state.lateIncidents || [])];
+    if (targetReq && targetReq.employeeId) {
+      try {
+        const { incidents } = recalculateEmployeeCycleLateness({
+          employeeId: targetReq.employeeId,
+          cycleFilterFn: null,
+          state: { ...state, requests: updatedRequests, shifts: updatedShifts },
+          payrollCycleId: (targetReq.date || new Date().toISOString()).slice(0, 7)
+        });
+        const incidentIds = new Set(incidents.map((i) => i.id));
+        updatedLateIncidents = [
+          ...updatedLateIncidents.filter((i) => !incidentIds.has(i.id) && String(i.employeeId) !== String(targetReq.employeeId)),
+          ...incidents
+        ];
+      } catch (e) {
+        console.error('Error auto-syncing late incidents upon request approval:', e);
+      }
+    }
+
     const updatedState = {
       ...state,
       requests: updatedRequests,
@@ -393,7 +413,8 @@ export default function RequestsModule({
       shifts: updatedShifts,
       leaveRequests: updatedLeaveRequests,
       leaveHistory: updatedLeaveHistory,
-      shiftSwaps: updatedShiftSwaps
+      shiftSwaps: updatedShiftSwaps,
+      lateIncidents: updatedLateIncidents
     };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);

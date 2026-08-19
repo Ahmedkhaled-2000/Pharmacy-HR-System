@@ -821,7 +821,7 @@ export default function LatePenaltyPolicyModule({
                             fontWeight: 700,
                             fontSize: '12px'
                           }}>
-                            المرة #{inc.occurrenceNumber}
+                            {inc.occurrenceNumber > 0 ? `المرة #${inc.occurrenceNumber}` : '— (إذن)'}
                           </span>
                         </td>
                         <td style={{ padding: '12px 14px' }}>
@@ -841,6 +841,11 @@ export default function LatePenaltyPolicyModule({
                           {inc.penaltyAmount > 0 ? `${fmt(inc.penaltyAmount)} ج.م` : 'بدون خصم'}
                         </td>
                         <td style={{ padding: '12px 14px' }}>
+                          {inc.status === 'approved_permission_exempt' && (
+                            <span style={{ background: 'rgba(16,185,129,0.15)', color: '#047857', border: '1px solid rgba(16,185,129,0.3)', padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700 }} title={inc.overrideReason}>
+                              ⏰ إذن معتمد (معفى من الخصم)
+                            </span>
+                          )}
                           {inc.status === 'approved' && (
                             <span style={{ background: 'rgba(16,185,129,0.1)', color: '#10b981', padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 600 }}>
                               ✅ معتمد
@@ -858,7 +863,7 @@ export default function LatePenaltyPolicyModule({
                           )}
                           {inc.status === 'cancelled' && (
                             <span style={{ background: 'rgba(220,38,38,0.1)', color: '#dc2626', padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 600 }} title={inc.overrideReason}>
-                              🚫 ملغى
+                              🚫 ملغي
                             </span>
                           )}
                         </td>
