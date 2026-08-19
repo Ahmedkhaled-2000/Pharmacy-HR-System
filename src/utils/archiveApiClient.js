@@ -42,24 +42,55 @@ async function archiveFetch(endpoint, options = {}) {
   const token = getArchiveToken();
   const headers = {
     'Content-Type': 'application/json',
+    'Accept': 'application/json',
     ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
     ...(options.headers || {}),
   };
 
-  const url = `${API_BASE_URL}?endpoint=archive/${endpoint}`;
+  const cleanBase = API_BASE_URL.replace(/\/+$/, '');
+  const cleanEndpoint = endpoint.replace(/^\/+/, '');
 
-  const response = await fetch(url, {
-    ...options,
-    headers,
-  });
+  // جلب البيانات عبر index.php?endpoint=archive/... لضمان التوافق مع كافة خوادم Apache / Nginx
+  const url = `${cleanBase}/index.php?endpoint=archive/${cleanEndpoint}`;
 
-  const data = await response.json().catch(() => ({ success: false, error: 'فشل تحليل استجابة الخادم' }));
+  try {
+    const response = await fetch(url, {
+      ...options,
+      headers,
+    });
 
-  if (!response.ok && !data.error) {
-    data.error = `خطأ في الخادم (${response.status})`;
+    // إذا لم ينجح، نحاول عبر المسار المباشر
+    if (!response.ok && (response.status === 404 || response.status === 405)) {
+      const altUrl = `${cleanBase}/archive/${cleanEndpoint}`;
+      const altResponse = await fetch(altUrl, {
+        ...options,
+        headers,
+      });
+      if (altResponse.ok) {
+        return await altResponse.json();
+      }
+    }
+
+    const data = await response.json().catch(() => ({ success: false, error: 'فشل تحليل استجابة الخادم' }));
+
+    if (!response.ok && !data.error) {
+      data.error = `خطأ في الخادم (${response.status})`;
+    }
+
+    return data;
+  } catch (err) {
+    // محاولة بديلة عبر المسار المباشر
+    try {
+      const altUrl = `${cleanBase}/archive/${cleanEndpoint}`;
+      const altResponse = await fetch(altUrl, {
+        ...options,
+        headers,
+      });
+      return await altResponse.json();
+    } catch {
+      return { success: false, error: err.message || 'تعذر الاتصال بخادم الأرشيف' };
+    }
   }
-
-  return data;
 }
 
 // 1. Auth API

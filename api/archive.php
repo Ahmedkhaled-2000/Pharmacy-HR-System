@@ -87,6 +87,7 @@ function setArchiveSetting(string $key, string $value): void
  */
 function handleArchiveApi(string $subPath, string $method): void
 {
+    $method = strtoupper(trim($method));
     $requestData = getRequestData();
 
     switch ($subPath) {
@@ -94,10 +95,12 @@ function handleArchiveApi(string $subPath, string $method): void
         // 1. المصادقة وتسجيل الدخول المستقل (Authentication)
         // =====================================================================
         case 'auth/login':
-            if ($method !== 'POST') jsonResponse(['success' => false, 'error' => 'Method not allowed'], 405);
+            $username = trim((string)($requestData['username'] ?? ($_POST['username'] ?? ($_GET['username'] ?? ''))));
+            $password = trim((string)($requestData['password'] ?? ($_POST['password'] ?? ($_GET['password'] ?? ''))));
 
-            $username = trim((string)($requestData['username'] ?? ''));
-            $password = trim((string)($requestData['password'] ?? ''));
+            if (empty($username) && empty($password) && $method !== 'POST') {
+                jsonResponse(['success' => false, 'error' => 'Method not allowed'], 405);
+            }
 
             $dbUser = getArchiveSetting('ADMIN_USERNAME', 'admin');
             $dbPass = getArchiveSetting('ADMIN_PASSWORD', '123456');
@@ -722,9 +725,17 @@ function handleArchiveApi(string $subPath, string $method): void
     }
 }
 
-// استدعاء المعالج إذا تم استدعاؤه مباشرة
-$reqEndpoint = $_GET['endpoint'] ?? '';
-if (str_starts_with($reqEndpoint, 'archive/')) {
-    $sub = substr($reqEndpoint, 8);
+// استدعاء المعالج إذا تم استدعاؤه كملف مستقل مباشرة وليس عبر index.php
+if (basename($_SERVER['SCRIPT_FILENAME'] ?? '') === 'archive.php') {
+    require_once __DIR__ . '/config.php';
+    require_once __DIR__ . '/db.php';
+    $reqEndpoint = $_GET['endpoint'] ?? '';
+    if (empty($reqEndpoint)) {
+        $path = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?? '';
+        if (preg_match('#/archive(?:/archive\.php)?/([^?]+)#', $path, $matches)) {
+            $reqEndpoint = 'archive/' . trim($matches[1], '/');
+        }
+    }
+    $sub = str_starts_with($reqEndpoint, 'archive/') ? substr($reqEndpoint, 8) : $reqEndpoint;
     handleArchiveApi($sub, $_SERVER['REQUEST_METHOD'] ?? 'GET');
 }
