@@ -388,6 +388,53 @@ export default function EmployeePortalView({
           sr++;
         });
 
+        // ── Allowances Breakdown Table on Grand Summary Sheet ──
+        const grandAllowanceItems = [];
+        if ((summary.managementAllowance || 0) > 0) {
+          grandAllowanceItems.push(['بدل إدارة شهري', `بدل إدارة معتمد لشغل وظيفة (${emp.jobTitle})`, parseFloat(fmt(summary.managementAllowance))]);
+        }
+        if ((summary.transportAllowance || 0) > 0) {
+          grandAllowanceItems.push(['بدل انتقال ومواصلات', 'بدل انتقال ومواصلات شهري ثابت', parseFloat(fmt(summary.transportAllowance))]);
+        }
+        if ((summary.extraAllowance || 0) > 0) {
+          grandAllowanceItems.push([summary.extraAllowanceTitle || 'أجر إضافي', 'أجر وبدل إضافي مخصص من الإدارة', parseFloat(fmt(summary.extraAllowance))]);
+        }
+
+        if (grandAllowanceItems.length > 0) {
+          sr++;
+          mergedTitle(wsSummary, sr, 'تفاصيل البدلات الثابتة والأجور الإضافية الشاملة', 8, 'FF047857', 12, 22);
+          sr++;
+          tableHeaderRow(wsSummary, sr, ['نوع البدل / الاستحقاق', 'البيان والتفاصيل', 'المبلغ المستحق (ج.م)'], 1);
+          wsSummary.mergeCells(sr, 2, sr, 7);
+          sr++;
+
+          grandAllowanceItems.forEach(([title, desc, amt]) => {
+            const cellTitle = wsSummary.getCell(sr, 1);
+            cellTitle.value = title;
+            cellTitle.font = { name: 'Arial', bold: true, size: 10.5, color: { argb: 'FF166534' } };
+            cellTitle.alignment = { horizontal: 'center' };
+            cellTitle.border = { top: { style: 'thin', color: { argb: 'FFCFC9B8' } }, left: { style: 'thin', color: { argb: 'FFCFC9B8' } }, bottom: { style: 'thin', color: { argb: 'FFCFC9B8' } }, right: { style: 'thin', color: { argb: 'FFCFC9B8' } } };
+            cellTitle.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0FDF4' } };
+
+            wsSummary.mergeCells(sr, 2, sr, 7);
+            const cellDesc = wsSummary.getCell(sr, 2);
+            cellDesc.value = desc;
+            cellDesc.font = { name: 'Arial', size: 10.5, color: { argb: 'FF166534' } };
+            cellDesc.alignment = { horizontal: 'center' };
+            cellDesc.border = { top: { style: 'thin', color: { argb: 'FFCFC9B8' } }, left: { style: 'thin', color: { argb: 'FFCFC9B8' } }, bottom: { style: 'thin', color: { argb: 'FFCFC9B8' } }, right: { style: 'thin', color: { argb: 'FFCFC9B8' } } };
+            cellDesc.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0FDF4' } };
+
+            const cellAmt = wsSummary.getCell(sr, 8);
+            cellAmt.value = amt;
+            cellAmt.numFmt = '#,##0.00';
+            cellAmt.font = { name: 'Arial', bold: true, size: 10.5, color: { argb: 'FF15803d' } };
+            cellAmt.alignment = { horizontal: 'center' };
+            cellAmt.border = { top: { style: 'thin', color: { argb: 'FFCFC9B8' } }, left: { style: 'thin', color: { argb: 'FFCFC9B8' } }, bottom: { style: 'thin', color: { argb: 'FFCFC9B8' } }, right: { style: 'thin', color: { argb: 'FFCFC9B8' } } };
+            cellAmt.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE4F4EB' } };
+            sr++;
+          });
+        }
+
         sr += 2;
         mergedTitle(wsSummary, sr, 'إجمالي صافي المستحقات الشامل لكافة الفروع', 8, 'FF134E4A', 14, 28);
         sr++;

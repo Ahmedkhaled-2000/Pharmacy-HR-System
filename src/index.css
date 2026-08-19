@@ -2191,6 +2191,11 @@ tbody tr:hover {
 /* ── PRINTING & PDF EXPORT STYLES (Single A4 Page Fit) ─────── */
 /* ───────────────────────────────────────────────────────────── */
 @media print {
+  @page {
+    size: A4 portrait;
+    margin: 6mm 8mm;
+  }
+
   html, body, #root, .app-layout, main {
     margin: 0 !important;
     padding: 0 !important;
@@ -2203,16 +2208,18 @@ tbody tr:hover {
     print-color-adjust: exact !important;
   }
 
-  /* Hide everything on the screen */
-  body * {
-    visibility: hidden !important;
-  }
-
-  /* Hide all elements marked no-print */
+  /* Hide everything marked no-print or outside printable area */
   .no-print,
-  .no-print * {
+  .no-print *,
+  .navbar,
+  .top-navbar,
+  .ep-sidebar,
+  .app-header {
     display: none !important;
     visibility: hidden !important;
+    height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
   }
 
   /* Reset all modal containers so they don't wrap, clip, or add scrollbars/borders */
@@ -2239,7 +2246,7 @@ tbody tr:hover {
     inset: auto !important;
     transform: none !important;
     display: block !important;
-    background: transparent !important;
+    background: #ffffff !important;
     box-shadow: none !important;
     border: none !important;
     border-radius: 0 !important;
@@ -2252,39 +2259,59 @@ tbody tr:hover {
     overflow: visible !important;
   }
 
-  /* Make ONLY #printable-payslip and its contents visible */
-  #printable-payslip,
-  #printable-payslip * {
-    visibility: visible !important;
+  .payslip-scroll-area {
+    display: block !important;
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+    width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Hide scrollbars completely in print */
+  ::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+  }
+  * {
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
   }
 
   #printable-payslip {
-    position: absolute !important;
-    left: 0 !important;
-    top: 0 !important;
+    position: static !important;
     width: 100% !important;
-    margin: 0 !important;
-    padding: 8px 12px !important;
+    max-width: 100% !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
     background: #ffffff !important;
-    color: #1e293b !important;
+    color: #0f172a !important;
     box-shadow: none !important;
     border: none !important;
     overflow: visible !important;
-    page-break-after: avoid !important;
-    page-break-inside: avoid !important;
     box-sizing: border-box !important;
-    zoom: 88%;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
 
   #printable-payslip table {
-    font-size: 10.5px !important;
+    font-size: 11px !important;
+    width: 100% !important;
+    border-collapse: collapse !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
 
   #printable-payslip table th,
   #printable-payslip table td {
     padding: 3px 5px !important;
+  }
+
+  #printable-payslip tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
 }
 

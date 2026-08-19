@@ -82,6 +82,9 @@ export default function PayslipPrintModal({
   const extTitle = summary.extraAllowanceTitle || emp.extraAllowanceTitle || 'أجر إضافي';
   const totalAllowances = summary.totalAllowances !== undefined ? summary.totalAllowances : (mgmtAllowance + transAllowance + extAllowance);
 
+  // Page Scale Fit Mode: 'single_page' (Compact Single A4) vs 'full' (Normal Extended)
+  const [printFitMode, setPrintFitMode] = React.useState('single_page');
+
   const handlePrint = () => {
     window.print();
   };
@@ -92,8 +95,121 @@ export default function PayslipPrintModal({
   };
 
   return (
-    <div className="modal-backdrop" style={{ zIndex: 2000 }}>
-      <div className="modal-content payslip-modal-container" style={{ maxWidth: '900px', width: '95%', background: '#fff', padding: '0', maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div className="modal-backdrop payslip-print-backdrop" style={{ zIndex: 2000 }}>
+      {/* Dynamic Scoped Print Styles */}
+      <style>{`
+        @media print {
+          @page {
+            size: A4 portrait;
+            margin: 6mm 8mm;
+          }
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            color: #0f172a !important;
+            height: auto !important;
+            min-height: 100% !important;
+            overflow: visible !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          /* Hide all non-printable elements and headers */
+          .no-print,
+          .no-print *,
+          .modal-backdrop::before,
+          .navbar,
+          .top-navbar,
+          .ep-sidebar,
+          .app-layout > *:not(.modal-backdrop),
+          #root > *:not(.modal-backdrop):not(.app-layout) {
+            display: none !important;
+            visibility: hidden !important;
+            height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+          /* Neutralize modal wrapper and drop shadows / scrollbars */
+          .modal-backdrop,
+          .payslip-print-backdrop {
+            position: static !important;
+            display: block !important;
+            background: transparent !important;
+            backdrop-filter: none !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            width: 100% !important;
+            height: auto !important;
+            min-height: auto !important;
+            max-height: none !important;
+            overflow: visible !important;
+            box-shadow: none !important;
+            border: none !important;
+          }
+          .payslip-modal-container {
+            position: static !important;
+            display: block !important;
+            background: #ffffff !important;
+            box-shadow: none !important;
+            border: none !important;
+            border-radius: 0 !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            height: auto !important;
+            max-height: none !important;
+            overflow: visible !important;
+          }
+          .payslip-scroll-area {
+            display: block !important;
+            overflow: visible !important;
+            height: auto !important;
+            max-height: none !important;
+            width: 100% !important;
+            padding: 0 !important;
+            margin: 0 !important;
+          }
+          /* Hide scrollbars completely */
+          ::-webkit-scrollbar {
+            display: none !important;
+            width: 0 !important;
+            height: 0 !important;
+          }
+          * {
+            scrollbar-width: none !important;
+            -ms-overflow-style: none !important;
+          }
+          #printable-payslip {
+            position: static !important;
+            display: block !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            margin: 0 auto !important;
+            padding: 0 !important;
+            overflow: visible !important;
+            box-sizing: border-box !important;
+            background: #ffffff !important;
+            color: #0f172a !important;
+            zoom: ${printFitMode === 'single_page' ? '0.80' : '1'};
+            transform-origin: top right;
+          }
+          #printable-payslip * {
+            overflow: visible !important;
+          }
+          /* Print page break avoiders */
+          table, tr, td, th {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+          .payslip-break-avoid {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+        }
+      `}</style>
+
+      <div className="modal-content payslip-modal-container" style={{ maxWidth: '920px', width: '96%', background: '#fff', padding: '0', maxHeight: '92vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRadius: '16px', boxShadow: '0 20px 40px rgba(0,0,0,0.2)' }}>
         {/* Modal Action Bar (Hidden during print) */}
         <div
           className="no-print"
@@ -102,20 +218,60 @@ export default function PayslipPrintModal({
             padding: '12px 20px',
             borderBottom: '1px solid var(--border)',
             display: 'flex',
-            justify: 'space-between',
+            justifyContent: 'space-between',
             alignItems: 'center',
-            borderRadius: '20px 20px 0 0',
-            flexShrink: 0
+            borderRadius: '16px 16px 0 0',
+            flexShrink: 0,
+            flexWrap: 'wrap',
+            gap: '10px'
           }}
         >
-          <h4 style={{ margin: 0, fontFamily: 'Cairo', color: 'var(--text)' }}>
-            📄 معاينة وتصدير كشف المرتب والبصمات الرسمي (PDF)
-          </h4>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <h4 style={{ margin: 0, fontFamily: 'Cairo', color: 'var(--text)', fontSize: '15px' }}>
+              📄 كشف المرتب والبصمات الرسمي (PDF)
+            </h4>
+            <div style={{ display: 'flex', background: 'var(--surface)', borderRadius: '8px', padding: '2px', border: '1px solid var(--border)' }}>
+              <button
+                type="button"
+                onClick={() => setPrintFitMode('single_page')}
+                style={{
+                  padding: '4px 10px',
+                  fontSize: '12px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  cursor: 'pointer',
+                  background: printFitMode === 'single_page' ? 'var(--primary)' : 'transparent',
+                  color: printFitMode === 'single_page' ? '#fff' : 'var(--text)',
+                  fontWeight: printFitMode === 'single_page' ? 'bold' : 'normal'
+                }}
+                title="ملاءمة كامل المحتوى في صفحة A4 واحدة مدمجة"
+              >
+                📄 صفحة واحدة مدمجة
+              </button>
+              <button
+                type="button"
+                onClick={() => setPrintFitMode('full')}
+                style={{
+                  padding: '4px 10px',
+                  fontSize: '12px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  cursor: 'pointer',
+                  background: printFitMode === 'full' ? 'var(--primary)' : 'transparent',
+                  color: printFitMode === 'full' ? '#fff' : 'var(--text)',
+                  fontWeight: printFitMode === 'full' ? 'bold' : 'normal'
+                }}
+                title="طباعة بالمقاس الطبيعي الممتد"
+              >
+                📜 المقاس الممتد الطبيعي
+              </button>
+            </div>
+          </div>
           <div style={{ display: 'flex', gap: '10px' }}>
-            <button className="btn btn-start" onClick={handlePrint}>
+            <button className="btn btn-start" onClick={handlePrint} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 18px', fontWeight: 'bold' }}>
               🖨️ طباعة / حفظ كـ PDF
             </button>
-            <button className="btn btn-ghost" onClick={onClose}>
+            <button className="btn btn-ghost" onClick={onClose} style={{ padding: '8px 14px' }}>
               ✕ إغلاق
             </button>
           </div>
@@ -123,7 +279,7 @@ export default function PayslipPrintModal({
 
         {/* Printable Payslip Layout Body */}
         <div className="payslip-scroll-area" style={{ overflowY: 'auto', flex: 1 }}>
-          <div id="printable-payslip" style={{ padding: '24px', fontFamily: "'Tajawal', sans-serif", color: '#1e293b', direction: 'rtl' }}>
+          <div id="printable-payslip" style={{ padding: '20px 24px', fontFamily: "'Tajawal', sans-serif", color: '#1e293b', direction: 'rtl' }}>
             {/* Header Banner */}
             <div
               style={{
