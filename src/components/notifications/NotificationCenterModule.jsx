@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { fmt, todayStr } from '../../utils/formatters';
+import { isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
 
 export default function NotificationCenterModule({
   state,
@@ -258,32 +259,43 @@ export default function NotificationCenterModule({
       });
   }, [requests, employees, branches, empFilter, dateFilter]);
 
-  // 4. Branch Manager Submitted Penalties (Bylaws)
-  const branchPenalties = useMemo(() => {
-    return requests
-      .filter((r) => r.type === 'penalty' || r.type === 'early_exit' || r.type === 'overtime')
-      .map((r) => {
-        const emp = employees.find((e) => String(e.id) === String(r.employeeId));
-        const branchObj = branches.find((b) => String(b.id) === String(r.branchId || emp?.branchId));
-
-        return {
-          ...r,
-          employeeName: emp?.name || r.employeeName || 'موظف',
-          employeeCode: emp?.code || '—',
-          branchName: branchObj?.name || 'الفرع الرئيسي',
-          ruleTitle: r.ruleTitle || r.reason || 'مخالفة لائحية',
-          impactDesc: r.impactType === 'deduction_days' ? `خصم ${r.impactVal} يوم من الراتب` : (r.amount ? `خصم مبلغ ${r.amount} ج.م` : `خصم مبلغ ${r.impactVal || 50} ج.م`)
-        };
-      })
-      .filter((r) => {
-        if (empFilter !== 'all' && String(r.employeeId) !== String(empFilter)) return false;
-        if (dateFilter) {
-          const rDate = (r.createdAt ? r.createdAt.slice(0, 10) : (r.date || ''));
-          if (!rDate.startsWith(dateFilter)) return false;
-        }
+  // 4. Lateness Penalties & Violations from Bylaws (Automated engine late incidents & Branch Manager submitted penalties)
+  const allBylawsPenalties = useMemo(() => {
+    const autoIncidents = (state.lateIncidents || [])
+      .filter((inc) => {
+        if (inc.status === 'cancelled' || inc.status === 'approved_permission_exempt' || inc.actionType === 'grace') return false;
+        if (isApprovedPermissionForDate(inc.employeeId, inc.date, state)) return false;
+        if (!inc.deductionMinutes && !inc.penaltyAmount) return false;
+        if (empFilter !== 'all' && String(inc.employeeId) !== String(empFilter)) return false;
+        if (branchFilter !== 'all' && String(inc.branchId) !== String(branchFilter)) return false;
+        if (dateFilter && !String(inc.date).startsWith(dateFilter)) return false;
         return true;
+      })
+      .map((inc) => {
+        const emp = employees.find((e) => String(e.id) === String(inc.employeeId));
+        const branchObj = branches.find((b) => String(b.id) === String(inc.branchId || emp?.branchId));
+        return {
+          id: inc.id,
+          employeeId: inc.employeeId,
+          employeeName: emp?.name || inc.employeeName || 'موظف',
+          employeeCode: emp?.code || inc.employeeCode || '—',
+          branchName: branchObj?.name || inc.branchName || 'الفرع الرئيسي',
+          branchId: inc.branchId || emp?.branchId,
+          ruleTitle: `تأخير لائحى: ${inc.tierName || 'تأخير عن موعد الوردية'} (${inc.lateMinutes} دقيقة - المرة ${inc.occurrenceNumber})`,
+          impactDesc: `خصم ${inc.deductionMinutes} دقيقة (${inc.penaltyAmount || 0} ج.م) • ${inc.actionLabel}`,
+          details: `الموعد المجدول: ${inc.scheduledStartTime || '—'} | البصمة الفعلية: ${inc.actualPunchInTime || '—'}`,
+          date: inc.date,
+          status: inc.status || 'approved',
+          isAutoBylaw: true,
+          adminApproved: true,
+          icon: '📜'
+        };
       });
-  }, [requests, employees, branches, empFilter, dateFilter]);
+
+    const manualPenalties = branchPenalties.map(p => ({ ...p, isAutoBylaw: false, icon: '⚖️' }));
+
+    return [...autoIncidents, ...manualPenalties];
+  }, [state.lateIncidents, state.requests, branchPenalties, employees, branches, empFilter, branchFilter, dateFilter]);
 
   // General Notification Handlers
   const notifications = (state.notifications || []).filter((n) => {
@@ -322,7 +334,7 @@ export default function NotificationCenterModule({
   const absentCount = todayAbsencesAndDelays.filter((a) => !a.isLeave && a.isScheduled).length;
   const leavesCount = todayAbsencesAndDelays.filter((a) => a.isLeave).length;
   const pendingCount = pendingRequests.length;
-  const penaltiesCount = branchPenalties.filter((p) => p.status === 'pending' || !p.adminApproved).length;
+  const penaltiesCount = allBylawsPenalties.length;
   const unreadCount = notifications.filter((n) => !n.read).length;
 
   return (
@@ -477,7 +489,7 @@ export default function NotificationCenterModule({
           </h3>
         </div>
 
-        {/* Branch Penalties */}
+        {/* Bylaws & Lateness Penalties */}
         <div
           onClick={() => setFilterType('penalties')}
           style={{
@@ -490,11 +502,11 @@ export default function NotificationCenterModule({
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#6b21a8' }}>⚖️ جزاءات مدير الفرع</span>
-            <span style={{ fontSize: '20px' }}>⚠️</span>
+            <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#6b21a8' }}>📜 جزاءات وتأخيرات اللائحة</span>
+            <span style={{ fontSize: '20px' }}>📜</span>
           </div>
           <h3 style={{ margin: '8px 0 0', fontSize: '24px', fontWeight: '900', color: '#7c3aed' }}>
-            {penaltiesCount} جزاء معلق
+            {penaltiesCount} واقعة وجزاء
           </h3>
         </div>
       </div>
@@ -502,7 +514,7 @@ export default function NotificationCenterModule({
       {/* Filter Navigation Tabs */}
       <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap', borderBottom: '1px solid var(--border)', paddingBottom: '12px' }}>
         <button className={`btn ${filterType === 'all' ? 'btn-start' : 'btn-ghost'}`} onClick={() => setFilterType('all')}>
-          🌐 جميع الإشعارات والأنشطة ({presentCount + absentCount + pendingCount + notifications.length})
+          🌐 جميع الإشعارات والأنشطة ({presentCount + absentCount + pendingCount + penaltiesCount + notifications.length})
         </button>
         <button className={`btn ${filterType === 'today_punches' ? 'btn-start' : 'btn-ghost'}`} onClick={() => setFilterType('today_punches')}>
           ⏱️ حضور وبصمات اليوم ({presentCount})
@@ -514,7 +526,7 @@ export default function NotificationCenterModule({
           📋 طلبات الموظفين ({pendingCount})
         </button>
         <button className={`btn ${filterType === 'penalties' ? 'btn-start' : 'btn-ghost'}`} onClick={() => setFilterType('penalties')}>
-          ⚖️ جزاءات اللائحة ({branchPenalties.length})
+          📜 جزاءات وتأخيرات اللائحة ({penaltiesCount})
         </button>
         <button className={`btn ${filterType === 'unread' ? 'btn-start' : 'btn-ghost'}`} onClick={() => setFilterType('unread')}>
           🔴 إشعارات جديدة ({unreadCount})
@@ -809,28 +821,29 @@ export default function NotificationCenterModule({
         </div>
       )}
 
-      {/* ── 4. Tab: Branch Manager Penalties (الجزاءات والمخالفات اللائحية) ── */}
+      {/* ── 4. Tab: Bylaws & Lateness Penalties (الجزاءات وتأخيرات لائحة العمل) ── */}
       {(filterType === 'all' || filterType === 'penalties') && (
         <div style={{ marginBottom: '24px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
             <h4 style={{ margin: 0, color: '#6b21a8', fontSize: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              ⚖️ الجزاءات والمخالفات اللائحية المرفوعة من مديري الفروع ({branchPenalties.length})
+              📜 وقائع التأخير وجزاءات لائحة العمل والجزاءات ({allBylawsPenalties.length})
             </h4>
-            <button className="btn btn-ghost" style={{ fontSize: '12px' }} onClick={() => onNavigateTab?.('bylaws')}>
-              الانتقال لسجل اللائحة 🔗
+            <button className="btn btn-ghost" style={{ fontSize: '12px', background: '#f5f3ff', color: '#7c3aed', border: '1px solid #ddd6fe', fontWeight: 'bold' }} onClick={() => onNavigateTab?.('bylaws')}>
+              الانتقال لسجل لائحة العمل 📜
             </button>
           </div>
 
-          {branchPenalties.length === 0 ? (
+          {allBylawsPenalties.length === 0 ? (
             <div style={{ padding: '20px', textAlign: 'center', color: 'var(--muted)', background: 'var(--surface)', borderRadius: '10px', border: '1px solid var(--border)' }}>
-              لا توجد أي جزاءات مسجلة حالياً.
+              لا توجد أي وقائع تأخير أو جزاءات مسجلة حالياً.
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {branchPenalties
+              {allBylawsPenalties
                 .filter((p) => branchFilter === 'all' || String(p.branchId) === String(branchFilter))
                 .map((p) => {
-                  const isApproved = p.status === 'approved' || p.adminApproved;
+                  const isAuto = p.isAutoBylaw;
+                  const isApproved = p.status === 'approved' || p.adminApproved || isAuto;
                   const isRejected = p.status === 'rejected';
                   const isCancelled = p.status === 'cancelled';
                   const isPending = !isApproved && !isRejected && !isCancelled;
@@ -840,8 +853,8 @@ export default function NotificationCenterModule({
                       key={p.id}
                       style={{
                         background: 'var(--surface)',
-                        border: isApproved ? '1px solid #e9d5ff' : isRejected ? '1px solid #fed7aa' : '1px solid #fbcfe8',
-                        borderRight: isApproved ? '4px solid #a855f7' : isRejected ? '4px solid #f97316' : '4px solid #ec4899',
+                        border: isAuto ? '1px solid #ddd6fe' : (isApproved ? '1px solid #e9d5ff' : isRejected ? '1px solid #fed7aa' : '1px solid #fbcfe8'),
+                        borderRight: isAuto ? '4px solid #7c3aed' : (isApproved ? '4px solid #a855f7' : isRejected ? '4px solid #f97316' : '4px solid #ec4899'),
                         padding: '14px 18px',
                         borderRadius: '10px',
                         display: 'flex',
@@ -853,12 +866,16 @@ export default function NotificationCenterModule({
                     >
                       <div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                          <span style={{ fontSize: '18px' }}>⚖️</span>
+                          <span style={{ fontSize: '18px' }}>{p.icon || (isAuto ? '📜' : '⚖️')}</span>
                           <h4 style={{ margin: 0, fontSize: '15px', color: 'var(--text)' }}>
                             {p.ruleTitle} — 👤 {p.employeeName} ({p.employeeCode})
                           </h4>
                           <span style={{ fontSize: '12px', color: 'var(--muted)' }}>• فرع {p.branchName}</span>
-                          {isApproved ? (
+                          {isAuto ? (
+                            <span style={{ background: '#f5f3ff', color: '#6d28d9', border: '1px solid #ddd6fe', padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                              📜 جزاء لائحة العمل معتمد
+                            </span>
+                          ) : isApproved ? (
                             <span style={{ background: '#dcfce7', color: '#15803d', padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold' }}>
                               🟢 معتمد ومخصوم من الأجر
                             </span>
@@ -880,32 +897,42 @@ export default function NotificationCenterModule({
                           الأثر المالي: {p.impactDesc} {p.details ? `• ${p.details}` : ''}
                         </p>
                         <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>
-                          📅 تاريخ المخالفة: {p.date || p.createdAt?.slice(0, 10) || todayDate}
+                          📅 تاريخ الوردية / الواقعة: {p.date || p.createdAt?.slice(0, 10) || todayDate}
                         </span>
                       </div>
 
-                      {isPending && (
-                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                          {onApproveRequest && (
-                            <button
-                              className="btn btn-start"
-                              style={{ fontSize: '12px', padding: '6px 14px' }}
-                              onClick={() => onApproveRequest(p.id)}
-                            >
-                              ✅ موافقة وتطبيق الخصم فوراً
-                            </button>
-                          )}
-                          {onRejectRequest && (
-                            <button
-                              className="btn btn-outline"
-                              style={{ fontSize: '12px', padding: '6px 14px', color: '#dc2626', borderColor: '#fca5a5' }}
-                              onClick={() => onRejectRequest(p.id)}
-                            >
-                              ❌ رفض الجزاء
-                            </button>
-                          )}
-                        </div>
-                      )}
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        {isAuto ? (
+                          <button
+                            className="btn btn-ghost"
+                            style={{ fontSize: '12px', padding: '6px 12px', background: '#faf5ff', color: '#7c3aed', border: '1px solid #e9d5ff', fontWeight: 'bold' }}
+                            onClick={() => onNavigateTab?.('bylaws')}
+                          >
+                            عرض باللائحة 📜
+                          </button>
+                        ) : isPending ? (
+                          <>
+                            {onApproveRequest && (
+                              <button
+                                className="btn btn-start"
+                                style={{ fontSize: '12px', padding: '6px 14px' }}
+                                onClick={() => onApproveRequest(p.id)}
+                              >
+                                ✅ موافقة وتطبيق الخصم فوراً
+                              </button>
+                            )}
+                            {onRejectRequest && (
+                              <button
+                                className="btn btn-outline"
+                                style={{ fontSize: '12px', padding: '6px 14px', color: '#dc2626', borderColor: '#fca5a5' }}
+                                onClick={() => onRejectRequest(p.id)}
+                              >
+                                ❌ رفض الجزاء
+                              </button>
+                            )}
+                          </>
+                        ) : null}
+                      </div>
                     </div>
                   );
                 })}

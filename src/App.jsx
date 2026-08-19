@@ -4267,6 +4267,20 @@ export default function App() {
           onLogout={handleLogout}
           pendingCount={(state.requests || []).filter(r => !r.hiddenFromAdmin && (r.status === 'pending' || r.status === 'pending_admin')).length}
           resignationCount={(state.resignationRequests || []).filter(r => (r.managerStatus === 'approved' || r.managerStatus === 'rejected') && !r.isAdminCreated && (!r.adminStatus || r.adminStatus === 'pending')).length}
+          bylawsCount={(() => {
+            const cIdStr = String(currentBranch?.id || '');
+            return (state.lateIncidents || []).filter((inc) => {
+              if (authRole === 'branch' && cIdStr && String(inc.branchId) !== cIdStr) return false;
+              return (
+                inc.status !== 'cancelled' &&
+                inc.status !== 'approved_permission_exempt' &&
+                inc.actionType !== 'grace' &&
+                !isApprovedPermissionForDate(inc.employeeId, inc.date, state) &&
+                (inc.deductionMinutes > 0 || inc.penaltyAmount > 0) &&
+                currentFilterFn(inc.date)
+              );
+            }).length;
+          })()}
           themeMode={themeMode}
           toggleTheme={toggleTheme}
           adminFilterMode={adminFilterMode}
@@ -4312,7 +4326,25 @@ export default function App() {
                       return isBranchMatch && (!r.managerStatus || r.managerStatus === 'pending');
                     }).length
                   },
-                  { id: 'bylaws', label: 'لائحة العمل والجزاءات', icon: '📜' },
+                  {
+                    id: 'bylaws',
+                    label: 'لائحة العمل والجزاءات',
+                    icon: '📜',
+                    badge: (() => {
+                      const cIdStr = String(currentBranch?.id || '');
+                      return (state.lateIncidents || []).filter((inc) => {
+                        if (cIdStr && String(inc.branchId) !== cIdStr) return false;
+                        return (
+                          inc.status !== 'cancelled' &&
+                          inc.status !== 'approved_permission_exempt' &&
+                          inc.actionType !== 'grace' &&
+                          !isApprovedPermissionForDate(inc.employeeId, inc.date, state) &&
+                          (inc.deductionMinutes > 0 || inc.penaltyAmount > 0) &&
+                          currentFilterFn(inc.date)
+                        );
+                      }).length;
+                    })()
+                  },
                 ]
               : undefined
           }

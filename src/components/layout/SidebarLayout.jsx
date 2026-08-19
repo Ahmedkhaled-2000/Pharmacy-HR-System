@@ -9,6 +9,7 @@ export default function SidebarLayout({
   onLogout,
   pendingCount = 0,
   resignationCount = 0,
+  bylawsCount = 0,
   notifications = [],
   themeMode,
   toggleTheme,
@@ -28,7 +29,7 @@ export default function SidebarLayout({
 
   const defaultAdminItems = [
     { id: 'dashboard', label: 'لوحة التحكم', icon: '📊' },
-    { id: 'notifications', label: 'الإشعارات والتنبيهات', icon: '🔔', badge: ((notifications || []).filter(n => !n.read).length) + pendingCount },
+    { id: 'notifications', label: 'الإشعارات والتنبيهات', icon: '🔔', badge: ((notifications || []).filter(n => !n.read).length) + pendingCount + bylawsCount },
     { id: 'requests', label: 'الطلبات', icon: '📋', badge: pendingCount },
     { id: 'employees', label: 'الموظفين', icon: '👥' },
     { id: 'branches', label: 'الفروع', icon: '🏢' },
@@ -41,7 +42,7 @@ export default function SidebarLayout({
     { id: 'adjustments-module', label: 'المكافآت والخصومات', icon: '📝' },
     { id: 'resignation', label: 'طلبات استقالة الموظفين', icon: '📝', badge: resignationCount },
     { id: 'whatsapp-center', label: 'مركز مراسلات الواتساب', icon: '💬' },
-    { id: 'bylaws', label: 'لائحة العمل والجزاءات', icon: '📜' },
+    { id: 'bylaws', label: 'لائحة العمل والجزاءات', icon: '📜', badge: bylawsCount },
     { id: 'evaluations', label: 'التقييمات', icon: '⭐️' },
     { id: 'loans-meds', label: 'السلف والأجل', icon: '💳' },
     { id: 'income-expenses', label: 'المصروفات والإيرادات', icon: '📈' },
