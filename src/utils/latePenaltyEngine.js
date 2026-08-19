@@ -576,6 +576,8 @@ export function recalculateEmployeeCycleLateness({
       status: status,
       overrideReason: overrideReason,
       permissionRequestId: approvedPerm ? approvedPerm.id : null,
+      read: prevInc ? Boolean(prevInc.read) : false,
+      readAt: prevInc?.readAt || null,
       modifiedBy: prevInc?.modifiedBy || null,
       modifiedAt: prevInc?.modifiedAt || null,
       createdAt: prevInc?.createdAt || new Date().toISOString(),

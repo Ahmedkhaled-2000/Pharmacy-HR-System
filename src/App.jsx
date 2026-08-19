@@ -4479,6 +4479,11 @@ export default function App() {
                   authRole="admin"
                   currentEmployee={null}
                   showToast={showToast}
+                  filterFn={currentFilterFn}
+                  monthPicker={monthPicker}
+                  filterMode={adminFilterMode}
+                  customFrom={adminCustomFrom}
+                  customTo={adminCustomTo}
                 />
               )}
 
@@ -4678,6 +4683,7 @@ export default function App() {
                 'loans-meds',
                 'income-expenses',
                 'pharmacy-archive',
+                'permissions-management',
                 'settings',
                 'notifications',
                 'approval-rules',

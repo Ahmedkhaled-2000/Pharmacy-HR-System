@@ -1534,6 +1534,93 @@ export default function EmployeePortalView({
             </div>
           )}
 
+          {/* ── Period Freeze Banner ── */}
+          {Boolean(state.orgSettings?.payrollPeriodFrozen?.[selectedMonth]?.isFrozen || state.orgSettings?.isPeriodFrozen) && (
+            <div
+              style={{
+                background: 'linear-gradient(135deg, #eff6ff, #dbeafe)',
+                border: '2px solid #3b82f6',
+                borderRadius: '16px',
+                padding: '14px 20px',
+                marginBottom: '20px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '14px',
+                boxShadow: '0 4px 12px rgba(59, 130, 246, 0.15)'
+              }}
+            >
+              <span style={{ fontSize: '30px' }}>🔒</span>
+              <div>
+                <div style={{ fontWeight: '900', fontSize: '15px', color: '#1e40af' }}>
+                  دورة رواتب شهر ({selectedMonth}) مقفلة ومجمدة رسمياً
+                </div>
+                <div style={{ fontSize: '13px', color: '#1e3a8a', marginTop: '2px' }}>
+                  تم اعتماد وإغلاق سجلات وبصمات هذا الشهر من قبل الإدارة العليا لضمان دقة وصرف المستحقات.
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Active Lateness Penalty Alert Banner for Employee ── */}
+          {(() => {
+            if (!emp?.id) return null;
+            const empPenalties = (state.lateIncidents || []).filter((inc) => {
+              if (String(inc.employeeId) !== String(emp.id)) return false;
+              if (inc.status === 'cancelled' || inc.status === 'approved_permission_exempt' || inc.actionType === 'grace') return false;
+              if (filterFn && !filterFn(inc.date)) return false;
+              return (inc.deductionMinutes > 0 || inc.penaltyAmount > 0);
+            });
+            if (empPenalties.length === 0) return null;
+            const totalMins = empPenalties.reduce((sum, i) => sum + (i.deductionMinutes || 0), 0);
+            const totalCash = empPenalties.reduce((sum, i) => sum + (i.penaltyAmount || 0), 0);
+
+            return (
+              <div
+                style={{
+                  background: 'linear-gradient(135deg, #faf5ff, #f3e8ff)',
+                  border: '2px solid #9333ea',
+                  borderRadius: '16px',
+                  padding: '14px 20px',
+                  marginBottom: '20px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: '14px',
+                  boxShadow: '0 4px 12px rgba(147, 51, 234, 0.15)'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                  <span style={{ fontSize: '32px' }}>📜</span>
+                  <div>
+                    <div style={{ fontWeight: '900', fontSize: '15px', color: '#6b21a8' }}>
+                      تنبيه لائحة العمل والجزاءات: تم تسجيل ({empPenalties.length}) واقعة تأخير / جزاء بدورة الشهر
+                    </div>
+                    <div style={{ fontSize: '13px', color: '#7e22ce', marginTop: '2px' }}>
+                      إجمالي خصومات اللائحة: <strong>{totalMins} دقيقة</strong> ({totalCash} ج.م). يمكنك الاطلاع على تفاصيل كل يوم وتقديم تظلم للإدارة.
+                    </div>
+                  </div>
+                </div>
+                <button
+                  className="btn"
+                  style={{
+                    background: '#7c3aed',
+                    color: '#ffffff',
+                    padding: '8px 18px',
+                    fontSize: '13px',
+                    fontWeight: 'bold',
+                    border: 'none',
+                    borderRadius: '10px',
+                    cursor: 'pointer'
+                  }}
+                  onClick={() => setActiveTab('bylaws')}
+                >
+                  عرض سجل اللائحة 📜
+                </button>
+              </div>
+            );
+          })()}
+
           {/* ── 1. Tab: Dashboard ── */}
           {activeTab === 'dashboard' && (
             <div className="fade-in">

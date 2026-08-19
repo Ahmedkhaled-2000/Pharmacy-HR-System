@@ -53,6 +53,14 @@ export default function PayrollModule({
     } catch { return ''; }
   });
 
+  const [payoutStartTime, setPayoutStartTime] = useState(() => {
+    try {
+      return localStorage.getItem('payroll_payout_start_time') || state.orgSettings?.payrollPayoutStartTime || '00:00';
+    } catch { return '00:00'; }
+  });
+
+  const isPeriodFrozen = Boolean(state.orgSettings?.payrollPeriodFrozen?.[monthPicker]?.isFrozen || state.orgSettings?.isPeriodFrozen);
+
   useEffect(() => {
     const sDay = state.orgSettings?.payrollPayoutStartDay !== undefined 
       ? state.orgSettings.payrollPayoutStartDay 
@@ -60,16 +68,18 @@ export default function PayrollModule({
     const eDay = state.orgSettings?.payrollPayoutEndDay !== undefined 
       ? state.orgSettings.payrollPayoutEndDay 
       : (() => { try { const v = localStorage.getItem('payroll_payout_end_day'); return v !== null && v !== '' ? parseInt(v, 10) : 25; } catch { return 25; } })();
+    const sTime = state.orgSettings?.payrollPayoutStartTime || (() => { try { return localStorage.getItem('payroll_payout_start_time') || '00:00'; } catch { return '00:00'; } })();
     const pType = state.orgSettings?.payrollPeriodType || (() => { try { return localStorage.getItem('payroll_period_type') || 'cycle'; } catch { return 'cycle'; } })();
     const cFrom = state.orgSettings?.payrollCustomFrom || (() => { try { return localStorage.getItem('payroll_custom_from') || ''; } catch { return ''; } })();
     const cTo = state.orgSettings?.payrollCustomTo || (() => { try { return localStorage.getItem('payroll_custom_to') || ''; } catch { return ''; } })();
 
     setPayoutStartDay(sDay);
     setPayoutEndDay(eDay);
+    setPayoutStartTime(sTime);
     setPeriodType(pType);
     setCustomFrom(cFrom);
     setCustomTo(cTo);
-  }, [state.orgSettings?.payrollPayoutStartDay, state.orgSettings?.payrollPayoutEndDay, state.orgSettings?.payrollPeriodType, state.orgSettings?.payrollCustomFrom, state.orgSettings?.payrollCustomTo]);
+  }, [state.orgSettings?.payrollPayoutStartDay, state.orgSettings?.payrollPayoutEndDay, state.orgSettings?.payrollPayoutStartTime, state.orgSettings?.payrollPeriodType, state.orgSettings?.payrollCustomFrom, state.orgSettings?.payrollCustomTo]);
 
   const employees = state.employees || [];
   const branches = state.branches || [];
@@ -80,12 +90,13 @@ export default function PayrollModule({
     return true;
   });
 
-  const handleSavePeriodSettings = async (newType, sVal, eVal, fromVal, toVal) => {
+  const handleSavePeriodSettings = async (newType, sVal, eVal, fromVal, toVal, sTimeVal = '00:00') => {
     const updatedSettings = {
       ...(state.orgSettings || {}),
       payrollPeriodType: newType,
       payrollPayoutStartDay: parseInt(sVal, 10) || 26,
       payrollPayoutEndDay: parseInt(eVal, 10) || 25,
+      payrollPayoutStartTime: sTimeVal || '00:00',
       payrollPayoutDay: parseInt(eVal, 10) || 25,
       payrollCustomFrom: fromVal || '',
       payrollCustomTo: toVal || ''
@@ -94,6 +105,7 @@ export default function PayrollModule({
     setPeriodType(newType);
     setPayoutStartDay(parseInt(sVal, 10) || 26);
     setPayoutEndDay(parseInt(eVal, 10) || 25);
+    setPayoutStartTime(sTimeVal || '00:00');
     setCustomFrom(fromVal || '');
     setCustomTo(toVal || '');
 
@@ -101,6 +113,7 @@ export default function PayrollModule({
       localStorage.setItem('payroll_period_type', newType);
       localStorage.setItem('payroll_payout_start_day', String(sVal));
       localStorage.setItem('payroll_payout_end_day', String(eVal));
+      localStorage.setItem('payroll_payout_start_time', sTimeVal || '00:00');
       if (fromVal) localStorage.setItem('payroll_custom_from', fromVal);
       if (toVal) localStorage.setItem('payroll_custom_to', toVal);
     } catch (e) {
@@ -114,8 +127,35 @@ export default function PayrollModule({
     if (newType === 'custom') {
       showToast?.(`✅ تم حفظ وتطبيق الفترة اليدوية المخصصة (من ${fromVal} إلى ${toVal}) على رواتب المنظومة وصفحة الموظف بنجاح`);
     } else {
-      showToast?.(`✅ تم حفظ وتثبيت الدورة الشهرية (من يوم ${sVal} للشهر السابق حتى يوم ${eVal} للشهر الحالي) وتطبيقها تلقائياً على صفحة الموظف بنجاح`);
+      showToast?.(`✅ تم حفظ وتثبيت الدورة الشهرية (من يوم ${sVal} الساعة ${sTimeVal} حتى يوم ${eVal}) بنجاح`);
     }
+  };
+
+  const handleToggleFreezePeriod = async () => {
+    const nextStatus = !isPeriodFrozen;
+    const confirmMsg = nextStatus
+      ? `هل أنت متأكد من إغلاق وتجميد دورة رواتب شهر (${monthPicker})؟ سيتم قفل تعديل البصمات والخصومات لضمان عدم تغيير المستحقات المصروفة.`
+      : `هل ترغب في فك تجميد دورة رواتب شهر (${monthPicker}) للسماح بالتعديلات من الإدارة؟`;
+
+    if (!window.confirm(confirmMsg)) return;
+
+    const frozenMap = { ...(state.orgSettings?.payrollPeriodFrozen || {}) };
+    frozenMap[monthPicker] = {
+      isFrozen: nextStatus,
+      frozenAt: new Date().toISOString(),
+      frozenBy: 'الإدارة العليا'
+    };
+
+    const updatedSettings = {
+      ...(state.orgSettings || {}),
+      payrollPeriodFrozen: frozenMap
+    };
+
+    const updatedState = { ...state, orgSettings: updatedSettings };
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+
+    showToast?.(nextStatus ? `🔒 تم تجميد دورة رواتب شهر (${monthPicker}) بنجاح` : `🔓 تم فك تجميد دورة رواتب شهر (${monthPicker})`);
   };
 
   // Helper to compute date range description for active settings
@@ -130,7 +170,7 @@ export default function PayrollModule({
     if (prevM < 1) { prevM = 12; prevY = y - 1; }
     const startStr = `${prevY}-${String(prevM).padStart(2, '0')}-${String(payoutStartDay).padStart(2, '0')}`;
     const endStr = `${y}-${String(m).padStart(2, '0')}-${String(payoutEndDay).padStart(2, '0')}`;
-    return `دورة الشهر (${monthPicker}): من ${startStr} إلى ${endStr}`;
+    return `دورة الشهر (${monthPicker}): من ${startStr} (${payoutStartTime}) إلى ${endStr}`;
   };
 
   const getPayrollRangeObj = () => {
@@ -224,13 +264,46 @@ export default function PayrollModule({
           </div>
         </div>
 
+        {/* Freeze Period Alert / Action Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: isPeriodFrozen ? 'rgba(239, 68, 68, 0.25)' : 'rgba(0,0,0,0.15)', padding: '10px 16px', borderRadius: '10px', flexWrap: 'wrap', gap: '10px', border: isPeriodFrozen ? '1px solid #fca5a5' : '1px solid rgba(255,255,255,0.2)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '20px' }}>{isPeriodFrozen ? '🔒' : '🔓'}</span>
+            <div>
+              <span style={{ fontWeight: '800', fontSize: '13.5px', color: isPeriodFrozen ? '#fee2e2' : '#fff' }}>
+                حالة دورة رواتب شهر ({monthPicker}): {isPeriodFrozen ? 'مغلقة ومجمدة رسمياً' : 'مفتوحة وقابلة للتعديل'}
+              </span>
+              <div style={{ fontSize: '11.5px', opacity: 0.9 }}>
+                {isPeriodFrozen ? 'تم قفل تعديل البصمات والخصومات لهذا الشهر لضمان عدم تغيير المستحقات المصروفة' : 'يمكن للإدارة ومدراء الفروع تسجيل وتعديل البصمات والجزاءات'}
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleToggleFreezePeriod}
+            style={{
+              background: isPeriodFrozen ? '#22c55e' : '#ef4444',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '8px',
+              padding: '7px 16px',
+              fontWeight: '800',
+              fontSize: '12.5px',
+              cursor: 'pointer',
+              boxShadow: '0 2px 6px rgba(0,0,0,0.2)'
+            }}
+          >
+            {isPeriodFrozen ? '🔓 فك تجميد دورة الرواتب' : '🔒 إغلاق وتجميد دورة الرواتب'}
+          </button>
+        </div>
+
         {periodType === 'cycle' ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap', background: 'rgba(255,255,255,0.1)', padding: '12px 16px', borderRadius: '10px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <label style={{ fontSize: '13px', fontWeight: 'bold' }}>من يوم (الشهر السابق):</label>
               <select
                 value={payoutStartDay}
-                onChange={(e) => handleSavePeriodSettings('cycle', e.target.value, payoutEndDay, customFrom, customTo)}
+                onChange={(e) => handleSavePeriodSettings('cycle', e.target.value, payoutEndDay, customFrom, customTo, payoutStartTime)}
                 style={{ padding: '6px 12px', borderRadius: '8px', border: 'none', background: '#fff', color: '#0f766e', fontWeight: 'bold', fontSize: '13px' }}
               >
                 {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
@@ -240,10 +313,20 @@ export default function PayrollModule({
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <label style={{ fontSize: '13px', fontWeight: 'bold' }}>الساعة:</label>
+              <input
+                type="time"
+                value={payoutStartTime}
+                onChange={(e) => handleSavePeriodSettings('cycle', payoutStartDay, payoutEndDay, customFrom, customTo, e.target.value)}
+                style={{ padding: '5px 10px', borderRadius: '8px', border: 'none', background: '#fff', color: '#0f766e', fontWeight: 'bold', fontSize: '13px' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <label style={{ fontSize: '13px', fontWeight: 'bold' }}>إلى يوم (الشهر الحالي):</label>
               <select
                 value={payoutEndDay}
-                onChange={(e) => handleSavePeriodSettings('cycle', payoutStartDay, e.target.value, customFrom, customTo)}
+                onChange={(e) => handleSavePeriodSettings('cycle', payoutStartDay, e.target.value, customFrom, customTo, payoutStartTime)}
                 style={{ padding: '6px 12px', borderRadius: '8px', border: 'none', background: '#fff', color: '#0f766e', fontWeight: 'bold', fontSize: '13px' }}
               >
                 {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
@@ -280,7 +363,7 @@ export default function PayrollModule({
 
             <button
               type="button"
-              onClick={() => handleSavePeriodSettings('custom', payoutStartDay, payoutEndDay, customFrom, customTo)}
+              onClick={() => handleSavePeriodSettings('custom', payoutStartDay, payoutEndDay, customFrom, customTo, payoutStartTime)}
               style={{
                 border: 'none',
                 background: '#fef08a',

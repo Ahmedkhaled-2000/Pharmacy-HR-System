@@ -66,7 +66,27 @@ export default function RequestsModule({
 
   const [showHiddenAdminRequests, setShowHiddenAdminRequests] = useState(false);
 
-  const allRequests = state.requests || [];
+  const allRequests = useMemo(() => {
+    const list = [...(state.requests || [])];
+    const existingIds = new Set(list.map((r) => r.id));
+
+    (state.leaveRequests || []).forEach((lr) => {
+      if (!existingIds.has(lr.id)) {
+        list.push({ ...lr, type: lr.type || 'leave' });
+        existingIds.add(lr.id);
+      }
+    });
+
+    (state.shiftSwaps || []).forEach((sw) => {
+      if (!existingIds.has(sw.id)) {
+        list.push({ ...sw, type: 'swap' });
+        existingIds.add(sw.id);
+      }
+    });
+
+    return list;
+  }, [state.requests, state.leaveRequests, state.shiftSwaps]);
+
   const hiddenAdminCount = allRequests.filter(r => r && r.hiddenFromAdmin).length;
   const visibleAdminRequests = allRequests.filter(r => showHiddenAdminRequests ? true : !r.hiddenFromAdmin);
   const requests = visibleAdminRequests;
@@ -680,6 +700,33 @@ export default function RequestsModule({
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          {/* Button: Toggle Hidden/Archived Requests */}
+          {hiddenAdminCount > 0 && (
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setShowHiddenAdminRequests(!showHiddenAdminRequests)}
+              style={{
+                background: showHiddenAdminRequests ? '#8b5cf6' : '#f5f3ff',
+                color: showHiddenAdminRequests ? '#ffffff' : '#6d28d9',
+                border: '1px solid #c4b5fd',
+                padding: '8px 14px',
+                fontSize: '12px',
+                fontWeight: '800',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              <span>{showHiddenAdminRequests ? '👁️‍🗨️ إخفاء المؤرشف' : '👁️ عرض المؤرشف'}</span>
+              <span style={{ background: 'rgba(0,0,0,0.15)', padding: '2px 7px', borderRadius: '99px', fontSize: '11px' }}>
+                {hiddenAdminCount}
+              </span>
+            </button>
+          )}
+
           {/* Button 1: Clear Admin View Only (New Requested Button) */}
           <button
             type="button"

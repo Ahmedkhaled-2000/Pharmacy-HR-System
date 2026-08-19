@@ -22,10 +22,12 @@ export default function EmployeePermissionsManagementModule({
   const permPolicy = state.permissionPolicy || DEFAULT_PERMISSION_POLICY;
   const [maxHours, setMaxHours] = useState(permPolicy.maxHoursPerPermission || 2);
   const [maxMonthlyCount, setMaxMonthlyCount] = useState(permPolicy.maxPermissionsPerMonth || 2);
+  const [cycleStartDay, setCycleStartDay] = useState(permPolicy.cycleStartDay || state.orgSettings?.payrollPayoutStartDay || 21);
+  const [cycleEndDay, setCycleEndDay] = useState(permPolicy.cycleEndDay || state.orgSettings?.payrollPayoutEndDay || 20);
   const [isSavingPolicy, setIsSavingPolicy] = useState(false);
 
   // ── الفلاتر ──
-  const [selectedMonth, setSelectedMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [selectedMonth, setSelectedMonth] = useState(() => monthPicker || new Date().toISOString().slice(0, 7));
   const [filterBranch, setFilterBranch] = useState(effectiveBranchId || '');
   const [filterEmployeeId, setFilterEmployeeId] = useState('');
   const [filterStatus, setFilterStatus] = useState('all'); // all | pending | approved | rejected | exceptional
@@ -83,6 +85,8 @@ export default function EmployeePermissionsManagementModule({
         ...permPolicy,
         maxHoursPerPermission: parseFloat(maxHours) || 2,
         maxPermissionsPerMonth: parseInt(maxMonthlyCount, 10) || 2,
+        cycleStartDay: parseInt(cycleStartDay, 10) || 21,
+        cycleEndDay: parseInt(cycleEndDay, 10) || 20,
         updatedAt: new Date().toISOString()
       };
       const updatedState = {
@@ -487,6 +491,32 @@ export default function EmployeePermissionsManagementModule({
                 style={{ width: '100px', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontWeight: 800, textAlign: 'center', fontSize: '15px' }}
               />
               <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--muted)' }}>مرات شهرياً (الرصيد المتاح)</span>
+            </div>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--text)', marginBottom: '6px' }}>
+              🗓️ فترة احتساب الأذونات الشهرية:
+            </label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--muted)' }}>من يوم</span>
+              <input
+                type="number"
+                min="1"
+                max="31"
+                value={cycleStartDay}
+                onChange={(e) => setCycleStartDay(e.target.value)}
+                style={{ width: '65px', padding: '9px 8px', borderRadius: '8px', border: '1px solid var(--border)', fontWeight: 800, textAlign: 'center', fontSize: '14px' }}
+              />
+              <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--muted)' }}>إلى يوم</span>
+              <input
+                type="number"
+                min="1"
+                max="31"
+                value={cycleEndDay}
+                onChange={(e) => setCycleEndDay(e.target.value)}
+                style={{ width: '65px', padding: '9px 8px', borderRadius: '8px', border: '1px solid var(--border)', fontWeight: 800, textAlign: 'center', fontSize: '14px' }}
+              />
             </div>
           </div>
 

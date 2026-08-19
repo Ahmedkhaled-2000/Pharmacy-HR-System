@@ -53,6 +53,17 @@ export default function EmployeePermissionsModule({
 
   const durationObj = calcDuration();
 
+  const permPolicy = state.permissionPolicy || { maxHoursPerPermission: 2, maxPermissionsPerMonth: 2 };
+  const maxHours = parseFloat(permPolicy.maxHoursPerPermission) || 2;
+  const maxMonthlyCount = parseInt(permPolicy.maxPermissionsPerMonth, 10) || 2;
+
+  // Compute used permissions in the active cycle for this employee
+  const currentMonthKey = date.slice(0, 7);
+  const usedPermCount = employeePermRequests.filter(
+    (r) => r.status === 'approved' && (r.date || r.createdAt)?.startsWith(currentMonthKey)
+  ).length;
+  const remainingPermCount = Math.max(0, maxMonthlyCount - usedPermCount);
+
   const handleSubmitPermission = async (e) => {
     e.preventDefault();
     if (!date || !startTime || !endTime) {
@@ -63,6 +74,17 @@ export default function EmployeePermissionsModule({
     if (durationObj.minutes <= 0) {
       showToast('مدة الإذن يجب أن تكون أكبر من صفر');
       return;
+    }
+
+    if (durationObj.minutes > maxHours * 60) {
+      showToast(`⚠️ تنبيه: الحد الأقصى المسموح به للإذن الواحد هو ${maxHours} ساعة (${maxHours * 60} دقيقة)`);
+      return;
+    }
+
+    if (remainingPermCount <= 0) {
+      if (!window.confirm(`⚠️ تنبيه: لقد استنفذت الحد الشهري للأذونات المتاحة (${maxMonthlyCount} أذونات لشهر ${currentMonthKey}). هل ترغب في إرسال الطلب كطلب استثنائي يحتاج موافقة الإدارة العليا؟`)) {
+        return;
+      }
     }
 
     const newPermReq = {
@@ -80,6 +102,7 @@ export default function EmployeePermissionsModule({
       durationMinutes: durationObj.minutes,
       durationText: durationObj.text,
       reason: reason.trim(),
+      isExceptional: remainingPermCount <= 0,
       targetApproval: 'branch_and_admin',
       status: 'pending',
       createdAt: new Date().toISOString()
@@ -117,6 +140,43 @@ export default function EmployeePermissionsModule({
         >
           {showForm ? '✕ إغلاق النموذج' : '+ تقديم طلب إذن جديد'}
         </button>
+      </div>
+
+      {/* Policy Guidelines Box */}
+      <div style={{
+        background: 'linear-gradient(135deg, rgba(13,148,136,0.06), rgba(13,148,136,0.12))',
+        border: '1px solid rgba(13,148,136,0.3)',
+        borderRadius: '12px',
+        padding: '12px 18px',
+        marginTop: '12px',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: '10px'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ fontSize: '20px' }}>📜</span>
+          <div>
+            <div style={{ fontWeight: '800', fontSize: '13.5px', color: 'var(--primary-dark)' }}>
+              ضوابط وسياسة الأذونات الشهرية المعتمدة
+            </div>
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
+              الحد الأقصى للإذن الواحد: <strong>{maxHours} ساعة</strong> · الحد الأقصى شهرياً: <strong>{maxMonthlyCount} مرات</strong>
+            </div>
+          </div>
+        </div>
+
+        <div style={{
+          background: remainingPermCount > 0 ? '#10b981' : '#ef4444',
+          color: '#fff',
+          padding: '4px 12px',
+          borderRadius: '8px',
+          fontWeight: '800',
+          fontSize: '12px'
+        }}>
+          الرصيد المتاح لك هذا الشهر: {remainingPermCount} من {maxMonthlyCount} أذونات
+        </div>
       </div>
 
       {showForm && (
