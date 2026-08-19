@@ -1,10 +1,11 @@
 /**
  * stateMerger.js
  * دمج ذكي ثنائي وثلاثي الأطراف لحالات التطبيق لمنع مسح أو تداخل البيانات بين الأجهزة المتزامنة
+ * مع دعم الحذف النهائي وحظر استرجاع الكيانات المحذوفة (Tombstone & Diff Deletion Tracking)
  */
 
 // استخراج مفتاح فريد للعنصر
-function getItemKey(item, fallbackPrefix = 'item') {
+export function getItemKey(item, fallbackPrefix = 'item') {
   if (!item || typeof item !== 'object') return null;
   if (item.id !== undefined && item.id !== null && item.id !== '') return String(item.id);
   if (item.deviceId) return String(item.deviceId);
@@ -17,7 +18,7 @@ function getItemKey(item, fallbackPrefix = 'item') {
 }
 
 // استخراج أحدث وقت تعديل للعنصر
-function getItemTime(item) {
+export function getItemTime(item) {
   if (!item) return 0;
   const timeVal = item.updatedAt || item.approvedAt || item.rejectedAt || item.createdAt || item.timestamp || item.date;
   if (!timeVal) return 0;
@@ -26,7 +27,7 @@ function getItemTime(item) {
   return isNaN(parsed) ? 0 : parsed;
 }
 
-function toSafeArray(val) {
+export function toSafeArray(val) {
   if (Array.isArray(val)) return val;
   if (val && typeof val === 'object') {
     return Object.values(val).filter((item) => item !== null && typeof item === 'object');
@@ -34,11 +35,35 @@ function toSafeArray(val) {
   return [];
 }
 
+/**
+ * فحص ما إذا كان العنصر أو أحد مفاتيحه أو الموظف/الفرع التابع له محذوفاً نهائياً
+ */
+export function isItemDeleted(item, key, deletedIds) {
+  if (!item || typeof item !== 'object') return true;
+  if (!deletedIds || !(deletedIds instanceof Set) || deletedIds.size === 0) return false;
+
+  if (key && deletedIds.has(key)) return true;
+  if (item.id !== undefined && item.id !== null && deletedIds.has(String(item.id))) return true;
+  if (item.id && deletedIds.has(`emp_${item.id}`)) return true;
+  if (item.code && (deletedIds.has(String(item.code)) || deletedIds.has(`emp_${item.code}`))) return true;
+  if (item.deviceId && (deletedIds.has(String(item.deviceId)) || deletedIds.has(`dev_${item.deviceId}`))) return true;
+  
+  // فحص ما إذا كان الموظف التابع له هذا السجل قد تم حذفه
+  if (item.employeeId && (deletedIds.has(String(item.employeeId)) || deletedIds.has(`emp_${item.employeeId}`))) return true;
+  if (item.employeeCode && (deletedIds.has(String(item.employeeCode)) || deletedIds.has(`emp_${item.employeeCode}`))) return true;
+  if (item.empId && (deletedIds.has(String(item.empId)) || deletedIds.has(`emp_${item.empId}`))) return true;
+  
+  // فحص ما إذا كان الفرع التابع له هذا السجل قد تم حذفه
+  if (item.branchId && (deletedIds.has(String(item.branchId)) || deletedIds.has(`branch_${item.branchId}`))) return true;
+
+  return false;
+}
+
 // دمج مصفوفتين حسب المفتاح الفريد وحسم التعارضات مع مراعاة العناصر المحذوفة نهائياً
 export function mergeArrays(localArr = [], remoteArr = [], options = {}) {
   const localList = toSafeArray(localArr);
   const remoteList = toSafeArray(remoteArr);
-  const deletedIds = options.deletedIds instanceof Set ? options.deletedIds : new Set(options.deletedIds || []);
+  const deletedIds = options.deletedIds instanceof Set ? options.deletedIds : new Set(toSafeArray(options.deletedIds).map(String));
 
   const map = new Map();
 
@@ -46,7 +71,7 @@ export function mergeArrays(localArr = [], remoteArr = [], options = {}) {
   for (const item of remoteList) {
     if (!item || typeof item !== 'object') continue;
     const key = getItemKey(item, options.prefix || 'rem');
-    if (key && !deletedIds.has(key) && !deletedIds.has(String(item.id))) {
+    if (key && !isItemDeleted(item, key, deletedIds)) {
       map.set(key, item);
     }
   }
@@ -55,7 +80,7 @@ export function mergeArrays(localArr = [], remoteArr = [], options = {}) {
   for (const item of localList) {
     if (!item || typeof item !== 'object') continue;
     const key = getItemKey(item, options.prefix || 'loc');
-    if (!key || deletedIds.has(key) || deletedIds.has(String(item.id))) continue;
+    if (!key || isItemDeleted(item, key, deletedIds)) continue;
 
     if (!map.has(key)) {
       // عنصر جديد غير موجود في السحابة أضيف محلياً -> الحفاظ عليه
@@ -86,7 +111,6 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
     } else if (localTime > remoteTime) {
       mergedEmp = { ...remoteItem, ...localItem };
     } else {
-      // If timestamps are equal (or both 0), local edits take precedence
       mergedEmp = { ...remoteItem, ...localItem };
       if (localItem.permissions !== undefined) {
         mergedEmp.permissions = localItem.permissions;
@@ -97,90 +121,71 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
     return mergedEmp;
   }
 
-  // 0.1 معالجة طلبات الاستقالة وحسم قرارات مدير الفرع والإدارة العليا
-  if (options.prefix === 'res') {
-    const localTime = getItemTime(localItem);
-    const remoteTime = getItemTime(remoteItem);
-
-    const mRank = (s) => (s === 'approved' || s === 'rejected' ? 20 : 10);
-    const aRank = (s) => (s === 'approved' || s === 'rejected' ? 30 : 10);
-
-    const localScore = mRank(localItem.managerStatus) + aRank(localItem.adminStatus);
-    const remoteScore = mRank(remoteItem.managerStatus) + aRank(remoteItem.adminStatus);
-
-    if (localScore > remoteScore) return { ...remoteItem, ...localItem };
-    if (remoteScore > localScore) return { ...localItem, ...remoteItem };
-
-    return localTime >= remoteTime ? { ...remoteItem, ...localItem } : { ...localItem, ...remoteItem };
-  }
-
   // 1. معالجة وحسم سجلات السداد والمدفوعات للسلف
   let mergedPaymentsHistory = undefined;
   let mergedPaidAmount = undefined;
   if (Array.isArray(localItem.paymentsHistory) || Array.isArray(remoteItem.paymentsHistory) || localItem.paidAmount !== undefined || remoteItem.paidAmount !== undefined) {
-    mergedPaymentsHistory = mergeArrays(localItem.paymentsHistory || [], remoteItem.paymentsHistory || [], { prefix: 'pay' });
-    const localPaid = parseFloat(localItem.paidAmount) || 0;
-    const remotePaid = parseFloat(remoteItem.paidAmount) || 0;
-    mergedPaidAmount = Math.max(localPaid, remotePaid);
+    const pLocal = Array.isArray(localItem.paymentsHistory) ? localItem.paymentsHistory : [];
+    const pRemote = Array.isArray(remoteItem.paymentsHistory) ? remoteItem.paymentsHistory : [];
+    const payMap = new Map();
+    [...pRemote, ...pLocal].forEach((p) => {
+      if (p && typeof p === 'object') {
+        const pKey = p.id || `${p.date}_${p.amount}_${p.paidAt || ''}`;
+        payMap.set(pKey, p);
+      }
+    });
+    mergedPaymentsHistory = Array.from(payMap.values());
+    const totalFromHistory = mergedPaymentsHistory.reduce((acc, p) => acc + (parseFloat(p.amount) || 0), 0);
+    mergedPaidAmount = Math.max(
+      parseFloat(localItem.paidAmount) || 0,
+      parseFloat(remoteItem.paidAmount) || 0,
+      totalFromHistory
+    );
   }
 
-  // 2. دمج الرسائل والردود الفرعية في حالة الشكاوى أو الملاحظات (replies / comments)
-  let mergedReplies = undefined;
-  if (Array.isArray(localItem.replies) || Array.isArray(remoteItem.replies)) {
-    mergedReplies = mergeArrays(localItem.replies || [], remoteItem.replies || [], { prefix: 'rep' });
+  // 2. معالجة وحسم بصمات الوجه والأجهزة البيومترية
+  let mergedBiometrics = undefined;
+  if (localItem.biometrics || remoteItem.biometrics) {
+    mergedBiometrics = {
+      ...(remoteItem.biometrics || {}),
+      ...(localItem.biometrics || {})
+    };
   }
 
-  // 3. أولوية حالة الاعتماد/الرفض والسداد:
-  const statusRanks = {
-    pending: 10,
-    pending_admin: 15,
-    rejected: 30,
-    cancelled: 30,
-    canceled: 30,
-    approved: 40,
-    partial: 50,
-    paid: 60,
-    completed: 60,
-    closed: 60
-  };
+  // 3. معالجة قائمة الأجهزة المسجلة للموظف
+  let mergedDevices = undefined;
+  if (Array.isArray(localItem.devices) || Array.isArray(remoteItem.devices)) {
+    const devMap = new Map();
+    [...(remoteItem.devices || []), ...(localItem.devices || [])].forEach((d) => {
+      if (d && typeof d === 'object') {
+        const dKey = d.deviceId || d.id;
+        if (dKey) devMap.set(dKey, d);
+      }
+    });
+    mergedDevices = Array.from(devMap.values());
+  }
 
-  const localRank = statusRanks[localItem.status] || 0;
-  const remoteRank = statusRanks[remoteItem.status] || 0;
-
-  // 4. مقارنة التوقيت الزمني للأحدث
+  // 4. حسم التعارض العام بناءً على أحدث توقيت تعديل
   const localTime = getItemTime(localItem);
   const remoteTime = getItemTime(remoteItem);
 
-  let baseWinner;
-  if (localRank !== remoteRank && (localRank >= 30 || remoteRank >= 30)) {
-    baseWinner = localRank >= remoteRank ? { ...remoteItem, ...localItem } : { ...localItem, ...remoteItem };
-  } else {
-    baseWinner = remoteTime > localTime ? { ...localItem, ...remoteItem } : { ...remoteItem, ...localItem };
-  }
+  let mergedBase = localTime >= remoteTime
+    ? { ...remoteItem, ...localItem }
+    : { ...localItem, ...remoteItem };
 
-  if (mergedReplies) {
-    baseWinner.replies = mergedReplies;
-  }
-  if (mergedPaymentsHistory) {
-    baseWinner.paymentsHistory = mergedPaymentsHistory;
-  }
-  if (mergedPaidAmount !== undefined) {
-    baseWinner.paidAmount = mergedPaidAmount;
-    const totalAmount = parseFloat(baseWinner.amount || baseWinner.totalAmount) || 0;
-    if (mergedPaidAmount >= totalAmount && totalAmount > 0) {
-      baseWinner.status = 'paid';
-    } else if (mergedPaidAmount > 0) {
-      baseWinner.status = 'partial';
-    }
-  }
+  if (mergedPaymentsHistory !== undefined) mergedBase.paymentsHistory = mergedPaymentsHistory;
+  if (mergedPaidAmount !== undefined) mergedBase.paidAmount = mergedPaidAmount;
+  if (mergedBiometrics !== undefined) mergedBase.biometrics = mergedBiometrics;
+  if (mergedDevices !== undefined) mergedBase.devices = mergedDevices;
 
-  return baseWinner;
+  return mergedBase;
 }
 
 // دمج جداول الشفتات (Rosters)
-export function mergeRosters(localRosters = [], remoteRosters = []) {
+export function mergeRosters(localRosters = [], remoteRosters = [], options = {}) {
   const localList = toSafeArray(localRosters);
   const remoteList = toSafeArray(remoteRosters);
+  const deletedIds = options.deletedIds instanceof Set ? options.deletedIds : new Set(toSafeArray(options.deletedIds).map(String));
 
   const getRosterKey = (r) => {
     if (!r || typeof r !== 'object') return null;
@@ -194,13 +199,15 @@ export function mergeRosters(localRosters = [], remoteRosters = []) {
   for (const r of remoteList) {
     if (!r || typeof r !== 'object') continue;
     const key = getRosterKey(r) || `ros_${Math.random()}`;
-    map.set(key, r);
+    if (!isItemDeleted(r, key, deletedIds)) {
+      map.set(key, r);
+    }
   }
 
   for (const r of localList) {
     if (!r || typeof r !== 'object') continue;
     const key = getRosterKey(r);
-    if (!key) continue;
+    if (!key || isItemDeleted(r, key, deletedIds)) continue;
 
     if (!map.has(key)) {
       map.set(key, r);
@@ -222,10 +229,11 @@ export function mergeRosters(localRosters = [], remoteRosters = []) {
   return Array.from(map.values());
 }
 
-// دمج الشفتات النشطة (activeShifts) مع منع استعادة الشفتات المنتهية
-export function mergeActiveShifts(localShifts = {}, remoteShifts = {}, mergedShifts = []) {
+// دمج الشفتات النشطة (activeShifts) مع منع استعادة الشفتات المنتهية أو المحذوفة
+export function mergeActiveShifts(localShifts = {}, remoteShifts = {}, mergedShifts = [], options = {}) {
   const local = typeof localShifts === 'object' && localShifts && !Array.isArray(localShifts) ? localShifts : {};
   const remote = typeof remoteShifts === 'object' && remoteShifts && !Array.isArray(remoteShifts) ? remoteShifts : {};
+  const deletedIds = options.deletedIds instanceof Set ? options.deletedIds : new Set(toSafeArray(options.deletedIds).map(String));
 
   // بناء مجموعة لتواقيع الشفتات المكتملة والمغلقة
   const closedShiftSignatures = new Set();
@@ -241,6 +249,7 @@ export function mergeActiveShifts(localShifts = {}, remoteShifts = {}, mergedShi
 
   // 1. فحص الشفتات النشطة المحلية أولاً (الأولوية لإجراءات الجهاز المحلي)
   for (const empId of Object.keys(local)) {
+    if (deletedIds.has(String(empId)) || deletedIds.has(`emp_${empId}`)) continue;
     const act = local[empId];
     if (!act || !act.date) continue;
     const sig = `${String(empId)}_${act.date}_${act.timeIn}`;
@@ -249,15 +258,15 @@ export function mergeActiveShifts(localShifts = {}, remoteShifts = {}, mergedShi
     }
   }
 
-  // 2. دمج الشفتات النشطة من السحابة إذا لم تكن مسجلة كانصراف مكتمل
+  // 2. دمج الشفتات النشطة من السحابة إذا لم تكن مسجلة كانصراف مكتمل أو محذوفة
   for (const empId of Object.keys(remote)) {
+    if (deletedIds.has(String(empId)) || deletedIds.has(`emp_${empId}`)) continue;
     const act = remote[empId];
     if (!act || !act.date) continue;
     const sig = `${String(empId)}_${act.date}_${act.timeIn}`;
     if (closedShiftSignatures.has(sig)) continue;
 
     if (!merged[empId]) {
-      // التحقق مما إذا كان هناك شفت أحدث لنفس اليوم محفوظ بالفعل
       const hasClosedShiftAfter = Array.isArray(mergedShifts) && mergedShifts.some(
         s => String(s.employeeId) === String(empId) && s.date === act.date && s.timeIn >= act.timeIn
       );
@@ -280,9 +289,93 @@ export function smartMergeStates(localState, remoteState) {
   if (!localState || typeof localState !== 'object') return remoteState;
 
   const deletedIds = new Set([
-    ...toSafeArray(localState._deletedIds || []),
-    ...toSafeArray(remoteState._deletedIds || [])
+    ...toSafeArray(localState._deletedIds || []).map(String),
+    ...toSafeArray(remoteState._deletedIds || []).map(String)
   ]);
+
+  // ── الكشف التلقائي الذكي عن العناصر المحذوفة محلياً (Auto-Diff Deletion Detection) ──
+  // 1. الموظفين المحذوفين
+  if (Array.isArray(localState.employees) && Array.isArray(remoteState.employees)) {
+    const localEmpIds = new Set(localState.employees.map(e => String(e.id)));
+    const localEmpCodes = new Set(localState.employees.map(e => String(e.code)));
+    for (const remEmp of remoteState.employees) {
+      if (remEmp && remEmp.id && !localEmpIds.has(String(remEmp.id)) && (!remEmp.code || !localEmpCodes.has(String(remEmp.code)))) {
+        deletedIds.add(String(remEmp.id));
+        deletedIds.add(`emp_${remEmp.id}`);
+        if (remEmp.code) {
+          deletedIds.add(String(remEmp.code));
+          deletedIds.add(`emp_${remEmp.code}`);
+        }
+      }
+    }
+  }
+
+  // 2. الفروع المحذوفة
+  if (Array.isArray(localState.branches) && Array.isArray(remoteState.branches)) {
+    const localBranchIds = new Set(localState.branches.map(b => String(b.id)));
+    for (const remBranch of remoteState.branches) {
+      if (remBranch && remBranch.id && !localBranchIds.has(String(remBranch.id))) {
+        deletedIds.add(String(remBranch.id));
+        deletedIds.add(`branch_${remBranch.id}`);
+      }
+    }
+  }
+
+  // 3. الورديات المحذوفة
+  if (Array.isArray(localState.shifts) && Array.isArray(remoteState.shifts)) {
+    const localShiftIds = new Set(localState.shifts.map(s => String(s.id)));
+    for (const remShift of remoteState.shifts) {
+      if (remShift && remShift.id && !localShiftIds.has(String(remShift.id))) {
+        deletedIds.add(String(remShift.id));
+        deletedIds.add(`shift_${remShift.id}`);
+      }
+    }
+  }
+
+  // 4. التسويات والمكافآت والخصومات المحذوفة
+  if (Array.isArray(localState.adjustments) && Array.isArray(remoteState.adjustments)) {
+    const localAdjIds = new Set(localState.adjustments.map(a => String(a.id)));
+    for (const remAdj of remoteState.adjustments) {
+      if (remAdj && remAdj.id && !localAdjIds.has(String(remAdj.id))) {
+        deletedIds.add(String(remAdj.id));
+        deletedIds.add(`adj_${remAdj.id}`);
+      }
+    }
+  }
+
+  // 5. السلف والآجل المحذوف
+  if (Array.isArray(localState.loans) && Array.isArray(remoteState.loans)) {
+    const localLoanIds = new Set(localState.loans.map(l => String(l.id)));
+    for (const remLoan of remoteState.loans) {
+      if (remLoan && remLoan.id && !localLoanIds.has(String(remLoan.id))) {
+        deletedIds.add(String(remLoan.id));
+        deletedIds.add(`loan_${remLoan.id}`);
+      }
+    }
+  }
+
+  // 6. الطلبات المحذوفة
+  if (Array.isArray(localState.requests) && Array.isArray(remoteState.requests)) {
+    const localReqIds = new Set(localState.requests.map(r => String(r.id)));
+    for (const remReq of remoteState.requests) {
+      if (remReq && remReq.id && !localReqIds.has(String(remReq.id))) {
+        deletedIds.add(String(remReq.id));
+        deletedIds.add(`req_${remReq.id}`);
+      }
+    }
+  }
+
+  // 7. الأجهزة المحذوفة
+  if (Array.isArray(localState.authorizedDevices) && Array.isArray(remoteState.authorizedDevices)) {
+    const localDevIds = new Set(localState.authorizedDevices.map(d => String(d.deviceId || d.id)));
+    for (const remDev of remoteState.authorizedDevices) {
+      const devKey = String(remDev.deviceId || remDev.id);
+      if (remDev && devKey && !localDevIds.has(devKey)) {
+        deletedIds.add(devKey);
+        deletedIds.add(`dev_${devKey}`);
+      }
+    }
+  }
 
   const mergedShifts = mergeArrays(localState.shifts, remoteState.shifts, { prefix: 'shift', deletedIds });
 
@@ -303,7 +396,6 @@ export function smartMergeStates(localState, remoteState) {
       } else if (localTime > remoteTime) {
         mergedSettings = { ...remoteSettings, ...localSettings };
       } else {
-        // Equal times, trust remote as truth if permissions exist
         mergedSettings = { ...localSettings, ...remoteSettings };
         if (remoteSettings.permissions !== undefined) {
           mergedSettings.permissions = remoteSettings.permissions;
@@ -338,7 +430,7 @@ export function smartMergeStates(localState, remoteState) {
     requests: mergeArrays(localState.requests, remoteState.requests, { prefix: 'req', deletedIds }),
     resignationRequests: mergeArrays(localState.resignationRequests, remoteState.resignationRequests, { prefix: 'res', deletedIds }),
     leaveRequests: mergeArrays(localState.leaveRequests, remoteState.leaveRequests, { prefix: 'leave', deletedIds }),
-    leaveHistory: mergeArrays(localState.leaveHistory, remoteState.leaveHistory, { prefix: 'lhist', deletedIds: new Set() }),
+    leaveHistory: mergeArrays(localState.leaveHistory, remoteState.leaveHistory, { prefix: 'lhist', deletedIds }),
     shiftSwaps: mergeArrays(localState.shiftSwaps, remoteState.shiftSwaps, { prefix: 'swap', deletedIds }),
     loans: mergeArrays(localState.loans, remoteState.loans, { prefix: 'loan', deletedIds }),
     logs: mergeArrays(localState.logs, remoteState.logs, { prefix: 'log', deletedIds }),
@@ -351,8 +443,8 @@ export function smartMergeStates(localState, remoteState) {
     transactions: mergeArrays(localState.transactions, remoteState.transactions, { prefix: 'tx', deletedIds }),
 
     // 4. الجداول والشفتات وقائمة المحذوفات
-    rosters: mergeRosters(localState.rosters, remoteState.rosters),
-    activeShifts: mergeActiveShifts(localState.activeShifts, remoteState.activeShifts, mergedShifts),
-    _deletedIds: Array.from(deletedIds).slice(-1000)
+    rosters: mergeRosters(localState.rosters, remoteState.rosters, { deletedIds }),
+    activeShifts: mergeActiveShifts(localState.activeShifts, remoteState.activeShifts, mergedShifts, { deletedIds }),
+    _deletedIds: Array.from(deletedIds).slice(-2000)
   };
 }

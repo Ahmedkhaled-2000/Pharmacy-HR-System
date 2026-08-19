@@ -54,6 +54,7 @@ import WhatsAppMessagingHub from './components/whatsapp/WhatsAppMessagingHub';
 import EmployeePortalView from './components/employee-portal/EmployeePortalView';
 
 import DeviceApprovalManager from './components/settings/DeviceApprovalManager';
+import { apiArchiveDeleteEmployee } from './utils/archiveApiClient';
 
 // New Comprehensive System Modules
 import LoginPage from './components/auth/LoginPage';
@@ -709,10 +710,11 @@ export default function App() {
 
   const handleDeleteBranch = async (branchId) => {
     const updatedBranches = (state.branches || []).filter((b) => b.id !== branchId);
-    const updatedState = { ...state, branches: updatedBranches };
+    const updatedDeletedIds = Array.from(new Set([...(state._deletedIds || []), String(branchId), `branch_${branchId}`])).slice(-2000);
+    const updatedState = { ...state, branches: updatedBranches, _deletedIds: updatedDeletedIds };
     setState(updatedState);
     await saveState(updatedState);
-    showToast('🗑️ تم حذف الفرع');
+    showToast('🗑️ تم حذف الفرع نهائياً');
   };
 
   const handleSaveEmployeeFile = async (empData) => {
@@ -1596,7 +1598,12 @@ export default function App() {
       return emp;
     });
 
-    const updatedState = { ...state, employees: updatedEmps };
+    let updatedDeletedIds = state._deletedIds || [];
+    if (newStatus === 'deleted' || newStatus === 'rejected') {
+      updatedDeletedIds = Array.from(new Set([...updatedDeletedIds, String(deviceId), `dev_${deviceId}`])).slice(-2000);
+    }
+
+    const updatedState = { ...state, employees: updatedEmps, _deletedIds: updatedDeletedIds };
     setState(updatedState);
     await saveState(updatedState);
     showToast(newStatus === 'approved' ? '✅ تم اعتماد الجهاز بنجاح' : '🗑 تم حذف/رفض الجهاز');
@@ -1609,16 +1616,64 @@ export default function App() {
       showToast('لا يمكن حذف الموظف الوحيد المتبقي بالنظام');
       return;
     }
-    if (!window.confirm(`هل أنت تأكد من حذف الموظف "${emp.name}"؟`)) return;
+    if (!window.confirm(`هل أنت متأكد من حذف الموظف "${emp.name}" نهائياً من كافة سجلات النظام؟`)) return;
 
-    const updatedEmps = state.employees.filter((e) => e.id !== empId);
+    const empIdStr = String(empId);
+    const empCodeStr = String(emp.code || '');
+
+    // 1. استبعاد الموظف من قائمة الموظفين
+    const updatedEmps = state.employees.filter((e) => String(e.id) !== empIdStr && String(e.code) !== empCodeStr);
+    
+    // 2. تنظيف الورديات والطلبات والشفتات النشطة والجداول التابعة للموظف
     const updatedActive = { ...state.activeShifts };
     delete updatedActive[empId];
+    delete updatedActive[empIdStr];
 
-    const updatedState = { ...state, employees: updatedEmps, activeShifts: updatedActive };
+    const updatedShifts = (state.shifts || []).filter((s) => String(s.employeeId) !== empIdStr);
+    const updatedRequests = (state.requests || []).filter((r) => String(r.employeeId) !== empIdStr);
+    const updatedResignations = (state.resignationRequests || []).filter((r) => String(r.employeeId) !== empIdStr);
+    const updatedLeaves = (state.leaveRequests || []).filter((l) => String(l.employeeId) !== empIdStr);
+    const updatedLoans = (state.loans || []).filter((l) => String(l.employeeId) !== empIdStr);
+    const updatedAdjs = (state.adjustments || []).filter((a) => String(a.employeeId) !== empIdStr);
+    const updatedRosters = (state.rosters || []).filter((r) => String(r.employeeId) !== empIdStr);
+    const updatedLateIncidents = (state.lateIncidents || []).filter((i) => String(i.employeeId) !== empIdStr);
+    const updatedNotes = (state.employeeNotes || []).filter((n) => String(n.employeeId) !== empIdStr);
+    const updatedEvals = (state.evaluations || []).filter((ev) => String(ev.employeeId) !== empIdStr);
+
+    // 3. تسجيل المعرفات المحذوفة لمنع استعادتها من أي جهاز أو سحابة
+    const updatedDeletedIds = Array.from(new Set([
+      ...(state._deletedIds || []),
+      empIdStr,
+      empCodeStr,
+      `emp_${empIdStr}`,
+      `emp_${empCodeStr}`
+    ])).filter(Boolean).slice(-2000);
+
+    // 4. حذف الموظف من خادم الأرشيف السحابي إن وجد
+    try {
+      apiArchiveDeleteEmployee(empId).catch(() => {});
+    } catch {}
+
+    const updatedState = {
+      ...state,
+      employees: updatedEmps,
+      activeShifts: updatedActive,
+      shifts: updatedShifts,
+      requests: updatedRequests,
+      resignationRequests: updatedResignations,
+      leaveRequests: updatedLeaves,
+      loans: updatedLoans,
+      adjustments: updatedAdjs,
+      rosters: updatedRosters,
+      lateIncidents: updatedLateIncidents,
+      employeeNotes: updatedNotes,
+      evaluations: updatedEvals,
+      _deletedIds: updatedDeletedIds
+    };
+
     setState(updatedState);
     await saveState(updatedState);
-    showToast(`تم حذف الموظف "${emp.name}"`);
+    showToast(`✅ تم حذف ملف الموظف "${emp.name}" وجميع سجلاته نهائياً`);
   };
 
   // Open Employee ID Card & QR Modal
@@ -1754,7 +1809,8 @@ export default function App() {
       return;
     }
     const updatedShifts = state.shifts.filter((s) => s.id !== id);
-    let updatedState = { ...state, shifts: updatedShifts };
+    const updatedDeletedIds = Array.from(new Set([...(state._deletedIds || []), String(id), `shift_${id}`])).slice(-2000);
+    let updatedState = { ...state, shifts: updatedShifts, _deletedIds: updatedDeletedIds };
     if (shift?.employeeId) {
       const recRes = recalculateEmployeeCycleLateness({
         employeeId: shift.employeeId,
@@ -1803,10 +1859,11 @@ export default function App() {
 
   const deleteAdjustment = async (id) => {
     const updatedAdjs = state.adjustments.filter((a) => a.id !== id);
-    const updatedState = { ...state, adjustments: updatedAdjs };
+    const updatedDeletedIds = Array.from(new Set([...(state._deletedIds || []), String(id), `adj_${id}`])).slice(-2000);
+    const updatedState = { ...state, adjustments: updatedAdjs, _deletedIds: updatedDeletedIds };
     setState(updatedState);
     await saveState(updatedState);
-    showToast('تم حذف التسوية المالية');
+    showToast('تم حذف التسوية المالية نهائياً');
   };
 
   // Day schedule lookup helper supporting exact date, English and Arabic keys
