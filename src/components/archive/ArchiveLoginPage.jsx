@@ -51,11 +51,11 @@ export default function ArchiveLoginPage({
   return (
     <div className="arch-root" style={{
       minHeight: '100vh',
-      backgroundColor: '#020617',
+      backgroundColor: '#070b14',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      padding: '1rem',
+      padding: '1.5rem',
       position: 'relative',
       overflow: 'hidden',
       color: '#f8fafc',
@@ -65,31 +65,20 @@ export default function ArchiveLoginPage({
       {/* Subtle Background Glow Orbs */}
       <div style={{
         position: 'absolute',
-        top: '25%',
-        right: '25%',
-        width: '384px',
-        height: '384px',
-        backgroundColor: 'rgba(37, 99, 235, 0.12)',
+        top: '20%',
+        right: '30%',
+        width: '450px',
+        height: '450px',
+        backgroundColor: 'rgba(37, 99, 235, 0.08)',
         borderRadius: '9999px',
-        filter: 'blur(64px)',
-        pointerEvents: 'none'
-      }} />
-      <div style={{
-        position: 'absolute',
-        bottom: '25%',
-        left: '25%',
-        width: '384px',
-        height: '384px',
-        backgroundColor: 'rgba(79, 70, 229, 0.12)',
-        borderRadius: '9999px',
-        filter: 'blur(64px)',
+        filter: 'blur(80px)',
         pointerEvents: 'none'
       }} />
 
-      <div style={{ width: '100%', maxWidth: '448px', position: 'relative', zIndex: 10, display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      <div style={{ width: '100%', maxWidth: '440px', position: 'relative', zIndex: 10, display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
         
-        {/* Header Branding */}
-        <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
+        {/* Header Branding (Screenshot 3 Match) */}
+        <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.625rem' }}>
           {pharmacyLogo ? (
             <div style={{
               width: '64px',
@@ -102,43 +91,46 @@ export default function ArchiveLoginPage({
               alignItems: 'center',
               justifyContent: 'center',
               margin: '0 auto',
-              boxShadow: '0 10px 25px -5px rgba(59, 130, 246, 0.15)',
+              boxShadow: '0 10px 25px -5px rgba(59, 130, 246, 0.2)',
               overflow: 'hidden'
             }}>
               <img src={pharmacyLogo} alt={pharmacyName} style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '12px' }} />
             </div>
           ) : (
             <div style={{
-              width: '64px',
-              height: '64px',
+              width: '56px',
+              height: '56px',
               borderRadius: '16px',
-              background: 'rgba(37, 99, 235, 0.2)',
+              background: '#1e3a8a',
               color: '#60a5fa',
-              border: '1px solid rgba(59, 130, 246, 0.3)',
+              border: '1px solid #2563eb',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               margin: '0 auto',
-              boxShadow: '0 10px 25px -5px rgba(59, 130, 246, 0.15)'
+              boxShadow: '0 10px 25px -5px rgba(37, 99, 235, 0.3)'
             }}>
-              <ShieldCheck className="w-8 h-8" style={{ width: '32px', height: '32px' }} />
+              <ShieldCheck style={{ width: '30px', height: '30px' }} />
             </div>
           )}
-          <h1 style={{ fontSize: '1.5rem', fontWeight: 900, color: '#f1f5f9', margin: '0', letterSpacing: '-0.025em' }}>{pharmacyName}</h1>
-          <p style={{ fontSize: '0.75rem', color: '#94a3b8', margin: '0' }}>بوابة الأرشيف الرقمي وإدارة وتوثيق الفواتير والمستندات</p>
+          <h1 style={{ fontSize: '1.65rem', fontWeight: 900, color: '#f8fafc', margin: '0', letterSpacing: '-0.02em' }}>
+            {pharmacyName || 'صيدلية الفلاي'}
+          </h1>
+          <p style={{ fontSize: '0.8rem', color: '#94a3b8', margin: '0', fontWeight: 500 }}>
+            سجل الدخول لحماية وإدارة بيانات الصيدلية والموردين
+          </p>
         </div>
 
-        {/* Login Form Card */}
-        <div className="glass-card" style={{
-          borderRadius: '24px',
+        {/* Login Form Card (Screenshot 3 Match) */}
+        <div style={{
+          borderRadius: '20px',
           padding: '2rem',
-          background: 'rgba(30, 41, 59, 0.75)',
-          backdropFilter: 'blur(16px)',
-          border: '1px solid rgba(255, 255, 255, 0.08)',
-          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.75)',
+          background: '#0b1120',
+          border: '1px solid #1e293b',
+          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.85)',
           display: 'flex',
           flexDirection: 'column',
-          gap: '1.5rem'
+          gap: '1.25rem'
         }}>
           
           {errorMsg && (
@@ -159,11 +151,11 @@ export default function ArchiveLoginPage({
             </div>
           )}
 
-          <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
             
             {/* Username */}
             <div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.75rem', fontWeight: 700, color: '#cbd5e1', marginBottom: '0.375rem' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.75rem', fontWeight: 700, color: '#cbd5e1', marginBottom: '0.5rem' }}>
                 <User style={{ width: '14px', height: '14px', color: '#60a5fa' }} />
                 اسم المستخدم:
               </label>
@@ -172,25 +164,27 @@ export default function ArchiveLoginPage({
                 required
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="أدخل اسم المستخدم (افتراضي: admin)"
+                placeholder="أدخل اسم المستخدم"
                 style={{
                   width: '100%',
-                  padding: '0.625rem 1rem',
+                  padding: '0.75rem 1rem',
                   borderRadius: '12px',
-                  backgroundColor: '#0f172a',
+                  backgroundColor: '#070b14',
                   border: '1px solid #334155',
                   fontSize: '0.875rem',
                   color: '#f8fafc',
                   outline: 'none',
                   transition: 'border-color 0.2s',
-                  fontFamily: 'inherit'
+                  fontFamily: 'inherit',
+                  direction: 'ltr',
+                  textAlign: 'center'
                 }}
               />
             </div>
 
             {/* Password */}
             <div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.75rem', fontWeight: 700, color: '#cbd5e1', marginBottom: '0.375rem' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.75rem', fontWeight: 700, color: '#cbd5e1', marginBottom: '0.5rem' }}>
                 <Lock style={{ width: '14px', height: '14px', color: '#818cf8' }} />
                 كلمة المرور:
               </label>
@@ -200,19 +194,19 @@ export default function ArchiveLoginPage({
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="أدخل كلمة المرور للأرشيف"
+                  placeholder="أدخل كلمة المرور الحماية"
                   style={{
                     width: '100%',
-                    padding: '0.625rem 2.5rem 0.625rem 1rem',
+                    padding: '0.75rem 2.5rem 0.75rem 1rem',
                     borderRadius: '12px',
-                    backgroundColor: '#0f172a',
+                    backgroundColor: '#070b14',
                     border: '1px solid #334155',
                     fontSize: '0.875rem',
                     color: '#f8fafc',
                     outline: 'none',
                     transition: 'border-color 0.2s',
                     direction: 'ltr',
-                    textAlign: 'left',
+                    textAlign: 'center',
                     fontFamily: 'inherit'
                   }}
                 />
@@ -221,7 +215,7 @@ export default function ArchiveLoginPage({
                   onClick={() => setShowPassword(!showPassword)}
                   style={{
                     position: 'absolute',
-                    right: '0.75rem',
+                    right: '0.875rem',
                     top: '50%',
                     transform: 'translateY(-50%)',
                     color: '#94a3b8',
@@ -242,20 +236,23 @@ export default function ArchiveLoginPage({
             <button
               type="submit"
               disabled={isLoading}
-              className="gradient-btn"
               style={{
                 width: '100%',
-                padding: '0.75rem 1rem',
+                padding: '0.875rem 1rem',
                 borderRadius: '12px',
                 fontWeight: 700,
-                fontSize: '0.75rem',
+                fontSize: '0.875rem',
                 color: '#ffffff',
+                backgroundColor: '#2563eb',
+                border: '1px solid #3b82f6',
+                boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)',
+                cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '0.5rem',
                 opacity: isLoading ? 0.6 : 1,
-                marginTop: '0.5rem'
+                marginTop: '0.25rem'
               }}
             >
               {isLoading ? (
@@ -264,7 +261,7 @@ export default function ArchiveLoginPage({
                   <span>جاري تسجيل الدخول...</span>
                 </>
               ) : (
-                <span>تسجيل الدخول للأرشيف</span>
+                <span>تسجيل الدخول للنظام</span>
               )}
             </button>
 
@@ -272,9 +269,9 @@ export default function ArchiveLoginPage({
 
         </div>
 
-        {/* Footer */}
-        <p style={{ fontSize: '0.6875rem', textAlign: 'center', color: '#64748b', margin: 0 }}>
-          نظام توثيق الأرشيف الإلكتروني © {pharmacyName}
+        {/* Footer (Screenshot 3 Match) */}
+        <p style={{ fontSize: '0.75rem', textAlign: 'center', color: '#64748b', margin: 0 }}>
+          نظام أرشفة الفواتير الإلكتروني © {pharmacyName || 'صيدلية الفلاي'}
         </p>
 
       </div>

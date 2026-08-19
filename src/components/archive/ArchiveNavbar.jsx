@@ -9,22 +9,25 @@ import {
   FilePlus,
   LogOut,
   X,
-  Menu
+  Menu,
+  Plus
 } from 'lucide-react';
 import { getArchiveUsername, clearArchiveSession } from '../../utils/archiveApiClient';
 
 export default function ArchiveNavbar({
   activeTab,
   setActiveTab,
-  pharmacyName = 'صيدليات مداواة',
+  pharmacyName = 'صيدلية الفلاي',
   pharmacyLogo = '',
   onOpenUploadModal,
   onOpenEmployeeModal,
   onOpenScanModal,
-  onLogout
+  onLogout,
+  settings = {}
 }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const currentUsername = getArchiveUsername();
+  const displayName = settings.pharmacyName || pharmacyName || 'صيدلية الفلاي';
 
   const handleSystemLogout = () => {
     if (!window.confirm('هل تريد بالتأكيد تسجيل الخروج من نظام الأرشيف؟')) return;
@@ -34,45 +37,45 @@ export default function ArchiveNavbar({
   };
 
   const navLinks = [
-    { id: 'invoices', name: 'الفواتير والأرشيف العام', icon: LayoutDashboard },
-    { id: 'suppliers', name: 'الموردين', icon: Building2 },
+    { id: 'invoices', name: 'الأرشيف ولوحة التحكم', icon: LayoutDashboard },
     { id: 'employees', name: 'الموظفين', icon: Users },
+    { id: 'suppliers', name: 'الموردين', icon: Building2 },
     { id: 'settings', name: 'إعدادات النظام', icon: Settings },
   ];
 
   return (
-    <header className="sticky top-0 z-40 glass-nav shadow-lg" style={{
-      background: 'rgba(15, 23, 42, 0.9)',
-      backdropFilter: 'blur(16px)',
-      borderBottom: '1px solid rgba(255, 255, 255, 0.08)'
+    <header className="sticky top-0 z-40" style={{
+      background: '#070b14',
+      borderBottom: '1px solid #1e293b',
+      boxShadow: '0 4px 20px -2px rgba(0, 0, 0, 0.6)'
     }}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-20">
           
-          {/* Logo & Institution Branding */}
+          {/* Right Logo & Institution Branding */}
           <div 
             onClick={() => setActiveTab('invoices')}
             className="flex items-center gap-3 cursor-pointer select-none"
           >
             {pharmacyLogo ? (
-              <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-slate-900 border border-slate-700/80 p-1 flex items-center justify-center shadow-md shadow-blue-500/10 shrink-0 overflow-hidden">
-                <img src={pharmacyLogo} alt={pharmacyName} className="w-full h-full object-contain rounded-lg" />
+              <div className="w-11 h-11 rounded-xl bg-slate-900 border border-slate-700/80 p-1 flex items-center justify-center shadow-lg shadow-blue-500/10 shrink-0 overflow-hidden">
+                <img src={pharmacyLogo} alt={displayName} className="w-full h-full object-contain rounded-lg" />
               </div>
             ) : (
-              <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20 shrink-0" style={{ background: 'linear-gradient(135deg, #2563eb, #4f46e5)' }}>
+              <div className="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg shadow-blue-600/30 shrink-0" style={{ background: '#2563eb' }}>
                 <ShieldCheck className="w-6 h-6 text-white" />
               </div>
             )}
             <div>
-              <h1 className="text-sm sm:text-lg font-bold text-slate-100 tracking-wide truncate max-w-[170px] sm:max-w-none" style={{ margin: 0 }}>
-                {pharmacyName}
+              <h1 className="text-base sm:text-lg font-black text-slate-100 tracking-wide truncate" style={{ margin: 0 }}>
+                {displayName}
               </h1>
-              <p className="text-[10px] sm:text-[11px] text-blue-400 font-semibold" style={{ margin: 0 }}>نظام الأرشيف الإلكتروني الذكي</p>
+              <p className="text-[11px] text-blue-400 font-semibold" style={{ margin: 0 }}>أرشيف الفواتير الرقمي</p>
             </div>
           </div>
 
-          {/* Desktop Navigation Links */}
-          <nav className="hidden md:flex items-center gap-1.5 bg-slate-800/60 p-1.5 rounded-xl border border-slate-700/50">
+          {/* Center Navigation Links Pills */}
+          <nav className="hidden md:flex items-center gap-1.5 p-1.5 rounded-2xl" style={{ background: '#0b1120', border: '1px solid #1e293b' }}>
             {navLinks.map((link) => {
               const Icon = link.icon;
               const isActive = activeTab === link.id;
@@ -81,12 +84,12 @@ export default function ArchiveNavbar({
                   key={link.id}
                   type="button"
                   onClick={() => setActiveTab(link.id)}
-                  className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all border-0 cursor-pointer ${
+                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all border-0 cursor-pointer ${
                     isActive
-                      ? 'bg-blue-600 text-white shadow-md'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-700/50 bg-transparent'
+                      ? 'text-white shadow-md'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 bg-transparent'
                   }`}
-                  style={isActive ? { background: '#2563eb', color: '#ffffff' } : {}}
+                  style={isActive ? { background: '#2563eb', color: '#ffffff', boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)' } : {}}
                 >
                   <Icon className="w-4 h-4" />
                   <span>{link.name}</span>
@@ -95,33 +98,23 @@ export default function ArchiveNavbar({
             })}
           </nav>
 
-          {/* Quick Action Buttons */}
-          <div className="flex items-center gap-2">
-            {onOpenScanModal && (
-              <button
-                type="button"
-                onClick={onOpenScanModal}
-                className="hidden xl:flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 bg-slate-800/80 hover:bg-slate-700 border border-slate-700 transition cursor-pointer"
-                title="فحص مجلد الفواتير تلقائياً"
-              >
-                <Scan className="w-3.5 h-3.5 text-cyan-400" />
-                <span>فحص مجلد</span>
-              </button>
-            )}
-
+          {/* Left Action Buttons */}
+          <div className="flex items-center gap-2.5">
             <button
               type="button"
               onClick={onOpenEmployeeModal}
-              className="hidden lg:flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition cursor-pointer"
+              className="hidden lg:flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white transition cursor-pointer"
+              style={{ background: '#0f172a', border: '1px solid #334155' }}
             >
-              <Users className="w-3.5 h-3.5 text-blue-400" />
+              <Plus className="w-3.5 h-3.5 text-blue-400" />
               <span>إضافة موظف</span>
             </button>
 
             <button
               type="button"
               onClick={onOpenUploadModal}
-              className="flex items-center gap-1.5 px-3 py-2 sm:px-3.5 sm:py-2 rounded-xl text-xs font-bold text-white gradient-btn shadow-md cursor-pointer"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold text-white shadow-lg cursor-pointer transition transform hover:scale-[1.02]"
+              style={{ background: '#2563eb', border: '1px solid #3b82f6', boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)' }}
             >
               <FilePlus className="w-4 h-4" />
               <span className="hidden sm:inline">رفع فاتورة جديدة</span>
@@ -132,7 +125,8 @@ export default function ArchiveNavbar({
               type="button"
               onClick={handleSystemLogout}
               title={`تسجيل الخروج (${currentUsername})`}
-              className="hidden sm:flex p-2 rounded-xl text-slate-400 hover:text-red-400 hover:bg-red-950/40 border border-slate-800 transition cursor-pointer"
+              className="p-2.5 rounded-xl text-slate-400 hover:text-red-400 hover:bg-red-950/40 transition cursor-pointer"
+              style={{ background: '#0f172a', border: '1px solid #1e293b' }}
             >
               <LogOut className="w-4 h-4" />
             </button>

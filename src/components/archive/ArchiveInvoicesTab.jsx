@@ -11,7 +11,9 @@ import {
   Eye,
   Trash2,
   Loader2,
-  Scan
+  Scan,
+  RotateCcw,
+  CloudUpload
 } from 'lucide-react';
 import { apiArchiveDeleteInvoice } from '../../utils/archiveApiClient';
 import { loadExcelJS } from '../../utils/excelExport';
@@ -32,7 +34,31 @@ export default function ArchiveInvoicesTab({
   const [selectedClerkId, setSelectedClerkId] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [quickDateFilter, setQuickDateFilter] = useState('all'); // 'all' | 'today' | 'week' | 'month'
   const [deletingId, setDeletingId] = useState(null);
+
+  const handleQuickDateSelect = (mode) => {
+    setQuickDateFilter(mode);
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+
+    if (mode === 'all') {
+      setStartDate('');
+      setEndDate('');
+    } else if (mode === 'today') {
+      setStartDate(todayStr);
+      setEndDate(todayStr);
+    } else if (mode === 'week') {
+      const firstDay = new Date(today);
+      firstDay.setDate(today.getDate() - today.getDay());
+      setStartDate(firstDay.toISOString().split('T')[0]);
+      setEndDate(todayStr);
+    } else if (mode === 'month') {
+      const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+      setStartDate(firstDay.toISOString().split('T')[0]);
+      setEndDate(todayStr);
+    }
+  };
 
   // Fast In-Memory Filtering
   const filteredInvoices = useMemo(() => {
@@ -54,18 +80,20 @@ export default function ArchiveInvoicesTab({
         const numMatch = (inv.invoiceNumber || inv.invoice_number || '').toLowerCase().includes(q);
         const supMatch = (inv.supplier?.name || inv.supplier_name || '').toLowerCase().includes(q);
         const notesMatch = (inv.notes || '').toLowerCase().includes(q);
+        const recMatch = (inv.receiver?.name || inv.receiver_name || '').toLowerCase().includes(q);
+        const clkMatch = (inv.entryClerk?.name || inv.entry_clerk_name || '').toLowerCase().includes(q);
         const itemMatch = inv.items?.some(
           (i) => (i.productName || i.product_name || i.item_name || '').toLowerCase().includes(q) || (i.batchNumber || i.batch_number || '').toLowerCase().includes(q)
         );
 
-        if (!numMatch && !supMatch && !notesMatch && !itemMatch) return false;
+        if (!numMatch && !supMatch && !notesMatch && !recMatch && !clkMatch && !itemMatch) return false;
       }
 
       return true;
     });
   }, [invoices, searchQuery, selectedSupplierId, selectedReceiverId, selectedClerkId, startDate, endDate]);
 
-  // Statistics Calculations
+  // Financial Computations
   const totalNet = filteredInvoices.reduce((sum, inv) => sum + (parseFloat(inv.netAmount || inv.net_amount || inv.totalAmount || inv.total_amount || 0)), 0);
 
   const handleDeleteInvoice = async (invId, invNumber, e) => {
@@ -105,10 +133,10 @@ export default function ArchiveInvoicesTab({
         { header: 'رقم الفاتورة', key: 'invoiceNumber', width: 18 },
         { header: 'اسم المورد / الشركة', key: 'supplierName', width: 26 },
         { header: 'تاريخ الفاتورة', key: 'invoiceDate', width: 14 },
-        { header: 'المستلم', key: 'receiver', width: 18 },
+        { header: 'مستلم الفاتورة', key: 'receiver', width: 18 },
         { header: 'مدخل البيانات', key: 'entryClerk', width: 18 },
         { header: 'عدد الأصناف', key: 'itemsCount', width: 12 },
-        { header: 'الصافي (ج.م)', key: 'netAmount', width: 16 },
+        { header: 'إجمالي الصافي (ج.م)', key: 'netAmount', width: 16 },
         { header: 'ملاحظات', key: 'notes', width: 30 }
       ];
 
@@ -149,160 +177,274 @@ export default function ArchiveInvoicesTab({
   return (
     <div className="space-y-6 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       
-      {/* Top Header & Fast Metric Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* ── 1. TOP 3 KPI STAT CARDS (Screenshot 2 Match) ── */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         
-        {/* Card 1: Total Invoices */}
-        <div className="glass-card p-5 border border-slate-800 rounded-2xl flex items-center justify-between shadow-lg">
+        {/* Card 1: Total Archived Invoices */}
+        <div className="p-6 rounded-2xl flex items-center justify-between shadow-xl" style={{ background: '#0b1120', border: '1px solid #1e293b' }}>
           <div>
-            <p className="text-xs text-slate-400 font-medium">إجمالي الفواتير المؤرشفة</p>
-            <h3 className="text-2xl font-black text-slate-100 mt-1">{invoices.length}</h3>
-            <span className="text-[10px] text-blue-400 font-semibold">{filteredInvoices.length} مطابقة للبحث</span>
+            <p className="text-xs text-slate-400 font-semibold" style={{ margin: 0 }}>إجمالي الفواتير المؤرشفة</p>
+            <h3 className="text-3xl font-black text-slate-100 mt-2" style={{ margin: '8px 0 0' }}>
+              {invoices.length} <span className="text-xl font-bold">فاتورة</span>
+            </h3>
           </div>
-          <div className="p-3 bg-blue-500/10 text-blue-400 rounded-2xl border border-blue-500/20 shadow-inner">
-            <FileText className="w-6 h-6" />
+          <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-inner" style={{ background: '#1e293b', color: '#38bdf8', border: '1px solid #334155' }}>
+            <FileText className="w-7 h-7" />
           </div>
         </div>
 
         {/* Card 2: Total Net Amount */}
-        <div className="glass-card p-5 border border-slate-800 rounded-2xl flex items-center justify-between shadow-lg">
+        <div className="p-6 rounded-2xl flex items-center justify-between shadow-xl" style={{ background: '#0b1120', border: '1px solid #1e293b' }}>
           <div>
-            <p className="text-xs text-slate-400 font-medium">صافي قيمة الفواتير المعروضة</p>
-            <h3 className="text-2xl font-black text-emerald-400 mt-1">
-              {totalNet.toLocaleString('ar-EG', { maximumFractionDigits: 2 })} ج.م
+            <p className="text-xs text-slate-400 font-semibold" style={{ margin: 0 }}>إجمالي قيمة الفواتير الصافية</p>
+            <h3 className="text-3xl font-black text-emerald-400 mt-2" style={{ margin: '8px 0 0', color: '#10b981' }}>
+              {totalNet.toLocaleString('ar-EG', { minimumFractionDigits: 2 })} <span className="text-lg font-bold">ج.م</span>
             </h3>
-            <span className="text-[10px] text-emerald-500 font-semibold">محدث لحظياً</span>
           </div>
-          <div className="p-3 bg-emerald-500/10 text-emerald-400 rounded-2xl border border-emerald-500/20 shadow-inner">
-            <DollarSign className="w-6 h-6" />
-          </div>
-        </div>
-
-        {/* Card 3: Suppliers Count */}
-        <div className="glass-card p-5 border border-slate-800 rounded-2xl flex items-center justify-between shadow-lg">
-          <div>
-            <p className="text-xs text-slate-400 font-medium">الشركات والموردين</p>
-            <h3 className="text-2xl font-black text-indigo-400 mt-1">{suppliers.length}</h3>
-            <span className="text-[10px] text-indigo-300 font-semibold">دليل الموردين النشط</span>
-          </div>
-          <div className="p-3 bg-indigo-500/10 text-indigo-400 rounded-2xl border border-indigo-500/20 shadow-inner">
-            <Building2 className="w-6 h-6" />
+          <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-inner" style={{ background: 'rgba(6, 78, 59, 0.4)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
+            <DollarSign className="w-7 h-7" />
           </div>
         </div>
 
-        {/* Card 4: Archive Staff */}
-        <div className="glass-card p-5 border border-slate-800 rounded-2xl flex items-center justify-between shadow-lg">
+        {/* Card 3: Pharma Companies Count */}
+        <div className="p-6 rounded-2xl flex items-center justify-between shadow-xl" style={{ background: '#0b1120', border: '1px solid #1e293b' }}>
           <div>
-            <p className="text-xs text-slate-400 font-medium">طاقم الاستلام والإدخال</p>
-            <h3 className="text-2xl font-black text-cyan-400 mt-1">{employees.length}</h3>
-            <span className="text-[10px] text-cyan-300 font-semibold">الموظفين المعتمدين</span>
+            <p className="text-xs text-slate-400 font-semibold" style={{ margin: 0 }}>إجمالي شركات الأدوية</p>
+            <h3 className="text-3xl font-black text-cyan-400 mt-2" style={{ margin: '8px 0 0', color: '#38bdf8' }}>
+              {suppliers.length} <span className="text-xl font-bold">شركة</span>
+            </h3>
           </div>
-          <div className="p-3 bg-cyan-500/10 text-cyan-400 rounded-2xl border border-cyan-500/20 shadow-inner">
-            <Users className="w-6 h-6" />
+          <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-inner" style={{ background: 'rgba(12, 74, 110, 0.4)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
+            <Building2 className="w-7 h-7" />
           </div>
         </div>
 
       </div>
 
-      {/* Main Filter & Action Bar */}
-      <div className="glass-card rounded-2xl p-5 border border-slate-800 space-y-4 shadow-xl">
+      {/* ── 2. FILTER & SEARCH SECTION (Screenshot 2 Match) ── */}
+      <div className="rounded-2xl p-5 space-y-4 shadow-xl text-right" style={{ background: '#0b1120', border: '1px solid #1e293b' }}>
         
-        <div className="flex flex-col lg:flex-row items-center justify-between gap-4">
-          
-          {/* Realtime Instant Search Input */}
-          <div className="relative w-full lg:w-96">
-            <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-3.5" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="بحث فوري برقم الفاتورة، اسم المورد، الصنف، رقم التشغيلة..."
-              className="w-full pr-10 pl-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 shadow-inner"
-            />
-          </div>
-
-          {/* Quick Filter Selectors */}
-          <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto">
-            
-            {/* Supplier Filter */}
+        {/* Filter Row 1: Suppliers Dropdown & Comprehensive Realtime Search */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+          <div className="lg:col-span-1">
             <select
               value={selectedSupplierId}
               onChange={(e) => setSelectedSupplierId(e.target.value)}
-              className="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+              className="w-full px-4 py-3 rounded-xl text-xs font-semibold text-slate-200 focus:outline-none focus:border-blue-500 cursor-pointer"
+              style={{ background: '#070b14', border: '1px solid #334155' }}
             >
-              <option value="">جميع الموردين ({suppliers.length})</option>
+              <option value="">جميع الشركات والموردين</option>
               {suppliers.map((s) => (
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
             </select>
+          </div>
 
-            {/* Date Range Filters */}
-            <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-slate-300">
-              <Calendar className="w-3.5 h-3.5 text-slate-500" />
-              <span>من:</span>
+          <div className="lg:col-span-2 relative">
+            <Search className="w-4 h-4 text-slate-400 absolute left-4 top-3.5" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="البحث الشامل الفوري (رقم الفاتورة، اسم المورد، الدواء، الباتش، الموظف.. أو الملاحظات)..."
+              className="w-full pl-11 pr-4 py-3 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 text-right"
+              style={{ background: '#070b14', border: '1px solid #334155' }}
+            />
+          </div>
+        </div>
+
+        {/* Filter Row 2: Quick Dates Pills & Date Range Picker */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+          
+          {/* Quick Date Pills */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <button
+              type="button"
+              onClick={() => handleQuickDateSelect('all')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                quickDateFilter === 'all' && !startDate && !endDate
+                  ? 'text-white'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              style={{
+                background: quickDateFilter === 'all' && !startDate && !endDate ? '#2563eb' : '#070b14',
+                border: '1px solid #334155'
+              }}
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>الكل</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleQuickDateSelect('today')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                quickDateFilter === 'today'
+                  ? 'text-white'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              style={{
+                background: quickDateFilter === 'today' ? '#2563eb' : '#070b14',
+                border: '1px solid #334155'
+              }}
+            >
+              اليوم
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleQuickDateSelect('week')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                quickDateFilter === 'week'
+                  ? 'text-white'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              style={{
+                background: quickDateFilter === 'week' ? '#2563eb' : '#070b14',
+                border: '1px solid #334155'
+              }}
+            >
+              هذا الأسبوع
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleQuickDateSelect('month')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                quickDateFilter === 'month'
+                  ? 'text-white'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              style={{
+                background: quickDateFilter === 'month' ? '#2563eb' : '#070b14',
+                border: '1px solid #334155'
+              }}
+            >
+              هذا الشهر
+            </button>
+          </div>
+
+          {/* Date Pickers */}
+          <div className="flex items-center gap-2 flex-wrap text-xs text-slate-300">
+            <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl" style={{ background: '#070b14', border: '1px solid #334155' }}>
+              <span className="text-slate-400 font-semibold">من تاريخ:</span>
               <input
                 type="date"
                 value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="bg-transparent text-slate-200 text-xs focus:outline-none border-none"
+                onChange={(e) => {
+                  setStartDate(e.target.value);
+                  setQuickDateFilter('custom');
+                }}
+                className="bg-transparent text-slate-200 text-xs focus:outline-none border-none font-mono"
               />
-              <span>إلى:</span>
+              <Calendar className="w-4 h-4 text-slate-400" />
+            </div>
+
+            <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl" style={{ background: '#070b14', border: '1px solid #334155' }}>
+              <span className="text-slate-400 font-semibold">إلى تاريخ:</span>
               <input
                 type="date"
                 value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="bg-transparent text-slate-200 text-xs focus:outline-none border-none"
+                onChange={(e) => {
+                  setEndDate(e.target.value);
+                  setQuickDateFilter('custom');
+                }}
+                className="bg-transparent text-slate-200 text-xs focus:outline-none border-none font-mono"
               />
+              <Calendar className="w-4 h-4 text-slate-400" />
             </div>
-
-            {/* Excel Export Button */}
-            <button
-              type="button"
-              onClick={handleExportExcel}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-emerald-300 bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-800/60 transition shadow-sm cursor-pointer"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
-              <span>تصدير Excel</span>
-            </button>
-
-            {/* Auto Folder Scan Button */}
-            {onOpenScanModal && (
-              <button
-                type="button"
-                onClick={onOpenScanModal}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-cyan-300 bg-cyan-950/60 hover:bg-cyan-900 border border-cyan-800/60 transition shadow-sm cursor-pointer"
-              >
-                <Scan className="w-3.5 h-3.5 text-cyan-400" />
-                <span>فحص مجلد</span>
-              </button>
-            )}
-
           </div>
 
         </div>
 
+        {/* Filter Row 3: Receiver & Clerk Filters */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 border-t" style={{ borderColor: '#1e293b' }}>
+          <div className="flex items-center gap-3">
+            <label className="text-xs font-semibold text-slate-400 whitespace-nowrap">فلترة المستلم:</label>
+            <select
+              value={selectedReceiverId}
+              onChange={(e) => setSelectedReceiverId(e.target.value)}
+              className="w-full px-3.5 py-2 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+              style={{ background: '#070b14', border: '1px solid #334155' }}
+            >
+              <option value="">الكل</option>
+              {employees.map((e) => (
+                <option key={e.id} value={e.id}>{e.name} ({e.role || 'موظف'})</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <label className="text-xs font-semibold text-slate-400 whitespace-nowrap">فلترة مدخل البيانات:</label>
+            <select
+              value={selectedClerkId}
+              onChange={(e) => setSelectedClerkId(e.target.value)}
+              className="w-full px-3.5 py-2 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+              style={{ background: '#070b14', border: '1px solid #334155' }}
+            >
+              <option value="">الكل</option>
+              {employees.map((e) => (
+                <option key={e.id} value={e.id}>{e.name} ({e.role || 'موظف'})</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
       </div>
 
-      {/* Invoices List Table Card */}
-      <div className="glass-card rounded-2xl border border-slate-800 overflow-hidden shadow-2xl">
+      {/* ── 3. INVOICES TABLE SECTION (Screenshot 2 Match) ── */}
+      <div className="rounded-2xl border overflow-hidden shadow-2xl" style={{ background: '#0b1120', borderColor: '#1e293b' }}>
         
+        {/* Table Header Bar */}
+        <div className="flex items-center justify-between p-5 border-b flex-wrap gap-3" style={{ background: '#070b14', borderColor: '#1e293b' }}>
+          
+          <div className="flex items-center gap-2.5">
+            {onOpenScanModal && (
+              <button
+                type="button"
+                onClick={onOpenScanModal}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer"
+                style={{ background: '#0f172a', border: '1px solid #0284c7', color: '#38bdf8' }}
+              >
+                <Scan className="w-4 h-4" />
+                <span>فحص مجلد الفواتير</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={handleExportExcel}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer"
+              style={{ background: '#0f172a', border: '1px solid #059669', color: '#34d399' }}
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              <span>تصدير الأرشيف شيت إكسل</span>
+            </button>
+          </div>
+
+          <h3 className="text-base font-black text-slate-100 flex items-center gap-2" style={{ margin: 0 }}>
+            <span>📁 أرشيف الفواتير المرفوعة والمستردة ({filteredInvoices.length})</span>
+          </h3>
+
+        </div>
+
         {/* Desktop Responsive Table */}
-        <div className="hidden md:block overflow-x-auto">
+        <div className="overflow-x-auto">
           <table className="w-full text-right text-xs text-slate-300 border-collapse">
-            <thead className="bg-slate-900/90 text-slate-400 font-bold border-b border-slate-800 uppercase tracking-wider">
+            <thead className="text-slate-400 font-bold border-b uppercase tracking-wider" style={{ background: '#070b14', borderColor: '#1e293b' }}>
               <tr>
-                <th className="p-4 w-12 text-center">#</th>
                 <th className="p-4">رقم الفاتورة</th>
-                <th className="p-4">المورد / الشركة</th>
+                <th className="p-4">اسم المورد / الشركة</th>
                 <th className="p-4">تاريخ الفاتورة</th>
-                <th className="p-4">المستلم / المدخل</th>
+                <th className="p-4">مستلم الفاتورة</th>
+                <th className="p-4 text-left">إجمالي الصافي</th>
                 <th className="p-4 text-center">الأصناف</th>
-                <th className="p-4 text-left">الصافي</th>
-                <th className="p-4 text-center">المستند</th>
-                <th className="p-4 text-center w-28">إجراءات</th>
+                <th className="p-4">الملاحظات</th>
+                <th className="p-4 text-center">Google Drive</th>
+                <th className="p-4 text-center w-28">الإجراءات</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/60">
+            <tbody className="divide-y" style={{ borderColor: '#1e293b' }}>
               {isLoading && filteredInvoices.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="p-12 text-center text-slate-400">
@@ -332,83 +474,73 @@ export default function ArchiveInvoicesTab({
                     <tr
                       key={inv.id || idx}
                       onClick={() => onSelectInvoice && onSelectInvoice(inv)}
-                      className="hover:bg-slate-800/40 transition cursor-pointer group"
+                      className="hover:bg-slate-800/30 transition cursor-pointer group"
                     >
-                      <td className="p-4 text-center font-mono text-slate-500">{idx + 1}</td>
-
-                      {/* Invoice Number */}
+                      {/* 1. Invoice Number */}
                       <td className="p-4">
                         <div className="font-bold text-slate-100 font-mono group-hover:text-blue-300 transition">
                           #{invNum}
                         </div>
-                        {inv.notes && (
-                          <div className="text-[10px] text-amber-400/90 truncate max-w-[140px] mt-0.5" title={inv.notes}>
-                            📝 {inv.notes}
-                          </div>
-                        )}
                       </td>
 
-                      {/* Supplier */}
+                      {/* 2. Supplier */}
                       <td className="p-4">
-                        <div className="flex items-center gap-2">
-                          <div className="w-7 h-7 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center font-bold text-xs shrink-0">
-                            {suppName.charAt(0)}
-                          </div>
-                          <span className="font-semibold text-slate-200 truncate max-w-[180px]">{suppName}</span>
-                        </div>
+                        <span className="font-semibold text-slate-200 truncate max-w-[180px] block">{suppName}</span>
                       </td>
 
-                      {/* Date */}
+                      {/* 3. Invoice Date */}
                       <td className="p-4 font-mono text-slate-400">{formattedDate}</td>
 
-                      {/* Receiver & Clerk */}
+                      {/* 4. Receiver */}
                       <td className="p-4">
-                        <div className="text-slate-300 text-[11px]">
-                          استلام: <span className="font-medium text-slate-400">{inv.receiver?.name || inv.receiver_name || '-'}</span>
-                        </div>
-                        <div className="text-[10px] text-slate-500">
-                          إدخال: {inv.entryClerk?.name || inv.entry_clerk_name || '-'}
-                        </div>
+                        <span className="text-slate-300 font-medium">{inv.receiver?.name || inv.receiver_name || '-'}</span>
                       </td>
 
-                      {/* Items count badge */}
-                      <td className="p-4 text-center">
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-cyan-950/80 text-cyan-300 border border-cyan-800/50">
-                          {itemsCount} صنف
-                        </span>
-                      </td>
-
-                      {/* Net Amount */}
+                      {/* 5. Net Amount */}
                       <td className="p-4 text-left font-mono font-bold text-emerald-400 text-sm">
                         {netVal.toLocaleString('ar-EG', { minimumFractionDigits: 2 })} ج.م
                       </td>
 
-                      {/* Attachment Document Status */}
+                      {/* 6. Items Count */}
+                      <td className="p-4 text-center">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold" style={{ background: '#082f49', color: '#38bdf8', border: '1px solid #0369a1' }}>
+                          {itemsCount} صنف
+                        </span>
+                      </td>
+
+                      {/* 7. Notes */}
+                      <td className="p-4 text-slate-400 text-xs truncate max-w-[160px]">
+                        {inv.notes || '-'}
+                      </td>
+
+                      {/* 8. Google Drive Link */}
                       <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}>
                         {hasFile ? (
                           <a
                             href={inv.fileUrl || inv.file_url || '#'}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-800/60 text-emerald-400 rounded-lg text-[11px] font-semibold transition"
-                            title="فتح الملف المرفوع"
+                            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition"
+                            style={{ background: 'rgba(6, 78, 59, 0.4)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.4)' }}
+                            title="فتح مستند الفاتورة"
                           >
-                            <span>عرض المستند</span>
+                            <span>فتح الملف</span>
                             <ExternalLink className="w-3 h-3" />
                           </a>
                         ) : (
-                          <span className="text-[10px] text-slate-500 font-medium">لا يوجد ملف</span>
+                          <span className="text-[11px] text-slate-500 font-medium">غير متوفر</span>
                         )}
                       </td>
 
-                      {/* Actions */}
+                      {/* 9. Actions */}
                       <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-center gap-1.5">
                           <button
                             type="button"
                             onClick={() => onSelectInvoice && onSelectInvoice(inv)}
-                            className="p-1.5 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 rounded-lg border border-blue-500/30 transition cursor-pointer"
-                            title="استعراض تفاصيل وبنود الفاتورة"
+                            className="p-2 rounded-xl transition cursor-pointer"
+                            style={{ background: '#1e293b', border: '1px solid #334155', color: '#60a5fa' }}
+                            title="معاينة تفاصيل الفاتورة"
                           >
                             <Eye className="w-4 h-4" />
                           </button>
@@ -417,7 +549,8 @@ export default function ArchiveInvoicesTab({
                             type="button"
                             disabled={deletingId === inv.id}
                             onClick={(e) => handleDeleteInvoice(inv.id, invNum, e)}
-                            className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg border border-red-500/30 transition cursor-pointer disabled:opacity-50"
+                            className="p-2 rounded-xl transition cursor-pointer disabled:opacity-50"
+                            style={{ background: '#1e293b', border: '1px solid #7f1d1d', color: '#f87171' }}
                             title="حذف الفاتورة"
                           >
                             {deletingId === inv.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
@@ -431,83 +564,6 @@ export default function ArchiveInvoicesTab({
               )}
             </tbody>
           </table>
-        </div>
-
-        {/* Adaptive Mobile Cards View */}
-        <div className="md:hidden p-4 space-y-3.5">
-          {isLoading && filteredInvoices.length === 0 ? (
-            <div className="p-8 text-center text-slate-400 text-xs flex items-center justify-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
-              <span>جاري تحميل البيانات...</span>
-            </div>
-          ) : filteredInvoices.length === 0 ? (
-            <div className="p-8 text-center text-slate-500 text-xs">لا توجد فواتير مطابقة لمعايير البحث</div>
-          ) : (
-            filteredInvoices.map((inv, idx) => {
-              const invNum = inv.invoiceNumber || inv.invoice_number || '-';
-              const suppName = inv.supplier?.name || inv.supplier_name || 'غير محدد';
-              const dateVal = inv.invoiceDate || inv.invoice_date || '';
-              const formattedDate = dateVal ? new Date(dateVal).toLocaleDateString('ar-EG') : '-';
-              const netVal = parseFloat(inv.netAmount || inv.net_amount || inv.totalAmount || 0);
-
-              return (
-                <div
-                  key={inv.id || idx}
-                  onClick={() => onSelectInvoice && onSelectInvoice(inv)}
-                  className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 space-y-3 shadow-md active:scale-[0.99] transition"
-                >
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-slate-100 font-mono">#{invNum}</span>
-                      <span className="text-[10px] text-slate-400 font-mono">{formattedDate}</span>
-                    </div>
-
-                    <p className="text-sm font-black text-emerald-400 font-mono">
-                      {netVal.toLocaleString('ar-EG')} ج.م
-                    </p>
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs">
-                    <div>
-                      <span className="text-slate-500 text-[11px] block">المورد:</span>
-                      <span className="font-bold text-blue-300">{suppName}</span>
-                    </div>
-
-                    <div className="text-left dir-ltr">
-                      <span className="text-slate-500 text-[11px] block text-right">الأصناف:</span>
-                      <span className="font-semibold text-cyan-300">{inv.items?.length || 0} صنف</span>
-                    </div>
-                  </div>
-
-                  {inv.notes && (
-                    <div className="p-2 bg-amber-950/30 border border-amber-800/40 rounded-xl text-[11px] text-amber-300">
-                      <span className="font-bold text-amber-400">ملاحظة:</span> {inv.notes}
-                    </div>
-                  )}
-
-                  <div className="flex items-center justify-between pt-2 border-t border-slate-800/80" onClick={(e) => e.stopPropagation()}>
-                    <button
-                      type="button"
-                      onClick={() => onSelectInvoice && onSelectInvoice(inv)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition shadow cursor-pointer"
-                    >
-                      <Eye className="w-3.5 h-3.5" />
-                      <span>تفاصيل الفاتورة</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      disabled={deletingId === inv.id}
-                      onClick={(e) => handleDeleteInvoice(inv.id, invNum, e)}
-                      className="p-1.5 text-red-400 hover:bg-red-950/40 rounded-xl transition border border-red-900/40 cursor-pointer"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              );
-            })
-          )}
         </div>
 
       </div>

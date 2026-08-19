@@ -211,241 +211,351 @@ export default function UploadInvoiceModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 overflow-y-auto">
-      <div className="glass-card rounded-2xl border border-slate-700 w-full max-w-5xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 my-auto">
+    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 overflow-y-auto" style={{ background: 'rgba(0, 0, 0, 0.85)', backdropFilter: 'blur(8px)' }}>
+      <div className="rounded-2xl w-full max-w-5xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 my-auto" style={{ background: '#0b1120', border: '1px solid #1e293b', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.8)' }}>
         
-        {/* Header */}
-        <div className="flex items-center justify-between p-5 border-b border-slate-800 bg-slate-900/60">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/20 flex items-center justify-center font-bold text-lg">
-              <FilePlus className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2" style={{ margin: 0 }}>
-                رفع وأرشفة فاتورة أدوية جديدة
-              </h2>
-              <p className="text-xs text-slate-400" style={{ margin: '2px 0 0' }}>
-                استخراج فوري عبر الذكاء الاصطناعي (AI OCR)، استيراد شيتات الإكسل، أو الأرشفة اليدوية
-              </p>
-            </div>
-          </div>
-
+        {/* Header (Screenshot 1 Match) */}
+        <div className="flex items-center justify-between p-5 border-b" style={{ background: '#070b14', borderColor: '#1e293b' }}>
           <button
             type="button"
             onClick={onClose}
-            className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl transition cursor-pointer"
+            className="p-2 text-slate-400 hover:text-white rounded-xl transition cursor-pointer"
+            style={{ background: '#1e293b', border: '1px solid #334155' }}
           >
             <X className="w-5 h-5" />
           </button>
+
+          <div className="flex items-center gap-3 text-right">
+            <div>
+              <h2 className="text-xl font-black text-slate-100 flex items-center justify-end gap-2" style={{ margin: 0 }}>
+                إضافة واسترداد فواتير جديدة
+              </h2>
+              <p className="text-xs text-slate-400" style={{ margin: '3px 0 0' }}>
+                اختر نوع الرفع المطلوب لتحليل وتفكيك المستندات أو الأرشفة المباشرة
+              </p>
+            </div>
+            <div className="w-12 h-12 rounded-2xl flex items-center justify-center font-bold text-xl shadow-lg shrink-0" style={{ background: '#1e3a8a', border: '1px solid #2563eb', color: '#60a5fa' }}>
+              <UploadCloud className="w-6 h-6" />
+            </div>
+          </div>
         </div>
 
-        {/* Mode Selector Tabs */}
-        <div className="flex border-b border-slate-800 bg-slate-950/60 p-2 gap-2">
-          <button
-            type="button"
-            onClick={() => setActiveMode('AI_EXTRACT')}
-            className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
-              activeMode === 'AI_EXTRACT'
-                ? 'bg-blue-600 text-white shadow-lg'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <Bot className="w-4 h-4" />
-            <span>استخراج ذكي بالذكاء الاصطناعي (صور وPDF)</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveMode('EXCEL_EXTRACT')}
-            className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
-              activeMode === 'EXCEL_EXTRACT'
-                ? 'bg-emerald-600 text-white shadow-lg'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <FileSpreadsheet className="w-4 h-4" />
-            <span>استيراد شيت Excel المورد</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveMode('DIRECT_UPLOAD')}
-            className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
-              activeMode === 'DIRECT_UPLOAD'
-                ? 'bg-purple-600 text-white shadow-lg'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <Layers className="w-4 h-4" />
-            <span>أرشفة وإدخال يدوي</span>
-          </button>
-        </div>
-
-        {/* Body Form */}
-        <form onSubmit={handleSaveInvoice} className="flex-1 overflow-y-auto p-5 space-y-6">
+        {/* Modal Scrollable Body */}
+        <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-6" style={{ background: '#0b1120' }}>
           
-          {/* File Dropzone */}
-          <div
-            onClick={() => fileInputRef.current?.click()}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault();
-              const f = e.dataTransfer.files?.[0];
-              if (f) handleFileSelected(f);
-            }}
-            className="border-2 border-dashed border-slate-700 hover:border-blue-500/80 bg-slate-900/40 hover:bg-slate-900/70 rounded-2xl p-6 text-center cursor-pointer transition space-y-3"
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*,.pdf,.xlsx,.xls,.csv"
-              onChange={(e) => handleFileSelected(e.target.files?.[0])}
-              className="hidden"
-            />
-
-            {selectedFile ? (
-              <div className="flex items-center justify-center gap-3">
-                <CheckCircle2 className="w-8 h-8 text-emerald-400" />
-                <div className="text-right">
-                  <span className="text-sm font-bold text-slate-100 block">{selectedFile.name}</span>
-                  <span className="text-xs text-slate-400 block font-mono">
-                    {(selectedFile.size / 1024).toFixed(1)} KB • {selectedFile.type || 'ملف'}
-                  </span>
+          {/* Section: Choose Processing Method (3 Cards in Screenshot 1) */}
+          <div className="space-y-2.5 text-right">
+            <label className="text-xs font-bold text-slate-300 block">اختر طريقة المعالجة والرفع:</label>
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+              
+              {/* Card 1: Excel Analysis */}
+              <div
+                onClick={() => setActiveMode('EXCEL_EXTRACT')}
+                className={`p-4 rounded-2xl cursor-pointer transition relative flex flex-col justify-between text-right ${
+                  activeMode === 'EXCEL_EXTRACT' ? 'shadow-lg' : 'hover:bg-slate-900/60'
+                }`}
+                style={{
+                  background: activeMode === 'EXCEL_EXTRACT' ? 'rgba(16, 185, 129, 0.08)' : '#0f172a',
+                  border: activeMode === 'EXCEL_EXTRACT' ? '2px solid #10b981' : '1px solid #1e293b'
+                }}
+              >
+                <div className="flex items-start justify-between">
+                  {activeMode === 'EXCEL_EXTRACT' && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md text-emerald-300" style={{ background: '#065f46' }}>
+                      محدد
+                    </span>
+                  )}
+                  <div className="w-9 h-9 rounded-xl flex items-center justify-center mr-auto" style={{ background: '#064e3b', color: '#34d399' }}>
+                    <FileSpreadsheet className="w-5 h-5" />
+                  </div>
+                </div>
+                <div className="mt-3">
+                  <h4 className="text-sm font-black text-slate-100" style={{ margin: 0 }}>1. تحليل ملفات الإكسل</h4>
+                  <p className="text-xs mt-1 font-medium" style={{ color: '#34d399', margin: '4px 0 0' }}>
+                    استخراج البيانات والأصناف آلياً. (ملفات Excel فقط)
+                  </p>
                 </div>
               </div>
-            ) : (
-              <div className="space-y-2">
-                <UploadCloud className="w-10 h-10 text-blue-400 mx-auto animate-bounce" />
-                <p className="text-xs font-bold text-slate-200">
-                  انقر هنا لاختيار ملف الفاتورة أو قم بسحبه وإسقاطه مباشرة
-                </p>
-                <p className="text-[11px] text-slate-500">يدعم صيغ: JPG, PNG, PDF, Excel (XLSX/XLS)</p>
-              </div>
-            )}
 
-            {isExtracting && (
-              <div className="pt-2 flex items-center justify-center gap-2 text-xs font-bold text-blue-400">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>{extractStatus}</span>
+              {/* Card 2: AI Analysis (Default Selected) */}
+              <div
+                onClick={() => setActiveMode('AI_EXTRACT')}
+                className={`p-4 rounded-2xl cursor-pointer transition relative flex flex-col justify-between text-right ${
+                  activeMode === 'AI_EXTRACT' ? 'shadow-lg' : 'hover:bg-slate-900/60'
+                }`}
+                style={{
+                  background: activeMode === 'AI_EXTRACT' ? 'rgba(37, 99, 235, 0.12)' : '#0f172a',
+                  border: activeMode === 'AI_EXTRACT' ? '2px solid #2563eb' : '1px solid #1e293b'
+                }}
+              >
+                <div className="flex items-start justify-between">
+                  {activeMode === 'AI_EXTRACT' && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md text-blue-200" style={{ background: '#1d4ed8' }}>
+                      محدد
+                    </span>
+                  )}
+                  <div className="w-9 h-9 rounded-xl flex items-center justify-center mr-auto" style={{ background: '#1e3a8a', color: '#60a5fa' }}>
+                    <Sparkles className="w-5 h-5" />
+                  </div>
+                </div>
+                <div className="mt-3">
+                  <h4 className="text-sm font-black text-slate-100" style={{ margin: 0 }}>2. تحليل بالذكاء الاصطناعي</h4>
+                  <p className="text-xs mt-1 font-medium" style={{ color: '#38bdf8', margin: '4px 0 0' }}>
+                    استخراج البيانات الحسابية الـ 9 آلياً. (صور و PDF فقط)
+                  </p>
+                </div>
               </div>
-            )}
+
+              {/* Card 3: Direct Upload */}
+              <div
+                onClick={() => setActiveMode('DIRECT_UPLOAD')}
+                className={`p-4 rounded-2xl cursor-pointer transition relative flex flex-col justify-between text-right ${
+                  activeMode === 'DIRECT_UPLOAD' ? 'shadow-lg' : 'hover:bg-slate-900/60'
+                }`}
+                style={{
+                  background: activeMode === 'DIRECT_UPLOAD' ? 'rgba(168, 85, 247, 0.08)' : '#0f172a',
+                  border: activeMode === 'DIRECT_UPLOAD' ? '2px solid #a855f7' : '1px solid #1e293b'
+                }}
+              >
+                <div className="flex items-start justify-between">
+                  {activeMode === 'DIRECT_UPLOAD' && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md text-purple-200" style={{ background: '#6b21a8' }}>
+                      محدد
+                    </span>
+                  )}
+                  <div className="w-9 h-9 rounded-xl flex items-center justify-center mr-auto" style={{ background: '#4c1d95', color: '#c084fc' }}>
+                    <Layers className="w-5 h-5" />
+                  </div>
+                </div>
+                <div className="mt-3">
+                  <h4 className="text-sm font-black text-slate-100" style={{ margin: 0 }}>3. أرشفة ورفع مباشر</h4>
+                  <p className="text-xs mt-1 font-medium" style={{ color: '#c084fc', margin: '4px 0 0' }}>
+                    رفع المستند كما هو دون استخراج. (يدعم جميع أنواع الملفات)
+                  </p>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          {/* Section: 9 Data Fields Information Box (Screenshot 1 Match) */}
+          {activeMode === 'AI_EXTRACT' && (
+            <div className="rounded-2xl p-4 text-right space-y-3" style={{ background: 'rgba(30, 58, 138, 0.25)', border: '1px solid rgba(59, 130, 246, 0.35)' }}>
+              <div className="flex items-center gap-2 text-blue-300 font-bold text-xs">
+                <AlertCircle className="w-4 h-4 text-blue-400 shrink-0" />
+                <span>البيانات الـ 9 التي يقوم الذكاء الاصطناعي باستخراجها:</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  '1. رقم الفاتورة',
+                  '2. اسم المورد / الشركة',
+                  '3. تاريخ الفاتورة',
+                  '4. الكميات',
+                  '5. سعر الوحدة',
+                  '6. الإجمالي قبل الخصم',
+                  '7. الخصم',
+                  '8. الصافي',
+                  '9. عدد الأصناف'
+                ].map((field, idx) => (
+                  <span
+                    key={idx}
+                    className="text-xs font-bold px-3 py-1 rounded-lg"
+                    style={{ background: '#1e3a8a', border: '1px solid #2563eb', color: '#bfdbfe' }}
+                  >
+                    {field}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Section: Dropzone Container (Screenshot 1 Match) */}
+          <div className="space-y-2 text-right">
+            <label className="text-xs font-bold text-slate-300 block">
+              {activeMode === 'EXCEL_EXTRACT' ? 'اختر ملف شيت الإكسل:' : 'اختر ملف الفواتير للتحليل:'}
+            </label>
+            
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                const f = e.dataTransfer.files?.[0];
+                if (f) handleFileSelected(f);
+              }}
+              className="rounded-2xl p-8 text-center cursor-pointer transition space-y-3"
+              style={{
+                border: '2px dashed rgba(59, 130, 246, 0.4)',
+                background: 'rgba(15, 23, 42, 0.6)',
+                backdropFilter: 'blur(8px)'
+              }}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={activeMode === 'EXCEL_EXTRACT' ? '.xlsx,.xls,.csv' : 'image/*,.pdf,.xlsx,.xls,.csv'}
+                onChange={(e) => handleFileSelected(e.target.files?.[0])}
+                className="hidden"
+              />
+
+              {selectedFile ? (
+                <div className="flex items-center justify-center gap-3">
+                  <CheckCircle2 className="w-8 h-8 text-emerald-400" />
+                  <div className="text-right">
+                    <span className="text-sm font-bold text-slate-100 block">{selectedFile.name}</span>
+                    <span className="text-xs text-slate-400 block font-mono">
+                      {(selectedFile.size / 1024).toFixed(1)} KB • {selectedFile.type || 'ملف'}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto" style={{ background: '#1e3a8a', color: '#38bdf8' }}>
+                    <UploadCloud className="w-8 h-8" />
+                  </div>
+                  <p className="text-sm font-black text-slate-100">
+                    اضغط هنا أو اسحب الملفات لإدراجها في قائمة الرفع
+                  </p>
+                  <p className="text-xs font-semibold text-slate-400">
+                    {activeMode === 'EXCEL_EXTRACT'
+                      ? 'يسمح برفع ملفات الإكسل فقط (.xlsx, .xls, .csv)'
+                      : 'يسمح برفع الصور والـ PDF فقط (.png, .jpg, .pdf)'}
+                  </p>
+                </div>
+              )}
+
+              {isExtracting && (
+                <div className="pt-2 flex items-center justify-center gap-2 text-xs font-bold text-blue-400">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>{extractStatus}</span>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Feedback messages */}
           {errorMsg && (
-            <div className="p-3 bg-red-950/60 border border-red-800 rounded-xl text-xs text-red-300 flex items-center gap-2">
+            <div className="p-3 bg-red-950/60 border border-red-800 rounded-xl text-xs text-red-300 flex items-center gap-2 text-right">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span>{errorMsg}</span>
             </div>
           )}
 
           {successMsg && (
-            <div className="p-3 bg-emerald-950/60 border border-emerald-800 rounded-xl text-xs text-emerald-300 flex items-center gap-2">
+            <div className="p-3 bg-emerald-950/60 border border-emerald-800 rounded-xl text-xs text-emerald-300 flex items-center gap-2 text-right">
               <CheckCircle2 className="w-4 h-4 shrink-0" />
               <span>{successMsg}</span>
             </div>
           )}
 
-          {/* Main Invoice Fields */}
-          <div className="glass-card rounded-2xl p-5 border border-slate-800 space-y-4">
-            <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider">بيانات الفاتورة الأساسية</h3>
-            
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300 block">رقم الفاتورة *</label>
-                <input
-                  type="text"
-                  required
-                  value={invoiceNumber}
-                  onChange={(e) => setInvoiceNumber(e.target.value)}
-                  placeholder="مثال: INV-10482"
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 font-mono focus:outline-none focus:border-blue-500"
-                />
-              </div>
+          {/* Form Fields & Extracted Data Form */}
+          <form onSubmit={handleSaveInvoice} className="space-y-6">
+            <div className="rounded-2xl p-5 space-y-4" style={{ background: '#0f172a', border: '1px solid #1e293b' }}>
+              <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider text-right">بيانات الفاتورة الأساسية</h3>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-right">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-300 block">رقم الفاتورة *</label>
+                  <input
+                    type="text"
+                    required
+                    value={invoiceNumber}
+                    onChange={(e) => setInvoiceNumber(e.target.value)}
+                    placeholder="مثال: INV-10482"
+                    className="w-full px-3.5 py-2.5 rounded-xl text-xs text-slate-100 font-mono focus:outline-none focus:border-blue-500"
+                    style={{ background: '#070b14', border: '1px solid #334155' }}
+                  />
+                </div>
 
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300 block">المورد / الشركة *</label>
-                <select
-                  required
-                  value={supplierId}
-                  onChange={(e) => setSupplierId(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-blue-500"
-                >
-                  <option value="">اختر المورد...</option>
-                  {suppliers.map((s) => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
-              </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-300 block">المورد / الشركة *</label>
+                  <select
+                    required
+                    value={supplierId}
+                    onChange={(e) => setSupplierId(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-blue-500"
+                    style={{ background: '#070b14', border: '1px solid #334155' }}
+                  >
+                    <option value="">اختر المورد...</option>
+                    {suppliers.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
 
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300 block">تاريخ الفاتورة *</label>
-                <input
-                  type="date"
-                  required
-                  value={invoiceDate}
-                  onChange={(e) => setInvoiceDate(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-blue-500"
-                />
-              </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-300 block">تاريخ الفاتورة *</label>
+                  <input
+                    type="date"
+                    required
+                    value={invoiceDate}
+                    onChange={(e) => setInvoiceDate(e.target.value)}
+                    className="w-full px-3.5 py-2 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-blue-500"
+                    style={{ background: '#070b14', border: '1px solid #334155' }}
+                  />
+                </div>
 
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300 block">أمين العهدة المستلم</label>
-                <select
-                  value={receiverId}
-                  onChange={(e) => setReceiverId(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-blue-500"
-                >
-                  <option value="">غير محدد</option>
-                  {employees.map((e) => (
-                    <option key={e.id} value={e.id}>{e.name} ({e.role || 'موظف'})</option>
-                  ))}
-                </select>
-              </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-300 block">أمين العهدة المستلم</label>
+                  <select
+                    value={receiverId}
+                    onChange={(e) => setReceiverId(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-blue-500"
+                    style={{ background: '#070b14', border: '1px solid #334155' }}
+                  >
+                    <option value="">غير محدد</option>
+                    {employees.map((e) => (
+                      <option key={e.id} value={e.id}>{e.name} ({e.role || 'موظف'})</option>
+                    ))}
+                  </select>
+                </div>
 
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300 block">مدخل البيانات بالأرشيف</label>
-                <select
-                  value={entryClerkId}
-                  onChange={(e) => setEntryClerkId(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-blue-500"
-                >
-                  <option value="">غير محدد</option>
-                  {employees.map((e) => (
-                    <option key={e.id} value={e.id}>{e.name} ({e.role || 'موظف'})</option>
-                  ))}
-                </select>
-              </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-300 block">مدخل البيانات بالأرشيف</label>
+                  <select
+                    value={entryClerkId}
+                    onChange={(e) => setEntryClerkId(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-blue-500"
+                    style={{ background: '#070b14', border: '1px solid #334155' }}
+                  >
+                    <option value="">غير محدد</option>
+                    {employees.map((e) => (
+                      <option key={e.id} value={e.id}>{e.name} ({e.role || 'موظف'})</option>
+                    ))}
+                  </select>
+                </div>
 
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300 block">ملاحظات الفاتورة</label>
-                <input
-                  type="text"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="أي ملاحظات خاصة بالتسليم أو الخصم..."
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-blue-500"
-                />
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-300 block">ملاحظات الفاتورة</label>
+                  <input
+                    type="text"
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="أي ملاحظات خاصة بالتسليم أو الخصم..."
+                    className="w-full px-3.5 py-2.5 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-blue-500"
+                    style={{ background: '#070b14', border: '1px solid #334155' }}
+                  />
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Items Section */}
-          <div className="glass-card rounded-2xl p-5 border border-slate-800 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                <span>أصناف وبنود الفاتورة ({items.length})</span>
-              </h3>
+            {/* Items Section */}
+            <div className="rounded-2xl p-5 space-y-4" style={{ background: '#0f172a', border: '1px solid #1e293b' }}>
+              <div className="flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={handleAddItemRow}
+                  className="px-3.5 py-2 rounded-xl text-xs font-bold text-blue-300 bg-blue-950/60 hover:bg-blue-900 border border-blue-800/60 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>إضافة صنف</span>
+                </button>
 
-              <button
-                type="button"
-                onClick={handleAddItemRow}
-                className="px-3 py-1.5 rounded-xl text-xs font-bold text-blue-300 bg-blue-950/60 hover:bg-blue-900 border border-blue-800/60 flex items-center gap-1 cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>إضافة صنف</span>
-              </button>
-            </div>
+                <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                  <span>أصناف وبنود الفاتورة ({items.length})</span>
+                </h3>
+              </div>
 
             {items.length === 0 ? (
               <p className="text-xs text-slate-500 py-6 text-center bg-slate-900/40 rounded-xl border border-slate-800">
@@ -586,6 +696,8 @@ export default function UploadInvoiceModal({
           </div>
 
         </form>
+
+        </div>
 
       </div>
     </div>
