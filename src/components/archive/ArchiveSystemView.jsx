@@ -47,6 +47,7 @@ export default function ArchiveSystemView({ isStandalone = false }) {
   // Modals
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
+  const [employeeToEdit, setEmployeeToEdit] = useState(null);
   const [isScanModalOpen, setIsScanModalOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
   const [selectedSupplier, setSelectedSupplier] = useState(null);
@@ -71,7 +72,6 @@ export default function ArchiveSystemView({ isStandalone = false }) {
         }
       } catch (err) {
         console.warn('Archive session check offline fallback:', err);
-        // If server is unreachable, trust local token if present
         setIsAuthenticated(Boolean(token));
       } finally {
         setIsCheckingAuth(false);
@@ -132,10 +132,12 @@ export default function ArchiveSystemView({ isStandalone = false }) {
   // Loading Screen
   if (isCheckingAuth) {
     return (
-      <div className="arch-root" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ textAlign: 'center', color: '#94a3b8' }}>
-          <div className="arch-animate-pulse" style={{ fontSize: '2.5rem', marginBottom: '12px' }}>🗄️</div>
-          <div style={{ fontWeight: 700, fontSize: '1rem' }}>جاري التحقق من جلسة الأرشيف...</div>
+      <div className="arch-root min-h-screen flex items-center justify-center bg-slate-950">
+        <div className="text-center text-slate-400">
+          <div className="w-12 h-12 rounded-2xl bg-blue-500/10 text-blue-400 flex items-center justify-center font-bold text-2xl mx-auto mb-3 animate-pulse border border-blue-500/20">
+            🗄️
+          </div>
+          <div className="font-bold text-sm text-slate-300">جاري التحقق من جلسة الأرشيف...</div>
         </div>
       </div>
     );
@@ -147,20 +149,23 @@ export default function ArchiveSystemView({ isStandalone = false }) {
   }
 
   return (
-    <div className="arch-root">
+    <div className="arch-root min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
       
       {/* Top Navbar */}
       <ArchiveNavbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         onOpenUploadModal={() => setIsUploadOpen(true)}
-        onOpenEmployeeModal={() => setIsEmployeeModalOpen(true)}
+        onOpenEmployeeModal={() => {
+          setEmployeeToEdit(null);
+          setIsEmployeeModalOpen(true);
+        }}
         onLogout={handleLogout}
         settings={settings}
       />
 
       {/* Main Content Area */}
-      <main className="arch-content">
+      <main className="flex-1 overflow-y-auto">
         
         {/* Tab 1: Invoices & Dashboard Archive */}
         {activeTab === 'invoices' && (
@@ -172,6 +177,7 @@ export default function ArchiveSystemView({ isStandalone = false }) {
             onOpenUploadModal={() => setIsUploadOpen(true)}
             onOpenScanModal={() => setIsScanModalOpen(true)}
             onSelectInvoice={(inv) => setSelectedInvoice(inv)}
+            onSelectSupplier={(s) => setSelectedSupplier(s)}
             onInvoiceDeleted={loadAllData}
           />
         )}
@@ -180,8 +186,10 @@ export default function ArchiveSystemView({ isStandalone = false }) {
         {activeTab === 'suppliers' && (
           <ArchiveSuppliersTab
             suppliers={suppliers}
+            isLoading={isLoading}
             onSelectSupplier={(s) => setSelectedSupplier(s)}
             onSupplierSaved={loadAllData}
+            onSupplierDeleted={loadAllData}
           />
         )}
 
@@ -189,8 +197,15 @@ export default function ArchiveSystemView({ isStandalone = false }) {
         {activeTab === 'employees' && (
           <ArchiveEmployeesTab
             employees={employees}
-            onOpenEmployeeModal={() => setIsEmployeeModalOpen(true)}
+            invoices={invoices}
+            isLoading={isLoading}
+            onOpenEmployeeModal={(emp) => {
+              setEmployeeToEdit(emp);
+              setIsEmployeeModalOpen(true);
+            }}
+            onSelectInvoice={(inv) => setSelectedInvoice(inv)}
             onEmployeeSaved={loadAllData}
+            onEmployeeDeleted={loadAllData}
           />
         )}
 
@@ -227,15 +242,21 @@ export default function ArchiveSystemView({ isStandalone = false }) {
       {selectedSupplier && (
         <SupplierDetailModal
           supplier={selectedSupplier}
+          invoices={invoices}
           onClose={() => setSelectedSupplier(null)}
+          onSelectInvoice={(inv) => setSelectedInvoice(inv)}
           onSupplierUpdated={loadAllData}
+          onSupplierDeleted={loadAllData}
         />
       )}
 
       <EmployeeManagerModal
         isOpen={isEmployeeModalOpen}
-        onClose={() => setIsEmployeeModalOpen(false)}
-        employees={employees}
+        onClose={() => {
+          setIsEmployeeModalOpen(false);
+          setEmployeeToEdit(null);
+        }}
+        employeeToEdit={employeeToEdit}
         onEmployeeSaved={loadAllData}
       />
 

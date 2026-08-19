@@ -1,233 +1,218 @@
 import React, { useState } from 'react';
+import { Users, Search, Plus, Phone, FileText, ChevronLeft, ArrowDownLeft, ArrowUpRight, Edit2, Trash2, Loader2, Shield } from 'lucide-react';
 import { apiArchiveSaveEmployee, apiArchiveDeleteEmployee } from '../../utils/archiveApiClient';
+import EmployeeInvoicesModal from './EmployeeInvoicesModal';
 
 export default function ArchiveEmployeesTab({
   employees = [],
+  invoices = [],
+  isLoading = false,
   onOpenEmployeeModal,
-  onEmployeeSaved = () => {}
+  onSelectInvoice,
+  onEmployeeSaved = () => {},
+  onEmployeeDeleted = () => {}
 }) {
-  const [search, setSearch] = useState('');
-  const [editingEmp, setEditingEmp] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedEmpForInvoices, setSelectedEmpForInvoices] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
 
-  const filtered = employees.filter(e => {
-    if (!search.trim()) return true;
-    const q = search.toLowerCase();
-    return (e.name || '').toLowerCase().includes(q) || (e.role || '').toLowerCase().includes(q) || (e.phone || '').includes(q);
+  const filteredEmployees = employees.filter((emp) => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      (emp.name || '').toLowerCase().includes(q) ||
+      (emp.role || '').toLowerCase().includes(q) ||
+      (emp.phone && emp.phone.includes(q))
+    );
   });
 
-  const handleToggleActive = async (emp) => {
-    try {
-      await apiArchiveSaveEmployee({
-        id: emp.id,
-        name: emp.name,
-        role: emp.role,
-        phone: emp.phone,
-        active: !emp.active
-      });
-      onEmployeeSaved();
-    } catch (err) {
-      alert('فشل تحديث حالة الموظف');
-    }
-  };
+  const handleDelete = async (emp, e) => {
+    if (e) e.stopPropagation();
+    if (!window.confirm(`هل أنت متأكد من حذف الموظف "${emp.name}"؟`)) return;
 
-  const handleDelete = async (id) => {
-    if (!window.confirm('هل أنت متأكد من حذف هذا الموظف؟')) return;
-    setDeletingId(id);
+    setDeletingId(emp.id);
     try {
-      const res = await apiArchiveDeleteEmployee(id);
+      const res = await apiArchiveDeleteEmployee(emp.id);
       if (res.success) {
-        onEmployeeSaved();
+        onEmployeeDeleted(emp.id);
       } else {
         alert(res.error || 'فشل حذف الموظف');
       }
-    } catch (e) {
+    } catch {
       alert('حدث خطأ أثناء الحذف');
     } finally {
       setDeletingId(null);
     }
   };
 
-  const handleSaveEdit = async (e) => {
-    e.preventDefault();
-    if (!editingEmp || !editingEmp.name.trim()) return;
-
-    try {
-      const res = await apiArchiveSaveEmployee(editingEmp);
-      if (res.success) {
-        setEditingEmp(null);
-        onEmployeeSaved();
-      }
-    } catch (err) {
-      alert('فشل حفظ التعديلات');
-    }
-  };
-
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+    <div className="space-y-6 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       
-      {/* Search & Actions Bar */}
-      <div className="arch-filter-card">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '14px' }}>
-          <div style={{ flex: 1, minWidth: '240px' }}>
+      {/* Top Header & Search */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-100 flex items-center gap-2" style={{ margin: 0 }}>
+            <Users className="w-6 h-6 text-cyan-400" />
+            إدارة طاقم العمل ومسؤولي الفواتير ({employees.length})
+          </h1>
+          <p className="text-xs text-slate-400 mt-1" style={{ margin: '4px 0 0 0' }}>
+            تتبع الفواتير المستلمة والمدخلة لكل أمين عهدة، محاسب، أو مراجع بالأرشيف
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <div className="relative w-full sm:w-72">
+            <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-3.5" />
             <input
               type="text"
-              className="arch-input"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="🔍 ابحث عن موظف بالاسم أو الدور الوظيفي..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="بحث باسم الموظف، الوظيفة، الهاتف..."
+              className="w-full pr-10 pl-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500 shadow-inner"
             />
           </div>
-          <button
-            type="button"
-            className="arch-btn-primary"
-            onClick={onOpenEmployeeModal}
-          >
-            ➕ إضافة موظف جديد
-          </button>
+
+          {onOpenEmployeeModal && (
+            <button
+              type="button"
+              onClick={() => onOpenEmployeeModal(null)}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-white gradient-btn flex items-center gap-1.5 shadow-md shrink-0 cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>إضافة موظف</span>
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Staff Table */}
-      <div className="arch-table-card">
-        <div className="arch-table-header">
-          <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: '#f8fafc' }}>
-            👥 طاقم عمل الأرشيف والاستلام ({filtered.length})
-          </h3>
-        </div>
+      {/* Employees Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        {isLoading && employees.length === 0 ? (
+          Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="glass-card rounded-2xl p-5 border border-slate-800/80 animate-pulse space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-xl bg-slate-800/80"></div>
+                <div className="space-y-2 flex-1">
+                  <div className="w-3/4 h-5 rounded-lg bg-slate-800/80"></div>
+                  <div className="w-1/2 h-3 rounded-lg bg-slate-800/50"></div>
+                </div>
+              </div>
+              <div className="pt-3 border-t border-slate-800/60 h-10 rounded-lg bg-slate-800/40"></div>
+            </div>
+          ))
+        ) : filteredEmployees.length === 0 ? (
+          <div className="col-span-full text-center text-slate-500 py-16 bg-slate-900/40 rounded-2xl border border-slate-800">
+            <Users className="w-12 h-12 mx-auto text-slate-700 stroke-1 mb-2" />
+            <p className="text-sm font-medium text-slate-400">لا يوجد موظفين مطابقين للبحث.</p>
+          </div>
+        ) : (
+          filteredEmployees.map((emp) => {
+            // Count invoices for this employee
+            const empId = emp.id;
+            const receivedCount = invoices.filter(i => String(i.receiverId || i.receiver_id) === String(empId)).length;
+            const enteredCount = invoices.filter(i => String(i.entryClerkId || i.entry_clerk_id) === String(empId)).length;
 
-        <div className="arch-table-responsive">
-          <table className="arch-table">
-            <thead>
-              <tr>
-                <th>اسم الموظف</th>
-                <th>المسمى الوظيفي</th>
-                <th>الهاتف</th>
-                <th>الحالة</th>
-                <th>فواتير استلمها</th>
-                <th>فواتير أدخلها</th>
-                <th>الإجراءات</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: '36px', color: '#64748b' }}>
-                    لا يوجد موظفين مسجلين في الأرشيف
-                  </td>
-                </tr>
-              ) : (
-                filtered.map((emp) => (
-                  <tr key={emp.id}>
-                    <td style={{ fontWeight: 800, color: '#f8fafc' }}>{emp.name}</td>
-                    <td>
-                      <span className="arch-badge purple">{emp.role || 'أمين مخزن'}</span>
-                    </td>
-                    <td style={{ color: '#94a3b8' }}>{emp.phone || '—'}</td>
-                    <td>
+            return (
+              <div
+                key={emp.id}
+                className="glass-card rounded-2xl p-5 border border-slate-800 hover:border-cyan-500/50 transition flex flex-col justify-between space-y-4 group shadow-md"
+              >
+                <div>
+                  {/* Top Info Row */}
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-xl bg-cyan-500/10 text-cyan-400 flex items-center justify-center font-bold text-xl group-hover:scale-105 transition border border-cyan-500/20 shadow-inner">
+                        {(emp.name || 'م').charAt(0)}
+                      </div>
+                      <div>
+                        <h3 className="text-base font-bold text-slate-100 group-hover:text-cyan-300 transition" style={{ margin: 0 }}>
+                          {emp.name}
+                        </h3>
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-cyan-400 bg-cyan-950/60 border border-cyan-800/50 px-2 py-0.5 rounded-full mt-1">
+                          <Shield className="w-3 h-3" />
+                          {emp.role || 'مسؤول أرشيف'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                      {onOpenEmployeeModal && (
+                        <button
+                          type="button"
+                          onClick={() => onOpenEmployeeModal(emp)}
+                          className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition cursor-pointer"
+                          title="تعديل الموظف"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                       <button
                         type="button"
-                        onClick={() => handleToggleActive(emp)}
-                        className={`arch-badge ${emp.active ? 'green' : 'gray'}`}
-                        style={{ cursor: 'pointer', border: 'none' }}
-                        title="انقر لتغيير الحالة"
+                        disabled={deletingId === emp.id}
+                        onClick={(e) => handleDelete(emp, e)}
+                        className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-950/40 rounded-lg transition cursor-pointer disabled:opacity-50"
+                        title="حذف الموظف"
                       >
-                        {emp.active ? '🟢 نشط' : '⚪ غير نشط'}
+                        {deletingId === emp.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
                       </button>
-                    </td>
-                    <td>
-                      <span className="arch-badge blue">{emp.received_count || 0} فاتورة</span>
-                    </td>
-                    <td>
-                      <span className="arch-badge amber">{emp.entered_count || 0} فاتورة</span>
-                    </td>
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <button
-                          type="button"
-                          className="arch-btn-secondary"
-                          onClick={() => setEditingEmp({ ...emp })}
-                          style={{ padding: '4px 10px', fontSize: '0.75rem' }}
-                        >
-                          ✏️ تعديل
-                        </button>
-                        <button
-                          type="button"
-                          className="arch-btn-danger"
-                          onClick={() => handleDelete(emp.id)}
-                          disabled={deletingId === emp.id}
-                        >
-                          {deletingId === emp.id ? '⏳' : '🗑️'}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                    </div>
+                  </div>
+
+                  {emp.phone && (
+                    <div className="text-xs text-slate-400 flex items-center gap-1.5 mt-3 pt-2 border-t border-slate-800/60">
+                      <Phone className="w-3.5 h-3.5 text-cyan-400" />
+                      <span className="dir-ltr">{emp.phone}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Counters Row */}
+                <div className="grid grid-cols-2 gap-2 pt-3 border-t border-slate-800/80">
+                  <div className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800/90 text-center">
+                    <span className="text-[10px] text-slate-400 block flex items-center justify-center gap-1">
+                      <ArrowDownLeft className="w-3 h-3 text-blue-400" />
+                      مستلمة
+                    </span>
+                    <strong className="text-sm font-mono font-bold text-blue-400 mt-0.5 block">
+                      {receivedCount}
+                    </strong>
+                  </div>
+
+                  <div className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800/90 text-center">
+                    <span className="text-[10px] text-slate-400 block flex items-center justify-center gap-1">
+                      <ArrowUpRight className="w-3 h-3 text-purple-400" />
+                      مدخلة
+                    </span>
+                    <strong className="text-sm font-mono font-bold text-purple-400 mt-0.5 block">
+                      {enteredCount}
+                    </strong>
+                  </div>
+                </div>
+
+                {/* Open in modal action */}
+                <button
+                  type="button"
+                  onClick={() => setSelectedEmpForInvoices(emp)}
+                  className="w-full py-2 px-3 rounded-xl bg-slate-800/80 hover:bg-cyan-950/40 text-cyan-300 hover:text-cyan-200 border border-slate-700/60 hover:border-cyan-800/60 text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>عرض كل فواتير الموظف</span>
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            );
+          })
+        )}
       </div>
 
-      {/* Edit Employee Modal */}
-      {editingEmp && (
-        <div className="arch-modal-overlay" onClick={() => setEditingEmp(null)}>
-          <div className="arch-modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px' }}>
-            <div className="arch-modal-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span>✏️</span>
-                <h3>تعديل بيانات الموظف</h3>
-              </div>
-              <button className="arch-btn-icon" onClick={() => setEditingEmp(null)}>✕</button>
-            </div>
-
-            <form onSubmit={handleSaveEdit}>
-              <div className="arch-modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                <div className="arch-input-group">
-                  <label className="arch-input-label">اسم الموظف *</label>
-                  <input
-                    type="text"
-                    className="arch-input"
-                    value={editingEmp.name || ''}
-                    onChange={(e) => setEditingEmp({ ...editingEmp, name: e.target.value })}
-                    required
-                  />
-                </div>
-
-                <div className="arch-input-group">
-                  <label className="arch-input-label">المسمى الوظيفي</label>
-                  <select
-                    className="arch-select"
-                    value={editingEmp.role || 'أمين مخزن'}
-                    onChange={(e) => setEditingEmp({ ...editingEmp, role: e.target.value })}
-                  >
-                    <option value="أمين مخزن">أمين مخزن</option>
-                    <option value="مدخل بيانات">مدخل بيانات</option>
-                    <option value="صيدلي أول">صيدلي أول</option>
-                    <option value="مدير فرع">مدير فرع</option>
-                    <option value="محاسب">محاسب</option>
-                  </select>
-                </div>
-
-                <div className="arch-input-group">
-                  <label className="arch-input-label">الهاتف</label>
-                  <input
-                    type="text"
-                    className="arch-input"
-                    value={editingEmp.phone || ''}
-                    onChange={(e) => setEditingEmp({ ...editingEmp, phone: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div className="arch-modal-footer">
-                <button type="button" className="arch-btn-secondary" onClick={() => setEditingEmp(null)}>إلغاء</button>
-                <button type="submit" className="arch-btn-primary">💾 حفظ التعديلات</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* Employee Invoices List Modal */}
+      <EmployeeInvoicesModal
+        isOpen={Boolean(selectedEmpForInvoices)}
+        onClose={() => setSelectedEmpForInvoices(null)}
+        employee={selectedEmpForInvoices}
+        invoices={invoices}
+        onSelectInvoice={onSelectInvoice}
+      />
 
     </div>
   );

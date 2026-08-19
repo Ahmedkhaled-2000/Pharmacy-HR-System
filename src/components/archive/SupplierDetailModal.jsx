@@ -1,12 +1,52 @@
 import React, { useState, useEffect } from 'react';
-import { apiArchiveGetSupplierMappings, apiArchiveSaveSupplierMappings, apiArchiveSaveSupplier } from '../../utils/archiveApiClient';
+import {
+  X,
+  Building2,
+  FileText,
+  Settings2,
+  DollarSign,
+  Phone,
+  Mail,
+  MapPin,
+  Save,
+  Plus,
+  Trash2,
+  Loader2,
+  CheckCircle2,
+  AlertCircle,
+  ExternalLink,
+  Table
+} from 'lucide-react';
+import {
+  apiArchiveGetSupplierMappings,
+  apiArchiveSaveSupplierMappings,
+  apiArchiveSaveSupplier,
+  apiArchiveDeleteSupplier
+} from '../../utils/archiveApiClient';
+
+const STANDARD_FIELDS = [
+  { value: 'productName', label: 'اسم الصنف / الدواء' },
+  { value: 'quantity', label: 'الكمية' },
+  { value: 'unitPrice', label: 'سعر الجمهور' },
+  { value: 'discount', label: 'نسبة الخصم %' },
+  { value: 'netPrice', label: 'الصافي للوحدة' },
+  { value: 'totalPrice', label: 'إجمالي الصافي للسطر' },
+  { value: 'bonusQuantity', label: 'البونص / المجاني' },
+  { value: 'batchNumber', label: 'رقم التشغيلة (Batch)' },
+  { value: 'expiryDate', label: 'تاريخ الصلاحية (Expiry)' }
+];
 
 export default function SupplierDetailModal({
   supplier,
+  invoices = [],
   onClose,
-  onSupplierUpdated = () => {}
+  onSelectInvoice,
+  onSupplierUpdated = () => {},
+  onSupplierDeleted = () => {}
 }) {
-  const [activeSubTab, setActiveSubTab] = useState('info'); // 'info' | 'mappings'
+  const [activeTab, setActiveTab] = useState('invoices'); // 'invoices' | 'info' | 'mappings'
+
+  // Info State
   const [name, setName] = useState(supplier?.name || '');
   const [phone, setPhone] = useState(supplier?.phone || '');
   const [email, setEmail] = useState(supplier?.email || '');
@@ -14,10 +54,23 @@ export default function SupplierDetailModal({
   const [taxNumber, setTaxNumber] = useState(supplier?.taxNumber || supplier?.tax_number || '');
   const [notes, setNotes] = useState(supplier?.notes || '');
 
-  // Column Mappings
+  // Mappings State
   const [mappings, setMappings] = useState([]);
+  const [isLoadingMappings, setIsLoadingMappings] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [msg, setMsg] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [statusMsg, setStatusMsg] = useState('');
+  const [isError, setIsError] = useState(false);
+
+  // Supplier Invoices
+  const supplierInvoices = invoices.filter(
+    (inv) => String(inv.supplierId || inv.supplier_id) === String(supplier?.id)
+  );
+
+  const totalSpent = supplierInvoices.reduce(
+    (sum, inv) => sum + parseFloat(inv.netAmount || inv.net_amount || inv.totalAmount || 0),
+    0
+  );
 
   useEffect(() => {
     if (supplier?.id) {
@@ -28,13 +81,16 @@ export default function SupplierDetailModal({
   if (!supplier) return null;
 
   const loadMappings = async () => {
+    setIsLoadingMappings(true);
     try {
       const res = await apiArchiveGetSupplierMappings(supplier.id);
       if (res.success && Array.isArray(res.mappings)) {
         setMappings(res.mappings);
       }
-    } catch (e) {
-      console.error(e);
+    } catch {
+      // Ignore
+    } finally {
+      setIsLoadingMappings(false);
     }
   };
 
@@ -52,25 +108,34 @@ export default function SupplierDetailModal({
     setMappings(mappings.filter((_, i) => i !== idx));
   };
 
-  const handleSaveInfo = async () => {
+  const handleSaveInfo = async (e) => {
+    if (e) e.preventDefault();
     setIsSaving(true);
-    setMsg('');
+    setStatusMsg('');
+    setIsError(false);
+
     try {
-      const res = await apiArchiveSaveSupplier({
+      const payload = {
         id: supplier.id,
-        name,
-        phone,
-        email,
-        address,
-        taxNumber,
-        notes
-      });
+        name: name.trim(),
+        phone: phone.trim() || null,
+        email: email.trim() || null,
+        address: address.trim() || null,
+        taxNumber: taxNumber.trim() || null,
+        notes: notes.trim() || null
+      };
+
+      const res = await apiArchiveSaveSupplier(payload);
       if (res.success) {
-        setMsg('✅ تم حفظ بيانات المورد بنجاح');
-        onSupplierUpdated();
+        setStatusMsg('تم حفظ وتحديث بيانات المورد بنجاح!');
+        onSupplierUpdated({ ...supplier, ...payload });
+      } else {
+        setIsError(true);
+        setStatusMsg(res.error || 'فشل تحديث بيانات المورد');
       }
-    } catch (e) {
-      setMsg('❌ فشل حفظ البيانات');
+    } catch {
+      setIsError(true);
+      setStatusMsg('حدث خطأ أثناء الحفظ');
     } finally {
       setIsSaving(false);
     }
@@ -78,200 +143,378 @@ export default function SupplierDetailModal({
 
   const handleSaveMappings = async () => {
     setIsSaving(true);
-    setMsg('');
+    setStatusMsg('');
+    setIsError(false);
+
     try {
-      const res = await apiArchiveSaveSupplierMappings(supplier.id, mappings);
+      const validMappings = mappings.filter((m) => m.rawColumnName.trim());
+      const res = await apiArchiveSaveSupplierMappings(supplier.id, validMappings);
       if (res.success) {
-        setMsg('✅ تم حفظ تعيين الأعمدة بنجاح');
-        onSupplierUpdated();
+        setStatusMsg('تم حفظ وتطبيق تعيينات أعمدة الإكسل لهذا المورد!');
+      } else {
+        setIsError(true);
+        setStatusMsg(res.error || 'فشل حفظ التعيينات');
       }
-    } catch (e) {
-      setMsg('❌ فشل حفظ التعيين');
+    } catch {
+      setIsError(true);
+      setStatusMsg('حدث خطأ أثناء حفظ التعيينات');
     } finally {
       setIsSaving(false);
     }
   };
 
-  const standardFieldOptions = [
-    { value: 'productName', label: 'اسم الصنف / الدواء' },
-    { value: 'quantity', label: 'الكمية' },
-    { value: 'unitPrice', label: 'سعر الشراء / الوحدة' },
-    { value: 'discount', label: 'الخصم' },
-    { value: 'totalPrice', label: 'إجمالي السعر' },
-    { value: 'sellingPrice', label: 'سعر الجمهور / البيع' },
-    { value: 'batchNumber', label: 'رقم التشغيلة / الباتش' },
-    { value: 'expiryDate', label: 'تاريخ الصلاحية' },
-  ];
+  const handleDeleteSupplier = async () => {
+    if (!window.confirm(`هل أنت متأكد من حذف المورد "${supplier.name}"؟`)) return;
+
+    setIsDeleting(true);
+    try {
+      const res = await apiArchiveDeleteSupplier(supplier.id);
+      if (res.success) {
+        onSupplierDeleted(supplier.id);
+        onClose();
+      } else {
+        alert(res.error || 'فشل حذف المورد');
+      }
+    } catch {
+      alert('حدث خطأ أثناء الحذف');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   return (
-    <div className="arch-modal-overlay" onClick={onClose}>
-      <div className="arch-modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '750px' }}>
+    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 overflow-y-auto">
+      <div className="glass-card rounded-2xl border border-slate-700 w-full max-w-4xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 my-auto">
         
         {/* Header */}
-        <div className="arch-modal-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <span style={{ fontSize: '1.4rem' }}>🏢</span>
+        <div className="flex items-center justify-between p-5 border-b border-slate-800 bg-slate-900/60">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center font-bold text-xl">
+              {(supplier.name || 'م').charAt(0)}
+            </div>
             <div>
-              <h3>تفاصيل المورد: {supplier.name}</h3>
-              <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
-                عدد الفواتير: {supplier.invoices_count || 0} · إجمالي المعاملات: {(parseFloat(supplier.total_invoiced || 0)).toLocaleString('en-US', { minimumFractionDigits: 2 })} ج.م
-              </span>
+              <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2" style={{ margin: 0 }}>
+                {supplier.name}
+              </h2>
+              <p className="text-xs text-slate-400" style={{ margin: '2px 0 0' }}>
+                {supplier.phone ? `هاتف: ${supplier.phone}` : 'سجل الشركة والمطابقة الآلية'}
+              </p>
             </div>
           </div>
-          <button className="arch-btn-icon" onClick={onClose}>✕</button>
-        </div>
 
-        {/* Tab switch */}
-        <div style={{ display: 'flex', gap: '8px', padding: '12px 24px', borderBottom: '1px solid #334155', background: 'rgba(15, 23, 42, 0.4)' }}>
           <button
             type="button"
-            className={`arch-nav-btn ${activeSubTab === 'info' ? 'active' : ''}`}
-            onClick={() => setActiveSubTab('info')}
+            onClick={onClose}
+            className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl transition cursor-pointer"
           >
-            📋 البيانات الأساسية
-          </button>
-          <button
-            type="button"
-            className={`arch-nav-btn ${activeSubTab === 'mappings' ? 'active' : ''}`}
-            onClick={() => setActiveSubTab('mappings')}
-          >
-            📊 تعيين أعمدة الإكسل (Column Mappings)
+            <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Body */}
-        <div className="arch-modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        {/* Top Metric Cards */}
+        <div className="grid grid-cols-2 gap-4 p-5 bg-slate-900/30 border-b border-slate-800">
+          <div className="p-4 rounded-xl bg-indigo-950/30 border border-indigo-900/50 flex items-center justify-between">
+            <div>
+              <span className="text-xs text-indigo-400 font-medium">عدد الفواتير المستلمة</span>
+              <p className="text-xl font-bold text-slate-100 mt-1">{supplierInvoices.length} فاتورة</p>
+            </div>
+            <FileText className="w-6 h-6 text-indigo-400" />
+          </div>
+
+          <div className="p-4 rounded-xl bg-emerald-950/30 border border-emerald-900/50 flex items-center justify-between">
+            <div>
+              <span className="text-xs text-emerald-400 font-medium">إجمالي المسحوبات (الصافي)</span>
+              <p className="text-xl font-bold text-emerald-400 mt-1 font-mono">
+                {totalSpent.toLocaleString('ar-EG', { maximumFractionDigits: 2 })} ج.م
+              </p>
+            </div>
+            <DollarSign className="w-6 h-6 text-emerald-400" />
+          </div>
+        </div>
+
+        {/* Subtabs */}
+        <div className="flex border-b border-slate-800 bg-slate-950/60 p-2 gap-2">
+          <button
+            type="button"
+            onClick={() => setActiveTab('invoices')}
+            className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+              activeTab === 'invoices' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>سجل الفواتير ({supplierInvoices.length})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('info')}
+            className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+              activeTab === 'info' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Building2 className="w-3.5 h-3.5" />
+            <span>بيانات ومعلومات المورد</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('mappings')}
+            className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+              activeTab === 'mappings' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Settings2 className="w-3.5 h-3.5" />
+            <span>تعيين أعمدة Excel ({mappings.length})</span>
+          </button>
+        </div>
+
+        {/* Tab Body */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
           
-          {msg && (
-            <div style={{
-              background: msg.startsWith('✅') ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-              border: `1px solid ${msg.startsWith('✅') ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
-              borderRadius: '12px',
-              padding: '10px 16px',
-              color: msg.startsWith('✅') ? '#34d399' : '#f87171',
-              fontSize: '0.85rem'
-            }}>
-              {msg}
+          {statusMsg && (
+            <div className={`p-3 rounded-xl text-xs flex items-center gap-2 border ${
+              isError ? 'bg-red-950/60 border-red-800 text-red-300' : 'bg-emerald-950/60 border-emerald-800 text-emerald-300'
+            }`}>
+              {isError ? <AlertCircle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
+              <span>{statusMsg}</span>
             </div>
           )}
 
-          {activeSubTab === 'info' && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
-              <div className="arch-input-group">
-                <label className="arch-input-label">اسم الشركة / المورد *</label>
-                <input type="text" className="arch-input" value={name} onChange={(e) => setName(e.target.value)} required />
-              </div>
-
-              <div className="arch-input-group">
-                <label className="arch-input-label">رقم الهاتف</label>
-                <input type="text" className="arch-input" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="010xxxxxxxx" />
-              </div>
-
-              <div className="arch-input-group">
-                <label className="arch-input-label">البريد الإلكتروني</label>
-                <input type="email" className="arch-input" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="supplier@example.com" />
-              </div>
-
-              <div className="arch-input-group">
-                <label className="arch-input-label">السجل أو الرقم الضريبي</label>
-                <input type="text" className="arch-input" value={taxNumber} onChange={(e) => setTaxNumber(e.target.value)} placeholder="123-456-789" />
-              </div>
-
-              <div className="arch-input-group" style={{ gridColumn: '1 / -1' }}>
-                <label className="arch-input-label">العنوان</label>
-                <input type="text" className="arch-input" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="العنوان أو الفرع" />
-              </div>
-
-              <div className="arch-input-group" style={{ gridColumn: '1 / -1' }}>
-                <label className="arch-input-label">ملاحظات إضافية</label>
-                <textarea className="arch-input" rows="2" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="ملاحظات المورد..." />
-              </div>
-            </div>
-          )}
-
-          {activeSubTab === 'mappings' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
-                يمكنك هنا مطابقة أسماء الأعمدة في شيتات الإكسل الصادرة من هذا المورد لتسهيل قراءتها واستخراج بنود الفواتير تلقائياً دون أخطاء.
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <button type="button" className="arch-btn-secondary" onClick={handleAddMapping} style={{ padding: '6px 12px', fontSize: '0.78rem' }}>
-                  ➕ إضافة مطابقة عمود
-                </button>
-              </div>
-
-              <div className="arch-table-responsive">
-                <table className="arch-table">
-                  <thead>
-                    <tr>
-                      <th>اسم العمود في ملف المورد (Raw Column)</th>
-                      <th>الحقل المعياري المقابل في النظام</th>
-                      <th style={{ width: '50px' }}></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {mappings.length === 0 ? (
+          {/* TAB 1: INVOICES LIST */}
+          {activeTab === 'invoices' && (
+            <div>
+              {supplierInvoices.length === 0 ? (
+                <div className="p-8 text-center text-slate-500 bg-slate-900/40 rounded-xl border border-slate-800 text-xs">
+                  لا توجد فواتير مؤرشفة مسجلة لهذا المورد حتى الآن.
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-xl border border-slate-800">
+                  <table className="w-full text-right text-xs text-slate-300 border-collapse">
+                    <thead className="bg-slate-900/90 text-slate-400 font-bold border-b border-slate-800 uppercase">
                       <tr>
-                        <td colSpan={3} style={{ textAlign: 'center', color: '#64748b', padding: '16px' }}>
-                          لم يتم تحديد مطابقة أعمدة خاصة بعد. النظام سيستخدم المطابقة الذكية الافتراضية.
-                        </td>
+                        <th className="p-3 w-10 text-center">#</th>
+                        <th className="p-3">رقم الفاتورة</th>
+                        <th className="p-3">تاريخ الفاتورة</th>
+                        <th className="p-3 text-center">الأصناف</th>
+                        <th className="p-3 text-left">الصافي</th>
+                        <th className="p-3 text-center">إجراءات</th>
                       </tr>
-                    ) : (
-                      mappings.map((m, idx) => (
-                        <tr key={idx}>
-                          <td>
-                            <input
-                              type="text"
-                              className="arch-input"
-                              value={m.rawColumnName || m.raw_column_name || ''}
-                              onChange={(e) => handleUpdateMapping(idx, 'rawColumnName', e.target.value)}
-                              placeholder="مثال: Item Name أو اسم الصنف"
-                            />
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60">
+                      {supplierInvoices.map((inv, idx) => (
+                        <tr key={inv.id || idx} className="hover:bg-slate-800/30">
+                          <td className="p-3 text-center font-mono text-slate-500">{idx + 1}</td>
+                          <td className="p-3 font-bold font-mono text-slate-100">
+                            #{inv.invoiceNumber || inv.invoice_number}
                           </td>
-                          <td>
-                            <select
-                              className="arch-select"
-                              value={m.standardField || m.standard_field || 'productName'}
-                              onChange={(e) => handleUpdateMapping(idx, 'standardField', e.target.value)}
-                            >
-                              {standardFieldOptions.map(opt => (
-                                <option key={opt.value} value={opt.value}>{opt.label}</option>
-                              ))}
-                            </select>
+                          <td className="p-3 font-mono text-slate-400">
+                            {inv.invoiceDate || inv.invoice_date || '-'}
                           </td>
-                          <td>
+                          <td className="p-3 text-center">
+                            <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono text-[11px]">
+                              {inv.items?.length || inv.itemsCount || 0} صنف
+                            </span>
+                          </td>
+                          <td className="p-3 text-left font-mono font-bold text-emerald-400">
+                            {parseFloat(inv.netAmount || inv.net_amount || inv.totalAmount || 0).toLocaleString('ar-EG')} ج.م
+                          </td>
+                          <td className="p-3 text-center">
                             <button
                               type="button"
-                              onClick={() => handleRemoveMapping(idx)}
-                              style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer' }}
+                              onClick={() => {
+                                onClose();
+                                if (onSelectInvoice) onSelectInvoice(inv);
+                              }}
+                              className="px-2.5 py-1 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 rounded-lg text-[11px] font-semibold transition cursor-pointer"
                             >
-                              🗑️
+                              عرض الفاتورة
                             </button>
                           </td>
                         </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 2: SUPPLIER INFO FORM */}
+          {activeTab === 'info' && (
+            <form onSubmit={handleSaveInfo} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-300 block">اسم المورد أو الشركة *</label>
+                  <input
+                    type="text"
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-300 block">رقم الهاتف والتواصل</label>
+                  <input
+                    type="text"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="010xxxxxxxx"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-indigo-500 font-mono"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-300 block">البريد الإلكتروني</label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="sales@company.com"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-300 block">الرقم أو السجل الضريبي</label>
+                  <input
+                    type="text"
+                    value={taxNumber}
+                    onChange={(e) => setTaxNumber(e.target.value)}
+                    placeholder="123-456-789"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-indigo-500 font-mono"
+                  />
+                </div>
+
+                <div className="space-y-1.5 sm:col-span-2">
+                  <label className="text-xs font-semibold text-slate-300 block">العنوان أو المقر</label>
+                  <input
+                    type="text"
+                    value={address}
+                    onChange={(e) => setAddress(e.target.value)}
+                    placeholder="الفرع أو عنوان المخزن..."
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                <div className="space-y-1.5 sm:col-span-2">
+                  <label className="text-xs font-semibold text-slate-300 block">ملاحظات إضافية</label>
+                  <textarea
+                    rows={2}
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="أي تعليمات أو شروط دفع خاصة بالمورد..."
+                    className="w-full px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={handleDeleteSupplier}
+                  disabled={isDeleting}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-red-400 hover:bg-red-950/40 border border-red-900/40 transition cursor-pointer"
+                >
+                  {isDeleting ? 'جاري الحذف...' : 'حذف المورد'}
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={isSaving}
+                  className="px-6 py-2.5 rounded-xl text-xs font-bold text-white gradient-btn flex items-center gap-1.5 shadow-md cursor-pointer disabled:opacity-50"
+                >
+                  {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  <span>حفظ بيانات المورد</span>
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* TAB 3: EXCEL COLUMN MAPPINGS */}
+          {activeTab === 'mappings' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-slate-300 font-bold" style={{ margin: 0 }}>
+                    قواعد استيراد ومطابقة أعمدة الإكسل
+                  </p>
+                  <p className="text-[11px] text-slate-500" style={{ margin: '2px 0 0' }}>
+                    اربط أسماء الأعمدة في شيت إكسل المورد بالحقول القياسية في الأرشيف
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleAddMapping}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold text-indigo-300 bg-indigo-950/60 hover:bg-indigo-900 border border-indigo-800/60 flex items-center gap-1 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>إضافة عمود</span>
+                </button>
+              </div>
+
+              {mappings.length === 0 ? (
+                <div className="p-8 text-center text-slate-500 bg-slate-900/40 rounded-xl border border-slate-800 text-xs">
+                  لا توجد قواعد تعيين أعمدة مسجلة لهذا المورد. انقر على "إضافة عمود" لربط شيتات الإكسل.
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {mappings.map((m, idx) => (
+                    <div key={idx} className="flex items-center gap-3 p-3 rounded-xl bg-slate-900/80 border border-slate-800">
+                      <div className="flex-1">
+                        <label className="text-[10px] text-slate-400 block mb-1">اسم العمود في ملف المورد (كما هو مكتوب بالإكسل)</label>
+                        <input
+                          type="text"
+                          value={m.rawColumnName}
+                          onChange={(e) => handleUpdateMapping(idx, 'rawColumnName', e.target.value)}
+                          placeholder="مثال: Item_Name أو اسم الصنف"
+                          className="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-slate-100"
+                        />
+                      </div>
+
+                      <span className="text-slate-500 font-bold mt-4">←</span>
+
+                      <div className="flex-1">
+                        <label className="text-[10px] text-slate-400 block mb-1">الحقل القياسي في الأرشيف</label>
+                        <select
+                          value={m.standardField}
+                          onChange={(e) => handleUpdateMapping(idx, 'standardField', e.target.value)}
+                          className="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-slate-100"
+                        >
+                          {STANDARD_FIELDS.map((f) => (
+                            <option key={f.value} value={f.value}>{f.label}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveMapping(idx)}
+                        className="p-1.5 text-slate-500 hover:text-red-400 transition mt-4"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex justify-end pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={handleSaveMappings}
+                  disabled={isSaving}
+                  className="px-6 py-2.5 rounded-xl text-xs font-bold text-white gradient-btn flex items-center gap-1.5 shadow-md cursor-pointer disabled:opacity-50"
+                >
+                  {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  <span>حفظ تعيينات الأعمدة</span>
+                </button>
               </div>
             </div>
           )}
 
-        </div>
-
-        {/* Footer */}
-        <div className="arch-modal-footer">
-          {activeSubTab === 'info' ? (
-            <button type="button" className="arch-btn-primary" onClick={handleSaveInfo} disabled={isSaving}>
-              {isSaving ? 'جاري الحفظ...' : '💾 حفظ بيانات المورد'}
-            </button>
-          ) : (
-            <button type="button" className="arch-btn-primary" onClick={handleSaveMappings} disabled={isSaving}>
-              {isSaving ? 'جاري الحفظ...' : '💾 حفظ تعيين الأعمدة'}
-            </button>
-          )}
-          <button type="button" className="arch-btn-secondary" onClick={onClose}>إغلاق</button>
         </div>
 
       </div>

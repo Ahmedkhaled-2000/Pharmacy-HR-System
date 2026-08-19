@@ -1,224 +1,174 @@
 import React, { useState } from 'react';
-import { apiArchiveSaveSupplier, apiArchiveDeleteSupplier } from '../../utils/archiveApiClient';
+import { Building2, Search, Plus, Phone, FileText, ChevronLeft, Loader2 } from 'lucide-react';
+import { apiArchiveSaveSupplier } from '../../utils/archiveApiClient';
 
 export default function ArchiveSuppliersTab({
   suppliers = [],
+  isLoading = false,
   onSelectSupplier,
   onSupplierSaved = () => {}
 }) {
-  const [search, setSearch] = useState('');
-  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
-  const [email, setEmail] = useState('');
-  const [address, setAddress] = useState('');
-  const [taxNumber, setTaxNumber] = useState('');
-  const [notes, setNotes] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-  const [deletingId, setDeletingId] = useState(null);
 
-  const filteredSuppliers = suppliers.filter(s => {
-    if (!search.trim()) return true;
-    const q = search.toLowerCase();
-    return (s.name || '').toLowerCase().includes(q) || (s.phone || '').includes(q);
-  });
-
-  const handleCreate = async (e) => {
+  const handleAddSupplier = async (e) => {
     e.preventDefault();
-    if (!name.trim()) return;
+    const tempName = name.trim();
+    const tempPhone = phone.trim();
+    if (!tempName) return;
 
     setIsSaving(true);
     try {
       const res = await apiArchiveSaveSupplier({
-        name: name.trim(),
-        phone,
-        email,
-        address,
-        taxNumber,
-        notes
+        name: tempName,
+        phone: tempPhone || null
       });
       if (res.success) {
         setName('');
         setPhone('');
-        setEmail('');
-        setAddress('');
-        setTaxNumber('');
-        setNotes('');
-        setIsAddOpen(false);
-        onSupplierSaved();
+        onSupplierSaved(res.supplier || { id: res.id || 'sup_' + Date.now(), name: tempName, phone: tempPhone });
       } else {
-        alert(res.error || 'فشل حفظ المورد');
+        alert(res.error || 'فشل إضافة المورد');
       }
-    } catch (err) {
+    } catch {
       alert('حدث خطأ أثناء حفظ المورد');
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleDelete = async (id, e) => {
-    e.stopPropagation();
-    if (!window.confirm('هل أنت متأكد من حذف هذا المورد؟')) return;
-
-    setDeletingId(id);
-    try {
-      const res = await apiArchiveDeleteSupplier(id);
-      if (res.success) {
-        onSupplierSaved();
-      } else {
-        alert(res.error || 'فشل حذف المورد');
-      }
-    } catch (err) {
-      alert('حدث خطأ أثناء الحذف');
-    } finally {
-      setDeletingId(null);
-    }
-  };
+  const filteredSuppliers = suppliers.filter((sup) => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      (sup.name || '').toLowerCase().includes(q) ||
+      (sup.phone && sup.phone.includes(q))
+    );
+  });
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+    <div className="space-y-6 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       
-      {/* Search & Actions Bar */}
-      <div className="arch-filter-card">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '14px' }}>
-          <div style={{ flex: 1, minWidth: '240px' }}>
-            <input
-              type="text"
-              className="arch-input"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="🔍 ابحث عن مورد أو شركة بالاسم أو رقم الهاتف..."
-            />
-          </div>
+      {/* Page Title & Search Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-100 flex items-center gap-2" style={{ margin: 0 }}>
+            <Building2 className="w-6 h-6 text-indigo-400" />
+            دليل وشركات الموردين الأرشيفية ({suppliers.length})
+          </h1>
+          <p className="text-xs text-slate-400 mt-1" style={{ margin: '4px 0 0 0' }}>
+            مطابقة شيتات الإكسل الصادرة، السجلات الضريبية وتاريخ الفواتير المستلمة لكل مورد
+          </p>
+        </div>
+
+        <div className="relative w-full sm:w-80">
+          <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-3.5" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="بحث عن اسم المورد أو الهاتف..."
+            className="w-full pr-10 pl-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 shadow-inner"
+          />
+        </div>
+      </div>
+
+      {/* Quick Add Supplier Card */}
+      <div className="glass-card rounded-2xl p-5 border border-slate-800 shadow-lg">
+        <form onSubmit={handleAddSupplier} className="flex flex-col sm:flex-row items-center gap-3">
+          <input
+            type="text"
+            required
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="اسم مورد الأدوية أو الشركة الجديد..."
+            className="flex-1 w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+          />
+          <input
+            type="text"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="رقم الهاتف (اختياري)..."
+            className="w-full sm:w-52 px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+          />
           <button
-            type="button"
-            className="arch-btn-primary"
-            onClick={() => setIsAddOpen(true)}
+            type="submit"
+            disabled={isSaving}
+            className="w-full sm:w-auto px-6 py-2.5 rounded-xl text-xs font-bold text-white gradient-btn flex items-center justify-center gap-1.5 shadow-md cursor-pointer disabled:opacity-50"
           >
-            ➕ إضافة مورد جديد
+            {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+            <span>إضافة مورد</span>
           </button>
-        </div>
+        </form>
       </div>
 
-      {/* Suppliers Table Card */}
-      <div className="arch-table-card">
-        <div className="arch-table-header">
-          <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: '#f8fafc' }}>
-            🏢 دليل الشركات والموردين ({filteredSuppliers.length})
-          </h3>
-        </div>
-
-        <div className="arch-table-responsive">
-          <table className="arch-table">
-            <thead>
-              <tr>
-                <th>اسم الشركة / المورد</th>
-                <th>الهاتف</th>
-                <th>البريد الإلكتروني</th>
-                <th>الرقم الضريبي</th>
-                <th>عدد الفواتير</th>
-                <th>إجمالي المعاملات</th>
-                <th>الإجراءات</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredSuppliers.length === 0 ? (
-                <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: '36px', color: '#64748b' }}>
-                    لا يوجد موردين مسجلين
-                  </td>
-                </tr>
-              ) : (
-                filteredSuppliers.map((s) => (
-                  <tr key={s.id} onClick={() => onSelectSupplier(s)} style={{ cursor: 'pointer' }}>
-                    <td style={{ fontWeight: 800, color: '#f8fafc' }}>{s.name}</td>
-                    <td style={{ color: '#94a3b8' }}>{s.phone || '—'}</td>
-                    <td style={{ color: '#94a3b8' }}>{s.email || '—'}</td>
-                    <td>{s.taxNumber || s.tax_number || '—'}</td>
-                    <td>
-                      <span className="arch-badge blue">{s.invoices_count || 0} فاتورة</span>
-                    </td>
-                    <td style={{ fontWeight: 700, color: '#34d399' }}>
-                      {(parseFloat(s.total_invoiced || 0)).toLocaleString('en-US', { minimumFractionDigits: 2 })} ج.م
-                    </td>
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }} onClick={(e) => e.stopPropagation()}>
-                        <button
-                          type="button"
-                          className="arch-btn-secondary"
-                          onClick={() => onSelectSupplier(s)}
-                          style={{ padding: '4px 10px', fontSize: '0.75rem' }}
-                        >
-                          ⚙️ التفاصيل والمطابقة
-                        </button>
-                        <button
-                          type="button"
-                          className="arch-btn-danger"
-                          onClick={(e) => handleDelete(s.id, e)}
-                          disabled={deletingId === s.id}
-                        >
-                          {deletingId === s.id ? '⏳' : '🗑️'}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Add Supplier Modal */}
-      {isAddOpen && (
-        <div className="arch-modal-overlay" onClick={() => setIsAddOpen(false)}>
-          <div className="arch-modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px' }}>
-            <div className="arch-modal-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span>🏢</span>
-                <h3>إضافة مورد جديد</h3>
+      {/* Suppliers List Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        {isLoading && suppliers.length === 0 ? (
+          Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="glass-card rounded-2xl p-5 border border-slate-800/80 animate-pulse space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-xl bg-slate-800/80"></div>
+                <div className="space-y-2 flex-1">
+                  <div className="w-3/4 h-5 rounded-lg bg-slate-800/80"></div>
+                  <div className="w-1/2 h-3 rounded-lg bg-slate-800/50"></div>
+                </div>
               </div>
-              <button className="arch-btn-icon" onClick={() => setIsAddOpen(false)}>✕</button>
+              <div className="pt-3 border-t border-slate-800/60 h-8 rounded-lg bg-slate-800/40"></div>
             </div>
-
-            <form onSubmit={handleCreate}>
-              <div className="arch-modal-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
-                <div className="arch-input-group" style={{ gridColumn: '1 / -1' }}>
-                  <label className="arch-input-label">اسم الشركة أو المورد *</label>
-                  <input type="text" className="arch-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="شركة المتحدون فارما" required autoFocus />
-                </div>
-                <div className="arch-input-group">
-                  <label className="arch-input-label">الهاتف</label>
-                  <input type="text" className="arch-input" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="010xxxxxxxx" />
-                </div>
-                <div className="arch-input-group">
-                  <label className="arch-input-label">البريد الإلكتروني</label>
-                  <input type="email" className="arch-input" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="sales@example.com" />
-                </div>
-                <div className="arch-input-group" style={{ gridColumn: '1 / -1' }}>
-                  <label className="arch-input-label">الرقم الضريبي</label>
-                  <input type="text" className="arch-input" value={taxNumber} onChange={(e) => setTaxNumber(e.target.value)} placeholder="السجل الضريبي" />
-                </div>
-                <div className="arch-input-group" style={{ gridColumn: '1 / -1' }}>
-                  <label className="arch-input-label">العنوان</label>
-                  <input type="text" className="arch-input" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="عنوان المورد" />
-                </div>
-                <div className="arch-input-group" style={{ gridColumn: '1 / -1' }}>
-                  <label className="arch-input-label">ملاحظات</label>
-                  <textarea className="arch-input" rows="2" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="أي ملاحظات إضافية..." />
-                </div>
-              </div>
-
-              <div className="arch-modal-footer">
-                <button type="button" className="arch-btn-secondary" onClick={() => setIsAddOpen(false)}>إلغاء</button>
-                <button type="submit" className="arch-btn-primary" disabled={isSaving}>
-                  {isSaving ? 'جاري الحفظ...' : '💾 حفظ المورد'}
-                </button>
-              </div>
-            </form>
+          ))
+        ) : filteredSuppliers.length === 0 ? (
+          <div className="col-span-full text-center text-slate-500 py-16 bg-slate-900/40 rounded-2xl border border-slate-800">
+            <Building2 className="w-12 h-12 mx-auto text-slate-700 stroke-1 mb-2" />
+            <p className="text-sm font-medium text-slate-400">لا يوجد موردين مطابقين لبحثك حالياً.</p>
           </div>
-        </div>
-      )}
+        ) : (
+          filteredSuppliers.map((sup) => {
+            const invoicesCount = sup._count?.invoices || sup.invoicesCount || sup.invoices_count || 0;
+            return (
+              <div
+                key={sup.id}
+                onClick={() => onSelectSupplier && onSelectSupplier(sup)}
+                className="glass-card rounded-2xl p-5 border border-slate-800 hover:border-indigo-500/50 cursor-pointer transition flex flex-col justify-between space-y-4 group shadow-md"
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center font-bold text-xl group-hover:scale-105 transition border border-indigo-500/20">
+                      {(sup.name || 'م').charAt(0)}
+                    </div>
+                    <div>
+                      <h3 className="text-base font-bold text-slate-100 group-hover:text-indigo-300 transition" style={{ margin: 0 }}>
+                        {sup.name}
+                      </h3>
+                      {sup.phone ? (
+                        <p className="text-xs text-slate-400 flex items-center gap-1.5 mt-1" style={{ margin: '4px 0 0 0' }}>
+                          <Phone className="w-3.5 h-3.5 text-indigo-400" />
+                          <span className="dir-ltr">{sup.phone}</span>
+                        </p>
+                      ) : (
+                        <p className="text-xs text-slate-500 mt-1" style={{ margin: '4px 0 0 0' }}>لا يوجد رقم هاتف مسجل</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs">
+                  <span className="text-slate-400 flex items-center gap-1">
+                    <FileText className="w-3.5 h-3.5 text-blue-400" />
+                    عدد الفواتير المستلمة: <strong className="text-slate-200">{invoicesCount}</strong>
+                  </span>
+                  <span className="text-indigo-400 font-bold group-hover:translate-x-[-4px] transition flex items-center gap-0.5">
+                    <span>التفاصيل</span>
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                  </span>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
 
     </div>
   );
