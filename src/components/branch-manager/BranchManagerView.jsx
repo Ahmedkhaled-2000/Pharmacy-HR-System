@@ -56,13 +56,13 @@ function getActiveBreakStr(activeShift) {
 }
 
 export function getArabicStatusBadge(status, adminApproved, branchApproved) {
-  if (status === 'approved' || adminApproved) {
-    return <span className="approval-status-badge approved" style={{ background: '#dcfce7', color: '#15803d', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px' }}>🟢 معتمد نهائياً</span>;
-  }
   if (status === 'rejected') {
     return <span className="approval-status-badge rejected" style={{ background: '#fee2e2', color: '#b91c1c', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px' }}>🔴 مرفوض</span>;
   }
-  if (status === 'pending_admin' || (branchApproved && !adminApproved)) {
+  if (status === 'approved' && adminApproved) {
+    return <span className="approval-status-badge approved" style={{ background: '#dcfce7', color: '#15803d', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px' }}>🟢 معتمد نهائياً</span>;
+  }
+  if (status === 'pending_admin' || branchApproved || (status === 'approved' && !adminApproved)) {
     return <span className="approval-status-badge pending" style={{ background: '#fef3c7', color: '#b45309', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px' }}>🟡 بانتظار الإدارة العليا</span>;
   }
   if (status === 'partial') {
@@ -79,6 +79,38 @@ export function getArabicBranchApprovalBadge(branchApproved, status) {
     return <span style={{ color: '#dc2626', fontWeight: 'bold', fontSize: '12.5px' }}>🔴 مرفوض</span>;
   }
   return <span style={{ color: '#d97706', fontWeight: 'bold', fontSize: '12.5px' }}>⏳ بانتظار موافقتك</span>;
+}
+
+export function getRequestSortTime(r) {
+  if (!r) return 0;
+  if (r.createdAt) {
+    const t = new Date(r.createdAt).getTime();
+    if (!isNaN(t) && t > 0) return t;
+  }
+  if (r.timestamp) {
+    const t = new Date(r.timestamp).getTime();
+    if (!isNaN(t) && t > 0) return t;
+  }
+  if (r.updatedAt) {
+    const t = new Date(r.updatedAt).getTime();
+    if (!isNaN(t) && t > 0) return t;
+  }
+  if (r.id) {
+    const parts = String(r.id).split('_');
+    for (const p of parts) {
+      const num = parseInt(p, 10);
+      if (!isNaN(num) && num > 1000000000000) return num;
+    }
+  }
+  if (r.date) {
+    const t = new Date(r.date).getTime();
+    if (!isNaN(t) && t > 0) return t;
+  }
+  if (r.startDate) {
+    const t = new Date(r.startDate).getTime();
+    if (!isNaN(t) && t > 0) return t;
+  }
+  return 0;
 }
 
 export default function BranchManagerView({
@@ -265,23 +297,27 @@ export default function BranchManagerView({
     });
   }, [state.employees, currentBranch]);
 
-  // Branch Requests
+  // Branch Requests (Sorted newest first)
   const branchRequests = useMemo(() => {
-    if (!currentBranch?.id) return state.requests || [];
+    if (!currentBranch?.id) {
+      return (state.requests || []).slice().sort((a, b) => getRequestSortTime(b) - getRequestSortTime(a));
+    }
     const cIdStr = String(currentBranch.id);
     const branchEmpIdSet = new Set(branchEmployees.map((e) => String(e.id)));
 
-    return (state.requests || []).filter((r) => {
+    const list = (state.requests || []).filter((r) => {
       // 1. Direct branch match on request
       if (r.branchId && String(r.branchId) === cIdStr) return true;
       // 2. Request employee belongs to this branch
       if (r.employeeId && branchEmpIdSet.has(String(r.employeeId))) return true;
       return false;
     });
+
+    return list.sort((a, b) => getRequestSortTime(b) - getRequestSortTime(a));
   }, [state.requests, branchEmployees, currentBranch]);
 
   const filteredBranchRequests = useMemo(() => {
-    return branchRequests.filter((r) => {
+    const list = branchRequests.filter((r) => {
       if (branchReqEmpFilter !== 'all' && String(r.employeeId) !== String(branchReqEmpFilter)) return false;
       if (branchReqDateFilter) {
         const rDate = (r.createdAt ? r.createdAt.slice(0, 10) : (r.startDate || r.date || ''));
@@ -289,6 +325,8 @@ export default function BranchManagerView({
       }
       return true;
     });
+
+    return list.sort((a, b) => getRequestSortTime(b) - getRequestSortTime(a));
   }, [branchRequests, branchReqEmpFilter, branchReqDateFilter]);
 
   // ── Calculate Manager Salary Metrics ──
@@ -351,14 +389,14 @@ export default function BranchManagerView({
 
     const updatedRequests = (state.requests || []).map((r) => {
       if (r.id === reqId) {
-        const rule = (state.approvalRules || []).find((ru) => ru.requestType === r.type || ru.id === r.type);
-        const requiresAdmin = rule ? (rule.reqAdmin !== false) : (r.targetApproval === 'admin_only' || ['loan', 'advance', 'penalty'].includes(r.type));
+        // Any request approved by the Branch Manager must wait for Upper Management (Admin) approval
         const isAdminApproved = Boolean(r.adminApproved);
-        const isFullyApproved = !requiresAdmin || isAdminApproved;
+        const isFullyApproved = isAdminApproved; // Only fully approved if admin already approved
 
         const updated = {
           ...r,
           branchApproved: true,
+          branchApprovedAt: new Date().toISOString(),
           status: isFullyApproved ? 'approved' : 'pending_admin',
           approvedAt: isFullyApproved ? new Date().toISOString() : r.approvedAt
         };
@@ -368,7 +406,7 @@ export default function BranchManagerView({
       return r;
     });
 
-    // 1. If fully approved roster edit/update
+    // 1. If fully approved roster edit/update (only if admin approved)
     if (approvedTargetReq && (approvedTargetReq.type === 'roster_update' || approvedTargetReq.type === 'roster_edit' || approvedTargetReq.type === 'roster_edit_request')) {
       const existingIdx = updatedRosters.findIndex(
         (ros) => ros.employeeId === approvedTargetReq.employeeId && ros.month === approvedTargetReq.month && (String(ros.branchId || '') === String(approvedTargetReq.branchId || ''))
@@ -391,7 +429,7 @@ export default function BranchManagerView({
       }
     }
 
-    // 2. If fully approved leave
+    // 2. If fully approved leave (only if admin approved)
     if (approvedTargetReq && (approvedTargetReq.type === 'leave' || approvedTargetReq.type === 'leave_request' || approvedTargetReq.leaveType)) {
       updatedLeaveRequests = updatedLeaveRequests.map((lr) => {
         if (lr.id === approvedTargetReq.id || (String(lr.employeeId) === String(approvedTargetReq.employeeId) && lr.startDate === approvedTargetReq.startDate)) {
@@ -401,7 +439,7 @@ export default function BranchManagerView({
       });
     }
 
-    // 3. If overtime request
+    // 3. If overtime request (only if admin approved)
     if (approvedTargetReq && approvedTargetReq.type === 'overtime') {
       const targetDate = approvedTargetReq.date || approvedTargetReq.startDate;
       const extraHours = parseFloat(approvedTargetReq.hours) || parseFloat(approvedTargetReq.amount) || 0;
@@ -415,11 +453,11 @@ export default function BranchManagerView({
       }
     }
 
-    // 4. If shift swap request
+    // 4. If shift swap request (only if admin approved)
     if (approvedTargetReq && (approvedTargetReq.type === 'swap' || approvedTargetReq.type === 'shift_swap')) {
       updatedSwaps = updatedSwaps.map((s) => {
         if (s.id === approvedTargetReq.id) {
-          return { ...s, status: 'approved', branchApproved: true };
+          return { ...s, status: 'approved', branchApproved: true, adminApproved: true };
         }
         return s;
       });
@@ -427,7 +465,7 @@ export default function BranchManagerView({
 
     // Dismiss or update notification
     const updatedNotifications = (state.notifications || []).map((n) => {
-      if (n.requestId === reqId) return { ...n, isRead: true, status: 'approved' };
+      if (n.requestId === reqId) return { ...n, isRead: true, status: 'pending_admin' };
       return n;
     });
 
@@ -443,7 +481,7 @@ export default function BranchManagerView({
 
     setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.(approvedTargetReq ? '✅ تم اعتماد وقبول الطلب بنجاح وتطبيقه بالنظام' : '✅ تم توقيع وموافقة مدير الفرع وتحويل الطلب للاعتماد النهائي من الإدارة العليا');
+    showToast?.(approvedTargetReq ? '✅ تم اعتماد وقبول الطلب بنجاح وتطبيقه بالنظام' : '✅ تم توقيع وموافقة مدير الفرع، والطلب الآن بانتظار الاعتماد النهائي من الإدارة العليا');
   };
 
   const handleManagerRejectRequest = async (reqId) => {
@@ -497,7 +535,7 @@ export default function BranchManagerView({
   const handleApproveRoster = async (targetId) => {
     const updatedRosters = (state.rosters || []).map((r) => {
       if (r.id === targetId || String(r.employeeId) === String(targetId)) {
-        const adminApproved = r.adminApproved || r.status === 'approved';
+        const adminApproved = Boolean(r.adminApproved);
         return {
           ...r,
           branchApproved: true,
@@ -509,7 +547,7 @@ export default function BranchManagerView({
 
     const updatedRequests = (state.requests || []).map((r) => {
       if (r.id === targetId || (r.employeeId === targetId && (r.type === 'roster_update' || r.type === 'roster_edit' || r.type === 'roster_edit_request'))) {
-        const isAdminApproved = r.adminApproved || r.status === 'approved';
+        const isAdminApproved = Boolean(r.adminApproved);
         return {
           ...r,
           branchApproved: true,
@@ -522,7 +560,7 @@ export default function BranchManagerView({
     const updatedState = { ...state, rosters: updatedRosters, requests: updatedRequests };
     setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.('✅ تم التوقيع والموافقة على الجدول من مدير الفرع بنجاح');
+    showToast?.('✅ تم التوقيع والموافقة على الجدول من مدير الفرع، وبانتظار الاعتماد النهائي من الإدارة العليا');
   };
 
   const handleSubmitRosterEditRequest = async (e) => {
