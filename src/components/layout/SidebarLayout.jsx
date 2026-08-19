@@ -44,6 +44,7 @@ export default function SidebarLayout({
     { id: 'evaluations', label: 'التقييمات', icon: '⭐️' },
     { id: 'loans-meds', label: 'السلف والأجل', icon: '💳' },
     { id: 'income-expenses', label: 'المصروفات والإيرادات', icon: '📈' },
+    { id: 'pharmacy-archive', label: 'أرشيف الفواتير والمستندات', icon: '🗄️', openInNewTab: true },
     { id: 'settings', label: 'الإعدادات', icon: '⚙️' },
   ];
 
@@ -125,7 +126,13 @@ export default function SidebarLayout({
               return (
                 <button
                   key={item.id}
-                  onClick={() => setActiveTab(item.id)}
+                  onClick={() => {
+                    if (item.openInNewTab || item.id === 'pharmacy-archive') {
+                      window.open(window.location.origin + '/archive', '_blank');
+                    } else {
+                      setActiveTab(item.id);
+                    }
+                  }}
                   title={item.label}
                   style={{
                     display: 'flex',

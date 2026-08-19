@@ -23,7 +23,13 @@ if (empty($endpoint)) {
     }
 }
 
-$clientIp = getClientIp();
+// توجيه مسارات نظام أرشيف الصيدلية
+if (str_starts_with($endpoint, 'archive/') || $endpoint === 'archive') {
+    require_once __DIR__ . '/archive.php';
+    $sub = str_starts_with($endpoint, 'archive/') ? substr($endpoint, 8) : '';
+    handleArchiveApi($sub, $method);
+    exit();
+}
 
 try {
     switch ($endpoint) {

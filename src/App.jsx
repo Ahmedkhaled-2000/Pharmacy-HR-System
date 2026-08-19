@@ -81,6 +81,7 @@ import PayslipPrintModal from './components/payroll/PayslipPrintModal';
 import ElectronicAttendanceAdmin from './components/attendance/ElectronicAttendanceAdmin';
 import NotificationCenterModule from './components/notifications/NotificationCenterModule';
 import AdminResignationModule from './components/resignation/AdminResignationModule';
+import ArchiveSystemView from './components/archive/ArchiveSystemView';
 import {
   sendGmailEmail,
   generateDailyDigestHTML,
@@ -107,10 +108,10 @@ export default function App() {
     setThemeMode((prev) => (prev === 'light' ? 'dark' : 'light'));
   };
 
-  // Navigation via URL: /admin | /kiosk | /employee
+  // Navigation via URL: /admin | /kiosk | /employee | /archive
   const location = useLocation();
   const navigate = useNavigate();
-  const viewMode = location.pathname.startsWith('/kiosk') ? 'kiosk' : location.pathname === '/employee' ? 'employee' : 'admin';
+  const viewMode = location.pathname.startsWith('/archive') ? 'archive' : location.pathname.startsWith('/kiosk') ? 'kiosk' : location.pathname === '/employee' ? 'employee' : 'admin';
   const kioskBranchId = location.pathname.startsWith('/kiosk/') ? location.pathname.split('/')[2] : null;
   const [adminSubTab, setAdminSubTab] = useState('dashboard'); // 'dashboard' | 'settings' | 'whatsapp'
   const [empActiveTab, setEmpActiveTab] = useState('portal'); // 'portal' | 'kiosk'
@@ -4010,6 +4011,8 @@ export default function App() {
         <Route path="/login" element={<Navigate to="/admin" replace />} />
         <Route path="/admin" element={null} />
         <Route path="/admin/*" element={null} />
+        <Route path="/archive" element={null} />
+        <Route path="/archive/*" element={null} />
         <Route path="/kiosk" element={null} />
         <Route path="/kiosk/*" element={null} />
         <Route path="/employee" element={null} />
@@ -4017,8 +4020,15 @@ export default function App() {
         <Route path="*" element={<Navigate to="/admin" replace />} />
       </Routes>
 
+      {/* ── 0. Standalone Pharmacy Archive System View ── */}
+      {viewMode === 'archive' && (
+        <ErrorBoundary fallbackTitle="حدث خطأ في نظام أرشيف الصيدلية">
+          <ArchiveSystemView isStandalone={true} />
+        </ErrorBoundary>
+      )}
+
       {/* ── 1. Unauthenticated Login Screen (Modern Unified LoginPage) ── */}
-      {viewMode !== 'kiosk' && (
+      {viewMode !== 'kiosk' && viewMode !== 'archive' && (
         (!isAdminLoggedIn && !currentEmpUser && !currentBranch) || authRole === 'none' ? (
           <ErrorBoundary fallbackTitle="حدث خطأ في شاشة تسجيل الدخول">
             <LoginPage 
@@ -4507,6 +4517,13 @@ export default function App() {
                 />
               )}
 
+              {/* 17. Pharmacy Archive System (أرشيف الفواتير والمستندات) */}
+              {activeNavTab === 'pharmacy-archive' && (
+                <ErrorBoundary fallbackTitle="حدث خطأ في نظام أرشيف الصيدلية">
+                  <ArchiveSystemView isStandalone={false} />
+                </ErrorBoundary>
+              )}
+
               {/* Default Fallback for Unknown Tab (يمنع ظهور أي شاشة بيضاء) */}
               {![
                 'dashboard',
@@ -4524,6 +4541,7 @@ export default function App() {
                 'evaluations',
                 'loans-meds',
                 'income-expenses',
+                'pharmacy-archive',
                 'settings',
                 'notifications',
                 'approval-rules',
