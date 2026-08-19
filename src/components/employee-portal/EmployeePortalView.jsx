@@ -1121,119 +1121,130 @@ export default function EmployeePortalView({
           )}
         </div>
 
-        {/* Nav Items */}
-        <nav style={{ flex: 1, padding: '10px 0', overflowY: 'auto' }}>
-          {NAV_ITEMS.filter((item) => {
-            const isMultiBranchEmp = emp?.branchesDetails && emp.branchesDetails.length > 1;
-            // Requirement 3: When All Branches is selected, ONLY show dashboard, salary, evaluations, bylaws
-            if (isMultiBranchEmp && !selectedBranchId) {
-              return ['dashboard', 'salary', 'evaluations', 'bylaws'].includes(item.id);
-            }
-            if (item.id === 'salary' && canViewSalary === false) return false;
-            if (item.id === 'adjustments' && canViewAdjustments === false) return false;
-            if (item.id === 'loans' && canApplyLoan === false) return false;
-            if (item.id === 'leaves' && canApplyLeave === false) return false;
-            if (item.id === 'permissions' && canApplyPermission === false) return false;
-            if ((item.id === 'swap' || item.id === 'swaps') && canApplySwap === false) return false;
-            if (item.id === 'bylaws' && canViewBylaws === false) return false;
-            if (item.id === 'evaluations' && canSubmitComplaint === false) return false;
-            if (item.id === 'roster' && canViewRoster === false) return false;
-            return true;
-          }).map((item) => {
-            const isActive = activeTab === item.id;
-            // Badge count
-            let badge = 0;
-            if (item.id === 'adjustments') badge = empAdjs.length;
-            if (item.id === 'shifts') badge = empShifts.length;
-            if (item.id === 'resignations') badge = resignationBadgeCount;
-
-            return (
-              <button
-                key={item.id}
-                onClick={() => setActiveTab(item.id)}
-                title={item.label}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                  width: '100%',
-                  padding: sidebarOpen ? '10px 16px' : '10px',
-                  justifyContent: sidebarOpen ? 'flex-start' : 'center',
-                  background: isActive ? 'var(--primary)' : 'transparent',
-                  color: isActive ? '#fff' : 'var(--text)',
-                  border: 'none',
-                  borderRadius: '0',
-                  cursor: 'pointer',
-                  fontSize: '13px',
-                  fontWeight: isActive ? 700 : 500,
-                  transition: 'background 0.15s, color 0.15s',
-                  textAlign: 'right',
-                  position: 'relative',
-                  borderRight: isActive ? '3px solid var(--primary-dark)' : '3px solid transparent',
-                }}
-                onMouseEnter={(e) => { if (!isActive) { e.currentTarget.style.background = 'var(--hover)'; } }}
-                onMouseLeave={(e) => { if (!isActive) { e.currentTarget.style.background = 'transparent'; } }}
-              >
-                <span style={{ fontSize: '17px', flexShrink: 0 }}>{item.icon}</span>
-                {sidebarOpen && (
-                  <>
-                    <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.label}</span>
-                    {badge > 0 && (
-                      <span style={{ background: isActive ? 'rgba(255,255,255,0.3)' : 'var(--primary)', color: isActive ? '#fff' : '#fff', fontSize: '10px', fontWeight: 700, padding: '1px 6px', borderRadius: '99px', flexShrink: 0 }}>
-                        {badge}
-                      </span>
-                    )}
-                  </>
-                )}
-              </button>
-            );
-          })}
-        </nav>
-
-        {/* Sidebar Footer */}
-        <div style={{ padding: '10px 8px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          {/* Export button */}
-          <button
-            onClick={() => {
-              if (!canExportExcel) { showToast('❌ تصدير Excel مقيد من الأدمن'); return; }
-              setShowExportModal(true);
-            }}
-            title="تصدير كشف المرتب Excel"
-            style={{
-              display: 'flex', alignItems: 'center', gap: '8px',
-              justifyContent: sidebarOpen ? 'flex-start' : 'center',
-              padding: sidebarOpen ? '8px 12px' : '8px',
-              background: 'var(--surface-muted)', border: '1px solid var(--border)',
-              borderRadius: '8px', cursor: canExportExcel ? 'pointer' : 'not-allowed',
-              opacity: canExportExcel ? 1 : 0.5, fontSize: '12.5px', color: 'var(--text)'
-            }}
-          >
-            <span>📥</span>
-            {sidebarOpen && <span>تصدير Excel</span>}
-          </button>
-
-          {/* Logout button */}
-          <button
-            onClick={() => {
-              if (typeof handleLogout === 'function') {
-                handleLogout();
-              } else {
-                setCurrentEmpUser(null);
+        {/* Nav Items & Direct Actions */}
+        <nav style={{ flex: 1, padding: '10px 0', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {NAV_ITEMS.filter((item) => {
+              const isMultiBranchEmp = emp?.branchesDetails && emp.branchesDetails.length > 1;
+              // Requirement 3: When All Branches is selected, ONLY show dashboard, salary, evaluations, bylaws
+              if (isMultiBranchEmp && !selectedBranchId) {
+                return ['dashboard', 'salary', 'evaluations', 'bylaws'].includes(item.id);
               }
-            }}
-            title="تسجيل الخروج"
-            style={{
-              display: 'flex', alignItems: 'center', gap: '8px',
-              justifyContent: sidebarOpen ? 'flex-start' : 'center',
-              padding: sidebarOpen ? '8px 12px' : '8px',
-              background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
-              borderRadius: '8px', cursor: 'pointer', fontSize: '12.5px', color: 'var(--danger)'
-            }}
-          >
-            <span>🚪</span>
-            {sidebarOpen && <span>تسجيل الخروج</span>}
-          </button>
-        </div>
+              if (item.id === 'salary' && canViewSalary === false) return false;
+              if (item.id === 'adjustments' && canViewAdjustments === false) return false;
+              if (item.id === 'loans' && canApplyLoan === false) return false;
+              if (item.id === 'leaves' && canApplyLeave === false) return false;
+              if (item.id === 'permissions' && canApplyPermission === false) return false;
+              if ((item.id === 'swap' || item.id === 'swaps') && canApplySwap === false) return false;
+              if (item.id === 'bylaws' && canViewBylaws === false) return false;
+              if (item.id === 'evaluations' && canSubmitComplaint === false) return false;
+              if (item.id === 'roster' && canViewRoster === false) return false;
+              return true;
+            }).map((item) => {
+              const isActive = activeTab === item.id;
+              // Badge count
+              let badge = 0;
+              if (item.id === 'adjustments') badge = empAdjs.length;
+              if (item.id === 'shifts') badge = empShifts.length;
+              if (item.id === 'resignations') badge = resignationBadgeCount;
+
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setActiveTab(item.id)}
+                  title={item.label}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    width: '100%',
+                    padding: sidebarOpen ? '10px 16px' : '10px',
+                    justifyContent: sidebarOpen ? 'flex-start' : 'center',
+                    background: isActive ? 'var(--primary)' : 'transparent',
+                    color: isActive ? '#fff' : 'var(--text)',
+                    border: 'none',
+                    borderRadius: '0',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                    fontWeight: isActive ? 700 : 500,
+                    transition: 'background 0.15s, color 0.15s',
+                    textAlign: 'right',
+                    position: 'relative',
+                    borderRight: isActive ? '3px solid var(--primary-dark)' : '3px solid transparent',
+                  }}
+                  onMouseEnter={(e) => { if (!isActive) { e.currentTarget.style.background = 'var(--hover)'; } }}
+                  onMouseLeave={(e) => { if (!isActive) { e.currentTarget.style.background = 'transparent'; } }}
+                >
+                  <span style={{ fontSize: '17px', flexShrink: 0 }}>{item.icon}</span>
+                  {sidebarOpen && (
+                    <>
+                      <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.label}</span>
+                      {badge > 0 && (
+                        <span style={{ background: isActive ? 'rgba(255,255,255,0.3)' : 'var(--primary)', color: isActive ? '#fff' : '#fff', fontSize: '10px', fontWeight: 700, padding: '1px 6px', borderRadius: '99px', flexShrink: 0 }}>
+                          {badge}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Action Buttons directly below menu items */}
+          <div style={{
+            padding: sidebarOpen ? '12px 10px 8px' : '12px 6px 8px',
+            marginTop: '8px',
+            borderTop: '1px solid var(--border)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '6px'
+          }}>
+            {/* Export button */}
+            <button
+              onClick={() => {
+                if (!canExportExcel) { showToast('❌ تصدير Excel مقيد من الأدمن'); return; }
+                setShowExportModal(true);
+              }}
+              title="تصدير كشف المرتب Excel"
+              style={{
+                display: 'flex', alignItems: 'center', gap: '8px',
+                justifyContent: sidebarOpen ? 'flex-start' : 'center',
+                padding: sidebarOpen ? '8px 12px' : '8px',
+                background: 'var(--surface-muted)', border: '1px solid var(--border)',
+                borderRadius: '8px', cursor: canExportExcel ? 'pointer' : 'not-allowed',
+                opacity: canExportExcel ? 1 : 0.5, fontSize: '12.5px', color: 'var(--text)',
+                fontWeight: 600, transition: 'all 0.15s'
+              }}
+            >
+              <span>📥</span>
+              {sidebarOpen && <span>تصدير Excel</span>}
+            </button>
+
+            {/* Logout button */}
+            <button
+              onClick={() => {
+                if (typeof handleLogout === 'function') {
+                  handleLogout();
+                } else {
+                  setCurrentEmpUser(null);
+                }
+              }}
+              title="تسجيل الخروج"
+              style={{
+                display: 'flex', alignItems: 'center', gap: '8px',
+                justifyContent: sidebarOpen ? 'flex-start' : 'center',
+                padding: sidebarOpen ? '8px 12px' : '8px',
+                background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
+                borderRadius: '8px', cursor: 'pointer', fontSize: '12.5px', color: 'var(--danger)',
+                fontWeight: 600, transition: 'all 0.15s'
+              }}
+            >
+              <span>🚪</span>
+              {sidebarOpen && <span>تسجيل الخروج</span>}
+            </button>
+          </div>
+        </nav>
       </aside>
 
       {/* ── Main Content ── */}
