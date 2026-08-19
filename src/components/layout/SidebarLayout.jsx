@@ -36,6 +36,7 @@ export default function SidebarLayout({
     { id: 'electronic-attendance', label: 'البصمة الإلكترونية', icon: '📸' },
     { id: 'roster', label: 'الجداول الشهرية', icon: '📅' },
     { id: 'leaves-tracking', label: 'الإجازات', icon: '🏖️' },
+    { id: 'permissions-management', label: 'أذونات الموظفين', icon: '⏰' },
     { id: 'payroll', label: 'رواتب الموظفين', icon: '💰' },
     { id: 'adjustments-module', label: 'المكافآت والخصومات', icon: '📝' },
     { id: 'resignation', label: 'طلبات استقالة الموظفين', icon: '📝', badge: resignationCount },

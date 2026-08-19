@@ -638,6 +638,9 @@ export default function PayslipPrintModal({
                 (inc) =>
                   String(inc.employeeId) === String(emp.id) &&
                   inc.status !== 'cancelled' &&
+                  inc.status !== 'approved_permission_exempt' &&
+                  inc.actionType !== 'grace' &&
+                  (inc.deductionMinutes > 0 || inc.penaltyAmount > 0) &&
                   (!selectedBranchId || String(inc.branchId) === String(selectedBranchId)) &&
                   (inc.date >= startCutoff && inc.date <= endCutoff)
               );

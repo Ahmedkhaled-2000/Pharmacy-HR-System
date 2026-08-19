@@ -542,3 +542,111 @@ export function recalculateEmployeeCycleLateness({
     updatedRequests: [...newLateRequests, ...otherReqs]
   };
 }
+
+// ── سياسة وضوابط الأذونات الافتراضية ──
+export const DEFAULT_PERMISSION_POLICY = {
+  maxHoursPerPermission: 2, // الحد الأقصى لساعات الإذن للمرة الواحدة (2 ساعة)
+  maxPermissionsPerMonth: 2, // الحد الأقصى لعدد مرات الإذن شهرياً للموظف (2 مرات)
+  requireReason: true,
+  allowExceptions: true,
+  autoAdjustPunches: true,
+  autoWaiveLatePenalties: true
+};
+
+/**
+ * يقوم بمزامنة الأذونات المعتمدة مع سجل البصمات (shifts):
+ * 1. تعويض ساعات الإذن المعتمدة في صافي ساعات العمل لليوم المعني.
+ * 2. وضع إشعار وملاحظة واضحة على البصمة بأنها معدلة بإذن معتمد.
+ * 3. تمكين ظهورها في شاشات الإدارة والفرع والموظف.
+ */
+export function applyApprovedPermissionsToShifts(state) {
+  if (!state || !state.shifts) return state?.shifts || [];
+
+  const approvedPerms = (state.requests || []).filter(
+    (r) =>
+      (r.type === 'permission' || r.type === 'إذن' || r.type === 'late_permission' || r.type === 'early_leave') &&
+      (r.status === 'approved' || r.adminApproved === true || (r.branchApproved && r.status !== 'rejected' && !r.isRejected)) &&
+      r.status !== 'rejected' &&
+      r.status !== 'cancelled'
+  );
+
+  if (approvedPerms.length === 0) return state.shifts;
+
+  const permsMap = new Map();
+  approvedPerms.forEach((p) => {
+    const pDate = p.date || p.startDate;
+    if (p.employeeId && pDate) {
+      permsMap.set(`${String(p.employeeId)}_${pDate}`, p);
+    }
+  });
+
+  return (state.shifts || []).map((shift) => {
+    if (!shift.employeeId || !shift.date) return shift;
+    const perm = permsMap.get(`${String(shift.employeeId)}_${shift.date}`);
+    if (!perm) return shift;
+
+    // حساب ساعات الإذن
+    let permHours = parseFloat(perm.hours) || 0;
+    if (!permHours && perm.durationMinutes) {
+      permHours = Math.round((perm.durationMinutes / 60) * 100) / 100;
+    }
+    if (!permHours && perm.startTime && perm.endTime) {
+      const [h1, m1] = perm.startTime.split(':').map(Number);
+      const [h2, m2] = perm.endTime.split(':').map(Number);
+      let diff = (h2 * 60 + (m2 || 0)) - (h1 * 60 + (m1 || 0));
+      if (diff <= 0) diff += 24 * 60;
+      permHours = Math.round((diff / 60) * 100) / 100;
+    }
+
+    const permTypeLabel = perm.permType === 'early' ? 'إذن انصراف مبكر' : (perm.isExceptional ? 'إذن استثنائي معتمد' : 'إذن تأخير عن الوردية');
+    const noteText = `⏰ تم تعديل البصمة واحتساب ساعات ${permTypeLabel} المعتمد (${perm.startTime || '—'} إلى ${perm.endTime || '—'}) [${permHours} س]${perm.reason ? ' - ' + perm.reason : ''}`;
+
+    const baseRawHours = shift._baseRawHours !== undefined ? shift._baseRawHours : parseFloat(shift.hours || shift.workHours || 0);
+    const updatedNetHours = Math.round((baseRawHours + (shift.hasApprovedPermission ? 0 : permHours)) * 100) / 100;
+
+    return {
+      ...shift,
+      _baseRawHours: baseRawHours,
+      hours: updatedNetHours > 0 ? updatedNetHours : (parseFloat(shift.hours) || baseRawHours),
+      workHours: updatedNetHours > 0 ? updatedNetHours : (parseFloat(shift.workHours) || baseRawHours),
+      hasApprovedPermission: true,
+      permissionId: perm.id,
+      permissionType: perm.permType || 'late',
+      permissionHours: permHours,
+      permissionTimeRange: `من ${perm.startTime || '—'} إلى ${perm.endTime || '—'}`,
+      permissionNotes: noteText,
+      notes: shift.notes && shift.notes.includes('⏰ تم تعديل البصمة') ? shift.notes : `${noteText}${shift.notes ? ' | ' + shift.notes : ''}`
+    };
+  });
+}
+
+/**
+ * مزامنة كاملة لكافة الموظفين لربط الأذونات المعتمدة وتحديث وقائع التأخير والبصمات
+ */
+export function syncAllEmployeesPermissionsAndLateness(state) {
+  if (!state) return state;
+  const updatedShifts = applyApprovedPermissionsToShifts(state);
+  const stateWithShifts = { ...state, shifts: updatedShifts };
+
+  const allIncidents = [];
+  const employees = state.employees || [];
+
+  for (const emp of employees) {
+    try {
+      const { incidents } = recalculateEmployeeCycleLateness({
+        employeeId: emp.id,
+        cycleFilterFn: null,
+        state: stateWithShifts,
+        payrollCycleId: new Date().toISOString().slice(0, 7)
+      });
+      allIncidents.push(...incidents);
+    } catch (e) {
+      console.error(`Error recalculating for emp ${emp.id}:`, e);
+    }
+  }
+
+  return {
+    ...stateWithShifts,
+    lateIncidents: allIncidents
+  };
+}

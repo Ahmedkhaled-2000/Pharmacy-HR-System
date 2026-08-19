@@ -93,8 +93,12 @@ import {
   notifyEmployeeEarlyExitWarning,
   notifyAdminOnOvertime
 } from './utils/gmailService';
+import EmployeePermissionsManagementModule from './components/permissions/EmployeePermissionsManagementModule';
 import {
   DEFAULT_LATE_PENALTY_POLICY,
+  DEFAULT_PERMISSION_POLICY,
+  applyApprovedPermissionsToShifts,
+  syncAllEmployeesPermissionsAndLateness,
   getEffectiveLatePolicy,
   classifyLateTier,
   getPenaltyForOccurrence,
@@ -2026,6 +2030,9 @@ export default function App() {
       (inc) =>
         String(inc.employeeId) === String(empId) &&
         inc.status !== 'cancelled' &&
+        inc.status !== 'approved_permission_exempt' &&
+        inc.actionType !== 'grace' &&
+        (inc.deductionMinutes > 0 || inc.penaltyAmount > 0) &&
         (!targetBranchId || String(inc.branchId) === String(targetBranchId)) &&
         effectiveFilterFn(inc.date)
     );
@@ -2235,7 +2242,8 @@ export default function App() {
       }
 
       const normalized = normalizeState(data);
-      setState(normalized);
+      const synced = syncAllEmployeesPermissionsAndLateness(normalized);
+      setState(synced);
       setLastSyncTime(nowTimeStr());
 
       // Sync active session user/branch with fresh database objects
@@ -4214,6 +4222,7 @@ export default function App() {
                   },
                   { id: 'branch-roster', label: 'الجدول الشهري للموظفين', icon: '📅' },
                   { id: 'emp-punches', label: 'متابعة حضور وبصمات الفرع', icon: '👥' },
+                  { id: 'permissions-management', label: 'أذونات الموظفين', icon: '⏰' },
                   { id: 'evaluations', label: 'التقييمات والشكاوي', icon: '⭐' },
                   { id: 'income-expenses', label: 'المصروفات والإيرادات', icon: '📈' },
                   {
@@ -4438,6 +4447,19 @@ export default function App() {
                   state={state}
                   setState={setState}
                   saveState={saveState}
+                  showToast={showToast}
+                />
+              )}
+
+              {/* 7.5. Employee Permissions Management (أذونات الموظفين) */}
+              {activeNavTab === 'permissions-management' && (
+                <EmployeePermissionsManagementModule
+                  state={state}
+                  setState={setState}
+                  saveState={saveState}
+                  currentBranch={null}
+                  authRole="admin"
+                  currentEmployee={null}
                   showToast={showToast}
                 />
               )}

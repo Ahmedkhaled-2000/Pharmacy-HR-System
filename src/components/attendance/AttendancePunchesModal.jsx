@@ -124,10 +124,27 @@ export default function AttendancePunchesModal({
                             const breakH = p.breakHours ? parseFloat(p.breakHours).toFixed(2) : null;
                             const shiftEarned = (parseFloat(netH) * bRate).toFixed(2);
 
+                            const perm = (state.requests || []).find(
+                              (r) =>
+                                String(r.employeeId) === String(selectedEmp?.id) &&
+                                (r.date === dateStr || r.startDate === dateStr) &&
+                                (r.type === 'permission' || r.type === 'إذن' || r.type === 'late_permission' || r.type === 'early_leave') &&
+                                (r.status === 'approved' || r.adminApproved || r.branchApproved)
+                            );
+                            const hasPerm = p.hasApprovedPermission || !!perm;
+                            const permHours = p.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
+
                             return (
-                              <tr key={p.id || index}>
+                              <tr key={p.id || index} style={{ background: hasPerm ? 'rgba(254, 243, 199, 0.25)' : 'transparent' }}>
                                 <td style={{ textAlign: 'center', fontWeight: '700' }}>{index + 1}</td>
-                                <td style={{ fontWeight: '700' }}>{dateStr}</td>
+                                <td style={{ fontWeight: '700' }}>
+                                  {dateStr}
+                                  {hasPerm && (
+                                    <span style={{ display: 'block', marginTop: '2px', background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
+                                      ⏰ معدلة بإذن (+{permHours} س)
+                                    </span>
+                                  )}
+                                </td>
                                 <td style={{ fontWeight: '600' }}>{dayName}</td>
                                 <td style={{ textAlign: 'center' }}>
                                   <span style={{ background: '#dcfce7', color: '#15803d', padding: '4px 10px', borderRadius: '12px', fontWeight: '800', fontSize: '12.5px', display: 'inline-block' }}>
@@ -146,7 +163,16 @@ export default function AttendancePunchesModal({
                                 <td style={{ textAlign: 'center', color: '#16a34a', fontWeight: '700' }}>
                                   {shiftEarned} ج.م
                                 </td>
-                                <td style={{ fontSize: '12px', color: 'var(--muted)' }}>{p.notes || p.statusLabel || 'تسجيل بصمة عادية'}</td>
+                                <td style={{ fontSize: '12px', color: hasPerm ? '#047857' : 'var(--muted)' }}>
+                                  {hasPerm ? (
+                                    <div>
+                                      <span style={{ fontWeight: 700 }}>⏰ معدلة باحتساب ساعات الإذن المعتمد ({perm?.startTime || '—'} إلى {perm?.endTime || '—'})</span>
+                                      {p.notes && !p.notes.includes('⏰ تم تعديل البصمة') && <div style={{ fontSize: '11px', color: 'var(--muted)' }}>{p.notes}</div>}
+                                    </div>
+                                  ) : (
+                                    p.notes || p.statusLabel || 'تسجيل بصمة عادية'
+                                  )}
+                                </td>
                               </tr>
                             );
                           })
@@ -207,10 +233,27 @@ export default function AttendancePunchesModal({
                     const shiftRate = getBranchRate(p.branchId || employee.branchId);
                     const shiftEarned = (parseFloat(netH) * shiftRate).toFixed(2);
 
+                    const perm = (state.requests || []).find(
+                      (r) =>
+                        String(r.employeeId) === String(employee.id) &&
+                        (r.date === dateStr || r.startDate === dateStr) &&
+                        (r.type === 'permission' || r.type === 'إذن' || r.type === 'late_permission' || r.type === 'early_leave') &&
+                        (r.status === 'approved' || r.adminApproved || r.branchApproved)
+                    );
+                    const hasPerm = p.hasApprovedPermission || !!perm;
+                    const permHours = p.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
+
                     return (
-                      <tr key={p.id || index}>
+                      <tr key={p.id || index} style={{ background: hasPerm ? 'rgba(254, 243, 199, 0.25)' : 'transparent' }}>
                         <td style={{ textAlign: 'center', fontWeight: '700' }}>{index + 1}</td>
-                        <td style={{ fontWeight: '700' }}>{dateStr}</td>
+                        <td style={{ fontWeight: '700' }}>
+                          {dateStr}
+                          {hasPerm && (
+                            <span style={{ display: 'block', marginTop: '2px', background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
+                              ⏰ معدلة بإذن (+{permHours} س)
+                            </span>
+                          )}
+                        </td>
                         <td style={{ fontWeight: '600' }}>{dayName}</td>
                         
                         {/* Entry Time Pill */}
@@ -272,8 +315,15 @@ export default function AttendancePunchesModal({
                         </td>
 
                         {/* Notes */}
-                        <td style={{ fontSize: '12px', color: 'var(--muted)' }}>
-                          {p.notes || p.statusLabel || 'تسجيل بصمة عادية'}
+                        <td style={{ fontSize: '12px', color: hasPerm ? '#047857' : 'var(--muted)' }}>
+                          {hasPerm ? (
+                            <div>
+                              <span style={{ fontWeight: 700 }}>⏰ معدلة باحتساب ساعات الإذن المعتمد ({perm?.startTime || '—'} إلى {perm?.endTime || '—'})</span>
+                              {p.notes && !p.notes.includes('⏰ تم تعديل البصمة') && <div style={{ fontSize: '11px', color: 'var(--muted)' }}>{p.notes}</div>}
+                            </div>
+                          ) : (
+                            p.notes || p.statusLabel || 'تسجيل بصمة عادية'
+                          )}
                         </td>
                       </tr>
                     );

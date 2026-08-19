@@ -11,7 +11,8 @@ import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import BranchResignationModule from '../resignation/BranchResignationModule';
 import { normalizeSchedule } from '../roster/RosterModule';
 import { shouldShowRequestToBranch } from '../../utils/formatters';
-import { recalculateEmployeeCycleLateness } from '../../utils/latePenaltyEngine';
+import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts } from '../../utils/latePenaltyEngine';
+import EmployeePermissionsManagementModule from '../permissions/EmployeePermissionsManagementModule';
 
 const WEEKDAYS_AR = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
 
@@ -2100,13 +2101,30 @@ export default function BranchManagerView({
                     ) : (
                       filteredShifts.map((s, idx) => {
                         const empObj = allEmps.find((e) => String(e.id) === String(s.employeeId)) || branchEmployees.find((e) => String(e.id) === String(s.employeeId));
+                        const perm = (state.requests || []).find(
+                          (r) =>
+                            String(r.employeeId) === String(s.employeeId) &&
+                            (r.date === s.date || r.startDate === s.date) &&
+                            (r.type === 'permission' || r.type === 'إذن' || r.type === 'late_permission' || r.type === 'early_leave') &&
+                            (r.status === 'approved' || r.adminApproved || r.branchApproved)
+                        );
+                        const hasPerm = s.hasApprovedPermission || !!perm;
+                        const permHours = s.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
+
                         return (
-                          <tr key={s.id}>
+                          <tr key={s.id} style={{ background: hasPerm ? 'rgba(254, 243, 199, 0.25)' : 'transparent' }}>
                             <td style={{ color: 'var(--muted)', fontWeight: 'bold' }}>{idx + 1}</td>
                             <td style={{ fontWeight: '800', color: 'var(--primary-dark)' }}>
                               {empObj ? `${empObj.name} (${empObj.code})` : (s.employeeName || 'موظف')}
                             </td>
-                            <td style={{ fontWeight: '700' }}>{s.date}</td>
+                            <td style={{ fontWeight: '700' }}>
+                              {s.date}
+                              {hasPerm && (
+                                <span style={{ display: 'block', marginTop: '2px', background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
+                                  ⏰ معدلة بإذن (+{permHours} س)
+                                </span>
+                              )}
+                            </td>
                             <td>{getArabicWeekday(s.date)}</td>
                             <td>
                               <span style={{ background: '#dcfce7', color: '#15803d', padding: '3px 8px', borderRadius: '6px', fontWeight: '700' }}>
@@ -2130,7 +2148,16 @@ export default function BranchManagerView({
                             <td style={{ fontWeight: '700', color: '#0d9488' }}>
                               {formatMoney(s.hours)} ساعة
                             </td>
-                            <td style={{ fontSize: '12px', color: 'var(--muted)' }}>{s.note || 'تسجيل بصمة عادية'}</td>
+                            <td style={{ fontSize: '12px', color: hasPerm ? '#047857' : 'var(--muted)' }}>
+                              {hasPerm ? (
+                                <div>
+                                  <span style={{ fontWeight: 700 }}>⏰ معدلة باحتساب ساعات الإذن المعتمد ({perm?.startTime || '—'} إلى {perm?.endTime || '—'})</span>
+                                  {s.note && !s.note.includes('⏰ تم تعديل البصمة') && <div style={{ fontSize: '11px', color: 'var(--muted)' }}>{s.note}</div>}
+                                </div>
+                              ) : (
+                                s.note || 'تسجيل بصمة عادية'
+                              )}
+                            </td>
                           </tr>
                         );
                       })
@@ -2638,6 +2665,19 @@ export default function BranchManagerView({
             </div>
           )}
         </div>
+      )}
+
+      {/* ── 8.5. PERMISSIONS MANAGEMENT TAB ── */}
+      {activeTab === 'permissions-management' && (
+        <EmployeePermissionsManagementModule
+          state={state}
+          setState={setState}
+          saveState={saveState}
+          currentBranch={currentBranch}
+          authRole="branch"
+          currentEmployee={null}
+          showToast={showToast}
+        />
       )}
 
       {/* ── 9. BYLAWS TAB ── */}

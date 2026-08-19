@@ -503,6 +503,9 @@ export default function PayrollModule({
                   (inc) =>
                     String(inc.employeeId) === String(selectedEmpModal.id) &&
                     inc.status !== 'cancelled' &&
+                    inc.status !== 'approved_permission_exempt' &&
+                    inc.actionType !== 'grace' &&
+                    (inc.deductionMinutes > 0 || inc.penaltyAmount > 0) &&
                     (!filterBranch || String(inc.branchId) === String(filterBranch)) &&
                     payrollFilterFn(inc.date)
                 );
