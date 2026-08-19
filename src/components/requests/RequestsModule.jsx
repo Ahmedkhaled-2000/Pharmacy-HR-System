@@ -39,6 +39,30 @@ export default function RequestsModule({
   const [filterDate, setFilterDate] = useState('');
   const [previewModalReq, setPreviewModalReq] = useState(null);
 
+  // Loan Modification State for Higher Management before approval
+  const [loanCustomAmount, setLoanCustomAmount] = useState('');
+  const [loanCustomType, setLoanCustomType] = useState('monthly'); // 'monthly' | 'installment'
+  const [loanCustomMonths, setLoanCustomMonths] = useState('1');
+  const [loanCustomMonthlyDed, setLoanCustomMonthlyDed] = useState('');
+  const [loanCustomNotes, setLoanCustomNotes] = useState('');
+  const [isEditingLoan, setIsEditingLoan] = useState(false);
+
+  const handleOpenPreview = (req) => {
+    setPreviewModalReq(req);
+    if (req && (req.type === 'loan' || req.type === 'advance' || req.type === 'meds' || req.type === 'credit_medicine')) {
+      const amt = req.amount || req.totalAmount || '';
+      const isInst = req.loanType === 'installments' || req.loanType === 'installment' || req.isInstallment || (parseInt(req.installmentsCount || req.monthsCount, 10) > 1);
+      const months = String(req.installmentsCount || req.monthsCount || (isInst ? '2' : '1'));
+      const monthly = req.monthlyDeduction || req.installmentAmount || (isInst && amt && months ? Math.ceil(parseFloat(amt) / parseInt(months, 10)) : amt);
+      setLoanCustomAmount(String(amt));
+      setLoanCustomType(isInst ? 'installment' : 'monthly');
+      setLoanCustomMonths(months);
+      setLoanCustomMonthlyDed(String(monthly));
+      setLoanCustomNotes(req.adminNotes || '');
+      setIsEditingLoan(false);
+    }
+  };
+
   const requests = state.requests || [];
   const employees = state.employees || [];
 
@@ -113,7 +137,7 @@ export default function RequestsModule({
     return getT(b) - getT(a);
   });
 
-  const handleApprove = async (reqId) => {
+  const handleApprove = async (reqId, customLoanData = null) => {
     let targetReq = null;
     let updatedRosters = [...(state.rosters || [])];
     let updatedAdjustments = [...(state.adjustments || [])];
@@ -123,6 +147,27 @@ export default function RequestsModule({
       if (r.id === reqId) {
         targetReq = { ...r, status: 'approved', adminApproved: true, branchApproved: true };
         if (targetReq.photoUrl) delete targetReq.photoUrl;
+
+        // Apply any loan modifications decided by Higher Management
+        if (customLoanData) {
+          const originalAmt = targetReq.originalAmount || targetReq.amount || targetReq.totalAmount;
+          const newAmt = parseFloat(customLoanData.amount) || parseFloat(targetReq.amount) || 0;
+          const isInst = customLoanData.loanType === 'installment';
+          const months = isInst ? Math.max(2, parseInt(customLoanData.installmentsCount, 10) || 2) : 1;
+          const monthly = parseFloat(customLoanData.monthlyDeduction) || (isInst ? Math.ceil(newAmt / months) : newAmt);
+
+          targetReq.amount = newAmt;
+          targetReq.totalAmount = newAmt;
+          targetReq.originalAmount = originalAmt;
+          targetReq.loanType = isInst ? 'installment' : 'monthly';
+          targetReq.installmentsCount = months;
+          targetReq.monthsCount = months;
+          targetReq.monthlyDeduction = monthly;
+          targetReq.installmentAmount = monthly;
+          targetReq.adminNotes = customLoanData.adminNotes || '';
+          targetReq.adminModified = (parseFloat(originalAmt) !== newAmt) || Boolean(customLoanData.isModified);
+        }
+
         return targetReq;
       }
       return r;
@@ -196,16 +241,20 @@ export default function RequestsModule({
 
     if (targetReq.type === 'loan' || targetReq.type === 'advance' || targetReq.type === 'meds' || targetReq.type === 'credit_medicine') {
       const totalAmount = parseFloat(targetReq.amount || targetReq.totalAmount) || 0;
-      const monthsCount = parseInt(targetReq.monthsCount || targetReq.installments, 10) || 1;
+      const monthsCount = parseInt(targetReq.monthsCount || targetReq.installmentsCount || targetReq.installments, 10) || 1;
       const monthlyInstallment = parseFloat(targetReq.monthlyDeduction || targetReq.installmentAmount) || (monthsCount > 1 ? Math.ceil(totalAmount / monthsCount) : totalAmount);
 
       const isMeds = targetReq.type === 'meds' || targetReq.type === 'credit_medicine';
-      const isInstallment = targetReq.loanType === 'installment' || monthsCount > 1;
+      const isInstallment = targetReq.loanType === 'installment' || targetReq.loanType === 'installments' || monthsCount > 1;
 
       let loanTypeTitle = isMeds ? 'مشتريات أدوية آجل' : isInstallment ? `سلفة مقسطة (${monthsCount} أقساط)` : 'سلفة شهرية';
-      const deductionDesc = isInstallment 
+      let deductionDesc = isInstallment 
         ? `خصم قسط ${loanTypeTitle} (قسط شهري) — مبلغ ${monthlyInstallment} ج.م من إجمالي ${totalAmount} ج.م`
         : `خصم ${loanTypeTitle} — مبلغ ${monthlyInstallment} ج.م`;
+
+      if (targetReq.adminNotes) {
+        deductionDesc += ` [ملاحظة الإدارة: ${targetReq.adminNotes}]`;
+      }
 
       updatedAdjustments.push({
         id: `adj_loan_${Date.now()}`,
@@ -660,7 +709,7 @@ export default function RequestsModule({
                         <button
                           className="btn btn-ghost"
                           style={{ padding: '4px 10px', fontSize: '12px', border: '1px solid var(--border)' }}
-                          onClick={() => setPreviewModalReq(req)}
+                          onClick={() => handleOpenPreview(req)}
                         >
                           👁️ معاينة الطلب
                         </button>
@@ -872,27 +921,53 @@ export default function RequestsModule({
                   </div>
                 )}
 
-                {/* ── LOAN / ADVANCE / MEDS DETAILS ── */}
+                {/* ── LOAN / ADVANCE / MEDS DETAILS (مع إمكانية تعديل الإدارة العليا قبل الاعتماد) ── */}
                 {isLoan && (
                   <div style={{ background: '#eff6ff', padding: '16px', borderRadius: '12px', border: '1px solid #bfdbfe' }}>
-                    <h4 style={{ margin: '0 0 10px', color: '#1e40af', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      💳 تفاصيل السلفة / الدواء الآجل:
-                    </h4>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                      <h4 style={{ margin: 0, color: '#1e40af', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        💳 تفاصيل السلفة / الدواء الآجل المطلوب:
+                      </h4>
+                      {previewModalReq.status !== 'approved' && previewModalReq.status !== 'rejected' && (
+                        <button
+                          type="button"
+                          className="btn"
+                          style={{
+                            padding: '5px 12px',
+                            fontSize: '12px',
+                            background: isEditingLoan ? '#2563eb' : '#fff',
+                            color: isEditingLoan ? '#fff' : '#1d4ed8',
+                            border: '1px solid #93c5fd',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            fontWeight: 'bold',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}
+                          onClick={() => setIsEditingLoan(!isEditingLoan)}
+                        >
+                          {isEditingLoan ? '✕ إلغاء التعديل واستعادة الطلب الأصلي' : '✏️ تعديل مبلغ أو أقساط السلفة قبل الاعتماد'}
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Summary Card */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: isEditingLoan ? '14px' : '0' }}>
                       <div style={{ background: '#dbeafe', padding: '10px 14px', borderRadius: '8px', border: '1px solid #93c5fd' }}>
-                        <span style={{ fontSize: '12px', color: '#1e40af', fontWeight: 'bold' }}>إجمالي المبلغ المطلوب:</span>
+                        <span style={{ fontSize: '12px', color: '#1e40af', fontWeight: 'bold' }}>المبلغ المطلوب من الموظف:</span>
                         <div style={{ fontWeight: '900', color: '#1d4ed8', fontSize: '17px' }}>
-                          💰 {totalAmount} ج.م
+                          💰 {previewModalReq.originalAmount || previewModalReq.amount || previewModalReq.totalAmount} ج.م
                         </div>
                       </div>
                       <div>
-                        <span style={{ fontSize: '12px', color: '#1e40af' }}>نظام السداد والخصم:</span>
+                        <span style={{ fontSize: '12px', color: '#1e40af' }}>نظام السداد المطلوب:</span>
                         <div style={{ fontWeight: 'bold', color: '#1e3a8a', fontSize: '13.5px' }}>
                           {isInstallment ? '📆 سلفة مقسطة على عدة شهور' : '💵 سلفة شهرية (خصم دفعة واحدة)'}
                         </div>
                       </div>
                       <div>
-                        <span style={{ fontSize: '12px', color: '#1e40af' }}>عدد الأقساط الشهرية:</span>
+                        <span style={{ fontSize: '12px', color: '#1e40af' }}>عدد الأقساط:</span>
                         <div style={{ fontWeight: 'bold', color: '#1e3a8a' }}>
                           {installmentsCount} شهر / قسط
                         </div>
@@ -904,6 +979,125 @@ export default function RequestsModule({
                         </div>
                       </div>
                     </div>
+
+                    {/* Badge if Modified by Admin */}
+                    {previewModalReq.adminModified && (
+                      <div style={{ marginTop: '12px', background: '#fef3c7', border: '1px solid #fde68a', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', color: '#92400e' }}>
+                        <strong>⚠️ قرار وتعديل الإدارة العليا: </strong>
+                        تم تعديل المبلغ المعتمد إلى <strong>{previewModalReq.amount} ج.م</strong>
+                        {previewModalReq.adminNotes && ` — (${previewModalReq.adminNotes})`}
+                      </div>
+                    )}
+
+                    {/* Interactive Admin Edit Form */}
+                    {isEditingLoan && (
+                      <div style={{ marginTop: '14px', background: '#fff', border: '2px solid #3b82f6', padding: '14px', borderRadius: '10px', boxShadow: '0 4px 12px rgba(59, 130, 246, 0.08)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '12px', color: '#1e40af', fontWeight: 'bold', fontSize: '13.5px' }}>
+                          <span>✏️</span>
+                          <span>لوحة تعديل وتخصيص السلفة المعتمدة من الإدارة العليا:</span>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', alignItems: 'flex-end' }}>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#334155', marginBottom: '4px' }}>
+                              المبلغ المعتمد النهائي (ج.م) *
+                            </label>
+                            <input
+                              type="number"
+                              min="1"
+                              value={loanCustomAmount}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setLoanCustomAmount(val);
+                                if (loanCustomType === 'installment' && parseInt(loanCustomMonths, 10) > 1 && val) {
+                                  setLoanCustomMonthlyDed(String(Math.ceil(parseFloat(val) / parseInt(loanCustomMonths, 10))));
+                                } else {
+                                  setLoanCustomMonthlyDed(val);
+                                }
+                              }}
+                              style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1.5px solid #3b82f6', fontWeight: 'bold', fontSize: '14px', color: '#1e40af', background: '#f0f7ff' }}
+                            />
+                          </div>
+
+                          <div>
+                            <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#334155', marginBottom: '4px' }}>
+                              نظام السداد والخصم
+                            </label>
+                            <select
+                              value={loanCustomType}
+                              onChange={(e) => {
+                                const t = e.target.value;
+                                setLoanCustomType(t);
+                                if (t === 'monthly') {
+                                  setLoanCustomMonths('1');
+                                  setLoanCustomMonthlyDed(loanCustomAmount);
+                                } else {
+                                  const m = loanCustomMonths === '1' ? '2' : loanCustomMonths;
+                                  setLoanCustomMonths(m);
+                                  if (loanCustomAmount) {
+                                    setLoanCustomMonthlyDed(String(Math.ceil(parseFloat(loanCustomAmount) / parseInt(m, 10))));
+                                  }
+                                }
+                              }}
+                              style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px' }}
+                            >
+                              <option value="monthly">💵 سلفة شهرية (خصم دفعة واحدة بالراتب)</option>
+                              <option value="installment">📆 سلفة مقسطة على عدة شهور</option>
+                            </select>
+                          </div>
+
+                          {loanCustomType === 'installment' && (
+                            <div>
+                              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#334155', marginBottom: '4px' }}>
+                                عدد الأقساط (شهور)
+                              </label>
+                              <input
+                                type="number"
+                                min="2"
+                                max="36"
+                                value={loanCustomMonths}
+                                onChange={(e) => {
+                                  const m = e.target.value;
+                                  setLoanCustomMonths(m);
+                                  if (loanCustomAmount && parseInt(m, 10) > 0) {
+                                    setLoanCustomMonthlyDed(String(Math.ceil(parseFloat(loanCustomAmount) / parseInt(m, 10))));
+                                  }
+                                }}
+                                style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px' }}
+                              />
+                            </div>
+                          )}
+
+                          {loanCustomType === 'installment' && (
+                            <div>
+                              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#334155', marginBottom: '4px' }}>
+                                القسط الشهري المستقطع (ج.م)
+                              </label>
+                              <input
+                                type="number"
+                                min="1"
+                                value={loanCustomMonthlyDed}
+                                onChange={(e) => setLoanCustomMonthlyDed(e.target.value)}
+                                style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px', fontWeight: 'bold', color: '#166534' }}
+                              />
+                            </div>
+                          )}
+                        </div>
+
+                        <div style={{ marginTop: '10px' }}>
+                          <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#334155', marginBottom: '4px' }}>
+                            📝 ملاحظة / توجيه الإدارة العليا بخصوص التعديل (تظهر للموظف وفي مسير الرواتب):
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="مثال: تمت الموافقة على 700 ج.م بدلاً من 1000 ج.م بناءً على تعليمات الإدارة"
+                            value={loanCustomNotes}
+                            onChange={(e) => setLoanCustomNotes(e.target.value)}
+                            style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px' }}
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1316,13 +1510,31 @@ export default function RequestsModule({
                       <button
                         type="button"
                         className="btn btn-start"
-                        style={{ padding: '8px 22px', fontSize: '13.5px', fontWeight: 'bold' }}
+                        style={{
+                          padding: '8px 22px',
+                          fontSize: '13.5px',
+                          fontWeight: 'bold',
+                          background: (isLoan && (isEditingLoan || (loanCustomAmount && parseFloat(loanCustomAmount) !== parseFloat(previewModalReq.amount)))) ? '#2563eb' : undefined
+                        }}
                         onClick={() => {
-                          handleApprove(previewModalReq.id);
+                          if (isLoan && (isEditingLoan || (loanCustomAmount && parseFloat(loanCustomAmount) !== parseFloat(previewModalReq.amount)))) {
+                            handleApprove(previewModalReq.id, {
+                              amount: loanCustomAmount,
+                              loanType: loanCustomType,
+                              installmentsCount: loanCustomMonths,
+                              monthlyDeduction: loanCustomMonthlyDed,
+                              adminNotes: loanCustomNotes,
+                              isModified: true
+                            });
+                          } else {
+                            handleApprove(previewModalReq.id);
+                          }
                           setPreviewModalReq(null);
                         }}
                       >
-                        ✓ اعتماد وموافقة الطلب فوراً
+                        {isLoan && (isEditingLoan || (loanCustomAmount && parseFloat(loanCustomAmount) !== parseFloat(previewModalReq.amount)))
+                          ? `✓ اعتماد السلفة بالمبلغ المعتمد (${loanCustomAmount || previewModalReq.amount} ج.م)`
+                          : '✓ اعتماد وموافقة الطلب فوراً'}
                       </button>
                     )}
                   </>
