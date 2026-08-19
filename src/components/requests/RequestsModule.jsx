@@ -480,15 +480,15 @@ export default function RequestsModule({
     showToast?.('❌ تم رفض الاعتراض وتثبيت الجزاء المالي');
   };
 
-  // Clear / Delete All Requests Permanently
+  // Clear / Delete Requests List ONLY (Without affecting any other system data)
   const handleClearAllRequests = async () => {
     const currentReqs = state.requests || requests || [];
     if (currentReqs.length === 0) {
-      alert('لا توجد أي طلبات حالياً لمسحها');
+      alert('لا توجد أي طلبات حالياً في هذه الصفحة لمسحها');
       return;
     }
     const isConfirmed = window.confirm(
-      `⚠️ تحذير أمني من الإدارة العليا:\n\nهل أنت متأكد تماماً من رغبتك في حذف ومسح جميع الطلبات المسجلة في النظام (${currentReqs.length} طلب) نهائياً؟\n\n⚠️ لن يمكن التراجع أو استعادة الطلبات بعد هذا الإجراء.`
+      `⚠️ تأكيد تفريغ سجل الطلبات:\n\nهل تريد مسح وتفريغ قائمة الطلبات الحالية (${currentReqs.length} طلب) من هذه الصفحة فقط؟\n\n✅ ملاحظة أمان: هذا الإجراء مخصص لمسح صفحة وسجل الطلبات فقط، ولن يؤثر إطلاقاً على أي بيانات أخرى في النظام (مثل بيانات الموظفين، الرواتب والخصومات، الشفتات، الجداول المعتمدة، أو أرصدة الإجازات).`
     );
     if (!isConfirmed) return;
 
@@ -498,13 +498,12 @@ export default function RequestsModule({
     const updatedState = {
       ...state,
       requests: [],
-      leaveRequests: [],
       _deletedIds: updatedDeleted
     };
 
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.('🗑️ تم مسح وحذف جميع الطلبات بنجاح!');
+    showToast?.('🗑️ تم تفريغ سجل صفحة الطلبات بنجاح دون المساس بباقي بيانات النظام!');
   };
 
   return (
@@ -530,7 +529,7 @@ export default function RequestsModule({
               color: requests.length > 0 ? '#ffffff' : 'var(--muted)',
               border: '1px solid ' + (requests.length > 0 ? '#dc2626' : 'var(--border)'),
               padding: '8px 16px',
-              fontSize: '13.5px',
+              fontSize: '13px',
               fontWeight: '800',
               borderRadius: '8px',
               cursor: requests.length > 0 ? 'pointer' : 'not-allowed',
@@ -540,9 +539,9 @@ export default function RequestsModule({
               boxShadow: requests.length > 0 ? '0 2px 8px rgba(239, 68, 68, 0.25)' : 'none',
               transition: 'all 0.2s ease'
             }}
-            title="حذف ومسح جميع الطلبات من النظام نهائياً"
+            title="مسح وتفريغ سجل صفحة الطلبات فقط دون المساس بباقي بيانات النظام"
           >
-            <span>🗑️ مسح جميع الطلبات</span>
+            <span>🗑️ مسح صفحة الطلبات فقط</span>
             <span style={{
               background: requests.length > 0 ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.05)',
               padding: '2px 8px',
