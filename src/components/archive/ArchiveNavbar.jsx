@@ -5,7 +5,6 @@ import {
   Users,
   Settings,
   ShieldCheck,
-  Scan,
   FilePlus,
   LogOut,
   X,
@@ -21,13 +20,13 @@ export default function ArchiveNavbar({
   pharmacyLogo = '',
   onOpenUploadModal,
   onOpenEmployeeModal,
-  onOpenScanModal,
   onLogout,
   settings = {}
 }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const currentUsername = getArchiveUsername();
-  const displayName = settings.pharmacyName || pharmacyName || 'صيدلية الفلاي';
+  const displayName = settings.PHARMACY_NAME || settings.pharmacyName || pharmacyName || 'صيدلية الفلاي';
+  const displayLogo = settings.PHARMACY_LOGO || settings.pharmacyLogo || pharmacyLogo;
 
   const handleSystemLogout = () => {
     if (!window.confirm('هل تريد بالتأكيد تسجيل الخروج من نظام الأرشيف؟')) return;
@@ -44,38 +43,73 @@ export default function ArchiveNavbar({
   ];
 
   return (
-    <header className="sticky top-0 z-40" style={{
-      background: '#070b14',
+    <header style={{
+      position: 'sticky',
+      top: 0,
+      zIndex: 40,
+      backgroundColor: '#070b14',
       borderBottom: '1px solid #1e293b',
       boxShadow: '0 4px 20px -2px rgba(0, 0, 0, 0.6)'
     }}>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-20">
+      <div style={{ maxWidth: '1440px', margin: '0 auto', padding: '0 1.5rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: '76px' }}>
           
-          {/* Right Logo & Institution Branding */}
+          {/* Right Logo & Branding (Match Screenshot 2) */}
           <div 
             onClick={() => setActiveTab('invoices')}
-            className="flex items-center gap-3 cursor-pointer select-none"
+            style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer', userSelect: 'none' }}
           >
-            {pharmacyLogo ? (
-              <div className="w-11 h-11 rounded-xl bg-slate-900 border border-slate-700/80 p-1 flex items-center justify-center shadow-lg shadow-blue-500/10 shrink-0 overflow-hidden">
-                <img src={pharmacyLogo} alt={displayName} className="w-full h-full object-contain rounded-lg" />
+            {displayLogo ? (
+              <div style={{
+                width: '42px',
+                height: '42px',
+                borderRadius: '12px',
+                backgroundColor: '#0b1120',
+                border: '1px solid #1e293b',
+                padding: '4px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                overflow: 'hidden',
+                boxShadow: '0 4px 14px rgba(37, 99, 235, 0.25)'
+              }}>
+                <img src={displayLogo} alt={displayName} style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '8px' }} />
               </div>
             ) : (
-              <div className="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg shadow-blue-600/30 shrink-0" style={{ background: '#2563eb' }}>
-                <ShieldCheck className="w-6 h-6 text-white" />
+              <div style={{
+                width: '42px',
+                height: '42px',
+                borderRadius: '12px',
+                backgroundColor: '#2563eb',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)',
+                border: '1px solid #3b82f6'
+              }}>
+                <ShieldCheck style={{ width: '22px', height: '22px', color: '#ffffff' }} />
               </div>
             )}
             <div>
-              <h1 className="text-base sm:text-lg font-black text-slate-100 tracking-wide truncate" style={{ margin: 0 }}>
+              <h1 style={{ fontSize: '1.125rem', fontWeight: 900, color: '#f8fafc', margin: 0, letterSpacing: '-0.01em', lineHeight: 1.2 }}>
                 {displayName}
               </h1>
-              <p className="text-[11px] text-blue-400 font-semibold" style={{ margin: 0 }}>أرشيف الفواتير الرقمي</p>
+              <p style={{ fontSize: '0.75rem', color: '#38bdf8', fontWeight: 600, margin: 0, marginTop: '2px' }}>
+                أرشيف الفواتير الرقمي
+              </p>
             </div>
           </div>
 
-          {/* Center Navigation Links Pills */}
-          <nav className="hidden md:flex items-center gap-1.5 p-1.5 rounded-2xl" style={{ background: '#0b1120', border: '1px solid #1e293b' }}>
+          {/* Center Navigation Links Pills (Match Screenshots 2, 3, 4, 5) */}
+          <nav className="hidden md:flex" style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.375rem',
+            padding: '0.375rem',
+            borderRadius: '16px',
+            backgroundColor: '#0b1120',
+            border: '1px solid #1e293b'
+          }}>
             {navLinks.map((link) => {
               const Icon = link.icon;
               const isActive = activeTab === link.id;
@@ -84,60 +118,151 @@ export default function ArchiveNavbar({
                   key={link.id}
                   type="button"
                   onClick={() => setActiveTab(link.id)}
-                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all border-0 cursor-pointer ${
-                    isActive
-                      ? 'text-white shadow-md'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 bg-transparent'
-                  }`}
-                  style={isActive ? { background: '#2563eb', color: '#ffffff', boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)' } : {}}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.55rem 1.15rem',
+                    borderRadius: '12px',
+                    fontSize: '0.8125rem',
+                    fontWeight: 700,
+                    border: 'none',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    backgroundColor: isActive ? '#2563eb' : 'transparent',
+                    color: isActive ? '#ffffff' : '#94a3b8',
+                    boxShadow: isActive ? '0 4px 14px rgba(37, 99, 235, 0.4)' : 'none'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isActive) {
+                      e.currentTarget.style.color = '#ffffff';
+                      e.currentTarget.style.backgroundColor = 'rgba(30, 41, 59, 0.6)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isActive) {
+                      e.currentTarget.style.color = '#94a3b8';
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                    }
+                  }}
                 >
-                  <Icon className="w-4 h-4" />
+                  <Icon style={{ width: '16px', height: '16px' }} />
                   <span>{link.name}</span>
                 </button>
               );
             })}
           </nav>
 
-          {/* Left Action Buttons */}
-          <div className="flex items-center gap-2.5">
+          {/* Left Action Buttons (Match Screenshot 2) */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
             <button
               type="button"
               onClick={onOpenEmployeeModal}
-              className="hidden lg:flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white transition cursor-pointer"
-              style={{ background: '#0f172a', border: '1px solid #334155' }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.375rem',
+                padding: '0.55rem 1rem',
+                borderRadius: '12px',
+                fontSize: '0.8125rem',
+                fontWeight: 700,
+                color: '#cbd5e1',
+                backgroundColor: '#0b1120',
+                border: '1px solid #1e293b',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = '#3b82f6';
+                e.currentTarget.style.color = '#ffffff';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = '#1e293b';
+                e.currentTarget.style.color = '#cbd5e1';
+              }}
             >
-              <Plus className="w-3.5 h-3.5 text-blue-400" />
+              <Plus style={{ width: '14px', height: '14px', color: '#60a5fa' }} />
               <span>إضافة موظف</span>
             </button>
 
             <button
               type="button"
               onClick={onOpenUploadModal}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold text-white shadow-lg cursor-pointer transition transform hover:scale-[1.02]"
-              style={{ background: '#2563eb', border: '1px solid #3b82f6', boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)' }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '0.55rem 1.15rem',
+                borderRadius: '12px',
+                fontSize: '0.8125rem',
+                fontWeight: 700,
+                color: '#ffffff',
+                backgroundColor: '#2563eb',
+                border: '1px solid #3b82f6',
+                boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = '#1d4ed8';
+                e.currentTarget.style.transform = 'translateY(-1px)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = '#2563eb';
+                e.currentTarget.style.transform = 'translateY(0)';
+              }}
             >
-              <FilePlus className="w-4 h-4" />
-              <span className="hidden sm:inline">رفع فاتورة جديدة</span>
-              <span className="sm:hidden">رفع فاتورة</span>
+              <FilePlus style={{ width: '16px', height: '16px' }} />
+              <span>رفع فاتورة جديدة</span>
             </button>
 
             <button
               type="button"
               onClick={handleSystemLogout}
               title={`تسجيل الخروج (${currentUsername})`}
-              className="p-2.5 rounded-xl text-slate-400 hover:text-red-400 hover:bg-red-950/40 transition cursor-pointer"
-              style={{ background: '#0f172a', border: '1px solid #1e293b' }}
+              style={{
+                padding: '0.55rem',
+                borderRadius: '12px',
+                backgroundColor: '#0b1120',
+                border: '1px solid #1e293b',
+                color: '#94a3b8',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = '#ef4444';
+                e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+                e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = '#94a3b8';
+                e.currentTarget.style.borderColor = '#1e293b';
+                e.currentTarget.style.backgroundColor = '#0b1120';
+              }}
             >
-              <LogOut className="w-4 h-4" />
+              <LogOut style={{ width: '16px', height: '16px' }} />
             </button>
 
-            {/* Mobile Menu Toggle Button */}
+            {/* Mobile Toggle */}
             <button
               type="button"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="md:hidden p-2 text-slate-300 bg-slate-800/80 hover:bg-slate-700 rounded-xl border border-slate-700/60 transition cursor-pointer"
+              className="md:hidden"
+              style={{
+                padding: '0.5rem',
+                color: '#cbd5e1',
+                backgroundColor: '#0b1120',
+                border: '1px solid #1e293b',
+                borderRadius: '12px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center'
+              }}
             >
-              {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+              {mobileMenuOpen ? <X style={{ width: '18px', height: '18px' }} /> : <Menu style={{ width: '18px', height: '18px' }} />}
             </button>
           </div>
 
@@ -146,58 +271,46 @@ export default function ArchiveNavbar({
 
       {/* Mobile Drawer Menu */}
       {mobileMenuOpen && (
-        <div className="md:hidden bg-slate-900/95 border-b border-slate-800 backdrop-blur-xl px-4 pt-2 pb-5 space-y-2 animate-fade-in">
-          <nav className="space-y-1">
-            {navLinks.map((link) => {
-              const Icon = link.icon;
-              const isActive = activeTab === link.id;
-              return (
-                <button
-                  key={link.id}
-                  type="button"
-                  onClick={() => {
-                    setActiveTab(link.id);
-                    setMobileMenuOpen(false);
-                  }}
-                  className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold transition border-0 cursor-pointer text-right ${
-                    isActive
-                      ? 'bg-blue-600 text-white shadow-md'
-                      : 'text-slate-300 hover:bg-slate-800/80 hover:text-white bg-transparent'
-                  }`}
-                  style={isActive ? { background: '#2563eb', color: '#ffffff' } : {}}
-                >
-                  <Icon className="w-4 h-4" />
-                  <span>{link.name}</span>
-                </button>
-              );
-            })}
-          </nav>
-
-          <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between">
-            <button
-              type="button"
-              onClick={() => {
-                setMobileMenuOpen(false);
-                onOpenEmployeeModal();
-              }}
-              className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold text-slate-200 bg-slate-800 border border-slate-700 cursor-pointer"
-            >
-              <Users className="w-4 h-4 text-blue-400" />
-              <span>إدارة الموظفين</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setMobileMenuOpen(false);
-                handleSystemLogout();
-              }}
-              className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold text-red-400 bg-red-950/40 border border-red-800/40 cursor-pointer"
-            >
-              <LogOut className="w-4 h-4" />
-              <span>تسجيل الخروج</span>
-            </button>
-          </div>
+        <div style={{
+          backgroundColor: '#0b1120',
+          borderBottom: '1px solid #1e293b',
+          padding: '1rem',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '0.5rem'
+        }}>
+          {navLinks.map((link) => {
+            const Icon = link.icon;
+            const isActive = activeTab === link.id;
+            return (
+              <button
+                key={link.id}
+                type="button"
+                onClick={() => {
+                  setActiveTab(link.id);
+                  setMobileMenuOpen(false);
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.75rem',
+                  padding: '0.75rem 1rem',
+                  borderRadius: '12px',
+                  fontSize: '0.875rem',
+                  fontWeight: 700,
+                  border: 'none',
+                  cursor: 'pointer',
+                  backgroundColor: isActive ? '#2563eb' : 'transparent',
+                  color: isActive ? '#ffffff' : '#94a3b8',
+                  textAlign: 'right',
+                  width: '100%'
+                }}
+              >
+                <Icon style={{ width: '18px', height: '18px' }} />
+                <span>{link.name}</span>
+              </button>
+            );
+          })}
         </div>
       )}
     </header>

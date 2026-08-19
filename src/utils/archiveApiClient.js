@@ -256,6 +256,12 @@ export async function apiArchiveSaveSettings(settingsObj) {
   });
 }
 
+export async function apiArchiveTestDrive() {
+  return await archiveFetch('test-drive', {
+    method: 'POST',
+  });
+}
+
 // 6. File Upload API
 export async function apiArchiveUploadFile(fileOrBase64, fileName = '') {
   if (typeof fileOrBase64 === 'string') {

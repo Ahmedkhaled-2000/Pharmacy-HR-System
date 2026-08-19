@@ -1,46 +1,37 @@
 import React, { useState, useEffect } from 'react';
 import {
   Settings,
-  Building,
-  Bot,
-  Sparkles,
-  HardDrive,
-  FolderSync,
-  Lock,
   ShieldCheck,
+  RotateCcw,
   Save,
-  KeyRound,
-  Image as ImageIcon,
+  Loader2,
   CheckCircle2,
   AlertCircle,
-  Loader2,
-  Eye,
-  EyeOff
+  HardDrive,
+  KeyRound,
+  Sparkles,
+  Folder,
+  Image as ImageIcon
 } from 'lucide-react';
-import { apiArchiveSaveSettings, apiArchiveChangeCredentials } from '../../utils/archiveApiClient';
+import { apiArchiveSaveSettings, apiArchiveTestDrive } from '../../utils/archiveApiClient';
 
 export default function ArchiveSettingsTab({
   settings = {},
   onSettingsSaved = () => {}
 }) {
-  const [pharmacyName, setPharmacyName] = useState(settings.PHARMACY_NAME || 'صيدليات مداواة');
-  const [pharmacyLogo, setPharmacyLogo] = useState(settings.PHARMACY_LOGO || '');
-  const [geminiKey, setGeminiKey] = useState(settings.GEMINI_API_KEY || '');
-  const [groqKey, setGroqKey] = useState(settings.GROQ_API_KEY || '');
-  const [driveEmail, setDriveEmail] = useState(settings.GOOGLE_CLIENT_EMAIL || '');
-  const [driveKey, setDriveKey] = useState(settings.GOOGLE_PRIVATE_KEY || '');
-  const [driveFolder, setDriveFolder] = useState(settings.GOOGLE_DRIVE_PARENT_FOLDER_ID || '');
-  const [scanFolder, setScanFolder] = useState(settings.AUTO_SCAN_FOLDER_PATH || '');
+  const [pharmacyName, setPharmacyName] = useState(settings.PHARMACY_NAME || settings.pharmacyName || 'صيدلية الفلاي');
+  const [pharmacyLogo, setPharmacyLogo] = useState(settings.PHARMACY_LOGO || settings.pharmacyLogo || '');
+  const [geminiKey, setGeminiKey] = useState(settings.GEMINI_API_KEY || settings.geminiApiKey || '');
+  const [groqKey, setGroqKey] = useState(settings.GROQ_API_KEY || settings.groqApiKey || '');
+  const [driveEmail, setDriveEmail] = useState(settings.GOOGLE_CLIENT_EMAIL || settings.googleClientEmail || '');
+  const [driveKey, setDriveKey] = useState(settings.GOOGLE_PRIVATE_KEY || settings.googlePrivateKey || '');
+  const [driveFolder, setDriveFolder] = useState(settings.GOOGLE_DRIVE_PARENT_FOLDER_ID || settings.googleDriveParentFolderId || '');
+  const [scanFolder, setScanFolder] = useState(settings.AUTO_SCAN_FOLDER_PATH || settings.autoScanFolderPath || '');
 
-  // Auth State
-  const [currentPassword, setCurrentPassword] = useState('');
-  const [newUsername, setNewUsername] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [authMsg, setAuthMsg] = useState('');
-  const [authIsError, setAuthIsError] = useState(false);
-  const [isSavingAuth, setIsSavingAuth] = useState(false);
+  // Connection test state
+  const [isTestingDrive, setIsTestingDrive] = useState(false);
+  const [driveStatus, setDriveStatus] = useState(settings.isDriveConnected ? 'connected' : 'disconnected'); // 'connected' | 'disconnected' | 'testing'
+  const [testResultMsg, setTestResultMsg] = useState('');
 
   // Settings Save State
   const [isSaving, setIsSaving] = useState(false);
@@ -48,15 +39,43 @@ export default function ArchiveSettingsTab({
   const [saveIsError, setSaveIsError] = useState(false);
 
   useEffect(() => {
-    setPharmacyName(settings.PHARMACY_NAME || 'صيدليات مداواة');
-    setPharmacyLogo(settings.PHARMACY_LOGO || '');
-    setGeminiKey(settings.GEMINI_API_KEY || '');
-    setGroqKey(settings.GROQ_API_KEY || '');
-    setDriveEmail(settings.GOOGLE_CLIENT_EMAIL || '');
-    setDriveKey(settings.GOOGLE_PRIVATE_KEY || '');
-    setDriveFolder(settings.GOOGLE_DRIVE_PARENT_FOLDER_ID || '');
-    setScanFolder(settings.AUTO_SCAN_FOLDER_PATH || '');
+    setPharmacyName(settings.PHARMACY_NAME || settings.pharmacyName || 'صيدلية الفلاي');
+    setPharmacyLogo(settings.PHARMACY_LOGO || settings.pharmacyLogo || '');
+    setGeminiKey(settings.GEMINI_API_KEY || settings.geminiApiKey || '');
+    setGroqKey(settings.GROQ_API_KEY || settings.groqApiKey || '');
+    setDriveEmail(settings.GOOGLE_CLIENT_EMAIL || settings.googleClientEmail || '');
+    setDriveKey(settings.GOOGLE_PRIVATE_KEY || settings.googlePrivateKey || '');
+    setDriveFolder(settings.GOOGLE_DRIVE_PARENT_FOLDER_ID || settings.googleDriveParentFolderId || '');
+    setScanFolder(settings.AUTO_SCAN_FOLDER_PATH || settings.autoScanFolderPath || '');
+    if (settings.GOOGLE_CLIENT_EMAIL && settings.GOOGLE_PRIVATE_KEY) {
+      setDriveStatus('connected');
+    }
   }, [settings]);
+
+  const handleTestConnection = async () => {
+    setIsTestingDrive(true);
+    setTestResultMsg('');
+    try {
+      if (!driveEmail || !driveKey) {
+        setDriveStatus('disconnected');
+        setTestResultMsg('يرجى إدخال البريد والمفتاح الخاص لـ Google Drive أولاً');
+        return;
+      }
+      const res = await apiArchiveTestDrive();
+      if (res.success || res.connected) {
+        setDriveStatus('connected');
+        setTestResultMsg('✅ الاتصال بـ Google Drive سليم ويعمل بنجاح!');
+      } else {
+        setDriveStatus('disconnected');
+        setTestResultMsg(res.error || '❌ تعذر الاتصال، يرجى مراجعة الصلاحيات والمفاتيح');
+      }
+    } catch {
+      setDriveStatus('disconnected');
+      setTestResultMsg('❌ فشل فحص الاتصال');
+    } finally {
+      setIsTestingDrive(false);
+    }
+  };
 
   const handleSaveAllSettings = async (e) => {
     e.preventDefault();
@@ -92,41 +111,9 @@ export default function ArchiveSettingsTab({
     }
   };
 
-  const handleChangeAuth = async (e) => {
-    e.preventDefault();
-    setAuthMsg('');
-    setAuthIsError(false);
-
-    if (newPassword && newPassword !== confirmPassword) {
-      setAuthIsError(true);
-      setAuthMsg('كلمة المرور الجديدة غير متطابقة مع تأكيد كلمة المرور');
-      return;
-    }
-
-    setIsSavingAuth(true);
-    try {
-      const res = await apiArchiveChangeCredentials(currentPassword, newUsername, newPassword);
-      if (res.success) {
-        setAuthMsg('تم تحديث بيانات الدخول بنجاح!');
-        setCurrentPassword('');
-        setNewPassword('');
-        setConfirmPassword('');
-      } else {
-        setAuthIsError(true);
-        setAuthMsg(res.error || 'فشل تحديث بيانات الدخول، تأكد من كلمة المرور الحالية');
-      }
-    } catch {
-      setAuthIsError(true);
-      setAuthMsg('حدث خطأ أثناء محاولة تحديث بيانات الدخول');
-    } finally {
-      setIsSavingAuth(false);
-    }
-  };
-
   const handleLogoUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = () => {
       setPharmacyLogo(reader.result);
@@ -135,281 +122,374 @@ export default function ArchiveSettingsTab({
   };
 
   return (
-    <div className="space-y-6 w-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div style={{ maxWidth: '1000px', margin: '0 auto', padding: '1.75rem 1.5rem 3.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       
-      {/* Top Title */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-100 flex items-center gap-2" style={{ margin: 0 }}>
-            <Settings className="w-6 h-6 text-blue-400" />
-            إعدادات وتهيئة نظام الأرشيف الذكي
+      {/* ── 1. Top Hero Header Card (Match Screenshot 3) ── */}
+      <div style={{
+        backgroundColor: '#0b1120',
+        border: '1px solid #1e293b',
+        borderRadius: '24px',
+        padding: '2.25rem 2rem',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexDirection: 'row-reverse',
+        boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.4)'
+      }}>
+        <div style={{
+          width: '56px',
+          height: '56px',
+          borderRadius: '16px',
+          backgroundColor: '#1e3a8a',
+          border: '1px solid #2563eb',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: '#60a5fa',
+          boxShadow: '0 4px 14px rgba(37, 99, 235, 0.35)',
+          flexShrink: 0
+        }}>
+          <Settings style={{ width: '28px', height: '28px' }} />
+        </div>
+
+        <div style={{ textAlign: 'right' }}>
+          <h1 style={{
+            fontSize: '1.65rem',
+            fontWeight: 900,
+            color: '#c084fc',
+            margin: 0,
+            letterSpacing: '-0.02em',
+            background: 'linear-gradient(135deg, #c084fc 0%, #60a5fa 100%)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent'
+          }}>
+            إعدادات النظام والتخزين السحابي
           </h1>
-          <p className="text-xs text-slate-400 mt-1" style={{ margin: '4px 0 0' }}>
-            تخصيص هوية الصيدلية، مفاتيح الذكاء الاصطناعي (AI)، ومسارات الفحص التلقائي
+          <p style={{ fontSize: '0.8125rem', color: '#94a3b8', margin: 0, marginTop: '0.375rem', fontWeight: 500 }}>
+            إدارة هوية الصيدلية، التوصيل المباشر مع Google Drive، وإعدادات الأمان
           </p>
         </div>
       </div>
 
-      {/* Global Settings Form */}
-      <form onSubmit={handleSaveAllSettings} className="space-y-6">
-        
-        {/* Card 1: Pharmacy Identity */}
-        <div className="glass-card rounded-2xl p-6 border border-slate-800 space-y-4 shadow-xl">
-          <div className="flex items-center gap-2.5 border-b border-slate-800 pb-3">
-            <Building className="w-5 h-5 text-blue-400" />
-            <h2 className="text-base font-bold text-slate-100" style={{ margin: 0 }}>هوية الصيدلية والشعار</h2>
+      {/* ── 2. Google Drive Status Card (Match Screenshot 3) ── */}
+      <div style={{
+        backgroundColor: '#0b1120',
+        border: '1px solid #1e293b',
+        borderRadius: '20px',
+        padding: '1.25rem 1.5rem',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.4)',
+        flexWrap: 'wrap',
+        gap: '1rem'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.875rem' }}>
+          <div style={{
+            width: '42px',
+            height: '42px',
+            borderRadius: '12px',
+            backgroundColor: driveStatus === 'connected' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+            border: '1px solid ' + (driveStatus === 'connected' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.3)'),
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: driveStatus === 'connected' ? '#34d399' : '#fbbf24'
+          }}>
+            <ShieldCheck style={{ width: '22px', height: '22px' }} />
           </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-center">
-            <div className="space-y-2">
-              <label className="text-xs font-semibold text-slate-300 block">اسم الصيدلية أو المجموعة *</label>
-              <input
-                type="text"
-                required
-                value={pharmacyName}
-                onChange={(e) => setPharmacyName(e.target.value)}
-                placeholder="صيدليات مداواة"
-                className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500"
-              />
-              <span className="text-[11px] text-slate-500 block">يظهر الاسم في ترويسة تقارير الفواتير وشيتات الطباعة A4</span>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs font-semibold text-slate-300 block">شعار الصيدلية (Logo)</label>
-              <div className="flex items-center gap-4">
-                {pharmacyLogo ? (
-                  <div className="w-14 h-14 rounded-xl border border-slate-700 overflow-hidden bg-slate-900 flex items-center justify-center p-1 relative group">
-                    <img src={pharmacyLogo} alt="Logo" className="w-full h-full object-contain" />
-                    <button
-                      type="button"
-                      onClick={() => setPharmacyLogo('')}
-                      className="absolute inset-0 bg-black/70 text-red-400 text-xs font-bold opacity-0 group-hover:opacity-100 transition flex items-center justify-center cursor-pointer"
-                    >
-                      إزالة
-                    </button>
-                  </div>
-                ) : (
-                  <div className="w-14 h-14 rounded-xl border border-dashed border-slate-700 bg-slate-900/50 flex items-center justify-center text-slate-500">
-                    <ImageIcon className="w-6 h-6" />
-                  </div>
-                )}
-
-                <div className="flex-1">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleLogoUpload}
-                    className="w-full text-xs text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-950 file:text-blue-300 hover:file:bg-blue-900 cursor-pointer"
-                  />
-                  <span className="text-[10px] text-slate-500 block mt-1">يُفضل ملف PNG بخلفية شفافة</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Card 2: AI OCR Engine Settings */}
-        <div className="glass-card rounded-2xl p-6 border border-slate-800 space-y-4 shadow-xl">
-          <div className="flex items-center gap-2.5 border-b border-slate-800 pb-3">
-            <Sparkles className="w-5 h-5 text-indigo-400" />
-            <h2 className="text-base font-bold text-slate-100" style={{ margin: 0 }}>
-              محركات الذكاء الاصطناعي لاستخراج وقراءة الفواتير (AI OCR Engine)
-            </h2>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <div className="space-y-2">
-              <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
-                <span>Google Gemini API Key</span>
-                <span className="text-[10px] text-indigo-400 font-normal">المحرك الأساسي لقراءة الصور وPDF</span>
-              </label>
-              <input
-                type="password"
-                value={geminiKey}
-                onChange={(e) => setGeminiKey(e.target.value)}
-                placeholder="AIzaSy..."
-                className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 font-mono"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
-                <span>Groq API Key (Llama-3 Vision)</span>
-                <span className="text-[10px] text-purple-400 font-normal">المحرك السريع الاحتياطي</span>
-              </label>
-              <input
-                type="password"
-                value={groqKey}
-                onChange={(e) => setGroqKey(e.target.value)}
-                placeholder="gsk_..."
-                className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 font-mono"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Card 3: Google Drive & Auto Scan Folder */}
-        <div className="glass-card rounded-2xl p-6 border border-slate-800 space-y-4 shadow-xl">
-          <div className="flex items-center gap-2.5 border-b border-slate-800 pb-3">
-            <FolderSync className="w-5 h-5 text-cyan-400" />
-            <h2 className="text-base font-bold text-slate-100" style={{ margin: 0 }}>
-              المزامنة السحابية ومسار الفحص التلقائي المحلي
-            </h2>
-          </div>
-
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-xs font-semibold text-slate-300 block">
-                مسار مجلد الفحص التلقائي المحلي (Auto Scan Folder Path)
-              </label>
-              <input
-                type="text"
-                value={scanFolder}
-                onChange={(e) => setScanFolder(e.target.value)}
-                placeholder="C:\Scanned_Invoices أو D:\Archive_Input"
-                className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500 font-mono"
-              />
-              <span className="text-[11px] text-slate-500 block">
-                المسار المحلي على جهاز الصيدلية الذي يتم وضع صور وفواتير الإكسل به للفحص الفوري
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <span style={{ fontSize: '0.875rem', fontWeight: 800, color: '#f8fafc' }}>
+                حالة الاتصال بـ Google Drive:
+              </span>
+              <span style={{
+                padding: '0.2rem 0.6rem',
+                borderRadius: '8px',
+                fontSize: '0.75rem',
+                fontWeight: 700,
+                backgroundColor: driveStatus === 'connected' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)',
+                color: driveStatus === 'connected' ? '#34d399' : '#fbbf24',
+                border: '1px solid ' + (driveStatus === 'connected' ? '#10b981' : '#f59e0b')
+              }}>
+                {driveStatus === 'connected' ? 'متصل بنجاح' : 'غير متصل'}
               </span>
             </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-slate-300 block">Google Drive Folder ID (اختياري)</label>
-                <input
-                  type="text"
-                  value={driveFolder}
-                  onChange={(e) => setDriveFolder(e.target.value)}
-                  placeholder="1A2B3C4D5E..."
-                  className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500 font-mono"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-slate-300 block">Google Client Email (اختياري)</label>
-                <input
-                  type="text"
-                  value={driveEmail}
-                  onChange={(e) => setDriveEmail(e.target.value)}
-                  placeholder="service-account@project.iam.gserviceaccount.com"
-                  className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500 font-mono"
-                />
-              </div>
-            </div>
+            <p style={{ fontSize: '0.75rem', color: '#94a3b8', margin: 0, marginTop: '2px' }}>
+              {testResultMsg || 'أدخل بيانات الاعتماد أدناه للتوصيل بنجاح'}
+            </p>
           </div>
         </div>
 
-        {/* Global Save Button & Alert */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2">
-          {saveMsg && (
-            <div className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold border ${saveIsError ? 'bg-red-950/60 border-red-800 text-red-400' : 'bg-emerald-950/60 border-emerald-800 text-emerald-300'}`}>
-              {saveIsError ? <AlertCircle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
-              <span>{saveMsg}</span>
-            </div>
-          )}
+        <button
+          type="button"
+          onClick={handleTestConnection}
+          disabled={isTestingDrive}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            padding: '0.625rem 1.25rem',
+            borderRadius: '12px',
+            fontSize: '0.8125rem',
+            fontWeight: 700,
+            color: '#f8fafc',
+            backgroundColor: '#070b14',
+            border: '1px solid #334155',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.borderColor = '#60a5fa';
+            e.currentTarget.style.backgroundColor = 'rgba(30, 41, 59, 0.6)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.borderColor = '#334155';
+            e.currentTarget.style.backgroundColor = '#070b14';
+          }}
+        >
+          {isTestingDrive ? <Loader2 style={{ width: '14px', height: '14px', animation: 'spin 1s linear infinite' }} /> : <RotateCcw style={{ width: '14px', height: '14px' }} />}
+          <span>اختبار الاتصال</span>
+        </button>
+      </div>
 
-          <div className="mr-auto">
-            <button
-              type="submit"
-              disabled={isSaving}
-              className="px-8 py-3 rounded-xl text-xs font-bold text-white gradient-btn flex items-center gap-2 shadow-xl cursor-pointer disabled:opacity-50"
-            >
-              {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              <span>حفظ وتطبيق إعدادات الأرشيف</span>
-            </button>
+      {/* ── 3. Main Settings Form (Match Screenshot 3) ── */}
+      <form onSubmit={handleSaveAllSettings} style={{
+        backgroundColor: '#0b1120',
+        border: '1px solid #1e293b',
+        borderRadius: '24px',
+        padding: '2rem',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '1.5rem',
+        boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.4)'
+      }}>
+        
+        {saveMsg && (
+          <div style={{
+            padding: '0.875rem 1rem',
+            borderRadius: '12px',
+            backgroundColor: saveIsError ? 'rgba(239, 68, 68, 0.1)' : 'rgba(16, 185, 129, 0.1)',
+            border: '1px solid ' + (saveIsError ? 'rgba(239, 68, 68, 0.3)' : 'rgba(16, 185, 129, 0.3)'),
+            color: saveIsError ? '#f87171' : '#34d399',
+            fontSize: '0.8125rem',
+            fontWeight: 600,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem'
+          }}>
+            {saveIsError ? <AlertCircle style={{ width: '16px', height: '16px' }} /> : <CheckCircle2 style={{ width: '16px', height: '16px' }} />}
+            <span>{saveMsg}</span>
+          </div>
+        )}
+
+        {/* Field 1: Pharmacy Name */}
+        <div>
+          <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 700, color: '#f8fafc', marginBottom: '0.375rem' }}>
+            📱 اسم الصيدلية / المؤسسة (PHARMACY_NAME):
+          </label>
+          <input
+            type="text"
+            required
+            value={pharmacyName}
+            onChange={(e) => setPharmacyName(e.target.value)}
+            placeholder="صيدلية الفلاي"
+            style={{
+              width: '100%',
+              padding: '0.75rem 1rem',
+              borderRadius: '12px',
+              backgroundColor: '#070b14',
+              border: '1px solid #1e293b',
+              fontSize: '0.875rem',
+              color: '#f8fafc',
+              outline: 'none',
+              transition: 'border-color 0.2s'
+            }}
+          />
+          <span style={{ fontSize: '0.72rem', color: '#64748b', marginTop: '0.25rem', display: 'block' }}>
+            يُستخدم هذا الاسم لإنشاء المجلد الرئيسي للفواتير في Google Drive وتحديث عنوان الموقع.
+          </span>
+        </div>
+
+        {/* Field 2: Pharmacy Logo */}
+        <div>
+          <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 700, color: '#f8fafc', marginBottom: '0.375rem' }}>
+            🖼️ شعار الصيدلية / اللوجو (PHARMACY_LOGO):
+          </label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            {pharmacyLogo ? (
+              <div style={{
+                width: '56px',
+                height: '56px',
+                borderRadius: '12px',
+                backgroundColor: '#070b14',
+                border: '1px solid #334155',
+                padding: '4px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                overflow: 'hidden'
+              }}>
+                <img src={pharmacyLogo} alt="Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+              </div>
+            ) : null}
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleLogoUpload}
+              style={{
+                flex: 1,
+                padding: '0.625rem 1rem',
+                borderRadius: '12px',
+                backgroundColor: '#070b14',
+                border: '1px solid #1e293b',
+                fontSize: '0.75rem',
+                color: '#94a3b8'
+              }}
+            />
           </div>
         </div>
+
+        {/* Field 3: Google Client Email */}
+        <div>
+          <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 700, color: '#f8fafc', marginBottom: '0.375rem' }}>
+            📧 البريد الإلكتروني لحساب الخدمة (GOOGLE_CLIENT_EMAIL):
+          </label>
+          <input
+            type="text"
+            value={driveEmail}
+            onChange={(e) => setDriveEmail(e.target.value)}
+            placeholder="archive-service@project.iam.gserviceaccount.com"
+            style={{
+              width: '100%',
+              padding: '0.75rem 1rem',
+              borderRadius: '12px',
+              backgroundColor: '#070b14',
+              border: '1px solid #1e293b',
+              fontSize: '0.875rem',
+              color: '#f8fafc',
+              outline: 'none',
+              fontFamily: 'monospace',
+              direction: 'ltr',
+              textAlign: 'left'
+            }}
+          />
+        </div>
+
+        {/* Field 4: Google Private Key */}
+        <div>
+          <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 700, color: '#f8fafc', marginBottom: '0.375rem' }}>
+            🔐 المفتاح الخاص للتخزين (GOOGLE_PRIVATE_KEY):
+          </label>
+          <textarea
+            rows={3}
+            value={driveKey}
+            onChange={(e) => setDriveKey(e.target.value)}
+            placeholder="-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC...\n-----END PRIVATE KEY-----"
+            style={{
+              width: '100%',
+              padding: '0.75rem 1rem',
+              borderRadius: '12px',
+              backgroundColor: '#070b14',
+              border: '1px solid #1e293b',
+              fontSize: '0.75rem',
+              color: '#f8fafc',
+              outline: 'none',
+              fontFamily: 'monospace',
+              direction: 'ltr',
+              textAlign: 'left',
+              resize: 'vertical'
+            }}
+          />
+        </div>
+
+        {/* Field 5: Google Drive Parent Folder ID */}
+        <div>
+          <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 700, color: '#f8fafc', marginBottom: '0.375rem' }}>
+            📁 معرّف مجلد جوجل درايف الرئيسي (GOOGLE_DRIVE_PARENT_FOLDER_ID):
+          </label>
+          <input
+            type="text"
+            value={driveFolder}
+            onChange={(e) => setDriveFolder(e.target.value)}
+            placeholder="1A2B3C4D5E6F7G8H9I0J..."
+            style={{
+              width: '100%',
+              padding: '0.75rem 1rem',
+              borderRadius: '12px',
+              backgroundColor: '#070b14',
+              border: '1px solid #1e293b',
+              fontSize: '0.875rem',
+              color: '#f8fafc',
+              outline: 'none',
+              fontFamily: 'monospace',
+              direction: 'ltr',
+              textAlign: 'left'
+            }}
+          />
+        </div>
+
+        {/* Field 6: Gemini API Key */}
+        <div>
+          <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 700, color: '#f8fafc', marginBottom: '0.375rem' }}>
+            ✨ مفتاح Gemini AI للتحليل الذكي (GEMINI_API_KEY):
+          </label>
+          <input
+            type="password"
+            value={geminiKey}
+            onChange={(e) => setGeminiKey(e.target.value)}
+            placeholder="AIzaSy..."
+            style={{
+              width: '100%',
+              padding: '0.75rem 1rem',
+              borderRadius: '12px',
+              backgroundColor: '#070b14',
+              border: '1px solid #1e293b',
+              fontSize: '0.875rem',
+              color: '#f8fafc',
+              outline: 'none',
+              fontFamily: 'monospace',
+              direction: 'ltr',
+              textAlign: 'left'
+            }}
+          />
+        </div>
+
+        {/* Submit Button */}
+        <button
+          type="submit"
+          disabled={isSaving}
+          style={{
+            width: '100%',
+            padding: '0.875rem 1.5rem',
+            borderRadius: '12px',
+            fontSize: '0.875rem',
+            fontWeight: 800,
+            color: '#ffffff',
+            backgroundColor: '#2563eb',
+            border: '1px solid #3b82f6',
+            boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '0.5rem',
+            opacity: isSaving ? 0.6 : 1,
+            marginTop: '0.5rem',
+            transition: 'all 0.2s ease'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = '#1d4ed8';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = '#2563eb';
+          }}
+        >
+          {isSaving ? <Loader2 style={{ width: '16px', height: '16px', animation: 'spin 1s linear infinite' }} /> : <Save style={{ width: '16px', height: '16px' }} />}
+          <span>حفظ كافة إعدادات النظام والتخزين</span>
+        </button>
 
       </form>
-
-      {/* Card 4: Change Password / Auth */}
-      <div className="glass-card rounded-2xl p-6 border border-slate-800 space-y-4 shadow-xl mt-8">
-        <div className="flex items-center gap-2.5 border-b border-slate-800 pb-3">
-          <ShieldCheck className="w-5 h-5 text-emerald-400" />
-          <h2 className="text-base font-bold text-slate-100" style={{ margin: 0 }}>
-            تغيير بيانات الدخول وحماية نظام الأرشيف
-          </h2>
-        </div>
-
-        <form onSubmit={handleChangeAuth} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <label className="text-xs font-semibold text-slate-300 block">اسم المستخدم الجديد (اختياري)</label>
-              <input
-                type="text"
-                value={newUsername}
-                onChange={(e) => setNewUsername(e.target.value)}
-                placeholder="اتركه فارغاً للإبقاء على الاسم الحالي"
-                className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs font-semibold text-slate-300 block">كلمة المرور الحالية *</label>
-              <input
-                type="password"
-                required
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
-                placeholder="كلمة المرور الحالية لتأكيد الهوية"
-                className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs font-semibold text-slate-300 block">كلمة المرور الجديدة</label>
-              <div className="relative">
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="كلمة المرور الجديدة"
-                  className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500 pl-10"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute left-3 top-2.5 text-slate-400 hover:text-slate-200"
-                >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs font-semibold text-slate-300 block">تأكيد كلمة المرور الجديدة</label>
-              <input
-                type="password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                placeholder="أعد كتابة كلمة المرور الجديدة"
-                className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-              />
-            </div>
-          </div>
-
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2">
-            {authMsg && (
-              <div className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold border ${authIsError ? 'bg-red-950/60 border-red-800 text-red-400' : 'bg-emerald-950/60 border-emerald-800 text-emerald-300'}`}>
-                {authIsError ? <AlertCircle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
-                <span>{authMsg}</span>
-              </div>
-            )}
-
-            <div className="mr-auto">
-              <button
-                type="submit"
-                disabled={isSavingAuth || !currentPassword}
-                className="px-6 py-2.5 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 flex items-center gap-2 shadow-lg transition cursor-pointer disabled:opacity-50"
-              >
-                {isSavingAuth ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
-                <span>تحديث بيانات الدخول</span>
-              </button>
-            </div>
-          </div>
-        </form>
-      </div>
 
     </div>
   );

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Users, Search, Plus, Phone, FileText, ChevronLeft, ArrowDownLeft, ArrowUpRight, Edit2, Trash2, Loader2, Shield } from 'lucide-react';
-import { apiArchiveSaveEmployee, apiArchiveDeleteEmployee } from '../../utils/archiveApiClient';
+import { Users, Search, Plus, Phone, FileText, ChevronLeft, Edit2, Trash2, Loader2, Shield } from 'lucide-react';
+import { apiArchiveDeleteEmployee } from '../../utils/archiveApiClient';
 import EmployeeInvoicesModal from './EmployeeInvoicesModal';
 
 export default function ArchiveEmployeesTab({
@@ -46,173 +46,223 @@ export default function ArchiveEmployeesTab({
   };
 
   return (
-    <div className="space-y-6 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div style={{ maxWidth: '1440px', margin: '0 auto', padding: '1.75rem 1.5rem 3.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       
-      {/* Top Header & Search */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      {/* ── 1. Top Header Bar (Match Screenshot 5) ── */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
         <div>
-          <h1 className="text-2xl font-bold text-slate-100 flex items-center gap-2" style={{ margin: 0 }}>
-            <Users className="w-6 h-6 text-cyan-400" />
-            إدارة طاقم العمل ومسؤولي الفواتير ({employees.length})
+          <h1 style={{ fontSize: '1.35rem', fontWeight: 900, color: '#f8fafc', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span>👥</span>
+            <span>دليل موظفي الصيدلية ({employees.length})</span>
           </h1>
-          <p className="text-xs text-slate-400 mt-1" style={{ margin: '4px 0 0 0' }}>
-            تتبع الفواتير المستلمة والمدخلة لكل أمين عهدة، محاسب، أو مراجع بالأرشيف
+          <p style={{ fontSize: '0.75rem', color: '#94a3b8', margin: 0, marginTop: '4px', fontWeight: 500 }}>
+            سجل أسماء الموظفين المستلمين ومدخلي البيانات وتتبع الفواتير المسجلة لكل موظف
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="relative w-full sm:w-72">
-            <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-3.5" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="بحث باسم الموظف، الوظيفة، الهاتف..."
-              className="w-full pr-10 pl-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500 shadow-inner"
-            />
-          </div>
-
-          {onOpenEmployeeModal && (
-            <button
-              type="button"
-              onClick={() => onOpenEmployeeModal(null)}
-              className="px-4 py-2.5 rounded-xl text-xs font-bold text-white gradient-btn flex items-center gap-1.5 shadow-md shrink-0 cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>إضافة موظف</span>
-            </button>
-          )}
-        </div>
+        <button
+          type="button"
+          onClick={() => onOpenEmployeeModal && onOpenEmployeeModal(null)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            padding: '0.65rem 1.35rem',
+            borderRadius: '12px',
+            fontSize: '0.8125rem',
+            fontWeight: 800,
+            color: '#ffffff',
+            backgroundColor: '#2563eb',
+            border: '1px solid #3b82f6',
+            boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = '#1d4ed8';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = '#2563eb';
+          }}
+        >
+          <Plus style={{ width: '16px', height: '16px' }} />
+          <span>إضافة موظف جديد</span>
+        </button>
       </div>
 
-      {/* Employees Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-        {isLoading && employees.length === 0 ? (
-          Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="glass-card rounded-2xl p-5 border border-slate-800/80 animate-pulse space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-xl bg-slate-800/80"></div>
-                <div className="space-y-2 flex-1">
-                  <div className="w-3/4 h-5 rounded-lg bg-slate-800/80"></div>
-                  <div className="w-1/2 h-3 rounded-lg bg-slate-800/50"></div>
-                </div>
-              </div>
-              <div className="pt-3 border-t border-slate-800/60 h-10 rounded-lg bg-slate-800/40"></div>
-            </div>
-          ))
-        ) : filteredEmployees.length === 0 ? (
-          <div className="col-span-full text-center text-slate-500 py-16 bg-slate-900/40 rounded-2xl border border-slate-800">
-            <Users className="w-12 h-12 mx-auto text-slate-700 stroke-1 mb-2" />
-            <p className="text-sm font-medium text-slate-400">لا يوجد موظفين مطابقين للبحث.</p>
+      {/* ── 2. Content Area (Match Screenshot 5 Empty / Filled) ── */}
+      {employees.length === 0 ? (
+        <div style={{
+          backgroundColor: '#0b1120',
+          border: '1px solid #1e293b',
+          borderRadius: '24px',
+          padding: '5rem 2rem',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '1rem',
+          boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.4)'
+        }}>
+          <div style={{
+            width: '64px',
+            height: '64px',
+            borderRadius: '20px',
+            backgroundColor: 'rgba(30, 41, 59, 0.5)',
+            border: '1px solid #1e293b',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#475569'
+          }}>
+            <Users style={{ width: '32px', height: '32px', strokeWidth: 1.5 }} />
           </div>
-        ) : (
-          filteredEmployees.map((emp) => {
-            // Count invoices for this employee
+
+          <p style={{ fontSize: '0.9375rem', fontWeight: 600, color: '#94a3b8', margin: 0 }}>
+            لا يوجد موظفين مسجلين حالياً.
+          </p>
+
+          <button
+            type="button"
+            onClick={() => onOpenEmployeeModal && onOpenEmployeeModal(null)}
+            style={{
+              padding: '0.65rem 1.75rem',
+              borderRadius: '12px',
+              fontSize: '0.8125rem',
+              fontWeight: 800,
+              color: '#ffffff',
+              backgroundColor: '#2563eb',
+              border: '1px solid #3b82f6',
+              boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)',
+              cursor: 'pointer',
+              marginTop: '0.5rem',
+              transition: 'all 0.2s ease'
+            }}
+          >
+            إضافة أول موظف الآن
+          </button>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1.25rem' }}>
+          {filteredEmployees.map((emp) => {
             const empId = emp.id;
             const receivedCount = invoices.filter(i => String(i.receiverId || i.receiver_id) === String(empId)).length;
             const enteredCount = invoices.filter(i => String(i.entryClerkId || i.entry_clerk_id) === String(empId)).length;
+            const isDel = deletingId === emp.id;
 
             return (
               <div
                 key={emp.id}
-                className="glass-card rounded-2xl p-5 border border-slate-800 hover:border-cyan-500/50 transition flex flex-col justify-between space-y-4 group shadow-md"
+                style={{
+                  backgroundColor: '#0b1120',
+                  border: '1px solid #1e293b',
+                  borderRadius: '20px',
+                  padding: '1.25rem 1.5rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '1rem',
+                  boxShadow: '0 4px 15px rgba(0, 0, 0, 0.3)',
+                  transition: 'all 0.2s ease'
+                }}
               >
-                <div>
-                  {/* Top Info Row */}
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 rounded-xl bg-cyan-500/10 text-cyan-400 flex items-center justify-center font-bold text-xl group-hover:scale-105 transition border border-cyan-500/20 shadow-inner">
-                        {(emp.name || 'م').charAt(0)}
-                      </div>
-                      <div>
-                        <h3 className="text-base font-bold text-slate-100 group-hover:text-cyan-300 transition" style={{ margin: 0 }}>
-                          {emp.name}
-                        </h3>
-                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-cyan-400 bg-cyan-950/60 border border-cyan-800/50 px-2 py-0.5 rounded-full mt-1">
-                          <Shield className="w-3 h-3" />
-                          {emp.role || 'مسؤول أرشيف'}
-                        </span>
-                      </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.875rem' }}>
+                    <div style={{
+                      width: '44px',
+                      height: '44px',
+                      borderRadius: '12px',
+                      backgroundColor: 'rgba(37, 99, 235, 0.15)',
+                      border: '1px solid rgba(37, 99, 235, 0.3)',
+                      color: '#60a5fa',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontWeight: 800,
+                      fontSize: '1.125rem'
+                    }}>
+                      {(emp.name || 'م').charAt(0)}
                     </div>
-
-                    <div className="flex items-center gap-1">
-                      {onOpenEmployeeModal && (
-                        <button
-                          type="button"
-                          onClick={() => onOpenEmployeeModal(emp)}
-                          className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition cursor-pointer"
-                          title="تعديل الموظف"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        disabled={deletingId === emp.id}
-                        onClick={(e) => handleDelete(emp, e)}
-                        className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-950/40 rounded-lg transition cursor-pointer disabled:opacity-50"
-                        title="حذف الموظف"
-                      >
-                        {deletingId === emp.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                      </button>
+                    <div>
+                      <h3 style={{ fontSize: '0.9375rem', fontWeight: 800, color: '#f8fafc', margin: 0 }}>
+                        {emp.name}
+                      </h3>
+                      <span style={{
+                        display: 'inline-block',
+                        padding: '0.15rem 0.5rem',
+                        borderRadius: '6px',
+                        backgroundColor: '#070b14',
+                        border: '1px solid #1e293b',
+                        fontSize: '0.6875rem',
+                        fontWeight: 700,
+                        color: '#38bdf8',
+                        marginTop: '4px'
+                      }}>
+                        {emp.role || 'مسؤول أرشيف'}
+                      </span>
                     </div>
                   </div>
 
-                  {emp.phone && (
-                    <div className="text-xs text-slate-400 flex items-center gap-1.5 mt-3 pt-2 border-t border-slate-800/60">
-                      <Phone className="w-3.5 h-3.5 text-cyan-400" />
-                      <span className="dir-ltr">{emp.phone}</span>
-                    </div>
-                  )}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+                    <button
+                      type="button"
+                      onClick={() => onOpenEmployeeModal && onOpenEmployeeModal(emp)}
+                      title="تعديل"
+                      style={{
+                        padding: '0.4rem',
+                        borderRadius: '8px',
+                        backgroundColor: '#070b14',
+                        border: '1px solid #1e293b',
+                        color: '#cbd5e1',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <Edit2 style={{ width: '13px', height: '13px' }} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => handleDelete(emp, e)}
+                      disabled={isDel}
+                      title="حذف"
+                      style={{
+                        padding: '0.4rem',
+                        borderRadius: '8px',
+                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                        border: '1px solid rgba(239, 68, 68, 0.3)',
+                        color: '#f87171',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {isDel ? <Loader2 style={{ width: '13px', height: '13px', animation: 'spin 1s linear infinite' }} /> : <Trash2 style={{ width: '13px', height: '13px' }} />}
+                    </button>
+                  </div>
                 </div>
 
-                {/* Counters Row */}
-                <div className="grid grid-cols-2 gap-2 pt-3 border-t border-slate-800/80">
-                  <div className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800/90 text-center">
-                    <span className="text-[10px] text-slate-400 block flex items-center justify-center gap-1">
-                      <ArrowDownLeft className="w-3 h-3 text-blue-400" />
-                      مستلمة
-                    </span>
-                    <strong className="text-sm font-mono font-bold text-blue-400 mt-0.5 block">
-                      {receivedCount}
-                    </strong>
-                  </div>
-
-                  <div className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800/90 text-center">
-                    <span className="text-[10px] text-slate-400 block flex items-center justify-center gap-1">
-                      <ArrowUpRight className="w-3 h-3 text-purple-400" />
-                      مدخلة
-                    </span>
-                    <strong className="text-sm font-mono font-bold text-purple-400 mt-0.5 block">
-                      {enteredCount}
-                    </strong>
-                  </div>
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  paddingTop: '0.75rem',
+                  borderTop: '1px solid #1e293b',
+                  fontSize: '0.75rem',
+                  color: '#94a3b8'
+                }}>
+                  <span>📥 المستلمة: <strong style={{ color: '#f8fafc' }}>{receivedCount}</strong></span>
+                  <span>✍️ المدخلة: <strong style={{ color: '#f8fafc' }}>{enteredCount}</strong></span>
                 </div>
-
-                {/* Open in modal action */}
-                <button
-                  type="button"
-                  onClick={() => setSelectedEmpForInvoices(emp)}
-                  className="w-full py-2 px-3 rounded-xl bg-slate-800/80 hover:bg-cyan-950/40 text-cyan-300 hover:text-cyan-200 border border-slate-700/60 hover:border-cyan-800/60 text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
-                >
-                  <FileText className="w-3.5 h-3.5" />
-                  <span>عرض كل فواتير الموظف</span>
-                  <ChevronLeft className="w-3.5 h-3.5" />
-                </button>
               </div>
             );
-          })
-        )}
-      </div>
+          })}
+        </div>
+      )}
 
-      {/* Employee Invoices List Modal */}
-      <EmployeeInvoicesModal
-        isOpen={Boolean(selectedEmpForInvoices)}
-        onClose={() => setSelectedEmpForInvoices(null)}
-        employee={selectedEmpForInvoices}
-        invoices={invoices}
-        onSelectInvoice={onSelectInvoice}
-      />
+      {selectedEmpForInvoices && (
+        <EmployeeInvoicesModal
+          employee={selectedEmpForInvoices}
+          invoices={invoices}
+          onClose={() => setSelectedEmpForInvoices(null)}
+          onSelectInvoice={onSelectInvoice}
+        />
+      )}
 
     </div>
   );

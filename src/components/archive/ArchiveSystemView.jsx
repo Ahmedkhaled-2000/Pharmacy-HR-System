@@ -149,7 +149,16 @@ export default function ArchiveSystemView({ isStandalone = false }) {
   }
 
   return (
-    <div className="arch-root min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+    <div className="arch-root" style={{
+      minHeight: '100vh',
+      backgroundColor: '#070b14',
+      color: '#f8fafc',
+      display: 'flex',
+      flexDirection: 'column',
+      fontFamily: "'Cairo', 'Segoe UI', sans-serif",
+      width: '100%',
+      overflowX: 'hidden'
+    }}>
       
       {/* Top Navbar */}
       <ArchiveNavbar
@@ -165,7 +174,7 @@ export default function ArchiveSystemView({ isStandalone = false }) {
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 overflow-y-auto">
+      <main style={{ flex: 1, overflowY: 'auto', backgroundColor: '#070b14', width: '100%' }}>
         
         {/* Tab 1: Invoices & Dashboard Archive */}
         {activeTab === 'invoices' && (

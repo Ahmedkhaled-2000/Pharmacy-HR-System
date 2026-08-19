@@ -49,126 +49,209 @@ export default function ArchiveSuppliersTab({
   });
 
   return (
-    <div className="space-y-6 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div style={{ maxWidth: '1440px', margin: '0 auto', padding: '1.75rem 1.5rem 3.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       
-      {/* Page Title & Search Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      {/* ── 1. Top Header Bar with Search (Match Screenshot 4) ── */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
         <div>
-          <h1 className="text-2xl font-bold text-slate-100 flex items-center gap-2" style={{ margin: 0 }}>
-            <Building2 className="w-6 h-6 text-indigo-400" />
-            دليل وشركات الموردين الأرشيفية ({suppliers.length})
+          <h1 style={{ fontSize: '1.35rem', fontWeight: 900, color: '#f8fafc', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span>🏢</span>
+            <span>دليل شركات الأدوية والموردين ({suppliers.length})</span>
           </h1>
-          <p className="text-xs text-slate-400 mt-1" style={{ margin: '4px 0 0 0' }}>
-            مطابقة شيتات الإكسل الصادرة، السجلات الضريبية وتاريخ الفواتير المستلمة لكل مورد
+          <p style={{ fontSize: '0.75rem', color: '#94a3b8', margin: 0, marginTop: '4px', fontWeight: 500 }}>
+            إدارة وشاشة استعلام الشركات ومعاينة إجمالي الفواتير والمسحوبات لكل مورد
           </p>
         </div>
 
-        <div className="relative w-full sm:w-80">
-          <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-3.5" />
+        <div style={{ position: 'relative', width: '100%', maxWidth: '320px' }}>
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="بحث عن اسم المورد أو الهاتف..."
-            className="w-full pr-10 pl-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 shadow-inner"
+            placeholder="ابحث عن اسم الشركة أو المورد..."
+            style={{
+              width: '100%',
+              padding: '0.625rem 2.5rem 0.625rem 1rem',
+              borderRadius: '12px',
+              backgroundColor: '#0b1120',
+              border: '1px solid #1e293b',
+              fontSize: '0.8125rem',
+              color: '#f8fafc',
+              outline: 'none'
+            }}
           />
+          <Search style={{
+            position: 'absolute',
+            right: '0.875rem',
+            top: '50%',
+            transform: 'translateY(-50%)',
+            width: '16px',
+            height: '16px',
+            color: '#64748b'
+          }} />
         </div>
       </div>
 
-      {/* Quick Add Supplier Card */}
-      <div className="glass-card rounded-2xl p-5 border border-slate-800 shadow-lg">
-        <form onSubmit={handleAddSupplier} className="flex flex-col sm:flex-row items-center gap-3">
+      {/* ── 2. Quick Add Supplier Card (Match Screenshot 4 Exactly) ── */}
+      <div style={{
+        backgroundColor: '#0b1120',
+        border: '1px solid #1e293b',
+        borderRadius: '20px',
+        padding: '1rem 1.25rem',
+        boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.4)'
+      }}>
+        <form onSubmit={handleAddSupplier} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.75rem' }}>
           <input
             type="text"
             required
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="اسم مورد الأدوية أو الشركة الجديد..."
-            className="flex-1 w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+            placeholder="اسم شركة الأدوية أو المورد الجديد..."
+            style={{
+              flex: 1,
+              minWidth: '240px',
+              padding: '0.65rem 1rem',
+              borderRadius: '12px',
+              backgroundColor: '#070b14',
+              border: '1px solid #1e293b',
+              fontSize: '0.8125rem',
+              color: '#f8fafc',
+              outline: 'none'
+            }}
           />
           <input
             type="text"
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
             placeholder="رقم الهاتف (اختياري)..."
-            className="w-full sm:w-52 px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+            style={{
+              width: '100%',
+              maxWidth: '240px',
+              padding: '0.65rem 1rem',
+              borderRadius: '12px',
+              backgroundColor: '#070b14',
+              border: '1px solid #1e293b',
+              fontSize: '0.8125rem',
+              color: '#f8fafc',
+              outline: 'none'
+            }}
           />
           <button
             type="submit"
             disabled={isSaving}
-            className="w-full sm:w-auto px-6 py-2.5 rounded-xl text-xs font-bold text-white gradient-btn flex items-center justify-center gap-1.5 shadow-md cursor-pointer disabled:opacity-50"
+            style={{
+              padding: '0.65rem 1.5rem',
+              borderRadius: '12px',
+              fontSize: '0.8125rem',
+              fontWeight: 800,
+              color: '#ffffff',
+              backgroundColor: '#2563eb',
+              border: '1px solid #3b82f6',
+              boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.375rem',
+              opacity: isSaving ? 0.6 : 1,
+              transition: 'all 0.2s ease'
+            }}
           >
-            {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+            {isSaving ? <Loader2 style={{ width: '14px', height: '14px', animation: 'spin 1s linear infinite' }} /> : <Plus style={{ width: '14px', height: '14px' }} />}
             <span>إضافة مورد</span>
           </button>
         </form>
       </div>
 
-      {/* Suppliers List Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-        {isLoading && suppliers.length === 0 ? (
-          Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="glass-card rounded-2xl p-5 border border-slate-800/80 animate-pulse space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-xl bg-slate-800/80"></div>
-                <div className="space-y-2 flex-1">
-                  <div className="w-3/4 h-5 rounded-lg bg-slate-800/80"></div>
-                  <div className="w-1/2 h-3 rounded-lg bg-slate-800/50"></div>
-                </div>
-              </div>
-              <div className="pt-3 border-t border-slate-800/60 h-8 rounded-lg bg-slate-800/40"></div>
-            </div>
-          ))
-        ) : filteredSuppliers.length === 0 ? (
-          <div className="col-span-full text-center text-slate-500 py-16 bg-slate-900/40 rounded-2xl border border-slate-800">
-            <Building2 className="w-12 h-12 mx-auto text-slate-700 stroke-1 mb-2" />
-            <p className="text-sm font-medium text-slate-400">لا يوجد موردين مطابقين لبحثك حالياً.</p>
-          </div>
-        ) : (
-          filteredSuppliers.map((sup) => {
+      {/* ── 3. Suppliers Content / Grid (Match Screenshot 4) ── */}
+      {filteredSuppliers.length === 0 ? (
+        <div style={{
+          textAlign: 'center',
+          padding: '4rem 1rem',
+          color: '#64748b',
+          fontSize: '0.875rem',
+          fontWeight: 600
+        }}>
+          <p style={{ margin: 0 }}>لا يوجد موردين مسجلين بهذه المواصفات.</p>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1.25rem' }}>
+          {filteredSuppliers.map((sup) => {
             const invoicesCount = sup._count?.invoices || sup.invoicesCount || sup.invoices_count || 0;
             return (
               <div
                 key={sup.id}
                 onClick={() => onSelectSupplier && onSelectSupplier(sup)}
-                className="glass-card rounded-2xl p-5 border border-slate-800 hover:border-indigo-500/50 cursor-pointer transition flex flex-col justify-between space-y-4 group shadow-md"
+                style={{
+                  backgroundColor: '#0b1120',
+                  border: '1px solid #1e293b',
+                  borderRadius: '20px',
+                  padding: '1.25rem 1.5rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  transition: 'all 0.2s ease',
+                  boxShadow: '0 4px 15px rgba(0, 0, 0, 0.3)'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = '#3b82f6';
+                  e.currentTarget.style.transform = 'translateY(-2px)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = '#1e293b';
+                  e.currentTarget.style.transform = 'translateY(0)';
+                }}
               >
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center font-bold text-xl group-hover:scale-105 transition border border-indigo-500/20">
-                      {(sup.name || 'م').charAt(0)}
-                    </div>
-                    <div>
-                      <h3 className="text-base font-bold text-slate-100 group-hover:text-indigo-300 transition" style={{ margin: 0 }}>
-                        {sup.name}
-                      </h3>
-                      {sup.phone ? (
-                        <p className="text-xs text-slate-400 flex items-center gap-1.5 mt-1" style={{ margin: '4px 0 0 0' }}>
-                          <Phone className="w-3.5 h-3.5 text-indigo-400" />
-                          <span className="dir-ltr">{sup.phone}</span>
-                        </p>
-                      ) : (
-                        <p className="text-xs text-slate-500 mt-1" style={{ margin: '4px 0 0 0' }}>لا يوجد رقم هاتف مسجل</p>
-                      )}
-                    </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.875rem' }}>
+                  <div style={{
+                    width: '44px',
+                    height: '44px',
+                    borderRadius: '12px',
+                    backgroundColor: 'rgba(37, 99, 235, 0.15)',
+                    border: '1px solid rgba(37, 99, 235, 0.3)',
+                    color: '#60a5fa',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontWeight: 800,
+                    fontSize: '1.125rem'
+                  }}>
+                    {(sup.name || 'م').charAt(0)}
+                  </div>
+                  <div>
+                    <h3 style={{ fontSize: '0.9375rem', fontWeight: 800, color: '#f8fafc', margin: 0 }}>
+                      {sup.name}
+                    </h3>
+                    {sup.phone ? (
+                      <p style={{ fontSize: '0.75rem', color: '#94a3b8', margin: 0, marginTop: '2px', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                        <Phone style={{ width: '12px', height: '12px', color: '#38bdf8' }} />
+                        <span style={{ direction: 'ltr' }}>{sup.phone}</span>
+                      </p>
+                    ) : (
+                      <p style={{ fontSize: '0.75rem', color: '#64748b', margin: 0, marginTop: '2px' }}>
+                        بدون رقم هاتف
+                      </p>
+                    )}
                   </div>
                 </div>
 
-                <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs">
-                  <span className="text-slate-400 flex items-center gap-1">
-                    <FileText className="w-3.5 h-3.5 text-blue-400" />
-                    عدد الفواتير المستلمة: <strong className="text-slate-200">{invoicesCount}</strong>
-                  </span>
-                  <span className="text-indigo-400 font-bold group-hover:translate-x-[-4px] transition flex items-center gap-0.5">
-                    <span>التفاصيل</span>
-                    <ChevronLeft className="w-3.5 h-3.5" />
-                  </span>
+                <div style={{
+                  padding: '0.35rem 0.75rem',
+                  borderRadius: '10px',
+                  backgroundColor: '#070b14',
+                  border: '1px solid #1e293b',
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                  color: '#94a3b8'
+                }}>
+                  {invoicesCount} فاتورة
                 </div>
               </div>
             );
-          })
-        )}
-      </div>
+          })}
+        </div>
+      )}
 
     </div>
   );
