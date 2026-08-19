@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { shouldShowRequestToBranch } from '../../utils/formatters';
 
 export default function ApprovalCenterModule({
   state,
@@ -56,11 +57,14 @@ export default function ApprovalCenterModule({
   const branches = state.branches || [];
   const requests = state.requests || [];
 
-  // Filter requests based on role
+  // Filter requests based on role and double approval rules
   const filteredRequests = requests.filter(req => {
-    if (currentRole === 'branch' && currentBranchId) {
-      const emp = employees.find(e => e.id === req.employeeId);
-      return emp && emp.branchId === currentBranchId;
+    if (currentRole === 'branch') {
+      if (!shouldShowRequestToBranch(req, state)) return false;
+      if (currentBranchId) {
+        const emp = employees.find(e => e.id === req.employeeId);
+        return emp && emp.branchId === currentBranchId;
+      }
     }
     return true;
   });

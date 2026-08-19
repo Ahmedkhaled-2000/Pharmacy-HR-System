@@ -390,3 +390,66 @@ export function applyShiftSwapToRosters(targetReq, currentRosters = [], employee
 
   return updatedRosters;
 }
+
+/**
+ * Determines whether a request should be visible to and require approval from the Branch Manager,
+ * adhering strictly to the Double Approval Rules configured by Higher Management (state.approvalRules).
+ * Loans, advances, and credit medicines are strictly administrative and NEVER shown to branch managers.
+ */
+export function shouldShowRequestToBranch(req, state) {
+  if (!req) return false;
+
+  // 1. Loans, Advances, Credit Medicines are strictly Higher Management only
+  const isLoanOrCredit = ['loan', 'advance', 'credit_medicine', 'meds'].includes(req.type);
+  if (isLoanOrCredit) return false;
+
+  // 2. Direct-to-admin flags
+  if (req.targetApproval === 'admin_only' || req.targetApproval === 'admin' || req.branchNotRequired || req.isDirectToAdmin) {
+    return false;
+  }
+
+  // 3. Evaluations and complaints are direct to upper management
+  if (['eval_edit_request', 'complaint'].includes(req.type)) {
+    return false;
+  }
+
+  // 4. Check Double Approval Rules Configured by Higher Management (state.approvalRules)
+  const rules = state?.approvalRules || [];
+  if (Array.isArray(rules) && rules.length > 0) {
+    // A. Check by specific requestType match (e.g. { requestType: 'leave', reqBranch: false })
+    const matchedRule = rules.find((r) => {
+      if (r.requestType && r.requestType === req.type) return true;
+      if (r.id && r.id === `rule_${req.type}`) return true;
+      return false;
+    });
+
+    if (matchedRule) {
+      if (matchedRule.reqBranch === false || matchedRule.requiresBranchManager === false) {
+        return false;
+      }
+      if (matchedRule.reqBranch === true || matchedRule.requiresBranchManager === true) {
+        return true;
+      }
+    }
+
+    // B. Check category rules (like long leave rule vs short leave rule)
+    if (req.type === 'leave' || req.type === 'leave_request') {
+      const days = parseFloat(req.daysCount || req.days || 1);
+      if (days > 3) {
+        const longLeaveRule = rules.find((r) => r.id === 'rule_long_leave' || (r.name && r.name.includes('أكثر من ثلاث')));
+        if (longLeaveRule && (longLeaveRule.requiresBranchManager === false || longLeaveRule.reqBranch === false)) {
+          return false;
+        }
+      }
+    }
+
+    // C. Check general rule if present
+    const generalRule = rules.find((r) => r.id === 'rule_general');
+    if (generalRule && (generalRule.requiresBranchManager === false || generalRule.reqBranch === false)) {
+      return false;
+    }
+  }
+
+  // 5. Default behavior for standard operational requests (leave <= 3 days, permission, swap, roster_update)
+  return true;
+}

@@ -19,7 +19,8 @@ import {
   fmt,
   parseArabicFloat,
   normalizeState,
-  applyShiftSwapToRosters
+  applyShiftSwapToRosters,
+  shouldShowRequestToBranch
 } from './utils/formatters';
 import { loadExcelJS, mergedTitle, tableHeaderRow, dataRow } from './utils/excelExport';
 import { playFingerprintChime, playNotificationChime } from './hooks/useAudio';
@@ -4119,6 +4120,7 @@ export default function App() {
                     label: 'مركز موافقات الطلبات',
                     icon: '📋',
                     badge: (state.requests || []).filter((r) => {
+                      if (!shouldShowRequestToBranch(r, state)) return false;
                       const cIdStr = String(currentBranch?.id || '');
                       const branchEmpIdSet = new Set(
                         (state.employees || [])

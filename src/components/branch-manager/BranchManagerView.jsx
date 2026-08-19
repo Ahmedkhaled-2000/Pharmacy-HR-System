@@ -10,6 +10,7 @@ import { getFormattedRequestBadge } from '../requests/RequestsModule';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import BranchResignationModule from '../resignation/BranchResignationModule';
 import { normalizeSchedule } from '../roster/RosterModule';
+import { shouldShowRequestToBranch } from '../../utils/formatters';
 
 const WEEKDAYS_AR = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
 
@@ -298,24 +299,26 @@ export default function BranchManagerView({
     });
   }, [state.employees, currentBranch]);
 
-  // Branch Requests (Sorted newest first)
+  // Branch Requests (Filtered by Higher Management Double Approval Rules & Sorted newest first)
   const branchRequests = useMemo(() => {
-    if (!currentBranch?.id) {
-      return (state.requests || []).slice().sort((a, b) => getRequestSortTime(b) - getRequestSortTime(a));
-    }
-    const cIdStr = String(currentBranch.id);
+    const cIdStr = currentBranch?.id ? String(currentBranch.id) : null;
     const branchEmpIdSet = new Set(branchEmployees.map((e) => String(e.id)));
 
     const list = (state.requests || []).filter((r) => {
-      // 1. Direct branch match on request
+      // 1. Must adhere strictly to Higher Management Double Approval Rules (Loans, advances, admin-only are excluded)
+      if (!shouldShowRequestToBranch(r, state)) return false;
+
+      if (!cIdStr) return true;
+
+      // 2. Direct branch match on request
       if (r.branchId && String(r.branchId) === cIdStr) return true;
-      // 2. Request employee belongs to this branch
+      // 3. Request employee belongs to this branch
       if (r.employeeId && branchEmpIdSet.has(String(r.employeeId))) return true;
       return false;
     });
 
     return list.sort((a, b) => getRequestSortTime(b) - getRequestSortTime(a));
-  }, [state.requests, branchEmployees, currentBranch]);
+  }, [state.requests, state.approvalRules, branchEmployees, currentBranch]);
 
   const filteredBranchRequests = useMemo(() => {
     const list = branchRequests.filter((r) => {
@@ -1015,7 +1018,7 @@ export default function BranchManagerView({
         <div className="card settings-card fade-in" style={{ padding: '20px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
             <h3 style={{ margin: 0, fontSize: '17px', color: '#1e293b' }}>
-              📋 جميع طلبات موظفي الفرع (إجازات - سلف - أذونات - تبديل شفتات)
+              📋 جميع طلبات موظفي الفرع (إجازات - أذونات - تبديل شفتات - جداول عمل)
             </h3>
 
             <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
