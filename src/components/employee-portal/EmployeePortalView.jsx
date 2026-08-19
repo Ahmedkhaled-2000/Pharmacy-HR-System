@@ -199,7 +199,6 @@ export default function EmployeePortalView({
     }
     setExporting(true);
     try {
-      const emp = empObj;
       const ExcelJS = await loadExcelJS(showToast);
 
       let filterFn;
