@@ -21,13 +21,36 @@ export default function EmployeeEvaluationsModule({
   const [showComplaintForm, setShowComplaintForm] = useState(false);
   const [empReplyInputs, setEmpReplyInputs] = useState({});
 
+  const empIdStr = String(emp.id || '').trim();
+  const empCodeStr = String(emp.code || '').trim();
+
   const employeeEvals = (state.evaluations || []).filter(
-    (e) => String(e.employeeId) === String(emp.id)
-  );
+    (e) => String(e.employeeId) === empIdStr || (empCodeStr && String(e.employeeId) === empCodeStr)
+  ).sort((a, b) => {
+    const getT = (e) => {
+      if (!e) return 0;
+      if (e.createdAt) { const t = new Date(e.createdAt).getTime(); if (!isNaN(t) && t > 0) return t; }
+      if (e.updatedAt) { const t = new Date(e.updatedAt).getTime(); if (!isNaN(t) && t > 0) return t; }
+      if (e.date) { const t = new Date(e.date).getTime(); if (!isNaN(t) && t > 0) return t; }
+      if (e.month) { const t = new Date(e.month + '-01').getTime(); if (!isNaN(t) && t > 0) return t; }
+      return 0;
+    };
+    return getT(b) - getT(a);
+  });
 
   const employeeComplaints = (state.requests || []).filter(
-    (r) => String(r.employeeId) === String(emp.id) && (r.type === 'complaint' || r.type === 'eval_edit_request')
-  );
+    (r) => (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeId) === empCodeStr)) && (r.type === 'complaint' || r.type === 'eval_edit_request')
+  ).sort((a, b) => {
+    const getT = (r) => {
+      if (!r) return 0;
+      if (r.createdAt) { const t = new Date(r.createdAt).getTime(); if (!isNaN(t) && t > 0) return t; }
+      if (r.timestamp) { const t = new Date(r.timestamp).getTime(); if (!isNaN(t) && t > 0) return t; }
+      if (r.updatedAt) { const t = new Date(r.updatedAt).getTime(); if (!isNaN(t) && t > 0) return t; }
+      if (r.date) { const t = new Date(r.date).getTime(); if (!isNaN(t) && t > 0) return t; }
+      return 0;
+    };
+    return getT(b) - getT(a);
+  });
 
   // Respond to Evaluation (Approve or Reject with Comment)
   const handleRespondEval = async (evalId, responseType) => {

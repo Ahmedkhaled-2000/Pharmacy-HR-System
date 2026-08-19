@@ -949,12 +949,21 @@ export default function EmployeePortalView({
   // Resignation badge count for sidebar
   const resignationBadgeCount = useMemo(() => {
     if (!emp) return 0;
-    const myRes = (state?.resignationRequests || []).filter(r => String(r.employeeId) === String(emp.id));
-    // Count any request where branch manager or admin replied
+    const empIdStr = String(emp.id || '').trim();
+    const empCodeStr = String(emp.code || '').trim();
+    const empUserStr = String(emp.username || '').trim();
+
+    const myRes = (state?.resignationRequests || []).filter(r => {
+      const rId = String(r.employeeId || '').trim();
+      return rId === empIdStr || (empCodeStr && rId === empCodeStr) || (empUserStr && rId === empUserStr);
+    });
+
+    // ONLY count requests that are actively awaiting the employee's decision / response
     return myRes.filter(r => 
-      (r.managerStatus === 'approved' || r.managerStatus === 'rejected') ||
-      (r.adminStatus === 'approved' || r.adminStatus === 'rejected') ||
-      r.employeeConditionStatus === 'pending'
+      r.adminStatus === 'approved' &&
+      r.conditionsDaysRemaining > 0 &&
+      r.employeeConditionStatus === 'pending' &&
+      !r.isCancelled
     ).length;
   }, [emp, state?.resignationRequests]);
 

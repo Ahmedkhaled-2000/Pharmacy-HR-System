@@ -14,9 +14,33 @@ export default function EmployeeResignationModule({
   const [requestType, setRequestType] = useState('resignation'); // 'resignation' | 'withdraw'
   const [reason, setReason] = useState('');
   
-  const empRequests = (state.resignationRequests || []).filter(r => r.employeeId === emp.id);
-  // Sort descending by date
-  empRequests.sort((a, b) => b.requestDate.localeCompare(a.requestDate));
+  const empIdStr = String(emp.id || '').trim();
+  const empCodeStr = String(emp.code || '').trim();
+  const empUserStr = String(emp.username || '').trim();
+
+  const empRequests = (state.resignationRequests || []).filter(r => {
+    const rId = String(r.employeeId || '').trim();
+    return rId === empIdStr || (empCodeStr && rId === empCodeStr) || (empUserStr && rId === empUserStr);
+  });
+
+  // Sort descending by newest request first
+  empRequests.sort((a, b) => {
+    const getT = (r) => {
+      if (!r) return 0;
+      if (r.createdAt) { const t = new Date(r.createdAt).getTime(); if (!isNaN(t) && t > 0) return t; }
+      if (r.updatedAt) { const t = new Date(r.updatedAt).getTime(); if (!isNaN(t) && t > 0) return t; }
+      if (r.id) {
+        const parts = String(r.id).split('_');
+        for (const p of parts) {
+          const num = parseInt(p, 10);
+          if (!isNaN(num) && num > 1000000000000) return num;
+        }
+      }
+      if (r.requestDate) { const t = new Date(r.requestDate).getTime(); if (!isNaN(t) && t > 0) return t; }
+      return 0;
+    };
+    return getT(b) - getT(a);
+  });
 
   const hasPendingAction = empRequests.some(r => r.adminStatus === 'approved' && r.employeeConditionStatus === 'pending');
 

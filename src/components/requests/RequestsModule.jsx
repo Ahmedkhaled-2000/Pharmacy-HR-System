@@ -92,6 +92,27 @@ export default function RequestsModule({
     return true;
   });
 
+  // Sort descending by newest request first
+  filteredRequests.sort((a, b) => {
+    const getT = (r) => {
+      if (!r) return 0;
+      if (r.createdAt) { const t = new Date(r.createdAt).getTime(); if (!isNaN(t) && t > 0) return t; }
+      if (r.timestamp) { const t = new Date(r.timestamp).getTime(); if (!isNaN(t) && t > 0) return t; }
+      if (r.updatedAt) { const t = new Date(r.updatedAt).getTime(); if (!isNaN(t) && t > 0) return t; }
+      if (r.id) {
+        const parts = String(r.id).split('_');
+        for (const p of parts) {
+          const num = parseInt(p, 10);
+          if (!isNaN(num) && num > 1000000000000) return num;
+        }
+      }
+      if (r.date) { const t = new Date(r.date).getTime(); if (!isNaN(t) && t > 0) return t; }
+      if (r.startDate) { const t = new Date(r.startDate).getTime(); if (!isNaN(t) && t > 0) return t; }
+      return 0;
+    };
+    return getT(b) - getT(a);
+  });
+
   const handleApprove = async (reqId) => {
     let targetReq = null;
     let updatedRosters = [...(state.rosters || [])];

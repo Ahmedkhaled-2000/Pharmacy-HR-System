@@ -704,13 +704,14 @@ export default function App() {
     );
 
     const isTerminated = empData.status === 'تم الاستقالة';
+    const terminationReason = empData.suspension_reason?.trim() || 'تم إنهاء الخدمة من قبل الإدارة';
 
     const normalizedEmpData = {
       ...empData,
       status: isTerminated ? 'تم الاستقالة' : 'على رأس العمل',
       is_active: !isTerminated,
       fingerprint_active: !isTerminated,
-      suspension_reason: isTerminated ? (empData.suspension_reason || 'تم إنهاء الخدمة') : '',
+      suspension_reason: isTerminated ? terminationReason : '',
       updatedAt: new Date().toISOString()
     };
 
@@ -735,7 +736,7 @@ export default function App() {
 
       // 2. Add or update resignation tracking record
       const hasRecord = updatedResignations.some(
-        (r) => String(r.employeeId) === empIdStr && r.adminStatus === 'approved'
+        (r) => (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeId) === empCodeStr)) && r.adminStatus === 'approved' && !r.isCancelled
       );
       if (!hasRecord) {
         const newReq = {
@@ -744,23 +745,38 @@ export default function App() {
           branchId: empData.branchId,
           type: 'resignation',
           isAdminCreated: true,
-          employeeReason: 'تغيير الحالة يدوياً من ملف الموظف: ' + (normalizedEmpData.suspension_reason || 'تم إنهاء الخدمة'),
+          employeeReason: terminationReason,
           requestDate: todayStr(),
           managerStatus: 'approved',
           managerComment: 'إجراء إداري مباشر من ملف الموظف',
           adminStatus: 'approved',
-          adminComment: 'إجراء إداري مباشر: ' + (normalizedEmpData.suspension_reason || 'تم إنهاء الخدمة'),
+          adminComment: terminationReason,
           conditionsDaysRemaining: 0,
           conditionsStartDate: '',
-          employeeConditionStatus: 'accepted'
+          employeeConditionStatus: 'accepted',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
         };
         updatedResignations = [newReq, ...updatedResignations];
       }
     } else {
-      // Returned to active duty: clean up all old resignation records for this employee
-      updatedResignations = updatedResignations.filter(
-        (r) => String(r.employeeId) !== empIdStr
-      );
+      // Returned to active duty: mark all old resignation records for this employee as cancelled and clear countdown
+      updatedResignations = updatedResignations.map((r) => {
+        const isThisEmp = String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeId) === empCodeStr);
+        if (isThisEmp) {
+          return {
+            ...r,
+            isCancelled: true,
+            cancelledReason: 'تم تعديل حالة الموظف يدوياً إلى على رأس العمل من قبل الإدارة',
+            adminStatus: 'cancelled',
+            conditionsDaysRemaining: 0,
+            conditionsStartDate: '',
+            employeeConditionStatus: 'cancelled',
+            updatedAt: new Date().toISOString()
+          };
+        }
+        return r;
+      });
     }
 
     const updatedState = {

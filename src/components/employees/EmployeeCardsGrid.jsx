@@ -160,47 +160,27 @@ export default function EmployeeCardsGrid({
 
                   let resStatusBadge = null;
 
-                  if (hasApprovedWithdraw) {
-                    // Withdrawn from resignation -> clean employee card without badges
-                    resStatusBadge = null;
-                  } else if (emp.status === 'تم الاستقالة' || emp.is_active === false) {
-                    const reasonText = emp.suspension_reason ? ` (${emp.suspension_reason})` : '';
+                  if (emp.status === 'تم الاستقالة' || emp.is_active === false) {
+                    const reasonText = emp.suspension_reason ? ` (${emp.suspension_reason})` : ' (تم إنهاء الخدمة من قبل الإدارة)';
                     resStatusBadge = (
                       <div style={{ background: 'var(--danger-light, #fee2e2)', color: 'var(--danger-dark, #991b1b)', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', marginTop: '6px', display: 'inline-block', border: '1px solid #fecaca' }}>
                         🔴 تم إنهاء الخدمة{reasonText}
                       </div>
                     );
-                  } else if (empReqs.length > 0) {
+                  } else if (!hasApprovedWithdraw && empReqs.length > 0) {
+                    // Employee is on duty: only show badge if there is an active pending or approved notice period
                     const activeRes = empReqs.find(r => r.type === 'resignation' && !r.isCancelled && r.adminStatus !== 'cancelled');
                     if (activeRes) {
-                      if (activeRes.employeeConditionStatus === 'rejected') {
-                        resStatusBadge = (
-                          <div style={{ background: 'var(--danger-light, #fee2e2)', color: 'var(--danger-dark, #991b1b)', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', marginTop: '6px', display: 'inline-block', border: '1px solid #fecaca' }}>
-                            🔴 تم إنهاء الخدمة (تم رفض شروط الاستقالة من الموظف)
-                          </div>
-                        );
-                      } else if (activeRes.adminStatus === 'rejected' || activeRes.managerStatus === 'rejected') {
-                        resStatusBadge = (
-                          <div style={{ background: 'var(--danger-light, #fee2e2)', color: 'var(--danger-dark, #991b1b)', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', marginTop: '6px', display: 'inline-block', border: '1px solid #fecaca' }}>
-                            ❌ استقالة مرفوضة إدارياً
-                          </div>
-                        );
-                      } else if (activeRes.adminStatus === 'approved') {
+                      if (activeRes.adminStatus === 'approved') {
                         const { endDate, remainingDays } = getResignationNoticeDetails(activeRes.conditionsStartDate || activeRes.requestDate, activeRes.conditionsDaysRemaining);
-                        if (remainingDays > 0) {
+                        if (remainingDays > 0 && activeRes.employeeConditionStatus !== 'rejected') {
                           resStatusBadge = (
                             <div style={{ background: 'var(--warning-light, #fef3c7)', color: 'var(--warning-dark, #92400e)', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', marginTop: '6px', display: 'inline-block', border: '1px solid #fde68a' }}>
                               ⏳ متبقي على إنهاء الخدمة: {remainingDays} يوم عمل (تاريخ الانتهاء: {endDate})
                             </div>
                           );
-                        } else {
-                          resStatusBadge = (
-                            <div style={{ background: 'var(--danger-light, #fee2e2)', color: 'var(--danger-dark, #991b1b)', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', marginTop: '6px', display: 'inline-block', border: '1px solid #fecaca' }}>
-                              🔴 تم إنهاء الخدمة (انتهاء فترة الإشعار / استقالة فورية: {activeRes.adminComment || ''})
-                            </div>
-                          );
                         }
-                      } else {
+                      } else if (activeRes.adminStatus === 'pending') {
                         resStatusBadge = (
                           <div style={{ background: 'var(--primary-light, #e0f2fe)', color: 'var(--primary-dark, #0369a1)', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', marginTop: '6px', display: 'inline-block', border: '1px solid #bae6fd' }}>
                             📝 استقالة قيد المراجعة

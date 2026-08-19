@@ -21,12 +21,30 @@ export default function EmployeeShiftSwapModule({
   const currentBranchId = selectedBranchId || emp.branchId;
   const colleagues = employees.filter((e) => e.id !== emp.id && (e.branchId === currentBranchId || (e.branchesDetails && e.branchesDetails.some(bd => bd.branchId === currentBranchId))));
 
+  const empIdStr = String(emp.id || '').trim();
+  const empCodeStr = String(emp.code || '').trim();
+
   // Swap Requests involving this employee
-  const swapRequests = (state.shiftSwaps || state.requests || []).filter(
-    (r) =>
-      (r.type === 'shift_swap' || r.type === 'swap') &&
-      (r.requesterEmpId === emp.id || r.targetEmpId === emp.id || r.employeeId === emp.id)
-  );
+  const swapRequests = (state.shiftSwaps || state.requests || []).filter((r) => {
+    const isSwap = r.type === 'shift_swap' || r.type === 'swap';
+    if (!isSwap) return false;
+    const rReqId = String(r.requesterEmpId || r.employeeId || '');
+    const rTarId = String(r.targetEmpId || '');
+    const matchesReq = rReqId === empIdStr || (empCodeStr && rReqId === empCodeStr);
+    const matchesTar = rTarId === empIdStr || (empCodeStr && rTarId === empCodeStr);
+    return matchesReq || matchesTar;
+  }).sort((a, b) => {
+    const getT = (r) => {
+      if (!r) return 0;
+      if (r.createdAt) { const t = new Date(r.createdAt).getTime(); if (!isNaN(t) && t > 0) return t; }
+      if (r.timestamp) { const t = new Date(r.timestamp).getTime(); if (!isNaN(t) && t > 0) return t; }
+      if (r.updatedAt) { const t = new Date(r.updatedAt).getTime(); if (!isNaN(t) && t > 0) return t; }
+      if (r.swapDate) { const t = new Date(r.swapDate).getTime(); if (!isNaN(t) && t > 0) return t; }
+      if (r.date) { const t = new Date(r.date).getTime(); if (!isNaN(t) && t > 0) return t; }
+      return 0;
+    };
+    return getT(b) - getT(a);
+  });
 
   const incomingSwaps = swapRequests.filter(
     (r) => r.targetEmpId === emp.id && r.status === 'pending_target'
