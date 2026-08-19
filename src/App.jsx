@@ -2029,7 +2029,10 @@ export default function App() {
         (!targetBranchId || String(inc.branchId) === String(targetBranchId)) &&
         effectiveFilterFn(inc.date)
     );
-    const lateDeduction = empLateIncidents.reduce((acc, inc) => acc + (parseFloat(inc.penaltyAmount) || 0), 0);
+    const lateDeduction = empLateIncidents.reduce((acc, inc) => {
+      const dynamicAmt = computeLatenessFinancialAmount(inc.deductionMinutes || 0, emp, inc.branchId || targetBranchId);
+      return acc + (dynamicAmt > 0 ? dynamicAmt : (parseFloat(inc.penaltyAmount) || 0));
+    }, 0);
     const lateDeductionMinutes = empLateIncidents.reduce((acc, inc) => acc + (parseFloat(inc.deductionMinutes) || 0), 0);
     const lateIncidentsCount = empLateIncidents.length;
 
@@ -2043,12 +2046,7 @@ export default function App() {
             amt = parseFloat(r.impactVal) || 0;
           } else if (r.impactType === 'time_deduction' || r.deductionMinutes) {
             const deductionMins = parseFloat(r.deductionMinutes !== undefined ? r.deductionMinutes : r.impactVal) || 0;
-            const salary = parseFloat(emp.salary) || 0;
-            const workHours = parseFloat(emp.workHoursPerDay) || 8;
-            const workDays = parseFloat(emp.workDaysPerMonth) || 26;
-            const totalHours = (workDays * workHours) > 0 ? (workDays * workHours) : 208;
-            const hourlyRate = salary > 0 ? salary / totalHours : 0;
-            amt = Math.round((deductionMins / 60) * hourlyRate * 100) / 100;
+            amt = computeLatenessFinancialAmount(deductionMins, emp, r.branchId || targetBranchId);
           } else if (r.impactType === 'deduction_days') {
             const salary = parseFloat(emp.salary) || 0;
             const workHours = parseFloat(emp.workHoursPerDay) || 8;

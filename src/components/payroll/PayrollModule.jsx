@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import PayslipPrintModal from './PayslipPrintModal';
 import { fmt } from '../../utils/formatters';
+import { computeLatenessFinancialAmount } from '../../utils/latePenaltyEngine';
 
 export default function PayrollModule({
   state,
@@ -535,29 +536,33 @@ export default function PayrollModule({
                           </tr>
                         </thead>
                         <tbody>
-                          {empLateIncidents.map((inc) => (
-                            <tr key={inc.id} style={{ borderBottom: '1px solid #fed7aa' }}>
-                              <td style={{ padding: '7px 10px', fontWeight: 600 }}>{inc.date}</td>
-                              <td style={{ padding: '7px 10px', color: '#2563eb', fontWeight: 600 }}>{inc.scheduledStartTime}</td>
-                              <td style={{ padding: '7px 10px', fontWeight: 600 }}>{inc.actualPunchInTime}</td>
-                              <td style={{ padding: '7px 10px' }}>
-                                <span style={{ background: 'rgba(234,88,12,0.1)', color: '#ea580c', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
-                                  {inc.lateMinutes} دقيقة
-                                </span>
-                              </td>
-                              <td style={{ padding: '7px 10px' }}>{inc.tierName}</td>
-                              <td style={{ padding: '7px 10px', fontWeight: 700 }}>المرة #{inc.occurrenceNumber}</td>
-                              <td style={{ padding: '7px 10px', color: inc.deductionMinutes > 0 ? '#dc2626' : '#16a34a', fontWeight: 600 }}>
-                                {inc.actionLabel}
-                              </td>
-                              <td style={{ padding: '7px 10px', fontWeight: 700 }}>
-                                {inc.deductionMinutes > 0 ? `${inc.deductionMinutes} دقيقة` : '—'}
-                              </td>
-                              <td style={{ padding: '7px 10px', fontWeight: 800, color: inc.penaltyAmount > 0 ? '#dc2626' : 'var(--muted)' }}>
-                                {inc.penaltyAmount > 0 ? `-${fmt(inc.penaltyAmount)} ج.م` : '0 ج.م'}
-                              </td>
-                            </tr>
-                          ))}
+                          {empLateIncidents.map((inc) => {
+                            const dayAmt = computeLatenessFinancialAmount(inc.deductionMinutes || 0, selectedEmpModal, inc.branchId || filterBranch);
+                            const penaltyVal = dayAmt > 0 ? dayAmt : (parseFloat(inc.penaltyAmount) || 0);
+                            return (
+                              <tr key={inc.id} style={{ borderBottom: '1px solid #fed7aa' }}>
+                                <td style={{ padding: '7px 10px', fontWeight: 600 }}>{inc.date}</td>
+                                <td style={{ padding: '7px 10px', color: '#2563eb', fontWeight: 600 }}>{inc.scheduledStartTime}</td>
+                                <td style={{ padding: '7px 10px', fontWeight: 600 }}>{inc.actualPunchInTime}</td>
+                                <td style={{ padding: '7px 10px' }}>
+                                  <span style={{ background: 'rgba(234,88,12,0.1)', color: '#ea580c', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
+                                    {inc.lateMinutes} دقيقة
+                                  </span>
+                                </td>
+                                <td style={{ padding: '7px 10px' }}>{inc.tierName}</td>
+                                <td style={{ padding: '7px 10px', fontWeight: 700 }}>المرة #{inc.occurrenceNumber}</td>
+                                <td style={{ padding: '7px 10px', color: inc.deductionMinutes > 0 ? '#dc2626' : '#16a34a', fontWeight: 600 }}>
+                                  {inc.actionLabel}
+                                </td>
+                                <td style={{ padding: '7px 10px', fontWeight: 700 }}>
+                                  {inc.deductionMinutes > 0 ? `${inc.deductionMinutes} دقيقة` : '—'}
+                                </td>
+                                <td style={{ padding: '7px 10px', fontWeight: 800, color: penaltyVal > 0 ? '#dc2626' : 'var(--muted)' }}>
+                                  {penaltyVal > 0 ? `-${fmt(penaltyVal)} ج.م` : '0 ج.م'}
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>

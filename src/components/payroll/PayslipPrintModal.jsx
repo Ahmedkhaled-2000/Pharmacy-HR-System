@@ -1,5 +1,6 @@
 import React from 'react';
 import { fmt, arabicWeekday, AR_MONTHS } from '../../utils/formatters';
+import { computeLatenessFinancialAmount } from '../../utils/latePenaltyEngine';
 
 export default function PayslipPrintModal({
   isOpen,
@@ -641,14 +642,18 @@ export default function PayslipPrintModal({
                   (inc.date >= startCutoff && inc.date <= endCutoff)
               );
 
-              const latePenaltyItems = empLateIncidents.map((inc) => ({
-                id: inc.id,
-                date: inc.date,
-                typeLabel: `⏱️ جزاء تأخير (${inc.tierName} - المرة #${inc.occurrenceNumber})`,
-                amount: parseFloat(inc.penaltyAmount) || 0,
-                details: `تأخير ${inc.lateMinutes} دقيقة عن الوردية (${inc.scheduledStartTime}) - ${inc.actionLabel} ${inc.deductionMinutes > 0 ? `(خصم ${inc.deductionMinutes} دقيقة)` : ''} ${inc.overrideReason ? `[ملاحظة: ${inc.overrideReason}]` : ''}`,
-                color: '#ea580c'
-              }));
+              const latePenaltyItems = empLateIncidents.map((inc) => {
+                const dayAmt = computeLatenessFinancialAmount(inc.deductionMinutes || 0, emp, inc.branchId || selectedBranchId);
+                const penaltyVal = dayAmt > 0 ? dayAmt : (parseFloat(inc.penaltyAmount) || 0);
+                return {
+                  id: inc.id,
+                  date: inc.date,
+                  typeLabel: `⏱️ جزاء تأخير (${inc.tierName} - المرة #${inc.occurrenceNumber})`,
+                  amount: penaltyVal,
+                  details: `تأخير ${inc.lateMinutes} دقيقة عن الوردية (${inc.scheduledStartTime}) - ${inc.actionLabel} ${inc.deductionMinutes > 0 ? `(خصم ${inc.deductionMinutes} دقيقة)` : ''} ${inc.overrideReason ? `[ملاحظة: ${inc.overrideReason}]` : ''}`,
+                  color: '#ea580c'
+                };
+              });
 
               const allLoansAndRequests = [...(state?.loans || []), ...(state?.requests || [])];
               const empLoans = allLoansAndRequests.filter(
@@ -703,20 +708,24 @@ export default function PayslipPrintModal({
                           </tr>
                         </thead>
                         <tbody>
-                          {empLateIncidents.map((inc) => (
-                            <tr key={inc.id}>
-                              <td style={{ padding: '4px', border: '1px solid #fed7aa', fontWeight: 600 }}>{inc.date} ({arabicWeekday(inc.date)})</td>
-                              <td style={{ padding: '4px', border: '1px solid #fed7aa', color: '#2563eb' }}>{inc.scheduledStartTime}</td>
-                              <td style={{ padding: '4px', border: '1px solid #fed7aa', fontWeight: 600 }}>{inc.actualPunchInTime}</td>
-                              <td style={{ padding: '4px', border: '1px solid #fed7aa', fontWeight: 700, color: '#ea580c' }}>{inc.lateMinutes} دقيقة</td>
-                              <td style={{ padding: '4px', border: '1px solid #fed7aa' }}>{inc.tierName} (#{inc.occurrenceNumber})</td>
-                              <td style={{ padding: '4px', border: '1px solid #fed7aa', fontWeight: 600, color: inc.deductionMinutes > 0 ? '#dc2626' : '#16a34a' }}>{inc.actionLabel}</td>
-                              <td style={{ padding: '4px', border: '1px solid #fed7aa' }}>{inc.deductionMinutes > 0 ? `${inc.deductionMinutes} دقيقة` : '—'}</td>
-                              <td style={{ padding: '4px', border: '1px solid #fed7aa', fontWeight: 700, color: inc.penaltyAmount > 0 ? '#dc2626' : '#16a34a' }}>
-                                {inc.penaltyAmount > 0 ? `-${fmt(inc.penaltyAmount)} ج.م` : '0 ج.م'}
-                              </td>
-                            </tr>
-                          ))}
+                          {empLateIncidents.map((inc) => {
+                            const dayAmt = computeLatenessFinancialAmount(inc.deductionMinutes || 0, emp, inc.branchId || selectedBranchId);
+                            const penaltyVal = dayAmt > 0 ? dayAmt : (parseFloat(inc.penaltyAmount) || 0);
+                            return (
+                              <tr key={inc.id}>
+                                <td style={{ padding: '4px', border: '1px solid #fed7aa', fontWeight: 600 }}>{inc.date} ({arabicWeekday(inc.date)})</td>
+                                <td style={{ padding: '4px', border: '1px solid #fed7aa', color: '#2563eb' }}>{inc.scheduledStartTime}</td>
+                                <td style={{ padding: '4px', border: '1px solid #fed7aa', fontWeight: 600 }}>{inc.actualPunchInTime}</td>
+                                <td style={{ padding: '4px', border: '1px solid #fed7aa', fontWeight: 700, color: '#ea580c' }}>{inc.lateMinutes} دقيقة</td>
+                                <td style={{ padding: '4px', border: '1px solid #fed7aa' }}>{inc.tierName} (#{inc.occurrenceNumber})</td>
+                                <td style={{ padding: '4px', border: '1px solid #fed7aa', fontWeight: 600, color: inc.deductionMinutes > 0 ? '#dc2626' : '#16a34a' }}>{inc.actionLabel}</td>
+                                <td style={{ padding: '4px', border: '1px solid #fed7aa' }}>{inc.deductionMinutes > 0 ? `${inc.deductionMinutes} دقيقة` : '—'}</td>
+                                <td style={{ padding: '4px', border: '1px solid #fed7aa', fontWeight: 700, color: penaltyVal > 0 ? '#dc2626' : '#16a34a' }}>
+                                  {penaltyVal > 0 ? `-${fmt(penaltyVal)} ج.م` : '0 ج.م'}
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>

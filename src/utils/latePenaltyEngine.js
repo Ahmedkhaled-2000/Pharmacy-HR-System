@@ -167,17 +167,36 @@ export function getPenaltyForOccurrence(tier, occurrenceNumber) {
 
 /**
  * حساب أجر الساعة والدقيقة وقيمة الخصم المالي للموظف
+ * المعادلة المعتمدة في النظام:
+ * 1. سعر اليوم = (سعر الساعة الشهري المدخل * ساعات العمل اليومية) / أيام العمل الشهرية
+ * 2. سعر الساعة اليومي = سعر اليوم / ساعات العمل اليومية = (سعر الساعة الشهري المدخل) / أيام العمل الشهرية
+ * 3. سعر الدقيقة = سعر الساعة اليومي / 60
+ * 4. قيمة الخصم المالي = دقائق الخصم * سعر الدقيقة
  */
-export function computeLatenessFinancialAmount(deductionMinutes, employee) {
+export function computeLatenessFinancialAmount(deductionMinutes, employee, branchId = null) {
   const mins = Math.max(0, parseFloat(deductionMinutes) || 0);
   if (mins === 0 || !employee) return 0;
 
-  const salary = parseFloat(employee.salary) || 0;
-  const workDays = parseFloat(employee.workDaysPerMonth) || 26;
-  const workHours = parseFloat(employee.workHoursPerDay) || 8;
+  let hourlyBase = parseFloat(employee.salary) || 0;
+  let workDays = parseFloat(employee.workDaysPerMonth) || 26;
+  let workHours = parseFloat(employee.workHoursPerDay) || 8;
 
-  const totalMonthlyHours = (workDays * workHours) > 0 ? (workDays * workHours) : 208;
-  const hourlyRate = salary > 0 ? salary / totalMonthlyHours : 0;
+  if (branchId && employee.branchesDetails && employee.branchesDetails.length > 0) {
+    const bd = employee.branchesDetails.find((b) => String(b.branchId) === String(branchId));
+    if (bd) {
+      hourlyBase = parseFloat(bd.salary) || hourlyBase;
+      workDays = parseFloat(bd.workDaysPerMonth) || workDays;
+      workHours = parseFloat(bd.workHoursPerDay) || workHours;
+    }
+  }
+
+  // 1. سعر اليوم = (سعر الساعة الشهري * ساعات اليوم) / أيام الشهر
+  const dailyRate = workDays > 0 ? (hourlyBase * workHours) / workDays : (hourlyBase * workHours);
+
+  // 2. سعر الساعة اليومي = سعر اليوم / ساعات اليوم = سعر الساعة الشهري / أيام الشهر
+  const hourlyRate = workHours > 0 ? (dailyRate / workHours) : (workDays > 0 ? hourlyBase / workDays : hourlyBase);
+
+  // 3. سعر الدقيقة
   const minuteRate = hourlyRate / 60;
 
   return Math.round(mins * minuteRate * 100) / 100;
@@ -390,16 +409,18 @@ export function recalculateEmployeeCycleLateness({
     tierCounters[tierKey] = (tierCounters[tierKey] || 0) + 1;
     const occurrenceNumber = tierCounters[tierKey];
 
-    // جلب قاعدة الجزاء المقابلة
-    const rule = getPenaltyForOccurrence(tier, occurrenceNumber);
-    const deductionMins = rule.deductionMinutes || 0;
-    const penaltyAmount = computeLatenessFinancialAmount(deductionMins, emp);
-
     const incId = `late_inc_${emp.id}_${shift.date}_${shift.timeIn.replace(':', '')}`;
     const prevInc = existingIncidentsMap.get(incId);
 
-    const branchObj = (state.branches || []).find((b) => b.id === (shift.branchId || sched.branchId || emp.branchId));
+    const effectiveShiftBranchId = shift.branchId || sched.branchId || emp.branchId;
+    const branchObj = (state.branches || []).find((b) => b.id === effectiveShiftBranchId);
     const branchName = branchObj ? branchObj.name : 'الفرع الرئيسي';
+
+    const isOverridden = prevInc && (prevInc.status === 'overridden' || prevInc.overrideReason);
+    const actionType = isOverridden ? prevInc.actionType : rule.action;
+    const actionLabel = isOverridden ? prevInc.actionLabel : rule.label;
+    const deductionMins = isOverridden ? (parseFloat(prevInc.deductionMinutes) || 0) : (rule.deductionMinutes || 0);
+    const penaltyAmount = computeLatenessFinancialAmount(deductionMins, emp, effectiveShiftBranchId);
 
     const incident = {
       id: incId,
@@ -407,7 +428,7 @@ export function recalculateEmployeeCycleLateness({
       employeeCode: emp.code || '',
       employeeName: emp.name || '',
       jobTitle: emp.jobTitle || '',
-      branchId: shift.branchId || sched.branchId || emp.branchId,
+      branchId: effectiveShiftBranchId,
       branchName: branchName,
       shiftId: shift.id,
       date: shift.date,
@@ -419,8 +440,8 @@ export function recalculateEmployeeCycleLateness({
       tierName: tier.name,
       tierColor: tier.color,
       occurrenceNumber: occurrenceNumber,
-      actionType: rule.action,
-      actionLabel: rule.label,
+      actionType: actionType,
+      actionLabel: actionLabel,
       deductionMinutes: deductionMins,
       deductionHours: Math.round((deductionMins / 60) * 100) / 100,
       penaltyAmount: penaltyAmount,

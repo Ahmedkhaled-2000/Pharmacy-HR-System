@@ -229,7 +229,7 @@ export default function LatePenaltyPolicyModule({
 
     const targetId = selectedIncidentForEdit.id;
     const emp = employees.find((e) => e.id === selectedIncidentForEdit.employeeId);
-    const penaltyAmt = computeLatenessFinancialAmount(overrideDeductionMinutes, emp);
+    const penaltyAmt = computeLatenessFinancialAmount(overrideDeductionMinutes, emp, selectedIncidentForEdit.branchId);
 
     const updatedIncidents = (state.lateIncidents || []).map((inc) => {
       if (inc.id === targetId) {
