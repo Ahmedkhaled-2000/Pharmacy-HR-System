@@ -83,6 +83,13 @@ export default function BylawsModule({
   const [newRuleImpactVal, setNewRuleImpactVal] = useState('0.25');
   const [showAddRuleModal, setShowAddRuleModal] = useState(false);
 
+  // Rule Editing State
+  const [editingRule, setEditingRule] = useState(null);
+  const [editRuleTitle, setEditRuleTitle] = useState('');
+  const [editRuleCategory, setEditRuleCategory] = useState('حضور وانصراف');
+  const [editRuleImpactType, setEditRuleImpactType] = useState('deduction_days');
+  const [editRuleImpactVal, setEditRuleImpactVal] = useState('0.25');
+
   // Penalty Objection State
   const [objectionTargetReq, setObjectionTargetReq] = useState(null);
   const [objectionReason, setObjectionReason] = useState('');
@@ -96,14 +103,45 @@ export default function BylawsModule({
     showToast?.('✅ تم حفظ وتحديث نصوص لائحة العمل الرسمية بنجاح');
   };
 
+  const handleResetDefaultBylawsText = async () => {
+    const defaultText = `
+📜 لائحة العمل والجزاءات الرسمية لمجموعة الصيدليات الطبية
+
+البند الأول: الحضور والانصراف والورديات
+1. التزام الموظف بالمواعيد المحددة للوردية وفقاً للجدول الشهري المعتمد.
+2. التوقيع عبر بصمة الوجه / اليد عند الحضور والانصراف في النطاق الجغرافي للصيدلية.
+3. التخلف عن الوردية بدون إذن مسبق يعتبر غياباً غير مبرر يخضع للجزاءات المالية.
+
+البند الثاني: السلوك المهني والانضباط
+1. الالتزام الكامل بالزي الرسمي والتأكد من مظهر الصيدلية والنظافة العامة.
+2. حسن معاملة المرضى والعملاء وتقديم الاستشارة الدوائية بمهنية عالية.
+3. عدم ترك الصيدلية أو الوردية بدون بديل معتمد وموافقة مدير الفرع.
+
+البند الثالث: تسليم النقدية والأدوية
+1. دقة تسليم الكاشير وجرد الخزينة نهاية كل وردية.
+2. يمنع سحب أدوية بالآجل إلا وفق الإجراءات الرسمية والطلبات المعتمدة.
+    `.trim();
+
+    if (!window.confirm('هل ترغب في استعادة النص الافتراضي للائحة العمل الرسمية؟')) return;
+
+    setBylawsText(defaultText);
+    const updatedState = { ...state, bylawsText: defaultText };
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+    showToast?.('🔄 تم استعادة النص الافتراضي للائحة العمل');
+  };
+
   const handleAddRule = async () => {
-    if (!newRuleTitle.trim()) return;
+    if (!newRuleTitle.trim()) {
+      showToast?.('يرجى كتابة عنوان المخالفة اللائحية');
+      return;
+    }
     const newRule = {
       id: 'b_' + Date.now(),
       title: newRuleTitle.trim(),
       category: newRuleCategory,
       impactType: newRuleImpactType,
-      impactVal: parseFloat(newRuleImpactVal) || 0
+      impactVal: newRuleImpactType === 'warning' ? 0 : (parseFloat(newRuleImpactVal) || 0)
     };
     const currentList = (state.bylawsRules && Array.isArray(state.bylawsRules) && state.bylawsRules.length > 0)
       ? state.bylawsRules
@@ -117,10 +155,51 @@ export default function BylawsModule({
     setShowAddRuleModal(false);
     setNewRuleTitle('');
     setNewRuleImpactVal('0.25');
-    showToast?.('✅ تم إضافة بند جزاء جديد إلى لائحة العمل');
+    showToast?.('✅ تم إضافة بند جزاء جديد إلى لائحة العمل بنجاح');
   };
 
-  const handleDeleteRule = async (id) => {
+  const handleOpenEditRule = (rule) => {
+    setEditingRule(rule);
+    setEditRuleTitle(rule.title || '');
+    setEditRuleCategory(rule.category || 'حضور وانصراف');
+    setEditRuleImpactType(rule.impactType || 'deduction_days');
+    setEditRuleImpactVal(String(rule.impactVal !== undefined ? rule.impactVal : '0.25'));
+  };
+
+  const handleSaveEditRule = async () => {
+    if (!editingRule || !editRuleTitle.trim()) {
+      showToast?.('يرجى كتابة عنوان المخالفة اللائحية');
+      return;
+    }
+
+    const currentList = (state.bylawsRules && Array.isArray(state.bylawsRules) && state.bylawsRules.length > 0)
+      ? state.bylawsRules
+      : DEFAULT_BYLAWS_RULES;
+
+    const updated = currentList.map((r) => {
+      if (String(r.id) === String(editingRule.id)) {
+        return {
+          ...r,
+          title: editRuleTitle.trim(),
+          category: editRuleCategory,
+          impactType: editRuleImpactType,
+          impactVal: editRuleImpactType === 'warning' ? 0 : (parseFloat(editRuleImpactVal) || 0)
+        };
+      }
+      return r;
+    });
+
+    const updatedState = { ...state, bylawsRules: updated };
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+
+    setEditingRule(null);
+    showToast?.('✅ تم حفظ وتعديل بند المخالفة اللائحية بنجاح');
+  };
+
+  const handleDeleteRule = async (id, title) => {
+    if (!window.confirm(`هل أنت متأكد من حذف بند المخالفة "${title || ''}" من لائحة العمل؟`)) return;
+
     const currentList = (state.bylawsRules && Array.isArray(state.bylawsRules) && state.bylawsRules.length > 0)
       ? state.bylawsRules
       : DEFAULT_BYLAWS_RULES;
@@ -130,6 +209,15 @@ export default function BylawsModule({
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
     showToast?.('🗑️ تم حذف بند الجزاء من اللائحة');
+  };
+
+  const handleResetDefaultRules = async () => {
+    if (!window.confirm('هل ترغب في إعادة ضبط واستعادة قائمة بنود المخالفات والجزاءات الافتراضية؟')) return;
+
+    const updatedState = { ...state, bylawsRules: DEFAULT_BYLAWS_RULES };
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+    showToast?.('🔄 تم استعادة بنود اللائحة الافتراضية بنجاح');
   };
 
   const handleSubmitViolation = async (e) => {
@@ -484,22 +572,35 @@ export default function BylawsModule({
         </div>
       </div>
 
-      {/* Tab 1: Bylaws Official Text */}
+          {/* Tab 1: Bylaws Official Text */}
       {activeTab === 'text' && (
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', padding: '20px', borderRadius: '14px' }}>
-          <h3 style={{ fontFamily: 'Cairo', margin: '0 0 14px', color: 'var(--primary-dark)' }}>
-            📜 نصوص وسياسات لائحة العمل الرسمية للصيدلية
-          </h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+            <h3 style={{ fontFamily: 'Cairo', margin: 0, color: 'var(--primary-dark)' }}>
+              📜 نصوص وسياسات لائحة العمل الرسمية للصيدلية
+            </h3>
+            {isAdmin && (
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={handleResetDefaultBylawsText}
+                style={{ fontSize: '12.5px', color: 'var(--muted)' }}
+                title="إعادة ضبط النص إلى المحتوى الافتراضي المعتمد"
+              >
+                🔄 استعادة النص الافتراضي
+              </button>
+            )}
+          </div>
 
           {isAdmin ? (
             <div>
               <textarea
                 value={bylawsText}
                 onChange={(e) => setBylawsText(e.target.value)}
-                rows={12}
+                rows={14}
                 style={{ width: '100%', padding: '14px', borderRadius: '10px', border: '1px solid var(--border)', fontFamily: 'inherit', fontSize: '14px', lineHeight: '1.8', background: 'var(--surface-muted)' }}
               />
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '12px' }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '12px', gap: '10px' }}>
                 <button className="btn btn-start" onClick={handleSaveBylawsText}>
                   💾 حفظ وتحديث نصوص اللائحة
                 </button>
@@ -561,9 +662,20 @@ export default function BylawsModule({
               ⚖️ جدول قواعد المخالفات والجزاءات اللائحية وتأثيرها على الأجور
             </h3>
             {isAdmin && (
-              <button className="btn btn-start" onClick={() => setShowAddRuleModal(true)}>
-                ➕ إضافة بند مخالفة جديد
-              </button>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={handleResetDefaultRules}
+                  style={{ fontSize: '13px' }}
+                  title="استعادة بنود اللائحة الافتراضية"
+                >
+                  🔄 استعادة الافتراضي
+                </button>
+                <button className="btn btn-start" onClick={() => setShowAddRuleModal(true)}>
+                  ➕ إضافة بند مخالفة جديد
+                </button>
+              </div>
             )}
           </div>
 
@@ -575,7 +687,7 @@ export default function BylawsModule({
                   <th>بند المخالفة اللائحية</th>
                   <th>نوع التأثير على الأجور</th>
                   <th>مقدار التأثير والخصم</th>
-                  {isAdmin && <th>الإجراءات</th>}
+                  {isAdmin && <th style={{ textAlign: 'center', minWidth: '130px' }}>الإجراءات</th>}
                 </tr>
               </thead>
               <tbody>
@@ -592,14 +704,51 @@ export default function BylawsModule({
                       {getImpactDesc(rule)}
                     </td>
                     {isAdmin && (
-                      <td>
-                        <button
-                          style={{ border: 'none', background: 'transparent', color: 'var(--danger)', cursor: 'pointer' }}
-                          onClick={() => handleDeleteRule(rule.id)}
-                          title="حذف البند"
-                        >
-                          🗑️
-                        </button>
+                      <td style={{ textAlign: 'center' }}>
+                        <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', alignItems: 'center' }}>
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            style={{
+                              padding: '4px 8px',
+                              fontSize: '12px',
+                              color: '#2563eb',
+                              border: '1px solid #93c5fd',
+                              background: '#eff6ff',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                              fontWeight: 'bold',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}
+                            onClick={() => handleOpenEditRule(rule)}
+                            title="تعديل بند المخالفة والخصم"
+                          >
+                            ✏️ تعديل
+                          </button>
+
+                          <button
+                            type="button"
+                            style={{
+                              border: '1px solid #fca5a5',
+                              background: '#fef2f2',
+                              color: '#dc2626',
+                              borderRadius: '6px',
+                              padding: '4px 8px',
+                              cursor: 'pointer',
+                              fontSize: '12px',
+                              fontWeight: 'bold',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}
+                            onClick={() => handleDeleteRule(rule.id, rule.title)}
+                            title="حذف البند من اللائحة"
+                          >
+                            🗑️ حذف
+                          </button>
+                        </div>
                       </td>
                     )}
                   </tr>
@@ -917,29 +1066,49 @@ export default function BylawsModule({
       {/* Modal: Add Rule */}
       {showAddRuleModal && (
         <div className="modal-backdrop" onClick={() => setShowAddRuleModal(false)}>
-          <div className="modal-card" style={{ maxWidth: '750px', width: '96%' }} onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ fontFamily: 'Cairo', margin: '0 0 16px', color: 'var(--primary-dark)' }}>
-              ➕ إضافة بند جديد لجدول المخالفات والجزاءات
-            </h3>
-
-            <div className="field" style={{ marginBottom: '14px' }}>
-              <label>عنوان المخالفة اللائحية:</label>
-              <input type="text" value={newRuleTitle} onChange={(e) => setNewRuleTitle(e.target.value)} placeholder="مثال: التأخير عن تسليم الخزينة..." required />
+          <div className="modal-card" style={{ maxWidth: '650px', width: '96%' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '12px' }}>
+              <h3 style={{ fontFamily: 'Cairo', margin: 0, color: 'var(--primary-dark)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                ➕ إضافة بند جديد لجدول المخالفات والجزاءات
+              </h3>
+              <button className="btn btn-ghost" onClick={() => setShowAddRuleModal(false)}>✕</button>
             </div>
 
             <div className="field" style={{ marginBottom: '14px' }}>
-              <label>التصنيف:</label>
-              <select value={newRuleCategory} onChange={(e) => setNewRuleCategory(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+              <label style={{ fontWeight: 'bold', marginBottom: '6px', display: 'block' }}>عنوان المخالفة اللائحية *</label>
+              <input
+                type="text"
+                value={newRuleTitle}
+                onChange={(e) => setNewRuleTitle(e.target.value)}
+                placeholder="مثال: التأخير عن تسليم الخزينة والمبيعات..."
+                required
+                style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)' }}
+              />
+            </div>
+
+            <div className="field" style={{ marginBottom: '14px' }}>
+              <label style={{ fontWeight: 'bold', marginBottom: '6px', display: 'block' }}>التصنيف اللائحي:</label>
+              <select
+                value={newRuleCategory}
+                onChange={(e) => setNewRuleCategory(e.target.value)}
+                style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)' }}
+              >
                 <option value="حضور وانصراف">حضور وانصراف</option>
                 <option value="سلوك وانضباط">سلوك وانضباط</option>
                 <option value="نظافة وجودة">نظافة وجودة</option>
                 <option value="ماليات وخزينة">ماليات وخزينة</option>
+                <option value="إجراءات إدارية">إجراءات إدارية</option>
+                <option value="خدمة عملاء">خدمة عملاء</option>
               </select>
             </div>
 
             <div className="field" style={{ marginBottom: '14px' }}>
-              <label>نوع التأثير على الأجور:</label>
-              <select value={newRuleImpactType} onChange={(e) => setNewRuleImpactType(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+              <label style={{ fontWeight: 'bold', marginBottom: '6px', display: 'block' }}>نوع التأثير على الأجور:</label>
+              <select
+                value={newRuleImpactType}
+                onChange={(e) => setNewRuleImpactType(e.target.value)}
+                style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)' }}
+              >
                 <option value="deduction_days">خصم عدد أيام من الراتب</option>
                 <option value="fixed_amount">خصم مبلغ مالي ثابت (ج.م)</option>
                 <option value="warning">إنذار كتابي رسمي</option>
@@ -948,14 +1117,133 @@ export default function BylawsModule({
 
             {newRuleImpactType !== 'warning' && (
               <div className="field" style={{ marginBottom: '20px' }}>
-                <label>مقدار الخصم (عدد الأيام أو المبلغ):</label>
-                <input type="number" step="0.25" value={newRuleImpactVal} onChange={(e) => setNewRuleImpactVal(e.target.value)} required />
+                <label style={{ fontWeight: 'bold', marginBottom: '6px', display: 'block' }}>
+                  {newRuleImpactType === 'deduction_days' ? 'مقدار الخصم (عدد الأيام من الراتب):' : 'المبلغ المالي المخصوم (ج.م):'}
+                </label>
+                <input
+                  type="number"
+                  step={newRuleImpactType === 'deduction_days' ? '0.25' : '10'}
+                  min="0"
+                  value={newRuleImpactVal}
+                  onChange={(e) => setNewRuleImpactVal(e.target.value)}
+                  required
+                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', fontWeight: 'bold' }}
+                />
               </div>
             )}
 
+            {/* Live Preview Card */}
+            <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '10px', padding: '12px 16px', marginBottom: '20px' }}>
+              <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>معاينة البند في الجدول:</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                <span className="badge badge-primary">{newRuleCategory}</span>
+                <strong style={{ fontSize: '13px' }}>{newRuleTitle || 'عنوان المخالفة'}</strong>
+                <span style={{ marginRight: 'auto', fontWeight: 'bold', color: '#dc2626' }}>
+                  {getImpactDesc({
+                    impactType: newRuleImpactType,
+                    impactVal: parseFloat(newRuleImpactVal) || 0
+                  })}
+                </span>
+              </div>
+            </div>
+
             <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
               <button type="button" className="btn btn-ghost" onClick={() => setShowAddRuleModal(false)}>إلغاء</button>
-              <button type="button" className="btn btn-start" onClick={handleAddRule}>💾 حفظ البند</button>
+              <button type="button" className="btn btn-start" onClick={handleAddRule}>💾 حفظ وإضافة البند</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Edit Rule */}
+      {editingRule && (
+        <div className="modal-backdrop" onClick={() => setEditingRule(null)}>
+          <div className="modal-card" style={{ maxWidth: '650px', width: '96%' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '12px' }}>
+              <h3 style={{ fontFamily: 'Cairo', margin: 0, color: 'var(--primary-dark)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                ✏️ تعديل بند المخالفة والجزاء اللائحي
+              </h3>
+              <button className="btn btn-ghost" onClick={() => setEditingRule(null)}>✕</button>
+            </div>
+
+            <div className="field" style={{ marginBottom: '14px' }}>
+              <label style={{ fontWeight: 'bold', marginBottom: '6px', display: 'block' }}>عنوان بند المخالفة اللائحية *</label>
+              <input
+                type="text"
+                value={editRuleTitle}
+                onChange={(e) => setEditRuleTitle(e.target.value)}
+                placeholder="مثال: التأخير عن موعد الشيفت من 15 إلى 30 دقيقة..."
+                required
+                style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)' }}
+              />
+            </div>
+
+            <div className="field" style={{ marginBottom: '14px' }}>
+              <label style={{ fontWeight: 'bold', marginBottom: '6px', display: 'block' }}>التصنيف اللائحي:</label>
+              <select
+                value={editRuleCategory}
+                onChange={(e) => setEditRuleCategory(e.target.value)}
+                style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)' }}
+              >
+                <option value="حضور وانصراف">حضور وانصراف</option>
+                <option value="سلوك وانضباط">سلوك وانضباط</option>
+                <option value="نظافة وجودة">نظافة وجودة</option>
+                <option value="ماليات وخزينة">ماليات وخزينة</option>
+                <option value="إجراءات إدارية">إجراءات إدارية</option>
+                <option value="خدمة عملاء">خدمة عملاء</option>
+              </select>
+            </div>
+
+            <div className="field" style={{ marginBottom: '14px' }}>
+              <label style={{ fontWeight: 'bold', marginBottom: '6px', display: 'block' }}>نوع التأثير على الأجور:</label>
+              <select
+                value={editRuleImpactType}
+                onChange={(e) => setEditRuleImpactType(e.target.value)}
+                style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)' }}
+              >
+                <option value="deduction_days">خصم عدد أيام من الراتب</option>
+                <option value="fixed_amount">خصم مبلغ مالي ثابت (ج.م)</option>
+                <option value="warning">إنذار كتابي رسمي</option>
+              </select>
+            </div>
+
+            {editRuleImpactType !== 'warning' && (
+              <div className="field" style={{ marginBottom: '20px' }}>
+                <label style={{ fontWeight: 'bold', marginBottom: '6px', display: 'block' }}>
+                  {editRuleImpactType === 'deduction_days' ? 'مقدار الخصم (عدد الأيام من الراتب):' : 'المبلغ المالي المخصوم (ج.م):'}
+                </label>
+                <input
+                  type="number"
+                  step={editRuleImpactType === 'deduction_days' ? '0.25' : '10'}
+                  min="0"
+                  value={editRuleImpactVal}
+                  onChange={(e) => setEditRuleImpactVal(e.target.value)}
+                  required
+                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', fontWeight: 'bold' }}
+                />
+              </div>
+            )}
+
+            {/* Live Preview Card */}
+            <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '10px', padding: '12px 16px', marginBottom: '20px' }}>
+              <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>معاينة التعديل في الجدول:</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                <span className="badge badge-primary">{editRuleCategory}</span>
+                <strong style={{ fontSize: '13px' }}>{editRuleTitle || 'عنوان البند'}</strong>
+                <span style={{ marginRight: 'auto', fontWeight: 'bold', color: '#dc2626' }}>
+                  {getImpactDesc({
+                    impactType: editRuleImpactType,
+                    impactVal: parseFloat(editRuleImpactVal) || 0
+                  })}
+                </span>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button type="button" className="btn btn-ghost" onClick={() => setEditingRule(null)}>إلغاء</button>
+              <button type="button" className="btn btn-start" onClick={handleSaveEditRule}>
+                💾 حفظ التعديلات
+              </button>
             </div>
           </div>
         </div>
