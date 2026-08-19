@@ -1,51 +1,133 @@
 import React, { useState } from 'react';
 import RosterPreviewModal from './RosterPreviewModal';
 
-export function getResolvedEmployeeRoster(employee, targetBranchId, state) {
+export const DEFAULT_ROSTER_SCHEDULE = {
+  'السبت': { type: 'shift', start: '08:00', end: '16:00' },
+  'الأحد': { type: 'shift', start: '08:00', end: '16:00' },
+  'الاثنين': { type: 'shift', start: '08:00', end: '16:00' },
+  'الثلاثاء': { type: 'shift', start: '16:00', end: '00:00' },
+  'الأربعاء': { type: 'shift', start: '08:00', end: '16:00' },
+  'الخميس': { type: 'shift', start: '08:00', end: '16:00' },
+  'الجمعة': { type: 'off', start: '', end: '' }
+};
+
+export function normalizeSchedule(rawSchedule) {
+  if (!rawSchedule || typeof rawSchedule !== 'object') return DEFAULT_ROSTER_SCHEDULE;
+  
+  const normalized = { ...DEFAULT_ROSTER_SCHEDULE };
+  
+  const dayKeyMap = {
+    'saturday': 'السبت',
+    'sunday': 'الأحد',
+    'monday': 'الاثنين',
+    'tuesday': 'الثلاثاء',
+    'wednesday': 'الأربعاء',
+    'thursday': 'الخميس',
+    'friday': 'الجمعة',
+    'السبت': 'السبت',
+    'الأحد': 'الأحد',
+    'الاحد': 'الأحد',
+    'الإثنين': 'الاثنين',
+    'الاثنين': 'الاثنين',
+    'الثلاثاء': 'الثلاثاء',
+    'الأربعاء': 'الأربعاء',
+    'الاربعاء': 'الأربعاء',
+    'الخميس': 'الخميس',
+    'الجمعة': 'الجمعة'
+  };
+
+  Object.entries(rawSchedule).forEach(([key, val]) => {
+    const cleanKey = String(key).trim().toLowerCase();
+    const mappedDay = dayKeyMap[cleanKey] || dayKeyMap[key];
+    if (mappedDay && val && typeof val === 'object') {
+      const isOff = val.type === 'off' || val.isOff === true;
+      normalized[mappedDay] = {
+        type: isOff ? 'off' : 'shift',
+        start: val.start || val.checkIn || '08:00',
+        end: val.end || val.checkOut || '16:00'
+      };
+    }
+  });
+
+  return normalized;
+}
+
+export function getResolvedEmployeeRoster(employee, targetBranchId, state, selectedMonth = null) {
   if (!employee || !state) return null;
   const rosters = state.rosters || [];
   const requests = state.requests || [];
   const empIdStr = String(employee.id);
   const branchIdStr = targetBranchId ? String(targetBranchId) : null;
+  const isMultiBranch = employee.branchesDetails && employee.branchesDetails.length > 1;
 
-  // 1. Check state.rosters
-  const foundRoster = rosters.find((r) => {
-    if (String(r.employeeId) !== empIdStr) return false;
-    if (r.status !== 'approved') return false;
-    if (branchIdStr) {
-      return String(r.branchId || '') === branchIdStr || (!r.branchId && (String(employee.branchId || '') === branchIdStr || String(employee.branchesDetails?.[0]?.branchId || '') === branchIdStr));
+  const branchMatches = (itemBranchId) => {
+    if (!branchIdStr) return true;
+    const itemBStr = itemBranchId ? String(itemBranchId) : '';
+    if (itemBStr === branchIdStr) return true;
+    
+    // Check match against branch object ID and Name
+    const targetBObj = (state.branches || []).find(b => String(b.id) === branchIdStr || b.name === branchIdStr);
+    if (targetBObj && (itemBStr === String(targetBObj.id) || itemBStr === targetBObj.name)) return true;
+
+    // If item has no branch specified and employee is single-branch, match primary branch
+    if (!itemBStr && !isMultiBranch) {
+      return String(employee.branchId || '') === branchIdStr || String(employee.branchesDetails?.[0]?.branchId || '') === branchIdStr;
     }
-    return true;
+    return false;
+  };
+
+  const candidates = [];
+
+  // 1. Gather all matching approved records from state.rosters
+  rosters.forEach((r) => {
+    if (String(r.employeeId) !== empIdStr) return;
+    if (r.status !== 'approved') return;
+    if (selectedMonth && r.month && r.month !== selectedMonth) return;
+    if (branchMatches(r.branchId)) {
+      candidates.push({
+        ...r,
+        approvedAt: r.approvedAt || r.updatedAt || r.createdAt || '2000-01-01',
+        source: 'rosters'
+      });
+    }
   });
 
-  if (foundRoster) return foundRoster;
-
-  // 2. Check approved requests in state.requests
-  const approvedReq = requests.find((req) => {
-    if (String(req.employeeId) !== empIdStr) return false;
-    if (req.type !== 'roster_update' && req.type !== 'roster_edit' && req.type !== 'roster_edit_request') return false;
-    if (req.status !== 'approved' && !req.adminApproved) return false;
-    if (branchIdStr) {
-      return String(req.branchId || '') === branchIdStr || (!req.branchId && (String(employee.branchId || '') === branchIdStr || String(employee.branchesDetails?.[0]?.branchId || '') === branchIdStr));
+  // 2. Gather all matching approved records from state.requests
+  requests.forEach((req) => {
+    if (String(req.employeeId) !== empIdStr) return;
+    if (req.type !== 'roster_update' && req.type !== 'roster_edit' && req.type !== 'roster_edit_request') return;
+    if (req.status !== 'approved' && !req.adminApproved) return;
+    if (selectedMonth && req.month && req.month !== selectedMonth) return;
+    if (branchMatches(req.branchId)) {
+      candidates.push({
+        id: req.id,
+        employeeId: req.employeeId,
+        branchId: req.branchId || targetBranchId || employee.branchId,
+        month: req.month,
+        fromDate: req.fromDate,
+        toDate: req.toDate,
+        schedule: req.schedule,
+        status: 'approved',
+        approvedAt: req.approvedAt || req.updatedAt || req.createdAt || '2000-01-01',
+        source: 'requests'
+      });
     }
-    return true;
   });
 
-  if (approvedReq) {
-    return {
-      id: approvedReq.id,
-      employeeId: approvedReq.employeeId,
-      branchId: approvedReq.branchId || targetBranchId || employee.branchId,
-      month: approvedReq.month,
-      fromDate: approvedReq.fromDate,
-      toDate: approvedReq.toDate,
-      schedule: approvedReq.schedule,
-      status: 'approved',
-      approvedAt: approvedReq.createdAt
-    };
-  }
+  if (candidates.length === 0) return null;
 
-  return null;
+  // Always pick the MOST RECENT approved roster!
+  candidates.sort((a, b) => {
+    const timeA = new Date(a.approvedAt || 0).getTime() || 0;
+    const timeB = new Date(b.approvedAt || 0).getTime() || 0;
+    return timeB - timeA;
+  });
+
+  const latest = candidates[0];
+  return {
+    ...latest,
+    schedule: normalizeSchedule(latest.schedule)
+  };
 }
 
 export default function RosterModule({

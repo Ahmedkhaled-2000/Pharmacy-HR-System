@@ -18,12 +18,33 @@ const daysOfWeek = ['السبت', 'الأحد', 'الاثنين', 'الثلاث�
 const DEFAULT_SCHEDULE = {
   'السبت': { type: 'shift', start: '08:00', end: '16:00' },
   'الأحد': { type: 'shift', start: '08:00', end: '16:00' },
-  'الاثنين': { type: 'off', start: '', end: '' },
+  'الاثنين': { type: 'shift', start: '08:00', end: '16:00' },
   'الثلاثاء': { type: 'shift', start: '16:00', end: '00:00' },
   'الأربعاء': { type: 'shift', start: '08:00', end: '16:00' },
   'الخميس': { type: 'shift', start: '08:00', end: '16:00' },
   'الجمعة': { type: 'off', start: '', end: '' }
 };
+
+function getDayScheduleFromSchedule(schedule, dateStr, arDayName) {
+  if (!schedule || typeof schedule !== 'object') return { type: arDayName === 'الجمعة' ? 'off' : 'shift', start: '08:00', end: '16:00' };
+  
+  if (schedule[dateStr]) return schedule[dateStr];
+  if (schedule[arDayName]) return schedule[arDayName];
+
+  const normAr = arDayName.replace(/[\u0625\u0623\u0622]/g, 'ا');
+  for (const [k, v] of Object.entries(schedule)) {
+    if (k.replace(/[\u0625\u0623\u0622]/g, 'ا') === normAr) {
+      return v;
+    }
+  }
+
+  const enDays = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  const jsDay = new Date(dateStr).getDay();
+  const enDay = enDays[jsDay];
+  if (enDay && schedule[enDay]) return schedule[enDay];
+
+  return { type: arDayName === 'الجمعة' ? 'off' : 'shift', start: '08:00', end: '16:00' };
+}
 
 /**
  * Build a list of all days in the given month with their weekday name and whether it's off
@@ -42,7 +63,7 @@ function buildMonthCalendar(selectedMonth, schedule, fromDate, toDate) {
         const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
         const jsDay = current.getDay();
         const arDayName = Object.keys(WEEKDAY_AR_MAP).find(k => WEEKDAY_AR_MAP[k] === jsDay) || '';
-        const daySchedule = schedule?.[dateStr] || schedule?.[arDayName] || Object.entries(schedule || {}).find(([k]) => k.replace(/[\u0625\u0623\u0622]/g, 'ا') === arDayName.replace(/[\u0625\u0623\u0622]/g, 'ا'))?.[1] || { type: 'shift', start: '08:00', end: '16:00' };
+        const daySchedule = getDayScheduleFromSchedule(schedule, dateStr, arDayName);
         result.push({ date: dateStr, day: d, arDayName, daySchedule });
         current.setDate(current.getDate() + 1);
       }
@@ -57,7 +78,7 @@ function buildMonthCalendar(selectedMonth, schedule, fromDate, toDate) {
     const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
     const jsDay = new Date(dateStr).getDay(); // 0=Sun..6=Sat
     const arDayName = Object.keys(WEEKDAY_AR_MAP).find(k => WEEKDAY_AR_MAP[k] === jsDay) || '';
-    const daySchedule = schedule?.[dateStr] || schedule?.[arDayName] || Object.entries(schedule || {}).find(([k]) => k.replace(/[\u0625\u0623\u0622]/g, 'ا') === arDayName.replace(/[\u0625\u0623\u0622]/g, 'ا'))?.[1] || { type: 'shift', start: '08:00', end: '16:00' };
+    const daySchedule = getDayScheduleFromSchedule(schedule, dateStr, arDayName);
     result.push({ date: dateStr, day: d, arDayName, daySchedule });
   }
   return result;
@@ -111,58 +132,76 @@ export function getResolvedEmployeeRoster(emp, targetBranchId, selectedMonth, st
   const targetBIdStr = targetBranchId ? String(targetBranchId) : null;
   const rosters = state.rosters || [];
   const requests = state.requests || [];
+  const isMultiBranch = emp.branchesDetails && emp.branchesDetails.length > 1;
 
-  // 1. Primary source: state.rosters
-  const fromRosters = rosters.find((r) => {
-    if (String(r.employeeId) !== empIdStr) return false;
-    if (selectedMonth && r.month && r.month !== selectedMonth) return false;
-    if (r.status !== 'approved') return false;
-    if (targetBIdStr) {
-      return (
-        String(r.branchId || '') === targetBIdStr ||
-        (!r.branchId && (String(emp.branchId || '') === targetBIdStr || String(emp.branchesDetails?.[0]?.branchId || '') === targetBIdStr))
-      );
+  const branchMatches = (itemBranchId) => {
+    if (!targetBIdStr) return true;
+    const itemBStr = itemBranchId ? String(itemBranchId) : '';
+    if (itemBStr === targetBIdStr) return true;
+    
+    // Check match against branch object ID and Name
+    const targetBObj = (state.branches || []).find(b => String(b.id) === targetBIdStr || b.name === targetBIdStr);
+    if (targetBObj && (itemBStr === String(targetBObj.id) || itemBStr === targetBObj.name)) return true;
+
+    // Fallback if employee is single-branch or item branch was empty
+    if (!itemBStr && !isMultiBranch) {
+      return String(emp.branchId || '') === targetBIdStr || String(emp.branchesDetails?.[0]?.branchId || '') === targetBIdStr;
     }
-    return true;
+    return false;
+  };
+
+  const candidates = [];
+
+  // 1. Gather all matching approved records from state.rosters
+  rosters.forEach((r) => {
+    if (String(r.employeeId) !== empIdStr) return;
+    if (r.status !== 'approved') return;
+    if (selectedMonth && r.month && r.month !== selectedMonth) return;
+    if (branchMatches(r.branchId)) {
+      candidates.push({
+        ...r,
+        approvedAt: r.approvedAt || r.updatedAt || r.createdAt || '2000-01-01',
+        source: 'rosters'
+      });
+    }
   });
 
-  if (fromRosters) {
-    return {
-      ...fromRosters,
-      schedule: normalizeSchedule(fromRosters.schedule)
-    };
-  }
-
-  // 2. Secondary source: approved requests in state.requests (approved by Admin)
-  const fromRequests = requests.find((r) => {
-    if (String(r.employeeId) !== empIdStr) return false;
-    if (r.type !== 'roster_update' && r.type !== 'roster_edit' && r.type !== 'roster_edit_request') return false;
-    if (selectedMonth && r.month && r.month !== selectedMonth) return false;
-    if (r.status !== 'approved' && !r.adminApproved) return false;
-    if (targetBIdStr) {
-      return (
-        String(r.branchId || '') === targetBIdStr ||
-        (!r.branchId && (String(emp.branchId || '') === targetBIdStr || String(emp.branchesDetails?.[0]?.branchId || '') === targetBIdStr))
-      );
+  // 2. Gather all matching approved records from state.requests
+  requests.forEach((req) => {
+    if (String(req.employeeId) !== empIdStr) return;
+    if (req.type !== 'roster_update' && req.type !== 'roster_edit' && req.type !== 'roster_edit_request') return;
+    if (req.status !== 'approved' && !req.adminApproved) return;
+    if (selectedMonth && req.month && req.month !== selectedMonth) return;
+    if (branchMatches(req.branchId)) {
+      candidates.push({
+        id: req.id,
+        employeeId: req.employeeId,
+        branchId: req.branchId || targetBranchId || emp.branchId,
+        month: req.month,
+        fromDate: req.fromDate,
+        toDate: req.toDate,
+        schedule: req.schedule,
+        status: 'approved',
+        approvedAt: req.approvedAt || req.updatedAt || req.createdAt || '2000-01-01',
+        source: 'requests'
+      });
     }
-    return true;
   });
 
-  if (fromRequests) {
-    return {
-      id: fromRequests.id,
-      employeeId: fromRequests.employeeId,
-      branchId: fromRequests.branchId || targetBranchId || emp.branchId,
-      month: fromRequests.month || selectedMonth,
-      fromDate: fromRequests.fromDate,
-      toDate: fromRequests.toDate,
-      schedule: normalizeSchedule(fromRequests.schedule),
-      status: 'approved',
-      approvedAt: fromRequests.approvedAt || fromRequests.createdAt
-    };
-  }
+  if (candidates.length === 0) return null;
 
-  return null;
+  // Sort candidates so the MOST RECENT approved roster is first!
+  candidates.sort((a, b) => {
+    const timeA = new Date(a.approvedAt || 0).getTime() || 0;
+    const timeB = new Date(b.approvedAt || 0).getTime() || 0;
+    return timeB - timeA;
+  });
+
+  const latest = candidates[0];
+  return {
+    ...latest,
+    schedule: normalizeSchedule(latest.schedule)
+  };
 }
 
 export default function EmployeeRosterModule({
@@ -425,7 +464,7 @@ export default function EmployeeRosterModule({
 
         {emp.branchesDetails.map((bd) => {
           const bId = bd.branchId;
-          const branchObj = (state.branches || []).find((b) => b.id === bId);
+          const branchObj = (state.branches || []).find((b) => String(b.id) === String(bId) || b.name === bId);
           const bName = branchObj ? branchObj.name : `فرع ${bId}`;
 
           const bRoster = getResolvedEmployeeRoster(emp, bId, selectedMonth, state);
@@ -438,9 +477,14 @@ export default function EmployeeRosterModule({
           return (
             <div key={bId} style={{ marginTop: '20px', padding: '16px', background: 'var(--surface-muted)', border: '1px solid var(--border)', borderRadius: '12px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '10px' }}>
-                <h4 style={{ margin: 0, color: 'var(--primary-dark)', fontSize: '16px' }}>
-                  🏢 جدول فرع: {bName}
-                </h4>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <h4 style={{ margin: 0, color: 'var(--primary-dark)', fontSize: '16px' }}>
+                    🏢 جدول فرع: {bName}
+                  </h4>
+                  <span className={`badge ${bRoster?.status === 'approved' ? 'badge-success' : 'badge-warning'}`} style={{ fontSize: '11.5px' }}>
+                    {bRoster?.status === 'approved' ? '🟢 معتمد' : '⏳ بانتظار الاعتماد'}
+                  </span>
+                </div>
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                   <span className="badge info">أيام عمل: {bWorkDays} | أيام راحة: {bOffDays}</span>
                   <button

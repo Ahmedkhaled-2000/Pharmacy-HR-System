@@ -29,6 +29,7 @@ import { compressImage } from './utils/imageCompressor';
 import { getPendingCount } from './utils/offlineStorage';
 import { saveAutoBackupOnModification } from './utils/backupHelper';
 import ErrorBoundary from './components/common/ErrorBoundary';
+import { normalizeSchedule } from './components/roster/RosterModule';
 
 // Modular Components
 import GlobalNavbar from './components/navbar/GlobalNavbar';
@@ -966,24 +967,36 @@ export default function App() {
 
       // 2. Roster Update Request Activation
       if (target.type === 'roster_update' || target.type === 'roster_edit' || target.type === 'roster_edit_request') {
-        const existingIdx = updatedRosters.findIndex(
-          (ros) => String(ros.employeeId) === String(target.employeeId) && (ros.month === target.month || !target.month || !ros.month) && (String(ros.branchId || '') === String(target.branchId || ''))
-        );
+        const targetEmp = (state.employees || []).find(e => String(e.id) === String(target.employeeId));
+        const targetBStr = target.branchId ? String(target.branchId) : (targetEmp?.branchId ? String(targetEmp.branchId) : '');
+
+        const normalizedSch = normalizeSchedule(target.schedule || target.newSchedule);
+
         const activeRosterObj = {
           id: target.id || `roster_${Date.now()}`,
           employeeId: target.employeeId,
-          branchId: target.branchId || null,
+          branchId: targetBStr || target.branchId || null,
           month: target.month || todayStr().slice(0, 7),
           fromDate: target.fromDate,
           toDate: target.toDate,
-          schedule: target.schedule,
+          schedule: normalizedSch,
           status: 'approved',
           approvedAt: new Date().toISOString()
         };
+
+        const existingIdx = updatedRosters.findIndex(
+          (ros) => String(ros.employeeId) === String(target.employeeId) && 
+                   (ros.month === target.month || !target.month || !ros.month) && 
+                   (String(ros.branchId || '') === targetBStr || (!ros.branchId && !targetBStr))
+        );
+
         if (existingIdx >= 0) {
           updatedRosters[existingIdx] = activeRosterObj;
         } else {
-          updatedRosters.push(activeRosterObj);
+          updatedRosters = updatedRosters.filter(
+            (ros) => !(String(ros.employeeId) === String(target.employeeId) && String(ros.branchId || '') === targetBStr && (ros.month === target.month || !target.month || !ros.month))
+          );
+          updatedRosters.unshift(activeRosterObj);
         }
       }
 

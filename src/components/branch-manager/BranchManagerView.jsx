@@ -9,6 +9,7 @@ import IncomeExpensesModule from '../finance/IncomeExpensesModule';
 import { getFormattedRequestBadge } from '../requests/RequestsModule';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import BranchResignationModule from '../resignation/BranchResignationModule';
+import { normalizeSchedule } from '../roster/RosterModule';
 
 const WEEKDAYS_AR = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
 
@@ -408,24 +409,36 @@ export default function BranchManagerView({
 
     // 1. If fully approved roster edit/update (only if admin approved)
     if (approvedTargetReq && (approvedTargetReq.type === 'roster_update' || approvedTargetReq.type === 'roster_edit' || approvedTargetReq.type === 'roster_edit_request')) {
-      const existingIdx = updatedRosters.findIndex(
-        (ros) => ros.employeeId === approvedTargetReq.employeeId && ros.month === approvedTargetReq.month && (String(ros.branchId || '') === String(approvedTargetReq.branchId || ''))
-      );
+      const targetEmp = (state.employees || []).find(e => String(e.id) === String(approvedTargetReq.employeeId));
+      const targetBStr = approvedTargetReq.branchId ? String(approvedTargetReq.branchId) : (targetEmp?.branchId ? String(targetEmp.branchId) : (currentBranch?.id ? String(currentBranch.id) : ''));
+
+      const normalizedSch = normalizeSchedule(approvedTargetReq.schedule || approvedTargetReq.newSchedule);
+
       const activeRosterObj = {
-        id: approvedTargetReq.id,
+        id: approvedTargetReq.id || `roster_${Date.now()}`,
         employeeId: approvedTargetReq.employeeId,
-        branchId: approvedTargetReq.branchId || currentBranch?.id || null,
-        month: approvedTargetReq.month,
+        branchId: targetBStr || approvedTargetReq.branchId || currentBranch?.id || null,
+        month: approvedTargetReq.month || new Date().toISOString().slice(0, 7),
         fromDate: approvedTargetReq.fromDate,
         toDate: approvedTargetReq.toDate,
-        schedule: approvedTargetReq.schedule,
+        schedule: normalizedSch,
         status: 'approved',
         approvedAt: new Date().toISOString()
       };
+
+      const existingIdx = updatedRosters.findIndex(
+        (ros) => String(ros.employeeId) === String(approvedTargetReq.employeeId) && 
+                 (ros.month === approvedTargetReq.month || !approvedTargetReq.month || !ros.month) && 
+                 (String(ros.branchId || '') === targetBStr || (!ros.branchId && !targetBStr))
+      );
+
       if (existingIdx >= 0) {
         updatedRosters[existingIdx] = activeRosterObj;
       } else {
-        updatedRosters.push(activeRosterObj);
+        updatedRosters = updatedRosters.filter(
+          (ros) => !(String(ros.employeeId) === String(approvedTargetReq.employeeId) && String(ros.branchId || '') === targetBStr && (ros.month === approvedTargetReq.month || !approvedTargetReq.month || !ros.month))
+        );
+        updatedRosters.unshift(activeRosterObj);
       }
     }
 
@@ -1418,40 +1431,34 @@ export default function BranchManagerView({
                 {isRoster && (() => {
                   const existingRoster = (state.rosters || []).find(r => 
                     String(r.employeeId) === String(previewModalReq.employeeId) &&
-                    (!previewModalReq.month || r.month === previewModalReq.month)
+                    (!previewModalReq.month || r.month === previewModalReq.month) &&
+                    (String(r.branchId || '') === String(previewModalReq.branchId || '') || !previewModalReq.branchId)
                   );
 
-                  const prevSchedule = previewModalReq.oldSchedule || previewModalReq.previousSchedule || existingRoster?.schedule || {};
-                  const newSchedule = previewModalReq.schedule || previewModalReq.newSchedule || {};
+                  const prevSchedule = normalizeSchedule(previewModalReq.oldSchedule || previewModalReq.previousSchedule || existingRoster?.schedule);
+                  const newSchedule = normalizeSchedule(previewModalReq.schedule || previewModalReq.newSchedule);
 
-                  const daysOfWeek = [
-                    { key: 'saturday', label: 'السبت' },
-                    { key: 'sunday', label: 'الأحد' },
-                    { key: 'monday', label: 'الإثنين' },
-                    { key: 'tuesday', label: 'الثلاثاء' },
-                    { key: 'wednesday', label: 'الأربعاء' },
-                    { key: 'thursday', label: 'الخميس' },
-                    { key: 'friday', label: 'الجمعة' },
+                  const standardDays = [
+                    { key: 'السبت', label: 'السبت' },
+                    { key: 'الأحد', label: 'الأحد' },
+                    { key: 'الاثنين', label: 'الاثنين' },
+                    { key: 'الثلاثاء', label: 'الثلاثاء' },
+                    { key: 'الأربعاء', label: 'الأربعاء' },
+                    { key: 'الخميس', label: 'الخميس' },
+                    { key: 'الجمعة', label: 'الجمعة' },
                   ];
 
-                  const dayNameMap = {
-                    'saturday': 'السبت',
-                    'sunday': 'الأحد',
-                    'monday': 'الإثنين',
-                    'tuesday': 'الثلاثاء',
-                    'wednesday': 'الأربعاء',
-                    'thursday': 'الخميس',
-                    'friday': 'الجمعة'
-                  };
-
-                  const customDateKeys = Object.keys(newSchedule).filter(k => 
-                    !daysOfWeek.some(d => d.key === k || d.label === k || d.label.replace('الإثنين', 'الاثنين') === k)
-                  );
+                  const isIsoDate = (k) => /^\d{4}-\d{2}-\d{2}$/.test(k);
+                  const customDateKeys = Object.keys(previewModalReq.schedule || {}).filter(isIsoDate);
                   const hasCustomDates = customDateKeys.length > 0;
 
                   const displayList = hasCustomDates 
-                    ? customDateKeys.sort().map(dateKey => ({ key: dateKey, label: `${dateKey} (${getArabicWeekday(dateKey)})` }))
-                    : daysOfWeek;
+                    ? customDateKeys.sort().map(dateKey => {
+                        const d = new Date(dateKey);
+                        const arDay = !isNaN(d.getTime()) ? d.toLocaleDateString('ar-EG', { weekday: 'long' }) : '';
+                        return { key: dateKey, label: arDay ? `${dateKey} (${arDay})` : dateKey };
+                      })
+                    : standardDays;
 
                   return (
                     <div style={{ background: '#f8fafc', padding: '18px', borderRadius: '14px', border: '1px solid #cbd5e1' }}>
@@ -1482,20 +1489,17 @@ export default function BranchManagerView({
                           </thead>
                           <tbody>
                             {displayList.map((dayItem) => {
-                              const arKey = dayNameMap[dayItem.key] || dayItem.label;
-                              const arKeyAlt = arKey ? arKey.replace('الإثنين', 'الاثنين') : '';
-                              
-                              const oldDay = prevSchedule[dayItem.key] || prevSchedule[arKey] || prevSchedule[arKeyAlt] || { isOff: dayItem.key === 'friday', checkIn: '09:00', checkOut: '17:00', hours: empObj?.workHoursPerDay || 8 };
-                              const newDay = newSchedule[dayItem.key] || newSchedule[arKey] || newSchedule[arKeyAlt] || oldDay;
+                              const oldDay = prevSchedule[dayItem.key] || { type: dayItem.key === 'الجمعة' ? 'off' : 'shift', start: '08:00', end: '16:00' };
+                              const newDay = newSchedule[dayItem.key] || oldDay;
 
-                              const isOldOff = oldDay.isOff || oldDay.type === 'off';
-                              const isNewOff = newDay.isOff || newDay.type === 'off';
+                              const isOldOff = oldDay.type === 'off' || oldDay.isOff === true;
+                              const isNewOff = newDay.type === 'off' || newDay.isOff === true;
 
-                              const oldStart = oldDay.checkIn || oldDay.start || oldDay.startTime || (isOldOff ? '—' : '09:00');
-                              const oldEnd = oldDay.checkOut || oldDay.end || oldDay.endTime || (isOldOff ? '—' : '17:00');
+                              const oldStart = oldDay.start || oldDay.checkIn || (isOldOff ? '—' : '08:00');
+                              const oldEnd = oldDay.end || oldDay.checkOut || (isOldOff ? '—' : '16:00');
 
-                              const newStart = newDay.checkIn || newDay.start || newDay.startTime || (isNewOff ? '—' : '09:00');
-                              const newEnd = newDay.checkOut || newDay.end || newDay.endTime || (isNewOff ? '—' : '17:00');
+                              const newStart = newDay.start || newDay.checkIn || (isNewOff ? '—' : '08:00');
+                              const newEnd = newDay.end || newDay.checkOut || (isNewOff ? '—' : '16:00');
 
                               const isChanged = (isOldOff !== isNewOff) || (oldStart !== newStart) || (oldEnd !== newEnd);
 

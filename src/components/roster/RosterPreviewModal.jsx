@@ -1,6 +1,61 @@
 import React from 'react';
 import { getResolvedEmployeeRoster } from './RosterModule';
 
+function getDayShiftInfo(schedule, day, fallbackHours = 8) {
+  if (!schedule || typeof schedule !== 'object') {
+    const isFriday = day.key === 'friday' || day.label === 'الجمعة';
+    return {
+      isOff: isFriday,
+      checkIn: isFriday ? '—' : '08:00',
+      checkOut: isFriday ? '—' : '16:00',
+      hours: isFriday ? 0 : fallbackHours
+    };
+  }
+
+  const possibleKeys = [
+    day.label,
+    day.key,
+    day.label.replace('الإثنين', 'الاثنين'),
+    day.label.replace('الاثنين', 'الإثنين'),
+    day.label.replace('الأحد', 'الاحد'),
+    day.label.replace('الأربعاء', 'الاربعاء')
+  ];
+
+  let raw = null;
+  for (const k of possibleKeys) {
+    if (schedule[k] !== undefined) {
+      raw = schedule[k];
+      break;
+    }
+  }
+
+  if (!raw) {
+    const normTarget = day.label.replace(/[\u0625\u0623\u0622]/g, 'ا');
+    for (const [k, v] of Object.entries(schedule)) {
+      if (k.replace(/[\u0625\u0623\u0622]/g, 'ا') === normTarget || String(k).toLowerCase() === day.key.toLowerCase()) {
+        raw = v;
+        break;
+      }
+    }
+  }
+
+  if (raw && typeof raw === 'object') {
+    const isOff = raw.type === 'off' || raw.isOff === true;
+    const checkIn = raw.start || raw.checkIn || (isOff ? '—' : '08:00');
+    const checkOut = raw.end || raw.checkOut || (isOff ? '—' : '16:00');
+    let hours = raw.hours !== undefined ? raw.hours : (isOff ? 0 : fallbackHours);
+    return { isOff, checkIn, checkOut, hours };
+  }
+
+  const isFriday = day.key === 'friday' || day.label === 'الجمعة';
+  return {
+    isOff: isFriday,
+    checkIn: isFriday ? '—' : '08:00',
+    checkOut: isFriday ? '—' : '16:00',
+    hours: isFriday ? 0 : fallbackHours
+  };
+}
+
 export default function RosterPreviewModal({
   employee,
   state,
@@ -34,7 +89,7 @@ export default function RosterPreviewModal({
               كود: {employee.code} | {isMultiBranch ? `مسجل في ${employee.branchesDetails.length} فروع` : `الفرع: ${employee.branchName || 'الرئيسي'}`} | المسمى الوظيفي: {employee.jobTitle}
             </span>
           </div>
-          <button className="btn btn-ghost" onClick={onClose}>✕ إغلاق Window</button>
+          <button className="btn btn-ghost" onClick={onClose}>✕ إغلاق النافذة</button>
         </div>
 
         {isMultiBranch ? (
@@ -80,11 +135,8 @@ export default function RosterPreviewModal({
                       </thead>
                       <tbody>
                         {daysOfWeek.map((day) => {
-                          const rawShift = bRoster?.schedule?.[day.label] || bRoster?.schedule?.[day.key] || bRoster?.schedule?.[day.label.replace('الإثنين', 'الاثنين')];
-                          const isOff = rawShift ? (rawShift.type === 'off' || rawShift.isOff === true) : (day.key === 'friday');
-                          const checkIn = rawShift?.start || rawShift?.checkIn || '09:00';
-                          const checkOut = rawShift?.end || rawShift?.checkOut || '17:00';
-                          const hours = rawShift?.hours || bd.workHoursPerDay || 8;
+                          const shiftInfo = getDayShiftInfo(bRoster?.schedule, day, bd.workHoursPerDay || 8);
+                          const { isOff, checkIn, checkOut, hours } = shiftInfo;
 
                           return (
                             <tr key={day.key} style={{ background: isOff ? '#fef2f2' : 'transparent' }}>
@@ -153,11 +205,8 @@ export default function RosterPreviewModal({
                 </thead>
                 <tbody>
                   {daysOfWeek.map((day) => {
-                    const rawShift = empRoster?.schedule?.[day.label] || empRoster?.schedule?.[day.key] || empRoster?.schedule?.[day.label.replace('الإثنين', 'الاثنين')];
-                    const isOff = rawShift ? (rawShift.type === 'off' || rawShift.isOff === true) : (day.key === 'friday');
-                    const checkIn = rawShift?.start || rawShift?.checkIn || '09:00';
-                    const checkOut = rawShift?.end || rawShift?.checkOut || '17:00';
-                    const hours = rawShift?.hours || employee.workHoursPerDay || 8;
+                    const shiftInfo = getDayShiftInfo(empRoster?.schedule, day, employee.workHoursPerDay || 8);
+                    const { isOff, checkIn, checkOut, hours } = shiftInfo;
 
                     return (
                       <tr key={day.key} style={{ background: isOff ? '#fef2f2' : 'transparent' }}>
