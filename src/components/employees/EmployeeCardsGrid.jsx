@@ -1,5 +1,5 @@
 import React from 'react';
-import { fmt } from '../../utils/formatters';
+import { fmt, todayStr } from '../../utils/formatters';
 
 export default function EmployeeCardsGrid({
   state,
