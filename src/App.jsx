@@ -965,15 +965,15 @@ export default function App() {
       }
 
       // 2. Roster Update Request Activation
-      if (target.type === 'roster_update') {
+      if (target.type === 'roster_update' || target.type === 'roster_edit' || target.type === 'roster_edit_request') {
         const existingIdx = updatedRosters.findIndex(
-          (ros) => ros.employeeId === target.employeeId && ros.month === target.month && (ros.branchId === target.branchId || (!ros.branchId && !target.branchId))
+          (ros) => String(ros.employeeId) === String(target.employeeId) && (ros.month === target.month || !target.month || !ros.month) && (String(ros.branchId || '') === String(target.branchId || ''))
         );
         const activeRosterObj = {
-          id: target.id,
+          id: target.id || `roster_${Date.now()}`,
           employeeId: target.employeeId,
           branchId: target.branchId || null,
-          month: target.month,
+          month: target.month || todayStr().slice(0, 7),
           fromDate: target.fromDate,
           toDate: target.toDate,
           schedule: target.schedule,

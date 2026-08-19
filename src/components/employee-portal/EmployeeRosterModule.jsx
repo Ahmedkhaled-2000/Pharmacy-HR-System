@@ -63,6 +63,108 @@ function buildMonthCalendar(selectedMonth, schedule, fromDate, toDate) {
   return result;
 }
 
+// Normalize schedule to standard Arabic day names and structure
+export function normalizeSchedule(rawSchedule) {
+  if (!rawSchedule || typeof rawSchedule !== 'object') return DEFAULT_SCHEDULE;
+  
+  const normalized = { ...DEFAULT_SCHEDULE };
+  
+  const dayKeyMap = {
+    'saturday': 'السبت',
+    'sunday': 'الأحد',
+    'monday': 'الاثنين',
+    'tuesday': 'الثلاثاء',
+    'wednesday': 'الأربعاء',
+    'thursday': 'الخميس',
+    'friday': 'الجمعة',
+    'السبت': 'السبت',
+    'الأحد': 'الأحد',
+    'الاحد': 'الأحد',
+    'الإثنين': 'الاثنين',
+    'الاثنين': 'الاثنين',
+    'الثلاثاء': 'الثلاثاء',
+    'الأربعاء': 'الأربعاء',
+    'الاربعاء': 'الأربعاء',
+    'الخميس': 'الخميس',
+    'الجمعة': 'الجمعة'
+  };
+
+  Object.entries(rawSchedule).forEach(([key, val]) => {
+    const cleanKey = String(key).trim().toLowerCase();
+    const mappedDay = dayKeyMap[cleanKey] || dayKeyMap[key];
+    if (mappedDay && val && typeof val === 'object') {
+      const isOff = val.type === 'off' || val.isOff === true;
+      normalized[mappedDay] = {
+        type: isOff ? 'off' : 'shift',
+        start: val.start || val.checkIn || '08:00',
+        end: val.end || val.checkOut || '16:00'
+      };
+    }
+  });
+
+  return normalized;
+}
+
+export function getResolvedEmployeeRoster(emp, targetBranchId, selectedMonth, state) {
+  if (!emp || !state) return null;
+  const empIdStr = String(emp.id);
+  const targetBIdStr = targetBranchId ? String(targetBranchId) : null;
+  const rosters = state.rosters || [];
+  const requests = state.requests || [];
+
+  // 1. Primary source: state.rosters
+  const fromRosters = rosters.find((r) => {
+    if (String(r.employeeId) !== empIdStr) return false;
+    if (selectedMonth && r.month && r.month !== selectedMonth) return false;
+    if (r.status !== 'approved') return false;
+    if (targetBIdStr) {
+      return (
+        String(r.branchId || '') === targetBIdStr ||
+        (!r.branchId && (String(emp.branchId || '') === targetBIdStr || String(emp.branchesDetails?.[0]?.branchId || '') === targetBIdStr))
+      );
+    }
+    return true;
+  });
+
+  if (fromRosters) {
+    return {
+      ...fromRosters,
+      schedule: normalizeSchedule(fromRosters.schedule)
+    };
+  }
+
+  // 2. Secondary source: approved requests in state.requests (approved by Admin)
+  const fromRequests = requests.find((r) => {
+    if (String(r.employeeId) !== empIdStr) return false;
+    if (r.type !== 'roster_update' && r.type !== 'roster_edit' && r.type !== 'roster_edit_request') return false;
+    if (selectedMonth && r.month && r.month !== selectedMonth) return false;
+    if (r.status !== 'approved' && !r.adminApproved) return false;
+    if (targetBIdStr) {
+      return (
+        String(r.branchId || '') === targetBIdStr ||
+        (!r.branchId && (String(emp.branchId || '') === targetBIdStr || String(emp.branchesDetails?.[0]?.branchId || '') === targetBIdStr))
+      );
+    }
+    return true;
+  });
+
+  if (fromRequests) {
+    return {
+      id: fromRequests.id,
+      employeeId: fromRequests.employeeId,
+      branchId: fromRequests.branchId || targetBranchId || emp.branchId,
+      month: fromRequests.month || selectedMonth,
+      fromDate: fromRequests.fromDate,
+      toDate: fromRequests.toDate,
+      schedule: normalizeSchedule(fromRequests.schedule),
+      status: 'approved',
+      approvedAt: fromRequests.approvedAt || fromRequests.createdAt
+    };
+  }
+
+  return null;
+}
+
 export default function EmployeeRosterModule({
   emp,
   state,
@@ -91,16 +193,15 @@ export default function EmployeeRosterModule({
     return `${selectedMonth}-${String(daysInMonth).padStart(2, '0')}`;
   });
 
-  // Sync state when selectedBranchId, activeFormBranchId, selectedMonth, or state.rosters change
+  // Active Approved Roster for current selected branch & month
+  const currentRoster = React.useMemo(() => {
+    return getResolvedEmployeeRoster(emp, curBranch, selectedMonth, state);
+  }, [emp, curBranch, selectedMonth, state]);
+
+  // Sync state when selectedBranchId, activeFormBranchId, selectedMonth, or state changes
   useEffect(() => {
     const targetBranch = selectedBranchId || activeFormBranchId || (isMultiBranch ? emp.branchesDetails?.[0]?.branchId : emp.branchId);
-    const approved = (state.rosters || []).find(
-      (r) =>
-        r.employeeId === emp.id &&
-        r.month === selectedMonth &&
-        r.status === 'approved' &&
-        (String(r.branchId || '') === String(targetBranch || '') || (!r.branchId && (String(emp.branchId || '') === String(targetBranch || '') || String(emp.branchesDetails?.[0]?.branchId || '') === String(targetBranch || ''))))
-    );
+    const approved = getResolvedEmployeeRoster(emp, targetBranch, selectedMonth, state);
 
     if (approved?.schedule) {
       setScheduleInputs(approved.schedule);
@@ -117,21 +218,12 @@ export default function EmployeeRosterModule({
       const daysInMonth = new Date(y, m, 0).getDate();
       setToDate(`${selectedMonth}-${String(daysInMonth).padStart(2, '0')}`);
     }
-  }, [selectedBranchId, activeFormBranchId, selectedMonth, state.rosters, emp.id, emp.branchId]);
-
-  // Active Approved Roster for current selected branch & month
-  const currentRoster = (state.rosters || []).find(
-    (r) =>
-      r.employeeId === emp.id &&
-      r.month === selectedMonth &&
-      r.status === 'approved' &&
-      (String(r.branchId || '') === String(curBranch || '') || (!r.branchId && (String(emp.branchId || '') === String(curBranch || '') || String(emp.branchesDetails?.[0]?.branchId || '') === String(curBranch || ''))))
-  );
+  }, [selectedBranchId, activeFormBranchId, selectedMonth, state.rosters, state.requests, emp.id, emp.branchId]);
 
   // Pending Roster Requests for Employee
   const pendingRosterReq = (state.requests || []).find(
     (r) =>
-      r.employeeId === emp.id &&
+      String(r.employeeId) === String(emp.id) &&
       (r.type === 'roster_update' || r.type === 'roster_edit' || r.type === 'roster_edit_request') &&
       (r.month === selectedMonth || !r.month) &&
       (r.status === 'pending' || r.status === 'pending_admin') &&
@@ -336,13 +428,7 @@ export default function EmployeeRosterModule({
           const branchObj = (state.branches || []).find((b) => b.id === bId);
           const bName = branchObj ? branchObj.name : `فرع ${bId}`;
 
-          const bRoster = (state.rosters || []).find(
-            (r) =>
-              r.employeeId === emp.id &&
-              r.month === selectedMonth &&
-              (r.branchId === bId || (!r.branchId && emp.branchesDetails[0].branchId === bId)) &&
-              r.status === 'approved'
-          );
+          const bRoster = getResolvedEmployeeRoster(emp, bId, selectedMonth, state);
 
           const bSchedule = bRoster?.schedule || DEFAULT_SCHEDULE;
           const bCalendar = buildMonthCalendar(selectedMonth, bSchedule, bRoster?.fromDate || fromDate, bRoster?.toDate || toDate);

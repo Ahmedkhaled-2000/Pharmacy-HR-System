@@ -259,13 +259,13 @@ export default function RequestsModule({
 
     if (targetReq.type === 'roster_update' || targetReq.type === 'roster_edit' || targetReq.type === 'roster_edit_request') {
       const existingIdx = updatedRosters.findIndex(
-        (ros) => ros.employeeId === targetReq.employeeId && ros.month === targetReq.month && (String(ros.branchId || '') === String(targetReq.branchId || ''))
+        (ros) => String(ros.employeeId) === String(targetReq.employeeId) && (ros.month === targetReq.month || !targetReq.month || !ros.month) && (String(ros.branchId || '') === String(targetReq.branchId || ''))
       );
       const activeRosterObj = {
-        id: targetReq.id,
+        id: targetReq.id || `roster_${Date.now()}`,
         employeeId: targetReq.employeeId,
         branchId: targetReq.branchId || null,
-        month: targetReq.month,
+        month: targetReq.month || new Date().toISOString().slice(0, 7),
         fromDate: targetReq.fromDate,
         toDate: targetReq.toDate,
         schedule: targetReq.schedule,

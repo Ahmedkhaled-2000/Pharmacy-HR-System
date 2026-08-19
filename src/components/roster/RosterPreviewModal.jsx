@@ -80,30 +80,29 @@ export default function RosterPreviewModal({
                       </thead>
                       <tbody>
                         {daysOfWeek.map((day) => {
-                          const shiftData = bRoster?.schedule?.[day.key] || {
-                            isOff: day.key === 'friday',
-                            checkIn: '09:00',
-                            checkOut: '17:00',
-                            hours: bd.workHoursPerDay || 8
-                          };
+                          const rawShift = bRoster?.schedule?.[day.label] || bRoster?.schedule?.[day.key] || bRoster?.schedule?.[day.label.replace('الإثنين', 'الاثنين')];
+                          const isOff = rawShift ? (rawShift.type === 'off' || rawShift.isOff === true) : (day.key === 'friday');
+                          const checkIn = rawShift?.start || rawShift?.checkIn || '09:00';
+                          const checkOut = rawShift?.end || rawShift?.checkOut || '17:00';
+                          const hours = rawShift?.hours || bd.workHoursPerDay || 8;
 
                           return (
-                            <tr key={day.key} style={{ background: shiftData.isOff ? '#fef2f2' : 'transparent' }}>
+                            <tr key={day.key} style={{ background: isOff ? '#fef2f2' : 'transparent' }}>
                               <td style={{ fontWeight: '800' }}>{day.label}</td>
                               <td>
-                                {shiftData.isOff ? <span className="badge badge-danger">🔴 راحة أسبوعية (Off)</span> : <span className="badge badge-success">🟢 وردية عمل عادية</span>}
+                                {isOff ? <span className="badge badge-danger">🔴 راحة أسبوعية (Off)</span> : <span className="badge badge-success">🟢 وردية عمل عادية</span>}
                               </td>
-                              <td style={{ fontWeight: '700', color: shiftData.isOff ? 'var(--muted)' : '#15803d' }}>
-                                {shiftData.isOff ? '—' : (shiftData.checkIn || shiftData.start || '09:00')}
+                              <td style={{ fontWeight: '700', color: isOff ? 'var(--muted)' : '#15803d' }}>
+                                {isOff ? '—' : checkIn}
                               </td>
-                              <td style={{ fontWeight: '700', color: shiftData.isOff ? 'var(--muted)' : '#b91c1c' }}>
-                                {shiftData.isOff ? '—' : (shiftData.checkOut || shiftData.end || '17:00')}
+                              <td style={{ fontWeight: '700', color: isOff ? 'var(--muted)' : '#b91c1c' }}>
+                                {isOff ? '—' : checkOut}
                               </td>
                               <td style={{ fontWeight: '700' }}>
-                                {shiftData.isOff ? '0 ساعة' : `${shiftData.hours || bd.workHoursPerDay || 8} ساعات`}
+                                {isOff ? '0 ساعة' : `${hours} ساعات`}
                               </td>
                               <td>
-                                {shiftData.isOff ? <span style={{ color: '#dc2626', fontSize: '12px' }}>راحة رسمية</span> : <span style={{ color: '#16a34a', fontSize: '12px' }}>مجدول</span>}
+                                {isOff ? <span style={{ color: '#dc2626', fontSize: '12px' }}>راحة رسمية</span> : <span style={{ color: '#16a34a', fontSize: '12px' }}>مجدول</span>}
                               </td>
                             </tr>
                           );
@@ -135,7 +134,7 @@ export default function RosterPreviewModal({
                 <span style={{ fontSize: '22px' }}>🚨</span>
                 <div>
                   <div style={{ fontSize: '14px', fontWeight: '900' }}>⚠️ تنبيه عاجل للإدارة العليا:</div>
-                  <div>تم اعتماد الجدول الشهري للموظف، ولكن لم يتم وضع أو تحديد جدول شهري تفصيلي لهذا الموظف حتى الآن!</div>
+                  <div>تم اعتماد الجدول الشهري للموظف، ولكن لم يتم وضع أو تحديد جدول شهري تفصيلي لهذا الموظف!</div>
                 </div>
               </div>
             )}
@@ -154,34 +153,33 @@ export default function RosterPreviewModal({
                 </thead>
                 <tbody>
                   {daysOfWeek.map((day) => {
-                    const shiftData = empRoster?.schedule?.[day.key] || {
-                      isOff: day.key === 'friday',
-                      checkIn: '09:00',
-                      checkOut: '17:00',
-                      hours: 8
-                    };
+                    const rawShift = empRoster?.schedule?.[day.label] || empRoster?.schedule?.[day.key] || empRoster?.schedule?.[day.label.replace('الإثنين', 'الاثنين')];
+                    const isOff = rawShift ? (rawShift.type === 'off' || rawShift.isOff === true) : (day.key === 'friday');
+                    const checkIn = rawShift?.start || rawShift?.checkIn || '09:00';
+                    const checkOut = rawShift?.end || rawShift?.checkOut || '17:00';
+                    const hours = rawShift?.hours || employee.workHoursPerDay || 8;
 
                     return (
-                      <tr key={day.key} style={{ background: shiftData.isOff ? '#fef2f2' : 'transparent' }}>
+                      <tr key={day.key} style={{ background: isOff ? '#fef2f2' : 'transparent' }}>
                         <td style={{ fontWeight: '800' }}>{day.label}</td>
                         <td>
-                          {shiftData.isOff ? (
+                          {isOff ? (
                             <span className="badge badge-danger">🔴 راحة أسبوعية (Off)</span>
                           ) : (
                             <span className="badge badge-success">🟢 وردية عمل عادية</span>
                           )}
                         </td>
-                        <td style={{ fontWeight: '700', color: shiftData.isOff ? 'var(--muted)' : '#15803d' }}>
-                          {shiftData.isOff ? '—' : (shiftData.checkIn || '09:00')}
+                        <td style={{ fontWeight: '700', color: isOff ? 'var(--muted)' : '#15803d' }}>
+                          {isOff ? '—' : checkIn}
                         </td>
-                        <td style={{ fontWeight: '700', color: shiftData.isOff ? 'var(--muted)' : '#b91c1c' }}>
-                          {shiftData.isOff ? '—' : (shiftData.checkOut || '17:00')}
+                        <td style={{ fontWeight: '700', color: isOff ? 'var(--muted)' : '#b91c1c' }}>
+                          {isOff ? '—' : checkOut}
                         </td>
                         <td style={{ fontWeight: '700' }}>
-                          {shiftData.isOff ? '0 ساعة' : `${shiftData.hours || 8} ساعات`}
+                          {isOff ? '0 ساعة' : `${hours} ساعات`}
                         </td>
                         <td>
-                          {shiftData.isOff ? (
+                          {isOff ? (
                             <span style={{ color: '#dc2626', fontSize: '12px' }}>راحة رسمية</span>
                           ) : (
                             <span style={{ color: '#16a34a', fontSize: '12px' }}>مجدول</span>
