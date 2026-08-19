@@ -266,7 +266,9 @@ export default function ArchiveSystemView({ isStandalone = false }) {
           setEmployeeToEdit(null);
         }}
         employeeToEdit={employeeToEdit}
+        employees={employees}
         onEmployeeSaved={loadAllData}
+        onEmployeeDeleted={loadAllData}
       />
 
       <FolderScanReviewModal
