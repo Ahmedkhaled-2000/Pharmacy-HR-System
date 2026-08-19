@@ -432,7 +432,7 @@ export default function PayrollModule({
               </div>
 
               {/* Salary Breakdown */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px', marginBottom: '20px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px', marginBottom: '20px' }}>
                 <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '10px', border: '1px solid var(--border)' }}>
                   <span style={{ fontSize: '12px', color: 'var(--muted)' }}>1. سعر الساعة الشهري</span>
                   <h4 style={{ margin: '4px 0 0 0', color: 'var(--primary-dark)' }}>{empSalary.toLocaleString()} ج.م</h4>
@@ -443,15 +443,29 @@ export default function PayrollModule({
                   <h4 style={{ margin: '4px 0 0 0', color: 'var(--primary-dark)' }}>{empSum.hours || 0} ساعة ({fmt(empSum.baseEarnings)} ج.م)</h4>
                 </div>
 
+                {empSum.totalAllowances > 0 && (
+                  <div style={{ background: '#eff6ff', padding: '14px', borderRadius: '10px', border: '1px solid #bfdbfe' }}>
+                    <span style={{ fontSize: '12px', color: '#1e40af' }}>3. البدلات الثابتة</span>
+                    <h4 style={{ margin: '4px 0 0 0', color: '#1d4ed8' }}>
+                      +{fmt(empSum.totalAllowances)} ج.م
+                    </h4>
+                    <div style={{ fontSize: '11px', color: '#1e40af', marginTop: '2px' }}>
+                      {empSum.managementAllowance > 0 && `إدارة: ${fmt(empSum.managementAllowance)} | `}
+                      {empSum.transportAllowance > 0 && `مواصلات: ${fmt(empSum.transportAllowance)} | `}
+                      {empSum.extraAllowance > 0 && `${empSum.extraAllowanceTitle || 'إضافي'}: ${fmt(empSum.extraAllowance)}`}
+                    </div>
+                  </div>
+                )}
+
                 <div style={{ background: '#f0fdf4', padding: '14px', borderRadius: '10px', border: '1px solid #bbf7d0' }}>
-                  <span style={{ fontSize: '12px', color: '#166534' }}>3. المكافآت والحوافز</span>
+                  <span style={{ fontSize: '12px', color: '#166534' }}>{empSum.totalAllowances > 0 ? '4.' : '3.'} المكافآت والحوافز</span>
                   <h4 style={{ margin: '4px 0 0 0', color: '#15803d' }}>
                     +{fmt(empSum.totalBonus)} ج.م
                   </h4>
                 </div>
 
                 <div style={{ background: '#fef2f2', padding: '14px', borderRadius: '10px', border: '1px solid #fecaca' }}>
-                  <span style={{ fontSize: '12px', color: '#991b1b' }}>4. إجمالي الخصومات والغيابات</span>
+                  <span style={{ fontSize: '12px', color: '#991b1b' }}>{empSum.totalAllowances > 0 ? '5.' : '4.'} إجمالي الخصومات والغيابات</span>
                   <h4 style={{ margin: '4px 0 0 0', color: '#dc2626' }}>
                     -{fmt(totalDed)} ج.م
                   </h4>

@@ -76,6 +76,12 @@ export default function PayslipPrintModal({
   const absenceDeduction = summary.absenceDeduction || 0;
   const netSalary = summary.netSalary || 0;
 
+  const mgmtAllowance = summary.managementAllowance !== undefined ? summary.managementAllowance : (parseFloat(emp.managementAllowance) || 0);
+  const transAllowance = summary.transportAllowance !== undefined ? summary.transportAllowance : (parseFloat(emp.transportAllowance) || 0);
+  const extAllowance = summary.extraAllowance !== undefined ? summary.extraAllowance : (parseFloat(emp.extraAllowance) || 0);
+  const extTitle = summary.extraAllowanceTitle || emp.extraAllowanceTitle || 'أجر إضافي';
+  const totalAllowances = summary.totalAllowances !== undefined ? summary.totalAllowances : (mgmtAllowance + transAllowance + extAllowance);
+
   const handlePrint = () => {
     window.print();
   };
@@ -408,8 +414,11 @@ export default function PayslipPrintModal({
               <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', fontFamily: 'Cairo', color: '#fff' }}>
                 🏆 الملخص المالي النهائي لشهر {fullMonthLabel} {isMultiBranch && !selectedBranchId ? '(شامل لكافة الفروع)' : ''}
               </h4>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '10px', fontSize: '13px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '8px', marginBottom: '10px', fontSize: '12.5px' }}>
                 <div>المستحقات الأساسية: <strong>{fmt(baseEarnings)} ج.م</strong></div>
+                {totalAllowances > 0 && (
+                  <div>+ إجمالي البدلات الثابتة: <strong>+{fmt(totalAllowances)} ج.م</strong></div>
+                )}
                 <div>+ المكافآت والحوافز: <strong>+{fmt(totalBonus)} ج.م</strong></div>
                 <div>- الخصومات والجزاءات: <strong>-{fmt(totalDeduction)} ج.م</strong></div>
               </div>
@@ -418,8 +427,40 @@ export default function PayslipPrintModal({
               </div>
             </div>
 
-            {/* Construct Full Breakdown of Bonuses, Loans, and Absence Deductions */}
+            {/* Construct Full Breakdown of Allowances, Bonuses, Loans, and Absence Deductions */}
             {(() => {
+              const allowanceItems = [];
+              if (mgmtAllowance > 0) {
+                allowanceItems.push({
+                  id: 'allowance_mgmt',
+                  date: `${month} (بدل شهري)`,
+                  typeLabel: '👔 بدل إدارة شهري',
+                  amount: mgmtAllowance,
+                  details: `بدل إدارة معتمد لشغل وظيفة (${emp.jobTitle})`,
+                  color: '#15803d'
+                });
+              }
+              if (transAllowance > 0) {
+                allowanceItems.push({
+                  id: 'allowance_trans',
+                  date: `${month} (بدل شهري)`,
+                  typeLabel: '🚗 بدل مواصلات شهري',
+                  amount: transAllowance,
+                  details: 'بدل انتقال ومواصلات شهري ثابت',
+                  color: '#15803d'
+                });
+              }
+              if (extAllowance > 0) {
+                allowanceItems.push({
+                  id: 'allowance_extra',
+                  date: `${month} (بدل شهري)`,
+                  typeLabel: `🏷️ ${extTitle}`,
+                  amount: extAllowance,
+                  details: 'أجر وبدل إضافي مخصص من قبل الإدارة',
+                  color: '#15803d'
+                });
+              }
+
               const manualItems = empAdjs.map((a) => ({
                 id: a.id,
                 date: a.date,
@@ -458,14 +499,14 @@ export default function PayslipPrintModal({
                 color: '#b91c1c'
               }] : [];
 
-              const allBreakdownItems = [...manualItems, ...loanItems, ...absenceItem];
+              const allBreakdownItems = [...allowanceItems, ...manualItems, ...loanItems, ...absenceItem];
 
               if (allBreakdownItems.length === 0) return null;
 
               return (
                 <>
                   <h4 style={{ margin: '0 0 6px 0', fontFamily: 'Cairo', color: '#0f766e', borderRight: '4px solid #0d9488', paddingRight: '8px', fontSize: '13.5px' }}>
-                    📝 تفاصيل المكافآت والخصومات والغيابات السلوكية ({allBreakdownItems.length} بند)
+                    📝 تفاصيل البدلات والمكافآت والخصومات والغيابات ({allBreakdownItems.length} بند)
                   </h4>
                   <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '16px', fontSize: '11.5px', textAlign: 'center' }}>
                     <thead>

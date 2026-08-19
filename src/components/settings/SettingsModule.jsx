@@ -12,6 +12,7 @@ import {
   removeSnapshot
 } from '../../utils/backupHelper';
 import GmailConfigCard from './GmailConfigCard';
+import { DEFAULT_JOBS, getJobsList } from '../../utils/jobsHelper';
 
 const ALL_REQUEST_TYPES = [
   { type: 'leave', label: 'طلبات الإجازات السنوية والرسمية' },
@@ -31,7 +32,16 @@ export default function SettingsModule({
   saveState,
   showToast
 }) {
-  const [activeTab, setActiveTab] = useState('general'); // 'general' | 'permissions' | 'rules' | 'gmail' | 'ip' | 'backup'
+  const [activeTab, setActiveTab] = useState('general'); // 'general' | 'jobs' | 'permissions' | 'rules' | 'gmail' | 'ip' | 'backup'
+
+  // Jobs & Roles Management State
+  const jobsList = getJobsList(state);
+  const [showJobModal, setShowJobModal] = useState(false);
+  const [editingJob, setEditingJob] = useState(null);
+  const [jobTitleInput, setJobTitleInput] = useState('');
+  const [jobIsMgmtInput, setJobIsMgmtInput] = useState(false);
+  const [jobDescInput, setJobDescInput] = useState('');
+  const [jobSearchQuery, setJobSearchQuery] = useState('');
 
   const orgSettings = state.orgSettings || {};
   const [orgName, setOrgName] = useState(orgSettings.orgName || 'مجموعة الصيدليات الطبية');
@@ -489,13 +499,16 @@ export default function SettingsModule({
             ⚙️ إعدادات منظومة الموارد البشرية والأجهزة والأدمن
           </h2>
           <p style={{ margin: '4px 0 0 0', color: 'var(--muted)', fontSize: '14px' }}>
-            تعديل اسم وشعار الصيدلية، قواعد التتابع المزدوج للموافقات، الصلاحيات، ومركز النسخ الاحتياطي
+            تعديل اسم وشعار الصيدلية، دليل الوظائف والكوادر، قواعد التتابع المزدوج للموافقات، الصلاحيات، ومركز النسخ الاحتياطي
           </p>
         </div>
 
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           <button className={`btn ${activeTab === 'general' ? 'btn-start' : 'btn-ghost'}`} onClick={() => setActiveTab('general')}>
             🏥 بيانات الصيدلية والمدير العام
+          </button>
+          <button className={`btn ${activeTab === 'jobs' ? 'btn-start' : 'btn-ghost'}`} onClick={() => setActiveTab('jobs')}>
+            💼 الوظائف والكوادر
           </button>
           <button className={`btn ${activeTab === 'permissions' ? 'btn-start' : 'btn-ghost'}`} onClick={() => setActiveTab('permissions')}>
             🔒 إدارة الصلاحيات
@@ -1243,6 +1256,325 @@ export default function SettingsModule({
         </div>
       )}
 
+
+      {/* Tab: Jobs & Roles Management */}
+      {activeTab === 'jobs' && (
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', padding: '24px', borderRadius: '16px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          {/* Header & Actions */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+            <div>
+              <h3 style={{ margin: 0, color: 'var(--primary-dark)', fontFamily: 'Cairo', fontSize: '18px' }}>
+                💼 دليل ومسميات الوظائف والكوادر بالشركة
+              </h3>
+              <p style={{ margin: '4px 0 0 0', color: 'var(--muted)', fontSize: '13px' }}>
+                تعريف الوظائف وتصنيفها إلى (وظائف إدارية) تمنح أحقية بدل الإدارة أو (كوادر تشغيلية) ليتم اختيارها في ملفات الموظفين.
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                type="button"
+                className="btn btn-start"
+                onClick={() => {
+                  setEditingJob(null);
+                  setJobTitleInput('');
+                  setJobIsMgmtInput(false);
+                  setJobDescInput('');
+                  setShowJobModal(true);
+                }}
+              >
+                ➕ إضافة وظيفة جديدة
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={async () => {
+                  if (window.confirm('هل تريد استعادة قائمة الوظائف القياسية الافتراضية؟')) {
+                    const updatedState = { ...state, jobs: DEFAULT_JOBS };
+                    setState(updatedState);
+                    if (saveState) await saveState(updatedState);
+                    showToast?.('🔄 تمت استعادة قائمة الوظائف الافتراضية بنجاح');
+                  }
+                }}
+              >
+                🔄 استعادة الافتراضي
+              </button>
+            </div>
+          </div>
+
+          {/* Quick Statistics Banner */}
+          {(() => {
+            const allEmps = state.employees || [];
+            const totalJobs = jobsList.length;
+            const mgmtJobs = jobsList.filter(j => j.isManagement || j.isAdminRole).length;
+            const operationalJobs = totalJobs - mgmtJobs;
+
+            return (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px' }}>
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '14px' }}>
+                  <span style={{ fontSize: '12px', color: 'var(--muted)' }}>إجمالي الوظائف المعرفة</span>
+                  <div style={{ fontSize: '20px', fontWeight: 'bold', color: 'var(--primary-dark)', marginTop: '4px' }}>
+                    {totalJobs} وظيفة
+                  </div>
+                </div>
+
+                <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '12px', padding: '14px' }}>
+                  <span style={{ fontSize: '12px', color: '#166534' }}>👔 وظائف إدارية (بدل إدارة)</span>
+                  <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#15803d', marginTop: '4px' }}>
+                    {mgmtJobs} وظيفة
+                  </div>
+                </div>
+
+                <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '12px', padding: '14px' }}>
+                  <span style={{ fontSize: '12px', color: '#1e40af' }}>🏬 كوادر تشغيلية وفنية</span>
+                  <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#1d4ed8', marginTop: '4px' }}>
+                    {operationalJobs} كادر
+                  </div>
+                </div>
+
+                <div style={{ background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: '12px', padding: '14px' }}>
+                  <span style={{ fontSize: '12px', color: '#6b21a8' }}>👥 إجمالي الموظفين المسجلين</span>
+                  <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#7e22ce', marginTop: '4px' }}>
+                    {allEmps.length} موظف
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Search Filter Bar */}
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+            <input
+              type="text"
+              placeholder="🔍 بحث باسم الوظيفة أو الوصف..."
+              value={jobSearchQuery}
+              onChange={(e) => setJobSearchQuery(e.target.value)}
+              style={{ flex: 1, padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)' }}
+            />
+          </div>
+
+          {/* Jobs Table */}
+          <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: '12px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'right', fontSize: '13.5px' }}>
+              <thead>
+                <tr style={{ background: 'var(--surface-muted)', borderBottom: '1px solid var(--border)' }}>
+                  <th style={{ padding: '12px' }}>#</th>
+                  <th style={{ padding: '12px' }}>المسمى الوظيفي</th>
+                  <th style={{ padding: '12px' }}>تصنيف الوظيفة</th>
+                  <th style={{ padding: '12px' }}>الوصف والمهام</th>
+                  <th style={{ padding: '12px', textAlign: 'center' }}>الموظفون الحاليون</th>
+                  <th style={{ padding: '12px', textAlign: 'center' }}>الإجراءات</th>
+                </tr>
+              </thead>
+              <tbody>
+                {jobsList
+                  .filter(j => !jobSearchQuery || j.title.toLowerCase().includes(jobSearchQuery.toLowerCase()) || (j.description && j.description.toLowerCase().includes(jobSearchQuery.toLowerCase())))
+                  .map((j, idx) => {
+                    const isMgmt = Boolean(j.isManagement || j.isAdminRole);
+                    const assignedEmps = (state.employees || []).filter(e => e.jobTitle?.trim() === j.title?.trim());
+
+                    return (
+                      <tr key={j.id || idx} style={{ borderBottom: '1px solid var(--border)', background: idx % 2 === 0 ? 'var(--surface)' : 'var(--surface-muted)' }}>
+                        <td style={{ padding: '12px', color: 'var(--muted)', fontWeight: 'bold' }}>{idx + 1}</td>
+                        <td style={{ padding: '12px', fontWeight: 'bold', color: 'var(--primary-dark)', fontSize: '14px' }}>
+                          💼 {j.title}
+                        </td>
+                        <td style={{ padding: '12px' }}>
+                          {isMgmt ? (
+                            <span style={{ background: '#dcfce7', color: '#166534', border: '1px solid #86efac', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                              👔 وظيفة إدارية (تمنح بدل إدارة)
+                            </span>
+                          ) : (
+                            <span style={{ background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                              🏬 كادر تشغيلي / فني
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ padding: '12px', color: 'var(--muted)', fontSize: '12.5px', maxWidth: '300px' }}>
+                          {j.description || '—'}
+                        </td>
+                        <td style={{ padding: '12px', textAlign: 'center' }}>
+                          <span style={{ background: assignedEmps.length > 0 ? '#e0f2fe' : '#f1f5f9', color: assignedEmps.length > 0 ? '#0369a1' : '#94a3b8', padding: '3px 8px', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold' }}>
+                            {assignedEmps.length} موظف
+                          </span>
+                        </td>
+                        <td style={{ padding: '12px', textAlign: 'center' }}>
+                          <div style={{ display: 'inline-flex', gap: '6px' }}>
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              style={{ padding: '4px 8px', fontSize: '12px' }}
+                              onClick={() => {
+                                setEditingJob(j);
+                                setJobTitleInput(j.title);
+                                setJobIsMgmtInput(Boolean(j.isManagement || j.isAdminRole));
+                                setJobDescInput(j.description || '');
+                                setShowJobModal(true);
+                              }}
+                              title="تعديل الوظيفة"
+                            >
+                              ✏️ تعديل
+                            </button>
+                            <button
+                              type="button"
+                              className="del-btn"
+                              style={{ padding: '4px 8px', fontSize: '12px' }}
+                              onClick={async () => {
+                                if (assignedEmps.length > 0) {
+                                  const confirmed = window.confirm(`⚠️ تنبيه: يوجد عدد (${assignedEmps.length}) موظف مسجلين حالياً على وظيفة (${j.title}). هل أنت متأكد من حذف هذه الوظيفة من قائمة الخيارات؟`);
+                                  if (!confirmed) return;
+                                } else {
+                                  if (!window.confirm(`هل أنت متأكد من حذف وظيفة (${j.title})؟`)) return;
+                                }
+
+                                const updatedJobs = jobsList.filter(item => item.id !== j.id && item.title !== j.title);
+                                const updatedState = { ...state, jobs: updatedJobs };
+                                setState(updatedState);
+                                if (saveState) await saveState(updatedState);
+                                showToast?.(`🗑️ تم حذف وظيفة (${j.title}) بنجاح`);
+                              }}
+                              title="حذف الوظيفة"
+                            >
+                              🗑️ حذف
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Add / Edit Job Modal */}
+          {showJobModal && (
+            <div className="modal-backdrop" style={{ zIndex: 1100 }}>
+              <div className="modal-content card" style={{ maxWidth: '520px', width: '92%', padding: '24px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '10px' }}>
+                  <h3 style={{ margin: 0, color: 'var(--primary-dark)', fontFamily: 'Cairo' }}>
+                    {editingJob ? '✏️ تعديل بيانات الوظيفة' : '➕ إضافة مسمى وظيفي جديد'}
+                  </h3>
+                  <button className="btn btn-ghost" onClick={() => setShowJobModal(false)}>✕</button>
+                </div>
+
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    if (!jobTitleInput.trim()) {
+                      showToast?.('⚠️ يرجى إدخال اسم المسمى الوظيفي');
+                      return;
+                    }
+
+                    const cleanTitle = jobTitleInput.trim();
+                    const isExisting = jobsList.some(j => j.title.toLowerCase() === cleanTitle.toLowerCase() && j.id !== editingJob?.id);
+                    if (isExisting) {
+                      showToast?.('⚠️ هذا المسمى الوظيفي موجود بالفعل في القائمة');
+                      return;
+                    }
+
+                    let updatedJobs;
+                    let updatedEmployees = [...(state.employees || [])];
+
+                    if (editingJob) {
+                      // Update existing job
+                      updatedJobs = jobsList.map(j => {
+                        if (j.id === editingJob.id || j.title === editingJob.title) {
+                          return {
+                            ...j,
+                            title: cleanTitle,
+                            isManagement: jobIsMgmtInput,
+                            isAdminRole: jobIsMgmtInput,
+                            description: jobDescInput.trim()
+                          };
+                        }
+                        return j;
+                      });
+
+                      // Update jobTitle in employees if title changed
+                      if (editingJob.title !== cleanTitle) {
+                        updatedEmployees = updatedEmployees.map(emp => {
+                          if (emp.jobTitle === editingJob.title) {
+                            return { ...emp, jobTitle: cleanTitle };
+                          }
+                          return emp;
+                        });
+                      }
+                    } else {
+                      // Add new job
+                      const newJobObj = {
+                        id: 'job_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+                        title: cleanTitle,
+                        isManagement: jobIsMgmtInput,
+                        isAdminRole: jobIsMgmtInput,
+                        description: jobDescInput.trim()
+                      };
+                      updatedJobs = [...jobsList, newJobObj];
+                    }
+
+                    const updatedState = { ...state, jobs: updatedJobs, employees: updatedEmployees };
+                    setState(updatedState);
+                    if (saveState) await saveState(updatedState);
+
+                    setShowJobModal(false);
+                    showToast?.(editingJob ? `✅ تم تعديل وظيفة (${cleanTitle}) بنجاح` : `✅ تمت إضافة وظيفة (${cleanTitle}) بنجاح`);
+                  }}
+                  style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}
+                >
+                  <div className="field">
+                    <label style={{ fontWeight: 'bold' }}>المسمى الوظيفي *</label>
+                    <input
+                      type="text"
+                      value={jobTitleInput}
+                      onChange={(e) => setJobTitleInput(e.target.value)}
+                      placeholder="مثال: صيدلي أول / مدير فرع / مسؤول تسويق"
+                      required
+                      autoFocus
+                    />
+                  </div>
+
+                  <div className="field">
+                    <label style={{ fontWeight: 'bold' }}>تصنيف طبيعة الوظيفة</label>
+                    <div style={{ background: jobIsMgmtInput ? '#f0fdf4' : '#f8fafc', border: `1px solid ${jobIsMgmtInput ? '#86efac' : '#cbd5e1'}`, padding: '12px 14px', borderRadius: '10px', marginTop: '4px' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', margin: 0 }}>
+                        <input
+                          type="checkbox"
+                          checked={jobIsMgmtInput}
+                          onChange={(e) => setJobIsMgmtInput(e.target.checked)}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                        />
+                        <span style={{ fontWeight: 'bold', fontSize: '13.5px', color: jobIsMgmtInput ? '#166534' : 'var(--text)' }}>
+                          👔 هذه الوظيفة مصنفة كـ (وظيفة إدارية / إشرافية)
+                        </span>
+                      </label>
+                      <p style={{ margin: '6px 0 0 28px', fontSize: '12px', color: 'var(--muted)', lineHeight: '1.5' }}>
+                        * عند تحديد هذا الخيار، سيظهر حقل مالي ديناميكي باسم <strong>(بدل إدارة)</strong> في ملف الموظف لتسجيل قيمة البدل وإضافتها في مسير الرواتب.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="field">
+                    <label style={{ fontWeight: 'bold' }}>الوصف والمهام الوظيفية (اختياري)</label>
+                    <textarea
+                      value={jobDescInput}
+                      onChange={(e) => setJobDescInput(e.target.value)}
+                      placeholder="اكتب نبذة مختصرة عن مهام ومسؤوليات هذه الوظيفة..."
+                      style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', minHeight: '70px', background: 'var(--surface)' }}
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
+                    <button type="button" className="btn btn-ghost" onClick={() => setShowJobModal(false)}>
+                      إلغاء
+                    </button>
+                    <button type="submit" className="btn btn-start">
+                      {editingJob ? '💾 حفظ التعديلات' : '➕ إضافة الوظيفة'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
     </div>
   );

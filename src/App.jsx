@@ -59,6 +59,7 @@ import SidebarLayout from './components/layout/SidebarLayout';
 import BranchManagementModule from './components/branches/BranchManagementModule';
 import EmployeeFileModal from './components/employees/EmployeeFileModal';
 import EmployeePhonesDirectoryModal from './components/employees/EmployeePhonesDirectoryModal';
+import { DEFAULT_JOBS, getJobsList, isManagementJob } from './utils/jobsHelper';
 import WorkBylawsModule from './components/bylaws/WorkBylawsModule';
 import BylawsModule from './components/bylaws/BylawsModule';
 import ApprovalCenterModule from './components/approvals/ApprovalCenterModule';
@@ -211,6 +212,7 @@ export default function App() {
         sendDailyDigest: true
       }
     },
+    jobs: DEFAULT_JOBS,
     branches: [
       {
         id: 'branch_main',
@@ -2009,7 +2011,21 @@ export default function App() {
       }, 0);
 
     const totalDeduction = manualDeduction + loanDeduction + totalAbsenceDeduction;
-    const netSalary = totalBaseEarnings + totalBonus - totalDeduction;
+
+    // Allowances calculation:
+    // 1. Management Allowance: Only applicable if employee holds an administrative/management role
+    const isMgmt = isManagementJob(emp.jobTitle, getJobsList(state));
+    const managementAllowance = isMgmt ? (parseFloat(emp.managementAllowance) || 0) : 0;
+
+    // 2. Transportation Allowance: Fixed allowance
+    const transportAllowance = parseFloat(emp.transportAllowance) || 0;
+
+    // 3. Extra Allowance: Custom named wage
+    const extraAllowance = parseFloat(emp.extraAllowance) || 0;
+    const extraAllowanceTitle = emp.extraAllowanceTitle?.trim() || 'أجر إضافي';
+
+    const totalAllowances = managementAllowance + transportAllowance + extraAllowance;
+    const netSalary = totalBaseEarnings + totalBonus + totalAllowances - totalDeduction;
 
     let rate = branches.length === 1 ? perBranch[branches[0].branchId].rate : (totalHours > 0 ? totalBaseEarnings / totalHours : (parseFloat(branches[0]?.salary) || 0));
     let dailyRate = branches.length === 1 ? perBranch[branches[0].branchId].dailyRate : (rate * (parseFloat(branches[0]?.workHoursPerDay) || WORK_HOURS_PER_DAY));
@@ -2023,6 +2039,12 @@ export default function App() {
       salary: Object.values(perBranch).reduce((acc, b) => acc + (b.monthlySalary || 0), 0),
       baseEarnings: totalBaseEarnings, 
       totalBonus, 
+      totalAllowances,
+      managementAllowance,
+      transportAllowance,
+      extraAllowance,
+      extraAllowanceTitle,
+      isManagement: isMgmt,
       totalDeduction, 
       absenceDeduction: totalAbsenceDeduction, 
       netSalary, 
@@ -2041,11 +2063,12 @@ export default function App() {
     const totalHours = Object.values(perEmp).reduce((s, e) => s + e.hours, 0);
     const totalBaseEarnings = Object.values(perEmp).reduce((s, e) => s + e.baseEarnings, 0);
     const totalBonus = Object.values(perEmp).reduce((s, e) => s + e.totalBonus, 0);
+    const totalAllowances = Object.values(perEmp).reduce((s, e) => s + (e.totalAllowances || 0), 0);
     const totalDeduction = Object.values(perEmp).reduce((s, e) => s + e.totalDeduction, 0);
     const totalAbsenceDeduction = Object.values(perEmp).reduce((s, e) => s + e.absenceDeduction, 0);
-    const grandNetSalary = totalBaseEarnings + totalBonus - totalDeduction;
+    const grandNetSalary = totalBaseEarnings + totalBonus + totalAllowances - totalDeduction;
 
-    return { perEmp, totalHours, totalBaseEarnings, totalBonus, totalDeduction, totalAbsenceDeduction, grandNetSalary };
+    return { perEmp, totalHours, totalBaseEarnings, totalBonus, totalAllowances, totalDeduction, totalAbsenceDeduction, grandNetSalary };
   };
 
   // Manual Shift Entry States
@@ -4408,6 +4431,7 @@ export default function App() {
         editingEmp={editingEmpFile}
         branches={state.branches || []}
         allEmployees={state.employees || []}
+        jobs={getJobsList(state)}
         onSave={handleSaveEmployeeFile}
         handleFileUpload={handleFileUpload}
       />
