@@ -2392,6 +2392,9 @@ export default function EmployeePortalView({
               showToast={showToast}
               userRole="employee"
               currentEmpId={emp.id}
+              currentBranchId={selectedBranchId || emp.branchId}
+              monthPicker={selectedMonth}
+              filterFn={filterFn}
             />
           )}
 

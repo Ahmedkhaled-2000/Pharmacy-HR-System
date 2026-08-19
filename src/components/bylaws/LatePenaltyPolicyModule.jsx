@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   DEFAULT_LATE_PENALTY_POLICY,
   getEffectiveLatePolicy,
@@ -24,17 +24,41 @@ export default function LatePenaltyPolicyModule({
   customTo = ''
 }) {
   const isAdmin = userRole === 'admin';
-  const isManagerOrAdmin = userRole === 'admin' || userRole === 'branch';
+  const isBranchManager = userRole === 'branch';
+  const isEmployee = userRole === 'employee';
+  const isManagerOrAdmin = isAdmin || isBranchManager;
+
+  const employees = state.employees || [];
+  const branches = state.branches || [];
+
+  // Scoped Employee for Employee Portal
+  const loggedInEmp = useMemo(() => {
+    if (!currentEmpId) return null;
+    return employees.find((e) => String(e.id) === String(currentEmpId));
+  }, [employees, currentEmpId]);
+
+  // Multi-branch check for employee
+  const isMultiBranchEmp = loggedInEmp?.branchesDetails && loggedInEmp.branchesDetails.length > 1;
 
   // Sub-tab: 'review' (سجل ومراجعة التأخيرات) | 'policy' (إعدادات وتخصيص اللائحة)
   const [subTab, setSubTab] = useState('review');
 
-  // Filters State
+  // Filters State with strict role-based initial values
   const [filterBranch, setFilterBranch] = useState(currentBranchId || '');
-  const [filterEmpId, setFilterEmpId] = useState(currentEmpId || '');
+  const [filterEmpId, setFilterEmpId] = useState(isEmployee ? (currentEmpId || '') : '');
   const [filterTier, setFilterTier] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Keep filterBranch and filterEmpId in sync with props
+  useEffect(() => {
+    if (isEmployee) {
+      setFilterEmpId(currentEmpId || '');
+      setFilterBranch(currentBranchId || '');
+    } else if (isBranchManager) {
+      setFilterBranch(currentBranchId || '');
+    }
+  }, [currentEmpId, currentBranchId, isEmployee, isBranchManager]);
 
   // Exception / Override Modal State
   const [selectedIncidentForEdit, setSelectedIncidentForEdit] = useState(null);
@@ -46,38 +70,70 @@ export default function LatePenaltyPolicyModule({
   // Policy Editor State
   const effectivePolicy = useMemo(() => getEffectiveLatePolicy(state), [state.latePenaltyPolicy, state.bylaws, state.orgSettings]);
   const [policyDraft, setPolicyDraft] = useState(() => JSON.parse(JSON.stringify(effectivePolicy)));
-  const [editingTierId, setEditingTierId] = useState(null);
 
   // Sync draft when state changes
-  React.useEffect(() => {
+  useEffect(() => {
     setPolicyDraft(JSON.parse(JSON.stringify(effectivePolicy)));
   }, [effectivePolicy]);
 
-  const employees = state.employees || [];
-  const branches = state.branches || [];
+  // Target Employees based on strictly scoped role
+  const targetEmployees = useMemo(() => {
+    if (isEmployee) {
+      return loggedInEmp ? [loggedInEmp] : [];
+    }
+    if (isBranchManager) {
+      const bId = currentBranchId;
+      return employees.filter(
+        (e) => String(e.branchId) === String(bId) || (e.branchesDetails && e.branchesDetails.some((bd) => String(bd.branchId) === String(bId)))
+      );
+    }
+    // Admin
+    if (filterBranch) {
+      return employees.filter(
+        (e) => String(e.branchId) === String(filterBranch) || (e.branchesDetails && e.branchesDetails.some((bd) => String(bd.branchId) === String(filterBranch)))
+      );
+    }
+    return employees;
+  }, [employees, loggedInEmp, isEmployee, isBranchManager, currentBranchId, filterBranch]);
 
-  // Calculate & Synchronize all incidents for the active cycle
+  // Calculate & Synchronize all incidents for the active cycle with strict branch/employee scoping
   const allIncidents = useMemo(() => {
-    // 1. First gather all calculated incidents from shifts + rosters
     const results = [];
-    const targetEmployees = employees.filter((e) => {
-      if (filterBranch && e.branchId !== filterBranch && (!e.branchesDetails || !e.branchesDetails.some((bd) => bd.branchId === filterBranch))) return false;
-      if (filterEmpId && String(e.id) !== String(filterEmpId)) return false;
-      return true;
-    });
 
-    targetEmployees.forEach((emp) => {
+    // Determine target employees to process
+    let empsToProcess = targetEmployees;
+    if (isEmployee) {
+      empsToProcess = loggedInEmp ? [loggedInEmp] : [];
+    } else if (filterEmpId) {
+      empsToProcess = targetEmployees.filter((e) => String(e.id) === String(filterEmpId));
+    }
+
+    empsToProcess.forEach((emp) => {
       const { incidents } = recalculateEmployeeCycleLateness({
         employeeId: emp.id,
         cycleFilterFn: filterFn,
         state,
         payrollCycleId: monthPicker || 'current'
       });
-      results.push(...incidents);
+
+      // Filter incidents by effective branch
+      incidents.forEach((inc) => {
+        if (isEmployee) {
+          // If employee works in multi-branches and has a branch selected, filter strictly
+          if (filterBranch && String(inc.branchId) !== String(filterBranch)) return;
+        } else if (isBranchManager) {
+          // Branch manager ONLY sees incidents occurring in their branch
+          if (String(inc.branchId) !== String(currentBranchId)) return;
+        } else if (filterBranch) {
+          // Admin filtered by branch
+          if (String(inc.branchId) !== String(filterBranch)) return;
+        }
+        results.push(inc);
+      });
     });
 
     return results.sort((a, b) => b.date.localeCompare(a.date) || (b.actualPunchInTime || '').localeCompare(a.actualPunchInTime || ''));
-  }, [employees, state.shifts, state.rosters, state.latePenaltyPolicy, filterFn, monthPicker, filterBranch, filterEmpId]);
+  }, [targetEmployees, loggedInEmp, isEmployee, isBranchManager, currentBranchId, filterBranch, filterEmpId, filterFn, monthPicker, state]);
 
   // Filtered incidents
   const filteredIncidents = useMemo(() => {
@@ -136,7 +192,7 @@ export default function LatePenaltyPolicyModule({
       let updatedRequests = [...(state.requests || [])];
       const allNewIncidents = [];
 
-      employees.forEach((emp) => {
+      targetEmployees.forEach((emp) => {
         const res = recalculateEmployeeCycleLateness({
           employeeId: emp.id,
           cycleFilterFn: filterFn,
@@ -188,7 +244,7 @@ export default function LatePenaltyPolicyModule({
           overrideReason: overrideReason.trim(),
           modifiedBy: {
             userId: currentEmpId || 'admin',
-            userName: isAdmin ? 'الإدارة العليا' : 'مدير الفرع',
+            userName: isAdmin ? 'الإدارة العليا' : (isBranchManager ? 'مدير الفرع' : 'المستخدم'),
             role: userRole
           },
           modifiedAt: new Date().toISOString()
@@ -261,15 +317,19 @@ export default function LatePenaltyPolicyModule({
     showToast?.('🔄 تم استعادة سياسة جزاءات التأخير القياسية بنجاح');
   };
 
+  // Branch name for display
+  const currentBranchObj = branches.find((b) => String(b.id) === String(currentBranchId || filterBranch));
+  const currentBranchName = currentBranchObj ? currentBranchObj.name : '';
+
   return (
     <div className="late-penalty-module" style={{ fontFamily: "'Tajawal', sans-serif" }}>
       {/* Header Bar */}
       <div style={{
         background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
         color: '#fff',
-        padding: '22px 24px',
+        padding: '20px 24px',
         borderRadius: '16px',
-        marginBottom: '24px',
+        marginBottom: '22px',
         boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
         display: 'flex',
         justifyContent: 'space-between',
@@ -278,77 +338,85 @@ export default function LatePenaltyPolicyModule({
         gap: '16px'
       }}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
-            <span style={{ fontSize: '26px' }}>⏱️</span>
-            <h2 style={{ fontFamily: 'Cairo', margin: 0, fontSize: '22px', fontWeight: 800, color: '#f8fafc' }}>
-              لائحة وجزاءات التأخير المستقلة (5 فئات)
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '24px' }}>⏱️</span>
+            <h2 style={{ fontFamily: 'Cairo', margin: 0, fontSize: '20px', fontWeight: 800, color: '#f8fafc' }}>
+              {isEmployee
+                ? `سجل جزاءات وتأخيرات: ${loggedInEmp?.name || ''}`
+                : isBranchManager
+                ? `لائحة وجزاءات التأخير - فرع ${currentBranchName || ''}`
+                : 'لائحة وجزاءات التأخير المستقلة (5 فئات)'}
             </h2>
             <span style={{
               background: 'rgba(16, 185, 129, 0.2)',
               color: '#34d399',
-              fontSize: '12px',
+              fontSize: '11px',
               padding: '3px 10px',
               borderRadius: '20px',
               border: '1px solid rgba(52, 211, 153, 0.3)',
               fontWeight: 600
             }}>
-              ✨ عدادات مستقلة لكل فئة
+              {isEmployee ? '👤 حساب الموظف' : isBranchManager ? `🏢 مدير فرع ${currentBranchName}` : '👑 الإدارة العامة'}
             </span>
           </div>
-          <p style={{ margin: 0, color: '#94a3b8', fontSize: '13px', lineHeight: '1.6' }}>
-            نظام آلي متكامل لحساب التأخير مقارنة بالجدول الشهري، مع إعادة الاحتساب التلقائي وفصل الجزاء الزمني عن الخصم المالي
+          <p style={{ margin: 0, color: '#94a3b8', fontSize: '13px', lineHeight: '1.5' }}>
+            {isEmployee
+              ? 'استعراض سجل تأخيراتك الشهرية المحسوبة طبقاً لجدول وردياتك وفئات التأخير المعتمدة'
+              : 'نظام آلي متكامل لحساب التأخير مقارنة بالجدول الشهري، مع إعادة الاحتساب التلقائي وفصل الجزاء الزمني عن الخصم المالي'}
           </p>
         </div>
 
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-          <button
-            className="btn"
-            onClick={handleTriggerFullRecalculation}
-            style={{
-              background: 'rgba(255,255,255,0.1)',
-              color: '#fff',
-              border: '1px solid rgba(255,255,255,0.2)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '8px 16px',
-              borderRadius: '10px',
-              cursor: 'pointer',
-              fontWeight: 600,
-              fontSize: '13px'
-            }}
-            title="إعادة احتساب وترتيب التكرارات لجميع موظفي الدورة الحالية"
-          >
-            🔄 إعادة احتساب التأخيرات للدورة
-          </button>
+          {isManagerOrAdmin && (
+            <button
+              className="btn"
+              onClick={handleTriggerFullRecalculation}
+              style={{
+                background: 'rgba(255,255,255,0.1)',
+                color: '#fff',
+                border: '1px solid rgba(255,255,255,0.2)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 16px',
+                borderRadius: '10px',
+                cursor: 'pointer',
+                fontWeight: 600,
+                fontSize: '13px'
+              }}
+              title="إعادة احتساب وترتيب التكرارات للدورة الحالية"
+            >
+              🔄 إعادة احتساب التأخيرات للدورة
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Sub-Navigation Tabs */}
-      <div style={{
-        display: 'flex',
-        gap: '10px',
-        borderBottom: '2px solid var(--border)',
-        paddingBottom: '12px',
-        marginBottom: '22px'
-      }}>
-        <button
-          className={`btn ${subTab === 'review' ? 'btn-primary' : 'btn-ghost'}`}
-          onClick={() => setSubTab('review')}
-          style={{
-            fontFamily: 'Cairo',
-            fontSize: '14px',
-            padding: '8px 18px',
-            borderRadius: '10px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px'
-          }}
-        >
-          📋 سجل ومراجعة التأخيرات ({filteredIncidents.length})
-        </button>
+      {/* Sub-Navigation Tabs (Policy settings tab only for Super Admin) */}
+      {isAdmin && (
+        <div style={{
+          display: 'flex',
+          gap: '10px',
+          borderBottom: '2px solid var(--border)',
+          paddingBottom: '12px',
+          marginBottom: '22px'
+        }}>
+          <button
+            className={`btn ${subTab === 'review' ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => setSubTab('review')}
+            style={{
+              fontFamily: 'Cairo',
+              fontSize: '14px',
+              padding: '8px 18px',
+              borderRadius: '10px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            📋 سجل ومراجعة التأخيرات ({filteredIncidents.length})
+          </button>
 
-        {isAdmin && (
           <button
             className={`btn ${subTab === 'policy' ? 'btn-primary' : 'btn-ghost'}`}
             onClick={() => setSubTab('policy')}
@@ -364,8 +432,8 @@ export default function LatePenaltyPolicyModule({
           >
             ⚙️ تخصيص سياسة اللائحة والجزاءات
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* ── Sub-Tab 1: Audit & Review ── */}
       {subTab === 'review' && (
@@ -373,7 +441,7 @@ export default function LatePenaltyPolicyModule({
           {/* Top KPI Metrics Cards (5 Tiers + Totals) */}
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
             gap: '12px',
             marginBottom: '24px'
           }}>
@@ -492,7 +560,7 @@ export default function LatePenaltyPolicyModule({
             </div>
           </div>
 
-          {/* Advanced Filter Bar */}
+          {/* Advanced Filter Bar (Scoped per role) */}
           <div style={{
             background: 'var(--surface)',
             border: '1px solid var(--border)',
@@ -504,47 +572,72 @@ export default function LatePenaltyPolicyModule({
             gap: '12px',
             alignItems: 'center'
           }}>
-            {/* Search */}
-            <div className="field" style={{ margin: 0 }}>
-              <label style={{ fontSize: '12px', color: 'var(--muted)' }}>بحث بالاسم أو الكود</label>
-              <input
-                type="text"
-                placeholder="ابحث..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                style={{ padding: '7px 10px', fontSize: '13px', borderRadius: '8px' }}
-              />
-            </div>
+            {/* Search (For managers & admins) */}
+            {!isEmployee && (
+              <div className="field" style={{ margin: 0 }}>
+                <label style={{ fontSize: '12px', color: 'var(--muted)' }}>بحث بالاسم أو الكود</label>
+                <input
+                  type="text"
+                  placeholder="ابحث..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{ padding: '7px 10px', fontSize: '13px', borderRadius: '8px' }}
+                />
+              </div>
+            )}
 
-            {/* Filter Branch */}
-            <div className="field" style={{ margin: 0 }}>
-              <label style={{ fontSize: '12px', color: 'var(--muted)' }}>الفرع</label>
-              <select
-                value={filterBranch}
-                onChange={(e) => setFilterBranch(e.target.value)}
-                style={{ padding: '7px 10px', fontSize: '13px', borderRadius: '8px' }}
-              >
-                <option value="">جميع الفروع</option>
-                {branches.map((b) => (
-                  <option key={b.id} value={b.id}>{b.name}</option>
-                ))}
-              </select>
-            </div>
+            {/* Branch Filter */}
+            {isAdmin ? (
+              <div className="field" style={{ margin: 0 }}>
+                <label style={{ fontSize: '12px', color: 'var(--muted)' }}>الفرع</label>
+                <select
+                  value={filterBranch}
+                  onChange={(e) => setFilterBranch(e.target.value)}
+                  style={{ padding: '7px 10px', fontSize: '13px', borderRadius: '8px' }}
+                >
+                  <option value="">جميع الفروع</option>
+                  {branches.map((b) => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+              </div>
+            ) : isEmployee && isMultiBranchEmp ? (
+              <div className="field" style={{ margin: 0 }}>
+                <label style={{ fontSize: '12px', color: 'var(--muted)' }}>فرع العمل</label>
+                <select
+                  value={filterBranch}
+                  onChange={(e) => setFilterBranch(e.target.value)}
+                  style={{ padding: '7px 10px', fontSize: '13px', borderRadius: '8px' }}
+                >
+                  <option value="">جميع فروعي ({loggedInEmp.branchesDetails.length} فروع)</option>
+                  {loggedInEmp.branchesDetails.map((bd) => {
+                    const bObj = branches.find((b) => b.id === bd.branchId);
+                    return (
+                      <option key={bd.branchId} value={bd.branchId}>
+                        {bObj ? bObj.name : bd.branchName || bd.branchId}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+            ) : null}
 
-            {/* Filter Employee */}
-            <div className="field" style={{ margin: 0 }}>
-              <label style={{ fontSize: '12px', color: 'var(--muted)' }}>الموظف</label>
-              <select
-                value={filterEmpId}
-                onChange={(e) => setFilterEmpId(e.target.value)}
-                style={{ padding: '7px 10px', fontSize: '13px', borderRadius: '8px' }}
-              >
-                <option value="">جميع الموظفين</option>
-                {employees.map((e) => (
-                  <option key={e.id} value={e.id}>{e.name} ({e.code})</option>
-                ))}
-              </select>
-            </div>
+            {/* Employee Filter (Admin & Branch Manager only) */}
+            {!isEmployee && (
+              <div className="field" style={{ margin: 0 }}>
+                <label style={{ fontSize: '12px', color: 'var(--muted)' }}>الموظف</label>
+                <select
+                  value={filterEmpId}
+                  onChange={(e) => setFilterEmpId(e.target.value)}
+                  style={{ padding: '7px 10px', fontSize: '13px', borderRadius: '8px' }}
+                >
+                  <option value="">جميع موظفي {isBranchManager ? `فرع ${currentBranchName}` : 'المؤسسة'}</option>
+                  {targetEmployees.map((e) => (
+                    <option key={e.id} value={e.id}>{e.name} ({e.code})</option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {/* Filter Tier */}
             <div className="field" style={{ margin: 0 }}>
@@ -593,7 +686,8 @@ export default function LatePenaltyPolicyModule({
                 <thead>
                   <tr style={{ background: 'var(--background)', borderBottom: '2px solid var(--border)', color: 'var(--muted)', fontFamily: 'Cairo' }}>
                     <th style={{ padding: '12px 14px' }}>التاريخ</th>
-                    <th style={{ padding: '12px 14px' }}>الموظف والفرع</th>
+                    {!isEmployee && <th style={{ padding: '12px 14px' }}>الموظف والفرع</th>}
+                    {isEmployee && isMultiBranchEmp && <th style={{ padding: '12px 14px' }}>الفرع</th>}
                     <th style={{ padding: '12px 14px' }}>موعد الشيفت (المجدول)</th>
                     <th style={{ padding: '12px 14px' }}>الحضور الفعلي</th>
                     <th style={{ padding: '12px 14px' }}>دقائق التأخير</th>
@@ -608,9 +702,11 @@ export default function LatePenaltyPolicyModule({
                 <tbody>
                   {filteredIncidents.length === 0 ? (
                     <tr>
-                      <td colSpan={11} style={{ padding: '40px', textAlign: 'center', color: 'var(--muted)' }}>
+                      <td colSpan={12} style={{ padding: '40px', textAlign: 'center', color: 'var(--muted)' }}>
                         <div style={{ fontSize: '32px', marginBottom: '8px' }}>🎉</div>
-                        لا توجد وقائع تأخير مسجلة مطابقة لمعايير البحث الحالية
+                        {isEmployee
+                          ? 'سجل الحضور ممتاز! لا توجد وقائع تأخير مسجلة لك في هذه الفترة.'
+                          : 'لا توجد وقائع تأخير مسجلة مطابقة لمعايير البحث الحالية.'}
                       </td>
                     </tr>
                   ) : (
@@ -626,12 +722,19 @@ export default function LatePenaltyPolicyModule({
                         <td style={{ padding: '12px 14px', fontWeight: 600 }}>
                           {inc.date}
                         </td>
-                        <td style={{ padding: '12px 14px' }}>
-                          <div style={{ fontWeight: 700, color: 'var(--text)' }}>{inc.employeeName}</div>
-                          <div style={{ fontSize: '11px', color: 'var(--muted)' }}>
-                            كود: {inc.employeeCode} · {inc.branchName}
-                          </div>
-                        </td>
+                        {!isEmployee && (
+                          <td style={{ padding: '12px 14px' }}>
+                            <div style={{ fontWeight: 700, color: 'var(--text)' }}>{inc.employeeName}</div>
+                            <div style={{ fontSize: '11px', color: 'var(--muted)' }}>
+                              كود: {inc.employeeCode} · {inc.branchName}
+                            </div>
+                          </td>
+                        )}
+                        {isEmployee && isMultiBranchEmp && (
+                          <td style={{ padding: '12px 14px', fontWeight: 600, color: 'var(--primary-dark)' }}>
+                            {inc.branchName}
+                          </td>
+                        )}
                         <td style={{ padding: '12px 14px', color: '#2563eb', fontWeight: 600 }}>
                           ⏰ {inc.scheduledStartTime}
                         </td>
