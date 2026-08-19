@@ -357,6 +357,29 @@ export function getScheduledShiftForDate(employeeId, dateStr, state) {
     }
   }
 
+  // 4. فحص الجداول العامة للموظف كـ Fallback في حال اختلاف اسم الشهر
+  const anyEmpRoster = (state.rosters || []).find(
+    (r) => String(r.employeeId) === empIdStr && (r.status === 'approved' || !r.status) && r.schedule
+  );
+  if (anyEmpRoster && anyEmpRoster.schedule) {
+    let sched = anyEmpRoster.schedule[arDay];
+    if (!sched) {
+      sched = Object.entries(anyEmpRoster.schedule).find(
+        ([k]) => k.replace(/[\u0625\u0623\u0622]/g, 'ا') === normalizedArDay
+      )?.[1];
+    }
+    if (sched && sched.type !== 'off' && sched.start) {
+      return {
+        start: sched.start,
+        end: sched.end || '',
+        type: sched.type || 'work',
+        branchId: anyEmpRoster.branchId || sched.branchId || '',
+        rosterId: anyEmpRoster.id,
+        source: 'roster_fallback'
+      };
+    }
+  }
+
   return null;
 }
 

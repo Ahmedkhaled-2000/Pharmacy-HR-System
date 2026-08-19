@@ -286,6 +286,7 @@ export default function NotificationCenterModule({
           details: `الموعد المجدول: ${inc.scheduledStartTime || '—'} | البصمة الفعلية: ${inc.actualPunchInTime || '—'}`,
           date: inc.date,
           status: inc.status || 'approved',
+          read: Boolean(inc.read),
           isAutoBylaw: true,
           adminApproved: true,
           icon: '📜'
@@ -306,6 +307,7 @@ export default function NotificationCenterModule({
           ruleTitle: r.ruleTitle || r.reason || 'مخالفة لائحية',
           impactDesc: r.impactType === 'deduction_days' ? `خصم ${r.impactVal} يوم من الراتب` : (r.amount ? `خصم مبلغ ${r.amount} ج.م` : `خصم مبلغ ${r.impactVal || 50} ج.م`),
           isAutoBylaw: false,
+          read: Boolean(r.read),
           icon: '⚖️'
         };
       })
@@ -322,6 +324,13 @@ export default function NotificationCenterModule({
     return [...autoIncidents, ...manualPenalties];
   }, [state.lateIncidents, state.requests, requests, employees, branches, empFilter, branchFilter, dateFilter]);
 
+  // Unread Bylaws Penalties
+  const unreadBylawsPenalties = useMemo(() => {
+    return allBylawsPenalties.filter(
+      (p) => !p.read && p.status !== 'cancelled' && p.status !== 'approved_permission_exempt'
+    );
+  }, [allBylawsPenalties]);
+
   // General Notification Handlers
   const notifications = (state.notifications || []).filter((n) => {
     if (empFilter !== 'all' && String(n.empId || n.employeeId) !== String(empFilter)) return false;
@@ -331,6 +340,7 @@ export default function NotificationCenterModule({
     }
     return true;
   });
+
   const handleMarkAsRead = async (id) => {
     const updated = (state.notifications || []).map((n) => (n.id === id ? { ...n, read: true } : n));
     const updatedState = { ...state, notifications: updated };
@@ -338,12 +348,40 @@ export default function NotificationCenterModule({
     if (saveState) await saveState(updatedState);
   };
 
-  const handleMarkAllRead = async () => {
-    const updated = (state.notifications || []).map((n) => ({ ...n, read: true }));
-    const updatedState = { ...state, notifications: updated };
+  const handleAcknowledgeLateIncident = async (incidentId) => {
+    const updatedLateIncidents = (state.lateIncidents || []).map((inc) =>
+      inc.id === incidentId ? { ...inc, read: true, readAt: new Date().toISOString() } : inc
+    );
+    const updatedRequests = (state.requests || []).map((r) =>
+      r.id === incidentId ? { ...r, read: true } : r
+    );
+    const updatedNotifications = (state.notifications || []).map((n) =>
+      (n.id === incidentId || n.id === `notif_late_${incidentId}`) ? { ...n, read: true } : n
+    );
+    const updatedState = {
+      ...state,
+      lateIncidents: updatedLateIncidents,
+      requests: updatedRequests,
+      notifications: updatedNotifications
+    };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.('✓ تم تحديد جميع الإشعارات كـ تمت القراءة');
+    showToast?.('✓ تم تأكيد وقراءة إشعار الجزاء اللائحي');
+  };
+
+  const handleMarkAllRead = async () => {
+    const updatedNotifs = (state.notifications || []).map((n) => ({ ...n, read: true }));
+    const updatedLateIncidents = (state.lateIncidents || []).map((inc) => ({ ...inc, read: true, readAt: new Date().toISOString() }));
+    const updatedRequests = (state.requests || []).map((r) => ({ ...r, read: true }));
+    const updatedState = {
+      ...state,
+      notifications: updatedNotifs,
+      lateIncidents: updatedLateIncidents,
+      requests: updatedRequests
+    };
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+    showToast?.('✓ تم تحديد جميع الإشعارات وتأخيرات اللائحة كمقروءة');
   };
 
   const handleClearNotifications = async () => {
@@ -360,7 +398,7 @@ export default function NotificationCenterModule({
   const leavesCount = todayAbsencesAndDelays.filter((a) => a.isLeave).length;
   const pendingCount = pendingRequests.length;
   const penaltiesCount = allBylawsPenalties.length;
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  const unreadCount = notifications.filter((n) => !n.read).length + unreadBylawsPenalties.length;
 
   return (
     <div className="bylaws-card fade-in" style={{ fontFamily: "'Tajawal', sans-serif" }}>
@@ -966,22 +1004,85 @@ export default function NotificationCenterModule({
         </div>
       )}
 
-      {/* ── 5. System Notifications Archive ── */}
+      {/* ── 5. System Notifications & Unread Bylaws Penalties ── */}
       {filterType === 'unread' && (
         <div>
-          <h4 style={{ margin: '0 0 12px', fontSize: '16px', color: 'var(--text)' }}>
-            🔔 قائمة الإشعارات غير المقروءة ({unreadCount})
-          </h4>
-          {notifications.filter((n) => !n.read).length === 0 ? (
-            <div style={{ padding: '30px', textAlign: 'center', color: 'var(--muted)', background: 'var(--surface)', borderRadius: '12px', border: '1px solid var(--border)' }}>
-              🎉 لا توجد إشعارات غير مقروءة جديدة.
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+            <h4 style={{ margin: 0, fontSize: '16px', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              🔔 قائمة الإشعارات والجزاءات اللائحية غير المقروءة ({unreadCount})
+            </h4>
+            {unreadCount > 0 && (
+              <button className="btn btn-start" style={{ fontSize: '12px', padding: '6px 14px' }} onClick={handleMarkAllRead}>
+                ✓ تحديد الكل كمقروء وتأكيد الاطلاع
+              </button>
+            )}
+          </div>
+
+          {unreadCount === 0 ? (
+            <div style={{ padding: '35px', textAlign: 'center', color: 'var(--muted)', background: 'var(--surface)', borderRadius: '12px', border: '1px solid var(--border)' }}>
+              🎉 لا توجد أي إشعارات أو جزاءات غير مقروءة جديدة. تم الاطلاع على كافة التنبيهات.
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {/* 1. Unread Bylaws Penalties */}
+              {unreadBylawsPenalties.map((item) => (
+                <div
+                  key={`unread_bylaw_${item.id}`}
+                  style={{
+                    padding: '16px 20px',
+                    borderRadius: '12px',
+                    background: 'rgba(124, 58, 237, 0.05)',
+                    border: '1px solid rgba(124, 58, 237, 0.3)',
+                    borderRight: '5px solid #7c3aed',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '12px'
+                  }}
+                >
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                      <span style={{ fontSize: '18px' }}>📜</span>
+                      <h4 style={{ margin: 0, fontSize: '15px', color: 'var(--text)' }}>
+                        {item.ruleTitle} — 👤 {item.employeeName} ({item.employeeCode})
+                      </h4>
+                      <span style={{ fontSize: '12px', color: 'var(--muted)' }}>• فرع {item.branchName}</span>
+                      <span style={{ background: '#f5f3ff', color: '#6d28d9', border: '1px solid #ddd6fe', padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold' }}>
+                        🔴 تنبيه جزاء لائحى غير مؤكد
+                      </span>
+                    </div>
+                    <p style={{ margin: '0 0 4px', fontSize: '13.5px', color: '#7c3aed', fontWeight: 'bold' }}>
+                      الأثر المالي: {item.impactDesc} {item.details ? `• ${item.details}` : ''}
+                    </p>
+                    <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>
+                      📅 تاريخ الوردية / الواقعة: {item.date || todayDate}
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <button
+                      className="btn btn-ghost"
+                      style={{ fontSize: '12px', padding: '6px 12px', background: '#faf5ff', color: '#7c3aed', border: '1px solid #e9d5ff', fontWeight: 'bold' }}
+                      onClick={() => onNavigateTab?.('bylaws')}
+                    >
+                      عرض باللائحة 📜
+                    </button>
+                    <button
+                      className="btn btn-start"
+                      style={{ fontSize: '12px', padding: '6px 16px' }}
+                      onClick={() => handleAcknowledgeLateIncident(item.id)}
+                    >
+                      ✓ تم
+                    </button>
+                  </div>
+                </div>
+              ))}
+
+              {/* 2. Unread General Notifications */}
               {notifications.filter((n) => !n.read).map((item) => (
                 <div
-                  key={item.id}
-                  onClick={() => handleMarkAsRead(item.id)}
+                  key={`unread_gen_${item.id}`}
                   style={{
                     padding: '14px 18px',
                     borderRadius: '10px',
@@ -991,7 +1092,8 @@ export default function NotificationCenterModule({
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
-                    cursor: 'pointer'
+                    flexWrap: 'wrap',
+                    gap: '10px'
                   }}
                 >
                   <div>
@@ -999,7 +1101,7 @@ export default function NotificationCenterModule({
                     <p style={{ margin: '0 0 4px', fontSize: '13px', color: 'var(--text-muted)' }}>{item.message || item.body}</p>
                     <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>🕒 {item.date || item.timestamp}</span>
                   </div>
-                  <button className="btn btn-ghost" style={{ fontSize: '12px' }} onClick={(e) => { e.stopPropagation(); handleMarkAsRead(item.id); }}>
+                  <button className="btn btn-start" style={{ fontSize: '12px', padding: '5px 14px' }} onClick={() => handleMarkAsRead(item.id)}>
                     ✓ تم
                   </button>
                 </div>

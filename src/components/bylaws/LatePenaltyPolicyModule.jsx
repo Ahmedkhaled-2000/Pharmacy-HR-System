@@ -98,9 +98,25 @@ export default function LatePenaltyPolicyModule({
 
   // Calculate & Synchronize all incidents for the active cycle with strict branch/employee scoping
   const allIncidents = useMemo(() => {
-    const results = [];
+    const map = new Map();
 
-    // Determine target employees to process
+    // 1. تضمين الوقائع المسجلة مسبقاً في state.lateIncidents والمتطابقة مع تصفية الفترة الحالية
+    (state.lateIncidents || []).forEach((inc) => {
+      if (filterFn && !filterFn(inc.date)) return;
+      if (isEmployee) {
+        if (String(inc.employeeId) !== String(currentEmpId)) return;
+        if (filterBranch && String(inc.branchId) !== String(filterBranch)) return;
+      } else if (isBranchManager) {
+        if (String(inc.branchId) !== String(currentBranchId)) return;
+        if (filterEmpId && String(inc.employeeId) !== String(filterEmpId)) return;
+      } else {
+        if (filterBranch && String(inc.branchId) !== String(filterBranch)) return;
+        if (filterEmpId && String(inc.employeeId) !== String(filterEmpId)) return;
+      }
+      map.set(inc.id, inc);
+    });
+
+    // 2. فحص وإعادة حساب أي ورديات جديدة بالدورة
     let empsToProcess = targetEmployees;
     if (isEmployee) {
       empsToProcess = loggedInEmp ? [loggedInEmp] : [];
@@ -109,31 +125,34 @@ export default function LatePenaltyPolicyModule({
     }
 
     empsToProcess.forEach((emp) => {
-      const { incidents } = recalculateEmployeeCycleLateness({
-        employeeId: emp.id,
-        cycleFilterFn: filterFn,
-        state,
-        payrollCycleId: monthPicker || 'current'
-      });
+      try {
+        const { incidents } = recalculateEmployeeCycleLateness({
+          employeeId: emp.id,
+          cycleFilterFn: filterFn,
+          state,
+          payrollCycleId: monthPicker || 'current'
+        });
 
-      // Filter incidents by effective branch
-      incidents.forEach((inc) => {
-        if (isEmployee) {
-          // If employee works in multi-branches and has a branch selected, filter strictly
-          if (filterBranch && String(inc.branchId) !== String(filterBranch)) return;
-        } else if (isBranchManager) {
-          // Branch manager ONLY sees incidents occurring in their branch
-          if (String(inc.branchId) !== String(currentBranchId)) return;
-        } else if (filterBranch) {
-          // Admin filtered by branch
-          if (String(inc.branchId) !== String(filterBranch)) return;
-        }
-        results.push(inc);
-      });
+        incidents.forEach((inc) => {
+          if (filterFn && !filterFn(inc.date)) return;
+          if (isEmployee) {
+            if (filterBranch && String(inc.branchId) !== String(filterBranch)) return;
+          } else if (isBranchManager) {
+            if (String(inc.branchId) !== String(currentBranchId)) return;
+          } else if (filterBranch) {
+            if (String(inc.branchId) !== String(filterBranch)) return;
+          }
+          map.set(inc.id, inc);
+        });
+      } catch (e) {
+        console.error('Error recalculating in policy module:', e);
+      }
     });
 
-    return results.sort((a, b) => b.date.localeCompare(a.date) || (b.actualPunchInTime || '').localeCompare(a.actualPunchInTime || ''));
-  }, [targetEmployees, loggedInEmp, isEmployee, isBranchManager, currentBranchId, filterBranch, filterEmpId, filterFn, monthPicker, state]);
+    return Array.from(map.values()).sort(
+      (a, b) => b.date.localeCompare(a.date) || (b.actualPunchInTime || '').localeCompare(a.actualPunchInTime || '')
+    );
+  }, [state.lateIncidents, targetEmployees, loggedInEmp, isEmployee, isBranchManager, currentBranchId, filterBranch, filterEmpId, filterFn, monthPicker, state]);
 
   // Filtered incidents
   const filteredIncidents = useMemo(() => {
