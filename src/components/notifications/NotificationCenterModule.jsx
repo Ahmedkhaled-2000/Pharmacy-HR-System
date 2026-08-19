@@ -292,10 +292,35 @@ export default function NotificationCenterModule({
         };
       });
 
-    const manualPenalties = branchPenalties.map(p => ({ ...p, isAutoBylaw: false, icon: '⚖️' }));
+    const manualPenalties = requests
+      .filter((r) => r.type === 'penalty' || r.type === 'early_exit' || r.type === 'overtime')
+      .map((r) => {
+        const emp = employees.find((e) => String(e.id) === String(r.employeeId));
+        const branchObj = branches.find((b) => String(b.id) === String(r.branchId || emp?.branchId));
+
+        return {
+          ...r,
+          employeeName: emp?.name || r.employeeName || 'موظف',
+          employeeCode: emp?.code || '—',
+          branchName: branchObj?.name || 'الفرع الرئيسي',
+          ruleTitle: r.ruleTitle || r.reason || 'مخالفة لائحية',
+          impactDesc: r.impactType === 'deduction_days' ? `خصم ${r.impactVal} يوم من الراتب` : (r.amount ? `خصم مبلغ ${r.amount} ج.م` : `خصم مبلغ ${r.impactVal || 50} ج.م`),
+          isAutoBylaw: false,
+          icon: '⚖️'
+        };
+      })
+      .filter((r) => {
+        if (empFilter !== 'all' && String(r.employeeId) !== String(empFilter)) return false;
+        if (branchFilter !== 'all' && String(r.branchId) !== String(branchFilter)) return false;
+        if (dateFilter) {
+          const rDate = (r.createdAt ? r.createdAt.slice(0, 10) : (r.date || ''));
+          if (!rDate.startsWith(dateFilter)) return false;
+        }
+        return true;
+      });
 
     return [...autoIncidents, ...manualPenalties];
-  }, [state.lateIncidents, state.requests, branchPenalties, employees, branches, empFilter, branchFilter, dateFilter]);
+  }, [state.lateIncidents, state.requests, requests, employees, branches, empFilter, branchFilter, dateFilter]);
 
   // General Notification Handlers
   const notifications = (state.notifications || []).filter((n) => {
