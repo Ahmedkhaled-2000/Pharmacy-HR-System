@@ -99,6 +99,7 @@ import {
   DEFAULT_PERMISSION_POLICY,
   applyApprovedPermissionsToShifts,
   syncAllEmployeesPermissionsAndLateness,
+  isApprovedPermissionForDate,
   getEffectiveLatePolicy,
   classifyLateTier,
   getPenaltyForOccurrence,
@@ -2032,6 +2033,7 @@ export default function App() {
         inc.status !== 'cancelled' &&
         inc.status !== 'approved_permission_exempt' &&
         inc.actionType !== 'grace' &&
+        !isApprovedPermissionForDate(empId, inc.date, state) &&
         (inc.deductionMinutes > 0 || inc.penaltyAmount > 0) &&
         (!targetBranchId || String(inc.branchId) === String(targetBranchId)) &&
         effectiveFilterFn(inc.date)
@@ -3553,6 +3555,7 @@ export default function App() {
               inc.status !== 'cancelled' &&
               inc.status !== 'approved_permission_exempt' &&
               inc.actionType !== 'grace' &&
+              !isApprovedPermissionForDate(empId, inc.date, state) &&
               (inc.deductionMinutes > 0 || inc.penaltyAmount > 0) &&
               (inc.branchId === bId || (!inc.branchId && bdIdx === 0))
           );
@@ -3844,6 +3847,7 @@ export default function App() {
             inc.status !== 'cancelled' &&
             inc.status !== 'approved_permission_exempt' &&
             inc.actionType !== 'grace' &&
+            !isApprovedPermissionForDate(empId, inc.date, state) &&
             (inc.deductionMinutes > 0 || inc.penaltyAmount > 0)
         );
 

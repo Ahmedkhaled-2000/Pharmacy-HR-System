@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { applyShiftSwapToRosters, arabicWeekday } from '../../utils/formatters';
 import { notifyEmployeeEarlyExitWarning } from '../../utils/gmailService';
-import { normalizeSchedule } from '../roster/RosterModule';
-import { recalculateEmployeeCycleLateness } from '../../utils/latePenaltyEngine';
+import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
 
 export function getFormattedRequestBadge(type, leaveType) {
   if (type === 'leave') {
@@ -280,37 +279,12 @@ export default function RequestsModule({
       updatedRosters = applyShiftSwapToRosters(targetReq, updatedRosters, state.employees || []);
     }
 
-    if (targetReq.type === 'permission') {
-      const permDate = targetReq.date || targetReq.startDate;
-      const permHours = parseFloat(targetReq.hours) || 0;
-
-      if (permDate && permHours > 0) {
-        const existingShiftIdx = updatedShifts.findIndex(
-          (s) => String(s.employeeId) === String(targetReq.employeeId) && s.date === permDate
-        );
-
-        if (existingShiftIdx >= 0) {
-          const s = updatedShifts[existingShiftIdx];
-          updatedShifts[existingShiftIdx] = {
-            ...s,
-            hours: (s.hours || 0) + permHours,
-            approvedPermissionHours: permHours,
-            note: (s.note ? s.note + ' · ' : '') + `تم إضافة ${permHours} س إذن معتمد`
-          };
-        } else {
-          updatedShifts.push({
-            id: `shift_perm_${Date.now()}`,
-            employeeId: targetReq.employeeId,
-            date: permDate,
-            timeIn: '09:00',
-            timeOut: '17:00',
-            hours: permHours,
-            breakHours: 0,
-            approvedPermissionHours: permHours,
-            note: `إذن دخول/خروج معتمد (${permHours} ساعة)`
-          });
-        }
-      }
+    if (targetReq.type === 'permission' || targetReq.type === 'إذن' || targetReq.type === 'late_permission' || targetReq.type === 'early_leave') {
+      updatedShifts = applyApprovedPermissionsToShifts({
+        ...state,
+        requests: updatedRequests,
+        shifts: updatedShifts
+      });
     }
 
     if (targetReq.type === 'roster_update' || targetReq.type === 'roster_edit' || targetReq.type === 'roster_edit_request') {

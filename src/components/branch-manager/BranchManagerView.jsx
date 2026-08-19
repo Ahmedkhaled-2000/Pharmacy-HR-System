@@ -11,7 +11,7 @@ import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import BranchResignationModule from '../resignation/BranchResignationModule';
 import { normalizeSchedule } from '../roster/RosterModule';
 import { shouldShowRequestToBranch } from '../../utils/formatters';
-import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts } from '../../utils/latePenaltyEngine';
+import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
 import EmployeePermissionsManagementModule from '../permissions/EmployeePermissionsManagementModule';
 
 const WEEKDAYS_AR = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
@@ -2101,13 +2101,7 @@ export default function BranchManagerView({
                     ) : (
                       filteredShifts.map((s, idx) => {
                         const empObj = allEmps.find((e) => String(e.id) === String(s.employeeId)) || branchEmployees.find((e) => String(e.id) === String(s.employeeId));
-                        const perm = (state.requests || []).find(
-                          (r) =>
-                            String(r.employeeId) === String(s.employeeId) &&
-                            (r.date === s.date || r.startDate === s.date) &&
-                            (r.type === 'permission' || r.type === 'إذن' || r.type === 'late_permission' || r.type === 'early_leave') &&
-                            (r.status === 'approved' || r.adminApproved || r.branchApproved)
-                        );
+                        const perm = isApprovedPermissionForDate(s.employeeId, s.date, state);
                         const hasPerm = s.hasApprovedPermission || !!perm;
                         const permHours = s.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import PayslipPrintModal from './PayslipPrintModal';
 import { fmt } from '../../utils/formatters';
-import { computeLatenessFinancialAmount } from '../../utils/latePenaltyEngine';
+import { computeLatenessFinancialAmount, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
 
 export default function PayrollModule({
   state,
@@ -505,6 +505,7 @@ export default function PayrollModule({
                     inc.status !== 'cancelled' &&
                     inc.status !== 'approved_permission_exempt' &&
                     inc.actionType !== 'grace' &&
+                    !isApprovedPermissionForDate(selectedEmpModal.id, inc.date, state) &&
                     (inc.deductionMinutes > 0 || inc.penaltyAmount > 0) &&
                     (!filterBranch || String(inc.branchId) === String(filterBranch)) &&
                     payrollFilterFn(inc.date)

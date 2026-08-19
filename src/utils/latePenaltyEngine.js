@@ -215,6 +215,61 @@ export function computeLatenessFinancialAmount(deductionMinutes, employee, branc
 }
 
 /**
+ * فحص ما إذا كان هناك إذن معتمد رسمي (تأخير / خروج مبكر / إذن عام / إذن استثنائي) للموظف لتاريخ معين
+ */
+export function isApprovedPermissionForDate(employeeId, dateStr, state) {
+  if (!employeeId || !dateStr || !state) return null;
+  const empIdStr = String(employeeId);
+  const targetDate = String(dateStr).slice(0, 10);
+
+  const allReqs = [
+    ...(state.requests || []),
+    ...(state.permissions || []),
+    ...(state.employeePermissions || [])
+  ];
+
+  return allReqs.find((r) => {
+    if (!r) return false;
+    const rEmpId = String(r.employeeId || r.empId || '');
+    if (rEmpId !== empIdStr) return false;
+
+    // فحص التاريخ بمرونة
+    const rDate = String(r.date || r.startDate || r.effectiveDate || r.reqDate || (r.createdAt ? r.createdAt.slice(0, 10) : '')).slice(0, 10);
+    if (rDate !== targetDate) return false;
+
+    // فحص نوع الطلب (أذونات بكافة مسمياتها)
+    const t = String(r.type || r.requestType || r.subType || '').toLowerCase();
+    const isPermType =
+      t.includes('perm') ||
+      t.includes('إذن') ||
+      t.includes('اذن') ||
+      r.permType === 'late' ||
+      r.permType === 'early' ||
+      t === 'late_permission' ||
+      t === 'early_leave' ||
+      t === 'permission';
+    if (!isPermType) return false;
+
+    // فحص حالة الاعتماد
+    const isApproved =
+      r.status === 'approved' ||
+      r.adminApproved === true ||
+      r.branchApproved === true ||
+      r.managerStatus === 'approved' ||
+      r.isApproved === true ||
+      r.status === 'approved_permission_exempt';
+
+    const isRejected =
+      r.status === 'rejected' ||
+      r.isRejected === true ||
+      r.status === 'cancelled' ||
+      r.isCancelled === true;
+
+    return isApproved && !isRejected;
+  }) || null;
+}
+
+/**
  * استخراج بداية الشيفت المجدول للموظف لتاريخ معين من الجداول الشهرية المعتمدة
  */
 export function getScheduledShiftForDate(employeeId, dateStr, state) {
@@ -428,9 +483,7 @@ export function recalculateEmployeeCycleLateness({
     const tierKey = tier.id;
 
     // فحص ما إذا كان هناك إذن معتمد للموظف في هذا التاريخ
-    const approvedPerm = approvedPermissions.find(
-      (p) => (p.date === shift.date || p.startDate === shift.date)
-    );
+    const approvedPerm = isApprovedPermissionForDate(emp.id, shift.date, state);
 
     const incId = `late_inc_${emp.id}_${shift.date}_${shift.timeIn.replace(':', '')}`;
     const prevInc = existingIncidentsMap.get(incId);
@@ -574,27 +627,9 @@ export const DEFAULT_PERMISSION_POLICY = {
 export function applyApprovedPermissionsToShifts(state) {
   if (!state || !state.shifts) return state?.shifts || [];
 
-  const approvedPerms = (state.requests || []).filter(
-    (r) =>
-      (r.type === 'permission' || r.type === 'إذن' || r.type === 'late_permission' || r.type === 'early_leave') &&
-      (r.status === 'approved' || r.adminApproved === true || (r.branchApproved && r.status !== 'rejected' && !r.isRejected)) &&
-      r.status !== 'rejected' &&
-      r.status !== 'cancelled'
-  );
-
-  if (approvedPerms.length === 0) return state.shifts;
-
-  const permsMap = new Map();
-  approvedPerms.forEach((p) => {
-    const pDate = p.date || p.startDate;
-    if (p.employeeId && pDate) {
-      permsMap.set(`${String(p.employeeId)}_${pDate}`, p);
-    }
-  });
-
   return (state.shifts || []).map((shift) => {
     if (!shift.employeeId || !shift.date) return shift;
-    const perm = permsMap.get(`${String(shift.employeeId)}_${shift.date}`);
+    const perm = isApprovedPermissionForDate(shift.employeeId, shift.date, state);
     if (!perm) return shift;
 
     // حساب ساعات الإذن

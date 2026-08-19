@@ -1,6 +1,6 @@
 import React from 'react';
 import { fmt, arabicWeekday, AR_MONTHS } from '../../utils/formatters';
-import { computeLatenessFinancialAmount } from '../../utils/latePenaltyEngine';
+import { computeLatenessFinancialAmount, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
 
 export default function PayslipPrintModal({
   isOpen,
@@ -640,6 +640,7 @@ export default function PayslipPrintModal({
                   inc.status !== 'cancelled' &&
                   inc.status !== 'approved_permission_exempt' &&
                   inc.actionType !== 'grace' &&
+                  !isApprovedPermissionForDate(emp.id, inc.date, state) &&
                   (inc.deductionMinutes > 0 || inc.penaltyAmount > 0) &&
                   (!selectedBranchId || String(inc.branchId) === String(selectedBranchId)) &&
                   (inc.date >= startCutoff && inc.date <= endCutoff)

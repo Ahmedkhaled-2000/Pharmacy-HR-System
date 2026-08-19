@@ -1,4 +1,5 @@
 import React from 'react';
+import { isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
 
 export default function AttendancePunchesModal({
   employee,
@@ -124,13 +125,7 @@ export default function AttendancePunchesModal({
                             const breakH = p.breakHours ? parseFloat(p.breakHours).toFixed(2) : null;
                             const shiftEarned = (parseFloat(netH) * bRate).toFixed(2);
 
-                            const perm = (state.requests || []).find(
-                              (r) =>
-                                String(r.employeeId) === String(selectedEmp?.id) &&
-                                (r.date === dateStr || r.startDate === dateStr) &&
-                                (r.type === 'permission' || r.type === 'إذن' || r.type === 'late_permission' || r.type === 'early_leave') &&
-                                (r.status === 'approved' || r.adminApproved || r.branchApproved)
-                            );
+                            const perm = isApprovedPermissionForDate(employee?.id, dateStr, state);
                             const hasPerm = p.hasApprovedPermission || !!perm;
                             const permHours = p.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
 
@@ -233,13 +228,7 @@ export default function AttendancePunchesModal({
                     const shiftRate = getBranchRate(p.branchId || employee.branchId);
                     const shiftEarned = (parseFloat(netH) * shiftRate).toFixed(2);
 
-                    const perm = (state.requests || []).find(
-                      (r) =>
-                        String(r.employeeId) === String(employee.id) &&
-                        (r.date === dateStr || r.startDate === dateStr) &&
-                        (r.type === 'permission' || r.type === 'إذن' || r.type === 'late_permission' || r.type === 'early_leave') &&
-                        (r.status === 'approved' || r.adminApproved || r.branchApproved)
-                    );
+                    const perm = isApprovedPermissionForDate(employee?.id, dateStr, state);
                     const hasPerm = p.hasApprovedPermission || !!perm;
                     const permHours = p.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
 

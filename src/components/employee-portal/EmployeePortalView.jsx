@@ -11,7 +11,7 @@ import EmployeeEvaluationsModule from './EmployeeEvaluationsModule';
 import PayslipPrintModal from '../payroll/PayslipPrintModal';
 import BylawsModule from '../bylaws/BylawsModule';
 import EmployeeResignationModule from './EmployeeResignationModule';
-import { computeLatenessFinancialAmount } from '../../utils/latePenaltyEngine';
+import { computeLatenessFinancialAmount, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
 
 // ─────────────────────────────────────────
 //  Month navigation helpers
@@ -300,6 +300,7 @@ export default function EmployeePortalView({
               inc.status !== 'cancelled' &&
               inc.status !== 'approved_permission_exempt' &&
               inc.actionType !== 'grace' &&
+              !isApprovedPermissionForDate(emp.id, inc.date, state) &&
               (inc.deductionMinutes > 0 || inc.penaltyAmount > 0) &&
               filterFn(inc.date) &&
               (inc.branchId === bId || (!inc.branchId && bdIdx === 0))
@@ -596,6 +597,7 @@ export default function EmployeePortalView({
             inc.status !== 'cancelled' &&
             inc.status !== 'approved_permission_exempt' &&
             inc.actionType !== 'grace' &&
+            !isApprovedPermissionForDate(emp.id, inc.date, state) &&
             (inc.deductionMinutes > 0 || inc.penaltyAmount > 0) &&
             filterFn(inc.date) &&
             (!selectedBranchId || String(inc.branchId) === String(selectedBranchId))
@@ -1977,27 +1979,49 @@ export default function EmployeePortalView({
                                   <td colSpan={canEditShift ? 10 : 9}>لا توجد ورديات مسجلة لهذا الفرع في هذا الشهر</td>
                                 </tr>
                               ) : (
-                                bShifts.map((s, idx) => (
-                                  <tr key={s.id}>
-                                    <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{idx + 1}</td>
-                                    <td style={{ fontWeight: 600 }}>{s.date}</td>
-                                    <td>{arabicWeekday(s.date)}</td>
-                                    <td><span className="ep-time-badge ep-time-in">{s.timeIn}</span></td>
-                                    <td><span className="ep-time-badge ep-time-out">{s.timeOut || '—'}</span></td>
-                                    <td>{(s.breakHours || 0) > 0 ? <span className="ep-break-badge">{fmt(s.breakHours)} س</span> : <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
-                                    <td className="money" style={{ color: 'var(--primary-dark)', fontWeight: 700 }}>{fmt(s.hours)} ساعة</td>
-                                    <td className="money" style={{ color: 'var(--success)', fontWeight: 600 }}>{canViewSalary ? `${fmt(s.hours * bRate)} ج.م` : '🔒 مقيد'}</td>
-                                    <td style={{ color: 'var(--text-muted)', fontSize: '0.88rem' }}>{s.note || '—'}</td>
-                                    {canEditShift && (
-                                      <td>
-                                        <div style={{ display: 'flex', gap: '6px' }}>
-                                          <button className="btn btn-ghost" style={{ padding: '3px 8px', fontSize: '12px' }} onClick={() => openEditShift && openEditShift(s)} title="تعديل الوردية">✏️</button>
-                                          <button className="btn btn-ghost" style={{ padding: '3px 8px', fontSize: '12px', color: 'var(--danger)' }} onClick={() => deleteShift && deleteShift(s.id)} title="حذف الوردية">🗑️</button>
-                                        </div>
+                                bShifts.map((s, idx) => {
+                                  const perm = isApprovedPermissionForDate(emp.id, s.date, state);
+                                  const hasPerm = s.hasApprovedPermission || !!perm;
+                                  const permHours = s.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
+
+                                  return (
+                                    <tr key={s.id} style={{ background: hasPerm ? 'rgba(254, 243, 199, 0.25)' : 'transparent' }}>
+                                      <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{idx + 1}</td>
+                                      <td style={{ fontWeight: 600 }}>
+                                        {s.date}
+                                        {hasPerm && (
+                                          <span style={{ display: 'block', marginTop: '2px', background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
+                                            ⏰ معدلة بإذن (+{permHours} س)
+                                          </span>
+                                        )}
                                       </td>
-                                    )}
-                                  </tr>
-                                ))
+                                      <td>{arabicWeekday(s.date)}</td>
+                                      <td><span className="ep-time-badge ep-time-in">{s.timeIn}</span></td>
+                                      <td><span className="ep-time-badge ep-time-out">{s.timeOut || '—'}</span></td>
+                                      <td>{(s.breakHours || 0) > 0 ? <span className="ep-break-badge">{fmt(s.breakHours)} س</span> : <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
+                                      <td className="money" style={{ color: 'var(--primary-dark)', fontWeight: 700 }}>{fmt(s.hours)} ساعة</td>
+                                      <td className="money" style={{ color: 'var(--success)', fontWeight: 600 }}>{canViewSalary ? `${fmt(s.hours * bRate)} ج.م` : '🔒 مقيد'}</td>
+                                      <td style={{ color: hasPerm ? '#047857' : 'var(--text-muted)', fontSize: '0.88rem' }}>
+                                        {hasPerm ? (
+                                          <div>
+                                            <span style={{ fontWeight: 700 }}>⏰ معدلة باحتساب ساعات الإذن المعتمد ({perm?.startTime || '—'} إلى {perm?.endTime || '—'})</span>
+                                            {s.note && !s.note.includes('⏰ تم تعديل البصمة') && <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{s.note}</div>}
+                                          </div>
+                                        ) : (
+                                          s.note || '—'
+                                        )}
+                                      </td>
+                                      {canEditShift && (
+                                        <td>
+                                          <div style={{ display: 'flex', gap: '6px' }}>
+                                            <button className="btn btn-ghost" style={{ padding: '3px 8px', fontSize: '12px' }} onClick={() => openEditShift && openEditShift(s)} title="تعديل الوردية">✏️</button>
+                                            <button className="btn btn-ghost" style={{ padding: '3px 8px', fontSize: '12px', color: 'var(--danger)' }} onClick={() => deleteShift && deleteShift(s.id)} title="حذف الوردية">🗑️</button>
+                                          </div>
+                                        </td>
+                                      )}
+                                    </tr>
+                                  );
+                                })
                               )}
                             </tbody>
                           </table>
@@ -2029,36 +2053,58 @@ export default function EmployeePortalView({
                           <td colSpan={canEditShift ? 10 : 9}>لا توجد ورديات مسجلة لهذا الشهر</td>
                         </tr>
                       ) : (
-                        empShifts.map((s, idx) => (
-                          <tr key={s.id}>
-                            <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{idx + 1}</td>
-                            <td style={{ fontWeight: 600 }}>{s.date}</td>
-                            <td>{arabicWeekday(s.date)}</td>
-                            <td><span className="ep-time-badge ep-time-in">{s.timeIn}</span></td>
-                            <td><span className="ep-time-badge ep-time-out">{s.timeOut || '—'}</span></td>
-                            <td>
-                              {(s.breakHours || 0) > 0
-                                ? <span className="ep-break-badge">{fmt(s.breakHours)} س</span>
-                                : <span style={{ color: 'var(--text-muted)' }}>—</span>
-                              }
-                            </td>
-                            <td className="money" style={{ color: 'var(--primary-dark)', fontWeight: 700 }}>
-                              {fmt(s.hours)} ساعة
-                            </td>
-                            <td className="money" style={{ color: 'var(--success)', fontWeight: 600 }}>
-                              {canViewSalary ? `${fmt(s.hours * (summary.perBranch?.[s.branchId]?.rate || summary.rate))} ج.م` : '🔒 مقيد'}
-                            </td>
-                            <td style={{ color: 'var(--text-muted)', fontSize: '0.88rem' }}>{s.note || '—'}</td>
-                            {canEditShift && (
-                              <td>
-                                <div style={{ display: 'flex', gap: '6px' }}>
-                                  <button className="btn btn-ghost" style={{ padding: '3px 8px', fontSize: '12px' }} onClick={() => openEditShift && openEditShift(s)} title="تعديل الوردية">✏️</button>
-                                  <button className="btn btn-ghost" style={{ padding: '3px 8px', fontSize: '12px', color: 'var(--danger)' }} onClick={() => deleteShift && deleteShift(s.id)} title="حذف الوردية">🗑️</button>
-                                </div>
+                        empShifts.map((s, idx) => {
+                          const perm = isApprovedPermissionForDate(emp.id, s.date, state);
+                          const hasPerm = s.hasApprovedPermission || !!perm;
+                          const permHours = s.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
+
+                          return (
+                            <tr key={s.id} style={{ background: hasPerm ? 'rgba(254, 243, 199, 0.25)' : 'transparent' }}>
+                              <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{idx + 1}</td>
+                              <td style={{ fontWeight: 600 }}>
+                                {s.date}
+                                {hasPerm && (
+                                  <span style={{ display: 'block', marginTop: '2px', background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
+                                    ⏰ معدلة بإذن (+{permHours} س)
+                                  </span>
+                                )}
                               </td>
-                            )}
-                          </tr>
-                        ))
+                              <td>{arabicWeekday(s.date)}</td>
+                              <td><span className="ep-time-badge ep-time-in">{s.timeIn}</span></td>
+                              <td><span className="ep-time-badge ep-time-out">{s.timeOut || '—'}</span></td>
+                              <td>
+                                {(s.breakHours || 0) > 0
+                                  ? <span className="ep-break-badge">{fmt(s.breakHours)} س</span>
+                                  : <span style={{ color: 'var(--text-muted)' }}>—</span>
+                                }
+                              </td>
+                              <td className="money" style={{ color: 'var(--primary-dark)', fontWeight: 700 }}>
+                                {fmt(s.hours)} ساعة
+                              </td>
+                              <td className="money" style={{ color: 'var(--success)', fontWeight: 600 }}>
+                                {canViewSalary ? `${fmt(s.hours * (summary.perBranch?.[s.branchId]?.rate || summary.rate))} ج.م` : '🔒 مقيد'}
+                              </td>
+                              <td style={{ color: hasPerm ? '#047857' : 'var(--text-muted)', fontSize: '0.88rem' }}>
+                                {hasPerm ? (
+                                  <div>
+                                    <span style={{ fontWeight: 700 }}>⏰ معدلة باحتساب ساعات الإذن المعتمد ({perm?.startTime || '—'} إلى {perm?.endTime || '—'})</span>
+                                    {s.note && !s.note.includes('⏰ تم تعديل البصمة') && <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{s.note}</div>}
+                                  </div>
+                                ) : (
+                                  s.note || '—'
+                                )}
+                              </td>
+                              {canEditShift && (
+                                <td>
+                                  <div style={{ display: 'flex', gap: '6px' }}>
+                                    <button className="btn btn-ghost" style={{ padding: '3px 8px', fontSize: '12px' }} onClick={() => openEditShift && openEditShift(s)} title="تعديل الوردية">✏️</button>
+                                    <button className="btn btn-ghost" style={{ padding: '3px 8px', fontSize: '12px', color: 'var(--danger)' }} onClick={() => deleteShift && deleteShift(s.id)} title="حذف الوردية">🗑️</button>
+                                  </div>
+                                </td>
+                              )}
+                            </tr>
+                          );
+                        })
                       )}
                     </tbody>
                     {empShifts.length > 0 && (
