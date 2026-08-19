@@ -679,37 +679,79 @@ export default function PayslipPrintModal({
                 color: '#b91c1c'
               }] : [];
 
-              const allBreakdownItems = [...allowanceItems, ...manualItems, ...latePenaltyItems, ...loanItems, ...absenceItem];
-
-              if (allBreakdownItems.length === 0) return null;
+              const generalBreakdownItems = [...allowanceItems, ...manualItems, ...loanItems, ...absenceItem];
 
               return (
                 <>
-                  <h4 style={{ margin: '0 0 6px 0', fontFamily: 'Cairo', color: '#0f766e', borderRight: '4px solid #0d9488', paddingRight: '8px', fontSize: '13.5px' }}>
-                    📝 تفاصيل البدلات والمكافآت والخصومات والغيابات ({allBreakdownItems.length} بند)
-                  </h4>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '16px', fontSize: '11.5px', textAlign: 'center' }}>
-                    <thead>
-                      <tr style={{ background: '#e2e8f0', color: '#334155' }}>
-                        <th style={{ padding: '5px', border: '1px solid #cbd5e1' }}>التاريخ</th>
-                        <th style={{ padding: '5px', border: '1px solid #cbd5e1' }}>نوع الإجراء / الخصم</th>
-                        <th style={{ padding: '5px', border: '1px solid #cbd5e1' }}>المبلغ</th>
-                        <th style={{ padding: '5px', border: '1px solid #cbd5e1' }}>السبب والبيان بالتفصيل</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {allBreakdownItems.map((item) => (
-                        <tr key={item.id}>
-                          <td style={{ padding: '4px', border: '1px solid #cbd5e1' }}>{item.date}</td>
-                          <td style={{ padding: '4px', border: '1px solid #cbd5e1', fontWeight: 'bold', color: item.color }}>
-                            {item.typeLabel}
-                          </td>
-                          <td style={{ padding: '4px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>{fmt(item.amount)} ج.م</td>
-                          <td style={{ padding: '4px', border: '1px solid #cbd5e1' }}>{item.details}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  {/* Dedicated Late Days & Penalties Table */}
+                  {empLateIncidents.length > 0 && (
+                    <div style={{ marginBottom: '14px' }}>
+                      <h4 style={{ margin: '0 0 6px 0', fontFamily: 'Cairo', color: '#c2410c', borderRight: '4px solid #ea580c', paddingRight: '8px', fontSize: '13px' }}>
+                        ⏱️ بيان وقائع وأيام التأخير والخصومات اليومية المعتمدة ({empLateIncidents.length} واقعة تأخير)
+                      </h4>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', textAlign: 'center', marginBottom: '8px' }}>
+                        <thead>
+                          <tr style={{ background: '#ffedd5', color: '#9a3412' }}>
+                            <th style={{ padding: '5px', border: '1px solid #fed7aa' }}>التاريخ واليوم</th>
+                            <th style={{ padding: '5px', border: '1px solid #fed7aa' }}>موعد الشيفت</th>
+                            <th style={{ padding: '5px', border: '1px solid #fed7aa' }}>الحضور الفعلي</th>
+                            <th style={{ padding: '5px', border: '1px solid #fed7aa' }}>دقائق التأخير</th>
+                            <th style={{ padding: '5px', border: '1px solid #fed7aa' }}>الفئة والتكرار</th>
+                            <th style={{ padding: '5px', border: '1px solid #fed7aa' }}>الجزاء المعتمد</th>
+                            <th style={{ padding: '5px', border: '1px solid #fed7aa' }}>دقائق الخصم</th>
+                            <th style={{ padding: '5px', border: '1px solid #fed7aa' }}>خصم اليوم</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {empLateIncidents.map((inc) => (
+                            <tr key={inc.id}>
+                              <td style={{ padding: '4px', border: '1px solid #fed7aa', fontWeight: 600 }}>{inc.date} ({arabicWeekday(inc.date)})</td>
+                              <td style={{ padding: '4px', border: '1px solid #fed7aa', color: '#2563eb' }}>{inc.scheduledStartTime}</td>
+                              <td style={{ padding: '4px', border: '1px solid #fed7aa', fontWeight: 600 }}>{inc.actualPunchInTime}</td>
+                              <td style={{ padding: '4px', border: '1px solid #fed7aa', fontWeight: 700, color: '#ea580c' }}>{inc.lateMinutes} دقيقة</td>
+                              <td style={{ padding: '4px', border: '1px solid #fed7aa' }}>{inc.tierName} (#{inc.occurrenceNumber})</td>
+                              <td style={{ padding: '4px', border: '1px solid #fed7aa', fontWeight: 600, color: inc.deductionMinutes > 0 ? '#dc2626' : '#16a34a' }}>{inc.actionLabel}</td>
+                              <td style={{ padding: '4px', border: '1px solid #fed7aa' }}>{inc.deductionMinutes > 0 ? `${inc.deductionMinutes} دقيقة` : '—'}</td>
+                              <td style={{ padding: '4px', border: '1px solid #fed7aa', fontWeight: 700, color: inc.penaltyAmount > 0 ? '#dc2626' : '#16a34a' }}>
+                                {inc.penaltyAmount > 0 ? `-${fmt(inc.penaltyAmount)} ج.م` : '0 ج.م'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {/* General Allowances, Adjustments & Loans Table */}
+                  {generalBreakdownItems.length > 0 && (
+                    <>
+                      <h4 style={{ margin: '0 0 6px 0', fontFamily: 'Cairo', color: '#0f766e', borderRight: '4px solid #0d9488', paddingRight: '8px', fontSize: '13px' }}>
+                        📝 تفاصيل البدلات والمكافآت والخصومات الأخرى والغيابات ({generalBreakdownItems.length} بند)
+                      </h4>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '16px', fontSize: '11px', textAlign: 'center' }}>
+                        <thead>
+                          <tr style={{ background: '#e2e8f0', color: '#334155' }}>
+                            <th style={{ padding: '5px', border: '1px solid #cbd5e1' }}>التاريخ</th>
+                            <th style={{ padding: '5px', border: '1px solid #cbd5e1' }}>نوع الإجراء / الخصم</th>
+                            <th style={{ padding: '5px', border: '1px solid #cbd5e1' }}>المبلغ</th>
+                            <th style={{ padding: '5px', border: '1px solid #cbd5e1' }}>السبب والبيان بالتفصيل</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {generalBreakdownItems.map((item) => (
+                            <tr key={item.id}>
+                              <td style={{ padding: '4px', border: '1px solid #cbd5e1' }}>{item.date}</td>
+                              <td style={{ padding: '4px', border: '1px solid #cbd5e1', fontWeight: 'bold', color: item.color }}>
+                                {item.typeLabel}
+                              </td>
+                              <td style={{ padding: '4px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>{fmt(item.amount)} ج.م</td>
+                              <td style={{ padding: '4px', border: '1px solid #cbd5e1' }}>{item.details}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </>
+                  )}
                 </>
               );
             })()}

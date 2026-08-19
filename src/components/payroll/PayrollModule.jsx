@@ -496,6 +496,75 @@ export default function PayrollModule({
                 </div>
               </div>
 
+              {/* Late Penalties Detailed Incidents Table */}
+              {(() => {
+                const empLateIncidents = (state.lateIncidents || []).filter(
+                  (inc) =>
+                    String(inc.employeeId) === String(selectedEmpModal.id) &&
+                    inc.status !== 'cancelled' &&
+                    (!filterBranch || String(inc.branchId) === String(filterBranch)) &&
+                    payrollFilterFn(inc.date)
+                );
+
+                if (empLateIncidents.length === 0) return null;
+
+                return (
+                  <div style={{ marginBottom: '22px', background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '12px', padding: '16px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                      <h4 style={{ margin: 0, fontFamily: 'Cairo', color: '#c2410c', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span>⏱️</span> جدول وقائع وأيام التأخير والخصم اليومي المعتمد ({empLateIncidents.length} واقعة تأخير)
+                      </h4>
+                      <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#9a3412' }}>
+                        إجمالي خصم التأخيرات: {fmt(empSum.lateDeduction)} ج.م ({empSum.lateDeductionMinutes} دقيقة)
+                      </span>
+                    </div>
+
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'center', background: '#fff', borderRadius: '8px', overflow: 'hidden' }}>
+                        <thead>
+                          <tr style={{ background: '#ffedd5', color: '#9a3412', borderBottom: '1px solid #fed7aa' }}>
+                            <th style={{ padding: '8px 10px' }}>التاريخ</th>
+                            <th style={{ padding: '8px 10px' }}>موعد الشيفت</th>
+                            <th style={{ padding: '8px 10px' }}>الحضور الفعلي</th>
+                            <th style={{ padding: '8px 10px' }}>دقائق التأخير</th>
+                            <th style={{ padding: '8px 10px' }}>فئة التأخير</th>
+                            <th style={{ padding: '8px 10px' }}>التكرار</th>
+                            <th style={{ padding: '8px 10px' }}>الجزاء اللائحي</th>
+                            <th style={{ padding: '8px 10px' }}>دقائق الخصم</th>
+                            <th style={{ padding: '8px 10px' }}>مبلغ الخصم لليوم</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {empLateIncidents.map((inc) => (
+                            <tr key={inc.id} style={{ borderBottom: '1px solid #fed7aa' }}>
+                              <td style={{ padding: '7px 10px', fontWeight: 600 }}>{inc.date}</td>
+                              <td style={{ padding: '7px 10px', color: '#2563eb', fontWeight: 600 }}>{inc.scheduledStartTime}</td>
+                              <td style={{ padding: '7px 10px', fontWeight: 600 }}>{inc.actualPunchInTime}</td>
+                              <td style={{ padding: '7px 10px' }}>
+                                <span style={{ background: 'rgba(234,88,12,0.1)', color: '#ea580c', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
+                                  {inc.lateMinutes} دقيقة
+                                </span>
+                              </td>
+                              <td style={{ padding: '7px 10px' }}>{inc.tierName}</td>
+                              <td style={{ padding: '7px 10px', fontWeight: 700 }}>المرة #{inc.occurrenceNumber}</td>
+                              <td style={{ padding: '7px 10px', color: inc.deductionMinutes > 0 ? '#dc2626' : '#16a34a', fontWeight: 600 }}>
+                                {inc.actionLabel}
+                              </td>
+                              <td style={{ padding: '7px 10px', fontWeight: 700 }}>
+                                {inc.deductionMinutes > 0 ? `${inc.deductionMinutes} دقيقة` : '—'}
+                              </td>
+                              <td style={{ padding: '7px 10px', fontWeight: 800, color: inc.penaltyAmount > 0 ? '#dc2626' : 'var(--muted)' }}>
+                                {inc.penaltyAmount > 0 ? `-${fmt(inc.penaltyAmount)} ج.م` : '0 ج.م'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })()}
+
               <div style={{ background: 'linear-gradient(135deg, #0d9488, #0f766e)', color: '#fff', padding: '18px', borderRadius: '12px', textAlign: 'center', marginBottom: '20px' }}>
                 <span style={{ fontSize: '13px', opacity: 0.9 }}>صافي الراتب النهائي المستحق للفترة ({getPeriodDesc()})</span>
                 <h2 style={{ margin: '6px 0 0 0', fontSize: '28px', fontWeight: '900' }}>

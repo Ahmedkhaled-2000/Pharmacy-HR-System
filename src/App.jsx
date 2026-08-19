@@ -3539,11 +3539,43 @@ export default function App() {
           }
 
           r++;
+          // ── Late Penalties Table for Branch ──
+          const bLateIncidents = (state.lateIncidents || []).filter(
+            (inc) =>
+              String(inc.employeeId) === String(empId) &&
+              filterFn(inc.date) &&
+              inc.status !== 'cancelled' &&
+              (inc.branchId === bId || (!inc.branchId && bdIdx === 0))
+          );
+
+          if (bLateIncidents.length > 0) {
+            mergedTitle(ws, r, `تفاصيل وقائع وأيام التأخيرات والخصم اليومي — فرع ${bName}`, COLS, 'FFD97706', 12, 22);
+            r++;
+            tableHeaderRow(ws, r, ['التاريخ', 'اليوم', 'الشيفت المجدول', 'الحضور الفعلي', 'دقائق التأخير', 'فئة التأخير', 'التكرار', 'الجزاء اللائحي', 'دقائق الخصم', 'مبلغ الخصم لليوم (ج.م)'], 1);
+            r++;
+            bLateIncidents.forEach((inc) => {
+              dataRow(ws, r, [
+                inc.date,
+                arabicWeekday(inc.date),
+                inc.scheduledStartTime,
+                inc.actualPunchInTime,
+                `${inc.lateMinutes} دقيقة`,
+                inc.tierName,
+                `المرة #${inc.occurrenceNumber}`,
+                inc.actionLabel,
+                inc.deductionMinutes > 0 ? `${inc.deductionMinutes} دقيقة` : '—',
+                fmt(inc.penaltyAmount)
+              ], 1, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+              r++;
+            });
+            r++;
+          }
+
           const bAdjs = state.adjustments.filter(
             (a) => (a.employeeId === empId || a.employeeId === 'all') && filterFn(a.date) && (a.branchId === bId || (!a.branchId && bdIdx === 0))
           );
 
-          mergedTitle(ws, r, `تفاصيل المكافآت والخصومات — فرع ${bName}`, COLS, 'FF3A6E69', 12, 22);
+          mergedTitle(ws, r, `تفاصيل المكافآت والخصومات الأخرى — فرع ${bName}`, COLS, 'FF3A6E69', 12, 22);
           r++;
           tableHeaderRow(ws, r, ['التاريخ', 'النوع', 'المبلغ', 'البيان / السبب'], 1);
           r++;
