@@ -2063,12 +2063,27 @@ export default function App() {
     const totalHours = Object.values(perEmp).reduce((s, e) => s + e.hours, 0);
     const totalBaseEarnings = Object.values(perEmp).reduce((s, e) => s + e.baseEarnings, 0);
     const totalBonus = Object.values(perEmp).reduce((s, e) => s + e.totalBonus, 0);
+    const totalManagementAllowance = Object.values(perEmp).reduce((s, e) => s + (e.managementAllowance || 0), 0);
+    const totalTransportAllowance = Object.values(perEmp).reduce((s, e) => s + (e.transportAllowance || 0), 0);
+    const totalExtraAllowance = Object.values(perEmp).reduce((s, e) => s + (e.extraAllowance || 0), 0);
     const totalAllowances = Object.values(perEmp).reduce((s, e) => s + (e.totalAllowances || 0), 0);
     const totalDeduction = Object.values(perEmp).reduce((s, e) => s + e.totalDeduction, 0);
     const totalAbsenceDeduction = Object.values(perEmp).reduce((s, e) => s + e.absenceDeduction, 0);
     const grandNetSalary = totalBaseEarnings + totalBonus + totalAllowances - totalDeduction;
 
-    return { perEmp, totalHours, totalBaseEarnings, totalBonus, totalAllowances, totalDeduction, totalAbsenceDeduction, grandNetSalary };
+    return {
+      perEmp,
+      totalHours,
+      totalBaseEarnings,
+      totalBonus,
+      totalManagementAllowance,
+      totalTransportAllowance,
+      totalExtraAllowance,
+      totalAllowances,
+      totalDeduction,
+      totalAbsenceDeduction,
+      grandNetSalary
+    };
   };
 
   // Manual Shift Entry States
@@ -3609,14 +3624,14 @@ export default function App() {
         sr += 2;
         mergedTitle(wsSummary, sr, 'إجمالي صافي المستحقات الشامل لكافة الفروع', 8, 'FF134E4A', 14, 28);
         sr++;
-        tableHeaderRow(wsSummary, sr, ['إجمالي الساعات بكافة الفروع', 'إجمالي المستحقات الأساسية', 'إجمالي المكافآت العامة', 'إجمالي الخصومات العامة', 'إجمالي صافي المرتب النهائي الشامل'], 1);
-        wsSummary.mergeCells(sr, 5, sr, 8);
+        tableHeaderRow(wsSummary, sr, ['إجمالي الساعات بكافة الفروع', 'إجمالي المستحقات الأساسية', 'إجمالي البدلات الثابتة (+)', 'إجمالي المكافآت العامة (+)', 'إجمالي الخصومات العامة (-)', 'إجمالي صافي المرتب النهائي الشامل'], 1);
+        wsSummary.mergeCells(sr, 6, sr, 8);
         sr++;
 
-        dataRow(wsSummary, sr, [fmt(grandTotalHours), fmt(grandTotalBase), fmt(grandTotalBonus), fmt(grandTotalDeduction)], 1, [0, 1, 2, 3]);
-        wsSummary.mergeCells(sr, 5, sr, 8);
-        const totalNetCell = wsSummary.getCell(sr, 5);
-        totalNetCell.value = fmt(grandTotalNet) + ' ج.م';
+        dataRow(wsSummary, sr, [fmt(grandTotalHours), fmt(grandTotalBase), fmt(summary.totalAllowances || 0), fmt(grandTotalBonus), fmt(grandTotalDeduction)], 1, [0, 1, 2, 3, 4]);
+        wsSummary.mergeCells(sr, 6, sr, 8);
+        const totalNetCell = wsSummary.getCell(sr, 6);
+        totalNetCell.value = fmt(summary.netSalary || grandTotalNet) + ' ج.م';
         totalNetCell.font = { name: 'Arial', bold: true, size: 13, color: { argb: 'FF134E4A' } };
         totalNetCell.alignment = { horizontal: 'center', vertical: 'middle' };
         totalNetCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE4EEEC' } };
@@ -3669,6 +3684,53 @@ export default function App() {
         }
 
         r++;
+        // ── Allowances Breakdown Table ──
+        const allowanceItems = [];
+        if ((summary.managementAllowance || 0) > 0) {
+          allowanceItems.push(['بدل إدارة شهري', `بدل إدارة معتمد لشغل وظيفة (${emp.jobTitle})`, parseFloat(fmt(summary.managementAllowance))]);
+        }
+        if ((summary.transportAllowance || 0) > 0) {
+          allowanceItems.push(['بدل انتقال ومواصلات', 'بدل انتقال ومواصلات شهري ثابت', parseFloat(fmt(summary.transportAllowance))]);
+        }
+        if ((summary.extraAllowance || 0) > 0) {
+          allowanceItems.push([summary.extraAllowanceTitle || 'أجر إضافي', 'أجر وبدل إضافي مخصص من الإدارة', parseFloat(fmt(summary.extraAllowance))]);
+        }
+
+        if (allowanceItems.length > 0) {
+          mergedTitle(ws, r, 'تفاصيل البدلات الثابتة والأجور الإضافية', COLS, 'FF047857', 12, 22);
+          r++;
+          tableHeaderRow(ws, r, ['نوع البدل / الاستحقاق', 'البيان والتفاصيل', 'المبلغ المستحق (ج.م)'], 1);
+          ws.mergeCells(r, 2, r, COLS - 1);
+          r++;
+
+          allowanceItems.forEach(([title, desc, amt]) => {
+            const cellTitle = ws.getCell(r, 1);
+            cellTitle.value = title;
+            cellTitle.font = { name: 'Arial', bold: true, size: 10.5, color: { argb: 'FF166534' } };
+            cellTitle.alignment = { horizontal: 'center' };
+            cellTitle.border = { top: { style: 'thin', color: { argb: 'FFCFC9B8' } }, left: { style: 'thin', color: { argb: 'FFCFC9B8' } }, bottom: { style: 'thin', color: { argb: 'FFCFC9B8' } }, right: { style: 'thin', color: { argb: 'FFCFC9B8' } } };
+            cellTitle.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0FDF4' } };
+
+            ws.mergeCells(r, 2, r, COLS - 1);
+            const cellDesc = ws.getCell(r, 2);
+            cellDesc.value = desc;
+            cellDesc.font = { name: 'Arial', size: 10.5, color: { argb: 'FF166534' } };
+            cellDesc.alignment = { horizontal: 'center' };
+            cellDesc.border = { top: { style: 'thin', color: { argb: 'FFCFC9B8' } }, left: { style: 'thin', color: { argb: 'FFCFC9B8' } }, bottom: { style: 'thin', color: { argb: 'FFCFC9B8' } }, right: { style: 'thin', color: { argb: 'FFCFC9B8' } } };
+            cellDesc.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0FDF4' } };
+
+            const cellAmt = ws.getCell(r, COLS);
+            cellAmt.value = amt;
+            cellAmt.numFmt = '#,##0.00';
+            cellAmt.font = { name: 'Arial', bold: true, size: 10.5, color: { argb: 'FF15803d' } };
+            cellAmt.alignment = { horizontal: 'center' };
+            cellAmt.border = { top: { style: 'thin', color: { argb: 'FFCFC9B8' } }, left: { style: 'thin', color: { argb: 'FFCFC9B8' } }, bottom: { style: 'thin', color: { argb: 'FFCFC9B8' } }, right: { style: 'thin', color: { argb: 'FFCFC9B8' } } };
+            cellAmt.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE4F4EB' } };
+            r++;
+          });
+          r++;
+        }
+
         const empAdjs = state.adjustments.filter((a) => (a.employeeId === empId || a.employeeId === 'all') && filterFn(a.date));
         mergedTitle(ws, r, 'تفاصيل المكافآت والخصومات', COLS, 'FF3A6E69', 12, 22);
         r++;
@@ -3701,13 +3763,13 @@ export default function App() {
         r += 2;
         mergedTitle(ws, r, 'الملخص المالي وصافي المرتب المستحق النهائي', COLS, 'FF134E4A', 13, 26);
         r++;
-        tableHeaderRow(ws, r, ['سعر الساعة الشهرية', 'إجمالي الساعات', 'المستحقات الأساسية', 'إجمالي المكافآت', 'إجمالي الخصومات', 'صافي المرتب النهائي'], 1);
-        ws.mergeCells(r, 6, r, COLS);
+        tableHeaderRow(ws, r, ['سعر الساعة الشهرية', 'إجمالي الساعات', 'المستحقات الأساسية', 'إجمالي البدلات (+)', 'إجمالي المكافآت (+)', 'إجمالي الخصومات (-)', 'صافي المرتب النهائي'], 1);
+        ws.mergeCells(r, 7, r, COLS);
         r++;
 
-        dataRow(ws, r, [fmt(emp.salary), fmt(summary.hours), fmt(summary.baseEarnings), fmt(summary.totalBonus), fmt(summary.totalDeduction)], 1, [0, 1, 2, 3, 4]);
-        ws.mergeCells(r, 6, r, COLS);
-        const netCell = ws.getCell(r, 6);
+        dataRow(ws, r, [fmt(emp.salary), fmt(summary.hours), fmt(summary.baseEarnings), fmt(summary.totalAllowances || 0), fmt(summary.totalBonus), fmt(summary.totalDeduction)], 1, [0, 1, 2, 3, 4, 5]);
+        ws.mergeCells(r, 7, r, COLS);
+        const netCell = ws.getCell(r, 7);
         netCell.value = fmt(summary.netSalary) + ' ج.م';
         netCell.font = { name: 'Arial', bold: true, size: 12, color: { argb: 'FF134E4A' } };
         netCell.alignment = { horizontal: 'center', vertical: 'middle' };
@@ -3759,33 +3821,56 @@ export default function App() {
 
       const ExcelJS = await loadExcelJS(showToast);
       const grandPayroll = computeGrandPayroll(filterFn, mode === 'month' ? monthPicker : null);
-      const COLS = 8;
+      const COLS = 12;
 
       const wb = new ExcelJS.Workbook();
       wb.creator = state.orgSettings.orgName || 'نظام الموارد البشرية';
       const ws = wb.addWorksheet('رواتب جميع الموظفين', { views: [{ rightToLeft: true, showGridLines: false }] });
-      ws.columns = [{ width: 10 }, { width: 22 }, { width: 16 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 18 }];
+      ws.columns = [
+        { width: 10 }, { width: 22 }, { width: 16 }, { width: 14 },
+        { width: 14 }, { width: 13 }, { width: 13 }, { width: 13 },
+        { width: 14 }, { width: 14 }, { width: 14 }, { width: 18 }
+      ];
 
       let r = 1;
       mergedTitle(ws, r, isMonthMode ? `كشف رواتب جميع الموظفين وإجمالي الأجور — ${periodLabel}` : `كشف رواتب الموظفين للفترة — ${periodLabel}`, COLS, 'FF0B3532', 16, 32);
       r += 2;
 
-      tableHeaderRow(ws, r, ['كود الموظف', 'اسم الموظف', 'الوظيفة', 'عدد الساعات', 'المستحقات الأساسية', 'المكافآت (+)', 'الخصومات (-)', 'صافي المرتب النهائي']);
+      tableHeaderRow(ws, r, ['كود الموظف', 'اسم الموظف', 'الوظيفة', 'عدد الساعات', 'المستحقات الأساسية', 'بدل الإدارة (+)', 'بدل الانتقال (+)', 'أجر إضافي (+)', 'إجمالي البدلات (+)', 'المكافآت (+)', 'الخصومات والغيابات (-)', 'صافي المرتب النهائي']);
       r++;
 
       state.employees.forEach((emp) => {
-        const s = grandPayroll.perEmp[emp.id] || { hours: 0, baseEarnings: 0, totalBonus: 0, totalDeduction: 0, netSalary: 0 };
-        dataRow(ws, r, [emp.code, emp.name, emp.jobTitle, fmt(s.hours), fmt(s.baseEarnings), fmt(s.totalBonus), fmt(s.totalDeduction), fmt(s.netSalary)], 1, [3, 4, 5, 6, 7]);
+        const s = grandPayroll.perEmp[emp.id] || { hours: 0, baseEarnings: 0, managementAllowance: 0, transportAllowance: 0, extraAllowance: 0, totalAllowances: 0, totalBonus: 0, totalDeduction: 0, absenceDeduction: 0, netSalary: 0 };
+        dataRow(
+          ws,
+          r,
+          [
+            emp.code,
+            emp.name,
+            emp.jobTitle,
+            fmt(s.hours),
+            fmt(s.baseEarnings),
+            fmt(s.managementAllowance || 0),
+            fmt(s.transportAllowance || 0),
+            fmt(s.extraAllowance || 0),
+            fmt(s.totalAllowances || 0),
+            fmt(s.totalBonus),
+            fmt((s.totalDeduction || 0) + (s.absenceDeduction || 0)),
+            fmt(s.netSalary)
+          ],
+          1,
+          [3, 4, 5, 6, 7, 8, 9, 10, 11]
+        );
         r++;
       });
 
       r++;
-      mergedTitle(ws, r, 'الإجمالي الكلي لأجور الشركة والرواتب المدفوعة', COLS, 'FF134E4A', 14, 28);
+      mergedTitle(ws, r, 'الإجمالي الكلي لأجور الشركة والرواتب والبدلات المدفوعة', COLS, 'FF134E4A', 14, 28);
       r++;
 
       ws.mergeCells(r, 1, r, 3);
       const grandLabel = ws.getCell(r, 1);
-      grandLabel.value = 'مجموع الأجور والرواتب المدفوعة كافة';
+      grandLabel.value = 'مجموع الأجور والرواتب والبدلات المدفوعة كافة';
       grandLabel.font = { name: 'Arial', bold: true, size: 12 };
       grandLabel.alignment = { horizontal: 'center' };
       grandLabel.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE4EEEC' } };
@@ -3793,11 +3878,15 @@ export default function App() {
 
       const hCell = ws.getCell(r, 4); hCell.value = parseFloat(fmt(grandPayroll.totalHours)); hCell.numFmt = '#,##0.00';
       const bCell = ws.getCell(r, 5); bCell.value = parseFloat(fmt(grandPayroll.totalBaseEarnings)); bCell.numFmt = '#,##0.00';
-      const boCell = ws.getCell(r, 6); boCell.value = parseFloat(fmt(grandPayroll.totalBonus)); boCell.numFmt = '#,##0.00';
-      const dCell = ws.getCell(r, 7); dCell.value = parseFloat(fmt(grandPayroll.totalDeduction)); dCell.numFmt = '#,##0.00';
-      const gCell = ws.getCell(r, 8); gCell.value = parseFloat(fmt(grandPayroll.grandNetSalary)); gCell.numFmt = '#,##0.00';
+      const mgmtCell = ws.getCell(r, 6); mgmtCell.value = parseFloat(fmt(grandPayroll.totalManagementAllowance || 0)); mgmtCell.numFmt = '#,##0.00';
+      const transCell = ws.getCell(r, 7); transCell.value = parseFloat(fmt(grandPayroll.totalTransportAllowance || 0)); transCell.numFmt = '#,##0.00';
+      const extCell = ws.getCell(r, 8); extCell.value = parseFloat(fmt(grandPayroll.totalExtraAllowance || 0)); extCell.numFmt = '#,##0.00';
+      const allCell = ws.getCell(r, 9); allCell.value = parseFloat(fmt(grandPayroll.totalAllowances || 0)); allCell.numFmt = '#,##0.00';
+      const boCell = ws.getCell(r, 10); boCell.value = parseFloat(fmt(grandPayroll.totalBonus)); boCell.numFmt = '#,##0.00';
+      const dCell = ws.getCell(r, 11); dCell.value = parseFloat(fmt((grandPayroll.totalDeduction || 0) + (grandPayroll.totalAbsenceDeduction || 0))); dCell.numFmt = '#,##0.00';
+      const gCell = ws.getCell(r, 12); gCell.value = parseFloat(fmt(grandPayroll.grandNetSalary)); gCell.numFmt = '#,##0.00';
 
-      [hCell, bCell, boCell, dCell, gCell].forEach((c) => {
+      [hCell, bCell, mgmtCell, transCell, extCell, allCell, boCell, dCell, gCell].forEach((c) => {
         c.font = { name: 'Arial', bold: true, size: 11, color: { argb: 'FF134E4A' } };
         c.alignment = { horizontal: 'center', vertical: 'middle' };
         c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE4EEEC' } };
