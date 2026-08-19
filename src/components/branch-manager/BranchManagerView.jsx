@@ -1414,6 +1414,143 @@ export default function BranchManagerView({
                   </div>
                 )}
 
+                {/* ── ROSTER EDIT DETAILS & COMPARISON (الجدول السابق مقابل الجديد) ── */}
+                {isRoster && (() => {
+                  const existingRoster = (state.rosters || []).find(r => 
+                    String(r.employeeId) === String(previewModalReq.employeeId) &&
+                    (!previewModalReq.month || r.month === previewModalReq.month)
+                  );
+
+                  const prevSchedule = previewModalReq.oldSchedule || previewModalReq.previousSchedule || existingRoster?.schedule || {};
+                  const newSchedule = previewModalReq.schedule || previewModalReq.newSchedule || {};
+
+                  const daysOfWeek = [
+                    { key: 'saturday', label: 'السبت' },
+                    { key: 'sunday', label: 'الأحد' },
+                    { key: 'monday', label: 'الإثنين' },
+                    { key: 'tuesday', label: 'الثلاثاء' },
+                    { key: 'wednesday', label: 'الأربعاء' },
+                    { key: 'thursday', label: 'الخميس' },
+                    { key: 'friday', label: 'الجمعة' },
+                  ];
+
+                  const dayNameMap = {
+                    'saturday': 'السبت',
+                    'sunday': 'الأحد',
+                    'monday': 'الإثنين',
+                    'tuesday': 'الثلاثاء',
+                    'wednesday': 'الأربعاء',
+                    'thursday': 'الخميس',
+                    'friday': 'الجمعة'
+                  };
+
+                  const customDateKeys = Object.keys(newSchedule).filter(k => 
+                    !daysOfWeek.some(d => d.key === k || d.label === k || d.label.replace('الإثنين', 'الاثنين') === k)
+                  );
+                  const hasCustomDates = customDateKeys.length > 0;
+
+                  const displayList = hasCustomDates 
+                    ? customDateKeys.sort().map(dateKey => ({ key: dateKey, label: `${dateKey} (${getArabicWeekday(dateKey)})` }))
+                    : daysOfWeek;
+
+                  return (
+                    <div style={{ background: '#f8fafc', padding: '18px', borderRadius: '14px', border: '1px solid #cbd5e1' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                        <h4 style={{ margin: 0, color: '#0f172a', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          📅 مقارنة ومعاينة تعديل الجدول الشهري (الجدول السابق مقابل الجديد):
+                        </h4>
+                        <span style={{ fontSize: '12px', background: '#e0f2fe', color: '#0369a1', padding: '4px 10px', borderRadius: '6px', fontWeight: 'bold' }}>
+                          الشهر: {previewModalReq.month || 'الشهر الحالي'}
+                        </span>
+                      </div>
+
+                      {previewModalReq.details && (
+                        <div style={{ background: '#fff', border: '1px solid #e2e8f0', padding: '10px 14px', borderRadius: '8px', marginBottom: '14px', fontSize: '13px', color: '#334155' }}>
+                          <strong>📝 تفاصيل التعديل المطلوبة: </strong> {previewModalReq.details}
+                        </div>
+                      )}
+
+                      <div className="table-responsive" style={{ maxHeight: '350px', overflowY: 'auto' }}>
+                        <table className="table" style={{ fontSize: '13px', width: '100%', borderCollapse: 'collapse' }}>
+                          <thead>
+                            <tr style={{ background: '#e2e8f0', color: '#1e293b' }}>
+                              <th style={{ padding: '8px 10px' }}>اليوم</th>
+                              <th style={{ padding: '8px 10px', background: '#fee2e2', color: '#991b1b' }}>⏮️ الجدول السابق (قبل التعديل)</th>
+                              <th style={{ padding: '8px 10px', background: '#dcfce7', color: '#166534' }}>⏭️ الجدول الجديد (بعد التعديل)</th>
+                              <th style={{ padding: '8px 10px' }}>موقف التغيير</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {displayList.map((dayItem) => {
+                              const arKey = dayNameMap[dayItem.key] || dayItem.label;
+                              const arKeyAlt = arKey ? arKey.replace('الإثنين', 'الاثنين') : '';
+                              
+                              const oldDay = prevSchedule[dayItem.key] || prevSchedule[arKey] || prevSchedule[arKeyAlt] || { isOff: dayItem.key === 'friday', checkIn: '09:00', checkOut: '17:00', hours: empObj?.workHoursPerDay || 8 };
+                              const newDay = newSchedule[dayItem.key] || newSchedule[arKey] || newSchedule[arKeyAlt] || oldDay;
+
+                              const isOldOff = oldDay.isOff || oldDay.type === 'off';
+                              const isNewOff = newDay.isOff || newDay.type === 'off';
+
+                              const oldStart = oldDay.checkIn || oldDay.start || oldDay.startTime || (isOldOff ? '—' : '09:00');
+                              const oldEnd = oldDay.checkOut || oldDay.end || oldDay.endTime || (isOldOff ? '—' : '17:00');
+
+                              const newStart = newDay.checkIn || newDay.start || newDay.startTime || (isNewOff ? '—' : '09:00');
+                              const newEnd = newDay.checkOut || newDay.end || newDay.endTime || (isNewOff ? '—' : '17:00');
+
+                              const isChanged = (isOldOff !== isNewOff) || (oldStart !== newStart) || (oldEnd !== newEnd);
+
+                              return (
+                                <tr key={dayItem.key} style={{ background: isChanged ? '#fffbeb' : '#fff', borderBottom: '1px solid #e2e8f0' }}>
+                                  <td style={{ fontWeight: 'bold', color: '#334155' }}>{dayItem.label}</td>
+                                  
+                                  {/* Previous Schedule */}
+                                  <td style={{ background: isOldOff ? '#fef2f2' : 'transparent' }}>
+                                    {isOldOff ? (
+                                      <span className="badge badge-danger" style={{ fontSize: '11px' }}>🔴 راحة أسبوعية</span>
+                                    ) : (
+                                      <div>
+                                        <span className="badge badge-success" style={{ fontSize: '11px' }}>🟢 وردية عمل</span>
+                                        <div style={{ fontSize: '12px', marginTop: '3px', color: '#475569' }}>
+                                          من <strong>{oldStart}</strong> إلى <strong>{oldEnd}</strong>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </td>
+
+                                  {/* New Schedule */}
+                                  <td style={{ background: isNewOff ? '#fef2f2' : 'transparent' }}>
+                                    {isNewOff ? (
+                                      <span className="badge badge-danger" style={{ fontSize: '11px' }}>🔴 راحة أسبوعية</span>
+                                    ) : (
+                                      <div>
+                                        <span className="badge badge-success" style={{ fontSize: '11px' }}>🟢 وردية عمل</span>
+                                        <div style={{ fontSize: '12px', marginTop: '3px', color: '#15803d', fontWeight: 'bold' }}>
+                                          من <strong>{newStart}</strong> إلى <strong>{newEnd}</strong>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </td>
+
+                                  {/* Change Status */}
+                                  <td>
+                                    {isChanged ? (
+                                      <span style={{ background: '#fef3c7', color: '#b45309', padding: '3px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 'bold', display: 'inline-block' }}>
+                                        ⚡ تم التعديل
+                                      </span>
+                                    ) : (
+                                      <span style={{ color: '#94a3b8', fontSize: '12px' }}>مطابق</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {/* 4. Reason & Notes Card */}
                 <div style={{ background: '#fff', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>
                   <h4 style={{ margin: '0 0 8px', color: 'var(--primary-dark)', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
