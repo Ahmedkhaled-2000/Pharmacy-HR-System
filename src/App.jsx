@@ -4099,7 +4099,7 @@ export default function App() {
           activeTab={activeNavTab}
           setActiveTab={setActiveNavTab}
           onLogout={handleLogout}
-          pendingCount={(state.requests || []).filter(r => r.status === 'pending' || r.status === 'pending_admin').length}
+          pendingCount={(state.requests || []).filter(r => !r.hiddenFromAdmin && (r.status === 'pending' || r.status === 'pending_admin')).length}
           resignationCount={(state.resignationRequests || []).filter(r => (r.managerStatus === 'approved' || r.managerStatus === 'rejected') && !r.isAdminCreated && (!r.adminStatus || r.adminStatus === 'pending')).length}
           themeMode={themeMode}
           toggleTheme={toggleTheme}

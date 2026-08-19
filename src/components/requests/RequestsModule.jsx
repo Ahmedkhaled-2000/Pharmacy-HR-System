@@ -64,7 +64,12 @@ export default function RequestsModule({
     }
   };
 
-  const requests = state.requests || [];
+  const [showHiddenAdminRequests, setShowHiddenAdminRequests] = useState(false);
+
+  const allRequests = state.requests || [];
+  const hiddenAdminCount = allRequests.filter(r => r && r.hiddenFromAdmin).length;
+  const visibleAdminRequests = allRequests.filter(r => showHiddenAdminRequests ? true : !r.hiddenFromAdmin);
+  const requests = visibleAdminRequests;
   const employees = state.employees || [];
 
   const formatDateStr = (dateVal) => {
@@ -542,15 +547,60 @@ export default function RequestsModule({
     showToast?.('❌ تم رفض الاعتراض وتثبيت الجزاء المالي');
   };
 
-  // Clear / Delete Requests List ONLY (Without affecting any other system data)
-  const handleClearAllRequests = async () => {
-    const currentReqs = state.requests || requests || [];
-    if (currentReqs.length === 0) {
-      alert('لا توجد أي طلبات حالياً في هذه الصفحة لمسحها');
+  // 1. Clear / Hide requests from Higher Management screen ONLY (Does NOT affect Employee or Branch Manager screens)
+  const handleClearAdminViewOnly = async () => {
+    const currentVisible = (state.requests || []).filter((r) => !r.hiddenFromAdmin);
+    if (currentVisible.length === 0) {
+      alert('لا توجد أي طلبات ظاهرة حالياً في شاشة الإدارة العليا لمسحها');
       return;
     }
     const isConfirmed = window.confirm(
-      `⚠️ تأكيد تفريغ سجل الطلبات:\n\nهل تريد مسح وتفريغ قائمة الطلبات الحالية (${currentReqs.length} طلب) من هذه الصفحة فقط؟\n\n✅ ملاحظة أمان: هذا الإجراء مخصص لمسح صفحة وسجل الطلبات فقط، ولن يؤثر إطلاقاً على أي بيانات أخرى في النظام (مثل بيانات الموظفين، الرواتب والخصومات، الشفتات، الجداول المعتمدة، أو أرصدة الإجازات).`
+      `⚠️ تأكيد مسح طلبات شاشة الإدارة العليا فقط:\n\nهل تريد مسح وإخفاء كافة الطلبات (${currentVisible.length} طلب) من صفحة الإدارة العليا فقط؟\n\n✅ ضمان الأمان الكامل:\n1. لن تُحذف الطلبات نهائياً من النظام.\n2. ستظل محفوظة وظاهرة بالكامل في شاشات وسجلات الموظفين ومديري الفروع.\n3. يمكنك إظهارها أو استعادتها لاحقاً في شاشة الإدارة متى شئت.`
+    );
+    if (!isConfirmed) return;
+
+    const updatedRequests = (state.requests || []).map((r) => ({
+      ...r,
+      hiddenFromAdmin: true
+    }));
+
+    const updatedState = {
+      ...state,
+      requests: updatedRequests
+    };
+
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+    showToast?.('🧹 تم مسح الطلبات من شاشة الإدارة العليا فقط بنجاح (محفوظة في شاشات الموظف والفرع)');
+  };
+
+  // Restore Hidden Requests in Higher Management screen
+  const handleRestoreAdminView = async () => {
+    const updatedRequests = (state.requests || []).map((r) => ({
+      ...r,
+      hiddenFromAdmin: false
+    }));
+
+    const updatedState = {
+      ...state,
+      requests: updatedRequests
+    };
+
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+    setShowHiddenAdminRequests(false);
+    showToast?.('↩️ تم استعادة كافة الطلبات للظهور في شاشة الإدارة العليا');
+  };
+
+  // 2. Clear / Delete Requests List from the ENTIRE system
+  const handleClearAllRequests = async () => {
+    const currentReqs = state.requests || [];
+    if (currentReqs.length === 0) {
+      alert('لا توجد أي طلبات حالياً في النظام لمسحها');
+      return;
+    }
+    const isConfirmed = window.confirm(
+      `⚠️ تحذير: مسح السجل العام لكافة الطلبات:\n\nهل تريد حذف كافة الطلبات (${currentReqs.length} طلب) نهائياً من النظام بالكامل لجميع الشاشات؟\n\n(ملاحظة: إذا كنت ترغب في تفريغ شاشة الإدارة العليا فقط دون التأثير على الموظف والفرع، اضغط Cancel واستخدم زر "مسح شاشة الإدارة فقط").`
     );
     if (!isConfirmed) return;
 
@@ -565,7 +615,7 @@ export default function RequestsModule({
 
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.('🗑️ تم تفريغ سجل صفحة الطلبات بنجاح دون المساس بباقي بيانات النظام!');
+    showToast?.('🗑️ تم تفريغ وحذف سجل الطلبات العام بالكامل من النظام!');
   };
 
   return (
@@ -580,39 +630,118 @@ export default function RequestsModule({
           </p>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          {/* Button 1: Clear Admin View Only (New Requested Button) */}
+          <button
+            type="button"
+            className="btn"
+            onClick={handleClearAdminViewOnly}
+            disabled={visibleAdminRequests.length === 0}
+            style={{
+              background: visibleAdminRequests.length > 0 ? '#2563eb' : 'var(--surface-muted)',
+              color: visibleAdminRequests.length > 0 ? '#ffffff' : 'var(--muted)',
+              border: '1px solid ' + (visibleAdminRequests.length > 0 ? '#1d4ed8' : 'var(--border)'),
+              padding: '8px 14px',
+              fontSize: '12px',
+              fontWeight: '800',
+              borderRadius: '8px',
+              cursor: visibleAdminRequests.length > 0 ? 'pointer' : 'not-allowed',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: visibleAdminRequests.length > 0 ? '0 2px 8px rgba(37, 99, 235, 0.25)' : 'none',
+              transition: 'all 0.2s ease'
+            }}
+            title="مسح وتفريغ الطلبات من شاشة الإدارة العليا فقط دون حذفها أو التأثير على شاشة الموظف أو مدير الفرع"
+          >
+            <span>🧹 مسح شاشة الإدارة فقط</span>
+            <span style={{
+              background: visibleAdminRequests.length > 0 ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.05)',
+              padding: '2px 7px',
+              borderRadius: '99px',
+              fontSize: '11px'
+            }}>
+              {visibleAdminRequests.length}
+            </span>
+          </button>
+
+          {/* Button 2: Clear Entire System Requests List */}
           <button
             type="button"
             className="btn"
             onClick={handleClearAllRequests}
-            disabled={requests.length === 0}
+            disabled={allRequests.length === 0}
             style={{
-              background: requests.length > 0 ? '#ef4444' : 'var(--surface-muted)',
-              color: requests.length > 0 ? '#ffffff' : 'var(--muted)',
-              border: '1px solid ' + (requests.length > 0 ? '#dc2626' : 'var(--border)'),
-              padding: '8px 16px',
-              fontSize: '13px',
+              background: allRequests.length > 0 ? '#ef4444' : 'var(--surface-muted)',
+              color: allRequests.length > 0 ? '#ffffff' : 'var(--muted)',
+              border: '1px solid ' + (allRequests.length > 0 ? '#dc2626' : 'var(--border)'),
+              padding: '8px 14px',
+              fontSize: '12px',
               fontWeight: '800',
               borderRadius: '8px',
-              cursor: requests.length > 0 ? 'pointer' : 'not-allowed',
+              cursor: allRequests.length > 0 ? 'pointer' : 'not-allowed',
               display: 'flex',
               alignItems: 'center',
               gap: '6px',
-              boxShadow: requests.length > 0 ? '0 2px 8px rgba(239, 68, 68, 0.25)' : 'none',
+              boxShadow: allRequests.length > 0 ? '0 2px 8px rgba(239, 68, 68, 0.25)' : 'none',
               transition: 'all 0.2s ease'
             }}
-            title="مسح وتفريغ سجل صفحة الطلبات فقط دون المساس بباقي بيانات النظام"
+            title="مسح وتفريغ السجل العام للطلبات نهائياً من كافة شاشات النظام"
           >
-            <span>🗑️ مسح صفحة الطلبات فقط</span>
+            <span>🗑️ مسح السجل العام للطلبات</span>
             <span style={{
-              background: requests.length > 0 ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.05)',
-              padding: '2px 8px',
+              background: allRequests.length > 0 ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.05)',
+              padding: '2px 7px',
               borderRadius: '99px',
-              fontSize: '12px'
+              fontSize: '11px'
             }}>
-              {requests.length}
+              {allRequests.length}
             </span>
           </button>
+
+          {/* Toggle / Restore Hidden Requests if any */}
+          {hiddenAdminCount > 0 && (
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => setShowHiddenAdminRequests(!showHiddenAdminRequests)}
+              style={{
+                fontSize: '12px',
+                fontWeight: '700',
+                padding: '6px 12px',
+                color: showHiddenAdminRequests ? '#2563eb' : 'var(--muted)',
+                border: '1px dashed var(--border)',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px'
+              }}
+              title="عرض أو إخفاء الطلبات التي تم مسحها من شاشة الإدارة سابقاً"
+            >
+              <span>{showHiddenAdminRequests ? '👁️ إخفاء الممسوح من الإدارة' : `👁️ عرض الممسوح من الإدارة (${hiddenAdminCount})`}</span>
+            </button>
+          )}
+
+          {hiddenAdminCount > 0 && showHiddenAdminRequests && (
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={handleRestoreAdminView}
+              style={{
+                fontSize: '11px',
+                fontWeight: '700',
+                padding: '5px 10px',
+                color: '#10b981',
+                border: '1px solid #10b981',
+                borderRadius: '8px',
+                cursor: 'pointer'
+              }}
+              title="إعادة كافة الطلبات الممسوحة للظهور في شاشة الإدارة"
+            >
+              ↩️ استعادة للظهور دائماً
+            </button>
+          )}
         </div>
       </div>
 
