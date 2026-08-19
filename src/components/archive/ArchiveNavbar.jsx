@@ -1,4 +1,17 @@
 import React, { useState } from 'react';
+import {
+  LayoutDashboard,
+  Building2,
+  Users,
+  Settings,
+  ShieldCheck,
+  Scan,
+  FilePlus,
+  LogOut,
+  X,
+  Menu
+} from 'lucide-react';
+import { getArchiveUsername, clearArchiveSession } from '../../utils/archiveApiClient';
 
 export default function ArchiveNavbar({
   activeTab,
