@@ -410,8 +410,9 @@ export default function RequestsModule({
 
   const handleDeleteOldRequest = async (reqId) => {
     if (!window.confirm('هل أنت متأكد من حذف هذا الطلب القديم نهائياً من السجل؟')) return;
-    const updatedRequests = requests.filter((r) => r.id !== reqId);
-    const updatedState = { ...state, requests: updatedRequests };
+    const updatedRequests = (state.requests || []).filter((r) => r.id !== reqId);
+    const updatedDeleted = Array.from(new Set([...(state._deletedIds || []), String(reqId)]));
+    const updatedState = { ...state, requests: updatedRequests, _deletedIds: updatedDeleted };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
     showToast?.('🗑️ تم حذف الطلب القديم بنجاح');
@@ -479,21 +480,26 @@ export default function RequestsModule({
     showToast?.('❌ تم رفض الاعتراض وتثبيت الجزاء المالي');
   };
 
-  // Clear / Delete All Requests
+  // Clear / Delete All Requests Permanently
   const handleClearAllRequests = async () => {
-    if (!requests || requests.length === 0) {
+    const currentReqs = state.requests || requests || [];
+    if (currentReqs.length === 0) {
       alert('لا توجد أي طلبات حالياً لمسحها');
       return;
     }
     const isConfirmed = window.confirm(
-      `⚠️ تحذير أمني من الإدارة العليا:\n\nهل أنت متأكد تماماً من رغبتك في حذف ومسح جميع الطلبات المسجلة في النظام (${requests.length} طلب) نهائياً؟\n\n⚠️ لن يمكن التراجع أو استعادة الطلبات بعد هذا الإجراء.`
+      `⚠️ تحذير أمني من الإدارة العليا:\n\nهل أنت متأكد تماماً من رغبتك في حذف ومسح جميع الطلبات المسجلة في النظام (${currentReqs.length} طلب) نهائياً؟\n\n⚠️ لن يمكن التراجع أو استعادة الطلبات بعد هذا الإجراء.`
     );
     if (!isConfirmed) return;
+
+    const allDeletedIds = currentReqs.map((r) => String(r.id)).filter(Boolean);
+    const updatedDeleted = Array.from(new Set([...(state._deletedIds || []), ...allDeletedIds]));
 
     const updatedState = {
       ...state,
       requests: [],
-      leaveRequests: []
+      leaveRequests: [],
+      _deletedIds: updatedDeleted
     };
 
     if (setState) setState(updatedState);

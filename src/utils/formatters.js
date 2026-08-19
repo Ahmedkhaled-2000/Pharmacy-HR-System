@@ -256,7 +256,8 @@ export function normalizeState(parsed) {
     approvalRules,
     rosters,
     ipRestrictions,
-    bylaws
+    bylaws,
+    _deletedIds: toSafeArray(parsed._deletedIds || [])
   };
 }
 
