@@ -347,13 +347,38 @@ export default function RequestsModule({
     }
 
     let updatedLeaveRequests = [...(state.leaveRequests || [])];
+    let updatedLeaveHistory = [...(state.leaveHistory || [])];
     if (targetReq.type === 'leave' || targetReq.type === 'leave_request') {
+      const approvedLeaveObj = {
+        id: targetReq.id || `leave_${Date.now()}`,
+        originalRequestId: targetReq.id,
+        employeeId: targetReq.employeeId,
+        employeeCode: targetReq.employeeCode,
+        employeeName: targetReq.employeeName,
+        leaveType: targetReq.leaveType || 'annual',
+        startDate: targetReq.startDate || targetReq.date,
+        endDate: targetReq.endDate || targetReq.startDate || targetReq.date,
+        daysCount: parseInt(targetReq.daysCount || targetReq.days || 1, 10),
+        status: 'approved',
+        adminApproved: true,
+        branchApproved: true,
+        reason: targetReq.reason || targetReq.details || '',
+        approvedAt: new Date().toISOString()
+      };
+
       updatedLeaveRequests = updatedLeaveRequests.map((lr) => {
         if (lr.id === targetReq.id || (String(lr.employeeId) === String(targetReq.employeeId) && lr.startDate === targetReq.startDate)) {
-          return { ...lr, status: 'approved', adminApproved: true, branchApproved: true };
+          return { ...lr, ...approvedLeaveObj };
         }
         return lr;
       });
+
+      const existingHistIdx = updatedLeaveHistory.findIndex(lh => lh.id === approvedLeaveObj.id || (String(lh.employeeId) === String(approvedLeaveObj.employeeId) && lh.startDate === approvedLeaveObj.startDate));
+      if (existingHistIdx >= 0) {
+        updatedLeaveHistory[existingHistIdx] = approvedLeaveObj;
+      } else {
+        updatedLeaveHistory.unshift(approvedLeaveObj);
+      }
     }
 
     const updatedShiftSwaps = (state.shiftSwaps || []).map((s) =>
@@ -367,6 +392,7 @@ export default function RequestsModule({
       adjustments: updatedAdjustments,
       shifts: updatedShifts,
       leaveRequests: updatedLeaveRequests,
+      leaveHistory: updatedLeaveHistory,
       shiftSwaps: updatedShiftSwaps
     };
     if (setState) setState(updatedState);
@@ -547,6 +573,34 @@ export default function RequestsModule({
     showToast?.('❌ تم رفض الاعتراض وتثبيت الجزاء المالي');
   };
 
+  const handleReplyObjection = async (reqId, reply, isAccepted) => {
+    const updatedRequests = requests.map((r) => {
+      if (r.id === reqId) {
+        return {
+          ...r,
+          objection: {
+            ...r.objection,
+            status: isAccepted ? 'accepted' : 'rejected',
+            adminReply: reply,
+            repliedAt: new Date().toISOString()
+          }
+        };
+      }
+      return r;
+    });
+
+    const updatedState = { ...state, requests: updatedRequests };
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+    if (previewModalReq?.id === reqId) {
+      setPreviewModalReq(prev => ({
+        ...prev,
+        objection: { ...prev.objection, status: isAccepted ? 'accepted' : 'rejected', adminReply: reply }
+      }));
+    }
+    showToast?.(isAccepted ? '✅ تم قبول الاعتراض وإلغاء الجزاء' : '❌ تم رفض الاعتراض وتثبيت الجزاء');
+  };
+
   // 1. Clear / Hide requests from Higher Management screen ONLY (Does NOT affect Employee or Branch Manager screens)
   const handleClearAdminViewOnly = async () => {
     const currentVisible = (state.requests || []).filter((r) => !r.hiddenFromAdmin);
@@ -555,7 +609,7 @@ export default function RequestsModule({
       return;
     }
     const isConfirmed = window.confirm(
-      `⚠️ تأكيد مسح طلبات شاشة الإدارة العليا فقط:\n\nهل تريد مسح وإخفاء كافة الطلبات (${currentVisible.length} طلب) من صفحة الإدارة العليا فقط؟\n\n✅ ضمان الأمان الكامل:\n1. لن تُحذف الطلبات نهائياً من النظام.\n2. ستظل محفوظة وظاهرة بالكامل في شاشات وسجلات الموظفين ومديري الفروع.\n3. يمكنك إظهارها أو استعادتها لاحقاً في شاشة الإدارة متى شئت.`
+      `⚠️ تأكيد مسح طلبات شاشة الإدارة العليا فقط:\n\nهل تريد مسح وإخفاء كافة الطلبات (${currentVisible.length} طلب) من صفحة الإدارة العليا فقط؟\n\n✅ ضمان الأمان الكامل:\n1. لن تُحذف الطلبات نهائياً من النظام.\n2. ستظل محفوظة وظاهرة بالكامل في شاشات وسجلات الموظفين ومديري الفروع.\n3. لن يتأثر رصيد الإجازات السنوية أو الأيام المأخوذة إطلاقاً.`
     );
     if (!isConfirmed) return;
 
@@ -571,7 +625,7 @@ export default function RequestsModule({
 
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.('🧹 تم مسح الطلبات من شاشة الإدارة العليا فقط بنجاح (محفوظة في شاشات الموظف والفرع)');
+    showToast?.('🧹 تم مسح الطلبات من شاشة الإدارة العليا فقط بنجاح (محفوظة في شاشات الموظف والفرع ورصيد الإجازات)');
   };
 
   // Restore Hidden Requests in Higher Management screen
@@ -592,7 +646,7 @@ export default function RequestsModule({
     showToast?.('↩️ تم استعادة كافة الطلبات للظهور في شاشة الإدارة العليا');
   };
 
-  // 2. Clear / Delete Requests List from the ENTIRE system
+  // 2. Clear / Delete Requests List from the ENTIRE system with Leave History Protection
   const handleClearAllRequests = async () => {
     const currentReqs = state.requests || [];
     if (currentReqs.length === 0) {

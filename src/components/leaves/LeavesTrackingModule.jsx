@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { calculateEmployeeLeaveStats, getEmployeeApprovedLeaves } from '../../utils/formatters';
 
 export default function LeavesTrackingModule({
   state,
@@ -12,7 +13,6 @@ export default function LeavesTrackingModule({
 
   const employees = state.employees || [];
   const branches = state.branches || [];
-  const requests = state.requests || [];
 
   // Filter employees
   const filteredEmployees = employees.filter((emp) => {
@@ -29,7 +29,7 @@ export default function LeavesTrackingModule({
             🏖️ متابعة كشوف وإجازات الموظفين ورصيد الإجازات السنوية
           </h2>
           <p style={{ margin: '4px 0 0 0', color: 'var(--muted)', fontSize: '14px' }}>
-            استعراض سجل الإجازات المأخوذة بكل موظف وتحديد رصيد الإجازات السنوية المتبقي
+            استعراض سجل الإجازات المأخوذة بكل موظف وتحديد رصيد الإجازات السنوية المتبقي بدقة متناهية ودائمة
           </p>
         </div>
       </div>
@@ -78,17 +78,7 @@ export default function LeavesTrackingModule({
             ) : (
               filteredEmployees.map((emp) => {
                 const empBranch = branches.find((b) => b.id === emp.branchId);
-                const annualTotal = emp.annualLeaveBalance !== undefined ? parseInt(emp.annualLeaveBalance) : 21;
-
-                // Taken approved leave requests
-                const takenLeaves = requests.filter(
-                  (r) => (r.employeeId === emp.id || r.employeeCode === emp.code) &&
-                    r.type === 'leave' &&
-                    r.status === 'approved'
-                );
-
-                const takenDaysCount = takenLeaves.reduce((acc, r) => acc + (parseInt(r.daysCount || r.days || 1)), 0);
-                const remainingDays = Math.max(0, annualTotal - takenDaysCount);
+                const { annualTotal, takenAnnualDays, remainingAnnualDays } = calculateEmployeeLeaveStats(emp, state);
 
                 return (
                   <tr key={emp.id}>
@@ -96,15 +86,15 @@ export default function LeavesTrackingModule({
                     <td style={{ fontWeight: '800' }}>{emp.name}</td>
                     <td>{empBranch?.name || 'المركز الرئيسي'}</td>
                     <td style={{ fontWeight: '800' }}>{annualTotal} يوم</td>
-                    <td style={{ color: '#d97706', fontWeight: '800' }}>{takenDaysCount} يوم</td>
-                    <td style={{ color: remainingDays > 0 ? '#16a34a' : '#dc2626', fontWeight: '900', fontSize: '15px' }}>
-                      {remainingDays} يوم
+                    <td style={{ color: '#d97706', fontWeight: '800' }}>{takenAnnualDays} يوم</td>
+                    <td style={{ color: remainingAnnualDays > 0 ? '#16a34a' : '#dc2626', fontWeight: '900', fontSize: '15px' }}>
+                      {remainingAnnualDays} يوم
                     </td>
                     <td>
-                      {remainingDays === 0 ? (
+                      {remainingAnnualDays === 0 ? (
                         <span className="badge badge-danger">🔒 رصيد مستنفذ (0 يوم)</span>
-                      ) : remainingDays <= 5 ? (
-                        <span className="badge badge-warning">⚠️ رصيد منخفض ({remainingDays} يوم)</span>
+                      ) : remainingAnnualDays <= 5 ? (
+                        <span className="badge badge-warning">⚠️ رصيد منخفض ({remainingAnnualDays} يوم)</span>
                       ) : (
                         <span className="badge badge-success">🟢 رصيد متاح</span>
                       )}
@@ -127,77 +117,74 @@ export default function LeavesTrackingModule({
       </div>
 
       {/* Detailed Leaves Modal for Employee */}
-      {selectedEmpModal && (
-        <div className="modal-backdrop">
-          <div className="modal-content card" style={{ maxWidth: '1050px', width: '96%', padding: '28px', maxHeight: '90vh', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <div>
-                <h3 style={{ margin: 0, color: '#0d9488' }}>
-                  🏖️ سجل كشف الإجازات للموظف: {selectedEmpModal.name}
-                </h3>
-                <span style={{ fontSize: '13px', color: 'var(--muted)' }}>
-                  كود: {selectedEmpModal.code} | الرصيد المتبقي: <strong>{selectedEmpModal.annualLeaveBalance || 21} يوم</strong>
-                </span>
-              </div>
-              <button className="btn btn-ghost" onClick={() => setSelectedEmpModal(null)}>✕ إغلاق</button>
-            </div>
+      {selectedEmpModal && (() => {
+        const empLeaves = getEmployeeApprovedLeaves(selectedEmpModal, state);
+        const { annualTotal, takenAnnualDays, remainingAnnualDays } = calculateEmployeeLeaveStats(selectedEmpModal, state);
 
-            {/* Taken leaves table */}
-            {requests.filter((r) => (r.employeeId === selectedEmpModal.id || r.employeeCode === selectedEmpModal.code) && r.type === 'leave').length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '30px', background: 'var(--surface-muted)', borderRadius: '10px', color: 'var(--muted)' }}>
-                لا توجد طلبات إجازة مسجلة لهذا الموظف.
+        return (
+          <div className="modal-backdrop">
+            <div className="modal-content card" style={{ maxWidth: '1050px', width: '96%', padding: '28px', maxHeight: '90vh', overflowY: 'auto' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+                <div>
+                  <h3 style={{ margin: 0, color: '#0d9488' }}>
+                    🏖️ سجل وكشف إجازات الموظف: {selectedEmpModal.name}
+                  </h3>
+                  <span style={{ fontSize: '13px', color: 'var(--muted)' }}>
+                    كود: {selectedEmpModal.code} | الرصيد الكلي: <strong>{annualTotal} يوم</strong> | المأخوذ: <strong style={{ color: '#d97706' }}>{takenAnnualDays} يوم</strong> | المتبقي: <strong style={{ color: remainingAnnualDays > 0 ? '#16a34a' : '#dc2626' }}>{remainingAnnualDays} يوم</strong>
+                  </span>
+                </div>
+                <button className="btn btn-ghost" onClick={() => setSelectedEmpModal(null)}>✕ إغلاق</button>
               </div>
-            ) : (
-              <div className="table-responsive">
-                <table className="bylaws-table" style={{ fontSize: '13px' }}>
-                  <thead>
-                    <tr style={{ background: 'var(--surface-muted)' }}>
-                      <th>تاريخ التقديم</th>
-                      <th>نوع الإجازة</th>
-                      <th>تاريخ البداية والنهاية</th>
-                      <th>السبب والبيان</th>
-                      <th>موافقة مدير الفرع</th>
-                      <th>حالة الإدارة العليا</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {requests
-                      .filter((r) => (r.employeeId === selectedEmpModal.id || r.employeeCode === selectedEmpModal.code) && r.type === 'leave')
-                      .map((r) => (
-                        <tr key={r.id}>
-                          <td>{r.createdAt ? r.createdAt.slice(0, 10) : '—'}</td>
+
+              {/* Taken leaves table */}
+              {empLeaves.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '30px', background: 'var(--surface-muted)', borderRadius: '10px', color: 'var(--muted)' }}>
+                  لا توجد إجازات مسجلة أو معتمدة لهذا الموظف حتى الآن.
+                </div>
+              ) : (
+                <div className="table-responsive">
+                  <table className="bylaws-table" style={{ fontSize: '13px' }}>
+                    <thead>
+                      <tr style={{ background: 'var(--surface-muted)' }}>
+                        <th>تاريخ التقديم / التسجيل</th>
+                        <th>نوع الإجازة</th>
+                        <th>تاريخ البداية والنهاية</th>
+                        <th>عدد الأيام</th>
+                        <th>السبب والبيان</th>
+                        <th>حالة الاعتماد</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {empLeaves.map((r, idx) => (
+                        <tr key={r.id || idx}>
+                          <td>{r.createdAt ? r.createdAt.slice(0, 10) : (r.startDate || '—')}</td>
                           <td>
-                            {r.leaveType === 'annual' ? (
-                              <span className="badge badge-success">🏖️ سنوية</span>
+                            {r.leaveType === 'annual' || (!r.leaveType && r.type === 'leave') ? (
+                              <span className="badge badge-success">🏖️ سنوية اعتيادية</span>
                             ) : r.leaveType === 'unpaid' ? (
-                              <span className="badge badge-warning">⏱️ إذن / غير مدفوعة الأجر</span>
+                              <span className="badge badge-warning">⏱️ غير مدفوعة الأجر</span>
+                            ) : r.leaveType === 'sick' ? (
+                              <span className="badge badge-danger">🏥 إجازة مرضية</span>
                             ) : (
-                              <span className="badge badge-primary">🌴 راحة أسبوعية</span>
+                              <span className="badge badge-primary">{r.leaveType || 'إجازة رسمية'}</span>
                             )}
                           </td>
                           <td style={{ fontWeight: '700' }}>{r.startDate} إلى {r.endDate || r.startDate}</td>
+                          <td style={{ fontWeight: '800', color: '#d97706' }}>{r.daysCount || r.days || 1} يوم</td>
                           <td style={{ fontSize: '12px' }}>{r.reason || r.details || '—'}</td>
                           <td>
-                            {r.branchApproved ? (
-                              <span style={{ color: '#16a34a', fontWeight: '700' }}>🟢 معتمد</span>
-                            ) : (
-                              <span style={{ color: '#d97706', fontWeight: '700' }}>⏳ قيد المراجعة</span>
-                            )}
-                          </td>
-                          <td>
-                            {r.status === 'approved' && <span className="approval-status-badge approved">🟢 معتمد نهائياً</span>}
-                            {r.status === 'pending_admin' && <span className="approval-status-badge pending">🟡 بانتظار الإدارة العليا</span>}
-                            {r.status === 'rejected' && <span className="approval-status-badge rejected">🔴 مرفوض</span>}
+                            <span className="approval-status-badge approved">🟢 معتمد ومسجل</span>
                           </td>
                         </tr>
                       ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
     </div>
   );

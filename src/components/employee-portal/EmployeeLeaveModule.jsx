@@ -28,9 +28,12 @@ export default function EmployeeLeaveModule({
     const fromLeaves = (state.leaveRequests || []).filter(
       (r) => String(r.employeeId) === empIdStr
     );
+    const fromHistory = (state.leaveHistory || []).filter(
+      (r) => String(r.employeeId) === empIdStr
+    );
 
     const map = new Map();
-    [...fromLeaves, ...fromRequests].forEach((r) => {
+    [...fromLeaves, ...fromHistory, ...fromRequests].forEach((r) => {
       const existing = map.get(r.id);
       if (!existing || r.status === 'approved' || r.adminApproved) {
         map.set(r.id, {

@@ -246,6 +246,7 @@ export function normalizeState(parsed) {
     requests,
     resignationRequests,
     leaveRequests,
+    leaveHistory: toSafeArray(parsed.leaveHistory),
     shiftSwaps,
     loans,
     evaluations,
@@ -453,3 +454,82 @@ export function shouldShowRequestToBranch(req, state) {
   // 5. Default behavior for standard operational requests (leave <= 3 days, permission, swap, roster_update)
   return true;
 }
+
+/**
+ * Returns all approved leaves for an employee from all historical and active sources
+ * (state.leaveHistory, state.leaveRequests, and state.requests)
+ */
+export function getEmployeeApprovedLeaves(emp, state) {
+  if (!emp) return [];
+  const empIdStr = String(emp.id || '');
+  const empCodeStr = String(emp.code || '');
+
+  const fromRequests = (state?.requests || []).filter(
+    (r) =>
+      (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode) === empCodeStr)) &&
+      (r.type === 'leave' || r.type === 'leave_request')
+  );
+
+  const fromLeaveRequests = (state?.leaveRequests || []).filter(
+    (r) =>
+      String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode) === empCodeStr)
+  );
+
+  const fromLeaveHistory = (state?.leaveHistory || []).filter(
+    (r) =>
+      String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode) === empCodeStr)
+  );
+
+  const map = new Map();
+  [...fromLeaveHistory, ...fromLeaveRequests, ...fromRequests].forEach((r) => {
+    if (!r) return;
+    const isApproved = r.status === 'approved' || r.adminApproved || !r.status;
+    const key = r.id || `${r.employeeId}_${r.startDate}_${r.endDate}_${r.daysCount || 1}`;
+    const existing = map.get(key);
+    if (!existing || isApproved) {
+      map.set(key, {
+        ...r,
+        status: isApproved ? 'approved' : (r.status || 'pending')
+      });
+    }
+  });
+
+  return Array.from(map.values()).sort((a, b) => {
+    const getT = (r) => {
+      if (!r) return 0;
+      if (r.createdAt) { const t = new Date(r.createdAt).getTime(); if (!isNaN(t) && t > 0) return t; }
+      if (r.startDate) { const t = new Date(r.startDate).getTime(); if (!isNaN(t) && t > 0) return t; }
+      return 0;
+    };
+    return getT(b) - getT(a);
+  });
+}
+
+/**
+ * Calculates annual leave total, taken days, and remaining balance for an employee
+ */
+export function calculateEmployeeLeaveStats(emp, state, targetYear = '') {
+  if (!emp) return { annualTotal: 21, takenAnnualDays: 0, remainingAnnualDays: 21, approvedLeaves: [] };
+  const year = targetYear || todayStr().slice(0, 4);
+  const annualTotal = emp.annualLeaveBalance !== undefined ? parseInt(emp.annualLeaveBalance, 10) : 21;
+  const allLeaves = getEmployeeApprovedLeaves(emp, state);
+
+  const approvedAnnualLeaves = allLeaves.filter((r) => {
+    const isAnnual = !r.leaveType || r.leaveType === 'annual' || r.type === 'annual_leave';
+    const isAppr = r.status === 'approved' || r.adminApproved;
+    const start = String(r.startDate || r.date || '');
+    const inYear = !year || start.startsWith(year);
+    return isAnnual && isAppr && inYear;
+  });
+
+  const takenAnnualDays = approvedAnnualLeaves.reduce((acc, r) => acc + (parseInt(r.daysCount || r.days || 1, 10)), 0);
+  const remainingAnnualDays = Math.max(0, annualTotal - takenAnnualDays);
+
+  return {
+    annualTotal,
+    takenAnnualDays,
+    remainingAnnualDays,
+    approvedLeaves: allLeaves
+  };
+}
+

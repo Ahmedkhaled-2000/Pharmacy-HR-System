@@ -335,10 +335,10 @@ export function smartMergeStates(localState, remoteState) {
     approvalRules: mergeArrays(localState.approvalRules, remoteState.approvalRules, { prefix: 'rule', deletedIds }),
     authorizedDevices: mergeArrays(localState.authorizedDevices, remoteState.authorizedDevices, { prefix: 'dev', deletedIds }),
 
-    // 3. المعاملات والطلبات والحضور
     requests: mergeArrays(localState.requests, remoteState.requests, { prefix: 'req', deletedIds }),
     resignationRequests: mergeArrays(localState.resignationRequests, remoteState.resignationRequests, { prefix: 'res', deletedIds }),
     leaveRequests: mergeArrays(localState.leaveRequests, remoteState.leaveRequests, { prefix: 'leave', deletedIds }),
+    leaveHistory: mergeArrays(localState.leaveHistory, remoteState.leaveHistory, { prefix: 'lhist', deletedIds: new Set() }),
     shiftSwaps: mergeArrays(localState.shiftSwaps, remoteState.shiftSwaps, { prefix: 'swap', deletedIds }),
     loans: mergeArrays(localState.loans, remoteState.loans, { prefix: 'loan', deletedIds }),
     logs: mergeArrays(localState.logs, remoteState.logs, { prefix: 'log', deletedIds }),
