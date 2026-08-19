@@ -1319,33 +1319,72 @@ export default function RequestsModule({
                 )}
 
                 {/* ── PERMISSION DETAILS ── */}
-                {isPermission && (
-                  <div style={{ background: '#fffbeb', padding: '16px', borderRadius: '12px', border: '1px solid #fde68a' }}>
-                    <h4 style={{ margin: '0 0 10px', color: '#92400e', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      ⏰ تفاصيل إذن الخروج / التأخير:
-                    </h4>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
-                      <div>
-                        <span style={{ fontSize: '12px', color: '#92400e' }}>يوم وتاريخ الإذن:</span>
-                        <div style={{ fontWeight: 'bold', color: '#78350f' }}>
-                          📅 {previewModalReq.date || previewModalReq.startDate || '—'} { (previewModalReq.date || previewModalReq.startDate) && `(${arabicWeekday(previewModalReq.date || previewModalReq.startDate)})` }
-                        </div>
+                {isPermission && (() => {
+                  const permDurationTxt = (() => {
+                    if (previewModalReq.durationText) return previewModalReq.durationText;
+                    if (previewModalReq.durationMinutes) {
+                      const hrs = Math.floor(previewModalReq.durationMinutes / 60);
+                      const mins = previewModalReq.durationMinutes % 60;
+                      let txt = '';
+                      if (hrs > 0) txt += `${hrs} ساعة `;
+                      if (mins > 0) txt += `${mins} دقيقة`;
+                      return txt || `${previewModalReq.durationMinutes} دقيقة`;
+                    }
+                    if (previewModalReq.hours) return `${previewModalReq.hours} ساعة`;
+                    const st = previewModalReq.startTime || previewModalReq.fromTime;
+                    const et = previewModalReq.endTime || previewModalReq.toTime;
+                    if (st && et) {
+                      const [h1, m1] = st.split(':').map(Number);
+                      const [h2, m2] = et.split(':').map(Number);
+                      let start = (h1 || 0) * 60 + (m1 || 0);
+                      let end = (h2 || 0) * 60 + (m2 || 0);
+                      if (end <= start) end += 24 * 60;
+                      const diff = end - start;
+                      const hrs = Math.floor(diff / 60);
+                      const mins = diff % 60;
+                      let txt = '';
+                      if (hrs > 0) txt += `${hrs} ساعة `;
+                      if (mins > 0) txt += `${mins} دقيقة`;
+                      return txt || `${diff} دقيقة`;
+                    }
+                    return '—';
+                  })();
+
+                  const permTypeLabel = previewModalReq.permType === 'early' ? 'إذن انصراف مبكر' : (previewModalReq.permType === 'late' ? 'إذن تأخير عن الوردية' : 'إذن خروج / تأخير');
+
+                  return (
+                    <div style={{ background: '#fffbeb', padding: '16px', borderRadius: '12px', border: '1px solid #fde68a' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                        <h4 style={{ margin: 0, color: '#92400e', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          ⏰ تفاصيل إذن الخروج / التأخير:
+                        </h4>
+                        <span style={{ background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '2px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 'bold' }}>
+                          {permTypeLabel}
+                        </span>
                       </div>
-                      <div>
-                        <span style={{ fontSize: '12px', color: '#92400e' }}>فترة الإذن بالساعات:</span>
-                        <div style={{ fontWeight: 'bold', color: '#78350f', fontSize: '14px' }}>
-                          من <strong>{previewModalReq.startTime || previewModalReq.fromTime || '09:00'}</strong> إلى <strong>{previewModalReq.endTime || previewModalReq.toTime || '17:00'}</strong>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+                        <div>
+                          <span style={{ fontSize: '12px', color: '#92400e' }}>يوم وتاريخ الإذن:</span>
+                          <div style={{ fontWeight: 'bold', color: '#78350f' }}>
+                            📅 {previewModalReq.date || previewModalReq.startDate || '—'} { (previewModalReq.date || previewModalReq.startDate) && `(${arabicWeekday(previewModalReq.date || previewModalReq.startDate)})` }
+                          </div>
                         </div>
-                      </div>
-                      <div style={{ background: '#fef3c7', padding: '8px 12px', borderRadius: '8px', border: '1px solid #fcd34d' }}>
-                        <span style={{ fontSize: '12px', color: '#92400e', fontWeight: 'bold' }}>إجمالي عدد الساعات:</span>
-                        <div style={{ fontWeight: '900', color: '#b45309', fontSize: '16px' }}>
-                          ⏱️ {previewModalReq.hours || '—'} ساعة
+                        <div>
+                          <span style={{ fontSize: '12px', color: '#92400e' }}>فترة الإذن بالساعات:</span>
+                          <div style={{ fontWeight: 'bold', color: '#78350f', fontSize: '14px' }}>
+                            من <strong>{previewModalReq.startTime || previewModalReq.fromTime || '09:00'}</strong> إلى <strong>{previewModalReq.endTime || previewModalReq.toTime || '17:00'}</strong>
+                          </div>
+                        </div>
+                        <div style={{ background: '#fef3c7', padding: '8px 12px', borderRadius: '8px', border: '1px solid #fcd34d' }}>
+                          <span style={{ fontSize: '12px', color: '#92400e', fontWeight: 'bold' }}>إجمالي مدة الإذن:</span>
+                          <div style={{ fontWeight: '900', color: '#b45309', fontSize: '16px' }}>
+                            ⏱️ {permDurationTxt}
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {/* ── SHIFT SWAP DETAILS ── */}
                 {isSwap && (

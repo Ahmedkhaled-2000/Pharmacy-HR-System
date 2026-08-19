@@ -76,6 +76,7 @@ export default function EmployeePermissionsModule({
       date,
       startTime,
       endTime,
+      hours: Math.round((durationObj.minutes / 60) * 100) / 100,
       durationMinutes: durationObj.minutes,
       durationText: durationObj.text,
       reason: reason.trim(),
