@@ -316,7 +316,7 @@ export default function NotificationCenterModule({
       });
 
     const manualPenalties = requests
-      .filter((r) => r.type === 'penalty' || r.type === 'early_exit' || r.type === 'overtime')
+      .filter((r) => r.type === 'penalty' || r.type === 'early_exit' || r.type === 'overtime' || r.type === 'disciplinary_penalty' || r.subType === 'disciplinary_penalty')
       .map((r) => {
         const emp = employees.find((e) => String(e.id) === String(r.employeeId));
         const branchObj = branches.find((b) => String(b.id) === String(r.branchId || emp?.branchId));
@@ -326,8 +326,8 @@ export default function NotificationCenterModule({
           employeeName: emp?.name || r.employeeName || 'موظف',
           employeeCode: emp?.code || '—',
           branchName: branchObj?.name || 'الفرع الرئيسي',
-          ruleTitle: r.ruleTitle || r.reason || 'مخالفة لائحية',
-          impactDesc: r.impactType === 'deduction_days' ? `خصم ${r.impactVal} يوم من الراتب` : (r.amount ? `خصم مبلغ ${r.amount} ج.م` : `خصم مبلغ ${r.impactVal || 50} ج.م`),
+          ruleTitle: r.ruleTitle || r.actionTitle || r.reason || 'مخالفة تأديبية',
+          impactDesc: r.actionTitle ? `${r.actionTitle}${r.amount > 0 ? ` (${r.amount} ج.م)` : ''}` : (r.impactType === 'deduction_days' ? `خصم ${r.impactVal} يوم من الراتب` : (r.amount ? `خصم مبلغ ${r.amount} ج.م` : `خصم مبلغ ${r.impactVal || 50} ج.م`)),
           isAutoBylaw: false,
           read: Boolean(r.read),
           icon: '⚖️'

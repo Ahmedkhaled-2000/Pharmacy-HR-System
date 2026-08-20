@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import LatePenaltyPolicyModule from './LatePenaltyPolicyModule';
+import DisciplinaryPenaltiesTab from './DisciplinaryPenaltiesTab';
 
 const DEFAULT_BYLAWS_RULES = [
   { id: 'b1', title: 'التأخير عن موعد الشيفت من 15 إلى 30 دقيقة', impactType: 'deduction_days', impactVal: 0.25, category: 'حضور وانصراف' },
@@ -556,6 +557,9 @@ export default function BylawsModule({
         </div>
 
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button className={`btn ${activeTab === 'disciplinary_penalties' ? 'btn-start' : 'btn-ghost'}`} onClick={() => setActiveTab('disciplinary_penalties')} style={{ borderColor: '#dc2626', color: activeTab === 'disciplinary_penalties' ? '#fff' : '#dc2626', fontWeight: 700, background: activeTab === 'disciplinary_penalties' ? '#dc2626' : 'transparent' }}>
+            ⚖️ لائحة الجزاءات التأديبية وعداد التكرار
+          </button>
           <button className={`btn ${activeTab === 'text' ? 'btn-start' : 'btn-ghost'}`} onClick={() => setActiveTab('text')}>
             📖 نصوص اللائحة الرسمية
           </button>
@@ -1007,6 +1011,23 @@ export default function BylawsModule({
       {/* Tab 4: Late Penalties Module */}
       {activeTab === 'late_penalties' && (
         <LatePenaltyPolicyModule
+          state={state}
+          setState={setState}
+          saveState={saveState}
+          showToast={showToast}
+          userRole={userRole}
+          currentEmpId={currentEmpId}
+          currentBranchId={currentBranchId}
+          filterFn={filterFn}
+          monthPicker={monthPicker}
+          customFrom={customFrom}
+          customTo={customTo}
+        />
+      )}
+
+      {/* Tab 5: Disciplinary Penalties & Violation Counter Module */}
+      {activeTab === 'disciplinary_penalties' && (
+        <DisciplinaryPenaltiesTab
           state={state}
           setState={setState}
           saveState={saveState}
