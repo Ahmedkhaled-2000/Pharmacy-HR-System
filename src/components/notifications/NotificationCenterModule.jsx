@@ -121,7 +121,7 @@ export default function NotificationCenterModule({
           note: s.note || ''
         };
       });
-  }, [shifts, employees, branches, activeShifts, effectiveDate, empFilter]);
+  }, [shifts, employees, branches, activeShifts, empFilter, branchFilter, authRole, currentBranch, activePeriodFn]);
 
   // 2. Absences & Delays Today
   const todayAbsencesAndDelays = useMemo(() => {
