@@ -4196,9 +4196,10 @@ export default function App() {
           resignationCount={(state.resignationRequests || []).filter(r => (r.managerStatus === 'approved' || r.managerStatus === 'rejected') && !r.isAdminCreated && (!r.adminStatus || r.adminStatus === 'pending')).length}
           bylawsCount={(() => {
             const cIdStr = String(currentBranch?.id || '');
-            return (state.lateIncidents || []).filter((inc) => {
+            const unreadLate = (state.lateIncidents || []).filter((inc) => {
               if (authRole === 'branch' && cIdStr && String(inc.branchId) !== cIdStr) return false;
               return (
+                !inc.read &&
                 inc.status !== 'cancelled' &&
                 inc.status !== 'approved_permission_exempt' &&
                 inc.actionType !== 'grace' &&
@@ -4207,6 +4208,14 @@ export default function App() {
                 currentFilterFn(inc.date)
               );
             }).length;
+
+            const unreadManual = (state.requests || []).filter((r) => {
+              if (r.type !== 'penalty' && r.type !== 'early_exit') return false;
+              if (authRole === 'branch' && cIdStr && String(r.branchId) !== cIdStr) return false;
+              return !r.read && currentFilterFn(r.date || r.createdAt?.slice(0, 10));
+            }).length;
+
+            return unreadLate + unreadManual;
           })()}
           themeMode={themeMode}
           toggleTheme={toggleTheme}
@@ -4259,9 +4268,10 @@ export default function App() {
                     icon: '📜',
                     badge: (() => {
                       const cIdStr = String(currentBranch?.id || '');
-                      return (state.lateIncidents || []).filter((inc) => {
+                      const unreadLate = (state.lateIncidents || []).filter((inc) => {
                         if (cIdStr && String(inc.branchId) !== cIdStr) return false;
                         return (
+                          !inc.read &&
                           inc.status !== 'cancelled' &&
                           inc.status !== 'approved_permission_exempt' &&
                           inc.actionType !== 'grace' &&
@@ -4270,6 +4280,14 @@ export default function App() {
                           currentFilterFn(inc.date)
                         );
                       }).length;
+
+                      const unreadManual = (state.requests || []).filter((r) => {
+                        if (r.type !== 'penalty' && r.type !== 'early_exit') return false;
+                        if (cIdStr && String(r.branchId) !== cIdStr) return false;
+                        return !r.read && currentFilterFn(r.date || r.createdAt?.slice(0, 10));
+                      }).length;
+
+                      return unreadLate + unreadManual;
                     })()
                   },
                 ]
