@@ -224,6 +224,49 @@ export default function EmployeeFileModal({
     }
   };
 
+  // Handle document management
+  const handleAddCustomDocument = () => {
+    if (!newDocTitle.trim()) return;
+    const newDoc = {
+      id: `doc_${Date.now()}`,
+      title: newDocTitle.trim(),
+      fileUrl: '',
+      fileType: 'image',
+      fileName: ''
+    };
+    setDocuments((prevDocs) => [...prevDocs, newDoc]);
+    setNewDocTitle('');
+  };
+
+  const handleDocFileUpload = (e, docId) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const fileUrl = event.target.result;
+      setDocuments((prevDocs) =>
+        prevDocs.map((d) =>
+          d.id === docId
+            ? {
+                ...d,
+                fileUrl,
+                fileName: file.name,
+                fileType: isPdf ? 'pdf' : 'image',
+                uploadedAt: new Date().toISOString()
+              }
+            : d
+        )
+      );
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleDeleteDocument = (docId) => {
+    setDocuments((prevDocs) => prevDocs.filter((d) => d.id !== docId));
+  };
+
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!name.trim()) {
@@ -958,6 +1001,16 @@ export default function EmployeeFileModal({
                           👁️ معاينة
                         </button>
                       )}
+
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        style={{ fontSize: '12px', color: '#dc2626', padding: '4px 8px' }}
+                        title="حذف المستند"
+                        onClick={() => handleDeleteDocument(doc.id)}
+                      >
+                        🗑️
+                      </button>
                     </div>
                   </div>
                 ))}
