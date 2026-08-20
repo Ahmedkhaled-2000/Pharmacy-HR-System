@@ -50,6 +50,11 @@ export default function DisciplinaryPenaltiesTab({
   // Expanded employee in counters tab
   const [expandedEmpId, setExpandedEmpId] = useState(null);
 
+  // Category Editing State
+  const [editingCategory, setEditingCategory] = useState(null);
+  const [catFormData, setCatFormData] = useState(null);
+  const [newRuleInput, setNewRuleInput] = useState('');
+
   // Extract all disciplinary penalties from state.requests
   const allDisciplinaryPenalties = useMemo(() => {
     const list = (state.requests || []).filter(
@@ -277,6 +282,146 @@ export default function DisciplinaryPenaltiesTab({
     setCancellingPenalty(null);
     setCancellationReason('');
     showToast?.('✅ تم إلغاء الجزاء وسحب الخصم من مسير الأجور وتوثيق الإلغاء في سجل التدقيق');
+  };
+
+  // ── Category Management Handlers ──
+  const handleOpenEditCategory = (cat) => {
+    setEditingCategory(cat);
+    setCatFormData(JSON.parse(JSON.stringify(cat)));
+    setNewRuleInput('');
+  };
+
+  const handleOpenAddCategory = () => {
+    const nextCode = String.fromCharCode(65 + (policy.length % 26));
+    const newCat = {
+      id: 'cat_custom_' + Date.now(),
+      code: nextCode,
+      name: `الفئة ${nextCode} — تصنيف جديد`,
+      description: 'وصف الفئة وطبيعة المخالفات التابعة لها...',
+      color: '#0284c7',
+      resetMonths: 12,
+      rules: [
+        { id: 'rule_' + Date.now() + '_1', title: 'مخالفة لائحية أولى' }
+      ],
+      escalation: [
+        { occurrence: 1, action: 'تنبيه موثق', type: 'alert', deductionDays: 0, note: 'تنبيه موثق في السجل' },
+        { occurrence: 2, action: 'إنذار كتابي', type: 'warning', deductionDays: 0, note: 'إنذار كتابي' },
+        { occurrence: 3, action: 'إنذار نهائي', type: 'final_warning', deductionDays: 0, note: 'إنذار نهائي' },
+        { occurrence: 4, action: 'خصم يوم من الأجر الأساسي', type: 'deduction', deductionDays: 1.0, note: 'خصم يوم' },
+        { occurrence: 5, action: 'خصم يومين من الأجر الأساسي', type: 'deduction', deductionDays: 2.0, note: 'خصم يومين' },
+        { occurrence: 6, action: 'إحالة للتحقيق واتخاذ الإجراء المناسب', type: 'investigation', deductionDays: 0, note: 'إحالة للتحقيق', isDefaultBeyond: true }
+      ]
+    };
+    setEditingCategory({ isNew: true, ...newCat });
+    setCatFormData(JSON.parse(JSON.stringify(newCat)));
+    setNewRuleInput('');
+  };
+
+  const handleSaveCategory = async () => {
+    if (!catFormData || !catFormData.name.trim()) {
+      showToast?.('⚠️ يرجى كتابة اسم الفئة');
+      return;
+    }
+
+    let updatedPolicy = [...policy];
+    if (editingCategory?.isNew) {
+      updatedPolicy.push(catFormData);
+    } else {
+      updatedPolicy = updatedPolicy.map((c) => (c.id === catFormData.id ? catFormData : c));
+    }
+
+    const updatedState = { ...state, disciplinaryPolicy: updatedPolicy };
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+
+    setEditingCategory(null);
+    setCatFormData(null);
+    showToast?.('✅ تم حفظ وتحديث الفئة وسلم الجزاءات بنجاح');
+  };
+
+  const handleResetCategoryToDefault = async (catId) => {
+    const defaultCat = DEFAULT_DISCIPLINARY_CATEGORIES.find((c) => c.id === catId);
+    if (!defaultCat) return;
+
+    if (!window.confirm(`هل ترغب في استعادة الإعدادات وسلم الجزاءات الافتراضي لـ "${defaultCat.name}"؟`)) return;
+
+    const updatedPolicy = policy.map((c) => (c.id === catId ? JSON.parse(JSON.stringify(defaultCat)) : c));
+    const updatedState = { ...state, disciplinaryPolicy: updatedPolicy };
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+
+    showToast?.(`🔄 تم استعادة الإعدادات الافتراضية لـ ${defaultCat.name}`);
+  };
+
+  const handleResetAllCategoriesToDefault = async () => {
+    if (!window.confirm('هل أنت متأكد من استعادة كافة فئات لائحة الجزاءات التأديبية وسلالم التصعيد إلى الإعدادات القياسية الافتراضية؟')) return;
+
+    const updatedState = { ...state, disciplinaryPolicy: DEFAULT_DISCIPLINARY_CATEGORIES };
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+
+    showToast?.('🔄 تم استعادة كافة فئات اللائحة الافتراضية بنجاح');
+  };
+
+  const handleDeleteCategory = async (catId, catName) => {
+    if (!window.confirm(`هل أنت متأكد من حذف الفئة "${catName}" نهائياً من اللائحة؟`)) return;
+
+    const updatedPolicy = policy.filter((c) => c.id !== catId);
+    const updatedState = { ...state, disciplinaryPolicy: updatedPolicy };
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+
+    showToast?.(`🗑️ تم حذف الفئة "${catName}" من اللائحة`);
+  };
+
+  const handleUpdateEscalation = (index, field, value) => {
+    const nextEsc = [...(catFormData.escalation || [])];
+    nextEsc[index][field] = field === 'deductionDays' ? (parseFloat(value) || 0) : value;
+    setCatFormData({ ...catFormData, escalation: nextEsc });
+  };
+
+  const handleAddEscalationStep = () => {
+    const nextOcc = (catFormData.escalation?.length || 0) + 1;
+    const newStep = {
+      occurrence: nextOcc,
+      action: `خصم ${nextOcc - 3 > 0 ? nextOcc - 3 : 1} يوم من الأجر الأساسي`,
+      type: 'deduction',
+      deductionDays: nextOcc - 3 > 0 ? nextOcc - 3 : 1,
+      note: `تكرار المرة ${nextOcc}`
+    };
+    setCatFormData({
+      ...catFormData,
+      escalation: [...(catFormData.escalation || []), newStep]
+    });
+  };
+
+  const handleRemoveEscalationStep = (index) => {
+    if ((catFormData.escalation || []).length <= 1) {
+      showToast?.('⚠️ يجب الإبقاء على مستوى تصعيد واحد على الأقل');
+      return;
+    }
+    const nextEsc = catFormData.escalation.filter((_, i) => i !== index).map((esc, i) => ({
+      ...esc,
+      occurrence: i + 1
+    }));
+    setCatFormData({ ...catFormData, escalation: nextEsc });
+  };
+
+  const handleAddRule = () => {
+    if (!newRuleInput.trim()) return;
+    const newRule = { id: 'rule_' + Date.now(), title: newRuleInput.trim() };
+    setCatFormData({
+      ...catFormData,
+      rules: [...(catFormData.rules || []), newRule]
+    });
+    setNewRuleInput('');
+  };
+
+  const handleRemoveRule = (ruleId) => {
+    setCatFormData({
+      ...catFormData,
+      rules: (catFormData.rules || []).filter((r) => r.id !== ruleId)
+    });
   };
 
   // Export Monthly Report to CSV/Excel
@@ -644,9 +789,31 @@ export default function DisciplinaryPenaltiesTab({
                 ⚖️ جدول فئات المخالفات وسلم التدرج التأديبي
               </h3>
               <p style={{ margin: 0, color: 'var(--muted)', fontSize: '13px' }}>
-                تطبيق مبدأ التصعيد التدريجي المستقل لكل فئة: (تنبيه ← إنذار ← إنذار نهائي ← خصم ← تحقيق)
+                تطبيق مبدأ التصعيد التدريجي المستقل لكل فئة مع إمكانية تعديل الإجراءات ونسب الخصم وفترة التصفير
               </p>
             </div>
+
+            {isAdmin && (
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ fontSize: '13px' }}
+                  onClick={handleResetAllCategoriesToDefault}
+                  title="استعادة كافة الفئات والسلالم إلى الإعدادات الافتراضية المعتمدة"
+                >
+                  🔄 استعادة الافتراضي لكافة الفئات
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-start"
+                  style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                  onClick={handleOpenAddCategory}
+                >
+                  ➕ إضافة فئة مخالفات جديدة
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Render Each Category Escalation Card */}
@@ -675,17 +842,50 @@ export default function DisciplinaryPenaltiesTab({
                   }}
                 >
                   <div>
-                    <h4 style={{ margin: '0 0 4px', color: cat.color || 'var(--text)', fontSize: '16px' }}>
+                    <h4 style={{ margin: '0 0 4px', color: cat.color || 'var(--text)', fontSize: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                       {cat.name}
                     </h4>
                     <p style={{ margin: 0, color: 'var(--muted)', fontSize: '12.5px' }}>
                       {cat.description}
                     </p>
                   </div>
-                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                     <span className="badge badge-primary">
                       🔄 فترة تصفير العداد: {cat.resetMonths > 0 ? `${cat.resetMonths} شهر من آخر مخالفة` : 'لا تصفير (تراكمي)'}
                     </span>
+
+                    {isAdmin && (
+                      <div style={{ display: 'flex', gap: '6px' }}>
+                        <button
+                          type="button"
+                          className="btn btn-start"
+                          style={{ padding: '6px 12px', fontSize: '12px', background: 'var(--primary-dark)' }}
+                          onClick={() => handleOpenEditCategory(cat)}
+                        >
+                          ✏️ تعديل الفئة والسلم
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          style={{ padding: '6px 10px', fontSize: '12px' }}
+                          title="استعادة بنود وسلم هذه الفئة للافتراضي"
+                          onClick={() => handleResetCategoryToDefault(cat.id)}
+                        >
+                          🔄 الافتراضي
+                        </button>
+                        {cat.id.startsWith('cat_custom_') && (
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            style={{ padding: '6px 10px', fontSize: '12px', color: '#dc2626' }}
+                            title="حذف هذه الفئة المخصصة"
+                            onClick={() => handleDeleteCategory(cat.id, cat.name)}
+                          >
+                            🗑️ حذف
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -696,11 +896,15 @@ export default function DisciplinaryPenaltiesTab({
                       📌 أمثلة المخالفات الشائعة تحت هذه الفئة:
                     </strong>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                      {(cat.rules || []).map((r) => (
-                        <span key={r.id} style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)', padding: '4px 10px', borderRadius: '6px', fontSize: '12px' }}>
-                          • {r.title}
-                        </span>
-                      ))}
+                      {(cat.rules || []).length === 0 ? (
+                        <span style={{ color: 'var(--muted)', fontSize: '12px' }}>لا توجد مخالفات مضافة حالياً.</span>
+                      ) : (
+                        (cat.rules || []).map((r) => (
+                          <span key={r.id} style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)', padding: '4px 10px', borderRadius: '6px', fontSize: '12px' }}>
+                            • {r.title}
+                          </span>
+                        ))
+                      )}
                     </div>
                   </div>
 
@@ -1442,6 +1646,299 @@ export default function DisciplinaryPenaltiesTab({
                 ))}
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Edit / Add Category & Escalation Ladder ── */}
+      {editingCategory && catFormData && (
+        <div className="modal-backdrop" onClick={() => setEditingCategory(null)} style={{ zIndex: 1060 }}>
+          <div
+            className="modal-card"
+            style={{
+              maxWidth: '850px',
+              width: '96%',
+              maxHeight: '92vh',
+              overflowY: 'auto',
+              borderRadius: '16px',
+              padding: '24px',
+              fontFamily: "'Tajawal', sans-serif"
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '12px', marginBottom: '18px' }}>
+              <div>
+                <h3 style={{ fontFamily: 'Cairo', margin: '0 0 4px', color: 'var(--primary-dark)', fontSize: '18px' }}>
+                  {editingCategory.isNew ? '➕ إضافة فئة مخالفات جديدة' : `✏️ تعديل بيانات وسلم ${catFormData.name}`}
+                </h3>
+                <p style={{ margin: 0, color: 'var(--muted)', fontSize: '13px' }}>
+                  تخصيص بنود الفئة، مدة تصفير العداد، أمثلة المخالفات، وسلم التدرج التأديبي
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setEditingCategory(null)}
+                style={{ fontSize: '18px', padding: '4px 8px' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSaveCategory();
+              }}
+            >
+              {/* General Category Settings */}
+              <div style={{ background: 'var(--surface-muted)', padding: '16px', borderRadius: '12px', marginBottom: '18px', border: '1px solid var(--border)' }}>
+                <h4 style={{ margin: '0 0 12px', fontSize: '14px', color: 'var(--primary-dark)' }}>
+                  ⚙️ الإعدادات العامة للفئة:
+                </h4>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '12px' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 'bold', marginBottom: '4px' }}>
+                      اسم الفئة الكامل:
+                    </label>
+                    <input
+                      type="text"
+                      value={catFormData.name}
+                      onChange={(e) => setCatFormData({ ...catFormData, name: e.target.value })}
+                      required
+                      style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: '#fff' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 'bold', marginBottom: '4px' }}>
+                      رمز الفئة (الكود):
+                    </label>
+                    <input
+                      type="text"
+                      value={catFormData.code}
+                      onChange={(e) => setCatFormData({ ...catFormData, code: e.target.value.toUpperCase() })}
+                      required
+                      style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: '#fff', fontWeight: 'bold' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 'bold', marginBottom: '4px' }}>
+                      لون الفئة للتمييز:
+                    </label>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <input
+                        type="color"
+                        value={catFormData.color || '#3b82f6'}
+                        onChange={(e) => setCatFormData({ ...catFormData, color: e.target.value })}
+                        style={{ width: '45px', height: '36px', borderRadius: '6px', border: '1px solid var(--border)', cursor: 'pointer', padding: '2px' }}
+                      />
+                      <input
+                        type="text"
+                        value={catFormData.color || '#3b82f6'}
+                        onChange={(e) => setCatFormData({ ...catFormData, color: e.target.value })}
+                        style={{ flex: 1, padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: '#fff' }}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 'bold', marginBottom: '4px' }}>
+                      مدة تصفير العداد (Reset Period):
+                    </label>
+                    <select
+                      value={catFormData.resetMonths}
+                      onChange={(e) => setCatFormData({ ...catFormData, resetMonths: parseInt(e.target.value) || 0 })}
+                      style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: '#fff' }}
+                    >
+                      <option value={12}>12 شهرًا من آخر مخالفة (الافتراضي الموصى به)</option>
+                      <option value={6}>6 أشهر من آخر مخالفة</option>
+                      <option value={24}>24 شهرًا (سنتان)</option>
+                      <option value={0}>بدون تصفير (تراكمي دائم)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 'bold', marginBottom: '4px' }}>
+                    وصف ونطاق الفئة:
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={catFormData.description || ''}
+                    onChange={(e) => setCatFormData({ ...catFormData, description: e.target.value })}
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: '#fff' }}
+                  />
+                </div>
+              </div>
+
+              {/* Common Rules Examples Editor */}
+              <div style={{ background: '#ffffff', border: '1px solid var(--border)', padding: '16px', borderRadius: '12px', marginBottom: '18px' }}>
+                <h4 style={{ margin: '0 0 10px', fontSize: '14px', color: 'var(--primary-dark)' }}>
+                  📌 أمثلة المخالفات الشائعة التابعة لهذه الفئة:
+                </h4>
+
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
+                  {(catFormData.rules || []).map((r) => (
+                    <span
+                      key={r.id}
+                      style={{
+                        background: 'var(--surface-muted)',
+                        border: '1px solid var(--border)',
+                        padding: '6px 12px',
+                        borderRadius: '20px',
+                        fontSize: '12.5px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px'
+                      }}
+                    >
+                      {r.title}
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveRule(r.id)}
+                        style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#dc2626', fontWeight: 'bold' }}
+                        title="حذف هذا البند"
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  ))}
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="text"
+                    placeholder="اكتب مخالفة جديدة ثم اضغط إضافة..."
+                    value={newRuleInput}
+                    onChange={(e) => setNewRuleInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddRule();
+                      }
+                    }}
+                    style={{ flex: 1, padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    onClick={handleAddRule}
+                    style={{ fontSize: '12.5px' }}
+                  >
+                    ➕ إضافة بند
+                  </button>
+                </div>
+              </div>
+
+              {/* Escalation Ladder Table Editor */}
+              <div style={{ background: '#ffffff', border: '1px solid var(--border)', padding: '16px', borderRadius: '12px', marginBottom: '20px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                  <h4 style={{ margin: 0, fontSize: '14px', color: 'var(--primary-dark)' }}>
+                    📈 سلم التدرج التأديبي وحساب الخصومات:
+                  </h4>
+                  <button
+                    type="button"
+                    className="btn btn-start"
+                    style={{ fontSize: '12px', padding: '6px 12px', background: '#0284c7' }}
+                    onClick={handleAddEscalationStep}
+                  >
+                    ➕ إضافة مستوى تصعيد (+1)
+                  </button>
+                </div>
+
+                <table className="bylaws-table" style={{ fontSize: '13px' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ width: '100px' }}>العداد</th>
+                      <th>الإجراء التأديبي المقرر</th>
+                      <th style={{ width: '150px' }}>نوع الإجراء</th>
+                      <th style={{ width: '130px' }}>أيام الخصم</th>
+                      <th>ملاحظات وتوجيهات</th>
+                      <th style={{ width: '60px' }}>حذف</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(catFormData.escalation || []).map((esc, idx) => (
+                      <tr key={idx}>
+                        <td>
+                          <strong>المرة {esc.occurrence}</strong>
+                        </td>
+                        <td>
+                          <input
+                            type="text"
+                            value={esc.action}
+                            onChange={(e) => handleUpdateEscalation(idx, 'action', e.target.value)}
+                            required
+                            style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--border)', fontWeight: 'bold' }}
+                          />
+                        </td>
+                        <td>
+                          <select
+                            value={esc.type || (esc.deductionDays > 0 ? 'deduction' : 'warning')}
+                            onChange={(e) => handleUpdateEscalation(idx, 'type', e.target.value)}
+                            style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--border)' }}
+                          >
+                            <option value="alert">تنبيه موثق</option>
+                            <option value="warning">إنذار كتابي</option>
+                            <option value="final_warning">إنذار نهائي</option>
+                            <option value="deduction">خصم مالي</option>
+                            <option value="investigation">تحقيق / مساءلة</option>
+                          </select>
+                        </td>
+                        <td>
+                          <input
+                            type="number"
+                            step="0.25"
+                            min="0"
+                            max="30"
+                            value={esc.deductionDays}
+                            onChange={(e) => handleUpdateEscalation(idx, 'deductionDays', e.target.value)}
+                            style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--border)', textAlign: 'center', fontWeight: 'bold' }}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="text"
+                            value={esc.note || ''}
+                            onChange={(e) => handleUpdateEscalation(idx, 'note', e.target.value)}
+                            placeholder="توجيه أو ملاحظة..."
+                            style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--border)' }}
+                          />
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            style={{ color: '#dc2626', padding: '4px 6px', fontSize: '13px' }}
+                            title="حذف هذا المستوى"
+                            onClick={() => handleRemoveEscalationStep(idx)}
+                          >
+                            🗑️
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Modal Footer Actions */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', borderTop: '1px solid var(--border)', paddingTop: '16px' }}>
+                <button type="button" className="btn btn-ghost" onClick={() => setEditingCategory(null)}>
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-start"
+                  style={{ background: '#16a34a', color: '#fff', fontWeight: 'bold', padding: '10px 24px' }}
+                >
+                  💾 حفظ وتحديث بنود الفئة في اللائحة
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
