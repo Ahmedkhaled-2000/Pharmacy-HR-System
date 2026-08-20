@@ -15,13 +15,16 @@ import GmailConfigCard from './GmailConfigCard';
 import { DEFAULT_JOBS, getJobsList } from '../../utils/jobsHelper';
 
 const ALL_REQUEST_TYPES = [
-  { type: 'leave', label: 'طلبات الإجازات السنوية والرسمية' },
-  { type: 'loan', label: 'طلبات السلف والآجل' },
-  { type: 'permission', label: 'طلبات الأذونات والتأخيرات' },
-  { type: 'swap', label: 'طلبات تبديل الشفتات والراحات' },
+  { type: 'long_leave', label: 'طلبات الإجازة أكثر من ثلاث أيام في الشهر (سنوية أو بدون أجر)' },
+  { type: 'leave', label: 'طلبات الإجازات (سنوية / مرضي / عارضة <= 3 أيام)' },
+  { type: 'loan', label: 'طلبات السلف الشهرية والتعليمات والآجل' },
+  { type: 'credit_medicine', label: 'طلبات سحب الأدوية بالآجل' },
+  { type: 'permission', label: 'طلبات أذونات وتأخيرات الموظفين' },
+  { type: 'swap', label: 'طلبات تبديل الشفتات والورديات' },
   { type: 'roster_edit', label: 'طلبات تعديل الجداول الشهرية' },
-  { type: 'bonus', label: 'طلبات وصرف المكافآت' },
+  { type: 'bonus', label: 'طلبات وصرف المكافآت والحوافز' },
   { type: 'penalty', label: 'طلبات الخصومات والجزاءات' },
+  { type: 'resignation', label: 'طلبات استقالة الموظفين' },
   { type: 'complaint', label: 'الشكاوى وملاحظات التقييم' },
   { type: 'punch_correction', label: 'طلبات تأكيد وتصحيح بصمات الوجه واليد' }
 ];
@@ -91,16 +94,19 @@ export default function SettingsModule({
   }, []);
 
   // Approval Rules Configuration & Add Modal States
-  const [rules, setRules] = useState(state.approvalRules || [
-    { id: '1', requestType: 'leave', typeLabel: 'طلبات الإجازات السنوية', reqBranch: true, reqAdmin: true },
-    { id: '2', requestType: 'loan', typeLabel: 'طلبات السلف والآجل', reqBranch: false, reqAdmin: true },
-    { id: '3', requestType: 'permission', typeLabel: 'طلبات الأذونات والتأخيرات', reqBranch: true, reqAdmin: true },
-    { id: '4', requestType: 'swap', typeLabel: 'طلبات تبديل الشفتات', reqBranch: true, reqAdmin: true }
-  ]);
+  const [rules, setRules] = useState(() => (state.approvalRules && state.approvalRules.length > 0 ? state.approvalRules : [
+    { id: 'rule_leave_over_3_days', requestType: 'long_leave', typeLabel: 'طلبات الإجازة أكثر من ثلاث أيام في الشهر (سنوية أو بدون أجر)', reqBranch: false, reqAdmin: true },
+    { id: 'rule_loan', requestType: 'loan', typeLabel: 'طلبات السلف الشهرية والتعليمات والآجل', reqBranch: false, reqAdmin: true },
+    { id: 'rule_meds', requestType: 'credit_medicine', typeLabel: 'طلبات سحب الأدوية بالآجل', reqBranch: false, reqAdmin: true },
+    { id: 'rule_leave', requestType: 'leave', typeLabel: 'طلبات الإجازات (سنوية / مرضي / عارضة <= 3 أيام)', reqBranch: true, reqAdmin: true },
+    { id: 'rule_swap', requestType: 'swap', typeLabel: 'طلبات تبديل الشفتات والورديات', reqBranch: true, reqAdmin: true },
+    { id: 'rule_permission', requestType: 'permission', typeLabel: 'طلبات أذونات وتأخيرات الموظفين', reqBranch: true, reqAdmin: true },
+    { id: 'rule_bonus', requestType: 'bonus', typeLabel: 'طلبات المكافآت والحوافز', reqBranch: true, reqAdmin: true }
+  ]));
   const [showAddRuleModal, setShowAddRuleModal] = useState(false);
-  const [newRuleType, setNewRuleType] = useState('leave');
-  const [newRuleLabel, setNewRuleLabel] = useState('طلبات الإجازات السنوية والرسمية');
-  const [newRuleReqBranch, setNewRuleReqBranch] = useState(true);
+  const [newRuleType, setNewRuleType] = useState('long_leave');
+  const [newRuleLabel, setNewRuleLabel] = useState('طلبات الإجازة أكثر من ثلاث أيام في الشهر (سنوية أو بدون أجر)');
+  const [newRuleReqBranch, setNewRuleReqBranch] = useState(false);
   const [newRuleReqAdmin, setNewRuleReqAdmin] = useState(true);
 
   const handleSaveGeneral = async (e) => {
@@ -137,7 +143,11 @@ export default function SettingsModule({
       return r;
     });
     setRules(updatedRules);
-    const updatedState = { ...state, approvalRules: updatedRules };
+    const updatedState = {
+      ...state,
+      approvalRules: updatedRules,
+      _approvalRulesUpdatedAt: new Date().toISOString()
+    };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
     showToast?.('✅ تم التحديث والتأثير على قواعد التسلسل والموافقات');
@@ -469,7 +479,11 @@ export default function SettingsModule({
     const updated = [...rules, newRule];
     setRules(updated);
     setShowAddRuleModal(false);
-    const updatedState = { ...state, approvalRules: updated };
+    const updatedState = {
+      ...state,
+      approvalRules: updated,
+      _approvalRulesUpdatedAt: new Date().toISOString()
+    };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
     showToast?.('✅ تم إضافة قاعدة موافقة جديدة وتطبيقها بنجاح');
@@ -478,14 +492,22 @@ export default function SettingsModule({
   const handleDeleteRule = async (ruleId) => {
     const updated = rules.filter(r => r.id !== ruleId);
     setRules(updated);
-    const updatedState = { ...state, approvalRules: updated };
+    const updatedState = {
+      ...state,
+      approvalRules: updated,
+      _approvalRulesUpdatedAt: new Date().toISOString()
+    };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
     showToast?.('🗑️ تم حذف قاعدة الموافقة بنجاح');
   };
 
   const handleSaveAllRules = async () => {
-    const updatedState = { ...state, approvalRules: rules };
+    const updatedState = {
+      ...state,
+      approvalRules: rules,
+      _approvalRulesUpdatedAt: new Date().toISOString()
+    };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
     showToast?.('💾 تم حفظ وتحسين وتطبيق كافة قواعد الموافقة المزدوجة بنجاح');

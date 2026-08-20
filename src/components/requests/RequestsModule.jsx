@@ -102,16 +102,24 @@ export default function RequestsModule({
       }
     });
 
+    (state.loans || []).forEach((ln) => {
+      if (!existingIds.has(ln.id)) {
+        list.push({ ...ln, type: ln.type || 'loan' });
+        existingIds.add(ln.id);
+      }
+    });
+
     return list.filter((r) => {
       if (!r) return false;
       if (isBranch) {
         if (!shouldShowRequestToBranch(r, state)) return false;
-        const isMatch = (r.branchId && String(r.branchId) === cIdStr) || (r.employeeId && branchEmpIdSet.has(String(r.employeeId)));
+        const reqBranchId = r.branchId || (state.employees || []).find((e) => String(e.id) === String(r.employeeId))?.branchId;
+        const isMatch = (reqBranchId && String(reqBranchId) === cIdStr) || (r.employeeId && branchEmpIdSet.has(String(r.employeeId)));
         return isMatch;
       }
       return true;
     });
-  }, [state.requests, state.leaveRequests, state.shiftSwaps, state.approvalRules, isBranch, cIdStr, branchEmpIdSet]);
+  }, [state.requests, state.leaveRequests, state.shiftSwaps, state.loans, state.employees, state.approvalRules, isBranch, cIdStr, branchEmpIdSet]);
 
   const hiddenAdminCount = isBranch ? 0 : allRequests.filter(r => r && r.hiddenFromAdmin).length;
   const visibleAdminRequests = isBranch ? allRequests : allRequests.filter(r => showHiddenAdminRequests ? true : !r.hiddenFromAdmin);
@@ -143,7 +151,9 @@ export default function RequestsModule({
   const filteredRequests = requests.filter((r) => {
     if (!r) return false;
     if (filterType !== 'all') {
-      if (filterType === 'loan') {
+      if (filterType === 'long_leave') {
+        if (r.type !== 'long_leave' && !r.isLongLeave && parseFloat(r.daysCount || r.days || 0) <= 3) return false;
+      } else if (filterType === 'loan') {
         if (r.type !== 'loan' && r.type !== 'advance') return false;
       } else if (filterType === 'meds') {
         if (r.type !== 'meds' && r.type !== 'credit_medicine') return false;
@@ -164,7 +174,8 @@ export default function RequestsModule({
     const rDate = (r.createdAt ? r.createdAt.slice(0, 10) : (r.date || r.startDate || ''));
     if (filterDate) {
       if (!rDate.startsWith(filterDate)) return false;
-    } else if (typeof filterFn === 'function' && rDate) {
+    } else if (typeof filterFn === 'function' && rDate && r.status !== 'pending') {
+      // Pending requests awaiting action always stay visible to prevent missing pending items
       if (!filterFn(rDate)) return false;
     }
     return true;
@@ -897,7 +908,8 @@ export default function RequestsModule({
           <label style={{ fontSize: '13px', fontWeight: 'bold' }}>نوع الطلب:</label>
           <select value={filterType} onChange={(e) => setFilterType(e.target.value)} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)' }}>
             <option value="all">-- جميع أنواع الطلبات --</option>
-            <option value="leave">🏖️ إجازات</option>
+            <option value="leave">🏖️ إجازات (&lt;= 3 أيام)</option>
+            <option value="long_leave">🏖️ إجازات أكثر من 3 أيام</option>
             <option value="permission">⏰ أذون خروج/دخول</option>
             <option value="loan">💳 سلف مالية</option>
             <option value="meds">💊 أدوية آجل</option>

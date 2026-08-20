@@ -301,25 +301,81 @@ export default function App() {
     },
     approvalRules: [
       {
-        id: 'rule_general',
-        name: 'طلبات المكافآت والجزاءات وتعديل البصمات والأذون وتأخير/خروج وإجازات <= 3 أيام والإضافي وتبديل الشفتات',
+        id: 'rule_leave_over_3_days',
+        requestType: 'long_leave',
+        name: 'طلبات الإجازة أكثر من ثلاث أيام في الشهر (سنوية أو بدون أجر)',
+        typeLabel: 'طلبات الإجازة أكثر من ثلاث أيام في الشهر (سنوية أو بدون أجر)',
+        reqBranch: false,
+        reqAdmin: true,
+        requiresBranchManager: false,
+        requiresSuperAdmin: true,
+        autoExecuteOnBoth: false
+      },
+      {
+        id: 'rule_loan',
+        requestType: 'loan',
+        name: 'طلبات السلف الشهرية والتعليمات والآجل',
+        typeLabel: 'طلبات السلف الشهرية والتعليمات والآجل',
+        reqBranch: false,
+        reqAdmin: true,
+        requiresBranchManager: false,
+        requiresSuperAdmin: true,
+        autoExecuteOnBoth: false
+      },
+      {
+        id: 'rule_meds',
+        requestType: 'credit_medicine',
+        name: 'طلبات سحب الأدوية بالآجل',
+        typeLabel: 'طلبات سحب الأدوية بالآجل',
+        reqBranch: false,
+        reqAdmin: true,
+        requiresBranchManager: false,
+        requiresSuperAdmin: true,
+        autoExecuteOnBoth: false
+      },
+      {
+        id: 'rule_leave',
+        requestType: 'leave',
+        name: 'طلبات الإجازات (سنوية / مرضي / عارضة <= 3 أيام)',
+        typeLabel: 'طلبات الإجازات (سنوية / مرضي / عارضة <= 3 أيام)',
+        reqBranch: true,
+        reqAdmin: true,
         requiresBranchManager: true,
         requiresSuperAdmin: true,
         autoExecuteOnBoth: true
       },
       {
-        id: 'rule_long_leave',
-        name: 'طلبات الإجازة أكثر من ثلاث أيام في الشهر (سنوية أو بدون أجر)',
-        requiresBranchManager: false,
+        id: 'rule_swap',
+        requestType: 'swap',
+        name: 'طلبات تبديل الشفتات والورديات',
+        typeLabel: 'طلبات تبديل الشفتات والورديات',
+        reqBranch: true,
+        reqAdmin: true,
+        requiresBranchManager: true,
         requiresSuperAdmin: true,
-        autoExecuteOnBoth: false
+        autoExecuteOnBoth: true
       },
       {
-        id: 'rule_loans',
-        name: 'طلبات السلف الشهرية والتعليمات والآجل',
-        requiresBranchManager: false,
+        id: 'rule_permission',
+        requestType: 'permission',
+        name: 'طلبات أذونات وتأخيرات الموظفين',
+        typeLabel: 'طلبات أذونات وتأخيرات الموظفين',
+        reqBranch: true,
+        reqAdmin: true,
+        requiresBranchManager: true,
         requiresSuperAdmin: true,
-        autoExecuteOnBoth: false
+        autoExecuteOnBoth: true
+      },
+      {
+        id: 'rule_bonus',
+        requestType: 'bonus',
+        name: 'طلبات المكافآت والحوافز',
+        typeLabel: 'طلبات المكافآت والحوافز',
+        reqBranch: true,
+        reqAdmin: true,
+        requiresBranchManager: true,
+        requiresSuperAdmin: true,
+        autoExecuteOnBoth: true
       }
     ],
     shifts: [],
@@ -843,7 +899,11 @@ export default function App() {
   };
 
   const handleSaveApprovalRules = async (rulesData) => {
-    const updatedState = { ...state, approvalRules: rulesData };
+    const updatedState = {
+      ...state,
+      approvalRules: rulesData,
+      _approvalRulesUpdatedAt: new Date().toISOString()
+    };
     setState(updatedState);
     await saveState(updatedState);
     showToast('⚙️ تم حفظ قواعد الموافقة والاعتماد');

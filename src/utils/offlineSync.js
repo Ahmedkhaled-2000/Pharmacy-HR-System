@@ -170,27 +170,26 @@ export function listenToConnectionChanges(onOnline, onOffline) {
   };
 }
 
-// ── تحميل الحالة: جلب أحدث نسخة سحابية ودمجها مع المخزن المحلي ───────────
+// ── تحميل الحالة: جلب أحدث نسخة سحابية من السحابة مباشرة ───────────
 export async function smartLoadState() {
-  const localData = await loadStateLocally();
-
   if (isOnline()) {
     try {
       const remoteData = await fetchRemoteState();
       if (remoteData) {
-        // دمج محلي وسحابي لضمان عدم فقدان أي معاملة تمت أوفلاين أو على جهاز آخر
-        const rawMerged = localData ? smartMergeStates(localData, remoteData) : remoteData;
-        const merged = normalizeState(rawMerged);
-        await saveStateLocally(merged);
-        return { data: merged, source: 'cloud_merged' };
+        const normalized = normalizeState(remoteData);
+        // تحديث الكاش المحلي كنسخة احتياطية للقراءة أوفلاين فقط
+        await saveStateLocally(normalized);
+        return { data: normalized, source: 'cloud' };
       }
     } catch (e) {
       console.warn('[Sync] Cloud load failed, falling back to local cache:', e);
     }
   }
 
+  // في حالة انقطاع الإنترنت فقط يتم استخدام الكاش المحلي
+  const localData = await loadStateLocally();
   if (localData) {
-    return { data: normalizeState(localData), source: 'local' };
+    return { data: normalizeState(localData), source: 'local_offline' };
   }
 
   return { data: null, source: 'none' };

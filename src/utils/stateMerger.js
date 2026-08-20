@@ -424,7 +424,16 @@ export function smartMergeStates(localState, remoteState) {
     branches: mergeArrays(localState.branches, remoteState.branches, { prefix: 'branch', deletedIds }),
     employees: mergeArrays(localState.employees, remoteState.employees, { prefix: 'emp', deletedIds }),
     shifts: mergedShifts,
-    approvalRules: mergeArrays(localState.approvalRules, remoteState.approvalRules, { prefix: 'rule', deletedIds }),
+    approvalRules: (() => {
+      if (localState._approvalRulesUpdatedAt || remoteState._approvalRulesUpdatedAt) {
+        const localT = new Date(localState._approvalRulesUpdatedAt || 0).getTime();
+        const remoteT = new Date(remoteState._approvalRulesUpdatedAt || 0).getTime();
+        return localT >= remoteT ? (localState.approvalRules || []) : (remoteState.approvalRules || []);
+      }
+      return localState.approvalRules && localState.approvalRules.length > 0 
+        ? localState.approvalRules 
+        : (remoteState.approvalRules || []);
+    })(),
     authorizedDevices: mergeArrays(localState.authorizedDevices, remoteState.authorizedDevices, { prefix: 'dev', deletedIds }),
 
     requests: mergeArrays(localState.requests, remoteState.requests, { prefix: 'req', deletedIds }),
