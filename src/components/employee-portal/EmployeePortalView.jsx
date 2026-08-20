@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { AR_MONTHS, arabicWeekday, todayStr, fmt, arabicMonthLabel } from '../../utils/formatters';
+import { AR_MONTHS, arabicWeekday, todayStr, fmt, arabicMonthLabel, getActivePayrollCycleMonth } from '../../utils/formatters';
 import { loadExcelJS, mergedTitle, tableHeaderRow, dataRow } from '../../utils/excelExport';
 
 import EmployeeLeaveModule from './EmployeeLeaveModule';
@@ -120,7 +120,10 @@ export default function EmployeePortalView({
   }, [state?.employees, currentEmpUser]);
 
   const [selectedMonth, setSelectedMonth] = useState(() => {
-    try { return localStorage.getItem('emp_selected_month') || CURRENT_MONTH; } catch { return CURRENT_MONTH; }
+    try {
+      const activeAutoCycle = getActivePayrollCycleMonth(orgSettings || state?.orgSettings);
+      return activeAutoCycle || localStorage.getItem('emp_selected_month') || CURRENT_MONTH;
+    } catch { return CURRENT_MONTH; }
   });
   const [activeTab, setActiveTab] = useState(() => {
     try { return localStorage.getItem('emp_active_tab') || 'dashboard'; } catch { return 'dashboard'; }
@@ -141,6 +144,25 @@ export default function EmployeePortalView({
   const [rangeEnd, setRangeEnd] = useState(() => {
     try { return localStorage.getItem('emp_range_end') || ''; } catch { return ''; }
   });
+
+  // Auto-sync selectedMonth with active payroll cycle when cutoff settings change
+  useEffect(() => {
+    const activeAutoCycle = getActivePayrollCycleMonth(orgSettings || state?.orgSettings);
+    if (activeAutoCycle && filterMode === 'month' && activeAutoCycle !== selectedMonth) {
+      setSelectedMonth(activeAutoCycle);
+    }
+  }, [
+    state?.orgSettings?.payrollPayoutStartDay,
+    state?.orgSettings?.payrollPayoutEndDay,
+    state?.orgSettings?.payrollPayoutStartTime,
+    state?.orgSettings?.payrollPayoutEndTime,
+    state?.orgSettings?.payrollPeriodType,
+    orgSettings?.payrollPayoutStartDay,
+    orgSettings?.payrollPayoutEndDay,
+    orgSettings?.payrollPayoutStartTime,
+    orgSettings?.payrollPayoutEndTime,
+    orgSettings?.payrollPeriodType
+  ]);
 
   useEffect(() => { try { localStorage.setItem('emp_active_tab', activeTab); } catch {} }, [activeTab]);
   useEffect(() => { try { localStorage.setItem('emp_selected_month', selectedMonth); } catch {} }, [selectedMonth]);

@@ -24,6 +24,45 @@ export function nowTimeStr() {
   return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0') + ':' + String(d.getSeconds()).padStart(2, '0');
 }
 
+/**
+ * دالة استخراج دورة الشهر المالية النشطة تلقائياً وفقاً لتاريخ ووقت تقفيل الرواتب
+ */
+export function getActivePayrollCycleMonth(orgSettings, refDate = new Date()) {
+  const pType = orgSettings?.payrollPeriodType || 'cycle';
+  const customFrom = orgSettings?.payrollCustomFrom || '';
+
+  if (pType === 'custom' && customFrom) {
+    return customFrom.slice(0, 7);
+  }
+
+  const sDay = orgSettings?.payrollPayoutStartDay !== undefined ? parseInt(orgSettings.payrollPayoutStartDay, 10) : 21;
+  const eDay = orgSettings?.payrollPayoutEndDay !== undefined ? parseInt(orgSettings.payrollPayoutEndDay, 10) : 20;
+  const eTime = orgSettings?.payrollPayoutEndTime || '03:00';
+
+  const now = refDate instanceof Date ? refDate : new Date(refDate);
+  const y = now.getFullYear();
+  const m = now.getMonth() + 1; // 1-12
+  const day = now.getDate();
+  const timeStr = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+
+  // إذا تجاوز اليوم يوم نهاية الدورة، أو كان في نفس يوم نهاية الدورة وتجاوز وقت الإغلاق المحدد:
+  const isPastCutoff = day > eDay || (day === eDay && timeStr >= eTime);
+
+  if (isPastCutoff) {
+    // الانتقال التلقائي لدورة الشهر الجديد
+    let nextY = y;
+    let nextM = m + 1;
+    if (nextM > 12) {
+      nextM = 1;
+      nextY = y + 1;
+    }
+    return `${nextY}-${String(nextM).padStart(2, '0')}`;
+  } else {
+    // دورة الشهر الحالي
+    return `${y}-${String(m).padStart(2, '0')}`;
+  }
+}
+
 export function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }

@@ -59,16 +59,23 @@ export default function PayrollModule({
     } catch { return '00:00'; }
   });
 
+  const [payoutEndTime, setPayoutEndTime] = useState(() => {
+    try {
+      return localStorage.getItem('payroll_payout_end_time') || state.orgSettings?.payrollPayoutEndTime || '03:00';
+    } catch { return '03:00'; }
+  });
+
   const isPeriodFrozen = Boolean(state.orgSettings?.payrollPeriodFrozen?.[monthPicker]?.isFrozen || state.orgSettings?.isPeriodFrozen);
 
   useEffect(() => {
     const sDay = state.orgSettings?.payrollPayoutStartDay !== undefined 
       ? state.orgSettings.payrollPayoutStartDay 
-      : (() => { try { const v = localStorage.getItem('payroll_payout_start_day'); return v !== null && v !== '' ? parseInt(v, 10) : 26; } catch { return 26; } })();
+      : (() => { try { const v = localStorage.getItem('payroll_payout_start_day'); return v !== null && v !== '' ? parseInt(v, 10) : 21; } catch { return 21; } })();
     const eDay = state.orgSettings?.payrollPayoutEndDay !== undefined 
       ? state.orgSettings.payrollPayoutEndDay 
-      : (() => { try { const v = localStorage.getItem('payroll_payout_end_day'); return v !== null && v !== '' ? parseInt(v, 10) : 25; } catch { return 25; } })();
+      : (() => { try { const v = localStorage.getItem('payroll_payout_end_day'); return v !== null && v !== '' ? parseInt(v, 10) : 20; } catch { return 20; } })();
     const sTime = state.orgSettings?.payrollPayoutStartTime || (() => { try { return localStorage.getItem('payroll_payout_start_time') || '00:00'; } catch { return '00:00'; } })();
+    const eTime = state.orgSettings?.payrollPayoutEndTime || (() => { try { return localStorage.getItem('payroll_payout_end_time') || '03:00'; } catch { return '03:00'; } })();
     const pType = state.orgSettings?.payrollPeriodType || (() => { try { return localStorage.getItem('payroll_period_type') || 'cycle'; } catch { return 'cycle'; } })();
     const cFrom = state.orgSettings?.payrollCustomFrom || (() => { try { return localStorage.getItem('payroll_custom_from') || ''; } catch { return ''; } })();
     const cTo = state.orgSettings?.payrollCustomTo || (() => { try { return localStorage.getItem('payroll_custom_to') || ''; } catch { return ''; } })();
@@ -76,10 +83,11 @@ export default function PayrollModule({
     setPayoutStartDay(sDay);
     setPayoutEndDay(eDay);
     setPayoutStartTime(sTime);
+    setPayoutEndTime(eTime);
     setPeriodType(pType);
     setCustomFrom(cFrom);
     setCustomTo(cTo);
-  }, [state.orgSettings?.payrollPayoutStartDay, state.orgSettings?.payrollPayoutEndDay, state.orgSettings?.payrollPayoutStartTime, state.orgSettings?.payrollPeriodType, state.orgSettings?.payrollCustomFrom, state.orgSettings?.payrollCustomTo]);
+  }, [state.orgSettings?.payrollPayoutStartDay, state.orgSettings?.payrollPayoutEndDay, state.orgSettings?.payrollPayoutStartTime, state.orgSettings?.payrollPayoutEndTime, state.orgSettings?.payrollPeriodType, state.orgSettings?.payrollCustomFrom, state.orgSettings?.payrollCustomTo]);
 
   const employees = state.employees || [];
   const branches = state.branches || [];
@@ -90,22 +98,24 @@ export default function PayrollModule({
     return true;
   });
 
-  const handleSavePeriodSettings = async (newType, sVal, eVal, fromVal, toVal, sTimeVal = '00:00') => {
+  const handleSavePeriodSettings = async (newType, sVal, eVal, fromVal, toVal, sTimeVal = '00:00', eTimeVal = '03:00') => {
     const updatedSettings = {
       ...(state.orgSettings || {}),
       payrollPeriodType: newType,
-      payrollPayoutStartDay: parseInt(sVal, 10) || 26,
-      payrollPayoutEndDay: parseInt(eVal, 10) || 25,
+      payrollPayoutStartDay: parseInt(sVal, 10) || 21,
+      payrollPayoutEndDay: parseInt(eVal, 10) || 20,
       payrollPayoutStartTime: sTimeVal || '00:00',
-      payrollPayoutDay: parseInt(eVal, 10) || 25,
+      payrollPayoutEndTime: eTimeVal || '03:00',
+      payrollPayoutDay: parseInt(eVal, 10) || 20,
       payrollCustomFrom: fromVal || '',
       payrollCustomTo: toVal || ''
     };
 
     setPeriodType(newType);
-    setPayoutStartDay(parseInt(sVal, 10) || 26);
-    setPayoutEndDay(parseInt(eVal, 10) || 25);
+    setPayoutStartDay(parseInt(sVal, 10) || 21);
+    setPayoutEndDay(parseInt(eVal, 10) || 20);
     setPayoutStartTime(sTimeVal || '00:00');
+    setPayoutEndTime(eTimeVal || '03:00');
     setCustomFrom(fromVal || '');
     setCustomTo(toVal || '');
 
@@ -114,6 +124,7 @@ export default function PayrollModule({
       localStorage.setItem('payroll_payout_start_day', String(sVal));
       localStorage.setItem('payroll_payout_end_day', String(eVal));
       localStorage.setItem('payroll_payout_start_time', sTimeVal || '00:00');
+      localStorage.setItem('payroll_payout_end_time', eTimeVal || '03:00');
       if (fromVal) localStorage.setItem('payroll_custom_from', fromVal);
       if (toVal) localStorage.setItem('payroll_custom_to', toVal);
     } catch (e) {
@@ -127,7 +138,7 @@ export default function PayrollModule({
     if (newType === 'custom') {
       showToast?.(`✅ تم حفظ وتطبيق الفترة اليدوية المخصصة (من ${fromVal} إلى ${toVal}) على رواتب المنظومة وصفحة الموظف بنجاح`);
     } else {
-      showToast?.(`✅ تم حفظ وتثبيت الدورة الشهرية (من يوم ${sVal} الساعة ${sTimeVal} حتى يوم ${eVal}) بنجاح`);
+      showToast?.(`✅ تم حفظ وتثبيت الدورة الشهرية (من يوم ${sVal} الساعة ${sTimeVal} حتى يوم ${eVal} الساعة ${eTimeVal}) بنجاح`);
     }
   };
 
@@ -170,7 +181,7 @@ export default function PayrollModule({
     if (prevM < 1) { prevM = 12; prevY = y - 1; }
     const startStr = `${prevY}-${String(prevM).padStart(2, '0')}-${String(payoutStartDay).padStart(2, '0')}`;
     const endStr = `${y}-${String(m).padStart(2, '0')}-${String(payoutEndDay).padStart(2, '0')}`;
-    return `دورة الشهر (${monthPicker}): من ${startStr} (${payoutStartTime}) إلى ${endStr}`;
+    return `دورة الشهر (${monthPicker}): من ${startStr} (${payoutStartTime}) إلى ${endStr} (${payoutEndTime})`;
   };
 
   const getPayrollRangeObj = () => {
@@ -298,46 +309,58 @@ export default function PayrollModule({
         </div>
 
         {periodType === 'cycle' ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap', background: 'rgba(255,255,255,0.1)', padding: '12px 16px', borderRadius: '10px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <label style={{ fontSize: '13px', fontWeight: 'bold' }}>من يوم (الشهر السابق):</label>
-              <select
-                value={payoutStartDay}
-                onChange={(e) => handleSavePeriodSettings('cycle', e.target.value, payoutEndDay, customFrom, customTo, payoutStartTime)}
-                style={{ padding: '6px 12px', borderRadius: '8px', border: 'none', background: '#fff', color: '#0f766e', fontWeight: 'bold', fontSize: '13px' }}
-              >
-                {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
-                  <option key={d} value={d}>يوم {d}</option>
-                ))}
-              </select>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', background: 'rgba(255,255,255,0.1)', padding: '14px 18px', borderRadius: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
+              {/* Start Cutoff */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(0,0,0,0.15)', padding: '8px 14px', borderRadius: '10px' }}>
+                <span style={{ fontSize: '15px' }}>🚩</span>
+                <label style={{ fontSize: '13px', fontWeight: 'bold' }}>من يوم (الشهر السابق):</label>
+                <select
+                  value={payoutStartDay}
+                  onChange={(e) => handleSavePeriodSettings('cycle', e.target.value, payoutEndDay, customFrom, customTo, payoutStartTime, payoutEndTime)}
+                  style={{ padding: '5px 10px', borderRadius: '8px', border: 'none', background: '#fff', color: '#0f766e', fontWeight: 'bold', fontSize: '13px' }}
+                >
+                  {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
+                    <option key={d} value={d}>يوم {d}</option>
+                  ))}
+                </select>
+
+                <label style={{ fontSize: '13px', fontWeight: 'bold', marginRight: '6px' }}>الساعة:</label>
+                <input
+                  type="time"
+                  value={payoutStartTime}
+                  onChange={(e) => handleSavePeriodSettings('cycle', payoutStartDay, payoutEndDay, customFrom, customTo, e.target.value, payoutEndTime)}
+                  style={{ padding: '4px 8px', borderRadius: '8px', border: 'none', background: '#fff', color: '#0f766e', fontWeight: 'bold', fontSize: '13px' }}
+                />
+              </div>
+
+              {/* End Cutoff */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(0,0,0,0.15)', padding: '8px 14px', borderRadius: '10px' }}>
+                <span style={{ fontSize: '15px' }}>🏁</span>
+                <label style={{ fontSize: '13px', fontWeight: 'bold' }}>إلى يوم (الشهر الحالي):</label>
+                <select
+                  value={payoutEndDay}
+                  onChange={(e) => handleSavePeriodSettings('cycle', payoutStartDay, e.target.value, customFrom, customTo, payoutStartTime, payoutEndTime)}
+                  style={{ padding: '5px 10px', borderRadius: '8px', border: 'none', background: '#fff', color: '#0f766e', fontWeight: 'bold', fontSize: '13px' }}
+                >
+                  {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
+                    <option key={d} value={d}>يوم {d}</option>
+                  ))}
+                </select>
+
+                <label style={{ fontSize: '13px', fontWeight: 'bold', marginRight: '6px' }}>الساعة:</label>
+                <input
+                  type="time"
+                  value={payoutEndTime}
+                  onChange={(e) => handleSavePeriodSettings('cycle', payoutStartDay, payoutEndDay, customFrom, customTo, payoutStartTime, e.target.value)}
+                  style={{ padding: '4px 8px', borderRadius: '8px', border: 'none', background: '#fff', color: '#0f766e', fontWeight: 'bold', fontSize: '13px' }}
+                />
+              </div>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <label style={{ fontSize: '13px', fontWeight: 'bold' }}>الساعة:</label>
-              <input
-                type="time"
-                value={payoutStartTime}
-                onChange={(e) => handleSavePeriodSettings('cycle', payoutStartDay, payoutEndDay, customFrom, customTo, e.target.value)}
-                style={{ padding: '5px 10px', borderRadius: '8px', border: 'none', background: '#fff', color: '#0f766e', fontWeight: 'bold', fontSize: '13px' }}
-              />
+            <div style={{ fontSize: '12px', opacity: 0.95, color: '#fef08a' }}>
+              ⚡ <strong>نظام الترحيل التلقائي:</strong> عند حلول موعد نهاية الدورة (يوم {payoutEndDay} الساعة {payoutEndTime}) يتم تلقائياً ترحيل وتجديد التصفية لبدء دورة الشهر الجديد في صفحة الموظف وشاشات الإدارة.
             </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <label style={{ fontSize: '13px', fontWeight: 'bold' }}>إلى يوم (الشهر الحالي):</label>
-              <select
-                value={payoutEndDay}
-                onChange={(e) => handleSavePeriodSettings('cycle', payoutStartDay, e.target.value, customFrom, customTo, payoutStartTime)}
-                style={{ padding: '6px 12px', borderRadius: '8px', border: 'none', background: '#fff', color: '#0f766e', fontWeight: 'bold', fontSize: '13px' }}
-              >
-                {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
-                  <option key={d} value={d}>يوم {d}</option>
-                ))}
-              </select>
-            </div>
-
-            <span style={{ fontSize: '12px', opacity: 0.9 }}>
-              (مثال: من 26 للشهر السابق حتى 25 للشهر الحالي يتم احتساب رواتب شهر {monthPicker})
-            </span>
           </div>
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap', background: 'rgba(255,255,255,0.1)', padding: '12px 16px', borderRadius: '10px' }}>

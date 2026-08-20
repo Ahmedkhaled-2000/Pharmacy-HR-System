@@ -15,6 +15,7 @@ import {
   arabicWeekday,
   todayStr,
   nowTimeStr,
+  getActivePayrollCycleMonth,
   uid,
   fmt,
   parseArabicFloat,
@@ -347,7 +348,10 @@ export default function App() {
     try { return localStorage.getItem('admin_filter_mode') || 'month'; } catch { return 'month'; }
   });
   const [monthPicker, setMonthPicker] = useState(() => {
-    try { return localStorage.getItem('admin_month_picker') || todayStr().slice(0, 7); } catch { return todayStr().slice(0, 7); }
+    try {
+      const activeAutoCycle = getActivePayrollCycleMonth(state?.orgSettings);
+      return activeAutoCycle || localStorage.getItem('admin_month_picker') || todayStr().slice(0, 7);
+    } catch { return todayStr().slice(0, 7); }
   });
   const [adminCustomFrom, setAdminCustomFrom] = useState(() => {
     try { return localStorage.getItem('admin_custom_from') || ''; } catch { return ''; }
@@ -355,6 +359,20 @@ export default function App() {
   const [adminCustomTo, setAdminCustomTo] = useState(() => {
     try { return localStorage.getItem('admin_custom_to') || ''; } catch { return ''; }
   });
+
+  // Auto-sync monthPicker with active payroll cycle when cutoff settings change
+  useEffect(() => {
+    const activeAutoCycle = getActivePayrollCycleMonth(state?.orgSettings);
+    if (activeAutoCycle && adminFilterMode === 'month' && activeAutoCycle !== monthPicker) {
+      setMonthPicker(activeAutoCycle);
+    }
+  }, [
+    state?.orgSettings?.payrollPayoutStartDay,
+    state?.orgSettings?.payrollPayoutEndDay,
+    state?.orgSettings?.payrollPayoutStartTime,
+    state?.orgSettings?.payrollPayoutEndTime,
+    state?.orgSettings?.payrollPeriodType
+  ]);
 
   React.useEffect(() => {
     try {

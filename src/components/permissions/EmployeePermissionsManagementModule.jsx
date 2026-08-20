@@ -13,7 +13,12 @@ export default function EmployeePermissionsManagementModule({
   currentBranch,
   authRole = 'admin',
   currentEmployee = null,
-  showToast
+  showToast,
+  filterFn = null,
+  monthPicker = null,
+  filterMode = 'month',
+  customFrom = '',
+  customTo = ''
 }) {
   const isBranchManager = authRole === 'branch';
   const effectiveBranchId = isBranchManager ? currentBranch?.id : null;
