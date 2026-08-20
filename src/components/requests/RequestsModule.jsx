@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { applyShiftSwapToRosters, arabicWeekday } from '../../utils/formatters';
+import { applyShiftSwapToRosters, arabicWeekday, shouldShowRequestToBranch } from '../../utils/formatters';
 import { notifyEmployeeEarlyExitWarning } from '../../utils/gmailService';
 import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
 
@@ -32,7 +32,14 @@ export default function RequestsModule({
   startShift,
   pauseShift,
   resumeShift,
-  stopShift
+  stopShift,
+  filterFn = null,
+  monthPicker = null,
+  filterMode = 'month',
+  customFrom = '',
+  customTo = '',
+  currentBranch = null,
+  authRole = 'admin'
 }) {
   const [filterType, setFilterType] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
@@ -66,6 +73,17 @@ export default function RequestsModule({
 
   const [showHiddenAdminRequests, setShowHiddenAdminRequests] = useState(false);
 
+  const isBranch = authRole === 'branch';
+  const cIdStr = String(currentBranch?.id || '');
+  const branchEmpIdSet = useMemo(() => {
+    if (!isBranch || !cIdStr) return new Set();
+    return new Set(
+      (state.employees || [])
+        .filter((e) => String(e.branchId || '') === cIdStr || (e.branchesDetails && e.branchesDetails.some((bd) => String(bd.branchId) === cIdStr)))
+        .map((e) => String(e.id))
+    );
+  }, [state.employees, isBranch, cIdStr]);
+
   const allRequests = useMemo(() => {
     const list = [...(state.requests || [])];
     const existingIds = new Set(list.map((r) => r.id));
@@ -84,11 +102,19 @@ export default function RequestsModule({
       }
     });
 
-    return list;
-  }, [state.requests, state.leaveRequests, state.shiftSwaps]);
+    return list.filter((r) => {
+      if (!r) return false;
+      if (isBranch) {
+        if (!shouldShowRequestToBranch(r, state)) return false;
+        const isMatch = (r.branchId && String(r.branchId) === cIdStr) || (r.employeeId && branchEmpIdSet.has(String(r.employeeId)));
+        return isMatch;
+      }
+      return true;
+    });
+  }, [state.requests, state.leaveRequests, state.shiftSwaps, state.approvalRules, isBranch, cIdStr, branchEmpIdSet]);
 
-  const hiddenAdminCount = allRequests.filter(r => r && r.hiddenFromAdmin).length;
-  const visibleAdminRequests = allRequests.filter(r => showHiddenAdminRequests ? true : !r.hiddenFromAdmin);
+  const hiddenAdminCount = isBranch ? 0 : allRequests.filter(r => r && r.hiddenFromAdmin).length;
+  const visibleAdminRequests = isBranch ? allRequests : allRequests.filter(r => showHiddenAdminRequests ? true : !r.hiddenFromAdmin);
   const requests = visibleAdminRequests;
   const employees = state.employees || [];
 
@@ -135,9 +161,11 @@ export default function RequestsModule({
     if (filterEmp !== 'all') {
       if (String(r.employeeId) !== String(filterEmp)) return false;
     }
+    const rDate = (r.createdAt ? r.createdAt.slice(0, 10) : (r.date || r.startDate || ''));
     if (filterDate) {
-      const rDate = (r.createdAt ? r.createdAt.slice(0, 10) : (r.date || r.startDate || ''));
       if (!rDate.startsWith(filterDate)) return false;
+    } else if (typeof filterFn === 'function' && rDate) {
+      if (!filterFn(rDate)) return false;
     }
     return true;
   });

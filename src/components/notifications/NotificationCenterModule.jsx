@@ -13,15 +13,34 @@ export default function NotificationCenterModule({
   onApproveLoan,
   onRejectLoan,
   onSendEarlyExitEmail,
-  onWaiveEarlyExit
+  onWaiveEarlyExit,
+  filterFn = null,
+  monthPicker = null,
+  filterMode = 'month',
+  customFrom = '',
+  customTo = '',
+  currentBranch = null,
+  authRole = 'admin'
 }) {
   const [filterType, setFilterType] = useState('all'); // 'all' | 'today_punches' | 'today_absences' | 'requests' | 'penalties' | 'unread'
-  const [branchFilter, setBranchFilter] = useState('all');
+  const [branchFilter, setBranchFilter] = useState(() => (authRole === 'branch' && currentBranch?.id ? currentBranch.id : 'all'));
   const [empFilter, setEmpFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('');
 
   const todayDate = todayStr();
-  const effectiveDate = dateFilter || todayDate;
+  const isCustom = (filterMode === 'custom' || filterMode === 'range') && customFrom && customTo;
+  const periodDisplayLabel = dateFilter 
+    ? `بتاريخ: ${dateFilter}` 
+    : (isCustom ? `الفترة المخصصة: من ${customFrom} إلى ${customTo}` : (monthPicker ? `دورة شهر (${monthPicker})` : todayDate));
+
+  const activePeriodFn = (d) => {
+    if (!d) return false;
+    const dateStr = String(d).slice(0, 10);
+    if (dateFilter) return dateStr.startsWith(dateFilter);
+    if (typeof filterFn === 'function') return filterFn(dateStr);
+    return dateStr.startsWith(todayDate);
+  };
+
   const employees = state.employees || [];
   const branches = state.branches || [];
   const shifts = state.shifts || [];
@@ -29,14 +48,14 @@ export default function NotificationCenterModule({
   const requests = state.requests || [];
   const loans = state.loans || [];
   const rosters = state.rosters || [];
-  const currentMonth = todayDate.slice(0, 7);
+  const currentMonth = (monthPicker || todayDate).slice(0, 7);
 
   // Helper: employee branch matching
-  const empBelongsToBranch = (emp, branchId) => {
-    if (!branchId || branchId === 'all') return true;
-    if (emp.branchId === branchId) return true;
+  const empBelongsToBranch = (emp, bId) => {
+    if (!bId || bId === 'all') return true;
+    if (emp.branchId === bId) return true;
     if (emp.branchesDetails && Array.isArray(emp.branchesDetails)) {
-      return emp.branchesDetails.some((bd) => bd.branchId === branchId);
+      return emp.branchesDetails.some((bd) => bd.branchId === bId);
     }
     return false;
   };
@@ -53,8 +72,10 @@ export default function NotificationCenterModule({
   const todayPunches = useMemo(() => {
     return shifts
       .filter((s) => {
-        if (!(s.date || '').startsWith(effectiveDate)) return false;
+        if (!activePeriodFn(s.date)) return false;
         if (empFilter !== 'all' && String(s.employeeId) !== String(empFilter)) return false;
+        const targetB = branchFilter !== 'all' ? branchFilter : (authRole === 'branch' && currentBranch?.id ? currentBranch.id : null);
+        if (targetB && String(s.branchId) !== String(targetB)) return false;
         return true;
       })
       .map((s) => {
@@ -251,24 +272,25 @@ export default function NotificationCenterModule({
       })
       .filter((r) => {
         if (empFilter !== 'all' && String(r.employeeId) !== String(empFilter)) return false;
-        if (dateFilter) {
-          const rDate = (r.createdAt ? r.createdAt.slice(0, 10) : (r.date || r.startDate || ''));
-          if (!rDate.startsWith(dateFilter)) return false;
-        }
+        const targetB = branchFilter !== 'all' ? branchFilter : (authRole === 'branch' && currentBranch?.id ? currentBranch.id : null);
+        if (targetB && String(r.branchId) !== String(targetB)) return false;
+        const rDate = (r.createdAt ? r.createdAt.slice(0, 10) : (r.date || r.startDate || ''));
+        if (rDate && !activePeriodFn(rDate)) return false;
         return true;
       });
-  }, [requests, employees, branches, empFilter, dateFilter]);
+  }, [requests, employees, branches, empFilter, branchFilter, authRole, currentBranch, activePeriodFn]);
 
   // 4. Lateness Penalties & Violations from Bylaws (Automated engine late incidents & Branch Manager submitted penalties)
   const allBylawsPenalties = useMemo(() => {
+    const targetB = branchFilter !== 'all' ? branchFilter : (authRole === 'branch' && currentBranch?.id ? currentBranch.id : null);
     const autoIncidents = (state.lateIncidents || [])
       .filter((inc) => {
         if (inc.status === 'cancelled' || inc.status === 'approved_permission_exempt' || inc.actionType === 'grace') return false;
         if (isApprovedPermissionForDate(inc.employeeId, inc.date, state)) return false;
         if (!inc.deductionMinutes && !inc.penaltyAmount) return false;
         if (empFilter !== 'all' && String(inc.employeeId) !== String(empFilter)) return false;
-        if (branchFilter !== 'all' && String(inc.branchId) !== String(branchFilter)) return false;
-        if (dateFilter && !String(inc.date).startsWith(dateFilter)) return false;
+        if (targetB && String(inc.branchId) !== String(targetB)) return false;
+        if (!activePeriodFn(inc.date)) return false;
         return true;
       })
       .map((inc) => {
@@ -313,16 +335,14 @@ export default function NotificationCenterModule({
       })
       .filter((r) => {
         if (empFilter !== 'all' && String(r.employeeId) !== String(empFilter)) return false;
-        if (branchFilter !== 'all' && String(r.branchId) !== String(branchFilter)) return false;
-        if (dateFilter) {
-          const rDate = (r.createdAt ? r.createdAt.slice(0, 10) : (r.date || ''));
-          if (!rDate.startsWith(dateFilter)) return false;
-        }
+        if (targetB && String(r.branchId) !== String(targetB)) return false;
+        const rDate = (r.createdAt ? r.createdAt.slice(0, 10) : (r.date || ''));
+        if (rDate && !activePeriodFn(rDate)) return false;
         return true;
       });
 
     return [...autoIncidents, ...manualPenalties];
-  }, [state.lateIncidents, state.requests, requests, employees, branches, empFilter, branchFilter, dateFilter]);
+  }, [state.lateIncidents, state.requests, requests, employees, branches, empFilter, branchFilter, authRole, currentBranch, activePeriodFn]);
 
   // Unread Bylaws Penalties
   const unreadBylawsPenalties = useMemo(() => {
@@ -334,10 +354,8 @@ export default function NotificationCenterModule({
   // General Notification Handlers
   const notifications = (state.notifications || []).filter((n) => {
     if (empFilter !== 'all' && String(n.empId || n.employeeId) !== String(empFilter)) return false;
-    if (dateFilter) {
-      const nDate = (n.date || (n.timestamp ? n.timestamp.slice(0, 10) : ''));
-      if (!nDate.startsWith(dateFilter)) return false;
-    }
+    const nDate = (n.date || (n.timestamp ? n.timestamp.slice(0, 10) : ''));
+    if (nDate && !activePeriodFn(nDate)) return false;
     return true;
   });
 
@@ -432,7 +450,7 @@ export default function NotificationCenterModule({
             )}
           </h2>
           <p style={{ margin: '4px 0 0', color: 'var(--muted)', fontSize: '14px' }}>
-            متابعة فورية للحضور والانصراف، الغيابات، طلبات الموظفين، والجزاءات ({effectiveDate})
+            متابعة فورية للحضور والانصراف، الغيابات، طلبات الموظفين، والجزاءات ({periodDisplayLabel})
           </p>
         </div>
 

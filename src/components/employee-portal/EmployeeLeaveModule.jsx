@@ -74,12 +74,17 @@ export default function EmployeeLeaveModule({
 
   const currentDaysCount = calcDaysCount(startDate, endDate);
 
-  // Calculate existing leave days requested/approved in the current month
-  const targetMonth = startDate.slice(0, 7);
+  // Calculate existing leave days requested/approved in the target month (strictly within that month/cycle)
+  const targetMonth = (startDate || selectedMonth || todayStr()).slice(0, 7);
   const monthLeaveDaysSoFar = employeeLeaveRequests
-    .filter((r) => r.status !== 'rejected' && r.startDate.startsWith(targetMonth))
-    .reduce((acc, r) => acc + (r.daysCount || 1), 0);
+    .filter((r) => {
+      if (r.status === 'rejected' || r.status === 'cancelled' || r.isCancelled) return false;
+      const rStart = r.startDate || (r.createdAt ? r.createdAt.slice(0, 10) : '');
+      return rStart && rStart.startsWith(targetMonth);
+    })
+    .reduce((acc, r) => acc + (parseFloat(r.daysCount || r.days) || 1), 0);
 
+  const remainingBranchDaysThisMonth = Math.max(0, 3 - monthLeaveDaysSoFar);
   const willExceedThreeDays = (monthLeaveDaysSoFar + currentDaysCount) > 3;
 
   const handleSubmitLeave = async (e) => {
@@ -244,13 +249,16 @@ export default function EmployeeLeaveModule({
 
           {/* Workflow notification hint */}
           <div style={{ marginTop: '12px', padding: '10px 14px', borderRadius: '8px', background: willExceedThreeDays ? 'rgba(234,179,8,0.15)' : 'rgba(59,130,246,0.1)', border: `1px solid ${willExceedThreeDays ? '#eab308' : '#3b82f6'}`, fontSize: '13px' }}>
+            <div style={{ marginBottom: '4px', fontWeight: '700' }}>
+              📅 رصيد الشهر ({targetMonth}): تم استهلاك {monthLeaveDaysSoFar} يوم • المتبقي للاعتماد المباشر من مدير الفرع: {remainingBranchDaysThisMonth} من 3 أيام.
+            </div>
             {willExceedThreeDays ? (
               <span style={{ color: '#854d0e', fontWeight: '700' }}>
-                ⚠️ تنبيه: مجموع إجازاتك هذا الشهر سينتقل إلى أكثر من 3 أيام ({monthLeaveDaysSoFar + currentDaysCount} أيام). وسيتم إرسال الطلب إلى <strong>الإدارة العليا فقط</strong> للاعتماد.
+                ⚠️ تنبيه: مجموع إجازاتك لشهر ({targetMonth}) سيتجاوز 3 أيام ({monthLeaveDaysSoFar + currentDaysCount} أيام). سيتم إرسال الطلب إلى <strong>الإدارة العليا فقط</strong> للاعتماد.
               </span>
             ) : (
               <span style={{ color: '#1e40af', fontWeight: '600' }}>
-                ℹ️ سيتم إرسال طلب الإجازة للاعتماد المزدوج من <strong>مدير الفرع والإدارة العليا</strong>.
+                ℹ️ سيتم إرسال طلب الإجازة للاعتماد من <strong>مدير الفرع والإدارة العليا</strong>.
               </span>
             )}
             {leaveType === 'unpaid' && (

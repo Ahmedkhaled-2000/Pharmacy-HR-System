@@ -4492,6 +4492,8 @@ export default function App() {
                   filterMode={adminFilterMode}
                   customFrom={adminCustomFrom}
                   customTo={adminCustomTo}
+                  currentBranch={currentBranch}
+                  authRole={authRole}
                 />
               )}
 
@@ -4502,6 +4504,11 @@ export default function App() {
                   setState={setState}
                   saveState={saveState}
                   showToast={showToast}
+                  filterFn={currentFilterFn}
+                  monthPicker={monthPicker}
+                  filterMode={adminFilterMode}
+                  customFrom={adminCustomFrom}
+                  customTo={adminCustomTo}
                 />
               )}
 
@@ -4511,8 +4518,8 @@ export default function App() {
                   state={state}
                   setState={setState}
                   saveState={saveState}
-                  currentBranch={null}
-                  authRole="admin"
+                  currentBranch={currentBranch}
+                  authRole={authRole}
                   currentEmployee={null}
                   showToast={showToast}
                   filterFn={currentFilterFn}
@@ -4574,7 +4581,7 @@ export default function App() {
                   setState={setState}
                   saveState={saveState}
                   showToast={showToast}
-                  userRole="admin"
+                  userRole={authRole === 'branch' ? 'branch' : 'admin'}
                   filterFn={currentFilterFn}
                   monthPicker={monthPicker}
                   filterMode={adminFilterMode}
@@ -4599,7 +4606,7 @@ export default function App() {
                   state={state}
                   setState={setState}
                   saveState={saveState}
-                  currentRole="admin"
+                  currentRole={authRole === 'branch' ? 'branch' : 'admin'}
                   onSaveEvaluation={handleSaveEvaluation}
                   onSaveEmployeeNote={handleSaveEmployeeNote}
                   onReplyToNote={handleReplyToNote}
@@ -4650,12 +4657,19 @@ export default function App() {
                   saveState={saveState}
                   showToast={showToast}
                   onNavigateTab={setActiveNavTab}
-                  onApproveRequest={(id) => handleApproveRequest(id, 'admin')}
-                  onRejectRequest={(id) => handleRejectRequest(id, 'admin')}
+                  onApproveRequest={(id) => handleApproveRequest(id, authRole === 'branch' ? 'branch' : 'admin')}
+                  onRejectRequest={(id) => handleRejectRequest(id, authRole === 'branch' ? 'branch' : 'admin')}
                   onApproveLoan={handleApproveLoan}
                   onRejectLoan={handleRejectLoan}
                   onSendEarlyExitEmail={handleSendEarlyExitEmail}
                   onWaiveEarlyExit={handleWaiveEarlyExit}
+                  filterFn={currentFilterFn}
+                  monthPicker={monthPicker}
+                  filterMode={adminFilterMode}
+                  customFrom={adminCustomFrom}
+                  customTo={adminCustomTo}
+                  currentBranch={currentBranch}
+                  authRole={authRole}
                 />
               )}
 
