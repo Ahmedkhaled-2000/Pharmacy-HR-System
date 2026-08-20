@@ -2468,51 +2468,57 @@ export default function App() {
     return unsubscribe;
   }, []);
 
-  // Cloud Synchronization with MariaDB (Ultra-Fast Smart Version Polling & Instant Live Broadcast)
+  // Cloud Synchronization with MariaDB (1-Second Ultra-Fast Smart Version Polling & Instant Live Broadcast)
   useEffect(() => {
     const applyRemoteData = (remoteData) => {
       const parsed = typeof remoteData === 'string' ? JSON.parse(remoteData) : remoteData;
       if (!parsed) return;
       const normalized = normalizeState(parsed);
       setState((prev) => {
-        const merged = normalizeState(smartMergeStates(prev, normalized));
-        if (JSON.stringify(prev) !== JSON.stringify(merged)) {
-          setLastSyncTime(nowTimeStr());
-          // Sync current logged-in employee session with fresh database permissions
-          setCurrentEmpUser((prevEmp) => {
-            if (!prevEmp) return prevEmp;
-            const fresh = (merged.employees || []).find((e) => e.id === prevEmp.id || (prevEmp.code && e.code === prevEmp.code));
-            return fresh || prevEmp;
-          });
-          return merged;
-        }
-        return prev;
+        setLastSyncTime(nowTimeStr());
+        // Sync current logged-in employee session with fresh database permissions
+        setCurrentEmpUser((prevEmp) => {
+          if (!prevEmp) return prevEmp;
+          const fresh = (normalized.employees || []).find((e) => e.id === prevEmp.id || (prevEmp.code && e.code === prevEmp.code));
+          return fresh || prevEmp;
+        });
+        return normalized;
       });
     };
 
     let lastKnownVersion = 0;
+    let lastKnownUpdatedAt = '';
+    let isPolling = false;
 
     const poll = async () => {
+      if (isPolling) return;
+      isPolling = true;
       try {
         const versionRes = await apiFetchVersion(STORAGE_KEY);
-        if (versionRes && typeof versionRes.version === 'number') {
-          if (versionRes.version !== lastKnownVersion || lastKnownVersion === 0) {
-            lastKnownVersion = versionRes.version;
-            setIsSyncing(true);
-            const remoteData = await apiFetchSettings(STORAGE_KEY);
-            setIsSyncing(false);
-            if (remoteData) {
-              applyRemoteData(remoteData);
-            }
+        const currentVer = typeof versionRes?.version === 'number' ? versionRes.version : 0;
+        const currentUpdated = versionRes?.updated_at || '';
+
+        const hasChanged = (currentVer > 0 && currentVer !== lastKnownVersion) ||
+          (currentUpdated && currentUpdated !== lastKnownUpdatedAt) ||
+          (lastKnownVersion === 0 && lastKnownUpdatedAt === '');
+
+        if (hasChanged) {
+          lastKnownVersion = currentVer;
+          lastKnownUpdatedAt = currentUpdated;
+          const remoteData = await apiFetchSettings(STORAGE_KEY);
+          if (remoteData) {
+            applyRemoteData(remoteData);
           }
         }
-      } catch {
-        setIsSyncing(false);
+      } catch (err) {
+        // Fallback: If sync/version endpoint failed, try direct fetch if needed or ignore
+      } finally {
+        isPolling = false;
       }
     };
 
-    // Fast polling every 2.5 seconds for instant multi-device synchronization without page reload
-    const pollInterval = setInterval(poll, 2500);
+    // Ultra-Fast polling every 1.0 second for instant 1-second multi-device sync without page reload
+    const pollInterval = setInterval(poll, 1000);
 
     // Instant local broadcast synchronization across tabs and windows (0ms immediate update)
     const unsubBroadcast = listenToLiveBroadcasts((liveState) => {
@@ -2532,6 +2538,7 @@ export default function App() {
     window.addEventListener('focus', handleFocusOrVisible);
     window.addEventListener('online', handleFocusOrVisible);
     document.addEventListener('visibilitychange', handleFocusOrVisible);
+    window.addEventListener('pointerdown', handleFocusOrVisible, { passive: true, once: true });
 
     return () => {
       clearInterval(pollInterval);
@@ -2539,6 +2546,7 @@ export default function App() {
       window.removeEventListener('focus', handleFocusOrVisible);
       window.removeEventListener('online', handleFocusOrVisible);
       document.removeEventListener('visibilitychange', handleFocusOrVisible);
+      window.removeEventListener('pointerdown', handleFocusOrVisible);
     };
   }, []);
 

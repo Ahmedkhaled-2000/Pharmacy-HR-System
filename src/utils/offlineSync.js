@@ -70,22 +70,17 @@ export async function smartSaveState(updatedState, options = {}) {
 
   if (isOnline()) {
     try {
-      // 2. جلب أحدث نسخة سحابية حالياً لدمجها قبل الكتابة
-      const remoteState = await fetchRemoteState();
+      // 2. حفظ الحالة مباشرة في MariaDB كمرجع حقيقي وأساسي
+      const finalStateToSave = cleanUpdated;
 
-      // 3. تطبيق خوارزمية الدمج الذكي لحفظ كل بيانات الأجهزة الأخرى
-      const finalStateToSave = remoteState
-        ? normalizeState(smartMergeStates(cleanUpdated, remoteState))
-        : cleanUpdated;
-
-      // 4. حفظ النسخة المدمجة في MariaDB
+      // 3. حفظ النسخة في MariaDB
       const res = await apiSaveSettings(STORAGE_KEY, finalStateToSave);
 
       if (!res?.success) {
         throw new Error(res?.error || 'Failed to save to MariaDB');
       }
 
-      // 5. تحديث النسخة المحلية بالنسخة المدمجة
+      // 4. تحديث النسخة المحلية وبث التحديث فورياً لكافة التبويبات المفتوحة
       await saveStateLocally(finalStateToSave);
       broadcastStateChange(finalStateToSave);
       onSyncSuccess?.(finalStateToSave);
