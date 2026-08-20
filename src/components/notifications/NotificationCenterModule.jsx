@@ -385,11 +385,29 @@ export default function NotificationCenterModule({
   };
 
   const handleClearNotifications = async () => {
-    if (!window.confirm('هل أنت متأكد من حذف جميع الإشعارات القديمة؟')) return;
-    const updatedState = { ...state, notifications: [] };
+    if (!window.confirm('هل أنت متأكد من مسح وتفريغ جميع سجلات الإشعارات والأرشيف نهائياً؟')) return;
+
+    const clearedNow = new Date().toISOString();
+    const currentDeleted = new Set(state._deletedIds || []);
+    (state.notifications || []).forEach((n) => {
+      if (n && n.id) currentDeleted.add(n.id);
+    });
+
+    const updatedState = {
+      ...state,
+      notifications: [],
+      _notificationsClearedAt: clearedNow,
+      _deletedIds: Array.from(currentDeleted).slice(-3000)
+    };
+
+    try {
+      localStorage.removeItem('app_notifications');
+      sessionStorage.removeItem('app_notifications');
+    } catch {}
+
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.('🗑️ تم مسح قائمة الإشعارات بنجاح');
+    showToast?.('🗑️ تم مسح وتفريغ الأرشيف نهائياً ولن يعود للظهور مرة أخرى');
   };
 
   // KPI Counts
@@ -459,11 +477,9 @@ export default function NotificationCenterModule({
             </button>
           )}
 
-          {notifications.length > 0 && (
-            <button className="btn btn-outline" style={{ color: '#dc2626', borderColor: '#fca5a5', fontSize: '13px' }} onClick={handleClearNotifications}>
-              🗑️ مسح الأرشيف
-            </button>
-          )}
+          <button className="btn btn-outline" style={{ color: '#dc2626', borderColor: '#fca5a5', fontSize: '13px', background: '#fff5f5' }} onClick={handleClearNotifications}>
+            🗑️ مسح الأرشيف
+          </button>
         </div>
       </div>
 

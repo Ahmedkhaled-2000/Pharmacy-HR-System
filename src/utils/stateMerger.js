@@ -435,7 +435,20 @@ export function smartMergeStates(localState, remoteState) {
     loans: mergeArrays(localState.loans, remoteState.loans, { prefix: 'loan', deletedIds }),
     logs: mergeArrays(localState.logs, remoteState.logs, { prefix: 'log', deletedIds }),
     evaluations: mergeArrays(localState.evaluations, remoteState.evaluations, { prefix: 'eval', deletedIds }),
-    notifications: mergeArrays(localState.notifications, remoteState.notifications, { prefix: 'notif', deletedIds }),
+    notifications: (() => {
+      let list = mergeArrays(localState.notifications, remoteState.notifications, { prefix: 'notif', deletedIds });
+      const clearedAt = localState._notificationsClearedAt || remoteState._notificationsClearedAt;
+      if (clearedAt) {
+        const clearTime = new Date(clearedAt).getTime();
+        list = list.filter((n) => {
+          const t = n.createdAt || n.timestamp || n.date;
+          if (!t) return false;
+          const nTime = new Date(t).getTime();
+          return !isNaN(nTime) && nTime > clearTime;
+        });
+      }
+      return list;
+    })(),
     adjustments: mergeArrays(localState.adjustments, remoteState.adjustments, { prefix: 'adj', deletedIds }),
     lateIncidents: mergeArrays(localState.lateIncidents, remoteState.lateIncidents, { prefix: 'late_inc', deletedIds }),
     employeeNotes: mergeArrays(localState.employeeNotes, remoteState.employeeNotes, { prefix: 'note', deletedIds }),
@@ -445,6 +458,7 @@ export function smartMergeStates(localState, remoteState) {
     // 4. الجداول والشفتات وقائمة المحذوفات
     rosters: mergeRosters(localState.rosters, remoteState.rosters, { deletedIds }),
     activeShifts: mergeActiveShifts(localState.activeShifts, remoteState.activeShifts, mergedShifts, { deletedIds }),
-    _deletedIds: Array.from(deletedIds).slice(-2000)
+    _notificationsClearedAt: localState._notificationsClearedAt || remoteState._notificationsClearedAt || null,
+    _deletedIds: Array.from(deletedIds).slice(-3000)
   };
 }
