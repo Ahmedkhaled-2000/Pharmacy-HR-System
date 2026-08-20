@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { applyShiftSwapToRosters, arabicWeekday, shouldShowRequestToBranch } from '../../utils/formatters';
 import { notifyEmployeeEarlyExitWarning } from '../../utils/gmailService';
 import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
+import { normalizeSchedule } from '../roster/RosterModule';
 
 export function getFormattedRequestBadge(type, leaveType) {
   if (type === 'leave') {
