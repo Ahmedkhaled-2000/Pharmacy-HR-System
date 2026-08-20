@@ -2,29 +2,6 @@ import React, { useState, useMemo, useEffect } from 'react';
 import LatePenaltyPolicyModule from './LatePenaltyPolicyModule';
 import DisciplinaryPenaltiesTab from './DisciplinaryPenaltiesTab';
 
-const DEFAULT_BYLAWS_RULES = [
-  { id: 'b1', title: 'التأخير عن موعد الشيفت من 15 إلى 30 دقيقة', impactType: 'deduction_days', impactVal: 0.25, category: 'حضور وانصراف' },
-  { id: 'b2', title: 'التأخير عن موعد الشيفت أكثر من 30 دقيقة', impactType: 'deduction_days', impactVal: 0.5, category: 'حضور وانصراف' },
-  { id: 'b3', title: 'الغياب عن الوردية بدون إذن مسبق', impactType: 'deduction_days', impactVal: 1.0, category: 'حضور وانصراف' },
-  { id: 'b4', title: 'عدم الالتزام بالزي الرسمي للصيدلية', impactType: 'fixed_amount', impactVal: 50, category: 'سلوك وانضباط' },
-  { id: 'b5', title: 'عدم الالتزام بنظافة وترتيب الصيدلية والرفوف', impactType: 'warning', impactVal: 0, category: 'نظافة وجودة' },
-  { id: 'b6', title: 'خطأ أو عجز في تسليم الكاشير نهاية الوردية', impactType: 'fixed_amount', impactVal: 100, category: 'ماليات وخزينة' }
-];
-
-export function getImpactDesc(rule) {
-  if (!rule) return '';
-  if (rule.impactType === 'deduction_days') {
-    return `خصم ${rule.impactVal} يوم من الراتب`;
-  }
-  if (rule.impactType === 'fixed_amount') {
-    return `خصم ${rule.impactVal} ج.م`;
-  }
-  if (rule.impactType === 'warning') {
-    return 'إنذار كتابي';
-  }
-  return rule.impactDesc || 'جزاء إداري';
-}
-
 export default function BylawsModule({
   state,
   setState,
@@ -39,17 +16,9 @@ export default function BylawsModule({
   customFrom = '',
   customTo = ''
 }) {
-  const [activeTab, setActiveTab] = useState('text'); // 'text' | 'rules' | 'records'
+  const [activeTab, setActiveTab] = useState('disciplinary_penalties'); // 'disciplinary_penalties' | 'text' | 'records' | 'late_penalties'
   const isManagerOrAdmin = userRole === 'admin' || userRole === 'branch';
   const isAdmin = userRole === 'admin';
-
-  // Dynamic bylaws rules from central state with default fallback
-  const bylawsRules = React.useMemo(() => {
-    if (state.bylawsRules && Array.isArray(state.bylawsRules) && state.bylawsRules.length > 0) {
-      return state.bylawsRules;
-    }
-    return DEFAULT_BYLAWS_RULES;
-  }, [state.bylawsRules]);
 
   // State for official bylaws text
   const [bylawsText, setBylawsText] = useState(
@@ -71,26 +40,6 @@ export default function BylawsModule({
 2. يمنع سحب أدوية بالآجل إلا وفق الإجراءات الرسمية والطلبات المعتمدة.
     `.trim()
   );
-
-  // Record Violation Form State
-  const [targetEmpId, setTargetEmpId] = useState('');
-  const [selectedRuleId, setSelectedRuleId] = useState('');
-  const [customReason, setCustomReason] = useState('');
-  const [showRecordModal, setShowRecordModal] = useState(false);
-
-  // Rule Addition State
-  const [newRuleTitle, setNewRuleTitle] = useState('');
-  const [newRuleCategory, setNewRuleCategory] = useState('حضور وانصراف');
-  const [newRuleImpactType, setNewRuleImpactType] = useState('deduction_days');
-  const [newRuleImpactVal, setNewRuleImpactVal] = useState('0.25');
-  const [showAddRuleModal, setShowAddRuleModal] = useState(false);
-
-  // Rule Editing State
-  const [editingRule, setEditingRule] = useState(null);
-  const [editRuleTitle, setEditRuleTitle] = useState('');
-  const [editRuleCategory, setEditRuleCategory] = useState('حضور وانصراف');
-  const [editRuleImpactType, setEditRuleImpactType] = useState('deduction_days');
-  const [editRuleImpactVal, setEditRuleImpactVal] = useState('0.25');
 
   // Penalty Objection State
   const [objectionTargetReq, setObjectionTargetReq] = useState(null);
@@ -131,174 +80,6 @@ export default function BylawsModule({
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
     showToast?.('🔄 تم استعادة النص الافتراضي للائحة العمل');
-  };
-
-  const handleAddRule = async () => {
-    if (!newRuleTitle.trim()) {
-      showToast?.('يرجى كتابة عنوان المخالفة اللائحية');
-      return;
-    }
-    const newRule = {
-      id: 'b_' + Date.now(),
-      title: newRuleTitle.trim(),
-      category: newRuleCategory,
-      impactType: newRuleImpactType,
-      impactVal: newRuleImpactType === 'warning' ? 0 : (parseFloat(newRuleImpactVal) || 0)
-    };
-    const currentList = (state.bylawsRules && Array.isArray(state.bylawsRules) && state.bylawsRules.length > 0)
-      ? state.bylawsRules
-      : DEFAULT_BYLAWS_RULES;
-    const updated = [...currentList, newRule];
-    
-    const updatedState = { ...state, bylawsRules: updated };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-
-    setShowAddRuleModal(false);
-    setNewRuleTitle('');
-    setNewRuleImpactVal('0.25');
-    showToast?.('✅ تم إضافة بند جزاء جديد إلى لائحة العمل بنجاح');
-  };
-
-  const handleOpenEditRule = (rule) => {
-    setEditingRule(rule);
-    setEditRuleTitle(rule.title || '');
-    setEditRuleCategory(rule.category || 'حضور وانصراف');
-    setEditRuleImpactType(rule.impactType || 'deduction_days');
-    setEditRuleImpactVal(String(rule.impactVal !== undefined ? rule.impactVal : '0.25'));
-  };
-
-  const handleSaveEditRule = async () => {
-    if (!editingRule || !editRuleTitle.trim()) {
-      showToast?.('يرجى كتابة عنوان المخالفة اللائحية');
-      return;
-    }
-
-    const currentList = (state.bylawsRules && Array.isArray(state.bylawsRules) && state.bylawsRules.length > 0)
-      ? state.bylawsRules
-      : DEFAULT_BYLAWS_RULES;
-
-    const updated = currentList.map((r) => {
-      if (String(r.id) === String(editingRule.id)) {
-        return {
-          ...r,
-          title: editRuleTitle.trim(),
-          category: editRuleCategory,
-          impactType: editRuleImpactType,
-          impactVal: editRuleImpactType === 'warning' ? 0 : (parseFloat(editRuleImpactVal) || 0)
-        };
-      }
-      return r;
-    });
-
-    const updatedState = { ...state, bylawsRules: updated };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-
-    setEditingRule(null);
-    showToast?.('✅ تم حفظ وتعديل بند المخالفة اللائحية بنجاح');
-  };
-
-  const handleDeleteRule = async (id, title) => {
-    if (!window.confirm(`هل أنت متأكد من حذف بند المخالفة "${title || ''}" من لائحة العمل؟`)) return;
-
-    const currentList = (state.bylawsRules && Array.isArray(state.bylawsRules) && state.bylawsRules.length > 0)
-      ? state.bylawsRules
-      : DEFAULT_BYLAWS_RULES;
-    const updated = currentList.filter(r => String(r.id) !== String(id));
-    
-    const updatedState = { ...state, bylawsRules: updated };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    showToast?.('🗑️ تم حذف بند الجزاء من اللائحة');
-  };
-
-  const handleResetDefaultRules = async () => {
-    if (!window.confirm('هل ترغب في إعادة ضبط واستعادة قائمة بنود المخالفات والجزاءات الافتراضية؟')) return;
-
-    const updatedState = { ...state, bylawsRules: DEFAULT_BYLAWS_RULES };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    showToast?.('🔄 تم استعادة بنود اللائحة الافتراضية بنجاح');
-  };
-
-  const handleSubmitViolation = async (e) => {
-    e.preventDefault();
-    if (!targetEmpId || !selectedRuleId) {
-      showToast?.('يرجى تحديد الموظف والمخالفة اللائحية');
-      return;
-    }
-
-    const emp = (state.employees || []).find(e => String(e.id) === String(targetEmpId));
-    const rule = bylawsRules.find(r => r.id === selectedRuleId);
-    if (!emp || !rule) return;
-
-    let amount = 0;
-    if (rule.impactType === 'deduction_days') {
-      const salary = parseFloat(emp.salary) || 0;
-      const workHours = parseFloat(emp.workHoursPerDay) || 8;
-      const workDays = parseFloat(emp.workDaysPerMonth) || 26;
-      const dailyRate = workDays > 0 ? (salary * workHours) / workDays : (salary * workHours);
-      amount = Math.round(dailyRate * (parseFloat(rule.impactVal) || 1) * 100) / 100;
-    } else if (rule.impactType === 'fixed_amount') {
-      amount = parseFloat(rule.impactVal) || 0;
-    }
-
-    const reqId = 'pen_' + Date.now();
-    const newReq = {
-      id: reqId,
-      employeeId: emp.id,
-      employeeName: emp.name,
-      employeeCode: emp.code,
-      branchId: emp.branchId,
-      type: 'penalty',
-      ruleId: rule.id,
-      ruleTitle: rule.title,
-      impactType: rule.impactType,
-      impactVal: rule.impactVal,
-      amount: amount,
-      reason: customReason || rule.title,
-      details: `مخالفة لائحية: ${rule.title} | التأثير: ${getImpactDesc(rule)}`,
-      createdAt: new Date().toISOString(),
-      targetApproval: 'admin_only',
-      branchApproved: true,
-      status: isAdmin ? 'approved' : 'pending',
-      adminApproved: isAdmin ? true : false,
-      approvedAt: isAdmin ? new Date().toISOString() : undefined
-    };
-
-    let updatedAdjustments = state.adjustments || [];
-    if (isAdmin && amount > 0) {
-      const penaltyDesc = `خصم جزاء لائحى: ${rule.title} (${rule.impactType === 'deduction_days' ? `خصم ${rule.impactVal} يوم` : `${amount} ج.م`})`;
-      const newAdj = {
-        id: `adj_pen_${reqId}`,
-        employeeId: emp.id,
-        employeeName: emp.name,
-        type: 'deduction',
-        amount: amount,
-        description: penaltyDesc,
-        notes: penaltyDesc,
-        reason: penaltyDesc,
-        date: new Date().toISOString().slice(0, 10),
-        createdAt: new Date().toISOString()
-      };
-      updatedAdjustments = [newAdj, ...updatedAdjustments];
-    }
-
-    const updatedRequests = [newReq, ...(state.requests || [])];
-    const updatedState = { ...state, requests: updatedRequests, adjustments: updatedAdjustments };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-
-    setShowRecordModal(false);
-    setTargetEmpId('');
-    setCustomReason('');
-    
-    if (isAdmin) {
-      showToast?.('⚖️ تم توثيق وتطبيق الجزاء المالي وخصمه من الراتب فوراً بنجاح');
-    } else {
-      showToast?.('✅ تم تسجيل المخالفة وإرسال طلب الجزاء فوراً للإدارة العليا للاعتماد والخصم');
-    }
   };
 
   const handleSubmitObjection = async (e) => {
@@ -355,7 +136,7 @@ export default function BylawsModule({
 
     // Automatically remove any corresponding deduction from adjustments
     const updatedAdjustments = (state.adjustments || []).filter((a) => {
-      if (a.id === reqId || a.id === `adj_${reqId}` || a.id === `adj_penalty_${reqId}`) return false;
+      if (a.id === reqId || a.id === `adj_${reqId}` || a.id === `adj_penalty_${reqId}` || a.requestId === reqId || a.id === `adj_disc_${reqId}`) return false;
       if (empId && String(a.employeeId) === String(empId) && (a.type === 'penalty' || a.type === 'deduction') && (a.reason === ruleTitle || a.details === ruleTitle)) return false;
       return true;
     });
@@ -407,7 +188,15 @@ export default function BylawsModule({
     const seenReqIds = new Set();
 
     (state.requests || []).forEach((r) => {
-      if (r.type === 'penalty' || r.type === 'early_exit' || r.subType === 'lateness' || (r.type === 'adjustment' && r.subType === 'penalty') || r.ruleTitle) {
+      if (
+        r.type === 'penalty' ||
+        r.type === 'early_exit' ||
+        r.subType === 'lateness' ||
+        (r.type === 'adjustment' && r.subType === 'penalty') ||
+        r.type === 'disciplinary_penalty' ||
+        r.subType === 'disciplinary_penalty' ||
+        r.ruleTitle
+      ) {
         seenReqIds.add(String(r.id));
         const emp = employees.find((e) => String(e.id) === String(r.employeeId));
         const bObj = branches.find((b) => String(b.id) === String(r.branchId || emp?.branchId));
@@ -432,10 +221,10 @@ export default function BylawsModule({
           employeeCode: emp?.code || r.employeeCode || '—',
           branchId: r.branchId || emp?.branchId,
           branchName: bObj?.name || 'الفرع الرئيسي',
-          ruleTitle: r.ruleTitle || (r.subType === 'lateness' ? `تأخير عن الشيفت (${r.latenessMinutes || ''} د)` : r.reason) || 'مخالفة لائحية',
-          category: r.category || 'انضباط ولائحة',
+          ruleTitle: r.ruleTitle || r.actionTitle || (r.subType === 'lateness' ? `تأخير عن الشيفت (${r.latenessMinutes || ''} د)` : r.reason) || 'مخالفة لائحية',
+          category: r.categoryName || r.category || 'انضباط ولائحة',
           impactType: r.impactType || (r.impactVal ? 'deduction_days' : 'fixed_amount'),
-          impactVal: r.impactVal || 0,
+          impactVal: r.impactVal || r.deductionDays || 0,
           amount: amount,
           date: r.date || (r.createdAt ? r.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10)),
           createdAt: r.createdAt || new Date().toISOString(),
@@ -450,7 +239,9 @@ export default function BylawsModule({
     });
 
     (state.adjustments || []).forEach((a) => {
-      const isLinkedToReq = Array.from(seenReqIds).some((reqId) => a.id === `adj_pen_${reqId}` || a.id === reqId || a.id === `adj_${reqId}`);
+      const isLinkedToReq = Array.from(seenReqIds).some(
+        (reqId) => a.id === `adj_pen_${reqId}` || a.id === `adj_disc_${reqId}` || a.id === reqId || a.id === `adj_${reqId}` || a.requestId === reqId
+      );
       if (!isLinkedToReq && (a.type === 'deduction' || a.type === 'penalty')) {
         const emp = employees.find((e) => String(e.id) === String(a.employeeId));
         const bObj = branches.find((b) => String(b.id) === String(a.branchId || emp?.branchId));
@@ -541,7 +332,6 @@ export default function BylawsModule({
 
   const pendingCount = filteredPenalties.filter((p) => p.status === 'pending' || p.status === 'pending_admin').length;
   const approvedCount = filteredPenalties.filter((p) => p.status === 'approved' || p.adminApproved).length;
-  const objectionCount = filteredPenalties.filter((p) => p.objection && p.objection.status === 'pending_admin').length;
 
   return (
     <div className="bylaws-card" style={{ fontFamily: "'Tajawal', sans-serif" }}>
@@ -549,38 +339,70 @@ export default function BylawsModule({
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
         <div>
           <h2 style={{ fontFamily: 'Cairo', margin: 0, color: 'var(--text)' }}>
-            📜 لائحة العمل والجزاءات وحساب الخصومات اللائحية
+            📜 لائحة العمل والجزاءات التأديبية
           </h2>
           <p style={{ margin: '4px 0 0 0', color: 'var(--muted)', fontSize: '14px' }}>
-            استعراض نصوص اللائحة الرسمية، قواعد المخالفات، وتوثيق الخصومات المباشرة
+            نظام عداد تكرار المخالفات المستقل، سياسات العمل الرسمية، وسجل القرارات والخصومات
           </p>
         </div>
 
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          <button className={`btn ${activeTab === 'disciplinary_penalties' ? 'btn-start' : 'btn-ghost'}`} onClick={() => setActiveTab('disciplinary_penalties')} style={{ borderColor: '#dc2626', color: activeTab === 'disciplinary_penalties' ? '#fff' : '#dc2626', fontWeight: 700, background: activeTab === 'disciplinary_penalties' ? '#dc2626' : 'transparent' }}>
+          <button
+            className={`btn ${activeTab === 'disciplinary_penalties' ? 'btn-start' : 'btn-ghost'}`}
+            onClick={() => setActiveTab('disciplinary_penalties')}
+            style={{
+              borderColor: '#dc2626',
+              color: activeTab === 'disciplinary_penalties' ? '#fff' : '#dc2626',
+              fontWeight: 700,
+              background: activeTab === 'disciplinary_penalties' ? '#dc2626' : 'transparent'
+            }}
+          >
             ⚖️ لائحة الجزاءات التأديبية وعداد التكرار
           </button>
-          <button className={`btn ${activeTab === 'text' ? 'btn-start' : 'btn-ghost'}`} onClick={() => setActiveTab('text')}>
+          <button
+            className={`btn ${activeTab === 'text' ? 'btn-start' : 'btn-ghost'}`}
+            onClick={() => setActiveTab('text')}
+          >
             📖 نصوص اللائحة الرسمية
           </button>
-          <button className={`btn ${activeTab === 'rules' ? 'btn-start' : 'btn-ghost'}`} onClick={() => setActiveTab('rules')}>
-            ⚖️ جدول المخالفات والجزاءات
-          </button>
-          <button className={`btn ${activeTab === 'records' ? 'btn-start' : 'btn-ghost'}`} onClick={() => setActiveTab('records')}>
+          <button
+            className={`btn ${activeTab === 'records' ? 'btn-start' : 'btn-ghost'}`}
+            onClick={() => setActiveTab('records')}
+          >
             📋 سجل الجزاءات والخصومات
           </button>
-          <button className={`btn ${activeTab === 'late_penalties' ? 'btn-start' : 'btn-ghost'}`} onClick={() => setActiveTab('late_penalties')} style={{ borderColor: 'var(--primary)', color: activeTab === 'late_penalties' ? '#fff' : 'var(--primary-dark)', fontWeight: 700 }}>
+          <button
+            className={`btn ${activeTab === 'late_penalties' ? 'btn-start' : 'btn-ghost'}`}
+            onClick={() => setActiveTab('late_penalties')}
+            style={{
+              borderColor: 'var(--primary)',
+              color: activeTab === 'late_penalties' ? '#fff' : 'var(--primary-dark)',
+              fontWeight: 700
+            }}
+          >
             ⏱️ جزاءات التأخير
           </button>
-          {isManagerOrAdmin && (
-            <button className="btn btn-start" style={{ background: '#dc2626' }} onClick={() => setShowRecordModal(true)}>
-              {isAdmin ? '⚖️ توثيق وتطبيق جزاء لائحي' : '⚠️ توثيق مخالفة لائحية جديدة'}
-            </button>
-          )}
         </div>
       </div>
 
-          {/* Tab 1: Bylaws Official Text */}
+      {/* Tab 1: Disciplinary Penalties & Violation Counter Module */}
+      {activeTab === 'disciplinary_penalties' && (
+        <DisciplinaryPenaltiesTab
+          state={state}
+          setState={setState}
+          saveState={saveState}
+          showToast={showToast}
+          userRole={userRole}
+          currentEmpId={currentEmpId}
+          currentBranchId={currentBranchId}
+          filterFn={filterFn}
+          monthPicker={monthPicker}
+          customFrom={customFrom}
+          customTo={customTo}
+        />
+      )}
+
+      {/* Tab 2: Bylaws Official Text */}
       {activeTab === 'text' && (
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', padding: '20px', borderRadius: '14px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
@@ -622,151 +444,6 @@ export default function BylawsModule({
         </div>
       )}
 
-      {/* Tab 2: Penalty Rules Table */}
-      {activeTab === 'rules' && (
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', padding: '20px', borderRadius: '14px' }}>
-          {/* Grace Period Configuration for Upper Management */}
-          {isAdmin && (
-            <div style={{ background: '#f0fdf4', border: '1px solid #86efac', padding: '16px 20px', borderRadius: '12px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
-              <div>
-                <h4 style={{ margin: '0 0 4px', color: '#166534', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  ⏱️ تحديد مدة السماح بالتأخير المعتمدة للإدارة العليا
-                </h4>
-                <p style={{ margin: 0, color: '#15803d', fontSize: '13px' }}>
-                  الموظف مسموح له بهذا الوقت بعد موعد ورديته المحدد بالجدول. عند تجاوز هذه المدة يتم فوراً رفع طلب جزاء للإدارة العليا ومدير الفرع وتنبيه النظام.
-                </p>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#ffffff', padding: '6px 12px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
-                  <input
-                    type="number"
-                    min="0"
-                    max="120"
-                    value={state.orgSettings?.latenessGracePeriodMinutes !== undefined ? state.orgSettings.latenessGracePeriodMinutes : 15}
-                    onChange={async (e) => {
-                      const val = parseInt(e.target.value) || 0;
-                      const updatedOrg = { ...state.orgSettings, latenessGracePeriodMinutes: val };
-                      const updatedState = { ...state, orgSettings: updatedOrg };
-                      if (setState) setState(updatedState);
-                      if (saveState) await saveState(updatedState);
-                    }}
-                    style={{ width: '60px', padding: '4px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: 'bold', textAlign: 'center' }}
-                  />
-                  <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#334155' }}>دقيقة</span>
-                </div>
-                <button
-                  className="btn btn-start"
-                  style={{ padding: '8px 16px', fontSize: '13px' }}
-                  onClick={() => showToast?.('✅ تم حفظ وتحديث مدة السماح بالتأخير بنجاح')}
-                >
-                  💾 حفظ المدة
-                </button>
-              </div>
-            </div>
-          )}
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
-            <h3 style={{ fontFamily: 'Cairo', margin: 0, color: 'var(--primary-dark)' }}>
-              ⚖️ جدول قواعد المخالفات والجزاءات اللائحية وتأثيرها على الأجور
-            </h3>
-            {isAdmin && (
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={handleResetDefaultRules}
-                  style={{ fontSize: '13px' }}
-                  title="استعادة بنود اللائحة الافتراضية"
-                >
-                  🔄 استعادة الافتراضي
-                </button>
-                <button className="btn btn-start" onClick={() => setShowAddRuleModal(true)}>
-                  ➕ إضافة بند مخالفة جديد
-                </button>
-              </div>
-            )}
-          </div>
-
-          <div className="table-responsive">
-            <table className="bylaws-table">
-              <thead>
-                <tr>
-                  <th>التصنيف</th>
-                  <th>بند المخالفة اللائحية</th>
-                  <th>نوع التأثير على الأجور</th>
-                  <th>مقدار التأثير والخصم</th>
-                  {isAdmin && <th style={{ textAlign: 'center', minWidth: '130px' }}>الإجراءات</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {bylawsRules.map((rule) => (
-                  <tr key={rule.id}>
-                    <td><span className="badge badge-primary">{rule.category}</span></td>
-                    <td style={{ fontWeight: '800' }}>{rule.title}</td>
-                    <td>
-                      {rule.impactType === 'deduction_days' && <span className="badge badge-danger">خصم أيام من الراتب</span>}
-                      {rule.impactType === 'fixed_amount' && <span className="badge badge-warning">خصم مبلغ ثابت</span>}
-                      {rule.impactType === 'warning' && <span className="badge secondary">إنذار كتابي</span>}
-                    </td>
-                    <td style={{ fontWeight: '900', color: 'var(--primary-dark)' }}>
-                      {getImpactDesc(rule)}
-                    </td>
-                    {isAdmin && (
-                      <td style={{ textAlign: 'center' }}>
-                        <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', alignItems: 'center' }}>
-                          <button
-                            type="button"
-                            className="btn btn-ghost"
-                            style={{
-                              padding: '4px 8px',
-                              fontSize: '12px',
-                              color: '#2563eb',
-                              border: '1px solid #93c5fd',
-                              background: '#eff6ff',
-                              borderRadius: '6px',
-                              cursor: 'pointer',
-                              fontWeight: 'bold',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '4px'
-                            }}
-                            onClick={() => handleOpenEditRule(rule)}
-                            title="تعديل بند المخالفة والخصم"
-                          >
-                            ✏️ تعديل
-                          </button>
-
-                          <button
-                            type="button"
-                            style={{
-                              border: '1px solid #fca5a5',
-                              background: '#fef2f2',
-                              color: '#dc2626',
-                              borderRadius: '6px',
-                              padding: '4px 8px',
-                              cursor: 'pointer',
-                              fontSize: '12px',
-                              fontWeight: 'bold',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '4px'
-                            }}
-                            onClick={() => handleDeleteRule(rule.id, rule.title)}
-                            title="حذف البند من اللائحة"
-                          >
-                            🗑️ حذف
-                          </button>
-                        </div>
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
       {/* Tab 3: Applied Penalty Records */}
       {activeTab === 'records' && (
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', padding: '20px', borderRadius: '14px' }}>
@@ -779,12 +456,6 @@ export default function BylawsModule({
                 استعراض كافة الخصومات والجزاءات لجميع الموظفين بالفروع مع إمكانية التصفية المباشرة
               </p>
             </div>
-
-            {isManagerOrAdmin && (
-              <button className="btn btn-start" style={{ background: '#dc2626' }} onClick={() => setShowRecordModal(true)}>
-                {isAdmin ? '⚖️ توثيق وتطبيق جزاء لائحي' : '⚠️ توثيق مخالفة لائحية جديدة'}
-              </button>
-            )}
           </div>
 
           {/* Metric Summary Cards */}
@@ -849,138 +520,132 @@ export default function BylawsModule({
             </div>
 
             {recordsPeriodMode === 'custom' && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <input type="date" value={recordsCustomFrom} onChange={(e) => setRecordsCustomFrom(e.target.value)} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px' }} />
-                <span style={{ fontSize: '12px', fontWeight: 'bold' }}>إلى</span>
-                <input type="date" value={recordsCustomTo} onChange={(e) => setRecordsCustomTo(e.target.value)} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px' }} />
+              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                <input
+                  type="date"
+                  value={recordsCustomFrom}
+                  onChange={(e) => setRecordsCustomFrom(e.target.value)}
+                  style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12.5px' }}
+                />
+                <span>إلى</span>
+                <input
+                  type="date"
+                  value={recordsCustomTo}
+                  onChange={(e) => setRecordsCustomTo(e.target.value)}
+                  style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12.5px' }}
+                />
               </div>
-            )}
-
-            {(recordsSearch || recordsBranch || recordsStatus !== 'all' || recordsPeriodMode !== 'all') && (
-              <button
-                className="btn btn-ghost"
-                style={{ fontSize: '12px', padding: '6px 12px' }}
-                onClick={() => {
-                  setRecordsSearch('');
-                  setRecordsBranch('');
-                  setRecordsStatus('all');
-                  setRecordsPeriodMode('all');
-                  setRecordsCustomFrom('');
-                  setRecordsCustomTo('');
-                }}
-              >
-                🔄 إعادة ضبط الفلاتر
-              </button>
             )}
           </div>
 
-          {/* Table */}
+          {/* Records Table */}
           <div className="table-responsive">
-            <table className="bylaws-table" style={{ fontSize: '13px' }}>
+            <table className="bylaws-table">
               <thead>
                 <tr>
-                  <th>تاريخ المخالفة</th>
-                  <th>الموظف والفرع</th>
-                  <th>نوع المخالفة اللائحية</th>
-                  <th>مقدار الخصم / الأثر المالي</th>
-                  <th>السبب والتفاصيل</th>
-                  <th>حالة الاعتماد</th>
-                  <th>الإجراءات / الاعتراض</th>
+                  <th>التاريخ</th>
+                  <th>الموظف</th>
+                  <th>الفرع</th>
+                  <th>بند ونوع الجزاء</th>
+                  <th>المقدار المالي</th>
+                  <th>البيان والتفاصيل</th>
+                  <th>الحالة</th>
+                  <th>الاعتراضات والإجراءات</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredPenalties.length === 0 ? (
-                  <tr><td colSpan="7" style={{ textAlign: 'center', color: 'var(--muted)', padding: '30px' }}>لا توجد جزاءات أو مخالفات مطابقة للفلاتر المحددة.</td></tr>
+                  <tr>
+                    <td colSpan={8} style={{ textAlign: 'center', padding: '30px', color: 'var(--muted)' }}>
+                      لا توجد جزاءات أو خصومات مسجلة في هذا النطاق.
+                    </td>
+                  </tr>
                 ) : (
                   filteredPenalties.map((p) => {
                     const isApproved = p.status === 'approved' || p.adminApproved;
                     const isRejected = p.status === 'rejected';
                     const isCancelled = p.status === 'cancelled';
-                    const isPending = !isApproved && !isRejected && !isCancelled;
+                    const hasObjection = Boolean(p.objection);
+                    const objStatus = p.objection?.status;
 
                     return (
                       <tr key={p.id}>
+                        <td>{p.date}</td>
                         <td>
-                          📅 {p.date || (p.createdAt ? p.createdAt.slice(0, 10) : '—')}
+                          <strong>{p.employeeName}</strong>
+                          <span style={{ display: 'block', fontSize: '11px', color: 'var(--muted)' }}>
+                            {p.employeeCode}
+                          </span>
                         </td>
+                        <td>{p.branchName}</td>
                         <td>
-                          <div style={{ fontWeight: '800', color: 'var(--text)' }}>{p.employeeName}</div>
-                          <div style={{ fontSize: '11.5px', color: 'var(--muted)' }}>كود: {p.employeeCode} • {p.branchName}</div>
+                          <span className="badge badge-primary">{p.category}</span>
+                          <strong style={{ display: 'block', fontSize: '13px', marginTop: '2px' }}>{p.ruleTitle}</strong>
                         </td>
-                        <td>
-                          <span className="badge badge-danger">⚠️ {p.ruleTitle}</span>
-                          {p.category && <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '2px' }}>{p.category}</div>}
+                        <td style={{ fontWeight: '800', color: p.amount > 0 ? '#dc2626' : 'var(--muted)' }}>
+                          {p.amount > 0 ? `${p.amount} ج.م` : 'بدون خصم مالي'}
                         </td>
-                        <td style={{ fontWeight: '900', color: '#b91c1c' }}>
-                          {p.impactType === 'deduction_days' && p.impactVal ? (
-                            `خصم ${p.impactVal} يوم (${p.amount ? `${p.amount} ج.م` : ''})`
-                          ) : p.amount > 0 ? (
-                            `خصم ${p.amount} ج.م`
-                          ) : (
-                            'إنذار / بدون خصم'
+                        <td style={{ maxWidth: '240px', fontSize: '12.5px' }}>
+                          <div>{p.reason}</div>
+                          {p.details && p.details !== p.reason && (
+                            <span style={{ fontSize: '11px', color: 'var(--muted)' }}>{p.details}</span>
                           )}
-                        </td>
-                        <td style={{ maxWidth: '220px', whiteSpace: 'normal', lineHeight: '1.5' }}>
-                          {p.reason || p.details || '—'}
                         </td>
                         <td>
                           {isCancelled ? (
-                            <span className="badge badge-secondary" style={{ background: '#f1f5f9', color: '#64748b' }}>⚪ ملغي (معفى)</span>
-                          ) : isApproved ? (
-                            <span className="badge badge-success">🟢 معتمد ومخصوم</span>
+                            <span className="badge badge-danger">ملغي ومسترد</span>
                           ) : isRejected ? (
-                            <span className="badge badge-danger">🔴 مرفوض من الإدارة</span>
+                            <span className="badge badge-danger">مرفوض</span>
+                          ) : isApproved ? (
+                            <span className="badge badge-success">معتمد ومخصوم</span>
                           ) : (
-                            <span className="badge badge-warning">⏳ بانتظار موافقة الإدارة</span>
+                            <span className="badge badge-warning">معلق بانتظار الإدارة</span>
                           )}
                         </td>
                         <td>
-                          {/* Admin Actions */}
                           {isAdmin ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                              {isPending && (
-                                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                                  <button
-                                    className="btn btn-start"
-                                    style={{ padding: '4px 10px', fontSize: '11.5px', background: '#dc2626' }}
-                                    onClick={() => handleAdminApprovePenalty(p.id)}
-                                    title="تطبيق الخصم فوراً"
-                                  >
-                                    ⚖️ تطبيق الخصم
-                                  </button>
-                                  <button
-                                    className="btn btn-ghost"
-                                    style={{ padding: '4px 10px', fontSize: '11.5px', border: '1px solid #cbd5e1' }}
-                                    onClick={() => handleAdminRejectPenalty(p.id)}
-                                    title="رفض وتجاهل الجزاء"
-                                  >
-                                    ❌ رفض
-                                  </button>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                              {hasObjection && objStatus === 'pending' && (
+                                <div style={{ background: '#fffbeb', border: '1px solid #fde68a', padding: '6px 8px', borderRadius: '6px', fontSize: '11px' }}>
+                                  <strong style={{ color: '#b45309', display: 'block' }}>اعتراض مقدم:</strong>
+                                  <span style={{ display: 'block', margin: '2px 0' }}>"{p.objection.reason}"</span>
+                                  <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
+                                    <button
+                                      className="btn btn-start"
+                                      style={{ fontSize: '10.5px', padding: '2px 6px', background: '#16a34a' }}
+                                      onClick={() => handleAdminApproveObjection(p.id)}
+                                      title="قبول الاعتراض وإلغاء الجزاء"
+                                    >
+                                      قبول وإلغاء
+                                    </button>
+                                    <button
+                                      className="btn btn-ghost"
+                                      style={{ fontSize: '10.5px', padding: '2px 6px', color: '#dc2626' }}
+                                      onClick={() => { setAdminRejectReplyReq(p); setAdminRejectReplyText(''); }}
+                                      title="رفض الاعتراض وتثبيت الجزاء"
+                                    >
+                                      رفض
+                                    </button>
+                                  </div>
                                 </div>
                               )}
-
-                              {p.objection && (
-                                <div style={{ background: '#fef3c7', padding: '6px 8px', borderRadius: '6px', border: '1px solid #fde68a', fontSize: '11.5px' }}>
-                                  <div style={{ color: '#92400e', fontWeight: 'bold' }}>✋ اعتراض الموظف: "{p.objection.reason}"</div>
-                                  {p.objection.status === 'pending_admin' && (
-                                    <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
-                                      <button className="btn btn-start" style={{ background: '#16a34a', padding: '2px 8px', fontSize: '11px' }} onClick={() => handleAdminApproveObjection(p.id)}>
-                                        ✓ قبول وإلغاء الخصم
-                                      </button>
-                                      <button className="btn btn-start" style={{ background: '#dc2626', padding: '2px 8px', fontSize: '11px' }} onClick={() => { setAdminRejectReplyReq(p); setAdminRejectReplyText(''); }}>
-                                        ✕ رفض الاعتراض
-                                      </button>
-                                    </div>
-                                  )}
-                                </div>
+                              {hasObjection && objStatus === 'approved' && (
+                                <span className="badge badge-success" style={{ fontSize: '11px' }}>✅ تم قبول الاعتراض</span>
+                              )}
+                              {hasObjection && objStatus === 'rejected' && (
+                                <span className="badge badge-danger" style={{ fontSize: '11px' }}>❌ تم رفض الاعتراض</span>
+                              )}
+                              {!hasObjection && (
+                                <span style={{ color: 'var(--muted)', fontSize: '12px' }}>—</span>
                               )}
                             </div>
                           ) : (
-                            /* Employee / Branch Manager View */
                             userRole === 'employee' ? (
-                              p.objection ? (
-                                <div style={{ fontSize: '11.5px', color: '#b45309', background: '#fef3c7', padding: '4px 8px', borderRadius: '6px' }}>
-                                  {p.objection.status === 'pending_admin' ? '⏳ اعتراضك قيد مراجعة الإدارة' : p.objection.status === 'approved' ? '✅ تم قبول اعتراضك وإلغاء الجزاء' : '❌ تم رفض الاعتراض'}
+                              hasObjection ? (
+                                <div>
+                                  <span className={`badge ${objStatus === 'approved' ? 'badge-success' : objStatus === 'rejected' ? 'badge-danger' : 'badge-warning'}`} style={{ fontSize: '11px' }}>
+                                    {objStatus === 'approved' ? 'تم قبول الاعتراض' : objStatus === 'rejected' ? 'تم رفض الاعتراض' : 'الاعتراض قيد المراجعة'}
+                                  </span>
                                 </div>
                               ) : !isCancelled ? (
                                 <button
@@ -1023,272 +688,6 @@ export default function BylawsModule({
           customFrom={customFrom}
           customTo={customTo}
         />
-      )}
-
-      {/* Tab 5: Disciplinary Penalties & Violation Counter Module */}
-      {activeTab === 'disciplinary_penalties' && (
-        <DisciplinaryPenaltiesTab
-          state={state}
-          setState={setState}
-          saveState={saveState}
-          showToast={showToast}
-          userRole={userRole}
-          currentEmpId={currentEmpId}
-          currentBranchId={currentBranchId}
-          filterFn={filterFn}
-          monthPicker={monthPicker}
-          customFrom={customFrom}
-          customTo={customTo}
-        />
-      )}
-
-      {/* Modal: Record Violation */}
-      {showRecordModal && (
-        <div className="modal-backdrop" onClick={() => setShowRecordModal(false)}>
-          <div className="modal-card" style={{ maxWidth: '750px', width: '96%' }} onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ fontFamily: 'Cairo', margin: '0 0 16px', color: 'var(--danger)' }}>
-              {isAdmin ? '⚖️ توثيق وتطبيق جزاء لائحي مباشر على الموظف' : '⚠️ توثيق مخالفة لائحية جديدة وإرسال طلب الخصم'}
-            </h3>
-
-            <form onSubmit={handleSubmitViolation}>
-              <div className="field" style={{ marginBottom: '14px' }}>
-                <label>اختر الموظف المخالف:</label>
-                <select
-                  value={targetEmpId}
-                  onChange={(e) => setTargetEmpId(e.target.value)}
-                  required
-                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)' }}
-                >
-                  <option value="">-- اختر الموظف --</option>
-                  {(state.employees || []).map((emp) => (
-                    <option key={emp.id} value={emp.id}>{emp.name} ({emp.code})</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="field" style={{ marginBottom: '14px' }}>
-                <label>اختر المخالفة اللائحية:</label>
-                <select
-                  value={selectedRuleId}
-                  onChange={(e) => setSelectedRuleId(e.target.value)}
-                  required
-                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)' }}
-                >
-                  <option value="">-- اختر المخالفة من اللائحة --</option>
-                  {bylawsRules.map((rule) => (
-                    <option key={rule.id} value={rule.id}>
-                      {rule.title} ({getImpactDesc(rule)})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="field" style={{ marginBottom: '20px' }}>
-                <label>تفاصيل وسبب الخصم اللائحي:</label>
-                <textarea
-                  value={customReason}
-                  onChange={(e) => setCustomReason(e.target.value)}
-                  placeholder="ملاحظات وتفاصيل إضافية حول المخالفة وتاريخ حدوثها..."
-                  rows={3}
-                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)' }}
-                />
-              </div>
-
-              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-                <button type="button" className="btn btn-ghost" onClick={() => setShowRecordModal(false)}>إلغاء</button>
-                <button type="submit" className="btn btn-start" style={{ background: '#dc2626', fontWeight: 'bold' }}>
-                  {isAdmin ? '⚖️ تطبيق الجزاء فوراً' : '📤 إرسال طلب الجزاء للإدارة العليا'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Modal: Add Rule */}
-      {showAddRuleModal && (
-        <div className="modal-backdrop" onClick={() => setShowAddRuleModal(false)}>
-          <div className="modal-card" style={{ maxWidth: '650px', width: '96%' }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '12px' }}>
-              <h3 style={{ fontFamily: 'Cairo', margin: 0, color: 'var(--primary-dark)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                ➕ إضافة بند جديد لجدول المخالفات والجزاءات
-              </h3>
-              <button className="btn btn-ghost" onClick={() => setShowAddRuleModal(false)}>✕</button>
-            </div>
-
-            <div className="field" style={{ marginBottom: '14px' }}>
-              <label style={{ fontWeight: 'bold', marginBottom: '6px', display: 'block' }}>عنوان المخالفة اللائحية *</label>
-              <input
-                type="text"
-                value={newRuleTitle}
-                onChange={(e) => setNewRuleTitle(e.target.value)}
-                placeholder="مثال: التأخير عن تسليم الخزينة والمبيعات..."
-                required
-                style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)' }}
-              />
-            </div>
-
-            <div className="field" style={{ marginBottom: '14px' }}>
-              <label style={{ fontWeight: 'bold', marginBottom: '6px', display: 'block' }}>التصنيف اللائحي:</label>
-              <select
-                value={newRuleCategory}
-                onChange={(e) => setNewRuleCategory(e.target.value)}
-                style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)' }}
-              >
-                <option value="حضور وانصراف">حضور وانصراف</option>
-                <option value="سلوك وانضباط">سلوك وانضباط</option>
-                <option value="نظافة وجودة">نظافة وجودة</option>
-                <option value="ماليات وخزينة">ماليات وخزينة</option>
-                <option value="إجراءات إدارية">إجراءات إدارية</option>
-                <option value="خدمة عملاء">خدمة عملاء</option>
-              </select>
-            </div>
-
-            <div className="field" style={{ marginBottom: '14px' }}>
-              <label style={{ fontWeight: 'bold', marginBottom: '6px', display: 'block' }}>نوع التأثير على الأجور:</label>
-              <select
-                value={newRuleImpactType}
-                onChange={(e) => setNewRuleImpactType(e.target.value)}
-                style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)' }}
-              >
-                <option value="deduction_days">خصم عدد أيام من الراتب</option>
-                <option value="fixed_amount">خصم مبلغ مالي ثابت (ج.م)</option>
-                <option value="warning">إنذار كتابي رسمي</option>
-              </select>
-            </div>
-
-            {newRuleImpactType !== 'warning' && (
-              <div className="field" style={{ marginBottom: '20px' }}>
-                <label style={{ fontWeight: 'bold', marginBottom: '6px', display: 'block' }}>
-                  {newRuleImpactType === 'deduction_days' ? 'مقدار الخصم (عدد الأيام من الراتب):' : 'المبلغ المالي المخصوم (ج.م):'}
-                </label>
-                <input
-                  type="number"
-                  step={newRuleImpactType === 'deduction_days' ? '0.25' : '10'}
-                  min="0"
-                  value={newRuleImpactVal}
-                  onChange={(e) => setNewRuleImpactVal(e.target.value)}
-                  required
-                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', fontWeight: 'bold' }}
-                />
-              </div>
-            )}
-
-            {/* Live Preview Card */}
-            <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '10px', padding: '12px 16px', marginBottom: '20px' }}>
-              <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>معاينة البند في الجدول:</span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                <span className="badge badge-primary">{newRuleCategory}</span>
-                <strong style={{ fontSize: '13px' }}>{newRuleTitle || 'عنوان المخالفة'}</strong>
-                <span style={{ marginRight: 'auto', fontWeight: 'bold', color: '#dc2626' }}>
-                  {getImpactDesc({
-                    impactType: newRuleImpactType,
-                    impactVal: parseFloat(newRuleImpactVal) || 0
-                  })}
-                </span>
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-              <button type="button" className="btn btn-ghost" onClick={() => setShowAddRuleModal(false)}>إلغاء</button>
-              <button type="button" className="btn btn-start" onClick={handleAddRule}>💾 حفظ وإضافة البند</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal: Edit Rule */}
-      {editingRule && (
-        <div className="modal-backdrop" onClick={() => setEditingRule(null)}>
-          <div className="modal-card" style={{ maxWidth: '650px', width: '96%' }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '12px' }}>
-              <h3 style={{ fontFamily: 'Cairo', margin: 0, color: 'var(--primary-dark)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                ✏️ تعديل بند المخالفة والجزاء اللائحي
-              </h3>
-              <button className="btn btn-ghost" onClick={() => setEditingRule(null)}>✕</button>
-            </div>
-
-            <div className="field" style={{ marginBottom: '14px' }}>
-              <label style={{ fontWeight: 'bold', marginBottom: '6px', display: 'block' }}>عنوان بند المخالفة اللائحية *</label>
-              <input
-                type="text"
-                value={editRuleTitle}
-                onChange={(e) => setEditRuleTitle(e.target.value)}
-                placeholder="مثال: التأخير عن موعد الشيفت من 15 إلى 30 دقيقة..."
-                required
-                style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)' }}
-              />
-            </div>
-
-            <div className="field" style={{ marginBottom: '14px' }}>
-              <label style={{ fontWeight: 'bold', marginBottom: '6px', display: 'block' }}>التصنيف اللائحي:</label>
-              <select
-                value={editRuleCategory}
-                onChange={(e) => setEditRuleCategory(e.target.value)}
-                style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)' }}
-              >
-                <option value="حضور وانصراف">حضور وانصراف</option>
-                <option value="سلوك وانضباط">سلوك وانضباط</option>
-                <option value="نظافة وجودة">نظافة وجودة</option>
-                <option value="ماليات وخزينة">ماليات وخزينة</option>
-                <option value="إجراءات إدارية">إجراءات إدارية</option>
-                <option value="خدمة عملاء">خدمة عملاء</option>
-              </select>
-            </div>
-
-            <div className="field" style={{ marginBottom: '14px' }}>
-              <label style={{ fontWeight: 'bold', marginBottom: '6px', display: 'block' }}>نوع التأثير على الأجور:</label>
-              <select
-                value={editRuleImpactType}
-                onChange={(e) => setEditRuleImpactType(e.target.value)}
-                style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)' }}
-              >
-                <option value="deduction_days">خصم عدد أيام من الراتب</option>
-                <option value="fixed_amount">خصم مبلغ مالي ثابت (ج.م)</option>
-                <option value="warning">إنذار كتابي رسمي</option>
-              </select>
-            </div>
-
-            {editRuleImpactType !== 'warning' && (
-              <div className="field" style={{ marginBottom: '20px' }}>
-                <label style={{ fontWeight: 'bold', marginBottom: '6px', display: 'block' }}>
-                  {editRuleImpactType === 'deduction_days' ? 'مقدار الخصم (عدد الأيام من الراتب):' : 'المبلغ المالي المخصوم (ج.م):'}
-                </label>
-                <input
-                  type="number"
-                  step={editRuleImpactType === 'deduction_days' ? '0.25' : '10'}
-                  min="0"
-                  value={editRuleImpactVal}
-                  onChange={(e) => setEditRuleImpactVal(e.target.value)}
-                  required
-                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', fontWeight: 'bold' }}
-                />
-              </div>
-            )}
-
-            {/* Live Preview Card */}
-            <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '10px', padding: '12px 16px', marginBottom: '20px' }}>
-              <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>معاينة التعديل في الجدول:</span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                <span className="badge badge-primary">{editRuleCategory}</span>
-                <strong style={{ fontSize: '13px' }}>{editRuleTitle || 'عنوان البند'}</strong>
-                <span style={{ marginRight: 'auto', fontWeight: 'bold', color: '#dc2626' }}>
-                  {getImpactDesc({
-                    impactType: editRuleImpactType,
-                    impactVal: parseFloat(editRuleImpactVal) || 0
-                  })}
-                </span>
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-              <button type="button" className="btn btn-ghost" onClick={() => setEditingRule(null)}>إلغاء</button>
-              <button type="button" className="btn btn-start" onClick={handleSaveEditRule}>
-                💾 حفظ التعديلات
-              </button>
-            </div>
-          </div>
-        </div>
       )}
 
       {/* Modal: Employee Submit Objection */}
