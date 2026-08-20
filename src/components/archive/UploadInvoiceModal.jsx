@@ -1,25 +1,34 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
   UploadCloud,
+  Sparkles,
   FileSpreadsheet,
-  FilePlus,
-  Loader2,
+  FileText,
+  FolderPlus,
   CheckCircle2,
   AlertCircle,
-  Trash2,
-  Plus,
-  Edit2,
+  Loader2,
+  UserCheck,
+  UserPen,
   Calendar,
-  Building2,
-  User,
-  Sparkles,
-  FileText,
   DollarSign,
-  Layers
+  Building,
+  Trash2,
+  Hash,
+  Info,
+  StickyNote,
+  Layers,
+  Plus,
+  Edit2
 } from 'lucide-react';
 import { performSmartExtraction } from '../../utils/archiveAiService';
-import { apiArchiveSaveInvoice, apiArchiveUploadFile } from '../../utils/archiveApiClient';
+import { parseExcelOrCsvMultiInvoices } from '../../utils/archiveExcelParser';
+import {
+  apiArchiveSaveInvoice,
+  apiArchiveSaveBatchInvoices,
+  apiArchiveUploadFile
+} from '../../utils/archiveApiClient';
 
 export default function UploadInvoiceModal({
   isOpen,
@@ -30,194 +39,329 @@ export default function UploadInvoiceModal({
   onInvoiceSaved = () => {}
 }) {
   const fileInputRef = useRef(null);
-  const [activeMode, setActiveMode] = useState('AI_EXTRACT'); // 'AI_EXTRACT' | 'EXCEL_EXTRACT' | 'DIRECT_UPLOAD'
+  const [mode, setMode] = useState('AI_EXTRACT'); // 'AI_EXTRACT' | 'EXCEL_EXTRACT' | 'DIRECT_UPLOAD'
+  const [fileList, setFileList] = useState([]);
 
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [filePreview, setFilePreview] = useState(null);
-  const [fileBase64, setFileBase64] = useState('');
-  const [mimeType, setMimeType] = useState('');
-
-  // AI & Processing States
-  const [isExtracting, setIsExtracting] = useState(false);
-  const [extractStatus, setExtractStatus] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
-  const [successMsg, setSuccessMsg] = useState('');
-
-  // Form Fields
-  const [invoiceNumber, setInvoiceNumber] = useState('');
-  const [supplierId, setSupplierId] = useState('');
-  const [invoiceDate, setInvoiceDate] = useState(() => new Date().toISOString().split('T')[0]);
+  // Staff & Supplier assignments
   const [receiverId, setReceiverId] = useState('');
   const [entryClerkId, setEntryClerkId] = useState('');
+  const [selectedSupplierName, setSelectedSupplierName] = useState('');
   const [notes, setNotes] = useState('');
 
-  // Items
-  const [items, setItems] = useState([]);
+  // Manual inputs for DIRECT_UPLOAD mode
+  const [invoiceNumber, setInvoiceNumber] = useState('');
+  const [totalAmount, setTotalAmount] = useState('');
+  const [invoiceDate, setInvoiceDate] = useState(() => new Date().toISOString().split('T')[0]);
+
+  // Status & Notifications
+  const [isUploading, setIsUploading] = useState(false);
+  const [globalError, setGlobalError] = useState('');
+  const [globalSuccess, setGlobalSuccess] = useState('');
+
+  // Reset state when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setFileList([]);
+      setGlobalError('');
+      setGlobalSuccess('');
+      setInvoiceDate(new Date().toISOString().split('T')[0]);
+      setInvoiceNumber('');
+      setTotalAmount('');
+      setNotes('');
+      setReceiverId('');
+      setEntryClerkId('');
+      setSelectedSupplierName('');
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
-  const handleFileSelected = (file) => {
-    if (!file) return;
-    setSelectedFile(file);
-    setErrorMsg('');
-    setSuccessMsg('');
+  // Helper to validate file type for active mode
+  const validateFileForMode = (file, targetMode) => {
+    const ext = (file.name || '').split('.').pop()?.toLowerCase() || '';
+    const mime = (file.type || '').toLowerCase();
 
-    const type = file.type || '';
-    setMimeType(type);
+    if (targetMode === 'EXCEL_EXTRACT') {
+      return ['xlsx', 'xls', 'csv'].includes(ext) || mime.includes('excel') || mime.includes('spreadsheet') || mime.includes('csv');
+    }
 
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const b64 = e.target?.result;
-      setFileBase64(b64);
-      setFilePreview(type.startsWith('image/') ? b64 : null);
+    if (targetMode === 'AI_EXTRACT') {
+      return ['jpg', 'jpeg', 'png', 'webp', 'pdf'].includes(ext) || mime.includes('image') || mime.includes('pdf');
+    }
 
-      // Auto start extraction if not direct upload
-      if (activeMode !== 'DIRECT_UPLOAD') {
-        runExtraction(file, b64);
-      }
-    };
-    reader.readAsDataURL(file);
+    // DIRECT_UPLOAD accepts any document
+    return true;
   };
 
-  const runExtraction = async (file, b64) => {
-    setIsExtracting(true);
-    setExtractStatus('جاري فحص وقراءة بيانات الفاتورة واستخراج البنود بالذكاء الاصطناعي...');
-    setErrorMsg('');
+  const handleModeChange = (newMode) => {
+    setMode(newMode);
+    setGlobalError('');
+    setGlobalSuccess('');
 
-    try {
-      const data = await performSmartExtraction(file, b64, settings, suppliers);
-      if (data) {
-        if (data.invoiceNumber) setInvoiceNumber(data.invoiceNumber);
-        if (data.invoiceDate) setInvoiceDate(data.invoiceDate.split('T')[0]);
-        if (data.supplierId) setSupplierId(data.supplierId);
-        if (data.notes) setNotes(data.notes);
-        if (Array.isArray(data.items) && data.items.length > 0) {
-          setItems(data.items);
+    const incompatible = fileList.filter((f) => !validateFileForMode(f.file, newMode));
+    if (incompatible.length > 0) {
+      setGlobalError(`تنبيه: تم استبعاد ${incompatible.length} ملفات غير متوافقة مع النمط المختار.`);
+      setFileList((prev) => prev.filter((f) => validateFileForMode(f.file, newMode)));
+    }
+  };
+
+  const handleFileSelect = (e) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const incomingFiles = Array.from(e.target.files);
+      const validFiles = [];
+      const rejectedFiles = [];
+
+      incomingFiles.forEach((file) => {
+        if (validateFileForMode(file, mode)) {
+          validFiles.push({
+            file,
+            status: 'PENDING',
+            message: '',
+            extractedInvoices: null,
+            extractedSummary: null
+          });
+        } else {
+          rejectedFiles.push(file.name);
         }
-        setSuccessMsg(`تم بنجاح استخراج بيانات الفاتورة و(${data.items?.length || 0}) صنف!`);
-      }
-    } catch (err) {
-      console.error('Smart extraction error:', err);
-      setErrorMsg('تعذر استخراج بعض البيانات تلقائياً، يمكنك إدخالها يدوياً.');
-    } finally {
-      setIsExtracting(false);
-      setExtractStatus('');
-    }
-  };
+      });
 
-  // Item Table Handlers
-  const handleAddItemRow = () => {
-    setItems([
-      ...items,
-      {
-        productName: '',
-        quantity: 1,
-        unitPrice: 0,
-        discount: 0,
-        netPrice: 0,
-        totalPrice: 0,
-        batchNumber: '',
-        expiryDate: ''
-      }
-    ]);
-  };
-
-  const handleItemChange = (index, field, value) => {
-    const updated = [...items];
-    const item = { ...updated[index], [field]: value };
-
-    // Auto-calculate Net & Total
-    const qty = parseFloat(item.quantity) || 0;
-    const price = parseFloat(item.unitPrice || item.publicPrice) || 0;
-    const disc = parseFloat(item.discount) || 0;
-
-    const netUnit = price * (1 - disc / 100);
-    item.netPrice = Math.round(netUnit * 100) / 100;
-    item.totalPrice = Math.round(netUnit * qty * 100) / 100;
-
-    updated[index] = item;
-    setItems(updated);
-  };
-
-  const handleRemoveItem = (index) => {
-    setItems(items.filter((_, i) => i !== index));
-  };
-
-  // Calculate totals
-  const totalGross = items.reduce((acc, it) => acc + ((parseFloat(it.unitPrice || it.publicPrice) || 0) * (parseFloat(it.quantity) || 0)), 0);
-  const totalNet = items.reduce((acc, it) => acc + (parseFloat(it.totalPrice) || 0), 0);
-  const totalDiscount = Math.max(0, totalGross - totalNet);
-
-  const handleSaveInvoice = async (e) => {
-    e.preventDefault();
-    if (!invoiceNumber.trim()) {
-      setErrorMsg('يرجى كتابة رقم الفاتورة');
-      return;
-    }
-    if (!supplierId) {
-      setErrorMsg('يرجى اختيار المورد / الشركة');
-      return;
-    }
-
-    setIsSaving(true);
-    setErrorMsg('');
-    setSuccessMsg('');
-
-    try {
-      let driveFileId = '';
-      let driveViewLink = '';
-
-      // Upload file to Google Drive if selected
-      if (selectedFile && fileBase64) {
-        setExtractStatus('جاري رفع وأرشفة ملف الفاتورة على Google Drive...');
-        try {
-          const uploadRes = await apiArchiveUploadFile(selectedFile.name, mimeType, fileBase64);
-          if (uploadRes.success) {
-            driveFileId = uploadRes.fileId;
-            driveViewLink = uploadRes.webViewLink;
-          }
-        } catch (uploadErr) {
-          console.warn('File upload to Google Drive skipped or failed:', uploadErr);
-        }
-      }
-
-      const supplierObj = suppliers.find((s) => String(s.id) === String(supplierId));
-      const receiverObj = employees.find((e) => String(e.id) === String(receiverId));
-      const entryClerkObj = employees.find((e) => String(e.id) === String(entryClerkId));
-
-      const payload = {
-        invoiceNumber: invoiceNumber.trim(),
-        supplierId,
-        supplierName: supplierObj?.name || 'مورد غير محدد',
-        invoiceDate,
-        receiverId: receiverId || null,
-        receiverName: receiverObj?.name || '',
-        entryClerkId: entryClerkId || null,
-        entryClerkName: entryClerkObj?.name || '',
-        notes,
-        totalGross: Math.round(totalGross * 100) / 100,
-        totalDiscount: Math.round(totalDiscount * 100) / 100,
-        totalNet: Math.round(totalNet * 100) / 100,
-        items,
-        driveFileId,
-        driveViewLink,
-        fileName: selectedFile?.name || '',
-        mimeType
-      };
-
-      const res = await apiArchiveSaveInvoice(payload);
-      if (res.success) {
-        onInvoiceSaved(res.invoice || payload);
-        onClose();
+      if (rejectedFiles.length > 0) {
+        setGlobalError(`تم تجاهل ${rejectedFiles.length} ملفات لعدم توافق صيغتها مع نمط الرفع الحالي.`);
       } else {
-        setErrorMsg(res.error || 'فشل حفظ الفاتورة');
+        setGlobalError('');
       }
-    } catch {
-      setErrorMsg('حدث خطأ أثناء حفظ الفاتورة');
+
+      setFileList((prev) => [...prev, ...validFiles]);
+      e.target.value = '';
+    }
+  };
+
+  const handleRemoveFile = (index) => {
+    setFileList((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const readFileAsBase64 = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = (error) => reject(error);
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const readFileAsArrayBuffer = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = (error) => reject(error);
+      reader.readAsArrayBuffer(file);
+    });
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setGlobalError('');
+    setGlobalSuccess('');
+
+    if (mode !== 'DIRECT_UPLOAD' && fileList.length === 0) {
+      setGlobalError('يرجى اختيار ملف فاتورة واحد على الأقل للرفع والتحليل.');
+      return;
+    }
+
+    if (mode === 'DIRECT_UPLOAD' && fileList.length === 0 && !invoiceNumber.trim()) {
+      setGlobalError('يرجى إدخال رقم الفاتورة عند الأرشفة المباشرة بدون ملف.');
+      return;
+    }
+
+    setIsUploading(true);
+    let successCount = 0;
+    let failCount = 0;
+    const allExtractedAndSavedInvoices = [];
+
+    try {
+      // 1. Process DIRECT_UPLOAD without file attached
+      if (mode === 'DIRECT_UPLOAD' && fileList.length === 0) {
+        const singleInvoice = {
+          invoiceNumber: invoiceNumber.trim() || `INV-${Date.now().toString().slice(-6)}`,
+          supplierName: selectedSupplierName.trim() || 'مورد عام',
+          invoiceDate: invoiceDate || new Date().toISOString().split('T')[0],
+          totalAmount: parseFloat(totalAmount) || 0,
+          discount: 0,
+          netAmount: parseFloat(totalAmount) || 0,
+          status: 'ARCHIVED',
+          uploadMode: 'DIRECT_UPLOAD',
+          receiverId: receiverId || null,
+          entryClerkId: entryClerkId || null,
+          notes: notes || '',
+          items: []
+        };
+
+        const res = await apiArchiveSaveInvoice(singleInvoice);
+        if (res.success) {
+          setGlobalSuccess('تم حفظ وأرشفة الفاتورة بنجاح!');
+          onInvoiceSaved(res.invoice || singleInvoice);
+          setTimeout(() => {
+            onClose();
+          }, 800);
+        } else {
+          setGlobalError(res.error || 'فشل حفظ الفاتورة');
+        }
+        setIsUploading(false);
+        return;
+      }
+
+      // 2. Process file list queue
+      for (let i = 0; i < fileList.length; i++) {
+        const item = fileList[i];
+        if (item.status === 'SUCCESS') continue;
+
+        // Update status to UPLOADING
+        setFileList((prev) =>
+          prev.map((f, idx) => (idx === i ? { ...f, status: 'UPLOADING', message: 'جاري التحليل والمعالجة...' } : f))
+        );
+
+        try {
+          let extractedInvoices = [];
+          const ext = (item.file.name || '').split('.').pop()?.toLowerCase() || '';
+          let fileBase64 = '';
+          let fileUrl = '';
+
+          // Step A: Read file
+          fileBase64 = await readFileAsBase64(item.file);
+          fileUrl = fileBase64;
+
+          // Step B: Upload file to server storage if supported
+          try {
+            const uploadRes = await apiArchiveUploadFile(item.file.name, item.file.type, fileBase64);
+            if (uploadRes && uploadRes.fileUrl) {
+              fileUrl = uploadRes.fileUrl;
+            }
+          } catch (uploadErr) {
+            console.warn('Storage upload fallback to Base64:', uploadErr);
+          }
+
+          // Step C: Extraction based on active mode
+          if (mode === 'EXCEL_EXTRACT') {
+            const arrayBuffer = await readFileAsArrayBuffer(item.file);
+            extractedInvoices = await parseExcelOrCsvMultiInvoices(arrayBuffer, item.file.name, {
+              defaultSupplierName: selectedSupplierName.trim() || undefined
+            });
+          } else if (mode === 'AI_EXTRACT') {
+            const singleExtracted = await performSmartExtraction(
+              item.file,
+              fileBase64,
+              settings,
+              suppliers,
+              (statusText) => {
+                setFileList((prev) =>
+                  prev.map((f, idx) => (idx === i ? { ...f, message: statusText } : f))
+                );
+              }
+            );
+            if (singleExtracted) {
+              extractedInvoices = [singleExtracted];
+            }
+          } else {
+            // DIRECT_UPLOAD with file attached
+            extractedInvoices = [
+              {
+                invoiceNumber: invoiceNumber.trim() || `INV-${Date.now().toString().slice(-6)}`,
+                supplierName: selectedSupplierName.trim() || 'مورد عام',
+                invoiceDate: invoiceDate || new Date().toISOString().split('T')[0],
+                totalAmount: parseFloat(totalAmount) || 0,
+                discount: 0,
+                netAmount: parseFloat(totalAmount) || 0,
+                itemsCount: 0,
+                items: []
+              }
+            ];
+          }
+
+          // Step D: Format and Save each extracted invoice into Archive DB
+          const invoicesToSave = extractedInvoices.map((inv) => ({
+            invoiceNumber: inv.invoiceNumber || `INV-${Date.now().toString().slice(-6)}`,
+            supplierName: inv.supplierName || selectedSupplierName.trim() || 'مورد عام',
+            invoiceDate: inv.invoiceDate || invoiceDate || new Date().toISOString().split('T')[0],
+            totalAmount: inv.totalAmount || 0,
+            discount: inv.discount || 0,
+            netAmount: inv.netAmount || (inv.totalAmount - (inv.discount || 0)) || 0,
+            status: 'ARCHIVED',
+            fileUrl: fileUrl,
+            fileName: item.file.name,
+            fileType: item.file.type || ext,
+            uploadMode: mode,
+            receiverId: receiverId || null,
+            entryClerkId: entryClerkId || null,
+            notes: notes || '',
+            items: inv.items || []
+          }));
+
+          let saveRes;
+          if (invoicesToSave.length === 1) {
+            saveRes = await apiArchiveSaveInvoice(invoicesToSave[0]);
+          } else {
+            saveRes = await apiArchiveSaveBatchInvoices(invoicesToSave);
+          }
+
+          if (saveRes.success) {
+            successCount++;
+            allExtractedAndSavedInvoices.push(...invoicesToSave);
+            const firstInv = invoicesToSave[0];
+            setFileList((prev) =>
+              prev.map((f, idx) =>
+                idx === i
+                  ? {
+                      ...f,
+                      status: 'SUCCESS',
+                      message: invoicesToSave.length > 1 ? `تم حفظ ${invoicesToSave.length} فواتير` : 'تم الحفظ بنجاح',
+                      extractedSummary: {
+                        invoiceNumber: firstInv.invoiceNumber,
+                        supplierName: firstInv.supplierName,
+                        invoiceDate: firstInv.invoiceDate,
+                        itemsCount: invoicesToSave.reduce((sum, inv) => sum + (inv.items?.length || 0), 0),
+                        totalAmount: firstInv.totalAmount,
+                        discount: firstInv.discount,
+                        netAmount: firstInv.netAmount
+                      }
+                    }
+                  : f
+              )
+            );
+          } else {
+            failCount++;
+            setFileList((prev) =>
+              prev.map((f, idx) =>
+                idx === i ? { ...f, status: 'ERROR', message: saveRes.error || 'فشل حفظ الفاتورة' } : f
+              )
+            );
+          }
+        } catch (itemErr) {
+          console.error(`Error processing file ${item.file.name}:`, itemErr);
+          failCount++;
+          setFileList((prev) =>
+            prev.map((f, idx) =>
+              idx === i ? { ...f, status: 'ERROR', message: itemErr?.message || 'فشل التحليل' } : f
+            )
+          );
+        }
+      }
+
+      if (successCount > 0) {
+        setGlobalSuccess(`تمت معالجة وأرشفة (${successCount}) ملف بنجاح!`);
+        onInvoiceSaved(allExtractedAndSavedInvoices[0]);
+        if (failCount === 0) {
+          setTimeout(() => {
+            onClose();
+          }, 1200);
+        }
+      } else if (failCount > 0) {
+        setGlobalError('تعذر حفظ بعض أو كل الفواتير. يرجى مراجعة رسائل الخطأ الموضحة.');
+      }
+    } catch (globalErr) {
+      console.error('Upload modal general error:', globalErr);
+      setGlobalError(globalErr?.message || 'حدث خطأ عام أثناء معالجة الفواتير');
     } finally {
-      setIsSaving(false);
-      setExtractStatus('');
+      setIsUploading(false);
     }
   };
 
@@ -238,777 +382,764 @@ export default function UploadInvoiceModal({
         fontFamily: "'Cairo', 'Segoe UI', sans-serif"
       }}
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget && !isUploading) onClose();
       }}
     >
       <div
         style={{
-          backgroundColor: '#0b1120',
+          backgroundColor: '#0f172a',
           border: '1px solid #1e293b',
-          borderRadius: '20px',
+          borderRadius: '24px',
           width: '100%',
-          maxWidth: '960px',
-          maxHeight: '92vh',
+          maxWidth: '840px',
+          maxHeight: '90vh',
           display: 'flex',
           flexDirection: 'column',
-          boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.9), 0 0 35px rgba(37, 99, 235, 0.12)',
-          overflow: 'hidden',
-          animation: 'archFadeIn 0.2s ease-out'
+          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
+          overflow: 'hidden'
         }}
       >
-        {/* Header (Matching Screenshot 2) */}
+        {/* Modal Header */}
         <div
           style={{
+            padding: '20px 24px',
+            borderBottom: '1px solid #1e293b',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '20px 24px',
-            borderBottom: '1px solid #1e293b',
-            backgroundColor: '#070b14'
+            background: 'linear-gradient(to left, rgba(30, 41, 59, 0.5), rgba(15, 23, 42, 0.8))'
           }}
         >
-          {/* Close Button on Left */}
-          <button
-            type="button"
-            onClick={onClose}
-            style={{
-              width: '38px',
-              height: '38px',
-              borderRadius: '12px',
-              backgroundColor: '#1e293b',
-              border: '1px solid #334155',
-              color: '#94a3b8',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              transition: 'all 0.2s ease'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = '#334155';
-              e.currentTarget.style.color = '#ffffff';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = '#1e293b';
-              e.currentTarget.style.color = '#94a3b8';
-            }}
-          >
-            <X style={{ width: '18px', height: '18px' }} />
-          </button>
-
-          {/* Right Header Title & Cloud Icon */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '14px', textAlign: 'right' }}>
-            <div>
-              <h2 style={{ fontSize: '1.2rem', fontWeight: 900, color: '#f8fafc', margin: 0, lineHeight: 1.3 }}>
-                إضافة واسترداد فواتير جديدة
-              </h2>
-              <p style={{ fontSize: '0.75rem', color: '#94a3b8', margin: '4px 0 0', fontWeight: 500 }}>
-                اختر نوع الرفع المطلوب لتحليل وتفكيك المستندات أو الأرشفة المباشرة
-              </p>
-            </div>
-
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div
               style={{
-                width: '46px',
-                height: '46px',
-                borderRadius: '14px',
-                backgroundColor: 'rgba(37, 99, 235, 0.15)',
-                border: '1px solid rgba(37, 99, 235, 0.35)',
-                color: '#60a5fa',
+                width: '42px',
+                height: '42px',
+                borderRadius: '12px',
+                backgroundColor: 'rgba(59, 130, 246, 0.15)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                flexShrink: 0
+                color: '#3b82f6'
               }}
             >
-              <UploadCloud style={{ width: '24px', height: '24px' }} />
+              <UploadCloud size={24} />
+            </div>
+            <div>
+              <h2 style={{ fontSize: '18px', fontWeight: '800', color: '#f8fafc', margin: 0 }}>
+                إضافة واسترداد فواتير جديدة
+              </h2>
+              <p style={{ fontSize: '12px', color: '#94a3b8', margin: '4px 0 0 0' }}>
+                اختر نوع الرفع المطلوب للتحليل وتفكيك المستندات أو الأرشفة المباشرة
+              </p>
             </div>
           </div>
+
+          <button
+            onClick={onClose}
+            disabled={isUploading}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: '#64748b',
+              cursor: 'pointer',
+              padding: '8px',
+              borderRadius: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'color 0.2s'
+            }}
+          >
+            <X size={20} />
+          </button>
         </div>
 
-        {/* Scrollable Content Body */}
-        <div style={{ padding: '24px', overflowY: 'auto', flex: 1 }}>
-          
-          {/* Section: Choose Processing Method (3 Cards matching Screenshot 2) */}
-          <div style={{ marginBottom: '20px', textAlign: 'right' }}>
-            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: '#cbd5e1', marginBottom: '10px' }}>
-              اختر طريقة المعالجة والرفع:
-            </label>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px' }}>
-              
-              {/* Card 1: Excel Analysis */}
-              <div
-                onClick={() => setActiveMode('EXCEL_EXTRACT')}
-                style={{
-                  padding: '16px',
-                  borderRadius: '16px',
-                  cursor: 'pointer',
-                  backgroundColor: activeMode === 'EXCEL_EXTRACT' ? 'rgba(16, 185, 129, 0.08)' : '#070b14',
-                  border: activeMode === 'EXCEL_EXTRACT' ? '2px solid #10b981' : '1px solid #1e293b',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  justifyContent: 'space-between',
-                  textAlign: 'right',
-                  transition: 'all 0.2s ease',
-                  boxShadow: activeMode === 'EXCEL_EXTRACT' ? '0 4px 20px rgba(16, 185, 129, 0.15)' : 'none'
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  {activeMode === 'EXCEL_EXTRACT' ? (
-                    <span style={{ fontSize: '0.65rem', fontWeight: 800, padding: '2px 8px', borderRadius: '6px', backgroundColor: '#065f46', color: '#6ee7b7' }}>
-                      محدد
-                    </span>
-                  ) : <div />}
-                  <div
-                    style={{
-                      width: '38px',
-                      height: '38px',
-                      borderRadius: '12px',
-                      backgroundColor: 'rgba(16, 185, 129, 0.12)',
-                      border: '1px solid rgba(16, 185, 129, 0.3)',
-                      color: '#34d399',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center'
-                    }}
-                  >
-                    <FileSpreadsheet style={{ width: '18px', height: '18px' }} />
-                  </div>
-                </div>
-                <div style={{ marginTop: '12px' }}>
-                  <h4 style={{ fontSize: '0.875rem', fontWeight: 800, color: '#f8fafc', margin: 0 }}>
-                    1. تحليل ملفات الإكسل
-                  </h4>
-                  <p style={{ fontSize: '0.75rem', color: '#34d399', margin: '4px 0 0', fontWeight: 600 }}>
-                    استخراج البيانات والأصناف آلياً. (ملفات Excel فقط)
-                  </p>
-                </div>
-              </div>
-
-              {/* Card 2: AI Analysis (Default Selected) */}
-              <div
-                onClick={() => setActiveMode('AI_EXTRACT')}
-                style={{
-                  padding: '16px',
-                  borderRadius: '16px',
-                  cursor: 'pointer',
-                  backgroundColor: activeMode === 'AI_EXTRACT' ? 'rgba(37, 99, 235, 0.12)' : '#070b14',
-                  border: activeMode === 'AI_EXTRACT' ? '2px solid #2563eb' : '1px solid #1e293b',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  justifyContent: 'space-between',
-                  textAlign: 'right',
-                  transition: 'all 0.2s ease',
-                  boxShadow: activeMode === 'AI_EXTRACT' ? '0 4px 20px rgba(37, 99, 235, 0.2)' : 'none'
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  {activeMode === 'AI_EXTRACT' ? (
-                    <span style={{ fontSize: '0.65rem', fontWeight: 800, padding: '2px 8px', borderRadius: '6px', backgroundColor: '#1d4ed8', color: '#bfdbfe' }}>
-                      محدد
-                    </span>
-                  ) : <div />}
-                  <div
-                    style={{
-                      width: '38px',
-                      height: '38px',
-                      borderRadius: '12px',
-                      backgroundColor: 'rgba(37, 99, 235, 0.18)',
-                      border: '1px solid rgba(37, 99, 235, 0.4)',
-                      color: '#60a5fa',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center'
-                    }}
-                  >
-                    <Sparkles style={{ width: '18px', height: '18px' }} />
-                  </div>
-                </div>
-                <div style={{ marginTop: '12px' }}>
-                  <h4 style={{ fontSize: '0.875rem', fontWeight: 800, color: '#f8fafc', margin: 0 }}>
-                    2. تحليل بالذكاء الاصطناعي
-                  </h4>
-                  <p style={{ fontSize: '0.75rem', color: '#38bdf8', margin: '4px 0 0', fontWeight: 600 }}>
-                    استخراج البيانات الحسابية الـ 9 آلياً. (صور و PDF فقط)
-                  </p>
-                </div>
-              </div>
-
-              {/* Card 3: Direct Upload */}
-              <div
-                onClick={() => setActiveMode('DIRECT_UPLOAD')}
-                style={{
-                  padding: '16px',
-                  borderRadius: '16px',
-                  cursor: 'pointer',
-                  backgroundColor: activeMode === 'DIRECT_UPLOAD' ? 'rgba(168, 85, 247, 0.08)' : '#070b14',
-                  border: activeMode === 'DIRECT_UPLOAD' ? '2px solid #a855f7' : '1px solid #1e293b',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  justifyContent: 'space-between',
-                  textAlign: 'right',
-                  transition: 'all 0.2s ease',
-                  boxShadow: activeMode === 'DIRECT_UPLOAD' ? '0 4px 20px rgba(168, 85, 247, 0.15)' : 'none'
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  {activeMode === 'DIRECT_UPLOAD' ? (
-                    <span style={{ fontSize: '0.65rem', fontWeight: 800, padding: '2px 8px', borderRadius: '6px', backgroundColor: '#6b21a8', color: '#e9d5ff' }}>
-                      محدد
-                    </span>
-                  ) : <div />}
-                  <div
-                    style={{
-                      width: '38px',
-                      height: '38px',
-                      borderRadius: '12px',
-                      backgroundColor: 'rgba(168, 85, 247, 0.12)',
-                      border: '1px solid rgba(168, 85, 247, 0.3)',
-                      color: '#c084fc',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center'
-                    }}
-                  >
-                    <Layers style={{ width: '18px', height: '18px' }} />
-                  </div>
-                </div>
-                <div style={{ marginTop: '12px' }}>
-                  <h4 style={{ fontSize: '0.875rem', fontWeight: 800, color: '#f8fafc', margin: 0 }}>
-                    3. أرشفة ورفع مباشر
-                  </h4>
-                  <p style={{ fontSize: '0.75rem', color: '#c084fc', margin: '4px 0 0', fontWeight: 600 }}>
-                    رفع المستند كما هو دون استخراج. (يدعم جميع أنواع الملفات)
-                  </p>
-                </div>
-              </div>
-
-            </div>
-          </div>
-
-          {/* Section: 9 Data Fields Information Box (Screenshot 2 Match) */}
-          {activeMode === 'AI_EXTRACT' && (
-            <div
+        {/* Modal Body */}
+        <form
+          onSubmit={handleSubmit}
+          style={{
+            padding: '24px',
+            overflowY: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '20px'
+          }}
+        >
+          {/* Mode Selector Tabs (3 Modes) */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, 1fr)',
+              gap: '12px',
+              backgroundColor: 'rgba(15, 23, 42, 0.6)',
+              padding: '6px',
+              borderRadius: '16px',
+              border: '1px solid #1e293b'
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => handleModeChange('AI_EXTRACT')}
               style={{
-                backgroundColor: 'rgba(30, 58, 138, 0.25)',
-                border: '1px solid rgba(59, 130, 246, 0.35)',
-                borderRadius: '16px',
-                padding: '16px',
-                marginBottom: '20px',
-                textAlign: 'right'
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#93c5fd', fontWeight: 800, fontSize: '0.775rem', marginBottom: '10px' }}>
-                <AlertCircle style={{ width: '16px', height: '16px', color: '#60a5fa', flexShrink: 0 }} />
-                <span>البيانات الـ 9 التي يقوم الذكاء الاصطناعي باستخراجها:</span>
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                {[
-                  '1. رقم الفاتورة',
-                  '2. اسم المورد / الشركة',
-                  '3. تاريخ الفاتورة',
-                  '4. الكميات',
-                  '5. سعر الوحدة',
-                  '6. الإجمالي قبل الخصم',
-                  '7. الخصم',
-                  '8. الصافي',
-                  '9. عدد الأصناف'
-                ].map((field, idx) => (
-                  <span
-                    key={idx}
-                    style={{
-                      fontSize: '0.75rem',
-                      fontWeight: 700,
-                      padding: '4px 10px',
-                      borderRadius: '8px',
-                      backgroundColor: '#1e3a8a',
-                      border: '1px solid #2563eb',
-                      color: '#dbeafe'
-                    }}
-                  >
-                    {field}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Section: Dropzone Container (Screenshot 2 Match) */}
-          <div style={{ marginBottom: '24px', textAlign: 'right' }}>
-            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: '#cbd5e1', marginBottom: '8px' }}>
-              {activeMode === 'EXCEL_EXTRACT' ? 'اختر ملف شيت الإكسل:' : 'اختر ملف الفواتير للتحليل:'}
-            </label>
-
-            <div
-              onClick={() => fileInputRef.current?.click()}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault();
-                const f = e.dataTransfer.files?.[0];
-                if (f) handleFileSelected(f);
-              }}
-              style={{
-                border: '2px dashed rgba(59, 130, 246, 0.4)',
-                backgroundColor: 'rgba(15, 23, 42, 0.6)',
-                borderRadius: '16px',
-                padding: '36px 20px',
-                textAlign: 'center',
+                padding: '12px 14px',
+                borderRadius: '12px',
+                border: 'none',
                 cursor: 'pointer',
-                transition: 'all 0.2s ease'
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                fontSize: '13px',
+                fontWeight: '700',
+                transition: 'all 0.2s',
+                backgroundColor: mode === 'AI_EXTRACT' ? '#2563eb' : 'transparent',
+                color: mode === 'AI_EXTRACT' ? '#ffffff' : '#94a3b8',
+                boxShadow: mode === 'AI_EXTRACT' ? '0 10px 15px -3px rgba(37, 99, 235, 0.3)' : 'none'
               }}
             >
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept={activeMode === 'EXCEL_EXTRACT' ? '.xlsx,.xls,.csv' : 'image/*,.pdf,.xlsx,.xls,.csv'}
-                onChange={(e) => handleFileSelected(e.target.files?.[0])}
-                style={{ display: 'none' }}
-              />
+              <Sparkles size={16} />
+              <span>تحليل ذكي (AI/صور/PDF)</span>
+            </button>
 
-              {selectedFile ? (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
-                  <CheckCircle2 style={{ width: '32px', height: '32px', color: '#10b981' }} />
-                  <div style={{ textAlign: 'right' }}>
-                    <span style={{ fontSize: '0.9rem', fontWeight: 800, color: '#f8fafc', display: 'block' }}>{selectedFile.name}</span>
-                    <span style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', fontFamily: 'monospace' }}>
-                      {(selectedFile.size / 1024).toFixed(1)} KB • {selectedFile.type || 'ملف'}
-                    </span>
-                  </div>
-                </div>
-              ) : (
-                <div>
-                  <div
-                    style={{
-                      width: '56px',
-                      height: '56px',
-                      borderRadius: '16px',
-                      backgroundColor: '#1e3a8a',
-                      color: '#38bdf8',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      margin: '0 auto 12px'
-                    }}
-                  >
-                    <UploadCloud style={{ width: '30px', height: '30px' }} />
-                  </div>
-                  <p style={{ fontSize: '0.925rem', fontWeight: 900, color: '#f8fafc', margin: '0 0 6px' }}>
-                    اضغط هنا أو اسحب الملفات لإدراجها في قائمة الرفع
-                  </p>
-                  <p style={{ fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8', margin: 0 }}>
-                    {activeMode === 'EXCEL_EXTRACT'
-                      ? 'يسمح برفع ملفات الإكسل فقط (.xlsx, .xls, .csv)'
-                      : 'يسمح برفع الصور والـ PDF فقط (png, jpg, pdf)'}
-                  </p>
-                </div>
+            <button
+              type="button"
+              onClick={() => handleModeChange('EXCEL_EXTRACT')}
+              style={{
+                padding: '12px 14px',
+                borderRadius: '12px',
+                border: 'none',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                fontSize: '13px',
+                fontWeight: '700',
+                transition: 'all 0.2s',
+                backgroundColor: mode === 'EXCEL_EXTRACT' ? '#059669' : 'transparent',
+                color: mode === 'EXCEL_EXTRACT' ? '#ffffff' : '#94a3b8',
+                boxShadow: mode === 'EXCEL_EXTRACT' ? '0 10px 15px -3px rgba(5, 150, 105, 0.3)' : 'none'
+              }}
+            >
+              <FileSpreadsheet size={16} />
+              <span>استيراد إكسل (Excel/CSV)</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleModeChange('DIRECT_UPLOAD')}
+              style={{
+                padding: '12px 14px',
+                borderRadius: '12px',
+                border: 'none',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                fontSize: '13px',
+                fontWeight: '700',
+                transition: 'all 0.2s',
+                backgroundColor: mode === 'DIRECT_UPLOAD' ? '#7c3aed' : 'transparent',
+                color: mode === 'DIRECT_UPLOAD' ? '#ffffff' : '#94a3b8',
+                boxShadow: mode === 'DIRECT_UPLOAD' ? '0 10px 15px -3px rgba(124, 58, 237, 0.3)' : 'none'
+              }}
+            >
+              <FolderPlus size={16} />
+              <span>أرشفة مباشرة (يدوي)</span>
+            </button>
+          </div>
+
+          {/* Mode Guidance Alert */}
+          <div
+            style={{
+              padding: '12px 16px',
+              borderRadius: '12px',
+              backgroundColor: 'rgba(30, 41, 59, 0.6)',
+              border: '1px solid rgba(51, 65, 85, 0.8)',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '10px',
+              fontSize: '12px',
+              color: '#cbd5e1'
+            }}
+          >
+            <Info size={16} style={{ color: '#38bdf8', shrink: 0, marginTop: '2px' }} />
+            <div>
+              {mode === 'AI_EXTRACT' && (
+                <span>
+                  <strong>نمط الذكاء الاصطناعي:</strong> يدعم صور الفواتير (JPG, PNG) وملفات PDF. يقوم محرك Groq و Gemini باستخراج الأصناف، الأسعار، الخصومات، والكميات تلقائياً.
+                </span>
               )}
-
-              {isExtracting && (
-                <div style={{ marginTop: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', fontSize: '0.8rem', fontWeight: 700, color: '#60a5fa' }}>
-                  <Loader2 style={{ width: '18px', height: '18px', animation: 'spin 1s linear infinite' }} />
-                  <span>{extractStatus}</span>
-                </div>
+              {mode === 'EXCEL_EXTRACT' && (
+                <span>
+                  <strong>نمط استيراد الإكسل:</strong> يدعم ملفات Excel (.xlsx, .xls) و CSV. يقوم بكشف الأعمدة وتفكيك الشيتات وتجميع الأصناف حسب رقم الفاتورة تلقائياً.
+                </span>
+              )}
+              {mode === 'DIRECT_UPLOAD' && (
+                <span>
+                  <strong>نمط الأرشفة المباشرة:</strong> إدخال بيانات الفاتورة يدوياً مع إمكانية إرفاق أي ملف مستند ليتم حفظه في الأرشيف مباشرة.
+                </span>
               )}
             </div>
           </div>
 
-          {/* Feedback messages */}
-          {errorMsg && (
-            <div style={{
-              backgroundColor: 'rgba(239, 68, 68, 0.12)',
-              border: '1px solid rgba(239, 68, 68, 0.3)',
-              color: '#fca5a5',
-              padding: '10px 14px',
-              borderRadius: '10px',
-              fontSize: '0.8rem',
-              marginBottom: '16px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px'
-            }}>
-              <AlertCircle style={{ width: '16px', height: '16px', flexShrink: 0 }} />
-              <span>{errorMsg}</span>
-            </div>
-          )}
-
-          {successMsg && (
-            <div style={{
-              backgroundColor: 'rgba(16, 185, 129, 0.12)',
-              border: '1px solid rgba(16, 185, 129, 0.3)',
-              color: '#6ee7b7',
-              padding: '10px 14px',
-              borderRadius: '10px',
-              fontSize: '0.8rem',
-              marginBottom: '16px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px'
-            }}>
-              <CheckCircle2 style={{ width: '16px', height: '16px', flexShrink: 0 }} />
-              <span>{successMsg}</span>
-            </div>
-          )}
-
-          {/* Form Fields & Extracted Data Form */}
-          <form onSubmit={handleSaveInvoice}>
+          {/* Global Error & Success Alerts */}
+          {globalError && (
             <div
               style={{
-                backgroundColor: '#070b14',
-                border: '1px solid #1e293b',
-                borderRadius: '16px',
-                padding: '20px',
-                marginBottom: '20px'
+                padding: '12px 16px',
+                borderRadius: '12px',
+                backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                color: '#f87171',
+                fontSize: '12px',
+                fontWeight: '600',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
               }}
             >
-              <h3 style={{ fontSize: '0.825rem', fontWeight: 800, color: '#38bdf8', textTransform: 'uppercase', margin: '0 0 14px', textAlign: 'right' }}>
-                📋 بيانات الفاتورة الأساسية
-              </h3>
+              <AlertCircle size={16} />
+              <span>{globalError}</span>
+            </div>
+          )}
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px', textAlign: 'right' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.775rem', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>رقم الفاتورة *</label>
-                  <input
-                    type="text"
-                    required
-                    value={invoiceNumber}
-                    onChange={(e) => setInvoiceNumber(e.target.value)}
-                    placeholder="مثال: INV-10482"
-                    style={{
-                      width: '100%',
-                      padding: '10px 12px',
-                      borderRadius: '10px',
-                      backgroundColor: '#0b1120',
-                      border: '1px solid #1e293b',
-                      color: '#f8fafc',
-                      fontSize: '0.875rem',
-                      fontFamily: 'monospace',
-                      boxSizing: 'border-box'
-                    }}
-                  />
-                </div>
+          {globalSuccess && (
+            <div
+              style={{
+                padding: '12px 16px',
+                borderRadius: '12px',
+                backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                border: '1px solid rgba(16, 185, 129, 0.3)',
+                color: '#34d399',
+                fontSize: '12px',
+                fontWeight: '600',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}
+            >
+              <CheckCircle2 size={16} />
+              <span>{globalSuccess}</span>
+            </div>
+          )}
 
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.775rem', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>المورد / الشركة *</label>
-                  <select
-                    required
-                    value={supplierId}
-                    onChange={(e) => setSupplierId(e.target.value)}
+          {/* Dropzone Area */}
+          <div
+            onClick={() => fileInputRef.current?.click()}
+            style={{
+              border: '2px dashed #334155',
+              borderRadius: '20px',
+              padding: '30px 20px',
+              textAlign: 'center',
+              cursor: 'pointer',
+              backgroundColor: 'rgba(15, 23, 42, 0.4)',
+              transition: 'all 0.2s',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '12px'
+            }}
+          >
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileSelect}
+              multiple
+              accept={
+                mode === 'EXCEL_EXTRACT'
+                  ? '.xlsx,.xls,.csv'
+                  : mode === 'AI_EXTRACT'
+                  ? '.jpg,.jpeg,.png,.webp,.pdf,image/*,application/pdf'
+                  : '*/*'
+              }
+              style={{ display: 'none' }}
+            />
+
+            <div
+              style={{
+                width: '54px',
+                height: '54px',
+                borderRadius: '16px',
+                backgroundColor:
+                  mode === 'EXCEL_EXTRACT'
+                    ? 'rgba(5, 150, 105, 0.15)'
+                    : mode === 'AI_EXTRACT'
+                    ? 'rgba(59, 130, 246, 0.15)'
+                    : 'rgba(124, 58, 237, 0.15)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: mode === 'EXCEL_EXTRACT' ? '#10b981' : mode === 'AI_EXTRACT' ? '#3b82f6' : '#a855f7'
+              }}
+            >
+              {mode === 'EXCEL_EXTRACT' ? (
+                <FileSpreadsheet size={28} />
+              ) : mode === 'AI_EXTRACT' ? (
+                <Sparkles size={28} />
+              ) : (
+                <UploadCloud size={28} />
+              )}
+            </div>
+
+            <div>
+              <p style={{ fontSize: '14px', fontWeight: '700', color: '#f1f5f9', margin: '0 0 4px 0' }}>
+                اضغط هنا لاختيار الملفات أو اسحبها وأفلتها هنا
+              </p>
+              <p style={{ fontSize: '11px', color: '#64748b', margin: 0 }}>
+                {mode === 'EXCEL_EXTRACT' && 'الصيغ المدعومة: XLSX, XLS, CSV (يمكنك رفع عدة ملفات معاً)'}
+                {mode === 'AI_EXTRACT' && 'الصيغ المدعومة: JPG, PNG, PDF, WEBP (استخراج ذكي لبنود الأدوية)'}
+                {mode === 'DIRECT_UPLOAD' && 'جميع الصيغ مقبولة كملفات مرفقة'}
+              </p>
+            </div>
+          </div>
+
+          {/* File Queue List */}
+          {fileList.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '12px', fontWeight: '700', color: '#94a3b8' }}>
+                  الملفات المحددة في قائمة الانتظار ({fileList.length}):
+                </span>
+                {!isUploading && (
+                  <button
+                    type="button"
+                    onClick={() => setFileList([])}
                     style={{
-                      width: '100%',
-                      padding: '10px 12px',
-                      borderRadius: '10px',
-                      backgroundColor: '#0b1120',
-                      border: '1px solid #1e293b',
-                      color: '#f8fafc',
-                      fontSize: '0.875rem',
-                      boxSizing: 'border-box'
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#f87171',
+                      fontSize: '11px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
                     }}
                   >
-                    <option value="">اختر المورد...</option>
-                    {suppliers.map((s) => (
-                      <option key={s.id} value={s.id} style={{ backgroundColor: '#0b1120', color: '#fff' }}>{s.name}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.775rem', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>تاريخ الفاتورة *</label>
-                  <input
-                    type="date"
-                    required
-                    value={invoiceDate}
-                    onChange={(e) => setInvoiceDate(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '9px 12px',
-                      borderRadius: '10px',
-                      backgroundColor: '#0b1120',
-                      border: '1px solid #1e293b',
-                      color: '#f8fafc',
-                      fontSize: '0.875rem',
-                      boxSizing: 'border-box'
-                    }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.775rem', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>أمين العهدة المستلم</label>
-                  <select
-                    value={receiverId}
-                    onChange={(e) => setReceiverId(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '10px 12px',
-                      borderRadius: '10px',
-                      backgroundColor: '#0b1120',
-                      border: '1px solid #1e293b',
-                      color: '#f8fafc',
-                      fontSize: '0.875rem',
-                      boxSizing: 'border-box'
-                    }}
-                  >
-                    <option value="">غير محدد</option>
-                    {employees.map((e) => (
-                      <option key={e.id} value={e.id} style={{ backgroundColor: '#0b1120', color: '#fff' }}>{e.name} ({e.role || 'موظف'})</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.775rem', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>مدخل البيانات بالأرشيف</label>
-                  <select
-                    value={entryClerkId}
-                    onChange={(e) => setEntryClerkId(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '10px 12px',
-                      borderRadius: '10px',
-                      backgroundColor: '#0b1120',
-                      border: '1px solid #1e293b',
-                      color: '#f8fafc',
-                      fontSize: '0.875rem',
-                      boxSizing: 'border-box'
-                    }}
-                  >
-                    <option value="">غير محدد</option>
-                    {employees.map((e) => (
-                      <option key={e.id} value={e.id} style={{ backgroundColor: '#0b1120', color: '#fff' }}>{e.name} ({e.role || 'موظف'})</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.775rem', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>ملاحظات الفاتورة</label>
-                  <input
-                    type="text"
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    placeholder="أي ملاحظات خاصة بالتسليم..."
-                    style={{
-                      width: '100%',
-                      padding: '10px 12px',
-                      borderRadius: '10px',
-                      backgroundColor: '#0b1120',
-                      border: '1px solid #1e293b',
-                      color: '#f8fafc',
-                      fontSize: '0.875rem',
-                      boxSizing: 'border-box'
-                    }}
-                  />
-                </div>
+                    <Trash2 size={12} />
+                    مسح الكل
+                  </button>
+                )}
               </div>
-            </div>
 
-            {/* Items Table Section */}
-            <div
-              style={{
-                backgroundColor: '#070b14',
-                border: '1px solid #1e293b',
-                borderRadius: '16px',
-                padding: '20px',
-                marginBottom: '20px'
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
-                <button
-                  type="button"
-                  onClick={handleAddItemRow}
+              {fileList.map((item, idx) => (
+                <div
+                  key={idx}
                   style={{
-                    padding: '6px 14px',
-                    borderRadius: '10px',
-                    fontSize: '0.775rem',
-                    fontWeight: 700,
-                    color: '#93c5fd',
-                    backgroundColor: 'rgba(30, 58, 138, 0.4)',
-                    border: '1px solid #2563eb',
+                    backgroundColor: '#1e293b',
+                    borderRadius: '14px',
+                    padding: '12px 16px',
+                    border: '1px solid #334155',
                     display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    cursor: 'pointer'
+                    flexDirection: 'column',
+                    gap: '8px'
                   }}
                 >
-                  <Plus style={{ width: '14px', height: '14px' }} />
-                  <span>إضافة صنف</span>
-                </button>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <FileText size={18} style={{ color: '#38bdf8' }} />
+                      <div>
+                        <p style={{ fontSize: '12px', fontWeight: '700', color: '#f8fafc', margin: 0 }}>
+                          {item.file.name}
+                        </p>
+                        <p style={{ fontSize: '10px', color: '#94a3b8', margin: '2px 0 0 0' }}>
+                          {(item.file.size / 1024).toFixed(1)} كيلوبايت
+                        </p>
+                      </div>
+                    </div>
 
-                <h3 style={{ fontSize: '0.825rem', fontWeight: 800, color: '#f8fafc', margin: 0 }}>
-                  أصناف وبنود الفاتورة ({items.length})
-                </h3>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      {item.status === 'PENDING' && (
+                        <span
+                          style={{
+                            fontSize: '11px',
+                            backgroundColor: '#334155',
+                            color: '#94a3b8',
+                            padding: '3px 10px',
+                            borderRadius: '999px',
+                            fontWeight: '600'
+                          }}
+                        >
+                          في الانتظار
+                        </span>
+                      )}
+                      {item.status === 'UPLOADING' && (
+                        <span
+                          style={{
+                            fontSize: '11px',
+                            backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                            color: '#60a5fa',
+                            padding: '3px 10px',
+                            borderRadius: '999px',
+                            fontWeight: '600',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}
+                        >
+                          <Loader2 size={12} className="animate-spin" />
+                          {item.message || 'جاري التحليل...'}
+                        </span>
+                      )}
+                      {item.status === 'SUCCESS' && (
+                        <span
+                          style={{
+                            fontSize: '11px',
+                            backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                            color: '#34d399',
+                            padding: '3px 10px',
+                            borderRadius: '999px',
+                            fontWeight: '600',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}
+                        >
+                          <CheckCircle2 size={12} />
+                          {item.message || 'تمت الأرشفة'}
+                        </span>
+                      )}
+                      {item.status === 'ERROR' && (
+                        <span
+                          style={{
+                            fontSize: '11px',
+                            backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                            color: '#f87171',
+                            padding: '3px 10px',
+                            borderRadius: '999px',
+                            fontWeight: '600'
+                          }}
+                        >
+                          {item.message || 'فشلت المعالجة'}
+                        </span>
+                      )}
+
+                      {!isUploading && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveFile(idx)}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: '#64748b',
+                            cursor: 'pointer',
+                            padding: '4px'
+                          }}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Summary Badge for Extracted Data */}
+                  {item.extractedSummary && (
+                    <div
+                      style={{
+                        padding: '8px 12px',
+                        backgroundColor: '#0f172a',
+                        borderRadius: '10px',
+                        border: '1px solid #334155',
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(4, 1fr)',
+                        gap: '8px',
+                        fontSize: '11px',
+                        color: '#cbd5e1'
+                      }}
+                    >
+                      <div>
+                        <span style={{ color: '#64748b' }}>رقم الفاتورة: </span>
+                        <strong>{item.extractedSummary.invoiceNumber}</strong>
+                      </div>
+                      <div>
+                        <span style={{ color: '#64748b' }}>المورد: </span>
+                        <strong>{item.extractedSummary.supplierName}</strong>
+                      </div>
+                      <div>
+                        <span style={{ color: '#64748b' }}>الأصناف: </span>
+                        <strong>{item.extractedSummary.itemsCount} صنف</strong>
+                      </div>
+                      <div>
+                        <span style={{ color: '#64748b' }}>الصافي: </span>
+                        <strong style={{ color: '#34d399' }}>{item.extractedSummary.netAmount} ج.م</strong>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Manual Input Fields for DIRECT_UPLOAD */}
+          {mode === 'DIRECT_UPLOAD' && (
+            <div
+              style={{
+                backgroundColor: 'rgba(30, 41, 59, 0.4)',
+                border: '1px solid #1e293b',
+                borderRadius: '16px',
+                padding: '16px',
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: '14px'
+              }}
+            >
+              <div>
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: '700', color: '#cbd5e1', marginBottom: '6px' }}>
+                  رقم الفاتورة: *
+                </label>
+                <input
+                  type="text"
+                  value={invoiceNumber}
+                  onChange={(e) => setInvoiceNumber(e.target.value)}
+                  placeholder="مثال: INV-1002"
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '10px',
+                    backgroundColor: '#0f172a',
+                    border: '1px solid #334155',
+                    color: '#f8fafc',
+                    fontSize: '12px',
+                    outline: 'none'
+                  }}
+                />
               </div>
 
-              {items.length === 0 ? (
-                <p style={{ fontSize: '0.775rem', color: '#64748b', padding: '24px', textAlign: 'center', backgroundColor: '#0b1120', borderRadius: '12px', border: '1px solid #1e293b', margin: 0 }}>
-                  لا توجد أصناف مضافة. سيتم استخراج الأصناف آلياً عند رفع الملف أو يمكنك النقر على "إضافة صنف".
-                </p>
-              ) : (
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'right', fontSize: '0.75rem', color: '#cbd5e1' }}>
-                    <thead>
-                      <tr style={{ backgroundColor: '#0b1120', borderBottom: '1px solid #1e293b', color: '#94a3b8', fontWeight: 800 }}>
-                        <th style={{ padding: '8px', width: '32px' }}>#</th>
-                        <th style={{ padding: '8px', minWidth: '180px' }}>اسم الصنف / الدواء</th>
-                        <th style={{ padding: '8px', width: '80px' }}>الكمية</th>
-                        <th style={{ padding: '8px', width: '90px' }}>سعر الجمهور</th>
-                        <th style={{ padding: '8px', width: '80px' }}>الخصم %</th>
-                        <th style={{ padding: '8px', width: '90px' }}>الصافي</th>
-                        <th style={{ padding: '8px', width: '100px' }}>الإجمالي</th>
-                        <th style={{ padding: '8px', width: '90px' }}>التشغيلة</th>
-                        <th style={{ padding: '8px', width: '90px' }}>الصلاحية</th>
-                        <th style={{ padding: '8px', width: '40px' }}></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {items.map((item, idx) => (
-                        <tr key={idx} style={{ borderBottom: '1px solid rgba(30, 41, 59, 0.6)' }}>
-                          <td style={{ padding: '8px', color: '#64748b', fontFamily: 'monospace' }}>{idx + 1}</td>
-                          <td style={{ padding: '8px' }}>
-                            <input
-                              type="text"
-                              value={item.productName || item.item_name || ''}
-                              onChange={(e) => handleItemChange(idx, 'productName', e.target.value)}
-                              placeholder="اسم الصنف..."
-                              style={{ width: '100%', padding: '6px 8px', borderRadius: '8px', backgroundColor: '#0b1120', border: '1px solid #1e293b', color: '#fff', fontSize: '0.75rem', boxSizing: 'border-box' }}
-                            />
-                          </td>
-                          <td style={{ padding: '8px' }}>
-                            <input
-                              type="number"
-                              min="1"
-                              value={item.quantity || 1}
-                              onChange={(e) => handleItemChange(idx, 'quantity', e.target.value)}
-                              style={{ width: '100%', padding: '6px 4px', borderRadius: '8px', backgroundColor: '#0b1120', border: '1px solid #1e293b', color: '#fff', fontSize: '0.75rem', textAlign: 'center', fontFamily: 'monospace', boxSizing: 'border-box' }}
-                            />
-                          </td>
-                          <td style={{ padding: '8px' }}>
-                            <input
-                              type="number"
-                              step="0.01"
-                              value={item.unitPrice || item.publicPrice || 0}
-                              onChange={(e) => handleItemChange(idx, 'unitPrice', e.target.value)}
-                              style={{ width: '100%', padding: '6px 4px', borderRadius: '8px', backgroundColor: '#0b1120', border: '1px solid #1e293b', color: '#fff', fontSize: '0.75rem', textAlign: 'center', fontFamily: 'monospace', boxSizing: 'border-box' }}
-                            />
-                          </td>
-                          <td style={{ padding: '8px' }}>
-                            <input
-                              type="number"
-                              step="0.1"
-                              value={item.discount || 0}
-                              onChange={(e) => handleItemChange(idx, 'discount', e.target.value)}
-                              style={{ width: '100%', padding: '6px 4px', borderRadius: '8px', backgroundColor: '#0b1120', border: '1px solid #1e293b', color: '#fbbf24', fontSize: '0.75rem', textAlign: 'center', fontFamily: 'monospace', boxSizing: 'border-box' }}
-                            />
-                          </td>
-                          <td style={{ padding: '8px', fontFamily: 'monospace', textAlign: 'center', color: '#f8fafc' }}>
-                            {(parseFloat(item.netPrice || 0)).toFixed(2)}
-                          </td>
-                          <td style={{ padding: '8px', fontFamily: 'monospace', fontWeight: 800, textAlign: 'center', color: '#34d399' }}>
-                            {(parseFloat(item.totalPrice || 0)).toFixed(2)}
-                          </td>
-                          <td style={{ padding: '8px' }}>
-                            <input
-                              type="text"
-                              value={item.batchNumber || ''}
-                              onChange={(e) => handleItemChange(idx, 'batchNumber', e.target.value)}
-                              placeholder="Batch"
-                              style={{ width: '100%', padding: '6px 4px', borderRadius: '8px', backgroundColor: '#0b1120', border: '1px solid #1e293b', color: '#fff', fontSize: '0.75rem', fontFamily: 'monospace', boxSizing: 'border-box' }}
-                            />
-                          </td>
-                          <td style={{ padding: '8px' }}>
-                            <input
-                              type="text"
-                              value={item.expiryDate || ''}
-                              onChange={(e) => handleItemChange(idx, 'expiryDate', e.target.value)}
-                              placeholder="MM/YY"
-                              style={{ width: '100%', padding: '6px 4px', borderRadius: '8px', backgroundColor: '#0b1120', border: '1px solid #1e293b', color: '#fff', fontSize: '0.75rem', fontFamily: 'monospace', boxSizing: 'border-box' }}
-                            />
-                          </td>
-                          <td style={{ padding: '8px', textAlign: 'center' }}>
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveItem(idx)}
-                              style={{ background: 'transparent', border: 'none', color: '#f87171', cursor: 'pointer', padding: '4px' }}
-                            >
-                              <Trash2 style={{ width: '14px', height: '14px' }} />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+              <div>
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: '700', color: '#cbd5e1', marginBottom: '6px' }}>
+                  تاريخ الفاتورة:
+                </label>
+                <input
+                  type="date"
+                  value={invoiceDate}
+                  onChange={(e) => setInvoiceDate(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '10px',
+                    backgroundColor: '#0f172a',
+                    border: '1px solid #334155',
+                    color: '#f8fafc',
+                    fontSize: '12px',
+                    outline: 'none'
+                  }}
+                />
+              </div>
 
-              {/* Totals Breakdown */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '24px', paddingTop: '16px', borderTop: '1px solid #1e293b', marginTop: '14px' }}>
-                <div style={{ textAlign: 'right' }}>
-                  <span style={{ fontSize: '0.7rem', color: '#94a3b8', display: 'block' }}>الإجمالي بالجمهور:</span>
-                  <span style={{ fontSize: '0.9rem', color: '#f8fafc', fontWeight: 800, fontFamily: 'monospace' }}>{totalGross.toFixed(2)} ج.م</span>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <span style={{ fontSize: '0.7rem', color: '#94a3b8', display: 'block' }}>إجمالي الخصم:</span>
-                  <span style={{ fontSize: '0.9rem', color: '#fbbf24', fontWeight: 800, fontFamily: 'monospace' }}>-{totalDiscount.toFixed(2)} ج.م</span>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <span style={{ fontSize: '0.7rem', color: '#94a3b8', display: 'block' }}>الصافي المطلوب:</span>
-                  <span style={{ fontSize: '1.05rem', color: '#34d399', fontWeight: 900, fontFamily: 'monospace' }}>{totalNet.toFixed(2)} ج.م</span>
-                </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: '700', color: '#cbd5e1', marginBottom: '6px' }}>
+                  المبلغ الإجمالي (الصافي):
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={totalAmount}
+                  onChange={(e) => setTotalAmount(e.target.value)}
+                  placeholder="0.00"
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '10px',
+                    backgroundColor: '#0f172a',
+                    border: '1px solid #334155',
+                    color: '#f8fafc',
+                    fontSize: '12px',
+                    outline: 'none'
+                  }}
+                />
               </div>
             </div>
+          )}
 
-            {/* Submit & Cancel Actions */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '14px', borderTop: '1px solid #1e293b' }}>
-              <button
-                type="button"
-                onClick={onClose}
+          {/* Supplier, Staff & Notes Assignments */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(4, 1fr)',
+              gap: '14px',
+              paddingTop: '12px',
+              borderTop: '1px solid #1e293b'
+            }}
+          >
+            <div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: '700', color: '#cbd5e1', marginBottom: '6px' }}>
+                <Building size={14} style={{ color: '#38bdf8' }} />
+                المورد / الشركة:
+              </label>
+              <input
+                type="text"
+                list="suppliers-list-modal"
+                value={selectedSupplierName}
+                onChange={(e) => setSelectedSupplierName(e.target.value)}
+                placeholder="اسم المورد أو الشركة..."
                 style={{
-                  padding: '10px 20px',
-                  borderRadius: '12px',
-                  backgroundColor: '#1e293b',
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: '10px',
+                  backgroundColor: '#0f172a',
                   border: '1px solid #334155',
-                  color: '#cbd5e1',
-                  fontSize: '0.825rem',
-                  fontWeight: 700,
-                  cursor: 'pointer'
+                  color: '#f8fafc',
+                  fontSize: '12px',
+                  outline: 'none'
                 }}
-              >
-                إلغاء
-              </button>
-
-              <button
-                type="submit"
-                disabled={isSaving || isExtracting}
-                style={{
-                  padding: '12px 28px',
-                  borderRadius: '12px',
-                  backgroundColor: '#2563eb',
-                  border: '1px solid #3b82f6',
-                  color: '#ffffff',
-                  fontSize: '0.875rem',
-                  fontWeight: 800,
-                  cursor: (isSaving || isExtracting) ? 'not-allowed' : 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  boxShadow: '0 4px 16px rgba(37, 99, 235, 0.4)'
-                }}
-              >
-                {isSaving ? (
-                  <>
-                    <Loader2 style={{ width: '16px', height: '16px', animation: 'spin 1s linear infinite' }} />
-                    <span>جاري الحفظ والأرشفة...</span>
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle2 style={{ width: '16px', height: '16px' }} />
-                    <span>حفظ وأرشفة الفاتورة نهائياً</span>
-                  </>
-                )}
-              </button>
+              />
+              <datalist id="suppliers-list-modal">
+                {suppliers.map((sup) => (
+                  <option key={sup.id} value={sup.name} />
+                ))}
+              </datalist>
             </div>
 
-          </form>
+            <div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: '700', color: '#cbd5e1', marginBottom: '6px' }}>
+                <UserCheck size={14} style={{ color: '#34d399' }} />
+                أمين العهدة المستلم:
+              </label>
+              <select
+                value={receiverId}
+                onChange={(e) => setReceiverId(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: '10px',
+                  backgroundColor: '#0f172a',
+                  border: '1px solid #334155',
+                  color: '#f8fafc',
+                  fontSize: '12px',
+                  outline: 'none'
+                }}
+              >
+                <option value="">غير محدد</option>
+                {employees.map((emp) => (
+                  <option key={emp.id} value={emp.id}>
+                    {emp.name} {emp.role ? `(${emp.role})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-        </div>
+            <div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: '700', color: '#cbd5e1', marginBottom: '6px' }}>
+                <UserPen size={14} style={{ color: '#818cf8' }} />
+                مدخل البيانات بالأرشيف:
+              </label>
+              <select
+                value={entryClerkId}
+                onChange={(e) => setEntryClerkId(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: '10px',
+                  backgroundColor: '#0f172a',
+                  border: '1px solid #334155',
+                  color: '#f8fafc',
+                  fontSize: '12px',
+                  outline: 'none'
+                }}
+              >
+                <option value="">غير محدد</option>
+                {employees.map((emp) => (
+                  <option key={emp.id} value={emp.id}>
+                    {emp.name} {emp.role ? `(${emp.role})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: '700', color: '#cbd5e1', marginBottom: '6px' }}>
+                <StickyNote size={14} style={{ color: '#fbbf24' }} />
+                ملاحظات الفاتورة:
+              </label>
+              <input
+                type="text"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="ملاحظات اختيارية..."
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: '10px',
+                  backgroundColor: '#0f172a',
+                  border: '1px solid #334155',
+                  color: '#f8fafc',
+                  fontSize: '12px',
+                  outline: 'none'
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Modal Footer Actions */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'flex-end',
+              gap: '12px',
+              paddingTop: '16px',
+              borderTop: '1px solid #1e293b'
+            }}
+          >
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={isUploading}
+              style={{
+                padding: '10px 20px',
+                borderRadius: '12px',
+                border: 'none',
+                backgroundColor: 'transparent',
+                color: '#94a3b8',
+                fontSize: '13px',
+                fontWeight: '600',
+                cursor: 'pointer'
+              }}
+            >
+              إلغاء
+            </button>
+
+            <button
+              type="submit"
+              disabled={isUploading || (mode !== 'DIRECT_UPLOAD' && fileList.length === 0)}
+              style={{
+                padding: '12px 28px',
+                borderRadius: '12px',
+                border: 'none',
+                backgroundColor:
+                  mode === 'EXCEL_EXTRACT' ? '#059669' : mode === 'AI_EXTRACT' ? '#2563eb' : '#7c3aed',
+                color: '#ffffff',
+                fontSize: '13px',
+                fontWeight: '700',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.4)',
+                opacity: isUploading || (mode !== 'DIRECT_UPLOAD' && fileList.length === 0) ? 0.5 : 1
+              }}
+            >
+              {isUploading ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  <span>جاري معالجة وحفظ الفواتير...</span>
+                </>
+              ) : (
+                <>
+                  <UploadCloud size={16} />
+                  <span>
+                    {mode === 'DIRECT_UPLOAD' && fileList.length === 0
+                      ? 'حفظ الفاتورة بالأرشيف'
+                      : `بدء رفع ومعالجة (${fileList.length}) ملفات`}
+                  </span>
+                </>
+              )}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

@@ -244,7 +244,9 @@ export default function ArchiveSystemView({ isStandalone = false }) {
           onClose={() => setSelectedInvoice(null)}
           suppliers={suppliers}
           employees={employees}
+          settings={settings}
           onInvoiceUpdated={loadAllData}
+          onInvoiceDeleted={loadAllData}
         />
       )}
 

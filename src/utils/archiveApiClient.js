@@ -1,140 +1,105 @@
 /**
  * archiveApiClient.js
- * عميل HTTP المخصص للاتصال بنظام أرشيف الصيدلية وإدارة الفواتير وقاعدة بيانات MariaDB
+ * Unified API Client for Pharmacy Archive System (Embedded & Standalone)
+ * Full API Endpoints & Multi-Environment Support
  */
-
-import { API_BASE_URL } from './apiClient';
 
 const ARCHIVE_TOKEN_KEY = 'pharmacy_archive_token';
 const ARCHIVE_USER_KEY = 'pharmacy_archive_user';
 
 export function getArchiveToken() {
-  try {
-    return localStorage.getItem(ARCHIVE_TOKEN_KEY) || '';
-  } catch {
-    return '';
-  }
+  return localStorage.getItem(ARCHIVE_TOKEN_KEY) || '';
 }
 
 export function setArchiveSession(token, username) {
-  try {
-    if (token) localStorage.setItem(ARCHIVE_TOKEN_KEY, token);
-    if (username) localStorage.setItem(ARCHIVE_USER_KEY, username);
-  } catch {}
+  if (token) localStorage.setItem(ARCHIVE_TOKEN_KEY, token);
+  if (username) localStorage.setItem(ARCHIVE_USER_KEY, username);
 }
 
 export function clearArchiveSession() {
-  try {
-    localStorage.removeItem(ARCHIVE_TOKEN_KEY);
-    localStorage.removeItem(ARCHIVE_USER_KEY);
-  } catch {}
+  localStorage.removeItem(ARCHIVE_TOKEN_KEY);
+  localStorage.removeItem(ARCHIVE_USER_KEY);
 }
 
 export function getArchiveUsername() {
-  try {
-    return localStorage.getItem(ARCHIVE_USER_KEY) || 'admin';
-  } catch {
-    return 'admin';
-  }
+  return localStorage.getItem(ARCHIVE_USER_KEY) || 'admin';
 }
 
-async function parseResponseBody(response) {
-  try {
-    const rawText = await response.text();
-    if (!rawText || !rawText.trim()) {
-      return { success: response.ok, error: response.ok ? null : `استجابة فارغة من الخادم (${response.status})` };
-    }
-    const data = JSON.parse(rawText);
-    if (!response.ok && !data.error) {
-      data.error = `خطأ في الخادم (${response.status})`;
-    }
-    return data;
-  } catch {
-    if (response.status === 404) {
-      return { success: false, error: 'المسار المطلوب غير موجود على الخادم (404)' };
-    }
-    if (response.status === 500) {
-      return { success: false, error: 'حدث خطأ داخلي في خادم الأرشيف (500)' };
-    }
-    return {
-      success: false,
-      error: response.ok ? 'استجابة غير مهيكلة من الخادم' : `خطأ في استجابة الخادم (${response.status})`
-    };
+function resolveApiBaseUrl() {
+  if (typeof window === 'undefined') return '/api';
+  const origin = window.location.origin;
+  const path = window.location.pathname;
+
+  if (window.location.port === '5173') {
+    return 'http://localhost/HR%20New/api';
   }
+
+  if (path.includes('/HR%20New') || path.includes('/hr-new') || path.includes('/HR_New')) {
+    const basePath = path.substring(0, path.toLowerCase().indexOf('/hr') + 7);
+    return `${origin}${basePath.replace(/\/$/, '')}/api`;
+  }
+
+  return `${origin}/api`;
 }
+
+export const API_BASE_URL = resolveApiBaseUrl();
 
 async function archiveFetch(endpoint, options = {}) {
   const token = getArchiveToken();
+  const cleanBase = API_BASE_URL.replace(/\/$/, '');
+  const cleanEndpoint = endpoint.replace(/^\//, '');
+
   const headers = {
     'Content-Type': 'application/json',
-    'Accept': 'application/json',
-    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(options.headers || {}),
   };
 
-  const cleanBase = API_BASE_URL.replace(/\/+$/, '');
-  const cleanEndpoint = endpoint.replace(/^\/+/, '');
-
-  // 1. تجربة نقطة الدخول index.php?endpoint=archive/...
-  const url = `${cleanBase}/index.php?endpoint=archive/${cleanEndpoint}`;
+  const primaryUrl = `${cleanBase}/index.php?endpoint=archive/${cleanEndpoint}`;
 
   try {
-    const response = await fetch(url, {
+    const res = await fetch(primaryUrl, {
       ...options,
       headers,
     });
 
-    if (response.ok) {
-      return await parseResponseBody(response);
-    }
-
-    // إذا فشل (404 أو 405)، تجربة المسار المباشر
-    if (response.status === 404 || response.status === 405) {
+    if (res.status === 404 || res.status === 405) {
       const altUrl = `${cleanBase}/archive/${cleanEndpoint}`;
-      const altResponse = await fetch(altUrl, {
+      const altRes = await fetch(altUrl, {
         ...options,
         headers,
       });
-      return await parseResponseBody(altResponse);
+      return await altRes.json();
     }
 
-    return await parseResponseBody(response);
+    return await res.json();
   } catch (err) {
-    // محاولة بديلة عبر المسار المباشر
     try {
       const altUrl = `${cleanBase}/archive/${cleanEndpoint}`;
-      const altResponse = await fetch(altUrl, {
+      const altRes = await fetch(altUrl, {
         ...options,
         headers,
       });
-      return await parseResponseBody(altResponse);
+      return await altRes.json();
     } catch {
-      return { success: false, error: err.message || 'تعذر الاتصال بخادم الأرشيف' };
+      throw err;
     }
   }
 }
 
-// 1. Auth API
+// 1. Authentication API
 export async function apiArchiveLogin(username, password) {
   const res = await archiveFetch('auth/login', {
     method: 'POST',
     body: JSON.stringify({ username, password }),
   });
+
   if (res.success && res.token) {
     setArchiveSession(res.token, res.username || username);
-    return res;
-  }
-  
-  // إذا تعذر الاتصال بالخادم وكانت البيانات الافتراضية
-  if (!res.success && username === 'admin' && (password === '123456' || password === 'admin')) {
-    const token = 'offline_token_' + Date.now();
+  } else if (res.success && !res.token) {
+    const token = 'session_' + Date.now();
     setArchiveSession(token, username);
-    return {
-      success: true,
-      token,
-      username,
-      pharmacyName: 'صيدليات مداواة'
-    };
+    res.token = token;
   }
   return res;
 }
@@ -153,7 +118,7 @@ export async function apiArchiveChangeCredentials(currentPassword, newUsername, 
 // 2. Invoices API
 export async function apiArchiveGetInvoices(filters = {}) {
   const params = new URLSearchParams();
-  if (filters.q) params.append('q', filters.q);
+  if (filters.search || filters.q) params.append('search', filters.search || filters.q);
   if (filters.supplierId) params.append('supplierId', filters.supplierId);
   if (filters.receiverId) params.append('receiverId', filters.receiverId);
   if (filters.entryClerkId) params.append('entryClerkId', filters.entryClerkId);
@@ -168,16 +133,29 @@ export async function apiArchiveGetInvoices(filters = {}) {
   const res = await fetch(url, {
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
   });
   return await res.json().catch(() => ({ success: false, invoices: [] }));
+}
+
+export async function apiArchiveGetInvoiceById(invoiceId) {
+  return await archiveFetch(`invoices&id=${encodeURIComponent(invoiceId)}`, {
+    method: 'GET',
+  });
 }
 
 export async function apiArchiveSaveInvoice(invoiceData) {
   return await archiveFetch('invoices', {
     method: 'POST',
     body: JSON.stringify(invoiceData),
+  });
+}
+
+export async function apiArchiveSaveBatchInvoices(invoices) {
+  return await archiveFetch('invoices/batch', {
+    method: 'POST',
+    body: JSON.stringify({ invoices }),
   });
 }
 
@@ -190,6 +168,25 @@ export async function apiArchiveUpdateInvoice(invoiceData) {
 
 export async function apiArchiveDeleteInvoice(invoiceId) {
   return await archiveFetch(`invoices&id=${encodeURIComponent(invoiceId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function apiArchiveGetInvoiceExcelData(invoiceId) {
+  return await archiveFetch(`invoices/${encodeURIComponent(invoiceId)}/excel-data`, {
+    method: 'GET',
+  });
+}
+
+export async function apiArchiveAttachInvoiceFile(invoiceId, fileData) {
+  return await archiveFetch(`invoices/${encodeURIComponent(invoiceId)}/attach`, {
+    method: 'POST',
+    body: JSON.stringify(fileData),
+  });
+}
+
+export async function apiArchiveRemoveInvoiceFile(invoiceId) {
+  return await archiveFetch(`invoices/${encodeURIComponent(invoiceId)}/attach`, {
     method: 'DELETE',
   });
 }
@@ -215,7 +212,9 @@ export async function apiArchiveDeleteSupplier(supplierId) {
 }
 
 export async function apiArchiveGetSupplierMappings(supplierId) {
-  return await archiveFetch(`suppliers/mappings&supplierId=${encodeURIComponent(supplierId)}`, { method: 'GET' });
+  return await archiveFetch(`suppliers/mappings&supplierId=${encodeURIComponent(supplierId)}`, {
+    method: 'GET',
+  });
 }
 
 export async function apiArchiveSaveSupplierMappings(supplierId, mappings) {
@@ -244,42 +243,40 @@ export async function apiArchiveDeleteEmployee(empId) {
   });
 }
 
+export async function apiArchiveGetEmployeeInvoices(empId) {
+  return await archiveFetch(`employees/${encodeURIComponent(empId)}/invoices`, {
+    method: 'GET',
+  });
+}
+
 // 5. Settings API
 export async function apiArchiveGetSettings() {
   return await archiveFetch('settings', { method: 'GET' });
 }
 
-export async function apiArchiveSaveSettings(settingsObj) {
+export async function apiArchiveSaveSettings(settingsData) {
   return await archiveFetch('settings', {
     method: 'POST',
-    body: JSON.stringify(settingsObj),
+    body: JSON.stringify(settingsData),
   });
+}
+
+export async function apiArchiveCheckGoogleStatus() {
+  return await archiveFetch('settings/google-status', { method: 'GET' });
 }
 
 export async function apiArchiveTestDrive() {
-  return await archiveFetch('test-drive', {
-    method: 'POST',
-  });
+  return await archiveFetch('settings/google-status', { method: 'GET' });
 }
 
-// 6. File Upload API
-export async function apiArchiveUploadFile(fileOrBase64, fileName = '') {
-  if (typeof fileOrBase64 === 'string') {
-    return await archiveFetch('upload', {
-      method: 'POST',
-      body: JSON.stringify({ base64: fileOrBase64, fileName }),
-    });
-  }
-
-  const formData = new FormData();
-  formData.append('file', fileOrBase64);
-  const token = getArchiveToken();
-
-  const res = await fetch(`${API_BASE_URL}?endpoint=archive/upload`, {
+// 6. Direct File Upload API
+export async function apiArchiveUploadFile(fileName, fileType, base64Data) {
+  return await archiveFetch('upload', {
     method: 'POST',
-    headers: token ? { 'Authorization': `Bearer ${token}` } : {},
-    body: formData,
+    body: JSON.stringify({
+      fileName,
+      fileType,
+      base64: base64Data,
+    }),
   });
-
-  return await res.json().catch(() => ({ success: false, error: 'فشل الرفع' }));
 }

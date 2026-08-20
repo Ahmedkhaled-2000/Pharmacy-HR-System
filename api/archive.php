@@ -1,7 +1,8 @@
 <?php
 /**
  * Archive System API Handler for Pharmacy HR System
- * Handles Authentication, Invoices, Suppliers, Employees, Settings, Mappings
+ * Handles Authentication, Invoices, Suppliers, Employees, Settings, Mappings, Excel Data, Drive Sync
+ * 100% Feature-Parity with Standalone Pharmacy Archive System
  * MariaDB 10.11+ via mysqli with Prepared Statements
  */
 
@@ -32,7 +33,7 @@ function createArchiveToken(string $username): string
     $payload = json_encode([
         'username' => $username,
         'scope' => 'pharmacy_archive',
-        'exp' => time() + (14 * 24 * 60 * 60) // 14 days
+        'exp' => time() + (30 * 24 * 60 * 60) // 30 days
     ]);
     $signature = hash_hmac('sha256', $payload, ARCHIVE_SECRET_KEY);
     return base64_encode($payload . '.' . $signature);
@@ -63,7 +64,7 @@ function verifyArchiveToken(?string $token): ?array
 }
 
 /**
- * التأكد التلقائي من وجود جداول الأرشيف في قاعدة البيانات
+ * التأكد التلقائي والترقية الذاتية لجداول الأرشيف في قاعدة البيانات (Self-Healing Schema Migration)
  */
 function ensureArchiveTablesExist(): void
 {
@@ -77,65 +78,72 @@ function ensureArchiveTablesExist(): void
         // 1. archive_suppliers
         $db->query("CREATE TABLE IF NOT EXISTS `archive_suppliers` (
             `id` VARCHAR(36) NOT NULL PRIMARY KEY,
-            `name` VARCHAR(255) NOT NULL,
+            `name` VARCHAR(255) NOT NULL UNIQUE,
             `phone` VARCHAR(50) NULL,
-            `email` VARCHAR(100) NULL,
+            `email` VARCHAR(255) NULL,
             `address` TEXT NULL,
             `tax_number` VARCHAR(100) NULL,
             `notes` TEXT NULL,
             `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
             `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-            INDEX `idx_archive_supp_name` (`name`)
+            INDEX `idx_archive_supplier_name` (`name`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
 
         // 2. archive_employees
         $db->query("CREATE TABLE IF NOT EXISTS `archive_employees` (
             `id` VARCHAR(36) NOT NULL PRIMARY KEY,
-            `name` VARCHAR(255) NOT NULL,
-            `role` VARCHAR(100) NOT NULL DEFAULT 'أمين مخزن',
+            `name` VARCHAR(255) NOT NULL UNIQUE,
+            `role` VARCHAR(100) NULL DEFAULT 'أمين مخزن',
             `phone` VARCHAR(50) NULL,
             `active` TINYINT(1) NOT NULL DEFAULT 1,
             `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-            `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)
+            `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+            INDEX `idx_archive_emp_active` (`active`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
 
         // 3. archive_invoices
         $db->query("CREATE TABLE IF NOT EXISTS `archive_invoices` (
             `id` VARCHAR(36) NOT NULL PRIMARY KEY,
             `invoice_number` VARCHAR(100) NOT NULL,
-            `supplier_id` VARCHAR(36) NULL,
-            `invoice_date` DATE NOT NULL,
+            `supplier_id` VARCHAR(36) NOT NULL,
+            `invoice_date` DATETIME NOT NULL,
+            `total_amount` DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+            `discount` DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+            `net_amount` DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+            `status` VARCHAR(50) NOT NULL DEFAULT 'ARCHIVED',
+            `file_url` LONGTEXT NULL,
+            `drive_file_id` VARCHAR(255) NULL,
+            `file_name` VARCHAR(255) NULL,
+            `file_type` VARCHAR(50) NULL,
+            `upload_mode` VARCHAR(50) NOT NULL DEFAULT 'AUTO_EXTRACT',
             `receiver_id` VARCHAR(36) NULL,
             `entry_clerk_id` VARCHAR(36) NULL,
-            `total_amount` DECIMAL(15,2) NOT NULL DEFAULT 0.00,
-            `total_discount` DECIMAL(15,2) NOT NULL DEFAULT 0.00,
-            `net_amount` DECIMAL(15,2) NOT NULL DEFAULT 0.00,
             `notes` TEXT NULL,
-            `file_url` TEXT NULL,
-            `drive_file_id` VARCHAR(255) NULL,
-            `upload_mode` VARCHAR(50) NOT NULL DEFAULT 'AUTO_EXTRACT',
             `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
             `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
             INDEX `idx_archive_inv_num` (`invoice_number`),
+            INDEX `idx_archive_inv_supplier` (`supplier_id`),
             INDEX `idx_archive_inv_date` (`invoice_date`),
-            INDEX `idx_archive_inv_supp` (`supplier_id`)
+            INDEX `idx_archive_inv_receiver` (`receiver_id`),
+            INDEX `idx_archive_inv_clerk` (`entry_clerk_id`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
 
         // 4. archive_invoice_items
         $db->query("CREATE TABLE IF NOT EXISTS `archive_invoice_items` (
             `id` VARCHAR(36) NOT NULL PRIMARY KEY,
             `invoice_id` VARCHAR(36) NOT NULL,
-            `item_name` VARCHAR(255) NOT NULL,
-            `quantity` DECIMAL(10,2) NOT NULL DEFAULT 1.00,
-            `unit_price` DECIMAL(15,2) NOT NULL DEFAULT 0.00,
-            `discount` DECIMAL(15,2) NOT NULL DEFAULT 0.00,
-            `total_price` DECIMAL(15,2) NOT NULL DEFAULT 0.00,
-            `public_price` DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+            `product_name` VARCHAR(255) NOT NULL,
+            `quantity` INT NOT NULL DEFAULT 1,
+            `unit_price` DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+            `discount` DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+            `total_price` DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+            `selling_price` DECIMAL(10, 2) NULL,
             `batch_number` VARCHAR(100) NULL,
-            `expiry_date` VARCHAR(50) NULL,
+            `expiry_date` DATE NULL,
             `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-            INDEX `idx_archive_item_inv` (`invoice_id`),
-            INDEX `idx_archive_item_name` (`item_name`)
+            `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+            INDEX `idx_archive_item_invoice` (`invoice_id`),
+            INDEX `idx_archive_item_product` (`product_name`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
 
         // 5. archive_column_mappings
@@ -170,7 +178,91 @@ function ensureArchiveTablesExist(): void
             INDEX `idx_archive_log_created` (`created_at`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
 
-        // البذور الافتراضية
+        // =====================================================================
+        // Safe Dynamic Schema Auto-Repair (Fixes column discrepancies)
+        // =====================================================================
+        
+        // Repair archive_invoices
+        $invoiceCols = [];
+        $colRes = $db->query("SHOW COLUMNS FROM `archive_invoices`");
+        if ($colRes) {
+            while ($row = $colRes->fetch_assoc()) {
+                $invoiceCols[$row['Field']] = true;
+            }
+        }
+
+        if (!isset($invoiceCols['discount'])) {
+            if (isset($invoiceCols['total_discount'])) {
+                $db->query("ALTER TABLE `archive_invoices` ADD COLUMN `discount` DECIMAL(10, 2) NOT NULL DEFAULT 0.00 AFTER `total_amount`");
+                $db->query("UPDATE `archive_invoices` SET `discount` = `total_discount` WHERE `discount` = 0 AND `total_discount` > 0");
+            } else {
+                $db->query("ALTER TABLE `archive_invoices` ADD COLUMN `discount` DECIMAL(10, 2) NOT NULL DEFAULT 0.00 AFTER `total_amount`");
+            }
+        }
+
+        if (!isset($invoiceCols['status'])) {
+            $db->query("ALTER TABLE `archive_invoices` ADD COLUMN `status` VARCHAR(50) NOT NULL DEFAULT 'ARCHIVED' AFTER `net_amount`");
+        }
+        if (!isset($invoiceCols['file_name'])) {
+            $db->query("ALTER TABLE `archive_invoices` ADD COLUMN `file_name` VARCHAR(255) NULL AFTER `drive_file_id`");
+        }
+        if (!isset($invoiceCols['file_type'])) {
+            $db->query("ALTER TABLE `archive_invoices` ADD COLUMN `file_type` VARCHAR(50) NULL AFTER `file_name`");
+        }
+        if (!isset($invoiceCols['upload_mode'])) {
+            $db->query("ALTER TABLE `archive_invoices` ADD COLUMN `upload_mode` VARCHAR(50) NOT NULL DEFAULT 'AUTO_EXTRACT' AFTER `file_type`");
+        }
+        if (!isset($invoiceCols['receiver_id'])) {
+            $db->query("ALTER TABLE `archive_invoices` ADD COLUMN `receiver_id` VARCHAR(36) NULL");
+        }
+        if (!isset($invoiceCols['entry_clerk_id'])) {
+            $db->query("ALTER TABLE `archive_invoices` ADD COLUMN `entry_clerk_id` VARCHAR(36) NULL");
+        }
+        if (!isset($invoiceCols['notes'])) {
+            $db->query("ALTER TABLE `archive_invoices` ADD COLUMN `notes` TEXT NULL");
+        }
+
+        // Repair archive_invoice_items
+        $itemCols = [];
+        $itemColRes = $db->query("SHOW COLUMNS FROM `archive_invoice_items`");
+        if ($itemColRes) {
+            while ($row = $itemColRes->fetch_assoc()) {
+                $itemCols[$row['Field']] = true;
+            }
+        }
+
+        if (!isset($itemCols['product_name'])) {
+            if (isset($itemCols['item_name'])) {
+                $db->query("ALTER TABLE `archive_invoice_items` ADD COLUMN `product_name` VARCHAR(255) NOT NULL DEFAULT 'منتج' AFTER `invoice_id`");
+                $db->query("UPDATE `archive_invoice_items` SET `product_name` = `item_name` WHERE `item_name` IS NOT NULL");
+            } else {
+                $db->query("ALTER TABLE `archive_invoice_items` ADD COLUMN `product_name` VARCHAR(255) NOT NULL DEFAULT 'منتج' AFTER `invoice_id`");
+            }
+        }
+
+        if (!isset($itemCols['selling_price'])) {
+            if (isset($itemCols['public_price'])) {
+                $db->query("ALTER TABLE `archive_invoice_items` ADD COLUMN `selling_price` DECIMAL(10, 2) NULL AFTER `total_price`");
+                $db->query("UPDATE `archive_invoice_items` SET `selling_price` = `public_price` WHERE `public_price` IS NOT NULL");
+            } else {
+                $db->query("ALTER TABLE `archive_invoice_items` ADD COLUMN `selling_price` DECIMAL(10, 2) NULL AFTER `total_price`");
+            }
+        }
+
+        if (!isset($itemCols['discount'])) {
+            $db->query("ALTER TABLE `archive_invoice_items` ADD COLUMN `discount` DECIMAL(10, 2) NOT NULL DEFAULT 0.00 AFTER `unit_price`");
+        }
+        if (!isset($itemCols['batch_number'])) {
+            $db->query("ALTER TABLE `archive_invoice_items` ADD COLUMN `batch_number` VARCHAR(100) NULL");
+        }
+        if (!isset($itemCols['expiry_date'])) {
+            $db->query("ALTER TABLE `archive_invoice_items` ADD COLUMN `expiry_date` DATE NULL");
+        }
+        if (!isset($itemCols['updated_at'])) {
+            $db->query("ALTER TABLE `archive_invoice_items` ADD COLUMN `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)");
+        }
+
+        // Default seeds for settings
         $defaults = [
             'ADMIN_USERNAME' => 'admin',
             'ADMIN_PASSWORD' => '123456',
@@ -178,691 +270,944 @@ function ensureArchiveTablesExist(): void
             'PHARMACY_LOGO' => '',
             'GEMINI_API_KEY' => '',
             'GROQ_API_KEY' => '',
-            'GOOGLE_CLIENT_EMAIL' => '',
-            'GOOGLE_PRIVATE_KEY' => '',
-            'GOOGLE_DRIVE_PARENT_FOLDER_ID' => '',
-            'AUTO_SCAN_FOLDER_PATH' => ''
+            'GOOGLE_DRIVE_FOLDER_ID' => '',
+            'AUTO_SCAN_FOLDER_PATH' => '',
+            'AUTO_SCAN_INTERVAL_MINUTES' => '30'
         ];
+
         foreach ($defaults as $k => $v) {
-            $check = Database::queryOne("SELECT `key_name` FROM `archive_system_settings` WHERE `key_name` = ? LIMIT 1", "s", [$k]);
-            if (!$check) {
-                Database::execute("INSERT INTO `archive_system_settings` (`key_name`, `value_data`) VALUES (?, ?)", "ss", [$k, $v]);
+            $existing = Database::queryOne("SELECT `key_name` FROM `archive_system_settings` WHERE `key_name` = ? LIMIT 1", "s", [$k]);
+            if (!$existing) {
+                Database::execute(
+                    "INSERT INTO `archive_system_settings` (`key_name`, `value_data`) VALUES (?, ?)",
+                    "ss",
+                    [$k, $v]
+                );
             }
         }
+
     } catch (Throwable $e) {
-        error_log('[Archive DB Init Warning] ' . $e->getMessage());
+        error_log('[Archive DB Init Error] ' . $e->getMessage());
     }
 }
 
-/**
- * جلب قيمة من إعدادات الأرشيف
- */
 function getArchiveSetting(string $key, string $default = ''): string
 {
-    try {
-        ensureArchiveTablesExist();
-        $row = Database::queryOne("SELECT `value_data` FROM `archive_system_settings` WHERE `key_name` = ? LIMIT 1", "s", [$key]);
-        return $row ? (string)$row['value_data'] : $default;
-    } catch (Throwable) {
-        return $default;
-    }
+    $row = Database::queryOne("SELECT `value_data` FROM `archive_system_settings` WHERE `key_name` = ? LIMIT 1", "s", [$key]);
+    return $row ? (string)$row['value_data'] : $default;
 }
 
-/**
- * حفظ قيمة في إعدادات الأرشيف
- */
 function setArchiveSetting(string $key, string $value): void
 {
-    try {
-        ensureArchiveTablesExist();
-        $sql = "INSERT INTO `archive_system_settings` (`key_name`, `value_data`, `updated_at`)
-                VALUES (?, ?, NOW(6))
-                ON DUPLICATE KEY UPDATE `value_data` = VALUES(`value_data`), `updated_at` = NOW(6)";
-        Database::execute($sql, "ss", [$key, $value]);
-    } catch (Throwable $e) {
-        error_log('[Archive setSetting Error] ' . $e->getMessage());
-    }
+    Database::execute(
+        "INSERT INTO `archive_system_settings` (`key_name`, `value_data`) VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE `value_data` = VALUES(`value_data`), `updated_at` = NOW(6)",
+        "ss",
+        [$key, $value]
+    );
 }
 
 /**
- * المعالج الرئيسي لطلبات الأرشيف
+ * المعالج الرئيسي لجميع مسارات الأرشيف
  */
 function handleArchiveApi(string $subPath, string $method): void
 {
+    ensureArchiveTablesExist();
+
+    $rawInput = file_get_contents('php://input');
+    $requestData = !empty($rawInput) ? json_decode($rawInput, true) : [];
+    if (!is_array($requestData)) $requestData = [];
+
+    // Parse subPath segments
+    $segments = array_values(array_filter(explode('/', trim($subPath, '/'))));
+    $rootResource = $segments[0] ?? '';
+    $action = $segments[1] ?? '';
+    $subAction = $segments[2] ?? '';
+
     try {
-        ensureArchiveTablesExist();
-        $method = strtoupper(trim($method));
-        $requestData = getRequestData();
+        switch ($rootResource) {
+            // =================================================================
+            // 1. المصادقة والأمان (Auth Endpoints)
+            // =================================================================
+            case 'auth':
+                if ($action === 'login' && $method === 'POST') {
+                    $username = trim((string)($requestData['username'] ?? ''));
+                    $password = (string)($requestData['password'] ?? '');
 
-        switch ($subPath) {
-            // =====================================================================
-            // 1. المصادقة وتسجيل الدخول المستقل (Authentication)
-            // =====================================================================
-            case 'auth/login':
-                $username = trim((string)($requestData['username'] ?? ($_POST['username'] ?? ($_GET['username'] ?? ''))));
-                $password = trim((string)($requestData['password'] ?? ($_POST['password'] ?? ($_GET['password'] ?? ''))));
+                    $savedUser = getArchiveSetting('ADMIN_USERNAME', 'admin');
+                    $savedPass = getArchiveSetting('ADMIN_PASSWORD', '123456');
 
-                $dbUser = getArchiveSetting('ADMIN_USERNAME', 'admin');
-                $dbPass = getArchiveSetting('ADMIN_PASSWORD', '123456');
+                    if ($username === $savedUser && $password === $savedPass) {
+                        $token = createArchiveToken($username);
+                        jsonResponse([
+                            'success' => true,
+                            'message' => 'تم تسجيل الدخول بنجاح',
+                            'token' => $token,
+                            'username' => $username,
+                            'user' => [
+                                'username' => $username,
+                                'role' => 'archive_admin',
+                                'pharmacyName' => getArchiveSetting('PHARMACY_NAME', 'صيدليات مداواة')
+                            ]
+                        ]);
+                    } else {
+                        jsonResponse(['success' => false, 'error' => 'اسم المستخدم أو كلمة المرور غير صحيحة'], 401);
+                    }
+                } elseif ($action === 'session' && $method === 'GET') {
+                    $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+                    $token = '';
+                    if (preg_match('/Bearer\s+(.*)$/i', $authHeader, $matches)) {
+                        $token = trim($matches[1]);
+                    }
 
-                if (($username === $dbUser && $password === $dbPass) || ($username === 'admin' && ($password === '123456' || $password === 'admin'))) {
-                    $token = createArchiveToken($username);
-                    jsonResponse([
-                        'success' => true,
-                        'message' => 'تم تسجيل الدخول بنجاح إلى أرشيف الصيدلية',
-                        'token' => $token,
-                        'username' => $username,
-                        'pharmacyName' => getArchiveSetting('PHARMACY_NAME', 'صيدليات مداواة')
-                    ]);
-                } else {
-                    jsonResponse(['success' => false, 'error' => 'اسم المستخدم أو كلمة المرور غير صحيحة'], 401);
+                    $userData = verifyArchiveToken($token);
+                    if ($userData) {
+                        jsonResponse([
+                            'success' => true,
+                            'authenticated' => true,
+                            'username' => $userData['username'],
+                            'user' => [
+                                'username' => $userData['username'],
+                                'role' => 'archive_admin',
+                                'pharmacyName' => getArchiveSetting('PHARMACY_NAME', 'صيدليات مداواة')
+                            ]
+                        ]);
+                    } else {
+                        jsonResponse(['success' => false, 'authenticated' => false], 401);
+                    }
+                } elseif ($action === 'change-credentials' && $method === 'POST') {
+                    $currPass = (string)($requestData['currentPassword'] ?? '');
+                    $newPass = (string)($requestData['newPassword'] ?? '');
+                    $newUser = trim((string)($requestData['newUsername'] ?? ''));
+
+                    $savedPass = getArchiveSetting('ADMIN_PASSWORD', '123456');
+
+                    if ($currPass !== $savedPass) {
+                        jsonResponse(['success' => false, 'error' => 'كلمة المرور الحالية غير صحيحة'], 400);
+                    }
+
+                    if (!empty($newUser)) setArchiveSetting('ADMIN_USERNAME', $newUser);
+                    if (!empty($newPass)) setArchiveSetting('ADMIN_PASSWORD', $newPass);
+
+                    jsonResponse(['success' => true, 'message' => 'تم تحديث بيانات الدخول بنجاح']);
                 }
                 break;
 
-        case 'auth/session':
-            $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-            $token = '';
-            if (preg_match('/Bearer\s+(.*)$/i', $authHeader, $matches)) {
-                $token = $matches[1];
-            } elseif (!empty($_GET['token'])) {
-                $token = (string)$_GET['token'];
-            }
+            // =================================================================
+            // 2. الفواتير والبنود (Invoices & Items Endpoints)
+            // =================================================================
+            case 'invoices':
+                // Check for sub-actions like /invoices/[id]/excel-data or /invoices/[id]/attach
+                if (!empty($action) && $action !== 'batch' && !empty($subAction)) {
+                    $invoiceId = $action;
 
-            $session = verifyArchiveToken($token);
-            if ($session) {
-                jsonResponse([
-                    'success' => true,
-                    'authenticated' => true,
-                    'username' => $session['username'],
-                    'pharmacyName' => getArchiveSetting('PHARMACY_NAME', 'صيدليات مداواة')
-                ]);
-            } else {
-                jsonResponse(['success' => false, 'authenticated' => false, 'error' => 'انتهت صلاحية الجلسة'], 401);
-            }
-            break;
+                    // 2.1 Excel Data Sub-route: /invoices/[id]/excel-data
+                    if ($subAction === 'excel-data' && $method === 'GET') {
+                        $inv = Database::queryOne("SELECT `file_url`, `drive_file_id`, `file_name`, `file_type` FROM `archive_invoices` WHERE `id` = ? LIMIT 1", "s", [$invoiceId]);
+                        if (!$inv) jsonResponse(['success' => false, 'error' => 'الفاتورة غير موجودة'], 404);
 
-        case 'auth/change-credentials':
-            if ($method !== 'POST') jsonResponse(['success' => false, 'error' => 'Method not allowed'], 405);
+                        $fileUrl = (string)($inv['file_url'] ?? '');
+                        $sheets = [];
 
-            $currentPass = (string)($requestData['currentPassword'] ?? '');
-            $newUsername = trim((string)($requestData['newUsername'] ?? ''));
-            $newPassword = trim((string)($requestData['newPassword'] ?? ''));
+                        // Parse from Base64 if available
+                        if (str_starts_with($fileUrl, 'data:')) {
+                            // Can be parsed on client side or returned directly
+                            jsonResponse(['success' => true, 'fileUrl' => $fileUrl, 'fileName' => $inv['file_name']]);
+                        } else {
+                            jsonResponse(['success' => true, 'fileUrl' => $fileUrl, 'driveFileId' => $inv['drive_file_id'], 'fileName' => $inv['file_name']]);
+                        }
+                    }
 
-            $dbPass = getArchiveSetting('ADMIN_PASSWORD', '123456');
-            if ($currentPass !== $dbPass) {
-                jsonResponse(['success' => false, 'error' => 'كلمة المرور الحالية غير صحيحة'], 400);
-            }
+                    // 2.2 Attach Document Sub-route: /invoices/[id]/attach
+                    if ($subAction === 'attach') {
+                        if ($method === 'POST') {
+                            $fileUrl = (string)($requestData['fileUrl'] ?? '');
+                            $driveFileId = (string)($requestData['driveFileId'] ?? '');
+                            $fileName = (string)($requestData['fileName'] ?? '');
+                            $fileType = (string)($requestData['fileType'] ?? '');
 
-            if (!empty($newUsername)) setArchiveSetting('ADMIN_USERNAME', $newUsername);
-            if (!empty($newPassword)) setArchiveSetting('ADMIN_PASSWORD', $newPassword);
+                            Database::execute(
+                                "UPDATE `archive_invoices` SET `file_url` = ?, `drive_file_id` = ?, `file_name` = ?, `file_type` = ?, `updated_at` = NOW(6) WHERE `id` = ?",
+                                "sssss",
+                                [$fileUrl, $driveFileId, $fileName, $fileType, $invoiceId]
+                            );
+                            jsonResponse(['success' => true, 'message' => 'تم إرفاق المستند بنجاح']);
+                        } elseif ($method === 'DELETE') {
+                            Database::execute(
+                                "UPDATE `archive_invoices` SET `file_url` = NULL, `drive_file_id` = NULL, `file_name` = NULL, `file_type` = NULL, `updated_at` = NOW(6) WHERE `id` = ?",
+                                "s",
+                                [$invoiceId]
+                            );
+                            jsonResponse(['success' => true, 'message' => 'تم إزالة المستند بنجاح']);
+                        }
+                    }
+                }
 
-            jsonResponse(['success' => true, 'message' => 'تم تحديث بيانات الدخول بنجاح']);
-            break;
+                // Batch Invoices Saving: /invoices/batch
+                if ($action === 'batch' && $method === 'POST') {
+                    $invoicesList = is_array($requestData['invoices'] ?? null) ? $requestData['invoices'] : (is_array($requestData) ? $requestData : []);
+                    if (empty($invoicesList)) jsonResponse(['success' => false, 'error' => 'لا توجد فواتير للحفظ'], 400);
 
-        // =====================================================================
-        // 2. الفواتير والبنود (Invoices & Items)
-        // =====================================================================
-        case 'invoices':
-            if ($method === 'GET') {
-                $query = trim((string)($_GET['q'] ?? ''));
-                $supplierId = trim((string)($_GET['supplierId'] ?? ''));
-                $receiverId = trim((string)($_GET['receiverId'] ?? ''));
-                $entryClerkId = trim((string)($_GET['entryClerkId'] ?? ''));
-                $startDate = trim((string)($_GET['startDate'] ?? ''));
-                $endDate = trim((string)($_GET['endDate'] ?? ''));
-                $invoiceId = trim((string)($_GET['id'] ?? ''));
+                    $savedInvoices = [];
+                    $db = Database::getConnection();
+                    $db->begin_transaction();
 
-                // جلب فاتورة واحدة تفصيلية إذا تم تمرير id
-                if (!empty($invoiceId)) {
-                    $inv = Database::queryOne(
-                        "SELECT inv.*, 
-                                s.name AS supplier_name, s.phone AS supplier_phone,
-                                r.name AS receiver_name,
-                                c.name AS entry_clerk_name
-                         FROM `archive_invoices` inv
-                         LEFT JOIN `archive_suppliers` s ON inv.supplier_id = s.id
-                         LEFT JOIN `archive_employees` r ON inv.receiver_id = r.id
-                         LEFT JOIN `archive_employees` c ON inv.entry_clerk_id = c.id
-                         WHERE inv.id = ? LIMIT 1",
-                        "s",
-                        [$invoiceId]
-                    );
+                    try {
+                        foreach ($invoicesList as $singleInv) {
+                            $invId = !empty($singleInv['id']) ? (string)$singleInv['id'] : generateUuid();
+                            $invNumber = trim((string)($singleInv['invoiceNumber'] ?? $singleInv['invoice_number'] ?? ''));
+                            if (empty($invNumber)) $invNumber = 'INV-' . strtoupper(substr(md5(uniqid()), 0, 6));
 
-                    if ($inv) {
-                        $items = Database::query(
-                            "SELECT * FROM `archive_invoice_items` WHERE `invoice_id` = ? ORDER BY `created_at` ASC",
+                            $suppId = trim((string)($singleInv['supplierId'] ?? $singleInv['supplier_id'] ?? ''));
+                            $suppName = trim((string)($singleInv['supplierName'] ?? $singleInv['supplier_name'] ?? ''));
+
+                            if (empty($suppId) && !empty($suppName)) {
+                                $existingSup = Database::queryOne("SELECT `id` FROM `archive_suppliers` WHERE `name` = ? LIMIT 1", "s", [$suppName]);
+                                if ($existingSup) {
+                                    $suppId = $existingSup['id'];
+                                } else {
+                                    $suppId = generateUuid();
+                                    Database::execute("INSERT INTO `archive_suppliers` (`id`, `name`) VALUES (?, ?)", "ss", [$suppId, $suppName]);
+                                }
+                            } elseif (empty($suppId)) {
+                                $defaultSup = Database::queryOne("SELECT `id` FROM `archive_suppliers` LIMIT 1");
+                                if ($defaultSup) {
+                                    $suppId = $defaultSup['id'];
+                                } else {
+                                    $suppId = generateUuid();
+                                    Database::execute("INSERT INTO `archive_suppliers` (`id`, `name`) VALUES (?, 'مورد عام')", "s", [$suppId]);
+                                }
+                            }
+
+                            $invDate = !empty($singleInv['invoiceDate']) ? (string)$singleInv['invoiceDate'] : (!empty($singleInv['invoice_date']) ? (string)$singleInv['invoice_date'] : date('Y-m-d H:i:s'));
+                            $totAmt = (float)($singleInv['totalAmount'] ?? $singleInv['total_amount'] ?? $singleInv['totalGross'] ?? 0);
+                            $disc = (float)($singleInv['discount'] ?? $singleInv['totalDiscount'] ?? $singleInv['total_discount'] ?? 0);
+                            $netAmt = (float)($singleInv['netAmount'] ?? $singleInv['net_amount'] ?? $singleInv['totalNet'] ?? ($totAmt - $disc));
+                            $stat = (string)($singleInv['status'] ?? 'ARCHIVED');
+                            $fUrl = (string)($singleInv['fileUrl'] ?? $singleInv['file_url'] ?? $singleInv['driveViewLink'] ?? '');
+                            $dId = (string)($singleInv['driveFileId'] ?? $singleInv['drive_file_id'] ?? '');
+                            $fName = (string)($singleInv['fileName'] ?? $singleInv['file_name'] ?? '');
+                            $fType = (string)($singleInv['fileType'] ?? $singleInv['file_type'] ?? '');
+                            $uMode = (string)($singleInv['uploadMode'] ?? $singleInv['upload_mode'] ?? 'AUTO_EXTRACT');
+                            $recId = !empty($singleInv['receiverId']) ? (string)$singleInv['receiverId'] : (!empty($singleInv['receiver_id']) ? (string)$singleInv['receiver_id'] : null);
+                            $entId = !empty($singleInv['entryClerkId']) ? (string)$singleInv['entryClerkId'] : (!empty($singleInv['entry_clerk_id']) ? (string)$singleInv['entry_clerk_id'] : null);
+                            $nts = (string)($singleInv['notes'] ?? '');
+                            $itms = is_array($singleInv['items'] ?? null) ? $singleInv['items'] : [];
+
+                            $sqlInv = "INSERT INTO `archive_invoices` (
+                                `id`, `invoice_number`, `supplier_id`, `invoice_date`, `total_amount`, `discount`, `net_amount`,
+                                `status`, `file_url`, `drive_file_id`, `file_name`, `file_type`, `upload_mode`,
+                                `receiver_id`, `entry_clerk_id`, `notes`, `created_at`, `updated_at`
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(6), NOW(6))";
+
+                            Database::execute($sqlInv, "ssssdddsssssssss", [
+                                $invId, $invNumber, $suppId, $invDate, $totAmt, $disc, $netAmt,
+                                $stat, $fUrl, $dId, $fName, $fType, $uMode,
+                                $recId, $entId, $nts
+                            ]);
+
+                            if (!empty($itms)) {
+                                $sqlItem = "INSERT INTO `archive_invoice_items` (
+                                    `id`, `invoice_id`, `product_name`, `quantity`, `unit_price`, `discount`,
+                                    `total_price`, `selling_price`, `batch_number`, `expiry_date`, `created_at`, `updated_at`
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(6), NOW(6))";
+
+                                foreach ($itms as $item) {
+                                    $itemId = !empty($item['id']) && !str_starts_with((string)$item['id'], 'item_') ? (string)$item['id'] : generateUuid();
+                                    $prodName = trim((string)($item['productName'] ?? $item['product_name'] ?? $item['item_name'] ?? 'منتج'));
+                                    $qty = (int)($item['quantity'] ?? 1);
+                                    $unitPrice = (float)($item['unitPrice'] ?? $item['unit_price'] ?? 0);
+                                    $itemDisc = (float)($item['discount'] ?? 0);
+                                    $totalPrice = (float)($item['totalPrice'] ?? $item['total_price'] ?? ($qty * $unitPrice - $itemDisc));
+                                    $sellingPrice = isset($item['sellingPrice']) && $item['sellingPrice'] !== '' ? (float)$item['sellingPrice'] : (isset($item['selling_price']) && $item['selling_price'] !== '' ? (float)$item['selling_price'] : null);
+                                    $batchNum = (string)($item['batchNumber'] ?? $item['batch_number'] ?? '');
+                                    $expiry = !empty($item['expiryDate']) ? (string)$item['expiryDate'] : (!empty($item['expiry_date']) ? (string)$item['expiry_date'] : null);
+
+                                    Database::execute($sqlItem, "sssiddssdss", [
+                                        $itemId, $invId, $prodName, $qty, $unitPrice, $itemDisc,
+                                        $totalPrice, $sellingPrice, $batchNum, $expiry
+                                    ]);
+                                }
+                            }
+                            $savedInvoices[] = $invId;
+                        }
+
+                        $db->commit();
+                        jsonResponse(['success' => true, 'message' => "تم حفظ " . count($savedInvoices) . " فاتورة بنجاح", 'ids' => $savedInvoices]);
+                    } catch (Throwable $e) {
+                        $db->rollback();
+                        jsonResponse(['success' => false, 'error' => 'فشل حفظ دفعة الفواتير: ' . $e->getMessage()], 500);
+                    }
+                }
+
+                // Standard Invoices CRUD
+                if ($method === 'GET') {
+                    $invoiceId = trim((string)($_GET['id'] ?? $action ?? ''));
+
+                    // Single Invoice details
+                    if (!empty($invoiceId) && $invoiceId !== 'invoices') {
+                        $inv = Database::queryOne(
+                            "SELECT i.*, 
+                                    s.name AS supplier_name,
+                                    s.phone AS supplier_phone,
+                                    r.name AS receiver_name,
+                                    c.name AS entry_clerk_name
+                             FROM `archive_invoices` i
+                             LEFT JOIN `archive_suppliers` s ON i.supplier_id = s.id
+                             LEFT JOIN `archive_employees` r ON i.receiver_id = r.id
+                             LEFT JOIN `archive_employees` c ON i.entry_clerk_id = c.id
+                             WHERE i.id = ? LIMIT 1",
                             "s",
                             [$invoiceId]
                         );
-                        $inv['items'] = $items;
-                        $inv['supplier'] = ['id' => $inv['supplier_id'], 'name' => $inv['supplier_name'], 'phone' => $inv['supplier_phone']];
+
+                        if ($inv) {
+                            $items = Database::query("SELECT * FROM `archive_invoice_items` WHERE `invoice_id` = ? ORDER BY `created_at` ASC", "s", [$invoiceId]);
+                            
+                            $formattedItems = array_map(function($it) {
+                                return [
+                                    'id' => $it['id'],
+                                    'invoiceId' => $it['invoice_id'],
+                                    'productName' => $it['product_name'],
+                                    'quantity' => (int)$it['quantity'],
+                                    'unitPrice' => (float)$it['unit_price'],
+                                    'discount' => (float)$it['discount'],
+                                    'totalPrice' => (float)$it['total_price'],
+                                    'sellingPrice' => $it['selling_price'] !== null ? (float)$it['selling_price'] : null,
+                                    'batchNumber' => $it['batch_number'] ?? '',
+                                    'expiryDate' => $it['expiry_date'] ?? null
+                                ];
+                            }, $items);
+
+                            $inv['items'] = $formattedItems;
+                            $inv['invoiceNumber'] = $inv['invoice_number'];
+                            $inv['supplierId'] = $inv['supplier_id'];
+                            $inv['invoiceDate'] = $inv['invoice_date'];
+                            $inv['totalAmount'] = (float)$inv['total_amount'];
+                            $inv['discount'] = (float)$inv['discount'];
+                            $inv['netAmount'] = (float)$inv['net_amount'];
+                            $inv['fileUrl'] = $inv['file_url'];
+                            $inv['driveFileId'] = $inv['drive_file_id'];
+                            $inv['fileName'] = $inv['file_name'];
+                            $inv['fileType'] = $inv['file_type'];
+                            $inv['uploadMode'] = $inv['upload_mode'];
+                            $inv['receiverId'] = $inv['receiver_id'];
+                            $inv['entryClerkId'] = $inv['entry_clerk_id'];
+                            $inv['supplier'] = [
+                                'id' => $inv['supplier_id'],
+                                'name' => $inv['supplier_name'] ?? 'مورد غير محدد',
+                                'phone' => $inv['supplier_phone'] ?? ''
+                            ];
+                            $inv['receiver'] = $inv['receiver_id'] ? ['id' => $inv['receiver_id'], 'name' => $inv['receiver_name']] : null;
+                            $inv['entryClerk'] = $inv['entry_clerk_id'] ? ['id' => $inv['entry_clerk_id'], 'name' => $inv['entry_clerk_name']] : null;
+
+                            jsonResponse(['success' => true, 'invoice' => $inv]);
+                        } else {
+                            jsonResponse(['success' => false, 'error' => 'الفاتورة غير موجودة'], 404);
+                        }
+                    }
+
+                    // Invoices List with filters
+                    $supplierFilter = trim((string)($_GET['supplierId'] ?? $_GET['supplier_id'] ?? ''));
+                    $receiverFilter = trim((string)($_GET['receiverId'] ?? $_GET['receiver_id'] ?? ''));
+                    $clerkFilter = trim((string)($_GET['entryClerkId'] ?? $_GET['entry_clerk_id'] ?? ''));
+                    $searchFilter = trim((string)($_GET['search'] ?? ''));
+                    $startDate = trim((string)($_GET['startDate'] ?? ''));
+                    $endDate = trim((string)($_GET['endDate'] ?? ''));
+
+                    $where = ["1=1"];
+                    $types = "";
+                    $params = [];
+
+                    if (!empty($supplierFilter)) {
+                        $where[] = "i.`supplier_id` = ?";
+                        $types .= "s";
+                        $params[] = $supplierFilter;
+                    }
+                    if (!empty($receiverFilter)) {
+                        $where[] = "i.`receiver_id` = ?";
+                        $types .= "s";
+                        $params[] = $receiverFilter;
+                    }
+                    if (!empty($clerkFilter)) {
+                        $where[] = "i.`entry_clerk_id` = ?";
+                        $types .= "s";
+                        $params[] = $clerkFilter;
+                    }
+                    if (!empty($startDate)) {
+                        $where[] = "i.`invoice_date` >= ?";
+                        $types .= "s";
+                        $params[] = $startDate . ' 00:00:00';
+                    }
+                    if (!empty($endDate)) {
+                        $where[] = "i.`invoice_date` <= ?";
+                        $types .= "s";
+                        $params[] = $endDate . ' 23:59:59';
+                    }
+                    if (!empty($searchFilter)) {
+                        $where[] = "(i.`invoice_number` LIKE ? OR s.`name` LIKE ? OR i.`notes` LIKE ?)";
+                        $types .= "sss";
+                        $searchTerm = "%{$searchFilter}%";
+                        $params[] = $searchTerm;
+                        $params[] = $searchTerm;
+                        $params[] = $searchTerm;
+                    }
+
+                    $sql = "SELECT i.*, 
+                                   s.name AS supplier_name,
+                                   s.phone AS supplier_phone,
+                                   r.name AS receiver_name,
+                                   c.name AS entry_clerk_name,
+                                   (SELECT COUNT(*) FROM `archive_invoice_items` WHERE `invoice_id` = i.id) AS items_count
+                            FROM `archive_invoices` i
+                            LEFT JOIN `archive_suppliers` s ON i.supplier_id = s.id
+                            LEFT JOIN `archive_employees` r ON i.receiver_id = r.id
+                            LEFT JOIN `archive_employees` c ON i.entry_clerk_id = c.id
+                            WHERE " . implode(" AND ", $where) . "
+                            ORDER BY i.`invoice_date` DESC, i.`created_at` DESC";
+
+                    $invoices = !empty($params) ? Database::query($sql, $types, $params) : Database::query($sql);
+
+                    // Attach items & standardize props
+                    foreach ($invoices as &$inv) {
+                        $invId = $inv['id'];
+                        $items = Database::query("SELECT * FROM `archive_invoice_items` WHERE `invoice_id` = ? ORDER BY `created_at` ASC", "s", [$invId]);
+                        
+                        $inv['items'] = array_map(function($it) {
+                            return [
+                                'id' => $it['id'],
+                                'invoiceId' => $it['invoice_id'],
+                                'productName' => $it['product_name'],
+                                'quantity' => (int)$it['quantity'],
+                                'unitPrice' => (float)$it['unit_price'],
+                                'discount' => (float)$it['discount'],
+                                'totalPrice' => (float)$it['total_price'],
+                                'sellingPrice' => $it['selling_price'] !== null ? (float)$it['selling_price'] : null,
+                                'batchNumber' => $it['batch_number'] ?? '',
+                                'expiryDate' => $it['expiry_date'] ?? null
+                            ];
+                        }, $items);
+
+                        $inv['invoiceNumber'] = $inv['invoice_number'];
+                        $inv['supplierId'] = $inv['supplier_id'];
+                        $inv['invoiceDate'] = $inv['invoice_date'];
+                        $inv['totalAmount'] = (float)$inv['total_amount'];
+                        $inv['discount'] = (float)$inv['discount'];
+                        $inv['netAmount'] = (float)$inv['net_amount'];
+                        $inv['fileUrl'] = $inv['file_url'];
+                        $inv['driveFileId'] = $inv['drive_file_id'];
+                        $inv['fileName'] = $inv['file_name'];
+                        $inv['fileType'] = $inv['file_type'];
+                        $inv['uploadMode'] = $inv['upload_mode'];
+                        $inv['receiverId'] = $inv['receiver_id'];
+                        $inv['entryClerkId'] = $inv['entry_clerk_id'];
+                        $inv['itemsCount'] = (int)($inv['items_count'] ?? count($inv['items']));
+                        $inv['supplier'] = [
+                            'id' => $inv['supplier_id'],
+                            'name' => $inv['supplier_name'] ?? 'مورد غير محدد',
+                            'phone' => $inv['supplier_phone'] ?? ''
+                        ];
                         $inv['receiver'] = $inv['receiver_id'] ? ['id' => $inv['receiver_id'], 'name' => $inv['receiver_name']] : null;
                         $inv['entryClerk'] = $inv['entry_clerk_id'] ? ['id' => $inv['entry_clerk_id'], 'name' => $inv['entry_clerk_name']] : null;
-                        jsonResponse(['success' => true, 'invoice' => $inv]);
-                    } else {
-                        jsonResponse(['success' => false, 'error' => 'الفاتورة غير موجودة'], 404);
                     }
-                }
 
-                // جلب جميع الفواتير
-                $sql = "SELECT inv.*, 
-                               s.name AS supplier_name, s.phone AS supplier_phone,
-                               r.name AS receiver_name,
-                               c.name AS entry_clerk_name,
-                               (SELECT COUNT(*) FROM `archive_invoice_items` WHERE `invoice_id` = inv.id) AS items_count
-                        FROM `archive_invoices` inv
-                        LEFT JOIN `archive_suppliers` s ON inv.supplier_id = s.id
-                        LEFT JOIN `archive_employees` r ON inv.receiver_id = r.id
-                        LEFT JOIN `archive_employees` c ON inv.entry_clerk_id = c.id
-                        WHERE 1=1";
-                $types = "";
-                $params = [];
+                    jsonResponse(['success' => true, 'invoices' => $invoices, 'count' => count($invoices)]);
 
-                if (!empty($supplierId)) {
-                    $sql .= " AND inv.supplier_id = ?";
-                    $types .= "s";
-                    $params[] = $supplierId;
-                }
-                if (!empty($receiverId)) {
-                    $sql .= " AND inv.receiver_id = ?";
-                    $types .= "s";
-                    $params[] = $receiverId;
-                }
-                if (!empty($entryClerkId)) {
-                    $sql .= " AND inv.entry_clerk_id = ?";
-                    $types .= "s";
-                    $params[] = $entryClerkId;
-                }
-                if (!empty($startDate)) {
-                    $sql .= " AND inv.invoice_date >= ?";
-                    $types .= "s";
-                    $params[] = $startDate . " 00:00:00";
-                }
-                if (!empty($endDate)) {
-                    $sql .= " AND inv.invoice_date <= ?";
-                    $types .= "s";
-                    $params[] = $endDate . " 23:59:59";
-                }
+                } elseif ($method === 'POST') {
+                    // Single invoice save
+                    $invoiceId = !empty($requestData['id']) ? (string)$requestData['id'] : generateUuid();
+                    $invoiceNumber = trim((string)($requestData['invoiceNumber'] ?? $requestData['invoice_number'] ?? ''));
+                    if (empty($invoiceNumber)) $invoiceNumber = 'INV-' . strtoupper(substr(md5(uniqid()), 0, 6));
 
-                $sql .= " ORDER BY inv.invoice_date DESC, inv.created_at DESC";
+                    $supplierId = trim((string)($requestData['supplierId'] ?? $requestData['supplier_id'] ?? ''));
+                    $supplierName = trim((string)($requestData['supplierName'] ?? $requestData['supplier_name'] ?? ''));
 
-                $invoices = Database::query($sql, $types, $params);
-
-                // جلب كافة البنود دفعة واحدة لتسريع استعراض الفواتير والبحث
-                $allInvoiceIds = array_column($invoices, 'id');
-                $itemsByInvoice = [];
-                if (!empty($allInvoiceIds)) {
-                    $placeholders = implode(',', array_fill(0, count($allInvoiceIds), '?'));
-                    $itemTypes = str_repeat('s', count($allInvoiceIds));
-                    $allItems = Database::query(
-                        "SELECT * FROM `archive_invoice_items` WHERE `invoice_id` IN ($placeholders)",
-                        $itemTypes,
-                        $allInvoiceIds
-                    );
-                    foreach ($allItems as $it) {
-                        $itemsByInvoice[$it['invoice_id']][] = $it;
+                    if (empty($supplierId) && !empty($supplierName)) {
+                        $existingSup = Database::queryOne("SELECT `id` FROM `archive_suppliers` WHERE `name` = ? LIMIT 1", "s", [$supplierName]);
+                        if ($existingSup) {
+                            $supplierId = $existingSup['id'];
+                        } else {
+                            $supplierId = generateUuid();
+                            Database::execute("INSERT INTO `archive_suppliers` (`id`, `name`) VALUES (?, ?)", "ss", [$supplierId, $supplierName]);
+                        }
+                    } elseif (empty($supplierId)) {
+                        $defaultSup = Database::queryOne("SELECT `id` FROM `archive_suppliers` LIMIT 1");
+                        if ($defaultSup) {
+                            $supplierId = $defaultSup['id'];
+                        } else {
+                            $supplierId = generateUuid();
+                            Database::execute("INSERT INTO `archive_suppliers` (`id`, `name`) VALUES (?, 'مورد عام')", "s", [$supplierId]);
+                        }
                     }
-                }
 
-                foreach ($invoices as &$inv) {
-                    $inv['items'] = $itemsByInvoice[$inv['id']] ?? [];
-                    $inv['supplier'] = ['id' => $inv['supplier_id'], 'name' => $inv['supplier_name'], 'phone' => $inv['supplier_phone']];
-                    $inv['receiver'] = $inv['receiver_id'] ? ['id' => $inv['receiver_id'], 'name' => $inv['receiver_name']] : null;
-                    $inv['entryClerk'] = $inv['entry_clerk_id'] ? ['id' => $inv['entry_clerk_id'], 'name' => $inv['entry_clerk_name']] : null;
-                    $inv['totalAmount'] = (float)$inv['total_amount'];
-                    $inv['discount'] = (float)$inv['discount'];
-                    $inv['netAmount'] = (float)$inv['net_amount'];
-                    $inv['invoiceNumber'] = $inv['invoice_number'];
-                    $inv['invoiceDate'] = $inv['invoice_date'];
-                    $inv['supplierId'] = $inv['supplier_id'];
-                    $inv['receiverId'] = $inv['receiver_id'];
-                    $inv['entryClerkId'] = $inv['entry_clerk_id'];
-                    $inv['fileUrl'] = $inv['file_url'];
-                    $inv['fileName'] = $inv['file_name'];
-                    $inv['fileType'] = $inv['file_type'];
-                    $inv['uploadMode'] = $inv['upload_mode'];
-                }
-                unset($inv);
+                    $invoiceDate = !empty($requestData['invoiceDate']) ? (string)$requestData['invoiceDate'] : (!empty($requestData['invoice_date']) ? (string)$requestData['invoice_date'] : date('Y-m-d H:i:s'));
+                    $totalAmount = (float)($requestData['totalAmount'] ?? $requestData['total_amount'] ?? $requestData['totalGross'] ?? 0);
+                    $discount = (float)($requestData['discount'] ?? $requestData['totalDiscount'] ?? $requestData['total_discount'] ?? 0);
+                    $netAmount = (float)($requestData['netAmount'] ?? $requestData['net_amount'] ?? $requestData['totalNet'] ?? ($totalAmount - $discount));
+                    $status = (string)($requestData['status'] ?? 'ARCHIVED');
+                    $fileUrl = (string)($requestData['fileUrl'] ?? $requestData['file_url'] ?? $requestData['driveViewLink'] ?? '');
+                    $driveFileId = (string)($requestData['driveFileId'] ?? $requestData['drive_file_id'] ?? '');
+                    $fileName = (string)($requestData['fileName'] ?? $requestData['file_name'] ?? '');
+                    $fileType = (string)($requestData['fileType'] ?? $requestData['file_type'] ?? '');
+                    $uploadMode = (string)($requestData['uploadMode'] ?? $requestData['upload_mode'] ?? 'AUTO_EXTRACT');
+                    $receiverId = !empty($requestData['receiverId']) ? (string)$requestData['receiverId'] : (!empty($requestData['receiver_id']) ? (string)$requestData['receiver_id'] : null);
+                    $entryClerkId = !empty($requestData['entryClerkId']) ? (string)$requestData['entryClerkId'] : (!empty($requestData['entry_clerk_id']) ? (string)$requestData['entry_clerk_id'] : null);
+                    $notes = (string)($requestData['notes'] ?? '');
+                    $items = is_array($requestData['items'] ?? null) ? $requestData['items'] : [];
 
-                // فلترة البحث اللحظي
-                if (!empty($query)) {
-                    $q = mb_strtolower($query, 'UTF-8');
-                    $invoices = array_values(array_filter($invoices, function($inv) use ($q) {
-                        if (stripos($inv['invoice_number'] ?? '', $q) !== false) return true;
-                        if (stripos($inv['supplier_name'] ?? '', $q) !== false) return true;
-                        if (stripos($inv['notes'] ?? '', $q) !== false) return true;
-                        if (!empty($inv['items'])) {
-                            foreach ($inv['items'] as $item) {
-                                if (stripos($item['product_name'] ?? '', $q) !== false) return true;
-                                if (stripos($item['batch_number'] ?? '', $q) !== false) return true;
+                    $db = Database::getConnection();
+                    $db->begin_transaction();
+
+                    try {
+                        $sqlInv = "INSERT INTO `archive_invoices` (
+                            `id`, `invoice_number`, `supplier_id`, `invoice_date`, `total_amount`, `discount`, `net_amount`,
+                            `status`, `file_url`, `drive_file_id`, `file_name`, `file_type`, `upload_mode`,
+                            `receiver_id`, `entry_clerk_id`, `notes`, `created_at`, `updated_at`
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(6), NOW(6))";
+
+                        Database::execute($sqlInv, "ssssdddsssssssss", [
+                            $invoiceId, $invoiceNumber, $supplierId, $invoiceDate, $totalAmount, $discount, $netAmount,
+                            $status, $fileUrl, $driveFileId, $fileName, $fileType, $uploadMode,
+                            $receiverId, $entryClerkId, $notes
+                        ]);
+
+                        if (!empty($items)) {
+                            $sqlItem = "INSERT INTO `archive_invoice_items` (
+                                `id`, `invoice_id`, `product_name`, `quantity`, `unit_price`, `discount`,
+                                `total_price`, `selling_price`, `batch_number`, `expiry_date`, `created_at`, `updated_at`
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(6), NOW(6))";
+
+                            foreach ($items as $item) {
+                                $itemId = !empty($item['id']) && !str_starts_with((string)$item['id'], 'item_') ? (string)$item['id'] : generateUuid();
+                                $prodName = trim((string)($item['productName'] ?? $item['product_name'] ?? $item['item_name'] ?? 'منتج'));
+                                $qty = (int)($item['quantity'] ?? 1);
+                                $unitPrice = (float)($item['unitPrice'] ?? $item['unit_price'] ?? 0);
+                                $itemDisc = (float)($item['discount'] ?? 0);
+                                $totalPrice = (float)($item['totalPrice'] ?? $item['total_price'] ?? ($qty * $unitPrice - $itemDisc));
+                                $sellingPrice = isset($item['sellingPrice']) && $item['sellingPrice'] !== '' ? (float)$item['sellingPrice'] : (isset($item['selling_price']) && $item['selling_price'] !== '' ? (float)$item['selling_price'] : null);
+                                $batchNum = (string)($item['batchNumber'] ?? $item['batch_number'] ?? '');
+                                $expiry = !empty($item['expiryDate']) ? (string)$item['expiryDate'] : (!empty($item['expiry_date']) ? (string)$item['expiry_date'] : null);
+
+                                Database::execute($sqlItem, "sssiddssdss", [
+                                    $itemId, $invoiceId, $prodName, $qty, $unitPrice, $itemDisc,
+                                    $totalPrice, $sellingPrice, $batchNum, $expiry
+                                ]);
                             }
                         }
-                        return false;
-                    }));
-                }
 
-                jsonResponse(['success' => true, 'invoices' => $invoices, 'count' => count($invoices)]);
-
-            } elseif ($method === 'POST') {
-                // حفظ فاتورة جديدة
-                $invoiceId = !empty($requestData['id']) ? (string)$requestData['id'] : generateUuid();
-                $invoiceNumber = trim((string)($requestData['invoiceNumber'] ?? ''));
-                $supplierId = trim((string)($requestData['supplierId'] ?? ''));
-                $supplierName = trim((string)($requestData['supplierName'] ?? ''));
-                $invoiceDate = !empty($requestData['invoiceDate']) ? (string)$requestData['invoiceDate'] : date('Y-m-d H:i:s');
-                $totalAmount = (float)($requestData['totalAmount'] ?? 0);
-                $discount = (float)($requestData['discount'] ?? 0);
-                $netAmount = (float)($requestData['netAmount'] ?? ($totalAmount - $discount));
-                $status = (string)($requestData['status'] ?? 'ARCHIVED');
-                $fileUrl = (string)($requestData['fileUrl'] ?? '');
-                $driveFileId = (string)($requestData['driveFileId'] ?? '');
-                $fileName = (string)($requestData['fileName'] ?? '');
-                $fileType = (string)($requestData['fileType'] ?? '');
-                $uploadMode = (string)($requestData['uploadMode'] ?? 'AUTO_EXTRACT');
-                $receiverId = !empty($requestData['receiverId']) ? (string)$requestData['receiverId'] : null;
-                $entryClerkId = !empty($requestData['entryClerkId']) ? (string)$requestData['entryClerkId'] : null;
-                $notes = (string)($requestData['notes'] ?? '');
-                $items = is_array($requestData['items'] ?? null) ? $requestData['items'] : [];
-
-                if (empty($invoiceNumber)) {
-                    $invoiceNumber = 'INV-' . strtoupper(substr(md5(uniqid()), 0, 6));
-                }
-
-                // التحقق من المورد أو إنشائه تلقائياً
-                if (empty($supplierId) && !empty($supplierName)) {
-                    $existingSup = Database::queryOne("SELECT `id` FROM `archive_suppliers` WHERE `name` = ? LIMIT 1", "s", [$supplierName]);
-                    if ($existingSup) {
-                        $supplierId = $existingSup['id'];
-                    } else {
-                        $supplierId = generateUuid();
-                        Database::execute("INSERT INTO `archive_suppliers` (`id`, `name`) VALUES (?, ?)", "ss", [$supplierId, $supplierName]);
+                        $db->commit();
+                        jsonResponse(['success' => true, 'message' => 'تم حفظ الفاتورة بنجاح', 'id' => $invoiceId, 'invoice' => ['id' => $invoiceId, 'invoiceNumber' => $invoiceNumber]]);
+                    } catch (Throwable $e) {
+                        $db->rollback();
+                        jsonResponse(['success' => false, 'error' => 'فشل حفظ الفاتورة: ' . $e->getMessage()], 500);
                     }
-                } elseif (empty($supplierId)) {
-                    $defaultSup = Database::queryOne("SELECT `id` FROM `archive_suppliers` LIMIT 1");
-                    if ($defaultSup) {
-                        $supplierId = $defaultSup['id'];
-                    } else {
-                        $supplierId = generateUuid();
-                        Database::execute("INSERT INTO `archive_suppliers` (`id`, `name`) VALUES (?, 'مورد عام')", "s", [$supplierId]);
-                    }
-                }
 
-                $db = Database::getConnection();
-                $db->begin_transaction();
+                } elseif ($method === 'PUT') {
+                    // Update invoice
+                    $invoiceId = trim((string)($requestData['id'] ?? $action ?? ''));
+                    if (empty($invoiceId)) jsonResponse(['success' => false, 'error' => 'Missing invoice ID'], 400);
 
-                try {
-                    $sqlInv = "INSERT INTO `archive_invoices` (
-                        `id`, `invoice_number`, `supplier_id`, `invoice_date`, `total_amount`, `discount`, `net_amount`,
-                        `status`, `file_url`, `drive_file_id`, `file_name`, `file_type`, `upload_mode`,
-                        `receiver_id`, `entry_clerk_id`, `notes`, `created_at`, `updated_at`
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(6), NOW(6))";
+                    $invoiceNumber = trim((string)($requestData['invoiceNumber'] ?? $requestData['invoice_number'] ?? ''));
+                    $supplierId = trim((string)($requestData['supplierId'] ?? $requestData['supplier_id'] ?? ''));
+                    $supplierName = trim((string)($requestData['supplierName'] ?? $requestData['supplier_name'] ?? ''));
 
-                    Database::execute($sqlInv, "ssssdddsssssssss", [
-                        $invoiceId, $invoiceNumber, $supplierId, $invoiceDate, $totalAmount, $discount, $netAmount,
-                        $status, $fileUrl, $driveFileId, $fileName, $fileType, $uploadMode,
-                        $receiverId, $entryClerkId, $notes
-                    ]);
-
-                    if (!empty($items)) {
-                        $sqlItem = "INSERT INTO `archive_invoice_items` (
-                            `id`, `invoice_id`, `product_name`, `quantity`, `unit_price`, `discount`,
-                            `total_price`, `selling_price`, `batch_number`, `expiry_date`, `created_at`, `updated_at`
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(6), NOW(6))";
-
-                        foreach ($items as $item) {
-                            $itemId = !empty($item['id']) ? (string)$item['id'] : generateUuid();
-                            $prodName = trim((string)($item['productName'] ?? $item['product_name'] ?? 'منتج'));
-                            $qty = (int)($item['quantity'] ?? 1);
-                            $unitPrice = (float)($item['unitPrice'] ?? $item['unit_price'] ?? 0);
-                            $itemDisc = (float)($item['discount'] ?? 0);
-                            $totalPrice = (float)($item['totalPrice'] ?? $item['total_price'] ?? ($qty * $unitPrice - $itemDisc));
-                            $sellingPrice = isset($item['sellingPrice']) && $item['sellingPrice'] !== '' ? (float)$item['sellingPrice'] : (isset($item['selling_price']) ? (float)$item['selling_price'] : null);
-                            $batchNum = (string)($item['batchNumber'] ?? $item['batch_number'] ?? '');
-                            $expiry = !empty($item['expiryDate']) ? (string)$item['expiryDate'] : (!empty($item['expiry_date']) ? (string)$item['expiry_date'] : null);
-
-                            Database::execute($sqlItem, "sssiddssdss", [
-                                $itemId, $invoiceId, $prodName, $qty, $unitPrice, $itemDisc,
-                                $totalPrice, $sellingPrice, $batchNum, $expiry
-                            ]);
+                    if (empty($supplierId) && !empty($supplierName)) {
+                        $existingSup = Database::queryOne("SELECT `id` FROM `archive_suppliers` WHERE `name` = ? LIMIT 1", "s", [$supplierName]);
+                        if ($existingSup) {
+                            $supplierId = $existingSup['id'];
+                        } else {
+                            $supplierId = generateUuid();
+                            Database::execute("INSERT INTO `archive_suppliers` (`id`, `name`) VALUES (?, ?)", "ss", [$supplierId, $supplierName]);
                         }
                     }
 
-                    $db->commit();
-                    jsonResponse(['success' => true, 'message' => 'تم حفظ الفاتورة بنجاح', 'id' => $invoiceId]);
-                } catch (Throwable $e) {
-                    $db->rollback();
-                    jsonResponse(['success' => false, 'error' => 'فشل حفظ الفاتورة: ' . $e->getMessage()], 500);
-                }
+                    $invoiceDate = (string)($requestData['invoiceDate'] ?? $requestData['invoice_date'] ?? date('Y-m-d H:i:s'));
+                    $totalAmount = (float)($requestData['totalAmount'] ?? $requestData['total_amount'] ?? $requestData['totalGross'] ?? 0);
+                    $discount = (float)($requestData['discount'] ?? $requestData['totalDiscount'] ?? $requestData['total_discount'] ?? 0);
+                    $netAmount = (float)($requestData['netAmount'] ?? $requestData['net_amount'] ?? $requestData['totalNet'] ?? ($totalAmount - $discount));
+                    $status = (string)($requestData['status'] ?? 'ARCHIVED');
+                    $receiverId = !empty($requestData['receiverId']) ? (string)$requestData['receiverId'] : (!empty($requestData['receiver_id']) ? (string)$requestData['receiver_id'] : null);
+                    $entryClerkId = !empty($requestData['entryClerkId']) ? (string)$requestData['entryClerkId'] : (!empty($requestData['entry_clerk_id']) ? (string)$requestData['entry_clerk_id'] : null);
+                    $notes = (string)($requestData['notes'] ?? '');
+                    $items = is_array($requestData['items'] ?? null) ? $requestData['items'] : null;
 
-            } elseif ($method === 'PUT') {
-                $invoiceId = trim((string)($requestData['id'] ?? ''));
-                if (empty($invoiceId)) jsonResponse(['success' => false, 'error' => 'Missing invoice ID'], 400);
+                    $db = Database::getConnection();
+                    $db->begin_transaction();
 
-                $invoiceNumber = trim((string)($requestData['invoiceNumber'] ?? ''));
-                $supplierId = trim((string)($requestData['supplierId'] ?? ''));
-                $invoiceDate = (string)($requestData['invoiceDate'] ?? date('Y-m-d H:i:s'));
-                $totalAmount = (float)($requestData['totalAmount'] ?? 0);
-                $discount = (float)($requestData['discount'] ?? 0);
-                $netAmount = (float)($requestData['netAmount'] ?? ($totalAmount - $discount));
-                $status = (string)($requestData['status'] ?? 'ARCHIVED');
-                $receiverId = !empty($requestData['receiverId']) ? (string)$requestData['receiverId'] : null;
-                $entryClerkId = !empty($requestData['entryClerkId']) ? (string)$requestData['entryClerkId'] : null;
-                $notes = (string)($requestData['notes'] ?? '');
-                $items = is_array($requestData['items'] ?? null) ? $requestData['items'] : null;
+                    try {
+                        $sql = "UPDATE `archive_invoices` SET
+                                `invoice_number` = ?,
+                                `supplier_id` = ?,
+                                `invoice_date` = ?,
+                                `total_amount` = ?,
+                                `discount` = ?,
+                                `net_amount` = ?,
+                                `status` = ?,
+                                `receiver_id` = ?,
+                                `entry_clerk_id` = ?,
+                                `notes` = ?,
+                                `updated_at` = NOW(6)
+                                WHERE `id` = ?";
 
-                $db = Database::getConnection();
-                $db->begin_transaction();
+                        Database::execute($sql, "sssdddsssss", [
+                            $invoiceNumber, $supplierId, $invoiceDate, $totalAmount, $discount, $netAmount,
+                            $status, $receiverId, $entryClerkId, $notes, $invoiceId
+                        ]);
 
-                try {
-                    $sql = "UPDATE `archive_invoices` SET
-                            `invoice_number` = ?,
-                            `supplier_id` = ?,
-                            `invoice_date` = ?,
-                            `total_amount` = ?,
-                            `discount` = ?,
-                            `net_amount` = ?,
-                            `status` = ?,
-                            `receiver_id` = ?,
-                            `entry_clerk_id` = ?,
-                            `notes` = ?,
-                            `updated_at` = NOW(6)
-                            WHERE `id` = ?";
+                        if ($items !== null) {
+                            Database::execute("DELETE FROM `archive_invoice_items` WHERE `invoice_id` = ?", "s", [$invoiceId]);
 
-                    Database::execute($sql, "sssdddsssss", [
-                        $invoiceNumber, $supplierId, $invoiceDate, $totalAmount, $discount, $netAmount,
-                        $status, $receiverId, $entryClerkId, $notes, $invoiceId
-                    ]);
+                            $sqlItem = "INSERT INTO `archive_invoice_items` (
+                                `id`, `invoice_id`, `product_name`, `quantity`, `unit_price`, `discount`,
+                                `total_price`, `selling_price`, `batch_number`, `expiry_date`, `created_at`, `updated_at`
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(6), NOW(6))";
 
-                    if ($items !== null) {
-                        Database::execute("DELETE FROM `archive_invoice_items` WHERE `invoice_id` = ?", "s", [$invoiceId]);
+                            foreach ($items as $item) {
+                                $itemId = !empty($item['id']) && !str_starts_with((string)$item['id'], 'item_') ? (string)$item['id'] : generateUuid();
+                                $prodName = trim((string)($item['productName'] ?? $item['product_name'] ?? $item['item_name'] ?? 'منتج'));
+                                $qty = (int)($item['quantity'] ?? 1);
+                                $unitPrice = (float)($item['unitPrice'] ?? $item['unit_price'] ?? 0);
+                                $itemDisc = (float)($item['discount'] ?? 0);
+                                $totalPrice = (float)($item['totalPrice'] ?? $item['total_price'] ?? ($qty * $unitPrice - $itemDisc));
+                                $sellingPrice = isset($item['sellingPrice']) && $item['sellingPrice'] !== '' ? (float)$item['sellingPrice'] : (isset($item['selling_price']) && $item['selling_price'] !== '' ? (float)$item['selling_price'] : null);
+                                $batchNum = (string)($item['batchNumber'] ?? $item['batch_number'] ?? '');
+                                $expiry = !empty($item['expiryDate']) ? (string)$item['expiryDate'] : (!empty($item['expiry_date']) ? (string)$item['expiry_date'] : null);
 
-                        $sqlItem = "INSERT INTO `archive_invoice_items` (
-                            `id`, `invoice_id`, `product_name`, `quantity`, `unit_price`, `discount`,
-                            `total_price`, `selling_price`, `batch_number`, `expiry_date`, `created_at`, `updated_at`
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(6), NOW(6))";
-
-                        foreach ($items as $item) {
-                            $itemId = !empty($item['id']) ? (string)$item['id'] : generateUuid();
-                            $prodName = trim((string)($item['productName'] ?? $item['product_name'] ?? 'منتج'));
-                            $qty = (int)($item['quantity'] ?? 1);
-                            $unitPrice = (float)($item['unitPrice'] ?? $item['unit_price'] ?? 0);
-                            $itemDisc = (float)($item['discount'] ?? 0);
-                            $totalPrice = (float)($item['totalPrice'] ?? $item['total_price'] ?? ($qty * $unitPrice - $itemDisc));
-                            $sellingPrice = isset($item['sellingPrice']) && $item['sellingPrice'] !== '' ? (float)$item['sellingPrice'] : (isset($item['selling_price']) ? (float)$item['selling_price'] : null);
-                            $batchNum = (string)($item['batchNumber'] ?? $item['batch_number'] ?? '');
-                            $expiry = !empty($item['expiryDate']) ? (string)$item['expiryDate'] : (!empty($item['expiry_date']) ? (string)$item['expiry_date'] : null);
-
-                            Database::execute($sqlItem, "sssiddssdss", [
-                                $itemId, $invoiceId, $prodName, $qty, $unitPrice, $itemDisc,
-                                $totalPrice, $sellingPrice, $batchNum, $expiry
-                            ]);
+                                Database::execute($sqlItem, "sssiddssdss", [
+                                    $itemId, $invoiceId, $prodName, $qty, $unitPrice, $itemDisc,
+                                    $totalPrice, $sellingPrice, $batchNum, $expiry
+                                ]);
+                            }
                         }
+
+                        $db->commit();
+                        jsonResponse(['success' => true, 'message' => 'تم تحديث بيانات الفاتورة بنجاح']);
+                    } catch (Throwable $e) {
+                        $db->rollback();
+                        jsonResponse(['success' => false, 'error' => 'فشل تحديث الفاتورة: ' . $e->getMessage()], 500);
                     }
 
-                    $db->commit();
-                    jsonResponse(['success' => true, 'message' => 'تم تحديث بيانات الفاتورة بنجاح']);
-                } catch (Throwable $e) {
-                    $db->rollback();
-                    jsonResponse(['success' => false, 'error' => 'فشل تحديث الفاتورة: ' . $e->getMessage()], 500);
+                } elseif ($method === 'DELETE') {
+                    $deleteId = trim((string)($_GET['id'] ?? $action ?? $requestData['id'] ?? ''));
+                    if (empty($deleteId)) jsonResponse(['success' => false, 'error' => 'Missing invoice ID'], 400);
+
+                    Database::execute("DELETE FROM `archive_invoice_items` WHERE `invoice_id` = ?", "s", [$deleteId]);
+                    Database::execute("DELETE FROM `archive_invoices` WHERE `id` = ?", "s", [$deleteId]);
+
+                    jsonResponse(['success' => true, 'message' => 'تم حذف الفاتورة بنجاح']);
                 }
+                break;
 
-            } elseif ($method === 'DELETE') {
-                $deleteId = trim((string)($_GET['id'] ?? $requestData['id'] ?? ''));
-                if (empty($deleteId)) jsonResponse(['success' => false, 'error' => 'Missing invoice ID'], 400);
+            // =================================================================
+            // 3. الموردين وتعيين الأعمدة (Suppliers & Column Mappings)
+            // =================================================================
+            case 'suppliers':
+                // Sub-route: /suppliers/mappings
+                if ($action === 'mappings') {
+                    if ($method === 'GET') {
+                        $supplierId = trim((string)($_GET['supplierId'] ?? $_GET['supplier_id'] ?? ''));
+                        if (empty($supplierId)) jsonResponse(['success' => false, 'error' => 'Missing supplier ID'], 400);
 
-                Database::execute("DELETE FROM `archive_invoice_items` WHERE `invoice_id` = ?", "s", [$deleteId]);
-                Database::execute("DELETE FROM `archive_invoices` WHERE `id` = ?", "s", [$deleteId]);
-
-                jsonResponse(['success' => true, 'message' => 'تم حذف الفاتورة بنجاح']);
-            }
-            break;
-
-        // =====================================================================
-        // 3. الموردين وتعيين الأعمدة (Suppliers & Mappings)
-        // =====================================================================
-        case 'suppliers':
-            if ($method === 'GET') {
-                $supplierId = trim((string)($_GET['id'] ?? ''));
-
-                if (!empty($supplierId)) {
-                    $supplier = Database::queryOne("SELECT * FROM `archive_suppliers` WHERE `id` = ? LIMIT 1", "s", [$supplierId]);
-                    if ($supplier) {
                         $mappings = Database::query("SELECT * FROM `archive_column_mappings` WHERE `supplier_id` = ?", "s", [$supplierId]);
-                        $supplier['columnMappings'] = $mappings;
-                        jsonResponse(['success' => true, 'supplier' => $supplier]);
+                        
+                        $formatted = array_map(function($m) {
+                            return [
+                                'id' => $m['id'],
+                                'supplierId' => $m['supplier_id'],
+                                'rawColumnName' => $m['raw_column_name'],
+                                'standardField' => $m['standard_field']
+                            ];
+                        }, $mappings);
+
+                        jsonResponse(['success' => true, 'mappings' => $formatted]);
+
+                    } elseif ($method === 'POST') {
+                        $supplierId = trim((string)($requestData['supplierId'] ?? $requestData['supplier_id'] ?? ''));
+                        $mappings = is_array($requestData['mappings'] ?? null) ? $requestData['mappings'] : [];
+
+                        if (empty($supplierId)) jsonResponse(['success' => false, 'error' => 'Missing supplier ID'], 400);
+
+                        Database::execute("DELETE FROM `archive_column_mappings` WHERE `supplier_id` = ?", "s", [$supplierId]);
+
+                        $sql = "INSERT INTO `archive_column_mappings` (`id`, `supplier_id`, `raw_column_name`, `standard_field`, `created_at`, `updated_at`)
+                                VALUES (?, ?, ?, ?, NOW(6), NOW(6))";
+
+                        foreach ($mappings as $m) {
+                            $raw = trim((string)($m['rawColumnName'] ?? $m['raw_column_name'] ?? ''));
+                            $std = trim((string)($m['standardField'] ?? $m['standard_field'] ?? ''));
+                            if (!empty($raw) && !empty($std)) {
+                                $mapId = generateUuid();
+                                Database::execute($sql, "ssss", [$mapId, $supplierId, $raw, $std]);
+                            }
+                        }
+
+                        jsonResponse(['success' => true, 'message' => 'تم حفظ تعيين ومطابقة الأعمدة بنجاح']);
+                    }
+                    break;
+                }
+
+                // Standard Suppliers CRUD
+                if ($method === 'GET') {
+                    $supplierId = trim((string)($_GET['id'] ?? $action ?? ''));
+
+                    if (!empty($supplierId) && $supplierId !== 'suppliers') {
+                        $supplier = Database::queryOne("SELECT * FROM `archive_suppliers` WHERE `id` = ? LIMIT 1", "s", [$supplierId]);
+                        if ($supplier) {
+                            $mappings = Database::query("SELECT * FROM `archive_column_mappings` WHERE `supplier_id` = ?", "s", [$supplierId]);
+                            $invoices = Database::query("SELECT * FROM `archive_invoices` WHERE `supplier_id` = ? ORDER BY `invoice_date` DESC", "s", [$supplierId]);
+                            
+                            $supplier['columnMappings'] = array_map(function($m) {
+                                return [
+                                    'id' => $m['id'],
+                                    'supplierId' => $m['supplier_id'],
+                                    'rawColumnName' => $m['raw_column_name'],
+                                    'standardField' => $m['standard_field']
+                                ];
+                            }, $mappings);
+
+                            $supplier['invoices'] = array_map(function($inv) {
+                                return [
+                                    'id' => $inv['id'],
+                                    'invoiceNumber' => $inv['invoice_number'],
+                                    'invoiceDate' => $inv['invoice_date'],
+                                    'totalAmount' => (float)$inv['total_amount'],
+                                    'discount' => (float)$inv['discount'],
+                                    'netAmount' => (float)$inv['net_amount'],
+                                    'status' => $inv['status'],
+                                    'fileUrl' => $inv['file_url']
+                                ];
+                            }, $invoices);
+
+                            $supplier['metrics'] = [
+                                'totalInvoicesCount' => count($invoices),
+                                'totalSpending' => array_reduce($invoices, fn($acc, $i) => $acc + (float)$i['net_amount'], 0)
+                            ];
+
+                            jsonResponse(['success' => true, 'supplier' => $supplier]);
+                        } else {
+                            jsonResponse(['success' => false, 'error' => 'المورد غير موجود'], 404);
+                        }
+                    }
+
+                    $suppliers = Database::query(
+                        "SELECT s.*, 
+                                (SELECT COUNT(*) FROM `archive_invoices` WHERE `supplier_id` = s.id) AS invoices_count,
+                                (SELECT COALESCE(SUM(`net_amount`), 0) FROM `archive_invoices` WHERE `supplier_id` = s.id) AS total_invoiced
+                         FROM `archive_suppliers` s
+                         ORDER BY s.name ASC"
+                    );
+
+                    jsonResponse(['success' => true, 'suppliers' => $suppliers]);
+
+                } elseif ($method === 'POST') {
+                    $id = !empty($requestData['id']) ? (string)$requestData['id'] : generateUuid();
+                    $name = trim((string)($requestData['name'] ?? ''));
+                    $phone = (string)($requestData['phone'] ?? '');
+                    $email = (string)($requestData['email'] ?? '');
+                    $address = (string)($requestData['address'] ?? '');
+                    $taxNumber = (string)($requestData['taxNumber'] ?? $requestData['tax_number'] ?? '');
+                    $notes = (string)($requestData['notes'] ?? '');
+
+                    if (empty($name)) jsonResponse(['success' => false, 'error' => 'اسم المورد مطلوب'], 400);
+
+                    $sql = "INSERT INTO `archive_suppliers` (`id`, `name`, `phone`, `email`, `address`, `tax_number`, `notes`, `created_at`, `updated_at`)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, NOW(6), NOW(6))
+                            ON DUPLICATE KEY UPDATE `phone` = VALUES(`phone`), `email` = VALUES(`email`), `address` = VALUES(`address`), `tax_number` = VALUES(`tax_number`), `notes` = VALUES(`notes`), `updated_at` = NOW(6)";
+
+                    Database::execute($sql, "sssssss", [$id, $name, $phone, $email, $address, $taxNumber, $notes]);
+
+                    jsonResponse(['success' => true, 'message' => 'تم حفظ المورد بنجاح', 'id' => $id, 'supplier' => ['id' => $id, 'name' => $name]]);
+
+                } elseif ($method === 'PUT') {
+                    $id = trim((string)($requestData['id'] ?? $action ?? ''));
+                    $name = trim((string)($requestData['name'] ?? ''));
+                    $phone = (string)($requestData['phone'] ?? '');
+                    $email = (string)($requestData['email'] ?? '');
+                    $address = (string)($requestData['address'] ?? '');
+                    $taxNumber = (string)($requestData['taxNumber'] ?? $requestData['tax_number'] ?? '');
+                    $notes = (string)($requestData['notes'] ?? '');
+
+                    if (empty($id) || empty($name)) jsonResponse(['success' => false, 'error' => 'البيانات غير مكتملة'], 400);
+
+                    $sql = "UPDATE `archive_suppliers` SET `name` = ?, `phone` = ?, `email` = ?, `address` = ?, `tax_number` = ?, `notes` = ?, `updated_at` = NOW(6) WHERE `id` = ?";
+                    Database::execute($sql, "sssssss", [$name, $phone, $email, $address, $taxNumber, $notes, $id]);
+
+                    jsonResponse(['success' => true, 'message' => 'تم تعديل بيانات المورد بنجاح']);
+
+                } elseif ($method === 'DELETE') {
+                    $id = trim((string)($_GET['id'] ?? $action ?? $requestData['id'] ?? ''));
+                    if (empty($id)) jsonResponse(['success' => false, 'error' => 'Missing ID'], 400);
+
+                    Database::execute("DELETE FROM `archive_column_mappings` WHERE `supplier_id` = ?", "s", [$id]);
+                    Database::execute("DELETE FROM `archive_suppliers` WHERE `id` = ?", "s", [$id]);
+                    jsonResponse(['success' => true, 'message' => 'تم حذف المورد بنجاح']);
+                }
+                break;
+
+            // =================================================================
+            // 4. موظفو الأرشيف (Employees Endpoints)
+            // =================================================================
+            case 'employees':
+                // Sub-route: /employees/[id]/invoices
+                if (!empty($action) && $subAction === 'invoices' && $method === 'GET') {
+                    $empId = $action;
+                    $received = Database::query("SELECT * FROM `archive_invoices` WHERE `receiver_id` = ? ORDER BY `invoice_date` DESC", "s", [$empId]);
+                    $entered = Database::query("SELECT * FROM `archive_invoices` WHERE `entry_clerk_id` = ? ORDER BY `invoice_date` DESC", "s", [$empId]);
+
+                    jsonResponse([
+                        'success' => true,
+                        'receivedInvoices' => $received,
+                        'enteredInvoices' => $entered
+                    ]);
+                }
+
+                if ($method === 'GET') {
+                    $employees = Database::query(
+                        "SELECT e.*,
+                                (SELECT COUNT(*) FROM `archive_invoices` WHERE `receiver_id` = e.id) AS received_count,
+                                (SELECT COUNT(*) FROM `archive_invoices` WHERE `entry_clerk_id` = e.id) AS entered_count
+                         FROM `archive_employees` e
+                         ORDER BY e.name ASC"
+                    );
+                    jsonResponse(['success' => true, 'employees' => $employees]);
+
+                } elseif ($method === 'POST') {
+                    $id = !empty($requestData['id']) ? (string)$requestData['id'] : generateUuid();
+                    $name = trim((string)($requestData['name'] ?? ''));
+                    $role = (string)($requestData['role'] ?? 'أمين مخزن');
+                    $phone = (string)($requestData['phone'] ?? '');
+                    $active = isset($requestData['active']) ? (int)(bool)$requestData['active'] : 1;
+
+                    if (empty($name)) jsonResponse(['success' => false, 'error' => 'اسم الموظف مطلوب'], 400);
+
+                    $sql = "INSERT INTO `archive_employees` (`id`, `name`, `role`, `phone`, `active`, `created_at`, `updated_at`)
+                            VALUES (?, ?, ?, ?, ?, NOW(6), NOW(6))
+                            ON DUPLICATE KEY UPDATE `role` = VALUES(`role`), `phone` = VALUES(`phone`), `active` = VALUES(`active`), `updated_at` = NOW(6)";
+
+                    Database::execute($sql, "ssssi", [$id, $name, $role, $phone, $active]);
+                    jsonResponse(['success' => true, 'message' => 'تم حفظ الموظف بنجاح', 'id' => $id]);
+
+                } elseif ($method === 'PUT') {
+                    $id = trim((string)($requestData['id'] ?? $action ?? ''));
+                    $name = trim((string)($requestData['name'] ?? ''));
+                    $role = (string)($requestData['role'] ?? 'أمين مخزن');
+                    $phone = (string)($requestData['phone'] ?? '');
+                    $active = isset($requestData['active']) ? (int)(bool)$requestData['active'] : 1;
+
+                    if (empty($id) || empty($name)) jsonResponse(['success' => false, 'error' => 'البيانات غير مكتملة'], 400);
+
+                    $sql = "UPDATE `archive_employees` SET `name` = ?, `role` = ?, `phone` = ?, `active` = ?, `updated_at` = NOW(6) WHERE `id` = ?";
+                    Database::execute($sql, "sssii", [$name, $role, $phone, $active, $id]);
+
+                    jsonResponse(['success' => true, 'message' => 'تم تحديث الموظف بنجاح']);
+
+                } elseif ($method === 'DELETE') {
+                    $id = trim((string)($_GET['id'] ?? $action ?? $requestData['id'] ?? ''));
+                    if (empty($id)) jsonResponse(['success' => false, 'error' => 'Missing ID'], 400);
+
+                    Database::execute("DELETE FROM `archive_employees` WHERE `id` = ?", "s", [$id]);
+                    jsonResponse(['success' => true, 'message' => 'تم حذف الموظف بنجاح']);
+                }
+                break;
+
+            // =================================================================
+            // 5. الإعدادات وتكامل Google Drive (Settings)
+            // =================================================================
+            case 'settings':
+                if ($action === 'google-status' && $method === 'GET') {
+                    $folderId = getArchiveSetting('GOOGLE_DRIVE_FOLDER_ID', '');
+                    jsonResponse([
+                        'success' => true,
+                        'connected' => !empty($folderId),
+                        'folderId' => $folderId
+                    ]);
+                }
+
+                if ($method === 'GET') {
+                    $rows = Database::query("SELECT `key_name`, `value_data` FROM `archive_system_settings`");
+                    $settings = [];
+                    foreach ($rows as $r) {
+                        $settings[$r['key_name']] = $r['value_data'];
+                    }
+
+                    if (isset($settings['ADMIN_PASSWORD'])) {
+                        $settings['ADMIN_PASSWORD_SET'] = !empty($settings['ADMIN_PASSWORD']);
+                        unset($settings['ADMIN_PASSWORD']);
+                    }
+
+                    jsonResponse(['success' => true, 'settings' => $settings]);
+
+                } elseif ($method === 'POST') {
+                    foreach ($requestData as $key => $val) {
+                        if ($key === 'ADMIN_PASSWORD' && empty($val)) continue;
+                        setArchiveSetting((string)$key, (string)$val);
+                    }
+
+                    jsonResponse(['success' => true, 'message' => 'تم حفظ الإعدادات بنجاح']);
+                }
+                break;
+
+            // =================================================================
+            // 6. رفع الملفات التخزينية المباشرة (File Upload)
+            // =================================================================
+            case 'upload':
+                if ($method !== 'POST') jsonResponse(['success' => false, 'error' => 'Method not allowed'], 405);
+
+                $uploadDir = __DIR__ . '/../uploads/archive/';
+                if (!is_dir($uploadDir)) {
+                    mkdir($uploadDir, 0755, true);
+                }
+
+                if (!empty($_FILES['file'])) {
+                    $file = $_FILES['file'];
+                    if ($file['error'] !== UPLOAD_ERR_OK) {
+                        jsonResponse(['success' => false, 'error' => 'فشل رفع الملف'], 400);
+                    }
+
+                    $ext = pathinfo($file['name'], PATHINFO_EXTENSION);
+                    $safeName = 'inv_' . date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
+                    $target = $uploadDir . $safeName;
+
+                    if (move_uploaded_file($file['tmp_name'], $target)) {
+                        $fileUrl = '/uploads/archive/' . $safeName;
+                        jsonResponse([
+                            'success' => true,
+                            'fileUrl' => $fileUrl,
+                            'fileName' => $file['name'],
+                            'fileType' => $file['type']
+                        ]);
                     } else {
-                        jsonResponse(['success' => false, 'error' => 'المورد غير موجود'], 404);
+                        jsonResponse(['success' => false, 'error' => 'فشل حفظ الملف على الخادم'], 500);
                     }
                 }
 
-                $suppliers = Database::query(
-                    "SELECT s.*, 
-                            (SELECT COUNT(*) FROM `archive_invoices` WHERE `supplier_id` = s.id) AS invoices_count,
-                            (SELECT COALESCE(SUM(`net_amount`), 0) FROM `archive_invoices` WHERE `supplier_id` = s.id) AS total_invoiced
-                     FROM `archive_suppliers` s
-                     ORDER BY s.name ASC"
-                );
+                if (!empty($requestData['base64'])) {
+                    $base64 = (string)$requestData['base64'];
+                    $fileName = (string)($requestData['fileName'] ?? 'invoice_' . time() . '.png');
+                    $ext = pathinfo($fileName, PATHINFO_EXTENSION) ?: 'png';
+                    $safeName = 'inv_' . date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
+                    $target = $uploadDir . $safeName;
 
-                jsonResponse(['success' => true, 'suppliers' => $suppliers]);
+                    $data = preg_replace('#^data:[^;]+;base64,#i', '', $base64);
+                    $data = base64_decode($data);
 
-            } elseif ($method === 'POST') {
-                $id = !empty($requestData['id']) ? (string)$requestData['id'] : generateUuid();
-                $name = trim((string)($requestData['name'] ?? ''));
-                $phone = (string)($requestData['phone'] ?? '');
-                $email = (string)($requestData['email'] ?? '');
-                $address = (string)($requestData['address'] ?? '');
-                $taxNumber = (string)($requestData['taxNumber'] ?? $requestData['tax_number'] ?? '');
-                $notes = (string)($requestData['notes'] ?? '');
-
-                if (empty($name)) jsonResponse(['success' => false, 'error' => 'اسم المورد مطلوب'], 400);
-
-                $sql = "INSERT INTO `archive_suppliers` (`id`, `name`, `phone`, `email`, `address`, `tax_number`, `notes`, `created_at`, `updated_at`)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, NOW(6), NOW(6))
-                        ON DUPLICATE KEY UPDATE `phone` = VALUES(`phone`), `email` = VALUES(`email`), `address` = VALUES(`address`), `tax_number` = VALUES(`tax_number`), `notes` = VALUES(`notes`), `updated_at` = NOW(6)";
-
-                Database::execute($sql, "sssssss", [$id, $name, $phone, $email, $address, $taxNumber, $notes]);
-
-                jsonResponse(['success' => true, 'message' => 'تم حفظ المورد بنجاح', 'id' => $id]);
-
-            } elseif ($method === 'PUT') {
-                $id = trim((string)($requestData['id'] ?? ''));
-                $name = trim((string)($requestData['name'] ?? ''));
-                $phone = (string)($requestData['phone'] ?? '');
-                $email = (string)($requestData['email'] ?? '');
-                $address = (string)($requestData['address'] ?? '');
-                $taxNumber = (string)($requestData['taxNumber'] ?? $requestData['tax_number'] ?? '');
-                $notes = (string)($requestData['notes'] ?? '');
-
-                if (empty($id) || empty($name)) jsonResponse(['success' => false, 'error' => 'البيانات غير مكتملة'], 400);
-
-                $sql = "UPDATE `archive_suppliers` SET `name` = ?, `phone` = ?, `email` = ?, `address` = ?, `tax_number` = ?, `notes` = ?, `updated_at` = NOW(6) WHERE `id` = ?";
-                Database::execute($sql, "sssssss", [$name, $phone, $email, $address, $taxNumber, $notes, $id]);
-
-                jsonResponse(['success' => true, 'message' => 'تم تعديل بيانات المورد بنجاح']);
-
-            } elseif ($method === 'DELETE') {
-                $id = trim((string)($_GET['id'] ?? $requestData['id'] ?? ''));
-                if (empty($id)) jsonResponse(['success' => false, 'error' => 'Missing ID'], 400);
-
-                Database::execute("DELETE FROM `archive_suppliers` WHERE `id` = ?", "s", [$id]);
-                jsonResponse(['success' => true, 'message' => 'تم حذف المورد بنجاح']);
-            }
-            break;
-
-        case 'suppliers/mappings':
-            if ($method === 'GET') {
-                $supplierId = trim((string)($_GET['supplierId'] ?? ''));
-                if (empty($supplierId)) jsonResponse(['success' => false, 'error' => 'Missing supplier ID'], 400);
-
-                $mappings = Database::query("SELECT * FROM `archive_column_mappings` WHERE `supplier_id` = ?", "s", [$supplierId]);
-                jsonResponse(['success' => true, 'mappings' => $mappings]);
-
-            } elseif ($method === 'POST') {
-                $supplierId = trim((string)($requestData['supplierId'] ?? ''));
-                $mappings = is_array($requestData['mappings'] ?? null) ? $requestData['mappings'] : [];
-
-                if (empty($supplierId)) jsonResponse(['success' => false, 'error' => 'Missing supplier ID'], 400);
-
-                Database::execute("DELETE FROM `archive_column_mappings` WHERE `supplier_id` = ?", "s", [$supplierId]);
-
-                $sql = "INSERT INTO `archive_column_mappings` (`id`, `supplier_id`, `raw_column_name`, `standard_field`, `created_at`, `updated_at`)
-                        VALUES (?, ?, ?, ?, NOW(6), NOW(6))";
-
-                foreach ($mappings as $m) {
-                    $raw = trim((string)($m['rawColumnName'] ?? $m['raw_column_name'] ?? ''));
-                    $std = trim((string)($m['standardField'] ?? $m['standard_field'] ?? ''));
-                    if (!empty($raw) && !empty($std)) {
-                        $mapId = generateUuid();
-                        Database::execute($sql, "ssss", [$mapId, $supplierId, $raw, $std]);
+                    if (file_put_contents($target, $data)) {
+                        $fileUrl = '/uploads/archive/' . $safeName;
+                        jsonResponse([
+                            'success' => true,
+                            'fileUrl' => $fileUrl,
+                            'fileName' => $fileName
+                        ]);
                     }
                 }
 
-                jsonResponse(['success' => true, 'message' => 'تم حفظ تعيين الأعمدة بنجاح']);
-            }
-            break;
+                jsonResponse(['success' => false, 'error' => 'لا يوجد ملف مرفوع'], 400);
+                break;
 
-        // =====================================================================
-        // 4. موظفو الأرشيف (Employees)
-        // =====================================================================
-        case 'employees':
-            if ($method === 'GET') {
-                $employees = Database::query(
-                    "SELECT e.*,
-                            (SELECT COUNT(*) FROM `archive_invoices` WHERE `receiver_id` = e.id) AS received_count,
-                            (SELECT COUNT(*) FROM `archive_invoices` WHERE `entry_clerk_id` = e.id) AS entered_count
-                     FROM `archive_employees` e
-                     ORDER BY e.name ASC"
-                );
-                jsonResponse(['success' => true, 'employees' => $employees]);
-
-            } elseif ($method === 'POST') {
-                $id = !empty($requestData['id']) ? (string)$requestData['id'] : generateUuid();
-                $name = trim((string)($requestData['name'] ?? ''));
-                $role = (string)($requestData['role'] ?? 'أمين مخزن');
-                $phone = (string)($requestData['phone'] ?? '');
-                $active = isset($requestData['active']) ? (int)(bool)$requestData['active'] : 1;
-
-                if (empty($name)) jsonResponse(['success' => false, 'error' => 'اسم الموظف مطلوب'], 400);
-
-                $sql = "INSERT INTO `archive_employees` (`id`, `name`, `role`, `phone`, `active`, `created_at`, `updated_at`)
-                        VALUES (?, ?, ?, ?, ?, NOW(6), NOW(6))
-                        ON DUPLICATE KEY UPDATE `role` = VALUES(`role`), `phone` = VALUES(`phone`), `active` = VALUES(`active`), `updated_at` = NOW(6)";
-
-                Database::execute($sql, "ssssi", [$id, $name, $role, $phone, $active]);
-                jsonResponse(['success' => true, 'message' => 'تم حفظ الموظف بنجاح', 'id' => $id]);
-
-            } elseif ($method === 'PUT') {
-                $id = trim((string)($requestData['id'] ?? ''));
-                $name = trim((string)($requestData['name'] ?? ''));
-                $role = (string)($requestData['role'] ?? 'أمين مخزن');
-                $phone = (string)($requestData['phone'] ?? '');
-                $active = isset($requestData['active']) ? (int)(bool)$requestData['active'] : 1;
-
-                if (empty($id) || empty($name)) jsonResponse(['success' => false, 'error' => 'البيانات غير مكتملة'], 400);
-
-                $sql = "UPDATE `archive_employees` SET `name` = ?, `role` = ?, `phone` = ?, `active` = ?, `updated_at` = NOW(6) WHERE `id` = ?";
-                Database::execute($sql, "sssii", [$name, $role, $phone, $active, $id]);
-
-                jsonResponse(['success' => true, 'message' => 'تم تحديث الموظف بنجاح']);
-
-            } elseif ($method === 'DELETE') {
-                $id = trim((string)($_GET['id'] ?? $requestData['id'] ?? ''));
-                if (empty($id)) jsonResponse(['success' => false, 'error' => 'Missing ID'], 400);
-
-                Database::execute("DELETE FROM `archive_employees` WHERE `id` = ?", "s", [$id]);
-                jsonResponse(['success' => true, 'message' => 'تم حذف الموظف بنجاح']);
-            }
-            break;
-
-        // =====================================================================
-        // 5. الإعدادات (System Settings)
-        // =====================================================================
-        case 'settings':
-            if ($method === 'GET') {
-                $rows = Database::query("SELECT `key_name`, `value_data` FROM `archive_system_settings`");
-                $settings = [];
-                foreach ($rows as $r) {
-                    $settings[$r['key_name']] = $r['value_data'];
-                }
-
-                if (isset($settings['ADMIN_PASSWORD'])) {
-                    $settings['ADMIN_PASSWORD_SET'] = !empty($settings['ADMIN_PASSWORD']);
-                    unset($settings['ADMIN_PASSWORD']);
-                }
-
-                jsonResponse(['success' => true, 'settings' => $settings]);
-
-            } elseif ($method === 'POST') {
-                foreach ($requestData as $key => $val) {
-                    if ($key === 'ADMIN_PASSWORD' && empty($val)) continue;
-                    setArchiveSetting((string)$key, (string)$val);
-                }
-
-                jsonResponse(['success' => true, 'message' => 'تم حفظ الإعدادات بنجاح']);
-            }
-            break;
-
-        // =====================================================================
-        // 6. رفع الملفات التخزينية (File Upload)
-        // =====================================================================
-        case 'upload':
-            if ($method !== 'POST') jsonResponse(['success' => false, 'error' => 'Method not allowed'], 405);
-
-            $uploadDir = __DIR__ . '/../uploads/archive/';
-            if (!is_dir($uploadDir)) {
-                mkdir($uploadDir, 0755, true);
-            }
-
-            if (!empty($_FILES['file'])) {
-                $file = $_FILES['file'];
-                if ($file['error'] !== UPLOAD_ERR_OK) {
-                    jsonResponse(['success' => false, 'error' => 'فشل رفع الملف'], 400);
-                }
-
-                $ext = pathinfo($file['name'], PATHINFO_EXTENSION);
-                $safeName = 'inv_' . date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
-                $target = $uploadDir . $safeName;
-
-                if (move_uploaded_file($file['tmp_name'], $target)) {
-                    $fileUrl = '/uploads/archive/' . $safeName;
-                    jsonResponse([
-                        'success' => true,
-                        'fileUrl' => $fileUrl,
-                        'fileName' => $file['name'],
-                        'fileType' => $file['type']
-                    ]);
-                } else {
-                    jsonResponse(['success' => false, 'error' => 'فشل حفظ الملف على الخادم'], 500);
-                }
-            }
-
-            if (!empty($requestData['base64'])) {
-                $base64 = (string)$requestData['base64'];
-                $fileName = (string)($requestData['fileName'] ?? 'invoice_' . time() . '.png');
-                $ext = pathinfo($fileName, PATHINFO_EXTENSION) ?: 'png';
-                $safeName = 'inv_' . date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
-                $target = $uploadDir . $safeName;
-
-                $data = preg_replace('#^data:image/\w+;base64,#i', '', $base64);
-                $data = base64_decode($data);
-
-                if (file_put_contents($target, $data)) {
-                    $fileUrl = '/uploads/archive/' . $safeName;
-                    jsonResponse([
-                        'success' => true,
-                        'fileUrl' => $fileUrl,
-                        'fileName' => $fileName
-                    ]);
-                }
-            }
-
-            jsonResponse(['success' => false, 'error' => 'لا يوجد ملف مرفوع'], 400);
-            break;
-
-        default:
-            jsonResponse(['success' => false, 'error' => "Unknown archive endpoint: {$subPath}"], 404);
-            break;
-    }
+            default:
+                jsonResponse(['success' => false, 'error' => "Unknown archive endpoint: {$subPath}"], 404);
+                break;
+        }
     } catch (Throwable $e) {
         error_log('[Archive API Error] ' . $e->getMessage());
         jsonResponse([
