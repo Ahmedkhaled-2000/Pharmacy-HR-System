@@ -13,16 +13,18 @@ export default function DisciplinaryPenaltiesTab({
   saveState,
   showToast,
   userRole = 'admin',
+  currentEmpId = null,
   currentBranchId = null,
   filterFn = null,
   monthPicker = null,
   customFrom = '',
   customTo = ''
 }) {
-  const isAdmin = userRole === 'admin';
-  const isBranch = userRole === 'branch';
+  const isEmployee = userRole === 'employee' || Boolean(currentEmpId);
+  const isBranch = userRole === 'branch' || (Boolean(currentBranchId) && !isEmployee && userRole !== 'admin');
+  const isAdmin = userRole === 'admin' && !isEmployee && !isBranch;
 
-  const employees = state.employees || [];
+  const allEmployeesList = state.employees || [];
   const branches = state.branches || [];
   const policy = state.disciplinaryPolicy || DEFAULT_DISCIPLINARY_CATEGORIES;
 
@@ -40,6 +42,14 @@ export default function DisciplinaryPenaltiesTab({
   // Audit Detail Modal State
   const [inspectedPenalty, setInspectedPenalty] = useState(null);
 
+  // Objection Modal State for Employee
+  const [objectionTargetPen, setObjectionTargetPen] = useState(null);
+  const [objectionReason, setObjectionReason] = useState('');
+
+  // Objection Reply Modal for Admin
+  const [adminRejectReplyPen, setAdminRejectReplyPen] = useState(null);
+  const [adminRejectReplyText, setAdminRejectReplyText] = useState('');
+
   // Filters State for Records
   const [searchQuery, setSearchQuery] = useState('');
   const [filterBranch, setFilterBranch] = useState(currentBranchId ? String(currentBranchId) : '');
@@ -48,30 +58,55 @@ export default function DisciplinaryPenaltiesTab({
   const [reportMonth, setReportMonth] = useState(monthPicker || new Date().toISOString().slice(0, 7));
 
   // Expanded employee in counters tab
-  const [expandedEmpId, setExpandedEmpId] = useState(null);
+  const [expandedEmpId, setExpandedEmpId] = useState(isEmployee && currentEmpId ? currentEmpId : null);
 
   // Category Editing State
   const [editingCategory, setEditingCategory] = useState(null);
   const [catFormData, setCatFormData] = useState(null);
   const [newRuleInput, setNewRuleInput] = useState('');
 
-  // Extract all disciplinary penalties from state.requests
+  // 1. Scoped Employees List according to User Role
+  const employees = useMemo(() => {
+    if (isEmployee && currentEmpId) {
+      return allEmployeesList.filter((e) => String(e.id) === String(currentEmpId));
+    }
+    if (isBranch && currentBranchId) {
+      return allEmployeesList.filter((e) => {
+        const direct = String(e.branchId) === String(currentBranchId);
+        const multi = e.branchesDetails && e.branchesDetails.some((b) => String(b.branchId) === String(currentBranchId));
+        return direct || multi;
+      });
+    }
+    return allEmployeesList;
+  }, [allEmployeesList, isEmployee, currentEmpId, isBranch, currentBranchId]);
+
+  // Set of employee IDs within current user's scope
+  const scopedEmpIds = useMemo(() => {
+    return new Set(employees.map((e) => String(e.id)));
+  }, [employees]);
+
+  // 2. Extract Disciplinary Penalties Scoped strictly by Role
   const allDisciplinaryPenalties = useMemo(() => {
-    const list = (state.requests || []).filter(
+    let list = (state.requests || []).filter(
       (r) => r.type === 'disciplinary_penalty' || r.subType === 'disciplinary_penalty'
     );
-    return list.sort((a, b) => (b.date || b.createdAt || '').localeCompare(a.date || a.createdAt || ''));
-  }, [state.requests]);
 
-  // Filtered penalties for records and reports
+    if (isEmployee && currentEmpId) {
+      list = list.filter((r) => String(r.employeeId) === String(currentEmpId));
+    } else if (isBranch && currentBranchId) {
+      list = list.filter(
+        (r) => String(r.branchId) === String(currentBranchId) || scopedEmpIds.has(String(r.employeeId))
+      );
+    }
+
+    return list.sort((a, b) => (b.date || b.createdAt || '').localeCompare(a.date || a.createdAt || ''));
+  }, [state.requests, isEmployee, currentEmpId, isBranch, currentBranchId, scopedEmpIds]);
+
+  // 3. Filtered penalties for records and reports
   const filteredPenalties = useMemo(() => {
     return allDisciplinaryPenalties.filter((p) => {
-      // Branch filter
-      if (currentBranchId && String(p.branchId) !== String(currentBranchId)) {
-        const emp = employees.find((e) => String(e.id) === String(p.employeeId));
-        const inBranchDetails = emp?.branchesDetails && emp.branchesDetails.some((b) => String(b.branchId) === String(currentBranchId));
-        if (!inBranchDetails) return false;
-      } else if (filterBranch && String(p.branchId) !== String(filterBranch)) {
+      // Branch filter (Admin only)
+      if (isAdmin && filterBranch && String(p.branchId) !== String(filterBranch)) {
         return false;
       }
 
@@ -81,6 +116,7 @@ export default function DisciplinaryPenaltiesTab({
         if (filterStatus === 'approved' && p.status !== 'approved' && !p.adminApproved) return false;
         if (filterStatus === 'rejected' && p.status !== 'rejected') return false;
         if (filterStatus === 'cancelled' && p.status !== 'cancelled' && !p.isCancelled) return false;
+        if (filterStatus === 'objection' && !p.objection) return false;
       }
 
       // Category filter
@@ -101,7 +137,7 @@ export default function DisciplinaryPenaltiesTab({
 
       return true;
     });
-  }, [allDisciplinaryPenalties, currentBranchId, filterBranch, filterStatus, filterCategory, searchQuery, employees]);
+  }, [allDisciplinaryPenalties, isAdmin, filterBranch, filterStatus, filterCategory, searchQuery]);
 
   // Analytics Metrics
   const currentMonthStr = monthPicker || new Date().toISOString().slice(0, 7);
@@ -133,7 +169,7 @@ export default function DisciplinaryPenaltiesTab({
   // ── Actions ──
   const handleApprovePenalty = async (pen) => {
     const reqId = pen.id;
-    const emp = employees.find((e) => String(e.id) === String(pen.employeeId));
+    const emp = allEmployeesList.find((e) => String(e.id) === String(pen.employeeId));
     const amount = parseFloat(pen.amount) || 0;
     const dailyRate = pen.dailyRate || getEmployeeDailyRate(emp, pen.branchId);
 
@@ -284,6 +320,125 @@ export default function DisciplinaryPenaltiesTab({
     showToast?.('✅ تم إلغاء الجزاء وسحب الخصم من مسير الأجور وتوثيق الإلغاء في سجل التدقيق');
   };
 
+  // ── Employee Objection Submission ──
+  const handleSubmitObjection = async (e) => {
+    e.preventDefault();
+    if (!objectionTargetPen || !objectionReason.trim()) {
+      showToast?.('يرجى كتابة أسباب ومبررات التظلم/الاعتراض');
+      return;
+    }
+
+    const updatedRequests = (state.requests || []).map((r) => {
+      if (r.id === objectionTargetPen.id) {
+        return {
+          ...r,
+          objection: {
+            status: 'pending',
+            reason: objectionReason.trim(),
+            submittedAt: new Date().toISOString()
+          },
+          auditLog: [
+            ...(r.auditLog || []),
+            {
+              action: 'objection_submitted',
+              by: objectionTargetPen.employeeName || 'الموظف',
+              role: 'employee',
+              timestamp: new Date().toISOString(),
+              note: `تم تقديم تظلم/اعتراض: ${objectionReason.trim()}`
+            }
+          ]
+        };
+      }
+      return r;
+    });
+
+    const updatedState = { ...state, requests: updatedRequests };
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+
+    setObjectionTargetPen(null);
+    setObjectionReason('');
+    showToast?.('✅ تم إرسال تظلمك واعتراضك إلى الإدارة العليا بنجاح وجاري مراجعته');
+  };
+
+  // ── Admin Objection Handlers ──
+  const handleAdminApproveObjection = async (penId) => {
+    const updatedRequests = (state.requests || []).map((r) => {
+      if (r.id === penId) {
+        return {
+          ...r,
+          status: 'cancelled',
+          isCancelled: true,
+          cancelledAt: new Date().toISOString(),
+          cancelledBy: 'الإدارة العليا',
+          cancellationReason: 'تم قبول تظلم الموظف وإلغاء الجزاء التأديبي',
+          objection: {
+            ...(r.objection || {}),
+            status: 'approved',
+            resolvedAt: new Date().toISOString()
+          },
+          auditLog: [
+            ...(r.auditLog || []),
+            {
+              action: 'objection_approved',
+              by: 'الإدارة العليا',
+              role: 'admin',
+              timestamp: new Date().toISOString(),
+              note: 'تم قبول تظلم الموظف وإلغاء الجزاء وسحب الخصم'
+            }
+          ]
+        };
+      }
+      return r;
+    });
+
+    const updatedAdjustments = (state.adjustments || []).filter((a) => {
+      if (a.requestId === penId || a.id === `adj_disc_${penId}`) return false;
+      return true;
+    });
+
+    const updatedState = { ...state, requests: updatedRequests, adjustments: updatedAdjustments };
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+
+    showToast?.('✅ تم قبول التظلم وإلغاء الجزاء والخصم التأديبي بنجاح');
+  };
+
+  const handleAdminRejectObjection = async (penId, replyText) => {
+    const updatedRequests = (state.requests || []).map((r) => {
+      if (r.id === penId) {
+        return {
+          ...r,
+          objection: {
+            ...(r.objection || {}),
+            status: 'rejected',
+            adminReply: replyText || 'تمت دراسة التظلم وتثبيت القرار التأديبي',
+            resolvedAt: new Date().toISOString()
+          },
+          auditLog: [
+            ...(r.auditLog || []),
+            {
+              action: 'objection_rejected',
+              by: 'الإدارة العليا',
+              role: 'admin',
+              timestamp: new Date().toISOString(),
+              note: `تم رفض التظلم وتثبيت الجزاء: ${replyText || 'بدون رد إضافي'}`
+            }
+          ]
+        };
+      }
+      return r;
+    });
+
+    const updatedState = { ...state, requests: updatedRequests };
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+
+    setAdminRejectReplyPen(null);
+    setAdminRejectReplyText('');
+    showToast?.('❌ تم رفض التظلم وتثبيت القرار التأديبي');
+  };
+
   // ── Category Management Handlers ──
   const handleOpenEditCategory = (cat) => {
     setEditingCategory(cat);
@@ -429,7 +584,7 @@ export default function DisciplinaryPenaltiesTab({
     const reportPenalties = allDisciplinaryPenalties.filter((p) => {
       const dateMatches = (p.date || p.createdAt || '').startsWith(reportMonth);
       if (!dateMatches) return false;
-      if (filterBranch && String(p.branchId) !== String(filterBranch)) return false;
+      if (isAdmin && filterBranch && String(p.branchId) !== String(filterBranch)) return false;
       return true;
     });
 
@@ -442,7 +597,7 @@ export default function DisciplinaryPenaltiesTab({
     csvContent += 'كود الموظف,اسم الموظف,الفرع,التاريخ,فئة المخالفة,نوع المخالفة,تكرار المخالفة,الإجراء المتخذ,أيام الخصم,قيمة الخصم (ج.م),الحالة,المسؤول\n';
 
     reportPenalties.forEach((p) => {
-      const emp = employees.find((e) => String(e.id) === String(p.employeeId));
+      const emp = allEmployeesList.find((e) => String(e.id) === String(p.employeeId));
       const bObj = branches.find((b) => String(b.id) === String(p.branchId));
       const statusLabel = p.status === 'approved' ? 'معتمد' : p.status === 'rejected' ? 'مرفوض' : p.status === 'cancelled' ? 'ملغي' : 'معلق';
       
@@ -495,7 +650,7 @@ export default function DisciplinaryPenaltiesTab({
             onClick={() => setSubTab('dashboard')}
             style={{ fontSize: '13px', padding: '8px 14px' }}
           >
-            📊 لوحة المؤشرات والإحصائيات
+            {isEmployee ? '📊 مؤشراتي التأديبية' : isBranch ? '📊 لوحة مؤشرات الفرع' : '📊 لوحة المؤشرات والإحصائيات'}
           </button>
           <button
             type="button"
@@ -511,7 +666,7 @@ export default function DisciplinaryPenaltiesTab({
             onClick={() => setSubTab('counters')}
             style={{ fontSize: '13px', padding: '8px 14px' }}
           >
-            👥 سجل الموظفين وعدادات التكرار
+            {isEmployee ? '👤 عدادات تكرار مخالفاتي' : isBranch ? '👥 سجل موظفي الفرع والعدادات' : '👥 سجل الموظفين وعدادات التكرار'}
           </button>
           <button
             type="button"
@@ -519,7 +674,7 @@ export default function DisciplinaryPenaltiesTab({
             onClick={() => setSubTab('records')}
             style={{ fontSize: '13px', padding: '8px 14px', position: 'relative' }}
           >
-            📋 سجل القرارات والاعتمادات
+            {isEmployee ? '📋 سجل جزاءاتي وقراراتي' : isBranch ? '📋 سجل قرارات الفرع والاعتمادات' : '📋 سجل القرارات والاعتمادات'}
             {pendingApprovalsCount > 0 && (
               <span
                 style={{
@@ -536,38 +691,43 @@ export default function DisciplinaryPenaltiesTab({
               </span>
             )}
           </button>
-          <button
-            type="button"
-            className={`btn ${subTab === 'report' ? 'btn-start' : 'btn-ghost'}`}
-            onClick={() => setSubTab('report')}
-            style={{ fontSize: '13px', padding: '8px 14px' }}
-          >
-            📄 التقرير الشهري والتصدير
-          </button>
+          {!isEmployee && (
+            <button
+              type="button"
+              className={`btn ${subTab === 'report' ? 'btn-start' : 'btn-ghost'}`}
+              onClick={() => setSubTab('report')}
+              style={{ fontSize: '13px', padding: '8px 14px' }}
+            >
+              {isBranch ? '📄 تقرير الفرع الشهري والتصدير' : '📄 التقرير الشهري والتصدير'}
+            </button>
+          )}
         </div>
 
-        <div>
-          <button
-            type="button"
-            className="btn btn-start"
-            style={{
-              background: '#dc2626',
-              color: '#ffffff',
-              fontWeight: 'bold',
-              fontSize: '13.5px',
-              padding: '8px 16px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px'
-            }}
-            onClick={() => {
-              setTargetEmpForModal(null);
-              setShowViolationModal(true);
-            }}
-          >
-            ➕ {isAdmin ? 'توثيق وتطبيق جزاء تأديبي' : 'رفع مخالفة تأديبية'}
-          </button>
-        </div>
+        {/* Action Button for Admin & Branch Manager Only */}
+        {(isAdmin || isBranch) && (
+          <div>
+            <button
+              type="button"
+              className="btn btn-start"
+              style={{
+                background: '#dc2626',
+                color: '#ffffff',
+                fontWeight: 'bold',
+                fontSize: '13.5px',
+                padding: '8px 16px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+              onClick={() => {
+                setTargetEmpForModal(null);
+                setShowViolationModal(true);
+              }}
+            >
+              ➕ {isAdmin ? 'توثيق وتطبيق جزاء تأديبي' : 'رفع مخالفة تأديبية للإدارة'}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* ── SubTab 1: Dashboard & Analytics ── */}
@@ -583,28 +743,36 @@ export default function DisciplinaryPenaltiesTab({
             }}
           >
             <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px', borderRight: '4px solid #3b82f6' }}>
-              <span style={{ fontSize: '13px', color: 'var(--muted)', display: 'block' }}>مخالفات الشهر الحالي ({currentMonthStr})</span>
+              <span style={{ fontSize: '13px', color: 'var(--muted)', display: 'block' }}>
+                {isEmployee ? `مخالفاتي للشهر الحالي (${currentMonthStr})` : isBranch ? `مخالفات موظفي الفرع (${currentMonthStr})` : `مخالفات الشهر الحالي (${currentMonthStr})`}
+              </span>
               <strong style={{ fontSize: '24px', color: '#1e293b', display: 'block', marginTop: '4px' }}>
                 {currentMonthPenalties.length} <span style={{ fontSize: '14px', fontWeight: 'normal', color: 'var(--muted)' }}>واقعة</span>
               </strong>
             </div>
 
             <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px', borderRight: '4px solid #dc2626' }}>
-              <span style={{ fontSize: '13px', color: 'var(--muted)', display: 'block' }}>إجمالي الخصومات التأديبية المنفذة</span>
+              <span style={{ fontSize: '13px', color: 'var(--muted)', display: 'block' }}>
+                {isEmployee ? 'إجمالي الخصومات المنفذة عليّ' : isBranch ? 'إجمالي خصومات موظفي الفرع' : 'إجمالي الخصومات التأديبية المنفذة'}
+              </span>
               <strong style={{ fontSize: '24px', color: '#dc2626', display: 'block', marginTop: '4px' }}>
                 {totalMonthDeductionAmount.toLocaleString()} <span style={{ fontSize: '14px', fontWeight: 'normal' }}>ج.م</span>
               </strong>
             </div>
 
             <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px', borderRight: '4px solid #ea580c' }}>
-              <span style={{ fontSize: '13px', color: 'var(--muted)', display: 'block' }}>طلبات معلقة بانتظار الاعتماد</span>
+              <span style={{ fontSize: '13px', color: 'var(--muted)', display: 'block' }}>
+                {isEmployee ? 'طلبات بانتظار قرار الإدارة' : isBranch ? 'طلبات الفرع بانتظار الاعتماد' : 'طلبات معلقة بانتظار الاعتماد'}
+              </span>
               <strong style={{ fontSize: '24px', color: pendingApprovalsCount > 0 ? '#ea580c' : '#10b981', display: 'block', marginTop: '4px' }}>
                 {pendingApprovalsCount} <span style={{ fontSize: '14px', fontWeight: 'normal', color: 'var(--muted)' }}>طلب</span>
               </strong>
             </div>
 
             <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px', borderRight: '4px solid #8b5cf6' }}>
-              <span style={{ fontSize: '13px', color: 'var(--muted)', display: 'block' }}>إجمالي السجل التأديبي التراكمي</span>
+              <span style={{ fontSize: '13px', color: 'var(--muted)', display: 'block' }}>
+                {isEmployee ? 'إجمالي سجلي التأديبي التراكمي' : isBranch ? 'إجمالي سجل الفرع التراكمي' : 'إجمالي السجل التأديبي التراكمي'}
+              </span>
               <strong style={{ fontSize: '24px', color: '#7c3aed', display: 'block', marginTop: '4px' }}>
                 {allDisciplinaryPenalties.length} <span style={{ fontSize: '14px', fontWeight: 'normal', color: 'var(--muted)' }}>قرار</span>
               </strong>
@@ -623,7 +791,7 @@ export default function DisciplinaryPenaltiesTab({
               }}
             >
               <h4 style={{ margin: '0 0 10px', color: '#991b1b', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                ⚠️ تنبيه تكرار المخالفات: موظفون وصلوا 3 مخالفات أو أكثر في فئة معينة ({criticalEmployees.length})
+                ⚠️ تنبيه تكرار المخالفات: {isEmployee ? 'وصلت 3 مخالفات أو أكثر في الفئات التالية' : `موظفون وصلوا 3 مخالفات أو أكثر في فئة معينة (${criticalEmployees.length})`}
               </h4>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
                 {criticalEmployees.map(({ emp, highCategories }) => (
@@ -637,7 +805,7 @@ export default function DisciplinaryPenaltiesTab({
                       fontSize: '13px'
                     }}
                   >
-                    <strong>{emp.name} ({emp.code}): </strong>
+                    {!isEmployee && <strong>{emp.name} ({emp.code}): </strong>}
                     {highCategories.map((c) => (
                       <span key={c.categoryId} className="badge badge-danger" style={{ marginRight: '6px' }}>
                         {c.categoryName.split('—')[0]}: {c.activeCount} مرات (المستوى القادم: {c.nextEscalationAction})
@@ -649,7 +817,7 @@ export default function DisciplinaryPenaltiesTab({
             </div>
           )}
 
-          {/* Pending Approvals Quick Table */}
+          {/* Pending Approvals Quick Table for Admin */}
           {pendingApprovalsCount > 0 && isAdmin && (
             <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '12px', padding: '16px', marginBottom: '20px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
@@ -751,7 +919,9 @@ export default function DisciplinaryPenaltiesTab({
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                       <strong style={{ fontSize: '14px', color: cat.color || 'inherit' }}>{cat.name}</strong>
-                      <span className="badge badge-primary" style={{ fontSize: '11px' }}>{countInCat} واقعة مسجلة</span>
+                      <span className="badge badge-primary" style={{ fontSize: '11px' }}>
+                        {countInCat} {isEmployee ? 'واقعة عليك' : 'واقعة مسجلة'}
+                      </span>
                     </div>
                     <p style={{ margin: '0 0 10px', fontSize: '12px', color: 'var(--muted)', lineHeight: 1.5 }}>
                       {cat.description}
@@ -954,44 +1124,45 @@ export default function DisciplinaryPenaltiesTab({
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
             <div>
               <h3 style={{ fontFamily: 'Cairo', margin: '0 0 4px', color: 'var(--primary-dark)' }}>
-                👥 سجل الموظفين وعدادات التكرار المستقلة
+                {isEmployee ? '👤 عدادات تكرار مخالفاتي وسجلي التأديبي' : isBranch ? '👥 سجل موظفي الفرع وعدادات التكرار المستقلة' : '👥 سجل الموظفين وعدادات التكرار المستقلة'}
               </h3>
               <p style={{ margin: 0, color: 'var(--muted)', fontSize: '13px' }}>
-                استعراض بطاقات الموظفين وعدادات التكرار النشطة لكل فئة مخالفة على حدة مع سجل المخالفات التاريخي
+                {isEmployee
+                  ? 'متابعة عدادات التكرار النشطة لكل فئة مخالفة وسجل القرارات التأديبية الخاصة بك'
+                  : 'استعراض بطاقات الموظفين وعدادات التكرار النشطة لكل فئة مخالفة على حدة مع سجل المخالفات التاريخي'}
               </p>
             </div>
 
-            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-              <input
-                type="text"
-                placeholder="🔍 بحث باسم الموظف أو الكود..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', width: '220px' }}
-              />
-              {!currentBranchId && (
-                <select
-                  value={filterBranch}
-                  onChange={(e) => setFilterBranch(e.target.value)}
-                  style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
-                >
-                  <option value="">-- جميع الفروع --</option>
-                  {branches.map((b) => (
-                    <option key={b.id} value={b.id}>{b.name}</option>
-                  ))}
-                </select>
-              )}
-            </div>
+            {!isEmployee && (
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                <input
+                  type="text"
+                  placeholder="🔍 بحث باسم الموظف أو الكود..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', width: '220px' }}
+                />
+                {isAdmin && (
+                  <select
+                    value={filterBranch}
+                    onChange={(e) => setFilterBranch(e.target.value)}
+                    style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                  >
+                    <option value="">-- جميع الفروع --</option>
+                    {branches.map((b) => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Employee Cards Grid */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             {employees
               .filter((emp) => {
-                if (currentBranchId && String(emp.branchId) !== String(currentBranchId)) {
-                  const inMulti = emp.branchesDetails && emp.branchesDetails.some((b) => String(b.branchId) === String(currentBranchId));
-                  if (!inMulti) return false;
-                } else if (filterBranch && String(emp.branchId) !== String(filterBranch)) {
+                if (isAdmin && filterBranch && String(emp.branchId) !== String(filterBranch)) {
                   return false;
                 }
                 if (searchQuery.trim()) {
@@ -1053,17 +1224,19 @@ export default function DisciplinaryPenaltiesTab({
                           {activeViolationsCount > 0 ? `⚠️ ${activeViolationsCount} مخالفات نشطة` : '✨ سجل نظيف تماماً'}
                         </span>
 
-                        <button
-                          type="button"
-                          className="btn btn-outline"
-                          style={{ fontSize: '12px', padding: '6px 12px' }}
-                          onClick={() => {
-                            setTargetEmpForModal(emp.id);
-                            setShowViolationModal(true);
-                          }}
-                        >
-                          ➕ إضافة مخالفة
-                        </button>
+                        {(isAdmin || isBranch) && (
+                          <button
+                            type="button"
+                            className="btn btn-outline"
+                            style={{ fontSize: '12px', padding: '6px 12px' }}
+                            onClick={() => {
+                              setTargetEmpForModal(emp.id);
+                              setShowViolationModal(true);
+                            }}
+                          >
+                            ➕ إضافة مخالفة
+                          </button>
+                        )}
 
                         <button
                           type="button"
@@ -1210,7 +1383,7 @@ export default function DisciplinaryPenaltiesTab({
               />
             </div>
 
-            {!currentBranchId && (
+            {isAdmin && (
               <div>
                 <select
                   value={filterBranch}
@@ -1236,6 +1409,7 @@ export default function DisciplinaryPenaltiesTab({
                 <option value="approved">✅ معتمد ومطبق</option>
                 <option value="cancelled">🚫 ملغي</option>
                 <option value="rejected">❌ مرفوض</option>
+                <option value="objection">✋ بها اعتراضات/تظلمات</option>
               </select>
             </div>
 
@@ -1279,12 +1453,14 @@ export default function DisciplinaryPenaltiesTab({
                   </tr>
                 ) : (
                   filteredPenalties.map((pen) => {
-                    const emp = employees.find((e) => String(e.id) === String(pen.employeeId));
+                    const emp = allEmployeesList.find((e) => String(e.id) === String(pen.employeeId));
                     const bObj = branches.find((b) => String(b.id) === String(pen.branchId));
                     const isApproved = pen.status === 'approved' || pen.adminApproved;
                     const isPending = pen.status === 'pending_admin' || pen.status === 'pending';
                     const isCancelled = pen.status === 'cancelled' || pen.isCancelled;
                     const isRejected = pen.status === 'rejected';
+                    const hasObjection = Boolean(pen.objection);
+                    const objStatus = pen.objection?.status;
 
                     return (
                       <tr key={pen.id} style={{ opacity: isCancelled ? 0.6 : 1 }}>
@@ -1338,7 +1514,7 @@ export default function DisciplinaryPenaltiesTab({
                           )}
                         </td>
                         <td>
-                          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
                             {/* Inspect / Audit log button */}
                             <button
                               type="button"
@@ -1350,7 +1526,28 @@ export default function DisciplinaryPenaltiesTab({
                               🔍 تفاصيل
                             </button>
 
-                            {/* Admin Approval on pending */}
+                            {/* Employee Objection Button */}
+                            {isEmployee && !isCancelled && (
+                              hasObjection ? (
+                                <span className={`badge ${objStatus === 'approved' ? 'badge-success' : objStatus === 'rejected' ? 'badge-danger' : 'badge-warning'}`} style={{ fontSize: '11px' }}>
+                                  {objStatus === 'approved' ? '✅ تم قبول تظلمك' : objStatus === 'rejected' ? '❌ تم رفض التظلم' : '⏳ التظلم قيد المراجعة'}
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="btn btn-outline"
+                                  style={{ padding: '3px 8px', fontSize: '11px', color: '#dc2626', borderColor: '#fca5a5' }}
+                                  onClick={() => {
+                                    setObjectionTargetPen(pen);
+                                    setObjectionReason('');
+                                  }}
+                                >
+                                  ✋ تقديم تظلم
+                                </button>
+                              )
+                            )}
+
+                            {/* Admin Actions on Pending */}
                             {isAdmin && isPending && (
                               <>
                                 <button
@@ -1370,6 +1567,33 @@ export default function DisciplinaryPenaltiesTab({
                                   ❌ رفض
                                 </button>
                               </>
+                            )}
+
+                            {/* Admin Objection Review Actions */}
+                            {isAdmin && hasObjection && objStatus === 'pending' && (
+                              <div style={{ display: 'flex', gap: '4px' }}>
+                                <button
+                                  type="button"
+                                  className="btn btn-start"
+                                  style={{ padding: '2px 6px', fontSize: '10.5px', background: '#16a34a' }}
+                                  title="قبول التظلم وإلغاء الجزاء"
+                                  onClick={() => handleAdminApproveObjection(pen.id)}
+                                >
+                                  قبول التظلم
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost"
+                                  style={{ padding: '2px 6px', fontSize: '10.5px', color: '#dc2626' }}
+                                  title="رفض التظلم"
+                                  onClick={() => {
+                                    setAdminRejectReplyPen(pen);
+                                    setAdminRejectReplyText('');
+                                  }}
+                                >
+                                  رفض التظلم
+                                </button>
+                              </div>
                             )}
 
                             {/* Admin Reasoned Cancellation on approved */}
@@ -1399,8 +1623,8 @@ export default function DisciplinaryPenaltiesTab({
         </div>
       )}
 
-      {/* ── SubTab 5: Monthly Report & Export ── */}
-      {subTab === 'report' && (
+      {/* ── SubTab 5: Monthly Report & Export (Admin & Branch Only) ── */}
+      {subTab === 'report' && !isEmployee && (
         <div>
           <div
             style={{
@@ -1427,7 +1651,7 @@ export default function DisciplinaryPenaltiesTab({
                 />
               </div>
 
-              {!currentBranchId && (
+              {isAdmin && (
                 <div>
                   <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', marginBottom: '4px' }}>🏢 تصفية الفرع:</label>
                   <select
@@ -1448,84 +1672,71 @@ export default function DisciplinaryPenaltiesTab({
               <button
                 type="button"
                 className="btn btn-start"
-                style={{ background: '#0284c7', color: '#ffffff', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}
                 onClick={handleExportCSV}
+                style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
               >
-                📊 تصدير التقرير الشهري (Excel / CSV)
+                📥 تصدير التقرير (Excel / CSV)
               </button>
             </div>
           </div>
 
-          {/* Monthly Summary Cards */}
-          <div style={{ background: '#ffffff', border: '1px solid var(--border)', borderRadius: '12px', padding: '16px', marginBottom: '16px' }}>
-            <h4 style={{ margin: '0 0 14px', fontFamily: 'Cairo', color: 'var(--primary-dark)' }}>
-              📑 تقرير الجزاءات التأديبية لشهر ({reportMonth})
-            </h4>
-
+          <div style={{ background: '#ffffff', border: '1px solid var(--border)', borderRadius: '12px', overflow: 'hidden' }}>
             <table className="bylaws-table">
               <thead>
                 <tr>
                   <th>الموظف</th>
-                  <th>الكود</th>
                   <th>الفرع</th>
-                  <th>عدد المخالفات</th>
-                  <th>مرات التكرار</th>
-                  <th>إجمالي الخصم المالي</th>
-                  <th>الحالة العامة</th>
+                  <th>التاريخ</th>
+                  <th>فئة المخالفة</th>
+                  <th>نوع المخالفة</th>
+                  <th>العداد</th>
+                  <th>الإجراء</th>
+                  <th>أيام الخصم</th>
+                  <th>القيمة (ج.م)</th>
+                  <th>الحالة</th>
                 </tr>
               </thead>
               <tbody>
-                {employees
-                  .filter((emp) => {
-                    if (filterBranch && String(emp.branchId) !== String(filterBranch)) return false;
-                    return true;
-                  })
-                  .map((emp) => {
-                    const empMonthPenalties = allDisciplinaryPenalties.filter(
-                      (p) => String(p.employeeId) === String(emp.id) && (p.date || p.createdAt || '').startsWith(reportMonth)
-                    );
-                    if (empMonthPenalties.length === 0) return null;
-
-                    const totalDed = empMonthPenalties
-                      .filter((p) => p.status === 'approved' || p.adminApproved)
-                      .reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
-
-                    const hasPending = empMonthPenalties.some((p) => p.status === 'pending_admin' || p.status === 'pending');
-                    const bObj = branches.find((b) => String(b.id) === String(emp.branchId));
-
+                {filteredPenalties
+                  .filter((p) => (p.date || p.createdAt || '').startsWith(reportMonth))
+                  .map((pen) => {
+                    const emp = allEmployeesList.find((e) => String(e.id) === String(pen.employeeId));
+                    const bObj = branches.find((b) => String(b.id) === String(pen.branchId));
                     return (
-                      <tr key={emp.id}>
-                        <td><strong>{emp.name}</strong></td>
-                        <td>{emp.code || '—'}</td>
+                      <tr key={pen.id}>
+                        <td><strong>{pen.employeeName || emp?.name}</strong> ({pen.employeeCode || emp?.code || '—'})</td>
                         <td>{bObj?.name || 'الفرع الرئيسي'}</td>
-                        <td>{empMonthPenalties.length}</td>
-                        <td>
-                          {empMonthPenalties.map((p) => `المرة ${p.occurrenceNumber || 1}`).join('، ')}
+                        <td>{pen.date}</td>
+                        <td><span className="badge badge-primary">{pen.categoryCode || '—'}</span></td>
+                        <td>{pen.ruleTitle}</td>
+                        <td>المرة {pen.occurrenceNumber || 1}</td>
+                        <td><strong>{pen.actionTitle}</strong></td>
+                        <td>{pen.deductionDays || 0}</td>
+                        <td style={{ fontWeight: 'bold', color: pen.amount > 0 ? '#dc2626' : 'inherit' }}>
+                          {pen.amount || 0} ج.م
                         </td>
                         <td>
-                          <strong style={{ color: totalDed > 0 ? '#dc2626' : '#1e293b' }}>
-                            {totalDed.toLocaleString()} ج.م
-                          </strong>
-                        </td>
-                        <td>
-                          {hasPending ? (
-                            <span className="badge badge-warning">يحتوي طلبات معلقة</span>
+                          {pen.status === 'approved' ? (
+                            <span className="badge badge-success">معتمد ومخصوم</span>
+                          ) : pen.status === 'rejected' ? (
+                            <span className="badge badge-danger">مرفوض</span>
+                          ) : pen.status === 'cancelled' ? (
+                            <span className="badge badge-danger">ملغي</span>
                           ) : (
-                            <span className="badge badge-success">مكتمل ومغلق</span>
+                            <span className="badge badge-warning">معلق</span>
                           )}
                         </td>
                       </tr>
                     );
-                  })
-                  .filter(Boolean)}
+                  })}
               </tbody>
             </table>
           </div>
         </div>
       )}
 
-      {/* ── Modal: Add New Disciplinary Violation ── */}
-      {showViolationModal && (
+      {/* ── Modal: Record New Violation ── */}
+      {showViolationModal && (isAdmin || isBranch) && (
         <DisciplinaryViolationModal
           isOpen={showViolationModal}
           onClose={() => {
@@ -1539,36 +1750,41 @@ export default function DisciplinaryPenaltiesTab({
           userRole={userRole}
           currentBranchId={currentBranchId}
           preSelectedEmpId={targetEmpForModal}
+          onViolationSaved={() => {
+            setShowViolationModal(false);
+            setTargetEmpForModal(null);
+          }}
         />
       )}
 
       {/* ── Modal: Reasoned Cancellation ── */}
       {cancellingPenalty && (
         <div className="modal-backdrop" onClick={() => setCancellingPenalty(null)}>
-          <div className="modal-card" style={{ maxWidth: '520px', width: '95%' }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal-card" style={{ maxWidth: '550px', width: '95%' }} onClick={(e) => e.stopPropagation()}>
             <h3 style={{ fontFamily: 'Cairo', margin: '0 0 12px', color: '#dc2626' }}>
-              🚫 إلغاء جزاء تأديبي مسبب
+              🚫 إلغاء مسبب لقرار تأديبي
             </h3>
-            <p style={{ fontSize: '13px', color: 'var(--muted)', marginBottom: '14px' }}>
-              سيتم إلغاء الجزاء، سحب أي خصم مالي مترتب عليه من مسير الأجور، وتوثيق سبب الإلغاء في سجل التدقيق الرسمي.
+            <p style={{ fontSize: '13px', color: 'var(--muted)', marginBottom: '16px' }}>
+              سيتم إلغاء القرار وسحب الخصم المالي تلقائياً من مسير الأجور، مع توثيق اسم المسؤول والسبب في سجل التدقيق (Audit Log).
             </p>
 
-            <div style={{ background: 'var(--surface-muted)', padding: '10px 14px', borderRadius: '8px', marginBottom: '14px', fontSize: '13px' }}>
+            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', padding: '12px', borderRadius: '8px', marginBottom: '16px', fontSize: '13px' }}>
               <div><strong>الموظف: </strong>{cancellingPenalty.employeeName}</div>
-              <div><strong>المخالفة: </strong>{cancellingPenalty.ruleTitle}</div>
-              <div><strong>قيمة الخصم: </strong>{cancellingPenalty.amount || 0} ج.م</div>
+              <div><strong>نوع المخالفة: </strong>{cancellingPenalty.ruleTitle}</div>
+              <div><strong>قيمة الخصم: </strong>{cancellingPenalty.amount} ج.م</div>
             </div>
 
-            <div style={{ marginBottom: '18px' }}>
-              <label style={{ display: 'block', fontWeight: 'bold', fontSize: '13px', marginBottom: '6px' }}>
-                سبب ومبررات الإلغاء <span style={{ color: 'red' }}>*</span>:
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 'bold', marginBottom: '6px' }}>
+                سبب ومبررات الإلغاء (إلزامي للتوثيق): *
               </label>
               <textarea
                 rows={3}
-                placeholder="بيان أسباب التراجع أو إلغاء الجزاء وقبول المبررات..."
                 value={cancellationReason}
                 onChange={(e) => setCancellationReason(e.target.value)}
+                placeholder="مثال: تقديم عذر طبي معتمد تم قبوله لاحقاً من الإدارة العليا..."
                 style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                required
               />
             </div>
 
@@ -1579,7 +1795,7 @@ export default function DisciplinaryPenaltiesTab({
               <button
                 type="button"
                 className="btn btn-start"
-                style={{ background: '#dc2626', color: '#fff', fontWeight: 'bold' }}
+                style={{ background: '#dc2626' }}
                 onClick={handleConfirmCancelPenalty}
               >
                 تأكيد الإلغاء وسحب الخصم
@@ -1645,6 +1861,94 @@ export default function DisciplinaryPenaltiesTab({
                   </div>
                 ))}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Employee Submit Objection / Tazallom ── */}
+      {objectionTargetPen && (
+        <div className="modal-backdrop" onClick={() => setObjectionTargetPen(null)}>
+          <div className="modal-card" style={{ maxWidth: '600px', width: '96%' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '10px', marginBottom: '14px' }}>
+              <h3 style={{ fontFamily: 'Cairo', margin: 0, color: '#dc2626' }}>
+                ✋ تقديم تظلم / اعتراض على القرار التأديبي
+              </h3>
+              <button type="button" className="btn btn-ghost" onClick={() => setObjectionTargetPen(null)}>✕</button>
+            </div>
+
+            <div style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)', borderRadius: '10px', padding: '12px', marginBottom: '14px', fontSize: '13px' }}>
+              <div><strong>المخالفة: </strong>{objectionTargetPen.ruleTitle} ({objectionTargetPen.categoryCode})</div>
+              <div><strong>الإجراء المتخذ: </strong>{objectionTargetPen.actionTitle}</div>
+              <div><strong>الخصم المالي: </strong>{objectionTargetPen.amount || 0} ج.م</div>
+              <div><strong>التاريخ: </strong>{objectionTargetPen.date}</div>
+            </div>
+
+            <form onSubmit={handleSubmitObjection}>
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 'bold', marginBottom: '6px' }}>
+                  أسباب ومبررات التظلم بالتفصيل: *
+                </label>
+                <textarea
+                  rows={4}
+                  value={objectionReason}
+                  onChange={(e) => setObjectionReason(e.target.value)}
+                  placeholder="اكتب أسباب التظلم والظروف والمبررات التي ترغب في رفعها للإدارة العليا..."
+                  required
+                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', fontFamily: 'inherit' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button type="button" className="btn btn-ghost" onClick={() => setObjectionTargetPen(null)}>
+                  إلغاء
+                </button>
+                <button type="submit" className="btn btn-start" style={{ background: '#dc2626' }}>
+                  📤 إرسال التظلم للإدارة العليا
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Admin Reject Objection Reply ── */}
+      {adminRejectReplyPen && (
+        <div className="modal-backdrop" onClick={() => setAdminRejectReplyPen(null)}>
+          <div className="modal-card" style={{ maxWidth: '600px', width: '96%' }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ fontFamily: 'Cairo', margin: '0 0 14px', color: '#dc2626' }}>
+              ❌ رفض تظلم الموظف وتثبيت الجزاء
+            </h3>
+
+            <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', padding: '12px', marginBottom: '14px', fontSize: '13px' }}>
+              <strong>تظلم الموظف: </strong>"{adminRejectReplyPen.objection?.reason}"
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 'bold', marginBottom: '6px' }}>
+                ملاحظات وسبب رفض التظلم:
+              </label>
+              <textarea
+                rows={3}
+                value={adminRejectReplyText}
+                onChange={(e) => setAdminRejectReplyText(e.target.value)}
+                placeholder="تمت دراسة التظلم ورؤي عدم كفاية المبررات وتثبيت القرار التأديبي..."
+                style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button type="button" className="btn btn-ghost" onClick={() => setAdminRejectReplyPen(null)}>
+                إلغاء
+              </button>
+              <button
+                type="button"
+                className="btn btn-start"
+                style={{ background: '#dc2626' }}
+                onClick={() => handleAdminRejectObjection(adminRejectReplyPen.id, adminRejectReplyText)}
+              >
+                تأكيد الرفض وتثبيت القرار
+              </button>
             </div>
           </div>
         </div>
