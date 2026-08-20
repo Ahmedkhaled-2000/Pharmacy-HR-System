@@ -59,12 +59,15 @@ function getActiveBreakStr(activeShift) {
   }
 }
 
-export function getArabicStatusBadge(status, adminApproved, branchApproved) {
+export function getArabicStatusBadge(status, adminApproved, branchApproved, req = null) {
   if (status === 'rejected') {
-    return <span className="approval-status-badge rejected" style={{ background: '#fee2e2', color: '#b91c1c', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px' }}>🔴 مرفوض</span>;
+    return <span className="approval-status-badge rejected" style={{ background: '#fee2e2', color: '#b91c1c', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px' }}>🔴 مرفوض نهائياً</span>;
   }
-  if (status === 'approved' && adminApproved) {
+  if (status === 'approved' && (adminApproved || branchApproved)) {
     return <span className="approval-status-badge approved" style={{ background: '#dcfce7', color: '#15803d', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px' }}>🟢 معتمد نهائياً</span>;
+  }
+  if (req?.branchDecision === 'rejected' || req?.branchRejected) {
+    return <span className="approval-status-badge pending" style={{ background: '#ffedd5', color: '#c2410c', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px' }}>⏳ قيد نظر الإدارة (لم يوافق الفرع)</span>;
   }
   if (status === 'pending_admin' || branchApproved || (status === 'approved' && !adminApproved)) {
     return <span className="approval-status-badge pending" style={{ background: '#fef3c7', color: '#b45309', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px' }}>🟡 بانتظار الإدارة العليا</span>;
@@ -75,9 +78,12 @@ export function getArabicStatusBadge(status, adminApproved, branchApproved) {
   return <span className="approval-status-badge pending" style={{ background: '#fef9c3', color: '#a16207', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px' }}>⏳ قيد المراجعة</span>;
 }
 
-export function getArabicBranchApprovalBadge(branchApproved, status) {
+export function getArabicBranchApprovalBadge(branchApproved, status, req = null) {
   if (branchApproved) {
     return <span style={{ color: '#16a34a', fontWeight: 'bold', fontSize: '12.5px' }}>🟢 تم اعتمادك</span>;
+  }
+  if (req?.branchDecision === 'rejected' || req?.branchRejected) {
+    return <span style={{ color: '#dc2626', fontWeight: 'bold', fontSize: '12.5px' }}>❌ لم توافق (محال للإدارة)</span>;
   }
   if (status === 'rejected') {
     return <span style={{ color: '#dc2626', fontWeight: 'bold', fontSize: '12.5px' }}>🔴 مرفوض</span>;
@@ -404,53 +410,63 @@ export default function BranchManagerView({
 
   // ── Handlers ──
   const handleManagerApproveRequest = async (reqId) => {
-    let approvedTargetReq = null;
+    let foundReq = (state.requests || []).find(r => r.id === reqId) ||
+                   (state.leaveRequests || []).find(r => r.id === reqId) ||
+                   (state.shiftSwaps || []).find(r => r.id === reqId) ||
+                   (state.loans || []).find(r => r.id === reqId);
+
+    if (!foundReq) {
+      showToast?.('لم يتم العثور على الطلب');
+      return;
+    }
+
+    const isAdminApproved = Boolean(foundReq.adminApproved);
+    const isFullyApproved = isAdminApproved; // Fully approved if admin already approved
+
+    const updatedTargetReq = {
+      ...foundReq,
+      branchApproved: true,
+      branchDecision: 'approved',
+      branchRejected: false,
+      branchApprovedAt: new Date().toISOString(),
+      status: isFullyApproved ? 'approved' : 'pending',
+      approvedAt: isFullyApproved ? new Date().toISOString() : foundReq.approvedAt
+    };
+
+    let updatedRequests = [...(state.requests || [])];
+    const reqIdx = updatedRequests.findIndex(r => r.id === reqId);
+    if (reqIdx >= 0) {
+      updatedRequests[reqIdx] = updatedTargetReq;
+    } else {
+      updatedRequests.unshift(updatedTargetReq);
+    }
+
     let updatedRosters = [...(state.rosters || [])];
     let updatedShifts = [...(state.shifts || [])];
     let updatedLeaveRequests = [...(state.leaveRequests || [])];
     let updatedSwaps = [...(state.shiftSwaps || [])];
 
-    const updatedRequests = (state.requests || []).map((r) => {
-      if (r.id === reqId) {
-        // Any request approved by the Branch Manager must wait for Upper Management (Admin) approval
-        const isAdminApproved = Boolean(r.adminApproved);
-        const isFullyApproved = isAdminApproved; // Only fully approved if admin already approved
-
-        const updated = {
-          ...r,
-          branchApproved: true,
-          branchApprovedAt: new Date().toISOString(),
-          status: isFullyApproved ? 'approved' : 'pending_admin',
-          approvedAt: isFullyApproved ? new Date().toISOString() : r.approvedAt
-        };
-        if (isFullyApproved) approvedTargetReq = updated;
-        return updated;
-      }
-      return r;
-    });
-
     // 1. If fully approved roster edit/update (only if admin approved)
-    if (approvedTargetReq && (approvedTargetReq.type === 'roster_update' || approvedTargetReq.type === 'roster_edit' || approvedTargetReq.type === 'roster_edit_request')) {
-      const targetEmp = (state.employees || []).find(e => String(e.id) === String(approvedTargetReq.employeeId));
-      const targetBStr = approvedTargetReq.branchId ? String(approvedTargetReq.branchId) : (targetEmp?.branchId ? String(targetEmp.branchId) : (currentBranch?.id ? String(currentBranch.id) : ''));
-
-      const normalizedSch = normalizeSchedule(approvedTargetReq.schedule || approvedTargetReq.newSchedule);
+    if (isFullyApproved && (updatedTargetReq.type === 'roster_update' || updatedTargetReq.type === 'roster_edit' || updatedTargetReq.type === 'roster_edit_request')) {
+      const targetEmp = (state.employees || []).find(e => String(e.id) === String(updatedTargetReq.employeeId));
+      const targetBStr = updatedTargetReq.branchId ? String(updatedTargetReq.branchId) : (targetEmp?.branchId ? String(targetEmp.branchId) : (currentBranch?.id ? String(currentBranch.id) : ''));
+      const normalizedSch = normalizeSchedule(updatedTargetReq.schedule || updatedTargetReq.newSchedule);
 
       const activeRosterObj = {
-        id: approvedTargetReq.id || `roster_${Date.now()}`,
-        employeeId: approvedTargetReq.employeeId,
-        branchId: targetBStr || approvedTargetReq.branchId || currentBranch?.id || null,
-        month: approvedTargetReq.month || new Date().toISOString().slice(0, 7),
-        fromDate: approvedTargetReq.fromDate,
-        toDate: approvedTargetReq.toDate,
+        id: updatedTargetReq.id || `roster_${Date.now()}`,
+        employeeId: updatedTargetReq.employeeId,
+        branchId: targetBStr || updatedTargetReq.branchId || currentBranch?.id || null,
+        month: updatedTargetReq.month || new Date().toISOString().slice(0, 7),
+        fromDate: updatedTargetReq.fromDate,
+        toDate: updatedTargetReq.toDate,
         schedule: normalizedSch,
         status: 'approved',
         approvedAt: new Date().toISOString()
       };
 
       const existingIdx = updatedRosters.findIndex(
-        (ros) => String(ros.employeeId) === String(approvedTargetReq.employeeId) && 
-                 (ros.month === approvedTargetReq.month || !approvedTargetReq.month || !ros.month) && 
+        (ros) => String(ros.employeeId) === String(updatedTargetReq.employeeId) && 
+                 (ros.month === updatedTargetReq.month || !updatedTargetReq.month || !ros.month) && 
                  (String(ros.branchId || '') === targetBStr || (!ros.branchId && !targetBStr))
       );
 
@@ -458,27 +474,27 @@ export default function BranchManagerView({
         updatedRosters[existingIdx] = activeRosterObj;
       } else {
         updatedRosters = updatedRosters.filter(
-          (ros) => !(String(ros.employeeId) === String(approvedTargetReq.employeeId) && String(ros.branchId || '') === targetBStr && (ros.month === approvedTargetReq.month || !approvedTargetReq.month || !ros.month))
+          (ros) => !(String(ros.employeeId) === String(updatedTargetReq.employeeId) && String(ros.branchId || '') === targetBStr && (ros.month === updatedTargetReq.month || !updatedTargetReq.month || !ros.month))
         );
         updatedRosters.unshift(activeRosterObj);
       }
     }
 
-    // 2. If fully approved leave (only if admin approved)
-    if (approvedTargetReq && (approvedTargetReq.type === 'leave' || approvedTargetReq.type === 'leave_request' || approvedTargetReq.leaveType)) {
-      updatedLeaveRequests = updatedLeaveRequests.map((lr) => {
-        if (lr.id === approvedTargetReq.id || (String(lr.employeeId) === String(approvedTargetReq.employeeId) && lr.startDate === approvedTargetReq.startDate)) {
-          return { ...lr, status: 'approved', branchApproved: true, adminApproved: true };
-        }
-        return lr;
-      });
+    // 2. If leave request
+    if (updatedTargetReq.type === 'leave' || updatedTargetReq.type === 'leave_request' || updatedTargetReq.leaveType) {
+      const lIdx = updatedLeaveRequests.findIndex(lr => lr.id === reqId || (String(lr.employeeId) === String(updatedTargetReq.employeeId) && lr.startDate === updatedTargetReq.startDate));
+      if (lIdx >= 0) {
+        updatedLeaveRequests[lIdx] = { ...updatedLeaveRequests[lIdx], branchApproved: true, status: isFullyApproved ? 'approved' : 'pending' };
+      } else {
+        updatedLeaveRequests.unshift({ ...updatedTargetReq, branchApproved: true, status: isFullyApproved ? 'approved' : 'pending' });
+      }
     }
 
     // 3. If overtime request (only if admin approved)
-    if (approvedTargetReq && approvedTargetReq.type === 'overtime') {
-      const targetDate = approvedTargetReq.date || approvedTargetReq.startDate;
-      const extraHours = parseFloat(approvedTargetReq.hours) || parseFloat(approvedTargetReq.amount) || 0;
-      const existingShiftIdx = updatedShifts.findIndex(s => s.employeeId === approvedTargetReq.employeeId && s.date === targetDate);
+    if (isFullyApproved && updatedTargetReq.type === 'overtime') {
+      const targetDate = updatedTargetReq.date || updatedTargetReq.startDate;
+      const extraHours = parseFloat(updatedTargetReq.hours) || parseFloat(updatedTargetReq.amount) || 0;
+      const existingShiftIdx = updatedShifts.findIndex(s => s.employeeId === updatedTargetReq.employeeId && s.date === targetDate);
       if (existingShiftIdx >= 0 && extraHours > 0) {
         updatedShifts[existingShiftIdx] = {
           ...updatedShifts[existingShiftIdx],
@@ -488,34 +504,34 @@ export default function BranchManagerView({
       }
     }
 
-    // 4. If shift swap request (only if admin approved)
-    if (approvedTargetReq && (approvedTargetReq.type === 'swap' || approvedTargetReq.type === 'shift_swap')) {
-      updatedSwaps = updatedSwaps.map((s) => {
-        if (s.id === approvedTargetReq.id) {
-          return { ...s, status: 'approved', branchApproved: true, adminApproved: true };
-        }
-        return s;
-      });
+    // 4. If shift swap request
+    if (updatedTargetReq.type === 'swap' || updatedTargetReq.type === 'shift_swap') {
+      const sIdx = updatedSwaps.findIndex(s => s.id === reqId);
+      if (sIdx >= 0) {
+        updatedSwaps[sIdx] = { ...updatedSwaps[sIdx], branchApproved: true, status: isFullyApproved ? 'approved' : 'pending' };
+      } else {
+        updatedSwaps.unshift({ ...updatedTargetReq, branchApproved: true, status: isFullyApproved ? 'approved' : 'pending' });
+      }
     }
 
     // Dismiss or update notification
     const updatedNotifications = (state.notifications || []).map((n) => {
-      if (n.requestId === reqId) return { ...n, isRead: true, status: 'pending_admin' };
+      if (n.requestId === reqId) return { ...n, isRead: true, status: isFullyApproved ? 'approved' : 'pending_admin' };
       return n;
     });
 
     let updatedLateIncidents = [...(state.lateIncidents || [])];
-    if (targetReq && targetReq.employeeId) {
+    if (updatedTargetReq && updatedTargetReq.employeeId) {
       try {
         const { incidents } = recalculateEmployeeCycleLateness({
-          employeeId: targetReq.employeeId,
+          employeeId: updatedTargetReq.employeeId,
           cycleFilterFn: null,
           state: { ...state, requests: updatedRequests, shifts: updatedShifts },
-          payrollCycleId: (targetReq.date || new Date().toISOString()).slice(0, 7)
+          payrollCycleId: (updatedTargetReq.date || new Date().toISOString()).slice(0, 7)
         });
         const incidentIds = new Set(incidents.map((i) => i.id));
         updatedLateIncidents = [
-          ...updatedLateIncidents.filter((i) => !incidentIds.has(i.id) && String(i.employeeId) !== String(targetReq.employeeId)),
+          ...updatedLateIncidents.filter((i) => !incidentIds.has(i.id) && String(i.employeeId) !== String(updatedTargetReq.employeeId)),
           ...incidents
         ];
       } catch (e) {
@@ -536,41 +552,60 @@ export default function BranchManagerView({
 
     setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.(approvedTargetReq ? '✅ تم اعتماد وقبول الطلب بنجاح وتطبيقه بالنظام' : '✅ تم توقيع وموافقة مدير الفرع، والطلب الآن بانتظار الاعتماد النهائي من الإدارة العليا');
+    showToast?.(isFullyApproved ? '✅ تم اعتماد وقبول الطلب بنجاح وتطبيقه بالنظام' : '✅ تم توقيع وموافقة مدير الفرع، والطلب الآن بانتظار الاعتماد النهائي من الإدارة العليا');
   };
 
   const handleManagerRejectRequest = async (reqId) => {
-    let rejectedTargetReq = null;
-    const updatedRequests = (state.requests || []).map((r) => {
-      if (r.id === reqId) {
-        rejectedTargetReq = { ...r, branchApproved: false, status: 'rejected', isRejected: true, rejectedAt: new Date().toISOString() };
-        return rejectedTargetReq;
-      }
-      return r;
-    });
+    let foundReq = (state.requests || []).find(r => r.id === reqId) ||
+                   (state.leaveRequests || []).find(r => r.id === reqId) ||
+                   (state.shiftSwaps || []).find(r => r.id === reqId) ||
+                   (state.loans || []).find(r => r.id === reqId);
+
+    if (!foundReq) {
+      showToast?.('لم يتم العثور على الطلب');
+      return;
+    }
+
+    // Branch manager rejection: marks branchApproved: false, branchDecision: 'rejected', and stays 'pending' for Higher Management final review
+    const updatedTargetReq = {
+      ...foundReq,
+      branchApproved: false,
+      branchDecision: 'rejected',
+      branchRejected: true,
+      branchRejectedAt: new Date().toISOString(),
+      status: 'pending' // Remains pending for Upper Management final verdict
+    };
+
+    let updatedRequests = [...(state.requests || [])];
+    const reqIdx = updatedRequests.findIndex(r => r.id === reqId);
+    if (reqIdx >= 0) {
+      updatedRequests[reqIdx] = updatedTargetReq;
+    } else {
+      updatedRequests.unshift(updatedTargetReq);
+    }
 
     let updatedLeaveRequests = [...(state.leaveRequests || [])];
-    if (rejectedTargetReq && (rejectedTargetReq.type === 'leave' || rejectedTargetReq.type === 'leave_request' || rejectedTargetReq.leaveType)) {
-      updatedLeaveRequests = updatedLeaveRequests.map((lr) => {
-        if (lr.id === rejectedTargetReq.id || (String(lr.employeeId) === String(rejectedTargetReq.employeeId) && lr.startDate === rejectedTargetReq.startDate)) {
-          return { ...lr, status: 'rejected', branchApproved: false };
-        }
-        return lr;
-      });
+    if (updatedTargetReq.type === 'leave' || updatedTargetReq.type === 'leave_request' || updatedTargetReq.leaveType) {
+      const lIdx = updatedLeaveRequests.findIndex(lr => lr.id === reqId || (String(lr.employeeId) === String(updatedTargetReq.employeeId) && lr.startDate === updatedTargetReq.startDate));
+      if (lIdx >= 0) {
+        updatedLeaveRequests[lIdx] = { ...updatedLeaveRequests[lIdx], branchApproved: false, branchDecision: 'rejected', status: 'pending' };
+      } else {
+        updatedLeaveRequests.unshift(updatedTargetReq);
+      }
     }
 
     let updatedSwaps = [...(state.shiftSwaps || [])];
-    if (rejectedTargetReq && (rejectedTargetReq.type === 'swap' || rejectedTargetReq.type === 'shift_swap')) {
-      updatedSwaps = updatedSwaps.map((s) => {
-        if (s.id === rejectedTargetReq.id) {
-          return { ...s, status: 'rejected', branchApproved: false };
-        }
-        return s;
-      });
+    if (updatedTargetReq.type === 'swap' || updatedTargetReq.type === 'shift_swap') {
+      const sIdx = updatedSwaps.findIndex(s => s.id === reqId);
+      if (sIdx >= 0) {
+        updatedSwaps[sIdx] = { ...updatedSwaps[sIdx], branchApproved: false, branchDecision: 'rejected', status: 'pending' };
+      } else {
+        updatedSwaps.unshift(updatedTargetReq);
+      }
     }
 
     const updatedNotifications = (state.notifications || []).map((n) => {
-      if (n.requestId === reqId) return { ...n, isRead: true, status: 'rejected' };
+      if (n.requestId === reqId) return { ...n, isRead: true, status: 'pending' };
       return n;
     });
 
@@ -584,7 +619,7 @@ export default function BranchManagerView({
 
     setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.('🔴 تم رفض الطلب من مدير الفرع');
+    showToast?.('⚠️ تم تسجيل عدم موافقة مدير الفرع، وتم تحويل الطلب للإدارة العليا للبت النهائي');
   };
 
   const handleApproveRoster = async (targetId) => {
@@ -1115,8 +1150,8 @@ export default function BranchManagerView({
                       <td style={{ fontSize: '12.5px' }}>{r.createdAt ? r.createdAt.slice(0, 10) : r.startDate || '—'}</td>
                       <td style={{ fontWeight: '700' }}>{r.employeeName || 'موظف'}</td>
                       <td>{getFormattedRequestBadge(r.type, r.leaveType)}</td>
-                      <td>{getArabicBranchApprovalBadge(r.branchApproved, r.status)}</td>
-                      <td>{getArabicStatusBadge(r.status, r.adminApproved, r.branchApproved)}</td>
+                      <td>{getArabicBranchApprovalBadge(r.branchApproved, r.status, r)}</td>
+                      <td>{getArabicStatusBadge(r.status, r.adminApproved, r.branchApproved, r)}</td>
                       <td>
                         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                           <button
@@ -1127,7 +1162,7 @@ export default function BranchManagerView({
                           >
                             👁️ معاينة الطلب
                           </button>
-                          {(!r.branchApproved && r.status !== 'rejected') && (
+                          {(!r.branchApproved && !r.branchRejected && r.status !== 'rejected') && (
                             <>
                               <button
                                 type="button"

@@ -203,42 +203,56 @@ export default function RequestsModule({
   });
 
   const handleApprove = async (reqId, customLoanData = null) => {
-    let targetReq = null;
+    let targetReq = (state.requests || []).find((r) => r.id === reqId) ||
+                    (state.leaveRequests || []).find((r) => r.id === reqId) ||
+                    (state.shiftSwaps || []).find((r) => r.id === reqId) ||
+                    (state.loans || []).find((r) => r.id === reqId) ||
+                    allRequests.find((r) => r.id === reqId);
+
+    if (!targetReq) {
+      showToast?.('لم يتم العثور على الطلب');
+      return;
+    }
+
+    targetReq = {
+      ...targetReq,
+      status: 'approved',
+      adminApproved: true,
+      approvedAt: new Date().toISOString()
+    };
+    if (targetReq.photoUrl) delete targetReq.photoUrl;
+
+    // Apply any loan modifications decided by Higher Management
+    if (customLoanData) {
+      const originalAmt = targetReq.originalAmount || targetReq.amount || targetReq.totalAmount;
+      const newAmt = parseFloat(customLoanData.amount) || parseFloat(targetReq.amount) || 0;
+      const isInst = customLoanData.loanType === 'installment';
+      const months = isInst ? Math.max(2, parseInt(customLoanData.installmentsCount, 10) || 2) : 1;
+      const monthly = parseFloat(customLoanData.monthlyDeduction) || (isInst ? Math.ceil(newAmt / months) : newAmt);
+
+      targetReq.amount = newAmt;
+      targetReq.totalAmount = newAmt;
+      targetReq.originalAmount = originalAmt;
+      targetReq.loanType = isInst ? 'installment' : 'monthly';
+      targetReq.installmentsCount = months;
+      targetReq.monthsCount = months;
+      targetReq.monthlyDeduction = monthly;
+      targetReq.installmentAmount = monthly;
+      targetReq.adminNotes = customLoanData.adminNotes || '';
+      targetReq.adminModified = (parseFloat(originalAmt) !== newAmt) || Boolean(customLoanData.isModified);
+    }
+
+    let updatedRequests = [...(state.requests || [])];
+    const rIdx = updatedRequests.findIndex((r) => r.id === reqId);
+    if (rIdx >= 0) {
+      updatedRequests[rIdx] = targetReq;
+    } else {
+      updatedRequests.unshift(targetReq);
+    }
+
     let updatedRosters = [...(state.rosters || [])];
     let updatedAdjustments = [...(state.adjustments || [])];
     let updatedShifts = [...(state.shifts || [])];
-
-    const updatedRequests = requests.map((r) => {
-      if (r.id === reqId) {
-        targetReq = { ...r, status: 'approved', adminApproved: true, branchApproved: true };
-        if (targetReq.photoUrl) delete targetReq.photoUrl;
-
-        // Apply any loan modifications decided by Higher Management
-        if (customLoanData) {
-          const originalAmt = targetReq.originalAmount || targetReq.amount || targetReq.totalAmount;
-          const newAmt = parseFloat(customLoanData.amount) || parseFloat(targetReq.amount) || 0;
-          const isInst = customLoanData.loanType === 'installment';
-          const months = isInst ? Math.max(2, parseInt(customLoanData.installmentsCount, 10) || 2) : 1;
-          const monthly = parseFloat(customLoanData.monthlyDeduction) || (isInst ? Math.ceil(newAmt / months) : newAmt);
-
-          targetReq.amount = newAmt;
-          targetReq.totalAmount = newAmt;
-          targetReq.originalAmount = originalAmt;
-          targetReq.loanType = isInst ? 'installment' : 'monthly';
-          targetReq.installmentsCount = months;
-          targetReq.monthsCount = months;
-          targetReq.monthlyDeduction = monthly;
-          targetReq.installmentAmount = monthly;
-          targetReq.adminNotes = customLoanData.adminNotes || '';
-          targetReq.adminModified = (parseFloat(originalAmt) !== newAmt) || Boolean(customLoanData.isModified);
-        }
-
-        return targetReq;
-      }
-      return r;
-    });
-
-    if (!targetReq) return;
 
     // 0. Overtime Request Approval
     if (targetReq.type === 'overtime') {
@@ -465,15 +479,34 @@ export default function RequestsModule({
   };
 
   const handleReject = async (reqId) => {
-    let targetReq = null;
-    const updatedRequests = requests.map((r) => {
-      if (r.id === reqId) {
-        targetReq = { ...r, status: 'rejected', adminApproved: false };
-        if (targetReq.photoUrl) delete targetReq.photoUrl;
-        return targetReq;
-      }
-      return r;
-    });
+    let targetReq = (state.requests || []).find((r) => r.id === reqId) ||
+                    (state.leaveRequests || []).find((r) => r.id === reqId) ||
+                    (state.shiftSwaps || []).find((r) => r.id === reqId) ||
+                    (state.loans || []).find((r) => r.id === reqId) ||
+                    allRequests.find((r) => r.id === reqId);
+
+    if (!targetReq) {
+      showToast?.('لم يتم العثور على الطلب');
+      return;
+    }
+
+    targetReq = {
+      ...targetReq,
+      status: 'rejected',
+      adminApproved: false,
+      isRejected: true,
+      adminRejected: true,
+      rejectedAt: new Date().toISOString()
+    };
+    if (targetReq.photoUrl) delete targetReq.photoUrl;
+
+    let updatedRequests = [...(state.requests || [])];
+    const rIdx = updatedRequests.findIndex((r) => r.id === reqId);
+    if (rIdx >= 0) {
+      updatedRequests[rIdx] = targetReq;
+    } else {
+      updatedRequests.unshift(targetReq);
+    }
 
     let updatedShifts = [...(state.shifts || [])];
     if (targetReq && targetReq.type === 'overtime') {
