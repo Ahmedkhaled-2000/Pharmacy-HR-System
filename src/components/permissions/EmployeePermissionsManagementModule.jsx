@@ -303,6 +303,7 @@ export default function EmployeePermissionsManagementModule({
     try {
       const emp = (state.employees || []).find((empObj) => String(empObj.id) === String(excEmpId));
       const durObj = computeDurationObj(excStartTime, excEndTime);
+      const isAdmin = authRole === 'admin';
 
       const newExcPerm = {
         id: 'perm_exc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
@@ -318,53 +319,67 @@ export default function EmployeePermissionsManagementModule({
         hours: durObj.hours,
         durationMinutes: durObj.minutes,
         durationText: durObj.text,
-        reason: `[إذن استثنائي]: ${excReason.trim() || 'تم المنح كإذن استثنائي من الإدارة'}`,
+        reason: `[إذن استثنائي]: ${excReason.trim() || (isAdmin ? 'تم المنح كإذن استثنائي من الإدارة العليا' : 'طلب إذن استثنائي مرفوع من مدير الفرع')}`,
         isExceptional: true,
         targetApproval: 'admin_only',
-        status: 'approved',
-        adminApproved: true,
+        status: isAdmin ? 'approved' : 'pending',
+        adminApproved: isAdmin ? true : false,
         branchApproved: true,
-        createdBy: currentEmployee ? currentEmployee.name : (authRole === 'admin' ? 'الإدارة العليا' : 'مدير الفرع'),
+        createdBy: currentEmployee ? currentEmployee.name : (isAdmin ? 'الإدارة العليا' : (currentBranch?.name ? `مدير فرع ${currentBranch.name}` : 'مدير الفرع')),
         createdAt: new Date().toISOString()
       };
 
       const updatedRequests = [newExcPerm, ...(state.requests || [])];
 
-      // مزامنة فورية مع البصمات (shifts)
-      const updatedShifts = applyApprovedPermissionsToShifts({
-        ...state,
-        requests: updatedRequests
-      });
-
-      // إلغاء الجزاءات اللائحية لليوم المعني
-      let updatedLateIncidents = [...(state.lateIncidents || [])];
-      try {
-        const { incidents } = recalculateEmployeeCycleLateness({
-          employeeId: emp.id,
-          cycleFilterFn: null,
-          state: { ...state, requests: updatedRequests, shifts: updatedShifts },
-          payrollCycleId: excDate.slice(0, 7)
+      if (isAdmin) {
+        // مزامنة فورية مع البصمات (shifts) فقط عند إصدار الإذن مباشرة من الإدارة العليا
+        const updatedShifts = applyApprovedPermissionsToShifts({
+          ...state,
+          requests: updatedRequests
         });
-        const incidentIds = new Set(incidents.map((i) => i.id));
-        updatedLateIncidents = [
-          ...updatedLateIncidents.filter((i) => !incidentIds.has(i.id) && String(i.employeeId) !== String(emp.id)),
-          ...incidents
-        ];
-      } catch (err) {
-        console.error('Error in recalculation:', err);
+
+        // إلغاء الجزاءات اللائحية لليوم المعني
+        let updatedLateIncidents = [...(state.lateIncidents || [])];
+        try {
+          const { incidents } = recalculateEmployeeCycleLateness({
+            employeeId: emp.id,
+            cycleFilterFn: null,
+            state: { ...state, requests: updatedRequests, shifts: updatedShifts },
+            payrollCycleId: excDate.slice(0, 7)
+          });
+          const incidentIds = new Set(incidents.map((i) => i.id));
+          updatedLateIncidents = [
+            ...updatedLateIncidents.filter((i) => !incidentIds.has(i.id) && String(i.employeeId) !== String(emp.id)),
+            ...incidents
+          ];
+        } catch (err) {
+          console.error('Error in recalculation:', err);
+        }
+
+        const updatedState = {
+          ...state,
+          requests: updatedRequests,
+          shifts: updatedShifts,
+          lateIncidents: updatedLateIncidents
+        };
+
+        if (setState) setState(updatedState);
+        if (saveState) await saveState(updatedState);
+
+        showToast?.(`✅ تم إصدار واعتماد الإذن الاستثنائي للموظف (${emp.name}) وتعديل بصمته فورياً`);
+      } else {
+        // عند طلبه من مدير الفرع، يتم حفظه كطلب معلق بانتظار موافقة واعتماد الإدارة العليا
+        const updatedState = {
+          ...state,
+          requests: updatedRequests
+        };
+
+        if (setState) setState(updatedState);
+        if (saveState) await saveState(updatedState);
+
+        showToast?.(`⏳ تم إرسال طلب الإذن الاستثنائي للموظف (${emp.name}) إلى الإدارة العليا للاعتماد`);
       }
 
-      const updatedState = {
-        ...state,
-        requests: updatedRequests,
-        shifts: updatedShifts,
-        lateIncidents: updatedLateIncidents
-      };
-
-      if (setState) setState(updatedState);
-      if (saveState) await saveState(updatedState);
-
-      showToast?.(`✅ تم إصدار الإذن الاستثنائي للموظف (${emp.name}) وتعديل بصمته وإلغاء أي خصم`);
       setShowExceptionalModal(false);
       setExcEmpId('');
       setExcReason('');
@@ -902,7 +917,7 @@ export default function EmployeePermissionsManagementModule({
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ fontSize: '24px' }}>✨</span>
                 <h3 style={{ margin: 0, fontSize: '18px', color: 'var(--primary-dark)', fontWeight: 800 }}>
-                  إصدار إذن استثنائي معتمد لموظف
+                  {authRole === 'admin' ? 'إصدار إذن استثنائي معتمد لموظف' : 'طلب إذن استثنائي لموظف (يُرسل للإدارة العليا)'}
                 </h3>
               </div>
               <button
@@ -916,6 +931,12 @@ export default function EmployeePermissionsManagementModule({
 
             <form onSubmit={handleCreateExceptionalPermission} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               
+              {authRole !== 'admin' && (
+                <div style={{ padding: '10px 14px', borderRadius: '8px', background: 'rgba(234, 179, 8, 0.15)', border: '1px solid #eab308', fontSize: '13px', color: '#854d0e', fontWeight: 700 }}>
+                  ⚠️ تنبيه: سيتم إرسال هذا الطلب مباشرة إلى <strong>الإدارة العليا</strong>، ولن يتم تفعيل الإذن وتعديل البصمات وإلغاء الخصم إلا بعد موافقة واعتماد الإدارة العليا.
+                </div>
+              )}
+
               {/* Employee Selection */}
               <div>
                 <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, marginBottom: '6px' }}>
@@ -1042,7 +1063,7 @@ export default function EmployeePermissionsManagementModule({
                   className="btn btn-start"
                   style={{ background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)', color: '#fff', border: 'none', padding: '10px 22px', borderRadius: '8px', fontWeight: 800 }}
                 >
-                  {excSubmitting ? 'جاري الإصدار والتطبيق...' : '✨ إصدار واعتماد فوري'}
+                  {excSubmitting ? 'جاري الإرسال...' : (authRole === 'admin' ? '✨ إصدار واعتماد فوري' : '📤 إرسال الطلب للإدارة العليا للاعتماد')}
                 </button>
               </div>
 
