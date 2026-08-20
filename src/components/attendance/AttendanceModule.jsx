@@ -6,15 +6,31 @@ export default function AttendanceModule({
   state,
   setState,
   saveState,
-  showToast
+  showToast,
+  filterFn = null,
+  monthPicker = null,
+  filterMode = 'month',
+  customFrom = '',
+  customTo = ''
 }) {
   const [selectedBranch, setSelectedBranch] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPunchEmp, setSelectedPunchEmp] = useState(null);
 
+  // Active period filter helper
+  const activePeriodFilter = (d) => {
+    if (!d) return false;
+    const dateStr = String(d).slice(0, 10);
+    if (typeof filterFn === 'function') return filterFn(dateStr);
+    return true;
+  };
+
+  const isCustom = (filterMode === 'custom' || filterMode === 'range') && customFrom && customTo;
+  const periodLabel = isCustom ? `الفترة المخصصة: من ${customFrom} إلى ${customTo}` : (monthPicker ? `دورة شهر (${monthPicker})` : '');
+
   // Manual Punch Form State
   const [manualEmpId, setManualEmpId] = useState('');
-  const [manualDate, setManualDate] = useState(new Date().toISOString().slice(0, 10));
+  const [manualDate, setManualDate] = useState(() => (customFrom ? customFrom : new Date().toISOString().slice(0, 10)));
   const [manualInTime, setManualInTime] = useState('');
   const [manualOutTime, setManualOutTime] = useState('');
   const [manualNotes, setManualNotes] = useState('');
@@ -178,7 +194,7 @@ export default function AttendanceModule({
               <th>اسم الموظف</th>
               <th>الفرع</th>
               <th>المسمى الوظيفي</th>
-              <th>عدد بصمات الشهر</th>
+              <th>عدد بصمات الفترة {periodLabel ? `(${periodLabel})` : ''}</th>
               <th>ساعات العمل المسجلة</th>
               <th>المعاينة والسجل</th>
             </tr>
@@ -189,7 +205,10 @@ export default function AttendanceModule({
             ) : (
               filteredEmployees.map((emp) => {
                 const b = branches.find((br) => br.id === emp.branchId);
-                const empPunches = (state.shifts || []).filter((p) => p.employeeId === emp.id || p.employeeCode === emp.code);
+                const empPunches = (state.shifts || []).filter((p) => {
+                  const isMatch = String(p.employeeId) === String(emp.id) || String(p.employeeCode) === String(emp.code);
+                  return isMatch && activePeriodFilter(p.date);
+                });
                 const totalHours = empPunches.reduce((acc, p) => acc + (parseFloat(p.hours) || parseFloat(p.workHours) || 8), 0).toFixed(1);
 
                 return (
@@ -217,11 +236,16 @@ export default function AttendanceModule({
         </table>
       </div>
 
-      {/* Attendance Punches Modal (Matching Image 2) */}
+      {/* Attendance Punches Modal */}
       {selectedPunchEmp && (
         <AttendancePunchesModal
           employee={selectedPunchEmp}
           state={state}
+          filterFn={filterFn}
+          monthPicker={monthPicker}
+          filterMode={filterMode}
+          customFrom={customFrom}
+          customTo={customTo}
           onClose={() => setSelectedPunchEmp(null)}
         />
       )}

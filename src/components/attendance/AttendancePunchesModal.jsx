@@ -4,12 +4,27 @@ import { isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils
 export default function AttendancePunchesModal({
   employee,
   state,
+  filterFn = null,
+  monthPicker = null,
+  filterMode = 'month',
+  customFrom = '',
+  customTo = '',
   onClose
 }) {
   if (!employee) return null;
 
+  const activePeriodFilter = (d) => {
+    if (!d) return false;
+    const dateStr = String(d).slice(0, 10);
+    if (typeof filterFn === 'function') return filterFn(dateStr);
+    return true;
+  };
+
+  const isCustom = (filterMode === 'custom' || filterMode === 'range') && customFrom && customTo;
+  const periodLabel = isCustom ? `الفترة المخصصة: من ${customFrom} إلى ${customTo}` : (monthPicker ? `دورة شهر (${monthPicker})` : '');
+
   const monthPunches = (state.shifts || []).filter(
-    (p) => p.employeeId === employee.id || p.employeeCode === employee.code
+    (p) => (String(p.employeeId) === String(employee.id) || String(p.employeeCode) === String(employee.code)) && activePeriodFilter(p.date)
   );
 
   // Group or process punches into rows
@@ -60,7 +75,7 @@ export default function AttendancePunchesModal({
               📋 سجل البصمات والورديات — {employee.name} (كود: {employee.code})
             </h3>
             <span style={{ fontSize: '13px', color: 'var(--muted)' }}>
-              {isMultiBranch ? `مسجل في ${employee.branchesDetails.length} فروع` : `الفرع: ${employee.branchName || 'الرئيسي'}`} | المسمى الوظيفي: {employee.jobTitle}
+              {isMultiBranch ? `مسجل في ${employee.branchesDetails.length} فروع` : `الفرع: ${employee.branchName || 'الرئيسي'}`} | المسمى الوظيفي: {employee.jobTitle} {periodLabel ? ` • (${periodLabel})` : ''}
             </span>
           </div>
           <button className="btn btn-ghost" onClick={onClose}>✕ إغلاق Window</button>
