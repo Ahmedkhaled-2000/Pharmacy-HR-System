@@ -2524,3 +2524,49 @@ tbody tr:hover {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
+
+/* ══════════════════════════════════════════════════════════════════ */
+/* ── DESKTOP APPLICATION STYLING & DROPDOWN ANIMATIONS ── */
+/* ══════════════════════════════════════════════════════════════════ */
+
+.desktop-app-layout {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--background);
+}
+
+.desktop-dropdown-animate {
+  animation: desktopDropdownFadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  transform-origin: top right;
+}
+
+@keyframes desktopDropdownFadeIn {
+  0% {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.desktop-menubar button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.desktop-titlebar {
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.desktop-workspace {
+  transition: padding 0.2s ease;
+}
+
+/* Sub-tabs horizontal scroll on smaller desktop viewports */
+.employees-hub-container button {
+  white-space: nowrap;
+}

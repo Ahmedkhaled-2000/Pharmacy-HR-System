@@ -61,6 +61,8 @@ import { apiArchiveDeleteEmployee } from './utils/archiveApiClient';
 // New Comprehensive System Modules
 import LoginPage from './components/auth/LoginPage';
 import SidebarLayout from './components/layout/SidebarLayout';
+import DesktopLayout from './components/layout/DesktopLayout';
+import EmployeesHubModule from './components/employees/EmployeesHubModule';
 import BranchManagementModule from './components/branches/BranchManagementModule';
 import EmployeeFileModal from './components/employees/EmployeeFileModal';
 import EmployeePhonesDirectoryModal from './components/employees/EmployeePhonesDirectoryModal';
@@ -168,6 +170,9 @@ export default function App() {
   const [activeNavTab, setActiveNavTab] = useState(() => {
     try { return localStorage.getItem('app_active_nav_tab') || 'dashboard'; } catch { return 'dashboard'; }
   });
+  const [activeSubTab, setActiveSubTab] = useState(() => {
+    try { return localStorage.getItem('app_active_sub_tab') || 'cards'; } catch { return 'cards'; }
+  });
   const [isEmpFileModalOpen, setIsEmpFileModalOpen] = useState(false);
   const [isEmpPhonesModalOpen, setIsEmpPhonesModalOpen] = useState(false);
   const [editingEmpFile, setEditingEmpFile] = useState(null);
@@ -194,9 +199,10 @@ export default function App() {
       if (currentEmpUser) localStorage.setItem('app_current_emp_user', JSON.stringify(currentEmpUser));
       else localStorage.removeItem('app_current_emp_user');
       localStorage.setItem('app_active_nav_tab', activeNavTab);
+      localStorage.setItem('app_active_sub_tab', activeSubTab);
       localStorage.setItem('app_is_admin', (authRole === 'admin' || isAdminLoggedIn) ? 'true' : 'false');
     } catch {}
-  }, [authRole, currentBranch, currentEmpUser, activeNavTab, isAdminLoggedIn]);
+  }, [authRole, currentBranch, currentEmpUser, activeNavTab, activeSubTab, isAdminLoggedIn]);
 
   // Core Data State
   const [state, setState] = useState({
@@ -4320,8 +4326,8 @@ export default function App() {
           />
         </ErrorBoundary>
       ) : (
-        /* ── 2. Authenticated Main Application with Sidebar ── */
-        <SidebarLayout
+        /* ── 2. Authenticated Main Application with Desktop Layout ── */
+        <DesktopLayout
           currentRole={authRole}
           currentBranch={currentBranch}
           notifications={state.notifications || []}
@@ -4337,6 +4343,8 @@ export default function App() {
           }
           activeTab={activeNavTab}
           setActiveTab={setActiveNavTab}
+          activeSubTab={activeSubTab}
+          setActiveSubTab={setActiveSubTab}
           onLogout={handleLogout}
           pendingCount={(state.requests || []).filter(r => !r.hiddenFromAdmin && (r.status === 'pending' || r.status === 'pending_admin')).length}
           resignationCount={(state.resignationRequests || []).filter(r => (r.managerStatus === 'approved' || r.managerStatus === 'rejected') && !r.isAdminCreated && (!r.adminStatus || r.adminStatus === 'pending')).length}
@@ -4373,72 +4381,6 @@ export default function App() {
           setAdminCustomFrom={setAdminCustomFrom}
           adminCustomTo={adminCustomTo}
           setAdminCustomTo={setAdminCustomTo}
-          customItems={
-            authRole === 'branch'
-              ? [
-                  { id: 'dashboard', label: 'لوحة التحكم', icon: '📊' },
-                  {
-                    id: 'requests',
-                    label: 'مركز موافقات الطلبات',
-                    icon: '📋',
-                    badge: (state.requests || []).filter((r) => {
-                      if (!shouldShowRequestToBranch(r, state)) return false;
-                      const cIdStr = String(currentBranch?.id || '');
-                      const branchEmpIdSet = new Set(
-                        (state.employees || [])
-                          .filter((e) => String(e.branchId || '') === cIdStr || (e.branchesDetails && e.branchesDetails.some((bd) => String(bd.branchId) === cIdStr)))
-                          .map((e) => String(e.id))
-                      );
-                      const isMatch = (r.branchId && String(r.branchId) === cIdStr) || (r.employeeId && branchEmpIdSet.has(String(r.employeeId)));
-                      return isMatch && !r.branchApproved && r.status !== 'rejected';
-                    }).length
-                  },
-                  { id: 'branch-roster', label: 'الجدول الشهري للموظفين', icon: '📅' },
-                  { id: 'emp-punches', label: 'متابعة حضور وبصمات الفرع', icon: '👥' },
-                  { id: 'permissions-management', label: 'أذونات الموظفين', icon: '⏰' },
-                  { id: 'evaluations', label: 'التقييمات والشكاوي', icon: '⭐' },
-                  { id: 'income-expenses', label: 'المصروفات والإيرادات', icon: '📈' },
-                  {
-                    id: 'resignation',
-                    label: 'طلبات استقالة الموظفين',
-                    icon: '📝',
-                    badge: (state.resignationRequests || []).filter((r) => {
-                      const cIdStr = String(currentBranch?.id || '');
-                      const isBranchMatch = String(r.branchId || '') === cIdStr;
-                      return isBranchMatch && (!r.managerStatus || r.managerStatus === 'pending');
-                    }).length
-                  },
-                  {
-                    id: 'bylaws',
-                    label: 'لائحة العمل والجزاءات',
-                    icon: '📜',
-                    badge: (() => {
-                      const cIdStr = String(currentBranch?.id || '');
-                      const unreadLate = (state.lateIncidents || []).filter((inc) => {
-                        if (cIdStr && String(inc.branchId) !== cIdStr) return false;
-                        return (
-                          !inc.read &&
-                          inc.status !== 'cancelled' &&
-                          inc.status !== 'approved_permission_exempt' &&
-                          inc.actionType !== 'grace' &&
-                          !isApprovedPermissionForDate(inc.employeeId, inc.date, state) &&
-                          (inc.deductionMinutes > 0 || inc.penaltyAmount > 0) &&
-                          currentFilterFn(inc.date)
-                        );
-                      }).length;
-
-                      const unreadManual = (state.requests || []).filter((r) => {
-                        if (r.type !== 'penalty' && r.type !== 'early_exit') return false;
-                        if (cIdStr && String(r.branchId) !== cIdStr) return false;
-                        return !r.read && currentFilterFn(r.date || r.createdAt?.slice(0, 10));
-                      }).length;
-
-                      return unreadLate + unreadManual;
-                    })()
-                  },
-                ]
-              : undefined
-          }
           onExportExcel={
             authRole === 'branch'
               ? () => {
@@ -4507,79 +4449,59 @@ export default function App() {
                 />
               )}
 
-              {/* 2. Employees Database (الموظفين) */}
-              {activeNavTab === 'employees' && (
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
-                    <div>
-                      <h2 style={{ fontFamily: 'Cairo', margin: 0 }}>👥 قاعدة بيانات وملفات الموظفين الشاملة</h2>
-                      <p style={{ margin: '4px 0 0 0', color: 'var(--muted)', fontSize: '14px' }}>
-                        إدارة الفروع، المسميات الوظيفية، أرقام الهواتف الشخصية، رقم قريب الطوارئ، ورصيد الإجازات
-                      </p>
-                    </div>
-                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                      <button
-                        type="button"
-                        className="btn btn-ghost"
-                        onClick={() => setIsEmpPhonesModalOpen(true)}
-                        style={{
-                          background: 'var(--primary-light)',
-                          color: 'var(--primary-dark)',
-                          border: '1px solid var(--primary-tint)',
-                          fontWeight: 800,
-                          fontSize: '13.5px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '6px'
-                        }}
-                      >
-                        <span>📞</span> أرقام الموظفين
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-start"
-                        onClick={() => {
-                          setEditingEmpFile(null);
-                          setIsEmpFileModalOpen(true);
-                        }}
-                      >
-                        👤 إضافة ملف موظف جديد
-                      </button>
-                    </div>
-                  </div>
-
-                  <EmployeeCardsGrid
-                    state={state}
-                    setState={setState}
-                    saveState={saveState}
-                    showToast={showToast}
-                    monthPicker={monthPicker}
-                    filterFn={currentFilterFn}
-                    computeEmpSummary={computeEmpSummary}
-                    openEmpCard={openEmpCard}
-                    openEditEmpModal={(emp) => {
-                      setEditingEmpFile(emp);
-                      setIsEmpFileModalOpen(true);
-                    }}
-                    handleDeleteEmp={handleDeleteEmp}
-                    getActiveElapsedStr={getActiveElapsedStr}
-                    getActiveBreakStr={getActiveBreakStr}
-                    startShift={startShift}
-                    pauseShift={pauseShift}
-                    resumeShift={resumeShift}
-                    stopShift={stopShift}
-                    setInspectedEmp={setInspectedEmp}
-                    sendWhatsAppMsg={sendWhatsAppMsg}
-                    generatePayslipMsg={generatePayslipMsg}
-                    importEmployeesFromExcel={importEmployeesFromExcel}
-                    exportEmployeesToExcel={exportEmployeesToExcel}
-                    openAddEmpModal={() => {
-                      setEditingEmpFile(null);
-                      setIsEmpFileModalOpen(true);
-                    }}
-                    openEmpPhonesModal={() => setIsEmpPhonesModalOpen(true)}
-                  />
-                </div>
+              {/* 2. Employees Hub (شؤون الموظفين - مدمج به البطاقات، الحضور والانصراف، البصمة الحيوية، والجداول الشهرية) */}
+              {(activeNavTab === 'employees' || activeNavTab === 'attendance' || activeNavTab === 'electronic-attendance' || activeNavTab === 'roster') && (
+                <EmployeesHubModule
+                  subTab={
+                    activeNavTab === 'attendance'
+                      ? 'attendance'
+                      : activeNavTab === 'electronic-attendance'
+                      ? 'biometrics'
+                      : activeNavTab === 'roster'
+                      ? 'roster'
+                      : activeSubTab
+                  }
+                  onSubTabChange={(sub) => setActiveSubTab(sub)}
+                  state={state}
+                  setState={setState}
+                  saveState={saveState}
+                  showToast={showToast}
+                  monthPicker={monthPicker}
+                  setMonthPicker={setMonthPicker}
+                  filterMode={adminFilterMode}
+                  setFilterMode={setAdminFilterMode}
+                  customFrom={adminCustomFrom}
+                  setCustomFrom={setAdminCustomFrom}
+                  customTo={adminCustomTo}
+                  setCustomTo={setAdminCustomTo}
+                  filterFn={currentFilterFn}
+                  computeEmpSummary={computeEmpSummary}
+                  openEmpCard={openEmpCard}
+                  openEditEmpModal={(emp) => {
+                    setEditingEmpFile(emp);
+                    setIsEmpFileModalOpen(true);
+                  }}
+                  handleDeleteEmp={handleDeleteEmp}
+                  getActiveElapsedStr={getActiveElapsedStr}
+                  getActiveBreakStr={getActiveBreakStr}
+                  startShift={startShift}
+                  pauseShift={pauseShift}
+                  resumeShift={resumeShift}
+                  stopShift={stopShift}
+                  setInspectedEmp={setInspectedEmp}
+                  sendWhatsAppMsg={sendWhatsAppMsg}
+                  generatePayslipMsg={generatePayslipMsg}
+                  importEmployeesFromExcel={importEmployeesFromExcel}
+                  exportEmployeesToExcel={exportEmployeesToExcel}
+                  openAddEmpModal={() => {
+                    setEditingEmpFile(null);
+                    setIsEmpFileModalOpen(true);
+                  }}
+                  openEmpPhonesModal={() => setIsEmpPhonesModalOpen(true)}
+                  setIsEmpPhonesModalOpen={setIsEmpPhonesModalOpen}
+                  setEditingEmpFile={setEditingEmpFile}
+                  setIsEmpFileModalOpen={setIsEmpFileModalOpen}
+                />
               )}
 
               {/* 3. Branch Management (الفروع) */}
@@ -4588,40 +4510,6 @@ export default function App() {
                   state={state}
                   onSaveBranch={handleSaveBranch}
                   onDeleteBranch={handleDeleteBranch}
-                />
-              )}
-
-              {/* 4. Attendance Punches (الحضور وانصراف الموظفين) */}
-              {activeNavTab === 'attendance' && (
-                <AttendanceModule
-                  state={state}
-                  setState={setState}
-                  saveState={saveState}
-                  showToast={showToast}
-                  filterFn={currentFilterFn}
-                  monthPicker={monthPicker}
-                  filterMode={adminFilterMode}
-                  customFrom={adminCustomFrom}
-                  customTo={adminCustomTo}
-                />
-              )}
-
-              {/* 4.5. Electronic Attendance (البصمة الإلكترونية) */}
-              {activeNavTab === 'electronic-attendance' && (
-                <ElectronicAttendanceAdmin
-                  state={state}
-                  setState={setState}
-                  saveState={saveState}
-                />
-              )}
-
-              {/* 5. Monthly Rosters (الجداول الشهرية) */}
-              {activeNavTab === 'roster' && (
-                <RosterModule
-                  state={state}
-                  setState={setState}
-                  saveState={saveState}
-                  showToast={showToast}
                 />
               )}
 
@@ -4916,7 +4804,7 @@ export default function App() {
               )}
             </ErrorBoundary>
           )}
-        </SidebarLayout>
+        </DesktopLayout>
       ))}
 
       {/* Comprehensive Employee File Modal */}

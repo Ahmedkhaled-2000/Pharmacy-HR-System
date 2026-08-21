@@ -137,48 +137,6 @@ export default function Dashboard({
 
   return (
     <div style={{ fontFamily: "'Tajawal', 'Cairo', sans-serif" }} className="fade-in-page">
-      {/* ── 1. Top Header: Pharmacy Name, Logo, GM Name ── */}
-      <div className="card settings-card fade-in" style={{ padding: '20px', marginBottom: '20px', background: 'var(--surface)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-            <div style={{
-              width: '60px',
-              height: '60px',
-              borderRadius: '50%',
-              background: 'linear-gradient(135deg, #0d9488, #0f766e)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#fff',
-              fontSize: '28px',
-              fontWeight: 'bold',
-              overflow: 'hidden',
-              boxShadow: '0 4px 12px rgba(13,148,136,0.3)'
-            }}>
-              {orgLogo ? <img src={orgLogo} alt="Logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : '🏥'}
-            </div>
-
-            <div>
-              <h2 style={{ margin: 0, fontFamily: 'Cairo', color: 'var(--text)', fontSize: '22px' }}>
-                {orgName}
-              </h2>
-              <p style={{ margin: '4px 0 0 0', color: 'var(--primary)', fontWeight: '700', fontSize: '14.5px' }}>
-                👤 {gmName}
-              </p>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <label style={{ fontSize: '13px', fontWeight: 'bold' }}>الشهر المعروض:</label>
-            <input
-              type="month"
-              value={monthPicker}
-              onChange={(e) => setMonthPicker(e.target.value)}
-              style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontWeight: 'bold' }}
-            />
-          </div>
-        </div>
-      </div>
 
       {/* ── 2. Employee Summary Cards Breakdown ── */}
       <h4 style={{ margin: '0 0 12px 0', fontSize: '16px', color: '#1e293b' }}>
