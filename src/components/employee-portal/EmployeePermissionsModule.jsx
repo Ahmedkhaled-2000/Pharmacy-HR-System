@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { todayStr, fmt } from '../../utils/formatters';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
+import { shouldRouteDirectToAdmin } from '../../utils/jobsHelper';
 
 export default function EmployeePermissionsModule({
   emp,
@@ -87,12 +88,16 @@ export default function EmployeePermissionsModule({
       }
     }
 
+    const reqBranchId = selectedBranchId || emp.branchId;
+    const isDirectAdmin = shouldRouteDirectToAdmin(emp, reqBranchId, state);
+    const targetApproval = isDirectAdmin ? 'admin_only' : 'branch_and_admin';
+
     const newPermReq = {
       id: 'perm_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
       employeeId: emp.id,
       employeeName: emp.name,
       employeeCode: emp.code,
-      branchId: selectedBranchId || emp.branchId,
+      branchId: reqBranchId,
       type: 'permission',
       permType, // 'late' or 'early'
       date,
@@ -103,7 +108,9 @@ export default function EmployeePermissionsModule({
       durationText: durationObj.text,
       reason: reason.trim(),
       isExceptional: remainingPermCount <= 0,
-      targetApproval: 'branch_and_admin',
+      targetApproval,
+      isDirectToAdmin: isDirectAdmin,
+      branchNotRequired: isDirectAdmin,
       status: 'pending',
       createdAt: new Date().toISOString()
     };

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { todayStr, uid } from '../../utils/formatters';
 import { notifyAdminOnResignationRequest } from '../../utils/gmailService';
+import { shouldRouteDirectToAdmin } from '../../utils/jobsHelper';
 
 export default function EmployeeResignationModule({
   emp,
@@ -51,17 +52,23 @@ export default function EmployeeResignationModule({
       return;
     }
 
+    const reqBranchId = selectedBranchId || emp.branchId;
+    const isDirectAdmin = shouldRouteDirectToAdmin(emp, reqBranchId, state);
+
     const newReq = {
       id: 'res_' + Date.now() + '_' + uid(),
       employeeId: emp.id,
-      branchId: selectedBranchId || emp.branchId,
+      branchId: reqBranchId,
       type: requestType,
       employeeReason: reason,
       requestDate: todayStr(),
-      managerStatus: 'pending',
-      managerComment: '',
+      managerStatus: isDirectAdmin ? 'skipped' : 'pending',
+      managerComment: isDirectAdmin ? 'تم التحويل للإدارة العليا مباشرة (وظيفة إدارية / فرع بدون مدير)' : '',
       adminStatus: 'pending',
       adminComment: '',
+      targetApproval: isDirectAdmin ? 'admin_only' : 'branch_and_admin',
+      isDirectToAdmin: isDirectAdmin,
+      branchNotRequired: isDirectAdmin,
       conditionsDaysRemaining: 0,
       conditionsStartDate: '',
       employeeConditionStatus: 'pending', // Will only be active if admin sets conditions
@@ -73,12 +80,14 @@ export default function EmployeeResignationModule({
       id: 'notif_' + newReq.id,
       type: 'resignation',
       title: `📝 طلب ${requestType === 'resignation' ? 'استقالة' : 'تراجع عن استقالة'} جديد`,
-      message: `قام الموظف ${emp.name} بتقديم طلب ${requestType === 'resignation' ? 'استقالة' : 'تراجع عن استقالة'} وبانتظار رد مدير الفرع.`,
+      message: isDirectAdmin
+        ? `قام الموظف ${emp.name} بتقديم طلب ${requestType === 'resignation' ? 'استقالة' : 'تراجع عن استقالة'} وتم توجيهه للإدارة العليا مباشرة.`
+        : `قام الموظف ${emp.name} بتقديم طلب ${requestType === 'resignation' ? 'استقالة' : 'تراجع عن استقالة'} وبانتظار رد مدير الفرع.`,
       date: todayStr(),
       timestamp: new Date().toISOString(),
       read: false,
-      targetRole: 'branch',
-      branchId: selectedBranchId || emp.branchId,
+      targetRole: isDirectAdmin ? 'admin' : 'branch',
+      branchId: reqBranchId,
     };
 
     const updatedState = { 
@@ -89,7 +98,7 @@ export default function EmployeeResignationModule({
     setState(updatedState);
     if (saveState) await saveState(updatedState);
 
-    showToast('تم إرسال الطلب لمدير الفرع للمراجعة أولاً ✅');
+    showToast(isDirectAdmin ? 'تم إرسال الطلب للإدارة العليا مباشرة ✅' : 'تم إرسال الطلب لمدير الفرع للمراجعة أولاً ✅');
     setShowForm(false);
     setReason('');
   };

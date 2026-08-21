@@ -64,7 +64,7 @@ import SidebarLayout from './components/layout/SidebarLayout';
 import BranchManagementModule from './components/branches/BranchManagementModule';
 import EmployeeFileModal from './components/employees/EmployeeFileModal';
 import EmployeePhonesDirectoryModal from './components/employees/EmployeePhonesDirectoryModal';
-import { DEFAULT_JOBS, getJobsList, isManagementJob } from './utils/jobsHelper';
+import { DEFAULT_JOBS, getJobsList, isManagementJob, getDepartmentsList, shouldRouteDirectToAdmin } from './utils/jobsHelper';
 import WorkBylawsModule from './components/bylaws/WorkBylawsModule';
 import BylawsModule from './components/bylaws/BylawsModule';
 import ApprovalCenterModule from './components/approvals/ApprovalCenterModule';
@@ -952,12 +952,12 @@ export default function App() {
         updatedShifts = updatedShifts.map((s) => {
           if (s.id === target.shiftId || (String(s.employeeId) === String(target.employeeId) && s.date === target.date)) {
             const regHours = s.regularHours !== undefined ? s.regularHours : (s.scheduledHours || s.hours);
-            const fullHours = s.actualWorkedHours || (regHours + overtimeHrs);
             return {
               ...s,
               overtimeStatus: 'approved',
-              hours: fullHours,
-              note: `ساعات عمل معتمدة (أساسي: ${regHours} س + إضافي: ${overtimeHrs} س)`
+              overtimeHours: overtimeHrs,
+              adminApproved: true,
+              note: `ساعات عمل وإضافي معتمد (أساسي: ${regHours} س + إضافي: ${overtimeHrs} س)`
             };
           }
           return s;
@@ -1160,8 +1160,8 @@ export default function App() {
           return {
             ...s,
             overtimeStatus: 'rejected',
-            hours: regHours,
-            note: `ساعات الوردية الأساسية (${regHours} س) — تم استبعاد الإضافي (${targetReq.hours} س)`
+            adminApproved: false,
+            note: `ساعات الوردية الأساسية (${regHours} س) — تم استبعاد الإضافي (${targetReq.hours} س) بواسطة الإدارة`
           };
         }
         return s;
@@ -2032,7 +2032,6 @@ export default function App() {
       const jsDay = new Date(dateStr).getDay();
       const daySchedule = getDayScheduleFromMap(roster.schedule, jsDay, dateStr);
       if (!daySchedule || daySchedule.type === 'off' || daySchedule.isOff) continue;
-
       const hasShift = (state.shifts || []).some(s => String(s.employeeId) === empIdStr && s.date === dateStr);
       if (hasShift) continue;
 
@@ -2117,15 +2116,18 @@ export default function App() {
 
     let totalHours = 0;
     let totalBaseEarnings = 0;
-    let totalAbsenceDeduction = 0;
+    let totalApprovedOvertimeHours = 0;
+    let totalPendingOvertimeHours = 0;
+    let totalOvertimeEarnings = 0;
     let totalAbsenceDaysCount = 0;
+    let totalAbsenceDeduction = 0;
     const perBranch = {};
 
-    branches.forEach(b => {
+    branches.forEach((b) => {
       const bId = b.branchId;
-      const hourlyBase = parseFloat(b.salary) || 0; // سعر الساعة الشهري المدخل من قبل الإدارة (الراتب الأساسي)
-      const workHoursPerDay = parseFloat(b.workHoursPerDay) || parseFloat(b.workHours) || WORK_HOURS_PER_DAY; // عدد ساعات العمل الموظف المدخلة من قبل الإدارة
-      const workDaysPerMonth = parseFloat(b.workDaysPerMonth) || parseFloat(b.workDays) || WORK_DAYS_PER_MONTH; // عدد أيام العمل الموظف المدخلة من قبل الإدارة
+      const hourlyBase = parseFloat(b.salary) || 0;
+      const workHoursPerDay = parseFloat(b.workHoursPerDay) || 8;
+      const workDaysPerMonth = parseFloat(b.workDaysPerMonth) || 26;
 
       // 1. احتساب سعر اليوم = (سعر الساعة الشهري * عدد ساعات العمل المدخلة) / عدد أيام العمل المدخلة
       const dailyRate = workDaysPerMonth > 0 ? (hourlyBase * workHoursPerDay) / workDaysPerMonth : 0;
@@ -2144,8 +2146,18 @@ export default function App() {
       const hours = bShifts.reduce((acc, s) => acc + getEffectiveShiftHours(s, state), 0);
       
       // 3. احتساب أجر اليوم / المستحقات = سعر الساعة اليومي * عدد الساعات الموضوعة في الجدول الشهري / الفعلية (بما فيها ساعات الإذن المعتمد)
-      // مثال: 25 * 10 = 250 ج.م
       const baseEarnings = hours * rate;
+
+      // 3.1 حساب ساعات ومستحقات الوقت الإضافي المعتمدة
+      const approvedOtHours = bShifts
+        .filter(s => s.overtimeStatus === 'approved' || (parseFloat(s.overtimeHours) > 0 && s.adminApproved))
+        .reduce((acc, s) => acc + (parseFloat(s.overtimeHours) || 0), 0);
+
+      const pendingOtHours = bShifts
+        .filter(s => s.overtimeStatus === 'pending' || (parseFloat(s.overtimeHours) > 0 && !s.overtimeStatus && !s.adminApproved))
+        .reduce((acc, s) => acc + (parseFloat(s.overtimeHours) || 0), 0);
+
+      const otEarnings = Math.round(approvedOtHours * rate * 100) / 100;
 
       // Absences
       let absenceDaysCount = 0;
@@ -2155,10 +2167,30 @@ export default function App() {
          absenceDeduction = absenceDaysCount * dailyRate;
       }
 
-      perBranch[bId] = { hours, dailyRate, rate, hourlyRate: rate, hourlyBase, monthlySalary, salary: monthlySalary, baseEarnings, absenceDaysCount, absenceDeduction, workHoursPerDay, workDaysPerMonth, monthlyRequiredHours };
+      perBranch[bId] = { 
+        hours, 
+        approvedOvertimeHours: approvedOtHours,
+        pendingOvertimeHours: pendingOtHours,
+        overtimeEarnings: otEarnings,
+        dailyRate, 
+        rate, 
+        hourlyRate: rate, 
+        hourlyBase, 
+        monthlySalary, 
+        salary: monthlySalary, 
+        baseEarnings, 
+        absenceDaysCount, 
+        absenceDeduction, 
+        workHoursPerDay, 
+        workDaysPerMonth, 
+        monthlyRequiredHours 
+      };
       
       totalHours += hours;
       totalBaseEarnings += baseEarnings;
+      totalApprovedOvertimeHours += approvedOtHours;
+      totalPendingOvertimeHours += pendingOtHours;
+      totalOvertimeEarnings += otEarnings;
       totalAbsenceDaysCount += absenceDaysCount;
       totalAbsenceDeduction += absenceDeduction;
     });
@@ -2246,30 +2278,53 @@ export default function App() {
     // 2. Transportation Allowance: Fixed allowance
     const transportAllowance = parseFloat(emp.transportAllowance) || 0;
 
-    // 3. Extra Allowance: Custom named wage
-    const extraAllowance = parseFloat(emp.extraAllowance) || 0;
-    const extraAllowanceTitle = emp.extraAllowanceTitle?.trim() || 'أجر إضافي';
+    // 3. Extra Allowance: Custom named wages (array or single fallback)
+    let extraAllowance = parseFloat(emp.extraAllowance) || 0;
+    let extraAllowanceTitle = emp.extraAllowanceTitle?.trim() || 'أجر إضافي';
+    let extraAllowances = [];
+
+    if (Array.isArray(emp.extraAllowances) && emp.extraAllowances.length > 0) {
+      extraAllowances = emp.extraAllowances.map(a => ({
+        id: a.id,
+        title: a.title?.trim() || 'أجر إضافي',
+        amount: parseFloat(a.amount) || 0
+      })).filter(a => a.amount > 0 || a.title);
+      extraAllowance = extraAllowances.reduce((acc, a) => acc + (a.amount || 0), 0);
+      extraAllowanceTitle = extraAllowances.map(a => a.title).join(' + ') || extraAllowanceTitle;
+    } else if (extraAllowance > 0) {
+      extraAllowances = [{ id: '1', title: extraAllowanceTitle, amount: extraAllowance }];
+    }
 
     const totalAllowances = managementAllowance + transportAllowance + extraAllowance;
-    const netSalary = totalBaseEarnings + totalBonus + totalAllowances - totalDeduction;
+    const totalEarnings = totalBaseEarnings + totalOvertimeEarnings;
+    const netSalary = totalBaseEarnings + totalOvertimeEarnings + totalBonus + totalAllowances - totalDeduction;
 
     let rate = branches.length === 1 ? perBranch[branches[0].branchId].rate : (totalHours > 0 ? totalBaseEarnings / totalHours : (parseFloat(branches[0]?.salary) || 0));
     let dailyRate = branches.length === 1 ? perBranch[branches[0].branchId].dailyRate : (rate * (parseFloat(branches[0]?.workHoursPerDay) || WORK_HOURS_PER_DAY));
 
     return { 
       hours: totalHours, 
+      totalHours: totalHours + totalApprovedOvertimeHours,
+      regularHours: totalHours,
+      approvedOvertimeHours: totalApprovedOvertimeHours,
+      pendingOvertimeHours: totalPendingOvertimeHours,
+      overtimeHours: totalApprovedOvertimeHours,
+      overtimeEarnings: totalOvertimeEarnings,
+      overtimePay: totalOvertimeEarnings,
       dailyRate, 
       rate, 
       hourlyRate: rate,
       monthlySalary: Object.values(perBranch).reduce((acc, b) => acc + (b.monthlySalary || 0), 0),
       salary: Object.values(perBranch).reduce((acc, b) => acc + (b.monthlySalary || 0), 0),
       baseEarnings: totalBaseEarnings, 
+      totalEarnings,
       totalBonus, 
       totalAllowances,
       managementAllowance,
       transportAllowance,
       extraAllowance,
       extraAllowanceTitle,
+      extraAllowances,
       isManagement: isMgmt,
       totalDeduction, 
       lateDeduction,
@@ -2293,6 +2348,8 @@ export default function App() {
 
     const totalHours = Object.values(perEmp).reduce((s, e) => s + e.hours, 0);
     const totalBaseEarnings = Object.values(perEmp).reduce((s, e) => s + e.baseEarnings, 0);
+    const totalOvertimeHours = Object.values(perEmp).reduce((s, e) => s + (e.approvedOvertimeHours || 0), 0);
+    const totalOvertimeEarnings = Object.values(perEmp).reduce((s, e) => s + (e.overtimeEarnings || 0), 0);
     const totalBonus = Object.values(perEmp).reduce((s, e) => s + e.totalBonus, 0);
     const totalManagementAllowance = Object.values(perEmp).reduce((s, e) => s + (e.managementAllowance || 0), 0);
     const totalTransportAllowance = Object.values(perEmp).reduce((s, e) => s + (e.transportAllowance || 0), 0);
@@ -2302,12 +2359,14 @@ export default function App() {
     const totalLateDeduction = Object.values(perEmp).reduce((s, e) => s + (e.lateDeduction || 0), 0);
     const totalLateDeductionMinutes = Object.values(perEmp).reduce((s, e) => s + (e.lateDeductionMinutes || 0), 0);
     const totalAbsenceDeduction = Object.values(perEmp).reduce((s, e) => s + e.absenceDeduction, 0);
-    const grandNetSalary = totalBaseEarnings + totalBonus + totalAllowances - totalDeduction;
+    const grandNetSalary = totalBaseEarnings + totalOvertimeEarnings + totalBonus + totalAllowances - totalDeduction;
 
     return {
       perEmp,
       totalHours,
       totalBaseEarnings,
+      totalOvertimeHours,
+      totalOvertimeEarnings,
       totalBonus,
       totalManagementAllowance,
       totalTransportAllowance,
@@ -3295,6 +3354,9 @@ export default function App() {
     let updatedNotifications = state.notifications || [];
 
     if (overtimeHours > 0) {
+      const isDirectAdmin = shouldRouteDirectToAdmin(emp, bId, state);
+      const targetApproval = isDirectAdmin ? 'admin_only' : 'both';
+
       const reqId = `req_ot_${empId}_${active.date}_${shiftId}`;
       overtimeReq = {
         id: reqId,
@@ -3317,7 +3379,9 @@ export default function App() {
         date: active.date,
         reason: `عمل الموظف ${emp?.name} عدد ${overtimeHours} ساعات إضافية فوق ساعات الوردية المحددة بالجدول (${scheduledHours} س).`,
         details: `الوردية المقررة: ${scheduledHours} س | الساعات الفعلية: ${netHours} س | الساعات الإضافية المطلوب اعتمادها: +${overtimeHours} س`,
-        targetApproval: 'both',
+        targetApproval,
+        isDirectToAdmin: isDirectAdmin,
+        branchNotRequired: isDirectAdmin,
         branchApproved: false,
         adminApproved: false,
         status: 'pending',
@@ -3331,11 +3395,13 @@ export default function App() {
         id: notifId,
         type: 'overtime_alert',
         title: `⏱️ طلب اعتماد ساعات إضافية: ${emp?.name} (+${overtimeHours} س)`,
-        message: `عمل الموظف ${emp?.name} بفرع ${bObj?.name || 'الفرع'} عدد ${overtimeHours} ساعات إضافية بعد انتهاء ورديته المقررة (${scheduledHours} س).`,
+        message: isDirectAdmin
+          ? `عمل الموظف ${emp?.name} بفرع ${bObj?.name || 'الفرع'} عدد ${overtimeHours} ساعات إضافية وتم توجيه الطلب للإدارة العليا مباشرة.`
+          : `عمل الموظف ${emp?.name} بفرع ${bObj?.name || 'الفرع'} عدد ${overtimeHours} ساعات إضافية بعد انتهاء ورديته المقررة (${scheduledHours} س).`,
         date: active.date,
         timestamp: new Date().toISOString(),
         read: false,
-        targetRole: 'all',
+        targetRole: isDirectAdmin ? 'admin' : 'all',
         branchId: bId,
         requestId: reqId
       };
@@ -3835,7 +3901,13 @@ export default function App() {
         if ((summary.transportAllowance || 0) > 0) {
           grandAllowanceItems.push(['بدل انتقال ومواصلات', 'بدل انتقال ومواصلات شهري ثابت', parseFloat(fmt(summary.transportAllowance))]);
         }
-        if ((summary.extraAllowance || 0) > 0) {
+        if (Array.isArray(summary.extraAllowances) && summary.extraAllowances.length > 0) {
+          summary.extraAllowances.forEach(ea => {
+            if ((parseFloat(ea.amount) || 0) > 0) {
+              grandAllowanceItems.push([ea.title || 'أجر إضافي', 'أجر وبدل إضافي مخصص من الإدارة', parseFloat(fmt(ea.amount))]);
+            }
+          });
+        } else if ((summary.extraAllowance || 0) > 0) {
           grandAllowanceItems.push([summary.extraAllowanceTitle || 'أجر إضافي', 'أجر وبدل إضافي مخصص من الإدارة', parseFloat(fmt(summary.extraAllowance))]);
         }
 
@@ -3946,7 +4018,13 @@ export default function App() {
         if ((summary.transportAllowance || 0) > 0) {
           allowanceItems.push(['بدل انتقال ومواصلات', 'بدل انتقال ومواصلات شهري ثابت', parseFloat(fmt(summary.transportAllowance))]);
         }
-        if ((summary.extraAllowance || 0) > 0) {
+        if (Array.isArray(summary.extraAllowances) && summary.extraAllowances.length > 0) {
+          summary.extraAllowances.forEach(ea => {
+            if ((parseFloat(ea.amount) || 0) > 0) {
+              allowanceItems.push([ea.title || 'أجر إضافي', 'أجر وبدل إضافي مخصص من الإدارة', parseFloat(fmt(ea.amount))]);
+            }
+          });
+        } else if ((summary.extraAllowance || 0) > 0) {
           allowanceItems.push([summary.extraAllowanceTitle || 'أجر إضافي', 'أجر وبدل إضافي مخصص من الإدارة', parseFloat(fmt(summary.extraAllowance))]);
         }
 
@@ -4846,6 +4924,7 @@ export default function App() {
         branches={state.branches || []}
         allEmployees={state.employees || []}
         jobs={getJobsList(state)}
+        departments={getDepartmentsList(state)}
         onSave={handleSaveEmployeeFile}
         handleFileUpload={handleFileUpload}
       />

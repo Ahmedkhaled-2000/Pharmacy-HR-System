@@ -186,7 +186,7 @@ export async function exportComprehensiveCompanyPayrollExcel({
       views: [{ rightToLeft: true, showGridLines: true }]
     });
 
-    const COLS_S1 = 21;
+    const COLS_S1 = 23;
     let r1 = 1;
 
     // Title
@@ -207,7 +207,7 @@ export async function exportComprehensiveCompanyPayrollExcel({
     ws1.mergeCells(kpiRow1, 1, kpiRow1, 4);
     ws1.mergeCells(kpiRow2, 1, kpiRow2, 4);
     const kpi1Title = ws1.getCell(kpiRow1, 1);
-    kpi1Title.value = '⏱️ إجمالي ساعات العمل الفعلية';
+    kpi1Title.value = '⏱️ إجمالي ساعات العمل الأساسية';
     kpi1Title.font = { name: 'Arial', bold: true, size: 10.5, color: { argb: 'FF0F766E' } };
     kpi1Title.alignment = { horizontal: 'center', vertical: 'middle' };
     kpi1Title.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0FDFA' } };
@@ -220,18 +220,18 @@ export async function exportComprehensiveCompanyPayrollExcel({
     kpi1Val.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0FDFA' } };
     kpi1Val.border = CELL_BORDER;
 
-    // KPI 2: Total Base Earnings
+    // KPI 2: Total Base Earnings & Overtime
     ws1.mergeCells(kpiRow1, 5, kpiRow1, 8);
     ws1.mergeCells(kpiRow2, 5, kpiRow2, 8);
     const kpi2Title = ws1.getCell(kpiRow1, 5);
-    kpi2Title.value = '💰 إجمالي المستحقات الأساسية';
+    kpi2Title.value = '💰 المستحقات والوقت الإضافي (+)';
     kpi2Title.font = { name: 'Arial', bold: true, size: 10.5, color: { argb: 'FF0369A1' } };
     kpi2Title.alignment = { horizontal: 'center', vertical: 'middle' };
     kpi2Title.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0F2FE' } };
     kpi2Title.border = CELL_BORDER;
 
     const kpi2Val = ws1.getCell(kpiRow2, 5);
-    kpi2Val.value = `${fmt(grandPayroll.totalBaseEarnings)} ج.م`;
+    kpi2Val.value = `${fmt(grandPayroll.totalBaseEarnings + (grandPayroll.totalOvertimeEarnings || 0))} ج.م`;
     kpi2Val.font = { name: 'Arial', bold: true, size: 14, color: { argb: 'FF0369A1' } };
     kpi2Val.alignment = { horizontal: 'center', vertical: 'middle' };
     kpi2Val.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0F2FE' } };
@@ -255,8 +255,8 @@ export async function exportComprehensiveCompanyPayrollExcel({
     kpi3Val.border = CELL_BORDER;
 
     // KPI 4: Total Deductions
-    ws1.mergeCells(kpiRow1, 13, kpiRow1, 16);
-    ws1.mergeCells(kpiRow2, 13, kpiRow2, 16);
+    ws1.mergeCells(kpiRow1, 13, kpiRow1, 17);
+    ws1.mergeCells(kpiRow2, 13, kpiRow2, 17);
     const kpi4Title = ws1.getCell(kpiRow1, 13);
     kpi4Title.value = '🔻 إجمالي الخصومات والاستقطاعات (-)';
     kpi4Title.font = { name: 'Arial', bold: true, size: 10.5, color: { argb: 'FFB91C1C' } };
@@ -272,16 +272,16 @@ export async function exportComprehensiveCompanyPayrollExcel({
     kpi4Val.border = CELL_BORDER;
 
     // KPI 5: Net Payable Payroll
-    ws1.mergeCells(kpiRow1, 17, kpiRow1, COLS_S1);
-    ws1.mergeCells(kpiRow2, 17, kpiRow2, COLS_S1);
-    const kpi5Title = ws1.getCell(kpiRow1, 17);
+    ws1.mergeCells(kpiRow1, 18, kpiRow1, COLS_S1);
+    ws1.mergeCells(kpiRow2, 18, kpiRow2, COLS_S1);
+    const kpi5Title = ws1.getCell(kpiRow1, 18);
     kpi5Title.value = '💳 صافي رواتب الشركة المستحقة (Net Payroll)';
     kpi5Title.font = { name: 'Arial', bold: true, size: 11, color: { argb: 'FF134E4A' } };
     kpi5Title.alignment = { horizontal: 'center', vertical: 'middle' };
     kpi5Title.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE6FFFA' } };
     kpi5Title.border = CELL_BORDER;
 
-    const kpi5Val = ws1.getCell(kpiRow2, 17);
+    const kpi5Val = ws1.getCell(kpiRow2, 18);
     kpi5Val.value = `${fmt(grandPayroll.grandNetSalary)} ج.م`;
     kpi5Val.font = { name: 'Arial', bold: true, size: 16, color: { argb: 'FF0F766E' } };
     kpi5Val.alignment = { horizontal: 'center', vertical: 'middle' };
@@ -298,7 +298,7 @@ export async function exportComprehensiveCompanyPayrollExcel({
     tblHeadBanner.value = '📋 كشف رواتب الموظفين التفصيلي الشامل ومفردات المرتبات';
     tblHeadBanner.font = { name: 'Arial', bold: true, size: 12, color: { argb: XLSX_STYLES.white } };
     tblHeadBanner.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: XLSX_STYLES.subHeaderBg } };
-    tblHeadBanner.alignment = { horizontal: 'right', vertical: 'middle' };
+    tblHeadBanner.alignment = { horizontal: 'center', vertical: 'middle' };
     ws1.getRow(r1).height = 26;
     r1++;
 
@@ -310,9 +310,11 @@ export async function exportComprehensiveCompanyPayrollExcel({
       'المسمى الوظيفي',
       'الفرع',
       'عدد الورديات',
-      'ساعات العمل (شاملة الأذونات)',
+      'ساعات العمل الأساسية',
+      'ساعات الوقت الإضافي (+)',
       'سعر الساعة (ج.م)',
       'المستحقات الأساسية (ج.م)',
+      'أجر الوقت الإضافي (+)',
       'بدل إدارة (+)',
       'بدل انتقال (+)',
       'أجر إضافي (+)',
@@ -336,6 +338,8 @@ export async function exportComprehensiveCompanyPayrollExcel({
         hours: 0,
         rate: 0,
         baseEarnings: 0,
+        approvedOvertimeHours: 0,
+        overtimeEarnings: 0,
         managementAllowance: 0,
         transportAllowance: 0,
         extraAllowance: 0,
@@ -355,7 +359,7 @@ export async function exportComprehensiveCompanyPayrollExcel({
         ? emp.branchesDetails.map((b) => b.branchName || (branches.find((br) => br.id === b.branchId)?.name) || 'فرع').join(' + ')
         : (branches.find((br) => br.id === emp.branchId)?.name || 'الفرع الرئيسي');
 
-      const totalAdditions = (summary.baseEarnings || 0) + (summary.totalAllowances || 0) + (summary.totalBonus || 0);
+      const totalAdditions = (summary.baseEarnings || 0) + (summary.overtimeEarnings || 0) + (summary.totalAllowances || 0) + (summary.totalBonus || 0);
       const isAlt = index % 2 === 1;
 
       const rowVals = [
@@ -366,8 +370,10 @@ export async function exportComprehensiveCompanyPayrollExcel({
         branchNames,
         shiftCount,
         parseFloat(fmt(summary.hours)),
+        parseFloat(fmt(summary.approvedOvertimeHours || 0)),
         parseFloat(fmt(summary.rate || summary.hourlyRate || 0)),
         parseFloat(fmt(summary.baseEarnings)),
+        parseFloat(fmt(summary.overtimeEarnings || 0)),
         parseFloat(fmt(summary.managementAllowance || 0)),
         parseFloat(fmt(summary.transportAllowance || 0)),
         parseFloat(fmt(summary.extraAllowance || 0)),
@@ -383,11 +389,11 @@ export async function exportComprehensiveCompanyPayrollExcel({
       ];
 
       writeDataRow(ws1, r1, rowVals, {
-        moneyCols: [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
-        hourCols: [7],
+        moneyCols: [9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22],
+        hourCols: [7, 8],
         intCols: [1, 6],
         isAlt,
-        highlightCol: 20,
+        highlightCol: 22,
         highlightColor: summary.netSalary >= 0
           ? { bg: XLSX_STYLES.highlightGreen, text: XLSX_STYLES.textGreen }
           : { bg: XLSX_STYLES.highlightRed, text: XLSX_STYLES.textRed }
@@ -410,81 +416,91 @@ export async function exportComprehensiveCompanyPayrollExcel({
     totShiftsCell.value = { formula: `SUM(F${startDataRow1}:F${endDataRow1})` };
     totShiftsCell.numFmt = INT_FORMAT;
 
-    // Hours total
+    // Hours total (Regular)
     const totHoursCell = ws1.getCell(r1, 7);
     totHoursCell.value = { formula: `SUM(G${startDataRow1}:G${endDataRow1})` };
     totHoursCell.numFmt = HOURS_FORMAT;
 
+    // Overtime Hours total
+    const totOtHoursCell = ws1.getCell(r1, 8);
+    totOtHoursCell.value = { formula: `SUM(H${startDataRow1}:H${endDataRow1})` };
+    totOtHoursCell.numFmt = HOURS_FORMAT;
+
     // Avg Rate
-    const avgRateCell = ws1.getCell(r1, 8);
-    avgRateCell.value = { formula: `AVERAGE(H${startDataRow1}:H${endDataRow1})` };
+    const avgRateCell = ws1.getCell(r1, 9);
+    avgRateCell.value = { formula: `AVERAGE(I${startDataRow1}:I${endDataRow1})` };
     avgRateCell.numFmt = MONEY_FORMAT;
 
     // Base Earnings
-    const totBaseCell = ws1.getCell(r1, 9);
-    totBaseCell.value = { formula: `SUM(I${startDataRow1}:I${endDataRow1})` };
+    const totBaseCell = ws1.getCell(r1, 10);
+    totBaseCell.value = { formula: `SUM(J${startDataRow1}:J${endDataRow1})` };
     totBaseCell.numFmt = MONEY_FORMAT;
 
+    // Overtime Earnings
+    const totOtPayCell = ws1.getCell(r1, 11);
+    totOtPayCell.value = { formula: `SUM(K${startDataRow1}:K${endDataRow1})` };
+    totOtPayCell.numFmt = MONEY_FORMAT;
+
     // Mgmt
-    const totMgmtCell = ws1.getCell(r1, 10);
-    totMgmtCell.value = { formula: `SUM(J${startDataRow1}:J${endDataRow1})` };
+    const totMgmtCell = ws1.getCell(r1, 12);
+    totMgmtCell.value = { formula: `SUM(L${startDataRow1}:L${endDataRow1})` };
     totMgmtCell.numFmt = MONEY_FORMAT;
 
     // Transport
-    const totTransCell = ws1.getCell(r1, 11);
-    totTransCell.value = { formula: `SUM(K${startDataRow1}:K${endDataRow1})` };
+    const totTransCell = ws1.getCell(r1, 13);
+    totTransCell.value = { formula: `SUM(M${startDataRow1}:M${endDataRow1})` };
     totTransCell.numFmt = MONEY_FORMAT;
 
     // Extra
-    const totExtraCell = ws1.getCell(r1, 12);
-    totExtraCell.value = { formula: `SUM(L${startDataRow1}:L${endDataRow1})` };
+    const totExtraCell = ws1.getCell(r1, 14);
+    totExtraCell.value = { formula: `SUM(N${startDataRow1}:N${endDataRow1})` };
     totExtraCell.numFmt = MONEY_FORMAT;
 
     // Bonus
-    const totBonusCell = ws1.getCell(r1, 13);
-    totBonusCell.value = { formula: `SUM(M${startDataRow1}:M${endDataRow1})` };
+    const totBonusCell = ws1.getCell(r1, 15);
+    totBonusCell.value = { formula: `SUM(O${startDataRow1}:O${endDataRow1})` };
     totBonusCell.numFmt = MONEY_FORMAT;
 
     // Total Additions
-    const totAddCell = ws1.getCell(r1, 14);
-    totAddCell.value = { formula: `SUM(N${startDataRow1}:N${endDataRow1})` };
+    const totAddCell = ws1.getCell(r1, 16);
+    totAddCell.value = { formula: `SUM(P${startDataRow1}:P${endDataRow1})` };
     totAddCell.numFmt = MONEY_FORMAT;
 
     // Late
-    const totLateCell = ws1.getCell(r1, 15);
-    totLateCell.value = { formula: `SUM(O${startDataRow1}:O${endDataRow1})` };
+    const totLateCell = ws1.getCell(r1, 17);
+    totLateCell.value = { formula: `SUM(Q${startDataRow1}:Q${endDataRow1})` };
     totLateCell.numFmt = MONEY_FORMAT;
 
     // Absence
-    const totAbsCell = ws1.getCell(r1, 16);
-    totAbsCell.value = { formula: `SUM(P${startDataRow1}:P${endDataRow1})` };
+    const totAbsCell = ws1.getCell(r1, 18);
+    totAbsCell.value = { formula: `SUM(R${startDataRow1}:R${endDataRow1})` };
     totAbsCell.numFmt = MONEY_FORMAT;
 
     // Other Ded
-    const totOtherCell = ws1.getCell(r1, 17);
-    totOtherCell.value = { formula: `SUM(Q${startDataRow1}:Q${endDataRow1})` };
+    const totOtherCell = ws1.getCell(r1, 19);
+    totOtherCell.value = { formula: `SUM(S${startDataRow1}:S${endDataRow1})` };
     totOtherCell.numFmt = MONEY_FORMAT;
 
     // Loans
-    const totLoansCell = ws1.getCell(r1, 18);
-    totLoansCell.value = { formula: `SUM(R${startDataRow1}:R${endDataRow1})` };
+    const totLoansCell = ws1.getCell(r1, 20);
+    totLoansCell.value = { formula: `SUM(T${startDataRow1}:T${endDataRow1})` };
     totLoansCell.numFmt = MONEY_FORMAT;
 
     // Total Ded
-    const totDedCell = ws1.getCell(r1, 19);
-    totDedCell.value = { formula: `SUM(S${startDataRow1}:S${endDataRow1})` };
+    const totDedCell = ws1.getCell(r1, 21);
+    totDedCell.value = { formula: `SUM(U${startDataRow1}:U${endDataRow1})` };
     totDedCell.numFmt = MONEY_FORMAT;
 
     // Net Salary Grand Total
-    const totNetCell = ws1.getCell(r1, 20);
-    totNetCell.value = { formula: `SUM(T${startDataRow1}:T${endDataRow1})` };
+    const totNetCell = ws1.getCell(r1, 22);
+    totNetCell.value = { formula: `SUM(V${startDataRow1}:V${endDataRow1})` };
     totNetCell.numFmt = MONEY_FORMAT;
 
-    const blankSignCell = ws1.getCell(r1, 21);
+    const blankSignCell = ws1.getCell(r1, 23);
     blankSignCell.value = '';
 
     [
-      totShiftsCell, totHoursCell, avgRateCell, totBaseCell, totMgmtCell,
+      totShiftsCell, totHoursCell, totOtHoursCell, avgRateCell, totBaseCell, totOtPayCell, totMgmtCell,
       totTransCell, totExtraCell, totBonusCell, totAddCell, totLateCell,
       totAbsCell, totOtherCell, totLoansCell, totDedCell, totNetCell, blankSignCell
     ].forEach((cell) => {
@@ -498,8 +514,8 @@ export async function exportComprehensiveCompanyPayrollExcel({
 
     autoFitWorksheetColumns(ws1, {
       1: 6, 2: 12, 3: 24, 4: 18, 5: 18, 6: 12, 7: 16, 8: 14, 9: 16,
-      10: 13, 11: 13, 12: 13, 13: 13, 14: 16, 15: 14, 16: 14, 17: 14,
-      18: 16, 19: 16, 20: 18, 21: 20
+      10: 16, 11: 14, 12: 13, 13: 13, 14: 13, 15: 13, 16: 16, 17: 14,
+      18: 14, 19: 14, 20: 16, 21: 16, 22: 18, 23: 20
     });
 
     // =========================================================================

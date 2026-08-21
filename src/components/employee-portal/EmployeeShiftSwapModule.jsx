@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { todayStr } from '../../utils/formatters';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
+import { shouldRouteDirectToAdmin } from '../../utils/jobsHelper';
 
 export default function EmployeeShiftSwapModule({
   emp,
@@ -58,6 +59,8 @@ export default function EmployeeShiftSwapModule({
       return;
     }
     const targetEmpObj = employees.find((e) => e.id === targetEmpId);
+    const isDirectAdmin = shouldRouteDirectToAdmin(emp, currentBranchId, state) || (targetEmpObj && shouldRouteDirectToAdmin(targetEmpObj, currentBranchId, state));
+    const targetApproval = isDirectAdmin ? 'admin_only' : 'branch_and_admin';
 
     const newSwapReq = {
       id: 'swap_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
@@ -71,6 +74,9 @@ export default function EmployeeShiftSwapModule({
       requesterDate: swapDate,
       targetDate: targetSwapDate,
       notes: swapNotes.trim(),
+      targetApproval,
+      isDirectToAdmin: isDirectAdmin,
+      branchNotRequired: isDirectAdmin,
       status: 'pending_target',
       createdAt: new Date().toISOString()
     };

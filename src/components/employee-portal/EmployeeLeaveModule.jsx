@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { todayStr, fmt } from '../../utils/formatters';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
+import { shouldRouteDirectToAdmin } from '../../utils/jobsHelper';
 
 export default function EmployeeLeaveModule({
   emp,
@@ -109,14 +110,16 @@ export default function EmployeeLeaveModule({
     }
 
     const daysCount = currentDaysCount;
-    const targetApproval = willExceedThreeDays ? 'admin_only' : 'branch_and_admin';
+    const reqBranchId = selectedBranchId || emp.branchId;
+    const isDirectAdmin = shouldRouteDirectToAdmin(emp, reqBranchId, state);
+    const targetApproval = (isDirectAdmin || willExceedThreeDays) ? 'admin_only' : 'branch_and_admin';
 
     const newRequest = {
       id: 'leave_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
       employeeId: emp.id,
       employeeName: emp.name,
       employeeCode: emp.code,
-      branchId: selectedBranchId || emp.branchId,
+      branchId: reqBranchId,
       type: 'leave',
       leaveType, // 'annual' or 'unpaid'
       startDate,
@@ -124,6 +127,8 @@ export default function EmployeeLeaveModule({
       daysCount,
       reason: reason.trim(),
       targetApproval, // 'branch_and_admin' or 'admin_only'
+      isDirectToAdmin: isDirectAdmin,
+      branchNotRequired: isDirectAdmin,
       status: 'pending',
       branchApproved: false,
       adminApproved: false,

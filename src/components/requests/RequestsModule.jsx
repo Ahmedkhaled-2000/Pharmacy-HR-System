@@ -261,12 +261,12 @@ export default function RequestsModule({
       updatedShifts = updatedShifts.map((s) => {
         if (s.id === targetReq.shiftId || (String(s.employeeId) === String(targetReq.employeeId) && s.date === targetReq.date)) {
           const regHours = s.regularHours !== undefined ? s.regularHours : (s.scheduledHours || s.hours);
-          const fullHours = s.actualWorkedHours || (regHours + overtimeHrs);
           return {
             ...s,
             overtimeStatus: 'approved',
-            hours: fullHours,
-            note: `ساعات عمل معتمدة (أساسي: ${regHours} س + إضافي: ${overtimeHrs} س)`
+            overtimeHours: overtimeHrs,
+            adminApproved: true,
+            note: `ساعات عمل وإضافي معتمد (أساسي: ${regHours} س + إضافي: ${overtimeHrs} س)`
           };
         }
         return s;
@@ -517,8 +517,8 @@ export default function RequestsModule({
           return {
             ...s,
             overtimeStatus: 'rejected',
-            hours: regHours,
-            note: `ساعات الوردية الأساسية (${regHours} س) — تم استبعاد الإضافي (${targetReq.hours} س)`
+            adminApproved: false,
+            note: `ساعات الوردية الأساسية (${regHours} س) — تم استبعاد الإضافي (${targetReq.hours} س) بواسطة الإدارة`
           };
         }
         return s;
@@ -1597,6 +1597,29 @@ export default function RequestsModule({
                         )}
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* ── OVERTIME REQUEST DETAILS ── */}
+                {previewModalReq.type === 'overtime' && (
+                  <div style={{ background: '#f0fdf4', padding: '16px', borderRadius: '12px', border: '1px solid #86efac' }}>
+                    <h4 style={{ margin: '0 0 10px', color: '#166534', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      ⏱️ تفاصيل الساعات الإضافية ومقارنة الوردية:
+                    </h4>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', fontSize: '13px' }}>
+                      <div style={{ background: '#fff', padding: '8px 12px', borderRadius: '8px', border: '1px solid #bbf7d0' }}>
+                        <span style={{ color: '#64748b', fontSize: '11.5px', display: 'block' }}>الوردية المقررة بالجدول:</span>
+                        <strong style={{ color: '#1e293b' }}>{previewModalReq.regularHours || previewModalReq.scheduledHours || 8} ساعات ({previewModalReq.scheduledStart || '—'} ➔ {previewModalReq.scheduledEnd || '—'})</strong>
+                      </div>
+                      <div style={{ background: '#fff', padding: '8px 12px', borderRadius: '8px', border: '1px solid #bbf7d0' }}>
+                        <span style={{ color: '#64748b', fontSize: '11.5px', display: 'block' }}>البصمة وساعات العمل الفعلية:</span>
+                        <strong style={{ color: '#1e293b' }}>{previewModalReq.totalShiftHours || previewModalReq.actualWorkedHours || '—'} ساعات ({previewModalReq.actualIn || '—'} ➔ {previewModalReq.actualOut || '—'})</strong>
+                      </div>
+                      <div style={{ background: '#dcfce7', padding: '8px 12px', borderRadius: '8px', border: '1px solid #86efac' }}>
+                        <span style={{ color: '#166534', fontSize: '11.5px', display: 'block' }}>الساعات الإضافية المطلوب اعتمادها:</span>
+                        <strong style={{ color: '#15803d', fontSize: '14px' }}>+{previewModalReq.hours} ساعة إضافية</strong>
+                      </div>
+                    </div>
                   </div>
                 )}
 

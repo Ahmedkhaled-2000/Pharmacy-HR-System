@@ -12,7 +12,7 @@ import {
   removeSnapshot
 } from '../../utils/backupHelper';
 import GmailConfigCard from './GmailConfigCard';
-import { DEFAULT_JOBS, getJobsList } from '../../utils/jobsHelper';
+import { DEFAULT_JOBS, getJobsList, DEFAULT_DEPARTMENTS, getDepartmentsList } from '../../utils/jobsHelper';
 
 const ALL_REQUEST_TYPES = [
   { type: 'long_leave', label: 'طلبات الإجازة أكثر من ثلاث أيام في الشهر (سنوية أو بدون أجر)' },
@@ -39,12 +39,21 @@ export default function SettingsModule({
 
   // Jobs & Roles Management State
   const jobsList = getJobsList(state);
+  const departmentsList = getDepartmentsList(state);
   const [showJobModal, setShowJobModal] = useState(false);
   const [editingJob, setEditingJob] = useState(null);
   const [jobTitleInput, setJobTitleInput] = useState('');
+  const [jobDeptInput, setJobDeptInput] = useState('');
   const [jobIsMgmtInput, setJobIsMgmtInput] = useState(false);
   const [jobDescInput, setJobDescInput] = useState('');
   const [jobSearchQuery, setJobSearchQuery] = useState('');
+  const [jobDeptFilter, setJobDeptFilter] = useState('all');
+
+  // Departments Management State
+  const [showDeptSection, setShowDeptSection] = useState(false);
+  const [newDeptInput, setNewDeptInput] = useState('');
+  const [editingDeptName, setEditingDeptName] = useState(null);
+  const [renameDeptInput, setRenameDeptInput] = useState('');
 
   const orgSettings = state.orgSettings || {};
   const [orgName, setOrgName] = useState(orgSettings.orgName || 'مجموعة الصيدليات الطبية');
@@ -1286,19 +1295,30 @@ export default function SettingsModule({
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
             <div>
               <h3 style={{ margin: 0, color: 'var(--primary-dark)', fontFamily: 'Cairo', fontSize: '18px' }}>
-                💼 دليل ومسميات الوظائف والكوادر بالشركة
+                💼 دليل ومسميات الوظائف والكوادر وهيكلة الأقسام
               </h3>
               <p style={{ margin: '4px 0 0 0', color: 'var(--muted)', fontSize: '13px' }}>
-                تعريف الوظائف وتصنيفها إلى (وظائف إدارية) تمنح أحقية بدل الإدارة أو (كوادر تشغيلية) ليتم اختيارها في ملفات الموظفين.
+                تعريف الوظائف وتوزيعها على الأقسام وتصنيفها إلى (وظائف إدارية) تمنح أحقية بدل الإدارة أو (كوادر تشغيلية).
               </p>
             </div>
-            <div style={{ display: 'flex', gap: '10px' }}>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className={`btn ${showDeptSection ? 'btn-start' : 'btn-ghost'}`}
+                onClick={() => setShowDeptSection(!showDeptSection)}
+                style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+              >
+                <span>🏢</span>
+                <span>إدارة الأقسام ({departmentsList.length})</span>
+                <span>{showDeptSection ? '▲' : '▼'}</span>
+              </button>
               <button
                 type="button"
                 className="btn btn-start"
                 onClick={() => {
                   setEditingJob(null);
                   setJobTitleInput('');
+                  setJobDeptInput(departmentsList[0] || 'الصيدلية');
                   setJobIsMgmtInput(false);
                   setJobDescInput('');
                   setShowJobModal(true);
@@ -1310,11 +1330,11 @@ export default function SettingsModule({
                 type="button"
                 className="btn btn-ghost"
                 onClick={async () => {
-                  if (window.confirm('هل تريد استعادة قائمة الوظائف القياسية الافتراضية؟')) {
-                    const updatedState = { ...state, jobs: DEFAULT_JOBS };
+                  if (window.confirm('هل تريد استعادة قائمة الوظائف والأقسام القياسية الافتراضية؟')) {
+                    const updatedState = { ...state, jobs: DEFAULT_JOBS, departments: DEFAULT_DEPARTMENTS };
                     setState(updatedState);
                     if (saveState) await saveState(updatedState);
-                    showToast?.('🔄 تمت استعادة قائمة الوظائف الافتراضية بنجاح');
+                    showToast?.('🔄 تمت استعادة قائمة الوظائف والأقسام الافتراضية بنجاح');
                   }
                 }}
               >
@@ -1331,11 +1351,18 @@ export default function SettingsModule({
             const operationalJobs = totalJobs - mgmtJobs;
 
             return (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '14px' }}>
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '14px' }}>
+                  <span style={{ fontSize: '12px', color: 'var(--muted)' }}>إجمالي الأقسام</span>
+                  <div style={{ fontSize: '20px', fontWeight: 'bold', color: 'var(--primary-dark)', marginTop: '4px' }}>
+                    🏢 {departmentsList.length} قسم
+                  </div>
+                </div>
+
                 <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '14px' }}>
                   <span style={{ fontSize: '12px', color: 'var(--muted)' }}>إجمالي الوظائف المعرفة</span>
                   <div style={{ fontSize: '20px', fontWeight: 'bold', color: 'var(--primary-dark)', marginTop: '4px' }}>
-                    {totalJobs} وظيفة
+                    💼 {totalJobs} وظيفة
                   </div>
                 </div>
 
@@ -1354,7 +1381,7 @@ export default function SettingsModule({
                 </div>
 
                 <div style={{ background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: '12px', padding: '14px' }}>
-                  <span style={{ fontSize: '12px', color: '#6b21a8' }}>👥 إجمالي الموظفين المسجلين</span>
+                  <span style={{ fontSize: '12px', color: '#6b21a8' }}>👥 الموظفون المسجلون</span>
                   <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#7e22ce', marginTop: '4px' }}>
                     {allEmps.length} موظف
                   </div>
@@ -1363,15 +1390,203 @@ export default function SettingsModule({
             );
           })()}
 
-          {/* Search Filter Bar */}
-          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+          {/* Collapsible Departments Management Card */}
+          {showDeptSection && (
+            <div style={{ background: '#f0fdf4', border: '1.5px solid #86efac', borderRadius: '14px', padding: '18px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                <div>
+                  <h4 style={{ margin: 0, color: '#166534', fontFamily: 'Cairo', fontSize: '16px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span>🏢</span> إدارة وهيكلة الأقسام بالصيدلية
+                  </h4>
+                  <p style={{ margin: '4px 0 0 0', color: '#15803d', fontSize: '12.5px' }}>
+                    أضف أو عدل أو احذف الأقسام لتظهر في القوائم المنسدلة عند تسجيل الوظائف وملفات الموظفين.
+                  </p>
+                </div>
+
+                {/* Add New Department Form */}
+                <div style={{ display: 'flex', gap: '8px', flex: '1', maxWidth: '400px', minWidth: '260px' }}>
+                  <input
+                    type="text"
+                    placeholder="اسم القسم الجديد (مثال: التسويق)"
+                    value={newDeptInput}
+                    onChange={(e) => setNewDeptInput(e.target.value)}
+                    style={{ flex: 1, padding: '8px 12px', borderRadius: '8px', border: '1px solid #86efac', background: '#fff' }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-start"
+                    style={{ padding: '8px 14px', fontSize: '13px' }}
+                    onClick={async () => {
+                      if (!newDeptInput.trim()) {
+                        showToast?.('⚠️ يرجى كتابة اسم القسم');
+                        return;
+                      }
+                      const cleanName = newDeptInput.trim();
+                      if (departmentsList.includes(cleanName)) {
+                        showToast?.('⚠️ هذا القسم موجود بالفعل');
+                        return;
+                      }
+                      const updatedDepts = [...departmentsList, cleanName];
+                      const updatedState = { ...state, departments: updatedDepts };
+                      setState(updatedState);
+                      setNewDeptInput('');
+                      showToast?.(`✅ تمت إضافة قسم (${cleanName}) بنجاح`);
+                      if (saveState) await saveState(updatedState);
+                    }}
+                  >
+                    ➕ إضافة قسم
+                  </button>
+                </div>
+              </div>
+
+              {/* Department Cards Grid */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '10px', marginTop: '6px' }}>
+                {departmentsList.map((dept) => {
+                  const linkedJobs = jobsList.filter(j => j.department === dept);
+                  const linkedEmps = (state.employees || []).filter(e => e.department === dept);
+                  const isEditing = editingDeptName === dept;
+
+                  return (
+                    <div
+                      key={dept}
+                      style={{
+                        background: '#fff',
+                        border: '1px solid #cbd5e1',
+                        borderRadius: '10px',
+                        padding: '10px 14px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '6px',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                      }}
+                    >
+                      {isEditing ? (
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          <input
+                            type="text"
+                            value={renameDeptInput}
+                            onChange={(e) => setRenameDeptInput(e.target.value)}
+                            style={{ flex: 1, padding: '4px 8px', fontSize: '13px', borderRadius: '6px', border: '1px solid var(--primary)' }}
+                            autoFocus
+                          />
+                          <button
+                            type="button"
+                            className="btn btn-start"
+                            style={{ padding: '4px 8px', fontSize: '12px' }}
+                            onClick={async () => {
+                              const cleanRename = renameDeptInput.trim();
+                              if (!cleanRename) return;
+                              if (cleanRename === dept) {
+                                setEditingDeptName(null);
+                                return;
+                              }
+                              if (departmentsList.includes(cleanRename)) {
+                                showToast?.('⚠️ يوجد قسم آخر بهذا الاسم');
+                                return;
+                              }
+                              const updatedDepts = departmentsList.map(d => d === dept ? cleanRename : d);
+                              const updatedJobs = jobsList.map(j => j.department === dept ? { ...j, department: cleanRename } : j);
+                              const updatedEmps = (state.employees || []).map(e => e.department === dept ? { ...e, department: cleanRename } : e);
+                              const updatedState = { ...state, departments: updatedDepts, jobs: updatedJobs, employees: updatedEmps };
+                              setState(updatedState);
+                              setEditingDeptName(null);
+                              showToast?.(`✅ تم تعديل اسم القسم إلى (${cleanRename})`);
+                              if (saveState) await saveState(updatedState);
+                            }}
+                          >
+                            حفظ
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            style={{ padding: '4px 8px', fontSize: '12px' }}
+                            onClick={() => setEditingDeptName(null)}
+                          >
+                            إلغاء
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontWeight: 'bold', color: 'var(--primary-dark)', fontSize: '14px' }}>
+                            🏢 {dept}
+                          </span>
+                          <div style={{ display: 'flex', gap: '4px' }}>
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              style={{ padding: '2px 6px', fontSize: '11px' }}
+                              onClick={() => {
+                                setEditingDeptName(dept);
+                                setRenameDeptInput(dept);
+                              }}
+                              title="تعديل اسم القسم"
+                            >
+                              ✏️
+                            </button>
+                            <button
+                              type="button"
+                              className="del-btn"
+                              style={{ padding: '2px 6px', fontSize: '11px' }}
+                              onClick={async () => {
+                                if (linkedJobs.length > 0 || linkedEmps.length > 0) {
+                                  const confirmed = window.confirm(
+                                    `⚠️ تنبيه: يوجد (${linkedJobs.length}) وظيفة و (${linkedEmps.length}) موظف مسجلين بقسم (${dept}). هل أنت متأكد من حذف هذا القسم؟`
+                                  );
+                                  if (!confirmed) return;
+                                } else {
+                                  if (!window.confirm(`هل أنت متأكد من حذف قسم (${dept})؟`)) return;
+                                }
+                                const updatedDepts = departmentsList.filter(d => d !== dept);
+                                const updatedState = { ...state, departments: updatedDepts };
+                                setState(updatedState);
+                                showToast?.(`🗑️ تم حذف قسم (${dept})`);
+                                if (saveState) await saveState(updatedState);
+                              }}
+                              title="حذف القسم"
+                            >
+                              🗑️
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      <div style={{ display: 'flex', gap: '8px', fontSize: '11.5px', color: 'var(--muted)' }}>
+                        <span>💼 {linkedJobs.length} وظيفة</span>
+                        <span>•</span>
+                        <span>👥 {linkedEmps.length} موظف</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Search & Department Filter Bar */}
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
             <input
               type="text"
               placeholder="🔍 بحث باسم الوظيفة أو الوصف..."
               value={jobSearchQuery}
               onChange={(e) => setJobSearchQuery(e.target.value)}
-              style={{ flex: 1, padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)' }}
+              style={{ flex: 1, minWidth: '220px', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)' }}
             />
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <label style={{ fontSize: '13px', fontWeight: 'bold', margin: 0 }}>🏢 تصفية بالقسم:</label>
+              <select
+                value={jobDeptFilter}
+                onChange={(e) => setJobDeptFilter(e.target.value)}
+                style={{ padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)', fontWeight: 'bold', fontSize: '13px' }}
+              >
+                <option value="all">كل الأقسام ({jobsList.length})</option>
+                {departmentsList.map(d => (
+                  <option key={d} value={d}>
+                    {d} ({jobsList.filter(j => j.department === d).length})
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {/* Jobs Table */}
@@ -1381,6 +1596,7 @@ export default function SettingsModule({
                 <tr style={{ background: 'var(--surface-muted)', borderBottom: '1px solid var(--border)' }}>
                   <th style={{ padding: '12px' }}>#</th>
                   <th style={{ padding: '12px' }}>المسمى الوظيفي</th>
+                  <th style={{ padding: '12px' }}>القسم التابع له</th>
                   <th style={{ padding: '12px' }}>تصنيف الوظيفة</th>
                   <th style={{ padding: '12px' }}>الوصف والمهام</th>
                   <th style={{ padding: '12px', textAlign: 'center' }}>الموظفون الحاليون</th>
@@ -1389,7 +1605,11 @@ export default function SettingsModule({
               </thead>
               <tbody>
                 {jobsList
-                  .filter(j => !jobSearchQuery || j.title.toLowerCase().includes(jobSearchQuery.toLowerCase()) || (j.description && j.description.toLowerCase().includes(jobSearchQuery.toLowerCase())))
+                  .filter(j => {
+                    const matchSearch = !jobSearchQuery || j.title.toLowerCase().includes(jobSearchQuery.toLowerCase()) || (j.description && j.description.toLowerCase().includes(jobSearchQuery.toLowerCase()));
+                    const matchDept = jobDeptFilter === 'all' || j.department === jobDeptFilter;
+                    return matchSearch && matchDept;
+                  })
                   .map((j, idx) => {
                     const isMgmt = Boolean(j.isManagement || j.isAdminRole);
                     const assignedEmps = (state.employees || []).filter(e => e.jobTitle?.trim() === j.title?.trim());
@@ -1399,6 +1619,11 @@ export default function SettingsModule({
                         <td style={{ padding: '12px', color: 'var(--muted)', fontWeight: 'bold' }}>{idx + 1}</td>
                         <td style={{ padding: '12px', fontWeight: 'bold', color: 'var(--primary-dark)', fontSize: '14px' }}>
                           💼 {j.title}
+                        </td>
+                        <td style={{ padding: '12px' }}>
+                          <span style={{ background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            🏢 {j.department || 'عام / غير محدد'}
+                          </span>
                         </td>
                         <td style={{ padding: '12px' }}>
                           {isMgmt ? (
@@ -1411,7 +1636,7 @@ export default function SettingsModule({
                             </span>
                           )}
                         </td>
-                        <td style={{ padding: '12px', color: 'var(--muted)', fontSize: '12.5px', maxWidth: '300px' }}>
+                        <td style={{ padding: '12px', color: 'var(--muted)', fontSize: '12.5px', maxWidth: '280px' }}>
                           {j.description || '—'}
                         </td>
                         <td style={{ padding: '12px', textAlign: 'center' }}>
@@ -1428,6 +1653,7 @@ export default function SettingsModule({
                               onClick={() => {
                                 setEditingJob(j);
                                 setJobTitleInput(j.title);
+                                setJobDeptInput(j.department || departmentsList[0] || 'الصيدلية');
                                 setJobIsMgmtInput(Boolean(j.isManagement || j.isAdminRole));
                                 setJobDescInput(j.description || '');
                                 setShowJobModal(true);
@@ -1472,7 +1698,7 @@ export default function SettingsModule({
           {/* Add / Edit Job Modal */}
           {showJobModal && (
             <div className="modal-backdrop" style={{ zIndex: 1100 }}>
-              <div className="modal-content card" style={{ maxWidth: '520px', width: '92%', padding: '24px' }}>
+              <div className="modal-content card" style={{ maxWidth: '540px', width: '92%', padding: '24px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '10px' }}>
                   <h3 style={{ margin: 0, color: 'var(--primary-dark)', fontFamily: 'Cairo' }}>
                     {editingJob ? '✏️ تعديل بيانات الوظيفة' : '➕ إضافة مسمى وظيفي جديد'}
@@ -1495,6 +1721,8 @@ export default function SettingsModule({
                       return;
                     }
 
+                    const selectedDept = jobDeptInput || departmentsList[0] || 'الصيدلية';
+
                     let updatedJobs;
                     let updatedEmployees = [...(state.employees || [])];
 
@@ -1505,6 +1733,7 @@ export default function SettingsModule({
                           return {
                             ...j,
                             title: cleanTitle,
+                            department: selectedDept,
                             isManagement: jobIsMgmtInput,
                             isAdminRole: jobIsMgmtInput,
                             description: jobDescInput.trim()
@@ -1513,7 +1742,7 @@ export default function SettingsModule({
                         return j;
                       });
 
-                      // Update jobTitle in employees if title changed
+                      // Update jobTitle & department in employees if title changed
                       if (editingJob.title !== cleanTitle) {
                         updatedEmployees = updatedEmployees.map(emp => {
                           if (emp.jobTitle === editingJob.title) {
@@ -1527,6 +1756,7 @@ export default function SettingsModule({
                       const newJobObj = {
                         id: 'job_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
                         title: cleanTitle,
+                        department: selectedDept,
                         isManagement: jobIsMgmtInput,
                         isAdminRole: jobIsMgmtInput,
                         description: jobDescInput.trim()
@@ -1558,6 +1788,22 @@ export default function SettingsModule({
                   </div>
 
                   <div className="field">
+                    <label style={{ fontWeight: 'bold' }}>القسم التابع له المسمى الوظيفي *</label>
+                    <select
+                      value={jobDeptInput}
+                      onChange={(e) => setJobDeptInput(e.target.value)}
+                      style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)', fontWeight: 'bold' }}
+                      required
+                    >
+                      {departmentsList.map((dept) => (
+                        <option key={dept} value={dept}>
+                          🏢 {dept}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="field">
                     <label style={{ fontWeight: 'bold' }}>تصنيف طبيعة الوظيفة</label>
                     <div style={{ background: jobIsMgmtInput ? '#f0fdf4' : '#f8fafc', border: `1px solid ${jobIsMgmtInput ? '#86efac' : '#cbd5e1'}`, padding: '12px 14px', borderRadius: '10px', marginTop: '4px' }}>
                       <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', margin: 0 }}>
@@ -1572,7 +1818,7 @@ export default function SettingsModule({
                         </span>
                       </label>
                       <p style={{ margin: '6px 0 0 28px', fontSize: '12px', color: 'var(--muted)', lineHeight: '1.5' }}>
-                        * عند تحديد هذا الخيار، سيظهر حقل مالي ديناميكي باسم <strong>(بدل إدارة)</strong> في ملف الموظف لتسجيل قيمة البدل وإضافتها في مسير الرواتب.
+                        * عند تحديد هذا الخيار، سيظهر حقل مالي ديناميكي باسم <strong>(بدل إدارة)</strong> في ملف الموظف لتسجيل قيمة البدل وإضافتها في مسير الرواتب، وتوجيه كافة طلبات الموظف للإدارة العليا مباشرة.
                       </p>
                     </div>
                   </div>

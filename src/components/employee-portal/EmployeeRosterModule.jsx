@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { arabicWeekday } from '../../utils/formatters';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
+import { shouldRouteDirectToAdmin } from '../../utils/jobsHelper';
 
 // Arabic weekday names mapped to JS getDay() index (0=Sunday)
 const WEEKDAY_AR_MAP = {
@@ -298,6 +299,9 @@ export default function EmployeeRosterModule({
 
     const targetBranch = activeFormBranchId || selectedBranchId || emp.branchId;
 
+    const isDirectAdmin = shouldRouteDirectToAdmin(emp, targetBranch, state);
+    const targetApproval = isDirectAdmin ? 'admin_only' : 'branch_and_admin';
+
     const newRosterReq = {
       id: 'roster_req_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
       employeeId: emp.id,
@@ -309,7 +313,9 @@ export default function EmployeeRosterModule({
       fromDate,
       toDate,
       schedule: scheduleInputs,
-      targetApproval: 'branch_and_admin',
+      targetApproval,
+      isDirectToAdmin: isDirectAdmin,
+      branchNotRequired: isDirectAdmin,
       status: 'pending',
       createdAt: new Date().toISOString()
     };
@@ -322,7 +328,7 @@ export default function EmployeeRosterModule({
     notifyAdminOnNewRequest({ state: updatedState, newRequest: newRosterReq, empName: emp.name });
 
     setShowRosterModal(false);
-    showToast('تم إرسال جدول الشيفتات الشهري للاعتماد من مدير الفرع والإدارة العليا 📅');
+    showToast(isDirectAdmin ? 'تم إرسال جدول الشيفتات الشهري للاعتماد من الإدارة العليا مباشرة 📅' : 'تم إرسال جدول الشيفتات الشهري للاعتماد من مدير الفرع والإدارة العليا 📅');
   };
 
   // Render Roster Builder Modal Component

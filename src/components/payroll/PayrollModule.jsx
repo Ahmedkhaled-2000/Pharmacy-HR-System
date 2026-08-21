@@ -475,7 +475,7 @@ export default function PayrollModule({
 
                 const empSum = state.computeEmpSummary
                   ? state.computeEmpSummary(emp.id, payrollFilterFn, monthPicker, filterBranch || null)
-                  : { hours: 0, baseEarnings: 0, totalBonus: 0, totalDeduction: 0, absenceDeduction: 0, netSalary: 0 };
+                  : { hours: 0, baseEarnings: 0, totalBonus: 0, totalDeduction: 0, absenceDeduction: 0, netSalary: 0, approvedOvertimeHours: 0, overtimeEarnings: 0 };
 
                 const totalDed = (empSum.totalDeduction || 0) + (empSum.absenceDeduction || 0);
 
@@ -485,8 +485,13 @@ export default function PayrollModule({
                     <td style={{ fontWeight: '800' }}>{emp.name}</td>
                     <td>{branchNameDisplay}</td>
                     <td>
-                      <strong style={{ color: '#0f766e' }}>{empSum.hours || 0} ساعة</strong>
-                      <div style={{ fontSize: '11.5px', color: 'var(--muted)' }}>({fmt(empSum.baseEarnings)} ج.م)</div>
+                      <strong style={{ color: '#0f766e' }}>{empSum.hours || 0} س أساسي</strong>
+                      {empSum.approvedOvertimeHours > 0 && (
+                        <div style={{ fontSize: '11.5px', color: '#15803d', fontWeight: 'bold' }}>
+                          ⭐ +{empSum.approvedOvertimeHours} س إضافي (+{fmt(empSum.overtimeEarnings)} ج.م)
+                        </div>
+                      )}
+                      <div style={{ fontSize: '11.5px', color: 'var(--muted)' }}>({fmt(empSum.baseEarnings)} ج.م أساسي)</div>
                     </td>
                     <td style={{ color: '#16a34a', fontWeight: '700' }}>
                       {empSum.totalBonus > 0 ? `+${fmt(empSum.totalBonus)} ج.م` : '0 ج.م'}
@@ -519,7 +524,7 @@ export default function PayrollModule({
         const empSalary = parseFloat(selectedEmpModal.salary) || 0;
         const empSum = state.computeEmpSummary
           ? state.computeEmpSummary(selectedEmpModal.id, payrollFilterFn, monthPicker, filterBranch || null)
-          : { hours: 0, baseEarnings: 0, totalBonus: 0, totalDeduction: 0, absenceDeduction: 0, netSalary: 0, absenceDaysCount: 0 };
+          : { hours: 0, baseEarnings: 0, totalBonus: 0, totalDeduction: 0, absenceDeduction: 0, netSalary: 0, absenceDaysCount: 0, approvedOvertimeHours: 0, pendingOvertimeHours: 0, overtimeEarnings: 0 };
 
         const totalDed = (empSum.totalDeduction || 0) + (empSum.absenceDeduction || 0);
 
@@ -550,6 +555,19 @@ export default function PayrollModule({
                   <h4 style={{ margin: '4px 0 0 0', color: 'var(--primary-dark)' }}>{empSum.hours || 0} ساعة ({fmt(empSum.baseEarnings)} ج.م)</h4>
                 </div>
 
+                {(empSum.approvedOvertimeHours > 0 || empSum.pendingOvertimeHours > 0) && (
+                  <div style={{ background: '#f0fdf4', padding: '14px', borderRadius: '10px', border: '1px solid #86efac' }}>
+                    <span style={{ fontSize: '12px', color: '#166534', fontWeight: 'bold' }}>⭐ الوقت الإضافي</span>
+                    <h4 style={{ margin: '4px 0 0 0', color: '#15803d' }}>
+                      +{fmt(empSum.overtimeEarnings)} ج.م
+                    </h4>
+                    <div style={{ fontSize: '11px', color: '#166534', marginTop: '2px' }}>
+                      {empSum.approvedOvertimeHours > 0 && `معتمد: ${empSum.approvedOvertimeHours} ساعة (${fmt(empSum.overtimeEarnings)} ج.م)`}
+                      {empSum.pendingOvertimeHours > 0 && ` | ⏳ معلق: ${empSum.pendingOvertimeHours} ساعة`}
+                    </div>
+                  </div>
+                )}
+
                 {empSum.totalAllowances > 0 && (
                   <div style={{ background: '#eff6ff', padding: '14px', borderRadius: '10px', border: '1px solid #bfdbfe' }}>
                     <span style={{ fontSize: '12px', color: '#1e40af' }}>3. البدلات الثابتة</span>
@@ -559,7 +577,9 @@ export default function PayrollModule({
                     <div style={{ fontSize: '11px', color: '#1e40af', marginTop: '2px' }}>
                       {empSum.managementAllowance > 0 && `إدارة: ${fmt(empSum.managementAllowance)} | `}
                       {empSum.transportAllowance > 0 && `مواصلات: ${fmt(empSum.transportAllowance)} | `}
-                      {empSum.extraAllowance > 0 && `${empSum.extraAllowanceTitle || 'إضافي'}: ${fmt(empSum.extraAllowance)}`}
+                      {Array.isArray(empSum.extraAllowances) && empSum.extraAllowances.length > 0 
+                        ? empSum.extraAllowances.map(a => `${a.title || 'إضافي'}: ${fmt(a.amount)}`).join(' | ')
+                        : (empSum.extraAllowance > 0 && `${empSum.extraAllowanceTitle || 'إضافي'}: ${fmt(empSum.extraAllowance)}`)}
                     </div>
                   </div>
                 )}

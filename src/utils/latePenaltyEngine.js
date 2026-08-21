@@ -692,6 +692,12 @@ export function getEffectiveShiftHours(shift, state) {
     return Math.round((rawHours + permHours) * 100) / 100;
   }
 
+  // إذا كانت الوردية تحتوي على وقت إضافي، نعتمد الساعات الأساسية المقررة (regularHours)
+  // لكي لا يتم صرف الإضافي تلقائياً قبل اعتماد الإدارة، وتجنباً للازدواج المالي عند صرفه في بند الوقت الإضافي
+  if ((parseFloat(shift.overtimeHours) > 0 || shift.overtimeStatus) && shift.regularHours !== undefined) {
+    return parseFloat(shift.regularHours) || 0;
+  }
+
   const currentStored = parseFloat(shift.hours !== undefined ? shift.hours : shift.workHours);
   return !isNaN(currentStored) && currentStored > 0 ? currentStored : Math.round(rawHours * 100) / 100;
 }

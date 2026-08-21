@@ -504,15 +504,21 @@ export default function PayslipPrintModal({
                     <div style={{ background: '#f0fdf4', padding: '6px 12px', color: '#166534', fontWeight: 'bold', fontSize: '13px', borderBottom: '1px solid #cbd5e1' }}>
                       ⏱️ ساعات العمل وأجر اليوم / المستحقات
                     </div>
-                    <div style={{ padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12px', flex: 1, justifyContent: 'center' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px dashed #e2e8f0', paddingBottom: '6px' }}>
-                        <span>عدد ساعات العمل الفعلية المسجلة</span>
+                    <div style={{ padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px', flex: 1, justifyContent: 'center' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px dashed #e2e8f0', paddingBottom: '4px' }}>
+                        <span>عدد ساعات العمل الأساسية المسجلة</span>
                         <strong>{fmt(totalHours)} ساعة</strong>
                       </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', color: '#15803d', fontWeight: 'bold', fontSize: '13px', paddingTop: '4px' }}>
-                        <span>✅ المستحقات الأساسية ({fmt(totalHours)} س × {fmt(hourlyRate)} ج.م)</span>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', color: '#15803d', fontWeight: 'bold', fontSize: '12.5px', borderBottom: summary.approvedOvertimeHours > 0 ? '1px dashed #e2e8f0' : 'none', paddingBottom: '4px' }}>
+                        <span>المستحقات الأساسية ({fmt(totalHours)} س × {fmt(hourlyRate)} ج.م)</span>
                         <span>{fmt(baseEarnings)} ج.م</span>
                       </div>
+                      {summary.approvedOvertimeHours > 0 && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#166534', fontWeight: 'bold', fontSize: '12.5px', paddingTop: '2px' }}>
+                          <span>⭐ أجر الوقت الإضافي المعتمد ({fmt(summary.approvedOvertimeHours)} س × {fmt(hourlyRate)} ج.م)</span>
+                          <span>+{fmt(summary.overtimeEarnings)} ج.م</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -585,6 +591,9 @@ export default function PayslipPrintModal({
               </h4>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px', marginBottom: '10px', fontSize: '12px' }}>
                 <div>المستحقات الأساسية: <strong>{fmt(baseEarnings)} ج.م</strong></div>
+                {summary.approvedOvertimeHours > 0 && (
+                  <div style={{ color: '#86efac' }}>+ ⭐ الوقت الإضافي المعتمد: <strong>+{fmt(summary.overtimeEarnings)} ج.م ({fmt(summary.approvedOvertimeHours)} س)</strong></div>
+                )}
                 {totalAllowances > 0 && (
                   <div>+ إجمالي البدلات الثابتة: <strong>+{fmt(totalAllowances)} ج.م</strong></div>
                 )}
@@ -625,7 +634,22 @@ export default function PayslipPrintModal({
                   color: '#15803d'
                 });
               }
-              if (extAllowance > 0) {
+              
+              const extraAllowancesList = summary.extraAllowances || emp.extraAllowances || [];
+              if (Array.isArray(extraAllowancesList) && extraAllowancesList.length > 0) {
+                extraAllowancesList.forEach((ea, idx) => {
+                  if ((parseFloat(ea.amount) || 0) > 0) {
+                    allowanceItems.push({
+                      id: `allowance_extra_${ea.id || idx}`,
+                      date: `${month} (بدل شهري)`,
+                      typeLabel: `🏷️ ${ea.title || 'أجر إضافي'}`,
+                      amount: parseFloat(ea.amount) || 0,
+                      details: 'أجر وبدل إضافي مخصص من قبل الإدارة',
+                      color: '#15803d'
+                    });
+                  }
+                });
+              } else if (extAllowance > 0) {
                 allowanceItems.push({
                   id: 'allowance_extra',
                   date: `${month} (بدل شهري)`,

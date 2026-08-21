@@ -1,3 +1,5 @@
+import { isManagementJob, isBranchWithoutManager, getJobsList } from './jobsHelper';
+
 export const AR_MONTHS = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
 export const AR_WEEKDAYS = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
 
@@ -453,7 +455,21 @@ export function shouldShowRequestToBranch(req, state) {
     return false;
   }
 
-  // 4. Check Double Approval Rules Configured by Higher Management (state.approvalRules)
+  // 4. Check if requesting employee holds an administrative/management role (direct to Admin)
+  const emp = (state?.employees || []).find(
+    (e) => String(e.id) === String(req.employeeId) || (req.employeeCode && String(e.code) === String(req.employeeCode))
+  );
+  if (emp && isManagementJob(emp.jobTitle, getJobsList(state))) {
+    return false;
+  }
+
+  // 5. Check if the branch has no assigned manager (direct to Admin)
+  const targetBranchId = req.branchId || emp?.branchId || emp?.branchesDetails?.[0]?.branchId;
+  if (targetBranchId && isBranchWithoutManager(targetBranchId, state)) {
+    return false;
+  }
+
+  // 6. Check Double Approval Rules Configured by Higher Management (state.approvalRules)
   const rules = state?.approvalRules || [];
   if (Array.isArray(rules) && rules.length > 0) {
     // A. Check by specific requestType match (e.g. { requestType: 'leave', reqBranch: false })

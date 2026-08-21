@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { compressImage } from '../../utils/imageCompressor';
-import { DEFAULT_JOBS, isManagementJob } from '../../utils/jobsHelper';
+import { DEFAULT_JOBS, isManagementJob, DEFAULT_DEPARTMENTS } from '../../utils/jobsHelper';
 
 export default function EmployeeFileModal({
   isOpen,
@@ -9,6 +9,7 @@ export default function EmployeeFileModal({
   branches = [],
   allEmployees = [],
   jobs = DEFAULT_JOBS,
+  departments = DEFAULT_DEPARTMENTS,
   onSave,
   handleFileUpload
 }) {
@@ -73,6 +74,23 @@ export default function EmployeeFileModal({
   const [transportAllowance, setTransportAllowance] = useState('0');
   const [extraAllowance, setExtraAllowance] = useState('0');
   const [extraAllowanceTitle, setExtraAllowanceTitle] = useState('');
+  // Multiple Extra Allowances: Array of { id, title, amount }
+  const [extraAllowances, setExtraAllowances] = useState([]);
+
+  const handleAddExtraAllowance = () => {
+    setExtraAllowances([
+      ...extraAllowances,
+      { id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 4), title: '', amount: '0' }
+    ]);
+  };
+
+  const handleExtraAllowanceChange = (id, field, value) => {
+    setExtraAllowances(extraAllowances.map(a => a.id === id ? { ...a, [field]: value } : a));
+  };
+
+  const handleRemoveExtraAllowance = (id) => {
+    setExtraAllowances(extraAllowances.filter(a => a.id !== id));
+  };
 
   const [hireDate, setHireDate] = useState('');
   const [contractType, setContractType] = useState('دوام كامل');
@@ -118,13 +136,30 @@ export default function EmployeeFileModal({
 
       setCode(editingEmp.code || '');
       setJobTitle(editingEmp.jobTitle || 'صيدلي');
-      setDepartment(editingEmp.department || 'الصيدلية');
+      setDepartment(editingEmp.department || jobs.find(j => j.title === editingEmp.jobTitle)?.department || departments[0] || 'الصيدلية');
       
       // Load allowances
       setManagementAllowance(String(editingEmp.managementAllowance !== undefined ? editingEmp.managementAllowance : '0'));
       setTransportAllowance(String(editingEmp.transportAllowance !== undefined ? editingEmp.transportAllowance : '0'));
       setExtraAllowance(String(editingEmp.extraAllowance !== undefined ? editingEmp.extraAllowance : '0'));
       setExtraAllowanceTitle(editingEmp.extraAllowanceTitle || '');
+
+      // Load multiple extra allowances
+      if (Array.isArray(editingEmp.extraAllowances) && editingEmp.extraAllowances.length > 0) {
+        setExtraAllowances(editingEmp.extraAllowances.map(a => ({
+          id: a.id || Math.random().toString(),
+          title: a.title || '',
+          amount: String(a.amount !== undefined ? a.amount : '0')
+        })));
+      } else if ((parseFloat(editingEmp.extraAllowance) || 0) > 0 || (editingEmp.extraAllowanceTitle && editingEmp.extraAllowanceTitle.trim())) {
+        setExtraAllowances([{
+          id: '1',
+          title: editingEmp.extraAllowanceTitle || 'أجر إضافي',
+          amount: String(editingEmp.extraAllowance || '0')
+        }]);
+      } else {
+        setExtraAllowances([]);
+      }
 
       // Load branchesDetails if they exist, otherwise fallback to legacy fields
       if (editingEmp.branchesDetails && editingEmp.branchesDetails.length > 0) {
@@ -178,13 +213,15 @@ export default function EmployeeFileModal({
 
       const nextCode = String(100 + (allEmployees.length + 1));
       setCode(nextCode);
-      setJobTitle(jobs[0]?.title || 'صيدلي');
-      setDepartment('الصيدلية');
+      const defaultJob = jobs[0]?.title || 'صيدلي';
+      setJobTitle(defaultJob);
+      setDepartment(jobs[0]?.department || departments[0] || 'الصيدلية');
       
       setManagementAllowance('0');
       setTransportAllowance('0');
       setExtraAllowance('0');
       setExtraAllowanceTitle('');
+      setExtraAllowances([]);
 
       setBranchesDetails([
         { id: Math.random().toString(), branchId: branches[0]?.id || '', salary: '4000', workHours: '8', workDays: '26' }
@@ -269,29 +306,31 @@ export default function EmployeeFileModal({
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    if (codeError) {
+      alert('يرجى تصحيح كود الموظف قبل الحفظ');
+      return;
+    }
+
     if (!name.trim()) {
       alert('يرجى إدخال اسم الموظف');
       return;
     }
-    if (!code.trim()) {
-      alert('يرجى إدخال كود الموظف');
-      return;
-    }
 
-    if (codeError) {
-      alert('لا يمكن الحفظ: ' + codeError);
-      return;
-    }
-
-    // Filter valid branches details
-    const validBranchesDetails = branchesDetails
-      .filter((bd) => bd.branchId)
-      .map((bd) => ({
+    // Clean valid branches details
+    const validBranchesDetails = branchesDetails.filter(bd => bd.branchId && bd.branchId.trim()).map(bd => {
+      const branchObj = branches.find(b => b.id === bd.branchId);
+      const salary = parseFloat(bd.salary) || 0;
+      const workHours = parseFloat(bd.workHours) || 8;
+      const workDays = parseFloat(bd.workDays) || 26;
+      return {
         branchId: bd.branchId,
-        salary: parseFloat(bd.salary) || 0,
-        workHoursPerDay: parseFloat(bd.workHours) || 8,
-        workDaysPerMonth: parseFloat(bd.workDays) || 26
-      }));
+        branchName: branchObj ? branchObj.name : 'فرع غير معروف',
+        branchCode: branchObj ? branchObj.branchCode : '',
+        salary: String(salary),
+        workHoursPerDay: String(workHours),
+        workDaysPerMonth: String(workDays)
+      };
+    });
 
     if (validBranchesDetails.length === 0) {
       alert('يرجى اختيار فرع واحد على الأقل للموظف وتحديد بيانات الراتب وساعات العمل');
@@ -309,6 +348,16 @@ export default function EmployeeFileModal({
 
     const isMgmt = isManagementJob(jobTitle, jobs);
 
+    const validExtraAllowances = extraAllowances
+      .filter(a => (parseFloat(a.amount) > 0) || (a.title && a.title.trim()))
+      .map(a => ({
+        id: a.id || Math.random().toString(),
+        title: a.title?.trim() || 'أجر إضافي',
+        amount: parseFloat(a.amount) || 0
+      }));
+    const totalExtraAllowance = validExtraAllowances.reduce((acc, a) => acc + (a.amount || 0), 0);
+    const combinedExtraTitle = validExtraAllowances.map(a => a.title).join(' + ');
+
     const employeeData = {
       id: editingEmp ? editingEmp.id : `emp_${Date.now()}`,
       name: name.trim(),
@@ -325,12 +374,13 @@ export default function EmployeeFileModal({
       code,
       username: code,
       jobTitle: jobTitle.trim(),
-      department,
+      department: department || (departments[0] || 'الصيدلية'),
       // Allowances
       managementAllowance: isMgmt ? (parseFloat(managementAllowance) || 0) : 0,
       transportAllowance: parseFloat(transportAllowance) || 0,
-      extraAllowance: parseFloat(extraAllowance) || 0,
-      extraAllowanceTitle: extraAllowanceTitle.trim(),
+      extraAllowances: validExtraAllowances,
+      extraAllowance: totalExtraAllowance,
+      extraAllowanceTitle: combinedExtraTitle.trim(),
       // For backwards compatibility and main branch logic, use the first branch's details
       branchId: validBranchesDetails[0].branchId,
       salary: validBranchesDetails[0].salary,
@@ -555,7 +605,14 @@ export default function EmployeeFileModal({
                 <label style={{ fontWeight: 'bold' }}>المسمى الوظيفي *</label>
                 <select
                   value={jobTitle}
-                  onChange={(e) => setJobTitle(e.target.value)}
+                  onChange={(e) => {
+                    const newTitle = e.target.value;
+                    setJobTitle(newTitle);
+                    const matchedJob = jobs.find(j => j.title?.trim() === newTitle?.trim());
+                    if (matchedJob && matchedJob.department) {
+                      setDepartment(matchedJob.department);
+                    }
+                  }}
                   style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)', fontWeight: 'bold' }}
                   required
                 >
@@ -581,7 +638,7 @@ export default function EmployeeFileModal({
                   const isMgmt = isManagementJob(jobTitle, jobs);
                   return isMgmt ? (
                     <div style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #86efac', padding: '6px 10px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 'bold', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      👔 وظيفة إدارية: تمنح الموظف أحقية صرف بدل الإدارة في البيانات المالية.
+                      👔 وظيفة إدارية: تمنح الموظف أحقية صرف بدل الإدارة وتوجه كافة طلباته للإدارة العليا مباشرة.
                     </div>
                   ) : (
                     <div style={{ background: '#f8fafc', color: '#475569', border: '1px solid #cbd5e1', padding: '6px 10px', borderRadius: '6px', fontSize: '11.5px', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -592,8 +649,25 @@ export default function EmployeeFileModal({
               </div>
 
               <div className="field">
-                <label>القسم</label>
-                <input type="text" value={department} onChange={(e) => setDepartment(e.target.value)} placeholder="الصيدلية / الإدارة" />
+                <label style={{ fontWeight: 'bold' }}>القسم *</label>
+                <select
+                  value={department}
+                  onChange={(e) => setDepartment(e.target.value)}
+                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)', fontWeight: 'bold' }}
+                  required
+                >
+                  <option value="">-- اختر القسم --</option>
+                  {departments.map((d) => (
+                    <option key={d} value={d}>
+                      🏢 {d}
+                    </option>
+                  ))}
+                  {department && !departments.includes(department) && (
+                    <option value={department}>
+                      📌 {department} (مخصص)
+                    </option>
+                  )}
+                </select>
               </div>
 
               <div className="field" style={{ gridColumn: 'span 2' }}>
@@ -812,8 +886,8 @@ export default function EmployeeFileModal({
 
                 const mgmtVal = isMgmt ? (parseFloat(managementAllowance) || 0) : 0;
                 const transVal = parseFloat(transportAllowance) || 0;
-                const extraVal = parseFloat(extraAllowance) || 0;
-                const totalAllowances = mgmtVal + transVal + extraVal;
+                const extraListSum = extraAllowances.reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
+                const totalAllowances = mgmtVal + transVal + extraListSum;
                 const totalEstimatedCompensation = baseMonthly + totalAllowances;
 
                 return (
@@ -880,50 +954,93 @@ export default function EmployeeFileModal({
                           * يضاف إلى مفردات الراتب تحت بند (بدل المواصلات).
                         </span>
                       </div>
+                    </div>
 
-                      {/* 3. أجر إضافي مع مسمى مخصص */}
-                      <div className="field" style={{ background: '#faf5ff', padding: '12px', borderRadius: '10px', border: '1px solid #e9d5ff', gridColumn: 'span 2' }}>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                          <div>
-                            <label style={{ color: '#6b21a8', fontWeight: 'bold' }}>
-                              🏷️ مسمى الأجر الإضافي
-                            </label>
-                            <input
-                              type="text"
-                              value={extraAllowanceTitle}
-                              onChange={(e) => setExtraAllowanceTitle(e.target.value)}
-                              placeholder="مثال: بدل سكن / حافز إشراف / بدل وجبة"
-                              style={{ background: '#fff', borderColor: '#e9d5ff' }}
-                            />
-                          </div>
-                          <div>
-                            <label style={{ color: '#6b21a8', fontWeight: 'bold' }}>
-                              💵 قيمة الأجر الإضافي (ج.م)
-                            </label>
-                            <input
-                              type="number"
-                              min="0"
-                              step="any"
-                              value={extraAllowance}
-                              onChange={(e) => setExtraAllowance(e.target.value)}
-                              placeholder="0"
-                              style={{ background: '#fff', borderColor: '#e9d5ff', fontWeight: 'bold', color: '#7e22ce' }}
-                            />
-                          </div>
+                    {/* 3. الأجور والبدلات الإضافية المخصصة (متعددة بديناميكية +) */}
+                    <div style={{ background: '#faf5ff', padding: '14px', borderRadius: '12px', border: '1px solid #e9d5ff', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                        <div>
+                          <label style={{ color: '#6b21a8', fontWeight: 'bold', margin: 0, fontSize: '14px' }}>
+                            🏷️ الأجور والبدلات الإضافية المخصصة (حوافز / بدلات مخصصة)
+                          </label>
+                          <p style={{ margin: '2px 0 0 0', fontSize: '11.5px', color: '#7e22ce' }}>
+                            يمكنك إضافة أكثر من مسمى للأجر الإضافي بقيمته لتظهر مفصلة في نظام أجور الموظف وكشوف الحساب.
+                          </p>
                         </div>
-                        <span style={{ fontSize: '11px', color: '#6b21a8', marginTop: '4px', display: 'block' }}>
-                          * يظهر في نظام أجر الموظف وكشف الحساب تحت المسمى المحدد هنا.
-                        </span>
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          onClick={handleAddExtraAllowance}
+                          style={{
+                            background: '#f3e8ff',
+                            color: '#6b21a8',
+                            border: '1px solid #d8b4fe',
+                            fontWeight: 'bold',
+                            fontSize: '12px',
+                            padding: '4px 10px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}
+                        >
+                          ➕ إضافة أجر إضافي آخر
+                        </button>
                       </div>
+
+                      {extraAllowances.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '12px', background: '#fff', borderRadius: '8px', border: '1px dashed #d8b4fe', color: '#6b21a8', fontSize: '12.5px' }}>
+                          لا توجد أجور إضافية مخصصة لهذا الموظف. انقر على <strong>(➕ إضافة أجر إضافي آخر)</strong> لإضافة حافز أو بدل مخصص.
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          {extraAllowances.map((ea, idx) => (
+                            <div key={ea.id || idx} style={{ display: 'flex', gap: '8px', alignItems: 'center', background: '#fff', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e9d5ff' }}>
+                              <div style={{ flex: 1 }}>
+                                <input
+                                  type="text"
+                                  placeholder="مسمى الأجر (مثال: حافز تميز / بدل سكن / بدل مخاطر)"
+                                  value={ea.title}
+                                  onChange={(e) => handleExtraAllowanceChange(ea.id, 'title', e.target.value)}
+                                  style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid #d8b4fe', fontSize: '13px', background: '#faf5ff' }}
+                                />
+                              </div>
+                              <div style={{ width: '160px' }}>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="any"
+                                  placeholder="القيمة ج.م"
+                                  value={ea.amount}
+                                  onChange={(e) => handleExtraAllowanceChange(ea.id, 'amount', e.target.value)}
+                                  style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid #d8b4fe', fontSize: '13px', fontWeight: 'bold', color: '#7e22ce', background: '#fff' }}
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                className="del-btn"
+                                onClick={() => handleRemoveExtraAllowance(ea.id)}
+                                style={{ padding: '6px 10px', fontSize: '12px' }}
+                                title="حذف هذا البند"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
                     {/* Live Total Compensation Card */}
                     <div style={{ background: '#0f766e', color: '#fff', padding: '12px 16px', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-                      <div style={{ display: 'flex', gap: '16px', fontSize: '13px', flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', gap: '14px', fontSize: '13px', flexWrap: 'wrap', alignItems: 'center' }}>
                         <span>الأساسي: <strong>{baseMonthly.toLocaleString()} ج.م</strong></span>
                         {mgmtVal > 0 && <span>+ بدل إدارة: <strong>+{mgmtVal.toLocaleString()} ج.م</strong></span>}
                         {transVal > 0 && <span>+ بدل مواصلات: <strong>+{transVal.toLocaleString()} ج.م</strong></span>}
-                        {extraVal > 0 && <span>+ {extraAllowanceTitle || 'أجر إضافي'}: <strong>+{extraVal.toLocaleString()} ج.م</strong></span>}
+                        {extraAllowances.filter(a => parseFloat(a.amount) > 0).map((a, i) => (
+                          <span key={a.id || i} style={{ background: 'rgba(255,255,255,0.15)', padding: '2px 8px', borderRadius: '6px' }}>
+                            + {a.title || 'أجر إضافي'}: <strong>+{parseFloat(a.amount).toLocaleString()} ج.م</strong>
+                          </span>
+                        ))}
                       </div>
                       <div style={{ fontSize: '14px', fontWeight: 'bold', background: 'rgba(255,255,255,0.2)', padding: '6px 12px', borderRadius: '8px' }}>
                         💰 إجمالي الاستحقاق الشهري التقديري: {totalEstimatedCompensation.toLocaleString()} ج.م

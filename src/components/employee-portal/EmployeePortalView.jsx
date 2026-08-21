@@ -458,7 +458,13 @@ export default function EmployeePortalView({
         if ((summary.transportAllowance || 0) > 0) {
           grandAllowanceItems.push(['بدل انتقال ومواصلات', 'بدل انتقال ومواصلات شهري ثابت', parseFloat(fmt(summary.transportAllowance))]);
         }
-        if ((summary.extraAllowance || 0) > 0) {
+        if (Array.isArray(summary.extraAllowances) && summary.extraAllowances.length > 0) {
+          summary.extraAllowances.forEach(ea => {
+            if ((parseFloat(ea.amount) || 0) > 0) {
+              grandAllowanceItems.push([ea.title || 'أجر إضافي', 'أجر وبدل إضافي مخصص من الإدارة', parseFloat(fmt(ea.amount))]);
+            }
+          });
+        } else if ((summary.extraAllowance || 0) > 0) {
           grandAllowanceItems.push([summary.extraAllowanceTitle || 'أجر إضافي', 'أجر وبدل إضافي مخصص من الإدارة', parseFloat(fmt(summary.extraAllowance))]);
         }
 
@@ -575,7 +581,13 @@ export default function EmployeePortalView({
         if ((summary.transportAllowance || 0) > 0) {
           allowanceItems.push(['بدل انتقال ومواصلات', 'بدل انتقال ومواصلات شهري ثابت', parseFloat(fmt(summary.transportAllowance))]);
         }
-        if ((summary.extraAllowance || 0) > 0) {
+        if (Array.isArray(summary.extraAllowances) && summary.extraAllowances.length > 0) {
+          summary.extraAllowances.forEach(ea => {
+            if ((parseFloat(ea.amount) || 0) > 0) {
+              allowanceItems.push([ea.title || 'أجر إضافي', 'أجر وبدل إضافي مخصص من الإدارة', parseFloat(fmt(ea.amount))]);
+            }
+          });
+        } else if ((summary.extraAllowance || 0) > 0) {
           allowanceItems.push([summary.extraAllowanceTitle || 'أجر إضافي', 'أجر وبدل إضافي مخصص من الإدارة', parseFloat(fmt(summary.extraAllowance))]);
         }
 
@@ -687,13 +699,13 @@ export default function EmployeePortalView({
         r += 2;
         mergedTitle(ws, r, 'الملخص المالي وصافي المرتب المستحق النهائي', COLS, 'FF134E4A', 13, 26);
         r++;
-        tableHeaderRow(ws, r, ['سعر الساعة الشهرية', 'إجمالي الساعات', 'مستحقات الأساسي', 'إجمالي البدلات (+)', 'إجمالي المكافآت (+)', 'إجمالي الخصومات (-)', 'صافي المرتب النهائي'], 1);
-        ws.mergeCells(r, 7, r, COLS);
+        tableHeaderRow(ws, r, ['سعر الساعة الشهرية', 'إجمالي الساعات', 'مستحقات الأساسي', 'الوقت الإضافي (+)', 'إجمالي البدلات (+)', 'إجمالي المكافآت (+)', 'إجمالي الخصومات (-)', 'صافي المرتب النهائي'], 1);
+        ws.mergeCells(r, 8, r, COLS);
         r++;
 
-        dataRow(ws, r, [fmt(emp.salary), fmt(summary.hours), fmt(summary.baseEarnings), fmt(summary.totalAllowances || 0), fmt(summary.totalBonus), fmt(summary.totalDeduction)], 1, [0, 1, 2, 3, 4, 5]);
-        ws.mergeCells(r, 7, r, COLS);
-        const netCell = ws.getCell(r, 7);
+        dataRow(ws, r, [fmt(emp.salary), fmt(summary.hours), fmt(summary.baseEarnings), fmt(summary.overtimeEarnings || 0), fmt(summary.totalAllowances || 0), fmt(summary.totalBonus), fmt(summary.totalDeduction)], 1, [0, 1, 2, 3, 4, 5, 6]);
+        ws.mergeCells(r, 8, r, COLS);
+        const netCell = ws.getCell(r, 8);
         netCell.value = fmt(summary.netSalary) + ' ج.م';
         netCell.font = { name: 'Arial', bold: true, size: 12, color: { argb: 'FF134E4A' } };
         netCell.alignment = { horizontal: 'center', vertical: 'middle' };
@@ -1943,6 +1955,20 @@ export default function EmployeePortalView({
                   <SummaryCard icon="📅" label="سعر اليوم (المحسوب)" value={canViewSalary ? `${fmt(summary.dailyRate)} ج.م / يوم` : '🔒 مقيد'} sub={canViewSalary ? `(الراتب الشهري ÷ ${workDaysPerMonth || 26} يوم)` : '🔒 مقيد'} />
                   <SummaryCard icon="💵" label="سعر الساعة اليومي" value={canViewSalary ? `${fmt(summary.rate || currentHourlyRate)} ج.م / س` : '🔒 مقيد'} sub={canViewSalary ? "المُدخل من الإدارة العليا" : '🔒 مقيد'} />
                   <SummaryCard icon="💰" label="المستحقات الأساسية (أجر الساعات)" value={canViewSalary ? `${fmt(summary.baseEarnings)} ج.م` : '🔒 مقيد'} sub={canViewSalary ? `${fmt(summary.hours)} س × ${fmt(summary.rate || currentHourlyRate)} ج.م` : '🔒 مقيد'} />
+                  {(summary.approvedOvertimeHours > 0 || summary.pendingOvertimeHours > 0) && (
+                    <SummaryCard
+                      icon="⭐"
+                      label="الوقت الإضافي"
+                      value={canViewSalary ? (summary.approvedOvertimeHours > 0 ? `+${fmt(summary.overtimeEarnings)} ج.م` : 'معلق') : '🔒 مقيد'}
+                      colorVar="--success"
+                      sub={canViewSalary ? (
+                        [
+                          summary.approvedOvertimeHours > 0 && `معتمد: ${fmt(summary.approvedOvertimeHours)} س (+${fmt(summary.overtimeEarnings)} ج.م)`,
+                          summary.pendingOvertimeHours > 0 && `⏳ معلق: ${fmt(summary.pendingOvertimeHours)} س`
+                        ].filter(Boolean).join(' | ')
+                      ) : '🔒 مقيد'}
+                    />
+                  )}
                   {summary.totalAllowances > 0 && (
                     <SummaryCard
                       icon="💼"
@@ -1952,7 +1978,9 @@ export default function EmployeePortalView({
                       sub={canViewSalary ? [
                         summary.managementAllowance > 0 && `إدارة: ${fmt(summary.managementAllowance)}`,
                         summary.transportAllowance > 0 && `مواصلات: ${fmt(summary.transportAllowance)}`,
-                        summary.extraAllowance > 0 && `${summary.extraAllowanceTitle || 'إضافي'}: ${fmt(summary.extraAllowance)}`
+                        Array.isArray(summary.extraAllowances) && summary.extraAllowances.length > 0
+                          ? summary.extraAllowances.map(a => `${a.title || 'إضافي'}: ${fmt(a.amount)}`).join(' | ')
+                          : (summary.extraAllowance > 0 && `${summary.extraAllowanceTitle || 'إضافي'}: ${fmt(summary.extraAllowance)}`)
                       ].filter(Boolean).join(' | ') : '🔒 مقيد'}
                     />
                   )}
@@ -2183,6 +2211,21 @@ export default function EmployeePortalView({
                                     ⏰ معدلة بإذن (+{permHours} س)
                                   </span>
                                 )}
+                                {s.overtimeStatus === 'approved' && (
+                                  <span style={{ display: 'block', marginTop: '2px', background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
+                                    ⭐ وقت إضافي معتمد (+{s.overtimeHours} س)
+                                  </span>
+                                )}
+                                {s.overtimeStatus === 'pending' && (
+                                  <span style={{ display: 'block', marginTop: '2px', background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
+                                    ⏳ إضافي (+{s.overtimeHours} س) بانتظار الاعتماد
+                                  </span>
+                                )}
+                                {s.overtimeStatus === 'rejected' && (
+                                  <span style={{ display: 'block', marginTop: '2px', background: '#f1f5f9', color: '#64748b', border: '1px solid #cbd5e1', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
+                                    ❌ إضافي مستبعد
+                                  </span>
+                                )}
                               </td>
                               <td>{arabicWeekday(s.date)}</td>
                               <td><span className="ep-time-badge ep-time-in">{s.timeIn}</span></td>
@@ -2377,11 +2420,20 @@ export default function EmployeePortalView({
                             <span className="ep-breakdown-value" style={{ color: '#15803d', fontWeight: 'bold' }}>+{fmt(summary.transportAllowance)} ج.م</span>
                           </div>
                         )}
-                        {summary.extraAllowance > 0 && (
-                          <div className="ep-breakdown-row">
-                            <span className="ep-breakdown-label">🏷️ {summary.extraAllowanceTitle || 'أجر إضافي مخصص'}</span>
-                            <span className="ep-breakdown-value" style={{ color: '#15803d', fontWeight: 'bold' }}>+{fmt(summary.extraAllowance)} ج.م</span>
-                          </div>
+                        {Array.isArray(summary.extraAllowances) && summary.extraAllowances.length > 0 ? (
+                          summary.extraAllowances.filter(a => (parseFloat(a.amount) || 0) > 0).map((a, i) => (
+                            <div key={a.id || i} className="ep-breakdown-row">
+                              <span className="ep-breakdown-label">🏷️ {a.title || 'أجر إضافي مخصص'}</span>
+                              <span className="ep-breakdown-value" style={{ color: '#15803d', fontWeight: 'bold' }}>+{fmt(a.amount)} ج.م</span>
+                            </div>
+                          ))
+                        ) : (
+                          summary.extraAllowance > 0 && (
+                            <div className="ep-breakdown-row">
+                              <span className="ep-breakdown-label">🏷️ {summary.extraAllowanceTitle || 'أجر إضافي مخصص'}</span>
+                              <span className="ep-breakdown-value" style={{ color: '#15803d', fontWeight: 'bold' }}>+{fmt(summary.extraAllowance)} ج.م</span>
+                            </div>
+                          )
                         )}
                         <div className="ep-breakdown-row ep-breakdown-result">
                           <span className="ep-breakdown-label">✅ إجمالي البدلات الثابتة المستحقة</span>

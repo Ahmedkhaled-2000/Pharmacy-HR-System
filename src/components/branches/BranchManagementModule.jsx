@@ -28,7 +28,7 @@ export default function BranchManagementModule({ state, onSaveBranch, onDeleteBr
     setPhones([
       { id: Date.now().toString(), number: '', type: 'landline' }
     ]);
-    setManagerId(employees[0]?.id || '');
+    setManagerId('');
     setUsername(`branch_${branches.length + 1}`);
     setPassword('123456');
     setIsModalOpen(true);
@@ -238,7 +238,9 @@ export default function BranchManagementModule({ state, onSaveBranch, onDeleteBr
                           👤 {manager.name} ({manager.code})
                         </span>
                       ) : (
-                        <span style={{ color: 'var(--muted)' }}>غير محدد</span>
+                        <span style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', padding: '4px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                          🚫 بدون مدير (مباشر للإدارة)
+                        </span>
                       )}
                     </td>
                     <td>
@@ -343,15 +345,31 @@ export default function BranchManagementModule({ state, onSaveBranch, onDeleteBr
               </div>
 
               <div className="field">
-                <label>مدير الفرع (يتم جلبه من قاعدة بيانات الموظفين)</label>
-                <select value={managerId} onChange={(e) => setManagerId(e.target.value)}>
-                  <option value="">-- اختر مدير الفرع --</option>
+                <label style={{ fontWeight: 'bold' }}>مدير الفرع (يتم جلبه من قاعدة بيانات الموظفين)</label>
+                <select
+                  value={managerId}
+                  onChange={(e) => setManagerId(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    borderRadius: '8px',
+                    border: '1.5px solid var(--border)',
+                    background: managerId ? 'var(--surface)' : '#fefce8',
+                    fontWeight: 700
+                  }}
+                >
+                  <option value="">🚫 فرع بدون مدير (تحويل كافة الطلبات للإدارة العليا مباشرة)</option>
                   {employees.map((emp) => (
                     <option key={emp.id} value={emp.id}>
-                      {emp.name} (كود: {emp.code} - {emp.jobTitle || 'موظف'})
+                      👤 {emp.name} (كود: {emp.code} - {emp.jobTitle || 'موظف'})
                     </option>
                   ))}
                 </select>
+                {!managerId && (
+                  <div style={{ background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a', padding: '6px 10px', borderRadius: '6px', fontSize: '11.5px', marginTop: '6px', fontWeight: 'bold' }}>
+                    ⚡ في حال اختيار (فرع بدون مدير): سيتم إرسال كافة طلبات موظفي هذا الفرع (إجازات، أذونات، سلف، استقالات، إلخ) مباشرة إلى الإدارة العليا للاعتماد النهائي.
+                  </div>
+                )}
               </div>
 
               <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '10px 0' }} />
