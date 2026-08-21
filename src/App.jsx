@@ -4550,6 +4550,9 @@ export default function App() {
 
                   <EmployeeCardsGrid
                     state={state}
+                    setState={setState}
+                    saveState={saveState}
+                    showToast={showToast}
                     monthPicker={monthPicker}
                     filterFn={currentFilterFn}
                     computeEmpSummary={computeEmpSummary}

@@ -1,8 +1,13 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import { fmt, todayStr } from '../../utils/formatters';
+import EmployeeTerminationModal from './EmployeeTerminationModal';
+import EmployeeComprehensiveDossierModal from './EmployeeComprehensiveDossierModal';
 
 export default function EmployeeCardsGrid({
   state,
+  setState,
+  saveState,
+  showToast,
   monthPicker,
   filterFn,
   computeEmpSummary,
@@ -17,8 +22,23 @@ export default function EmployeeCardsGrid({
   importEmployeesFromExcel,
   exportEmployeesToExcel,
   openAddEmpModal,
-  openEmpPhonesModal
+  openEmpPhonesModal,
+  onTerminateEmployee,
+  onReinstateEmployee
 }) {
+  const [activeMainTab, setActiveMainTab] = useState('active'); // 'active' | 'resigned'
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedBranchFilter, setSelectedBranchFilter] = useState('all');
+
+  // Modals state
+  const [terminationModalEmp, setTerminationModalEmp] = useState(null);
+  const [dossierModalEmp, setDossierModalEmp] = useState(null);
+  const [rehireModalEmp, setRehireModalEmp] = useState(null);
+  const [rehireDate, setRehireDate] = useState(todayStr());
+  const [rehireBranchId, setRehireBranchId] = useState('');
+  const [rehireNotes, setRehireNotes] = useState('');
+  const [isRehiring, setIsRehiring] = useState(false);
+
   const branches = state.branches || [];
   const employees = state.employees || [];
   const empRequests = state.resignationRequests || [];
@@ -48,42 +68,183 @@ export default function EmployeeCardsGrid({
 
   // Group employees by branch
   const getBranchName = (bId) => {
-    const b = branches.find((item) => item.id === bId);
+    const b = branches.find((item) => String(item.id) === String(bId));
     return b ? `${b.name} (${b.branchCode})` : 'المركز الرئيسي / بدون فرع';
   };
 
-  // Grouping map
-  const groupedEmployees = {};
-  employees.forEach((emp) => {
-    if (emp.branchesDetails && emp.branchesDetails.length > 0) {
-      emp.branchesDetails.forEach((bd) => {
-        const key = bd.branchId || 'main';
-        if (!groupedEmployees[key]) groupedEmployees[key] = [];
-        groupedEmployees[key].push(emp);
-      });
-    } else {
-      const key = emp.branchId || 'main';
-      if (!groupedEmployees[key]) groupedEmployees[key] = [];
-      groupedEmployees[key].push(emp);
+  // Split Active vs Resigned
+  const activeEmployeesList = useMemo(() => {
+    return employees.filter((emp) => emp.is_active !== false && emp.status !== 'تم الاستقالة' && emp.status !== 'resigned');
+  }, [employees]);
+
+  const resignedEmployeesList = useMemo(() => {
+    return employees.filter((emp) => emp.is_active === false || emp.status === 'تم الاستقالة' || emp.status === 'resigned');
+  }, [employees]);
+
+  // Current list based on active tab and search filters
+  const displayedEmployees = useMemo(() => {
+    const baseList = activeMainTab === 'active' ? activeEmployeesList : resignedEmployeesList;
+    return baseList.filter((emp) => {
+      // Branch filter
+      if (selectedBranchFilter !== 'all') {
+        const matchesMain = String(emp.branchId) === String(selectedBranchFilter);
+        const matchesDetails = emp.branchesDetails?.some((b) => String(b.branchId) === String(selectedBranchFilter));
+        if (!matchesMain && !matchesDetails) return false;
+      }
+      // Search term
+      if (searchTerm.trim()) {
+        const term = searchTerm.trim().toLowerCase();
+        const matchName = emp.name?.toLowerCase().includes(term);
+        const matchCode = emp.code?.toLowerCase().includes(term);
+        const matchJob = emp.jobTitle?.toLowerCase().includes(term);
+        const matchPhone = emp.phone?.includes(term);
+        if (!matchName && !matchCode && !matchJob && !matchPhone) return false;
+      }
+      return true;
+    });
+  }, [activeMainTab, activeEmployeesList, resignedEmployeesList, selectedBranchFilter, searchTerm]);
+
+  // Grouping map for displayed employees
+  const groupedEmployees = useMemo(() => {
+    const grouped = {};
+    displayedEmployees.forEach((emp) => {
+      if (emp.branchesDetails && emp.branchesDetails.length > 0) {
+        emp.branchesDetails.forEach((bd) => {
+          const key = bd.branchId || 'main';
+          if (!grouped[key]) grouped[key] = [];
+          if (!grouped[key].some((e) => String(e.id) === String(emp.id))) {
+            grouped[key].push(emp);
+          }
+        });
+      } else {
+        const key = emp.branchId || 'main';
+        if (!grouped[key]) grouped[key] = [];
+        grouped[key].push(emp);
+      }
+    });
+    return grouped;
+  }, [displayedEmployees]);
+
+  // Handle Termination
+  const handleConfirmTermination = async (empId, data) => {
+    if (onTerminateEmployee) {
+      await onTerminateEmployee(empId, data);
+      setTerminationModalEmp(null);
+      return;
     }
-  });
+
+    // Default internal handler
+    const updatedEmployees = employees.map((e) => {
+      if (String(e.id) === String(empId)) {
+        return {
+          ...e,
+          status: 'تم الاستقالة',
+          is_active: false,
+          fingerprint_active: false,
+          terminationReason: data.terminationReason,
+          terminationDate: data.terminationDate,
+          resignationDate: data.terminationDate,
+          terminationNotes: data.clearanceNotes,
+          terminatedAt: new Date().toISOString(),
+          finalSettlement: data.settlement,
+          updatedAt: new Date().toISOString()
+        };
+      }
+      return e;
+    });
+
+    const updatedActiveShifts = { ...(state.activeShifts || {}) };
+    delete updatedActiveShifts[empId];
+    delete updatedActiveShifts[String(empId)];
+
+    const updatedState = {
+      ...state,
+      employees: updatedEmployees,
+      activeShifts: updatedActiveShifts
+    };
+
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+    if (showToast) showToast('✅ تم إنهاء خدمة الموظف وتصفية حسابه المالي ونقله لتبويبة المستقيلين');
+
+    setTerminationModalEmp(null);
+  };
+
+  // Handle Rehire / Reinstate
+  const handleConfirmRehire = async (e) => {
+    e.preventDefault();
+    if (!rehireModalEmp) return;
+
+    setIsRehiring(true);
+    try {
+      if (onReinstateEmployee) {
+        await onReinstateEmployee(rehireModalEmp.id, {
+          rehireDate,
+          rehireBranchId: rehireBranchId || rehireModalEmp.branchId || 'main',
+          rehireNotes
+        });
+      } else {
+        const updatedEmployees = employees.map((emp) => {
+          if (String(emp.id) === String(rehireModalEmp.id)) {
+            return {
+              ...emp,
+              status: 'على رأس العمل',
+              is_active: true,
+              fingerprint_active: true,
+              suspension_reason: '',
+              branchId: rehireBranchId || emp.branchId || 'main',
+              rejoinDate: rehireDate,
+              reinstatedAt: new Date().toISOString(),
+              reinstatementNotes: rehireNotes.trim(),
+              updatedAt: new Date().toISOString()
+            };
+          }
+          return emp;
+        });
+
+        const updatedState = {
+          ...state,
+          employees: updatedEmployees
+        };
+
+        if (setState) setState(updatedState);
+        if (saveState) await saveState(updatedState);
+        if (showToast) showToast(`✅ تم إعادة الموظف (${rehireModalEmp.name}) على رأس العمل بنجاح مع الاحتفاظ بكامل سجلاته التاريخية`);
+      }
+
+      setRehireModalEmp(null);
+      setRehireNotes('');
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsRehiring(false);
+    }
+  };
 
   return (
     <>
-      {/* Section Header */}
-      <div className="section-head" style={{ marginBottom: '20px' }}>
-        <h2>👥 قائمة الموظفين الشاملة حسب الفروع ({employees.length} موظف)</h2>
+      {/* ── TOP SECTION HEADER & TAB CONTROLS ── */}
+      <div className="section-head" style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: '20px', fontFamily: 'Cairo', color: 'var(--text)' }}>
+            👥 إدارة ملفات وشؤون الموظفين
+          </h2>
+          <span style={{ fontSize: '13px', color: 'var(--muted)' }}>
+            إجمالي القوى العاملة المسجلة: <strong>{employees.length} موظف</strong> (النشطون: {activeEmployeesList.length} · المستقيلون: {resignedEmployeesList.length})
+          </span>
+        </div>
+
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           <button
             type="button"
             className="btn btn-ghost"
             onClick={openEmpPhonesModal}
             style={{
-              background: 'var(--primary-light)',
-              color: 'var(--primary-dark)',
-              border: '1px solid var(--primary-tint)',
+              background: 'var(--primary-light, #e0f2fe)',
+              color: 'var(--primary-dark, #0369a1)',
+              border: '1px solid var(--primary-tint, #bae6fd)',
               fontWeight: 800,
-              fontSize: '13.5px',
+              fontSize: '13px',
               display: 'flex',
               alignItems: 'center',
               gap: '6px'
@@ -91,23 +252,161 @@ export default function EmployeeCardsGrid({
           >
             <span>📞</span> أرقام الموظفين
           </button>
-          <label className="btn btn-ghost" style={{ cursor: 'pointer', margin: 0 }}>
-            📤 استيراد الموظفين من Excel
+          <label className="btn btn-ghost" style={{ cursor: 'pointer', margin: 0, fontSize: '13px' }}>
+            📤 استيراد Excel
             <input type="file" accept=".xlsx, .xls" onChange={importEmployeesFromExcel} style={{ display: 'none' }} />
           </label>
-          <button className="btn btn-ghost" onClick={exportEmployeesToExcel}>
-            📥 تصدير الموظفين إلى Excel
+          <button className="btn btn-ghost" onClick={exportEmployeesToExcel} style={{ fontSize: '13px' }}>
+            📥 تصدير Excel
           </button>
-          <button className="btn-add-job" onClick={openAddEmpModal}>
+          <button className="btn-add-job" onClick={openAddEmpModal} style={{ fontSize: '13px' }}>
             + إضافة موظف جديد
           </button>
         </div>
       </div>
 
-      {/* Render Branch Groups */}
+      {/* ── MODERN MAIN TABS (ACTIVE vs RESIGNED) ── */}
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '18px', borderBottom: '2px solid var(--border)', paddingBottom: '12px' }}>
+        <button
+          type="button"
+          onClick={() => setActiveMainTab('active')}
+          style={{
+            padding: '10px 22px',
+            borderRadius: '12px',
+            border: 'none',
+            background: activeMainTab === 'active' ? 'linear-gradient(135deg, #0f766e 0%, #115e59 100%)' : '#fff',
+            color: activeMainTab === 'active' ? '#fff' : '#475569',
+            fontWeight: 'bold',
+            fontSize: '14px',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            boxShadow: activeMainTab === 'active' ? '0 4px 12px rgba(15,118,110,0.25)' : '0 1px 3px rgba(0,0,0,0.05)',
+            transition: 'all 0.2s ease'
+          }}
+        >
+          <span>🟢 الموظفون الحاليون (على رأس العمل)</span>
+          <span
+            style={{
+              background: activeMainTab === 'active' ? 'rgba(255,255,255,0.25)' : '#e2e8f0',
+              color: activeMainTab === 'active' ? '#fff' : '#0f766e',
+              padding: '2px 8px',
+              borderRadius: '20px',
+              fontSize: '12px',
+              fontWeight: '900'
+            }}
+          >
+            {activeEmployeesList.length}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveMainTab('resigned')}
+          style={{
+            padding: '10px 22px',
+            borderRadius: '12px',
+            border: 'none',
+            background: activeMainTab === 'resigned' ? 'linear-gradient(135deg, #991b1b 0%, #7f1d1d 100%)' : '#fff',
+            color: activeMainTab === 'resigned' ? '#fff' : '#475569',
+            fontWeight: 'bold',
+            fontSize: '14px',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            boxShadow: activeMainTab === 'resigned' ? '0 4px 12px rgba(153,27,27,0.25)' : '0 1px 3px rgba(0,0,0,0.05)',
+            transition: 'all 0.2s ease'
+          }}
+        >
+          <span>📁 المستقيلون ومنتهية خدمتهم</span>
+          <span
+            style={{
+              background: activeMainTab === 'resigned' ? 'rgba(255,255,255,0.25)' : '#fee2e2',
+              color: activeMainTab === 'resigned' ? '#fff' : '#991b1b',
+              padding: '2px 8px',
+              borderRadius: '20px',
+              fontSize: '12px',
+              fontWeight: '900'
+            }}
+          >
+            {resignedEmployeesList.length}
+          </span>
+        </button>
+      </div>
+
+      {/* ── SEARCH & FILTER TOOLBAR ── */}
+      <div style={{ display: 'flex', gap: '12px', marginBottom: '20px', flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ flex: '1 1 260px', position: 'relative' }}>
+          <input
+            type="text"
+            placeholder={`🔍 البحث في ${activeMainTab === 'active' ? 'الموظفين الحاليين' : 'المستقيلين'} بالاسم، الكود، الوظيفة أو الهاتف...`}
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            style={{
+              width: '100%',
+              padding: '10px 14px',
+              borderRadius: '10px',
+              border: '1px solid var(--border)',
+              background: '#fff',
+              fontSize: '13.5px',
+              boxSizing: 'border-box'
+            }}
+          />
+          {searchTerm && (
+            <button
+              type="button"
+              onClick={() => setSearchTerm('')}
+              style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'none', cursor: 'pointer', color: '#94a3b8' }}
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
+        <div style={{ minWidth: '180px' }}>
+          <select
+            value={selectedBranchFilter}
+            onChange={(e) => setSelectedBranchFilter(e.target.value)}
+            style={{
+              width: '100%',
+              padding: '10px 14px',
+              borderRadius: '10px',
+              border: '1px solid var(--border)',
+              background: '#fff',
+              fontSize: '13.5px',
+              boxSizing: 'border-box'
+            }}
+          >
+            <option value="all">🏬 جميع الفروع</option>
+            {branches.map((b) => (
+              <option key={b.id} value={b.id}>{b.name}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* ── NO RESULTS ALERT ── */}
+      {displayedEmployees.length === 0 && (
+        <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: '16px', padding: '40px 20px', textAlign: 'center', color: 'var(--muted)' }}>
+          <span style={{ fontSize: '40px', display: 'block', marginBottom: '10px' }}>
+            {activeMainTab === 'active' ? '👥' : '📁'}
+          </span>
+          <h3 style={{ margin: '0 0 6px', color: 'var(--text)' }}>
+            {activeMainTab === 'active' ? 'لا يوجد موظفون على رأس العمل يطابقون البحث' : 'لا يوجد موظفون مستقيلون أو منتهية خدمتهم'}
+          </h3>
+          <p style={{ fontSize: '13px', margin: 0 }}>
+            {activeMainTab === 'active' ? 'يمكنك إضافة موظف جديد من الزر بالأعلى' : 'عند إنهاء خدمة أي موظف سيتم نقله وحفظ سجلاته الكاملة هنا'}
+          </p>
+        </div>
+      )}
+
+      {/* ── RENDER BRANCH GROUPS & EMPLOYEE CARDS ── */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
         {Object.keys(groupedEmployees).map((branchKey) => {
           const branchEmps = groupedEmployees[branchKey];
+          if (!branchEmps || branchEmps.length === 0) return null;
           const branchTitle = getBranchName(branchKey);
 
           return (
@@ -115,18 +414,20 @@ export default function EmployeeCardsGrid({
               {/* Branch Header Banner */}
               <div
                 style={{
-                  background: 'linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%)',
+                  background: activeMainTab === 'active'
+                    ? 'linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%)'
+                    : 'linear-gradient(135deg, #7f1d1d 0%, #991b1b 100%)',
                   color: '#fff',
                   padding: '12px 20px',
                   borderRadius: '12px',
                   marginBottom: '16px',
                   display: 'flex',
-                  justify: 'space-between',
+                  justifyContent: 'space-between',
                   alignItems: 'center'
                 }}
               >
-                <h3 style={{ margin: 0, fontFamily: 'Cairo', fontSize: '17px', color: '#fff' }}>
-                  🏬 {branchTitle}
+                <h3 style={{ margin: 0, fontFamily: 'Cairo', fontSize: '16.5px', color: '#fff' }}>
+                  🏬 {branchTitle} {activeMainTab === 'resigned' ? '(المستقيلون)' : ''}
                 </h3>
                 <span style={{ background: 'rgba(255,255,255,0.2)', padding: '4px 12px', borderRadius: '20px', fontSize: '13px', fontWeight: 'bold' }}>
                   {branchEmps.length} موظف
@@ -136,16 +437,16 @@ export default function EmployeeCardsGrid({
               {/* Full Width Horizontal Rectangular Cards */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                 {branchEmps.map((emp) => {
-                  const active = state.activeShifts[emp.id];
-                  const empSum = computeEmpSummary(emp.id, filterFn);
+                  const active = state.activeShifts?.[emp.id];
+                  const empSum = computeEmpSummary ? computeEmpSummary(emp.id, filterFn) : { hours: 0, netSalary: 0 };
                   
                   const empIdStr = String(emp.id || '').trim();
                   const empCodeStr = String(emp.code || '').trim();
                   const empUserStr = String(emp.username || '').trim();
 
-                  // Get all resignation/withdraw requests for this employee sorted newest first
+                  // Resignation requests details
                   const empReqs = empRequests
-                    .filter(r => {
+                    .filter((r) => {
                       const rId = String(r.employeeId || '').trim();
                       return rId === empIdStr || (empCodeStr && rId === empCodeStr) || (empUserStr && rId === empUserStr);
                     })
@@ -161,15 +462,27 @@ export default function EmployeeCardsGrid({
                   let resStatusBadge = null;
 
                   if (emp.status === 'تم الاستقالة' || emp.is_active === false) {
-                    const reasonText = emp.suspension_reason ? ` (${emp.suspension_reason})` : ' (تم إنهاء الخدمة من قبل الإدارة)';
+                    const reasonText = emp.terminationReason || emp.suspension_reason || 'تم إنهاء الخدمة';
+                    const termDate = emp.terminationDate || emp.resignationDate || emp.terminatedAt?.slice(0, 10);
                     resStatusBadge = (
-                      <div style={{ background: 'var(--danger-light, #fee2e2)', color: 'var(--danger-dark, #991b1b)', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', marginTop: '6px', display: 'inline-block', border: '1px solid #fecaca' }}>
-                        🔴 تم إنهاء الخدمة{reasonText}
+                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '6px' }}>
+                        <span style={{ background: '#fee2e2', color: '#991b1b', padding: '3px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 'bold', border: '1px solid #fca5a5' }}>
+                          🔴 إنهاء الخدمة: {reasonText}
+                        </span>
+                        {termDate && (
+                          <span style={{ background: '#f1f5f9', color: '#475569', padding: '3px 8px', borderRadius: '6px', fontSize: '11.5px', border: '1px solid #cbd5e1' }}>
+                            📅 تاريخ: {termDate}
+                          </span>
+                        )}
+                        {emp.finalSettlement && (
+                          <span style={{ background: '#dcfce7', color: '#166534', padding: '3px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 'bold', border: '1px solid #86efac' }}>
+                            💰 صافي المخالصة: {fmt(emp.finalSettlement.netSettlement || 0)} ج.م
+                          </span>
+                        )}
                       </div>
                     );
                   } else if (!hasApprovedWithdraw && empReqs.length > 0) {
-                    // Employee is on duty: only show badge if there is an active pending or approved notice period
-                    const activeRes = empReqs.find(r => r.type === 'resignation' && !r.isCancelled && r.adminStatus !== 'cancelled');
+                    const activeRes = empReqs.find((r) => r.type === 'resignation' && !r.isCancelled && r.adminStatus !== 'cancelled');
                     if (activeRes) {
                       if (activeRes.adminStatus === 'approved') {
                         const { endDate, remainingDays } = getResignationNoticeDetails(activeRes.conditionsStartDate || activeRes.requestDate, activeRes.conditionsDaysRemaining);
@@ -190,17 +503,19 @@ export default function EmployeeCardsGrid({
                     }
                   }
 
+                  const isEmpTerminated = emp.status === 'تم الاستقالة' || emp.is_active === false;
+
                   return (
                     <div
                       key={emp.id}
                       style={{
                         background: '#fff',
-                        border: '1px solid var(--border)',
+                        border: isEmpTerminated ? '1px solid #fca5a5' : '1px solid var(--border)',
                         borderRadius: '14px',
                         padding: '16px 20px',
                         display: 'flex',
                         flexDirection: 'row',
-                        justify: 'space-between',
+                        justifyContent: 'space-between',
                         alignItems: 'center',
                         flexWrap: 'wrap',
                         gap: '16px',
@@ -211,7 +526,7 @@ export default function EmployeeCardsGrid({
                     >
                       {/* Left Block: Avatar, Name, Title & Code */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: '16px', minWidth: '260px', flex: 1 }}>
-                        <div className="emp-avatar-circle" style={{ width: '52px', height: '52px', flexShrink: 0 }}>
+                        <div className="emp-avatar-circle" style={{ width: '52px', height: '52px', flexShrink: 0, opacity: isEmpTerminated ? 0.75 : 1 }}>
                           {emp.photoUrl ? (
                             <img src={emp.photoUrl} alt={emp.name} className="emp-img" />
                           ) : (
@@ -219,8 +534,10 @@ export default function EmployeeCardsGrid({
                           )}
                         </div>
                         <div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <h3 style={{ margin: 0, fontFamily: 'Cairo', fontSize: '17px' }}>{emp.name}</h3>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                            <h3 style={{ margin: 0, fontFamily: 'Cairo', fontSize: '17px', color: isEmpTerminated ? '#7f1d1d' : 'var(--text)' }}>
+                              {emp.name}
+                            </h3>
                             <span className="code-badge">كود: {emp.code}</span>
                             {emp.devices && emp.devices.some((d) => d.status === 'pending') && (
                               <span
@@ -237,54 +554,61 @@ export default function EmployeeCardsGrid({
                             )}
                           </div>
                           <span style={{ color: 'var(--muted)', fontSize: '13px', display: 'block' }}>
-                            {emp.jobTitle} {emp.phone ? ` · 📞 ${emp.phone}` : ''}
+                            {emp.jobTitle} {emp.department ? ` · قسم: ${emp.department}` : ''} {emp.phone ? ` · 📞 ${emp.phone}` : ''}
                           </span>
                           {resStatusBadge}
                         </div>
                       </div>
 
-                      {/* Middle Block: Live Punch Clock Status (Start Button Removed) */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: '220px' }}>
-                        <span className={`dot ${active ? (active.isPaused ? 'paused' : 'live') : ''}`}></span>
-                        <div>
-                          <div style={{ fontWeight: 'bold', fontSize: '15px', color: 'var(--text)' }}>
-                            {active ? getActiveElapsedStr(emp.id) : 'لا توجد وردية نشطة الآن'}
-                          </div>
-                          <div style={{ fontSize: '12.5px', color: 'var(--muted)' }}>
-                            {active ? (
-                              active.isPaused ? (
-                                <span style={{ color: 'var(--accent)', fontWeight: 'bold' }}>
-                                  موقفة مؤقتاً (بريك: {getActiveBreakStr(emp.id)})
-                                </span>
+                      {/* Middle Block: Live Punch Clock Status (Only for active tab) */}
+                      {!isEmpTerminated ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: '220px' }}>
+                          <span className={`dot ${active ? (active.isPaused ? 'paused' : 'live') : ''}`}></span>
+                          <div>
+                            <div style={{ fontWeight: 'bold', fontSize: '15px', color: 'var(--text)' }}>
+                              {active ? getActiveElapsedStr(emp.id) : 'لا توجد وردية نشطة الآن'}
+                            </div>
+                            <div style={{ fontSize: '12.5px', color: 'var(--muted)' }}>
+                              {active ? (
+                                active.isPaused ? (
+                                  <span style={{ color: 'var(--accent)', fontWeight: 'bold' }}>
+                                    موقفة مؤقتاً (بريك: {getActiveBreakStr(emp.id)})
+                                  </span>
+                                ) : (
+                                  `جارية منذ ${active.timeIn}${getActiveBreakStr(emp.id) ? ` · (بريك: ${getActiveBreakStr(emp.id)})` : ''}`
+                                )
                               ) : (
-                                `جارية منذ ${active.timeIn}${getActiveBreakStr(emp.id) ? ` · (بريك: ${getActiveBreakStr(emp.id)})` : ''}`
-                              )
-                            ) : (
-                              'تتم البصمة من بوابة الحضور / الكشك'
-                            )}
+                                'تتم البصمة من بوابة الحضور / الكشك'
+                              )}
+                            </div>
                           </div>
-                        </div>
 
-                        {active && (
-                          <div style={{ display: 'flex', gap: '6px' }}>
-                            {active.isPaused ? (
-                              <button className="btn btn-resume" style={{ padding: '6px 12px', fontSize: '12px' }} onClick={() => resumeShift(emp.id)}>
-                                استئناف
+                          {active && (
+                            <div style={{ display: 'flex', gap: '6px' }}>
+                              {active.isPaused ? (
+                                <button className="btn btn-resume" style={{ padding: '6px 12px', fontSize: '12px' }} onClick={() => resumeShift(emp.id)}>
+                                  استئناف
+                                </button>
+                              ) : (
+                                <button className="btn btn-pause" style={{ padding: '6px 12px', fontSize: '12px' }} onClick={() => pauseShift(emp.id)}>
+                                  بريك
+                                </button>
+                              )}
+                              <button className="btn btn-stop" style={{ padding: '6px 12px', fontSize: '12px' }} onClick={() => stopShift(emp.id)}>
+                                إنهاء
                               </button>
-                            ) : (
-                              <button className="btn btn-pause" style={{ padding: '6px 12px', fontSize: '12px' }} onClick={() => pauseShift(emp.id)}>
-                                بريك
-                              </button>
-                            )}
-                            <button className="btn btn-stop" style={{ padding: '6px 12px', fontSize: '12px' }} onClick={() => stopShift(emp.id)}>
-                              إنهاء
-                            </button>
-                          </div>
-                        )}
-                      </div>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        /* Middle Block for Resigned: Archive Summary snippet */
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', color: '#64748b' }}>
+                          <span>📁 ملف محفوظ بالأرشيف</span>
+                        </div>
+                      )}
 
                       {/* Right-Middle Block: Financial Summary */}
-                      {(() => {
+                      {!isEmpTerminated && (() => {
                         const bdObj = emp.branchesDetails?.find((b) => String(b.branchId) === String(branchKey));
                         const branchHourlyRate = bdObj ? parseFloat(bdObj.salary) || 0 : (parseFloat(emp.salary) || 0);
                         const branchSum = empSum.perBranch?.[branchKey] || empSum;
@@ -299,15 +623,95 @@ export default function EmployeeCardsGrid({
                         );
                       })()}
 
-                      {/* Action Buttons (QR & Edit/Delete) */}
-                      <div style={{ display: 'flex', gap: '6px' }}>
+                      {/* Action Buttons Group */}
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        {/* 1. If Active: End of Service Button */}
+                        {!isEmpTerminated ? (
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            onClick={() => setTerminationModalEmp(emp)}
+                            title="إنهاء الخدمة النهائي وتصفية الحساب"
+                            style={{
+                              background: '#fef2f2',
+                              color: '#991b1b',
+                              border: '1px solid #fecaca',
+                              fontWeight: 'bold',
+                              fontSize: '12px',
+                              padding: '6px 12px',
+                              borderRadius: '8px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}
+                          >
+                            <span>🛑</span> إنهاء الخدمة النهائي
+                          </button>
+                        ) : (
+                          /* 2. If Resigned: Rehire & Dossier Buttons */
+                          <>
+                            <button
+                              type="button"
+                              className="btn btn-start"
+                              onClick={() => {
+                                setRehireModalEmp(emp);
+                                setRehireBranchId(emp.branchId || 'main');
+                              }}
+                              title="إعادة الموظف على رأس العمل"
+                              style={{
+                                background: '#059669',
+                                color: '#fff',
+                                fontWeight: 'bold',
+                                fontSize: '12px',
+                                padding: '6px 12px',
+                                borderRadius: '8px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                              }}
+                            >
+                              <span>🔄</span> إعادة على رأس العمل
+                            </button>
+
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              onClick={() => setDossierModalEmp(emp)}
+                              title="فتح السجل الشامل لجميع بيانات وسجلات الموظف"
+                              style={{
+                                background: '#e0f2fe',
+                                color: '#0369a1',
+                                border: '1px solid #bae6fd',
+                                fontWeight: 'bold',
+                                fontSize: '12px',
+                                padding: '6px 12px',
+                                borderRadius: '8px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                              }}
+                            >
+                              <span>📄</span> السجل الشامل
+                            </button>
+
+                            <button
+                              type="button"
+                              className="icon-btn"
+                              onClick={() => setTerminationModalEmp(emp)}
+                              title="إعادة معاينة وطباعة المخالصة المالية"
+                            >
+                              🖨️
+                            </button>
+                          </>
+                        )}
+
                         <button className="icon-btn" title="بطاقة الموظف والـ QR" onClick={() => openEmpCard(emp)}>
-                          🪪 QR بطاقة
+                          🪪 QR
                         </button>
                         <button className="icon-btn" title="تعديل بيانات الموظف" onClick={() => openEditEmpModal(emp)}>
-                          ✏️ تعديل
+                          ✏️
                         </button>
-                        <button className="icon-btn danger" title="حذف" onClick={() => handleDeleteEmp(emp.id)}>
+                        <button className="icon-btn danger" title="حذف الموظف نهائياً" onClick={() => handleDeleteEmp(emp.id)}>
                           🗑️
                         </button>
                       </div>
@@ -319,6 +723,111 @@ export default function EmployeeCardsGrid({
           );
         })}
       </div>
+
+      {/* ── MODAL 1: TERMINATION & FINANCIAL SETTLEMENT ── */}
+      {terminationModalEmp && (
+        <EmployeeTerminationModal
+          emp={terminationModalEmp}
+          state={state}
+          onClose={() => setTerminationModalEmp(null)}
+          onConfirmTermination={handleConfirmTermination}
+        />
+      )}
+
+      {/* ── MODAL 2: COMPREHENSIVE DOSSIER MODAL ── */}
+      {dossierModalEmp && (
+        <EmployeeComprehensiveDossierModal
+          emp={dossierModalEmp}
+          state={state}
+          onClose={() => setDossierModalEmp(null)}
+          onOpenRehireModal={(emp) => {
+            setDossierModalEmp(null);
+            setRehireModalEmp(emp);
+            setRehireBranchId(emp.branchId || 'main');
+          }}
+          onOpenEditModal={(emp) => {
+            setDossierModalEmp(null);
+            openEditEmpModal(emp);
+          }}
+          onOpenIDCardModal={(emp) => {
+            setDossierModalEmp(null);
+            openEmpCard(emp);
+          }}
+        />
+      )}
+
+      {/* ── MODAL 3: REHIRE / REINSTATE CONFIRMATION MODAL ── */}
+      {rehireModalEmp && (
+        <div className="modal-backdrop" style={{ zIndex: 1300, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="modal-content" style={{ maxWidth: '520px', width: '92%', borderRadius: '16px', padding: '24px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '12px', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0, color: '#059669', fontSize: '17px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                🔄 إعادة الموظف على رأس العمل
+              </h3>
+              <button className="del-btn" onClick={() => setRehireModalEmp(null)} disabled={isRehiring}>✕</button>
+            </div>
+
+            <form onSubmit={handleConfirmRehire}>
+              <div style={{ background: '#f0fdf4', border: '1px solid #86efac', borderRadius: '10px', padding: '12px 16px', marginBottom: '16px', color: '#166534', fontSize: '13px' }}>
+                هل تريد إعادة الموظف <strong>{rehireModalEmp.name} ({rehireModalEmp.code})</strong> إلى الخدمة وعلى رأس العمل؟
+                <div style={{ fontSize: '12px', color: '#15803d', marginTop: '4px' }}>
+                  ⭐ سيعود الموظف لكافة سجلاته السابقة (البصمات، الورديات، الرواتب، الأذونات، والتقييمات) مع تفعيل حسابه وبصمته فوراً.
+                </div>
+              </div>
+
+              <div className="field" style={{ marginBottom: '12px' }}>
+                <label style={{ fontSize: '12.5px', fontWeight: 'bold' }}>تاريخ مباشرة العمل / العودة *</label>
+                <input
+                  type="date"
+                  value={rehireDate}
+                  onChange={(e) => setRehireDate(e.target.value)}
+                  required
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px' }}
+                />
+              </div>
+
+              <div className="field" style={{ marginBottom: '12px' }}>
+                <label style={{ fontSize: '12.5px', fontWeight: 'bold' }}>الفرع المسند إليه *</label>
+                <select
+                  value={rehireBranchId}
+                  onChange={(e) => setRehireBranchId(e.target.value)}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px' }}
+                >
+                  <option value="main">المركز الرئيسي / عام</option>
+                  {branches.map((b) => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="field" style={{ marginBottom: '16px' }}>
+                <label style={{ fontSize: '12.5px', fontWeight: 'bold' }}>ملاحظات وتفاصيل إعادة التعيين</label>
+                <textarea
+                  rows={2}
+                  placeholder="ملاحظات قرار المباشرة والعودة..."
+                  value={rehireNotes}
+                  onChange={(e) => setRehireNotes(e.target.value)}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px', resize: 'vertical' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', borderTop: '1px solid var(--border)', paddingTop: '14px' }}>
+                <button type="button" className="btn btn-ghost" onClick={() => setRehireModalEmp(null)} disabled={isRehiring}>
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-start"
+                  style={{ background: '#059669', color: '#fff', fontWeight: 'bold', padding: '8px 20px' }}
+                  disabled={isRehiring}
+                >
+                  {isRehiring ? '⏳ جاري الحفظ...' : '✅ تأكيد العودة على رأس العمل'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </>
   );
 }
