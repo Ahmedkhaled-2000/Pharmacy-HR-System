@@ -385,6 +385,50 @@ export default function EmployeeCardsGrid({
             ))}
           </select>
         </div>
+
+        {/* Quick Action Buttons */}
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+          {openEmpPhonesModal && (
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={openEmpPhonesModal}
+              style={{
+                background: 'var(--primary-light)',
+                color: 'var(--primary-dark)',
+                border: '1px solid var(--primary-tint)',
+                fontWeight: 800,
+                fontSize: '13px',
+                padding: '9px 14px',
+                borderRadius: '10px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              <span>📞</span> أرقام الموظفين
+            </button>
+          )}
+
+          {openAddEmpModal && (
+            <button
+              type="button"
+              className="btn btn-start"
+              onClick={openAddEmpModal}
+              style={{
+                fontWeight: 800,
+                fontSize: '13px',
+                padding: '9px 16px',
+                borderRadius: '10px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              <span>👤</span> إضافة ملف موظف جديد
+            </button>
+          )}
+        </div>
       </div>
 
       {/* ── NO RESULTS ALERT ── */}

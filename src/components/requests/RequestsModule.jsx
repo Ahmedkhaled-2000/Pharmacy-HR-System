@@ -319,6 +319,7 @@ export default function RequestsModule({
       });
     }
 
+    let updatedLoans = [...(state.loans || [])];
     if (targetReq.type === 'loan' || targetReq.type === 'advance' || targetReq.type === 'meds' || targetReq.type === 'credit_medicine') {
       const totalAmount = parseFloat(targetReq.amount || targetReq.totalAmount) || 0;
       const monthsCount = parseInt(targetReq.monthsCount || targetReq.installmentsCount || targetReq.installments, 10) || 1;
@@ -327,26 +328,32 @@ export default function RequestsModule({
       const isMeds = targetReq.type === 'meds' || targetReq.type === 'credit_medicine';
       const isInstallment = targetReq.loanType === 'installment' || targetReq.loanType === 'installments' || monthsCount > 1;
 
-      let loanTypeTitle = isMeds ? 'مشتريات أدوية آجل' : isInstallment ? `سلفة مقسطة (${monthsCount} أقساط)` : 'سلفة شهرية';
-      let deductionDesc = isInstallment 
-        ? `خصم قسط ${loanTypeTitle} (قسط شهري) — مبلغ ${monthlyInstallment} ج.م من إجمالي ${totalAmount} ج.م`
-        : `خصم ${loanTypeTitle} — مبلغ ${monthlyInstallment} ج.م`;
-
-      if (targetReq.adminNotes) {
-        deductionDesc += ` [ملاحظة الإدارة: ${targetReq.adminNotes}]`;
-      }
-
-      updatedAdjustments.push({
-        id: `adj_loan_${Date.now()}`,
+      const approvedLoanObj = {
+        id: targetReq.id,
         employeeId: targetReq.employeeId,
-        type: 'deduction',
-        amount: monthlyInstallment,
-        description: deductionDesc,
-        notes: deductionDesc,
-        reason: deductionDesc,
-        date: targetReq.date || new Date().toISOString().slice(0, 10),
-        createdAt: new Date().toISOString()
-      });
+        employeeCode: targetReq.employeeCode,
+        employeeName: targetReq.employeeName,
+        type: isMeds ? 'meds' : 'loan',
+        loanType: isInstallment ? 'installment' : 'monthly',
+        amount: totalAmount,
+        totalAmount: totalAmount,
+        paidAmount: parseFloat(targetReq.paidAmount) || 0,
+        monthlyDeduction: monthlyInstallment,
+        installmentAmount: monthlyInstallment,
+        installmentsCount: monthsCount,
+        notes: targetReq.reason || targetReq.details || targetReq.adminNotes || (isMeds ? 'مشتريات أدوية آجل معتمدة' : 'سلفة مالية معتمدة'),
+        date: targetReq.date || (targetReq.createdAt ? targetReq.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10)),
+        status: 'approved',
+        adminApproved: true,
+        approvedAt: new Date().toISOString()
+      };
+
+      const lIdx = updatedLoans.findIndex((l) => String(l.id) === String(targetReq.id));
+      if (lIdx >= 0) {
+        updatedLoans[lIdx] = { ...updatedLoans[lIdx], ...approvedLoanObj };
+      } else {
+        updatedLoans.unshift(approvedLoanObj);
+      }
     }
 
     if (targetReq.type === 'swap' || targetReq.type === 'shift_swap' || targetReq.type === 'shift_edit') {
@@ -456,6 +463,7 @@ export default function RequestsModule({
     const updatedState = {
       ...state,
       requests: updatedRequests,
+      loans: updatedLoans,
       rosters: updatedRosters,
       adjustments: updatedAdjustments,
       shifts: updatedShifts,

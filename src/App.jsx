@@ -2258,21 +2258,47 @@ export default function App() {
     });
     const allEmpAdjs = Array.from(mergedAdjsMap.values());
 
+    const nonLoanEmpAdjs = allEmpAdjs.filter((a) => !String(a.id).startsWith('adj_loan_') && !String(a.description || '').includes('خصم سلفة'));
     const totalBonus = allEmpAdjs.filter((a) => a.type === 'bonus').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
-    const manualDeduction = allEmpAdjs.filter((a) => a.type === 'deduction' || a.type === 'penalty').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
+    const manualDeduction = nonLoanEmpAdjs.filter((a) => a.type === 'deduction' || a.type === 'penalty').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
 
-    // Calculate approved loans/advances deductions for the filtered period
-    const allLoansList = [...(state.loans || []), ...(state.requests || [])];
-    const loanDeduction = allLoansList
-      .filter((l) => String(l.employeeId) === String(empId) && (l.status === 'approved' || l.adminApproved || l.status === 'partial') && (l.type === 'loan' || l.type === 'advance' || l.type === 'meds' || l.type === 'credit_medicine'))
-      .reduce((acc, l) => {
-        const total = parseFloat(l.amount) || 0;
-        const paid = parseFloat(l.paidAmount) || 0;
-        const rem = Math.max(0, total - paid);
-        if (rem <= 0) return acc;
-        const monthlyDeduction = parseFloat(l.monthlyDeduction || l.installmentAmount) || Math.min(rem, total);
-        return acc + Math.min(rem, monthlyDeduction);
-      }, 0);
+    // Calculate approved loans/advances deductions for the filtered period with deduplication by ID
+    const loanDeductionMap = new Map();
+    (state.requests || [])
+      .filter(
+        (r) =>
+          String(r.employeeId) === String(empId) &&
+          (r.status === 'approved' || r.adminApproved || r.status === 'partial') &&
+          (r.type === 'loan' || r.type === 'advance' || r.type === 'meds' || r.type === 'credit_medicine') &&
+          effectiveFilterFn(r.date || (r.createdAt ? r.createdAt.slice(0, 10) : ''))
+      )
+      .forEach((r) => loanDeductionMap.set(String(r.id), r));
+
+    (state.loans || [])
+      .filter(
+        (l) =>
+          String(l.employeeId) === String(empId) &&
+          l.status !== 'pending' &&
+          l.status !== 'pending_admin' &&
+          l.status !== 'rejected' &&
+          l.status !== 'cancelled' &&
+          (l.type === 'loan' || l.type === 'advance' || l.type === 'meds' || l.type === 'credit_medicine') &&
+          effectiveFilterFn(l.date || (l.createdAt ? l.createdAt.slice(0, 10) : ''))
+      )
+      .forEach((l) => {
+        const existing = loanDeductionMap.get(String(l.id));
+        loanDeductionMap.set(String(l.id), { ...(existing || {}), ...l });
+      });
+
+    const uniqueApprovedLoans = Array.from(loanDeductionMap.values());
+    const loanDeduction = uniqueApprovedLoans.reduce((acc, l) => {
+      const total = parseFloat(l.amount || l.totalAmount) || 0;
+      const paid = parseFloat(l.paidAmount) || 0;
+      const rem = Math.max(0, total - paid);
+      if (rem <= 0) return acc;
+      const monthlyDeduction = parseFloat(l.monthlyDeduction || l.installmentAmount) || Math.min(rem, total);
+      return acc + Math.min(rem, monthlyDeduction);
+    }, 0);
 
     const totalDeduction = manualDeduction + loanDeduction + totalAbsenceDeduction + lateDeduction;
 

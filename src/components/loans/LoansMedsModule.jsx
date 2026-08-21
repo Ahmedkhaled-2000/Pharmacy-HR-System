@@ -59,7 +59,8 @@ export default function LoansMedsModule({
     const allLoanRequests = (state.requests || [])
       .filter(
         (r) =>
-          (r.type === 'loan' || r.type === 'advance' || r.type === 'meds' || r.type === 'credit_medicine')
+          (r.type === 'loan' || r.type === 'advance' || r.type === 'meds' || r.type === 'credit_medicine') &&
+          (r.status === 'approved' || r.adminApproved || r.status === 'partial' || r.status === 'paid')
       )
       .map((r) => {
         const directLoan = directLoans.find((l) => String(l.id) === String(r.id));
@@ -87,7 +88,7 @@ export default function LoansMedsModule({
           paymentsHistory: history,
           medsItems: r.medsItems || r.items || r.medsDetails || [],
           monthlyDeduction: r.monthlyDeduction || r.installmentAmount || null,
-          status: r.status || 'pending',
+          status: r.status || 'approved',
           notes: r.reason || r.details || r.notes || (isMeds ? 'طلب أدوية آجل' : 'طلب سلفة مالية'),
           date: r.date || (r.createdAt ? r.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10)),
           createdAt: r.createdAt || new Date().toISOString()
@@ -99,6 +100,7 @@ export default function LoansMedsModule({
       map.set(String(item.id), item);
     });
     directLoans.forEach((l) => {
+      if (l.status === 'rejected' || l.status === 'cancelled' || l.status === 'pending' || l.status === 'pending_admin') return;
       const idStr = String(l.id);
       const existing = map.get(idStr);
       const paid = Math.max(parseFloat(l.paidAmount) || 0, parseFloat(existing?.paidAmount) || 0);

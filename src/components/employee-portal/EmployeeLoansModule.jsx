@@ -36,15 +36,16 @@ export default function EmployeeLoansModule({
     const directLoans = (state.loans || []).filter((l) => String(l.employeeId) === String(emp.id));
 
     const map = new Map();
-    directLoans.forEach((item) => {
-      map.set(item.id, item);
-    });
     reqs.forEach((r) => {
-      const direct = map.get(r.id);
-      const history = (direct?.paymentsHistory && direct.paymentsHistory.length > 0) ? direct.paymentsHistory : (r.paymentsHistory || r.payments || r.paidHistory || []);
-      const paidVal = direct?.paidAmount !== undefined ? direct.paidAmount : (r.paidAmount || 0);
-      map.set(r.id, {
-        ...r,
+      map.set(String(r.id), r);
+    });
+    directLoans.forEach((item) => {
+      const existing = map.get(String(item.id));
+      const history = (item?.paymentsHistory && item.paymentsHistory.length > 0) ? item.paymentsHistory : (existing?.paymentsHistory || existing?.payments || existing?.paidHistory || []);
+      const paidVal = item?.paidAmount !== undefined ? item.paidAmount : (existing?.paidAmount || 0);
+      map.set(String(item.id), {
+        ...(existing || {}),
+        ...item,
         paidAmount: parseFloat(paidVal) || 0,
         paymentsHistory: history
       });
@@ -537,7 +538,11 @@ export default function EmployeeLoansModule({
                       {(r.status === 'approved' || r.adminApproved) && rem > 0 && <span className="badge warning">⏳ جاري سداد الأقساط</span>}
                       {(r.status === 'approved' || r.adminApproved) && rem === 0 && <span className="badge success">✅ مسددة بالكامل</span>}
                       {r.status === 'rejected' && <span className="badge danger">❌ مرفوضة</span>}
-                      {r.status === 'pending' && <span className="badge warning">⏳ قيد الانتظار</span>}
+                      {(r.status === 'pending' || r.status === 'pending_admin' || !r.status) && (
+                        <span className="badge warning" style={{ background: '#fef3c7', color: '#92400e', fontWeight: 'bold' }}>
+                          ⏳ قيد مراجعة الإدارة
+                        </span>
+                      )}
                     </td>
                     <td>
                       <button

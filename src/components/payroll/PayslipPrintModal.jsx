@@ -660,14 +660,16 @@ export default function PayslipPrintModal({
                 });
               }
 
-              const manualItems = empAdjs.map((a) => ({
-                id: a.id,
-                date: a.date,
-                typeLabel: a.type === 'bonus' ? '➕ مكافأة / حافز' : '➖ خصم / جزاء مالى',
-                amount: parseFloat(a.amount) || 0,
-                details: a.reason || a.details || '—',
-                color: a.type === 'bonus' ? '#16a34a' : '#dc2626'
-              }));
+              const manualItems = (empAdjs || [])
+                .filter((a) => !String(a.id).startsWith('adj_loan_') && !String(a.description || a.notes || a.reason || '').includes('خصم سلفة'))
+                .map((a) => ({
+                  id: a.id,
+                  date: a.date,
+                  typeLabel: a.type === 'bonus' ? '➕ مكافأة / حافز' : '➖ خصم / جزاء مالى',
+                  amount: parseFloat(a.amount) || 0,
+                  details: a.reason || a.details || a.description || '—',
+                  color: a.type === 'bonus' ? '#16a34a' : '#dc2626'
+                }));
 
               // Late Penalty Incidents
               const empLateIncidents = (state?.lateIncidents || []).filter(
@@ -695,23 +697,55 @@ export default function PayslipPrintModal({
                 };
               });
 
-              const allLoansAndRequests = [...(state?.loans || []), ...(state?.requests || [])];
-              const empLoans = allLoansAndRequests.filter(
-                (r) =>
-                  String(r.employeeId) === String(emp.id) &&
-                  (r.status === 'approved' || r.adminApproved) &&
-                  (r.type === 'loan' || r.type === 'advance' || r.type === 'meds' || r.type === 'credit_medicine') &&
-                  (r.date || (r.createdAt ? r.createdAt.slice(0, 10) : '')).startsWith(month)
-              );
+              const loanBreakdownMap = new Map();
+              (state?.requests || [])
+                .filter(
+                  (r) =>
+                    String(r.employeeId) === String(emp.id) &&
+                    (r.status === 'approved' || r.adminApproved || r.status === 'partial') &&
+                    (r.type === 'loan' || r.type === 'advance' || r.type === 'meds' || r.type === 'credit_medicine') &&
+                    (r.date || (r.createdAt ? r.createdAt.slice(0, 10) : '')).startsWith(month)
+                )
+                .forEach((r) => loanBreakdownMap.set(String(r.id), r));
 
-              const loanItems = empLoans.map((l) => ({
-                id: l.id,
-                date: l.date || (l.createdAt ? l.createdAt.slice(0, 10) : month + '-01'),
-                typeLabel: (l.type === 'meds' || l.type === 'credit_medicine') ? '💳 خصم أدوية ومشتريات آجل' : '💳 خصم سلفة مالية شخصية',
-                amount: parseFloat(l.amount) || 0,
-                details: l.reason || l.details || l.notes || 'خصم سلفة مالية معتمدة رسمياً',
-                color: '#dc2626'
-              }));
+              (state?.loans || [])
+                .filter(
+                  (l) =>
+                    String(l.employeeId) === String(emp.id) &&
+                    l.status !== 'pending' &&
+                    l.status !== 'pending_admin' &&
+                    l.status !== 'rejected' &&
+                    l.status !== 'cancelled' &&
+                    (l.type === 'loan' || l.type === 'advance' || l.type === 'meds' || l.type === 'credit_medicine') &&
+                    (l.date || (l.createdAt ? l.createdAt.slice(0, 10) : '')).startsWith(month)
+                )
+                .forEach((l) => {
+                  const existing = loanBreakdownMap.get(String(l.id));
+                  loanBreakdownMap.set(String(l.id), { ...(existing || {}), ...l });
+                });
+
+              const empLoans = Array.from(loanBreakdownMap.values());
+
+              const loanItems = empLoans.map((l) => {
+                const total = parseFloat(l.amount || l.totalAmount) || 0;
+                const paid = parseFloat(l.paidAmount) || 0;
+                const rem = Math.max(0, total - paid);
+                const monthlyDeduction = parseFloat(l.monthlyDeduction || l.installmentAmount) || Math.min(rem, total);
+                const isInstallment = l.loanType === 'installment' || parseInt(l.installmentsCount || l.monthsCount, 10) > 1;
+
+                return {
+                  id: l.id,
+                  date: l.date || (l.createdAt ? l.createdAt.slice(0, 10) : month + '-01'),
+                  typeLabel: (l.type === 'meds' || l.type === 'credit_medicine')
+                    ? '💳 خصم أدوية ومشتريات آجل'
+                    : isInstallment
+                    ? `💳 خصم قسط سلفة مقسطة (${fmt(monthlyDeduction)} ج.م)`
+                    : '💳 خصم سلفة مالية شهرية',
+                  amount: monthlyDeduction,
+                  details: l.reason || l.details || l.notes || `خصم سلفة معتمدة (إجمالي ${fmt(total)} ج.م)`,
+                  color: '#dc2626'
+                };
+              });
 
               const absenceDaysCount = summary.absenceDaysCount || 0;
               const absenceDeductionTotal = summary.absenceDeduction || 0;

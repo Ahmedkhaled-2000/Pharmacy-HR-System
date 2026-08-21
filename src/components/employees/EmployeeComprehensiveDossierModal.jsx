@@ -27,10 +27,20 @@ export default function EmployeeComprehensiveDossierModal({
     .filter((s) => s.overtimeStatus === 'approved' || (parseFloat(s.overtimeHours) > 0 && s.adminApproved))
     .reduce((acc, s) => acc + (parseFloat(s.overtimeHours) || 0), 0);
 
-  // 2. Loans & advances history
-  const allLoansRaw = [...(state.loans || []), ...(state.requests || [])];
-  const empLoans = allLoansRaw
+  // 2. Loans & advances history (Deduplicated by ID)
+  const dossierLoanMap = new Map();
+  (state.requests || [])
+    .filter((r) => (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeId) === empCodeStr)) && (r.type === 'loan' || r.type === 'advance' || r.type === 'meds' || r.type === 'credit_medicine'))
+    .forEach((r) => dossierLoanMap.set(String(r.id), r));
+
+  (state.loans || [])
     .filter((l) => (String(l.employeeId) === empIdStr || (empCodeStr && String(l.employeeId) === empCodeStr)) && (l.type === 'loan' || l.type === 'advance' || l.type === 'meds' || l.type === 'credit_medicine'))
+    .forEach((l) => {
+      const existing = dossierLoanMap.get(String(l.id));
+      dossierLoanMap.set(String(l.id), { ...(existing || {}), ...l });
+    });
+
+  const empLoans = Array.from(dossierLoanMap.values())
     .sort((a, b) => new Date(b.date || b.createdAt || 0) - new Date(a.date || a.createdAt || 0));
 
   // 3. Permissions history
@@ -399,9 +409,23 @@ export default function EmployeeComprehensiveDossierModal({
                         <td style={{ padding: '8px', color: '#16a34a' }}>{fmt(paid)} ج.م</td>
                         <td style={{ padding: '8px', fontWeight: 'bold', color: rem > 0 ? '#b91c1c' : '#16a34a' }}>{fmt(rem)} ج.م</td>
                         <td style={{ padding: '8px' }}>
-                          <span style={{ background: rem <= 0 ? '#dcfce7' : '#fee2e2', color: rem <= 0 ? '#166534' : '#991b1b', padding: '2px 8px', borderRadius: '6px', fontSize: '11px' }}>
-                            {rem <= 0 ? 'مسدد بالكامل' : 'متبقي مديونية'}
-                          </span>
+                          {l.status === 'pending' || l.status === 'pending_admin' ? (
+                            <span style={{ background: '#fef3c7', color: '#92400e', padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold' }}>
+                              ⏳ قيد مراجعة الإدارة
+                            </span>
+                          ) : l.status === 'rejected' ? (
+                            <span style={{ background: '#fee2e2', color: '#991b1b', padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold' }}>
+                              ❌ مرفوض
+                            </span>
+                          ) : rem <= 0 ? (
+                            <span style={{ background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold' }}>
+                              ✅ مسدد بالكامل
+                            </span>
+                          ) : (
+                            <span style={{ background: '#fee2e2', color: '#991b1b', padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold' }}>
+                              🔴 متبقي مديونية معتمدة
+                            </span>
+                          )}
                         </td>
                       </tr>
                     );
