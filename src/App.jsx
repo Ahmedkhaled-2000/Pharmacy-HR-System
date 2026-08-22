@@ -2520,17 +2520,66 @@ export default function App() {
   }, []);
 
   // ── مستمع الإشعارات للطلبات الجديدة ───────────────
-  const prevRequestsLengthRef = useRef(0);
+  const isInitialLoadDoneRef = useRef(false);
+  const knownRequestIdsRef = useRef(new Set());
+
   useEffect(() => {
-    const currentLength = state.requests ? state.requests.length : 0;
-    if (currentLength > prevRequestsLengthRef.current) {
-      if (authRole === 'admin' || authRole === 'branch') {
-        playNotificationChime();
-        showToast('🔔 يوجد طلب جديد يحتاج للمراجعة');
+    const reqs = state.requests || [];
+
+    // On initial app load / state hydration: populate existing request IDs without triggering notification sound or toast
+    if (!isInitialLoadDoneRef.current) {
+      if (reqs.length > 0 || !isLoading) {
+        reqs.forEach((r) => {
+          if (r && r.id) knownRequestIdsRef.current.add(String(r.id));
+        });
+        isInitialLoadDoneRef.current = true;
+      }
+      return;
+    }
+
+    // Identify truly brand-new requests added in real-time after initial load
+    const newRequests = reqs.filter((r) => r && r.id && !knownRequestIdsRef.current.has(String(r.id)));
+
+    // Track all current IDs
+    reqs.forEach((r) => {
+      if (r && r.id) knownRequestIdsRef.current.add(String(r.id));
+    });
+
+    if (newRequests.length === 0) return;
+
+    // Filter only pending requests
+    const pendingNewRequests = newRequests.filter(
+      (r) => r.status === 'pending' || r.status === 'pending_admin' || !r.status
+    );
+
+    if (pendingNewRequests.length === 0) return;
+
+    // 1. الإدارة العليا (Super Admin): تنبيه بالصوت والرسالة للطلبات الجديدة
+    if (authRole === 'admin') {
+      playNotificationChime();
+      showToast('🔔 يوجد طلب جديد يحتاج للمراجعة من الإدارة العليا');
+    }
+    // 2. مدير الفرع (Branch Manager): عدم تشغيل أصوات الإدارة العليا
+    // يظهر فقط إشعار نصي هادئ إذا كان الطلب يخص موظفاً بفرعه وموجهاً لموافقة مدير الفرع
+    else if (authRole === 'branch') {
+      const currentBranchId = currentBranch?.id;
+      const branchEmployees = (state.employees || []).filter(
+        (e) => String(e.branchId) === String(currentBranchId) || (e.branchesDetails && e.branchesDetails.some((bd) => String(bd.branchId) === String(currentBranchId)))
+      );
+      const branchEmpIds = new Set(branchEmployees.map((e) => String(e.id)));
+
+      const branchPendingReqs = pendingNewRequests.filter((r) => {
+        if (!shouldShowRequestToBranch(r, state)) return false;
+        if (r.branchId && String(r.branchId) === String(currentBranchId)) return true;
+        if (r.employeeId && branchEmpIds.has(String(r.employeeId))) return true;
+        return false;
+      });
+
+      if (branchPendingReqs.length > 0) {
+        showToast('🔔 يوجد طلب جديد لموظف بالفرع يحتاج للمراجعة');
       }
     }
-    prevRequestsLengthRef.current = currentLength;
-  }, [state.requests, authRole]);
+  }, [state.requests, authRole, isLoading, currentBranch, state.employees, state.approvalRules]);
 
   // ── مستمع تغيرات الاتصال بالإنترنت ───────────────
   useEffect(() => {
