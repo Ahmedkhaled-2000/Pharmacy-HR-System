@@ -40,7 +40,8 @@ export default function RequestsModule({
   customFrom = '',
   customTo = '',
   currentBranch = null,
-  authRole = 'admin'
+  authRole = 'admin',
+  executeWithOwnerGuard
 }) {
   const [filterType, setFilterType] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
@@ -215,275 +216,300 @@ export default function RequestsModule({
       return;
     }
 
-    targetReq = {
-      ...targetReq,
-      status: 'approved',
-      adminApproved: true,
-      approvedAt: new Date().toISOString()
-    };
-    if (targetReq.photoUrl) delete targetReq.photoUrl;
+    const performApprove = async () => {
+      let approvedTargetReq = {
+        ...targetReq,
+        status: 'approved',
+        adminApproved: true,
+        approvedAt: new Date().toISOString()
+      };
+      if (approvedTargetReq.photoUrl) delete approvedTargetReq.photoUrl;
 
-    // Apply any loan modifications decided by Higher Management
-    if (customLoanData) {
-      const originalAmt = targetReq.originalAmount || targetReq.amount || targetReq.totalAmount;
-      const newAmt = parseFloat(customLoanData.amount) || parseFloat(targetReq.amount) || 0;
-      const isInst = customLoanData.loanType === 'installment';
-      const months = isInst ? Math.max(2, parseInt(customLoanData.installmentsCount, 10) || 2) : 1;
-      const monthly = parseFloat(customLoanData.monthlyDeduction) || (isInst ? Math.ceil(newAmt / months) : newAmt);
+      // Apply any loan modifications decided by Higher Management
+      if (customLoanData) {
+        const originalAmt = approvedTargetReq.originalAmount || approvedTargetReq.amount || approvedTargetReq.totalAmount;
+        const newAmt = parseFloat(customLoanData.amount) || parseFloat(approvedTargetReq.amount) || 0;
+        const isInst = customLoanData.loanType === 'installment';
+        const months = isInst ? Math.max(2, parseInt(customLoanData.installmentsCount, 10) || 2) : 1;
+        const monthly = parseFloat(customLoanData.monthlyDeduction) || (isInst ? Math.ceil(newAmt / months) : newAmt);
 
-      targetReq.amount = newAmt;
-      targetReq.totalAmount = newAmt;
-      targetReq.originalAmount = originalAmt;
-      targetReq.loanType = isInst ? 'installment' : 'monthly';
-      targetReq.installmentsCount = months;
-      targetReq.monthsCount = months;
-      targetReq.monthlyDeduction = monthly;
-      targetReq.installmentAmount = monthly;
-      targetReq.adminNotes = customLoanData.adminNotes || '';
-      targetReq.adminModified = (parseFloat(originalAmt) !== newAmt) || Boolean(customLoanData.isModified);
-    }
-
-    let updatedRequests = [...(state.requests || [])];
-    const rIdx = updatedRequests.findIndex((r) => r.id === reqId);
-    if (rIdx >= 0) {
-      updatedRequests[rIdx] = targetReq;
-    } else {
-      updatedRequests.unshift(targetReq);
-    }
-
-    let updatedRosters = [...(state.rosters || [])];
-    let updatedAdjustments = [...(state.adjustments || [])];
-    let updatedShifts = [...(state.shifts || [])];
-
-    // 0. Overtime Request Approval
-    if (targetReq.type === 'overtime') {
-      const overtimeHrs = parseFloat(targetReq.hours) || 0;
-      updatedShifts = updatedShifts.map((s) => {
-        if (s.id === targetReq.shiftId || (String(s.employeeId) === String(targetReq.employeeId) && s.date === targetReq.date)) {
-          const regHours = s.regularHours !== undefined ? s.regularHours : (s.scheduledHours || s.hours);
-          return {
-            ...s,
-            overtimeStatus: 'approved',
-            overtimeHours: overtimeHrs,
-            adminApproved: true,
-            note: `ساعات عمل وإضافي معتمد (أساسي: ${regHours} س + إضافي: ${overtimeHrs} س)`
-          };
-        }
-        return s;
-      });
-    }
-
-    if (targetReq.type === 'penalty' || targetReq.type === 'early_exit') {
-      const emp = (state.employees || []).find((e) => String(e.id) === String(targetReq.employeeId));
-      let amount = 0;
-      if (targetReq.impactType === 'deduction_days') {
-        const salary = emp ? parseFloat(emp.salary) || 0 : 0;
-        const workHours = emp ? parseFloat(emp.workHoursPerDay) || 8 : 8;
-        const workDays = emp ? parseFloat(emp.workDaysPerMonth) || 26 : 26;
-        const dailyRate = workDays > 0 ? (salary * workHours) / workDays : (salary * workHours);
-        amount = Math.round(dailyRate * (parseFloat(targetReq.impactVal) || 1) * 100) / 100;
-      } else if (targetReq.impactType === 'fixed_amount') {
-        amount = parseFloat(targetReq.impactVal) || 0;
-      } else if (targetReq.amount) {
-        amount = parseFloat(targetReq.amount) || 0;
+        approvedTargetReq.amount = newAmt;
+        approvedTargetReq.totalAmount = newAmt;
+        approvedTargetReq.originalAmount = originalAmt;
+        approvedTargetReq.loanType = isInst ? 'installment' : 'monthly';
+        approvedTargetReq.installmentsCount = months;
+        approvedTargetReq.monthsCount = months;
+        approvedTargetReq.monthlyDeduction = monthly;
+        approvedTargetReq.installmentAmount = monthly;
+        approvedTargetReq.adminNotes = customLoanData.adminNotes || '';
+        approvedTargetReq.adminModified = (parseFloat(originalAmt) !== newAmt) || Boolean(customLoanData.isModified);
       }
 
-      if (amount > 0) {
-        const ruleTitle = targetReq.ruleTitle || targetReq.reason || targetReq.details || 'مخالفة لائحية';
-        const penaltyDesc = `خصم جزاء لائحى: ${ruleTitle} (${targetReq.impactType === 'deduction_days' ? `خصم ${targetReq.impactVal} يوم` : `${amount} ج.م`})`;
+      let updatedRequests = [...(state.requests || [])];
+      const rIdx = updatedRequests.findIndex((r) => r.id === reqId);
+      if (rIdx >= 0) {
+        updatedRequests[rIdx] = approvedTargetReq;
+      } else {
+        updatedRequests.unshift(approvedTargetReq);
+      }
+
+      let updatedRosters = [...(state.rosters || [])];
+      let updatedAdjustments = [...(state.adjustments || [])];
+      let updatedShifts = [...(state.shifts || [])];
+
+      // 0. Overtime Request Approval
+      if (approvedTargetReq.type === 'overtime') {
+        const overtimeHrs = parseFloat(approvedTargetReq.hours) || 0;
+        updatedShifts = updatedShifts.map((s) => {
+          if (s.id === approvedTargetReq.shiftId || (String(s.employeeId) === String(approvedTargetReq.employeeId) && s.date === approvedTargetReq.date)) {
+            const regHours = s.regularHours !== undefined ? s.regularHours : (s.scheduledHours || s.hours);
+            return {
+              ...s,
+              overtimeStatus: 'approved',
+              overtimeHours: overtimeHrs,
+              adminApproved: true,
+              note: `ساعات عمل وإضافي معتمد (أساسي: ${regHours} س + إضافي: ${overtimeHrs} س)`
+            };
+          }
+          return s;
+        });
+      }
+
+      if (approvedTargetReq.type === 'penalty' || approvedTargetReq.type === 'early_exit') {
+        const emp = (state.employees || []).find((e) => String(e.id) === String(approvedTargetReq.employeeId));
+        let amount = 0;
+        if (approvedTargetReq.impactType === 'deduction_days') {
+          const salary = emp ? parseFloat(emp.salary) || 0 : 0;
+          const workHours = emp ? parseFloat(emp.workHoursPerDay) || 8 : 8;
+          const workDays = emp ? parseFloat(emp.workDaysPerMonth) || 26 : 26;
+          const dailyRate = workDays > 0 ? (salary * workHours) / workDays : (salary * workHours);
+          amount = Math.round(dailyRate * (parseFloat(approvedTargetReq.impactVal) || 1) * 100) / 100;
+        } else if (approvedTargetReq.impactType === 'fixed_amount') {
+          amount = parseFloat(approvedTargetReq.impactVal) || 0;
+        } else if (approvedTargetReq.amount) {
+          amount = parseFloat(approvedTargetReq.amount) || 0;
+        }
+
+        if (amount > 0) {
+          const ruleTitle = approvedTargetReq.ruleTitle || approvedTargetReq.reason || approvedTargetReq.details || 'مخالفة لائحية';
+          const penaltyDesc = `خصم جزاء لائحى: ${ruleTitle} (${approvedTargetReq.impactType === 'deduction_days' ? `خصم ${approvedTargetReq.impactVal} يوم` : `${amount} ج.م`})`;
+          updatedAdjustments.push({
+            id: `adj_pen_${Date.now()}`,
+            employeeId: approvedTargetReq.employeeId,
+            type: 'deduction',
+            amount,
+            description: penaltyDesc,
+            notes: penaltyDesc,
+            reason: penaltyDesc,
+            date: approvedTargetReq.date || approvedTargetReq.startDate || new Date().toISOString().slice(0, 10),
+            createdAt: new Date().toISOString()
+          });
+        }
+      }
+
+      if (approvedTargetReq.type === 'bonus') {
         updatedAdjustments.push({
-          id: `adj_pen_${Date.now()}`,
-          employeeId: targetReq.employeeId,
-          type: 'deduction',
-          amount,
-          description: penaltyDesc,
-          notes: penaltyDesc,
-          reason: penaltyDesc,
-          date: targetReq.date || targetReq.startDate || new Date().toISOString().slice(0, 10),
+          id: `adj_${Date.now()}`,
+          employeeId: approvedTargetReq.employeeId,
+          type: 'bonus',
+          amount: parseFloat(approvedTargetReq.amount) || 0,
+          description: approvedTargetReq.details || approvedTargetReq.reason || 'مكافأة معتمدة من الإدارة العليا',
+          notes: approvedTargetReq.details || approvedTargetReq.reason || 'مكافأة معتمدة من الإدارة العليا',
+          reason: approvedTargetReq.reason || approvedTargetReq.details || 'مكافأة معتمدة من الإدارة العليا',
+          date: approvedTargetReq.date || approvedTargetReq.startDate || new Date().toISOString().slice(0, 10),
           createdAt: new Date().toISOString()
         });
       }
-    }
 
-    if (targetReq.type === 'bonus') {
-      updatedAdjustments.push({
-        id: `adj_${Date.now()}`,
-        employeeId: targetReq.employeeId,
-        type: 'bonus',
-        amount: parseFloat(targetReq.amount) || 0,
-        description: targetReq.details || targetReq.reason || 'مكافأة معتمدة من الإدارة العليا',
-        notes: targetReq.details || targetReq.reason || 'مكافأة معتمدة من الإدارة العليا',
-        reason: targetReq.reason || targetReq.details || 'مكافأة معتمدة من الإدارة العليا',
-        date: targetReq.date || targetReq.startDate || new Date().toISOString().slice(0, 10),
-        createdAt: new Date().toISOString()
-      });
-    }
+      let updatedLoans = [...(state.loans || [])];
+      if (approvedTargetReq.type === 'loan' || approvedTargetReq.type === 'advance' || approvedTargetReq.type === 'meds' || approvedTargetReq.type === 'credit_medicine') {
+        const totalAmount = parseFloat(approvedTargetReq.amount || approvedTargetReq.totalAmount) || 0;
+        const monthsCount = parseInt(approvedTargetReq.monthsCount || approvedTargetReq.installmentsCount || approvedTargetReq.installments, 10) || 1;
+        const monthlyInstallment = parseFloat(approvedTargetReq.monthlyDeduction || approvedTargetReq.installmentAmount) || (monthsCount > 1 ? Math.ceil(totalAmount / monthsCount) : totalAmount);
 
-    let updatedLoans = [...(state.loans || [])];
-    if (targetReq.type === 'loan' || targetReq.type === 'advance' || targetReq.type === 'meds' || targetReq.type === 'credit_medicine') {
-      const totalAmount = parseFloat(targetReq.amount || targetReq.totalAmount) || 0;
-      const monthsCount = parseInt(targetReq.monthsCount || targetReq.installmentsCount || targetReq.installments, 10) || 1;
-      const monthlyInstallment = parseFloat(targetReq.monthlyDeduction || targetReq.installmentAmount) || (monthsCount > 1 ? Math.ceil(totalAmount / monthsCount) : totalAmount);
+        const isMeds = approvedTargetReq.type === 'meds' || approvedTargetReq.type === 'credit_medicine';
+        const isInstallment = approvedTargetReq.loanType === 'installment' || approvedTargetReq.loanType === 'installments' || monthsCount > 1;
 
-      const isMeds = targetReq.type === 'meds' || targetReq.type === 'credit_medicine';
-      const isInstallment = targetReq.loanType === 'installment' || targetReq.loanType === 'installments' || monthsCount > 1;
+        const approvedLoanObj = {
+          id: approvedTargetReq.id,
+          employeeId: approvedTargetReq.employeeId,
+          employeeCode: approvedTargetReq.employeeCode,
+          employeeName: approvedTargetReq.employeeName,
+          type: isMeds ? 'meds' : 'loan',
+          loanType: isInstallment ? 'installment' : 'monthly',
+          amount: totalAmount,
+          totalAmount: totalAmount,
+          paidAmount: parseFloat(approvedTargetReq.paidAmount) || 0,
+          monthlyDeduction: monthlyInstallment,
+          installmentAmount: monthlyInstallment,
+          installmentsCount: monthsCount,
+          notes: approvedTargetReq.reason || approvedTargetReq.details || approvedTargetReq.adminNotes || (isMeds ? 'مشتريات أدوية آجل معتمدة' : 'سلفة مالية معتمدة'),
+          date: approvedTargetReq.date || (approvedTargetReq.createdAt ? approvedTargetReq.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10)),
+          status: 'approved',
+          adminApproved: true,
+          approvedAt: new Date().toISOString()
+        };
 
-      const approvedLoanObj = {
-        id: targetReq.id,
-        employeeId: targetReq.employeeId,
-        employeeCode: targetReq.employeeCode,
-        employeeName: targetReq.employeeName,
-        type: isMeds ? 'meds' : 'loan',
-        loanType: isInstallment ? 'installment' : 'monthly',
-        amount: totalAmount,
-        totalAmount: totalAmount,
-        paidAmount: parseFloat(targetReq.paidAmount) || 0,
-        monthlyDeduction: monthlyInstallment,
-        installmentAmount: monthlyInstallment,
-        installmentsCount: monthsCount,
-        notes: targetReq.reason || targetReq.details || targetReq.adminNotes || (isMeds ? 'مشتريات أدوية آجل معتمدة' : 'سلفة مالية معتمدة'),
-        date: targetReq.date || (targetReq.createdAt ? targetReq.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10)),
-        status: 'approved',
-        adminApproved: true,
-        approvedAt: new Date().toISOString()
-      };
-
-      const lIdx = updatedLoans.findIndex((l) => String(l.id) === String(targetReq.id));
-      if (lIdx >= 0) {
-        updatedLoans[lIdx] = { ...updatedLoans[lIdx], ...approvedLoanObj };
-      } else {
-        updatedLoans.unshift(approvedLoanObj);
+        const lIdx = updatedLoans.findIndex((l) => String(l.id) === String(approvedTargetReq.id));
+        if (lIdx >= 0) {
+          updatedLoans[lIdx] = { ...updatedLoans[lIdx], ...approvedLoanObj };
+        } else {
+          updatedLoans.unshift(approvedLoanObj);
+        }
       }
-    }
 
-    if (targetReq.type === 'swap' || targetReq.type === 'shift_swap' || targetReq.type === 'shift_edit') {
-      updatedRosters = applyShiftSwapToRosters(targetReq, updatedRosters, state.employees || []);
-    }
+      if (approvedTargetReq.type === 'swap' || approvedTargetReq.type === 'shift_swap' || approvedTargetReq.type === 'shift_edit') {
+        updatedRosters = applyShiftSwapToRosters(approvedTargetReq, updatedRosters, state.employees || []);
+      }
 
-    if (targetReq.type === 'permission' || targetReq.type === 'إذن' || targetReq.type === 'late_permission' || targetReq.type === 'early_leave') {
-      updatedShifts = applyApprovedPermissionsToShifts({
-        ...state,
-        requests: updatedRequests,
-        shifts: updatedShifts
-      });
-    }
+      if (approvedTargetReq.type === 'permission' || approvedTargetReq.type === 'إذن' || approvedTargetReq.type === 'late_permission' || approvedTargetReq.type === 'early_leave') {
+        updatedShifts = applyApprovedPermissionsToShifts({
+          ...state,
+          requests: updatedRequests,
+          shifts: updatedShifts
+        });
+      }
 
-    if (targetReq.type === 'roster_update' || targetReq.type === 'roster_edit' || targetReq.type === 'roster_edit_request') {
-      const targetEmp = (state.employees || []).find(e => String(e.id) === String(targetReq.employeeId));
-      const targetBStr = targetReq.branchId ? String(targetReq.branchId) : (targetEmp?.branchId ? String(targetEmp.branchId) : '');
+      if (approvedTargetReq.type === 'roster_update' || approvedTargetReq.type === 'roster_edit' || approvedTargetReq.type === 'roster_edit_request') {
+        const targetEmp = (state.employees || []).find(e => String(e.id) === String(approvedTargetReq.employeeId));
+        const targetBStr = approvedTargetReq.branchId ? String(approvedTargetReq.branchId) : (targetEmp?.branchId ? String(targetEmp.branchId) : '');
 
-      const normalizedSch = normalizeSchedule(targetReq.schedule || targetReq.newSchedule);
+        const normalizedSch = normalizeSchedule(approvedTargetReq.schedule || approvedTargetReq.newSchedule);
 
-      const activeRosterObj = {
-        id: targetReq.id || `roster_${Date.now()}`,
-        employeeId: targetReq.employeeId,
-        branchId: targetBStr || targetReq.branchId || null,
-        month: targetReq.month || new Date().toISOString().slice(0, 7),
-        fromDate: targetReq.fromDate,
-        toDate: targetReq.toDate,
-        schedule: normalizedSch,
-        status: 'approved',
-        approvedAt: new Date().toISOString()
-      };
+        const activeRosterObj = {
+          id: approvedTargetReq.id || `roster_${Date.now()}`,
+          employeeId: approvedTargetReq.employeeId,
+          branchId: targetBStr || approvedTargetReq.branchId || null,
+          month: approvedTargetReq.month || new Date().toISOString().slice(0, 7),
+          fromDate: approvedTargetReq.fromDate,
+          toDate: approvedTargetReq.toDate,
+          schedule: normalizedSch,
+          status: 'approved',
+          approvedAt: new Date().toISOString()
+        };
 
-      const existingIdx = updatedRosters.findIndex(
-        (ros) => String(ros.employeeId) === String(targetReq.employeeId) && 
-                 (ros.month === targetReq.month || !targetReq.month || !ros.month) && 
-                 (String(ros.branchId || '') === targetBStr || (!ros.branchId && !targetBStr))
+        const existingIdx = updatedRosters.findIndex(
+          (ros) => String(ros.employeeId) === String(approvedTargetReq.employeeId) && 
+                   (ros.month === approvedTargetReq.month || !approvedTargetReq.month || !ros.month) && 
+                   (String(ros.branchId || '') === targetBStr || (!ros.branchId && !targetBStr))
+        );
+
+        if (existingIdx >= 0) {
+          updatedRosters[existingIdx] = activeRosterObj;
+        } else {
+          updatedRosters = updatedRosters.filter(
+            (ros) => !(String(ros.employeeId) === String(approvedTargetReq.employeeId) && String(ros.branchId || '') === targetBStr && (ros.month === approvedTargetReq.month || !targetReq.month || !ros.month))
+          );
+          updatedRosters.unshift(activeRosterObj);
+        }
+      }
+
+      let updatedLeaveRequests = [...(state.leaveRequests || [])];
+      let updatedLeaveHistory = [...(state.leaveHistory || [])];
+      if (approvedTargetReq.type === 'leave' || approvedTargetReq.type === 'leave_request') {
+        const approvedLeaveObj = {
+          id: approvedTargetReq.id || `leave_${Date.now()}`,
+          originalRequestId: approvedTargetReq.id,
+          employeeId: approvedTargetReq.employeeId,
+          employeeCode: approvedTargetReq.employeeCode,
+          employeeName: approvedTargetReq.employeeName,
+          leaveType: approvedTargetReq.leaveType || 'annual',
+          startDate: approvedTargetReq.startDate || approvedTargetReq.date,
+          endDate: approvedTargetReq.endDate || approvedTargetReq.startDate || approvedTargetReq.date,
+          daysCount: parseInt(approvedTargetReq.daysCount || approvedTargetReq.days || 1, 10),
+          status: 'approved',
+          adminApproved: true,
+          branchApproved: true,
+          reason: approvedTargetReq.reason || approvedTargetReq.details || '',
+          approvedAt: new Date().toISOString()
+        };
+
+        updatedLeaveRequests = updatedLeaveRequests.map((lr) => {
+          if (lr.id === approvedTargetReq.id || (String(lr.employeeId) === String(approvedTargetReq.employeeId) && lr.startDate === approvedTargetReq.startDate)) {
+            return { ...lr, ...approvedLeaveObj };
+          }
+          return lr;
+        });
+
+        const existingHistIdx = updatedLeaveHistory.findIndex(lh => lh.id === approvedLeaveObj.id || (String(lh.employeeId) === String(approvedLeaveObj.employeeId) && lh.startDate === approvedLeaveObj.startDate));
+        if (existingHistIdx >= 0) {
+          updatedLeaveHistory[existingHistIdx] = approvedLeaveObj;
+        } else {
+          updatedLeaveHistory.unshift(approvedLeaveObj);
+        }
+      }
+
+      const updatedShiftSwaps = (state.shiftSwaps || []).map((s) =>
+        s.id === reqId ? { ...s, status: 'approved', adminApproved: true, branchApproved: true, approvedAt: new Date().toISOString() } : s
       );
 
-      if (existingIdx >= 0) {
-        updatedRosters[existingIdx] = activeRosterObj;
-      } else {
-        updatedRosters = updatedRosters.filter(
-          (ros) => !(String(ros.employeeId) === String(targetReq.employeeId) && String(ros.branchId || '') === targetBStr && (ros.month === targetReq.month || !targetReq.month || !ros.month))
-        );
-        updatedRosters.unshift(activeRosterObj);
-      }
-    }
-
-    let updatedLeaveRequests = [...(state.leaveRequests || [])];
-    let updatedLeaveHistory = [...(state.leaveHistory || [])];
-    if (targetReq.type === 'leave' || targetReq.type === 'leave_request') {
-      const approvedLeaveObj = {
-        id: targetReq.id || `leave_${Date.now()}`,
-        originalRequestId: targetReq.id,
-        employeeId: targetReq.employeeId,
-        employeeCode: targetReq.employeeCode,
-        employeeName: targetReq.employeeName,
-        leaveType: targetReq.leaveType || 'annual',
-        startDate: targetReq.startDate || targetReq.date,
-        endDate: targetReq.endDate || targetReq.startDate || targetReq.date,
-        daysCount: parseInt(targetReq.daysCount || targetReq.days || 1, 10),
-        status: 'approved',
-        adminApproved: true,
-        branchApproved: true,
-        reason: targetReq.reason || targetReq.details || '',
-        approvedAt: new Date().toISOString()
-      };
-
-      updatedLeaveRequests = updatedLeaveRequests.map((lr) => {
-        if (lr.id === targetReq.id || (String(lr.employeeId) === String(targetReq.employeeId) && lr.startDate === targetReq.startDate)) {
-          return { ...lr, ...approvedLeaveObj };
+      let updatedLateIncidents = [...(state.lateIncidents || [])];
+      if (approvedTargetReq && approvedTargetReq.employeeId) {
+        try {
+          const { incidents } = recalculateEmployeeCycleLateness({
+            employeeId: approvedTargetReq.employeeId,
+            cycleFilterFn: null,
+            state: { ...state, requests: updatedRequests, shifts: updatedShifts },
+            payrollCycleId: (approvedTargetReq.date || new Date().toISOString()).slice(0, 7)
+          });
+          const incidentIds = new Set(incidents.map((i) => i.id));
+          updatedLateIncidents = [
+            ...updatedLateIncidents.filter((i) => !incidentIds.has(i.id) && String(i.employeeId) !== String(approvedTargetReq.employeeId)),
+            ...incidents
+          ];
+        } catch (e) {
+          console.error('Error auto-syncing late incidents upon request approval:', e);
         }
-        return lr;
-      });
-
-      const existingHistIdx = updatedLeaveHistory.findIndex(lh => lh.id === approvedLeaveObj.id || (String(lh.employeeId) === String(approvedLeaveObj.employeeId) && lh.startDate === approvedLeaveObj.startDate));
-      if (existingHistIdx >= 0) {
-        updatedLeaveHistory[existingHistIdx] = approvedLeaveObj;
-      } else {
-        updatedLeaveHistory.unshift(approvedLeaveObj);
       }
-    }
 
-    const updatedShiftSwaps = (state.shiftSwaps || []).map((s) =>
-      s.id === reqId ? { ...s, status: 'approved', adminApproved: true, branchApproved: true, approvedAt: new Date().toISOString() } : s
-    );
+      const updatedState = {
+        ...state,
+        requests: updatedRequests,
+        loans: updatedLoans,
+        rosters: updatedRosters,
+        adjustments: updatedAdjustments,
+        shifts: updatedShifts,
+        leaveRequests: updatedLeaveRequests,
+        leaveHistory: updatedLeaveHistory,
+        shiftSwaps: updatedShiftSwaps,
+        lateIncidents: updatedLateIncidents
+      };
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      showToast?.('✅ تم اعتماد موافقة الطلب وتطبيق التأثير فوراً على الأجور والجداول');
 
-    let updatedLateIncidents = [...(state.lateIncidents || [])];
-    if (targetReq && targetReq.employeeId) {
-      try {
-        const { incidents } = recalculateEmployeeCycleLateness({
-          employeeId: targetReq.employeeId,
-          cycleFilterFn: null,
-          state: { ...state, requests: updatedRequests, shifts: updatedShifts },
-          payrollCycleId: (targetReq.date || new Date().toISOString()).slice(0, 7)
-        });
-        const incidentIds = new Set(incidents.map((i) => i.id));
-        updatedLateIncidents = [
-          ...updatedLateIncidents.filter((i) => !incidentIds.has(i.id) && String(i.employeeId) !== String(targetReq.employeeId)),
-          ...incidents
-        ];
-      } catch (e) {
-        console.error('Error auto-syncing late incidents upon request approval:', e);
+      if (approvedTargetReq.type === 'تأكيد بصمة الوجه' || approvedTargetReq.type === 'تأكيد بصمة اليد') {
+        const empId = approvedTargetReq.employeeId;
+        const actionType = approvedTargetReq.targetAction;
+
+        if (actionType === 'shift_start' && startShift) startShift(empId, 'admin');
+        else if (actionType === 'break_start' && pauseShift) pauseShift(empId, 'admin');
+        else if (actionType === 'break_end' && resumeShift) resumeShift(empId, 'admin');
+        else if (actionType === 'shift_end' && stopShift) stopShift(empId, 'admin');
       }
-    }
-
-    const updatedState = {
-      ...state,
-      requests: updatedRequests,
-      loans: updatedLoans,
-      rosters: updatedRosters,
-      adjustments: updatedAdjustments,
-      shifts: updatedShifts,
-      leaveRequests: updatedLeaveRequests,
-      leaveHistory: updatedLeaveHistory,
-      shiftSwaps: updatedShiftSwaps,
-      lateIncidents: updatedLateIncidents
     };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    showToast?.('✅ تم اعتماد موافقة الطلب وتطبيق التأثير فوراً على الأجور والجداول');
 
-    if (targetReq.type === 'تأكيد بصمة الوجه' || targetReq.type === 'تأكيد بصمة اليد') {
-      const empId = targetReq.employeeId;
-      const actionType = targetReq.targetAction;
+    let lockKey = null;
+    let actionTitle = 'اعتماد وموافقة على طلب';
+    const reqType = targetReq.type;
 
-      if (actionType === 'shift_start' && startShift) startShift(empId, 'admin');
-      else if (actionType === 'break_start' && pauseShift) pauseShift(empId, 'admin');
-      else if (actionType === 'break_end' && resumeShift) resumeShift(empId, 'admin');
-      else if (actionType === 'shift_end' && stopShift) stopShift(empId, 'admin');
+    if (reqType === 'loan' || reqType === 'advance' || reqType === 'meds' || reqType === 'credit_medicine') {
+      lockKey = 'lockApproveLoans';
+      actionTitle = 'اعتماد وصرف سلفة مالية / أدوية آجل';
+    } else if (reqType === 'bonus' || reqType === 'penalty' || reqType === 'early_exit' || reqType === 'overtime') {
+      lockKey = 'lockDirectBonusDeduction';
+      actionTitle = 'اعتماد مكافأة / خصم / إضافي';
+    }
+
+    if (lockKey && executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey,
+        actionTitle,
+        actionDetails: `الموظف: ${targetReq.employeeName || targetReq.employeeId} - نوع الطلب: ${targetReq.typeLabel || reqType}`,
+        onExecute: performApprove
+      });
+    } else {
+      await performApprove();
     }
   };
 
@@ -608,40 +634,53 @@ export default function RequestsModule({
   };
 
   const handleApprovePenaltyObjection = async (reqId) => {
-    let empId = null;
-    let ruleTitle = '';
-    const updatedRequests = requests.map((r) => {
-      if (r.id === reqId) {
-        empId = r.employeeId;
-        ruleTitle = r.ruleTitle;
-        return {
-          ...r,
-          status: 'cancelled',
-          isCancelled: true,
-          cancelledAt: new Date().toISOString(),
-          objection: {
-            ...(r.objection || {}),
-            status: 'approved',
-            resolvedAt: new Date().toISOString()
-          }
-        };
+    const performApproveObjection = async () => {
+      let empId = null;
+      let ruleTitle = '';
+      const updatedRequests = requests.map((r) => {
+        if (r.id === reqId) {
+          empId = r.employeeId;
+          ruleTitle = r.ruleTitle;
+          return {
+            ...r,
+            status: 'cancelled',
+            isCancelled: true,
+            cancelledAt: new Date().toISOString(),
+            objection: {
+              ...(r.objection || {}),
+              status: 'approved',
+              resolvedAt: new Date().toISOString()
+            }
+          };
+        }
+        return r;
+      });
+
+      const updatedAdjustments = (state.adjustments || []).filter((a) => {
+        if (a.id === reqId || a.id === `adj_${reqId}` || a.id === `adj_penalty_${reqId}`) return false;
+        if (empId && String(a.employeeId) === String(empId) && (a.type === 'penalty' || a.type === 'deduction') && (a.reason === ruleTitle || a.details === ruleTitle)) return false;
+        return true;
+      });
+
+      const updatedState = { ...state, requests: updatedRequests, adjustments: updatedAdjustments };
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      if (previewModalReq?.id === reqId) {
+        setPreviewModalReq(prev => ({ ...prev, status: 'cancelled', isCancelled: true, objection: { ...prev.objection, status: 'approved' } }));
       }
-      return r;
-    });
+      showToast?.('✅ تم قبول اعتراض الموظف وإلغاء الجزاء والخصم المالي تلقائياً');
+    };
 
-    const updatedAdjustments = (state.adjustments || []).filter((a) => {
-      if (a.id === reqId || a.id === `adj_${reqId}` || a.id === `adj_penalty_${reqId}`) return false;
-      if (empId && String(a.employeeId) === String(empId) && (a.type === 'penalty' || a.type === 'deduction') && (a.reason === ruleTitle || a.details === ruleTitle)) return false;
-      return true;
-    });
-
-    const updatedState = { ...state, requests: updatedRequests, adjustments: updatedAdjustments };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    if (previewModalReq?.id === reqId) {
-      setPreviewModalReq(prev => ({ ...prev, status: 'cancelled', isCancelled: true, objection: { ...prev.objection, status: 'approved' } }));
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockDirectBonusDeduction',
+        actionTitle: 'قبول اعتراض وإلغاء جزاء مالي',
+        actionDetails: 'إلغاء الخصم المالي للجزاء من راتب الموظف',
+        onExecute: performApproveObjection
+      });
+    } else {
+      await performApproveObjection();
     }
-    showToast?.('✅ تم قبول اعتراض الموظف وإلغاء الجزاء والخصم المالي تلقائياً');
   };
 
   const handleRejectPenaltyObjection = async (reqId, reply = '') => {
@@ -754,18 +793,31 @@ export default function RequestsModule({
     );
     if (!isConfirmed) return;
 
-    const allDeletedIds = currentReqs.map((r) => String(r.id)).filter(Boolean);
-    const updatedDeleted = Array.from(new Set([...(state._deletedIds || []), ...allDeletedIds]));
+    const performClearAllRequests = async () => {
+      const allDeletedIds = currentReqs.map((r) => String(r.id)).filter(Boolean);
+      const updatedDeleted = Array.from(new Set([...(state._deletedIds || []), ...allDeletedIds]));
 
-    const updatedState = {
-      ...state,
-      requests: [],
-      _deletedIds: updatedDeleted
+      const updatedState = {
+        ...state,
+        requests: [],
+        _deletedIds: updatedDeleted
+      };
+
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      showToast?.('🗑️ تم تفريغ وحذف سجل الطلبات العام بالكامل من النظام!');
     };
 
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    showToast?.('🗑️ تم تفريغ وحذف سجل الطلبات العام بالكامل من النظام!');
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockFactoryReset',
+        actionTitle: 'مسح وحذف سجل الطلبات العام نهائياً',
+        actionDetails: `إجمالي الطلبات: ${currentReqs.length} طلب`,
+        onExecute: performClearAllRequests
+      });
+    } else {
+      await performClearAllRequests();
+    }
   };
 
   return (

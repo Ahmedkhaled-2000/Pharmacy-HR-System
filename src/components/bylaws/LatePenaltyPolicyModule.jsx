@@ -21,7 +21,8 @@ export default function LatePenaltyPolicyModule({
   filterFn = null,
   monthPicker = null,
   customFrom = '',
-  customTo = ''
+  customTo = '',
+  executeWithOwnerGuard
 }) {
   const isAdmin = userRole === 'admin';
   const isBranchManager = userRole === 'branch';
@@ -250,93 +251,119 @@ export default function LatePenaltyPolicyModule({
     const emp = employees.find((e) => e.id === selectedIncidentForEdit.employeeId);
     const penaltyAmt = computeLatenessFinancialAmount(overrideDeductionMinutes, emp, selectedIncidentForEdit.branchId);
 
-    const updatedIncidents = (state.lateIncidents || []).map((inc) => {
-      if (inc.id === targetId) {
-        return {
-          ...inc,
-          actionType: overrideAction,
-          actionLabel: overrideAction === 'grace' ? 'سماح (استثناء إداري)' : `خصم ${overrideDeductionMinutes} دقيقة`,
-          deductionMinutes: parseFloat(overrideDeductionMinutes) || 0,
-          deductionHours: Math.round(((parseFloat(overrideDeductionMinutes) || 0) / 60) * 100) / 100,
-          penaltyAmount: penaltyAmt,
-          status: overrideStatus,
-          overrideReason: overrideReason.trim(),
-          modifiedBy: {
-            userId: currentEmpId || 'admin',
-            userName: isAdmin ? 'الإدارة العليا' : (isBranchManager ? 'مدير الفرع' : 'المستخدم'),
-            role: userRole
-          },
-          modifiedAt: new Date().toISOString()
-        };
-      }
-      return inc;
-    });
+    const performSaveOverride = async () => {
+      const updatedIncidents = (state.lateIncidents || []).map((inc) => {
+        if (inc.id === targetId) {
+          return {
+            ...inc,
+            actionType: overrideAction,
+            actionLabel: overrideAction === 'grace' ? 'سماح (استثناء إداري)' : `خصم ${overrideDeductionMinutes} دقيقة`,
+            deductionMinutes: parseFloat(overrideDeductionMinutes) || 0,
+            deductionHours: Math.round(((parseFloat(overrideDeductionMinutes) || 0) / 60) * 100) / 100,
+            penaltyAmount: penaltyAmt,
+            status: overrideStatus,
+            overrideReason: overrideReason.trim(),
+            modifiedBy: {
+              userId: currentEmpId || 'admin',
+              userName: isAdmin ? 'الإدارة العليا' : (isBranchManager ? 'مدير الفرع' : 'المستخدم'),
+              role: userRole
+            },
+            modifiedAt: new Date().toISOString()
+          };
+        }
+        return inc;
+      });
 
-    // Also update associated request in state.requests
-    const updatedRequests = (state.requests || []).map((r) => {
-      if (r.id === `req_${targetId}`) {
-        return {
-          ...r,
-          impactVal: parseFloat(overrideDeductionMinutes) || 0,
-          deductionMinutes: parseFloat(overrideDeductionMinutes) || 0,
-          amount: penaltyAmt,
-          status: overrideStatus === 'cancelled' ? 'cancelled' : 'approved',
-          adminApproved: overrideStatus !== 'cancelled',
-          reason: `${r.reason} [تعديل إداري: ${overrideReason.trim()}]`
-        };
-      }
-      return r;
-    });
-
-    const updatedState = {
-      ...state,
-      lateIncidents: updatedIncidents,
-      requests: updatedRequests
-    };
-
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-
-    setSelectedIncidentForEdit(null);
-    showToast?.('✅ تم حفظ التعديل والاستثناء اللائحي بنجاح');
-  };
-
-  // Handler: Save Policy Configuration
-  const handleSavePolicy = async () => {
-    try {
-      let updatedRequests = [...(state.requests || [])];
-      const allNewIncidents = [];
-
-      employees.forEach((emp) => {
-        const res = recalculateEmployeeCycleLateness({
-          employeeId: emp.id,
-          cycleFilterFn: filterFn,
-          state: { ...state, latePenaltyPolicy: policyDraft },
-          payrollCycleId: monthPicker || 'current'
-        });
-        allNewIncidents.push(...res.incidents);
-        updatedRequests = res.updatedRequests;
+      // Also update associated request in state.requests
+      const updatedRequests = (state.requests || []).map((r) => {
+        if (r.id === `req_${targetId}`) {
+          return {
+            ...r,
+            impactVal: parseFloat(overrideDeductionMinutes) || 0,
+            deductionMinutes: parseFloat(overrideDeductionMinutes) || 0,
+            amount: penaltyAmt,
+            status: overrideStatus === 'cancelled' ? 'cancelled' : 'approved',
+            adminApproved: overrideStatus !== 'cancelled',
+            reason: `${r.reason} [تعديل إداري: ${overrideReason.trim()}]`
+          };
+        }
+        return r;
       });
 
       const updatedState = {
         ...state,
-        latePenaltyPolicy: policyDraft,
-        bylaws: {
-          ...(state.bylaws || {}),
-          latePenaltyPolicy: policyDraft
-        },
-        lateIncidents: allNewIncidents,
+        lateIncidents: updatedIncidents,
         requests: updatedRequests
       };
 
       if (setState) setState(updatedState);
       if (saveState) await saveState(updatedState);
 
-      setSubTab('review');
-      showToast?.('✅ تم حفظ التعديلات اللائحية وإعادة احتساب وتطبيق التأخيرات فورياً!');
-    } catch (err) {
-      console.error('Error saving policy:', err);
-      showToast?.('❌ حدث خطأ أثناء حفظ السياسة');
+      setSelectedIncidentForEdit(null);
+      showToast?.('✅ تم حفظ التعديل والاستثناء اللائحي بنجاح');
+    };
+
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockDirectBonusDeduction',
+        actionTitle: 'حفظ استثناء وتعديل جزاء تأخير',
+        actionDetails: `الموظف: ${emp?.name || ''} - الإجراء: ${overrideAction}`,
+        onExecute: performSaveOverride
+      });
+    } else {
+      await performSaveOverride();
+    }
+  };
+
+  // Handler: Save Policy Configuration
+  const handleSavePolicy = async () => {
+    const performSavePolicy = async () => {
+      try {
+        let updatedRequests = [...(state.requests || [])];
+        const allNewIncidents = [];
+
+        employees.forEach((emp) => {
+          const res = recalculateEmployeeCycleLateness({
+            employeeId: emp.id,
+            cycleFilterFn: filterFn,
+            state: { ...state, latePenaltyPolicy: policyDraft },
+            payrollCycleId: monthPicker || 'current'
+          });
+          allNewIncidents.push(...res.incidents);
+          updatedRequests = res.updatedRequests;
+        });
+
+        const updatedState = {
+          ...state,
+          latePenaltyPolicy: policyDraft,
+          bylaws: {
+            ...(state.bylaws || {}),
+            latePenaltyPolicy: policyDraft
+          },
+          lateIncidents: allNewIncidents,
+          requests: updatedRequests
+        };
+
+        if (setState) setState(updatedState);
+        if (saveState) await saveState(updatedState);
+
+        setSubTab('review');
+        showToast?.('✅ تم حفظ التعديلات اللائحية وإعادة احتساب وتطبيق التأخيرات فورياً!');
+      } catch (err) {
+        console.error('Error saving policy:', err);
+        showToast?.('❌ حدث خطأ أثناء حفظ السياسة');
+      }
+    };
+
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockEditSystemPermissions',
+        actionTitle: 'تعديل وحفظ لائحة وسياسة جزاءات التأخير',
+        actionDetails: 'تحديث قواعد احتساب التأخير وتطبيقها على الموظفين',
+        onExecute: performSavePolicy
+      });
+    } else {
+      await performSavePolicy();
     }
   };
 
@@ -344,41 +371,54 @@ export default function LatePenaltyPolicyModule({
   const handleRestoreDefaultPolicy = async () => {
     if (!window.confirm('هل ترغب بالتأكيد في استعادة اللائحة القياسية الافتراضية لجزاءات التأخير؟')) return;
 
-    try {
-      setPolicyDraft(JSON.parse(JSON.stringify(DEFAULT_LATE_PENALTY_POLICY)));
-      let updatedRequests = [...(state.requests || [])];
-      const allNewIncidents = [];
+    const performRestorePolicy = async () => {
+      try {
+        setPolicyDraft(JSON.parse(JSON.stringify(DEFAULT_LATE_PENALTY_POLICY)));
+        let updatedRequests = [...(state.requests || [])];
+        const allNewIncidents = [];
 
-      employees.forEach((emp) => {
-        const res = recalculateEmployeeCycleLateness({
-          employeeId: emp.id,
-          cycleFilterFn: filterFn,
-          state: { ...state, latePenaltyPolicy: DEFAULT_LATE_PENALTY_POLICY },
-          payrollCycleId: monthPicker || 'current'
+        employees.forEach((emp) => {
+          const res = recalculateEmployeeCycleLateness({
+            employeeId: emp.id,
+            cycleFilterFn: filterFn,
+            state: { ...state, latePenaltyPolicy: DEFAULT_LATE_PENALTY_POLICY },
+            payrollCycleId: monthPicker || 'current'
+          });
+          allNewIncidents.push(...res.incidents);
+          updatedRequests = res.updatedRequests;
         });
-        allNewIncidents.push(...res.incidents);
-        updatedRequests = res.updatedRequests;
+
+        const updatedState = {
+          ...state,
+          latePenaltyPolicy: DEFAULT_LATE_PENALTY_POLICY,
+          bylaws: {
+            ...(state.bylaws || {}),
+            latePenaltyPolicy: DEFAULT_LATE_PENALTY_POLICY
+          },
+          lateIncidents: allNewIncidents,
+          requests: updatedRequests
+        };
+
+        if (setState) setState(updatedState);
+        if (saveState) await saveState(updatedState);
+
+        setSubTab('review');
+        showToast?.('🔄 تم استعادة سياسة جزاءات التأخير القياسية وإعادة احتساب السجلات بنجاح');
+      } catch (err) {
+        console.error('Error restoring default policy:', err);
+        showToast?.('❌ حدث خطأ أثناء استعادة اللائحة');
+      }
+    };
+
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockEditSystemPermissions',
+        actionTitle: 'استعادة سياسة جزاءات التأخير الافتراضية',
+        actionDetails: 'إعادة تعيين سياسة التأخير القياسية',
+        onExecute: performRestorePolicy
       });
-
-      const updatedState = {
-        ...state,
-        latePenaltyPolicy: DEFAULT_LATE_PENALTY_POLICY,
-        bylaws: {
-          ...(state.bylaws || {}),
-          latePenaltyPolicy: DEFAULT_LATE_PENALTY_POLICY
-        },
-        lateIncidents: allNewIncidents,
-        requests: updatedRequests
-      };
-
-      if (setState) setState(updatedState);
-      if (saveState) await saveState(updatedState);
-
-      setSubTab('review');
-      showToast?.('🔄 تم استعادة سياسة جزاءات التأخير القياسية وإعادة احتساب السجلات بنجاح');
-    } catch (err) {
-      console.error('Error restoring default policy:', err);
-      showToast?.('❌ حدث خطأ أثناء استعادة اللائحة');
+    } else {
+      await performRestorePolicy();
     }
   };
 

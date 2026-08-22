@@ -3,7 +3,7 @@ import FaceRegistrationModal from './FaceRegistrationModal';
 import FaceTestModal from './FaceTestModal';
 import { saveFaceDescriptor, deleteFaceDescriptor, saveHandDescriptor, deleteHandDescriptor } from '../../utils/faceStorage';
 
-export default function ElectronicAttendanceAdmin({ state, setState, saveState, showToast }) {
+export default function ElectronicAttendanceAdmin({ state, setState, saveState, showToast, executeWithOwnerGuard }) {
   const [selectedEmp, setSelectedEmp] = useState(null);
   const [modalMode, setModalMode] = useState(null); // 'register' | 'test' | null
 
@@ -31,36 +31,50 @@ export default function ElectronicAttendanceAdmin({ state, setState, saveState, 
 
   const deletePrint = async (empId, type) => {
     const isHand = type === 'hand';
+    const emp = employees.find(e => e.id === empId);
     if (!window.confirm(`هل أنت متأكد من حذف بصمة ${isHand ? 'اليد' : 'الوجه'} لهذا الموظف؟`)) return;
     
-    // Delete from Storage / DB
-    if (isHand) {
-      await deleteHandDescriptor(empId);
-    } else {
-      await deleteFaceDescriptor(empId);
-    }
-
-    const updatedEmployees = employees.map(emp => {
-      if (emp.id === empId) {
-        if (isHand) {
-          const { hand_descriptor, has_hand_descriptor, ...rest } = emp;
-          return rest;
-        } else {
-          const { face_descriptor, has_face_descriptor, ...rest } = emp;
-          return rest;
-        }
+    const performDelete = async () => {
+      // Delete from Storage / DB
+      if (isHand) {
+        await deleteHandDescriptor(empId);
+      } else {
+        await deleteFaceDescriptor(empId);
       }
-      return emp;
-    });
 
-    const updatedState = { ...state, employees: updatedEmployees };
-    setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    
-    if (showToast) {
-      showToast(`🗑️ تم حذف بصمة ${isHand ? 'اليد' : 'الوجه'} بنجاح.`);
+      const updatedEmployees = employees.map(emp => {
+        if (emp.id === empId) {
+          if (isHand) {
+            const { hand_descriptor, has_hand_descriptor, ...rest } = emp;
+            return rest;
+          } else {
+            const { face_descriptor, has_face_descriptor, ...rest } = emp;
+            return rest;
+          }
+        }
+        return emp;
+      });
+
+      const updatedState = { ...state, employees: updatedEmployees };
+      setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      
+      if (showToast) {
+        showToast(`🗑️ تم حذف بصمة ${isHand ? 'اليد' : 'الوجه'} بنجاح.`);
+      } else {
+        alert(`تم حذف بصمة ${isHand ? 'اليد' : 'الوجه'} بنجاح.`);
+      }
+    };
+
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockSuspendBiometric',
+        actionTitle: `حذف بصمة ${isHand ? 'اليد' : 'الوجه'} للموظف (${emp?.name || empId})`,
+        actionDetails: 'حذف بيانات البصمة المحفوظة للموظف نهائياً',
+        onExecute: performDelete
+      });
     } else {
-      alert(`تم حذف بصمة ${isHand ? 'اليد' : 'الوجه'} بنجاح.`);
+      await performDelete();
     }
   };
 
@@ -128,55 +142,81 @@ export default function ElectronicAttendanceAdmin({ state, setState, saveState, 
     if (!suspendingEmp) return;
     const reason = suspensionReasonInput.trim() || 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق';
 
-    const updatedEmployees = employees.map(emp => {
-      if (emp.id === suspendingEmp.id) {
-        return {
-          ...emp,
-          biometricSuspended: true,
-          suspensionReason: reason,
-          suspendedAt: new Date().toISOString(),
-          suspendedBy: 'الإدارة العليا'
-        };
+    const performSuspend = async () => {
+      const updatedEmployees = employees.map(emp => {
+        if (emp.id === suspendingEmp.id) {
+          return {
+            ...emp,
+            biometricSuspended: true,
+            suspensionReason: reason,
+            suspendedAt: new Date().toISOString(),
+            suspendedBy: 'الإدارة العليا'
+          };
+        }
+        return emp;
+      });
+
+      const updatedState = { ...state, employees: updatedEmployees };
+      setState(updatedState);
+      if (saveState) await saveState(updatedState);
+
+      if (showToast) {
+        showToast(`⛔ تم إيقاف بصمة الموظف (${suspendingEmp.name}) مؤقتاً بنجاح.`);
       }
-      return emp;
-    });
+      setSuspendingEmp(null);
+      setSuspensionReasonInput('');
+    };
 
-    const updatedState = { ...state, employees: updatedEmployees };
-    setState(updatedState);
-    if (saveState) await saveState(updatedState);
-
-    if (showToast) {
-      showToast(`⛔ تم إيقاف بصمة الموظف (${suspendingEmp.name}) مؤقتاً بنجاح.`);
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockSuspendBiometric',
+        actionTitle: `إيقاف بصمة الموظف (${suspendingEmp.name}) مؤقتاً`,
+        actionDetails: `السبب: ${reason}`,
+        onExecute: performSuspend
+      });
+    } else {
+      await performSuspend();
     }
-    setSuspendingEmp(null);
-    setSuspensionReasonInput('');
   };
 
   // Reactivate Biometric Action
   const handleConfirmReactivate = async () => {
     if (!reactivatingEmp) return;
 
-    const updatedEmployees = employees.map(emp => {
-      if (emp.id === reactivatingEmp.id) {
-        const { biometricSuspended, suspensionReason, suspendedAt, suspendedBy, punchDisabled, ...rest } = emp;
-        return {
-          ...rest,
-          biometricSuspended: false,
-          punchDisabled: false,
-          reactivatedAt: new Date().toISOString()
-        };
+    const performReactivate = async () => {
+      const updatedEmployees = employees.map(emp => {
+        if (emp.id === reactivatingEmp.id) {
+          const { biometricSuspended, suspensionReason, suspendedAt, suspendedBy, punchDisabled, ...rest } = emp;
+          return {
+            ...rest,
+            biometricSuspended: false,
+            punchDisabled: false,
+            reactivatedAt: new Date().toISOString()
+          };
+        }
+        return emp;
+      });
+
+      const updatedState = { ...state, employees: updatedEmployees };
+      setState(updatedState);
+      if (saveState) await saveState(updatedState);
+
+      if (showToast) {
+        showToast(`🟢 تم إعادة تفعيل بصمة وصلاحية حضور الموظف (${reactivatingEmp.name}) بنجاح!`);
       }
-      return emp;
-    });
+      setReactivatingEmp(null);
+    };
 
-    const updatedState = { ...state, employees: updatedEmployees };
-    setState(updatedState);
-    if (saveState) await saveState(updatedState);
-
-    if (showToast) {
-      showToast(`🟢 تم إعادة تفعيل بصمة وصلاحية حضور الموظف (${reactivatingEmp.name}) بنجاح!`);
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockSuspendBiometric',
+        actionTitle: `إعادة تفعيل بصمة الموظف (${reactivatingEmp.name})`,
+        actionDetails: 'إعادة تفعيل صلاحية تسجيل البصمة والحضور',
+        onExecute: performReactivate
+      });
+    } else {
+      await performReactivate();
     }
-    setReactivatingEmp(null);
   };
 
   // Filtered Employees List

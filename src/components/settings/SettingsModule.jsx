@@ -37,7 +37,8 @@ export default function SettingsModule({
   showToast,
   authRole = 'admin',
   activeSubTab = 'general',
-  setActiveSubTab
+  setActiveSubTab,
+  executeWithOwnerGuard
 }) {
   const [activeTab, setActiveTab] = useState(activeSubTab || 'general'); // 'general' | 'jobs' | 'permissions' | 'rules' | 'gmail' | 'ip' | 'backup' | 'owner'
 
@@ -69,8 +70,8 @@ export default function SettingsModule({
   const [orgName, setOrgName] = useState(orgSettings.orgName || 'مجموعة الصيدليات الطبية');
   const [gmName, setGmName] = useState(orgSettings.generalManagerName || 'د. أحمد خالد - المدير العام للصيدليات');
   const [logoUrl, setLogoUrl] = useState(orgSettings.logoUrl || '');
-  const [adminUser, setAdminUser] = useState(orgSettings.adminUser || 'admin');
-  const [adminPass, setAdminPass] = useState(orgSettings.adminPass || 'admin123');
+  const [adminUser, setAdminUser] = useState(orgSettings.adminUser || orgSettings.adminUsername || 'admin');
+  const [adminPass, setAdminPass] = useState(orgSettings.adminPass || orgSettings.adminPassword || 'admin123');
   const [biometricType, setBiometricType] = useState(orgSettings.biometricType || 'face');
 
   // ── Owner Role & Modification Locks State ──
@@ -144,26 +145,24 @@ export default function SettingsModule({
       return;
     }
     if (ownerPasswordInput !== ownerConfirmPasswordInput) {
-      showToast?.('❌ كلمة المرور غير متطابقة مع تأكيد كلمة المرور');
+      showToast?.('⚠️ كلمة المرور وتأكيد كلمة المرور غير متطابقين');
       return;
     }
 
     const updatedOrgSettings = {
       ...(state.orgSettings || {}),
-      ownerUsername: ownerUsernameInput.trim(),
+      ownerUsername: ownerUsernameInput.trim().toLowerCase(),
       ownerPassword: ownerPasswordInput.trim()
     };
     const updatedState = { ...state, orgSettings: updatedOrgSettings };
     setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.('👑 تم حفظ وتحديث بيانات دخول المالك بنجاح!');
+    showToast?.('👑 تم حفظ وتحديث بيانات دخول المالك بنجاح');
   };
 
   const handleToggleOwnerLock = async (lockKey) => {
-    const updatedLocks = {
-      ...ownerLocks,
-      [lockKey]: !ownerLocks[lockKey]
-    };
+    const newVal = !ownerLocks[lockKey];
+    const updatedLocks = { ...ownerLocks, [lockKey]: newVal };
     setOwnerLocks(updatedLocks);
 
     const updatedOrgSettings = {
@@ -173,7 +172,7 @@ export default function SettingsModule({
     const updatedState = { ...state, orgSettings: updatedOrgSettings };
     setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.('✅ تم تحديث مصفوفة أقفال التعديلات فورياً');
+    showToast?.(newVal ? `🔒 تم تفعيل القفل: يتطلب إذن المالك لتعديل هذا الإجراء` : `🔓 تم تعطيل القفل: متاح للادارة العليا التعديل مباشرة`);
   };
 
   const handleSetAllLocks = async (val) => {
@@ -182,6 +181,7 @@ export default function SettingsModule({
       updatedLocks[k] = val;
     });
     setOwnerLocks(updatedLocks);
+
     const updatedOrgSettings = {
       ...(state.orgSettings || {}),
       ownerModificationLocks: updatedLocks
@@ -189,7 +189,7 @@ export default function SettingsModule({
     const updatedState = { ...state, orgSettings: updatedOrgSettings };
     setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.(val ? '🔒 تم قفل كافة تعديلات النظام على الإدارة العليا' : '🔓 تم فتح وإلغاء قفل كافة التعديلات');
+    showToast?.(val ? '🔒 تم قفل وتأمين جميع صلاحيات وإجراءات النظام بالكامل لصالح المالك' : '🔓 تم فتح وتعطيل كافة الأقفال للإدارة العليا');
   };
 
   const handleSetRecommendedLocks = async () => {
@@ -387,28 +387,64 @@ export default function SettingsModule({
 
   const handleSaveGeneral = async (e) => {
     e.preventDefault();
-    const updatedSettings = {
-      ...orgSettings,
-      orgName: orgName.trim(),
-      generalManagerName: gmName.trim(),
-      logoUrl,
-      adminUser: adminUser.trim(),
-      adminPass: adminPass.trim(),
-      biometricType,
-      loanRequestStartDay: parseInt(loanRequestStartDay, 10) || 1,
-      loanRequestEndDay: parseInt(loanRequestEndDay, 10) || 10,
-      maxMonthlyLoanSalaryPercent: parseFloat(maxMonthlyLoanSalaryPercent) || 50,
-      approvedIPs, // keeping this for legacy components
-      updatedAt: Date.now()
+
+    const isAdminCredsChanged =
+      adminUser.trim() !== (orgSettings.adminUser || orgSettings.adminUsername || 'admin') ||
+      adminPass.trim() !== (orgSettings.adminPass || orgSettings.adminPassword || 'admin123');
+
+    const isCutoffRulesChanged =
+      (parseInt(loanRequestStartDay, 10) || 1) !== (orgSettings.loanRequestStartDay !== undefined ? orgSettings.loanRequestStartDay : 1) ||
+      (parseInt(loanRequestEndDay, 10) || 10) !== (orgSettings.loanRequestEndDay !== undefined ? orgSettings.loanRequestEndDay : 10) ||
+      (parseFloat(maxMonthlyLoanSalaryPercent) || 50) !== (orgSettings.maxMonthlyLoanSalaryPercent !== undefined ? orgSettings.maxMonthlyLoanSalaryPercent : 50);
+
+    const performSaveGeneral = async () => {
+      const updatedSettings = {
+        ...orgSettings,
+        orgName: orgName.trim(),
+        generalManagerName: gmName.trim(),
+        logoUrl,
+        adminUser: adminUser.trim(),
+        adminPass: adminPass.trim(),
+        adminUsername: adminUser.trim(),
+        adminPassword: adminPass.trim(),
+        biometricType,
+        loanRequestStartDay: parseInt(loanRequestStartDay, 10) || 1,
+        loanRequestEndDay: parseInt(loanRequestEndDay, 10) || 10,
+        maxMonthlyLoanSalaryPercent: parseFloat(maxMonthlyLoanSalaryPercent) || 50,
+        approvedIPs, // keeping this for legacy components
+        updatedAt: Date.now()
+      };
+      const updatedIpRestrictions = {
+        enabled: ipEnabled,
+        allowedIps: approvedIPs.map(ip => ({ label: `راوتر`, ip }))
+      };
+      const updatedState = { ...state, orgSettings: updatedSettings, ipRestrictions: updatedIpRestrictions };
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      showToast?.('✅ تم حفظ إعدادات المؤسسة وضوابط السلف وحماية النظام بنجاح');
     };
-    const updatedIpRestrictions = {
-      enabled: ipEnabled,
-      allowedIps: approvedIPs.map(ip => ({ label: `راوتر`, ip }))
-    };
-    const updatedState = { ...state, orgSettings: updatedSettings, ipRestrictions: updatedIpRestrictions };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    showToast?.('✅ تم حفظ إعدادات المؤسسة وضوابط السلف وحماية النظام بنجاح');
+
+    if (isAdminCredsChanged && state.orgSettings?.ownerModificationLocks?.lockChangeAdminCredentials && authRole !== 'owner') {
+      executeWithOwnerGuard?.({
+        lockKey: 'lockChangeAdminCredentials',
+        actionTitle: 'تغيير بيانات دخول المدير العام (Admin Credentials)',
+        actionDetails: `المستخدم الجديد: ${adminUser.trim()}`,
+        onExecute: performSaveGeneral
+      });
+      return;
+    }
+
+    if (isCutoffRulesChanged && state.orgSettings?.ownerModificationLocks?.lockEditCutoffRules && authRole !== 'owner') {
+      executeWithOwnerGuard?.({
+        lockKey: 'lockEditCutoffRules',
+        actionTitle: 'تعديل فترات وقيود دورة السلف والرواتب',
+        actionDetails: `نافذة التقديم: من يوم ${loanRequestStartDay} إلى ${loanRequestEndDay}`,
+        onExecute: performSaveGeneral
+      });
+      return;
+    }
+
+    await performSaveGeneral();
   };
 
   const handleToggleRule = async (ruleId, field) => {
@@ -594,150 +630,189 @@ export default function SettingsModule({
       expandedPerms[actionName] = isChecked;
     });
 
-    const nowTime = Date.now();
-    let updatedOrgSettings = { ...(state.orgSettings || orgSettings), updatedAt: nowTime };
-    let updatedEmployees = [...(state.employees || [])];
+    const performSavePermissions = async () => {
+      const nowTime = Date.now();
+      let updatedOrgSettings = { ...(state.orgSettings || orgSettings), updatedAt: nowTime };
+      let updatedEmployees = [...(state.employees || [])];
 
-    if (selectedEmpForPerm === 'all') {
-      updatedOrgSettings = {
-        ...updatedOrgSettings,
-        permissions: { ...expandedPerms },
-        empPermissions: {}
-      };
-      updatedEmployees = updatedEmployees.map((e) => ({
-        ...e,
-        permissions: { ...expandedPerms },
-        updatedAt: nowTime
-      }));
-      showToast?.('💾 تم حفظ وتطبيق الصلاحيات بنجاح على جميع الموظفين بالنظام');
+      if (selectedEmpForPerm === 'all') {
+        updatedOrgSettings = {
+          ...updatedOrgSettings,
+          permissions: { ...expandedPerms },
+          empPermissions: {}
+        };
+        updatedEmployees = updatedEmployees.map((e) => ({
+          ...e,
+          permissions: { ...expandedPerms },
+          updatedAt: nowTime
+        }));
+        showToast?.('💾 تم حفظ وتطبيق الصلاحيات بنجاح على جميع الموظفين بالنظام');
+      } else {
+        const targetEmp = updatedEmployees.find((e) => String(e.id) === String(selectedEmpForPerm) || String(e.code) === String(selectedEmpForPerm));
+        const targetId = targetEmp ? String(targetEmp.id) : String(selectedEmpForPerm);
+        const targetCode = targetEmp ? String(targetEmp.code) : String(selectedEmpForPerm);
+
+        const updatedEmpPerms = {
+          ...(updatedOrgSettings.empPermissions || {}),
+          [targetId]: { ...expandedPerms },
+          [targetCode]: { ...expandedPerms }
+        };
+        updatedOrgSettings = {
+          ...updatedOrgSettings,
+          empPermissions: updatedEmpPerms
+        };
+        updatedEmployees = updatedEmployees.map((e) =>
+          (String(e.id) === targetId || String(e.code) === targetCode) ? { ...e, permissions: { ...expandedPerms }, updatedAt: nowTime } : e
+        );
+        showToast?.(`💾 تم حفظ وتطبيق الصلاحيات للموظف (${targetEmp?.name || selectedEmpForPerm}) بنجاح`);
+      }
+
+      const updatedState = { ...state, orgSettings: updatedOrgSettings, employees: updatedEmployees };
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+    };
+
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockEditSystemPermissions',
+        actionTitle: 'حفظ وتحديث مصفوفة الصلاحيات',
+        actionDetails: selectedEmpForPerm === 'all' ? 'تعديل الصلاحيات العامة لجميع الموظفين' : `تعديل صلاحيات الموظف المحدد`,
+        onExecute: performSavePermissions
+      });
     } else {
-      const targetEmp = updatedEmployees.find((e) => String(e.id) === String(selectedEmpForPerm) || String(e.code) === String(selectedEmpForPerm));
-      const targetId = targetEmp ? String(targetEmp.id) : String(selectedEmpForPerm);
-      const targetCode = targetEmp ? String(targetEmp.code) : String(selectedEmpForPerm);
-
-      const updatedEmpPerms = {
-        ...(updatedOrgSettings.empPermissions || {}),
-        [targetId]: { ...expandedPerms },
-        [targetCode]: { ...expandedPerms }
-      };
-      updatedOrgSettings = {
-        ...updatedOrgSettings,
-        empPermissions: updatedEmpPerms
-      };
-      updatedEmployees = updatedEmployees.map((e) =>
-        (String(e.id) === targetId || String(e.code) === targetCode) ? { ...e, permissions: { ...expandedPerms }, updatedAt: nowTime } : e
-      );
-      showToast?.(`💾 تم حفظ وتطبيق الصلاحيات للموظف (${targetEmp?.name || selectedEmpForPerm}) بنجاح`);
+      await performSavePermissions();
     }
-
-    const updatedState = { ...state, orgSettings: updatedOrgSettings, employees: updatedEmployees };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
   };
 
   const handleRevokeAllPermissions = async () => {
     if (!window.confirm('🚨 هل أنت متأكد من رغبتك في إيقاف وتعطيل جميع الصلاحيات لنطاق الموظفين المحدد؟')) return;
 
-    const allFalse = {};
-    SYSTEM_PERMISSION_CATALOG.forEach((p) => {
-      let actionName = p.key.startsWith('can') ? p.key.slice(3) : p.key;
-      allFalse['can' + actionName] = false;
-      allFalse['allow' + actionName] = false;
-      allFalse[p.key] = false;
-      allFalse[actionName] = false;
-    });
-    setPermState(allFalse);
+    const performRevoke = async () => {
+      const allFalse = {};
+      SYSTEM_PERMISSION_CATALOG.forEach((p) => {
+        let actionName = p.key.startsWith('can') ? p.key.slice(3) : p.key;
+        allFalse['can' + actionName] = false;
+        allFalse['allow' + actionName] = false;
+        allFalse[p.key] = false;
+        allFalse[actionName] = false;
+      });
+      setPermState(allFalse);
 
-    let updatedOrgSettings = { ...(state.orgSettings || orgSettings) };
-    let updatedEmployees = [...(state.employees || [])];
+      let updatedOrgSettings = { ...(state.orgSettings || orgSettings) };
+      let updatedEmployees = [...(state.employees || [])];
 
-    if (selectedEmpForPerm === 'all') {
-      updatedOrgSettings = {
-        ...updatedOrgSettings,
-        permissions: { ...allFalse },
-        empPermissions: {}
-      };
-      updatedEmployees = updatedEmployees.map((e) => ({
-        ...e,
-        permissions: { ...allFalse }
-      }));
-      showToast?.('🚫 تم إيقاف وتعطيل جميع الصلاحيات لجميع الموظفين بالنظام');
+      if (selectedEmpForPerm === 'all') {
+        updatedOrgSettings = {
+          ...updatedOrgSettings,
+          permissions: { ...allFalse },
+          empPermissions: {}
+        };
+        updatedEmployees = updatedEmployees.map((e) => ({
+          ...e,
+          permissions: { ...allFalse }
+        }));
+        showToast?.('🚫 تم إيقاف وتعطيل جميع الصلاحيات لجميع الموظفين بالنظام');
+      } else {
+        const targetEmp = updatedEmployees.find((e) => String(e.id) === String(selectedEmpForPerm) || String(e.code) === String(selectedEmpForPerm));
+        const targetId = targetEmp ? String(targetEmp.id) : String(selectedEmpForPerm);
+        const targetCode = targetEmp ? String(targetEmp.code) : String(selectedEmpForPerm);
+
+        const updatedEmpPerms = {
+          ...(updatedOrgSettings.empPermissions || {}),
+          [targetId]: { ...allFalse },
+          [targetCode]: { ...allFalse }
+        };
+        updatedOrgSettings = {
+          ...updatedOrgSettings,
+          empPermissions: updatedEmpPerms
+        };
+        updatedEmployees = updatedEmployees.map((e) =>
+          (String(e.id) === targetId || String(e.code) === targetCode) ? { ...e, permissions: { ...allFalse } } : e
+        );
+        showToast?.(`🚫 تم إيقاف وتعطيل جميع الصلاحيات للموظف (${targetEmp?.name || selectedEmpForPerm}) بنجاح`);
+      }
+
+      const updatedState = { ...state, orgSettings: updatedOrgSettings, employees: updatedEmployees };
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+    };
+
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockEditSystemPermissions',
+        actionTitle: 'تعطيل وإلغاء كافة الصلاحيات',
+        actionDetails: 'إلغاء الصلاحيات للنطاق المحدد',
+        onExecute: performRevoke
+      });
     } else {
-      const targetEmp = updatedEmployees.find((e) => String(e.id) === String(selectedEmpForPerm) || String(e.code) === String(selectedEmpForPerm));
-      const targetId = targetEmp ? String(targetEmp.id) : String(selectedEmpForPerm);
-      const targetCode = targetEmp ? String(targetEmp.code) : String(selectedEmpForPerm);
-
-      const updatedEmpPerms = {
-        ...(updatedOrgSettings.empPermissions || {}),
-        [targetId]: { ...allFalse },
-        [targetCode]: { ...allFalse }
-      };
-      updatedOrgSettings = {
-        ...updatedOrgSettings,
-        empPermissions: updatedEmpPerms
-      };
-      updatedEmployees = updatedEmployees.map((e) =>
-        (String(e.id) === targetId || String(e.code) === targetCode) ? { ...e, permissions: { ...allFalse } } : e
-      );
-      showToast?.(`🚫 تم إيقاف وتعطيل جميع الصلاحيات للموظف (${targetEmp?.name || selectedEmpForPerm}) بنجاح`);
+      await performRevoke();
     }
-
-    const updatedState = { ...state, orgSettings: updatedOrgSettings, employees: updatedEmployees };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
   };
 
   const handleResetDefaultPermissions = async () => {
-    const standardPerms = {};
-    SYSTEM_PERMISSION_CATALOG.forEach((p) => {
-      let actionName = p.key.startsWith('can') ? p.key.slice(3) : p.key;
-      standardPerms['can' + actionName] = p.defaultVal;
-      standardPerms['allow' + actionName] = p.defaultVal;
-      standardPerms[p.key] = p.defaultVal;
-      standardPerms[actionName] = p.defaultVal;
-    });
-    setPermState(standardPerms);
-
-    let updatedOrgSettings = { ...(state.orgSettings || orgSettings) };
-    let updatedEmployees = [...(state.employees || [])];
-
-    if (selectedEmpForPerm === 'all') {
-      updatedOrgSettings = {
-        ...updatedOrgSettings,
-        permissions: { ...standardPerms },
-        empPermissions: {}
-      };
-      updatedEmployees = updatedEmployees.map((e) => {
-        const { permissions, ...rest } = e;
-        return { ...rest, permissions: { ...standardPerms } };
+    const performReset = async () => {
+      const standardPerms = {};
+      SYSTEM_PERMISSION_CATALOG.forEach((p) => {
+        let actionName = p.key.startsWith('can') ? p.key.slice(3) : p.key;
+        standardPerms['can' + actionName] = p.defaultVal;
+        standardPerms['allow' + actionName] = p.defaultVal;
+        standardPerms[p.key] = p.defaultVal;
+        standardPerms[actionName] = p.defaultVal;
       });
-      showToast?.('🔄 تمت استعادة الصلاحيات القياسية لجميع الموظفين');
-    } else {
-      const targetEmp = updatedEmployees.find((e) => String(e.id) === String(selectedEmpForPerm) || String(e.code) === String(selectedEmpForPerm));
-      const targetId = targetEmp ? String(targetEmp.id) : String(selectedEmpForPerm);
-      const targetCode = targetEmp ? String(targetEmp.code) : String(selectedEmpForPerm);
+      setPermState(standardPerms);
 
-      const updatedEmpPerms = { ...(updatedOrgSettings.empPermissions || {}) };
-      delete updatedEmpPerms[targetId];
-      delete updatedEmpPerms[targetCode];
+      let updatedOrgSettings = { ...(state.orgSettings || orgSettings) };
+      let updatedEmployees = [...(state.employees || [])];
 
-      updatedOrgSettings = {
-        ...updatedOrgSettings,
-        empPermissions: updatedEmpPerms
-      };
-      updatedEmployees = updatedEmployees.map((e) => {
-        if (String(e.id) === targetId || String(e.code) === targetCode) {
+      if (selectedEmpForPerm === 'all') {
+        updatedOrgSettings = {
+          ...updatedOrgSettings,
+          permissions: { ...standardPerms },
+          empPermissions: {}
+        };
+        updatedEmployees = updatedEmployees.map((e) => {
           const { permissions, ...rest } = e;
-          return rest;
-        }
-        return e;
-      });
-      showToast?.(`🔄 تمت استعادة الصلاحيات الافتراضية للموظف (${targetEmp?.name || selectedEmpForPerm})`);
-    }
+          return { ...rest, permissions: { ...standardPerms } };
+        });
+        showToast?.('🔄 تمت استعادة الصلاحيات القياسية لجميع الموظفين');
+      } else {
+        const targetEmp = updatedEmployees.find((e) => String(e.id) === String(selectedEmpForPerm) || String(e.code) === String(selectedEmpForPerm));
+        const targetId = targetEmp ? String(targetEmp.id) : String(selectedEmpForPerm);
+        const targetCode = targetEmp ? String(targetEmp.code) : String(selectedEmpForPerm);
 
-    const updatedState = { ...state, orgSettings: updatedOrgSettings, employees: updatedEmployees };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
+        const updatedEmpPerms = { ...(updatedOrgSettings.empPermissions || {}) };
+        delete updatedEmpPerms[targetId];
+        delete updatedEmpPerms[targetCode];
+
+        updatedOrgSettings = {
+          ...updatedOrgSettings,
+          empPermissions: updatedEmpPerms
+        };
+        updatedEmployees = updatedEmployees.map((e) => {
+          if (String(e.id) === targetId || String(e.code) === targetCode) {
+            const { permissions, ...rest } = e;
+            return rest;
+          }
+          return e;
+        });
+        showToast?.(`🔄 تمت استعادة الصلاحيات الافتراضية للموظف (${targetEmp?.name || selectedEmpForPerm})`);
+      }
+
+      const updatedState = { ...state, orgSettings: updatedOrgSettings, employees: updatedEmployees };
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+    };
+
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockEditSystemPermissions',
+        actionTitle: 'استعادة الصلاحيات الافتراضية',
+        actionDetails: 'إعادة ضبط الصلاحيات القياسية للنظام',
+        onExecute: performReset
+      });
+    } else {
+      await performReset();
+    }
   };
 
   const handleAddRule = async () => {
@@ -745,48 +820,88 @@ export default function SettingsModule({
       showToast?.('⚠️ توجد قاعدة معرفة مسبقاً لهذا النوع من الطلبات');
       return;
     }
-    const newRule = {
-      id: String(Date.now()),
-      requestType: newRuleType,
-      typeLabel: newRuleLabel,
-      reqBranch: newRuleReqBranch,
-      reqAdmin: newRuleReqAdmin
+
+    const performAdd = async () => {
+      const newRule = {
+        id: String(Date.now()),
+        requestType: newRuleType,
+        typeLabel: newRuleLabel,
+        reqBranch: newRuleReqBranch,
+        reqAdmin: newRuleReqAdmin
+      };
+      const updated = [...rules, newRule];
+      setRules(updated);
+      setShowAddRuleModal(false);
+      const updatedState = {
+        ...state,
+        approvalRules: updated,
+        _approvalRulesUpdatedAt: new Date().toISOString()
+      };
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      showToast?.('✅ تم إضافة قاعدة موافقة جديدة وتطبيقها بنجاح');
     };
-    const updated = [...rules, newRule];
-    setRules(updated);
-    setShowAddRuleModal(false);
-    const updatedState = {
-      ...state,
-      approvalRules: updated,
-      _approvalRulesUpdatedAt: new Date().toISOString()
-    };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    showToast?.('✅ تم إضافة قاعدة موافقة جديدة وتطبيقها بنجاح');
+
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockEditSystemPermissions',
+        actionTitle: 'إضافة مسار موافقة واعتماد',
+        actionDetails: `نوع الطلب: ${newRuleLabel}`,
+        onExecute: performAdd
+      });
+    } else {
+      await performAdd();
+    }
   };
 
   const handleDeleteRule = async (ruleId) => {
-    const updated = rules.filter(r => r.id !== ruleId);
-    setRules(updated);
-    const updatedState = {
-      ...state,
-      approvalRules: updated,
-      _approvalRulesUpdatedAt: new Date().toISOString()
+    const performDelete = async () => {
+      const updated = rules.filter(r => r.id !== ruleId);
+      setRules(updated);
+      const updatedState = {
+        ...state,
+        approvalRules: updated,
+        _approvalRulesUpdatedAt: new Date().toISOString()
+      };
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      showToast?.('🗑️ تم حذف قاعدة الموافقة بنجاح');
     };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    showToast?.('🗑️ تم حذف قاعدة الموافقة بنجاح');
+
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockEditSystemPermissions',
+        actionTitle: 'حذف قاعدة موافقة واعتماد',
+        actionDetails: 'إلغاء قاعدة الموافقة المزدوجة',
+        onExecute: performDelete
+      });
+    } else {
+      await performDelete();
+    }
   };
 
   const handleSaveAllRules = async () => {
-    const updatedState = {
-      ...state,
-      approvalRules: rules,
-      _approvalRulesUpdatedAt: new Date().toISOString()
+    const performSave = async () => {
+      const updatedState = {
+        ...state,
+        approvalRules: rules,
+        _approvalRulesUpdatedAt: new Date().toISOString()
+      };
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      showToast?.('💾 تم حفظ وتحسين وتطبيق كافة قواعد الموافقة المزدوجة بنجاح');
     };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    showToast?.('💾 تم حفظ وتحسين وتطبيق كافة قواعد الموافقة المزدوجة بنجاح');
+
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockEditSystemPermissions',
+        actionTitle: 'حفظ وتطبيق قواعد الموافقة المزدوجة',
+        actionDetails: 'تحديث مصفوفة مسارات الاعتماد',
+        onExecute: performSave
+      });
+    } else {
+      await performSave();
+    }
   };
 
   return (
@@ -2208,10 +2323,23 @@ export default function SettingsModule({
                 className="btn btn-ghost"
                 onClick={async () => {
                   if (window.confirm('هل تريد استعادة قائمة الوظائف والأقسام القياسية الافتراضية؟')) {
-                    const updatedState = { ...state, jobs: DEFAULT_JOBS, departments: DEFAULT_DEPARTMENTS };
-                    setState(updatedState);
-                    if (saveState) await saveState(updatedState);
-                    showToast?.('🔄 تمت استعادة قائمة الوظائف والأقسام الافتراضية بنجاح');
+                    const performRestore = async () => {
+                      const updatedState = { ...state, jobs: DEFAULT_JOBS, departments: DEFAULT_DEPARTMENTS };
+                      setState(updatedState);
+                      if (saveState) await saveState(updatedState);
+                      showToast?.('🔄 تمت استعادة قائمة الوظائف والأقسام الافتراضية بنجاح');
+                    };
+
+                    if (executeWithOwnerGuard) {
+                      executeWithOwnerGuard({
+                        lockKey: 'lockManageJobs',
+                        actionTitle: 'استعادة دليل الوظائف والأقسام الافتراضي',
+                        actionDetails: 'إعادة ضبط الوظائف والأقسام للافتراضي',
+                        onExecute: performRestore
+                      });
+                    } else {
+                      await performRestore();
+                    }
                   }
                 }}
               >
@@ -2303,12 +2431,26 @@ export default function SettingsModule({
                         showToast?.('⚠️ هذا القسم موجود بالفعل');
                         return;
                       }
-                      const updatedDepts = [...departmentsList, cleanName];
-                      const updatedState = { ...state, departments: updatedDepts };
-                      setState(updatedState);
-                      setNewDeptInput('');
-                      showToast?.(`✅ تمت إضافة قسم (${cleanName}) بنجاح`);
-                      if (saveState) await saveState(updatedState);
+
+                      const performAddDept = async () => {
+                        const updatedDepts = [...departmentsList, cleanName];
+                        const updatedState = { ...state, departments: updatedDepts };
+                        setState(updatedState);
+                        setNewDeptInput('');
+                        showToast?.(`✅ تمت إضافة قسم (${cleanName}) بنجاح`);
+                        if (saveState) await saveState(updatedState);
+                      };
+
+                      if (executeWithOwnerGuard) {
+                        executeWithOwnerGuard({
+                          lockKey: 'lockManageJobs',
+                          actionTitle: 'إضافة قسم جديد',
+                          actionDetails: `اسم القسم: ${cleanName}`,
+                          onExecute: performAddDept
+                        });
+                      } else {
+                        await performAddDept();
+                      }
                     }}
                   >
                     ➕ إضافة قسم
@@ -2361,14 +2503,28 @@ export default function SettingsModule({
                                 showToast?.('⚠️ يوجد قسم آخر بهذا الاسم');
                                 return;
                               }
-                              const updatedDepts = departmentsList.map(d => d === dept ? cleanRename : d);
-                              const updatedJobs = jobsList.map(j => j.department === dept ? { ...j, department: cleanRename } : j);
-                              const updatedEmps = (state.employees || []).map(e => e.department === dept ? { ...e, department: cleanRename } : e);
-                              const updatedState = { ...state, departments: updatedDepts, jobs: updatedJobs, employees: updatedEmps };
-                              setState(updatedState);
-                              setEditingDeptName(null);
-                              showToast?.(`✅ تم تعديل اسم القسم إلى (${cleanRename})`);
-                              if (saveState) await saveState(updatedState);
+
+                              const performRenameDept = async () => {
+                                const updatedDepts = departmentsList.map(d => d === dept ? cleanRename : d);
+                                const updatedJobs = jobsList.map(j => j.department === dept ? { ...j, department: cleanRename } : j);
+                                const updatedEmps = (state.employees || []).map(e => e.department === dept ? { ...e, department: cleanRename } : e);
+                                const updatedState = { ...state, departments: updatedDepts, jobs: updatedJobs, employees: updatedEmps };
+                                setState(updatedState);
+                                setEditingDeptName(null);
+                                showToast?.(`✅ تم تعديل اسم القسم إلى (${cleanRename})`);
+                                if (saveState) await saveState(updatedState);
+                              };
+
+                              if (executeWithOwnerGuard) {
+                                executeWithOwnerGuard({
+                                  lockKey: 'lockManageJobs',
+                                  actionTitle: 'تعديل اسم القسم',
+                                  actionDetails: `الاسم القديم: ${dept} -> الجديد: ${cleanRename}`,
+                                  onExecute: performRenameDept
+                                });
+                              } else {
+                                await performRenameDept();
+                              }
                             }}
                           >
                             حفظ
@@ -2413,11 +2569,25 @@ export default function SettingsModule({
                                 } else {
                                   if (!window.confirm(`هل أنت متأكد من حذف قسم (${dept})؟`)) return;
                                 }
-                                const updatedDepts = departmentsList.filter(d => d !== dept);
-                                const updatedState = { ...state, departments: updatedDepts };
-                                setState(updatedState);
-                                showToast?.(`🗑️ تم حذف قسم (${dept})`);
-                                if (saveState) await saveState(updatedState);
+
+                                const performDeleteDept = async () => {
+                                  const updatedDepts = departmentsList.filter(d => d !== dept);
+                                  const updatedState = { ...state, departments: updatedDepts };
+                                  setState(updatedState);
+                                  showToast?.(`🗑️ تم حذف قسم (${dept})`);
+                                  if (saveState) await saveState(updatedState);
+                                };
+
+                                if (executeWithOwnerGuard) {
+                                  executeWithOwnerGuard({
+                                    lockKey: 'lockManageJobs',
+                                    actionTitle: 'حذف قسم',
+                                    actionDetails: `القسم: ${dept}`,
+                                    onExecute: performDeleteDept
+                                  });
+                                } else {
+                                  await performDeleteDept();
+                                }
                               }}
                               title="حذف القسم"
                             >
@@ -2551,12 +2721,25 @@ export default function SettingsModule({
                                   if (!window.confirm(`هل أنت متأكد من حذف وظيفة (${j.title})؟`)) return;
                                 }
 
-                                const updatedJobs = jobsList.filter(item => item.id !== j.id && item.title !== j.title);
-                                const updatedState = { ...state, jobs: updatedJobs };
-                                setState(updatedState);
-                                showToast?.(`🗑️ تم حذف وظيفة (${j.title}) بنجاح`);
-                                if (saveState) {
-                                  saveState(updatedState).catch(err => console.error('Delete job error:', err));
+                                const performDeleteJob = async () => {
+                                  const updatedJobs = jobsList.filter(item => item.id !== j.id && item.title !== j.title);
+                                  const updatedState = { ...state, jobs: updatedJobs };
+                                  setState(updatedState);
+                                  showToast?.(`🗑️ تم حذف وظيفة (${j.title}) بنجاح`);
+                                  if (saveState) {
+                                    saveState(updatedState).catch(err => console.error('Delete job error:', err));
+                                  }
+                                };
+
+                                if (executeWithOwnerGuard) {
+                                  executeWithOwnerGuard({
+                                    lockKey: 'lockManageJobs',
+                                    actionTitle: 'حذف مسمى وظيفي',
+                                    actionDetails: `الوظيفة: ${j.title}`,
+                                    onExecute: performDeleteJob
+                                  });
+                                } else {
+                                  await performDeleteJob();
                                 }
                               }}
                               title="حذف الوظيفة"
@@ -2600,54 +2783,67 @@ export default function SettingsModule({
 
                     const selectedDept = jobDeptInput || departmentsList[0] || 'الصيدلية';
 
-                    let updatedJobs;
-                    let updatedEmployees = [...(state.employees || [])];
+                    const performSaveJob = async () => {
+                      let updatedJobs;
+                      let updatedEmployees = [...(state.employees || [])];
 
-                    if (editingJob) {
-                      // Update existing job
-                      updatedJobs = jobsList.map(j => {
-                        if (j.id === editingJob.id || j.title === editingJob.title) {
-                          return {
-                            ...j,
-                            title: cleanTitle,
-                            department: selectedDept,
-                            isManagement: jobIsMgmtInput,
-                            isAdminRole: jobIsMgmtInput,
-                            description: jobDescInput.trim()
-                          };
-                        }
-                        return j;
-                      });
-
-                      // Update jobTitle & department in employees if title changed
-                      if (editingJob.title !== cleanTitle) {
-                        updatedEmployees = updatedEmployees.map(emp => {
-                          if (emp.jobTitle === editingJob.title) {
-                            return { ...emp, jobTitle: cleanTitle };
+                      if (editingJob) {
+                        // Update existing job
+                        updatedJobs = jobsList.map(j => {
+                          if (j.id === editingJob.id || j.title === editingJob.title) {
+                            return {
+                              ...j,
+                              title: cleanTitle,
+                              department: selectedDept,
+                              isManagement: jobIsMgmtInput,
+                              isAdminRole: jobIsMgmtInput,
+                              description: jobDescInput.trim()
+                            };
                           }
-                          return emp;
+                          return j;
                         });
+
+                        // Update jobTitle & department in employees if title changed
+                        if (editingJob.title !== cleanTitle) {
+                          updatedEmployees = updatedEmployees.map(emp => {
+                            if (emp.jobTitle === editingJob.title) {
+                              return { ...emp, jobTitle: cleanTitle };
+                            }
+                            return emp;
+                          });
+                        }
+                      } else {
+                        // Add new job
+                        const newJobObj = {
+                          id: 'job_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+                          title: cleanTitle,
+                          department: selectedDept,
+                          isManagement: jobIsMgmtInput,
+                          isAdminRole: jobIsMgmtInput,
+                          description: jobDescInput.trim()
+                        };
+                        updatedJobs = [...jobsList, newJobObj];
                       }
+
+                      const updatedState = { ...state, jobs: updatedJobs, employees: updatedEmployees };
+                      setState(updatedState);
+                      setShowJobModal(false);
+                      showToast?.(editingJob ? `✅ تم تعديل وظيفة (${cleanTitle}) بنجاح` : `✅ تمت إضافة وظيفة (${cleanTitle}) بنجاح`);
+
+                      if (saveState) {
+                        saveState(updatedState).catch(err => console.error('Save job error:', err));
+                      }
+                    };
+
+                    if (executeWithOwnerGuard) {
+                      executeWithOwnerGuard({
+                        lockKey: 'lockManageJobs',
+                        actionTitle: editingJob ? 'تعديل بيانات الوظيفة' : 'إضافة مسمى وظيفي جديد',
+                        actionDetails: `المسمى: ${cleanTitle}`,
+                        onExecute: performSaveJob
+                      });
                     } else {
-                      // Add new job
-                      const newJobObj = {
-                        id: 'job_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
-                        title: cleanTitle,
-                        department: selectedDept,
-                        isManagement: jobIsMgmtInput,
-                        isAdminRole: jobIsMgmtInput,
-                        description: jobDescInput.trim()
-                      };
-                      updatedJobs = [...jobsList, newJobObj];
-                    }
-
-                    const updatedState = { ...state, jobs: updatedJobs, employees: updatedEmployees };
-                    setState(updatedState);
-                    setShowJobModal(false);
-                    showToast?.(editingJob ? `✅ تم تعديل وظيفة (${cleanTitle}) بنجاح` : `✅ تمت إضافة وظيفة (${cleanTitle}) بنجاح`);
-
-                    if (saveState) {
-                      saveState(updatedState).catch(err => console.error('Save job error:', err));
+                      performSaveJob();
                     }
                   }}
                   style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}

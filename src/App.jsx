@@ -842,25 +842,45 @@ export default function App() {
   const handleSaveBranch = async (branchData) => {
     const currentBranches = state.branches || [];
     const exists = currentBranches.some((b) => b.id === branchData.id);
-    let updatedBranches;
-    if (exists) {
-      updatedBranches = currentBranches.map((b) => (b.id === branchData.id ? branchData : b));
-    } else {
-      updatedBranches = [...currentBranches, branchData];
-    }
-    const updatedState = { ...state, branches: updatedBranches };
-    setState(updatedState);
-    await saveState(updatedState);
-    showToast('✅ تم حفظ بيانات الفرع بنجاح');
+
+    const performSaveBranch = async () => {
+      let updatedBranches;
+      if (exists) {
+        updatedBranches = currentBranches.map((b) => (b.id === branchData.id ? branchData : b));
+      } else {
+        updatedBranches = [...currentBranches, branchData];
+      }
+      const updatedState = { ...state, branches: updatedBranches };
+      setState(updatedState);
+      await saveState(updatedState);
+      showToast('✅ تم حفظ بيانات الفرع بنجاح');
+    };
+
+    executeWithOwnerGuard({
+      lockKey: 'lockManageBranches',
+      actionTitle: exists ? `تعديل بيانات فرع (${branchData.name})` : `إضافة فرع جديد (${branchData.name})`,
+      actionDetails: `اسم الفرع: ${branchData.name} · الكود: ${branchData.code || '—'}`,
+      onExecute: performSaveBranch
+    });
   };
 
   const handleDeleteBranch = async (branchId) => {
-    const updatedBranches = (state.branches || []).filter((b) => b.id !== branchId);
-    const updatedDeletedIds = Array.from(new Set([...(state._deletedIds || []), String(branchId), `branch_${branchId}`])).slice(-2000);
-    const updatedState = { ...state, branches: updatedBranches, _deletedIds: updatedDeletedIds };
-    setState(updatedState);
-    await saveState(updatedState);
-    showToast('🗑️ تم حذف الفرع نهائياً');
+    const branch = (state.branches || []).find((b) => b.id === branchId);
+    const performDeleteBranch = async () => {
+      const updatedBranches = (state.branches || []).filter((b) => b.id !== branchId);
+      const updatedDeletedIds = Array.from(new Set([...(state._deletedIds || []), String(branchId), `branch_${branchId}`])).slice(-2000);
+      const updatedState = { ...state, branches: updatedBranches, _deletedIds: updatedDeletedIds };
+      setState(updatedState);
+      await saveState(updatedState);
+      showToast('🗑️ تم حذف الفرع نهائياً');
+    };
+
+    executeWithOwnerGuard({
+      lockKey: 'lockManageBranches',
+      actionTitle: `حذف فرع (${branch?.name || branchId})`,
+      actionDetails: 'حذف الفرع نهائياً من قاعدة البيانات',
+      onExecute: performDeleteBranch
+    });
   };
 
   const handleSaveEmployeeFile = async (empData) => {
@@ -868,9 +888,10 @@ export default function App() {
     const empIdStr = String(empData.id);
     const empCodeStr = String(empData.code || '');
 
-    const exists = currentEmps.some(
+    const oldEmp = currentEmps.find(
       (e) => String(e.id) === empIdStr || (e.code && String(e.code) === empCodeStr)
     );
+    const exists = Boolean(oldEmp);
 
     const isTerminated = empData.status === 'تم الاستقالة';
     const terminationReason = empData.suspension_reason?.trim() || 'تم إنهاء الخدمة من قبل الإدارة';
@@ -884,99 +905,187 @@ export default function App() {
       updatedAt: new Date().toISOString()
     };
 
-    let updatedEmps;
-    if (exists) {
-      updatedEmps = currentEmps.map((e) =>
-        String(e.id) === empIdStr || (e.code && String(e.code) === empCodeStr)
-          ? { ...e, ...normalizedEmpData, id: e.id }
-          : e
-      );
-    } else {
-      updatedEmps = [...currentEmps, normalizedEmpData];
-    }
-
-    let updatedActiveShifts = { ...(state.activeShifts || {}) };
-    let updatedResignations = [...(state.resignationRequests || [])];
-
-    if (isTerminated) {
-      // 1. Immediately terminate active shift if running
-      delete updatedActiveShifts[empData.id];
-      if (empIdStr) delete updatedActiveShifts[empIdStr];
-
-      // 2. Add or update resignation tracking record
-      const hasRecord = updatedResignations.some(
-        (r) => (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeId) === empCodeStr)) && r.adminStatus === 'approved' && !r.isCancelled
-      );
-      if (!hasRecord) {
-        const newReq = {
-          id: 'res_file_' + Date.now(),
-          employeeId: empData.id,
-          branchId: empData.branchId,
-          type: 'resignation',
-          isAdminCreated: true,
-          employeeReason: terminationReason,
-          requestDate: todayStr(),
-          managerStatus: 'approved',
-          managerComment: 'إجراء إداري مباشر من ملف الموظف',
-          adminStatus: 'approved',
-          adminComment: terminationReason,
-          conditionsDaysRemaining: 0,
-          conditionsStartDate: '',
-          employeeConditionStatus: 'accepted',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        };
-        updatedResignations = [newReq, ...updatedResignations];
+    const performSaveEmpFile = async () => {
+      let updatedEmps;
+      if (exists) {
+        updatedEmps = currentEmps.map((e) =>
+          String(e.id) === empIdStr || (e.code && String(e.code) === empCodeStr)
+            ? { ...e, ...normalizedEmpData, id: e.id }
+            : e
+        );
+      } else {
+        updatedEmps = [...currentEmps, normalizedEmpData];
       }
-    } else {
-      // Returned to active duty: mark all old resignation records for this employee as cancelled and clear countdown
-      updatedResignations = updatedResignations.map((r) => {
-        const isThisEmp = String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeId) === empCodeStr);
-        if (isThisEmp) {
-          return {
-            ...r,
-            isCancelled: true,
-            cancelledReason: 'تم تعديل حالة الموظف يدوياً إلى على رأس العمل من قبل الإدارة',
-            adminStatus: 'cancelled',
+
+      let updatedActiveShifts = { ...(state.activeShifts || {}) };
+      let updatedResignations = [...(state.resignationRequests || [])];
+
+      if (isTerminated) {
+        // 1. Immediately terminate active shift if running
+        delete updatedActiveShifts[empData.id];
+        if (empIdStr) delete updatedActiveShifts[empIdStr];
+
+        // 2. Add or update resignation tracking record
+        const hasRecord = updatedResignations.some(
+          (r) => (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeId) === empCodeStr)) && r.adminStatus === 'approved' && !r.isCancelled
+        );
+        if (!hasRecord) {
+          const newReq = {
+            id: 'res_file_' + Date.now(),
+            employeeId: empData.id,
+            branchId: empData.branchId,
+            type: 'resignation',
+            isAdminCreated: true,
+            employeeReason: terminationReason,
+            requestDate: todayStr(),
+            managerStatus: 'approved',
+            managerComment: 'إجراء إداري مباشر من ملف الموظف',
+            adminStatus: 'approved',
+            adminComment: terminationReason,
             conditionsDaysRemaining: 0,
             conditionsStartDate: '',
-            employeeConditionStatus: 'cancelled',
+            employeeConditionStatus: 'accepted',
+            createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
           };
+          updatedResignations = [newReq, ...updatedResignations];
         }
-        return r;
-      });
-    }
+      } else {
+        // Returned to active duty: mark all old resignation records for this employee as cancelled and clear countdown
+        updatedResignations = updatedResignations.map((r) => {
+          const isThisEmp = String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeId) === empCodeStr);
+          if (isThisEmp) {
+            return {
+              ...r,
+              isCancelled: true,
+              cancelledReason: 'تم تعديل حالة الموظف يدوياً إلى على رأس العمل من قبل الإدارة',
+              adminStatus: 'cancelled',
+              conditionsDaysRemaining: 0,
+              conditionsStartDate: '',
+              employeeConditionStatus: 'cancelled',
+              updatedAt: new Date().toISOString()
+            };
+          }
+          return r;
+        });
+      }
 
-    const updatedState = {
-      ...state,
-      employees: updatedEmps,
-      activeShifts: updatedActiveShifts,
-      resignationRequests: updatedResignations
+      const updatedState = {
+        ...state,
+        employees: updatedEmps,
+        activeShifts: updatedActiveShifts,
+        resignationRequests: updatedResignations
+      };
+
+      setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      setEditingEmpFile(null);
+      showToast(isTerminated ? '🔒 تم حفظ الحالة وإيقاف الحساب والبصمة بنجاح' : '💾 تم حفظ وتحديث ملف الموظف بنجاح');
     };
 
-    setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    setEditingEmpFile(null);
-    showToast(isTerminated ? '🔒 تم حفظ الحالة وإيقاف الحساب والبصمة بنجاح' : '💾 تم حفظ وتحديث ملف الموظف بنجاح');
+    // Check specific modification locks if editing an existing employee
+    if (exists && oldEmp) {
+      // 1. Check Salary Lock
+      const isSalaryChanged =
+        parseFloat(empData.salary || empData.baseSalary || 0) !== parseFloat(oldEmp.salary || oldEmp.baseSalary || 0) ||
+        parseFloat(empData.hourlyRate || 0) !== parseFloat(oldEmp.hourlyRate || 0) ||
+        parseFloat(empData.monthlyTargetHours || empData.targetHours || 0) !== parseFloat(oldEmp.monthlyTargetHours || oldEmp.targetHours || 0);
+
+      if (isSalaryChanged && state.orgSettings?.ownerModificationLocks?.lockEditSalary && authRole !== 'owner') {
+        executeWithOwnerGuard({
+          lockKey: 'lockEditSalary',
+          actionTitle: `تعديل الراتب الأساسي للموظف (${empData.name})`,
+          actionDetails: `الراتب القديم: ${oldEmp.salary || oldEmp.baseSalary || 0} ج.م ➔ الراتب الجديد: ${empData.salary || empData.baseSalary || 0} ج.م`,
+          onExecute: performSaveEmpFile
+        });
+        return;
+      }
+
+      // 2. Check Allowances Lock
+      const isAllowancesChanged =
+        JSON.stringify(empData.allowances || empData.fixedAllowances || {}) !== JSON.stringify(oldEmp.allowances || oldEmp.fixedAllowances || {}) ||
+        parseFloat(empData.housingAllowance || 0) !== parseFloat(oldEmp.housingAllowance || 0) ||
+        parseFloat(empData.transportAllowance || 0) !== parseFloat(oldEmp.transportAllowance || 0) ||
+        parseFloat(empData.otherAllowances || 0) !== parseFloat(oldEmp.otherAllowances || 0) ||
+        parseFloat(empData.adminAllowance || 0) !== parseFloat(oldEmp.adminAllowance || 0) ||
+        parseFloat(empData.overtimeHourRate || empData.overtimeRate || 0) !== parseFloat(oldEmp.overtimeHourRate || oldEmp.overtimeRate || 0);
+
+      if (isAllowancesChanged && state.orgSettings?.ownerModificationLocks?.lockEditAllowances && authRole !== 'owner') {
+        executeWithOwnerGuard({
+          lockKey: 'lockEditAllowances',
+          actionTitle: `تعديل البدلات أو أجر الإضافي للموظف (${empData.name})`,
+          actionDetails: 'تعديل بدلات أو بنود الأجر الإضافي للموظف',
+          onExecute: performSaveEmpFile
+        });
+        return;
+      }
+
+      // 3. Check Termination Lock
+      const isTerminationAction = isTerminated && oldEmp.status !== 'تم الاستقالة';
+      if (isTerminationAction && state.orgSettings?.ownerModificationLocks?.lockTerminateEmployee && authRole !== 'owner') {
+        executeWithOwnerGuard({
+          lockKey: 'lockTerminateEmployee',
+          actionTitle: `إنهاء خدمة واستقالة الموظف (${empData.name})`,
+          actionDetails: `السبب: ${terminationReason}`,
+          onExecute: performSaveEmpFile
+        });
+        return;
+      }
+
+      // 4. Check Biometric Lock
+      const isBiometricStatusChanged = (
+        Boolean(empData.fingerprint_active) !== Boolean(oldEmp.fingerprint_active) ||
+        Boolean(empData.biometricSuspended) !== Boolean(oldEmp.biometricSuspended) ||
+        Boolean(empData.punchDisabled) !== Boolean(oldEmp.punchDisabled)
+      );
+      if (isBiometricStatusChanged && state.orgSettings?.ownerModificationLocks?.lockSuspendBiometric && authRole !== 'owner') {
+        executeWithOwnerGuard({
+          lockKey: 'lockSuspendBiometric',
+          actionTitle: `تعديل حالة البصمة للموظف (${empData.name})`,
+          actionDetails: 'إيقاف أو تفعيل بصمة الموظف يدوياً',
+          onExecute: performSaveEmpFile
+        });
+        return;
+      }
+    }
+
+    await performSaveEmpFile();
   };
 
   const handleSaveBylaws = async (bylawsData) => {
-    const updatedState = { ...state, bylaws: bylawsData };
-    setState(updatedState);
-    await saveState(updatedState);
-    showToast('📜 تم حفظ لائحة الجزاءات بنجاح');
+    const performSave = async () => {
+      const updatedState = { ...state, bylaws: bylawsData };
+      setState(updatedState);
+      await saveState(updatedState);
+      showToast('📜 تم حفظ لائحة الجزاءات بنجاح');
+    };
+
+    executeWithOwnerGuard({
+      lockKey: 'lockEditSystemPermissions',
+      actionTitle: 'تعديل لائحة الجزاءات والانضباط',
+      actionDetails: 'تحديث قواعد ونصوص اللائحة الداخلية',
+      onExecute: performSave
+    });
   };
 
   const handleSaveApprovalRules = async (rulesData) => {
-    const updatedState = {
-      ...state,
-      approvalRules: rulesData,
-      _approvalRulesUpdatedAt: new Date().toISOString()
+    const performSave = async () => {
+      const updatedState = {
+        ...state,
+        approvalRules: rulesData,
+        _approvalRulesUpdatedAt: new Date().toISOString()
+      };
+      setState(updatedState);
+      await saveState(updatedState);
+      showToast('⚙️ تم حفظ قواعد الموافقة والاعتماد');
     };
-    setState(updatedState);
-    await saveState(updatedState);
-    showToast('⚙️ تم حفظ قواعد الموافقة والاعتماد');
+
+    executeWithOwnerGuard({
+      lockKey: 'lockEditSystemPermissions',
+      actionTitle: 'تعديل قواعد الموافقة المزدوجة',
+      actionDetails: 'تحديث مصفوفة تسلسل الاعتمادات والموافقات',
+      onExecute: performSave
+    });
   };
 
   const handleApproveRequest = async (requestId, role = 'admin') => {
@@ -984,227 +1093,179 @@ export default function App() {
     const target = currentRequests.find((r) => r.id === requestId);
     if (!target) return;
 
-    let isBranchApproved = target.branchApproved;
-    let isAdminApproved = target.adminApproved;
+    const performApprove = async () => {
+      let isBranchApproved = target.branchApproved;
+      let isAdminApproved = target.adminApproved;
 
-    if (role === 'admin') {
-      isAdminApproved = true;
-      isBranchApproved = true; // Admin approval is final and supreme
-    } else if (role === 'branch') {
-      isBranchApproved = true;
-    }
-
-    const isFullyApproved = role === 'admin' || (isBranchApproved && isAdminApproved);
-
-    const updatedRequests = currentRequests.map((r) => {
-      if (r.id === requestId) {
-        return {
-          ...r,
-          branchApproved: isBranchApproved,
-          adminApproved: isAdminApproved,
-          status: isFullyApproved ? 'approved' : 'pending_admin',
-          approvedAt: isFullyApproved ? new Date().toISOString() : r.approvedAt
-        };
-      }
-      return r;
-    });
-
-    let updatedAdjs = state.adjustments || [];
-    let updatedRosters = state.rosters || [];
-    let updatedSwaps = state.shiftSwaps || [];
-    let updatedEmps = state.employees || [];
-    let updatedShifts = state.shifts || [];
-
-    if (isFullyApproved) {
-      // 0. Overtime Request Approval (Include overtime hours in shift and payroll)
-      if (target.type === 'overtime') {
-        const overtimeHrs = parseFloat(target.hours) || 0;
-        updatedShifts = updatedShifts.map((s) => {
-          if (s.id === target.shiftId || (String(s.employeeId) === String(target.employeeId) && s.date === target.date)) {
-            const regHours = s.regularHours !== undefined ? s.regularHours : (s.scheduledHours || s.hours);
-            return {
-              ...s,
-              overtimeStatus: 'approved',
-              overtimeHours: overtimeHrs,
-              adminApproved: true,
-              note: `ساعات عمل وإضافي معتمد (أساسي: ${regHours} س + إضافي: ${overtimeHrs} س)`
-            };
-          }
-          return s;
-        });
+      if (role === 'admin') {
+        isAdminApproved = true;
+        isBranchApproved = true; // Admin approval is final and supreme
+      } else if (role === 'branch') {
+        isBranchApproved = true;
       }
 
-      // 0.1 Annual Leave Auto-Deduction
-      if (target.type === 'leave' && target.leaveType === 'annual') {
-        updatedEmps = updatedEmps.map(e => {
-          if (e.id === target.employeeId) {
-            const currentBal = e.annualLeaveBalance !== undefined ? Number(e.annualLeaveBalance) : 21;
-            const newBal = Math.max(0, currentBal - (target.daysCount || 1));
-            return { ...e, annualLeaveBalance: newBal };
-          }
-          return e;
-        });
-      }
-      // 1. Unpaid Leave Auto-Deduction
-      if (target.leaveType === 'unpaid') {
-        const emp = state.employees.find((e) => e.id === target.employeeId);
-        const days = target.daysCount || 1;
-        const salary = emp ? parseFloat(emp.salary) || 0 : 0;
-        const workHours = emp ? parseFloat(emp.workHoursPerDay) || 8 : 8;
-        const workDays = emp ? parseFloat(emp.workDaysPerMonth) || 26 : 26;
-        const dailyRate = workDays > 0 ? (salary * workHours) / workDays : 0;
-        const totalDeductionAmt = Math.round(days * dailyRate * 100) / 100;
+      const isFullyApproved = role === 'admin' || (isBranchApproved && isAdminApproved);
 
-        const newAdj = {
-          id: `adj_unpaid_${uid()}`,
-          type: 'deduction',
-          employeeId: target.employeeId,
-          date: target.startDate || todayStr(),
-          amount: totalDeductionAmt,
-          description: `إجازة غير مدفوعة الأجر (${target.startDate} إلى ${target.endDate})`
-        };
-        updatedAdjs = [...updatedAdjs, newAdj];
-      }
-
-      // 1.5 Penalty & Early Exit Request Auto-Deduction & Bylaws Wage Impact
-      if (target.type === 'penalty' || target.type === 'early_exit') {
-        const emp = state.employees.find((e) => e.id === target.employeeId);
-        let amount = 0;
-        if (target.impactType === 'deduction_days') {
-          const salary = emp ? parseFloat(emp.salary) || 0 : 0;
-          const workHours = emp ? parseFloat(emp.workHoursPerDay) || 8 : 8;
-          const workDays = emp ? parseFloat(emp.workDaysPerMonth) || 26 : 26;
-          const dailyRate = workDays > 0 ? (salary * workHours) / workDays : 0;
-          amount = Math.round(dailyRate * (parseFloat(target.impactVal) || 1) * 100) / 100;
-        } else if (target.impactType === 'fixed_amount') {
-          amount = parseFloat(target.impactVal) || 0;
-        } else if (target.amount) {
-          amount = parseFloat(target.amount) || 0;
-        }
-
-        if (amount > 0) {
-          const ruleTitle = target.ruleTitle || target.reason || target.details || 'مخالفة لائحية';
-          const penaltyDesc = `خصم جزاء لائحى: ${ruleTitle} (${target.impactType === 'deduction_days' ? `خصم ${target.impactVal} يوم` : `${amount} ج.م`})`;
-          const newAdj = {
-            id: `adj_pen_${uid()}`,
-            type: 'deduction',
-            employeeId: target.employeeId,
-            date: target.date || target.startDate || todayStr(),
-            amount,
-            description: penaltyDesc,
-            notes: penaltyDesc,
-            reason: penaltyDesc
+      const updatedRequests = currentRequests.map((r) => {
+        if (r.id === requestId) {
+          return {
+            ...r,
+            branchApproved: isBranchApproved,
+            adminApproved: isAdminApproved,
+            status: isFullyApproved ? 'approved' : 'pending_admin',
+            approvedAt: isFullyApproved ? new Date().toISOString() : r.approvedAt
           };
-          updatedAdjs = [...updatedAdjs, newAdj];
+        }
+        return r;
+      });
+
+      let updatedAdjs = state.adjustments || [];
+      let updatedRosters = state.rosters || [];
+      let updatedSwaps = state.shiftSwaps || [];
+      let updatedEmps = state.employees || [];
+      let updatedShifts = state.shifts || [];
+
+      if (isFullyApproved) {
+        // 0. Overtime Request Approval (Include overtime hours in shift and payroll)
+        if (target.type === 'overtime') {
+          const overtimeHrs = parseFloat(target.hours) || 0;
+          updatedShifts = updatedShifts.map((s) => {
+            if (s.id === target.shiftId || (String(s.employeeId) === String(target.employeeId) && s.date === target.date)) {
+              const regHours = s.regularHours !== undefined ? s.regularHours : (s.scheduledHours || s.hours);
+              return {
+                ...s,
+                overtimeStatus: 'approved',
+                overtimeHours: overtimeHrs,
+                adminApproved: true,
+                note: `ساعات عمل وإضافي معتمد (أساسي: ${regHours} س + إضافي: ${overtimeHrs} س)`
+              };
+            }
+            return s;
+          });
+        }
+
+        // 1. Penalty / Early Exit Direct Financial Deduction Integration
+        if (target.type === 'penalty' || target.type === 'early_exit') {
+          const emp = (state.employees || []).find((e) => String(e.id) === String(target.employeeId));
+          let amount = 0;
+          if (target.impactType === 'deduction_days') {
+            const salary = emp ? parseFloat(emp.salary) || 0 : 0;
+            const workHours = emp ? parseFloat(emp.workHoursPerDay) || 8 : 8;
+            const workDays = emp ? parseFloat(emp.workDaysPerMonth) || 26 : 26;
+            const dailyRate = workDays > 0 ? (salary * workHours) / workDays : (salary * workHours);
+            amount = Math.round(dailyRate * (parseFloat(target.impactVal) || 1) * 100) / 100;
+          } else if (target.impactType === 'fixed_amount') {
+            amount = parseFloat(target.impactVal) || 0;
+          } else if (target.amount) {
+            amount = parseFloat(target.amount) || 0;
+          }
+
+          if (amount > 0) {
+            const ruleTitle = target.ruleTitle || target.reason || target.details || 'مخالفة لائحية';
+            const penaltyDesc = `خصم جزاء لائحى: ${ruleTitle} (${target.impactType === 'deduction_days' ? `خصم ${target.impactVal} يوم` : `${amount} ج.م`})`;
+            updatedAdjs.push({
+              id: `adj_pen_${Date.now()}`,
+              employeeId: target.employeeId,
+              type: 'deduction',
+              amount,
+              description: penaltyDesc,
+              notes: penaltyDesc,
+              reason: penaltyDesc,
+              date: target.date || target.startDate || new Date().toISOString().slice(0, 10),
+              createdAt: new Date().toISOString()
+            });
+          }
+        }
+
+        // 2. Bonus Financial Reward Integration
+        if (target.type === 'bonus') {
+          updatedAdjs.push({
+            id: `adj_${Date.now()}`,
+            employeeId: target.employeeId,
+            type: 'bonus',
+            amount: parseFloat(target.amount) || 0,
+            description: target.details || target.reason || 'مكافأة معتمدة من الإدارة العليا',
+            notes: target.details || target.reason || 'مكافأة معتمدة من الإدارة العليا',
+            reason: target.reason || target.details || 'مكافأة معتمدة من الإدارة العليا',
+            date: target.date || target.startDate || new Date().toISOString().slice(0, 10),
+            createdAt: new Date().toISOString()
+          });
+        }
+
+        // 3. Loans & Credit Medicines Auto-Enrollment into Direct Adjustments for Current Cycle
+        if (target.type === 'loan' || target.type === 'advance' || target.type === 'meds' || target.type === 'credit_medicine') {
+          const totalAmount = parseFloat(target.amount || target.totalAmount) || 0;
+          const monthsCount = parseInt(target.monthsCount || target.installmentsCount || target.installments, 10) || 1;
+          const monthlyInstallment = parseFloat(target.monthlyDeduction || target.installmentAmount) || (monthsCount > 1 ? Math.ceil(totalAmount / monthsCount) : totalAmount);
+
+          const isMeds = target.type === 'meds' || target.type === 'credit_medicine';
+          const isInstallment = target.loanType === 'installment' || target.loanType === 'installments' || monthsCount > 1;
+
+          let loanTypeTitle = isMeds ? 'مشتريات أدوية آجل' : isInstallment ? `سلفة مقسطة (${monthsCount} أقساط)` : 'سلفة شهرية';
+          const deductionDesc = isInstallment 
+            ? `خصم قسط ${loanTypeTitle} (قسط شهري) — مبلغ ${monthlyInstallment} ج.م من إجمالي ${totalAmount} ج.م`
+            : `خصم ${loanTypeTitle} — مبلغ ${monthlyInstallment} ج.م`;
+
+          updatedAdjs.push({
+            id: `adj_loan_${Date.now()}`,
+            employeeId: target.employeeId,
+            type: 'deduction',
+            amount: monthlyInstallment,
+            description: deductionDesc,
+            notes: deductionDesc,
+            reason: deductionDesc,
+            date: todayStr()
+          });
+        }
+
+        // 4. Shift Swaps Schedule Swapping in Rosters
+        if (target.type === 'swap' || target.type === 'shift_swap') {
+          updatedRosters = applyShiftSwapToRosters(target, updatedRosters, state.employees || []);
+        }
+
+        // 5. Approved Employee Permissions: Automatically update actual shift hours & lateness
+        if (target.type === 'permission') {
+          updatedShifts = applyApprovedPermissionsToShifts([target], updatedShifts, state.bylaws, updatedEmps);
         }
       }
 
-      // 1.8 Loan / Advance / Credit Meds Request Auto-Deduction & Activation
-      if (target.type === 'loan' || target.type === 'advance' || target.type === 'meds' || target.type === 'credit_medicine') {
-        const totalAmount = parseFloat(target.amount || target.totalAmount) || 0;
-        const monthsCount = parseInt(target.monthsCount || target.installments, 10) || 1;
-        const monthlyInstallment = parseFloat(target.monthlyDeduction || target.installmentAmount) || (monthsCount > 1 ? Math.ceil(totalAmount / monthsCount) : totalAmount);
+      const updatedState = {
+        ...state,
+        requests: updatedRequests,
+        adjustments: updatedAdjs,
+        rosters: updatedRosters,
+        shiftSwaps: updatedSwaps,
+        employees: updatedEmps,
+        shifts: updatedShifts
+      };
 
-        const isMeds = target.type === 'meds' || target.type === 'credit_medicine';
-        const isInstallment = target.loanType === 'installment' || monthsCount > 1;
-
-        let loanTypeTitle = '';
-        if (isMeds) {
-          loanTypeTitle = 'مشتريات أدوية آجل';
-        } else if (isInstallment) {
-          loanTypeTitle = `سلفة مقسطة (${monthsCount} أقساط)`;
-        } else {
-          loanTypeTitle = 'سلفة شهرية';
-        }
-
-        const deductionDesc = isInstallment 
-          ? `خصم قسط ${loanTypeTitle} (قسط شهري) — مبلغ ${monthlyInstallment} ج.م من إجمالي ${totalAmount} ج.م`
-          : `خصم ${loanTypeTitle} — مبلغ ${monthlyInstallment} ج.م`;
-
-        const newAdj = {
-          id: `adj_loan_${uid()}`,
-          employeeId: target.employeeId,
-          type: 'deduction',
-          amount: monthlyInstallment,
-          description: deductionDesc,
-          notes: deductionDesc,
-          reason: deductionDesc,
-          date: target.date || todayStr()
-        };
-        updatedAdjs = [...updatedAdjs, newAdj];
-      }
-
-      // 2. Roster Update Request Activation
-      if (target.type === 'roster_update' || target.type === 'roster_edit' || target.type === 'roster_edit_request') {
-        const targetEmp = (state.employees || []).find(e => String(e.id) === String(target.employeeId));
-        const targetBStr = target.branchId ? String(target.branchId) : (targetEmp?.branchId ? String(targetEmp.branchId) : '');
-
-        const normalizedSch = normalizeSchedule(target.schedule || target.newSchedule);
-
-        const activeRosterObj = {
-          id: target.id || `roster_${Date.now()}`,
-          employeeId: target.employeeId,
-          branchId: targetBStr || target.branchId || null,
-          month: target.month || todayStr().slice(0, 7),
-          fromDate: target.fromDate,
-          toDate: target.toDate,
-          schedule: normalizedSch,
-          status: 'approved',
-          approvedAt: new Date().toISOString()
-        };
-
-        const existingIdx = updatedRosters.findIndex(
-          (ros) => String(ros.employeeId) === String(target.employeeId) && 
-                   (ros.month === target.month || !target.month || !ros.month) && 
-                   (String(ros.branchId || '') === targetBStr || (!ros.branchId && !targetBStr))
-        );
-
-        if (existingIdx >= 0) {
-          updatedRosters[existingIdx] = activeRosterObj;
-        } else {
-          updatedRosters = updatedRosters.filter(
-            (ros) => !(String(ros.employeeId) === String(target.employeeId) && String(ros.branchId || '') === targetBStr && (ros.month === target.month || !target.month || !ros.month))
-          );
-          updatedRosters.unshift(activeRosterObj);
-        }
-      }
-
-      // 3. Shift Swap & Shift Edit Request Activation & Instant Roster Update
-      if (target.type === 'shift_swap' || target.type === 'swap' || target.type === 'shift_edit') {
-        updatedSwaps = (state.shiftSwaps || []).map((s) =>
-          s.id === requestId ? { ...s, status: 'approved', adminApproved: true, branchApproved: true, approvedAt: new Date().toISOString() } : s
-        );
-
-        updatedRosters = applyShiftSwapToRosters(target, updatedRosters, state.employees || []);
-      }
-
-      // 4. Bonus direct adjustments
-      if (target.type === 'bonus') {
-        const newAdj = {
-          id: `adj_${Date.now()}`,
-          employeeId: target.employeeId,
-          type: 'bonus',
-          amount: parseFloat(target.amount) || 0,
-          description: target.details || target.reason || 'مكافأة معتمدة من الإدارة',
-          notes: target.details || target.reason || 'مكافأة معتمدة من الإدارة',
-          date: todayStr()
-        };
-        updatedAdjs = [...updatedAdjs, newAdj];
-      }
-    }
-
-    const updatedState = {
-      ...state,
-      requests: updatedRequests,
-      adjustments: updatedAdjs,
-      rosters: updatedRosters,
-      shiftSwaps: updatedSwaps,
-      employees: updatedEmps
+      setState(updatedState);
+      await saveState(updatedState);
+      showToast('✅ تمت الموافقة على الطلب بنجاح');
     };
 
-    setState(updatedState);
-    await saveState(updatedState);
-    showToast(isFullyApproved ? '🎉 تم اعتماد الطلب وتحديث الرواتب والسجلات بنجاح!' : '✅ تم قبول خطوتك في انتظار الاعتماد المكتمل');
+    if (role === 'admin') {
+      if (target.type === 'loan' || target.type === 'advance' || target.type === 'meds' || target.type === 'credit_medicine') {
+        executeWithOwnerGuard({
+          lockKey: 'lockApproveLoans',
+          actionTitle: `اعتماد طلب سلفة / أدوية آجل (${target.employeeName || target.employeeId})`,
+          actionDetails: `المبلغ: ${target.amount || target.totalAmount} ج.م`,
+          onExecute: performApprove
+        });
+        return;
+      }
+      if (target.type === 'bonus' || target.type === 'penalty' || target.type === 'early_exit') {
+        executeWithOwnerGuard({
+          lockKey: 'lockDirectBonusDeduction',
+          actionTitle: `اعتماد تسوية مالية (${target.type === 'bonus' ? 'مكافأة' : 'خصم/جزاء'})`,
+          actionDetails: `الموظف: ${target.employeeName || target.employeeId}`,
+          onExecute: performApprove
+        });
+        return;
+      }
+    }
+
+    await performApprove();
   };
 
   const handleRejectRequest = async (requestId, role = 'admin') => {
@@ -1295,40 +1356,109 @@ export default function App() {
   };
 
   const handleAddManualPunch = async ({ employeeId, type, date, time }) => {
-    const newShift = {
-      id: `shift_${Date.now()}`,
-      employeeId,
-      date,
-      timeIn: type === 'in' ? time : '09:00',
-      timeOut: type === 'out' ? time : '17:00',
-      hours: 8,
-      note: `بصمة يدوية (${type === 'in' ? 'دخول' : 'خروج'})`
+    const performAddPunch = async () => {
+      const isCheckIn = type === 'in';
+      const emp = (state.employees || []).find((e) => String(e.id) === String(employeeId));
+      const targetDate = date || todayStr();
+      const existingShift = (state.shifts || []).find(
+        (s) => String(s.employeeId) === String(employeeId) && s.date === targetDate
+      );
+
+      let updatedShifts;
+      if (existingShift) {
+        updatedShifts = (state.shifts || []).map((s) => {
+          if (s.id === existingShift.id) {
+            const timeIn = isCheckIn ? time : (s.timeIn || '09:00');
+            const timeOut = !isCheckIn ? time : (s.timeOut || '17:00');
+            const hours = computeHours(targetDate, timeIn, timeOut, s.breakHours || 0);
+            return {
+              ...s,
+              timeIn,
+              timeOut,
+              hours,
+              note: (s.note || '') + ' (تحديث بصمة يدوية)'
+            };
+          }
+          return s;
+        });
+      } else {
+        const timeIn = isCheckIn ? time : '09:00';
+        const timeOut = !isCheckIn ? time : '17:00';
+        const hours = computeHours(targetDate, timeIn, timeOut, 0);
+        const newShift = {
+          id: `punch_${Date.now()}`,
+          employeeId,
+          employeeCode: emp?.code || '',
+          employeeName: emp?.name || '',
+          branchId: emp?.branchId || '',
+          date: targetDate,
+          timeIn,
+          timeOut,
+          hours,
+          breakHours: 0,
+          note: 'تسجيل بصمة يدوية مباشرة'
+        };
+        updatedShifts = [newShift, ...(state.shifts || [])];
+      }
+
+      let updatedState = { ...state, shifts: updatedShifts };
+      const recRes = recalculateEmployeeCycleLateness({
+        employeeId,
+        cycleFilterFn: currentFilterFn,
+        state: updatedState,
+        payrollCycleId: targetDate.slice(0, 7)
+      });
+      updatedState = {
+        ...updatedState,
+        lateIncidents: recRes.incidents,
+        requests: recRes.updatedRequests
+      };
+
+      setState(updatedState);
+      await saveState(updatedState);
+      showToast('✅ تم تسجيل البصمة وتحديث الورديات بنجاح');
     };
-    const updatedState = {
-      ...state,
-      shifts: [...(state.shifts || []), newShift]
-    };
-    setState(updatedState);
-    await saveState(updatedState);
-    showToast('⏱️ تم إضافة البصمة اليدوية بنجاح');
+
+    executeWithOwnerGuard({
+      lockKey: 'lockManualShiftEntry',
+      actionTitle: `تسجيل بصمة يدوية (${type === 'in' ? 'حضور' : 'انصراف'})`,
+      actionDetails: `تاريخ: ${date || todayStr()} · الوقت: ${time}`,
+      onExecute: performAddPunch
+    });
   };
 
   const handleAddDirectAdjustment = async ({ employeeId, type, amount, notes }) => {
-    const newAdj = {
-      id: `adj_${Date.now()}`,
-      employeeId,
-      type,
-      amount,
-      notes: notes || (type === 'bonus' ? 'مكافأة مباشرة' : 'خصم مباشر'),
-      date: todayStr()
+    const parsedAmt = parseFloat(amount);
+    if (!parsedAmt || parsedAmt <= 0) return;
+
+    const performAddDirectAdj = async () => {
+      const newAdj = {
+        id: `adj_${Date.now()}`,
+        employeeId,
+        type: type === 'bonus' ? 'bonus' : 'deduction',
+        amount: parsedAmt,
+        description: notes || (type === 'bonus' ? 'مكافأة مباشرة' : 'خصم مباشر'),
+        notes: notes || '',
+        reason: notes || '',
+        date: todayStr(),
+        createdAt: new Date().toISOString()
+      };
+
+      const updatedState = {
+        ...state,
+        adjustments: [...(state.adjustments || []), newAdj]
+      };
+      setState(updatedState);
+      await saveState(updatedState);
+      showToast(`✅ تم إضافة ${type === 'bonus' ? 'المكافأة' : 'الخصم'} بنجاح`);
     };
-    const updatedState = {
-      ...state,
-      adjustments: [...(state.adjustments || []), newAdj]
-    };
-    setState(updatedState);
-    await saveState(updatedState);
-    showToast('💰 تم إضافة المعاملة وتحديث الرواتب مباشرة');
+
+    executeWithOwnerGuard({
+      lockKey: 'lockDirectBonusDeduction',
+      actionTitle: type === 'bonus' ? 'إضافة مكافأة مالية مباشرة' : 'تسجيل خصم مالي مباشر',
+      actionDetails: `مبلغ: ${parsedAmt} ج.م`,
+      onExecute: performAddDirectAdj
+    });
   };
 
   const handleSaveEvaluation = async (evalData) => {
@@ -1390,52 +1520,61 @@ export default function App() {
       ? `خصم قسط ${loanTypeTitle} (قسط شهري) — مبلغ ${monthlyInstallment} ج.م من إجمالي ${totalAmount} ج.م`
       : `خصم ${loanTypeTitle} — مبلغ ${monthlyInstallment} ج.م`;
 
-    const newAdj = {
-      id: `adj_loan_${Date.now()}`,
-      employeeId: loan.employeeId,
-      type: 'deduction',
-      amount: monthlyInstallment,
-      description: deductionDesc,
-      notes: deductionDesc,
-      reason: deductionDesc,
-      date: todayStr()
+    const performApproveLoan = async () => {
+      const newAdj = {
+        id: `adj_loan_${Date.now()}`,
+        employeeId: loan.employeeId,
+        type: 'deduction',
+        amount: monthlyInstallment,
+        description: deductionDesc,
+        notes: deductionDesc,
+        reason: deductionDesc,
+        date: todayStr()
+      };
+
+      const updatedLoans = (state.loans || []).map((l) =>
+        String(l.id) === String(loanId) ? { ...l, status: 'approved', paidAmount: l.paidAmount || 0 } : l
+      );
+      if (!updatedLoans.some((l) => String(l.id) === String(loanId))) {
+        updatedLoans.push({
+          ...loan,
+          status: 'approved',
+          paidAmount: 0
+        });
+      }
+
+      const updatedRequests = (state.requests || []).map((r) =>
+        String(r.id) === String(loanId) ? { ...r, status: 'approved', adminApproved: true, branchApproved: true } : r
+      );
+
+      const notif = {
+        id: `notif_${Date.now()}`,
+        type: 'loan',
+        title: `💳 تم اعتماد ${loanTypeTitle}`,
+        message: `تم اعتماد طلب ${loanTypeTitle} للموظف بمبلغ ${monthlyInstallment} ج.م وتطبيقه في الرواتب`,
+        date: todayStr(),
+        read: false
+      };
+
+      const updatedState = {
+        ...state,
+        loans: updatedLoans,
+        requests: updatedRequests,
+        adjustments: [...(state.adjustments || []), newAdj],
+        notifications: [notif, ...(state.notifications || [])]
+      };
+
+      setState(updatedState);
+      await saveState(updatedState);
+      showToast('✅ تم اعتماد السلفة وتطبيق الخصم فوراً في نظام أجر الموظف');
     };
 
-    const updatedLoans = (state.loans || []).map((l) =>
-      String(l.id) === String(loanId) ? { ...l, status: 'approved', paidAmount: l.paidAmount || 0 } : l
-    );
-    if (!updatedLoans.some((l) => String(l.id) === String(loanId))) {
-      updatedLoans.push({
-        ...loan,
-        status: 'approved',
-        paidAmount: 0
-      });
-    }
-
-    const updatedRequests = (state.requests || []).map((r) =>
-      String(r.id) === String(loanId) ? { ...r, status: 'approved', adminApproved: true, branchApproved: true } : r
-    );
-
-    const notif = {
-      id: `notif_${Date.now()}`,
-      type: 'loan',
-      title: `💳 تم اعتماد ${loanTypeTitle}`,
-      message: `تم اعتماد طلب ${loanTypeTitle} للموظف بمبلغ ${monthlyInstallment} ج.م وتطبيقه في الرواتب`,
-      date: todayStr(),
-      read: false
-    };
-
-    const updatedState = {
-      ...state,
-      loans: updatedLoans,
-      requests: updatedRequests,
-      adjustments: [...(state.adjustments || []), newAdj],
-      notifications: [notif, ...(state.notifications || [])]
-    };
-
-    setState(updatedState);
-    await saveState(updatedState);
-    showToast('✅ تم اعتماد السلفة وتطبيق الخصم فوراً في نظام أجر الموظف');
+    executeWithOwnerGuard({
+      lockKey: 'lockApproveLoans',
+      actionTitle: `اعتماد وصرف ${loanTypeTitle} (${loan.employeeName || loan.employeeId})`,
+      actionDetails: `المبلغ: ${totalAmount} ج.م · القسط الشهري: ${monthlyInstallment} ج.م`,
+      onExecute: performApproveLoan
+    });
   };
 
   const handleRejectLoan = async (loanId) => {
@@ -1768,62 +1907,71 @@ export default function App() {
     }
     if (!window.confirm(`هل أنت متأكد من حذف الموظف "${emp.name}" نهائياً من كافة سجلات النظام؟`)) return;
 
-    const empIdStr = String(empId);
-    const empCodeStr = String(emp.code || '');
+    const performDelete = async () => {
+      const empIdStr = String(empId);
+      const empCodeStr = String(emp.code || '');
 
-    // 1. استبعاد الموظف من قائمة الموظفين
-    const updatedEmps = state.employees.filter((e) => String(e.id) !== empIdStr && String(e.code) !== empCodeStr);
-    
-    // 2. تنظيف الورديات والطلبات والشفتات النشطة والجداول التابعة للموظف
-    const updatedActive = { ...state.activeShifts };
-    delete updatedActive[empId];
-    delete updatedActive[empIdStr];
+      // 1. استبعاد الموظف من قائمة الموظفين
+      const updatedEmps = state.employees.filter((e) => String(e.id) !== empIdStr && String(e.code) !== empCodeStr);
+      
+      // 2. تنظيف الورديات والطلبات والشفتات النشطة والجداول التابعة للموظف
+      const updatedActive = { ...state.activeShifts };
+      delete updatedActive[empId];
+      delete updatedActive[empIdStr];
 
-    const updatedShifts = (state.shifts || []).filter((s) => String(s.employeeId) !== empIdStr);
-    const updatedRequests = (state.requests || []).filter((r) => String(r.employeeId) !== empIdStr);
-    const updatedResignations = (state.resignationRequests || []).filter((r) => String(r.employeeId) !== empIdStr);
-    const updatedLeaves = (state.leaveRequests || []).filter((l) => String(l.employeeId) !== empIdStr);
-    const updatedLoans = (state.loans || []).filter((l) => String(l.employeeId) !== empIdStr);
-    const updatedAdjs = (state.adjustments || []).filter((a) => String(a.employeeId) !== empIdStr);
-    const updatedRosters = (state.rosters || []).filter((r) => String(r.employeeId) !== empIdStr);
-    const updatedLateIncidents = (state.lateIncidents || []).filter((i) => String(i.employeeId) !== empIdStr);
-    const updatedNotes = (state.employeeNotes || []).filter((n) => String(n.employeeId) !== empIdStr);
-    const updatedEvals = (state.evaluations || []).filter((ev) => String(ev.employeeId) !== empIdStr);
+      const updatedShifts = (state.shifts || []).filter((s) => String(s.employeeId) !== empIdStr);
+      const updatedRequests = (state.requests || []).filter((r) => String(r.employeeId) !== empIdStr);
+      const updatedResignations = (state.resignationRequests || []).filter((r) => String(r.employeeId) !== empIdStr);
+      const updatedLeaves = (state.leaveRequests || []).filter((l) => String(l.employeeId) !== empIdStr);
+      const updatedLoans = (state.loans || []).filter((l) => String(l.employeeId) !== empIdStr);
+      const updatedAdjs = (state.adjustments || []).filter((a) => String(a.employeeId) !== empIdStr);
+      const updatedRosters = (state.rosters || []).filter((r) => String(r.employeeId) !== empIdStr);
+      const updatedLateIncidents = (state.lateIncidents || []).filter((i) => String(i.employeeId) !== empIdStr);
+      const updatedNotes = (state.employeeNotes || []).filter((n) => String(n.employeeId) !== empIdStr);
+      const updatedEvals = (state.evaluations || []).filter((ev) => String(ev.employeeId) !== empIdStr);
 
-    // 3. تسجيل المعرفات المحذوفة لمنع استعادتها من أي جهاز أو سحابة
-    const updatedDeletedIds = Array.from(new Set([
-      ...(state._deletedIds || []),
-      empIdStr,
-      empCodeStr,
-      `emp_${empIdStr}`,
-      `emp_${empCodeStr}`
-    ])).filter(Boolean).slice(-2000);
+      // 3. تسجيل المعرفات المحذوفة لمنع استعادتها من أي جهاز أو سحابة
+      const updatedDeletedIds = Array.from(new Set([
+        ...(state._deletedIds || []),
+        empIdStr,
+        empCodeStr,
+        `emp_${empIdStr}`,
+        `emp_${empCodeStr}`
+      ])).filter(Boolean).slice(-2000);
 
-    // 4. حذف الموظف من خادم الأرشيف السحابي إن وجد
-    try {
-      apiArchiveDeleteEmployee(empId).catch(() => {});
-    } catch {}
+      // 4. حذف الموظف من خادم الأرشيف السحابي إن وجد
+      try {
+        apiArchiveDeleteEmployee(empId).catch(() => {});
+      } catch {}
 
-    const updatedState = {
-      ...state,
-      employees: updatedEmps,
-      activeShifts: updatedActive,
-      shifts: updatedShifts,
-      requests: updatedRequests,
-      resignationRequests: updatedResignations,
-      leaveRequests: updatedLeaves,
-      loans: updatedLoans,
-      adjustments: updatedAdjs,
-      rosters: updatedRosters,
-      lateIncidents: updatedLateIncidents,
-      employeeNotes: updatedNotes,
-      evaluations: updatedEvals,
-      _deletedIds: updatedDeletedIds
+      const updatedState = {
+        ...state,
+        employees: updatedEmps,
+        activeShifts: updatedActive,
+        shifts: updatedShifts,
+        requests: updatedRequests,
+        resignationRequests: updatedResignations,
+        leaveRequests: updatedLeaves,
+        loans: updatedLoans,
+        adjustments: updatedAdjs,
+        rosters: updatedRosters,
+        lateIncidents: updatedLateIncidents,
+        employeeNotes: updatedNotes,
+        evaluations: updatedEvals,
+        _deletedIds: updatedDeletedIds
+      };
+
+      setState(updatedState);
+      await saveState(updatedState);
+      showToast(`✅ تم حذف ملف الموظف "${emp.name}" وجميع سجلاته نهائياً`);
     };
 
-    setState(updatedState);
-    await saveState(updatedState);
-    showToast(`✅ تم حذف ملف الموظف "${emp.name}" وجميع سجلاته نهائياً`);
+    executeWithOwnerGuard({
+      lockKey: 'lockDeleteEmployee',
+      actionTitle: `حذف ملف الموظف (${emp.name}) نهائياً`,
+      actionDetails: `كود الموظف: ${emp.code} · الوظيفة: ${emp.jobTitle}`,
+      onExecute: performDelete
+    });
   };
 
   // Open Employee ID Card & QR Modal
@@ -1861,36 +2009,47 @@ export default function App() {
     }
     const parsedBreak = Math.max(0, parseFloat(mBreak) || 0);
     const hours = computeHours(mDate, mIn, mOut, parsedBreak);
-    const newShift = {
-      id: uid(),
-      employeeId: mEmpId,
-      date: mDate,
-      timeIn: mIn,
-      timeOut: mOut,
-      hours,
-      breakHours: Math.round(parsedBreak * 100) / 100,
-      note: mNote.trim()
+    const emp = getEmp(mEmpId);
+
+    const performAddManual = async () => {
+      const newShift = {
+        id: uid(),
+        employeeId: mEmpId,
+        date: mDate,
+        timeIn: mIn,
+        timeOut: mOut,
+        hours,
+        breakHours: Math.round(parsedBreak * 100) / 100,
+        note: mNote.trim()
+      };
+      const updatedShifts = [...state.shifts, newShift];
+      let updatedState = { ...state, shifts: updatedShifts };
+      const recRes = recalculateEmployeeCycleLateness({
+        employeeId: mEmpId,
+        cycleFilterFn: currentFilterFn,
+        state: updatedState,
+        payrollCycleId: mDate.slice(0, 7)
+      });
+      updatedState = {
+        ...updatedState,
+        lateIncidents: recRes.incidents,
+        requests: recRes.updatedRequests
+      };
+      setState(updatedState);
+      await saveState(updatedState);
+      setMIn('');
+      setMOut('');
+      setMBreak('0');
+      setMNote('');
+      showToast('تمت إضافة الوردية بنجاح');
     };
-    const updatedShifts = [...state.shifts, newShift];
-    let updatedState = { ...state, shifts: updatedShifts };
-    const recRes = recalculateEmployeeCycleLateness({
-      employeeId: mEmpId,
-      cycleFilterFn: currentFilterFn,
-      state: updatedState,
-      payrollCycleId: mDate.slice(0, 7)
+
+    executeWithOwnerGuard({
+      lockKey: 'lockManualShiftEntry',
+      actionTitle: `تسجيل وردية يدوية للموظف (${emp?.name || mEmpId})`,
+      actionDetails: `تاريخ: ${mDate} · الساعات: ${hours} س`,
+      onExecute: performAddManual
     });
-    updatedState = {
-      ...updatedState,
-      lateIncidents: recRes.incidents,
-      requests: recRes.updatedRequests
-    };
-    setState(updatedState);
-    await saveState(updatedState);
-    setMIn('');
-    setMOut('');
-    setMBreak('0');
-    setMNote('');
-    showToast('تمت إضافة الوردية بنجاح');
   };
 
   const openEditShift = (shift) => {
@@ -1918,38 +2077,47 @@ export default function App() {
     const parsedBreak = Math.max(0, parseFloat(breakHours) || 0);
     const netHours = computeHours(date, timeIn, timeOut, parsedBreak);
 
-    const updatedShifts = state.shifts.map((s) => {
-      if (s.id === id) {
-        return {
-          ...s,
-          employeeId,
-          date,
-          timeIn,
-          timeOut,
-          breakHours: Math.round(parsedBreak * 100) / 100,
-          hours: netHours,
-          note: note ? note.trim() : ''
-        };
-      }
-      return s;
-    });
+    const performSaveEdit = async () => {
+      const updatedShifts = state.shifts.map((s) => {
+        if (s.id === id) {
+          return {
+            ...s,
+            employeeId,
+            date,
+            timeIn,
+            timeOut,
+            breakHours: Math.round(parsedBreak * 100) / 100,
+            hours: netHours,
+            note: note ? note.trim() : ''
+          };
+        }
+        return s;
+      });
 
-    let updatedState = { ...state, shifts: updatedShifts };
-    const recRes = recalculateEmployeeCycleLateness({
-      employeeId,
-      cycleFilterFn: currentFilterFn,
-      state: updatedState,
-      payrollCycleId: date.slice(0, 7)
-    });
-    updatedState = {
-      ...updatedState,
-      lateIncidents: recRes.incidents,
-      requests: recRes.updatedRequests
+      let updatedState = { ...state, shifts: updatedShifts };
+      const recRes = recalculateEmployeeCycleLateness({
+        employeeId,
+        cycleFilterFn: currentFilterFn,
+        state: updatedState,
+        payrollCycleId: date.slice(0, 7)
+      });
+      updatedState = {
+        ...updatedState,
+        lateIncidents: recRes.incidents,
+        requests: recRes.updatedRequests
+      };
+      setState(updatedState);
+      await saveState(updatedState);
+      setEditingShift(null);
+      showToast('تم تعديل الوردية بنجاح وتحديث وقائع التأخير');
     };
-    setState(updatedState);
-    await saveState(updatedState);
-    setEditingShift(null);
-    showToast('تم تعديل الوردية بنجاح وتحديث وقائع التأخير');
+
+    executeWithOwnerGuard({
+      lockKey: 'lockEditPastShifts',
+      actionTitle: `تعديل وردية سابقة (${editingShift.employeeName || editingShift.employeeId})`,
+      actionDetails: `تاريخ: ${editingShift.date} · الساعات: ${netHours} س`,
+      onExecute: performSaveEdit
+    });
   };
 
   const deleteShift = async (id) => {
@@ -2000,30 +2168,51 @@ export default function App() {
       showToast('يرجى إدخال مبلغ صحيح');
       return;
     }
-    const newAdj = {
-      id: uid(),
-      type: aType,
-      employeeId: aEmpId,
-      date: aDate || todayStr(),
-      amount,
-      description: aDesc.trim()
+    const emp = getEmp(aEmpId);
+
+    const performAddAdjustment = async () => {
+      const newAdj = {
+        id: uid(),
+        type: aType,
+        employeeId: aEmpId,
+        date: aDate || todayStr(),
+        amount,
+        description: aDesc.trim()
+      };
+      const updatedAdjs = [...state.adjustments, newAdj];
+      const updatedState = { ...state, adjustments: updatedAdjs };
+      setState(updatedState);
+      await saveState(updatedState);
+      setAAmount('');
+      setADesc('');
+      showToast('تمت إضافة التسوية المالية بنجاح');
     };
-    const updatedAdjs = [...state.adjustments, newAdj];
-    const updatedState = { ...state, adjustments: updatedAdjs };
-    setState(updatedState);
-    await saveState(updatedState);
-    setAAmount('');
-    setADesc('');
-    showToast('تمت إضافة التسوية المالية بنجاح');
+
+    executeWithOwnerGuard({
+      lockKey: 'lockDirectBonusDeduction',
+      actionTitle: aType === 'bonus' ? 'إضافة مكافأة مالية مباشرة' : 'تسجيل خصم مالي مباشر',
+      actionDetails: `مبلغ: ${amount} ج.م · الموظف: ${emp?.name || aEmpId}`,
+      onExecute: performAddAdjustment
+    });
   };
 
   const deleteAdjustment = async (id) => {
-    const updatedAdjs = state.adjustments.filter((a) => a.id !== id);
-    const updatedDeletedIds = Array.from(new Set([...(state._deletedIds || []), String(id), `adj_${id}`])).slice(-2000);
-    const updatedState = { ...state, adjustments: updatedAdjs, _deletedIds: updatedDeletedIds };
-    setState(updatedState);
-    await saveState(updatedState);
-    showToast('تم حذف التسوية المالية نهائياً');
+    const adj = (state.adjustments || []).find((a) => a.id === id);
+    const performDeleteAdjustment = async () => {
+      const updatedAdjs = state.adjustments.filter((a) => a.id !== id);
+      const updatedDeletedIds = Array.from(new Set([...(state._deletedIds || []), String(id), `adj_${id}`])).slice(-2000);
+      const updatedState = { ...state, adjustments: updatedAdjs, _deletedIds: updatedDeletedIds };
+      setState(updatedState);
+      await saveState(updatedState);
+      showToast('تم حذف التسوية المالية نهائياً');
+    };
+
+    executeWithOwnerGuard({
+      lockKey: 'lockDirectBonusDeduction',
+      actionTitle: 'حذف تسوية مالية (مكافأة / خصم)',
+      actionDetails: `مبلغ: ${adj?.amount || ''} ج.م · ${adj?.description || ''}`,
+      onExecute: performDeleteAdjustment
+    });
   };
 
   // Day schedule lookup helper supporting exact date, English and Arabic keys
@@ -4686,6 +4875,7 @@ export default function App() {
                   customTo={adminCustomTo}
                   currentBranch={currentBranch}
                   authRole={authRole}
+                  executeWithOwnerGuard={executeWithOwnerGuard}
                 />
               )}
 
@@ -4755,6 +4945,7 @@ export default function App() {
                   filterMode={adminFilterMode}
                   customFrom={adminCustomFrom}
                   customTo={adminCustomTo}
+                  executeWithOwnerGuard={executeWithOwnerGuard}
                 />
               )}
 
@@ -4779,6 +4970,7 @@ export default function App() {
                   filterMode={adminFilterMode}
                   customFrom={adminCustomFrom}
                   customTo={adminCustomTo}
+                  executeWithOwnerGuard={executeWithOwnerGuard}
                 />
               )}
 
@@ -4789,6 +4981,7 @@ export default function App() {
                   setState={setState}
                   saveState={saveState}
                   showToast={showToast}
+                  executeWithOwnerGuard={executeWithOwnerGuard}
                 />
               )}
 
@@ -4813,6 +5006,7 @@ export default function App() {
                   setState={setState}
                   saveState={saveState}
                   showToast={showToast}
+                  executeWithOwnerGuard={executeWithOwnerGuard}
                 />
               )}
 
@@ -4841,6 +5035,7 @@ export default function App() {
                   authRole={authRole}
                   activeSubTab={activeSubTab}
                   setActiveSubTab={setActiveSubTab}
+                  executeWithOwnerGuard={executeWithOwnerGuard}
                 />
               )}
 
@@ -4877,29 +5072,9 @@ export default function App() {
                   showToast={showToast}
                   currentRole="admin"
                   currentBranchId={null}
-                  onApproveRequest={(reqId) => {
-                    const req = (state.requests || []).find((r) => r.id === reqId);
-                    if (req) {
-                      const updatedReqs = (state.requests || []).map((r) => r.id === reqId ? { ...r, status: 'approved', adminApproved: true, branchApproved: true } : r);
-                      const updatedState = { ...state, requests: updatedReqs };
-                      setState(updatedState);
-                      saveState(updatedState);
-                      showToast('✅ تم اعتماد الطلب بنجاح');
-                    }
-                  }}
-                  onRejectRequest={(reqId) => {
-                    const updatedReqs = (state.requests || []).map((r) => r.id === reqId ? { ...r, status: 'rejected', adminApproved: false } : r);
-                    const updatedState = { ...state, requests: updatedReqs };
-                    setState(updatedState);
-                    saveState(updatedState);
-                    showToast('🔴 تم رفض الطلب');
-                  }}
-                  onSaveApprovalRules={(newRules) => {
-                    const updatedState = { ...state, approvalRules: newRules };
-                    setState(updatedState);
-                    saveState(updatedState);
-                    showToast('✅ تم حفظ قواعد الموافقة المزدوجة بنجاح');
-                  }}
+                  onApproveRequest={(reqId) => handleApproveRequest(reqId, 'admin')}
+                  onRejectRequest={(reqId) => handleRejectRequest(reqId, 'admin')}
+                  onSaveApprovalRules={handleSaveApprovalRules}
                 />
               )}
 

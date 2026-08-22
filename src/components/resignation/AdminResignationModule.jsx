@@ -5,7 +5,8 @@ export default function AdminResignationModule({
   state,
   setState,
   saveState,
-  showToast
+  showToast,
+  executeWithOwnerGuard
 }) {
   const [adminComment, setAdminComment] = useState({});
   const [noticeDays, setNoticeDays] = useState({});
@@ -79,96 +80,109 @@ export default function AdminResignationModule({
     const nDays = isWithdraw ? 0 : (parseInt(noticeDays[reqId], 10) || 0);
     const nStart = noticeStart[reqId] || todayStr();
 
-    let updatedReqs = (state.resignationRequests || []).map(r => {
-      if (r.id === reqId) {
-        return { 
-          ...r, 
-          adminStatus: status, 
-          adminComment: comment,
-          conditionsDaysRemaining: (!isWithdraw && status === 'approved') ? nDays : 0,
-          conditionsStartDate: (!isWithdraw && status === 'approved' && nDays > 0) ? nStart : '',
-          employeeConditionStatus: (!isWithdraw && status === 'approved' && nDays > 0) ? 'pending' : 'accepted',
-          updatedAt: new Date().toISOString()
-        };
-      }
-      return r;
-    });
-
-    let updatedEmployees = state.employees || [];
-    let updatedActiveShifts = { ...(state.activeShifts || {}) };
-    
-    // Case 1: If approved and it is a WITHDRAW request:
-    // 1. Cancel ALL previous resignation requests for this employee and reset their remaining days/conditions to 0/empty
-    // 2. Reactivate employee back to "على رأس العمل" and enable fingerprint and clear suspension reason
-    if (status === 'approved' && isWithdraw) {
-      updatedReqs = updatedReqs.map(r => {
-        const isSameEmp = String(r.employeeId) === String(targetReq.employeeId);
-        if (isSameEmp && r.type === 'resignation') {
-          return {
-            ...r,
-            isCancelled: true,
-            cancelledReason: `تم إلغاء الاستقالة بسبب قبول طلب التراجع عن الاستقالة: ${comment}`,
-            adminStatus: 'cancelled',
-            conditionsDaysRemaining: 0,
-            conditionsStartDate: '',
-            employeeConditionStatus: 'cancelled',
+    const performAction = async () => {
+      let updatedReqs = (state.resignationRequests || []).map(r => {
+        if (r.id === reqId) {
+          return { 
+            ...r, 
+            adminStatus: status, 
+            adminComment: comment,
+            conditionsDaysRemaining: (!isWithdraw && status === 'approved') ? nDays : 0,
+            conditionsStartDate: (!isWithdraw && status === 'approved' && nDays > 0) ? nStart : '',
+            employeeConditionStatus: (!isWithdraw && status === 'approved' && nDays > 0) ? 'pending' : 'accepted',
             updatedAt: new Date().toISOString()
           };
         }
         return r;
       });
 
-      updatedEmployees = updatedEmployees.map(e => {
-        const isTarget = String(e.id) === String(targetReq.employeeId) || (e.code && String(e.code) === String(targetReq.employeeId));
-        if (isTarget) {
-          return {
-            ...e,
-            status: 'على رأس العمل',
-            is_active: true,
-            fingerprint_active: true,
-            suspension_reason: '',
-            updatedAt: new Date().toISOString()
-          };
-        }
-        return e;
-      });
-    }
+      let updatedEmployees = state.employees || [];
+      let updatedActiveShifts = { ...(state.activeShifts || {}) };
+      
+      // Case 1: If approved and it is a WITHDRAW request:
+      // 1. Cancel ALL previous resignation requests for this employee and reset their remaining days/conditions to 0/empty
+      // 2. Reactivate employee back to "على رأس العمل" and enable fingerprint and clear suspension reason
+      if (status === 'approved' && isWithdraw) {
+        updatedReqs = updatedReqs.map(r => {
+          const isSameEmp = String(r.employeeId) === String(targetReq.employeeId);
+          if (isSameEmp && r.type === 'resignation') {
+            return {
+              ...r,
+              isCancelled: true,
+              cancelledReason: `تم إلغاء الاستقالة بسبب قبول طلب التراجع عن الاستقالة: ${comment}`,
+              adminStatus: 'cancelled',
+              conditionsDaysRemaining: 0,
+              conditionsStartDate: '',
+              employeeConditionStatus: 'cancelled',
+              updatedAt: new Date().toISOString()
+            };
+          }
+          return r;
+        });
 
-    // Case 2: ONLY for resignation requests with 0 notice days (immediate effect):
-    // -> Deactivate employee, stop fingerprint & remove active shift
-    if (status === 'approved' && !isWithdraw && nDays === 0) {
-      delete updatedActiveShifts[targetReq.employeeId];
-      if (targetReq.employeeId) delete updatedActiveShifts[String(targetReq.employeeId)];
+        updatedEmployees = updatedEmployees.map(e => {
+          const isTarget = String(e.id) === String(targetReq.employeeId) || (e.code && String(e.code) === String(targetReq.employeeId));
+          if (isTarget) {
+            return {
+              ...e,
+              status: 'على رأس العمل',
+              is_active: true,
+              fingerprint_active: true,
+              suspension_reason: '',
+              updatedAt: new Date().toISOString()
+            };
+          }
+          return e;
+        });
+      }
 
-      updatedEmployees = updatedEmployees.map(e => {
-        const isTarget = String(e.id) === String(targetReq.employeeId) || (e.code && String(e.code) === String(targetReq.employeeId));
-        if (isTarget) {
-          return {
-            ...e,
-            status: 'تم الاستقالة',
-            is_active: false,
-            suspension_reason: `تم قبول الاستقالة فوراً: ${comment}`,
-            fingerprint_active: false,
-            updatedAt: new Date().toISOString()
-          };
-        }
-        return e;
-      });
-    }
+      // Case 2: ONLY for resignation requests with 0 notice days (immediate effect):
+      // -> Deactivate employee, stop fingerprint & remove active shift
+      if (status === 'approved' && !isWithdraw && nDays === 0) {
+        delete updatedActiveShifts[targetReq.employeeId];
+        if (targetReq.employeeId) delete updatedActiveShifts[String(targetReq.employeeId)];
 
-    const updatedState = { 
-      ...state, 
-      resignationRequests: updatedReqs, 
-      employees: updatedEmployees,
-      activeShifts: updatedActiveShifts
+        updatedEmployees = updatedEmployees.map(e => {
+          const isTarget = String(e.id) === String(targetReq.employeeId) || (e.code && String(e.code) === String(targetReq.employeeId));
+          if (isTarget) {
+            return {
+              ...e,
+              status: 'تم الاستقالة',
+              is_active: false,
+              suspension_reason: `تم قبول الاستقالة فوراً: ${comment}`,
+              fingerprint_active: false,
+              updatedAt: new Date().toISOString()
+            };
+          }
+          return e;
+        });
+      }
+
+      const updatedState = { 
+        ...state, 
+        resignationRequests: updatedReqs, 
+        employees: updatedEmployees,
+        activeShifts: updatedActiveShifts
+      };
+      setState(updatedState);
+      if (saveState) await saveState(updatedState);
+
+      showToast(status === 'approved' 
+        ? (isWithdraw ? '✅ تم قبول طلب التراجع وإعادة الموظف على رأس العمل' : '✅ تم اعتماد الاستقالة وتحديث سجلات الموظف') 
+        : '❌ تم رفض الطلب من الإدارة العليا'
+      );
     };
-    setState(updatedState);
-    if (saveState) await saveState(updatedState);
 
-    showToast(status === 'approved' 
-      ? (isWithdraw ? '✅ تم قبول طلب التراجع وإعادة الموظف على رأس العمل' : '✅ تم اعتماد الاستقالة وتحديث سجلات الموظف') 
-      : '❌ تم رفض الطلب من الإدارة العليا'
-    );
+    if (status === 'approved' && !isWithdraw && executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockTerminateEmployee',
+        actionTitle: 'اعتماد وقبول طلب استقالة موظف',
+        actionDetails: `الموظف: ${targetReq.employeeName || targetReq.employeeId}`,
+        onExecute: performAction
+      });
+    } else {
+      await performAction();
+    }
   };
 
   const handleInputChange = (id, field, value) => {
@@ -190,63 +204,76 @@ export default function AdminResignationModule({
     const emp = (state.employees || []).find(e => String(e.id) === String(manualData.employeeId));
     if (!emp) return;
     
-    const newReq = {
-      id: 'res_manual_' + Date.now(),
-      employeeId: emp.id,
-      branchId: emp.branchId,
-      type: manualData.type,
-      isAdminCreated: true,
-      employeeReason: 'تم الإنشاء يدوياً بواسطة الإدارة العليا: ' + manualData.reason,
-      requestDate: todayStr(),
-      managerStatus: 'approved',
-      managerComment: 'إجراء إداري مباشر من الإدارة العليا',
-      adminStatus: 'approved',
-      adminComment: 'إجراء إداري مباشر: ' + manualData.reason,
-      conditionsDaysRemaining: nDays,
-      conditionsStartDate: nDays > 0 ? nStart : '',
-      employeeConditionStatus: 'accepted'
-    };
+    const performManualSubmit = async () => {
+      const newReq = {
+        id: 'res_manual_' + Date.now(),
+        employeeId: emp.id,
+        branchId: emp.branchId,
+        type: manualData.type,
+        isAdminCreated: true,
+        employeeReason: 'تم الإنشاء يدوياً بواسطة الإدارة العليا: ' + manualData.reason,
+        requestDate: todayStr(),
+        managerStatus: 'approved',
+        managerComment: 'إجراء إداري مباشر من الإدارة العليا',
+        adminStatus: 'approved',
+        adminComment: 'إجراء إداري مباشر: ' + manualData.reason,
+        conditionsDaysRemaining: nDays,
+        conditionsStartDate: nDays > 0 ? nStart : '',
+        employeeConditionStatus: 'accepted'
+      };
 
-    let updatedEmployees = state.employees || [];
-    let updatedActiveShifts = { ...(state.activeShifts || {}) };
-    
-    // If immediate (nDays === 0) -> stop account and fingerprint and shift
-    if (nDays === 0) {
-      delete updatedActiveShifts[emp.id];
-    }
-
-    updatedEmployees = updatedEmployees.map(e => {
-      if (String(e.id) === String(emp.id)) {
-        if (nDays === 0) {
-          return {
-            ...e,
-            status: 'تم الاستقالة',
-            is_active: false,
-            suspension_reason: `تم ${manualData.type === 'resignation' ? 'قبول الاستقالة' : 'إنهاء الخدمة'} يدوياً: ${manualData.reason}`,
-            fingerprint_active: false
-          };
-        } else {
-          return {
-            ...e,
-            fingerprint_active: false // Disable fingerprint during notice
-          };
-        }
+      let updatedEmployees = state.employees || [];
+      let updatedActiveShifts = { ...(state.activeShifts || {}) };
+      
+      // If immediate (nDays === 0) -> stop account and fingerprint and shift
+      if (nDays === 0) {
+        delete updatedActiveShifts[emp.id];
       }
-      return e;
-    });
 
-    const updatedState = { 
-      ...state, 
-      resignationRequests: [newReq, ...(state.resignationRequests || [])],
-      employees: updatedEmployees,
-      activeShifts: updatedActiveShifts
+      updatedEmployees = updatedEmployees.map(e => {
+        if (String(e.id) === String(emp.id)) {
+          if (nDays === 0) {
+            return {
+              ...e,
+              status: 'تم الاستقالة',
+              is_active: false,
+              suspension_reason: `تم ${manualData.type === 'resignation' ? 'قبول الاستقالة' : 'إنهاء الخدمة'} يدوياً: ${manualData.reason}`,
+              fingerprint_active: false
+            };
+          } else {
+            return {
+              ...e,
+              fingerprint_active: false // Disable fingerprint during notice
+            };
+          }
+        }
+        return e;
+      });
+
+      const updatedState = { 
+        ...state, 
+        resignationRequests: [newReq, ...(state.resignationRequests || [])],
+        employees: updatedEmployees,
+        activeShifts: updatedActiveShifts
+      };
+
+      setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      showToast('تم تطبيق الإجراء اليدوي بنجاح');
+      setShowManualForm(false);
+      setManualData({ employeeId: '', type: 'resignation', reason: '', noticeDays: '0', noticeStart: todayStr() });
     };
 
-    setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    showToast('تم تطبيق الإجراء اليدوي بنجاح');
-    setShowManualForm(false);
-    setManualData({ employeeId: '', type: 'resignation', reason: '', noticeDays: '0', noticeStart: todayStr() });
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockTerminateEmployee',
+        actionTitle: manualData.type === 'resignation' ? 'تسجيل استقالة يدوية لموظف' : 'إنهاء خدمة موظف',
+        actionDetails: `الموظف: ${emp.name}`,
+        onExecute: performManualSubmit
+      });
+    } else {
+      await performManualSubmit();
+    }
   };
 
   const readyCount = (state.resignationRequests || []).filter(r => 

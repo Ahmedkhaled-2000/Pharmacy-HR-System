@@ -14,7 +14,8 @@ export default function BylawsModule({
   monthPicker = null,
   filterMode = 'all',
   customFrom = '',
-  customTo = ''
+  customTo = '',
+  executeWithOwnerGuard
 }) {
   const [activeTab, setActiveTab] = useState('disciplinary_penalties'); // 'disciplinary_penalties' | 'text' | 'records' | 'late_penalties'
   const isManagerOrAdmin = userRole === 'admin' || userRole === 'branch';
@@ -48,10 +49,23 @@ export default function BylawsModule({
   const [adminRejectReplyText, setAdminRejectReplyText] = useState('');
 
   const handleSaveBylawsText = async () => {
-    const updatedState = { ...state, bylawsText };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    showToast?.('✅ تم حفظ وتحديث نصوص لائحة العمل الرسمية بنجاح');
+    const performSaveText = async () => {
+      const updatedState = { ...state, bylawsText };
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      showToast?.('✅ تم حفظ وتحديث نصوص لائحة العمل الرسمية بنجاح');
+    };
+
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockEditSystemPermissions',
+        actionTitle: 'حفظ وتحديث نصوص لائحة العمل الرسمية',
+        actionDetails: 'تعديل السياسات العامة للائحة',
+        onExecute: performSaveText
+      });
+    } else {
+      await performSaveText();
+    }
   };
 
   const handleResetDefaultBylawsText = async () => {
@@ -75,11 +89,24 @@ export default function BylawsModule({
 
     if (!window.confirm('هل ترغب في استعادة النص الافتراضي للائحة العمل الرسمية؟')) return;
 
-    setBylawsText(defaultText);
-    const updatedState = { ...state, bylawsText: defaultText };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    showToast?.('🔄 تم استعادة النص الافتراضي للائحة العمل');
+    const performResetText = async () => {
+      setBylawsText(defaultText);
+      const updatedState = { ...state, bylawsText: defaultText };
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      showToast?.('🔄 تم استعادة النص الافتراضي للائحة العمل');
+    };
+
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockEditSystemPermissions',
+        actionTitle: 'استعادة النص الافتراضي للائحة العمل',
+        actionDetails: 'إعادة ضبط النصوص القياسية',
+        onExecute: performResetText
+      });
+    } else {
+      await performResetText();
+    }
   };
 
   const handleSubmitObjection = async (e) => {
@@ -113,39 +140,52 @@ export default function BylawsModule({
   };
 
   const handleAdminApproveObjection = async (reqId) => {
-    let empId = null;
-    let ruleTitle = '';
-    const updatedRequests = (state.requests || []).map((r) => {
-      if (r.id === reqId) {
-        empId = r.employeeId;
-        ruleTitle = r.ruleTitle;
-        return {
-          ...r,
-          status: 'cancelled',
-          isCancelled: true,
-          cancelledAt: new Date().toISOString(),
-          objection: {
-            ...(r.objection || {}),
-            status: 'approved',
-            resolvedAt: new Date().toISOString()
-          }
-        };
-      }
-      return r;
-    });
+    const performApproveObj = async () => {
+      let empId = null;
+      let ruleTitle = '';
+      const updatedRequests = (state.requests || []).map((r) => {
+        if (r.id === reqId) {
+          empId = r.employeeId;
+          ruleTitle = r.ruleTitle;
+          return {
+            ...r,
+            status: 'cancelled',
+            isCancelled: true,
+            cancelledAt: new Date().toISOString(),
+            objection: {
+              ...(r.objection || {}),
+              status: 'approved',
+              resolvedAt: new Date().toISOString()
+            }
+          };
+        }
+        return r;
+      });
 
-    // Automatically remove any corresponding deduction from adjustments
-    const updatedAdjustments = (state.adjustments || []).filter((a) => {
-      if (a.id === reqId || a.id === `adj_${reqId}` || a.id === `adj_penalty_${reqId}` || a.requestId === reqId || a.id === `adj_disc_${reqId}`) return false;
-      if (empId && String(a.employeeId) === String(empId) && (a.type === 'penalty' || a.type === 'deduction') && (a.reason === ruleTitle || a.details === ruleTitle)) return false;
-      return true;
-    });
+      // Automatically remove any corresponding deduction from adjustments
+      const updatedAdjustments = (state.adjustments || []).filter((a) => {
+        if (a.id === reqId || a.id === `adj_${reqId}` || a.id === `adj_penalty_${reqId}` || a.requestId === reqId || a.id === `adj_disc_${reqId}`) return false;
+        if (empId && String(a.employeeId) === String(empId) && (a.type === 'penalty' || a.type === 'deduction') && (a.reason === ruleTitle || a.details === ruleTitle)) return false;
+        return true;
+      });
 
-    const updatedState = { ...state, requests: updatedRequests, adjustments: updatedAdjustments };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
+      const updatedState = { ...state, requests: updatedRequests, adjustments: updatedAdjustments };
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
 
-    showToast?.('✅ تم قبول الاعتراض وإلغاء الخصم والجزاء اللائحي تلقائياً');
+      showToast?.('✅ تم قبول الاعتراض وإلغاء الخصم والجزاء اللائحي تلقائياً');
+    };
+
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockDirectBonusDeduction',
+        actionTitle: 'قبول اعتراض وإلغاء خصم جزاء لائحي',
+        actionDetails: `معرف الطلب: ${reqId}`,
+        onExecute: performApproveObj
+      });
+    } else {
+      await performApproveObj();
+    }
   };
 
   const handleAdminRejectObjection = async (reqId, reply = '') => {
@@ -399,6 +439,7 @@ export default function BylawsModule({
           monthPicker={monthPicker}
           customFrom={customFrom}
           customTo={customTo}
+          executeWithOwnerGuard={executeWithOwnerGuard}
         />
       )}
 
@@ -687,6 +728,7 @@ export default function BylawsModule({
           monthPicker={monthPicker}
           customFrom={customFrom}
           customTo={customTo}
+          executeWithOwnerGuard={executeWithOwnerGuard}
         />
       )}
 

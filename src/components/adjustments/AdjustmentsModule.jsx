@@ -10,7 +10,8 @@ export default function AdjustmentsModule({
   monthPicker,
   filterMode,
   customFrom,
-  customTo
+  customTo,
+  executeWithOwnerGuard
 }) {
   const [selectedBranchId, setSelectedBranchId] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -113,48 +114,75 @@ export default function AdjustmentsModule({
     }
 
     const empObj = employees.find((item) => item.id === targetEmpId);
-    const newAdj = {
-      id: `adj_${Date.now()}`,
-      employeeId: targetEmpId,
-      employeeName: empObj?.name || '',
-      employeeCode: empObj?.code || '',
-      branchId: adjBranchId || null,
-      type: adjType,
-      amount,
-      date: adjDate,
-      reason: adjReason.trim(),
-      details: adjReason.trim(),
-      createdBy: 'admin',
-      createdAt: new Date().toISOString()
+    const performAdd = async () => {
+      const newAdj = {
+        id: `adj_${Date.now()}`,
+        employeeId: targetEmpId,
+        employeeName: empObj?.name || '',
+        employeeCode: empObj?.code || '',
+        branchId: adjBranchId || null,
+        type: adjType,
+        amount,
+        date: adjDate,
+        reason: adjReason.trim(),
+        details: adjReason.trim(),
+        createdBy: 'admin',
+        createdAt: new Date().toISOString()
+      };
+
+      const updatedAdjs = [newAdj, ...(state.adjustments || [])];
+      const updatedState = { ...state, adjustments: updatedAdjs };
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+
+      setShowAddModal(false);
+      setAdjAmount('');
+      setAdjReason('');
+      showToast?.(`✅ تم تسجيل ${adjType === 'bonus' ? 'المكافأة' : 'الخصم'} بنجاح للموظف ${empObj?.name}`);
     };
 
-    const updatedAdjs = [newAdj, ...(state.adjustments || [])];
-    const updatedState = { ...state, adjustments: updatedAdjs };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-
-    setShowAddModal(false);
-    setAdjAmount('');
-    setAdjReason('');
-    showToast?.(`✅ تم تسجيل ${adjType === 'bonus' ? 'المكافأة' : 'الخصم'} بنجاح للموظف ${empObj?.name}`);
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockDirectBonusDeduction',
+        actionTitle: adjType === 'bonus' ? 'إضافة مكافأة مالية مباشرة' : 'إضافة خصم / جزاء مالي مباشر',
+        actionDetails: `الموظف: ${empObj?.name || targetEmpId} - المبلغ: ${amount} ج.م`,
+        onExecute: performAdd
+      });
+    } else {
+      await performAdd();
+    }
   };
 
   const handleDeleteAdjustment = async (adjId) => {
     if (!window.confirm('هل أنت متأكد من رغبتك في حذف وإلغاء هذا الجزاء / البند الإداري نهائياً؟')) return;
-    const updatedAdjs = (state.adjustments || []).filter((a) => String(a.id) !== String(adjId));
-    const updatedReqs = (state.requests || []).filter((r) => String(r.id) !== String(adjId));
-    const updatedNotifs = (state.notifications || []).filter((n) => String(n.requestId) !== String(adjId) && String(n.id) !== String(adjId));
-    const updatedDeleted = [...(state._deletedIds || []), String(adjId)];
-    const updatedState = {
-      ...state,
-      adjustments: updatedAdjs,
-      requests: updatedReqs,
-      notifications: updatedNotifs,
-      _deletedIds: updatedDeleted
+
+    const performDelete = async () => {
+      const updatedAdjs = (state.adjustments || []).filter((a) => String(a.id) !== String(adjId));
+      const updatedReqs = (state.requests || []).filter((r) => String(r.id) !== String(adjId));
+      const updatedNotifs = (state.notifications || []).filter((n) => String(n.requestId) !== String(adjId) && String(n.id) !== String(adjId));
+      const updatedDeleted = [...(state._deletedIds || []), String(adjId)];
+      const updatedState = {
+        ...state,
+        adjustments: updatedAdjs,
+        requests: updatedReqs,
+        notifications: updatedNotifs,
+        _deletedIds: updatedDeleted
+      };
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      showToast?.('🗑️ تم حذف وإلغاء الجزاء / البند المالي بنجاح نهائياً');
     };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    showToast?.('🗑️ تم حذف وإلغاء الجزاء / البند المالي بنجاح نهائياً');
+
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockDirectBonusDeduction',
+        actionTitle: 'حذف وإلغاء بند مالي / مكافأة / جزاء',
+        actionDetails: `معرف البند: ${adjId}`,
+        onExecute: performDelete
+      });
+    } else {
+      await performDelete();
+    }
   };
 
   return (

@@ -5,7 +5,8 @@ export default function LoansMedsModule({
   state,
   setState,
   saveState,
-  showToast
+  showToast,
+  executeWithOwnerGuard
 }) {
   const [selectedEmpModal, setSelectedEmpModal] = useState(null);
   const [filterBranch, setFilterBranch] = useState('');
@@ -38,17 +39,30 @@ export default function LoansMedsModule({
   }, [state.orgSettings]);
 
   const handleSaveLoanSettings = async () => {
-    const updatedSettings = {
-      ...(state.orgSettings || {}),
-      loanRequestStartDay: parseInt(ruleStartDay) || 1,
-      loanRequestEndDay: parseInt(ruleEndDay) || 10,
-      maxMonthlyLoanSalaryPercent: parseFloat(ruleMaxMonthlyPercent) || 50,
-      maxInstallmentLoanSalaryMultiplier: parseFloat(ruleMaxInstallmentMultiplier) || 2
+    const performSaveLoanSettings = async () => {
+      const updatedSettings = {
+        ...(state.orgSettings || {}),
+        loanRequestStartDay: parseInt(ruleStartDay) || 1,
+        loanRequestEndDay: parseInt(ruleEndDay) || 10,
+        maxMonthlyLoanSalaryPercent: parseFloat(ruleMaxMonthlyPercent) || 50,
+        maxInstallmentLoanSalaryMultiplier: parseFloat(ruleMaxInstallmentMultiplier) || 2
+      };
+      const updatedState = { ...state, orgSettings: updatedSettings };
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      showToast?.('✅ تم حفظ ضوابط وشروط السلف للموظفين وتطبيقها فوراً!');
     };
-    const updatedState = { ...state, orgSettings: updatedSettings };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    showToast?.('✅ تم حفظ ضوابط وشروط السلف للموظفين وتطبيقها فوراً!');
+
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockEditCutoffRules',
+        actionTitle: 'تعديل ضوابط ومواعيد السلف',
+        actionDetails: `النافذة: من يوم ${ruleStartDay} إلى ${ruleEndDay}`,
+        onExecute: performSaveLoanSettings
+      });
+    } else {
+      await performSaveLoanSettings();
+    }
   };
 
   const employees = state.employees || [];
@@ -169,39 +183,52 @@ export default function LoansMedsModule({
     const monthlyDeduction = (entryType === 'loan' && loanRepayPlan === 'installment') ? Math.round((parsed / months) * 100) / 100 : parsed;
     const entryId = `loan_${Date.now()}`;
 
-    const newLoan = {
-      id: entryId,
-      employeeId: targetEmpId,
-      employeeName: empObj?.name || '',
-      employeeCode: empObj?.code || '',
-      branchId: empObj?.branchId || '',
-      type: entryType,
-      loanType: entryType === 'loan' ? (loanRepayPlan === 'installment' ? 'installment' : 'monthly') : 'monthly',
-      typeLabel: entryType === 'loan' ? (loanRepayPlan === 'installment' ? 'سلفة مقسطة معتمدة' : 'سلفة مالية معتمدة') : 'أدوية ومشتريات آجل معتمدة',
-      amount: parsed,
-      paidAmount: 0,
-      monthsCount: months,
-      monthlyDeduction: monthlyDeduction,
-      status: 'approved',
-      adminApproved: true,
-      branchApproved: true,
-      notes: notes.trim() || (entryType === 'loan' ? 'سلفة مالية مسجلة من الإدارة العليا' : 'مشتريات أدوية آجل'),
-      reason: notes.trim() || (entryType === 'loan' ? 'سلفة مالية مسجلة من الإدارة العليا' : 'مشتريات أدوية آجل'),
-      date: new Date().toISOString().slice(0, 10),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      paymentsHistory: []
+    const performAddEntry = async () => {
+      const newLoan = {
+        id: entryId,
+        employeeId: targetEmpId,
+        employeeName: empObj?.name || '',
+        employeeCode: empObj?.code || '',
+        branchId: empObj?.branchId || '',
+        type: entryType,
+        loanType: entryType === 'loan' ? (loanRepayPlan === 'installment' ? 'installment' : 'monthly') : 'monthly',
+        typeLabel: entryType === 'loan' ? (loanRepayPlan === 'installment' ? 'سلفة مقسطة معتمدة' : 'سلفة مالية معتمدة') : 'أدوية ومشتريات آجل معتمدة',
+        amount: parsed,
+        paidAmount: 0,
+        monthsCount: months,
+        monthlyDeduction: monthlyDeduction,
+        status: 'approved',
+        adminApproved: true,
+        branchApproved: true,
+        notes: notes.trim() || (entryType === 'loan' ? 'سلفة مالية مسجلة من الإدارة العليا' : 'مشتريات أدوية آجل'),
+        reason: notes.trim() || (entryType === 'loan' ? 'سلفة مالية مسجلة من الإدارة العليا' : 'مشتريات أدوية آجل'),
+        date: new Date().toISOString().slice(0, 10),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        paymentsHistory: []
+      };
+
+      const updatedLoans = [newLoan, ...(state.loans || [])];
+      const updatedRequests = [newLoan, ...(state.requests || [])];
+      const updatedState = { ...state, loans: updatedLoans, requests: updatedRequests };
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+
+      showToast?.(`✅ تم تسجيل واعتماد ${entryType === 'loan' ? 'السلفة' : 'الأدوية الآجل'} للموظف ${empObj?.name} بنجاح!`);
+      setAmount('');
+      setNotes('');
     };
 
-    const updatedLoans = [newLoan, ...(state.loans || [])];
-    const updatedRequests = [newLoan, ...(state.requests || [])];
-    const updatedState = { ...state, loans: updatedLoans, requests: updatedRequests };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-
-    showToast?.(`✅ تم تسجيل واعتماد ${entryType === 'loan' ? 'السلفة' : 'الأدوية الآجل'} للموظف ${empObj?.name} بنجاح!`);
-    setAmount('');
-    setNotes('');
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockApproveLoans',
+        actionTitle: entryType === 'loan' ? 'صرف وتسجيل سلفة مالية' : 'صرف وتسجيل أدوية آجل',
+        actionDetails: `الموظف: ${empObj?.name} - المبلغ: ${parsed} ج.م`,
+        onExecute: performAddEntry
+      });
+    } else {
+      await performAddEntry();
+    }
   };
 
   // Form State for Payment Modal
@@ -217,80 +244,93 @@ export default function LoansMedsModule({
       return;
     }
 
-    const payRecord = {
-      id: 'pay_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
-      date: new Date().toISOString().slice(0, 10),
-      amount: parsedPay,
-      note: noteStr.trim() || 'سداد دفعة سلفة مالية/آجل',
-      type: 'manual',
-      createdAt: new Date().toISOString()
+    const performRecordPayment = async () => {
+      const payRecord = {
+        id: 'pay_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+        date: new Date().toISOString().slice(0, 10),
+        amount: parsedPay,
+        note: noteStr.trim() || 'سداد دفعة سلفة مالية/آجل',
+        type: 'manual',
+        createdAt: new Date().toISOString()
+      };
+
+      // Update in state.loans
+      let loansArr = [...(state.loans || [])];
+      let foundInLoans = false;
+      loansArr = loansArr.map((l) => {
+        if (String(l.id) === String(targetLoanId)) {
+          foundInLoans = true;
+          const total = parseFloat(l.amount) || 0;
+          const newPaid = (parseFloat(l.paidAmount) || 0) + parsedPay;
+          const history = [...(l.paymentsHistory || []), payRecord];
+          return {
+            ...l,
+            paidAmount: newPaid,
+            paymentsHistory: history,
+            status: newPaid >= total ? 'paid' : 'partial',
+            updatedAt: new Date().toISOString()
+          };
+        }
+        return l;
+      });
+
+      // Update in state.requests
+      let reqsArr = [...(state.requests || [])];
+      let foundInRequests = false;
+      reqsArr = reqsArr.map((r) => {
+        if (String(r.id) === String(targetLoanId)) {
+          foundInRequests = true;
+          const total = parseFloat(r.amount) || 0;
+          const newPaid = (parseFloat(r.paidAmount) || 0) + parsedPay;
+          const history = [...(r.paymentsHistory || []), payRecord];
+          return {
+            ...r,
+            paidAmount: newPaid,
+            paymentsHistory: history,
+            status: newPaid >= total ? 'paid' : 'partial',
+            updatedAt: new Date().toISOString()
+          };
+        }
+        return r;
+      });
+
+      // If item was an approved request not yet in state.loans, add it to state.loans
+      if (!foundInLoans && foundInRequests) {
+        const targetReq = reqsArr.find((r) => String(r.id) === String(targetLoanId));
+        if (targetReq) {
+          loansArr.unshift({
+            ...targetReq,
+            id: targetReq.id,
+            employeeId: targetReq.employeeId,
+            amount: parseFloat(targetReq.amount) || 0,
+            paidAmount: parseFloat(targetReq.paidAmount) || 0,
+            paymentsHistory: targetReq.paymentsHistory || [payRecord],
+            status: (parseFloat(targetReq.paidAmount) || 0) >= (parseFloat(targetReq.amount) || 0) ? 'paid' : 'partial',
+            updatedAt: new Date().toISOString()
+          });
+        }
+      }
+
+      const updatedState = { ...state, loans: loansArr, requests: reqsArr };
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+
+      showToast?.(`✅ تم تسجيل سداد مبلغ ${parsedPay} ج.م بنجاح وتحديث مديونية الموظف!`);
+      setPayingLoanId(null);
+      setPayInputAmount('');
+      setPayInputNotes('');
     };
 
-    // Update in state.loans
-    let loansArr = [...(state.loans || [])];
-    let foundInLoans = false;
-    loansArr = loansArr.map((l) => {
-      if (String(l.id) === String(targetLoanId)) {
-        foundInLoans = true;
-        const total = parseFloat(l.amount) || 0;
-        const newPaid = (parseFloat(l.paidAmount) || 0) + parsedPay;
-        const history = [...(l.paymentsHistory || []), payRecord];
-        return {
-          ...l,
-          paidAmount: newPaid,
-          paymentsHistory: history,
-          status: newPaid >= total ? 'paid' : 'partial',
-          updatedAt: new Date().toISOString()
-        };
-      }
-      return l;
-    });
-
-    // Update in state.requests
-    let reqsArr = [...(state.requests || [])];
-    let foundInRequests = false;
-    reqsArr = reqsArr.map((r) => {
-      if (String(r.id) === String(targetLoanId)) {
-        foundInRequests = true;
-        const total = parseFloat(r.amount) || 0;
-        const newPaid = (parseFloat(r.paidAmount) || 0) + parsedPay;
-        const history = [...(r.paymentsHistory || []), payRecord];
-        return {
-          ...r,
-          paidAmount: newPaid,
-          paymentsHistory: history,
-          status: newPaid >= total ? 'paid' : 'partial',
-          updatedAt: new Date().toISOString()
-        };
-      }
-      return r;
-    });
-
-    // If item was an approved request not yet in state.loans, add it to state.loans
-    if (!foundInLoans && foundInRequests) {
-      const targetReq = reqsArr.find((r) => String(r.id) === String(targetLoanId));
-      if (targetReq) {
-        loansArr.unshift({
-          ...targetReq,
-          id: targetReq.id,
-          employeeId: targetReq.employeeId,
-          amount: parseFloat(targetReq.amount) || 0,
-          paidAmount: parseFloat(targetReq.paidAmount) || 0,
-          paymentsHistory: targetReq.paymentsHistory || [payRecord],
-          status: (parseFloat(targetReq.paidAmount) || 0) >= (parseFloat(targetReq.amount) || 0) ? 'paid' : 'partial',
-          updatedAt: new Date().toISOString()
-        });
-      }
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockApproveLoans',
+        actionTitle: 'تسجيل سداد دفعة سلفة/آجل',
+        actionDetails: `المبلغ: ${parsedPay} ج.م`,
+        onExecute: performRecordPayment
+      });
+    } else {
+      await performRecordPayment();
     }
-
-    const updatedState = { ...state, loans: loansArr, requests: reqsArr };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-
-    showToast?.(`✅ تم تسجيل سداد مبلغ ${parsedPay} ج.م بنجاح وتحديث مديونية الموظف!`);
-    setPayingLoanId(null);
-    setPayInputAmount('');
-    setPayInputNotes('');
   };
 
   const handleAutoCloseMonthlyInstallments = async () => {
@@ -305,57 +345,70 @@ export default function LoansMedsModule({
       return;
     }
 
-    let processedCount = 0;
-    let loansArr = [...(state.loans || [])];
-    let reqsArr = [...(state.requests || [])];
+    const performAutoClose = async () => {
+      let processedCount = 0;
+      let loansArr = [...(state.loans || [])];
+      let reqsArr = [...(state.requests || [])];
 
-    const processItem = (item) => {
-      const total = parseFloat(item.amount || item.totalAmount) || 0;
-      const paid = parseFloat(item.paidAmount) || 0;
-      const rem = Math.max(0, total - paid);
-      if (rem <= 0) return item;
+      const processItem = (item) => {
+        const total = parseFloat(item.amount || item.totalAmount) || 0;
+        const paid = parseFloat(item.paidAmount) || 0;
+        const rem = Math.max(0, total - paid);
+        if (rem <= 0) return item;
 
-      const history = item.paymentsHistory || item.payments || item.paidHistory || [];
-      const alreadyPaidThisMonth = history.some((p) => p.month === currentMonth || p.date === endDate || p.note?.includes(currentMonth));
-      if (alreadyPaidThisMonth) return item;
+        const history = item.paymentsHistory || item.payments || item.paidHistory || [];
+        const alreadyPaidThisMonth = history.some((p) => p.month === currentMonth || p.date === endDate || p.note?.includes(currentMonth));
+        if (alreadyPaidThisMonth) return item;
 
-      const installmentVal = Math.min(rem, parseFloat(item.monthlyDeduction || item.installmentAmount) || rem);
-      const roundedInstallment = Math.round(installmentVal * 100) / 100;
-      const autoPayRecord = {
-        id: `auto_pay_${currentMonth}_${item.id}_${Date.now()}`,
-        month: currentMonth,
-        date: endDate,
-        amount: roundedInstallment,
-        note: `خصم قسط شهري تلقائي في نهاية فترة الرواتب (${startDate} إلى ${endDate})`,
-        type: 'auto_payroll'
+        const installmentVal = Math.min(rem, parseFloat(item.monthlyDeduction || item.installmentAmount) || rem);
+        const roundedInstallment = Math.round(installmentVal * 100) / 100;
+        const autoPayRecord = {
+          id: `auto_pay_${currentMonth}_${item.id}_${Date.now()}`,
+          month: currentMonth,
+          date: endDate,
+          amount: roundedInstallment,
+          note: `خصم قسط شهري تلقائي في نهاية فترة الرواتب (${startDate} إلى ${endDate})`,
+          type: 'auto_payroll'
+        };
+
+        processedCount++;
+        const newPaid = Math.round((paid + roundedInstallment) * 100) / 100;
+        return {
+          ...item,
+          paidAmount: newPaid,
+          paymentsHistory: [...history, autoPayRecord],
+          status: newPaid >= total ? 'paid' : 'partial'
+        };
       };
 
-      processedCount++;
-      const newPaid = Math.round((paid + roundedInstallment) * 100) / 100;
-      return {
-        ...item,
-        paidAmount: newPaid,
-        paymentsHistory: [...history, autoPayRecord],
-        status: newPaid >= total ? 'paid' : 'partial'
-      };
+      loansArr = loansArr.map(processItem);
+      reqsArr = reqsArr.map((r) => {
+        if (r.status === 'approved' || r.adminApproved || r.status === 'partial') {
+          return processItem(r);
+        }
+        return r;
+      });
+
+      const updatedState = { ...state, loans: loansArr, requests: reqsArr };
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+
+      if (processedCount > 0) {
+        showToast?.(`✅ تم خصم وتأكيد سداد الأقساط التلقائية لعدد ${processedCount} سلفة عن دورة ${currentMonth} (${endDate})!`);
+      } else {
+        showToast?.(`ℹ️ جميع الأقساط لسلف هذه الدورة (${currentMonth}) مخصومة ومسددة بالكامل مسبقاً.`);
+      }
     };
 
-    loansArr = loansArr.map(processItem);
-    reqsArr = reqsArr.map((r) => {
-      if (r.status === 'approved' || r.adminApproved || r.status === 'partial') {
-        return processItem(r);
-      }
-      return r;
-    });
-
-    const updatedState = { ...state, loans: loansArr, requests: reqsArr };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-
-    if (processedCount > 0) {
-      showToast?.(`✅ تم خصم وتأكيد سداد الأقساط التلقائية لعدد ${processedCount} سلفة عن دورة ${currentMonth} (${endDate})!`);
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockApproveLoans',
+        actionTitle: 'الخصم التلقائي لأقساط السلف',
+        actionDetails: `دورة الرواتب: ${currentMonth}`,
+        onExecute: performAutoClose
+      });
     } else {
-      showToast?.(`ℹ️ جميع الأقساط لسلف هذه الدورة (${currentMonth}) مخصومة ومسددة بالكامل مسبقاً.`);
+      await performAutoClose();
     }
   };
 

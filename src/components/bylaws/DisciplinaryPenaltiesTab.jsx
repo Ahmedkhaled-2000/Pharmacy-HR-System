@@ -18,7 +18,8 @@ export default function DisciplinaryPenaltiesTab({
   filterFn = null,
   monthPicker = null,
   customFrom = '',
-  customTo = ''
+  customTo = '',
+  executeWithOwnerGuard
 }) {
   const isEmployee = userRole === 'employee' || Boolean(currentEmpId);
   const isBranch = userRole === 'branch' || (Boolean(currentBranchId) && !isEmployee && userRole !== 'admin');
@@ -173,101 +174,124 @@ export default function DisciplinaryPenaltiesTab({
     const amount = parseFloat(pen.amount) || 0;
     const dailyRate = pen.dailyRate || getEmployeeDailyRate(emp, pen.branchId);
 
-    // Update Request
-    const updatedRequests = (state.requests || []).map((r) => {
-      if (r.id === reqId) {
-        return {
-          ...r,
-          status: 'approved',
-          adminApproved: true,
-          approvedAt: new Date().toISOString(),
-          approvedBy: 'الإدارة العليا',
-          auditLog: [
-            ...(r.auditLog || []),
-            {
-              action: 'approved',
-              by: 'الإدارة العليا',
-              role: 'admin',
-              timestamp: new Date().toISOString(),
-              note: 'تم اعتماد وتطبيق الجزاء التأديبي من الإدارة العليا'
-            }
-          ]
+    const performApprove = async () => {
+      // Update Request
+      const updatedRequests = (state.requests || []).map((r) => {
+        if (r.id === reqId) {
+          return {
+            ...r,
+            status: 'approved',
+            adminApproved: true,
+            approvedAt: new Date().toISOString(),
+            approvedBy: 'الإدارة العليا',
+            auditLog: [
+              ...(r.auditLog || []),
+              {
+                action: 'approved',
+                by: 'الإدارة العليا',
+                role: 'admin',
+                timestamp: new Date().toISOString(),
+                note: 'تم اعتماد وتطبيق الجزاء التأديبي من الإدارة العليا'
+              }
+            ]
+          };
+        }
+        return r;
+      });
+
+      // Create Adjustment entry if financial deduction
+      let updatedAdjustments = state.adjustments || [];
+      if (amount > 0) {
+        const adjDesc = `خصم جزاء تأديبي: ${pen.categoryCode || ''} - ${pen.ruleTitle || ''} (المرة ${pen.occurrenceNumber || 1})`;
+        const newAdj = {
+          id: `adj_disc_${reqId}`,
+          requestId: reqId,
+          employeeId: pen.employeeId,
+          employeeName: pen.employeeName,
+          branchId: pen.branchId,
+          type: 'deduction',
+          subType: 'disciplinary_penalty',
+          amount: amount,
+          deductionDays: pen.deductionDays || 0,
+          dailyRate: dailyRate,
+          description: adjDesc,
+          notes: adjDesc,
+          reason: adjDesc,
+          date: pen.date || new Date().toISOString().slice(0, 10),
+          createdAt: new Date().toISOString()
         };
+        updatedAdjustments = [newAdj, ...updatedAdjustments];
       }
-      return r;
-    });
 
-    // Create Adjustment entry if financial deduction
-    let updatedAdjustments = state.adjustments || [];
-    if (amount > 0) {
-      const adjDesc = `خصم جزاء تأديبي: ${pen.categoryCode || ''} - ${pen.ruleTitle || ''} (المرة ${pen.occurrenceNumber || 1})`;
-      const newAdj = {
-        id: `adj_disc_${reqId}`,
-        requestId: reqId,
-        employeeId: pen.employeeId,
-        employeeName: pen.employeeName,
-        branchId: pen.branchId,
-        type: 'deduction',
-        subType: 'disciplinary_penalty',
-        amount: amount,
-        deductionDays: pen.deductionDays || 0,
-        dailyRate: dailyRate,
-        description: adjDesc,
-        notes: adjDesc,
-        reason: adjDesc,
-        date: pen.date || new Date().toISOString().slice(0, 10),
-        createdAt: new Date().toISOString()
+      // Update Employee Status if Suspension or Dismissal
+      let updatedEmployees = state.employees || [];
+      if (pen.actionTitle === 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق') {
+        const suspReason = pen.overrideReason?.trim() || pen.details?.trim() || pen.reason || pen.ruleTitle || 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق';
+        updatedEmployees = updatedEmployees.map((e) => {
+          if (String(e.id) === String(pen.employeeId)) {
+            return {
+              ...e,
+              biometricSuspended: true,
+              suspensionReason: suspReason,
+              suspendedAt: new Date().toISOString(),
+              suspendedBy: 'الإدارة العليا'
+            };
+          }
+          return e;
+        });
+      }
+
+      if (pen.actionTitle === 'إنهاء خدمة / فصل تأديبي') {
+        const termReason = pen.overrideReason?.trim() || pen.details?.trim() || pen.reason || pen.ruleTitle || 'إنهاء خدمة / فصل تأديبي';
+        updatedEmployees = updatedEmployees.map((e) => {
+          if (String(e.id) === String(pen.employeeId)) {
+            return {
+              ...e,
+              status: 'تم الاستقالة',
+              is_active: false,
+              isTerminated: true,
+              terminationReason: termReason,
+              terminatedAt: new Date().toISOString(),
+              biometricSuspended: true,
+              suspensionReason: 'تم إنهاء خدمة الموظف (فصل تأديبي)'
+            };
+          }
+          return e;
+        });
+      }
+
+      const updatedState = {
+        ...state,
+        requests: updatedRequests,
+        adjustments: updatedAdjustments,
+        employees: updatedEmployees
       };
-      updatedAdjustments = [newAdj, ...updatedAdjustments];
-    }
 
-    // Update Employee Status if Suspension or Dismissal
-    let updatedEmployees = state.employees || [];
-    if (pen.actionTitle === 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق') {
-      const suspReason = pen.overrideReason?.trim() || pen.details?.trim() || pen.reason || pen.ruleTitle || 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق';
-      updatedEmployees = updatedEmployees.map((e) => {
-        if (String(e.id) === String(pen.employeeId)) {
-          return {
-            ...e,
-            biometricSuspended: true,
-            suspensionReason: suspReason,
-            suspendedAt: new Date().toISOString(),
-            suspendedBy: 'الإدارة العليا'
-          };
-        }
-        return e;
-      });
-    }
-
-    if (pen.actionTitle === 'إنهاء خدمة / فصل تأديبي') {
-      const termReason = pen.overrideReason?.trim() || pen.details?.trim() || pen.reason || pen.ruleTitle || 'إنهاء خدمة / فصل تأديبي';
-      updatedEmployees = updatedEmployees.map((e) => {
-        if (String(e.id) === String(pen.employeeId)) {
-          return {
-            ...e,
-            status: 'تم الاستقالة',
-            is_active: false,
-            isTerminated: true,
-            terminationReason: termReason,
-            terminatedAt: new Date().toISOString(),
-            biometricSuspended: true,
-            suspensionReason: 'تم إنهاء خدمة الموظف (فصل تأديبي)'
-          };
-        }
-        return e;
-      });
-    }
-
-    const updatedState = {
-      ...state,
-      requests: updatedRequests,
-      adjustments: updatedAdjustments,
-      employees: updatedEmployees
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      showToast?.('✅ تم اعتماد وتطبيق الجزاء التأديبي وتحديث حالة الموظف بنجاح');
     };
 
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    showToast?.('✅ تم اعتماد وتطبيق الجزاء التأديبي وتحديث حالة الموظف بنجاح');
+    if (executeWithOwnerGuard) {
+      let lockKey = 'lockDirectBonusDeduction';
+      let actionTitle = 'اعتماد وتطبيق جزاء تأديبي';
+      if (pen.actionTitle === 'إنهاء خدمة / فصل تأديبي') {
+        lockKey = 'lockTerminateEmployee';
+        actionTitle = 'فصل تأديبي وإنهاء خدمة موظف';
+      } else if (pen.actionTitle === 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق') {
+        lockKey = 'lockSuspendBiometric';
+        actionTitle = 'إيقاف مؤقت وتعليق بصمة الموظف';
+      }
+
+      executeWithOwnerGuard({
+        lockKey,
+        actionTitle,
+        actionDetails: `الموظف: ${pen.employeeName} - الإجراء: ${pen.actionTitle}`,
+        onExecute: performApprove
+      });
+    } else {
+      await performApprove();
+    }
   };
 
   const handleRejectPenalty = async (pen) => {
@@ -313,49 +337,62 @@ export default function DisciplinaryPenaltiesTab({
 
     const penId = cancellingPenalty.id;
 
-    // Update Request to Cancelled
-    const updatedRequests = (state.requests || []).map((r) => {
-      if (r.id === penId) {
-        return {
-          ...r,
-          status: 'cancelled',
-          isCancelled: true,
-          cancelledAt: new Date().toISOString(),
-          cancelledBy: 'الإدارة العليا',
-          cancellationReason: cancellationReason.trim(),
-          auditLog: [
-            ...(r.auditLog || []),
-            {
-              action: 'cancelled',
-              by: 'الإدارة العليا',
-              role: 'admin',
-              timestamp: new Date().toISOString(),
-              note: `تم إلغاء الجزاء التأديبي: ${cancellationReason.trim()}`
-            }
-          ]
-        };
-      }
-      return r;
-    });
+    const performCancel = async () => {
+      // Update Request to Cancelled
+      const updatedRequests = (state.requests || []).map((r) => {
+        if (r.id === penId) {
+          return {
+            ...r,
+            status: 'cancelled',
+            isCancelled: true,
+            cancelledAt: new Date().toISOString(),
+            cancelledBy: 'الإدارة العليا',
+            cancellationReason: cancellationReason.trim(),
+            auditLog: [
+              ...(r.auditLog || []),
+              {
+                action: 'cancelled',
+                by: 'الإدارة العليا',
+                role: 'admin',
+                timestamp: new Date().toISOString(),
+                note: `تم إلغاء الجزاء التأديبي: ${cancellationReason.trim()}`
+              }
+            ]
+          };
+        }
+        return r;
+      });
 
-    // Remove any corresponding adjustment entry from adjustments array
-    const updatedAdjustments = (state.adjustments || []).filter((a) => {
-      if (a.requestId === penId || a.id === `adj_disc_${penId}`) return false;
-      return true;
-    });
+      // Remove any corresponding adjustment entry from adjustments array
+      const updatedAdjustments = (state.adjustments || []).filter((a) => {
+        if (a.requestId === penId || a.id === `adj_disc_${penId}`) return false;
+        return true;
+      });
 
-    const updatedState = {
-      ...state,
-      requests: updatedRequests,
-      adjustments: updatedAdjustments
+      const updatedState = {
+        ...state,
+        requests: updatedRequests,
+        adjustments: updatedAdjustments
+      };
+
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+
+      setCancellingPenalty(null);
+      setCancellationReason('');
+      showToast?.('✅ تم إلغاء الجزاء وسحب الخصم من مسير الأجور وتوثيق الإلغاء في سجل التدقيق');
     };
 
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-
-    setCancellingPenalty(null);
-    setCancellationReason('');
-    showToast?.('✅ تم إلغاء الجزاء وسحب الخصم من مسير الأجور وتوثيق الإلغاء في سجل التدقيق');
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockDirectBonusDeduction',
+        actionTitle: 'إلغاء جزاء تأديبي وسحب الخصم المالي',
+        actionDetails: `الموظف: ${cancellingPenalty.employeeName || ''} - السبب: ${cancellationReason.trim()}`,
+        onExecute: performCancel
+      });
+    } else {
+      await performCancel();
+    }
   };
 
   // ── Employee Objection Submission ──
@@ -401,45 +438,58 @@ export default function DisciplinaryPenaltiesTab({
 
   // ── Admin Objection Handlers ──
   const handleAdminApproveObjection = async (penId) => {
-    const updatedRequests = (state.requests || []).map((r) => {
-      if (r.id === penId) {
-        return {
-          ...r,
-          status: 'cancelled',
-          isCancelled: true,
-          cancelledAt: new Date().toISOString(),
-          cancelledBy: 'الإدارة العليا',
-          cancellationReason: 'تم قبول تظلم الموظف وإلغاء الجزاء التأديبي',
-          objection: {
-            ...(r.objection || {}),
-            status: 'approved',
-            resolvedAt: new Date().toISOString()
-          },
-          auditLog: [
-            ...(r.auditLog || []),
-            {
-              action: 'objection_approved',
-              by: 'الإدارة العليا',
-              role: 'admin',
-              timestamp: new Date().toISOString(),
-              note: 'تم قبول تظلم الموظف وإلغاء الجزاء وسحب الخصم'
-            }
-          ]
-        };
-      }
-      return r;
-    });
+    const performApproveObj = async () => {
+      const updatedRequests = (state.requests || []).map((r) => {
+        if (r.id === penId) {
+          return {
+            ...r,
+            status: 'cancelled',
+            isCancelled: true,
+            cancelledAt: new Date().toISOString(),
+            cancelledBy: 'الإدارة العليا',
+            cancellationReason: 'تم قبول تظلم الموظف وإلغاء الجزاء التأديبي',
+            objection: {
+              ...(r.objection || {}),
+              status: 'approved',
+              resolvedAt: new Date().toISOString()
+            },
+            auditLog: [
+              ...(r.auditLog || []),
+              {
+                action: 'objection_approved',
+                by: 'الإدارة العليا',
+                role: 'admin',
+                timestamp: new Date().toISOString(),
+                note: 'تم قبول تظلم الموظف وإلغاء الجزاء وسحب الخصم'
+              }
+            ]
+          };
+        }
+        return r;
+      });
 
-    const updatedAdjustments = (state.adjustments || []).filter((a) => {
-      if (a.requestId === penId || a.id === `adj_disc_${penId}`) return false;
-      return true;
-    });
+      const updatedAdjustments = (state.adjustments || []).filter((a) => {
+        if (a.requestId === penId || a.id === `adj_disc_${penId}`) return false;
+        return true;
+      });
 
-    const updatedState = { ...state, requests: updatedRequests, adjustments: updatedAdjustments };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
+      const updatedState = { ...state, requests: updatedRequests, adjustments: updatedAdjustments };
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
 
-    showToast?.('✅ تم قبول التظلم وإلغاء الجزاء والخصم التأديبي بنجاح');
+      showToast?.('✅ تم قبول التظلم وإلغاء الجزاء والخصم التأديبي بنجاح');
+    };
+
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockDirectBonusDeduction',
+        actionTitle: 'قبول تظلم موظف وإلغاء الخصم المالي',
+        actionDetails: `معرف الجزاء: ${penId}`,
+        onExecute: performApproveObj
+      });
+    } else {
+      await performApproveObj();
+    }
   };
 
   const handleAdminRejectObjection = async (penId, replyText) => {
@@ -516,20 +566,33 @@ export default function DisciplinaryPenaltiesTab({
       return;
     }
 
-    let updatedPolicy = [...policy];
-    if (editingCategory?.isNew) {
-      updatedPolicy.push(catFormData);
+    const performSaveCat = async () => {
+      let updatedPolicy = [...policy];
+      if (editingCategory?.isNew) {
+        updatedPolicy.push(catFormData);
+      } else {
+        updatedPolicy = updatedPolicy.map((c) => (c.id === catFormData.id ? catFormData : c));
+      }
+
+      const updatedState = { ...state, disciplinaryPolicy: updatedPolicy };
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+
+      setEditingCategory(null);
+      setCatFormData(null);
+      showToast?.('✅ تم حفظ وتحديث الفئة وسلم الجزاءات بنجاح');
+    };
+
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockEditSystemPermissions',
+        actionTitle: 'تعديل وحفظ فئة جزاءات لائحية',
+        actionDetails: `الفئة: ${catFormData.name}`,
+        onExecute: performSaveCat
+      });
     } else {
-      updatedPolicy = updatedPolicy.map((c) => (c.id === catFormData.id ? catFormData : c));
+      await performSaveCat();
     }
-
-    const updatedState = { ...state, disciplinaryPolicy: updatedPolicy };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-
-    setEditingCategory(null);
-    setCatFormData(null);
-    showToast?.('✅ تم حفظ وتحديث الفئة وسلم الجزاءات بنجاح');
   };
 
   const handleResetCategoryToDefault = async (catId) => {
@@ -538,33 +601,72 @@ export default function DisciplinaryPenaltiesTab({
 
     if (!window.confirm(`هل ترغب في استعادة الإعدادات وسلم الجزاءات الافتراضي لـ "${defaultCat.name}"؟`)) return;
 
-    const updatedPolicy = policy.map((c) => (c.id === catId ? JSON.parse(JSON.stringify(defaultCat)) : c));
-    const updatedState = { ...state, disciplinaryPolicy: updatedPolicy };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
+    const performResetCat = async () => {
+      const updatedPolicy = policy.map((c) => (c.id === catId ? JSON.parse(JSON.stringify(defaultCat)) : c));
+      const updatedState = { ...state, disciplinaryPolicy: updatedPolicy };
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
 
-    showToast?.(`🔄 تم استعادة الإعدادات الافتراضية لـ ${defaultCat.name}`);
+      showToast?.(`🔄 تم استعادة الإعدادات الافتراضية لـ ${defaultCat.name}`);
+    };
+
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockEditSystemPermissions',
+        actionTitle: 'استعادة الإعدادات الافتراضية لفئة الجزاءات',
+        actionDetails: `الفئة: ${defaultCat.name}`,
+        onExecute: performResetCat
+      });
+    } else {
+      await performResetCat();
+    }
   };
 
   const handleResetAllCategoriesToDefault = async () => {
     if (!window.confirm('هل أنت متأكد من استعادة كافة فئات لائحة الجزاءات التأديبية وسلالم التصعيد إلى الإعدادات القياسية الافتراضية؟')) return;
 
-    const updatedState = { ...state, disciplinaryPolicy: DEFAULT_DISCIPLINARY_CATEGORIES };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
+    const performResetAll = async () => {
+      const updatedState = { ...state, disciplinaryPolicy: DEFAULT_DISCIPLINARY_CATEGORIES };
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
 
-    showToast?.('🔄 تم استعادة كافة فئات اللائحة الافتراضية بنجاح');
+      showToast?.('🔄 تم استعادة كافة فئات اللائحة الافتراضية بنجاح');
+    };
+
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockEditSystemPermissions',
+        actionTitle: 'استعادة كافة فئات اللائحة للافتراضي',
+        actionDetails: 'إعادة تعيين جدول الجزاءات بالكامل',
+        onExecute: performResetAll
+      });
+    } else {
+      await performResetAll();
+    }
   };
 
   const handleDeleteCategory = async (catId, catName) => {
     if (!window.confirm(`هل أنت متأكد من حذف الفئة "${catName}" نهائياً من اللائحة؟`)) return;
 
-    const updatedPolicy = policy.filter((c) => c.id !== catId);
-    const updatedState = { ...state, disciplinaryPolicy: updatedPolicy };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
+    const performDeleteCat = async () => {
+      const updatedPolicy = policy.filter((c) => c.id !== catId);
+      const updatedState = { ...state, disciplinaryPolicy: updatedPolicy };
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
 
-    showToast?.(`🗑️ تم حذف الفئة "${catName}" من اللائحة`);
+      showToast?.(`🗑️ تم حذف الفئة "${catName}" من اللائحة`);
+    };
+
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockEditSystemPermissions',
+        actionTitle: 'حذف فئة من لائحة الجزاءات',
+        actionDetails: `الفئة: ${catName}`,
+        onExecute: performDeleteCat
+      });
+    } else {
+      await performDeleteCat();
+    }
   };
 
   const handleUpdateEscalation = (index, field, value) => {
@@ -1788,6 +1890,7 @@ export default function DisciplinaryPenaltiesTab({
           userRole={userRole}
           currentBranchId={currentBranchId}
           preSelectedEmpId={targetEmpForModal}
+          executeWithOwnerGuard={executeWithOwnerGuard}
           onViolationSaved={() => {
             setShowViolationModal(false);
             setTargetEmpForModal(null);

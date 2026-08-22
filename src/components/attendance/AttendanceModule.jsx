@@ -11,7 +11,8 @@ export default function AttendanceModule({
   monthPicker = null,
   filterMode = 'month',
   customFrom = '',
-  customTo = ''
+  customTo = '',
+  executeWithOwnerGuard
 }) {
   const [selectedBranch, setSelectedBranch] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -58,44 +59,56 @@ export default function AttendanceModule({
     const outHour = parseInt(manualOutTime.split(':')[0]) || 17;
     const workHours = Math.max(1, outHour - inHour);
 
-    const newPunch = {
-      id: `punch_manual_${Date.now()}`,
-      employeeId: manualEmpId,
-      employeeCode: empObj?.code || '',
-      employeeName: empObj?.name || '',
-      branchId: manualBranchId || empObj?.branchId || '',
-      date: manualDate,
-      timeIn: manualInTime,
-      timeOut: manualOutTime,
-      hours: workHours,
-      note: manualNotes.trim() || 'تسجيل بصمة يدوية من الأدمن',
-      statusLabel: 'تسجيل يدوي',
-      createdAt: new Date().toISOString()
+    const performAdd = async () => {
+      const newPunch = {
+        id: `punch_manual_${Date.now()}`,
+        employeeId: manualEmpId,
+        employeeCode: empObj?.code || '',
+        employeeName: empObj?.name || '',
+        branchId: manualBranchId || empObj?.branchId || '',
+        date: manualDate,
+        timeIn: manualInTime,
+        timeOut: manualOutTime,
+        hours: workHours,
+        note: manualNotes.trim() || 'تسجيل بصمة يدوية من الأدمن',
+        statusLabel: 'تسجيل يدوي',
+        createdAt: new Date().toISOString()
+      };
+
+      const updatedShifts = [newPunch, ...(state.shifts || [])];
+      let updatedState = { ...state, shifts: updatedShifts };
+      
+      // Auto-recalculate employee lateness occurrences in current cycle
+      const recRes = recalculateEmployeeCycleLateness({
+        employeeId: manualEmpId,
+        state: updatedState,
+        payrollCycleId: manualDate.slice(0, 7)
+      });
+      updatedState = {
+        ...updatedState,
+        lateIncidents: recRes.incidents,
+        requests: recRes.updatedRequests
+      };
+
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      setManualInTime('');
+      setManualOutTime('');
+      setManualNotes('');
+      setManualBranchId('');
+      showToast?.('✅ تم إضافة البصمة اليدوية للموظف بنجاح!');
     };
 
-    const updatedShifts = [newPunch, ...(state.shifts || [])];
-    let updatedState = { ...state, shifts: updatedShifts };
-    
-    // Auto-recalculate employee lateness occurrences in current cycle
-    const recRes = recalculateEmployeeCycleLateness({
-      employeeId: manualEmpId,
-      state: updatedState,
-      payrollCycleId: manualDate.slice(0, 7)
-    });
-    updatedState = {
-      ...updatedState,
-      lateIncidents: recRes.incidents,
-      requests: recRes.updatedRequests
-    };
-
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    setManualInTime('');
-    setManualOutTime('');
-    setManualNotes('');
-    setManualBranchId('');
-    showToast?.('✅ تم إضافة البصمة اليدوية للموظف بنجاح!');
-    setManualNotes('');
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockManualShiftEntry',
+        actionTitle: `تسجيل بصمة يدوية للموظف (${empObj?.name || manualEmpId})`,
+        actionDetails: `تاريخ: ${manualDate} · من ${manualInTime} إلى ${manualOutTime}`,
+        onExecute: performAdd
+      });
+    } else {
+      await performAdd();
+    }
   };
 
   return (

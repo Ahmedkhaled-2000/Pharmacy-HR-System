@@ -15,7 +15,8 @@ export default function DisciplinaryViolationModal({
   userRole = 'admin',
   currentBranchId = null,
   preSelectedEmpId = null,
-  onViolationSaved = null
+  onViolationSaved = null,
+  executeWithOwnerGuard
 }) {
   const isAdmin = userRole === 'admin';
   const isBranch = userRole === 'branch';
@@ -166,150 +167,173 @@ export default function DisciplinaryViolationModal({
     const reqId = 'disc_' + Date.now();
     const occurrenceNumber = isOverrideActive ? (counterResult ? counterResult.newCount : 1) : (counterResult ? counterResult.newCount : 1);
 
-    const newViolationRequest = {
-      id: reqId,
-      employeeId: selectedEmp.id,
-      employeeName: selectedEmp.name,
-      employeeCode: selectedEmp.code,
-      branchId: selectedEmp.branchId || currentBranchId,
-      type: 'disciplinary_penalty',
-      subType: 'disciplinary_penalty',
-      categoryId: selectedCategory.id,
-      categoryCode: selectedCategory.code,
-      categoryName: selectedCategory.name,
-      ruleId: selectedRuleId,
-      ruleTitle: ruleTitle,
-      occurrenceNumber: occurrenceNumber,
-      previousOccurrencesCount: counterResult ? counterResult.previousCount : 0,
-      actionTitle: effectiveActionName,
-      deductionType: isOverrideActive && overrideAction === 'خصم من الأجر الأساسي' ? deductionType : 'days',
-      deductionFixedAmount: isOverrideActive && overrideAction === 'خصم من الأجر الأساسي' && deductionType === 'fixed_amount' ? (parseFloat(deductionFixedAmount) || 0) : null,
-      deductionHours: isOverrideActive && overrideAction === 'خصم من الأجر الأساسي' && deductionType === 'hours_minutes' ? (parseFloat(deductionHours) || 0) : null,
-      deductionMinutes: isOverrideActive && overrideAction === 'خصم من الأجر الأساسي' && deductionType === 'hours_minutes' ? (parseFloat(deductionMinutes) || 0) : null,
-      deductionDays: effectiveDeductionDays,
-      dailyRate: dailyRate,
-      hourlyRate: hourlyRate,
-      amount: effectiveDeductionAmount,
-      date: violationDate,
-      reason: incidentDetails || ruleTitle,
-      details: incidentDetails,
-      investigationNotes: investigationNotes,
-      attachmentName: attachmentName,
-      isOverride: isOverrideActive,
-      overrideReason: isOverrideActive ? overrideReason : null,
-      createdRole: isAdmin ? 'admin' : 'branch',
-      createdByName: isAdmin ? 'الإدارة العليا' : 'مدير الفرع',
-      createdAt: new Date().toISOString(),
-      status: isAdmin ? 'approved' : 'pending_admin',
-      adminApproved: isAdmin,
-      approvedAt: isAdmin ? new Date().toISOString() : null,
-      approvedBy: isAdmin ? 'الإدارة العليا' : null,
-      auditLog: [
-        {
-          action: 'created',
-          by: isAdmin ? 'الإدارة العليا' : 'مدير الفرع',
-          role: userRole,
-          timestamp: new Date().toISOString(),
-          note: isAdmin ? 'توثيق وتطبيق جزاء تأديبي فوري' : 'رفع مقترح جزاء تأديبي بانتظار اعتماد الإدارة العليا'
-        }
-      ]
-    };
+    const performSaveViolation = async () => {
+      const newViolationRequest = {
+        id: reqId,
+        employeeId: selectedEmp.id,
+        employeeName: selectedEmp.name,
+        employeeCode: selectedEmp.code,
+        branchId: selectedEmp.branchId || currentBranchId,
+        type: 'disciplinary_penalty',
+        subType: 'disciplinary_penalty',
+        categoryId: selectedCategory.id,
+        categoryCode: selectedCategory.code,
+        categoryName: selectedCategory.name,
+        ruleId: selectedRuleId,
+        ruleTitle: ruleTitle,
+        occurrenceNumber: occurrenceNumber,
+        previousOccurrencesCount: counterResult ? counterResult.previousCount : 0,
+        actionTitle: effectiveActionName,
+        deductionType: isOverrideActive && overrideAction === 'خصم من الأجر الأساسي' ? deductionType : 'days',
+        deductionFixedAmount: isOverrideActive && overrideAction === 'خصم من الأجر الأساسي' && deductionType === 'fixed_amount' ? (parseFloat(deductionFixedAmount) || 0) : null,
+        deductionHours: isOverrideActive && overrideAction === 'خصم من الأجر الأساسي' && deductionType === 'hours_minutes' ? (parseFloat(deductionHours) || 0) : null,
+        deductionMinutes: isOverrideActive && overrideAction === 'خصم من الأجر الأساسي' && deductionType === 'hours_minutes' ? (parseFloat(deductionMinutes) || 0) : null,
+        deductionDays: effectiveDeductionDays,
+        dailyRate: dailyRate,
+        hourlyRate: hourlyRate,
+        amount: effectiveDeductionAmount,
+        date: violationDate,
+        reason: incidentDetails || ruleTitle,
+        details: incidentDetails,
+        investigationNotes: investigationNotes,
+        attachmentName: attachmentName,
+        isOverride: isOverrideActive,
+        overrideReason: isOverrideActive ? overrideReason : null,
+        createdRole: isAdmin ? 'admin' : 'branch',
+        createdByName: isAdmin ? 'الإدارة العليا' : 'مدير الفرع',
+        createdAt: new Date().toISOString(),
+        status: isAdmin ? 'approved' : 'pending_admin',
+        adminApproved: isAdmin,
+        approvedAt: isAdmin ? new Date().toISOString() : null,
+        approvedBy: isAdmin ? 'الإدارة العليا' : null,
+        auditLog: [
+          {
+            action: 'created',
+            by: isAdmin ? 'الإدارة العليا' : 'مدير الفرع',
+            role: userRole,
+            timestamp: new Date().toISOString(),
+            note: isAdmin ? 'توثيق وتطبيق جزاء تأديبي فوري' : 'رفع مقترح جزاء تأديبي بانتظار اعتماد الإدارة العليا'
+          }
+        ]
+      };
 
-    let updatedAdjustments = state.adjustments || [];
-    let updatedEmployees = state.employees || [];
+      let updatedAdjustments = state.adjustments || [];
+      let updatedEmployees = state.employees || [];
 
-    // إذا كانت الإدارة العليا وتم اختيار إيقاف مؤقت عن العمل، يتم إيقاف بصمة الموظف فورياً
-    if (isAdmin && effectiveActionName === 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق') {
-      const suspReason = overrideReason?.trim() || incidentDetails?.trim() || ruleTitle || 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق';
-      updatedEmployees = updatedEmployees.map((emp) => {
-        if (String(emp.id) === String(selectedEmp.id)) {
-          return {
-            ...emp,
-            biometricSuspended: true,
-            suspensionReason: suspReason,
-            suspendedAt: new Date().toISOString(),
-            suspendedBy: 'الإدارة العليا'
-          };
-        }
-        return emp;
-      });
-    }
+      // إذا كانت الإدارة العليا وتم اختيار إيقاف مؤقت عن العمل، يتم إيقاف بصمة الموظف فورياً
+      if (isAdmin && effectiveActionName === 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق') {
+        const suspReason = overrideReason?.trim() || incidentDetails?.trim() || ruleTitle || 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق';
+        updatedEmployees = updatedEmployees.map((emp) => {
+          if (String(emp.id) === String(selectedEmp.id)) {
+            return {
+              ...emp,
+              biometricSuspended: true,
+              suspensionReason: suspReason,
+              suspendedAt: new Date().toISOString(),
+              suspendedBy: 'الإدارة العليا'
+            };
+          }
+          return emp;
+        });
+      }
 
-    // إذا كانت الإدارة العليا وتم اختيار إنهاء خدمة / فصل تأديبي
-    if (isAdmin && effectiveActionName === 'إنهاء خدمة / فصل تأديبي') {
-      const termReason = overrideReason?.trim() || incidentDetails?.trim() || ruleTitle || 'إنهاء خدمة / فصل تأديبي';
-      updatedEmployees = updatedEmployees.map((emp) => {
-        if (String(emp.id) === String(selectedEmp.id)) {
-          return {
-            ...emp,
-            status: 'تم الاستقالة',
-            is_active: false,
-            isTerminated: true,
-            terminationReason: termReason,
-            terminatedAt: new Date().toISOString(),
-            biometricSuspended: true,
-            suspensionReason: 'تم إنهاء خدمة الموظف (فصل تأديبي)'
-          };
-        }
-        return emp;
-      });
-    }
+      // إذا كانت الإدارة العليا وتم اختيار إنهاء خدمة / فصل تأديبي
+      if (isAdmin && effectiveActionName === 'إنهاء خدمة / فصل تأديبي') {
+        const termReason = overrideReason?.trim() || incidentDetails?.trim() || ruleTitle || 'إنهاء خدمة / فصل تأديبي';
+        updatedEmployees = updatedEmployees.map((emp) => {
+          if (String(emp.id) === String(selectedEmp.id)) {
+            return {
+              ...emp,
+              status: 'تم الاستقالة',
+              is_active: false,
+              isTerminated: true,
+              terminationReason: termReason,
+              terminatedAt: new Date().toISOString(),
+              biometricSuspended: true,
+              suspensionReason: 'تم إنهاء خدمة الموظف (فصل تأديبي)'
+            };
+          }
+          return emp;
+        });
+      }
 
-    // إذا كانت الإدارة العليا وتم فرض خصم مالي، يتم الترحيل المباشر للأجور والتسويات
-    if (isAdmin && effectiveDeductionAmount > 0) {
-      let deductionDetail = '';
-      if (isOverrideActive && overrideAction === 'خصم من الأجر الأساسي') {
-        if (deductionType === 'fixed_amount') {
-          deductionDetail = `خصم مبلغ ثابت ${effectiveDeductionAmount} ج.م`;
-        } else if (deductionType === 'hours_minutes') {
-          deductionDetail = `خصم ${deductionHours || 0} ساعة و ${deductionMinutes || 0} دقيقة (${effectiveDeductionAmount} ج.م)`;
+      // إذا كانت الإدارة العليا وتم فرض خصم مالي، يتم الترحيل المباشر للأجور والتسويات
+      if (isAdmin && effectiveDeductionAmount > 0) {
+        let deductionDetail = '';
+        if (isOverrideActive && overrideAction === 'خصم من الأجر الأساسي') {
+          if (deductionType === 'fixed_amount') {
+            deductionDetail = `خصم مبلغ ثابت ${effectiveDeductionAmount} ج.م`;
+          } else if (deductionType === 'hours_minutes') {
+            deductionDetail = `خصم ${deductionHours || 0} ساعة و ${deductionMinutes || 0} دقيقة (${effectiveDeductionAmount} ج.م)`;
+          } else {
+            deductionDetail = `خصم ${effectiveDeductionDays} يوم (${effectiveDeductionAmount} ج.م)`;
+          }
         } else {
           deductionDetail = `خصم ${effectiveDeductionDays} يوم (${effectiveDeductionAmount} ج.م)`;
         }
-      } else {
-        deductionDetail = `خصم ${effectiveDeductionDays} يوم (${effectiveDeductionAmount} ج.م)`;
+
+        const adjDesc = `خصم جزاء تأديبي: ${selectedCategory.code} - ${ruleTitle} (المرة ${occurrenceNumber} - ${deductionDetail})`;
+        const newAdj = {
+          id: `adj_disc_${reqId}`,
+          requestId: reqId,
+          employeeId: selectedEmp.id,
+          employeeName: selectedEmp.name,
+          branchId: selectedEmp.branchId || currentBranchId,
+          type: 'deduction',
+          subType: 'disciplinary_penalty',
+          amount: effectiveDeductionAmount,
+          deductionDays: effectiveDeductionDays,
+          dailyRate: dailyRate,
+          description: adjDesc,
+          notes: adjDesc,
+          reason: adjDesc,
+          date: violationDate,
+          createdAt: new Date().toISOString()
+        };
+        updatedAdjustments = [newAdj, ...updatedAdjustments];
       }
 
-      const adjDesc = `خصم جزاء تأديبي: ${selectedCategory.code} - ${ruleTitle} (المرة ${occurrenceNumber} - ${deductionDetail})`;
-      const newAdj = {
-        id: `adj_disc_${reqId}`,
-        requestId: reqId,
-        employeeId: selectedEmp.id,
-        employeeName: selectedEmp.name,
-        branchId: selectedEmp.branchId || currentBranchId,
-        type: 'deduction',
-        subType: 'disciplinary_penalty',
-        amount: effectiveDeductionAmount,
-        deductionDays: effectiveDeductionDays,
-        dailyRate: dailyRate,
-        description: adjDesc,
-        notes: adjDesc,
-        reason: adjDesc,
-        date: violationDate,
-        createdAt: new Date().toISOString()
+      const updatedRequests = [newViolationRequest, ...(state.requests || [])];
+      const updatedState = {
+        ...state,
+        requests: updatedRequests,
+        adjustments: updatedAdjustments,
+        employees: updatedEmployees
       };
-      updatedAdjustments = [newAdj, ...updatedAdjustments];
-    }
 
-    const updatedRequests = [newViolationRequest, ...(state.requests || [])];
-    const updatedState = {
-      ...state,
-      requests: updatedRequests,
-      adjustments: updatedAdjustments,
-      employees: updatedEmployees
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+
+      if (isAdmin) {
+        showToast?.(`⚖️ تم اعتماد وتطبيق الجزاء التأديبي بنجاح (${effectiveActionName})`);
+      } else {
+        showToast?.('📤 تم إرسال المخالفة التأديبية بنجاح إلى الإدارة العليا للاعتماد والتطبيق');
+      }
+
+      if (onViolationSaved) onViolationSaved(newViolationRequest);
+      onClose();
     };
 
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
+    if (isAdmin && executeWithOwnerGuard) {
+      let lockKey = 'lockDirectBonusDeduction';
+      let actionTitle = 'توثيق وتطبيق جزاء تأديبي مباشر';
+      if (effectiveActionName === 'إنهاء خدمة / فصل تأديبي') {
+        lockKey = 'lockTerminateEmployee';
+        actionTitle = 'فصل تأديبي وإنهاء خدمة موظف';
+      } else if (effectiveActionName === 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق') {
+        lockKey = 'lockSuspendBiometric';
+        actionTitle = 'إيقاف مؤقت وتعليق بصمة الموظف';
+      }
 
-    if (isAdmin) {
-      showToast?.(`⚖️ تم اعتماد وتطبيق الجزاء التأديبي بنجاح (${effectiveActionName})`);
+      executeWithOwnerGuard({
+        lockKey,
+        actionTitle,
+        actionDetails: `الموظف: ${selectedEmp.name} - الإجراء: ${effectiveActionName}`,
+        onExecute: performSaveViolation
+      });
     } else {
-      showToast?.('📤 تم إرسال المخالفة التأديبية بنجاح إلى الإدارة العليا للاعتماد والتطبيق');
+      await performSaveViolation();
     }
-
-    if (onViolationSaved) onViolationSaved(newViolationRequest);
-    onClose();
   };
 
   return (

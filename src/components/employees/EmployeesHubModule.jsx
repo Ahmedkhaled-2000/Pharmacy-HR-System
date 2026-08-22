@@ -39,7 +39,8 @@ export default function EmployeesHubModule({
   openEmpPhonesModal,
   setIsEmpPhonesModalOpen,
   setEditingEmpFile,
-  setIsEmpFileModalOpen
+  setIsEmpFileModalOpen,
+  executeWithOwnerGuard
 }) {
   const [currentSubTab, setCurrentSubTab] = useState(subTab || 'cards');
 
@@ -107,6 +108,7 @@ export default function EmployeesHubModule({
           filterMode={filterMode}
           customFrom={customFrom}
           customTo={customTo}
+          executeWithOwnerGuard={executeWithOwnerGuard}
         />
       )}
 
@@ -117,6 +119,7 @@ export default function EmployeesHubModule({
           setState={setState}
           saveState={saveState}
           showToast={showToast}
+          executeWithOwnerGuard={executeWithOwnerGuard}
         />
       )}
 
