@@ -19,6 +19,7 @@ export default function ElectronicKioskView({
   
   const [inputCode, setInputCode] = useState('');
   const [matchedEmp, setMatchedEmp] = useState(null);
+  const [blockedStatusModal, setBlockedStatusModal] = useState(null);
   
   const [activeAction, setActiveAction] = useState(null);
   const [selectedBranchId, setSelectedBranchId] = useState(null);
@@ -49,6 +50,32 @@ export default function ElectronicKioskView({
     if (!inputCode) return;
     const emp = employees.find(e => e.code === inputCode.trim());
     if (emp) {
+      // 1. Check if employee is Resigned or Terminated
+      if (emp.status === 'تم الاستقالة' || emp.is_active === false || emp.isTerminated || emp.resignationStatus === 'approved') {
+        setBlockedStatusModal({
+          type: 'resigned',
+          emp,
+          reason: emp.terminationReason || emp.suspensionReason || 'تم إنهاء خدمة الموظف / استقالة رسمية مسجلة بالنظام.',
+          date: emp.terminatedAt || null
+        });
+        setMatchedEmp(null);
+        setInputCode('');
+        return;
+      }
+
+      // 2. Check if employee's biometric is temporarily suspended
+      if (emp.biometricSuspended || emp.punchDisabled) {
+        setBlockedStatusModal({
+          type: 'suspended',
+          emp,
+          reason: emp.suspensionReason || 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق',
+          date: emp.suspendedAt || null
+        });
+        setMatchedEmp(null);
+        setInputCode('');
+        return;
+      }
+
       if (kioskBranchId) {
         const belongsToBranch = emp.branchId === kioskBranchId || (emp.branchesDetails && emp.branchesDetails.some(b => b.branchId === kioskBranchId));
         if (!belongsToBranch) {
@@ -434,6 +461,114 @@ export default function ElectronicKioskView({
           onCancel={() => setActiveAction(null)}
           biometricType={matchedEmp?.preferred_biometric || orgSettings?.biometricType || 'face'}
         />
+      )}
+
+      {/* ── Blocked / Suspended / Resigned Employee Notification Modal ── */}
+      {blockedStatusModal && (
+        <div className="modal-backdrop" style={{ zIndex: 1300, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div
+            className="modal-content card"
+            style={{
+              maxWidth: '520px',
+              width: '94%',
+              padding: '28px',
+              borderRadius: '24px',
+              border: `2px solid ${blockedStatusModal.type === 'resigned' ? '#450a0a' : '#ef4444'}`,
+              background: '#ffffff',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+              textAlign: 'center',
+              fontFamily: "'Tajawal', sans-serif"
+            }}
+          >
+            {/* Warning Icon Badge */}
+            <div style={{
+              width: '64px',
+              height: '64px',
+              borderRadius: '20px',
+              background: blockedStatusModal.type === 'resigned' ? '#fee2e2' : '#fee2e2',
+              color: '#dc2626',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '32px',
+              margin: '0 auto 16px auto',
+              boxShadow: '0 8px 16px rgba(220, 38, 38, 0.15)'
+            }}>
+              {blockedStatusModal.type === 'resigned' ? '🚫' : '⛔'}
+            </div>
+
+            {/* Title */}
+            <h3 style={{ margin: '0 0 6px 0', fontFamily: 'Cairo', fontSize: '20px', fontWeight: 800, color: '#991b1b' }}>
+              عذراً، لا يمكن تسجيل الدخول أو الحضور
+            </h3>
+            <span style={{
+              display: 'inline-block',
+              background: blockedStatusModal.type === 'resigned' ? '#450a0a' : '#fee2e2',
+              color: blockedStatusModal.type === 'resigned' ? '#ffffff' : '#b91c1c',
+              fontSize: '12px',
+              fontWeight: 800,
+              padding: '3px 12px',
+              borderRadius: '20px',
+              marginBottom: '18px'
+            }}>
+              {blockedStatusModal.type === 'resigned' ? '⚠️ الموظف منهي خدمته / استقالة مسجلة' : '⏸️ تم إيقاف البصمة مؤقتاً'}
+            </span>
+
+            {/* Employee Card */}
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '12px 16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '12px', textAlign: 'right' }}>
+              <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: '#e2e8f0', color: '#334155', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', fontWeight: 800, flexShrink: 0 }}>
+                {blockedStatusModal.emp?.photoUrl ? (
+                  <img src={blockedStatusModal.emp.photoUrl} alt={blockedStatusModal.emp.name} style={{ width: '100%', height: '100%', borderRadius: '12px', objectFit: 'cover' }} />
+                ) : (
+                  blockedStatusModal.emp?.name?.slice(0, 1) || '👤'
+                )}
+              </div>
+              <div style={{ flex: 1 }}>
+                <strong style={{ fontSize: '15px', color: '#1e293b', display: 'block' }}>{blockedStatusModal.emp?.name}</strong>
+                <span style={{ fontSize: '12px', color: '#64748b' }}>
+                  كود الموظف: <strong style={{ fontFamily: 'monospace' }}>{blockedStatusModal.emp?.code}</strong> · {blockedStatusModal.emp?.jobTitle || 'موظف'}
+                </span>
+              </div>
+            </div>
+
+            {/* Reason Box */}
+            <div style={{ background: '#fff5f5', border: '1.5px dashed #fca5a5', borderRadius: '12px', padding: '14px', marginBottom: '18px', textAlign: 'right' }}>
+              <div style={{ fontWeight: 800, color: '#991b1b', fontSize: '13px', marginBottom: '6px' }}>
+                📌 سبب منع الدخول:
+              </div>
+              <p style={{ margin: 0, fontSize: '13.5px', color: '#7f1d1d', fontWeight: 600, lineHeight: '1.6' }}>
+                {blockedStatusModal.reason}
+              </p>
+              {blockedStatusModal.date && (
+                <span style={{ fontSize: '11px', color: '#94a3b8', display: 'block', marginTop: '6px' }}>
+                  تاريخ تسجيل الإجراء: {new Date(blockedStatusModal.date).toLocaleDateString('ar-EG')}
+                </span>
+              )}
+            </div>
+
+            <p style={{ margin: '0 0 18px 0', fontSize: '12.5px', color: '#64748b' }}>
+              * يرجى مراجعة إدارة الموارد البشرية أو الإدارة العليا للاستفسار أو إعادة تفعيل البصمة.
+            </p>
+
+            {/* Close Button */}
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => setBlockedStatusModal(null)}
+              style={{
+                width: '100%',
+                padding: '11px',
+                borderRadius: '12px',
+                fontWeight: 800,
+                fontSize: '14px',
+                background: '#dc2626',
+                border: 'none'
+              }}
+            >
+              حسناً، فهمت ذلك
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

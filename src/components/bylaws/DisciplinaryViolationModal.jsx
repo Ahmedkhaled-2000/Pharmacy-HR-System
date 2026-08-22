@@ -50,6 +50,10 @@ export default function DisciplinaryViolationModal({
   const [isOverrideActive, setIsOverrideActive] = useState(false);
   const [overrideAction, setOverrideAction] = useState('خصم من الأجر الأساسي');
   const [overrideDeductionDays, setOverrideDeductionDays] = useState(1);
+  const [deductionType, setDeductionType] = useState('days'); // 'days' | 'fixed_amount' | 'hours_minutes'
+  const [deductionFixedAmount, setDeductionFixedAmount] = useState('');
+  const [deductionHours, setDeductionHours] = useState(1);
+  const [deductionMinutes, setDeductionMinutes] = useState(0);
   const [overrideReason, setOverrideReason] = useState('');
 
   useEffect(() => {
@@ -91,16 +95,45 @@ export default function DisciplinaryViolationModal({
     return getEmployeeDailyRate(selectedEmp, currentBranchId || selectedEmp?.branchId);
   }, [selectedEmp, currentBranchId]);
 
+  const empHoursPerDay = selectedEmp?.workHours || 8;
+  const hourlyRate = useMemo(() => {
+    const hours = parseFloat(empHoursPerDay) || 8;
+    return hours > 0 ? Math.round((dailyRate / hours) * 100) / 100 : 0;
+  }, [dailyRate, empHoursPerDay]);
+
   const effectiveDeductionDays = useMemo(() => {
     if (isOverrideActive) {
-      return parseFloat(overrideDeductionDays) || 0;
+      if (overrideAction !== 'خصم من الأجر الأساسي') return 0;
+      if (deductionType === 'days') {
+        return parseFloat(overrideDeductionDays) || 0;
+      }
+      if (deductionType === 'fixed_amount') {
+        const amt = parseFloat(deductionFixedAmount) || 0;
+        return dailyRate > 0 ? Math.round((amt / dailyRate) * 100) / 100 : 0;
+      }
+      if (deductionType === 'hours_minutes') {
+        const totalH = (parseFloat(deductionHours) || 0) + (parseFloat(deductionMinutes) || 0) / 60;
+        const hoursInDay = parseFloat(empHoursPerDay) || 8;
+        return hoursInDay > 0 ? Math.round((totalH / hoursInDay) * 100) / 100 : 0;
+      }
     }
     return counterResult ? counterResult.deductionDays : 0;
-  }, [isOverrideActive, overrideDeductionDays, counterResult]);
+  }, [isOverrideActive, overrideAction, deductionType, overrideDeductionDays, deductionFixedAmount, deductionHours, deductionMinutes, dailyRate, empHoursPerDay, counterResult]);
 
   const effectiveDeductionAmount = useMemo(() => {
+    if (isOverrideActive) {
+      if (overrideAction !== 'خصم من الأجر الأساسي') return 0;
+      if (deductionType === 'fixed_amount') {
+        return parseFloat(deductionFixedAmount) || 0;
+      }
+      if (deductionType === 'hours_minutes') {
+        const totalH = (parseFloat(deductionHours) || 0) + (parseFloat(deductionMinutes) || 0) / 60;
+        return Math.round(hourlyRate * totalH * 100) / 100;
+      }
+      return Math.round(dailyRate * (parseFloat(overrideDeductionDays) || 0) * 100) / 100;
+    }
     return Math.round(dailyRate * effectiveDeductionDays * 100) / 100;
-  }, [dailyRate, effectiveDeductionDays]);
+  }, [isOverrideActive, overrideAction, deductionType, deductionFixedAmount, deductionHours, deductionMinutes, hourlyRate, dailyRate, overrideDeductionDays, effectiveDeductionDays]);
 
   const effectiveActionName = useMemo(() => {
     if (isOverrideActive) {
@@ -149,8 +182,13 @@ export default function DisciplinaryViolationModal({
       occurrenceNumber: occurrenceNumber,
       previousOccurrencesCount: counterResult ? counterResult.previousCount : 0,
       actionTitle: effectiveActionName,
+      deductionType: isOverrideActive && overrideAction === 'خصم من الأجر الأساسي' ? deductionType : 'days',
+      deductionFixedAmount: isOverrideActive && overrideAction === 'خصم من الأجر الأساسي' && deductionType === 'fixed_amount' ? (parseFloat(deductionFixedAmount) || 0) : null,
+      deductionHours: isOverrideActive && overrideAction === 'خصم من الأجر الأساسي' && deductionType === 'hours_minutes' ? (parseFloat(deductionHours) || 0) : null,
+      deductionMinutes: isOverrideActive && overrideAction === 'خصم من الأجر الأساسي' && deductionType === 'hours_minutes' ? (parseFloat(deductionMinutes) || 0) : null,
       deductionDays: effectiveDeductionDays,
       dailyRate: dailyRate,
+      hourlyRate: hourlyRate,
       amount: effectiveDeductionAmount,
       date: violationDate,
       reason: incidentDetails || ruleTitle,
@@ -178,10 +216,61 @@ export default function DisciplinaryViolationModal({
     };
 
     let updatedAdjustments = state.adjustments || [];
+    let updatedEmployees = state.employees || [];
+
+    // إذا كانت الإدارة العليا وتم اختيار إيقاف مؤقت عن العمل، يتم إيقاف بصمة الموظف فورياً
+    if (isAdmin && effectiveActionName === 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق') {
+      const suspReason = overrideReason?.trim() || incidentDetails?.trim() || ruleTitle || 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق';
+      updatedEmployees = updatedEmployees.map((emp) => {
+        if (String(emp.id) === String(selectedEmp.id)) {
+          return {
+            ...emp,
+            biometricSuspended: true,
+            suspensionReason: suspReason,
+            suspendedAt: new Date().toISOString(),
+            suspendedBy: 'الإدارة العليا'
+          };
+        }
+        return emp;
+      });
+    }
+
+    // إذا كانت الإدارة العليا وتم اختيار إنهاء خدمة / فصل تأديبي
+    if (isAdmin && effectiveActionName === 'إنهاء خدمة / فصل تأديبي') {
+      const termReason = overrideReason?.trim() || incidentDetails?.trim() || ruleTitle || 'إنهاء خدمة / فصل تأديبي';
+      updatedEmployees = updatedEmployees.map((emp) => {
+        if (String(emp.id) === String(selectedEmp.id)) {
+          return {
+            ...emp,
+            status: 'تم الاستقالة',
+            is_active: false,
+            isTerminated: true,
+            terminationReason: termReason,
+            terminatedAt: new Date().toISOString(),
+            biometricSuspended: true,
+            suspensionReason: 'تم إنهاء خدمة الموظف (فصل تأديبي)'
+          };
+        }
+        return emp;
+      });
+    }
 
     // إذا كانت الإدارة العليا وتم فرض خصم مالي، يتم الترحيل المباشر للأجور والتسويات
     if (isAdmin && effectiveDeductionAmount > 0) {
-      const adjDesc = `خصم جزاء تأديبي: ${selectedCategory.code} - ${ruleTitle} (المرة ${occurrenceNumber} - ${effectiveDeductionDays > 0 ? `خصم ${effectiveDeductionDays} يوم` : ''})`;
+      let deductionDetail = '';
+      if (isOverrideActive && overrideAction === 'خصم من الأجر الأساسي') {
+        if (deductionType === 'fixed_amount') {
+          deductionDetail = `خصم مبلغ ثابت ${effectiveDeductionAmount} ج.م`;
+        } else if (deductionType === 'hours_minutes') {
+          deductionDetail = `خصم ${deductionHours || 0} ساعة و ${deductionMinutes || 0} دقيقة (${effectiveDeductionAmount} ج.م)`;
+        } else {
+          deductionDetail = `خصم ${effectiveDeductionDays} يوم (${effectiveDeductionAmount} ج.م)`;
+        }
+      } else {
+        deductionDetail = `خصم ${effectiveDeductionDays} يوم (${effectiveDeductionAmount} ج.م)`;
+      }
+
+      const adjDesc = `خصم جزاء تأديبي: ${selectedCategory.code} - ${ruleTitle} (المرة ${occurrenceNumber} - ${deductionDetail})`;
       const newAdj = {
         id: `adj_disc_${reqId}`,
         requestId: reqId,
@@ -206,7 +295,8 @@ export default function DisciplinaryViolationModal({
     const updatedState = {
       ...state,
       requests: updatedRequests,
-      adjustments: updatedAdjustments
+      adjustments: updatedAdjustments,
+      employees: updatedEmployees
     };
 
     if (setState) setState(updatedState);
@@ -434,14 +524,14 @@ export default function DisciplinaryViolationModal({
             {isOverrideActive && (
               <div style={{ marginTop: '14px', borderTop: '1px dashed #fca5a5', paddingTop: '12px' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '12px' }}>
-                  <div>
+                  <div style={{ gridColumn: overrideAction === 'خصم من الأجر الأساسي' ? '1 / -1' : 'auto' }}>
                     <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 'bold', marginBottom: '4px' }}>
                       الإجراء الاستثنائي المحدد:
                     </label>
                     <select
                       value={overrideAction}
                       onChange={(e) => setOverrideAction(e.target.value)}
-                      style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                      style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border)', fontWeight: 'bold' }}
                     >
                       <option value="خصم من الأجر الأساسي">خصم من الأجر الأساسي</option>
                       <option value="إنذار نهائي مباشر">إنذار نهائي مباشر</option>
@@ -451,20 +541,139 @@ export default function DisciplinaryViolationModal({
                     </select>
                   </div>
 
+                  {/* Deduction Type Options */}
                   {overrideAction === 'خصم من الأجر الأساسي' && (
-                    <div>
-                      <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 'bold', marginBottom: '4px' }}>
-                        عدد أيام الخصم:
+                    <div style={{ gridColumn: '1 / -1', background: '#fff', border: '1px solid #fed7aa', padding: '14px', borderRadius: '10px' }}>
+                      <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 'bold', marginBottom: '8px', color: '#c2410c' }}>
+                        طريقة احتساب الخصم المالي:
                       </label>
-                      <input
-                        type="number"
-                        step="0.25"
-                        min="0.25"
-                        max="30"
-                        value={overrideDeductionDays}
-                        onChange={(e) => setOverrideDeductionDays(e.target.value)}
-                        style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid var(--border)' }}
-                      />
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
+                        <button
+                          type="button"
+                          className={`btn ${deductionType === 'days' ? 'btn-start' : 'btn-ghost'}`}
+                          style={{ padding: '6px 14px', fontSize: '12px' }}
+                          onClick={() => setDeductionType('days')}
+                        >
+                          📅 خصم بعدد الأيام
+                        </button>
+                        <button
+                          type="button"
+                          className={`btn ${deductionType === 'fixed_amount' ? 'btn-start' : 'btn-ghost'}`}
+                          style={{ padding: '6px 14px', fontSize: '12px' }}
+                          onClick={() => setDeductionType('fixed_amount')}
+                        >
+                          💵 خصم مبلغ مالي ثابت (ج.م)
+                        </button>
+                        <button
+                          type="button"
+                          className={`btn ${deductionType === 'hours_minutes' ? 'btn-start' : 'btn-ghost'}`}
+                          style={{ padding: '6px 14px', fontSize: '12px' }}
+                          onClick={() => setDeductionType('hours_minutes')}
+                        >
+                          ⏱️ خصم ساعات ودقائق محددة
+                        </button>
+                      </div>
+
+                      {/* Mode 1: Days */}
+                      {deductionType === 'days' && (
+                        <div style={{ maxWidth: '280px' }}>
+                          <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', marginBottom: '4px' }}>
+                            عدد أيام الخصم (أيام):
+                          </label>
+                          <input
+                            type="number"
+                            step="0.25"
+                            min="0.25"
+                            max="30"
+                            value={overrideDeductionDays}
+                            onChange={(e) => setOverrideDeductionDays(e.target.value)}
+                            style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                          />
+                        </div>
+                      )}
+
+                      {/* Mode 2: Fixed Financial Amount */}
+                      {deductionType === 'fixed_amount' && (
+                        <div style={{ maxWidth: '280px' }}>
+                          <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', marginBottom: '4px' }}>
+                            المبلغ المالي المخصوم (ج.م):
+                          </label>
+                          <input
+                            type="number"
+                            step="1"
+                            min="1"
+                            placeholder="مثال: 200"
+                            value={deductionFixedAmount}
+                            onChange={(e) => setDeductionFixedAmount(e.target.value)}
+                            style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                          />
+                        </div>
+                      )}
+
+                      {/* Mode 3: Hours & Minutes */}
+                      {deductionType === 'hours_minutes' && (
+                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                          <div style={{ flex: 1, maxWidth: '140px' }}>
+                            <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', marginBottom: '4px' }}>
+                              عدد الساعات:
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              max="24"
+                              step="1"
+                              value={deductionHours}
+                              onChange={(e) => setDeductionHours(e.target.value)}
+                              style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                            />
+                          </div>
+                          <div style={{ flex: 1, maxWidth: '140px' }}>
+                            <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', marginBottom: '4px' }}>
+                              عدد الدقائق:
+                            </label>
+                            <select
+                              value={deductionMinutes}
+                              onChange={(e) => setDeductionMinutes(e.target.value)}
+                              style={{ width: '100%', padding: '8px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                            >
+                              <option value="0">0 دقيقة</option>
+                              <option value="15">15 دقيقة (ربع ساعة)</option>
+                              <option value="30">30 دقيقة (نصف ساعة)</option>
+                              <option value="45">45 دقيقة (إلا ربع)</option>
+                            </select>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Live Calculation Preview */}
+                      <div style={{ marginTop: '10px', padding: '8px 12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '12.5px', display: 'flex', gap: '14px', flexWrap: 'wrap', alignItems: 'center' }}>
+                        <span style={{ color: '#0369a1', fontWeight: 'bold' }}>
+                          💡 أجر اليوم: {dailyRate} ج.م · أجر الساعة ({empHoursPerDay} س): {hourlyRate} ج.م
+                        </span>
+                        <span style={{ color: '#dc2626', fontWeight: '800' }}>
+                          💰 إجمالي الخصم المحتسب: {effectiveDeductionAmount} ج.م (معادل {effectiveDeductionDays} يوم)
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Suspension Notice Banner */}
+                  {overrideAction === 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق' && (
+                    <div style={{ gridColumn: '1 / -1', background: '#fef2f2', border: '1.5px solid #f87171', padding: '12px 16px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontSize: '24px' }}>⛔</span>
+                      <div style={{ fontSize: '12.5px', color: '#991b1b', lineHeight: '1.5' }}>
+                        <strong>تنبيه إداري أمني:</strong> عند اعتماد هذا الإجراء، سيتم <strong>إيقاف بصمة الموظف الإلكترونية وصلاحية تسجيل الحضور فورياً</strong>، ولن يتمكن من فتح شيفت حتى يتم مراجعة التحقيق وإعادة تفعيل بصمته من صفحة البصمة الإلكترونية.
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Dismissal Notice Banner */}
+                  {overrideAction === 'إنهاء خدمة / فصل تأديبي' && (
+                    <div style={{ gridColumn: '1 / -1', background: '#450a0a', color: '#ffffff', padding: '12px 16px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontSize: '24px' }}>🚫</span>
+                      <div style={{ fontSize: '12.5px', lineHeight: '1.5' }}>
+                        <strong>تنبيه حرج:</strong> سيتم إنهاء خدمة الموظف تأديبياً، وتغيير حالته إلى <strong>مستقيل/منهي خدمته</strong> وإيقاف بصمته وحرمانه من تسجيل الحضور نهائياً في النظام.
+                      </div>
                     </div>
                   )}
                 </div>

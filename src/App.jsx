@@ -3210,8 +3210,12 @@ export default function App() {
   // Punch Shift Actions
   const startShift = async (empId, source = 'admin', branchId = null) => {
     const emp = getEmp(empId);
-    if (emp && (emp.is_active === false || emp.fingerprint_active === false || emp.status === 'تم الاستقالة')) {
-      showToast(`❌ تم إيقاف بصمة وحساب هذا الموظف (تم إنهاء الخدمة / الاستقالة${emp.suspension_reason ? `: ${emp.suspension_reason}` : ''})`);
+    if (emp && (emp.is_active === false || emp.fingerprint_active === false || emp.status === 'تم الاستقالة' || emp.isTerminated || emp.resignationStatus === 'approved')) {
+      showToast(`❌ لا يمكن تسجيل الحضور: تم إنهاء خدمة هذا الموظف (استقالة أو إنهاء تعاقد${emp.terminationReason ? `: ${emp.terminationReason}` : ''})`);
+      return;
+    }
+    if (emp && (emp.biometricSuspended || emp.punchDisabled)) {
+      showToast(`⛔ لا يمكن تسجيل الحضور: تم إيقاف بصمة الموظف مؤقتاً (${emp.suspensionReason || 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق'})`);
       return;
     }
     if (!getEmpPermission(empId, 'canStartEnd') || !getEmpPermission(empId, 'canLivePunch')) {

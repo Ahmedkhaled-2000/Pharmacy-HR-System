@@ -221,15 +221,53 @@ export default function DisciplinaryPenaltiesTab({
       updatedAdjustments = [newAdj, ...updatedAdjustments];
     }
 
+    // Update Employee Status if Suspension or Dismissal
+    let updatedEmployees = state.employees || [];
+    if (pen.actionTitle === 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق') {
+      const suspReason = pen.overrideReason?.trim() || pen.details?.trim() || pen.reason || pen.ruleTitle || 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق';
+      updatedEmployees = updatedEmployees.map((e) => {
+        if (String(e.id) === String(pen.employeeId)) {
+          return {
+            ...e,
+            biometricSuspended: true,
+            suspensionReason: suspReason,
+            suspendedAt: new Date().toISOString(),
+            suspendedBy: 'الإدارة العليا'
+          };
+        }
+        return e;
+      });
+    }
+
+    if (pen.actionTitle === 'إنهاء خدمة / فصل تأديبي') {
+      const termReason = pen.overrideReason?.trim() || pen.details?.trim() || pen.reason || pen.ruleTitle || 'إنهاء خدمة / فصل تأديبي';
+      updatedEmployees = updatedEmployees.map((e) => {
+        if (String(e.id) === String(pen.employeeId)) {
+          return {
+            ...e,
+            status: 'تم الاستقالة',
+            is_active: false,
+            isTerminated: true,
+            terminationReason: termReason,
+            terminatedAt: new Date().toISOString(),
+            biometricSuspended: true,
+            suspensionReason: 'تم إنهاء خدمة الموظف (فصل تأديبي)'
+          };
+        }
+        return e;
+      });
+    }
+
     const updatedState = {
       ...state,
       requests: updatedRequests,
-      adjustments: updatedAdjustments
+      adjustments: updatedAdjustments,
+      employees: updatedEmployees
     };
 
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.('✅ تم اعتماد وتطبيق الجزاء التأديبي وترحيل الخصم لمسير الأجور بنجاح');
+    showToast?.('✅ تم اعتماد وتطبيق الجزاء التأديبي وتحديث حالة الموظف بنجاح');
   };
 
   const handleRejectPenalty = async (pen) => {

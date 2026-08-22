@@ -116,6 +116,7 @@ export default function EmployeesHubModule({
           state={state}
           setState={setState}
           saveState={saveState}
+          showToast={showToast}
         />
       )}
 
