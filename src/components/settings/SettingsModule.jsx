@@ -11,6 +11,7 @@ import {
   fetchSnapshotsList,
   removeSnapshot
 } from '../../utils/backupHelper';
+import { apiFetchFaces, apiDeleteFace } from '../../utils/apiClient';
 import GmailConfigCard from './GmailConfigCard';
 import { DEFAULT_JOBS, getJobsList, DEFAULT_DEPARTMENTS, getDepartmentsList } from '../../utils/jobsHelper';
 
@@ -101,6 +102,120 @@ export default function SettingsModule({
     window.addEventListener('auto-backup-updated', handleUpdate);
     return () => window.removeEventListener('auto-backup-updated', handleUpdate);
   }, []);
+
+  // Factory Reset / Data Wipe States
+  const [showWipeModal, setShowWipeModal] = useState(false);
+  const [wipeConfirmPassword, setWipeConfirmPassword] = useState('');
+  const [wipeAutoBackup, setWipeAutoBackup] = useState(true);
+  const [isWiping, setIsWiping] = useState(false);
+  const [showWipePasswordText, setShowWipePasswordText] = useState(false);
+
+  const handleExecuteFullDataWipe = async () => {
+    const currentAdminPass = state.orgSettings?.adminPassword || state.orgSettings?.adminPass || '123';
+    if (!wipeConfirmPassword || wipeConfirmPassword.trim() !== String(currentAdminPass).trim()) {
+      showToast?.('❌ كلمة المرور غير صحيحة! يرجى إدخال كلمة مرور الإدارة العليا لتأكيد المسح.');
+      return;
+    }
+
+    try {
+      setIsWiping(true);
+      showToast?.('⏳ جاري البدء في مسح وتصفير بيانات النظام...');
+
+      // 1. If auto backup before wipe is checked, export full backup JSON
+      if (wipeAutoBackup) {
+        try {
+          await exportFullBackup(state);
+          showToast?.('💾 تم تنزيل نسخة أمان احتياطية تلقائياً قبل المسح.');
+        } catch (bErr) {
+          console.warn('Backup before wipe skipped or failed:', bErr);
+        }
+      }
+
+      // 2. Clear all biometric face/hand descriptors from database
+      try {
+        const faces = await apiFetchFaces();
+        if (Array.isArray(faces) && faces.length > 0) {
+          for (const face of faces) {
+            if (face.employee_id) {
+              await apiDeleteFace(face.employee_id);
+            }
+          }
+        }
+      } catch (fErr) {
+        console.warn('Error clearing biometric faces:', fErr);
+      }
+
+      // 3. Construct clean wiped state preserving Higher Management credentials
+      const preservedAdminUser = state.orgSettings?.adminUsername || state.orgSettings?.adminUser || 'admin';
+      const preservedAdminPass = state.orgSettings?.adminPassword || state.orgSettings?.adminPass || '123';
+      const preservedOrgName = state.orgSettings?.orgName || 'مجموعة الصيدليات الطبية';
+      const preservedGmName = state.orgSettings?.generalManagerName || 'د. أحمد خالد - المدير العام للصيدليات';
+      const preservedLogo = state.orgSettings?.logoUrl || '';
+
+      const wipedState = {
+        employees: [],
+        branches: [],
+        shifts: [],
+        activeShifts: {},
+        adjustments: [],
+        requests: [],
+        resignationRequests: [],
+        leaveRequests: [],
+        leaveHistory: [],
+        shiftSwaps: [],
+        loans: [],
+        evaluations: [],
+        notifications: [],
+        employeeNotes: [],
+        authorizedDevices: [],
+        logs: [],
+        rosters: [],
+        lateIncidents: [],
+        breakLogs: [],
+        permissionRequests: [],
+        pendingDeviceRegistrations: [],
+        approvedDevices: [],
+        orgSettings: {
+          ...(state.orgSettings || {}),
+          adminUsername: preservedAdminUser,
+          adminPassword: preservedAdminPass,
+          adminUser: preservedAdminUser,
+          adminPass: preservedAdminPass,
+          orgName: preservedOrgName,
+          generalManagerName: preservedGmName,
+          logoUrl: preservedLogo
+        },
+        approvalRules: state.approvalRules || [],
+        bylaws: state.bylaws || {
+          gracePeriodMinutes: 15,
+          resetPeriodDays: 30,
+          latePenalties: [],
+          earlyExitPenalties: [],
+          deductionOptions: []
+        },
+        ipRestrictions: { enabled: false, allowedIps: [] },
+        customJobs: state.customJobs || [],
+        customDepartments: state.customDepartments || [],
+        _deletedIds: [],
+        _wipedAt: new Date().toISOString()
+      };
+
+      // 4. Save locally and sync to Cloud/MariaDB
+      setState(wipedState);
+      if (saveState) {
+        await saveState(wipedState);
+      }
+
+      showToast?.('✅ تم مسح وتصفير كافة بيانات النظام وقاعدة البيانات بنجاح! تم الاحتفاظ ببيانات دخول الإدارة العليا.');
+      setShowWipeModal(false);
+      setWipeConfirmPassword('');
+    } catch (err) {
+      console.error('Data wipe failed:', err);
+      showToast?.('❌ حدث خطأ أثناء مسح البيانات: ' + (err.message || err));
+    } finally {
+      setIsWiping(false);
+    }
+  };
 
   // Approval Rules Configuration & Add Modal States
   const [rules, setRules] = useState(() => (state.approvalRules && state.approvalRules.length > 0 ? state.approvalRules : [
@@ -1284,6 +1399,59 @@ export default function SettingsModule({
               </div>
             )}
           </div>
+
+          {/* Card 4: Danger Zone - Factory Reset & Full Data Wipe */}
+          <div style={{
+            background: '#fff5f5',
+            border: '2px solid #f87171',
+            borderRadius: '14px',
+            padding: '22px',
+            boxShadow: '0 4px 14px rgba(239,68,68,0.08)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '14px' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                  <span style={{ fontSize: '20px' }}>🚨</span>
+                  <h4 style={{ margin: 0, fontFamily: 'Cairo', color: '#991b1b', fontSize: '16px', fontWeight: 800 }}>
+                    منطقة العمليات الحساسة: مسح وتصفير قاعدة البيانات بالكامل (Factory Reset)
+                  </h4>
+                  <span style={{ background: '#fee2e2', color: '#b91c1c', fontSize: '11px', fontWeight: 900, padding: '2px 8px', borderRadius: '6px', border: '1px solid #fca5a5' }}>
+                    إجراء نهائي
+                  </span>
+                </div>
+                <p style={{ margin: 0, fontSize: '13px', color: '#7f1d1d', lineHeight: '1.6', maxWidth: '820px' }}>
+                  يتيح هذا الإجراء تفريغ ومسح كافة بيانات المنظومة بالكامل من قاعدة البيانات والسيرفر (يشمل: جميع ملفات الموظفين، الفروع، الورديات، بصمات الوجه، سجلات الحضور والانصراف، الجداول الشهرية، السلف والمديونيات، والأذونات والإجازات)، مع <strong>الاحتفاظ الحصري باسم مستخدم وكلمة مرور الإدارة العليا</strong> وإعدادات المنظومة الأساسية للبدء من جديد.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setWipeConfirmPassword('');
+                  setShowWipeModal(true);
+                }}
+                style={{
+                  background: 'linear-gradient(135deg, #dc2626 0%, #991b1b 100%)',
+                  color: '#ffffff',
+                  border: 'none',
+                  padding: '10px 20px',
+                  borderRadius: '10px',
+                  fontSize: '13.5px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  boxShadow: '0 4px 12px rgba(220,38,38,0.25)',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                <span>🗑️</span>
+                <span>مسح وتصفير بيانات السيستم بالكامل</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1845,6 +2013,171 @@ export default function SettingsModule({
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Security Modal: Factory Reset & Data Wipe Confirmation ── */}
+      {showWipeModal && (
+        <div className="modal-backdrop" style={{ zIndex: 1400, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div
+            className="modal-content card"
+            style={{
+              maxWidth: '650px',
+              width: '95%',
+              padding: '28px',
+              borderRadius: '20px',
+              border: '2px solid #ef4444',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.25)',
+              background: 'var(--surface)'
+            }}
+          >
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', borderBottom: '1px solid var(--border)', paddingBottom: '14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ width: '42px', height: '42px', borderRadius: '12px', background: '#fee2e2', color: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px' }}>
+                  ⚠️
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, color: '#991b1b', fontSize: '17px', fontWeight: 800 }}>
+                    تأكيد مسح وتصفير بيانات النظام بالكامل
+                  </h3>
+                  <span style={{ fontSize: '12px', color: 'var(--muted)' }}>عملية حساسة ولا يمكن التراجع عنها</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => {
+                  if (!isWiping) setShowWipeModal(false);
+                }}
+                disabled={isWiping}
+                style={{ fontSize: '16px' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Impact Details Box */}
+            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '12px', padding: '14px 16px', marginBottom: '18px' }}>
+              <div style={{ fontWeight: 800, color: '#991b1b', fontSize: '13.5px', marginBottom: '8px' }}>
+                📌 تفاصيل ومحتويات عملية المسح والتصفير:
+              </div>
+              <ul style={{ margin: 0, paddingRight: '20px', fontSize: '12.5px', color: '#7f1d1d', lineHeight: '1.8' }}>
+                <li><strong>سيتم حذف ومسح:</strong> كافة ملفات الموظفين، الفروع، الورديات، بصمات الوجه، سجلات الحضور والانصراف، الجداول الشهرية، السلف والديون، والطلبات بالكامل.</li>
+                <li><strong>سيتم الاحتفاظ بـ:</strong> اسم مستخدم الإدارة العليا وكلمة المرور الحالية واسم المؤسسة للتمكن من تسجيل الدخول وإعادة التهيئة مباشرة.</li>
+              </ul>
+            </div>
+
+            {/* Safe Auto-Backup Checkbox */}
+            <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '10px', padding: '12px 14px', marginBottom: '18px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <input
+                type="checkbox"
+                id="wipe_auto_backup"
+                checked={wipeAutoBackup}
+                onChange={(e) => setWipeAutoBackup(e.target.checked)}
+                disabled={isWiping}
+                style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+              />
+              <label htmlFor="wipe_auto_backup" style={{ fontSize: '13px', color: '#065f46', fontWeight: 700, cursor: 'pointer' }}>
+                💾 تنزيل نسخة احتياطية كاملة (JSON) تلقائياً على جهازي قبل تنفيذ المسح (موصى به كإجراء أمان)
+              </label>
+            </div>
+
+            {/* Password Verification Field */}
+            <div style={{ marginBottom: '22px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: 'var(--text)', marginBottom: '6px' }}>
+                🔒 أدخل كلمة مرور الإدارة العليا الحالية لتأكيد هويتك وتنفيذ المسح:
+              </label>
+              <div style={{ position: 'relative' }}>
+                <input
+                  type={showWipePasswordText ? 'text' : 'password'}
+                  placeholder="كلمة مرور الإدارة العليا..."
+                  value={wipeConfirmPassword}
+                  onChange={(e) => setWipeConfirmPassword(e.target.value)}
+                  disabled={isWiping}
+                  style={{
+                    width: '100%',
+                    padding: '11px 40px 11px 14px',
+                    borderRadius: '10px',
+                    border: '1.5px solid #cbd5e1',
+                    fontSize: '14px',
+                    boxSizing: 'border-box'
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && wipeConfirmPassword && !isWiping) {
+                      handleExecuteFullDataWipe();
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowWipePasswordText(!showWipePasswordText)}
+                  style={{
+                    position: 'absolute',
+                    left: '10px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    border: 'none',
+                    background: 'none',
+                    cursor: 'pointer',
+                    fontSize: '16px',
+                    color: '#64748b'
+                  }}
+                >
+                  {showWipePasswordText ? '👁️' : '🔒'}
+                </button>
+              </div>
+              <span style={{ fontSize: '11.5px', color: 'var(--muted)', marginTop: '4px', display: 'block' }}>
+                * لن يتم قبول العملية إلا إذا تطابقت كلمة المرور المدخلة مع كلمة مرور الإدارة العليا الحالية.
+              </span>
+            </div>
+
+            {/* Modal Actions */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', borderTop: '1px solid var(--border)', paddingTop: '16px' }}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setShowWipeModal(false)}
+                disabled={isWiping}
+                style={{ padding: '9px 18px', fontWeight: 700 }}
+              >
+                إلغاء وتراجع
+              </button>
+
+              <button
+                type="button"
+                className="btn"
+                onClick={handleExecuteFullDataWipe}
+                disabled={isWiping || !wipeConfirmPassword}
+                style={{
+                  background: isWiping || !wipeConfirmPassword ? '#94a3b8' : 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)',
+                  color: '#ffffff',
+                  border: 'none',
+                  padding: '10px 22px',
+                  borderRadius: '10px',
+                  fontWeight: 800,
+                  fontSize: '13.5px',
+                  cursor: isWiping || !wipeConfirmPassword ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  boxShadow: '0 4px 14px rgba(220,38,38,0.25)'
+                }}
+              >
+                {isWiping ? (
+                  <>
+                    <span className="spinner" style={{ width: '14px', height: '14px' }}></span>
+                    <span>جاري مسح وتصفير قاعدة البيانات...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>🔥</span>
+                    <span>تأكيد مسح وتصفير البيانات نهائياً</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
