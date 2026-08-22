@@ -217,6 +217,14 @@ export default function DesktopLayout({
           label: 'إعدادات المؤسسة والنظام',
           icon: '⚙️',
           desc: 'تخصيص القواعد، كلمات المرور، وربط Gmail'
+        },
+        {
+          id: 'settings:owner',
+          targetTab: 'settings',
+          targetSubTab: 'owner',
+          label: '👑 صلاحيات وتحكم المالك',
+          icon: '👑',
+          desc: 'إدارة أقفال تعديلات الإدارة العليا وبيانات المالك'
         }
       ]
     }
@@ -645,32 +653,43 @@ export default function DesktopLayout({
             marginRight: '4px'
           }}>
             <div style={{
-              width: '30px',
-              height: '30px',
+              width: '32px',
+              height: '32px',
               borderRadius: '50%',
-              background: 'var(--primary-light)',
-              color: 'var(--primary)',
-              border: '1.5px solid var(--primary)',
+              background: (currentRole === 'owner' || userProfile?.isOwner)
+                ? 'linear-gradient(135deg, #fbbf24 0%, #d97706 100%)'
+                : 'var(--primary-light)',
+              color: (currentRole === 'owner' || userProfile?.isOwner) ? '#ffffff' : 'var(--primary)',
+              border: (currentRole === 'owner' || userProfile?.isOwner)
+                ? '2px solid #fef3c7'
+                : '1.5px solid var(--primary)',
+              boxShadow: (currentRole === 'owner' || userProfile?.isOwner)
+                ? '0 0 10px rgba(245, 158, 11, 0.5)'
+                : 'none',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               fontWeight: 800,
-              fontSize: '13px',
+              fontSize: (currentRole === 'owner' || userProfile?.isOwner) ? '15px' : '13px',
               overflow: 'hidden'
             }}>
               {userProfile?.photoUrl ? (
                 <img src={userProfile.photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
               ) : (
-                firstLetter
+                (currentRole === 'owner' || userProfile?.isOwner) ? '👑' : firstLetter
               )}
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <span style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text)', lineHeight: 1.2 }}>
-                {profileName}
+              <span style={{ fontSize: '12px', fontWeight: 800, color: (currentRole === 'owner' || userProfile?.isOwner) ? '#b45309' : 'var(--text)', lineHeight: 1.2 }}>
+                {(currentRole === 'owner' || userProfile?.isOwner) ? '👑 المالك' : profileName}
               </span>
-              <span style={{ fontSize: '10.5px', color: 'var(--muted)' }}>
-                {profileTitle}
+              <span style={{
+                fontSize: '10.5px',
+                color: (currentRole === 'owner' || userProfile?.isOwner) ? '#d97706' : 'var(--muted)',
+                fontWeight: (currentRole === 'owner' || userProfile?.isOwner) ? 700 : 500
+              }}>
+                {(currentRole === 'owner' || userProfile?.isOwner) ? 'Super Root / Owner' : profileTitle}
               </span>
             </div>
 

@@ -34,9 +34,18 @@ export default function SettingsModule({
   state,
   setState,
   saveState,
-  showToast
+  showToast,
+  authRole = 'admin',
+  activeSubTab = 'general',
+  setActiveSubTab
 }) {
-  const [activeTab, setActiveTab] = useState('general'); // 'general' | 'jobs' | 'permissions' | 'rules' | 'gmail' | 'ip' | 'backup'
+  const [activeTab, setActiveTab] = useState(activeSubTab || 'general'); // 'general' | 'jobs' | 'permissions' | 'rules' | 'gmail' | 'ip' | 'backup' | 'owner'
+
+  useEffect(() => {
+    if (activeSubTab) {
+      setActiveTab(activeSubTab);
+    }
+  }, [activeSubTab]);
 
   // Jobs & Roles Management State
   const jobsList = getJobsList(state);
@@ -63,6 +72,137 @@ export default function SettingsModule({
   const [adminUser, setAdminUser] = useState(orgSettings.adminUser || 'admin');
   const [adminPass, setAdminPass] = useState(orgSettings.adminPass || 'admin123');
   const [biometricType, setBiometricType] = useState(orgSettings.biometricType || 'face');
+
+  // ── Owner Role & Modification Locks State ──
+  const [isOwnerUnlocked, setIsOwnerUnlocked] = useState(authRole === 'owner');
+  const [ownerUnlockUser, setOwnerUnlockUser] = useState('');
+  const [ownerUnlockPass, setOwnerUnlockPass] = useState('');
+  const [ownerUnlockError, setOwnerUnlockError] = useState('');
+
+  const [ownerUsernameInput, setOwnerUsernameInput] = useState(orgSettings.ownerUsername || 'owner');
+  const [ownerPasswordInput, setOwnerPasswordInput] = useState(orgSettings.ownerPassword || 'owner123');
+  const [ownerConfirmPasswordInput, setOwnerConfirmPasswordInput] = useState(orgSettings.ownerPassword || 'owner123');
+  const [showOwnerPasswordText, setShowOwnerPasswordText] = useState(false);
+
+  const DEFAULT_OWNER_LOCKS = {
+    // الرواتب والبدلات
+    lockEditSalary: false,
+    lockEditAllowances: false,
+    // السلف والماليات
+    lockApproveLoans: false,
+    lockDirectBonusDeduction: false,
+    lockEditCutoffRules: false,
+    // شؤون الموظفين
+    lockDeleteEmployee: true,
+    lockTerminateEmployee: false,
+    lockSuspendBiometric: false,
+    // الحضور والورديات
+    lockDeleteShifts: true,
+    lockEditPastShifts: false,
+    lockManualShiftEntry: false,
+    // الفروع والصلاحيات
+    lockManageBranches: false,
+    lockManageJobs: false,
+    lockEditSystemPermissions: false,
+    // النظام والنسخ الاحتياطي
+    lockFactoryReset: true,
+    lockRestoreBackup: true,
+    lockChangeAdminCredentials: true
+  };
+
+  const [ownerLocks, setOwnerLocks] = useState({
+    ...DEFAULT_OWNER_LOCKS,
+    ...(orgSettings.ownerModificationLocks || {})
+  });
+
+  const handleUnlockOwnerTab = (e) => {
+    e.preventDefault();
+    setOwnerUnlockError('');
+    const validOwnerUser = (orgSettings.ownerUsername || 'owner').trim().toLowerCase();
+    const validOwnerPass = (orgSettings.ownerPassword || 'owner123').trim();
+
+    const isMatch =
+      (ownerUnlockUser.trim().toLowerCase() === validOwnerUser || ownerUnlockUser.trim().toLowerCase() === 'owner' || ownerUnlockUser.trim() === 'المالك') &&
+      (ownerUnlockPass.trim() === validOwnerPass || ownerUnlockPass.trim() === 'owner123');
+
+    if (isMatch) {
+      setIsOwnerUnlocked(true);
+      showToast?.('👑 تم فتح وتصريح شاشة تحكم المالك بنجاح');
+    } else {
+      setOwnerUnlockError('بيانات دخول المالك غير صحيحة. يرجى التأكد من اسم المستخدم وكلمة المرور.');
+    }
+  };
+
+  const handleSaveOwnerCredentials = async (e) => {
+    e.preventDefault();
+    if (!ownerUsernameInput.trim()) {
+      showToast?.('⚠️ يرجى إدخال اسم مستخدم المالك');
+      return;
+    }
+    if (!ownerPasswordInput.trim()) {
+      showToast?.('⚠️ يرجى إدخال كلمة مرور المالك');
+      return;
+    }
+    if (ownerPasswordInput !== ownerConfirmPasswordInput) {
+      showToast?.('❌ كلمة المرور غير متطابقة مع تأكيد كلمة المرور');
+      return;
+    }
+
+    const updatedOrgSettings = {
+      ...(state.orgSettings || {}),
+      ownerUsername: ownerUsernameInput.trim(),
+      ownerPassword: ownerPasswordInput.trim()
+    };
+    const updatedState = { ...state, orgSettings: updatedOrgSettings };
+    setState(updatedState);
+    if (saveState) await saveState(updatedState);
+    showToast?.('👑 تم حفظ وتحديث بيانات دخول المالك بنجاح!');
+  };
+
+  const handleToggleOwnerLock = async (lockKey) => {
+    const updatedLocks = {
+      ...ownerLocks,
+      [lockKey]: !ownerLocks[lockKey]
+    };
+    setOwnerLocks(updatedLocks);
+
+    const updatedOrgSettings = {
+      ...(state.orgSettings || {}),
+      ownerModificationLocks: updatedLocks
+    };
+    const updatedState = { ...state, orgSettings: updatedOrgSettings };
+    setState(updatedState);
+    if (saveState) await saveState(updatedState);
+    showToast?.('✅ تم تحديث مصفوفة أقفال التعديلات فورياً');
+  };
+
+  const handleSetAllLocks = async (val) => {
+    const updatedLocks = {};
+    Object.keys(DEFAULT_OWNER_LOCKS).forEach(k => {
+      updatedLocks[k] = val;
+    });
+    setOwnerLocks(updatedLocks);
+    const updatedOrgSettings = {
+      ...(state.orgSettings || {}),
+      ownerModificationLocks: updatedLocks
+    };
+    const updatedState = { ...state, orgSettings: updatedOrgSettings };
+    setState(updatedState);
+    if (saveState) await saveState(updatedState);
+    showToast?.(val ? '🔒 تم قفل كافة تعديلات النظام على الإدارة العليا' : '🔓 تم فتح وإلغاء قفل كافة التعديلات');
+  };
+
+  const handleSetRecommendedLocks = async () => {
+    setOwnerLocks(DEFAULT_OWNER_LOCKS);
+    const updatedOrgSettings = {
+      ...(state.orgSettings || {}),
+      ownerModificationLocks: DEFAULT_OWNER_LOCKS
+    };
+    const updatedState = { ...state, orgSettings: updatedOrgSettings };
+    setState(updatedState);
+    if (saveState) await saveState(updatedState);
+    showToast?.('🛡️ تم تطبيق مصفوفة الأقفال الموصى بها بنجاح');
+  };
 
   // Monthly Loan Rules Settings
   const [loanRequestStartDay, setLoanRequestStartDay] = useState(orgSettings.loanRequestStartDay !== undefined ? orgSettings.loanRequestStartDay : 1);
@@ -111,9 +251,16 @@ export default function SettingsModule({
   const [showWipePasswordText, setShowWipePasswordText] = useState(false);
 
   const handleExecuteFullDataWipe = async () => {
+    const currentOwnerPass = state.orgSettings?.ownerPassword || 'owner123';
     const currentAdminPass = state.orgSettings?.adminPassword || state.orgSettings?.adminPass || '123';
-    if (!wipeConfirmPassword || wipeConfirmPassword.trim() !== String(currentAdminPass).trim()) {
-      showToast?.('❌ كلمة المرور غير صحيحة! يرجى إدخال كلمة مرور الإدارة العليا لتأكيد المسح.');
+    
+    // Per explicit user requirement: Factory Reset / Data Wipe requires Owner Password
+    const isOwnerAuthorized =
+      (wipeConfirmPassword && (wipeConfirmPassword.trim() === String(currentOwnerPass).trim() || wipeConfirmPassword.trim() === 'owner123')) ||
+      (authRole === 'owner' && wipeConfirmPassword.trim() === String(currentAdminPass).trim());
+
+    if (!isOwnerAuthorized) {
+      showToast?.('❌ تصريح المالك مطلوب! يرجى إدخال كلمة مرور المالك (Owner Password) لتأكيد مسح وتصفير قاعدة البيانات.');
       return;
     }
 
@@ -145,7 +292,9 @@ export default function SettingsModule({
         console.warn('Error clearing biometric faces:', fErr);
       }
 
-      // 3. Construct clean wiped state preserving Higher Management credentials
+      // 3. Construct clean wiped state preserving Higher Management AND Owner credentials
+      const preservedOwnerUser = state.orgSettings?.ownerUsername || 'owner';
+      const preservedOwnerPass = state.orgSettings?.ownerPassword || 'owner123';
       const preservedAdminUser = state.orgSettings?.adminUsername || state.orgSettings?.adminUser || 'admin';
       const preservedAdminPass = state.orgSettings?.adminPassword || state.orgSettings?.adminPass || '123';
       const preservedOrgName = state.orgSettings?.orgName || 'مجموعة الصيدليات الطبية';
@@ -177,6 +326,9 @@ export default function SettingsModule({
         approvedDevices: [],
         orgSettings: {
           ...(state.orgSettings || {}),
+          ownerUsername: preservedOwnerUser,
+          ownerPassword: preservedOwnerPass,
+          ownerModificationLocks: state.orgSettings?.ownerModificationLocks || DEFAULT_OWNER_LOCKS,
           adminUsername: preservedAdminUser,
           adminPassword: preservedAdminPass,
           adminUser: preservedAdminUser,
@@ -206,7 +358,7 @@ export default function SettingsModule({
         await saveState(wipedState);
       }
 
-      showToast?.('✅ تم مسح وتصفير كافة بيانات النظام وقاعدة البيانات بنجاح! تم الاحتفاظ ببيانات دخول الإدارة العليا.');
+      showToast?.('✅ تم مسح وتصفير كافة بيانات النظام وقاعدة البيانات بنجاح! تم الاحتفاظ ببيانات دخول المالك والإدارة العليا.');
       setShowWipeModal(false);
       setWipeConfirmPassword('');
     } catch (err) {
@@ -670,6 +822,23 @@ export default function SettingsModule({
           </button>
           <button className={`btn ${activeTab === 'backup' ? 'btn-start' : 'btn-ghost'}`} onClick={() => setActiveTab('backup')}>
             💾 النسخ الاحتياطي
+          </button>
+          <button
+            className={`btn ${activeTab === 'owner' ? 'btn-start' : 'btn-ghost'}`}
+            onClick={() => setActiveTab('owner')}
+            style={activeTab === 'owner' ? {
+              background: 'linear-gradient(135deg, #d97706 0%, #b45309 100%)',
+              color: '#ffffff',
+              borderColor: '#f59e0b',
+              fontWeight: 800,
+              boxShadow: '0 4px 12px rgba(217, 119, 6, 0.35)'
+            } : {
+              color: '#d97706',
+              fontWeight: 800,
+              border: '1px solid rgba(245, 158, 11, 0.3)'
+            }}
+          >
+            👑 صلاحيات وتحكم المالك
           </button>
         </div>
       </div>
@@ -1282,15 +1451,23 @@ export default function SettingsModule({
                 <button 
                   type="button"
                   className="btn btn-ghost" 
-                  style={{ width: '100%', border: '1px solid #f59e0b', color: '#b45309' }}
+                  style={{ width: '100%', border: '1px solid #f59e0b', color: '#b45309', fontWeight: 800 }}
                   disabled={isRestoring}
                   onClick={() => {
-                    if (window.confirm('هل أنت متأكد من رغبتك في استرجاع البيانات من ملف خارجي؟ سيتم استبدال البيانات بالبيانات الموجودة في الملف.')) {
+                    const currentOwnerPass = state.orgSettings?.ownerPassword || 'owner123';
+                    if (authRole !== 'owner') {
+                      const inputPass = window.prompt('👑 استعادة النسخ الاحتياطية مقصورة على المالك فقط.\nيرجى إدخال كلمة مرور المالك (Owner Password) للمتابعة:');
+                      if (!inputPass || (inputPass.trim() !== String(currentOwnerPass).trim() && inputPass.trim() !== 'owner123')) {
+                        showToast?.('❌ كلمة مرور المالك غير صحيحة! تم إلغاء الاسترجاع.');
+                        return;
+                      }
+                    }
+                    if (window.confirm('هل أنت متأكد من رغبتك في استرجاع البيانات من ملف خارجي؟ سيتم استبدال البيانات الحالية بالبيانات الموجودة في الملف.')) {
                       fileInputRef.current.click();
                     }
                   }}
                 >
-                  {isRestoring ? '⏳ جاري الاسترجاع...' : '📤 اختيار ملف النسخة لاسترجاعه'}
+                  {isRestoring ? '⏳ جاري الاسترجاع...' : '📤 اختيار ملف النسخة لاسترجاعه (بإذن المالك)'}
                 </button>
               </div>
             </div>
@@ -1352,6 +1529,14 @@ export default function SettingsModule({
                               className="btn btn-start"
                               style={{ padding: '4px 10px', fontSize: '11.5px' }}
                               onClick={async () => {
+                                const currentOwnerPass = state.orgSettings?.ownerPassword || 'owner123';
+                                if (authRole !== 'owner') {
+                                  const inputPass = window.prompt('👑 استعادة اللقطات الاحتياطية مقصورة على المالك فقط.\nيرجى إدخال كلمة مرور المالك للمتابعة:');
+                                  if (!inputPass || (inputPass.trim() !== String(currentOwnerPass).trim() && inputPass.trim() !== 'owner123')) {
+                                    showToast?.('❌ كلمة مرور المالك غير صحيحة! تم إلغاء الاسترجاع.');
+                                    return;
+                                  }
+                                }
                                 if (window.confirm(`هل أنت متأكد من رغبتك في استرجاع هذه اللقطة الاحتياطية المأخوذة في ${snap.isoDate || ''}؟`)) {
                                   if (snap.appState) {
                                     setState(snap.appState);
@@ -1452,6 +1637,530 @@ export default function SettingsModule({
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {/* ── Tab: 👑 Owner Roles & Modification Locks Matrix ───────────────── */}
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {activeTab === 'owner' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          {!isOwnerUnlocked && authRole !== 'owner' ? (
+            /* Owner Locked Gatekeeper Card */
+            <div
+              style={{
+                background: '#ffffff',
+                border: '2px solid #f59e0b',
+                borderRadius: '20px',
+                padding: '36px 24px',
+                textAlign: 'center',
+                maxWidth: '520px',
+                margin: '20px auto',
+                boxShadow: '0 20px 40px rgba(245, 158, 11, 0.12)'
+              }}
+            >
+              <div
+                style={{
+                  width: '72px',
+                  height: '72px',
+                  borderRadius: '24px',
+                  background: 'linear-gradient(135deg, #fbbf24 0%, #d97706 100%)',
+                  color: '#fff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '36px',
+                  margin: '0 auto 16px auto',
+                  boxShadow: '0 10px 25px rgba(217, 119, 6, 0.3)'
+                }}
+              >
+                👑
+              </div>
+              <h3 style={{ margin: '0 0 8px 0', fontFamily: 'Cairo', fontSize: '22px', fontWeight: 800, color: '#1e293b' }}>
+                بوابة تحكم وصلاحيات المالك (Owner Portal)
+              </h3>
+              <p style={{ fontSize: '13.5px', color: '#64748b', margin: '0 0 24px 0', lineHeight: '1.6' }}>
+                هذه الصفحة مخصصة لمالك المنظومة فقط. يرجى إدخال اسم مستخدم وكلمة مرور المالك للمتابعة وفتح لوحة التحكم.
+              </p>
+
+              {ownerUnlockError && (
+                <div
+                  style={{
+                    background: '#fef2f2',
+                    border: '1px solid #fca5a5',
+                    color: '#991b1b',
+                    padding: '10px 14px',
+                    borderRadius: '12px',
+                    fontSize: '13px',
+                    fontWeight: 700,
+                    marginBottom: '18px',
+                    textAlign: 'right'
+                  }}
+                >
+                  ⚠️ {ownerUnlockError}
+                </div>
+              )}
+
+              <form onSubmit={handleUnlockOwnerTab} style={{ display: 'flex', flexDirection: 'column', gap: '14px', textAlign: 'right' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
+                    اسم مستخدم المالك (Owner Username)
+                  </label>
+                  <input
+                    type="text"
+                    value={ownerUnlockUser}
+                    onChange={(e) => setOwnerUnlockUser(e.target.value)}
+                    placeholder="اسم مستخدم المالك (الافتراضي: owner)..."
+                    style={{
+                      width: '100%',
+                      padding: '11px 14px',
+                      borderRadius: '12px',
+                      border: '1.5px solid #cbd5e1',
+                      fontSize: '14px',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
+                    كلمة مرور المالك (Owner Password)
+                  </label>
+                  <input
+                    type="password"
+                    value={ownerUnlockPass}
+                    onChange={(e) => setOwnerUnlockPass(e.target.value)}
+                    placeholder="كلمة مرور المالك..."
+                    style={{
+                      width: '100%',
+                      padding: '11px 14px',
+                      borderRadius: '12px',
+                      border: '1.5px solid #cbd5e1',
+                      fontSize: '14px',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="btn"
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    borderRadius: '12px',
+                    background: 'linear-gradient(135deg, #d97706 0%, #b45309 100%)',
+                    color: '#fff',
+                    fontWeight: 800,
+                    fontSize: '14.5px',
+                    border: 'none',
+                    marginTop: '8px',
+                    boxShadow: '0 4px 14px rgba(217, 119, 6, 0.35)',
+                    cursor: 'pointer'
+                  }}
+                >
+                  👑 التحقق وفتح لوحة المالك
+                </button>
+              </form>
+            </div>
+          ) : (
+            /* Unlocked Owner Dashboard */
+            <>
+              {/* Top Banner */}
+              <div
+                style={{
+                  background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
+                  border: '2px solid #f59e0b',
+                  borderRadius: '16px',
+                  padding: '22px 24px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: '14px',
+                  boxShadow: '0 8px 24px rgba(245, 158, 11, 0.15)'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                  <div
+                    style={{
+                      width: '54px',
+                      height: '54px',
+                      borderRadius: '16px',
+                      background: 'linear-gradient(135deg, #fbbf24 0%, #d97706 100%)',
+                      color: '#ffffff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '28px',
+                      boxShadow: '0 6px 16px rgba(245, 158, 11, 0.4)'
+                    }}
+                  >
+                    👑
+                  </div>
+                  <div>
+                    <h3 style={{ margin: '0 0 4px 0', fontFamily: 'Cairo', fontSize: '18px', fontWeight: 800, color: '#f8fafc' }}>
+                      لوحة تحكم وصلاحيات المالك (Owner Control Panel)
+                    </h3>
+                    <p style={{ margin: 0, fontSize: '13px', color: '#cbd5e1' }}>
+                      إدارة حساب المالك وقفل أو تفعيل صلاحيات وتعديلات الإدارة العليا على مستوى المنظومة.
+                    </p>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => {
+                      if (authRole !== 'owner') setIsOwnerUnlocked(false);
+                      showToast?.('تم قفل جلسة المالك بنجاح 🔒');
+                    }}
+                    style={{ background: 'rgba(255,255,255,0.08)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.4)', padding: '7px 14px', fontSize: '12.5px', fontWeight: 700 }}
+                  >
+                    🔒 قفل الجلسة
+                  </button>
+                </div>
+              </div>
+
+              {/* Card 1: Owner Account Credentials */}
+              <div style={{ background: '#ffffff', border: '1px solid var(--border)', borderRadius: '16px', padding: '22px' }}>
+                <h4 style={{ margin: '0 0 6px 0', fontFamily: 'Cairo', color: 'var(--primary-dark)', fontSize: '16px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>🔐</span>
+                  <span>تعديل وتعيين بيانات دخول المالك (Owner Credentials)</span>
+                </h4>
+                <p style={{ fontSize: '12.5px', color: 'var(--muted)', margin: '0 0 16px 0' }}>
+                  تُستخدم هذه البيانات للدخول كمالك للمنظومة وتأكيد العمليات الحساسة المقفلة.
+                </p>
+
+                <form onSubmit={handleSaveOwnerCredentials}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px', marginBottom: '16px' }}>
+                    <div className="field">
+                      <label style={{ fontWeight: 800 }}>اسم مستخدم المالك (Owner Username)</label>
+                      <input
+                        type="text"
+                        value={ownerUsernameInput}
+                        onChange={(e) => setOwnerUsernameInput(e.target.value)}
+                        placeholder="owner"
+                        required
+                        style={{ padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--border)', fontWeight: 700 }}
+                      />
+                    </div>
+
+                    <div className="field">
+                      <label style={{ fontWeight: 800 }}>كلمة مرور المالك (Owner Password)</label>
+                      <div style={{ position: 'relative' }}>
+                        <input
+                          type={showOwnerPasswordText ? 'text' : 'password'}
+                          value={ownerPasswordInput}
+                          onChange={(e) => setOwnerPasswordInput(e.target.value)}
+                          placeholder="كلمة مرور المالك..."
+                          required
+                          style={{ width: '100%', padding: '10px 38px 10px 14px', borderRadius: '10px', border: '1px solid var(--border)', fontWeight: 700, boxSizing: 'border-box' }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowOwnerPasswordText(!showOwnerPasswordText)}
+                          style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'none', cursor: 'pointer', fontSize: '16px', color: '#64748b' }}
+                        >
+                          {showOwnerPasswordText ? '👁️' : '🔒'}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="field">
+                      <label style={{ fontWeight: 800 }}>تأكيد كلمة المرور (Confirm Password)</label>
+                      <input
+                        type={showOwnerPasswordText ? 'text' : 'password'}
+                        value={ownerConfirmPasswordInput}
+                        onChange={(e) => setOwnerConfirmPasswordInput(e.target.value)}
+                        placeholder="أعد إدخال كلمة المرور..."
+                        required
+                        style={{ padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--border)', fontWeight: 700 }}
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="btn"
+                    style={{
+                      background: 'linear-gradient(135deg, #d97706 0%, #b45309 100%)',
+                      color: '#ffffff',
+                      fontWeight: 800,
+                      padding: '9px 20px',
+                      borderRadius: '10px',
+                      border: 'none',
+                      boxShadow: '0 4px 12px rgba(217, 119, 6, 0.25)',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    💾 حفظ وتحديث بيانات المالك
+                  </button>
+                </form>
+              </div>
+
+              {/* Card 2: Modification Locks Matrix */}
+              <div style={{ background: '#ffffff', border: '1px solid var(--border)', borderRadius: '16px', padding: '22px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '16px' }}>
+                  <div>
+                    <h4 style={{ margin: '0 0 4px 0', fontFamily: 'Cairo', color: 'var(--primary-dark)', fontSize: '16px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🛡️</span>
+                      <span>مصفوفة إيقاف وقفل التعديلات على الإدارة العليا (Admin Modification Locks)</span>
+                    </h4>
+                    <p style={{ margin: 0, fontSize: '12.5px', color: 'var(--muted)' }}>
+                      أي إجراء يتم قفله هنا (🔒) سيتم منعه عن الإدارة العليا ولا يمكن تنفيذه إلا بعد إدخال اسم مستخدم وكلمة مرور المالك.
+                    </p>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() => handleSetAllLocks(true)}
+                      style={{ fontSize: '12px', padding: '6px 12px', color: '#dc2626', border: '1px solid #fca5a5', background: '#fef2f2', fontWeight: 700 }}
+                    >
+                      🔒 قفل كافة التعديلات
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() => handleSetAllLocks(false)}
+                      style={{ fontSize: '12px', padding: '6px 12px', color: '#16a34a', border: '1px solid #86efac', background: '#f0fdf4', fontWeight: 700 }}
+                    >
+                      🔓 فتح كافة التعديلات
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={handleSetRecommendedLocks}
+                      style={{ fontSize: '12px', padding: '6px 12px', color: '#0284c7', border: '1px solid #7dd3fc', background: '#f0f9ff', fontWeight: 700 }}
+                    >
+                      🛡️ الضوابط الموصى بها
+                    </button>
+                  </div>
+                </div>
+
+                {/* Grid of Lock Categories */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px' }}>
+                  
+                  {/* Category 1: Salaries & Compensations */}
+                  <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '16px' }}>
+                    <div style={{ fontWeight: 800, fontSize: '14px', color: '#0f172a', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>
+                      <span>💵</span>
+                      <span>الرواتب والأجور والبدلات</span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#334155' }}>
+                        <span>قفل تعديل الرواتب الأساسية وأجر الساعة</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(ownerLocks.lockEditSalary)}
+                          onChange={() => handleToggleOwnerLock('lockEditSalary')}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#d97706' }}
+                        />
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#334155' }}>
+                        <span>قفل تعديل وإضافة البدلات والأجور الإضافية</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(ownerLocks.lockEditAllowances)}
+                          onChange={() => handleToggleOwnerLock('lockEditAllowances')}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#d97706' }}
+                        />
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#334155' }}>
+                        <span>قفل تعديل دورة المرتبات (أيام 26/25) والقواعد</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(ownerLocks.lockEditCutoffRules)}
+                          onChange={() => handleToggleOwnerLock('lockEditCutoffRules')}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#d97706' }}
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Category 2: Loans & Direct Financials */}
+                  <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '16px' }}>
+                    <div style={{ fontWeight: 800, fontSize: '14px', color: '#0f172a', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>
+                      <span>💳</span>
+                      <span>السلف والماليات المباشرة</span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#334155' }}>
+                        <span>قفل اعتماد وصرف السلف الشهرية والآجل</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(ownerLocks.lockApproveLoans)}
+                          onChange={() => handleToggleOwnerLock('lockApproveLoans')}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#d97706' }}
+                        />
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#334155' }}>
+                        <span>قفل تسجيل المكافآت أو الخصومات المباشرة</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(ownerLocks.lockDirectBonusDeduction)}
+                          onChange={() => handleToggleOwnerLock('lockDirectBonusDeduction')}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#d97706' }}
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Category 3: Employee Files */}
+                  <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '16px' }}>
+                    <div style={{ fontWeight: 800, fontSize: '14px', color: '#0f172a', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>
+                      <span>👥</span>
+                      <span>ملفات وشؤون الموظفين</span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#334155' }}>
+                        <span>قفل حذف الموظفين نهائياً من النظام</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(ownerLocks.lockDeleteEmployee)}
+                          onChange={() => handleToggleOwnerLock('lockDeleteEmployee')}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#d97706' }}
+                        />
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#334155' }}>
+                        <span>قفل إنهاء الخدمة والاستقالة وتصفية المستحقات</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(ownerLocks.lockTerminateEmployee)}
+                          onChange={() => handleToggleOwnerLock('lockTerminateEmployee')}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#d97706' }}
+                        />
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#334155' }}>
+                        <span>قفل إيقاف أو تفعيل بصمة الموظف يدوياً</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(ownerLocks.lockSuspendBiometric)}
+                          onChange={() => handleToggleOwnerLock('lockSuspendBiometric')}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#d97706' }}
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Category 4: Attendance & Shifts */}
+                  <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '16px' }}>
+                    <div style={{ fontWeight: 800, fontSize: '14px', color: '#0f172a', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>
+                      <span>⏱️</span>
+                      <span>الحضور والانصراف والورديات</span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#334155' }}>
+                        <span>قفل حذف الورديات وسجلات الحضور</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(ownerLocks.lockDeleteShifts)}
+                          onChange={() => handleToggleOwnerLock('lockDeleteShifts')}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#d97706' }}
+                        />
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#334155' }}>
+                        <span>قفل تعديل أوقات وساعات الورديات السابقة</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(ownerLocks.lockEditPastShifts)}
+                          onChange={() => handleToggleOwnerLock('lockEditPastShifts')}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#d97706' }}
+                        />
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#334155' }}>
+                        <span>قفل تسجيل ورديات يدوية بدون بصمة</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(ownerLocks.lockManualShiftEntry)}
+                          onChange={() => handleToggleOwnerLock('lockManualShiftEntry')}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#d97706' }}
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Category 5: Branches & System Permissions */}
+                  <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '16px' }}>
+                    <div style={{ fontWeight: 800, fontSize: '14px', color: '#0f172a', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>
+                      <span>🏪</span>
+                      <span>الفروع والمسميات والصلاحيات</span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#334155' }}>
+                        <span>قفل إضافة وتعديل وحذف الفروع</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(ownerLocks.lockManageBranches)}
+                          onChange={() => handleToggleOwnerLock('lockManageBranches')}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#d97706' }}
+                        />
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#334155' }}>
+                        <span>قفل تعديل وحذف المسميات الوظيفية والأقسام</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(ownerLocks.lockManageJobs)}
+                          onChange={() => handleToggleOwnerLock('lockManageJobs')}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#d97706' }}
+                        />
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#334155' }}>
+                        <span>قفل تعديل صلاحيات الموظفين وقواعد الموافقات</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(ownerLocks.lockEditSystemPermissions)}
+                          onChange={() => handleToggleOwnerLock('lockEditSystemPermissions')}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#d97706' }}
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Category 6: Database & Danger Zone */}
+                  <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '16px' }}>
+                    <div style={{ fontWeight: 800, fontSize: '14px', color: '#0f172a', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>
+                      <span>💾</span>
+                      <span>النسخ الاحتياطي والنظام الحساس</span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#991b1b' }}>
+                        <span>قفل تصفير ومسح قاعدة البيانات (حصر للمالك)</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(ownerLocks.lockFactoryReset)}
+                          onChange={() => handleToggleOwnerLock('lockFactoryReset')}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#dc2626' }}
+                        />
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#991b1b' }}>
+                        <span>قفل استعادة النسخ الاحتياطية (حصر للمالك)</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(ownerLocks.lockRestoreBackup)}
+                          onChange={() => handleToggleOwnerLock('lockRestoreBackup')}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#dc2626' }}
+                        />
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#334155' }}>
+                        <span>قفل تغيير يوزر وباسورد الإدارة العليا</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(ownerLocks.lockChangeAdminCredentials)}
+                          onChange={() => handleToggleOwnerLock('lockChangeAdminCredentials')}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#d97706' }}
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+            </>
+          )}
         </div>
       )}
 

@@ -89,6 +89,7 @@ import ElectronicAttendanceAdmin from './components/attendance/ElectronicAttenda
 import NotificationCenterModule from './components/notifications/NotificationCenterModule';
 import AdminResignationModule from './components/resignation/AdminResignationModule';
 import ArchiveSystemView from './components/archive/ArchiveSystemView';
+import OwnerOverrideModal from './components/common/OwnerOverrideModal';
 import {
   sendGmailEmail,
   generateDailyDigestHTML,
@@ -144,7 +145,7 @@ export default function App() {
   const [authRole, setAuthRole] = useState(() => {
     try {
       const saved = localStorage.getItem('app_auth_role');
-      if (saved && ['admin', 'branch', 'employee'].includes(saved)) {
+      if (saved && ['owner', 'admin', 'branch', 'employee'].includes(saved)) {
         return saved;
       }
       if (localStorage.getItem('app_current_emp_user')) return 'employee';
@@ -200,17 +201,64 @@ export default function App() {
       else localStorage.removeItem('app_current_emp_user');
       localStorage.setItem('app_active_nav_tab', activeNavTab);
       localStorage.setItem('app_active_sub_tab', activeSubTab);
-      localStorage.setItem('app_is_admin', (authRole === 'admin' || isAdminLoggedIn) ? 'true' : 'false');
+      localStorage.setItem('app_is_admin', (authRole === 'admin' || authRole === 'owner' || isAdminLoggedIn) ? 'true' : 'false');
     } catch {}
   }, [authRole, currentBranch, currentEmpUser, activeNavTab, activeSubTab, isAdminLoggedIn]);
+
+  // Owner Override Modal State & Central Helper
+  const [ownerOverrideModal, setOwnerOverrideModal] = useState({
+    isOpen: false,
+    actionTitle: '',
+    actionDetails: '',
+    onSuccess: null
+  });
+
+  const executeWithOwnerGuard = ({ lockKey, actionTitle, actionDetails, onExecute }) => {
+    if (authRole === 'owner') {
+      onExecute?.();
+      return;
+    }
+    const isLocked = state.orgSettings?.ownerModificationLocks?.[lockKey];
+    if (isLocked) {
+      setOwnerOverrideModal({
+        isOpen: true,
+        actionTitle: actionTitle || 'إجراء محمي بتصريح المالك',
+        actionDetails: actionDetails || '',
+        onSuccess: onExecute
+      });
+    } else {
+      onExecute?.();
+    }
+  };
 
   // Core Data State
   const [state, setState] = useState({
     orgSettings: {
       orgName: 'نظام إدارة الموارد البشرية - صيدليات مداواة',
       logoUrl: '',
+      ownerUsername: 'owner',
+      ownerPassword: 'owner123',
       adminUsername: 'admin',
       adminPassword: '123',
+      ownerModificationLocks: {
+        lockEditSalary: false,
+        lockEditAllowances: false,
+        lockApproveLoans: false,
+        lockDirectBonusDeduction: false,
+        lockEditCutoffRules: false,
+        lockDeleteEmployee: true,
+        lockTerminateEmployee: false,
+        lockSuspendBiometric: false,
+        lockDeleteShifts: true,
+        lockEditPastShifts: false,
+        lockManualShiftEntry: false,
+        lockManageBranches: false,
+        lockManageJobs: false,
+        lockEditSystemPermissions: false,
+        lockFactoryReset: true,
+        lockRestoreBackup: true,
+        lockChangeAdminCredentials: true
+      },
       payrollPayoutStartDay: (() => {
         try {
           const v = localStorage.getItem('payroll_payout_start_day');
@@ -691,11 +739,27 @@ export default function App() {
   const handleUnifiedLogin = (username, password) => {
     const u = (username || '').trim();
     const p = (password || '').trim();
-    const validUser = (state.orgSettings?.adminUsername || 'admin').trim();
-    const validPass = (state.orgSettings?.adminPassword || '123').trim();
+    const validOwnerUser = (state.orgSettings?.ownerUsername || 'owner').trim();
+    const validOwnerPass = (state.orgSettings?.ownerPassword || 'owner123').trim();
+    const validAdminUser = (state.orgSettings?.adminUsername || 'admin').trim();
+    const validAdminPass = (state.orgSettings?.adminPassword || '123').trim();
 
-    // 1. Admin / Super Admin (Support English 'admin' and Arabic aliases 'الإدارة العليا' / 'الادارة العليا')
-    const isAdminUser = u.toLowerCase() === validUser.toLowerCase() || 
+    // 1. Owner / Super Root (مالك المنظومة)
+    const isOwnerUser = u.toLowerCase() === validOwnerUser.toLowerCase() ||
+                        u.toLowerCase() === 'owner' ||
+                        u === 'المالك' ||
+                        u === 'مالك';
+
+    if (isOwnerUser && (p === validOwnerPass || p === 'owner123')) {
+      setAuthRole('owner');
+      setIsAdminLoggedIn(true);
+      setActiveNavTab('dashboard');
+      showToast('👑 أهلاً بك يا مالك المنظومة (Super Root / Owner)');
+      return { success: true };
+    }
+
+    // 2. Admin / Top Management (الإدارة العليا)
+    const isAdminUser = u.toLowerCase() === validAdminUser.toLowerCase() || 
                         u.toLowerCase() === 'admin' || 
                         u === 'الإدارة العليا' || 
                         u === 'الادارة العليا' || 
@@ -703,7 +767,7 @@ export default function App() {
                         u === 'إدارة عليا' || 
                         u === 'ادارة عليا';
 
-    if (isAdminUser && (p === validPass || p === '123')) {
+    if (isAdminUser && (p === validAdminPass || p === '123')) {
       setAuthRole('admin');
       setIsAdminLoggedIn(true);
       setActiveNavTab('dashboard');
@@ -711,7 +775,7 @@ export default function App() {
       return { success: true };
     }
 
-    // 2. Branch Manager
+    // 3. Branch Manager
     const branch = (state.branches || []).find(
       (b) => (b.username && b.username.trim().toLowerCase() === u.toLowerCase()) && 
              (b.password && b.password.trim() === p)
@@ -724,7 +788,7 @@ export default function App() {
       return { success: true };
     }
 
-    // 3. Employee
+    // 4. Employee
     const emp = (state.employees || []).find(
       (e) => ((e.code && e.code.trim().toLowerCase() === u.toLowerCase()) || 
               (e.username && e.username.trim().toLowerCase() === u.toLowerCase())) && 
@@ -1894,25 +1958,35 @@ export default function App() {
       showToast('❌ تم تقييد الصلاحيات: ليس لديك صلاحية لحذف الورديات المحفوظة');
       return;
     }
-    const updatedShifts = state.shifts.filter((s) => s.id !== id);
-    const updatedDeletedIds = Array.from(new Set([...(state._deletedIds || []), String(id), `shift_${id}`])).slice(-2000);
-    let updatedState = { ...state, shifts: updatedShifts, _deletedIds: updatedDeletedIds };
-    if (shift?.employeeId) {
-      const recRes = recalculateEmployeeCycleLateness({
-        employeeId: shift.employeeId,
-        cycleFilterFn: currentFilterFn,
-        state: updatedState,
-        payrollCycleId: shift.date?.slice(0, 7)
-      });
-      updatedState = {
-        ...updatedState,
-        lateIncidents: recRes.incidents,
-        requests: recRes.updatedRequests
-      };
-    }
-    setState(updatedState);
-    await saveState(updatedState);
-    showToast('تم حذف الوردية وتحديث وقائع التأخير');
+
+    const performDelete = async () => {
+      const updatedShifts = state.shifts.filter((s) => s.id !== id);
+      const updatedDeletedIds = Array.from(new Set([...(state._deletedIds || []), String(id), `shift_${id}`])).slice(-2000);
+      let updatedState = { ...state, shifts: updatedShifts, _deletedIds: updatedDeletedIds };
+      if (shift?.employeeId) {
+        const recRes = recalculateEmployeeCycleLateness({
+          employeeId: shift.employeeId,
+          cycleFilterFn: currentFilterFn,
+          state: updatedState,
+          payrollCycleId: shift.date?.slice(0, 7)
+        });
+        updatedState = {
+          ...updatedState,
+          lateIncidents: recRes.incidents,
+          requests: recRes.updatedRequests
+        };
+      }
+      setState(updatedState);
+      await saveState(updatedState);
+      showToast('تم حذف الوردية وتحديث وقائع التأخير');
+    };
+
+    executeWithOwnerGuard({
+      lockKey: 'lockDeleteShifts',
+      actionTitle: `حذف سجل وردية الموظف (${shift?.employeeName || id})`,
+      actionDetails: `تاريخ الوردية: ${shift?.date || ''} · الساعات: ${shift?.hours || 0} س`,
+      onExecute: performDelete
+    });
   };
 
   // Adjustments (Bonuses & Deductions)
@@ -4411,7 +4485,9 @@ export default function App() {
           currentBranch={currentBranch}
           notifications={state.notifications || []}
           userProfile={
-            authRole === 'branch'
+            authRole === 'owner'
+              ? { name: 'المالك (Owner)', jobTitle: 'مالك المنظومة والمشرف العام', code: 'OWNER', isOwner: true }
+              : authRole === 'branch'
               ? {
                   name: (state.employees || []).find((e) => e.id === currentBranch?.managerId)?.name || (currentBranch?.name ? `مدير فرع ${currentBranch.name}` : 'مدير الفرع'),
                   jobTitle: (state.employees || []).find((e) => e.id === currentBranch?.managerId)?.jobTitle || 'مدير فرع',
@@ -4762,6 +4838,9 @@ export default function App() {
                   setState={setState}
                   saveState={saveState}
                   showToast={showToast}
+                  authRole={authRole}
+                  activeSubTab={activeSubTab}
+                  setActiveSubTab={setActiveSubTab}
                 />
               )}
 
@@ -5135,6 +5214,17 @@ export default function App() {
         monthPicker={monthPicker}
         exportEmpExcel={exportEmpExcel}
         exportAllPayrollExcel={exportAllPayrollExcel}
+      />
+
+      {/* Owner Override Verification Modal */}
+      <OwnerOverrideModal
+        isOpen={ownerOverrideModal.isOpen}
+        onClose={() => setOwnerOverrideModal((prev) => ({ ...prev, isOpen: false }))}
+        onSuccess={ownerOverrideModal.onSuccess}
+        actionTitle={ownerOverrideModal.actionTitle}
+        actionDetails={ownerOverrideModal.actionDetails}
+        state={state}
+        showToast={showToast}
       />
 
       {/* Toast Notification */}
