@@ -5,6 +5,7 @@ import {
   calculateViolationCounter,
   getEmployeeDisciplinarySummary
 } from '../../utils/disciplinaryPenaltyEngine';
+import { computeLatenessFinancialAmount } from '../../utils/latePenaltyEngine';
 import { getEmpDisplayName } from '../../utils/formatters';
 import DisciplinaryViolationModal from './DisciplinaryViolationModal';
 
@@ -87,22 +88,148 @@ export default function DisciplinaryPenaltiesTab({
     return new Set(employees.map((e) => String(e.id)));
   }, [employees]);
 
-  // 2. Extract Disciplinary Penalties Scoped strictly by Role
+  // 2. Extract Disciplinary Penalties Scoped strictly by Role (Requests + Late Incidents + Adjustments)
   const allDisciplinaryPenalties = useMemo(() => {
-    let list = (state.requests || []).filter(
-      (r) => r.type === 'disciplinary_penalty' || r.subType === 'disciplinary_penalty'
-    );
+    const list = [];
+    const seenIds = new Set();
 
-    if (isEmployee && currentEmpId) {
-      list = list.filter((r) => String(r.employeeId) === String(currentEmpId));
-    } else if (isBranch && currentBranchId) {
-      list = list.filter(
-        (r) => String(r.branchId) === String(currentBranchId) || scopedEmpIds.has(String(r.employeeId))
+    // 1. Requests (Disciplinary Penalties, Direct Penalties, Violations, Deductions)
+    (state.requests || []).forEach((r) => {
+      if (
+        r.type === 'disciplinary_penalty' ||
+        r.subType === 'disciplinary_penalty' ||
+        r.type === 'penalty' ||
+        r.type === 'deduction' ||
+        r.subType === 'penalty' ||
+        r.type === 'early_exit' ||
+        r.subType === 'lateness' ||
+        r.ruleTitle
+      ) {
+        if (isEmployee && currentEmpId && String(r.employeeId) !== String(currentEmpId)) return;
+        if (isBranch && currentBranchId && String(r.branchId) !== String(currentBranchId) && !scopedEmpIds.has(String(r.employeeId))) return;
+
+        seenIds.add(String(r.id));
+        const emp = allEmployeesList.find((e) => String(e.id) === String(r.employeeId));
+        const bObj = (state.branches || []).find((b) => String(b.id) === String(r.branchId || emp?.branchId));
+
+        let amount = parseFloat(r.amount) || 0;
+        if (!amount && (r.impactType || r.impactVal)) {
+          if (r.impactType === 'deduction_days') {
+            const dailyRate = getEmployeeDailyRate(emp, r.branchId);
+            amount = Math.round(dailyRate * (parseFloat(r.impactVal) || 1) * 100) / 100;
+          } else if (r.impactType === 'fixed_amount') {
+            amount = parseFloat(r.impactVal) || 0;
+          }
+        }
+
+        list.push({
+          id: r.id,
+          employeeId: r.employeeId,
+          employeeName: r.employeeName || emp?.name || 'موظف',
+          employeeCode: r.employeeCode || emp?.code || '—',
+          branchId: r.branchId || emp?.branchId,
+          branchName: bObj?.name || 'الفرع الرئيسي',
+          categoryId: r.categoryId || r.categoryCode || 'CAT_A',
+          categoryCode: r.categoryCode || r.categoryId || 'CAT_A',
+          categoryName: r.categoryName || r.category || 'انضباط ولائحة',
+          ruleTitle: r.ruleTitle || r.actionTitle || (r.subType === 'lateness' ? `تأخير عن الشيفت (${r.latenessMinutes || ''} د)` : r.reason) || 'مخالفة لائحية',
+          actionTitle: r.actionTitle || (r.deductionDays ? `خصم ${r.deductionDays} يوم` : 'تنبيه موثق'),
+          occurrenceNumber: r.occurrenceNumber || 1,
+          deductionDays: r.deductionDays || (r.impactType === 'deduction_days' ? (parseFloat(r.impactVal) || 0) : 0),
+          amount: amount,
+          date: r.date || (r.createdAt ? r.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10)),
+          createdAt: r.createdAt || new Date().toISOString(),
+          reason: r.reason || r.ruleTitle || r.details || 'مخالفة لائحية',
+          status: r.status || (r.adminApproved ? 'approved' : 'pending_admin'),
+          adminApproved: r.adminApproved || r.status === 'approved',
+          objection: r.objection || null,
+          sourceType: 'request'
+        });
+      }
+    });
+
+    // 2. Late Incidents (وقائع التأخير اللائحي التلقائية)
+    (state.lateIncidents || []).forEach((inc) => {
+      if (inc.status === 'cancelled' || inc.status === 'approved_permission_exempt' || inc.actionType === 'grace') return;
+      if (isEmployee && currentEmpId && String(inc.employeeId) !== String(currentEmpId)) return;
+      if (isBranch && currentBranchId && String(inc.branchId) !== String(currentBranchId) && !scopedEmpIds.has(String(inc.employeeId))) return;
+
+      const incIdStr = String(inc.id);
+      if (seenIds.has(incIdStr)) return;
+      seenIds.add(incIdStr);
+
+      const emp = allEmployeesList.find((e) => String(e.id) === String(inc.employeeId));
+      const bObj = (state.branches || []).find((b) => String(b.id) === String(inc.branchId || emp?.branchId));
+      const dayAmt = computeLatenessFinancialAmount(inc.deductionMinutes || 0, emp, inc.branchId);
+      const incAmount = dayAmt > 0 ? dayAmt : (parseFloat(inc.penaltyAmount) || 0);
+
+      list.push({
+        id: inc.id,
+        employeeId: inc.employeeId,
+        employeeName: inc.employeeName || emp?.name || 'موظف',
+        employeeCode: inc.employeeCode || emp?.code || '—',
+        branchId: inc.branchId || emp?.branchId,
+        branchName: inc.branchName || bObj?.name || 'الفرع الرئيسي',
+        categoryId: inc.tierId || inc.tierKey || 'CAT_LATE',
+        categoryCode: inc.tierKey || inc.tierId || 'CAT_LATE',
+        categoryName: `⏱️ تأخيرات الورديات (${inc.tierName || 'اللائحة'})`,
+        ruleTitle: `تأخير عن الشيفت (${inc.lateMinutes || 0} دقيقة) - ${inc.tierName || ''}`,
+        actionTitle: inc.actionLabel || `خصم ${inc.deductionMinutes || 0} دقيقة`,
+        occurrenceNumber: inc.occurrenceNumber || 1,
+        deductionMinutes: inc.deductionMinutes || 0,
+        deductionDays: (inc.deductionMinutes || 0) / 480,
+        amount: incAmount,
+        date: inc.date || (inc.createdAt ? inc.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10)),
+        createdAt: inc.createdAt || inc.date,
+        reason: `حضور الساعة ${inc.actualPunchInTime || '—'} بدلاً من ${inc.scheduledStartTime || '—'} (تأخير ${inc.lateMinutes || 0} دقيقة)`,
+        status: inc.status === 'overridden' ? 'overridden' : (inc.status || 'approved'),
+        adminApproved: true,
+        objection: inc.objection || null,
+        sourceType: 'late_incident',
+        rawIncident: inc
+      });
+    });
+
+    // 3. Adjustments (الخصومات والجزاءات الإدارية المباشرة)
+    (state.adjustments || []).forEach((a) => {
+      if (a.type !== 'penalty' && a.type !== 'deduction') return;
+      if (isEmployee && currentEmpId && String(a.employeeId) !== String(currentEmpId)) return;
+      if (isBranch && currentBranchId && String(a.branchId) !== String(currentBranchId) && !scopedEmpIds.has(String(a.employeeId))) return;
+
+      const isLinked = Array.from(seenIds).some(
+        (id) => a.id === `adj_pen_${id}` || a.id === `adj_disc_${id}` || a.id === id || a.id === `adj_${id}` || a.requestId === id
       );
-    }
+      if (isLinked) return;
+
+      const emp = allEmployeesList.find((e) => String(e.id) === String(a.employeeId));
+      const bObj = (state.branches || []).find((b) => String(b.id) === String(a.branchId || emp?.branchId));
+
+      list.push({
+        id: a.id,
+        employeeId: a.employeeId,
+        employeeName: a.employeeName || emp?.name || 'موظف',
+        employeeCode: a.employeeCode || emp?.code || '—',
+        branchId: a.branchId || emp?.branchId,
+        branchName: bObj?.name || 'الفرع الرئيسي',
+        categoryId: 'CAT_ADMIN_PENALTY',
+        categoryCode: 'CAT_ADMIN_PENALTY',
+        categoryName: '🏷️ جزاءات وخصومات إدارية',
+        ruleTitle: a.reason || a.description || 'خصم إداري مباشر',
+        actionTitle: 'خصم مالي مباشر',
+        occurrenceNumber: 1,
+        amount: parseFloat(a.amount) || 0,
+        date: a.date || (a.createdAt ? a.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10)),
+        createdAt: a.createdAt || a.date,
+        reason: a.reason || a.description || 'خصم إداري',
+        status: 'approved',
+        adminApproved: true,
+        objection: a.objection || null,
+        sourceType: 'adjustment'
+      });
+    });
 
     return list.sort((a, b) => (b.date || b.createdAt || '').localeCompare(a.date || a.createdAt || ''));
-  }, [state.requests, isEmployee, currentEmpId, isBranch, currentBranchId, scopedEmpIds]);
+  }, [state.requests, state.lateIncidents, state.adjustments, state.branches, isEmployee, currentEmpId, isBranch, currentBranchId, scopedEmpIds, allEmployeesList]);
 
   // 3. Filtered penalties for records and reports
   const filteredPenalties = useMemo(() => {
@@ -141,7 +268,7 @@ export default function DisciplinaryPenaltiesTab({
 
       return true;
     });
-  }, [allDisciplinaryPenalties, isAdmin, filterBranch, filterStatus, filterCategory, searchQuery]);
+  }, [allDisciplinaryPenalties, isAdmin, filterBranch, filterStatus, filterCategory, searchQuery, allEmployeesList]);
 
   // Analytics Metrics
   const currentMonthStr = monthPicker || new Date().toISOString().slice(0, 7);
@@ -151,13 +278,13 @@ export default function DisciplinaryPenaltiesTab({
 
   const approvedMonthPenalties = currentMonthPenalties.filter((p) => p.status === 'approved' || p.adminApproved);
   const totalMonthDeductionAmount = approvedMonthPenalties.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
-  const pendingApprovalsCount = allDisciplinaryPenalties.filter((p) => p.status === 'pending_admin' || p.status === 'pending').length;
+  const pendingApprovalsCount = allDisciplinaryPenalties.filter((p) => (p.status === 'pending_admin' || p.status === 'pending') || (p.objection && p.objection.status === 'pending')).length;
 
   // Employees with 3+ violations in any category
   const criticalEmployees = useMemo(() => {
     const list = [];
     employees.forEach((emp) => {
-      const summary = getEmployeeDisciplinarySummary(emp.id, state.requests || [], policy);
+      const summary = getEmployeeDisciplinarySummary(emp.id, allDisciplinaryPenalties, policy);
       const highCategories = Object.values(summary).filter((c) => c.activeCount >= 3);
       if (highCategories.length > 0) {
         list.push({
@@ -168,7 +295,7 @@ export default function DisciplinaryPenaltiesTab({
       }
     });
     return list;
-  }, [employees, state.requests, policy]);
+  }, [employees, allDisciplinaryPenalties, policy]);
 
   // ── Actions ──
   const handleApprovePenalty = async (pen) => {
@@ -406,31 +533,66 @@ export default function DisciplinaryPenaltiesTab({
       return;
     }
 
-    const updatedRequests = (state.requests || []).map((r) => {
-      if (r.id === objectionTargetPen.id) {
-        return {
-          ...r,
-          objection: {
-            status: 'pending',
-            reason: objectionReason.trim(),
-            submittedAt: new Date().toISOString()
-          },
-          auditLog: [
-            ...(r.auditLog || []),
-            {
-              action: 'objection_submitted',
-              by: objectionTargetPen.employeeName || 'الموظف',
-              role: 'employee',
-              timestamp: new Date().toISOString(),
-              note: `تم تقديم تظلم/اعتراض: ${objectionReason.trim()}`
-            }
-          ]
-        };
-      }
-      return r;
-    });
+    const penId = objectionTargetPen.id;
+    const objData = {
+      status: 'pending',
+      reason: objectionReason.trim(),
+      submittedAt: new Date().toISOString()
+    };
 
-    const updatedState = { ...state, requests: updatedRequests };
+    let updatedRequests = [...(state.requests || [])];
+    let updatedLateIncidents = [...(state.lateIncidents || [])];
+    let updatedAdjustments = [...(state.adjustments || [])];
+
+    if (objectionTargetPen.sourceType === 'late_incident') {
+      updatedLateIncidents = updatedLateIncidents.map((inc) => {
+        if (String(inc.id) === String(penId)) {
+          return {
+            ...inc,
+            objection: objData,
+            status: 'objection_pending'
+          };
+        }
+        return inc;
+      });
+    } else if (objectionTargetPen.sourceType === 'adjustment') {
+      updatedAdjustments = updatedAdjustments.map((a) => {
+        if (String(a.id) === String(penId)) {
+          return {
+            ...a,
+            objection: objData
+          };
+        }
+        return a;
+      });
+    } else {
+      updatedRequests = updatedRequests.map((r) => {
+        if (String(r.id) === String(penId)) {
+          return {
+            ...r,
+            objection: objData,
+            auditLog: [
+              ...(r.auditLog || []),
+              {
+                action: 'objection_submitted',
+                by: objectionTargetPen.employeeName || 'الموظف',
+                role: 'employee',
+                timestamp: new Date().toISOString(),
+                note: `تم تقديم تظلم/اعتراض: ${objectionReason.trim()}`
+              }
+            ]
+          };
+        }
+        return r;
+      });
+    }
+
+    const updatedState = {
+      ...state,
+      requests: updatedRequests,
+      lateIncidents: updatedLateIncidents,
+      adjustments: updatedAdjustments
+    };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
 
@@ -442,8 +604,8 @@ export default function DisciplinaryPenaltiesTab({
   // ── Admin Objection Handlers ──
   const handleAdminApproveObjection = async (penId) => {
     const performApproveObj = async () => {
-      const updatedRequests = (state.requests || []).map((r) => {
-        if (r.id === penId) {
+      let updatedRequests = (state.requests || []).map((r) => {
+        if (String(r.id) === String(penId)) {
           return {
             ...r,
             status: 'cancelled',
@@ -471,12 +633,35 @@ export default function DisciplinaryPenaltiesTab({
         return r;
       });
 
+      let updatedLateIncidents = (state.lateIncidents || []).map((inc) => {
+        if (String(inc.id) === String(penId)) {
+          return {
+            ...inc,
+            status: 'cancelled',
+            actionType: 'grace',
+            deductionMinutes: 0,
+            penaltyAmount: 0,
+            objection: {
+              ...(inc.objection || {}),
+              status: 'approved',
+              resolvedAt: new Date().toISOString()
+            }
+          };
+        }
+        return inc;
+      });
+
       const updatedAdjustments = (state.adjustments || []).filter((a) => {
-        if (a.requestId === penId || a.id === `adj_disc_${penId}`) return false;
+        if (String(a.id) === String(penId) || a.requestId === penId || a.id === `adj_disc_${penId}`) return false;
         return true;
       });
 
-      const updatedState = { ...state, requests: updatedRequests, adjustments: updatedAdjustments };
+      const updatedState = {
+        ...state,
+        requests: updatedRequests,
+        lateIncidents: updatedLateIncidents,
+        adjustments: updatedAdjustments
+      };
       if (setState) setState(updatedState);
       if (saveState) await saveState(updatedState);
 
@@ -497,7 +682,7 @@ export default function DisciplinaryPenaltiesTab({
 
   const handleAdminRejectObjection = async (penId, replyText) => {
     const updatedRequests = (state.requests || []).map((r) => {
-      if (r.id === penId) {
+      if (String(r.id) === String(penId)) {
         return {
           ...r,
           objection: {
@@ -521,7 +706,23 @@ export default function DisciplinaryPenaltiesTab({
       return r;
     });
 
-    const updatedState = { ...state, requests: updatedRequests };
+    const updatedLateIncidents = (state.lateIncidents || []).map((inc) => {
+      if (String(inc.id) === String(penId)) {
+        return {
+          ...inc,
+          status: 'approved',
+          objection: {
+            ...(inc.objection || {}),
+            status: 'rejected',
+            adminReply: replyText || 'تمت دراسة التظلم وتثبيت القرار التأديبي',
+            resolvedAt: new Date().toISOString()
+          }
+        };
+      }
+      return inc;
+    });
+
+    const updatedState = { ...state, requests: updatedRequests, lateIncidents: updatedLateIncidents };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
 

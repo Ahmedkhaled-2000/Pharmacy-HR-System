@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import LatePenaltyPolicyModule from './LatePenaltyPolicyModule';
 import DisciplinaryPenaltiesTab from './DisciplinaryPenaltiesTab';
+import { computeLatenessFinancialAmount } from '../../utils/latePenaltyEngine';
 
 export default function BylawsModule({
   state,
@@ -124,21 +125,56 @@ export default function BylawsModule({
       return;
     }
 
-    const updatedRequests = (state.requests || []).map((r) => {
-      if (r.id === objectionTargetReq.id) {
-        return {
-          ...r,
-          objection: {
-            status: 'pending',
-            reason: objectionReason.trim(),
-            submittedAt: new Date().toISOString()
-          }
-        };
-      }
-      return r;
-    });
+    const penId = objectionTargetReq.id;
+    const objData = {
+      status: 'pending',
+      reason: objectionReason.trim(),
+      submittedAt: new Date().toISOString()
+    };
 
-    const updatedState = { ...state, requests: updatedRequests };
+    let updatedRequests = [...(state.requests || [])];
+    let updatedLateIncidents = [...(state.lateIncidents || [])];
+    let updatedAdjustments = [...(state.adjustments || [])];
+
+    if (objectionTargetReq.sourceType === 'late_incident') {
+      updatedLateIncidents = updatedLateIncidents.map((inc) => {
+        if (String(inc.id) === String(penId)) {
+          return {
+            ...inc,
+            objection: objData,
+            status: 'objection_pending'
+          };
+        }
+        return inc;
+      });
+    } else if (objectionTargetReq.sourceType === 'adjustment') {
+      updatedAdjustments = updatedAdjustments.map((a) => {
+        if (String(a.id) === String(penId)) {
+          return {
+            ...a,
+            objection: objData
+          };
+        }
+        return a;
+      });
+    } else {
+      updatedRequests = updatedRequests.map((r) => {
+        if (String(r.id) === String(penId)) {
+          return {
+            ...r,
+            objection: objData
+          };
+        }
+        return r;
+      });
+    }
+
+    const updatedState = {
+      ...state,
+      requests: updatedRequests,
+      lateIncidents: updatedLateIncidents,
+      adjustments: updatedAdjustments
+    };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
 
@@ -152,7 +188,7 @@ export default function BylawsModule({
       let empId = null;
       let ruleTitle = '';
       const updatedRequests = (state.requests || []).map((r) => {
-        if (r.id === reqId) {
+        if (String(r.id) === String(reqId)) {
           empId = r.employeeId;
           ruleTitle = r.ruleTitle;
           return {
@@ -170,14 +206,37 @@ export default function BylawsModule({
         return r;
       });
 
+      const updatedLateIncidents = (state.lateIncidents || []).map((inc) => {
+        if (String(inc.id) === String(reqId)) {
+          return {
+            ...inc,
+            status: 'cancelled',
+            actionType: 'grace',
+            deductionMinutes: 0,
+            penaltyAmount: 0,
+            objection: {
+              ...(inc.objection || {}),
+              status: 'approved',
+              resolvedAt: new Date().toISOString()
+            }
+          };
+        }
+        return inc;
+      });
+
       // Automatically remove any corresponding deduction from adjustments
       const updatedAdjustments = (state.adjustments || []).filter((a) => {
-        if (a.id === reqId || a.id === `adj_${reqId}` || a.id === `adj_penalty_${reqId}` || a.requestId === reqId || a.id === `adj_disc_${reqId}`) return false;
+        if (String(a.id) === String(reqId) || a.id === `adj_${reqId}` || a.id === `adj_penalty_${reqId}` || a.requestId === reqId || a.id === `adj_disc_${reqId}`) return false;
         if (empId && String(a.employeeId) === String(empId) && (a.type === 'penalty' || a.type === 'deduction') && (a.reason === ruleTitle || a.details === ruleTitle)) return false;
         return true;
       });
 
-      const updatedState = { ...state, requests: updatedRequests, adjustments: updatedAdjustments };
+      const updatedState = {
+        ...state,
+        requests: updatedRequests,
+        lateIncidents: updatedLateIncidents,
+        adjustments: updatedAdjustments
+      };
       if (setState) setState(updatedState);
       if (saveState) await saveState(updatedState);
 
@@ -198,7 +257,7 @@ export default function BylawsModule({
 
   const handleAdminRejectObjection = async (reqId, reply = '') => {
     const updatedRequests = (state.requests || []).map((r) => {
-      if (r.id === reqId) {
+      if (String(r.id) === String(reqId)) {
         return {
           ...r,
           objection: {
@@ -212,13 +271,29 @@ export default function BylawsModule({
       return r;
     });
 
-    const updatedState = { ...state, requests: updatedRequests };
+    const updatedLateIncidents = (state.lateIncidents || []).map((inc) => {
+      if (String(inc.id) === String(reqId)) {
+        return {
+          ...inc,
+          status: 'approved',
+          objection: {
+            ...(inc.objection || {}),
+            status: 'rejected',
+            adminReply: reply || 'تمت مراجعة ودراسة الاعتراض وتثبيت الجزاء المالي وفق اللائحة',
+            resolvedAt: new Date().toISOString()
+          }
+        };
+      }
+      return inc;
+    });
+
+    const updatedState = { ...state, requests: updatedRequests, lateIncidents: updatedLateIncidents };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
 
     setAdminRejectReplyReq(null);
     setAdminRejectReplyText('');
-    showToast?.('❌ تم رفض الاعتراض وتثبيت الجزاء المالي');
+    showToast?.('تم تسجيل قرار الرفض على الاعتراض');
   };
 
   const [recordsSearch, setRecordsSearch] = useState('');
@@ -284,6 +359,40 @@ export default function BylawsModule({
           sourceType: 'request'
         });
       }
+    });
+
+    (state.lateIncidents || []).forEach((inc) => {
+      if (inc.status === 'cancelled' || inc.status === 'approved_permission_exempt' || inc.actionType === 'grace') return;
+      const incIdStr = String(inc.id);
+      if (seenReqIds.has(incIdStr)) return;
+      seenReqIds.add(incIdStr);
+
+      const emp = employees.find((e) => String(e.id) === String(inc.employeeId));
+      const bObj = branches.find((b) => String(b.id) === String(inc.branchId || emp?.branchId));
+      const dayAmt = computeLatenessFinancialAmount(inc.deductionMinutes || 0, emp, inc.branchId);
+      const incAmount = dayAmt > 0 ? dayAmt : (parseFloat(inc.penaltyAmount) || 0);
+
+      list.push({
+        id: inc.id,
+        employeeId: inc.employeeId,
+        employeeName: emp?.name || inc.employeeName || 'موظف',
+        employeeCode: emp?.code || inc.employeeCode || '—',
+        branchId: inc.branchId || emp?.branchId,
+        branchName: inc.branchName || bObj?.name || 'الفرع الرئيسي',
+        ruleTitle: `⏱️ تأخير عن الشيفت (${inc.lateMinutes || 0} دقيقة) - ${inc.tierName || 'اللائحة'}`,
+        category: 'تأخيرات الحضور والورديات',
+        impactType: 'deduction_minutes',
+        impactVal: inc.deductionMinutes || 0,
+        amount: incAmount,
+        date: inc.date || (inc.createdAt ? inc.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10)),
+        createdAt: inc.createdAt || inc.date,
+        reason: `حضور ${inc.actualPunchInTime || '—'} بدلاً من ${inc.scheduledStartTime || '—'} (تأخير ${inc.lateMinutes || 0} دقيقة)`,
+        details: inc.actionLabel || `خصم ${inc.deductionMinutes || 0} دقيقة`,
+        status: inc.status === 'overridden' ? 'overridden' : (inc.status || 'approved'),
+        adminApproved: true,
+        objection: inc.objection || null,
+        sourceType: 'late_incident'
+      });
     });
 
     (state.adjustments || []).forEach((a) => {

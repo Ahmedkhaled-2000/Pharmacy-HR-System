@@ -282,10 +282,14 @@ export function calculateViolationCounter({
   // استخراج كافة المخالفات السابقة المعتمدة لنفس الموظف ونفس الفئة
   const empCategoryHistory = (allRequests || []).filter((r) => {
     if (String(r.employeeId) !== String(employeeId)) return false;
-    if (r.type !== 'disciplinary_penalty' && r.subType !== 'disciplinary_penalty') return false;
     if (r.status === 'cancelled' || r.status === 'rejected' || r.isCancelled) return false;
-    // التحقق من نفس الفئة
-    const isSameCategory = r.categoryId === categoryId || r.categoryCode === category.code || r.categoryName === category.name;
+    // التحقق من نفس الفئة أو الكود أو الاسم
+    const isSameCategory =
+      r.categoryId === categoryId ||
+      r.categoryCode === category.code ||
+      r.categoryName === category.name ||
+      (categoryId === 'CAT_LATE' && (r.sourceType === 'late_incident' || r.subType === 'lateness')) ||
+      (category.code === 'CAT_A' && (r.categoryId === 'CAT_A' || r.categoryCode === 'CAT_A'));
     return isSameCategory;
   });
 
