@@ -128,6 +128,9 @@ export default function SettingsModule({
 
     if (isMatch) {
       setIsOwnerUnlocked(true);
+      setOwnerUnlockUser('');
+      setOwnerUnlockPass('');
+      setOwnerUnlockError('');
       showToast?.('👑 تم فتح وتصريح شاشة تحكم المالك بنجاح');
     } else {
       setOwnerUnlockError('بيانات دخول المالك غير صحيحة. يرجى التأكد من اسم المستخدم وكلمة المرور.');
@@ -1929,6 +1932,9 @@ export default function SettingsModule({
                     className="btn btn-ghost"
                     onClick={() => {
                       if (authRole !== 'owner') setIsOwnerUnlocked(false);
+                      setOwnerUnlockUser('');
+                      setOwnerUnlockPass('');
+                      setOwnerUnlockError('');
                       showToast?.('تم قفل جلسة المالك بنجاح 🔒');
                     }}
                     style={{ background: 'rgba(255,255,255,0.08)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.4)', padding: '7px 14px', fontSize: '12.5px', fontWeight: 700 }}

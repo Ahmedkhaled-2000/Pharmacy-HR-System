@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 export default function OwnerOverrideModal({
   isOpen,
@@ -13,6 +13,15 @@ export default function OwnerOverrideModal({
   const [password, setPassword] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setUsername('');
+      setPassword('');
+      setErrorMsg('');
+      setIsVerifying(false);
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -39,6 +48,9 @@ export default function OwnerOverrideModal({
 
     if (isMatch) {
       setIsVerifying(false);
+      setUsername('');
+      setPassword('');
+      setErrorMsg('');
       if (showToast) {
         showToast('👑 تم تأكيد تصريح المالك وتنفيذ الإجراء بنجاح');
       }
@@ -48,6 +60,13 @@ export default function OwnerOverrideModal({
       setIsVerifying(false);
       setErrorMsg('بيانات دخول المالك غير صحيحة. تم رفض العملية.');
     }
+  };
+
+  const handleCancel = () => {
+    setUsername('');
+    setPassword('');
+    setErrorMsg('');
+    onClose?.();
   };
 
   return (
@@ -243,7 +262,7 @@ export default function OwnerOverrideModal({
 
               <button
                 type="button"
-                onClick={onClose}
+                onClick={handleCancel}
                 style={{
                   padding: '12px',
                   borderRadius: '12px',
