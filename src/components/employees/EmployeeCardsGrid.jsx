@@ -742,6 +742,30 @@ export default function EmployeeCardsGrid({
                               type="button"
                               className="btn btn-ghost"
                               onClick={() => {
+                                setDossierInitialTab('settlement');
+                                setDossierModalEmp(emp);
+                              }}
+                              title="فتح صفحة المخالصة المالية وإخلاء الطرف"
+                              style={{
+                                background: '#fef3c7',
+                                color: '#92400e',
+                                border: '1px solid #fde68a',
+                                fontWeight: 'bold',
+                                fontSize: '12px',
+                                padding: '6px 12px',
+                                borderRadius: '8px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                              }}
+                            >
+                              <span>📥</span> إخلاء الطرف
+                            </button>
+
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              onClick={() => {
                                 setDossierInitialTab('summary');
                                 setDossierModalEmp(emp);
                               }}
