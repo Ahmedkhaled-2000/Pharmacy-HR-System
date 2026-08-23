@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { fmt, getEmpDisplayName } from '../../utils/formatters';
+import { fmt, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 
 export default function AdjustmentsModule({
   state,
@@ -381,7 +381,7 @@ export default function AdjustmentsModule({
                   required
                 >
                   <option value="">-- اختر الموظف --</option>
-                  {employees.map((e) => (
+                  {employees.filter(isEmployeeActive).map((e) => (
                     <option key={e.id} value={e.id}>{getEmpDisplayName(e)} ({e.code})</option>
                   ))}
                 </select>

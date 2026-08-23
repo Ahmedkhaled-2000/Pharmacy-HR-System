@@ -1,4 +1,5 @@
 import React from 'react';
+import { getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 
 export default function ManualShiftForm({
   state,
@@ -26,9 +27,10 @@ export default function ManualShiftForm({
           <div className="field" style={{ flex: '1 1 180px', minWidth: '150px' }}>
             <label htmlFor="mEmpId">الموظف</label>
             <select id="mEmpId" value={mEmpId} onChange={(e) => setMEmpId(e.target.value)}>
-              {state.employees.map((e) => (
+              <option value="">-- اختر الموظف --</option>
+              {(state.employees || []).filter(isEmployeeActive).map((e) => (
                 <option key={e.id} value={e.id}>
-                  {e.name} (كود: {e.code})
+                  {getEmpDisplayName(e)} (كود: {e.code})
                 </option>
               ))}
             </select>

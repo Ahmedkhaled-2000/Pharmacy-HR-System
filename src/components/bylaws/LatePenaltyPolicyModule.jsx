@@ -8,7 +8,7 @@ import {
   recalculateEmployeeCycleLateness,
   countEmployeeTierOccurrences
 } from '../../utils/latePenaltyEngine';
-import { fmt } from '../../utils/formatters';
+import { fmt, isEmployeeActive } from '../../utils/formatters';
 
 export default function LatePenaltyPolicyModule({
   state,
@@ -79,22 +79,23 @@ export default function LatePenaltyPolicyModule({
 
   // Target Employees based on strictly scoped role
   const targetEmployees = useMemo(() => {
+    let list = employees.filter(isEmployeeActive);
     if (isEmployee) {
       return loggedInEmp ? [loggedInEmp] : [];
     }
     if (isBranchManager) {
       const bId = currentBranchId;
-      return employees.filter(
+      return list.filter(
         (e) => String(e.branchId) === String(bId) || (e.branchesDetails && e.branchesDetails.some((bd) => String(bd.branchId) === String(bId)))
       );
     }
     // Admin
     if (filterBranch) {
-      return employees.filter(
+      return list.filter(
         (e) => String(e.branchId) === String(filterBranch) || (e.branchesDetails && e.branchesDetails.some((bd) => String(bd.branchId) === String(filterBranch)))
       );
     }
-    return employees;
+    return list;
   }, [employees, loggedInEmp, isEmployee, isBranchManager, currentBranchId, filterBranch]);
 
   // Calculate & Synchronize all incidents for the active cycle with strict branch/employee scoping

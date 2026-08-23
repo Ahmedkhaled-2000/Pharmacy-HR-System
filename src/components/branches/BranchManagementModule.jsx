@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import BranchPhonesDirectoryModal from './BranchPhonesDirectoryModal';
+import { getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 
 export default function BranchManagementModule({ state, onSaveBranch, onDeleteBranch }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -359,9 +360,9 @@ export default function BranchManagementModule({ state, onSaveBranch, onDeleteBr
                   }}
                 >
                   <option value="">🚫 فرع بدون مدير (تحويل كافة الطلبات للإدارة العليا مباشرة)</option>
-                  {employees.map((emp) => (
+                  {employees.filter(isEmployeeActive).map((emp) => (
                     <option key={emp.id} value={emp.id}>
-                      👤 {emp.name} (كود: {emp.code} - {emp.jobTitle || 'موظف'})
+                      👤 {getEmpDisplayName(emp)} (كود: {emp.code} - {emp.jobTitle || 'موظف'})
                     </option>
                   ))}
                 </select>

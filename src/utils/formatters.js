@@ -611,3 +611,18 @@ export function calculateEmployeeLeaveStats(emp, state, targetYear = '') {
   };
 }
 
+/**
+ * Checks whether an employee is currently active (not terminated / resigned).
+ * Ensures terminated/resigned employees do not appear when selecting employees in forms, dropdowns, and modals.
+ */
+export function isEmployeeActive(emp) {
+  if (!emp) return false;
+  if (emp.is_active === false) return false;
+  const s = String(emp.status || '').trim().toLowerCase();
+  if (s === 'تم الاستقالة' || s === 'resigned' || s === 'terminated' || s === 'منتهية خدمته' || s === 'مستقيل' || s === 'inactive' || s === 'معلق') return false;
+  if (emp.isTerminated === true || emp.isResigned === true) return false;
+  if (emp.resignationStatus === 'approved') return false;
+  return true;
+}
+
+

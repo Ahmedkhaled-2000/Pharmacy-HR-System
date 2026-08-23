@@ -1,5 +1,5 @@
 import React from 'react';
-import { fmt } from '../../utils/formatters';
+import { fmt, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 
 export default function WhatsAppMessagingHub({
   state,
@@ -40,9 +40,9 @@ export default function WhatsAppMessagingHub({
               }
             }}>
               <option value="all">🚀 جميع الموظفين (إرسال جماعي دفعة واحدة)</option>
-              {state.employees.map((e) => (
+              {(state.employees || []).filter(isEmployeeActive).map((e) => (
                 <option key={e.id} value={e.id}>
-                  👤 الموظف: {e.name} (كود: {e.code}) {e.phone ? `· 📱 ${e.phone}` : '❌ بدون رقم'}
+                  👤 الموظف: {getEmpDisplayName(e)} (كود: {e.code}) {e.phone ? `· 📱 ${e.phone}` : '❌ بدون رقم'}
                 </option>
               ))}
             </select>
@@ -121,12 +121,12 @@ export default function WhatsAppMessagingHub({
                   </tr>
                 </thead>
                 <tbody>
-                  {state.employees.map((e) => {
+                  {(state.employees || []).filter(isEmployeeActive).map((e) => {
                     const s = computeEmpSummary(e.id, (d) => d.startsWith(monthPicker));
                     return (
                       <tr key={e.id}>
                         <td>{e.code}</td>
-                        <td>{e.name}</td>
+                        <td>{getEmpDisplayName(e)}</td>
                         <td>{e.phone ? `📱 ${e.phone}` : '❌ لا يوجد رقم'}</td>
                         <td className="money" style={{ color: 'var(--primary)' }}>{fmt(s.netSalary)} ج.م</td>
                         <td>

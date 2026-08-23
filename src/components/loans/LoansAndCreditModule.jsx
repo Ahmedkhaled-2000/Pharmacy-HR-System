@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 
 export default function LoansAndCreditModule({
   state,
@@ -85,9 +86,9 @@ export default function LoansAndCreditModule({
               <label>اختر الموظف</label>
               <select value={empId} onChange={(e) => setEmpId(e.target.value)} required>
                 <option value="">-- اختر الموظف --</option>
-                {employees.map((e) => (
+                {employees.filter(isEmployeeActive).map((e) => (
                   <option key={e.id} value={e.id}>
-                    {e.name} (كود: {e.code})
+                    {getEmpDisplayName(e)} (كود: {e.code})
                   </option>
                 ))}
               </select>

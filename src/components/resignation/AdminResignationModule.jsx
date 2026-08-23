@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { arabicWeekday, todayStr, getEmpDisplayName } from '../../utils/formatters';
+import { arabicWeekday, todayStr, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 
 export default function AdminResignationModule({
   state,
@@ -352,7 +352,7 @@ export default function AdminResignationModule({
                 >
                   <option value="">-- اختر موظف --</option>
                   {(state.employees || [])
-                    .filter(e => e.is_active !== false && e.status !== 'تم الاستقالة')
+                    .filter(isEmployeeActive)
                     .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
                     .map(e => (
                       <option key={e.id} value={e.id}>

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { getEmpDisplayName } from '../../utils/formatters';
+import { getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 
 export default function EvaluationsModule({
   state,
@@ -312,7 +312,7 @@ export default function EvaluationsModule({
                 <label>اختر الموظف</label>
                 <select value={noteEmpId} onChange={(e) => setNoteEmpId(e.target.value)} required>
                   <option value="">-- اختر الموظف --</option>
-                  {employees.map((e) => (
+                  {employees.filter(isEmployeeActive).map((e) => (
                     <option key={e.id} value={e.id}>
                       {getEmpDisplayName(e)} (كود: {e.code})
                     </option>
@@ -758,7 +758,7 @@ export default function EvaluationsModule({
                 <label>اختر الموظف المراد تقييمه</label>
                 <select value={evalEmpId} onChange={(e) => setEvalEmpId(e.target.value)} required>
                   <option value="">-- اختر الموظف --</option>
-                  {employees.map((e) => (
+                  {employees.filter(isEmployeeActive).map((e) => (
                     <option key={e.id} value={e.id}>
                       {getEmpDisplayName(e)} (كود: {e.code} - {e.jobTitle})
                     </option>

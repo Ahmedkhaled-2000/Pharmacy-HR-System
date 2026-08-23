@@ -1,4 +1,5 @@
 import React from 'react';
+import { getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 
 export default function PermissionsCard({
   selectedPermEmpId,
@@ -143,9 +144,9 @@ export default function PermissionsCard({
           }}
         >
           <option value="all">جميع الموظفين (الصلاحيات العامة للمؤسسة)</option>
-          {state.employees.map((e) => (
+          {(state.employees || []).filter(isEmployeeActive).map((e) => (
             <option key={e.id} value={e.id}>
-              الموظف: {e.name} (كود: {e.code}) {e.permissions ? '⭐ [صلاحيات مخصصة]' : ''}
+              الموظف: {getEmpDisplayName(e)} (كود: {e.code}) {e.permissions ? '⭐ [صلاحيات مخصصة]' : ''}
             </option>
           ))}
         </select>

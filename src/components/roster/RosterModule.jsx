@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import RosterPreviewModal from './RosterPreviewModal';
-import { getEmpDisplayName } from '../../utils/formatters';
+import { getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 
 export const DEFAULT_ROSTER_SCHEDULE = {
   'السبت': { type: 'shift', start: '08:00', end: '16:00' },
@@ -145,6 +145,7 @@ export default function RosterModule({
   const branches = state.branches || [];
 
   const filteredEmployees = employees.filter((emp) => {
+    if (!isEmployeeActive(emp)) return false;
     if (selectedBranch && emp.branchId !== selectedBranch && (!emp.branchesDetails || !emp.branchesDetails.some(bd => String(bd.branchId) === String(selectedBranch)))) return false;
     if (searchQuery) {
       const q = searchQuery.toLowerCase();

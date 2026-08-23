@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { fmt, getEmpDisplayName } from '../../utils/formatters';
+import { fmt, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 
 export default function LoansMedsModule({
   state,
@@ -150,6 +150,7 @@ export default function LoansMedsModule({
   }, [state.loans, state.requests, employees]);
 
   const filteredEmployees = employees.filter((emp) => {
+    if (!isEmployeeActive(emp)) return false;
     if (filterBranch && emp.branchId !== filterBranch) return false;
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
@@ -542,7 +543,7 @@ export default function LoansMedsModule({
             <label>اختر الموظف</label>
             <select value={targetEmpId} onChange={(e) => setTargetEmpId(e.target.value)} required>
               <option value="">-- اختر الموظف --</option>
-              {employees.map((e) => (
+              {employees.filter(isEmployeeActive).map((e) => (
                 <option key={e.id} value={e.id}>{getEmpDisplayName(e)} ({e.code})</option>
               ))}
             </select>

@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { fmt, todayStr } from '../../utils/formatters';
+import { fmt, todayStr, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 import { isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
 
 export default function NotificationCenterModule({
@@ -472,8 +472,8 @@ export default function NotificationCenterModule({
             style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontWeight: 'bold' }}
           >
             <option value="all">👤 جميع الموظفين</option>
-            {employees.map((e) => (
-              <option key={e.id} value={e.id}>{e.name} ({e.code})</option>
+            {employees.filter(isEmployeeActive).map((e) => (
+              <option key={e.id} value={e.id}>{getEmpDisplayName(e)} ({e.code})</option>
             ))}
           </select>
 

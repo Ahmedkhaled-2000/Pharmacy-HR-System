@@ -10,7 +10,7 @@ import { getFormattedRequestBadge } from '../requests/RequestsModule';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import BranchResignationModule from '../resignation/BranchResignationModule';
 import { normalizeSchedule } from '../roster/RosterModule';
-import { shouldShowRequestToBranch, getEmpDisplayName } from '../../utils/formatters';
+import { shouldShowRequestToBranch, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
 import EmployeePermissionsManagementModule from '../permissions/EmployeePermissionsManagementModule';
 
@@ -296,11 +296,12 @@ export default function BranchManagerView({
     };
   }, [state.employees, currentBranch]);
 
-  // Branch Employees (matching primary branch OR listed in branchesDetails)
+  // Branch Employees (matching primary branch OR listed in branchesDetails, AND active)
   const branchEmployees = useMemo(() => {
-    if (!currentBranch?.id) return state.employees || [];
+    const list = (state.employees || []).filter(isEmployeeActive);
+    if (!currentBranch?.id) return list;
     const cIdStr = String(currentBranch.id);
-    return (state.employees || []).filter((e) => {
+    return list.filter((e) => {
       if (e.branchId && String(e.branchId) === cIdStr) return true;
       if (e.branchesDetails && e.branchesDetails.some((bd) => String(bd.branchId) === cIdStr)) return true;
       return false;

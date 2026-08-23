@@ -4,7 +4,7 @@ import {
   getEmployeeDailyRate,
   calculateViolationCounter
 } from '../../utils/disciplinaryPenaltyEngine';
-import { getEmpDisplayName } from '../../utils/formatters';
+import { getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 
 export default function DisciplinaryViolationModal({
   isOpen,
@@ -26,16 +26,17 @@ export default function DisciplinaryViolationModal({
   const branches = state.branches || [];
   const policy = state.disciplinaryPolicy || DEFAULT_DISCIPLINARY_CATEGORIES;
 
-  // Filter employees if branch manager
+  // Filter employees if branch manager and filter active employees
   const availableEmployees = useMemo(() => {
+    let list = employees.filter(isEmployeeActive);
     if (isBranch && currentBranchId) {
-      return employees.filter((emp) => {
+      return list.filter((emp) => {
         const directMatch = String(emp.branchId) === String(currentBranchId);
         const multiMatch = emp.branchesDetails && emp.branchesDetails.some((b) => String(b.branchId) === String(currentBranchId));
         return directMatch || multiMatch;
       });
     }
-    return employees;
+    return list;
   }, [employees, isBranch, currentBranchId]);
 
   // Form State

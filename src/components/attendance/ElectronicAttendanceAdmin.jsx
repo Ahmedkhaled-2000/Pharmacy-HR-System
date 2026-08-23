@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import FaceRegistrationModal from './FaceRegistrationModal';
 import FaceTestModal from './FaceTestModal';
 import { saveFaceDescriptor, deleteFaceDescriptor, saveHandDescriptor, deleteHandDescriptor } from '../../utils/faceStorage';
-import { getEmpDisplayName } from '../../utils/formatters';
+import { getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 
 export default function ElectronicAttendanceAdmin({ state, setState, saveState, showToast, executeWithOwnerGuard }) {
   const [selectedEmp, setSelectedEmp] = useState(null);
@@ -223,6 +223,7 @@ export default function ElectronicAttendanceAdmin({ state, setState, saveState, 
   // Filtered Employees List
   const filteredEmployees = useMemo(() => {
     return employees.filter(emp => {
+      if (!isEmployeeActive(emp)) return false;
       const empBiometricType = emp.preferred_biometric || globalBiometricType;
       const isHand = empBiometricType === 'hand';
       const hasBiometric = isHand 
@@ -253,9 +254,10 @@ export default function ElectronicAttendanceAdmin({ state, setState, saveState, 
     });
   }, [employees, filterStatus, searchQuery, globalBiometricType]);
 
-  const activeCount = employees.filter(e => !e.biometricSuspended && !e.punchDisabled && (e.has_face_descriptor || e.face_descriptor || e.has_hand_descriptor || e.hand_descriptor)).length;
-  const suspendedCount = employees.filter(e => e.biometricSuspended || e.punchDisabled).length;
-  const unregisteredCount = employees.filter(e => !e.has_face_descriptor && !e.face_descriptor && !e.has_hand_descriptor && !e.hand_descriptor).length;
+  const activeEmployeesOnly = employees.filter(isEmployeeActive);
+  const activeCount = activeEmployeesOnly.filter(e => !e.biometricSuspended && !e.punchDisabled && (e.has_face_descriptor || e.face_descriptor || e.has_hand_descriptor || e.hand_descriptor)).length;
+  const suspendedCount = activeEmployeesOnly.filter(e => e.biometricSuspended || e.punchDisabled).length;
+  const unregisteredCount = activeEmployeesOnly.filter(e => !e.has_face_descriptor && !e.face_descriptor && !e.has_hand_descriptor && !e.hand_descriptor).length;
 
   return (
     <div className="module-container" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>

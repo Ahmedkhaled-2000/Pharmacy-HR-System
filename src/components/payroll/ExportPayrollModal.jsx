@@ -1,5 +1,5 @@
 import React from 'react';
-import { arabicMonthLabel } from '../../utils/formatters';
+import { arabicMonthLabel, isEmployeeActive } from '../../utils/formatters';
 
 export default function ExportPayrollModal({
   isExportModalOpen,
@@ -39,7 +39,7 @@ export default function ExportPayrollModal({
             <div className="field" style={{ marginBottom: '14px' }}>
               <label>اختر الموظف</label>
               <select value={exportEmpId} onChange={(e) => setExportEmpId(e.target.value)}>
-                {state.employees.map((e) => (
+                {(state.employees || []).filter(isEmployeeActive).map((e) => (
                   <option key={e.id} value={e.id}>
                     {e.name} ({e.jobTitle})
                   </option>

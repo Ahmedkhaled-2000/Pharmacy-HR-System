@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { applyShiftSwapToRosters, arabicWeekday, shouldShowRequestToBranch, getEmpDisplayName } from '../../utils/formatters';
+import { applyShiftSwapToRosters, arabicWeekday, shouldShowRequestToBranch, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 import { notifyEmployeeEarlyExitWarning } from '../../utils/gmailService';
 import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
 import { normalizeSchedule } from '../roster/RosterModule';
@@ -979,7 +979,7 @@ export default function RequestsModule({
           <label style={{ fontSize: '13px', fontWeight: 'bold' }}>👤 الموظف:</label>
           <select value={filterEmp} onChange={(e) => setFilterEmp(e.target.value)} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px' }}>
             <option value="all">-- جميع الموظفين --</option>
-            {employees.map((e) => (
+            {employees.filter(isEmployeeActive).map((e) => (
               <option key={e.id} value={e.id}>{getEmpDisplayName(e)} ({e.code})</option>
             ))}
           </select>

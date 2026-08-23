@@ -14,6 +14,7 @@ import {
 import { apiFetchFaces, apiDeleteFace } from '../../utils/apiClient';
 import GmailConfigCard from './GmailConfigCard';
 import { DEFAULT_JOBS, getJobsList, DEFAULT_DEPARTMENTS, getDepartmentsList } from '../../utils/jobsHelper';
+import { getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 
 const ALL_REQUEST_TYPES = [
   { type: 'long_leave', label: 'طلبات الإجازة أكثر من ثلاث أيام في الشهر (سنوية أو بدون أجر)' },
@@ -1063,9 +1064,9 @@ export default function SettingsModule({
                 style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: '#fff', fontWeight: 'bold' }}
               >
                 <option value="all">👥 جميع الموظفين بالمنظومة (الصلاحيات العامة الافتراضية)</option>
-                {(state.employees || []).map((emp) => (
+                {(state.employees || []).filter(isEmployeeActive).map((emp) => (
                   <option key={emp.id} value={emp.id}>
-                    {emp.name} ({emp.code}) {emp.permissions ? '⭐ [صلاحية مخصصة]' : ''}
+                    {getEmpDisplayName(emp)} ({emp.code}) {emp.permissions ? '⭐ [صلاحية مخصصة]' : ''}
                   </option>
                 ))}
               </select>

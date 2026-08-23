@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { calculateEmployeeLeaveStats, getEmployeeApprovedLeaves, getEmpDisplayName } from '../../utils/formatters';
+import { calculateEmployeeLeaveStats, getEmployeeApprovedLeaves, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 
 export default function LeavesTrackingModule({
   state,
@@ -16,6 +16,7 @@ export default function LeavesTrackingModule({
 
   // Filter employees
   const filteredEmployees = employees.filter((emp) => {
+    if (!isEmployeeActive(emp)) return false;
     if (filterBranch && emp.branchId !== filterBranch) return false;
     if (searchQuery) {
       const q = searchQuery.toLowerCase();

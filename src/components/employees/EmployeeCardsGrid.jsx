@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { fmt, todayStr, getEmpDisplayName } from '../../utils/formatters';
+import { fmt, todayStr, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 import EmployeeTerminationModal from './EmployeeTerminationModal';
 import EmployeeComprehensiveDossierModal from './EmployeeComprehensiveDossierModal';
 
@@ -74,11 +74,11 @@ export default function EmployeeCardsGrid({
 
   // Split Active vs Resigned
   const activeEmployeesList = useMemo(() => {
-    return employees.filter((emp) => emp.is_active !== false && emp.status !== 'تم الاستقالة' && emp.status !== 'resigned');
+    return employees.filter(isEmployeeActive);
   }, [employees]);
 
   const resignedEmployeesList = useMemo(() => {
-    return employees.filter((emp) => emp.is_active === false || emp.status === 'تم الاستقالة' || emp.status === 'resigned');
+    return employees.filter((emp) => !isEmployeeActive(emp));
   }, [employees]);
 
   // Current list based on active tab and search filters

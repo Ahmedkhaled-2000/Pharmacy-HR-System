@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { arabicWeekday, getEmpDisplayName } from '../../utils/formatters';
+import { arabicWeekday, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 import {
   DEFAULT_PERMISSION_POLICY,
   applyApprovedPermissionsToShifts,
@@ -586,7 +586,7 @@ export default function EmployeePermissionsManagementModule({
             style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px', fontWeight: 600 }}
           >
             <option value="">👤 جميع الموظفين</option>
-            {employees.map((e) => (
+            {employees.filter(isEmployeeActive).map((e) => (
               <option key={e.id} value={e.id}>{getEmpDisplayName(e)} ({e.code})</option>
             ))}
           </select>
@@ -957,7 +957,7 @@ export default function EmployeePermissionsManagementModule({
                   style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '14px', fontWeight: 600 }}
                 >
                   <option value="">-- اضغط لاختيار الموظف --</option>
-                  {employees.map((e) => (
+                  {employees.filter(isEmployeeActive).map((e) => (
                     <option key={e.id} value={e.id}>
                       {getEmpDisplayName(e)} (كود: {e.code}) - {branches.find(b => b.id === e.branchId)?.name || 'الفرع الرئيسي'}
                     </option>

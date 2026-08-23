@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { getEmpDisplayName } from '../../utils/formatters';
+import { getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 
 export default function WhatsAppCenterModule({
   state,
@@ -14,6 +14,7 @@ export default function WhatsAppCenterModule({
   const branches = state.branches || [];
 
   const filteredEmployees = employees.filter((e) => {
+    if (!isEmployeeActive(e)) return false;
     if (selectedBranch && e.branchId !== selectedBranch) return false;
     return true;
   });

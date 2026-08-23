@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import AttendancePunchesModal from './AttendancePunchesModal';
 import { recalculateEmployeeCycleLateness } from '../../utils/latePenaltyEngine';
-import { getEmpDisplayName } from '../../utils/formatters';
+import { getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 
 export default function AttendanceModule({
   state,
@@ -42,6 +42,7 @@ export default function AttendanceModule({
   const branches = state.branches || [];
 
   const filteredEmployees = employees.filter((emp) => {
+    if (!isEmployeeActive(emp)) return false;
     if (selectedBranch && emp.branchId !== selectedBranch && (!emp.branchesDetails || !emp.branchesDetails.some((bd) => bd.branchId === selectedBranch))) return false;
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
@@ -141,7 +142,7 @@ export default function AttendanceModule({
             <label>اختر الموظف</label>
             <select value={manualEmpId} onChange={(e) => setManualEmpId(e.target.value)} required>
               <option value="">-- اختر الموظف --</option>
-              {employees.map((e) => (
+              {employees.filter(isEmployeeActive).map((e) => (
                 <option key={e.id} value={e.id}>{getEmpDisplayName(e)} (كود: {e.code})</option>
               ))}
             </select>
