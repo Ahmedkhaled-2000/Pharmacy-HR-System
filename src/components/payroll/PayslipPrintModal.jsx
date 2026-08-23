@@ -547,7 +547,7 @@ export default function PayslipPrintModal({
               <div style={{ marginBottom: '12px' }}>
                 <div style={{ background: '#0f766e', color: '#fff', padding: '6px 12px', borderRadius: '8px 8px 0 0', fontWeight: 800, fontSize: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span>🏢 تفاصيل احتساب الأجر وسعر الساعة وساعات العمل لكل فرع على حدة ({assignedBranches.length} فروع):</span>
-                  <span style="font-size: 10px; background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 4px;">موظف متعدد الفروع</span>
+                  <span style={{ fontSize: '10px', background: 'rgba(255,255,255,0.2)', padding: '2px 8px', borderRadius: '4px' }}>موظف متعدد الفروع</span>
                 </div>
                 <div style={{ border: '1.5px solid #0f766e', borderTop: 'none', padding: '8px', background: '#f8fafc', display: 'grid', gridTemplateColumns: `repeat(${assignedBranches.length > 2 ? '3' : '2'}, 1fr)`, gap: '8px' }}>
                   {assignedBranches.map((bd, idx) => {
