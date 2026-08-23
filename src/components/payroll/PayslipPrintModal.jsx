@@ -110,6 +110,165 @@ export default function PayslipPrintModal({
     };
   });
 
+  // 1. Allowances breakdown
+  const allowanceItems = [];
+  if (mgmtAllowance > 0) {
+    allowanceItems.push({
+      id: 'allowance_mgmt',
+      date: `${month} (شهري)`,
+      typeLabel: '👔 بدل إدارة شهري',
+      amount: mgmtAllowance,
+      isPositive: true,
+      details: `بدل إدارة معتمد لشغل وظيفة (${emp.jobTitle || 'موظف'})`,
+      color: '#15803d'
+    });
+  }
+  if (transAllowance > 0) {
+    allowanceItems.push({
+      id: 'allowance_trans',
+      date: `${month} (شهري)`,
+      typeLabel: '🚗 بدل مواصلات شهري',
+      amount: transAllowance,
+      isPositive: true,
+      details: 'بدل انتقال ومواصلات شهري ثابت',
+      color: '#15803d'
+    });
+  }
+  const extraAllowancesList = summary.extraAllowances || emp.extraAllowances || [];
+  if (Array.isArray(extraAllowancesList) && extraAllowancesList.length > 0) {
+    extraAllowancesList.forEach((ea, idx) => {
+      if ((parseFloat(ea.amount) || 0) > 0) {
+        allowanceItems.push({
+          id: `allowance_extra_${ea.id || idx}`,
+          date: `${month} (شهري)`,
+          typeLabel: `🏷️ ${ea.title || 'أجر إضافي'}`,
+          amount: parseFloat(ea.amount) || 0,
+          isPositive: true,
+          details: 'أجر وبدل إضافي مخصص من قبل الإدارة',
+          color: '#15803d'
+        });
+      }
+    });
+  } else if (extAllowance > 0) {
+    allowanceItems.push({
+      id: 'allowance_extra',
+      date: `${month} (شهري)`,
+      typeLabel: `🏷️ ${extTitle}`,
+      amount: extAllowance,
+      isPositive: true,
+      details: 'أجر وبدل إضافي مخصص من قبل الإدارة',
+      color: '#15803d'
+    });
+  }
+
+  // 2. Adjustments (Bonuses and Penalties)
+  const manualItems = (empAdjs || [])
+    .filter((a) => !String(a.id).startsWith('adj_loan_') && !String(a.description || a.notes || a.reason || '').includes('خصم سلفة'))
+    .map((a) => ({
+      id: a.id,
+      date: a.date || month,
+      typeLabel: a.type === 'bonus' ? '➕ مكافأة / حافز تميز' : '➖ خصم / جزاء إداري',
+      amount: parseFloat(a.amount) || 0,
+      isPositive: a.type === 'bonus',
+      details: a.reason || a.details || a.description || '—',
+      color: a.type === 'bonus' ? '#16a34a' : '#dc2626'
+    }));
+
+  // 3. Late Incidents (التأخيرات)
+  const empLateIncidents = (state?.lateIncidents || []).filter(
+    (inc) =>
+      String(inc.employeeId) === String(emp.id) &&
+      inc.status !== 'cancelled' &&
+      inc.status !== 'approved_permission_exempt' &&
+      inc.actionType !== 'grace' &&
+      (inc.deductionMinutes > 0 || inc.penaltyAmount > 0) &&
+      (!selectedBranchId || String(inc.branchId) === String(selectedBranchId)) &&
+      (inc.date >= startCutoff && inc.date <= endCutoff)
+  );
+
+  const latePenaltyItems = empLateIncidents.map((inc) => {
+    const dayAmt = computeLatenessFinancialAmount(inc.deductionMinutes || 0, emp, inc.branchId || selectedBranchId);
+    const penaltyVal = dayAmt > 0 ? dayAmt : (parseFloat(inc.penaltyAmount) || 0);
+    return {
+      id: inc.id,
+      date: inc.date,
+      scheduledStartTime: inc.scheduledStartTime || '—',
+      actualPunchInTime: inc.actualPunchInTime || '—',
+      lateMinutes: inc.lateMinutes || 0,
+      tierName: inc.tierName || 'فئة عامة',
+      occurrenceNumber: inc.occurrenceNumber || 1,
+      actionLabel: inc.actionLabel || 'خصم لائحي',
+      deductionMinutes: inc.deductionMinutes || 0,
+      amount: penaltyVal
+    };
+  });
+
+  // 4. Loans & Credit Medicine (السلف ومشتريات الأدوية)
+  const loanBreakdownMap = new Map();
+  (state?.requests || [])
+    .filter(
+      (r) =>
+        String(r.employeeId) === String(emp.id) &&
+        (r.status === 'approved' || r.adminApproved || r.status === 'partial') &&
+        (r.type === 'loan' || r.type === 'advance' || r.type === 'meds' || r.type === 'credit_medicine') &&
+        (r.date || (r.createdAt ? r.createdAt.slice(0, 10) : '')).startsWith(month)
+    )
+    .forEach((r) => loanBreakdownMap.set(String(r.id), r));
+
+  (state?.loans || [])
+    .filter(
+      (l) =>
+        String(l.employeeId) === String(emp.id) &&
+        l.status !== 'pending' &&
+        l.status !== 'pending_admin' &&
+        l.status !== 'rejected' &&
+        l.status !== 'cancelled' &&
+        (l.type === 'loan' || l.type === 'advance' || l.type === 'meds' || l.type === 'credit_medicine') &&
+        (l.date || (l.createdAt ? l.createdAt.slice(0, 10) : '')).startsWith(month)
+    )
+    .forEach((l) => {
+      const existing = loanBreakdownMap.get(String(l.id));
+      loanBreakdownMap.set(String(l.id), { ...(existing || {}), ...l });
+    });
+
+  const empLoans = Array.from(loanBreakdownMap.values()).map((l) => {
+    const total = parseFloat(l.amount || l.totalAmount) || 0;
+    const paid = parseFloat(l.paidAmount) || 0;
+    const rem = Math.max(0, total - paid);
+    const monthlyDeduction = parseFloat(l.monthlyDeduction || l.installmentAmount) || Math.min(rem, total);
+    const isInstallment = l.loanType === 'installment' || parseInt(l.installmentsCount || l.monthsCount, 10) > 1;
+
+    return {
+      id: l.id,
+      date: l.date || (l.createdAt ? l.createdAt.slice(0, 10) : month + '-01'),
+      typeLabel: (l.type === 'meds' || l.type === 'credit_medicine')
+        ? '💊 مشتريات أدوية بالآجل'
+        : isInstallment
+        ? `💳 قسط سلفة مقسطة (${l.currentInstallmentNumber || 1}/${l.installmentsCount || l.monthsCount || 1})`
+        : '💳 سلفة نقدية شهرية',
+      totalAmount: total,
+      paidAmount: paid,
+      deductedThisMonth: monthlyDeduction,
+      remainingBalance: Math.max(0, rem - monthlyDeduction),
+      notes: l.reason || l.details || l.notes || '—'
+    };
+  });
+
+  // 5. Absence deductions (الغياب)
+  const absenceDaysCount = summary.absenceDaysCount || 0;
+  const absenceDeductionTotal = summary.absenceDeduction || 0;
+  const absenceItem = absenceDaysCount > 0 ? [{
+    id: 'absence_summary',
+    date: `${month} (غيابات الشهر)`,
+    typeLabel: '🚫 غياب بدون إذن رسمي',
+    amount: absenceDeductionTotal,
+    isPositive: false,
+    details: `خصم عدد (${absenceDaysCount}) يوم غياب بدون إذن عن الورديات بسعر اليوم (${fmt(dailyRate)} ج.م)`,
+    color: '#b91c1c'
+  }] : [];
+
+  const generalFinancialItems = [...allowanceItems, ...manualItems, ...absenceItem];
+
   const handlePrint = () => {
     try {
       const html = generateOfficialPayslipHTML({
@@ -458,6 +617,119 @@ export default function PayslipPrintModal({
               </table>
             </div>
 
+            {/* Late Penalties Table (If exists) */}
+            {latePenaltyItems.length > 0 && (
+              <div style={{ marginBottom: '12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
+                  <h4 style={{ margin: 0, fontFamily: 'Cairo', color: '#c2410c', borderRight: '3px solid #ea580c', paddingRight: '6px', fontSize: '12.5px', fontWeight: 800 }}>
+                    ⏱️ ثانياً: وقائع وجزاءات التأخير اللائحي ({latePenaltyItems.length} واقعة)
+                  </h4>
+                  <span style={{ fontSize: '10.5px', color: '#c2410c', fontWeight: 'bold' }}>
+                    إجمالي الخصم: -{fmt(summary.lateDeduction || 0)} ج.م ({summary.lateDeductionMinutes || 0} دقيقة)
+                  </span>
+                </div>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10.5px', textAlign: 'center' }}>
+                  <thead>
+                    <tr style={{ background: '#ffedd5', color: '#9a3412', fontWeight: 800 }}>
+                      <th style={{ padding: '4px', border: '1px solid #fed7aa' }}>التاريخ</th>
+                      <th style={{ padding: '4px', border: '1px solid #fed7aa' }}>الشيفت</th>
+                      <th style={{ padding: '4px', border: '1px solid #fed7aa' }}>الحضور</th>
+                      <th style={{ padding: '4px', border: '1px solid #fed7aa' }}>التأخير</th>
+                      <th style={{ padding: '4px', border: '1px solid #fed7aa' }}>الفئة</th>
+                      <th style={{ padding: '4px', border: '1px solid #fed7aa' }}>الجزاء اللائحي</th>
+                      <th style={{ padding: '4px', border: '1px solid #fed7aa' }}>دقائق الخصم</th>
+                      <th style={{ padding: '4px', border: '1px solid #fed7aa' }}>مبلغ الخصم</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {latePenaltyItems.map((inc) => (
+                      <tr key={inc.id}>
+                        <td style={{ padding: '3px', border: '1px solid #fed7aa', fontWeight: 'bold' }}>{inc.date}</td>
+                        <td style={{ padding: '3px', border: '1px solid #fed7aa', color: '#2563eb' }}>{inc.scheduledStartTime}</td>
+                        <td style={{ padding: '3px', border: '1px solid #fed7aa', fontWeight: 'bold' }}>{inc.actualPunchInTime}</td>
+                        <td style={{ padding: '3px', border: '1px solid #fed7aa', color: '#ea580c', fontWeight: 'bold' }}>{inc.lateMinutes} د</td>
+                        <td style={{ padding: '3px', border: '1px solid #fed7aa' }}>{inc.tierName} (#{inc.occurrenceNumber})</td>
+                        <td style={{ padding: '3px', border: '1px solid #fed7aa', color: inc.deductionMinutes > 0 ? '#dc2626' : '#16a34a', fontWeight: 'bold' }}>{inc.actionLabel}</td>
+                        <td style={{ padding: '3px', border: '1px solid #fed7aa' }}>{inc.deductionMinutes > 0 ? `${inc.deductionMinutes} د` : '—'}</td>
+                        <td style={{ padding: '3px', border: '1px solid #fed7aa', fontWeight: 'bold', color: '#dc2626' }}>-{fmt(inc.amount)} ج.م</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Loans and Credit Meds Table (If exists) */}
+            {empLoans.length > 0 && (
+              <div style={{ marginBottom: '12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
+                  <h4 style={{ margin: 0, fontFamily: 'Cairo', color: '#991b1b', borderRight: '3px solid #dc2626', paddingRight: '6px', fontSize: '12.5px', fontWeight: 800 }}>
+                    💳 ثالثاً: السلف ومشتريات الأدوية والأقساط ({empLoans.length} بند)
+                  </h4>
+                  <span style={{ fontSize: '10.5px', color: '#991b1b', fontWeight: 'bold' }}>
+                    إجمالي المخصوم بالشهر: -{fmt(summary.loansDeduction || 0)} ج.م
+                  </span>
+                </div>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10.5px', textAlign: 'center' }}>
+                  <thead>
+                    <tr style={{ background: '#fee2e2', color: '#991b1b', fontWeight: 800 }}>
+                      <th style={{ padding: '4px', border: '1px solid #fca5a5' }}>البيان</th>
+                      <th style={{ padding: '4px', border: '1px solid #fca5a5' }}>التاريخ</th>
+                      <th style={{ padding: '4px', border: '1px solid #fca5a5' }}>أصل المبلغ</th>
+                      <th style={{ padding: '4px', border: '1px solid #fca5a5' }}>المسدد سابقاً</th>
+                      <th style={{ padding: '4px', border: '1px solid #fca5a5' }}>المخصوم بهذا الشهر</th>
+                      <th style={{ padding: '4px', border: '1px solid #fca5a5' }}>المتبقي بعد الخصم</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {empLoans.map((l) => (
+                      <tr key={l.id}>
+                        <td style={{ padding: '3px', border: '1px solid #fca5a5', fontWeight: 'bold' }}>{l.typeLabel}</td>
+                        <td style={{ padding: '3px', border: '1px solid #fca5a5' }}>{l.date}</td>
+                        <td style={{ padding: '3px', border: '1px solid #fca5a5' }}>{fmt(l.totalAmount)} ج.م</td>
+                        <td style={{ padding: '3px', border: '1px solid #fca5a5', color: '#16a34a' }}>{fmt(l.paidAmount)} ج.م</td>
+                        <td style={{ padding: '3px', border: '1px solid #fca5a5', fontWeight: 'bold', color: '#dc2626' }}>-{fmt(l.deductedThisMonth)} ج.م</td>
+                        <td style={{ padding: '3px', border: '1px solid #fca5a5', fontWeight: 'bold', color: '#b91c1c' }}>{fmt(l.remainingBalance)} ج.م</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Allowances, Bonuses, & Deductions Table (If exists) */}
+            {generalFinancialItems.length > 0 && (
+              <div style={{ marginBottom: '12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
+                  <h4 style={{ margin: 0, fontFamily: 'Cairo', color: '#0f766e', borderRight: '3px solid #0f766e', paddingRight: '6px', fontSize: '12.5px', fontWeight: 800 }}>
+                    📝 رابعاً: بيان البدلات الثابتة والمكافآت والجزاءات والغياب ({generalFinancialItems.length} بند)
+                  </h4>
+                </div>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10.5px', textAlign: 'center' }}>
+                  <thead>
+                    <tr style={{ background: '#f1f5f9', color: '#334155', fontWeight: 800 }}>
+                      <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '22%' }}>نوع البند</th>
+                      <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '18%' }}>الفترة / التاريخ</th>
+                      <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '18%' }}>المبلغ</th>
+                      <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '42%' }}>البيان والتفاصيل</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {generalFinancialItems.map((item) => (
+                      <tr key={item.id}>
+                        <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold', color: item.color }}>{item.typeLabel}</td>
+                        <td style={{ padding: '3px', border: '1px solid #cbd5e1' }}>{item.date}</td>
+                        <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold', color: item.isPositive ? '#16a34a' : '#dc2626' }}>
+                          {item.isPositive ? '+' : '-'}{fmt(item.amount)} ج.م
+                        </td>
+                        <td style={{ padding: '3px', border: '1px solid #cbd5e1', textAlign: 'right', paddingRight: '8px' }}>{item.details}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
             {/* Salary Financial Summary Box */}
             <div style={{ background: '#0f766e', color: '#fff', borderRadius: '8px', padding: '10px 14px', marginBottom: '12px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.25)', paddingBottom: '5px', marginBottom: '6px' }}>
@@ -469,7 +741,7 @@ export default function PayslipPrintModal({
                 </div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px', fontSize: '11px' }}>
-                <div>الأساسي: <strong>{fmt(baseEarnings)} ج.م</strong></div>
+                <div>الأساسي: <strong>${fmt(baseEarnings)} ج.م</strong></div>
                 {summary.approvedOvertimeHours > 0 && (
                   <div style={{ color: '#86efac' }}>+ الإضافي: <strong>+{fmt(summary.overtimeEarnings)} ج.م</strong></div>
                 )}
@@ -483,6 +755,7 @@ export default function PayslipPrintModal({
                 {summary.absenceDeduction > 0 && (
                   <div style={{ color: '#fecaca' }}>- غيابات: <strong>-{fmt(summary.absenceDeduction)} ج.م</strong></div>
                 )}
+                <div>- سلف وأدوية: <strong>-{fmt(summary.loansDeduction || 0)} ج.م</strong></div>
                 <div>- إجمالي الخصومات: <strong>-{fmt(totalDeduction)} ج.م</strong></div>
               </div>
             </div>

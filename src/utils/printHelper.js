@@ -392,7 +392,7 @@ export function generateOfficialPayslipHTML({
 
   const isMultiBranch = emp?.branchesDetails && emp.branchesDetails.length > 1;
   const targetBranchDetails = selectedBranchId
-    ? emp.branchesDetails?.find((b) => b.branchId === selectedBranchId)
+    ? emp.branchesDetails?.find((b) => String(b.branchId) === String(selectedBranchId))
     : (emp.branchesDetails?.[0] || null);
 
   const baseSalary = targetBranchDetails ? (parseFloat(targetBranchDetails.salary) || 0) : (parseFloat(emp?.salary) || 0);
@@ -425,26 +425,183 @@ export function generateOfficialPayslipHTML({
   const extTitle = summary.extraAllowanceTitle || emp?.extraAllowanceTitle || 'أجر إضافي';
   const totalAllowances = summary.totalAllowances !== undefined ? summary.totalAllowances : (mgmtAllowance + transAllowance + extAllowance);
 
+  // 1. Allowances breakdown
+  const allowanceItems = [];
+  if (mgmtAllowance > 0) {
+    allowanceItems.push({
+      id: 'allowance_mgmt',
+      date: `${month} (شهري)`,
+      typeLabel: '👔 بدل إدارة شهري',
+      amount: mgmtAllowance,
+      isPositive: true,
+      details: `بدل إدارة معتمد لشغل وظيفة (${emp?.jobTitle || 'موظف'})`,
+      color: '#15803d'
+    });
+  }
+  if (transAllowance > 0) {
+    allowanceItems.push({
+      id: 'allowance_trans',
+      date: `${month} (شهري)`,
+      typeLabel: '🚗 بدل مواصلات شهري',
+      amount: transAllowance,
+      isPositive: true,
+      details: 'بدل انتقال ومواصلات شهري ثابت',
+      color: '#15803d'
+    });
+  }
+  const extraAllowancesList = summary.extraAllowances || emp?.extraAllowances || [];
+  if (Array.isArray(extraAllowancesList) && extraAllowancesList.length > 0) {
+    extraAllowancesList.forEach((ea, idx) => {
+      if ((parseFloat(ea.amount) || 0) > 0) {
+        allowanceItems.push({
+          id: `allowance_extra_${ea.id || idx}`,
+          date: `${month} (شهري)`,
+          typeLabel: `🏷️ ${ea.title || 'أجر إضافي'}`,
+          amount: parseFloat(ea.amount) || 0,
+          isPositive: true,
+          details: 'أجر وبدل إضافي مخصص من قبل الإدارة',
+          color: '#15803d'
+        });
+      }
+    });
+  } else if (extAllowance > 0) {
+    allowanceItems.push({
+      id: 'allowance_extra',
+      date: `${month} (شهري)`,
+      typeLabel: `🏷️ ${extTitle}`,
+      amount: extAllowance,
+      isPositive: true,
+      details: 'أجر وبدل إضافي مخصص من قبل الإدارة',
+      color: '#15803d'
+    });
+  }
+
+  // 2. Adjustments (Bonuses and Penalties)
+  const manualItems = (adjustments || [])
+    .filter((a) => !String(a.id).startsWith('adj_loan_') && !String(a.description || a.notes || a.reason || '').includes('خصم سلفة'))
+    .map((a) => ({
+      id: a.id,
+      date: a.date || month,
+      typeLabel: a.type === 'bonus' ? '➕ مكافأة / حافز تميز' : '➖ خصم / جزاء إداري',
+      amount: parseFloat(a.amount) || 0,
+      isPositive: a.type === 'bonus',
+      details: a.reason || a.details || a.description || '—',
+      color: a.type === 'bonus' ? '#16a34a' : '#dc2626'
+    }));
+
+  // 3. Late Incidents (التأخيرات)
+  const empLateIncidents = (state?.lateIncidents || []).filter(
+    (inc) =>
+      String(inc.employeeId) === String(emp?.id) &&
+      inc.status !== 'cancelled' &&
+      inc.status !== 'approved_permission_exempt' &&
+      inc.actionType !== 'grace' &&
+      (inc.deductionMinutes > 0 || inc.penaltyAmount > 0) &&
+      (!selectedBranchId || String(inc.branchId) === String(selectedBranchId)) &&
+      (inc.date >= startCutoff && inc.date <= endCutoff)
+  );
+
+  const latePenaltyItems = empLateIncidents.map((inc) => {
+    const penaltyVal = (parseFloat(inc.penaltyAmount) || 0) > 0 ? parseFloat(inc.penaltyAmount) : ((parseFloat(inc.deductionMinutes) || 0) * (dailyRate / (workHoursPerDay * 60)));
+    return {
+      id: inc.id,
+      date: inc.date,
+      scheduledStartTime: inc.scheduledStartTime || '—',
+      actualPunchInTime: inc.actualPunchInTime || '—',
+      lateMinutes: inc.lateMinutes || 0,
+      tierName: inc.tierName || 'فئة عامة',
+      occurrenceNumber: inc.occurrenceNumber || 1,
+      actionLabel: inc.actionLabel || 'خصم لائحي',
+      deductionMinutes: inc.deductionMinutes || 0,
+      amount: Math.round(penaltyVal * 100) / 100
+    };
+  });
+
+  // 4. Loans & Credit Medicine (السلف ومشتريات الأدوية)
+  const loanBreakdownMap = new Map();
+  (state?.requests || [])
+    .filter(
+      (r) =>
+        String(r.employeeId) === String(emp?.id) &&
+        (r.status === 'approved' || r.adminApproved || r.status === 'partial') &&
+        (r.type === 'loan' || r.type === 'advance' || r.type === 'meds' || r.type === 'credit_medicine') &&
+        (r.date || (r.createdAt ? r.createdAt.slice(0, 10) : '')).startsWith(month)
+    )
+    .forEach((r) => loanBreakdownMap.set(String(r.id), r));
+
+  (state?.loans || [])
+    .filter(
+      (l) =>
+        String(l.employeeId) === String(emp?.id) &&
+        l.status !== 'pending' &&
+        l.status !== 'pending_admin' &&
+        l.status !== 'rejected' &&
+        l.status !== 'cancelled' &&
+        (l.type === 'loan' || l.type === 'advance' || l.type === 'meds' || l.type === 'credit_medicine') &&
+        (l.date || (l.createdAt ? l.createdAt.slice(0, 10) : '')).startsWith(month)
+    )
+    .forEach((l) => {
+      const existing = loanBreakdownMap.get(String(l.id));
+      loanBreakdownMap.set(String(l.id), { ...(existing || {}), ...l });
+    });
+
+  const empLoans = Array.from(loanBreakdownMap.values()).map((l) => {
+    const total = parseFloat(l.amount || l.totalAmount) || 0;
+    const paid = parseFloat(l.paidAmount) || 0;
+    const rem = Math.max(0, total - paid);
+    const monthlyDeduction = parseFloat(l.monthlyDeduction || l.installmentAmount) || Math.min(rem, total);
+    const isInstallment = l.loanType === 'installment' || parseInt(l.installmentsCount || l.monthsCount, 10) > 1;
+
+    return {
+      id: l.id,
+      date: l.date || (l.createdAt ? l.createdAt.slice(0, 10) : month + '-01'),
+      typeLabel: (l.type === 'meds' || l.type === 'credit_medicine')
+        ? '💊 مشتريات أدوية بالآجل'
+        : isInstallment
+        ? `💳 قسط سلفة مقسطة (${l.currentInstallmentNumber || 1}/${l.installmentsCount || l.monthsCount || 1})`
+        : '💳 سلفة نقدية شهرية',
+      totalAmount: total,
+      paidAmount: paid,
+      deductedThisMonth: monthlyDeduction,
+      remainingBalance: Math.max(0, rem - monthlyDeduction),
+      notes: l.reason || l.details || l.notes || '—'
+    };
+  });
+
+  // 5. Absence deductions (الغياب)
+  const absenceDaysCount = summary.absenceDaysCount || 0;
+  const absenceDeductionTotal = summary.absenceDeduction || 0;
+  const absenceItem = absenceDaysCount > 0 ? [{
+    id: 'absence_summary',
+    date: `${month} (غيابات الشهر)`,
+    typeLabel: '🚫 غياب بدون إذن رسمي',
+    amount: absenceDeductionTotal,
+    isPositive: false,
+    details: `خصم عدد (${absenceDaysCount}) يوم غياب بدون إذن عن الورديات بسعر اليوم (${fmt(dailyRate)} ج.م)`,
+    color: '#b91c1c'
+  }] : [];
+
+  const generalFinancialItems = [...allowanceItems, ...manualItems, ...absenceItem];
   const isCompact = printFitMode === 'single_page';
 
   return `
-    <div style="width: 100%; max-width: 800px; margin: 0 auto; background: #fff; font-family: 'Cairo', 'Tajawal', sans-serif; line-height: 1.45; color: #0f172a; font-size: ${isCompact ? '11px' : '12px'};">
+    <div style="width: 100%; max-width: 800px; margin: 0 auto; background: #fff; font-family: 'Cairo', 'Tajawal', sans-serif; line-height: 1.4; color: #0f172a; font-size: ${isCompact ? '10.5px' : '11.5px'};">
       
       <!-- Header -->
-      <div style="border-bottom: 2.5px double #0f766e; padding-bottom: 8px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+      <div style="border-bottom: 2.5px double #0f766e; padding-bottom: 6px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
         <div style="text-align: right;">
-          <h2 style="margin: 0; color: #0f766e; font-size: 18px; font-weight: 800;">🏥 ${orgName}</h2>
+          <h2 style="margin: 0; color: #0f766e; font-size: 17px; font-weight: 800;">🏥 ${orgName}</h2>
           <span style="font-size: 11px; color: #475569; font-weight: 600;">${gmName}</span>
         </div>
         <div style="text-align: center;">
-          <div style="background: #f0fdf4; border: 2px solid #0f766e; padding: 4px 14px; border-radius: 6px;">
-            <h3 style="margin: 0; color: #0f766e; font-size: 14px; font-weight: 800;">كشف مرتب وبصمات شهر ${fullMonthLabel}</h3>
+          <div style="background: #f0fdf4; border: 2px solid #0f766e; padding: 3px 14px; border-radius: 6px;">
+            <h3 style="margin: 0; color: #0f766e; font-size: 13.5px; font-weight: 800;">كشف مرتب وبصمات شهر ${fullMonthLabel}</h3>
           </div>
-          <span style="font-size: 10.5px; color: #0f766e; font-weight: bold; margin-top: 2px; display: block;">
+          <span style="font-size: 10px; color: #0f766e; font-weight: bold; margin-top: 2px; display: block;">
             الفترة: من ${startCutoff} إلى ${endCutoff}
           </span>
         </div>
-        <div style="text-align: left; font-size: 10.5px; color: #475569;">
+        <div style="text-align: left; font-size: 10px; color: #475569;">
           <div>تاريخ الطباعة: <strong>${printDate}</strong></div>
           <div>كود الموظف: <strong>${emp?.code || '—'}</strong></div>
         </div>
@@ -452,8 +609,8 @@ export function generateOfficialPayslipHTML({
 
       <!-- Employee Info Box -->
       <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 12px; margin-bottom: 8px;">
-        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; font-size: 11px;">
-          <div>اسم الموظف: <strong style="color: #0f766e; font-size: 12px;">${emp?.name}</strong></div>
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; font-size: 10.5px;">
+          <div>اسم الموظف: <strong style="color: #0f766e; font-size: 11.5px;">${emp?.name}</strong></div>
           <div>المسمى الوظيفي: <strong>${emp?.jobTitle || '—'}</strong></div>
           <div>الفرع / الفروع: <strong>${branchNames}</strong></div>
           <div>رقم الهاتف: <strong>${emp?.phone || '—'}</strong></div>
@@ -464,10 +621,10 @@ export function generateOfficialPayslipHTML({
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
         <!-- Calc Box -->
         <div style="border: 1px solid #cbd5e1; border-radius: 6px; overflow: hidden; background: #fff;">
-          <div style="background: #f0fdf4; padding: 4px 10px; color: #166534; font-weight: 800; font-size: 11.5px; border-bottom: 1px solid #cbd5e1;">
+          <div style="background: #f0fdf4; padding: 3px 10px; color: #166534; font-weight: 800; font-size: 11px; border-bottom: 1px solid #cbd5e1;">
             ⚙️ احتساب سعر الساعة وأجر اليوم
           </div>
-          <div style="padding: 6px 10px; display: flex; flexDirection: column; gap: 3px; font-size: 10.5px;">
+          <div style="padding: 5px 10px; display: flex; flex-direction: column; gap: 2px; font-size: 10px;">
             <div style="display: flex; justify-content: space-between;">
               <span>1. سعر الساعة الشهري (من الإدارة):</span>
               <strong>${fmt(baseSalary)} ج.م</strong>
@@ -489,10 +646,10 @@ export function generateOfficialPayslipHTML({
 
         <!-- Earnings Box -->
         <div style="border: 1px solid #cbd5e1; border-radius: 6px; overflow: hidden; background: #fff;">
-          <div style="background: #f0fdf4; padding: 4px 10px; color: #166534; font-weight: 800; font-size: 11.5px; border-bottom: 1px solid #cbd5e1;">
+          <div style="background: #f0fdf4; padding: 3px 10px; color: #166534; font-weight: 800; font-size: 11px; border-bottom: 1px solid #cbd5e1;">
             ⏱️ ساعات العمل الفعلية والمستحقات
           </div>
-          <div style="padding: 6px 10px; display: flex; flexDirection: column; gap: 4px; font-size: 10.5px;">
+          <div style="padding: 5px 10px; display: flex; flex-direction: column; gap: 3px; font-size: 10px;">
             <div style="display: flex; justify-content: space-between;">
               <span>عدد ساعات العمل الأساسية المسجلة:</span>
               <strong>${fmt(totalHours)} ساعة</strong>
@@ -518,20 +675,20 @@ export function generateOfficialPayslipHTML({
 
       <!-- Punches & Shifts Table -->
       <div style="margin-bottom: 8px;">
-        <div style="font-weight: 800; color: #0f766e; font-size: 11.5px; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center;">
-          <span>📋 تفاصيل سجل الحضور والبصمات (${(shifts || []).length} وردية):</span>
-          <span style="font-size: 10px; color: #64748b;">إجمالي الساعات: ${fmt(totalHours)} س</span>
+        <div style="font-weight: 800; color: #0f766e; font-size: 11px; margin-bottom: 3px; display: flex; justify-content: space-between; align-items: center;">
+          <span>📋 أولاً: تفاصيل سجل الحضور والبصمات (${(shifts || []).length} وردية):</span>
+          <span style="font-size: 9.5px; color: #64748b;">إجمالي الساعات: ${fmt(totalHours)} س</span>
         </div>
-        <table style="width: 100%; border-collapse: collapse; font-size: 10px; text-align: center;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 9.5px; text-align: center;">
           <thead>
             <tr style="background: #f1f5f9; color: #334155; font-weight: 800;">
-              <th style="padding: 3px; width: 4%;">#</th>
-              <th style="padding: 3px; width: 22%;">اليوم والتاريخ</th>
-              <th style="padding: 3px; width: 14%;">وقت الدخول</th>
-              <th style="padding: 3px; width: 14%;">وقت الخروج</th>
-              <th style="padding: 3px; width: 12%;">البريك</th>
-              <th style="padding: 3px; width: 14%;">ساعات العمل</th>
-              <th style="padding: 3px; width: 20%;">الأجر المستحق</th>
+              <th style="padding: 2.5px; width: 4%;">#</th>
+              <th style="padding: 2.5px; width: 22%;">اليوم والتاريخ</th>
+              <th style="padding: 2.5px; width: 14%;">وقت الدخول</th>
+              <th style="padding: 2.5px; width: 14%;">وقت الخروج</th>
+              <th style="padding: 2.5px; width: 12%;">البريك</th>
+              <th style="padding: 2.5px; width: 14%;">ساعات العمل</th>
+              <th style="padding: 2.5px; width: 20%;">الأجر المستحق</th>
             </tr>
           </thead>
           <tbody>
@@ -541,13 +698,13 @@ export function generateOfficialPayslipHTML({
               const hasPerm = s.hasPermission || false;
               return `
                 <tr style="background: ${hasPerm ? '#fefce8' : (idx % 2 === 0 ? '#fff' : '#f8fafc')};">
-                  <td style="padding: 2.5px;">${idx + 1}</td>
-                  <td style="padding: 2.5px; font-weight: bold;">${s.dayName || ''} ${s.date}</td>
-                  <td style="padding: 2.5px; color: #16a34a;">${s.timeIn || '—'}</td>
-                  <td style="padding: 2.5px; color: #dc2626;">${s.timeOut || '—'}</td>
-                  <td style="padding: 2.5px;">${fmt(s.breakHours)} س</td>
-                  <td style="padding: 2.5px; font-weight: bold;">${fmt(effHours)} س</td>
-                  <td style="padding: 2.5px; font-weight: bold; color: #0d9488;">${fmt(effHours * shiftRate)} ج.م</td>
+                  <td style="padding: 2px;">${idx + 1}</td>
+                  <td style="padding: 2px; font-weight: bold;">${s.dayName || ''} ${s.date}</td>
+                  <td style="padding: 2px; color: #16a34a;">${s.timeIn || '—'}</td>
+                  <td style="padding: 2px; color: #dc2626;">${s.timeOut || '—'}</td>
+                  <td style="padding: 2px;">${fmt(s.breakHours)} س</td>
+                  <td style="padding: 2px; font-weight: bold;">${fmt(effHours)} س</td>
+                  <td style="padding: 2px; font-weight: bold; color: #0d9488;">${fmt(effHours * shiftRate)} ج.م</td>
                 </tr>
               `;
             }).join('') : `
@@ -558,26 +715,129 @@ export function generateOfficialPayslipHTML({
           </tbody>
           ${(shifts && shifts.length > 0) ? `
             <tfoot>
-              <tr style="background: #e2e8f0; font-weight: 800; font-size: 10.5px;">
-                <td colspan="4" style="padding: 3px 6px; text-align: right;">الإجمالي:</td>
-                <td style="padding: 3px;">${fmt(totalBreakHours)} س</td>
-                <td style="padding: 3px; color: #0f766e;">${fmt(totalHours)} س</td>
-                <td style="padding: 3px; color: #0d9488;">${fmt(baseEarnings)} ج.م</td>
+              <tr style="background: #e2e8f0; font-weight: 800; font-size: 10px;">
+                <td colspan="4" style="padding: 2.5px 6px; text-align: right;">الإجمالي:</td>
+                <td style="padding: 2.5px;">${fmt(totalBreakHours)} س</td>
+                <td style="padding: 2.5px; color: #0f766e;">${fmt(totalHours)} س</td>
+                <td style="padding: 2.5px; color: #0d9488;">${fmt(baseEarnings)} ج.م</td>
               </tr>
             </tfoot>
           ` : ''}
         </table>
       </div>
 
+      <!-- Late Penalties Table (If exists) -->
+      ${latePenaltyItems.length > 0 ? `
+        <div style="margin-bottom: 8px; page-break-inside: avoid;">
+          <div style="font-weight: 800; color: #c2410c; font-size: 11px; margin-bottom: 3px; display: flex; justify-content: space-between; align-items: center;">
+            <span>⏱️ ثانياً: وقائع وجزاءات التأخير اللائحي (${latePenaltyItems.length} واقعة):</span>
+            <span style="font-size: 9.5px; color: #c2410c; font-weight: bold;">إجمالي الخصم: -${fmt(summary.lateDeduction || 0)} ج.م (${summary.lateDeductionMinutes || 0} دقيقة)</span>
+          </div>
+          <table style="width: 100%; border-collapse: collapse; font-size: 9.5px; text-align: center;">
+            <thead>
+              <tr style="background: #ffedd5; color: #9a3412; font-weight: 800;">
+                <th style="padding: 2.5px;">التاريخ</th>
+                <th style="padding: 2.5px;">الشيفت</th>
+                <th style="padding: 2.5px;">الحضور</th>
+                <th style="padding: 2.5px;">التأخير</th>
+                <th style="padding: 2.5px;">الفئة</th>
+                <th style="padding: 2.5px;">الجزاء اللائحي</th>
+                <th style="padding: 2.5px;">دقائق الخصم</th>
+                <th style="padding: 2.5px;">مبلغ الخصم</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${latePenaltyItems.map((inc) => `
+                <tr>
+                  <td style="padding: 2px; border: 1px solid #fed7aa; font-weight: bold;">${inc.date}</td>
+                  <td style="padding: 2px; border: 1px solid #fed7aa; color: #2563eb;">${inc.scheduledStartTime}</td>
+                  <td style="padding: 2px; border: 1px solid #fed7aa; font-weight: bold;">${inc.actualPunchInTime}</td>
+                  <td style="padding: 2px; border: 1px solid #fed7aa; color: #ea580c; font-weight: bold;">${inc.lateMinutes} د</td>
+                  <td style="padding: 2px; border: 1px solid #fed7aa;">${inc.tierName} (#${inc.occurrenceNumber})</td>
+                  <td style="padding: 2px; border: 1px solid #fed7aa; color: ${inc.deductionMinutes > 0 ? '#dc2626' : '#16a34a'}; font-weight: bold;">${inc.actionLabel}</td>
+                  <td style="padding: 2px; border: 1px solid #fed7aa;">${inc.deductionMinutes > 0 ? `${inc.deductionMinutes} د` : '—'}</td>
+                  <td style="padding: 2px; border: 1px solid #fed7aa; font-weight: bold; color: #dc2626;">-${fmt(inc.amount)} ج.م</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      ` : ''}
+
+      <!-- Loans and Credit Meds Table (If exists) -->
+      ${empLoans.length > 0 ? `
+        <div style="margin-bottom: 8px; page-break-inside: avoid;">
+          <div style="font-weight: 800; color: #991b1b; font-size: 11px; margin-bottom: 3px; display: flex; justify-content: space-between; align-items: center;">
+            <span>💳 ثالثاً: السلف ومشتريات الأدوية والأقساط (${empLoans.length} بند):</span>
+            <span style="font-size: 9.5px; color: #991b1b; font-weight: bold;">إجمالي المخصوم بالشهر: -${fmt(summary.loansDeduction || 0)} ج.م</span>
+          </div>
+          <table style="width: 100%; border-collapse: collapse; font-size: 9.5px; text-align: center;">
+            <thead>
+              <tr style="background: #fee2e2; color: #991b1b; font-weight: 800;">
+                <th style="padding: 2.5px;">البيان</th>
+                <th style="padding: 2.5px;">التاريخ</th>
+                <th style="padding: 2.5px;">أصل المبلغ</th>
+                <th style="padding: 2.5px;">المسدد سابقاً</th>
+                <th style="padding: 2.5px;">المخصوم بهذا الشهر</th>
+                <th style="padding: 2.5px;">المتبقي بعد الخصم</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${empLoans.map((l) => `
+                <tr>
+                  <td style="padding: 2px; border: 1px solid #fca5a5; font-weight: bold;">${l.typeLabel}</td>
+                  <td style="padding: 2px; border: 1px solid #fca5a5;">${l.date}</td>
+                  <td style="padding: 2px; border: 1px solid #fca5a5;">${fmt(l.totalAmount)} ج.م</td>
+                  <td style="padding: 2px; border: 1px solid #fca5a5; color: #16a34a;">${fmt(l.paidAmount)} ج.م</td>
+                  <td style="padding: 2px; border: 1px solid #fca5a5; font-weight: bold; color: #dc2626;">-${fmt(l.deductedThisMonth)} ج.م</td>
+                  <td style="padding: 2px; border: 1px solid #fca5a5; font-weight: bold; color: #b91c1c;">${fmt(l.remainingBalance)} ج.م</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      ` : ''}
+
+      <!-- Allowances, Bonuses, & Deductions Table (If exists) -->
+      ${generalFinancialItems.length > 0 ? `
+        <div style="margin-bottom: 8px; page-break-inside: avoid;">
+          <div style="font-weight: 800; color: #0f766e; font-size: 11px; margin-bottom: 3px;">
+            📝 رابعاً: بيان البدلات الثابتة والمكافآت والجزاءات والغياب (${generalFinancialItems.length} بند):
+          </div>
+          <table style="width: 100%; border-collapse: collapse; font-size: 9.5px; text-align: center;">
+            <thead>
+              <tr style="background: #f1f5f9; color: #334155; font-weight: 800;">
+                <th style="padding: 2.5px; width: 22%;">نوع البند</th>
+                <th style="padding: 2.5px; width: 18%;">الفترة / التاريخ</th>
+                <th style="padding: 2.5px; width: 18%;">المبلغ</th>
+                <th style="padding: 2.5px; width: 42%;">البيان والتفاصيل</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${generalFinancialItems.map((item) => `
+                <tr>
+                  <td style="padding: 2px; border: 1px solid #cbd5e1; font-weight: bold; color: ${item.color};">${item.typeLabel}</td>
+                  <td style="padding: 2px; border: 1px solid #cbd5e1;">${item.date}</td>
+                  <td style="padding: 2px; border: 1px solid #cbd5e1; font-weight: bold; color: ${item.isPositive ? '#16a34a' : '#dc2626'};">
+                    ${item.isPositive ? '+' : '-'}${fmt(item.amount)} ج.م
+                  </td>
+                  <td style="padding: 2px; border: 1px solid #cbd5e1; text-align: right; padding-right: 6px;">${item.details}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      ` : ''}
+
       <!-- Financial Final Summary Box -->
-      <div style="background: #0f766e; color: #fff; border-radius: 6px; padding: 8px 12px; margin-bottom: 8px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.25); padding-bottom: 4px; margin-bottom: 4px;">
+      <div style="background: #0f766e; color: #fff; border-radius: 6px; padding: 6px 12px; margin-bottom: 8px; page-break-inside: avoid;">
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.25); padding-bottom: 3px; margin-bottom: 3px;">
           <span style="font-size: 11.5px; font-weight: 800;">🏆 الملخص المالي النهائي لشهر ${fullMonthLabel}:</span>
-          <span style="font-size: 14px; font-weight: 900; background: rgba(255,255,255,0.2); padding: 2px 10px; border-radius: 4px;">
+          <span style="font-size: 13.5px; font-weight: 900; background: rgba(255,255,255,0.2); padding: 2px 10px; border-radius: 4px;">
             صافي المرتب المستحق: ${fmt(netSalary)} ج.م
           </span>
         </div>
-        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; font-size: 10.5px;">
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; font-size: 10px;">
           <div>الأساسي: <strong>${fmt(baseEarnings)} ج.م</strong></div>
           <div>الإضافي: <strong>+${fmt(summary.overtimeEarnings || 0)} ج.م</strong></div>
           <div>البدلات: <strong>+${fmt(totalAllowances)} ج.م</strong></div>
@@ -590,17 +850,17 @@ export function generateOfficialPayslipHTML({
       </div>
 
       <!-- Signatures Block -->
-      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; text-align: center; font-size: 11px; margin-top: 6px; page-break-inside: avoid;">
-        <div style="border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px;">
-          <div style="font-weight: 800; color: #0f172a; margin-bottom: 20px;">توقيع الموظف المستلم</div>
+      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; text-align: center; font-size: 10.5px; margin-top: 6px; page-break-inside: avoid;">
+        <div style="border: 1px solid #cbd5e1; border-radius: 6px; padding: 5px;">
+          <div style="font-weight: 800; color: #0f172a; margin-bottom: 18px;">توقيع الموظف المستلم</div>
           <div style="border-top: 1px dotted #94a3b8; padding-top: 2px; font-size: 10px;">${emp?.name}</div>
         </div>
-        <div style="border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px;">
-          <div style="font-weight: 800; color: #0f172a; margin-bottom: 20px;">توقيع الإدارة المالية</div>
+        <div style="border: 1px solid #cbd5e1; border-radius: 6px; padding: 5px;">
+          <div style="font-weight: 800; color: #0f172a; margin-bottom: 18px;">توقيع الإدارة المالية</div>
           <div style="border-top: 1px dotted #94a3b8; padding-top: 2px; font-size: 10px;">المحاسب المالي والختم</div>
         </div>
-        <div style="border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px;">
-          <div style="font-weight: 800; color: #0f172a; margin-bottom: 20px;">اعتماد المدير العام</div>
+        <div style="border: 1px solid #cbd5e1; border-radius: 6px; padding: 5px;">
+          <div style="font-weight: 800; color: #0f172a; margin-bottom: 18px;">اعتماد المدير العام</div>
           <div style="border-top: 1px dotted #94a3b8; padding-top: 2px; font-size: 10px;">${gmName}</div>
         </div>
       </div>
@@ -608,4 +868,5 @@ export function generateOfficialPayslipHTML({
     </div>
   `;
 }
+
 
