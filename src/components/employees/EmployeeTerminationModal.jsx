@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { fmt, todayStr } from '../../utils/formatters';
 import { computeEmployeeFinalSettlement } from '../../utils/settlementHelper';
+import { triggerDirectPrint, generateClearanceSlipHTML } from '../../utils/printHelper';
+import { compressImage } from '../../utils/imageCompressor';
 
 export default function EmployeeTerminationModal({
   emp,
@@ -12,6 +14,8 @@ export default function EmployeeTerminationModal({
   const [customReason, setCustomReason] = useState('');
   const [terminationDate, setTerminationDate] = useState(todayStr());
   const [clearanceNotes, setClearanceNotes] = useState('');
+  const [signedDoc, setSignedDoc] = useState(emp?.signedClearanceDoc || null);
+  const [isUploadingDoc, setIsUploadingDoc] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!emp) return null;
@@ -20,7 +24,45 @@ export default function EmployeeTerminationModal({
   const settlement = computeEmployeeFinalSettlement(emp.id, state, terminationDate);
 
   const handlePrintSlip = () => {
-    window.print();
+    try {
+      const html = generateClearanceSlipHTML({
+        emp,
+        state,
+        terminationDate,
+        effectiveReason,
+        clearanceNotes,
+        settlement
+      });
+      triggerDirectPrint(html, `إخلاء طرف - ${emp.name}`);
+    } catch (err) {
+      console.error('Error generating print slip:', err);
+      window.print();
+    }
+  };
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingDoc(true);
+    try {
+      const isImage = file.type.startsWith('image/');
+      const dataUrl = await compressImage(file, isImage ? 1400 : undefined, 0.85);
+      const newDoc = {
+        dataUrl,
+        fileName: file.name,
+        fileType: file.type,
+        fileSize: file.size,
+        uploadedAt: new Date().toISOString(),
+        notes: clearanceNotes.trim()
+      };
+      setSignedDoc(newDoc);
+    } catch (err) {
+      console.error('Error uploading signed clearance:', err);
+      alert('حدث خطأ أثناء رفع المستند');
+    } finally {
+      setIsUploadingDoc(false);
+    }
   };
 
   const handleSubmit = (e) => {
@@ -39,7 +81,8 @@ export default function EmployeeTerminationModal({
         terminationReason: effectiveReason,
         terminationDate,
         clearanceNotes: clearanceNotes.trim(),
-        settlement
+        settlement,
+        signedClearanceDoc: signedDoc
       });
     } catch (err) {
       console.error(err);
@@ -306,6 +349,77 @@ export default function EmployeeTerminationModal({
               </div>
             </div>
           )}
+
+          {/* Section 3: Optional Signed Clearance Upload */}
+          <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', padding: '16px', borderRadius: '12px', marginBottom: '20px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+              <h4 style={{ margin: 0, color: '#0f766e', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                📤 إرفاق مستند إخلاء الطرف الموقع بعد الطباعة (اختياري الآن أو لاحقاً):
+              </h4>
+              <span style={{ fontSize: '11.5px', color: '#64748b' }}>
+                يدعم الصور (JPG/PNG) وملفات PDF
+              </span>
+            </div>
+
+            {signedDoc ? (
+              <div style={{ background: '#f0fdf4', border: '1px solid #86efac', borderRadius: '10px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  {signedDoc.fileType?.startsWith('image/') || signedDoc.dataUrl?.startsWith('data:image/') ? (
+                    <img
+                      src={signedDoc.dataUrl}
+                      alt="إخلاء الطرف الموقع"
+                      style={{ width: '48px', height: '48px', objectFit: 'cover', borderRadius: '6px', border: '1px solid #86efac', cursor: 'pointer' }}
+                      onClick={() => {
+                        const w = window.open('');
+                        w.document.write(`<img src="${signedDoc.dataUrl}" style="max-width:100%;height:auto;"/>`);
+                      }}
+                      title="اضغط للتكبير"
+                    />
+                  ) : (
+                    <span style={{ fontSize: '32px' }}>📄</span>
+                  )}
+                  <div>
+                    <strong style={{ color: '#166534', fontSize: '13px', display: 'block' }}>
+                      ✅ تم إرفاق المستند الموقع بنجاح
+                    </strong>
+                    <span style={{ fontSize: '11.5px', color: '#475569' }}>
+                      {signedDoc.fileName || 'مستند إخلاء طرف موقع'} · {new Date(signedDoc.uploadedAt || Date.now()).toLocaleString('ar-EG')}
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <label className="btn btn-ghost" style={{ cursor: 'pointer', margin: 0, padding: '6px 12px', fontSize: '12px', background: '#fff', border: '1px solid #cbd5e1' }}>
+                    🔄 تغيير الملف
+                    <input type="file" accept="image/*,application/pdf" onChange={handleFileUpload} style={{ display: 'none' }} disabled={isUploadingDoc} />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setSignedDoc(null)}
+                    style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5', padding: '6px 12px', borderRadius: '6px', fontSize: '12px', cursor: 'pointer', fontWeight: 'bold' }}
+                  >
+                    🗑️ إزالة
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ border: '2px dashed #cbd5e1', borderRadius: '10px', padding: '16px', textAlign: 'center', background: '#fff' }}>
+                <p style={{ margin: '0 0 10px', fontSize: '12.5px', color: '#475569' }}>
+                  بعد طباعة النموذج وتوقيعه من الموظف والمدير، يمكنك رفعه هنا ليتم حفظه في أرشيف الموظف مباشرة.
+                </p>
+                <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                  <label className="btn btn-ghost" style={{ cursor: isUploadingDoc ? 'not-allowed' : 'pointer', margin: 0, padding: '8px 16px', fontSize: '12.5px', background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', fontWeight: 'bold' }}>
+                    {isUploadingDoc ? '⏳ جاري الضغط والرفع...' : '📁 اختيار ملف من الجهاز (صورة / PDF)'}
+                    <input type="file" accept="image/*,application/pdf" onChange={handleFileUpload} style={{ display: 'none' }} disabled={isUploadingDoc} />
+                  </label>
+                  <label className="btn btn-ghost" style={{ cursor: isUploadingDoc ? 'not-allowed' : 'pointer', margin: 0, padding: '8px 16px', fontSize: '12.5px', background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', fontWeight: 'bold' }}>
+                    📷 تصوير عبر الكاميرا
+                    <input type="file" accept="image/*" capture="environment" onChange={handleFileUpload} style={{ display: 'none' }} disabled={isUploadingDoc} />
+                  </label>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Action Buttons */}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', borderTop: '1px solid var(--border)', paddingTop: '16px' }}>

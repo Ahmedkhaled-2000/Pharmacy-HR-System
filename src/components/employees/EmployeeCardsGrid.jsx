@@ -33,6 +33,7 @@ export default function EmployeeCardsGrid({
   // Modals state
   const [terminationModalEmp, setTerminationModalEmp] = useState(null);
   const [dossierModalEmp, setDossierModalEmp] = useState(null);
+  const [dossierInitialTab, setDossierInitialTab] = useState('summary');
   const [rehireModalEmp, setRehireModalEmp] = useState(null);
   const [rehireDate, setRehireDate] = useState(todayStr());
   const [rehireBranchId, setRehireBranchId] = useState('');
@@ -157,6 +158,7 @@ export default function EmployeeCardsGrid({
           terminationNotes: data.clearanceNotes,
           terminatedAt: new Date().toISOString(),
           finalSettlement: data.settlement,
+          signedClearanceDoc: data.signedClearanceDoc || e.signedClearanceDoc || null,
           updatedAt: new Date().toISOString()
         };
       }
@@ -178,6 +180,40 @@ export default function EmployeeCardsGrid({
     if (showToast) showToast('✅ تم إنهاء خدمة الموظف وتصفية حسابه المالي ونقله لتبويبة المستقيلين');
 
     setTerminationModalEmp(null);
+  };
+
+  // Handle Save / Delete Signed Clearance Document
+  const handleSaveSignedClearance = async (empId, signedDoc) => {
+    const updatedEmployees = employees.map((e) => {
+      if (String(e.id) === String(empId)) {
+        return {
+          ...e,
+          signedClearanceDoc: signedDoc,
+          updatedAt: new Date().toISOString()
+        };
+      }
+      return e;
+    });
+
+    const updatedState = {
+      ...state,
+      employees: updatedEmployees
+    };
+
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+
+    // Update active modal emp reference in real-time
+    if (dossierModalEmp && String(dossierModalEmp.id) === String(empId)) {
+      setDossierModalEmp({ ...dossierModalEmp, signedClearanceDoc: signedDoc });
+    }
+    if (terminationModalEmp && String(terminationModalEmp.id) === String(empId)) {
+      setTerminationModalEmp({ ...terminationModalEmp, signedClearanceDoc: signedDoc });
+    }
+
+    if (showToast) {
+      showToast(signedDoc ? '✅ تم حفظ وأرشفة إخلاء الطرف الموقع بنجاح' : '🗑️ تم حذف مستند إخلاء الطرف');
+    }
   };
 
   // Handle Rehire / Reinstate
@@ -617,8 +653,33 @@ export default function EmployeeCardsGrid({
                         </div>
                       ) : (
                         /* Middle Block for Resigned: Archive Summary snippet */
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', color: '#64748b' }}>
-                          <span>📁 ملف محفوظ بالأرشيف</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '12px', color: '#64748b', flexWrap: 'wrap' }}>
+                          <span style={{ background: '#f1f5f9', padding: '3px 8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
+                            📁 تاريخ الإنهاء: <strong>{emp.terminationDate || emp.resignationDate || '—'}</strong>
+                          </span>
+                          {emp.signedClearanceDoc ? (
+                            <span
+                              onClick={() => {
+                                setDossierInitialTab('settlement');
+                                setDossierModalEmp(emp);
+                              }}
+                              style={{ background: '#dcfce7', color: '#166534', border: '1px solid #86efac', padding: '3px 8px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                              title="اضغط لفتح ومعاينة إخلاء الطرف الموقع"
+                            >
+                              <span>🟢</span> إخلاء طرف موقع
+                            </span>
+                          ) : (
+                            <span
+                              onClick={() => {
+                                setDossierInitialTab('settlement');
+                                setDossierModalEmp(emp);
+                              }}
+                              style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', padding: '3px 8px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                              title="اضغط لرفع وثيقة إخلاء الطرف الموقعة"
+                            >
+                              <span>📤</span> رفع إخلاء الطرف
+                            </span>
+                          )}
                         </div>
                       )}
 
@@ -663,7 +724,7 @@ export default function EmployeeCardsGrid({
                             <span>🛑</span> إنهاء الخدمة النهائي
                           </button>
                         ) : (
-                          /* 2. If Resigned: Rehire & Dossier Buttons */
+                          /* 2. If Resigned: Rehire, Dossier & Clearance Buttons */
                           <>
                             <button
                               type="button"
@@ -685,13 +746,40 @@ export default function EmployeeCardsGrid({
                                 gap: '4px'
                               }}
                             >
-                              <span>🔄</span> إعادة على رأس العمل
+                              <span>🔄</span> إعادة للعمل
                             </button>
 
                             <button
                               type="button"
                               className="btn btn-ghost"
-                              onClick={() => setDossierModalEmp(emp)}
+                              onClick={() => {
+                                setDossierInitialTab('settlement');
+                                setDossierModalEmp(emp);
+                              }}
+                              title="فتح صفحة المخالصة المالية ورفع/معاينة إخلاء الطرف"
+                              style={{
+                                background: emp.signedClearanceDoc ? '#dcfce7' : '#fef3c7',
+                                color: emp.signedClearanceDoc ? '#166534' : '#92400e',
+                                border: `1px solid ${emp.signedClearanceDoc ? '#86efac' : '#fde68a'}`,
+                                fontWeight: 'bold',
+                                fontSize: '12px',
+                                padding: '6px 12px',
+                                borderRadius: '8px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                              }}
+                            >
+                              <span>{emp.signedClearanceDoc ? '📜' : '📤'}</span> إخلاء الطرف
+                            </button>
+
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              onClick={() => {
+                                setDossierInitialTab('summary');
+                                setDossierModalEmp(emp);
+                              }}
                               title="فتح السجل الشامل لجميع بيانات وسجلات الموظف"
                               style={{
                                 background: '#e0f2fe',
@@ -754,7 +842,12 @@ export default function EmployeeCardsGrid({
         <EmployeeComprehensiveDossierModal
           emp={dossierModalEmp}
           state={state}
-          onClose={() => setDossierModalEmp(null)}
+          initialTab={dossierInitialTab}
+          onClose={() => {
+            setDossierModalEmp(null);
+            setDossierInitialTab('summary');
+          }}
+          onSaveSignedClearance={handleSaveSignedClearance}
           onOpenRehireModal={(emp) => {
             setDossierModalEmp(null);
             setRehireModalEmp(emp);
