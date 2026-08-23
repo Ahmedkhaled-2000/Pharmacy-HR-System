@@ -145,23 +145,7 @@ export function normalizeState(parsed) {
       });
     });
   } else {
-    employees = [
-      {
-        id: 'emp_101',
-        code: '101',
-        username: '101',
-        name: 'أحمد محمود',
-        phone: '01012345678',
-        jobTitle: 'مساعد صيدلي',
-        salary: 4000,
-        workHoursPerDay: 8,
-        workDaysPerMonth: 26,
-        password: '123',
-        photoUrl: '',
-        createdAt: todayStr(),
-        devices: []
-      }
-    ];
+    employees = [];
   }
 
   // Ensure existing employees have devices array and normalized permissions
@@ -265,7 +249,7 @@ export function normalizeState(parsed) {
 
   const shifts = toSafeArray(parsed.shifts).map((s) => ({
     ...s,
-    employeeId: s.employeeId || s.jobId || (employees[0] ? employees[0].id : 'emp_101')
+    employeeId: s.employeeId || s.jobId || (employees[0] ? employees[0].id : '')
   }));
 
   const adjustments = toSafeArray(parsed.adjustments).map((a) => ({

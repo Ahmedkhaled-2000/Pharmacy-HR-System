@@ -290,44 +290,8 @@ export default function App() {
       }
     },
     jobs: DEFAULT_JOBS,
-    branches: [
-      {
-        id: 'branch_main',
-        branchCode: 'BR-101',
-        name: 'الفرع الرئيسي - صيدلية مداواة 1',
-        address: 'شارع النصر - المقطم',
-        phone: '0221234567',
-        managerId: 'emp_101',
-        username: 'main_branch',
-        password: '123'
-      }
-    ],
-    employees: [
-      {
-        id: 'emp_101',
-        code: '101',
-        username: '101',
-        name: 'أحمد محمود علي',
-        phone: '01012345678',
-        nationalId: '29901010123456',
-        dob: '1995-05-12',
-        address: 'القاهرة - المقطم',
-        maritalStatus: 'أعزب',
-        jobTitle: 'مساعد صيدلي',
-        department: 'الصيدلية',
-        branchId: 'branch_main',
-        hireDate: '2023-01-15',
-        contractType: 'دوام كامل',
-        status: 'على رأس العمل',
-        salary: 4000,
-        workHoursPerDay: 8,
-        workDaysPerMonth: 26,
-        password: '123',
-        photoUrl: '',
-        documents: [],
-        createdAt: todayStr()
-      }
-    ],
+    branches: [],
+    employees: [],
     bylaws: {
       gracePeriodMinutes: 15,
       resetPeriodDays: 30,
@@ -4609,7 +4573,78 @@ export default function App() {
 
   return (
     <div className={`mode-${viewMode}`}>
-      {isLoading && <div className="loading-bar"></div>}
+      {isLoading && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'linear-gradient(135deg, #0f172a 0%, #134e4a 100%)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 99999,
+          color: '#ffffff',
+          fontFamily: "'Cairo', 'Tajawal', sans-serif",
+          direction: 'rtl'
+        }}>
+          <div style={{
+            background: 'rgba(255, 255, 255, 0.08)',
+            backdropFilter: 'blur(12px)',
+            border: '1px solid rgba(255, 255, 255, 0.15)',
+            borderRadius: '20px',
+            padding: '36px 48px',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            boxShadow: '0 20px 40px rgba(0, 0, 0, 0.3)',
+            maxWidth: '90%',
+            textAlign: 'center'
+          }}>
+            <div style={{
+              width: '68px',
+              height: '68px',
+              borderRadius: '16px',
+              background: 'linear-gradient(135deg, #0d9488 0%, #14b8a6 100%)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '34px',
+              marginBottom: '18px',
+              boxShadow: '0 8px 20px rgba(20, 184, 166, 0.35)'
+            }}>
+              🏥
+            </div>
+            <h2 style={{ margin: '0 0 8px 0', fontSize: '20px', fontWeight: 800, color: '#f0fdf4', letterSpacing: '-0.5px' }}>
+              منظومة الموارد البشرية والرواتب
+            </h2>
+            <div style={{ fontSize: '13px', color: '#99f6e4', marginBottom: '24px', fontWeight: 600 }}>
+              مجموعة الصيدليات الطبية
+            </div>
+            
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              background: 'rgba(0, 0, 0, 0.25)',
+              padding: '8px 18px',
+              borderRadius: '30px',
+              border: '1px solid rgba(255, 255, 255, 0.1)'
+            }}>
+              <div style={{
+                width: '16px',
+                height: '16px',
+                border: '2.5px solid rgba(255, 255, 255, 0.2)',
+                borderTopColor: '#2dd4bf',
+                borderRadius: '50%',
+                animation: 'spin 0.8s linear infinite'
+              }}></div>
+              <span style={{ fontSize: '12.5px', color: '#e2e8f0', fontWeight: 600 }}>
+                جاري الاتصال بالسحابة وجلب أحدث البيانات الحية...
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Safe URL Routes */}
       <Routes>
