@@ -24,8 +24,8 @@ import {
   shouldShowRequestToBranch
 } from './utils/formatters';
 import { loadExcelJS, mergedTitle, tableHeaderRow, dataRow } from './utils/excelExport';
-import { exportComprehensiveCompanyPayrollExcel } from './utils/grandPayrollExcelExporter';
 import { smartSaveState, smartLoadState, loadLocalStateFast, listenToConnectionChanges, syncNow, listenToLiveBroadcasts } from './utils/offlineSync';
+import { smartMergeStates } from './utils/stateMerger';
 import { compressImage } from './utils/imageCompressor';
 import { getPendingCount } from './utils/offlineStorage';
 import { saveAutoBackupOnModification } from './utils/backupHelper';
