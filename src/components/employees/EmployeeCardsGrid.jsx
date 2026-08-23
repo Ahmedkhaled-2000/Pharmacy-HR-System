@@ -109,22 +109,31 @@ export default function EmployeeCardsGrid({
   const groupedEmployees = useMemo(() => {
     const grouped = {};
     displayedEmployees.forEach((emp) => {
-      if (emp.branchesDetails && emp.branchesDetails.length > 0) {
-        emp.branchesDetails.forEach((bd) => {
-          const key = bd.branchId || 'main';
-          if (!grouped[key]) grouped[key] = [];
-          if (!grouped[key].some((e) => String(e.id) === String(emp.id))) {
-            grouped[key].push(emp);
-          }
-        });
-      } else {
-        const key = emp.branchId || 'main';
+      if (selectedBranchFilter !== 'all') {
+        // When a specific branch is selected in filter, strictly group under that branch only
+        const key = selectedBranchFilter;
         if (!grouped[key]) grouped[key] = [];
-        grouped[key].push(emp);
+        if (!grouped[key].some((e) => String(e.id) === String(emp.id))) {
+          grouped[key].push(emp);
+        }
+      } else {
+        if (emp.branchesDetails && emp.branchesDetails.length > 0) {
+          emp.branchesDetails.forEach((bd) => {
+            const key = bd.branchId || 'main';
+            if (!grouped[key]) grouped[key] = [];
+            if (!grouped[key].some((e) => String(e.id) === String(emp.id))) {
+              grouped[key].push(emp);
+            }
+          });
+        } else {
+          const key = emp.branchId || 'main';
+          if (!grouped[key]) grouped[key] = [];
+          grouped[key].push(emp);
+        }
       }
     });
     return grouped;
-  }, [displayedEmployees]);
+  }, [displayedEmployees, selectedBranchFilter]);
 
   // Handle Termination
   const handleConfirmTermination = async (empId, data) => {
