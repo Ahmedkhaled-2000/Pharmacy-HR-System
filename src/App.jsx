@@ -2840,7 +2840,7 @@ export default function App() {
     return unsubscribe;
   }, []);
 
-  // Cloud Synchronization with MariaDB (1-Second Ultra-Fast Smart Version Polling & Instant Live Broadcast)
+  // Cloud Synchronization with MariaDB (Adaptive Smart Polling & Instant 0ms Live Broadcast)
   useEffect(() => {
     const applyRemoteData = (remoteData) => {
       const parsed = typeof remoteData === 'string' ? JSON.parse(remoteData) : remoteData;
@@ -2863,10 +2863,10 @@ export default function App() {
     let isPolling = false;
 
     const poll = async () => {
-      if (isPolling) return;
+      if (isPolling || !navigator.onLine) return;
       isPolling = true;
       try {
-        const versionRes = await apiFetchVersion(STORAGE_KEY);
+        const versionRes = await apiFetchVersion(STORAGE_KEY, { timeout: 4000 });
         const currentVer = typeof versionRes?.version === 'number' ? versionRes.version : 0;
         const currentUpdated = versionRes?.updated_at || '';
 
@@ -2877,20 +2877,30 @@ export default function App() {
         if (hasChanged) {
           lastKnownVersion = currentVer;
           lastKnownUpdatedAt = currentUpdated;
-          const remoteData = await apiFetchSettings(STORAGE_KEY);
-          if (remoteData) {
+          const remoteData = await apiFetchSettings(STORAGE_KEY, { timeout: 8000, useETag: true });
+          if (remoteData && !remoteData.notModified) {
             applyRemoteData(remoteData);
           }
         }
       } catch (err) {
-        // Fallback: If sync/version endpoint failed, try direct fetch if needed or ignore
+        // خطأ صامت في استطلاع الخلفية لتجنب إجهاد الشبكة
       } finally {
         isPolling = false;
       }
     };
 
-    // Ultra-Fast polling every 1.0 second for instant 1-second multi-device sync without page reload
-    const pollInterval = setInterval(poll, 1000);
+    // Adaptive polling: 10s when tab is active, 60s when tab is in background
+    let timerId = null;
+    const scheduleNextPoll = () => {
+      const isVisible = typeof document !== 'undefined' ? document.visibilityState === 'visible' : true;
+      const delay = isVisible ? 10000 : 60000;
+      timerId = setTimeout(async () => {
+        await poll();
+        scheduleNextPoll();
+      }, delay);
+    };
+
+    scheduleNextPoll();
 
     // Instant local broadcast synchronization across tabs and windows (0ms immediate update)
     const unsubBroadcast = listenToLiveBroadcasts((liveState) => {
@@ -2903,26 +2913,25 @@ export default function App() {
 
     const handleFocusOrVisible = () => {
       if (document.visibilityState === 'visible' || document.hasFocus()) {
-        poll();
+        clearTimeout(timerId);
+        poll().then(() => scheduleNextPoll());
       }
     };
 
     window.addEventListener('focus', handleFocusOrVisible);
     window.addEventListener('online', handleFocusOrVisible);
     document.addEventListener('visibilitychange', handleFocusOrVisible);
-    window.addEventListener('pointerdown', handleFocusOrVisible, { passive: true, once: true });
 
     return () => {
-      clearInterval(pollInterval);
+      clearTimeout(timerId);
       unsubBroadcast();
       window.removeEventListener('focus', handleFocusOrVisible);
       window.removeEventListener('online', handleFocusOrVisible);
       document.removeEventListener('visibilitychange', handleFocusOrVisible);
-      window.removeEventListener('pointerdown', handleFocusOrVisible);
     };
   }, []);
 
-  // Save State function with Smart Deep Merge & Auto-Backup
+  // Save State function with Optimistic Non-Blocking Sync & Auto-Backup
   const saveState = async (updatedState) => {
     setIsSyncing(true);
     const result = await smartSaveState(updatedState, {

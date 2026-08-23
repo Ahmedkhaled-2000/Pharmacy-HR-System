@@ -31,50 +31,94 @@ const getApiBaseUrl = () => {
 export const API_BASE_URL = getApiBaseUrl();
 
 /**
- * دالة مساعدة لتنفيذ طلبات الـ HTTP مع معالجة الأخطاء والتنسيق
+ * دالة مساعدة متقدمة لتنفيذ طلبات الـ HTTP مع مهلة زمنية ذكية ومعالجة الأخطاء والتنسيق
  */
+const activeETags = new Map();
+
 async function request(endpoint, options = {}) {
   const url = `${API_BASE_URL}/${endpoint.replace(/^\/+/, '')}`;
+  const timeoutMs = options.timeout || 12000;
+  
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+    ...options.headers,
+  };
+
+  // دعم ETag التلقائي للطلبات المشروطة إذا كان مفعلاً
+  if (options.useETag && activeETags.has(url)) {
+    headers['If-None-Match'] = activeETags.get(url);
+  }
+
   const config = {
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-      ...options.headers,
-    },
     ...options,
+    headers,
+    signal: controller.signal,
   };
 
   try {
     const response = await fetch(url, config);
+    clearTimeout(timeoutId);
+
+    // معالجة حالة عدم التغيير HTTP 304 Not Modified
+    if (response.status === 304) {
+      return { notModified: true, status: 304 };
+    }
+
+    // تخزين الـ ETag المستلم للطلبات اللاحقة
+    const etag = response.headers.get('ETag') || response.headers.get('etag');
+    if (etag) {
+      activeETags.set(url, etag);
+    }
+
     if (!response.ok) {
       const errorText = await response.text();
       let errorJson;
       try { errorJson = JSON.parse(errorText); } catch { /* ignore */ }
       throw new Error(errorJson?.error || `HTTP ${response.status}: ${response.statusText}`);
     }
+
     return await response.json();
   } catch (error) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      console.warn(`[ApiClient] Request to ${endpoint} timed out after ${timeoutMs}ms`);
+      throw new Error(`انتهت مهلة الاتصال بالخادم (${timeoutMs / 1000} ثواني)`);
+    }
     console.warn(`[ApiClient] Request to ${endpoint} failed:`, error.message);
     throw error;
   }
 }
 
 // ── 1. دوال إعدادات وبيانات التطبيق الرئيسية (Settings / State) ────────────────
-export async function apiFetchSettings(key = STORAGE_KEY) {
-  const res = await request(`settings?key=${encodeURIComponent(key)}`, { method: 'GET' });
+export async function apiFetchSettings(key = STORAGE_KEY, options = {}) {
+  const res = await request(`settings?key=${encodeURIComponent(key)}`, {
+    method: 'GET',
+    timeout: options.timeout || 10000,
+    useETag: options.useETag || false
+  });
+  if (res?.notModified) return { notModified: true };
   return res?.value || null;
 }
 
-export async function apiSaveSettings(key = STORAGE_KEY, value) {
+export async function apiSaveSettings(key = STORAGE_KEY, value, options = {}) {
   return await request('settings', {
     method: 'POST',
     body: JSON.stringify({ key, value }),
+    timeout: options.timeout || 15000,
+    keepalive: true
   });
 }
 
 // ── 2. فحص الإصدار للمزامنة الخفيفة (Ultra-Fast Smart Polling) ────────────────
-export async function apiFetchVersion(key = STORAGE_KEY) {
-  return await request(`sync/version?key=${encodeURIComponent(key)}`, { method: 'GET' });
+export async function apiFetchVersion(key = STORAGE_KEY, options = {}) {
+  return await request(`sync/version?key=${encodeURIComponent(key)}`, {
+    method: 'GET',
+    timeout: options.timeout || 5000
+  });
 }
 
 // ── 3. دوال البصمات الحيوية (Biometrics / Faces & Hands) ──────────────────────

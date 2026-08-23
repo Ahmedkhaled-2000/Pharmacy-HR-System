@@ -1,12 +1,14 @@
 /**
  * offlineSync.js
  * مزامنة ودمج البيانات بذكاء مع MariaDB & PHP API لحماية البيانات من التداخل والمسح بين الأجهزة
+ * مجهز بتقنيات الـ Ultra-Low Latency, Adaptive Polling, والـ Optimistic UI
  */
 
 import {
   STORAGE_KEY,
   apiFetchSettings,
   apiSaveSettings,
+  apiFetchVersion,
 } from './apiClient';
 import {
   saveStateLocally,
@@ -47,9 +49,12 @@ export function isOnline() {
 }
 
 // ── جلب أحدث نسخة سحابية من MariaDB عبر PHP API ──────────────────────────
-export async function fetchRemoteState() {
+export async function fetchRemoteState(options = {}) {
   try {
-    const rawData = await apiFetchSettings(STORAGE_KEY);
+    const rawData = await apiFetchSettings(STORAGE_KEY, options);
+    if (rawData && rawData.notModified) {
+      return { notModified: true };
+    }
     if (rawData) {
       const parsed = typeof rawData === 'string' ? JSON.parse(rawData) : rawData;
       return normalizeState(parsed);
@@ -65,34 +70,29 @@ export async function smartSaveState(updatedState, options = {}) {
   const { onSyncSuccess, onSyncFail, onQueuedOffline } = options;
   const cleanUpdated = normalizeState(updatedState);
 
-  // 1. حفظ محلي فوري دائماً للنسخ الاحتياطي
+  // 1. تحديث الكاش المحلي وبث التغيير لكافة التبويبات فورياً (0ms)
   await saveStateLocally(cleanUpdated);
+  broadcastStateChange(cleanUpdated);
 
   if (isOnline()) {
     try {
-      // 2. حفظ الحالة مباشرة في MariaDB كمرجع حقيقي وأساسي
-      const finalStateToSave = cleanUpdated;
-
-      // 3. حفظ النسخة في MariaDB
-      const res = await apiSaveSettings(STORAGE_KEY, finalStateToSave);
+      // 2. إرسال النسخة النظيفة إلى السحابة مباشرة
+      const res = await apiSaveSettings(STORAGE_KEY, cleanUpdated, { timeout: 12000 });
 
       if (!res?.success) {
         throw new Error(res?.error || 'Failed to save to MariaDB');
       }
 
-      // 4. تحديث النسخة المحلية وبث التحديث فورياً لكافة التبويبات المفتوحة
-      await saveStateLocally(finalStateToSave);
-      broadcastStateChange(finalStateToSave);
-      onSyncSuccess?.(finalStateToSave);
-      return { success: true, queued: false, mergedState: finalStateToSave };
+      onSyncSuccess?.(cleanUpdated);
+      return { success: true, queued: false, mergedState: cleanUpdated };
     } catch (e) {
       console.error('[Sync] Network/Server error during save:', e);
       await addToPendingQueue({ type: 'SAVE_STATE', state: updatedState });
       onSyncFail?.(e.message);
-      return { success: false, queued: false, error: e.message, mergedState: updatedState };
+      return { success: false, queued: true, error: e.message, mergedState: updatedState };
     }
   } else {
-    // 6. غير متصل: حفظ محلي وجدولة المزامنة عند عودة الإنترنت
+    // 3. غير متصل: جدولة المزامنة عند عودة الإنترنت
     console.log('[Sync] Offline - state saved locally, will merge & sync when online');
     await addToPendingQueue({ type: 'SAVE_STATE', state: updatedState });
     onQueuedOffline?.();
@@ -121,12 +121,18 @@ export async function syncNow(onProgress) {
     const localState = await loadStateLocally();
 
     if (!localState) {
-      return { success: false, reason: 'no_local_data' };
+      const remote = await fetchRemoteState();
+      if (remote && !remote.notModified) {
+        await saveStateLocally(remote);
+        return { success: true, mergedState: remote };
+      }
+      return { success: false, reason: 'no_data' };
     }
 
     // جلب النسخة السحابية ودمجها مع المحلية
     const remoteState = await fetchRemoteState();
-    const mergedState = remoteState ? smartMergeStates(localState, remoteState) : localState;
+    const validRemote = remoteState && !remoteState.notModified ? remoteState : null;
+    const mergedState = validRemote ? smartMergeStates(localState, validRemote) : localState;
 
     const res = await apiSaveSettings(STORAGE_KEY, mergedState);
     if (!res?.success) {
@@ -135,6 +141,7 @@ export async function syncNow(onProgress) {
 
     await saveStateLocally(mergedState);
     await clearPendingQueue();
+    broadcastStateChange(mergedState);
     onProgress?.('تمت المزامنة والدمج بنجاح ✅');
     return { success: true, mergedState };
   } catch (e) {
@@ -165,27 +172,95 @@ export function listenToConnectionChanges(onOnline, onOffline) {
   };
 }
 
-// ── تحميل الحالة: جلب أحدث نسخة سحابية من السحابة مباشرة ───────────
+// ── تحميل الحالة السحابية فائق السرعة مع مهلة ذكية ─────────────────────
 export async function smartLoadState() {
   if (isOnline()) {
     try {
-      const remoteData = await fetchRemoteState();
-      if (remoteData) {
+      // محاولة جلب أحدث نسخة حية من السحابة بمهلة 8 ثوان
+      const remoteData = await fetchRemoteState({ timeout: 8000, useETag: true });
+      
+      if (remoteData && !remoteData.notModified) {
         const normalized = normalizeState(remoteData);
-        // تحديث الكاش المحلي كنسخة احتياطية للقراءة أوفلاين فقط
+        // تحديث الكاش المحلي كنسخة احتياطية
         await saveStateLocally(normalized);
         return { data: normalized, source: 'cloud' };
+      } else if (remoteData && remoteData.notModified) {
+        // لم تتغير البيانات في السحابة -> استخدام الكاش المحلي الفوري
+        const localData = await loadStateLocally();
+        if (localData) {
+          return { data: normalizeState(localData), source: 'cloud_cached_304' };
+        }
       }
     } catch (e) {
-      console.warn('[Sync] Cloud load failed, falling back to local cache:', e);
+      console.warn('[Sync] Cloud load failed or timed out, falling back to local storage:', e);
     }
   }
 
-  // في حالة انقطاع الإنترنت فقط يتم استخدام الكاش المحلي
+  // في حالة انقطاع الإنترنت أو بطء الشبكة الشديد، نعتمد على الكاش المحلي كخيار آمن
   const localData = await loadStateLocally();
   if (localData) {
     return { data: normalizeState(localData), source: 'local_offline' };
   }
 
   return { data: null, source: 'none' };
+}
+
+// ── استطلاع ذكي متكيف في الخلفية (Adaptive Background Smart Polling) ────────
+export function startSmartPolling({ onRemoteUpdate, intervalActive = 15000, intervalIdle = 60000 }) {
+  let lastKnownVersion = null;
+  let timerId = null;
+  let isFetching = false;
+
+  const checkVersion = async () => {
+    if (!isOnline() || isFetching) return;
+    
+    try {
+      isFetching = true;
+      const vRes = await apiFetchVersion(STORAGE_KEY, { timeout: 4000 });
+      const currentVer = vRes?.version || vRes?.updated_at || vRes?.timestamp;
+
+      if (currentVer) {
+        if (lastKnownVersion && currentVer !== lastKnownVersion) {
+          console.log('[Sync Polling] New cloud version detected:', currentVer, 'Old:', lastKnownVersion);
+          const freshData = await fetchRemoteState({ timeout: 7000 });
+          if (freshData && !freshData.notModified) {
+            onRemoteUpdate?.(freshData);
+            await saveStateLocally(freshData);
+          }
+        }
+        lastKnownVersion = currentVer;
+      }
+    } catch (err) {
+      // خطأ صامت في استطلاع الخلفية لتجنب إزعاج المستخدم
+    } finally {
+      isFetching = false;
+    }
+  };
+
+  const scheduleNext = () => {
+    const isVisible = typeof document !== 'undefined' ? document.visibilityState === 'visible' : true;
+    const delay = isVisible ? intervalActive : intervalIdle;
+    timerId = setTimeout(async () => {
+      await checkVersion();
+      scheduleNext();
+    }, delay);
+  };
+
+  // بدء الجدولة
+  scheduleNext();
+
+  // ضبط التوقيت فور عودة التبويب للواجهة
+  const handleVisibilityChange = () => {
+    if (document.visibilityState === 'visible') {
+      clearTimeout(timerId);
+      checkVersion().then(() => scheduleNext());
+    }
+  };
+
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+
+  return () => {
+    clearTimeout(timerId);
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
+  };
 }
