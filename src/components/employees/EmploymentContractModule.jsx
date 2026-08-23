@@ -2,6 +2,48 @@ import React, { useState, useEffect } from 'react';
 import { fmt, todayStr, getEmpDisplayName } from '../../utils/formatters';
 import { triggerDirectPrint } from '../../utils/printHelper';
 
+/**
+ * دالة مساعدة لتحليل نصوص اللائحة إلى أقسام وبنود مرتبة
+ */
+export function parseBylawsIntoSections(text) {
+  if (!text) return [];
+  const clean = text.trim();
+  const lines = clean.split('\n');
+  const sections = [];
+  let currentSection = null;
+
+  const isHeaderLine = (l) => {
+    const trimmed = l.trim();
+    return (
+      /^(\u0623\u0648\u0644\u0627\u064b|\u062b\u0627\u0646\u064a\u0627\u064b|\u062b\u0627\u0644\u062b\u0627\u064b|\u0631\u0627\u0628\u0639\u0627\u064b|\u062e\u0627\u0645\u0633\u0627\u064b|\u0633\u0627\u062f\u0633\u0627\u064b|\u0633\u0627\u0628\u0639\u0627\u064b|\u062b\u0627\u0645\u0646\u0627\u064b|\u062a\u0627\u0633\u0639\u0627\u064b|\u0639\u0627\u0634\u0631\u0627\u064b|\u0627\u0644\u062d\u0627\u062f\u064a\u060c?\s*\u0639\u0634\u0631|\u0627\u0644\u062b\u0627\u0646\u064a\s*\u0639\u0634\u0631|\u0627\u0644\u062b\u0627\u0644\u062b\s*\u0639\u0634\u0631|\u0627\u0644\u0631\u0627\u0628\u0639\s*\u0639\u0634\u0631|\u0627\u0644\u062e\u0627\u0645\u0633\s*\u0639\u0634\u0631|\u0627\u0644\u0628\u0646\u062f|\u0645\u0627\u062f\u0629|\u0627\u0644\u0644\u0627\u0626\u062d\u0629|\u0636\u0648\u0628\u0637|\d+\s*[\.\-\)])/i.test(trimmed)
+    );
+  };
+
+  lines.forEach((line) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed === '------------------------------------------------------------' || trimmed.startsWith('===') || trimmed.startsWith('---')) return;
+
+    if (isHeaderLine(trimmed)) {
+      if (currentSection) {
+        sections.push(currentSection);
+      }
+      currentSection = { title: trimmed, points: [] };
+    } else {
+      if (currentSection) {
+        currentSection.points.push(trimmed);
+      } else {
+        currentSection = { title: 'مقدمة اللائحة العامة', points: [trimmed] };
+      }
+    }
+  });
+
+  if (currentSection) {
+    sections.push(currentSection);
+  }
+
+  return sections;
+}
+
 export default function EmploymentContractModule({
   state,
   setState,
@@ -27,29 +69,91 @@ export default function EmploymentContractModule({
   const taxNumber = orgSettings.taxNumber || '948-284-102';
 
   // Branch Names for selected employee
-  const branchNames = emp?.branchesDetails && emp.branchesDetails.length > 0
+  const isMultiBranch = emp?.branchesDetails && emp.branchesDetails.length > 1;
+  const branchNames = isMultiBranch
     ? emp.branchesDetails.map(bd => {
         const br = (state.branches || []).find(b => String(b.id) === String(bd.branchId));
         return br ? br.name : `فرع ${bd.branchId}`;
       }).join(' + ')
     : ((state.branches || []).find(b => String(b.id) === String(emp?.branchId))?.name || emp?.branchName || 'المركز الرئيسي');
 
-  // Salary breakdown
-  const monthlySalary = parseFloat(emp?.monthlySalary) || (
-    (parseFloat(emp?.salary) || 0) * (parseFloat(emp?.workHoursPerDay) || 8) * (parseFloat(emp?.workDaysPerMonth) || 26)
-  ) || (parseFloat(emp?.salary) || 0);
+  // Target details and accurate base salary calculation
+  const targetBranchDetails = emp?.branchesDetails?.[0] || null;
+  const rateVal = targetBranchDetails ? (parseFloat(targetBranchDetails.salary) || 0) : (parseFloat(emp?.salary) || 0);
+  const workHours = targetBranchDetails ? (parseFloat(targetBranchDetails.workHours || targetBranchDetails.workHoursPerDay) || 8) : (parseFloat(emp?.workHoursPerDay) || 8);
+  const workDays = targetBranchDetails ? (parseFloat(targetBranchDetails.workDays || targetBranchDetails.workDaysPerMonth) || 26) : (parseFloat(emp?.workDaysPerMonth) || 26);
 
-  const workHours = emp?.workHoursPerDay || 8;
-  const workDays = emp?.workDaysPerMonth || 26;
+  const calcDailyRate = workDays > 0 ? (rateVal * workHours) / workDays : 0;
+  const calcHourlyRate = workHours > 0 ? calcDailyRate / workHours : (workDays > 0 ? rateVal / workDays : rateVal);
+
+  const monthlySalary = parseFloat(emp?.monthlySalary) || (
+    isMultiBranch
+      ? emp.branchesDetails.reduce((sum, bd) => {
+          const r = parseFloat(bd.salary) || 0;
+          const h = parseFloat(bd.workHours || bd.workHoursPerDay) || 8;
+          const d = parseFloat(bd.workDays || bd.workDaysPerMonth) || 26;
+          const daily = d > 0 ? (r * h) / d : 0;
+          return sum + (daily * d);
+        }, 0)
+      : (calcDailyRate * workDays)
+  ) || (rateVal * workHours);
+
   const hireDate = emp?.hireDate || emp?.hiring_date || todayStr();
 
   // Official bylaws text from state
   const officialBylawsText = state.bylawsText || `
-1. الالتزام بالحضور والانصراف في المواعيد المقررة وفق نظام البصمة الإلكترونية.
-2. الالتزام بالزي الرسمي والمظهر اللائق وحسن معاملة المرضى والعملاء.
-3. الدقة التامة في تحصيل النقدية وجرد الخزينة وتسليم الورديات.
-4. يمنع سحب أي أدوية بالآجل إلا وفق الإجراءات المعتمدة من الإدارة.
-5. الالتزام بجدول الورديات وعدم التغيب أو ترك العمل بدون إذن رسمي مسبق.
+اللائحة التنظيمية للعمل داخل الفروع:
+حرصاً من إدارة الصيدلية على تنظيم العمل وضمان الانضباط وحماية حقوق الصيدلية وجميع العاملين، تم اعتماد اللائحة التنظيمية التالية:
+
+أولاً: الانضباط العام
+- الالتزام بمواعيد الشيفت المحددة والحضور في الوقت المناسب للاستلام.
+- ممنوع مغادرة مكان العمل بدون إذن المشرف.
+- أي تأخير أو غياب بدون إذن يعد مخالفة إدارية.
+
+ثانياً: احترام التسلسل الإداري
+- أي شكوى أو اعتراض يتم تقديمه لمدير الفرع أولاً.
+- ممنوع تجاوز التسلسل الإداري أو إثارة الشكاوى أمام الزملاء أو العملاء.
+- أي تواصل مباشر مع الإدارة دون المرور على مدير الفرع غير معترف به.
+
+ثالثاً: الالتزام بتعليمات مدير الفرع
+- تعليمات مدير الفرع أو مشرف الشيفت واجبة التنفيذ أثناء العمل.
+- أي ملاحظات يتم مناقشتها بعد انتهاء الخدمة والأسلوب الإداري.
+- ممنوع الجدال أثناء العمل أو أثناء خدمة العملاء.
+
+رابعاً: السلوك المهني داخل الفرع
+- الالتزام بالمستوى المهني اللائق في جميع الأوقات.
+- التحدث مع الزملاء والعملاء بأسلوب محترم وهادئ.
+- ممنوع العصبية أو رفع الصوت أو أي أسلوب غير لائق.
+
+خامساً: التعامل مع العملاء
+- العميل الواقف أمامك له الأولوية القصوى في الخدمة.
+- ممنوع الانشغال بالموبايل أثناء خدمة العملاء.
+- أي مشكلة يتم الرجوع فيها فوراً لمدير الفرع.
+
+سادساً: التواصل مع العملاء (تليفون وواتس)
+- التواصل مع العملاء يتم فقط من خلال تليفون الفرع أو الواتس الرسمي.
+- ممنوع استخدام الهاتف الشخصي أو تبادل أرقام مع العملاء.
+
+سابعاً: الزي الرسمي وبطاقة التعريف
+- الالتزام بالزي الرسمي المعتمد للصيدلية وبطاقة التعريف بشكل واضح.
+- ممنوع العمل بدون زي رسمي أو بطاقة التعريف الشخصية.
+
+ثامناً: المتعلقات الشخصية
+- توضع جميع المتعلقات الشخصية في المكان المخصص لها فقط.
+- ممنوع وجود أي متعلقات داخل منطقة البيع أو على الكاونتر.
+
+تاسعاً: تنظيم وقت الصلاة والمكالمات الشخصية
+- تنظيم وقت الصلاة بما لا يؤثر على سير العمل وبحد أقصى 15 دقيقة.
+- المكالمات الشخصية للضرورة فقط وفي أضيق الحدود.
+
+عاشراً: دخول أفراد من خارج الصيدلية
+- ممنوع دخول أي فرد من خارج الصيدلية تحت أي ظرف، وأي استثناء يكون بموافقة الإدارة فقط.
+
+الحادي عشر: الأكل داخل الفرع
+- يُسمح بالأكل بما لا يؤثر على بيئة العمل وممنوع الأكل بروائح نفاذة أو في تجمعات.
+
+الثاني عشر: استخدام إمكانيات الفرع
+- أجهزة الفرع مخصصة لأغراض العمل فقط.
   `.trim();
 
   // Default contract clauses generator
@@ -148,9 +252,10 @@ export default function EmploymentContractModule({
 
   const handleSaveContract = async () => {
     if (!emp) return;
+
     const performSave = async () => {
       const updatedEmployees = state.employees.map(e => {
-        if (e.id === emp.id) {
+        if (String(e.id) === String(emp.id)) {
           return {
             ...e,
             contractClauses: clauses,
@@ -164,7 +269,7 @@ export default function EmploymentContractModule({
       if (setState) setState(updatedState);
       if (saveState) await saveState(updatedState);
       setIsEditing(false);
-      showToast?.(`✅ تم حفظ نموذج عقد العمل للموظف (${emp.name}) بنجاح`);
+      showToast?.(`✅ تم حفظ بنود عقد العمل للموظف (${emp.name}) بنجاح وإلغاء وضع التعديل`);
     };
 
     if (executeWithOwnerGuard) {
@@ -185,95 +290,127 @@ export default function EmploymentContractModule({
 
     const issueDateStr = new Date().toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' });
     const contractNo = `CNT-${emp.code || emp.id}-${new Date().getFullYear()}`;
+    const bylawsSections = parseBylawsIntoSections(officialBylawsText);
 
     const html = `
-      <div style="max-width: 820px; margin: 0 auto; background: #fff; font-family: 'Cairo', 'Tajawal', sans-serif; line-height: 1.6; color: #0f172a;">
+      <div style="max-width: 820px; margin: 0 auto; background: #fff; font-family: 'Cairo', 'Tajawal', sans-serif; line-height: 1.5; color: #0f172a; font-size: 11.5px;">
         
         <!-- Official Header -->
-        <div style="border-bottom: 3px double #0f766e; padding-bottom: 12px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
+        <div style="border-bottom: 2.5px double #0f766e; padding-bottom: 8px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; page-break-inside: avoid; break-inside: avoid;">
           <div style="text-align: right;">
-            <h2 style="margin: 0; color: #0f766e; font-size: 20px; font-weight: 800;">🏥 ${orgName}</h2>
-            <span style="font-size: 12px; color: #475569; font-weight: 600;">الإدارة العامة والشؤون القانونية والموارد البشرية</span>
-            <div style="font-size: 11px; color: #64748b; margin-top: 2px;">س.ت: ${commercialReg} | ب.ض: ${taxNumber}</div>
+            <h2 style="margin: 0; color: #0f766e; font-size: 18px; font-weight: 800;">🏥 ${orgName}</h2>
+            <span style="font-size: 11px; color: #475569; font-weight: 600;">الإدارة العامة والشؤون القانونية والموارد البشرية</span>
+            <div style="font-size: 10px; color: #64748b; margin-top: 2px;">س.ت: ${commercialReg} | ب.ض: ${taxNumber}</div>
           </div>
           <div style="text-align: center;">
-            <div style="background: #f0fdf4; border: 2px solid #0f766e; padding: 6px 20px; border-radius: 8px;">
-              <h3 style="margin: 0; color: #0f766e; font-size: 16px; font-weight: 800;">عَقْـدُ عَمَـلٍ فَرْدِيّ مُوَحَّـد</h3>
+            <div style="background: #f0fdf4; border: 2px solid #0f766e; padding: 4px 18px; border-radius: 6px;">
+              <h3 style="margin: 0; color: #0f766e; font-size: 14.5px; font-weight: 800;">عَقْـدُ عَمَـلٍ فَرْدِيّ مُوَحَّـد</h3>
             </div>
-            <span style="font-size: 11px; color: #64748b; margin-top: 4px; display: block;">رقم العقد: <strong>${contractNo}</strong></span>
+            <span style="font-size: 10.5px; color: #64748b; margin-top: 3px; display: block;">رقم العقد: <strong>${contractNo}</strong></span>
           </div>
-          <div style="text-align: left; font-size: 11.5px; color: #475569;">
+          <div style="text-align: left; font-size: 10.5px; color: #475569;">
             <div>تاريخ التحرير: <strong>${issueDateStr}</strong></div>
             <div>المدير العام: <strong>${gmName}</strong></div>
           </div>
         </div>
 
+        <!-- Quick Employee Dossier Summary Bar (Matching Page Toolbar) -->
+        <div style="background: #f8fafc; border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 8px 12px; margin-bottom: 10px; font-size: 11px; page-break-inside: avoid; break-inside: avoid;">
+          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; font-size: 10.5px;">
+            <div>الاسم الكامل: <strong style="color: #0f766e;">${emp.name}</strong></div>
+            <div>المسمى الوظيفي: <strong>${emp.jobTitle || '—'}</strong></div>
+            <div>الفرع المعتمد: <strong>${branchNames}</strong></div>
+            <div>الرقم القومي: <strong>${emp.nationalId || emp.national_id || '—'}</strong></div>
+            <div>الراتب الأساسي: <strong style="color: #059669;">${fmt(monthlySalary)} ج.م</strong></div>
+            <div>تاريخ التعيين: <strong>${hireDate}</strong></div>
+            <div>ساعات العمل: <strong>${workHours} س/يوم (${workDays} يوم)</strong></div>
+            <div>فترة الاختبار: <strong style="color: #d97706;">3 أشهر</strong></div>
+          </div>
+        </div>
+
         <!-- Preamble Box -->
-        <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; font-size: 12.5px;">
-          <div style="font-weight: 800; color: #0f766e; margin-bottom: 6px; font-size: 13.5px; border-bottom: 1px dashed #cbd5e1; padding-bottom: 4px;">
+        <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px 12px; margin-bottom: 10px; font-size: 11px; page-break-inside: avoid; break-inside: avoid;">
+          <div style="font-weight: 800; color: #0f766e; margin-bottom: 4px; font-size: 12px; border-bottom: 1px dashed #cbd5e1; padding-bottom: 3px;">
             📜 تمهيد وهوية طرفي التعاقد:
           </div>
-          <p style="margin: 4px 0 6px;">
+          <p style="margin: 3px 0 4px; font-size: 11px;">
             إنه في يوم <strong>${new Date().toLocaleDateString('ar-EG', { weekday: 'long' })}</strong> الموافق <strong>${issueDateStr}</strong>، تم الاتفاق والتراضي بين كل من:
           </p>
-          <div style="margin-bottom: 6px; padding: 6px 10px; background: #fff; border-radius: 6px; border: 1px solid #e2e8f0;">
+          <div style="margin-bottom: 4px; padding: 4px 8px; background: #fff; border-radius: 4px; border: 1px solid #e2e8f0;">
             <strong>الطرف الأول (صاحب العمل):</strong> ${orgName}، ويمثلها قانوناً السيد/ <strong>${gmName}</strong> بصفته (المدير العام)، ومقرها: ${orgAddress}.
           </div>
-          <div style="padding: 6px 10px; background: #fff; border-radius: 6px; border: 1px solid #e2e8f0;">
+          <div style="padding: 4px 8px; background: #fff; border-radius: 4px; border: 1px solid #e2e8f0;">
             <strong>الطرف الثاني (الموظف):</strong> السيد/ <strong>${emp.name}</strong>، الجنسية: مصري، الرقم القومي: <strong>${emp.nationalId || emp.national_id || '—'}</strong>، المؤهل: <strong>${emp.qualification || 'بكالوريوس صيدلة / علوم طبية'}</strong>، الهاتف: <strong>${emp.phone || '—'}</strong>، كود: <strong>${emp.code || '—'}</strong>.
           </div>
-          <p style="margin: 8px 0 0; color: #475569; font-size: 12px;">
+          <p style="margin: 4px 0 0; color: #475569; font-size: 10.5px;">
             ولما كان الطرف الأول يمتلك ويدير مجموعة صيدليات، ورغب في الاستعانة بخبرات الطرف الثاني، فقد اتفق الطرفان بكامل أهليتهما القانونية على البنود والشروط التالية:
           </p>
         </div>
 
-        <!-- Contract Clauses -->
-        <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px;">
-          ${clauses.map((c, i) => `
-            <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 14px;">
-              <h4 style="margin: 0 0 4px; color: #0f766e; font-size: 13px; font-weight: 800;">
+        <!-- Contract Clauses (No page-break split inside clause box) -->
+        <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px;">
+          ${clauses.map((c) => `
+            <div style="page-break-inside: avoid; break-inside: avoid; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 12px;">
+              <h4 style="margin: 0 0 3px; color: #0f766e; font-size: 11.5px; font-weight: 800;">
                 ${c.title}
               </h4>
-              <p style="margin: 0; font-size: 12px; line-height: 1.55; color: #1e293b; text-align: justify;">
+              <p style="margin: 0; font-size: 11px; line-height: 1.5; color: #1e293b; text-align: justify;">
                 ${c.content}
               </p>
             </div>
           `).join('')}
         </div>
 
-        <!-- Attached Bylaws Section if selected -->
+        <!-- Attached Bylaws Section: 2-Column Side-by-Side Compact Table to save paper -->
         ${includeFullBylaws ? `
-          <div style="page-break-inside: avoid; background: #fdfefe; border: 1px solid #99f6e4; border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 11.5px;">
-            <div style="font-weight: 800; color: #0f766e; margin-bottom: 6px; font-size: 12.5px; border-bottom: 1px dashed #99f6e4; padding-bottom: 4px;">
-              📋 ملحق نصوص وسياسات لائحة العمل والجزاءات المعتمدة للصيدلية:
+          <div style="page-break-inside: avoid; break-inside: avoid; border: 1.5px solid #0f766e; border-radius: 8px; overflow: hidden; margin-top: 10px; margin-bottom: 12px;">
+            <div style="background: #f0fdf4; padding: 6px 12px; border-bottom: 1.5px solid #0f766e; display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-weight: 800; color: #0f766e; font-size: 11.5px;">📋 ملحق نصوص وسياسات لائحة العمل والجزاءات المعتمدة للصيدلية (${bylawsSections.length} بنود):</span>
+              <span style="font-size: 10px; color: #166534; font-weight: bold;">(جزء لا يتجزأ ومتمم لبنود العقد)</span>
             </div>
-            <pre style="font-family: 'Cairo', sans-serif; font-size: 11px; color: #334155; white-space: pre-wrap; margin: 0; line-height: 1.5;">${officialBylawsText}</pre>
+            <div style="padding: 8px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: #ffffff;">
+              ${bylawsSections.map(sec => `
+                <div style="border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 8px; background: #f8fafc; font-size: 9.5px; page-break-inside: avoid; break-inside: avoid;">
+                  <div style="font-weight: 800; color: #0f766e; border-bottom: 1px dashed #cbd5e1; padding-bottom: 3px; margin-bottom: 3px; font-size: 10px;">
+                    ${sec.title}
+                  </div>
+                  <div style="color: #334155; line-height: 1.4;">
+                    ${sec.points.map(p => `
+                      <div style="display: flex; gap: 4px; align-items: flex-start; margin-bottom: 2px;">
+                        <span style="color: #0f766e; font-size: 8px; margin-top: 2px;">▪</span>
+                        <span>${p}</span>
+                      </div>
+                    `).join('')}
+                  </div>
+                </div>
+              `).join('')}
+            </div>
           </div>
         ` : ''}
 
         <!-- Signatures & Witness Block -->
-        <div style="page-break-inside: avoid; border-top: 2px solid #cbd5e1; padding-top: 14px; margin-top: 18px;">
-          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; text-align: center; font-size: 12px;">
+        <div style="page-break-inside: avoid; break-inside: avoid; border-top: 2px solid #cbd5e1; padding-top: 10px; margin-top: 12px;">
+          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; text-align: center; font-size: 11px;">
             
-            <div style="border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px; background: #f8fafc;">
-              <div style="font-weight: 800; color: #0f172a; margin-bottom: 30px;">توقيع الطرف الأول (صاحب العمل)</div>
-              <div style="border-top: 1px dotted #94a3b8; padding-top: 4px; font-size: 11.5px;">
+            <div style="border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px; background: #f8fafc;">
+              <div style="font-weight: 800; color: #0f172a; margin-bottom: 24px;">توقيع الطرف الأول (صاحب العمل)</div>
+              <div style="border-top: 1px dotted #94a3b8; padding-top: 3px; font-size: 10.5px;">
                 <strong>${gmName}</strong>
-                <div style="color: #64748b; font-size: 10.5px;">(المدير العام والختم الرسمي)</div>
+                <div style="color: #64748b; font-size: 9.5px;">(المدير العام والختم الرسمي)</div>
               </div>
             </div>
 
-            <div style="border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px; background: #f8fafc;">
-              <div style="font-weight: 800; color: #0f172a; margin-bottom: 30px;">توقيع الطرف الثاني (الموظف)</div>
-              <div style="border-top: 1px dotted #94a3b8; padding-top: 4px; font-size: 11.5px;">
+            <div style="border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px; background: #f8fafc;">
+              <div style="font-weight: 800; color: #0f172a; margin-bottom: 24px;">توقيع الطرف الثاني (الموظف)</div>
+              <div style="border-top: 1px dotted #94a3b8; padding-top: 3px; font-size: 10.5px;">
                 <strong>${emp.name}</strong>
-                <div style="color: #64748b; font-size: 10.5px;">(التوقيع وبصمة الإبهام)</div>
+                <div style="color: #64748b; font-size: 9.5px;">(التوقيع وبصمة الإبهام)</div>
               </div>
             </div>
 
-            <div style="border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px; background: #f8fafc;">
-              <div style="font-weight: 800; color: #0f172a; margin-bottom: 30px;">الشهود والاعتماد القانوني</div>
-              <div style="border-top: 1px dotted #94a3b8; padding-top: 4px; font-size: 11px; text-align: right; padding-right: 6px;">
+            <div style="border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px; background: #f8fafc;">
+              <div style="font-weight: 800; color: #0f172a; margin-bottom: 24px;">الشهود والاعتماد القانوني</div>
+              <div style="border-top: 1px dotted #94a3b8; padding-top: 3px; font-size: 10px; text-align: right; padding-right: 4px;">
                 <div>شاهد 1: .............................</div>
                 <div>شاهد 2: .............................</div>
               </div>
@@ -336,7 +473,7 @@ export default function EmploymentContractModule({
                 type="button"
                 className="btn btn-start"
                 onClick={handleSaveContract}
-                style={{ padding: '8px 16px', background: 'var(--primary)', color: '#fff', borderRadius: '8px', fontWeight: 'bold' }}
+                style={{ padding: '8px 16px', background: '#0f766e', color: '#fff', borderRadius: '8px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}
               >
                 💾 حفظ بنود العقد
               </button>
@@ -443,7 +580,7 @@ export default function EmploymentContractModule({
         </div>
 
         {/* Dynamic Clauses */}
-        {clauses.map((clause, idx) => (
+        {clauses.map((clause) => (
           <div
             key={clause.id}
             style={{
@@ -521,13 +658,27 @@ export default function EmploymentContractModule({
 
             {/* If Clause 7: Adherence to Bylaws, show preview of official bylaws text */}
             {clause.id === 'c7' && (
-              <div style={{ marginTop: '10px', background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: '8px', padding: '10px 14px' }}>
-                <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#0f766e', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <div style={{ marginTop: '12px', background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: '8px', padding: '12px 16px' }}>
+                <div style={{ fontSize: '12.5px', fontWeight: 'bold', color: '#0f766e', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <span>📋</span> نصوص وسياسات لائحة العمل الرسمية المعتمدة للصيدلية (مستدعاة تلقائياً من صفحة اللائحة):
                 </div>
-                <pre style={{ margin: 0, fontSize: '11.5px', color: '#334155', fontFamily: 'Tajawal, Cairo, sans-serif', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
-                  {officialBylawsText}
-                </pre>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '8px' }}>
+                  {parseBylawsIntoSections(officialBylawsText).map((sec, sIdx) => (
+                    <div key={sIdx} style={{ background: '#fff', border: '1px solid #ccfbf1', borderRadius: '6px', padding: '8px 10px', fontSize: '11.5px' }}>
+                      <div style={{ fontWeight: 'bold', color: '#0f766e', marginBottom: '4px', borderBottom: '1px dashed #99f6e4', paddingBottom: '2px' }}>
+                        {sec.title}
+                      </div>
+                      <div style={{ color: '#334155', lineHeight: 1.4 }}>
+                        {sec.points.map((p, pIdx) => (
+                          <div key={pIdx} style={{ display: 'flex', gap: '4px', alignItems: 'flex-start', marginBottom: '2px' }}>
+                            <span style={{ color: '#0f766e', fontSize: '9px', marginTop: '2px' }}>▪</span>
+                            <span>{p}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
