@@ -3,7 +3,8 @@ import {
   DEFAULT_DISCIPLINARY_CATEGORIES,
   getEmployeeDailyRate,
   calculateViolationCounter,
-  getEmployeeDisciplinarySummary
+  getEmployeeDisciplinarySummary,
+  resolveDisciplinaryCategory
 } from '../../utils/disciplinaryPenaltyEngine';
 import { computeLatenessFinancialAmount } from '../../utils/latePenaltyEngine';
 import { getEmpDisplayName } from '../../utils/formatters';
@@ -122,6 +123,10 @@ export default function DisciplinaryPenaltiesTab({
           }
         }
 
+        const cat = resolveDisciplinaryCategory(r, policy);
+        const rawTitle = r.ruleTitle || r.actionTitle || (r.subType === 'lateness' ? `تأخير عن الشيفت (${r.latenessMinutes || ''} د)` : r.reason) || 'مخالفة لائحية';
+        const cleanTitle = String(rawTitle).replace(/^CAT_ADMIN_PENALTY\s*/i, '').replace(/^late_[a-z0-9_]+\s*/i, '');
+
         list.push({
           id: r.id,
           employeeId: r.employeeId,
@@ -129,17 +134,17 @@ export default function DisciplinaryPenaltiesTab({
           employeeCode: r.employeeCode || emp?.code || '—',
           branchId: r.branchId || emp?.branchId,
           branchName: bObj?.name || 'الفرع الرئيسي',
-          categoryId: r.categoryId || r.categoryCode || 'CAT_A',
-          categoryCode: r.categoryCode || r.categoryId || 'CAT_A',
-          categoryName: r.categoryName || r.category || 'انضباط ولائحة',
-          ruleTitle: r.ruleTitle || r.actionTitle || (r.subType === 'lateness' ? `تأخير عن الشيفت (${r.latenessMinutes || ''} د)` : r.reason) || 'مخالفة لائحية',
+          categoryId: cat.id,
+          categoryCode: cat.code,
+          categoryName: cat.name,
+          ruleTitle: cleanTitle,
           actionTitle: r.actionTitle || (r.deductionDays ? `خصم ${r.deductionDays} يوم` : 'تنبيه موثق'),
           occurrenceNumber: r.occurrenceNumber || 1,
           deductionDays: r.deductionDays || (r.impactType === 'deduction_days' ? (parseFloat(r.impactVal) || 0) : 0),
           amount: amount,
           date: r.date || (r.createdAt ? r.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10)),
           createdAt: r.createdAt || new Date().toISOString(),
-          reason: r.reason || r.ruleTitle || r.details || 'مخالفة لائحية',
+          reason: (r.reason || r.ruleTitle || r.details || 'مخالفة لائحية').replace(/^CAT_ADMIN_PENALTY\s*/i, ''),
           status: r.status || (r.adminApproved ? 'approved' : 'pending_admin'),
           adminApproved: r.adminApproved || r.status === 'approved',
           objection: r.objection || null,
@@ -163,6 +168,8 @@ export default function DisciplinaryPenaltiesTab({
       const dayAmt = computeLatenessFinancialAmount(inc.deductionMinutes || 0, emp, inc.branchId);
       const incAmount = dayAmt > 0 ? dayAmt : (parseFloat(inc.penaltyAmount) || 0);
 
+      const cat = resolveDisciplinaryCategory({ sourceType: 'late_incident', ...inc }, policy);
+
       list.push({
         id: inc.id,
         employeeId: inc.employeeId,
@@ -170,10 +177,10 @@ export default function DisciplinaryPenaltiesTab({
         employeeCode: inc.employeeCode || emp?.code || '—',
         branchId: inc.branchId || emp?.branchId,
         branchName: inc.branchName || bObj?.name || 'الفرع الرئيسي',
-        categoryId: inc.tierId || inc.tierKey || 'CAT_LATE',
-        categoryCode: inc.tierKey || inc.tierId || 'CAT_LATE',
-        categoryName: `⏱️ تأخيرات الورديات (${inc.tierName || 'اللائحة'})`,
-        ruleTitle: `تأخير عن الشيفت (${inc.lateMinutes || 0} دقيقة) - ${inc.tierName || ''}`,
+        categoryId: cat.id,
+        categoryCode: cat.code,
+        categoryName: cat.name,
+        ruleTitle: `تأخير عن موعد الوردية (${inc.lateMinutes || 0} دقيقة) - ${inc.tierName || 'لائحة التأخير'}`,
         actionTitle: inc.actionLabel || `خصم ${inc.deductionMinutes || 0} دقيقة`,
         occurrenceNumber: inc.occurrenceNumber || 1,
         deductionMinutes: inc.deductionMinutes || 0,
@@ -190,9 +197,26 @@ export default function DisciplinaryPenaltiesTab({
       });
     });
 
-    // 3. Adjustments (الخصومات والجزاءات الإدارية المباشرة)
+    // 3. Adjustments (الخصومات والجزاءات الإدارية المباشرة - مع استبعاد السلف والأدوية والأقساط)
     (state.adjustments || []).forEach((a) => {
       if (a.type !== 'penalty' && a.type !== 'deduction') return;
+      
+      const reasonLower = (a.reason || a.description || a.details || '').toLowerCase();
+      if (
+        a.isLoan ||
+        a.loanId ||
+        a.type === 'loan' ||
+        a.type === 'loan_installment' ||
+        a.type === 'meds' ||
+        reasonLower.includes('سلفة') ||
+        reasonLower.includes('سلفه') ||
+        reasonLower.includes('قسط') ||
+        reasonLower.includes('أدوية') ||
+        reasonLower.includes('ادوية')
+      ) {
+        return;
+      }
+
       if (isEmployee && currentEmpId && String(a.employeeId) !== String(currentEmpId)) return;
       if (isBranch && currentBranchId && String(a.branchId) !== String(currentBranchId) && !scopedEmpIds.has(String(a.employeeId))) return;
 
@@ -203,6 +227,10 @@ export default function DisciplinaryPenaltiesTab({
 
       const emp = allEmployeesList.find((e) => String(e.id) === String(a.employeeId));
       const bObj = (state.branches || []).find((b) => String(b.id) === String(a.branchId || emp?.branchId));
+      const cat = resolveDisciplinaryCategory(a, policy);
+
+      const rawTitle = a.reason || a.description || 'خصم إداري مباشر';
+      const cleanTitle = String(rawTitle).replace(/^CAT_ADMIN_PENALTY\s*/i, '').replace(/^late_[a-z0-9_]+\s*/i, '');
 
       list.push({
         id: a.id,
@@ -211,16 +239,16 @@ export default function DisciplinaryPenaltiesTab({
         employeeCode: a.employeeCode || emp?.code || '—',
         branchId: a.branchId || emp?.branchId,
         branchName: bObj?.name || 'الفرع الرئيسي',
-        categoryId: 'CAT_ADMIN_PENALTY',
-        categoryCode: 'CAT_ADMIN_PENALTY',
-        categoryName: '🏷️ جزاءات وخصومات إدارية',
-        ruleTitle: a.reason || a.description || 'خصم إداري مباشر',
+        categoryId: cat.id,
+        categoryCode: cat.code,
+        categoryName: cat.name,
+        ruleTitle: cleanTitle,
         actionTitle: 'خصم مالي مباشر',
         occurrenceNumber: 1,
         amount: parseFloat(a.amount) || 0,
         date: a.date || (a.createdAt ? a.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10)),
         createdAt: a.createdAt || a.date,
-        reason: a.reason || a.description || 'خصم إداري',
+        reason: cleanTitle,
         status: 'approved',
         adminApproved: true,
         objection: a.objection || null,
@@ -229,7 +257,7 @@ export default function DisciplinaryPenaltiesTab({
     });
 
     return list.sort((a, b) => (b.date || b.createdAt || '').localeCompare(a.date || a.createdAt || ''));
-  }, [state.requests, state.lateIncidents, state.adjustments, state.branches, isEmployee, currentEmpId, isBranch, currentBranchId, scopedEmpIds, allEmployeesList]);
+  }, [state.requests, state.lateIncidents, state.adjustments, state.branches, isEmployee, currentEmpId, isBranch, currentBranchId, scopedEmpIds, allEmployeesList, policy]);
 
   // 3. Filtered penalties for records and reports
   const filteredPenalties = useMemo(() => {
@@ -1518,8 +1546,8 @@ export default function DisciplinaryPenaltiesTab({
               .map((emp) => {
                 const bObj = branches.find((b) => String(b.id) === String(emp.branchId));
                 const dailyRate = getEmployeeDailyRate(emp, currentBranchId || emp.branchId);
-                const summary = getEmployeeDisciplinarySummary(emp.id, state.requests || [], policy);
                 const empPenalties = allDisciplinaryPenalties.filter((p) => String(p.employeeId) === String(emp.id));
+                const summary = getEmployeeDisciplinarySummary(emp.id, allDisciplinaryPenalties, policy);
                 const isExpanded = expandedEmpId === emp.id;
 
                 const activeViolationsCount = Object.values(summary).reduce((sum, c) => sum + c.activeCount, 0);
@@ -1661,11 +1689,28 @@ export default function DisciplinaryPenaltiesTab({
                               {empPenalties.map((p) => {
                                 const isApproved = p.status === 'approved' || p.adminApproved;
                                 const isCancelled = p.status === 'cancelled' || p.isCancelled;
+                                const cat = resolveDisciplinaryCategory(p, policy);
+                                const cleanTitle = String(p.ruleTitle || p.reason || 'مخالفة لائحية')
+                                  .replace(/^CAT_ADMIN_PENALTY\s*/i, '')
+                                  .replace(/^late_[a-z0-9_]+\s*/i, '');
+
                                 return (
                                   <tr key={p.id} style={{ opacity: isCancelled ? 0.6 : 1 }}>
                                     <td>{p.date}</td>
                                     <td>
-                                      <span className="badge badge-primary">{p.categoryCode}</span> {p.ruleTitle}
+                                      <span
+                                        className="badge badge-primary"
+                                        style={{
+                                          background: cat.color || '#0284c7',
+                                          color: '#ffffff',
+                                          fontSize: '11px',
+                                          fontWeight: 'bold',
+                                          padding: '2px 8px'
+                                        }}
+                                      >
+                                        فئة {cat.code}
+                                      </span>{' '}
+                                      <span style={{ fontSize: '12.5px' }}>{cleanTitle}</span>
                                     </td>
                                     <td>المرة {p.occurrenceNumber || 1}</td>
                                     <td><strong>{p.actionTitle}</strong></td>
@@ -1807,6 +1852,11 @@ export default function DisciplinaryPenaltiesTab({
                     const hasObjection = Boolean(pen.objection);
                     const objStatus = pen.objection?.status;
 
+                    const cat = resolveDisciplinaryCategory(pen, policy);
+                    const cleanTitle = String(pen.ruleTitle || pen.reason || 'مخالفة لائحية')
+                      .replace(/^CAT_ADMIN_PENALTY\s*/i, '')
+                      .replace(/^late_[a-z0-9_]+\s*/i, '');
+
                     return (
                       <tr key={pen.id} style={{ opacity: isCancelled ? 0.6 : 1 }}>
                         <td>{pen.date}</td>
@@ -1818,8 +1868,19 @@ export default function DisciplinaryPenaltiesTab({
                         </td>
                         <td>{bObj?.name || 'الفرع الرئيسي'}</td>
                         <td>
-                          <span className="badge badge-primary">{pen.categoryCode || '—'}</span>
-                          <strong style={{ display: 'block', fontSize: '12.5px', marginTop: '2px' }}>{pen.ruleTitle}</strong>
+                          <span
+                            className="badge badge-primary"
+                            style={{
+                              background: cat.color || '#0284c7',
+                              color: '#ffffff',
+                              fontSize: '11px',
+                              fontWeight: 'bold',
+                              padding: '2px 8px'
+                            }}
+                          >
+                            فئة {cat.code}
+                          </span>
+                          <strong style={{ display: 'block', fontSize: '12.5px', marginTop: '2px' }}>{cleanTitle}</strong>
                           {pen.isOverride && (
                             <span className="badge badge-danger" style={{ fontSize: '10px', marginTop: '2px' }}>⚡ تجاوز تلقائي</span>
                           )}

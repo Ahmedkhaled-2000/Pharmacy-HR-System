@@ -82,6 +82,34 @@ export default function DisciplinaryViolationModal({
     }
   }, [selectedCategory]);
 
+  // التجميع الشامل لكافة السجلات والمخالفات السابقة للموظف لحساب العداد بدقة
+  const allViolationHistory = useMemo(() => {
+    const list = [...(state.requests || [])];
+    (state.lateIncidents || []).forEach((inc) => {
+      if (inc.status !== 'cancelled' && inc.status !== 'approved_permission_exempt') {
+        list.push({ ...inc, sourceType: 'late_incident' });
+      }
+    });
+    (state.adjustments || []).forEach((a) => {
+      if (a.type === 'penalty' || a.type === 'deduction') {
+        const reasonLower = (a.reason || a.description || a.details || '').toLowerCase();
+        if (
+          !a.isLoan &&
+          !a.loanId &&
+          !a.type?.includes('loan') &&
+          !reasonLower.includes('سلفة') &&
+          !reasonLower.includes('سلفه') &&
+          !reasonLower.includes('قسط') &&
+          !reasonLower.includes('أدوية') &&
+          !reasonLower.includes('ادوية')
+        ) {
+          list.push({ ...a, sourceType: 'adjustment' });
+        }
+      }
+    });
+    return list;
+  }, [state.requests, state.lateIncidents, state.adjustments]);
+
   // Calculation of Occurrence Counter & Suggested Action
   const counterResult = useMemo(() => {
     if (!selectedEmpId || !selectedCategoryId) return null;
@@ -89,10 +117,10 @@ export default function DisciplinaryViolationModal({
       employeeId: selectedEmpId,
       categoryId: selectedCategoryId,
       ruleId: selectedRuleId,
-      allRequests: state.requests || [],
+      allRequests: allViolationHistory,
       disciplinaryPolicy: policy
     });
-  }, [selectedEmpId, selectedCategoryId, selectedRuleId, state.requests, policy]);
+  }, [selectedEmpId, selectedCategoryId, selectedRuleId, allViolationHistory, policy]);
 
   const dailyRate = useMemo(() => {
     return getEmployeeDailyRate(selectedEmp, currentBranchId || selectedEmp?.branchId);

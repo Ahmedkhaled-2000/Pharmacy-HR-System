@@ -227,6 +227,89 @@ export const DEFAULT_DISCIPLINARY_CATEGORIES = [
 ];
 
 /**
+ * حل وتحديد الفئة التأديبية القياسية (A إلى J) لأي مخالفة أو واقعة تأخير أو جزاء إداري
+ */
+export function resolveDisciplinaryCategory(pen, disciplinaryPolicy = DEFAULT_DISCIPLINARY_CATEGORIES) {
+  const policy = disciplinaryPolicy || DEFAULT_DISCIPLINARY_CATEGORIES;
+  if (!pen) return policy[0] || DEFAULT_DISCIPLINARY_CATEGORIES[0];
+
+  // 1. فحص الكود أو المعرف المباشر
+  const rawCatId = String(pen.categoryId || pen.categoryCode || pen.tierId || pen.tierKey || '').trim();
+  const directMatch = policy.find(
+    (c) =>
+      c.id === rawCatId ||
+      c.code === rawCatId ||
+      c.code === rawCatId.replace('CAT_', '') ||
+      c.id === `cat_${rawCatId}` ||
+      c.id === `cat_${rawCatId.toLowerCase()}`
+  );
+  if (directMatch) return directMatch;
+
+  // 2. تحليل الكلمات الدلالية من نص المخالفة والسبب
+  const text = `${pen.ruleTitle || ''} ${pen.reason || ''} ${pen.details || ''} ${pen.actionTitle || ''} ${pen.categoryName || ''} ${pen.category || ''}`.toLowerCase();
+
+  // أ. الحضور والانصراف والتأخيرات ومواعيد الوردية -> الفئة A
+  if (
+    pen.sourceType === 'late_incident' ||
+    pen.subType === 'lateness' ||
+    pen.type === 'early_exit' ||
+    rawCatId.startsWith('late_') ||
+    text.includes('تأخير') ||
+    text.includes('انصراف') ||
+    text.includes('حضور') ||
+    text.includes('شيفت') ||
+    text.includes('بصمة') ||
+    text.includes('مواعيد') ||
+    text.includes('وردية')
+  ) {
+    return policy.find((c) => c.code === 'A' || c.id === 'cat_admin_simple') || policy[0];
+  }
+
+  // ب. نظافة الفرع وترتيب مكان العمل -> الفئة F
+  if (text.includes('نظافة') || text.includes('نظافه') || text.includes('ترتيب') || text.includes('مكان العمل')) {
+    return policy.find((c) => c.code === 'F' || c.id === 'cat_workplace_cleanliness') || policy[5] || policy[0];
+  }
+
+  // ج. المظهر العام والزي الرسمي -> الفئة E
+  if (text.includes('مظهر') || text.includes('زي') || text.includes('يونيفورم') || text.includes('لائق') || text.includes('هندام')) {
+    return policy.find((c) => c.code === 'E' || c.id === 'cat_appearance') || policy[4] || policy[0];
+  }
+
+  // د. التعليمات والأوامر الإدارية -> الفئة B
+  if (text.includes('تعليمات') || text.includes('أوامر') || text.includes('مسؤول') || text.includes('إجراءات')) {
+    return policy.find((c) => c.code === 'B' || c.id === 'cat_instructions') || policy[1] || policy[0];
+  }
+
+  // هـ. العهدة والخزينة والكاشير والجرد والإهمال -> الفئة D
+  if (text.includes('خزينة') || text.includes('كاشير') || text.includes('جرد') || text.includes('عهدة') || text.includes('إهمال') || text.includes('تقصير')) {
+    return policy.find((c) => c.code === 'D' || c.id === 'cat_negligence') || policy[3] || policy[0];
+  }
+
+  // و. التعامل مع العملاء والمرضى -> الفئة H
+  if (text.includes('عملاء') || text.includes('جمهور') || text.includes('مرضى') || text.includes('زبائن') || text.includes('شكوى')) {
+    return policy.find((c) => c.code === 'H' || c.id === 'cat_customers_treatment') || policy[7] || policy[0];
+  }
+
+  // ز. التسعير والصرف الدوائي والروشتات -> الفئة I
+  if (text.includes('تسعير') || text.includes('صرف') || text.includes('دواء') || text.includes('أدوية') || text.includes('روشتة')) {
+    return policy.find((c) => c.code === 'I' || c.id === 'cat_pricing_dispensing') || policy[8] || policy[0];
+  }
+
+  // ح. الهاتف والأجهزة الشخصية -> الفئة C
+  if (text.includes('هاتف') || text.includes('موبايل') || text.includes('أجهزة') || text.includes('جوال') || text.includes('سوشيال')) {
+    return policy.find((c) => c.code === 'C' || c.id === 'cat_phone_devices') || policy[2] || policy[0];
+  }
+
+  // ط. الأمانة والمخالفات الجسيمة -> الفئة J
+  if (text.includes('أمانة') || text.includes('سرقة') || text.includes('تزوير') || text.includes('مشاجرة') || text.includes('جسيمة') || text.includes('اختلاس')) {
+    return policy.find((c) => c.code === 'J' || c.id === 'cat_grave_misconduct') || policy[9] || policy[0];
+  }
+
+  // الافتراضي: الفئة A
+  return policy[0] || DEFAULT_DISCIPLINARY_CATEGORIES[0];
+}
+
+/**
  * حساب سعر اليوم الأساسي للموظف وفق معادلة النظام الحالية
  */
 export function getEmployeeDailyRate(employee, branchId = null) {
@@ -276,25 +359,21 @@ export function calculateViolationCounter({
     };
   }
 
-  const category = (disciplinaryPolicy || DEFAULT_DISCIPLINARY_CATEGORIES).find((c) => c.id === categoryId) || DEFAULT_DISCIPLINARY_CATEGORIES[0];
+  const category = (disciplinaryPolicy || DEFAULT_DISCIPLINARY_CATEGORIES).find((c) => c.id === categoryId || c.code === categoryId || c.id === `cat_${categoryId}`) || DEFAULT_DISCIPLINARY_CATEGORIES[0];
   const rule = ruleId ? (category.rules || []).find((r) => r.id === ruleId) : null;
 
   // استخراج كافة المخالفات السابقة المعتمدة لنفس الموظف ونفس الفئة
   const empCategoryHistory = (allRequests || []).filter((r) => {
     if (String(r.employeeId) !== String(employeeId)) return false;
     if (r.status === 'cancelled' || r.status === 'rejected' || r.isCancelled) return false;
-    // التحقق من نفس الفئة أو الكود أو الاسم
-    const isSameCategory =
-      r.categoryId === categoryId ||
-      r.categoryCode === category.code ||
-      r.categoryName === category.name ||
-      (categoryId === 'CAT_LATE' && (r.sourceType === 'late_incident' || r.subType === 'lateness')) ||
-      (category.code === 'CAT_A' && (r.categoryId === 'CAT_A' || r.categoryCode === 'CAT_A'));
-    return isSameCategory;
+    
+    // حل الفئة التأديبية بدقة
+    const resolvedCat = resolveDisciplinaryCategory(r, disciplinaryPolicy);
+    return resolvedCat && (resolvedCat.id === category.id || resolvedCat.code === category.code);
   });
 
   // الترتيب زمنيًا من الأقدم للأحدث
-  empCategoryHistory.sort((a, b) => (a.createdAt || a.date || '').localeCompare(b.createdAt || b.date || ''));
+  empCategoryHistory.sort((a, b) => (a.createdAt || a.date || '').localeCompare(a.createdAt || b.date || ''));
 
   const effectiveResetMonths = category.resetMonths !== undefined ? category.resetMonths : resetPeriodMonths;
   let activeHistory = [];
