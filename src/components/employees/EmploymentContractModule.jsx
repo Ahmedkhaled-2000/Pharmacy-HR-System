@@ -573,24 +573,24 @@ export default function EmploymentContractModule({
 
             {/* If Clause 7: Adherence to Bylaws, show preview of official bylaws structured sections */}
             {clause.id === 'c7' && (
-              <div style={{ marginTop: '14px', background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: '12px', padding: '16px 18px', boxShadow: '0 1px 4px rgba(0,0,0,0.02)' }}>
-                <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#0f766e', marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+              <div style={{ marginTop: '14px', background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: '12px', padding: '16px 18px', boxShadow: '0 1px 4px rgba(0,0,0,0.02)', width: '100%', boxSizing: 'border-box' }}>
+                <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#0f766e', marginBottom: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <span>📋</span> نصوص وسياسات لائحة العمل الرسمية المعتمدة للصيدلية (مستدعاة تلقائياً من صفحة اللائحة):
                   </div>
-                  <span style={{ background: '#ccfbf1', color: '#0f766e', border: '1px solid #99f6e4', padding: '2px 10px', borderRadius: '99px', fontSize: '11.5px', fontWeight: 'bold' }}>
-                    {bylawsSections.length} بنود معتمدة
+                  <span style={{ background: '#ccfbf1', color: '#0f766e', border: '1px solid #99f6e4', padding: '3px 12px', borderRadius: '99px', fontSize: '12px', fontWeight: 'bold' }}>
+                    {bylawsSections.length} بنود وسياسات معتمدة
                   </span>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '10px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '12px', width: '100%', boxSizing: 'border-box' }}>
                   {bylawsSections.map((sec, sIdx) => {
                     const isPreamble = sec.category === 'preamble' || sec.title?.includes('مقدمة') || sec.title?.includes('تمهيد');
                     return (
-                      <div key={sec.id || sIdx} style={{ background: '#ffffff', border: `1px solid ${isPreamble ? '#99f6e4' : '#e2e8f0'}`, borderRadius: '8px', padding: '10px 12px', fontSize: '12px', boxShadow: '0 1px 2px rgba(0,0,0,0.02)' }}>
-                        <div style={{ fontWeight: 'bold', color: '#0f766e', marginBottom: '6px', borderBottom: '1px dashed #99f6e4', paddingBottom: '4px', fontSize: '12px' }}>
+                      <div key={sec.id || sIdx} style={{ background: '#ffffff', border: `1px solid ${isPreamble ? '#99f6e4' : '#e2e8f0'}`, borderRadius: '10px', padding: '12px 14px', fontSize: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.03)', minWidth: 0 }}>
+                        <div style={{ fontWeight: 'bold', color: '#0f766e', marginBottom: '8px', borderBottom: '1px dashed #99f6e4', paddingBottom: '4px', fontSize: '12.5px' }}>
                           {sec.title}
                         </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', color: '#334155', lineHeight: 1.45 }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', color: '#334155', lineHeight: 1.45 }}>
                           {(sec.points || []).map((p, pIdx) => {
                             const pStr = String(p || '').trim();
                             const isWarning = pStr.startsWith('❌');
@@ -598,7 +598,7 @@ export default function EmploymentContractModule({
                             const cleanP = pStr.replace(/^❌\s*/, '').replace(/^✔️\s*/, '').replace(/^▪\s*/, '').replace(/^\-\s*/, '');
                             return (
                               <div key={pIdx} style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
-                                <span style={{ fontSize: '10px', marginTop: '1.5px', color: isWarning ? '#dc2626' : isObligation ? '#16a34a' : '#0f766e' }}>
+                                <span style={{ fontSize: '11px', marginTop: '1px', color: isWarning ? '#dc2626' : isObligation ? '#16a34a' : '#0f766e' }}>
                                   {isWarning ? '❌' : isObligation ? '✔️' : '▪'}
                                 </span>
                                 <span style={{ color: isWarning ? '#991b1b' : isObligation ? '#166534' : '#334155' }}>

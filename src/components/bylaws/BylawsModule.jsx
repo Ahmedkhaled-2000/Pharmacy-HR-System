@@ -612,24 +612,97 @@ export default function BylawsModule({
           </p>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{
-            background: activeTab === 'disciplinary_penalties' ? '#fef2f2' : activeTab === 'late_penalties' ? '#f0fdf4' : activeTab === 'records' ? '#eff6ff' : '#f8fafc',
-            color: activeTab === 'disciplinary_penalties' ? '#dc2626' : activeTab === 'late_penalties' ? '#166534' : activeTab === 'records' ? '#1e40af' : '#475569',
-            border: `1px solid ${activeTab === 'disciplinary_penalties' ? '#fecaca' : activeTab === 'late_penalties' ? '#86efac' : activeTab === 'records' ? '#bfdbfe' : '#cbd5e1'}`,
-            padding: '6px 14px',
-            borderRadius: '99px',
-            fontSize: '13px',
-            fontWeight: 800,
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px'
-          }}>
-            {activeTab === 'disciplinary_penalties' && '⚖️ لائحة الجزاءات التأديبية وعداد التكرار'}
-            {activeTab === 'text' && '📖 نصوص اللائحة الرسمية'}
-            {activeTab === 'records' && '📋 سجل الجزاءات والخصومات'}
-            {activeTab === 'late_penalties' && '⏱️ سياسة جزاءات التأخير وحساب التأخيرات'}
-          </span>
+        {/* Interactive Tabs Switcher Bar */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', background: 'var(--surface-muted)', padding: '4px', borderRadius: '12px', border: '1px solid var(--border)' }}>
+          <button
+            type="button"
+            onClick={() => setActiveTab('text')}
+            style={{
+              padding: '7px 14px',
+              borderRadius: '8px',
+              border: 'none',
+              fontSize: '13px',
+              fontWeight: 800,
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: activeTab === 'text' ? '#0f766e' : 'transparent',
+              color: activeTab === 'text' ? '#ffffff' : 'var(--text)',
+              boxShadow: activeTab === 'text' ? '0 2px 6px rgba(15,118,110,0.25)' : 'none',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <span>📖</span> نصوص وسياسات اللائحة ({bylawsSections.length})
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('disciplinary_penalties')}
+            style={{
+              padding: '7px 14px',
+              borderRadius: '8px',
+              border: 'none',
+              fontSize: '13px',
+              fontWeight: 800,
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: activeTab === 'disciplinary_penalties' ? '#dc2626' : 'transparent',
+              color: activeTab === 'disciplinary_penalties' ? '#ffffff' : 'var(--text)',
+              boxShadow: activeTab === 'disciplinary_penalties' ? '0 2px 6px rgba(220,38,38,0.25)' : 'none',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <span>⚖️</span> لائحة الجزاءات والمخالفات
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('records')}
+            style={{
+              padding: '7px 14px',
+              borderRadius: '8px',
+              border: 'none',
+              fontSize: '13px',
+              fontWeight: 800,
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: activeTab === 'records' ? '#2563eb' : 'transparent',
+              color: activeTab === 'records' ? '#ffffff' : 'var(--text)',
+              boxShadow: activeTab === 'records' ? '0 2px 6px rgba(37,99,235,0.25)' : 'none',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <span>📋</span> سجل القرارات والخصومات {filteredPenalties.length > 0 && `(${filteredPenalties.length})`}
+          </button>
+
+          {isManagerOrAdmin && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('late_penalties')}
+              style={{
+                padding: '7px 14px',
+                borderRadius: '8px',
+                border: 'none',
+                fontSize: '13px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: activeTab === 'late_penalties' ? '#16a34a' : 'transparent',
+                color: activeTab === 'late_penalties' ? '#ffffff' : 'var(--text)',
+                boxShadow: activeTab === 'late_penalties' ? '0 2px 6px rgba(22,163,74,0.25)' : 'none',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <span>⏱️</span> جزاءات التأخير
+            </button>
+          )}
         </div>
       </div>
 

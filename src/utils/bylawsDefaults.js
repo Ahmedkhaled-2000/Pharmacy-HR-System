@@ -180,13 +180,86 @@ export function sectionsToBylawsText(sections = []) {
  */
 export function isBylawsHeaderLine(line) {
   if (!line) return false;
-  const t = String(line).trim().replace(/^[\*\#\-\_\=]+\s*/, '');
+  // إزالة الأحرف غير المرئية والرموز والترقيم والمسافات الزائدة
+  let t = String(line)
+    .replace(/[\u200E\u200F\u200B\uFEFF\u00A0]/g, ' ')
+    .trim()
+    .replace(/^[\*\#\-\_\=\.\:\—\–\•\▪\▫\🔹\🔸\📌\✨\⭐\📜\📋\⚖️]+\s*/, '')
+    .trim();
+
   if (!t) return false;
 
+  // إذا كان السطر مجرد خط فاصل
+  if (/^[\-\_\=\*\.]{3,}$/.test(t)) return false;
+
   // فحص صيغ الأرقام والترتيب العربي الشائعة
-  const arabicOrdinalsRegex = /^(📜|📋|⚖️|🔹|🔸|▪️)?\s*(مقدمة|تمهيد|أولاً|اولا|أولا|اولاً|ثانياً|ثانيا|ثالثاً|ثالثا|رابعاً|رابعا|خامساً|خامسا|سادساً|سادسا|سابعاً|سابعا|ثامناً|ثامنا|تاسعاً|تاسعا|عاشراً|عاشرا|الحادي\s*عشر|الثاني\s*عشر|الثالث\s*عشر|الرابع\s*عشر|الخامس\s*عشر|السادس\s*عشر|السابع\s*عشر|الثامن\s*عشر|التاسع\s*عشر|العشرون|البند\s+(الأول|الاول|الثاني|الثالث|الرابع|الخامس|السادس|السابع|الثامن|التاسع|العاشر|الحادي\s*عشر|الثاني\s*عشر|الثالث\s*عشر|الرابع\s*عشر|الخامس\s*عشر|\d+)|المادة\s+(الأولى|الاولى|الثانية|الثالثة|الرابعة|الخامسة|السادسة|السابعة|الثامنة|التاسعة|العاشرة|\d+)|اللائحة\s+التنظيمية|\d+\s*[\.\-\)])/i;
+  const arabicOrdinalsRegex = /^(📜|📋|⚖️|🔹|🔸|▪️|📌|⭐)?\s*(مقدمة|تمهيد|اللائحة\s+التنظيمية|الائحة\s+التنظيمية|أولاً|اولاً|أولا|اولا|ثانياً|ثانيا|ثالثاً|ثالثا|رابعاً|رابعا|خامساً|خامسا|سادساً|سادسا|سابعاً|سابعا|ثامناً|ثامنا|تاسعاً|تاسعا|عاشراً|عاشرا|الحادي\s*عشر|حادي\s*عشر|الثاني\s*عشر|ثاني\s*عشر|الثالث\s*عشر|ثالث\s*عشر|الرابع\s*عشر|رابع\s*عشر|الخامس\s*عشر|خامس\s*عشر|السادس\s*عشر|سادس\s*عشر|السابع\s*عشر|سابع\s*عشر|الثامن\s*عشر|ثامن\s*عشر|التاسع\s*عشر|تاسع\s*عشر|العشرون|البند\s*(\d+|[^\s\:\-]+)|المادة\s*(\d+|[^\s\:\-]+)|بند\s*(\d+|[^\s\:\-]+)|مادة\s*(\d+|[^\s\:\-]+)|(\d+)[\.\-\:\)])/i;
 
   return arabicOrdinalsRegex.test(t);
+}
+
+/**
+ * دالة ذكية لتطهير وتفكيك البنود المدمجة في أي قسم تلقائياً
+ */
+export function sanitizeBylawsSections(sections = []) {
+  if (!Array.isArray(sections) || sections.length === 0) {
+    return DEFAULT_PHARMACY_BYLAWS_SECTIONS;
+  }
+
+  const result = [];
+  let counter = 1;
+
+  for (let i = 0; i < sections.length; i++) {
+    const sec = sections[i] || {};
+    const rawTitle = String(sec.title || '').replace(/[\u200E\u200F\u200B\uFEFF\u00A0]/g, ' ').trim();
+    const isPreamble = sec.category === 'preamble' || rawTitle.includes('مقدمة') || rawTitle.includes('تمهيد') || rawTitle.includes('اللائحة التنظيمية');
+    
+    let currentSec = {
+      id: sec.id || (isPreamble ? 'bylaw_preamble' : `bylaw_${counter++}`),
+      title: rawTitle || (isPreamble ? '📜 مقدمة اللائحة التنظيمية' : `البند رقم (${counter})`),
+      category: isPreamble ? 'preamble' : (sec.category || 'general'),
+      points: []
+    };
+
+    const points = Array.isArray(sec.points) ? sec.points : [];
+
+    for (let j = 0; j < points.length; j++) {
+      let pStr = String(points[j] || '').replace(/[\u200E\u200F\u200B\uFEFF\u00A0]/g, ' ').trim();
+      
+      // إهمال الأسطر الفاصلة
+      if (!pStr || /^[\-\_\=\*\.]{3,}$/.test(pStr) || pStr.startsWith('====') || pStr.startsWith('----') || pStr.startsWith('____')) {
+        continue;
+      }
+
+      // إذا كانت النقطة تحتوي على رأس بند جديد تم دمجه بالخطأ
+      if (isBylawsHeaderLine(pStr)) {
+        // حفظ القسم الحالي إذا كان يحتوي على بيانات
+        if (currentSec.points.length > 0 || currentSec.title) {
+          result.push(currentSec);
+        }
+        const isNextPreamble = pStr.includes('مقدمة') || pStr.includes('تمهيد') || pStr.includes('اللائحة التنظيمية');
+        currentSec = {
+          id: isNextPreamble ? 'bylaw_preamble' : `bylaw_${counter++}`,
+          title: pStr,
+          category: isNextPreamble ? 'preamble' : 'general',
+          points: []
+        };
+      } else {
+        // تنظيف علامات الترقيم العادية
+        let cleanP = pStr;
+        if (cleanP.startsWith('- ') || cleanP.startsWith('* ') || cleanP.startsWith('▪ ') || cleanP.startsWith('• ') || cleanP.startsWith('▫ ')) {
+          cleanP = cleanP.slice(2).trim();
+        }
+        currentSec.points.push(cleanP);
+      }
+    }
+
+    if (currentSec && (currentSec.points.length > 0 || currentSec.title)) {
+      result.push(currentSec);
+    }
+  }
+
+  return result.length > 0 ? result : DEFAULT_PHARMACY_BYLAWS_SECTIONS;
 }
 
 /**
@@ -197,11 +270,11 @@ export function parseBylawsIntoSections(text) {
     return DEFAULT_PHARMACY_BYLAWS_SECTIONS;
   }
 
-  const clean = text.trim();
+  const clean = text.replace(/[\u200E\u200F\u200B\uFEFF\u00A0]/g, ' ').trim();
   if (!clean) return DEFAULT_PHARMACY_BYLAWS_SECTIONS;
 
   const lines = clean.split('\n');
-  const sections = [];
+  const rawSections = [];
   let currentSection = null;
   let sectionCounter = 1;
 
@@ -210,13 +283,13 @@ export function parseBylawsIntoSections(text) {
     const trimmed = rawLine.trim();
 
     // تجاهل الفواصل والأسطر الفارغة
-    if (!trimmed || trimmed.startsWith('===') || trimmed.startsWith('---') || trimmed === '------------------------------------------------------------') {
+    if (!trimmed || /^[\-\_\=\*\.]{3,}$/.test(trimmed) || trimmed.startsWith('===') || trimmed.startsWith('---') || trimmed.startsWith('___')) {
       continue;
     }
 
     if (isBylawsHeaderLine(trimmed)) {
       if (currentSection) {
-        sections.push(currentSection);
+        rawSections.push(currentSection);
       }
       const isPreamble = trimmed.includes('مقدمة') || trimmed.includes('تمهيد') || trimmed.includes('اللائحة التنظيمية');
       currentSection = {
@@ -228,7 +301,7 @@ export function parseBylawsIntoSections(text) {
     } else {
       // إزالة علامات الترقيم في بداية النقطة إن وجدت للحصول على نص نظيف مع الاحتفاظ بالرموز التعبيرية
       let cleanPoint = trimmed;
-      if (cleanPoint.startsWith('- ') || cleanPoint.startsWith('* ') || cleanPoint.startsWith('▪ ') || cleanPoint.startsWith('• ')) {
+      if (cleanPoint.startsWith('- ') || cleanPoint.startsWith('* ') || cleanPoint.startsWith('▪ ') || cleanPoint.startsWith('• ') || cleanPoint.startsWith('▫ ')) {
         cleanPoint = cleanPoint.slice(2).trim();
       }
 
@@ -247,18 +320,18 @@ export function parseBylawsIntoSections(text) {
   }
 
   if (currentSection && (currentSection.points.length > 0 || currentSection.title)) {
-    sections.push(currentSection);
+    rawSections.push(currentSection);
   }
 
-  return sections.length > 0 ? sections : DEFAULT_PHARMACY_BYLAWS_SECTIONS;
+  return sanitizeBylawsSections(rawSections);
 }
 
 /**
- * استخراج مصفوفة البنود المنظمة من حالة النظام مع التوافق التراجعي
+ * استخراج مصفوفة البنود المنظمة من حالة النظام مع التوافق التراجعي والتطهير التلقائي
  */
 export function getBylawsSectionsFromState(state = {}) {
   if (state && Array.isArray(state.bylawsSections) && state.bylawsSections.length > 0) {
-    return state.bylawsSections;
+    return sanitizeBylawsSections(state.bylawsSections);
   }
 
   if (state && state.bylawsText && typeof state.bylawsText === 'string' && state.bylawsText.trim().length > 0) {
