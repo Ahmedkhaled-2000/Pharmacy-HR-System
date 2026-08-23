@@ -1,5 +1,6 @@
 import React from 'react';
 import { getResolvedEmployeeRoster } from './RosterModule';
+import { getEmpDisplayName } from '../../utils/formatters';
 
 function getDayShiftInfo(schedule, day, fallbackHours = 8) {
   if (!schedule || typeof schedule !== 'object') {
@@ -83,10 +84,12 @@ export default function RosterPreviewModal({
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
           <div>
             <h3 style={{ margin: 0, color: '#0d9488', fontSize: '18px' }}>
-              📅 الجدول الشهري والأسبوعي للموظف: {employee.name}
+              📅 الجدول الشهري والأسبوعي للموظف: {getEmpDisplayName(employee)}
             </h3>
             <span style={{ fontSize: '13px', color: 'var(--muted)' }}>
-              كود: {employee.code} | {isMultiBranch ? `مسجل في ${employee.branchesDetails.length} فروع` : `الفرع: ${employee.branchName || 'الرئيسي'}`} | المسمى الوظيفي: {employee.jobTitle}
+              كود: {employee.code}
+              {employee.nickname && employee.nickname.trim() !== employee.name?.trim() && ` | الاسم الرسمي: ${employee.name}`}
+              {' '}| {isMultiBranch ? `مسجل في ${employee.branchesDetails.length} فروع` : `الفرع: ${employee.branchName || 'الرئيسي'}`} | المسمى الوظيفي: {employee.jobTitle}
             </span>
           </div>
           <button className="btn btn-ghost" onClick={onClose}>✕ إغلاق النافذة</button>

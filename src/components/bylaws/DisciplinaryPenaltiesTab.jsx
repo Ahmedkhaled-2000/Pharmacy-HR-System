@@ -5,6 +5,7 @@ import {
   calculateViolationCounter,
   getEmployeeDisciplinarySummary
 } from '../../utils/disciplinaryPenaltyEngine';
+import { getEmpDisplayName } from '../../utils/formatters';
 import DisciplinaryViolationModal from './DisciplinaryViolationModal';
 
 export default function DisciplinaryPenaltiesTab({
@@ -128,12 +129,14 @@ export default function DisciplinaryPenaltiesTab({
       // Search Query
       if (searchQuery.trim()) {
         const q = searchQuery.trim().toLowerCase();
-        const matchName = (p.employeeName || '').toLowerCase().includes(q);
-        const matchCode = (p.employeeCode || '').toLowerCase().includes(q);
+        const emp = allEmployeesList.find((e) => String(e.id) === String(p.employeeId));
+        const matchName = (p.employeeName || emp?.name || '').toLowerCase().includes(q);
+        const matchNickname = (emp?.nickname || '').toLowerCase().includes(q);
+        const matchCode = (p.employeeCode || emp?.code || '').toLowerCase().includes(q);
         const matchRule = (p.ruleTitle || '').toLowerCase().includes(q);
         const matchReason = (p.reason || '').toLowerCase().includes(q);
         const matchAction = (p.actionTitle || '').toLowerCase().includes(q);
-        if (!matchName && !matchCode && !matchRule && !matchReason && !matchAction) return false;
+        if (!matchName && !matchNickname && !matchCode && !matchRule && !matchReason && !matchAction) return false;
       }
 
       return true;
@@ -1347,12 +1350,13 @@ export default function DisciplinaryPenaltiesTab({
                             fontSize: '16px'
                           }}
                         >
-                          {emp.name.slice(0, 1)}
+                          {getEmpDisplayName(emp).slice(0, 1)}
                         </div>
                         <div>
-                          <strong style={{ fontSize: '15px', color: 'var(--text)' }}>{emp.name}</strong>
+                          <strong style={{ fontSize: '15px', color: 'var(--text)' }}>{getEmpDisplayName(emp)}</strong>
                           <div style={{ fontSize: '12px', color: 'var(--muted)', display: 'flex', gap: '10px', marginTop: '2px' }}>
                             <span>الكود: <strong>{emp.code || '—'}</strong></span>
+                            {emp.nickname && emp.nickname.trim() !== emp.name?.trim() && <span>الرسمي: <strong>{emp.name}</strong></span>}
                             <span>الفرع: <strong>{bObj?.name || 'الفرع الرئيسي'}</strong></span>
                             <span>سعر اليوم: <strong>{dailyRate} ج.م</strong></span>
                           </div>
@@ -1606,7 +1610,7 @@ export default function DisciplinaryPenaltiesTab({
                       <tr key={pen.id} style={{ opacity: isCancelled ? 0.6 : 1 }}>
                         <td>{pen.date}</td>
                         <td>
-                          <strong>{pen.employeeName || emp?.name}</strong>
+                          <strong>{emp ? getEmpDisplayName(emp) : (pen.employeeName || '—')}</strong>
                           <span style={{ display: 'block', fontSize: '11px', color: 'var(--muted)' }}>
                             {pen.employeeCode || emp?.code || '—'}
                           </span>

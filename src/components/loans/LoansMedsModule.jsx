@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { fmt } from '../../utils/formatters';
+import { fmt, getEmpDisplayName } from '../../utils/formatters';
 
 export default function LoansMedsModule({
   state,
@@ -151,7 +151,13 @@ export default function LoansMedsModule({
 
   const filteredEmployees = employees.filter((emp) => {
     if (filterBranch && emp.branchId !== filterBranch) return false;
-    if (searchQuery && !emp.name.toLowerCase().includes(searchQuery.toLowerCase()) && !emp.code.includes(searchQuery)) return false;
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      const matchName = emp.name?.toLowerCase().includes(q);
+      const matchNickname = emp.nickname?.toLowerCase().includes(q);
+      const matchCode = emp.code?.includes(q);
+      if (!matchName && !matchNickname && !matchCode) return false;
+    }
     return true;
   });
 
@@ -537,7 +543,7 @@ export default function LoansMedsModule({
             <select value={targetEmpId} onChange={(e) => setTargetEmpId(e.target.value)} required>
               <option value="">-- اختر الموظف --</option>
               {employees.map((e) => (
-                <option key={e.id} value={e.id}>{e.name} ({e.code})</option>
+                <option key={e.id} value={e.id}>{getEmpDisplayName(e)} ({e.code})</option>
               ))}
             </select>
           </div>
@@ -644,7 +650,7 @@ export default function LoansMedsModule({
                 return (
                   <tr key={emp.id}>
                     <td style={{ fontWeight: '700' }}>{emp.code}</td>
-                    <td style={{ fontWeight: '800' }}>{emp.name}</td>
+                    <td style={{ fontWeight: '800' }}>{getEmpDisplayName(emp)}</td>
                     <td>{empBranch?.name || 'المركز الرئيسي'}</td>
                     <td style={{ fontWeight: '800', color: '#0d9488' }}>{totalEmpDebt.toLocaleString()} ج.م</td>
                     <td style={{ color: '#16a34a', fontWeight: '700' }}>{totalEmpPaid.toLocaleString()} ج.م</td>

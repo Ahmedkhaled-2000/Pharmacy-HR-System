@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import AttendancePunchesModal from './AttendancePunchesModal';
 import { recalculateEmployeeCycleLateness } from '../../utils/latePenaltyEngine';
+import { getEmpDisplayName } from '../../utils/formatters';
 
 export default function AttendanceModule({
   state,
@@ -42,7 +43,13 @@ export default function AttendanceModule({
 
   const filteredEmployees = employees.filter((emp) => {
     if (selectedBranch && emp.branchId !== selectedBranch && (!emp.branchesDetails || !emp.branchesDetails.some((bd) => bd.branchId === selectedBranch))) return false;
-    if (searchQuery && !emp.name.toLowerCase().includes(searchQuery.toLowerCase()) && !emp.code.includes(searchQuery)) return false;
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      const matchName = emp.name?.toLowerCase().includes(q);
+      const matchNickname = emp.nickname?.toLowerCase().includes(q);
+      const matchCode = emp.code?.includes(q);
+      if (!matchName && !matchNickname && !matchCode) return false;
+    }
     return true;
   });
 
@@ -135,7 +142,7 @@ export default function AttendanceModule({
             <select value={manualEmpId} onChange={(e) => setManualEmpId(e.target.value)} required>
               <option value="">-- اختر الموظف --</option>
               {employees.map((e) => (
-                <option key={e.id} value={e.id}>{e.name} (كود: {e.code})</option>
+                <option key={e.id} value={e.id}>{getEmpDisplayName(e)} (كود: {e.code})</option>
               ))}
             </select>
           </div>
@@ -227,7 +234,7 @@ export default function AttendanceModule({
                 return (
                   <tr key={emp.id}>
                     <td style={{ fontWeight: '700' }}>{emp.code}</td>
-                    <td style={{ fontWeight: '800' }}>{emp.name}</td>
+                    <td style={{ fontWeight: '800' }}>{getEmpDisplayName(emp)}</td>
                     <td>{b?.name || 'المركز الرئيسي'}</td>
                     <td>{emp.jobTitle}</td>
                     <td><span className="badge badge-primary">{empPunches.length} وردية</span></td>

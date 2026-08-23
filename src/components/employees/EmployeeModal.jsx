@@ -8,6 +8,8 @@ export default function EmployeeModal({
   setEmpPhotoUrl,
   empName,
   setEmpName,
+  empNickname,
+  setEmpNickname,
   empCode,
   setEmpCode,
   empPhone,
@@ -76,8 +78,12 @@ export default function EmployeeModal({
           {/* Input Fields */}
           <div className="form-row" style={{ flexDirection: 'column', gap: '12px', width: '100%' }}>
             <div className="field">
-              <label>اسم الموظف الثلاثي / الكامل</label>
+              <label>الاسم بالكامل (الرسمي في مسير الرواتب والمفردات)</label>
               <input type="text" value={empName} onChange={(e) => setEmpName(e.target.value)} placeholder="مثال: أحمد محمود علي" />
+            </div>
+            <div className="field">
+              <label>اسم الشهرة (يظهر في جميع شاشات وصفحات النظام)</label>
+              <input type="text" value={empNickname || ''} onChange={(e) => setEmpNickname?.(e.target.value)} placeholder="مثال: د. أحمد / دكتور كريم (اختياري)" />
             </div>
             <div className="field">
               <label>كود الموظف / البصمة الإلكترونية</label>

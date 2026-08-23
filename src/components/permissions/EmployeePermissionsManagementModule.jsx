@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { arabicWeekday } from '../../utils/formatters';
+import { arabicWeekday, getEmpDisplayName } from '../../utils/formatters';
 import {
   DEFAULT_PERMISSION_POLICY,
   applyApprovedPermissionsToShifts,
@@ -173,9 +173,10 @@ export default function EmployeePermissionsManagementModule({
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
         const name = (p.employeeName || p.empObj?.name || '').toLowerCase();
+        const nickname = (p.empObj?.nickname || '').toLowerCase();
         const code = (p.employeeCode || p.empObj?.code || '').toLowerCase();
         const reason = (p.reason || '').toLowerCase();
-        if (!name.includes(q) && !code.includes(q) && !reason.includes(q)) return false;
+        if (!name.includes(q) && !nickname.includes(q) && !code.includes(q) && !reason.includes(q)) return false;
       }
 
       return true;
@@ -586,7 +587,7 @@ export default function EmployeePermissionsManagementModule({
           >
             <option value="">👤 جميع الموظفين</option>
             {employees.map((e) => (
-              <option key={e.id} value={e.id}>{e.name} ({e.code})</option>
+              <option key={e.id} value={e.id}>{getEmpDisplayName(e)} ({e.code})</option>
             ))}
           </select>
 
@@ -668,7 +669,14 @@ export default function EmployeePermissionsManagementModule({
                     >
                       <td style={{ padding: '12px 14px', fontWeight: 700, color: 'var(--muted)' }}>{idx + 1}</td>
                       <td style={{ padding: '12px 14px' }}>
-                        <div style={{ fontWeight: 800, color: 'var(--text)' }}>{perm.employeeName || perm.empObj?.name || '—'}</div>
+                        <div style={{ fontWeight: 800, color: 'var(--text)' }}>
+                          {perm.empObj ? getEmpDisplayName(perm.empObj) : (perm.employeeName || '—')}
+                        </div>
+                        {perm.empObj?.nickname && perm.empObj.nickname.trim() !== perm.empObj.name?.trim() && (
+                          <div style={{ fontSize: '11px', color: 'var(--muted)' }}>
+                            الاسم الرسمي: {perm.empObj.name}
+                          </div>
+                        )}
                         <div style={{ fontSize: '11px', color: 'var(--muted)' }}>كود: {perm.employeeCode || perm.empObj?.code || '—'}</div>
                       </td>
                       <td style={{ padding: '12px 14px', fontWeight: 600, color: 'var(--primary-dark)' }}>
@@ -951,7 +959,7 @@ export default function EmployeePermissionsManagementModule({
                   <option value="">-- اضغط لاختيار الموظف --</option>
                   {employees.map((e) => (
                     <option key={e.id} value={e.id}>
-                      {e.name} (كود: {e.code}) - {branches.find(b => b.id === e.branchId)?.name || 'الفرع الرئيسي'}
+                      {getEmpDisplayName(e)} (كود: {e.code}) - {branches.find(b => b.id === e.branchId)?.name || 'الفرع الرئيسي'}
                     </option>
                   ))}
                 </select>

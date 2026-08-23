@@ -4,6 +4,7 @@ import {
   getEmployeeDailyRate,
   calculateViolationCounter
 } from '../../utils/disciplinaryPenaltyEngine';
+import { getEmpDisplayName } from '../../utils/formatters';
 
 export default function DisciplinaryViolationModal({
   isOpen,
@@ -389,7 +390,7 @@ export default function DisciplinaryViolationModal({
                   const bObj = branches.find((b) => String(b.id) === String(emp.branchId));
                   return (
                     <option key={emp.id} value={emp.id}>
-                      {emp.name} ({emp.code || '—'}) - {bObj?.name || 'الفرع الرئيسي'}
+                      {getEmpDisplayName(emp)} ({emp.code || '—'}) - {bObj?.name || 'الفرع الرئيسي'}
                     </option>
                   );
                 })}

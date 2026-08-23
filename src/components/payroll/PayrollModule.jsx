@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import PayslipPrintModal from './PayslipPrintModal';
-import { fmt } from '../../utils/formatters';
+import { fmt, getEmpDisplayName } from '../../utils/formatters';
 import { computeLatenessFinancialAmount, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
 
 export default function PayrollModule({
@@ -94,7 +94,13 @@ export default function PayrollModule({
 
   const filteredEmployees = employees.filter((emp) => {
     if (filterBranch && emp.branchId !== filterBranch && (!emp.branchesDetails || !emp.branchesDetails.some((bd) => bd.branchId === filterBranch))) return false;
-    if (searchQuery && !emp.name.toLowerCase().includes(searchQuery.toLowerCase()) && !emp.code.includes(searchQuery)) return false;
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      const matchName = emp.name?.toLowerCase().includes(q);
+      const matchNickname = emp.nickname?.toLowerCase().includes(q);
+      const matchCode = emp.code?.includes(q);
+      if (!matchName && !matchNickname && !matchCode) return false;
+    }
     return true;
   });
 
@@ -482,7 +488,14 @@ export default function PayrollModule({
                 return (
                   <tr key={emp.id}>
                     <td style={{ fontWeight: '700' }}>{emp.code}</td>
-                    <td style={{ fontWeight: '800' }}>{emp.name}</td>
+                    <td style={{ fontWeight: '800' }}>
+                      <div>{getEmpDisplayName(emp)}</div>
+                      {emp.nickname && emp.nickname.trim() !== emp.name?.trim() && (
+                        <div style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 'normal' }}>
+                          الاسم الرسمي: {emp.name}
+                        </div>
+                      )}
+                    </td>
                     <td>{branchNameDisplay}</td>
                     <td>
                       <strong style={{ color: '#0f766e' }}>{empSum.hours || 0} س أساسي</strong>

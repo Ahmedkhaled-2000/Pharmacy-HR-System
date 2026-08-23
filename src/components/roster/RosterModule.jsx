@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import RosterPreviewModal from './RosterPreviewModal';
+import { getEmpDisplayName } from '../../utils/formatters';
 
 export const DEFAULT_ROSTER_SCHEDULE = {
   'السبت': { type: 'shift', start: '08:00', end: '16:00' },
@@ -145,7 +146,13 @@ export default function RosterModule({
 
   const filteredEmployees = employees.filter((emp) => {
     if (selectedBranch && emp.branchId !== selectedBranch && (!emp.branchesDetails || !emp.branchesDetails.some(bd => String(bd.branchId) === String(selectedBranch)))) return false;
-    if (searchQuery && !emp.name.toLowerCase().includes(searchQuery.toLowerCase()) && !emp.code.includes(searchQuery)) return false;
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      const matchName = emp.name?.toLowerCase().includes(q);
+      const matchNickname = emp.nickname?.toLowerCase().includes(q);
+      const matchCode = emp.code?.includes(q);
+      if (!matchName && !matchNickname && !matchCode) return false;
+    }
     return true;
   });
 
@@ -205,7 +212,7 @@ export default function RosterModule({
                 return (
                   <tr key={emp.id}>
                     <td style={{ fontWeight: '700' }}>{emp.code}</td>
-                    <td style={{ fontWeight: '800' }}>{emp.name}</td>
+                    <td style={{ fontWeight: '800' }}>{getEmpDisplayName(emp)}</td>
                     <td>{b?.name || 'المركز الرئيسي'}</td>
                     <td>{emp.jobTitle}</td>
                     <td>

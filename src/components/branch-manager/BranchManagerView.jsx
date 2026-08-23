@@ -10,7 +10,7 @@ import { getFormattedRequestBadge } from '../requests/RequestsModule';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import BranchResignationModule from '../resignation/BranchResignationModule';
 import { normalizeSchedule } from '../roster/RosterModule';
-import { shouldShowRequestToBranch } from '../../utils/formatters';
+import { shouldShowRequestToBranch, getEmpDisplayName } from '../../utils/formatters';
 import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
 import EmployeePermissionsManagementModule from '../permissions/EmployeePermissionsManagementModule';
 
@@ -1261,7 +1261,7 @@ export default function BranchManagerView({
                     <div>
                       <span style={{ color: 'var(--muted)', fontSize: '12px' }}>اسم الموظف:</span>
                       <div style={{ fontWeight: 'bold', color: 'var(--text)', fontSize: '14px' }}>
-                        {previewModalReq.employeeName || empObj?.name || 'غير معروف'}
+                        {empObj ? getEmpDisplayName(empObj) : (previewModalReq.employeeName || 'غير معروف')}
                       </div>
                     </div>
                     <div>

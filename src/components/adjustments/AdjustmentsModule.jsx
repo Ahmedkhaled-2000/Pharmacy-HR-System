@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { fmt } from '../../utils/formatters';
+import { fmt, getEmpDisplayName } from '../../utils/formatters';
 
 export default function AdjustmentsModule({
   state,
@@ -94,8 +94,9 @@ export default function AdjustmentsModule({
     if (searchTerm.trim()) {
       const q = searchTerm.trim().toLowerCase();
       const matchName = (emp.name || '').toLowerCase().includes(q);
+      const matchNickname = (emp.nickname || '').toLowerCase().includes(q);
       const matchCode = (emp.code || '').toLowerCase().includes(q);
-      if (!matchName && !matchCode) return false;
+      if (!matchName && !matchNickname && !matchCode) return false;
     }
     return true;
   });
@@ -280,11 +281,14 @@ export default function AdjustmentsModule({
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
                 <div className="emp-avatar-circle" style={{ width: '46px', height: '46px' }}>
-                  {emp.photoUrl ? <img src={emp.photoUrl} alt={emp.name} className="emp-img" /> : <span>{emp.name.charAt(0)}</span>}
+                  {emp.photoUrl ? <img src={emp.photoUrl} alt={getEmpDisplayName(emp)} className="emp-img" /> : <span>{getEmpDisplayName(emp).charAt(0)}</span>}
                 </div>
                 <div>
-                  <h4 style={{ margin: 0, fontFamily: 'Cairo', fontSize: '15px' }}>{emp.name}</h4>
-                  <span style={{ fontSize: '12px', color: 'var(--muted)' }}>{emp.jobTitle} · كود: {emp.code}</span>
+                  <h4 style={{ margin: 0, fontFamily: 'Cairo', fontSize: '15px' }}>{getEmpDisplayName(emp)}</h4>
+                  <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                    {emp.jobTitle} · كود: {emp.code}
+                    {emp.nickname && emp.nickname.trim() !== emp.name?.trim() && ` · (${emp.name})`}
+                  </span>
                 </div>
               </div>
 
@@ -307,7 +311,7 @@ export default function AdjustmentsModule({
           <div className="modal-content card" style={{ maxWidth: '1050px', width: '96%', padding: '28px', maxHeight: '90vh', overflowY: 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <h3 style={{ margin: 0, fontFamily: 'Cairo' }}>
-                📝 سجل مكافآت وخصومات: {inspectEmp.name} ({inspectEmp.code})
+                📝 سجل مكافآت وخصومات: {getEmpDisplayName(inspectEmp)} ({inspectEmp.code})
               </h3>
               <button className="btn btn-ghost" onClick={() => setInspectEmp(null)}>✕ إغلاق</button>
             </div>
@@ -378,7 +382,7 @@ export default function AdjustmentsModule({
                 >
                   <option value="">-- اختر الموظف --</option>
                   {employees.map((e) => (
-                    <option key={e.id} value={e.id}>{e.name} ({e.code})</option>
+                    <option key={e.id} value={e.id}>{getEmpDisplayName(e)} ({e.code})</option>
                   ))}
                 </select>
               </div>

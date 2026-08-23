@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { getEmpDisplayName } from '../../utils/formatters';
 
 export default function WhatsAppCenterModule({
   state,
@@ -85,7 +86,7 @@ export default function WhatsAppCenterModule({
               <select value={targetEmpId} onChange={(e) => setTargetEmpId(e.target.value)}>
                 <option value="">-- إرسال لجميع الموظفين بالمجموعة / الفرع --</option>
                 {filteredEmployees.map((emp) => (
-                  <option key={emp.id} value={emp.id}>{emp.name} ({emp.code})</option>
+                  <option key={emp.id} value={emp.id}>{getEmpDisplayName(emp)} ({emp.code})</option>
                 ))}
               </select>
             </div>
@@ -135,7 +136,7 @@ export default function WhatsAppCenterModule({
                 return (
                   <tr key={emp.id}>
                     <td style={{ fontWeight: '700' }}>{emp.code}</td>
-                    <td style={{ fontWeight: '800' }}>{emp.name}</td>
+                    <td style={{ fontWeight: '800' }}>{getEmpDisplayName(emp)}</td>
                     <td>{b?.name || 'المركز الرئيسي'}</td>
                     <td>{emp.jobTitle}</td>
                     <td style={{ direction: 'ltr', textAlign: 'right' }}>{emp.phone || '01000000000'}</td>

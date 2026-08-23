@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { AR_MONTHS, arabicWeekday, todayStr, fmt, arabicMonthLabel, getActivePayrollCycleMonth } from '../../utils/formatters';
+import { AR_MONTHS, arabicWeekday, todayStr, fmt, arabicMonthLabel, getActivePayrollCycleMonth, getEmpDisplayName } from '../../utils/formatters';
 import { loadExcelJS, mergedTitle, tableHeaderRow, dataRow } from '../../utils/excelExport';
 
 import EmployeeLeaveModule from './EmployeeLeaveModule';
@@ -1264,17 +1264,18 @@ export default function EmployeePortalView({
             title={sidebarOpen ? 'طيّ القائمة' : 'توسيع القائمة'}
           >
             {emp.photoUrl
-              ? <img src={emp.photoUrl} alt={emp.name} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
-              : <span>{emp.name.charAt(0)}</span>
+              ? <img src={emp.photoUrl} alt={getEmpDisplayName(emp)} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+              : <span>{getEmpDisplayName(emp).charAt(0)}</span>
             }
           </div>
           {sidebarOpen && (
             <div style={{ overflow: 'hidden', minWidth: 0 }}>
               <div style={{ fontWeight: 700, fontSize: '13px', color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {emp.name}
+                {getEmpDisplayName(emp)}
               </div>
               <div style={{ fontSize: '11px', color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {emp.jobTitle} · {emp.code}
+                {emp.nickname && emp.nickname.trim() !== emp.name?.trim() && ` (${emp.name})`}
               </div>
             </div>
           )}

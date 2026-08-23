@@ -559,6 +559,7 @@ export default function App() {
   const [isEmpModalOpen, setIsEmpModalOpen] = useState(false);
   const [editingEmp, setEditingEmp] = useState(null);
   const [empName, setEmpName] = useState('');
+  const [empNickname, setEmpNickname] = useState('');
   const [empCode, setEmpCode] = useState('');
   const [empPhone, setEmpPhone] = useState('');
   const [empJobTitle, setEmpJobTitle] = useState('مساعد صيدلي');
@@ -1737,6 +1738,7 @@ export default function App() {
   const openAddEmpModal = () => {
     setEditingEmp(null);
     setEmpName('');
+    setEmpNickname('');
     setEmpCode(String(101 + state.employees.length));
     setEmpPhone('');
     setEmpJobTitle('مساعد صيدلي');
@@ -1752,6 +1754,7 @@ export default function App() {
   const openEditEmpModal = (emp) => {
     setEditingEmp(emp);
     setEmpName(emp.name);
+    setEmpNickname(emp.nickname || '');
     setEmpCode(emp.code);
     setEmpPhone(emp.phone || '');
     setEmpJobTitle(emp.jobTitle);
@@ -1792,6 +1795,7 @@ export default function App() {
           ? {
               ...e,
               name: empName.trim(),
+              nickname: empNickname.trim(),
               code: empCode.trim(),
               username: empCode.trim(),
               phone: empPhone.trim(),
@@ -1810,6 +1814,7 @@ export default function App() {
       const newEmp = {
         id: 'emp_' + uid(),
         name: empName.trim(),
+        nickname: empNickname.trim(),
         code: empCode.trim(),
         username: empCode.trim(),
         phone: empPhone.trim(),
@@ -5281,6 +5286,8 @@ export default function App() {
         setEmpPhotoUrl={setEmpPhotoUrl}
         empName={empName}
         setEmpName={setEmpName}
+        empNickname={empNickname}
+        setEmpNickname={setEmpNickname}
         empCode={empCode}
         setEmpCode={setEmpCode}
         empPhone={empPhone}

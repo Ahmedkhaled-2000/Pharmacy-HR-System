@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { getEmpDisplayName } from '../../utils/formatters';
 
 export default function EvaluationsModule({
   state,
@@ -313,7 +314,7 @@ export default function EvaluationsModule({
                   <option value="">-- اختر الموظف --</option>
                   {employees.map((e) => (
                     <option key={e.id} value={e.id}>
-                      {e.name} (كود: {e.code})
+                      {getEmpDisplayName(e)} (كود: {e.code})
                     </option>
                   ))}
                 </select>
@@ -424,10 +425,11 @@ export default function EvaluationsModule({
           // Search text
           if (complaintSearch.trim()) {
             const q = complaintSearch.toLowerCase();
-            const name = (comp.employeeName || empObj?.name || '').toLowerCase();
+            const name = (comp.employeeName || (empObj ? getEmpDisplayName(empObj) : '')).toLowerCase();
+            const nickname = (empObj?.nickname || '').toLowerCase();
             const subject = (comp.subject || '').toLowerCase();
             const details = (comp.details || comp.reason || '').toLowerCase();
-            if (!name.includes(q) && !subject.includes(q) && !details.includes(q)) return false;
+            if (!name.includes(q) && !nickname.includes(q) && !subject.includes(q) && !details.includes(q)) return false;
           }
 
           return true;
@@ -758,7 +760,7 @@ export default function EvaluationsModule({
                   <option value="">-- اختر الموظف --</option>
                   {employees.map((e) => (
                     <option key={e.id} value={e.id}>
-                      {e.name} (كود: {e.code} - {e.jobTitle})
+                      {getEmpDisplayName(e)} (كود: {e.code} - {e.jobTitle})
                     </option>
                   ))}
                 </select>
@@ -831,7 +833,7 @@ export default function EvaluationsModule({
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '12px' }}>
                     <div>
                       <h4 style={{ margin: '0 0 2px 0', fontSize: '16px', fontWeight: '800' }}>
-                        👤 الموظف: {ev.employeeName || emp?.name || 'غير محدد'} ({ev.employeeCode || emp?.code})
+                        👤 الموظف: {emp ? getEmpDisplayName(emp) : (ev.employeeName || 'غير محدد')} ({ev.employeeCode || emp?.code})
                       </h4>
                       <span style={{ fontSize: '12.5px', color: 'var(--muted)' }}>
                         المقيم: {ev.evaluatorRole || 'الإدارة العليا'} &nbsp;|&nbsp; التاريخ/الشهر: {ev.month || ev.date}

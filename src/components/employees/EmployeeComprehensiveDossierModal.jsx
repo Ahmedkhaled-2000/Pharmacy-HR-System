@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { fmt, todayStr } from '../../utils/formatters';
+import { fmt, todayStr, getEmpDisplayName } from '../../utils/formatters';
 import { getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
 
 export default function EmployeeComprehensiveDossierModal({
@@ -98,14 +98,21 @@ export default function EmployeeComprehensiveDossierModal({
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
             <div className="emp-avatar-circle" style={{ width: '60px', height: '60px', borderRadius: '50%', background: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px', flexShrink: 0 }}>
               {emp.photoUrl ? (
-                <img src={emp.photoUrl} alt={emp.name} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                <img src={emp.photoUrl} alt={getEmpDisplayName(emp)} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
               ) : (
-                emp.name?.charAt(0) || '👤'
+                getEmpDisplayName(emp)?.charAt(0) || '👤'
               )}
             </div>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                <h2 style={{ margin: 0, fontSize: '20px', fontFamily: 'Cairo', color: 'var(--text)' }}>{emp.name}</h2>
+                <h2 style={{ margin: 0, fontSize: '20px', fontFamily: 'Cairo', color: 'var(--text)' }}>
+                  {getEmpDisplayName(emp)}
+                </h2>
+                {emp.nickname && emp.nickname.trim() !== emp.name?.trim() && (
+                  <span style={{ background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', padding: '2px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold' }}>
+                    الاسم الرسمي: {emp.name}
+                  </span>
+                )}
                 <span className="code-badge" style={{ background: '#e2e8f0', color: '#334155', padding: '2px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold' }}>
                   كود: {emp.code}
                 </span>
@@ -248,7 +255,8 @@ export default function EmployeeComprehensiveDossierModal({
             <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: '14px', padding: '18px' }}>
               <h4 style={{ margin: '0 0 14px', fontSize: '14.5px', color: 'var(--text)' }}>📋 الملف الشخصي والتعاقدي التفصيلي:</h4>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px', fontSize: '13px' }}>
-                <div>الاسم الكامل: <strong>{emp.name}</strong></div>
+                <div>الاسم الكامل (الرسمي): <strong>{emp.name}</strong></div>
+                {emp.nickname && <div>اسم الشهرة: <strong style={{ color: 'var(--primary)' }}>{emp.nickname}</strong></div>}
                 <div>الرقم القومي: <strong>{emp.nationalId || emp.national_id || '—'}</strong></div>
                 <div>المسمى الوظيفي: <strong>{emp.jobTitle}</strong></div>
                 <div>القسم: <strong>{emp.department || 'عام'}</strong></div>

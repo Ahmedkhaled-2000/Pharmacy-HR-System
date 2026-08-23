@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { calculateEmployeeLeaveStats, getEmployeeApprovedLeaves } from '../../utils/formatters';
+import { calculateEmployeeLeaveStats, getEmployeeApprovedLeaves, getEmpDisplayName } from '../../utils/formatters';
 
 export default function LeavesTrackingModule({
   state,
@@ -17,7 +17,13 @@ export default function LeavesTrackingModule({
   // Filter employees
   const filteredEmployees = employees.filter((emp) => {
     if (filterBranch && emp.branchId !== filterBranch) return false;
-    if (searchQuery && !emp.name.toLowerCase().includes(searchQuery.toLowerCase()) && !emp.code.includes(searchQuery)) return false;
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      const matchName = emp.name?.toLowerCase().includes(q);
+      const matchNickname = emp.nickname?.toLowerCase().includes(q);
+      const matchCode = emp.code?.includes(q);
+      if (!matchName && !matchNickname && !matchCode) return false;
+    }
     return true;
   });
 
@@ -83,7 +89,7 @@ export default function LeavesTrackingModule({
                 return (
                   <tr key={emp.id}>
                     <td style={{ fontWeight: '700' }}>{emp.code}</td>
-                    <td style={{ fontWeight: '800' }}>{emp.name}</td>
+                    <td style={{ fontWeight: '800' }}>{getEmpDisplayName(emp)}</td>
                     <td>{empBranch?.name || 'المركز الرئيسي'}</td>
                     <td style={{ fontWeight: '800' }}>{annualTotal} يوم</td>
                     <td style={{ color: '#d97706', fontWeight: '800' }}>{takenAnnualDays} يوم</td>
@@ -127,10 +133,12 @@ export default function LeavesTrackingModule({
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
                 <div>
                   <h3 style={{ margin: 0, color: '#0d9488' }}>
-                    🏖️ سجل وكشف إجازات الموظف: {selectedEmpModal.name}
+                    🏖️ سجل وكشف إجازات الموظف: {getEmpDisplayName(selectedEmpModal)}
                   </h3>
                   <span style={{ fontSize: '13px', color: 'var(--muted)' }}>
-                    كود: {selectedEmpModal.code} | الرصيد الكلي: <strong>{annualTotal} يوم</strong> | المأخوذ: <strong style={{ color: '#d97706' }}>{takenAnnualDays} يوم</strong> | المتبقي: <strong style={{ color: remainingAnnualDays > 0 ? '#16a34a' : '#dc2626' }}>{remainingAnnualDays} يوم</strong>
+                    كود: {selectedEmpModal.code}
+                    {selectedEmpModal.nickname && selectedEmpModal.nickname.trim() !== selectedEmpModal.name?.trim() && ` | الاسم الرسمي: ${selectedEmpModal.name}`}
+                    {' '}| الرصيد الكلي: <strong>{annualTotal} يوم</strong> | المأخوذ: <strong style={{ color: '#d97706' }}>{takenAnnualDays} يوم</strong> | المتبقي: <strong style={{ color: remainingAnnualDays > 0 ? '#16a34a' : '#dc2626' }}>{remainingAnnualDays} يوم</strong>
                   </span>
                 </div>
                 <button className="btn btn-ghost" onClick={() => setSelectedEmpModal(null)}>✕ إغلاق</button>

@@ -83,6 +83,27 @@ export function fmt(n) {
   return (Math.round(num * 100) / 100).toFixed(2);
 }
 
+/**
+ * الحصول على اسم العرض للموظف في شاشات وجداول النظام
+ * إذا تم إدخال "اسم الشهرة" (nickname) يتم عرضه، وإلا يتم عرض الاسم الكامل (name)
+ */
+export function getEmpDisplayName(emp) {
+  if (!emp) return '';
+  if (typeof emp === 'string') return emp;
+  const nickname = emp.nickname?.trim();
+  if (nickname) return nickname;
+  return emp.name?.trim() || emp.fullName?.trim() || '—';
+}
+
+/**
+ * الحصول على الاسم الرسمي الكامل للموظف (لمسير الرواتب ومفردات المرتب الرسمية)
+ */
+export function getEmpOfficialName(emp) {
+  if (!emp) return '';
+  if (typeof emp === 'string') return emp;
+  return emp.name?.trim() || emp.fullName?.trim() || emp.nickname?.trim() || '—';
+}
+
 export function toSafeArray(val) {
   if (Array.isArray(val)) return val;
   if (val && typeof val === 'object') {
@@ -101,6 +122,7 @@ export function normalizeState(parsed) {
   if (rawEmployees.length > 0) {
     employees = rawEmployees.map((e) => ({
       ...e,
+      nickname: e.nickname || '',
       phone: e.phone || '',
       username: e.username || e.code || ''
     }));
@@ -111,6 +133,7 @@ export function normalizeState(parsed) {
         code: String(101 + idx),
         username: String(101 + idx),
         name: job.name || (id === 'dataentry' ? 'مدخل بيانات' : 'مساعد صيدلي'),
+        nickname: '',
         phone: '01000000000',
         jobTitle: job.name || 'موظف',
         salary: typeof job.salary === 'number' ? job.salary : (parseFloat(job.salary) || 0),

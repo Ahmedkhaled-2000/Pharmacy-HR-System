@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import FaceRegistrationModal from './FaceRegistrationModal';
 import FaceTestModal from './FaceTestModal';
 import { saveFaceDescriptor, deleteFaceDescriptor, saveHandDescriptor, deleteHandDescriptor } from '../../utils/faceStorage';
+import { getEmpDisplayName } from '../../utils/formatters';
 
 export default function ElectronicAttendanceAdmin({ state, setState, saveState, showToast, executeWithOwnerGuard }) {
   const [selectedEmp, setSelectedEmp] = useState(null);
@@ -242,9 +243,10 @@ export default function ElectronicAttendanceAdmin({ state, setState, saveState, 
       if (searchQuery.trim()) {
         const q = searchQuery.trim().toLowerCase();
         const matchName = (emp.name || '').toLowerCase().includes(q);
+        const matchNickname = (emp.nickname || '').toLowerCase().includes(q);
         const matchCode = (emp.code || '').toLowerCase().includes(q);
         const matchJob = (emp.jobTitle || '').toLowerCase().includes(q);
-        if (!matchName && !matchCode && !matchJob) return false;
+        if (!matchName && !matchNickname && !matchCode && !matchJob) return false;
       }
 
       return true;
@@ -375,10 +377,15 @@ export default function ElectronicAttendanceAdmin({ state, setState, saveState, 
                           fontWeight: 'bold',
                           fontSize: '14px'
                         }}>
-                          {emp.name.slice(0, 1)}
+                          {getEmpDisplayName(emp).slice(0, 1)}
                         </div>
                         <div>
-                          <strong style={{ fontSize: '14px' }}>{emp.name}</strong>
+                          <strong style={{ fontSize: '14px' }}>{getEmpDisplayName(emp)}</strong>
+                          {emp.nickname && emp.nickname.trim() !== emp.name?.trim() && (
+                            <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>
+                              الاسم الرسمي: {emp.name}
+                            </span>
+                          )}
                           <span style={{ display: 'block', fontSize: '11.5px', color: 'var(--muted)' }}>
                             {emp.jobTitle || 'موظف'}
                           </span>

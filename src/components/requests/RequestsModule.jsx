@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { applyShiftSwapToRosters, arabicWeekday, shouldShowRequestToBranch } from '../../utils/formatters';
+import { applyShiftSwapToRosters, arabicWeekday, shouldShowRequestToBranch, getEmpDisplayName } from '../../utils/formatters';
 import { notifyEmployeeEarlyExitWarning } from '../../utils/gmailService';
 import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
 import { normalizeSchedule } from '../roster/RosterModule';
@@ -980,7 +980,7 @@ export default function RequestsModule({
           <select value={filterEmp} onChange={(e) => setFilterEmp(e.target.value)} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px' }}>
             <option value="all">-- جميع الموظفين --</option>
             {employees.map((e) => (
-              <option key={e.id} value={e.id}>{e.name} ({e.code})</option>
+              <option key={e.id} value={e.id}>{getEmpDisplayName(e)} ({e.code})</option>
             ))}
           </select>
         </div>
@@ -1057,7 +1057,12 @@ export default function RequestsModule({
                         </span>
                       </div>
                     </td>
-                    <td style={{ fontWeight: '800' }}>{req.employeeName || 'موظف'}</td>
+                    <td style={{ fontWeight: '800' }}>
+                      {(() => {
+                        const emp = employees.find(e => e.id === req.employeeId || e.code === req.employeeCode);
+                        return emp ? getEmpDisplayName(emp) : (req.employeeName || 'موظف');
+                      })()}
+                    </td>
                     <td>{getFormattedRequestBadge(req.type, req.leaveType)}</td>
                     <td>
                       {(req.targetApproval === 'admin_only' || req.targetApproval === 'admin' || ['loan', 'advance', 'credit_medicine', 'eval_edit_request', 'complaint'].includes(req.type) || req.branchNotRequired || req.isDirectToAdmin) ? (
@@ -1197,7 +1202,7 @@ export default function RequestsModule({
                     <div>
                       <span style={{ color: 'var(--muted)', fontSize: '12px' }}>اسم الموظف:</span>
                       <div style={{ fontWeight: 'bold', color: 'var(--text)', fontSize: '14px' }}>
-                        {previewModalReq.employeeName || empObj?.name || 'غير معروف'}
+                        {empObj ? getEmpDisplayName(empObj) : (previewModalReq.employeeName || 'غير معروف')}
                       </div>
                     </div>
                     <div>

@@ -17,6 +17,7 @@ export default function EmployeeFileModal({
 
   // 1. Personal Data
   const [name, setName] = useState('');
+  const [nickname, setNickname] = useState('');
   const [phone, setPhone] = useState('');
   const [phones, setPhones] = useState([
     { id: '1', number: '', type: 'mobile' }
@@ -125,6 +126,7 @@ export default function EmployeeFileModal({
       }
 
       setName(editingEmp.name || '');
+      setNickname(editingEmp.nickname || '');
       setPhone(editingEmp.phone || '');
       setEmail(editingEmp.email || '');
       setRelativePhone(String(editingEmp.relativePhone || editingEmp.emergencyPhone || '').replace(/\D/g, ''));
@@ -361,6 +363,7 @@ export default function EmployeeFileModal({
     const employeeData = {
       id: editingEmp ? editingEmp.id : `emp_${Date.now()}`,
       name: name.trim(),
+      nickname: nickname.trim(),
       phone: primaryPhone,
       phones: validPhones,
       email: email.trim(),
@@ -481,11 +484,16 @@ export default function EmployeeFileModal({
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                 <div className="field">
-                  <label>الاسم بالكامل</label>
-                  <input type="text" value={name} onChange={(e) => setName(e.target.value)} required placeholder="اسم الموظف الثلاثي" />
+                  <label>الاسم بالكامل (الرسمي في مسير الرواتب والمفردات) *</label>
+                  <input type="text" value={name} onChange={(e) => setName(e.target.value)} required placeholder="اسم الموظف الثلاثي أو الرباعي الرسمي" />
                 </div>
 
                 <div className="field">
+                  <label>اسم الشهرة (يظهر في جميع شاشات وصفحات النظام)</label>
+                  <input type="text" value={nickname} onChange={(e) => setNickname(e.target.value)} placeholder="مثال: د. أحمد / دكتور كريم (اختياري)" />
+                </div>
+
+                <div className="field" style={{ gridColumn: 'span 2' }}>
                   <label>البريد الإلكتروني الشخصي (Gmail التنبيهات)</label>
                   <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="employee@gmail.com" />
                 </div>

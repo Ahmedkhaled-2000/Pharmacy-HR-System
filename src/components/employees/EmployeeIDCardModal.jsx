@@ -27,13 +27,18 @@ export default function EmployeeIDCardModal({
         <div className="vip-badge-body">
           <div className="vip-photo-ring">
             {selectedEmpCard.photoUrl ? (
-              <img src={selectedEmpCard.photoUrl} alt={selectedEmpCard.name} />
+              <img src={selectedEmpCard.photoUrl} alt={selectedEmpCard.nickname || selectedEmpCard.name} />
             ) : (
-              <div className="badge-avatar-placeholder">{selectedEmpCard.name.charAt(0)}</div>
+              <div className="badge-avatar-placeholder">{(selectedEmpCard.nickname || selectedEmpCard.name).charAt(0)}</div>
             )}
           </div>
 
-          <h2>{selectedEmpCard.name}</h2>
+          <h2>{selectedEmpCard.nickname || selectedEmpCard.name}</h2>
+          {selectedEmpCard.nickname && selectedEmpCard.nickname.trim() !== selectedEmpCard.name?.trim() && (
+            <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '-4px', marginBottom: '4px' }}>
+              الاسم الرسمي: {selectedEmpCard.name}
+            </div>
+          )}
           <p className="vip-badge-job">{selectedEmpCard.jobTitle}</p>
           {selectedEmpCard.phone && <div style={{ fontSize: '13px', color: 'var(--muted)', marginTop: '2px' }}>📞 {selectedEmpCard.phone}</div>}
 

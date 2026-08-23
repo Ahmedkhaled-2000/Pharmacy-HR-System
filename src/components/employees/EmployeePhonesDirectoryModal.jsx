@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { getEmpDisplayName } from '../../utils/formatters';
 
 export default function EmployeePhonesDirectoryModal({
   isOpen,
@@ -90,6 +91,7 @@ export default function EmployeePhonesDirectoryModal({
       // Search Query filter
       const matchesSearch = !q || (
         (emp.name && emp.name.toLowerCase().includes(q)) ||
+        (emp.nickname && emp.nickname.toLowerCase().includes(q)) ||
         (emp.code && emp.code.toLowerCase().includes(q)) ||
         (emp.jobTitle && emp.jobTitle.toLowerCase().includes(q)) ||
         (emp.branchDisplay && emp.branchDisplay.toLowerCase().includes(q)) ||
@@ -266,13 +268,18 @@ export default function EmployeePhonesDirectoryModal({
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '10px', borderBottom: '1px dashed var(--border)', paddingBottom: '8px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                       <div className="emp-avatar-circle" style={{ width: '40px', height: '40px', flexShrink: 0, fontSize: '15px' }}>
-                        {emp.photoUrl ? <img src={emp.photoUrl} alt={emp.name} /> : <span>{emp.name?.charAt(0) || 'م'}</span>}
+                        {emp.photoUrl ? <img src={emp.photoUrl} alt={getEmpDisplayName(emp)} /> : <span>{getEmpDisplayName(emp)?.charAt(0) || 'م'}</span>}
                       </div>
                       <div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <span style={{ fontWeight: 800, fontSize: '15px', color: 'var(--text)' }}>
-                            {emp.name}
+                            {getEmpDisplayName(emp)}
                           </span>
+                          {emp.nickname && emp.nickname.trim() !== emp.name?.trim() && (
+                            <span style={{ fontSize: '11px', color: 'var(--muted)', background: 'var(--surface-muted)', padding: '1px 6px', borderRadius: '4px', border: '1px solid var(--border)' }}>
+                              ({emp.name})
+                            </span>
+                          )}
                           <span className="badge badge-primary" style={{ fontSize: '11px' }}>
                             {emp.code}
                           </span>

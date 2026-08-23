@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { arabicWeekday, todayStr } from '../../utils/formatters';
+import { arabicWeekday, todayStr, getEmpDisplayName } from '../../utils/formatters';
 
 export default function AdminResignationModule({
   state,
@@ -356,7 +356,7 @@ export default function AdminResignationModule({
                     .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
                     .map(e => (
                       <option key={e.id} value={e.id}>
-                        {e.name} - {state.branches?.find(b => b.id === e.branchId)?.name || 'بدون فرع'} (كود: {e.code || '-'})
+                        {getEmpDisplayName(e)} - {state.branches?.find(b => b.id === e.branchId)?.name || 'بدون فرع'} (كود: {e.code || '-'})
                       </option>
                   ))}
                 </select>
@@ -434,10 +434,17 @@ export default function AdminResignationModule({
                 <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', paddingBottom: '15px', marginBottom: '15px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                     <div className="emp-avatar-circle" style={{ width: '45px', height: '45px' }}>
-                      {emp?.photoUrl ? <img src={emp.photoUrl} alt={emp.name} /> : <span>{emp?.name?.charAt(0) || '?'}</span>}
+                      {emp?.photoUrl ? <img src={emp.photoUrl} alt={getEmpDisplayName(emp)} /> : <span>{getEmpDisplayName(emp)?.charAt(0) || '?'}</span>}
                     </div>
                     <div>
-                      <div style={{ fontWeight: 'bold', fontSize: '16px' }}>{emp?.name || 'موظف محذوف'}</div>
+                      <div style={{ fontWeight: 'bold', fontSize: '16px' }}>
+                        {emp ? getEmpDisplayName(emp) : (req.employeeName || 'موظف محذوف')}
+                        {emp?.nickname && emp.nickname.trim() !== emp.name?.trim() && (
+                          <span style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 'normal', marginRight: '6px' }}>
+                            ({emp.name})
+                          </span>
+                        )}
+                      </div>
                       <div style={{ color: 'var(--muted)', fontSize: '13px', marginTop: '4px' }}>
                         الفرع: <strong>{branch?.name || 'الرئيسي'}</strong> | كود: {emp?.code || '-'} | {emp?.jobTitle || '-'}
                       </div>

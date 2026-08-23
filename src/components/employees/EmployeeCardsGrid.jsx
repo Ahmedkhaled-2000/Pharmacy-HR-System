@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { fmt, todayStr } from '../../utils/formatters';
+import { fmt, todayStr, getEmpDisplayName } from '../../utils/formatters';
 import EmployeeTerminationModal from './EmployeeTerminationModal';
 import EmployeeComprehensiveDossierModal from './EmployeeComprehensiveDossierModal';
 
@@ -95,10 +95,11 @@ export default function EmployeeCardsGrid({
       if (searchTerm.trim()) {
         const term = searchTerm.trim().toLowerCase();
         const matchName = emp.name?.toLowerCase().includes(term);
+        const matchNickname = emp.nickname?.toLowerCase().includes(term);
         const matchCode = emp.code?.toLowerCase().includes(term);
         const matchJob = emp.jobTitle?.toLowerCase().includes(term);
         const matchPhone = emp.phone?.includes(term);
-        if (!matchName && !matchCode && !matchJob && !matchPhone) return false;
+        if (!matchName && !matchNickname && !matchCode && !matchJob && !matchPhone) return false;
       }
       return true;
     });
@@ -572,16 +573,21 @@ export default function EmployeeCardsGrid({
                       <div style={{ display: 'flex', alignItems: 'center', gap: '16px', minWidth: '260px', flex: 1 }}>
                         <div className="emp-avatar-circle" style={{ width: '52px', height: '52px', flexShrink: 0, opacity: isEmpTerminated ? 0.75 : 1 }}>
                           {emp.photoUrl ? (
-                            <img src={emp.photoUrl} alt={emp.name} className="emp-img" />
+                            <img src={emp.photoUrl} alt={getEmpDisplayName(emp)} className="emp-img" />
                           ) : (
-                            <span style={{ fontSize: '20px' }}>{emp.name.charAt(0)}</span>
+                            <span style={{ fontSize: '20px' }}>{getEmpDisplayName(emp).charAt(0)}</span>
                           )}
                         </div>
                         <div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                             <h3 style={{ margin: 0, fontFamily: 'Cairo', fontSize: '17px', color: isEmpTerminated ? '#7f1d1d' : 'var(--text)' }}>
-                              {emp.name}
+                              {getEmpDisplayName(emp)}
                             </h3>
+                            {emp.nickname && emp.nickname.trim() !== emp.name?.trim() && (
+                              <span style={{ fontSize: '11px', color: 'var(--muted)', background: 'var(--surface-muted)', padding: '1px 7px', borderRadius: '4px', border: '1px solid var(--border)' }} title="الاسم الرسمي الكامل">
+                                📋 {emp.name}
+                              </span>
+                            )}
                             <span className="code-badge">كود: {emp.code}</span>
                             {emp.devices && emp.devices.some((d) => d.status === 'pending') && (
                               <span
