@@ -8,6 +8,8 @@ export default function BylawsModule({
   saveState,
   showToast,
   userRole = 'admin',
+  activeSubTab = 'disciplinary_penalties',
+  setActiveSubTab,
   currentEmpId = null,
   currentBranchId = null,
   filterFn = null,
@@ -17,7 +19,13 @@ export default function BylawsModule({
   customTo = '',
   executeWithOwnerGuard
 }) {
-  const [activeTab, setActiveTab] = useState('disciplinary_penalties'); // 'disciplinary_penalties' | 'text' | 'records' | 'late_penalties'
+  const [activeTab, setActiveTab] = useState(activeSubTab || 'disciplinary_penalties'); // 'disciplinary_penalties' | 'text' | 'records' | 'late_penalties'
+
+  useEffect(() => {
+    if (activeSubTab) {
+      setActiveTab(activeSubTab);
+    }
+  }, [activeSubTab]);
   const isManagerOrAdmin = userRole === 'admin' || userRole === 'branch';
   const isAdmin = userRole === 'admin';
 
@@ -386,42 +394,24 @@ export default function BylawsModule({
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          <button
-            className={`btn ${activeTab === 'disciplinary_penalties' ? 'btn-start' : 'btn-ghost'}`}
-            onClick={() => setActiveTab('disciplinary_penalties')}
-            style={{
-              borderColor: '#dc2626',
-              color: activeTab === 'disciplinary_penalties' ? '#fff' : '#dc2626',
-              fontWeight: 700,
-              background: activeTab === 'disciplinary_penalties' ? '#dc2626' : 'transparent'
-            }}
-          >
-            ⚖️ لائحة الجزاءات التأديبية وعداد التكرار
-          </button>
-          <button
-            className={`btn ${activeTab === 'text' ? 'btn-start' : 'btn-ghost'}`}
-            onClick={() => setActiveTab('text')}
-          >
-            📖 نصوص اللائحة الرسمية
-          </button>
-          <button
-            className={`btn ${activeTab === 'records' ? 'btn-start' : 'btn-ghost'}`}
-            onClick={() => setActiveTab('records')}
-          >
-            📋 سجل الجزاءات والخصومات
-          </button>
-          <button
-            className={`btn ${activeTab === 'late_penalties' ? 'btn-start' : 'btn-ghost'}`}
-            onClick={() => setActiveTab('late_penalties')}
-            style={{
-              borderColor: 'var(--primary)',
-              color: activeTab === 'late_penalties' ? '#fff' : 'var(--primary-dark)',
-              fontWeight: 700
-            }}
-          >
-            ⏱️ جزاءات التأخير
-          </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{
+            background: activeTab === 'disciplinary_penalties' ? '#fef2f2' : activeTab === 'late_penalties' ? '#f0fdf4' : activeTab === 'records' ? '#eff6ff' : '#f8fafc',
+            color: activeTab === 'disciplinary_penalties' ? '#dc2626' : activeTab === 'late_penalties' ? '#166534' : activeTab === 'records' ? '#1e40af' : '#475569',
+            border: `1px solid ${activeTab === 'disciplinary_penalties' ? '#fecaca' : activeTab === 'late_penalties' ? '#86efac' : activeTab === 'records' ? '#bfdbfe' : '#cbd5e1'}`,
+            padding: '6px 14px',
+            borderRadius: '99px',
+            fontSize: '13px',
+            fontWeight: 800,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}>
+            {activeTab === 'disciplinary_penalties' && '⚖️ لائحة الجزاءات التأديبية وعداد التكرار'}
+            {activeTab === 'text' && '📖 نصوص اللائحة الرسمية'}
+            {activeTab === 'records' && '📋 سجل الجزاءات والخصومات'}
+            {activeTab === 'late_penalties' && '⏱️ سياسة جزاءات التأخير وحساب التأخيرات'}
+          </span>
         </div>
       </div>
 

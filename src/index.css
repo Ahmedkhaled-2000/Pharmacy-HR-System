@@ -2541,6 +2541,11 @@ tbody tr:hover {
   transform-origin: top right;
 }
 
+.desktop-flyout-animate {
+  animation: desktopFlyoutFadeIn 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+  transform-origin: top right;
+}
+
 @keyframes desktopDropdownFadeIn {
   0% {
     opacity: 0;
@@ -2549,6 +2554,17 @@ tbody tr:hover {
   100% {
     opacity: 1;
     transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes desktopFlyoutFadeIn {
+  0% {
+    opacity: 0;
+    transform: translateX(8px) scale(0.98);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
   }
 }
 

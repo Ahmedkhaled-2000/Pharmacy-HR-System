@@ -4970,6 +4970,8 @@ export default function App() {
                   saveState={saveState}
                   showToast={showToast}
                   userRole={authRole === 'branch' ? 'branch' : 'admin'}
+                  activeSubTab={activeSubTab}
+                  setActiveSubTab={setActiveSubTab}
                   filterFn={currentFilterFn}
                   monthPicker={monthPicker}
                   filterMode={adminFilterMode}

@@ -27,6 +27,7 @@ export default function DesktopLayout({
   children
 }) {
   const [openDropdown, setOpenDropdown] = useState(null);
+  const [hoveredFlyoutId, setHoveredFlyoutId] = useState(null);
   const menuContainerRef = useRef(null);
 
   const unreadNotificationsCount = (notifications || []).filter(n => !n.read).length;
@@ -76,6 +77,14 @@ export default function DesktopLayout({
           label: 'الجداول والورديات الشهرية',
           icon: '📅',
           desc: 'توزيع شفتات العمل ومناوبات الكادر الطبي'
+        },
+        {
+          id: 'employees:jobs',
+          targetTab: 'employees',
+          targetSubTab: 'jobs',
+          label: 'الوظائف والأقسام',
+          icon: '💼',
+          desc: 'دليل وهيكلة المسميات الوظيفية وتصنيف الكوادر والبدلات'
         }
       ]
     },
@@ -175,10 +184,45 @@ export default function DesktopLayout({
         {
           id: 'bylaws',
           targetTab: 'bylaws',
+          targetSubTab: 'disciplinary_penalties',
           label: 'لائحة العمل والجزاءات',
           icon: '📜',
           badge: bylawsCount,
-          desc: 'تطبيق بنود لائحة العمل واحتساب الغرامات'
+          desc: 'تطبيق بنود لائحة العمل واحتساب الغرامات والخصومات',
+          subChildren: [
+            {
+              id: 'bylaws:disciplinary_penalties',
+              targetTab: 'bylaws',
+              targetSubTab: 'disciplinary_penalties',
+              label: 'لائحة الجزاءات التأديبية وعداد التكرار',
+              icon: '⚖️',
+              desc: 'نظام عداد تكرار المخالفات واحتساب الغرامات'
+            },
+            {
+              id: 'bylaws:text',
+              targetTab: 'bylaws',
+              targetSubTab: 'text',
+              label: 'نصوص اللائحة الرسمية',
+              icon: '📖',
+              desc: 'بنود وسياسات لائحة العمل المعتمدة'
+            },
+            {
+              id: 'bylaws:records',
+              targetTab: 'bylaws',
+              targetSubTab: 'records',
+              label: 'سجل الجزاءات والخصومات',
+              icon: '📋',
+              desc: 'سجل الخصومات والمخالفات المطبقة والمصروفة'
+            },
+            {
+              id: 'bylaws:late_penalties',
+              targetTab: 'bylaws',
+              targetSubTab: 'late_penalties',
+              label: 'جزاءات التأخير',
+              icon: '⏱️',
+              desc: 'شرائح التأخير واحتساب دقائق الخصم'
+            }
+          ]
         },
         {
           id: 'evaluations',
@@ -214,12 +258,71 @@ export default function DesktopLayout({
         {
           id: 'settings',
           targetTab: 'settings',
+          targetSubTab: 'general',
           label: 'إعدادات المؤسسة والنظام',
           icon: '⚙️',
-          desc: 'تخصيص القواعد، كلمات المرور، وربط Gmail'
+          desc: 'تخصيص القواعد، الصلاحيات، وربط النظام',
+          subChildren: [
+            {
+              id: 'settings:general',
+              targetTab: 'settings',
+              targetSubTab: 'general',
+              label: 'بيانات الصيدلية والمدير العام',
+              icon: '🏢',
+              desc: 'الاسم، الشعار، المدير العام، وحساب الأدمن'
+            },
+            {
+              id: 'settings:permissions',
+              targetTab: 'settings',
+              targetSubTab: 'permissions',
+              label: 'إدارة الصلاحيات',
+              icon: '🔒',
+              desc: 'أدوار المستخدمين وصلاحيات الوصول والعمليات'
+            },
+            {
+              id: 'settings:rules',
+              targetTab: 'settings',
+              targetSubTab: 'rules',
+              label: 'قواعد الموافقة المزدوجة',
+              icon: '🔐',
+              desc: 'شروط ومسارات الاعتماد والمديرين للطلبات'
+            },
+            {
+              id: 'settings:gmail',
+              targetTab: 'settings',
+              targetSubTab: 'gmail',
+              label: 'بريد Gmail والتنبيهات',
+              icon: '✉️',
+              desc: 'إعدادات الربط بالبريد لإرسال الإشعارات'
+            },
+            {
+              id: 'settings:ip',
+              targetTab: 'settings',
+              targetSubTab: 'ip',
+              label: 'راوترات الفروع وبصمة الأجهزة',
+              icon: '🌐',
+              desc: 'تحديد نطاقات شبكات الفروع المعتمدة'
+            },
+            {
+              id: 'settings:backup',
+              targetTab: 'settings',
+              targetSubTab: 'backup',
+              label: 'النسخ الاحتياطي وقاعدة البيانات',
+              icon: '💾',
+              desc: 'تصدير واسترجاع قواعد البيانات وتصفير النظام'
+            },
+            {
+              id: 'settings:owner',
+              targetTab: 'settings',
+              targetSubTab: 'owner',
+              label: 'صلاحيات وتحكم المالك',
+              icon: '👑',
+              desc: 'أقفال تعديلات الإدارة العليا وبيانات المالك'
+            }
+          ]
         },
         {
-          id: 'settings:owner',
+          id: 'settings:owner-shortcut',
           targetTab: 'settings',
           targetSubTab: 'owner',
           label: '👑 صلاحيات وتحكم المالك',
@@ -331,6 +434,15 @@ export default function DesktopLayout({
     }
     if (menu.children) {
       return menu.children.some(child => {
+        if (child.subChildren && child.subChildren.length > 0) {
+          return child.subChildren.some(subChild => {
+            if (subChild.targetTab === activeTab) {
+              if (subChild.targetSubTab) return activeSubTab === subChild.targetSubTab;
+              return true;
+            }
+            return false;
+          });
+        }
         if (child.targetTab === activeTab) {
           if (child.targetSubTab) {
             return activeSubTab === child.targetSubTab;
@@ -348,11 +460,13 @@ export default function DesktopLayout({
     const handleClickOutside = (e) => {
       if (menuContainerRef.current && !menuContainerRef.current.contains(e.target)) {
         setOpenDropdown(null);
+        setHoveredFlyoutId(null);
       }
     };
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
         setOpenDropdown(null);
+        setHoveredFlyoutId(null);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -371,8 +485,10 @@ export default function DesktopLayout({
         setActiveTab(menu.targetTab);
       }
       setOpenDropdown(null);
+      setHoveredFlyoutId(null);
     } else {
       setOpenDropdown(prev => (prev === menu.id ? null : menu.id));
+      setHoveredFlyoutId(null);
     }
   };
 
@@ -380,6 +496,7 @@ export default function DesktopLayout({
     if (subItem.openInNewTab || subItem.targetTab === 'pharmacy-archive') {
       window.open(window.location.origin + '/archive', '_blank');
       setOpenDropdown(null);
+      setHoveredFlyoutId(null);
       return;
     }
 
@@ -388,6 +505,7 @@ export default function DesktopLayout({
       setActiveSubTab(subItem.targetSubTab);
     }
     setOpenDropdown(null);
+    setHoveredFlyoutId(null);
   };
 
   // Breadcrumb current label generator
@@ -397,15 +515,23 @@ export default function DesktopLayout({
         return { group: menu.label, item: null, icon: menu.icon };
       }
       if (menu.children) {
-        const foundChild = menu.children.find(c => {
-          if (c.targetTab === activeTab) {
-            if (c.targetSubTab) return activeSubTab === c.targetSubTab;
-            return true;
+        for (const c of menu.children) {
+          if (c.subChildren && c.subChildren.length > 0) {
+            const foundSub = c.subChildren.find(sub => {
+              if (sub.targetTab === activeTab) {
+                if (sub.targetSubTab) return activeSubTab === sub.targetSubTab;
+                return true;
+              }
+              return false;
+            });
+            if (foundSub) {
+              return { group: menu.label, item: `${c.label} › ${foundSub.label}`, icon: foundSub.icon || c.icon };
+            }
           }
-          return false;
-        });
-        if (foundChild) {
-          return { group: menu.label, item: foundChild.label, icon: foundChild.icon };
+          if (c.targetTab === activeTab) {
+            if (c.targetSubTab && activeSubTab !== c.targetSubTab) continue;
+            return { group: menu.label, item: c.label, icon: c.icon };
+          }
         }
       }
     }
@@ -847,83 +973,215 @@ export default function DesktopLayout({
                   }}
                 >
                   {menu.children.map((child) => {
-                    const isChildActive = child.targetTab === activeTab && (!child.targetSubTab || activeSubTab === child.targetSubTab);
+                    const hasSubChildren = child.subChildren && child.subChildren.length > 0;
+                    const isChildActive = hasSubChildren
+                      ? child.subChildren.some(sc => sc.targetTab === activeTab && (!sc.targetSubTab || activeSubTab === sc.targetSubTab))
+                      : (child.targetTab === activeTab && (!child.targetSubTab || activeSubTab === child.targetSubTab));
+                    const isFlyoutOpen = hoveredFlyoutId === child.id;
 
                     return (
-                      <button
+                      <div
                         key={child.id}
-                        type="button"
-                        onClick={() => handleSubItemClick(child)}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'flex-start',
-                          gap: '10px',
-                          padding: '9px 12px',
-                          borderRadius: '8px',
-                          border: 'none',
-                          background: isChildActive ? 'var(--primary-light)' : 'transparent',
-                          color: isChildActive ? 'var(--primary-dark)' : 'var(--text)',
-                          cursor: 'pointer',
-                          textAlign: 'right',
-                          width: '100%',
-                          transition: 'all 0.15s ease'
-                        }}
-                        onMouseEnter={(e) => {
-                          if (!isChildActive) {
-                            e.currentTarget.style.background = 'var(--hover)';
+                        style={{ position: 'relative' }}
+                        onMouseEnter={() => {
+                          if (hasSubChildren) {
+                            setHoveredFlyoutId(child.id);
+                          } else {
+                            setHoveredFlyoutId(null);
                           }
                         }}
                         onMouseLeave={(e) => {
-                          if (!isChildActive) {
-                            e.currentTarget.style.background = 'transparent';
+                          if (hasSubChildren && !e.currentTarget.contains(e.relatedTarget)) {
+                            setHoveredFlyoutId(null);
                           }
                         }}
                       >
-                        <span style={{ fontSize: '18px', marginTop: '1px', flexShrink: 0 }}>
-                          {child.icon}
-                        </span>
-
-                        <div style={{ flex: 1, overflow: 'hidden' }}>
-                          <div style={{
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (hasSubChildren) {
+                              setHoveredFlyoutId(prev => prev === child.id ? null : child.id);
+                            } else {
+                              handleSubItemClick(child);
+                            }
+                          }}
+                          style={{
                             display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            gap: '6px'
-                          }}>
-                            <span style={{
-                              fontWeight: isChildActive ? 800 : 700,
-                              fontSize: '13px',
-                              color: isChildActive ? 'var(--primary)' : 'var(--text)'
+                            alignItems: 'flex-start',
+                            gap: '10px',
+                            padding: '9px 12px',
+                            borderRadius: '8px',
+                            border: 'none',
+                            background: isChildActive ? 'var(--primary-light)' : isFlyoutOpen ? 'var(--hover)' : 'transparent',
+                            color: isChildActive ? 'var(--primary-dark)' : 'var(--text)',
+                            cursor: 'pointer',
+                            textAlign: 'right',
+                            width: '100%',
+                            transition: 'all 0.15s ease'
+                          }}
+                          onMouseEnter={(e) => {
+                            if (!isChildActive && !isFlyoutOpen) {
+                              e.currentTarget.style.background = 'var(--hover)';
+                            }
+                          }}
+                          onMouseLeave={(e) => {
+                            if (!isChildActive && !isFlyoutOpen) {
+                              e.currentTarget.style.background = 'transparent';
+                            }
+                          }}
+                        >
+                          <span style={{ fontSize: '18px', marginTop: '1px', flexShrink: 0 }}>
+                            {child.icon}
+                          </span>
+
+                          <div style={{ flex: 1, overflow: 'hidden' }}>
+                            <div style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              gap: '6px'
                             }}>
-                              {child.label}
-                            </span>
-                            {child.badge > 0 && (
                               <span style={{
-                                background: 'var(--danger)',
-                                color: '#ffffff',
-                                fontSize: '10px',
-                                fontWeight: 800,
-                                padding: '1px 5px',
-                                borderRadius: '99px'
+                                fontWeight: isChildActive ? 800 : 700,
+                                fontSize: '13px',
+                                color: isChildActive ? 'var(--primary)' : 'var(--text)'
                               }}>
-                                {child.badge}
+                                {child.label}
                               </span>
+
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                {child.badge > 0 && (
+                                  <span style={{
+                                    background: 'var(--danger)',
+                                    color: '#ffffff',
+                                    fontSize: '10px',
+                                    fontWeight: 800,
+                                    padding: '1px 5px',
+                                    borderRadius: '99px'
+                                  }}>
+                                    {child.badge}
+                                  </span>
+                                )}
+
+                                {/* Flyout Indicator Chevron in RTL (◀) */}
+                                {hasSubChildren && (
+                                  <span style={{
+                                    fontSize: '11px',
+                                    color: isChildActive ? 'var(--primary)' : 'var(--muted)',
+                                    opacity: 0.7,
+                                    transform: isFlyoutOpen ? 'translateX(-2px)' : 'none',
+                                    transition: 'transform 0.15s ease'
+                                  }}>
+                                    ◀
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            {child.desc && (
+                              <p style={{
+                                margin: '2px 0 0',
+                                fontSize: '11px',
+                                color: 'var(--muted)',
+                                lineHeight: 1.3,
+                                whiteSpace: 'normal'
+                              }}>
+                                {child.desc}
+                              </p>
                             )}
                           </div>
+                        </button>
 
-                          {child.desc && (
-                            <p style={{
-                              margin: '2px 0 0',
-                              fontSize: '11px',
-                              color: 'var(--muted)',
-                              lineHeight: 1.3,
-                              whiteSpace: 'normal'
-                            }}>
-                              {child.desc}
-                            </p>
-                          )}
-                        </div>
-                      </button>
+                        {/* ── Cascading Side-Flyout Submenu (RTL: flies out to the left) ── */}
+                        {hasSubChildren && isFlyoutOpen && (
+                          <div
+                            className="desktop-flyout-animate"
+                            style={{
+                              position: 'absolute',
+                              top: '-4px',
+                              right: 'calc(100% + 6px)',
+                              minWidth: '280px',
+                              maxWidth: '340px',
+                              background: 'var(--surface)',
+                              border: '1px solid var(--border)',
+                              borderRadius: '12px',
+                              boxShadow: '0 14px 35px rgba(0,0,0,0.22)',
+                              padding: '6px',
+                              zIndex: 1100,
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '3px'
+                            }}
+                            onMouseEnter={() => setHoveredFlyoutId(child.id)}
+                            onMouseLeave={() => setHoveredFlyoutId(null)}
+                          >
+                            {child.subChildren.map((subChild) => {
+                              const isSubChildActive = subChild.targetTab === activeTab && (!subChild.targetSubTab || activeSubTab === subChild.targetSubTab);
+
+                              return (
+                                <button
+                                  key={subChild.id}
+                                  type="button"
+                                  onClick={() => handleSubItemClick(subChild)}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'flex-start',
+                                    gap: '10px',
+                                    padding: '8px 12px',
+                                    borderRadius: '8px',
+                                    border: 'none',
+                                    background: isSubChildActive ? 'var(--primary-light)' : 'transparent',
+                                    color: isSubChildActive ? 'var(--primary-dark)' : 'var(--text)',
+                                    cursor: 'pointer',
+                                    textAlign: 'right',
+                                    width: '100%',
+                                    transition: 'all 0.15s ease'
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    if (!isSubChildActive) e.currentTarget.style.background = 'var(--hover)';
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    if (!isSubChildActive) e.currentTarget.style.background = 'transparent';
+                                  }}
+                                >
+                                  <span style={{ fontSize: '17px', marginTop: '1px', flexShrink: 0 }}>
+                                    {subChild.icon}
+                                  </span>
+
+                                  <div style={{ flex: 1, overflow: 'hidden' }}>
+                                    <div style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'space-between',
+                                      gap: '6px'
+                                    }}>
+                                      <span style={{
+                                        fontWeight: isSubChildActive ? 800 : 700,
+                                        fontSize: '12.5px',
+                                        color: isSubChildActive ? 'var(--primary)' : 'var(--text)'
+                                      }}>
+                                        {subChild.label}
+                                      </span>
+                                    </div>
+
+                                    {subChild.desc && (
+                                      <p style={{
+                                        margin: '2px 0 0',
+                                        fontSize: '11px',
+                                        color: 'var(--muted)',
+                                        lineHeight: 1.3,
+                                        whiteSpace: 'normal'
+                                      }}>
+                                        {subChild.desc}
+                                      </p>
+                                    )}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
                     );
                   })}
                 </div>
