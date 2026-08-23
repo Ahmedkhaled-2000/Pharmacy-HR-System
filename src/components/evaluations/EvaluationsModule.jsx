@@ -12,7 +12,7 @@ export default function EvaluationsModule({
   onReplyToNote,
   showToast
 }) {
-  const [activeTab, setActiveTab] = useState('notes'); // 'notes' | 'evaluations' | 'requests'
+  const [activeTab, setActiveTab] = useState('evaluations'); // 'evaluations' | 'notes' | 'complaints' | 'requests'
 
   // Evaluation Form State
   const [evalEmpId, setEvalEmpId] = useState('');
@@ -252,6 +252,8 @@ export default function EvaluationsModule({
     setReplyTextMap({ ...replyTextMap, [noteId]: '' });
   };
 
+  const complaintsCount = (state.requests || []).filter((r) => r.type === 'complaint').length;
+
   return (
     <div className="bylaws-card" style={{ fontFamily: "'Tajawal', sans-serif" }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
@@ -264,38 +266,46 @@ export default function EvaluationsModule({
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button
-            type="button"
-            className={`btn ${activeTab === 'notes' ? 'btn-start' : 'btn-ghost'}`}
-            onClick={() => setActiveTab('notes')}
-          >
-            💬 ملاحظات الفروع والردود ({notes.length})
-          </button>
-          <button
-            type="button"
-            className={`btn ${activeTab === 'complaints' ? 'btn-start' : 'btn-ghost'}`}
-            onClick={() => setActiveTab('complaints')}
-          >
-            📋 شكاوى الموظفين والردود ({ (state.requests || []).filter(r => r.type === 'complaint').length })
-          </button>
-          <button
-            type="button"
-            className={`btn ${activeTab === 'evaluations' ? 'btn-start' : 'btn-ghost'}`}
-            onClick={() => setActiveTab('evaluations')}
-          >
-            ⭐ تقييم الأداء والدرجات ({evaluations.length})
-          </button>
-          {evalEditRequests.length > 0 && (
-            <button
-              type="button"
-              className={`btn ${activeTab === 'requests' ? 'btn-start' : 'btn-ghost'}`}
-              onClick={() => setActiveTab('requests')}
-              style={{ background: '#f59e0b', color: '#fff' }}
+        {/* Dropdown Selector for Evaluation Sections */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'var(--surface, #f8fafc)', padding: '6px 12px', borderRadius: '12px', border: '1px solid var(--border)' }}>
+            <span style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--muted)' }}>
+              📑 القسم المعروض:
+            </span>
+            <select
+              value={activeTab}
+              onChange={(e) => setActiveTab(e.target.value)}
+              style={{
+                padding: '8px 16px',
+                borderRadius: '10px',
+                border: '1.5px solid var(--primary, #0f766e)',
+                background: '#ffffff',
+                color: 'var(--text)',
+                fontFamily: 'Cairo, Tajawal, sans-serif',
+                fontWeight: 'bold',
+                fontSize: '13.5px',
+                cursor: 'pointer',
+                boxShadow: '0 2px 6px rgba(15,118,110,0.1)',
+                outline: 'none',
+                minWidth: '250px'
+              }}
             >
-              🔔 طلبات تعديل التقييم ({evalEditRequests.length})
-            </button>
-          )}
+              <option value="evaluations">
+                ⭐ تقييم الأداء والدرجات ({evaluations.length})
+              </option>
+              <option value="notes">
+                💬 ملاحظات الفروع والردود ({notes.length})
+              </option>
+              <option value="complaints">
+                📋 شكاوى الموظفين والردود ({complaintsCount})
+              </option>
+              {evalEditRequests.length > 0 && (
+                <option value="requests">
+                  🔔 طلبات تعديل التقييم ({evalEditRequests.length})
+                </option>
+              )}
+            </select>
+          </div>
         </div>
       </div>
 
