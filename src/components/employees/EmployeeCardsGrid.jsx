@@ -657,7 +657,7 @@ export default function EmployeeCardsGrid({
                           <span style={{ background: '#f1f5f9', padding: '3px 8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
                             📁 تاريخ الإنهاء: <strong>{emp.terminationDate || emp.resignationDate || '—'}</strong>
                           </span>
-                          {emp.signedClearanceDoc ? (
+                          {emp.signedClearanceDoc && (
                             <span
                               onClick={() => {
                                 setDossierInitialTab('settlement');
@@ -667,17 +667,6 @@ export default function EmployeeCardsGrid({
                               title="اضغط لفتح ومعاينة إخلاء الطرف الموقع"
                             >
                               <span>🟢</span> إخلاء طرف موقع
-                            </span>
-                          ) : (
-                            <span
-                              onClick={() => {
-                                setDossierInitialTab('settlement');
-                                setDossierModalEmp(emp);
-                              }}
-                              style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', padding: '3px 8px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
-                              title="اضغط لرفع وثيقة إخلاء الطرف الموقعة"
-                            >
-                              <span>📤</span> رفع إخلاء الطرف
                             </span>
                           )}
                         </div>
@@ -724,7 +713,7 @@ export default function EmployeeCardsGrid({
                             <span>🛑</span> إنهاء الخدمة النهائي
                           </button>
                         ) : (
-                          /* 2. If Resigned: Rehire, Dossier & Clearance Buttons */
+                          /* 2. If Resigned: Rehire & Dossier Buttons */
                           <>
                             <button
                               type="button"
@@ -747,30 +736,6 @@ export default function EmployeeCardsGrid({
                               }}
                             >
                               <span>🔄</span> إعادة للعمل
-                            </button>
-
-                            <button
-                              type="button"
-                              className="btn btn-ghost"
-                              onClick={() => {
-                                setDossierInitialTab('settlement');
-                                setDossierModalEmp(emp);
-                              }}
-                              title="فتح صفحة المخالصة المالية ورفع/معاينة إخلاء الطرف"
-                              style={{
-                                background: emp.signedClearanceDoc ? '#dcfce7' : '#fef3c7',
-                                color: emp.signedClearanceDoc ? '#166534' : '#92400e',
-                                border: `1px solid ${emp.signedClearanceDoc ? '#86efac' : '#fde68a'}`,
-                                fontWeight: 'bold',
-                                fontSize: '12px',
-                                padding: '6px 12px',
-                                borderRadius: '8px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '4px'
-                              }}
-                            >
-                              <span>{emp.signedClearanceDoc ? '📜' : '📤'}</span> إخلاء الطرف
                             </button>
 
                             <button
