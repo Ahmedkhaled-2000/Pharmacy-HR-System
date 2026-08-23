@@ -75,6 +75,17 @@ export default function EmployeeComprehensiveDossierModal({
     .filter((r) => String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeId) === empCodeStr))
     .sort((a, b) => new Date(b.createdAt || b.requestDate || 0) - new Date(a.createdAt || a.requestDate || 0));
 
+  // Final settlement snapshot if saved
+  const finalSettlement = emp.finalSettlement || emp.settlementRecord || null;
+
+  // Helper branch name
+  const getBranchName = (bId) => {
+    const b = (state.branches || []).find((br) => String(br.id) === String(bId));
+    return b ? `${b.name}` : (bId === 'main' ? 'المركز الرئيسي' : 'فرع');
+  };
+
+  const isTerminated = emp.status === 'تم الاستقالة' || emp.is_active === false;
+
   // Handlers for Signed Clearance Document
   const handleUploadSignedDoc = async (e) => {
     const file = e.target.files?.[0];
