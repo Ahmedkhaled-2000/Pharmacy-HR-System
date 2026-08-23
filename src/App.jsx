@@ -4995,6 +4995,8 @@ export default function App() {
               {/* 11. Performance Evaluations (التقييمات) */}
               {activeNavTab === 'evaluations' && (
                 <EvaluationsModule
+                  subTab={activeSubTab}
+                  onSubTabChange={setActiveSubTab}
                   state={state}
                   setState={setState}
                   saveState={saveState}

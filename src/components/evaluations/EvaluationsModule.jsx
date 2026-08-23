@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 
 export default function EvaluationsModule({
+  subTab = 'evaluations',
+  onSubTabChange,
   state,
   setState,
   saveState,
@@ -12,7 +14,21 @@ export default function EvaluationsModule({
   onReplyToNote,
   showToast
 }) {
-  const [activeTab, setActiveTab] = useState('evaluations'); // 'evaluations' | 'notes' | 'complaints' | 'requests'
+  const [activeTab, setActiveTab] = useState(subTab || 'evaluations'); // 'evaluations' | 'notes' | 'complaints' | 'requests'
+
+  // Synchronize when parent passes subTab from Top Nav Submenu
+  useEffect(() => {
+    if (subTab && subTab !== activeTab) {
+      setActiveTab(subTab);
+    }
+  }, [subTab]);
+
+  const handleTabChange = (newTab) => {
+    setActiveTab(newTab);
+    if (onSubTabChange) {
+      onSubTabChange(newTab);
+    }
+  };
 
   // Evaluation Form State
   const [evalEmpId, setEvalEmpId] = useState('');
@@ -274,7 +290,7 @@ export default function EvaluationsModule({
             </span>
             <select
               value={activeTab}
-              onChange={(e) => setActiveTab(e.target.value)}
+              onChange={(e) => handleTabChange(e.target.value)}
               style={{
                 padding: '8px 16px',
                 borderRadius: '10px',

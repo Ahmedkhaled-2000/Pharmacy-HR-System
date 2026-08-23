@@ -227,9 +227,36 @@ export default function DesktopLayout({
         {
           id: 'evaluations',
           targetTab: 'evaluations',
+          targetSubTab: 'evaluations',
           label: 'تقييمات الأداء والشكاوى',
           icon: '⭐',
-          desc: 'تقييم أداء الكوادر وملاحظات المديرين'
+          desc: 'تقييم أداء الكوادر وملاحظات المديرين',
+          subChildren: [
+            {
+              id: 'evaluations:evaluations',
+              targetTab: 'evaluations',
+              targetSubTab: 'evaluations',
+              label: 'تقييم الأداء والدرجات',
+              icon: '⭐',
+              desc: 'إنشاء ومتابعة تقييمات الأداء الشهرية'
+            },
+            {
+              id: 'evaluations:notes',
+              targetTab: 'evaluations',
+              targetSubTab: 'notes',
+              label: 'ملاحظات الفروع والردود',
+              icon: '💬',
+              desc: 'ملاحظات مديري الفروع وردود الإدارة العليا'
+            },
+            {
+              id: 'evaluations:complaints',
+              targetTab: 'evaluations',
+              targetSubTab: 'complaints',
+              label: 'شكاوى الموظفين والردود',
+              icon: '📋',
+              desc: 'صندوق شكاوى وتظلمات الموظفين ومتابعتها'
+            }
+          ]
         },
         {
           id: 'pharmacy-archive',
@@ -402,9 +429,36 @@ export default function DesktopLayout({
         {
           id: 'evaluations',
           targetTab: 'evaluations',
+          targetSubTab: 'evaluations',
           label: 'التقييمات والشكاوى',
           icon: '⭐',
-          desc: 'تقييم أداء موظفي الفرع وتقديم الملاحظات'
+          desc: 'تقييم أداء موظفي الفرع وتقديم الملاحظات',
+          subChildren: [
+            {
+              id: 'branch-evaluations:evaluations',
+              targetTab: 'evaluations',
+              targetSubTab: 'evaluations',
+              label: 'تقييم الأداء والدرجات',
+              icon: '⭐',
+              desc: 'استعراض تقييمات أداء موظفي الفرع'
+            },
+            {
+              id: 'branch-evaluations:notes',
+              targetTab: 'evaluations',
+              targetSubTab: 'notes',
+              label: 'ملاحظات الفرع والردود',
+              icon: '💬',
+              desc: 'إرسال ملاحظات للإدارة ومتابعة الردود'
+            },
+            {
+              id: 'branch-evaluations:complaints',
+              targetTab: 'evaluations',
+              targetSubTab: 'complaints',
+              label: 'شكاوى الموظفين والردود',
+              icon: '📋',
+              desc: 'متابعة شكاوى موظفي الفرع'
+            }
+          ]
         },
         {
           id: 'income-expenses',
