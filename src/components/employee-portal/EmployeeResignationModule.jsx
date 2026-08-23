@@ -73,6 +73,15 @@ export default function EmployeeResignationModule({
   const currentDayOfMonth = new Date().getDate();
   const isInsideWindow = allowAnytime || (currentDayOfMonth >= windowStartDay && currentDayOfMonth <= windowEndDay);
 
+  // Check if there is any pending resignation request awaiting manager/admin decision or pending employee condition action
+  const hasPendingAction = empRequests.some(r => 
+    !r.isCancelled && (
+      r.adminStatus === 'pending' || 
+      r.managerStatus === 'pending' || 
+      (r.adminStatus === 'approved_with_conditions' && r.employeeConditionStatus === 'pending')
+    )
+  );
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!reason.trim()) {
