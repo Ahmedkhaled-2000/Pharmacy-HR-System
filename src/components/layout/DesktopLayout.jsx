@@ -442,8 +442,8 @@ export default function DesktopLayout({
         zIndex: 100,
         boxShadow: '0 1px 4px rgba(0,0,0,0.03)'
       }}>
-        {/* Left Side: System Title & Breadcrumb */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+        {/* Right Side (Start in RTL): System Title, User Profile Badge, & Breadcrumb */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           {/* App Logo/Icon Indicator */}
           <div style={{
             width: '32px',
@@ -465,7 +465,71 @@ export default function DesktopLayout({
             <span style={{ fontWeight: 800, fontSize: '14px', color: 'var(--text)' }}>
               منظومة الموارد البشرية
             </span>
+
             <span style={{ color: 'var(--border)', fontSize: '16px' }}>/</span>
+
+            {/* User Profile & Role Badge (الإدارة العليا / المالك) */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '7px',
+              padding: '2px 8px 2px 4px',
+              background: (currentRole === 'owner' || userProfile?.isOwner)
+                ? 'rgba(245, 158, 11, 0.1)'
+                : 'var(--surface-muted)',
+              borderRadius: '20px',
+              border: (currentRole === 'owner' || userProfile?.isOwner)
+                ? '1px solid rgba(245, 158, 11, 0.3)'
+                : '1px solid var(--border)'
+            }}>
+              <div style={{
+                width: '26px',
+                height: '26px',
+                borderRadius: '50%',
+                background: (currentRole === 'owner' || userProfile?.isOwner)
+                  ? 'linear-gradient(135deg, #fbbf24 0%, #d97706 100%)'
+                  : 'var(--primary-light)',
+                color: (currentRole === 'owner' || userProfile?.isOwner) ? '#ffffff' : 'var(--primary)',
+                border: (currentRole === 'owner' || userProfile?.isOwner)
+                  ? '1.5px solid #fef3c7'
+                  : '1.5px solid var(--primary)',
+                boxShadow: (currentRole === 'owner' || userProfile?.isOwner)
+                  ? '0 0 8px rgba(245, 158, 11, 0.4)'
+                  : 'none',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: 800,
+                fontSize: (currentRole === 'owner' || userProfile?.isOwner) ? '13px' : '11px',
+                overflow: 'hidden'
+              }}>
+                {userProfile?.photoUrl ? (
+                  <img src={userProfile.photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ) : (
+                  (currentRole === 'owner' || userProfile?.isOwner) ? '👑' : firstLetter
+                )}
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.15 }}>
+                <span style={{
+                  fontSize: '11.5px',
+                  fontWeight: 800,
+                  color: (currentRole === 'owner' || userProfile?.isOwner) ? '#b45309' : 'var(--text)'
+                }}>
+                  {(currentRole === 'owner' || userProfile?.isOwner) ? '👑 المالك' : profileName}
+                </span>
+                <span style={{
+                  fontSize: '9.5px',
+                  color: (currentRole === 'owner' || userProfile?.isOwner) ? '#d97706' : 'var(--muted)',
+                  fontWeight: (currentRole === 'owner' || userProfile?.isOwner) ? 700 : 500
+                }}>
+                  {(currentRole === 'owner' || userProfile?.isOwner) ? 'Super Root / Owner' : profileTitle}
+                </span>
+              </div>
+            </div>
+
+            <span style={{ color: 'var(--border)', fontSize: '16px' }}>/</span>
+
             {/* Active Breadcrumb Section */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: 'var(--muted)' }}>
               <span>{breadcrumb.icon}</span>
@@ -480,7 +544,7 @@ export default function DesktopLayout({
           </div>
         </div>
 
-        {/* Right Side: Quick Action Toolbar & Profile */}
+        {/* Left Side: Quick Action Toolbar & Logout */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           
           {/* Payroll Cycle / Month Filter */}
@@ -643,78 +707,31 @@ export default function DesktopLayout({
             <span>{themeMode === 'dark' ? '☀️' : '🌙'}</span>
           </button>
 
-          {/* User Profile & Quick Logout */}
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            paddingRight: '6px',
-            borderRight: '1px solid var(--border)',
-            marginRight: '4px'
-          }}>
-            <div style={{
-              width: '32px',
-              height: '32px',
-              borderRadius: '50%',
-              background: (currentRole === 'owner' || userProfile?.isOwner)
-                ? 'linear-gradient(135deg, #fbbf24 0%, #d97706 100%)'
-                : 'var(--primary-light)',
-              color: (currentRole === 'owner' || userProfile?.isOwner) ? '#ffffff' : 'var(--primary)',
-              border: (currentRole === 'owner' || userProfile?.isOwner)
-                ? '2px solid #fef3c7'
-                : '1.5px solid var(--primary)',
-              boxShadow: (currentRole === 'owner' || userProfile?.isOwner)
-                ? '0 0 10px rgba(245, 158, 11, 0.5)'
-                : 'none',
+          {/* Quick Logout Button */}
+          <button
+            type="button"
+            onClick={onLogout}
+            title="تسجيل الخروج"
+            style={{
+              border: '1px solid var(--danger-border, #fca5a5)',
+              background: 'var(--danger-light, #fee2e2)',
+              color: 'var(--danger, #dc2626)',
+              padding: '5px 10px',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontSize: '12px',
+              fontWeight: 700,
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center',
-              fontWeight: 800,
-              fontSize: (currentRole === 'owner' || userProfile?.isOwner) ? '15px' : '13px',
-              overflow: 'hidden'
-            }}>
-              {userProfile?.photoUrl ? (
-                <img src={userProfile.photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              ) : (
-                (currentRole === 'owner' || userProfile?.isOwner) ? '👑' : firstLetter
-              )}
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <span style={{ fontSize: '12px', fontWeight: 800, color: (currentRole === 'owner' || userProfile?.isOwner) ? '#b45309' : 'var(--text)', lineHeight: 1.2 }}>
-                {(currentRole === 'owner' || userProfile?.isOwner) ? '👑 المالك' : profileName}
-              </span>
-              <span style={{
-                fontSize: '10.5px',
-                color: (currentRole === 'owner' || userProfile?.isOwner) ? '#d97706' : 'var(--muted)',
-                fontWeight: (currentRole === 'owner' || userProfile?.isOwner) ? 700 : 500
-              }}>
-                {(currentRole === 'owner' || userProfile?.isOwner) ? 'Super Root / Owner' : profileTitle}
-              </span>
-            </div>
-
-            <button
-              type="button"
-              onClick={onLogout}
-              title="تسجيل الخروج"
-              style={{
-                background: 'transparent',
-                border: 'none',
-                color: 'var(--danger)',
-                cursor: 'pointer',
-                padding: '4px 6px',
-                borderRadius: '6px',
-                fontSize: '14px',
-                display: 'flex',
-                alignItems: 'center',
-                transition: 'background 0.15s'
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--danger-light)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-            >
-              🚪
-            </button>
-          </div>
+              gap: '4px',
+              transition: 'all 0.15s'
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = '#fecaca'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--danger-light, #fee2e2)'; }}
+          >
+            <span>🚪</span>
+            <span>خروج</span>
+          </button>
         </div>
       </header>
 
