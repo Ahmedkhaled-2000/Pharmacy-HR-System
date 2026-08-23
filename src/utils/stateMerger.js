@@ -415,6 +415,24 @@ export function smartMergeStates(localState, remoteState) {
       ...(remoteState.bylaws || {}),
       ...(localState.bylaws || {})
     },
+    bylawsSections: (() => {
+      const localT = new Date(localState.bylawsUpdatedAt || 0).getTime();
+      const remoteT = new Date(remoteState.bylawsUpdatedAt || 0).getTime();
+      if (localT > remoteT && Array.isArray(localState.bylawsSections) && localState.bylawsSections.length > 0) {
+        return localState.bylawsSections;
+      }
+      if (Array.isArray(remoteState.bylawsSections) && remoteState.bylawsSections.length > 0) {
+        return remoteState.bylawsSections;
+      }
+      return localState.bylawsSections || remoteState.bylawsSections || undefined;
+    })(),
+    bylawsText: (() => {
+      const localT = new Date(localState.bylawsUpdatedAt || 0).getTime();
+      const remoteT = new Date(remoteState.bylawsUpdatedAt || 0).getTime();
+      if (localT > remoteT && localState.bylawsText) return localState.bylawsText;
+      return remoteState.bylawsText || localState.bylawsText || undefined;
+    })(),
+    bylawsUpdatedAt: localState.bylawsUpdatedAt || remoteState.bylawsUpdatedAt || undefined,
     ipRestrictions: {
       ...(remoteState.ipRestrictions || {}),
       ...(localState.ipRestrictions || {})

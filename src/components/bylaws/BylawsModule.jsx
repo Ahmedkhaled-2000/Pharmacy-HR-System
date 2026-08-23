@@ -2,6 +2,12 @@ import React, { useState, useMemo, useEffect } from 'react';
 import LatePenaltyPolicyModule from './LatePenaltyPolicyModule';
 import DisciplinaryPenaltiesTab from './DisciplinaryPenaltiesTab';
 import { computeLatenessFinancialAmount } from '../../utils/latePenaltyEngine';
+import {
+  DEFAULT_PHARMACY_BYLAWS_SECTIONS,
+  parseBylawsIntoSections,
+  sectionsToBylawsText,
+  getBylawsSectionsFromState
+} from '../../utils/bylawsDefaults';
 
 export default function BylawsModule({
   state,
@@ -30,26 +36,27 @@ export default function BylawsModule({
   const isManagerOrAdmin = userRole === 'admin' || userRole === 'branch';
   const isAdmin = userRole === 'admin';
 
-  // State for official bylaws text
-  const [bylawsText, setBylawsText] = useState(
-    state.bylawsText || `
-📜 لائحة العمل والجزاءات الرسمية لمجموعة الصيدليات الطبية
+  // State for official bylaws structured sections & raw text
+  const [bylawsSections, setBylawsSections] = useState(() => getBylawsSectionsFromState(state));
+  const [bylawsViewMode, setBylawsViewMode] = useState('structured'); // 'structured' | 'raw_text'
+  const [bylawsRawText, setBylawsRawText] = useState(() => {
+    if (state.bylawsText && typeof state.bylawsText === 'string' && state.bylawsText.trim().length > 0) {
+      return state.bylawsText;
+    }
+    return sectionsToBylawsText(getBylawsSectionsFromState(state));
+  });
 
-البند الأول: الحضور والانصراف والورديات
-1. التزام الموظف بالمواعيد المحددة للوردية وفقاً للجدول الشهري المعتمد.
-2. التوقيع عبر بصمة الوجه / اليد عند الحضور والانصراف في النطاق الجغرافي للصيدلية.
-3. التخلف عن الوردية بدون إذن مسبق يعتبر غياباً غير مبرر يخضع للجزاءات المالية.
-
-البند الثاني: السلوك المهني والانضباط
-1. الالتزام الكامل بالزي الرسمي والتأكد من مظهر الصيدلية والنظافة العامة.
-2. حسن معاملة المرضى والعملاء وتقديم الاستشارة الدوائية بمهنية عالية.
-3. عدم ترك الصيدلية أو الوردية بدون بديل معتمد وموافقة مدير الفرع.
-
-البند الثالث: تسليم النقدية والأدوية
-1. دقة تسليم الكاشير وجرد الخزينة نهاية كل وردية.
-2. يمنع سحب أدوية بالآجل إلا وفق الإجراءات الرسمية والطلبات المعتمدة.
-    `.trim()
-  );
+  // Keep synced if state changes from remote
+  useEffect(() => {
+    if (state.bylawsSections && Array.isArray(state.bylawsSections) && state.bylawsSections.length > 0) {
+      setBylawsSections(state.bylawsSections);
+      setBylawsRawText(sectionsToBylawsText(state.bylawsSections));
+    } else if (state.bylawsText) {
+      const parsed = parseBylawsIntoSections(state.bylawsText);
+      setBylawsSections(parsed);
+      setBylawsRawText(state.bylawsText);
+    }
+  }, [state.bylawsSections, state.bylawsText]);
 
   // Penalty Objection State
   const [objectionTargetReq, setObjectionTargetReq] = useState(null);
@@ -57,19 +64,131 @@ export default function BylawsModule({
   const [adminRejectReplyReq, setAdminRejectReplyReq] = useState(null);
   const [adminRejectReplyText, setAdminRejectReplyText] = useState('');
 
+  // ── Clause / Section Management Handlers ──
+  const handleAddBylawSection = () => {
+    const nextNum = bylawsSections.length;
+    const newSection = {
+      id: `bylaw_${Date.now()}`,
+      title: `البند رقم (${nextNum}): بند وسياسة جديدة`,
+      category: 'general',
+      points: ['اكتب نص الضابط أو السياسة التنظيمية هنا...']
+    };
+    const updated = [...bylawsSections, newSection];
+    setBylawsSections(updated);
+    setBylawsRawText(sectionsToBylawsText(updated));
+  };
+
+  const handleUpdateBylawSection = (secId, field, val) => {
+    const updated = bylawsSections.map((s) => (s.id === secId ? { ...s, [field]: val } : s));
+    setBylawsSections(updated);
+    setBylawsRawText(sectionsToBylawsText(updated));
+  };
+
+  const handleMoveBylawSection = (idx, direction) => {
+    if (direction === 'up' && idx === 0) return;
+    if (direction === 'down' && idx === bylawsSections.length - 1) return;
+    const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+    const updated = [...bylawsSections];
+    const temp = updated[idx];
+    updated[idx] = updated[targetIdx];
+    updated[targetIdx] = temp;
+    setBylawsSections(updated);
+    setBylawsRawText(sectionsToBylawsText(updated));
+  };
+
+  const handleDeleteBylawSection = (secId) => {
+    if (window.confirm('هل أنت متأكد من حذف هذا البند من لائحة العمل؟')) {
+      const updated = bylawsSections.filter((s) => s.id !== secId);
+      setBylawsSections(updated);
+      setBylawsRawText(sectionsToBylawsText(updated));
+    }
+  };
+
+  const handleAddPointToSection = (secId, initialText = '') => {
+    const updated = bylawsSections.map((s) => {
+      if (s.id === secId) {
+        return {
+          ...s,
+          points: [...(s.points || []), initialText || 'ضابط أو تعليمات جديدة...']
+        };
+      }
+      return s;
+    });
+    setBylawsSections(updated);
+    setBylawsRawText(sectionsToBylawsText(updated));
+  };
+
+  const handleUpdatePoint = (secId, pIdx, val) => {
+    const updated = bylawsSections.map((s) => {
+      if (s.id === secId) {
+        const newPoints = [...(s.points || [])];
+        newPoints[pIdx] = val;
+        return { ...s, points: newPoints };
+      }
+      return s;
+    });
+    setBylawsSections(updated);
+    setBylawsRawText(sectionsToBylawsText(updated));
+  };
+
+  const handleTogglePointMarker = (secId, pIdx) => {
+    const updated = bylawsSections.map((s) => {
+      if (s.id === secId) {
+        const newPoints = [...(s.points || [])];
+        let p = String(newPoints[pIdx] || '').trim();
+        if (p.startsWith('❌')) {
+          p = '✔️ ' + p.replace(/^❌\s*/, '');
+        } else if (p.startsWith('✔️')) {
+          p = p.replace(/^✔️\s*/, '');
+        } else {
+          p = '❌ ' + p.replace(/^▪\s*/, '').replace(/^\-\s*/, '');
+        }
+        newPoints[pIdx] = p;
+        return { ...s, points: newPoints };
+      }
+      return s;
+    });
+    setBylawsSections(updated);
+    setBylawsRawText(sectionsToBylawsText(updated));
+  };
+
+  const handleDeletePoint = (secId, pIdx) => {
+    const updated = bylawsSections.map((s) => {
+      if (s.id === secId) {
+        const newPoints = (s.points || []).filter((_, idx) => idx !== pIdx);
+        return { ...s, points: newPoints };
+      }
+      return s;
+    });
+    setBylawsSections(updated);
+    setBylawsRawText(sectionsToBylawsText(updated));
+  };
+
+  const handleRawTextChange = (text) => {
+    setBylawsRawText(text);
+    const parsed = parseBylawsIntoSections(text);
+    setBylawsSections(parsed);
+  };
+
   const handleSaveBylawsText = async () => {
     const performSaveText = async () => {
-      const updatedState = { ...state, bylawsText };
+      const formattedText = sectionsToBylawsText(bylawsSections);
+      const updatedState = {
+        ...state,
+        bylawsSections: bylawsSections,
+        bylawsText: formattedText,
+        bylawsUpdatedAt: new Date().toISOString()
+      };
       if (setState) setState(updatedState);
       if (saveState) await saveState(updatedState);
-      showToast?.('✅ تم حفظ وتحديث نصوص لائحة العمل الرسمية بنجاح');
+      showToast?.('✅ تم حفظ وتحديث بنود وسياسات لائحة العمل الرسمية بنجاح');
     };
 
     if (executeWithOwnerGuard) {
       executeWithOwnerGuard({
         lockKey: 'lockEditSystemPermissions',
-        actionTitle: 'حفظ وتحديث نصوص لائحة العمل الرسمية',
-        actionDetails: 'تعديل السياسات العامة للائحة',
+        actionTitle: 'حفظ وتحديث بنود لائحة العمل الرسمية',
+        actionDetails: `عدد البنود المعتمدة: ${bylawsSections.length} بند`,
         onExecute: performSaveText
       });
     } else {
@@ -78,39 +197,29 @@ export default function BylawsModule({
   };
 
   const handleResetDefaultBylawsText = async () => {
-    const defaultText = `
-📜 لائحة العمل والجزاءات الرسمية لمجموعة الصيدليات الطبية
-
-البند الأول: الحضور والانصراف والورديات
-1. التزام الموظف بالمواعيد المحددة للوردية وفقاً للجدول الشهري المعتمد.
-2. التوقيع عبر بصمة الوجه / اليد عند الحضور والانصراف في النطاق الجغرافي للصيدلية.
-3. التخلف عن الوردية بدون إذن مسبق يعتبر غياباً غير مبرر يخضع للجزاءات المالية.
-
-البند الثاني: السلوك المهني والانضباط
-1. الالتزام الكامل بالزي الرسمي والتأكد من مظهر الصيدلية والنظافة العامة.
-2. حسن معاملة المرضى والعملاء وتقديم الاستشارة الدوائية بمهنية عالية.
-3. عدم ترك الصيدلية أو الوردية بدون بديل معتمد وموافقة مدير الفرع.
-
-البند الثالث: تسليم النقدية والأدوية
-1. دقة تسليم الكاشير وجرد الخزينة نهاية كل وردية.
-2. يمنع سحب أدوية بالآجل إلا وفق الإجراءات الرسمية والطلبات المعتمدة.
-    `.trim();
-
-    if (!window.confirm('هل ترغب في استعادة النص الافتراضي للائحة العمل الرسمية؟')) return;
+    if (!window.confirm('هل ترغب في استعادة بنود اللائحة النموذجية المعتمدة للصيدلية (14 بنداً شاملاً لكافة السياسات)؟')) return;
 
     const performResetText = async () => {
-      setBylawsText(defaultText);
-      const updatedState = { ...state, bylawsText: defaultText };
+      const defaultSections = DEFAULT_PHARMACY_BYLAWS_SECTIONS;
+      const defaultText = sectionsToBylawsText(defaultSections);
+      setBylawsSections(defaultSections);
+      setBylawsRawText(defaultText);
+      const updatedState = {
+        ...state,
+        bylawsSections: defaultSections,
+        bylawsText: defaultText,
+        bylawsUpdatedAt: new Date().toISOString()
+      };
       if (setState) setState(updatedState);
       if (saveState) await saveState(updatedState);
-      showToast?.('🔄 تم استعادة النص الافتراضي للائحة العمل');
+      showToast?.('🔄 تم استعادة بنود اللائحة النموذجية المعتمدة للصيدلية بنجاح');
     };
 
     if (executeWithOwnerGuard) {
       executeWithOwnerGuard({
         lockKey: 'lockEditSystemPermissions',
-        actionTitle: 'استعادة النص الافتراضي للائحة العمل',
-        actionDetails: 'إعادة ضبط النصوص القياسية',
+        actionTitle: 'استعادة بنود اللائحة النموذجية',
+        actionDetails: 'إعادة ضبط اللائحة للنموذج المعتمد',
         onExecute: performResetText
       });
     } else {
@@ -542,43 +651,398 @@ export default function BylawsModule({
         />
       )}
 
-      {/* Tab 2: Bylaws Official Text */}
+      {/* Tab 2: Bylaws Official Structured Clauses & Policies */}
       {activeTab === 'text' && (
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', padding: '20px', borderRadius: '14px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
-            <h3 style={{ fontFamily: 'Cairo', margin: 0, color: 'var(--primary-dark)' }}>
-              📜 نصوص وسياسات لائحة العمل الرسمية للصيدلية
-            </h3>
-            {isAdmin && (
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={handleResetDefaultBylawsText}
-                style={{ fontSize: '12.5px', color: 'var(--muted)' }}
-                title="إعادة ضبط النص إلى المحتوى الافتراضي المعتمد"
-              >
-                🔄 استعادة النص الافتراضي
-              </button>
-            )}
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', padding: '22px', borderRadius: '16px', boxShadow: '0 2px 10px rgba(0,0,0,0.03)' }}>
+          {/* Section Header & Toolbar */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', flexWrap: 'wrap', gap: '12px', borderBottom: '1.5px solid var(--border)', paddingBottom: '14px' }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <h3 style={{ fontFamily: 'Cairo', margin: 0, color: 'var(--primary-dark)', fontSize: '17px', fontWeight: 800 }}>
+                  📜 نصوص وسياسات لائحة العمل الرسمية للصيدلية
+                </h3>
+                <span style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #86efac', padding: '3px 10px', borderRadius: '99px', fontSize: '11.5px', fontWeight: 'bold' }}>
+                  {bylawsSections.length} بند وسياسة معتمدة
+                </span>
+              </div>
+              <p style={{ margin: '4px 0 0', fontSize: '13px', color: 'var(--muted)' }}>
+                صياغة وتنظيم بنود وسياسات وضوابط ومحظورات العمل الرسمية التي تُستدعى تلقائياً في عقود الموظفين
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+              {isAdmin && (
+                <>
+                  <div style={{ display: 'inline-flex', background: 'var(--surface-muted)', border: '1px solid var(--border)', borderRadius: '8px', padding: '3px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setBylawsViewMode('structured')}
+                      style={{
+                        padding: '5px 12px',
+                        borderRadius: '6px',
+                        border: 'none',
+                        fontSize: '12px',
+                        fontWeight: 'bold',
+                        cursor: 'pointer',
+                        background: bylawsViewMode === 'structured' ? '#0f766e' : 'transparent',
+                        color: bylawsViewMode === 'structured' ? '#fff' : 'var(--text)'
+                      }}
+                    >
+                      🗂️ بنود تفاعلية
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBylawsViewMode('raw_text')}
+                      style={{
+                        padding: '5px 12px',
+                        borderRadius: '6px',
+                        border: 'none',
+                        fontSize: '12px',
+                        fontWeight: 'bold',
+                        cursor: 'pointer',
+                        background: bylawsViewMode === 'raw_text' ? '#0f766e' : 'transparent',
+                        color: bylawsViewMode === 'raw_text' ? '#fff' : 'var(--text)'
+                      }}
+                    >
+                      📝 محرر النص
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={handleResetDefaultBylawsText}
+                    style={{ fontSize: '12px', color: 'var(--muted)', padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                    title="استعادة بنود اللائحة النموذجية المعتمدة للصيدلية (14 بنداً)"
+                  >
+                    🔄 استعادة النموذجية
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn btn-start"
+                    onClick={handleSaveBylawsText}
+                    style={{ background: '#0f766e', color: '#fff', fontWeight: 'bold', fontSize: '13px', padding: '7px 16px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    💾 حفظ وتحديث اللائحة
+                  </button>
+                </>
+              )}
+            </div>
           </div>
 
-          {isAdmin ? (
+          {/* Admin: Structured Builder Mode */}
+          {isAdmin && bylawsViewMode === 'structured' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div style={{ background: '#f8fafc', border: '1px dashed #cbd5e1', padding: '10px 14px', borderRadius: '10px', fontSize: '12.5px', color: '#475569', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                <span>💡 يمكنك تعديل عناوين البنود، وإضافة أو حذف الضوابط والنقاط، والتبديل بين نقطة عادية (▪) أو تحذير وحظر (❌) أو التزام (✔️).</span>
+                <button
+                  type="button"
+                  onClick={handleAddBylawSection}
+                  style={{ background: '#0f766e', color: '#fff', border: 'none', padding: '5px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer' }}
+                >
+                  ➕ إضافة بند جديد
+                </button>
+              </div>
+
+              {bylawsSections.map((sec, sIdx) => {
+                const isPreamble = sec.category === 'preamble' || sec.title?.includes('مقدمة') || sec.title?.includes('تمهيد');
+
+                return (
+                  <div
+                    key={sec.id || `sec_${sIdx}`}
+                    style={{
+                      background: isPreamble ? '#f0fdfa' : '#ffffff',
+                      border: `1.5px solid ${isPreamble ? '#99f6e4' : '#e2e8f0'}`,
+                      borderRadius: '12px',
+                      padding: '16px 18px',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    {/* Clause Header Bar */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: '1 1 320px' }}>
+                        <span style={{
+                          background: isPreamble ? '#ccfbf1' : '#f1f5f9',
+                          color: isPreamble ? '#0f766e' : '#334155',
+                          fontWeight: 800,
+                          fontSize: '11.5px',
+                          padding: '3px 8px',
+                          borderRadius: '6px',
+                          border: `1px solid ${isPreamble ? '#99f6e4' : '#cbd5e1'}`,
+                          whiteSpace: 'nowrap'
+                        }}>
+                          {isPreamble ? 'مقدمة' : `البند ${sIdx}`}
+                        </span>
+
+                        <input
+                          type="text"
+                          value={sec.title}
+                          onChange={(e) => handleUpdateBylawSection(sec.id, 'title', e.target.value)}
+                          placeholder="عنوان البند (مثال: أولاً: الانضباط العام ومواعيد العمل)"
+                          style={{
+                            flex: 1,
+                            fontWeight: 800,
+                            fontSize: '14px',
+                            color: '#0f766e',
+                            fontFamily: 'Cairo',
+                            padding: '6px 10px',
+                            borderRadius: '8px',
+                            border: '1px solid #cbd5e1',
+                            background: '#ffffff'
+                          }}
+                        />
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <button
+                          type="button"
+                          onClick={() => handleMoveBylawSection(sIdx, 'up')}
+                          disabled={sIdx === 0}
+                          title="تحريك لأعلى"
+                          style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '4px 8px', cursor: sIdx === 0 ? 'not-allowed' : 'pointer', opacity: sIdx === 0 ? 0.4 : 1, fontSize: '11px' }}
+                        >
+                          ▲
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleMoveBylawSection(sIdx, 'down')}
+                          disabled={sIdx === bylawsSections.length - 1}
+                          title="تحريك لأسفل"
+                          style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '4px 8px', cursor: sIdx === bylawsSections.length - 1 ? 'not-allowed' : 'pointer', opacity: sIdx === bylawsSections.length - 1 ? 0.4 : 1, fontSize: '11px' }}
+                        >
+                          ▼
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteBylawSection(sec.id)}
+                          title="حذف هذا البند"
+                          style={{ background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5', borderRadius: '6px', padding: '4px 8px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}
+                        >
+                          🗑️ حذف
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Points / Policy Items */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '10px' }}>
+                      {(sec.points || []).map((point, pIdx) => {
+                        const pointStr = String(point || '');
+                        const isWarning = pointStr.startsWith('❌');
+                        const isObligation = pointStr.startsWith('✔️');
+
+                        return (
+                          <div
+                            key={pIdx}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              background: isWarning ? '#fef2f2' : isObligation ? '#f0fdf4' : '#f8fafc',
+                              border: `1px solid ${isWarning ? '#fecaca' : isObligation ? '#bbf7d0' : '#e2e8f0'}`,
+                              borderRadius: '8px',
+                              padding: '5px 8px'
+                            }}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => handleTogglePointMarker(sec.id, pIdx)}
+                              title="انقر لتغيير الرمز (▪ عادي / ❌ حظر ومحظورات / ✔️ التزام وقاعدة)"
+                              style={{
+                                background: isWarning ? '#fee2e2' : isObligation ? '#dcfce7' : '#e2e8f0',
+                                border: 'none',
+                                borderRadius: '4px',
+                                padding: '3px 6px',
+                                cursor: 'pointer',
+                                fontSize: '12px'
+                              }}
+                            >
+                              {isWarning ? '❌' : isObligation ? '✔️' : '▪'}
+                            </button>
+
+                            <input
+                              type="text"
+                              value={pointStr.replace(/^❌\s*/, '').replace(/^✔️\s*/, '').replace(/^▪\s*/, '').replace(/^\-\s*/, '')}
+                              onChange={(e) => {
+                                const prefix = isWarning ? '❌ ' : isObligation ? '✔️ ' : '';
+                                handleUpdatePoint(sec.id, pIdx, prefix + e.target.value);
+                              }}
+                              style={{
+                                flex: 1,
+                                border: 'none',
+                                background: 'transparent',
+                                fontSize: '13px',
+                                fontFamily: 'Tajawal, sans-serif',
+                                color: isWarning ? '#991b1b' : isObligation ? '#166534' : '#1e293b',
+                                outline: 'none'
+                              }}
+                            />
+
+                            <button
+                              type="button"
+                              onClick={() => handleDeletePoint(sec.id, pIdx)}
+                              title="حذف هذه النقطة"
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: '#94a3b8',
+                                cursor: 'pointer',
+                                fontSize: '13px',
+                                padding: '2px 6px'
+                              }}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Add Point Form inside this section */}
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginTop: '6px' }}>
+                      <input
+                        type="text"
+                        placeholder="✍️ اكتب ضابطاً أو حظراً جديداً واضغط Enter أو زر الإضافة..."
+                        id={`input_new_point_${sec.id}`}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && e.target.value.trim()) {
+                            handleAddPointToSection(sec.id, e.target.value.trim());
+                            e.target.value = '';
+                          }
+                        }}
+                        style={{
+                          flex: 1,
+                          padding: '6px 12px',
+                          borderRadius: '6px',
+                          border: '1px dashed #cbd5e1',
+                          fontSize: '12px',
+                          background: '#fff'
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const inputEl = document.getElementById(`input_new_point_${sec.id}`);
+                          if (inputEl && inputEl.value.trim()) {
+                            handleAddPointToSection(sec.id, inputEl.value.trim());
+                            inputEl.value = '';
+                          } else {
+                            handleAddPointToSection(sec.id);
+                          }
+                        }}
+                        style={{
+                          background: '#f1f5f9',
+                          border: '1px solid #cbd5e1',
+                          borderRadius: '6px',
+                          padding: '6px 12px',
+                          fontSize: '11.5px',
+                          fontWeight: 'bold',
+                          cursor: 'pointer',
+                          color: '#334155'
+                        }}
+                      >
+                        ➕ إضافة نقطة
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Add New Section Big Button */}
+              <button
+                type="button"
+                onClick={handleAddBylawSection}
+                style={{
+                  padding: '14px',
+                  borderRadius: '12px',
+                  border: '2px dashed #0f766e',
+                  background: '#f0fdfa',
+                  color: '#0f766e',
+                  fontWeight: 800,
+                  fontSize: '14px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <span>➕</span> إضافة بند وسياسة تنظيمية جديدة للائحة العمل
+              </button>
+            </div>
+          )}
+
+          {/* Admin: Raw Text Mode with Instant Live Sync */}
+          {isAdmin && bylawsViewMode === 'raw_text' && (
             <div>
+              <div style={{ background: '#fffbeb', border: '1px solid #fde68a', padding: '10px 14px', borderRadius: '10px', fontSize: '12.5px', color: '#92400e', marginBottom: '12px' }}>
+                ℹ️ <strong>ملاحظة المزامنة الذكية:</strong> أي تعديل تجريه على النص أدناه يتم تحليله وتقسيمه تلقائياً إلى بنود وضوابط منظمة داخل عقود الموظفين والطباعة.
+              </div>
               <textarea
-                value={bylawsText}
-                onChange={(e) => setBylawsText(e.target.value)}
-                rows={14}
-                style={{ width: '100%', padding: '14px', borderRadius: '10px', border: '1px solid var(--border)', fontFamily: 'inherit', fontSize: '14px', lineHeight: '1.8', background: 'var(--surface-muted)' }}
+                value={bylawsRawText}
+                onChange={(e) => handleRawTextChange(e.target.value)}
+                rows={16}
+                style={{
+                  width: '100%',
+                  padding: '14px',
+                  borderRadius: '10px',
+                  border: '1px solid var(--border)',
+                  fontFamily: 'Tajawal, monospace, sans-serif',
+                  fontSize: '13.5px',
+                  lineHeight: '1.8',
+                  background: 'var(--surface-muted)',
+                  resize: 'vertical'
+                }}
               />
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '12px', gap: '10px' }}>
-                <button className="btn btn-start" onClick={handleSaveBylawsText}>
+                <button className="btn btn-start" onClick={handleSaveBylawsText} style={{ background: '#0f766e', color: '#fff', fontWeight: 'bold' }}>
                   💾 حفظ وتحديث نصوص اللائحة
                 </button>
               </div>
             </div>
-          ) : (
-            <div style={{ background: 'var(--surface-muted)', padding: '20px', borderRadius: '12px', whiteSpace: 'pre-wrap', lineHeight: '1.9', fontSize: '14.5px', border: '1px solid var(--border)' }}>
-              {bylawsText}
+          )}
+
+          {/* Read-Only Clean Cards for Employees / Non-Admins */}
+          {!isAdmin && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '12px' }}>
+              {bylawsSections.map((sec, idx) => {
+                const isPreamble = sec.category === 'preamble' || sec.title?.includes('مقدمة');
+                return (
+                  <div
+                    key={sec.id || idx}
+                    style={{
+                      background: isPreamble ? '#f0fdfa' : '#f8fafc',
+                      border: `1px solid ${isPreamble ? '#99f6e4' : '#e2e8f0'}`,
+                      borderRadius: '10px',
+                      padding: '14px',
+                      fontSize: '12.5px'
+                    }}
+                  >
+                    <div style={{ fontWeight: 800, color: '#0f766e', marginBottom: '8px', borderBottom: '1px dashed #cbd5e1', paddingBottom: '4px', fontSize: '13.5px' }}>
+                      {sec.title}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', color: '#334155', lineHeight: 1.5 }}>
+                      {(sec.points || []).map((p, pIdx) => {
+                        const pStr = String(p || '');
+                        const isWarning = pStr.startsWith('❌');
+                        const isObligation = pStr.startsWith('✔️');
+                        return (
+                          <div key={pIdx} style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
+                            <span style={{ fontSize: '11px', marginTop: '2px', color: isWarning ? '#dc2626' : isObligation ? '#16a34a' : '#0f766e' }}>
+                              {isWarning ? '❌' : isObligation ? '✔️' : '▪'}
+                            </span>
+                            <span style={{ color: isWarning ? '#991b1b' : isObligation ? '#166534' : '#334155' }}>
+                              {pStr.replace(/^❌\s*/, '').replace(/^✔️\s*/, '').replace(/^▪\s*/, '').replace(/^\-\s*/, '')}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

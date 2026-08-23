@@ -25,9 +25,7 @@ import {
 } from './utils/formatters';
 import { loadExcelJS, mergedTitle, tableHeaderRow, dataRow } from './utils/excelExport';
 import { exportComprehensiveCompanyPayrollExcel } from './utils/grandPayrollExcelExporter';
-import { playFingerprintChime, playNotificationChime } from './hooks/useAudio';
-import { smartSaveState, smartLoadState, listenToConnectionChanges, syncNow, listenToLiveBroadcasts } from './utils/offlineSync';
-import { smartMergeStates } from './utils/stateMerger';
+import { smartSaveState, smartLoadState, loadLocalStateFast, listenToConnectionChanges, syncNow, listenToLiveBroadcasts } from './utils/offlineSync';
 import { compressImage } from './utils/imageCompressor';
 import { getPendingCount } from './utils/offlineStorage';
 import { saveAutoBackupOnModification } from './utils/backupHelper';
@@ -2692,15 +2690,35 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // ── تحميل البيانات: من السحابة أو من الذاكرة المحلية (أوف لاين) ───────────
+  // ── تحميل البيانات الفوري (Instant Stale-While-Revalidate Boot & Background Sync) ──
   useEffect(() => {
-    setIsLoading(true);
+    let isMounted = true;
+
+    // 1. إقلاع فوري فائق السرعة من الذاكرة المحلية (في غضون 5 إلى 20 مللي ثانية!)
+    loadLocalStateFast().then((cachedData) => {
+      if (cachedData && isMounted) {
+        const normalizedCached = normalizeState(cachedData);
+        const syncedCached = syncAllEmployeesPermissionsAndLateness(normalizedCached);
+        setState(syncedCached);
+        setIsLoading(false); // إخفاء شاشة التحميل فوراً ودخول المستخدم للنظام بدون أي انتظار
+      }
+    }).catch(() => {});
+
+    // 2. مهلة أمان قصوى صارمة تضمن إخفاء شاشة التحميل مهما حدث (1.2 ثانية كحد أقصى)
+    const safetyTimer = setTimeout(() => {
+      if (isMounted) {
+        setIsLoading(false);
+      }
+    }, 1200);
+
+    // 3. جلب ومزامنة أحدث البيانات السحابية في الخلفية
     smartLoadState().then(({ data, source }) => {
+      if (!isMounted) return;
       setIsLoading(false);
       if (!data) return;
 
-      if (source === 'local') {
-        showToast('📴 أنت أوف لاين - تم تحميل آخر نسخة محفوظة محلياً');
+      if (source === 'local_offline') {
+        // تم الاعتماد على الكاش المحلي
       }
 
       const normalized = normalizeState(data);
@@ -2746,9 +2764,14 @@ export default function App() {
       setPermAllowViewAdjustments(perms.allowViewAdjustments !== undefined ? perms.allowViewAdjustments : true);
       setPermAllowExportExcel(perms.allowExportExcel !== undefined ? perms.allowExportExcel : true);
     }).catch((err) => {
-      setIsLoading(false);
+      if (isMounted) setIsLoading(false);
       console.error('Load error:', err);
     });
+
+    return () => {
+      isMounted = false;
+      clearTimeout(safetyTimer);
+    };
   }, []);
 
   // ── مستمع الإشعارات للطلبات الجديدة ───────────────

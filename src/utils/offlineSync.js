@@ -172,34 +172,49 @@ export function listenToConnectionChanges(onOnline, onOffline) {
   };
 }
 
-// ── تحميل الحالة السحابية فائق السرعة مع مهلة ذكية ─────────────────────
+// ── قراءة الحالة المحلية فورياً بدون أي تأخير (0ms Instant Load) ───────────
+export async function loadLocalStateFast() {
+  try {
+    const localData = await loadStateLocally();
+    if (localData) {
+      return normalizeState(localData);
+    }
+  } catch (e) {
+    console.warn('[Sync] Local storage load error:', e);
+  }
+  return null;
+}
+
+// ── تحميل الحالة السحابية فائق السرعة مع مهلة ذكية (Smart Fast Load) ─────
 export async function smartLoadState() {
+  // 1. فحص وجود بيانات سريعة محلياً
+  const localCache = await loadLocalStateFast();
+
   if (isOnline()) {
     try {
-      // محاولة جلب أحدث نسخة حية من السحابة بمهلة 8 ثوان
-      const remoteData = await fetchRemoteState({ timeout: 8000, useETag: true });
+      // محاولة جلب أحدث نسخة حية من السحابة بمهلة قصيرة ذكية (3 ثوان كحد أقصى)
+      const remoteData = await fetchRemoteState({ timeout: 3500, useETag: true });
       
       if (remoteData && !remoteData.notModified) {
         const normalized = normalizeState(remoteData);
-        // تحديث الكاش المحلي كنسخة احتياطية
-        await saveStateLocally(normalized);
-        return { data: normalized, source: 'cloud' };
+        // إذا كان لدينا كاش محلي، ندمجهما بذكاء لحماية البيانات
+        const merged = localCache ? smartMergeStates(localCache, normalized) : normalized;
+        await saveStateLocally(merged);
+        return { data: merged, source: 'cloud' };
       } else if (remoteData && remoteData.notModified) {
         // لم تتغير البيانات في السحابة -> استخدام الكاش المحلي الفوري
-        const localData = await loadStateLocally();
-        if (localData) {
-          return { data: normalizeState(localData), source: 'cloud_cached_304' };
+        if (localCache) {
+          return { data: localCache, source: 'cloud_cached_304' };
         }
       }
     } catch (e) {
-      console.warn('[Sync] Cloud load failed or timed out, falling back to local storage:', e);
+      console.warn('[Sync] Cloud load timed out or failed, using local storage cache:', e);
     }
   }
 
-  // في حالة انقطاع الإنترنت أو بطء الشبكة الشديد، نعتمد على الكاش المحلي كخيار آمن
-  const localData = await loadStateLocally();
-  if (localData) {
-    return { data: normalizeState(localData), source: 'local_offline' };
+  // إذا كنا أوف لاين أو حدث بطء في الشبكة، استخدام الكاش المحلي مباشرة
+  if (localCache) {
+    return { data: localCache, source: 'local_offline' };
   }
 
   return { data: null, source: 'none' };

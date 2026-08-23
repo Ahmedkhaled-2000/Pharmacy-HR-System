@@ -1,48 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { fmt, todayStr, getEmpDisplayName } from '../../utils/formatters';
 import { triggerDirectPrint } from '../../utils/printHelper';
-
-/**
- * دالة مساعدة لتحليل نصوص اللائحة إلى أقسام وبنود مرتبة
- */
-export function parseBylawsIntoSections(text) {
-  if (!text) return [];
-  const clean = text.trim();
-  const lines = clean.split('\n');
-  const sections = [];
-  let currentSection = null;
-
-  const isHeaderLine = (l) => {
-    const trimmed = l.trim();
-    return (
-      /^(\u0623\u0648\u0644\u0627\u064b|\u062b\u0627\u0646\u064a\u0627\u064b|\u062b\u0627\u0644\u062b\u0627\u064b|\u0631\u0627\u0628\u0639\u0627\u064b|\u062e\u0627\u0645\u0633\u0627\u064b|\u0633\u0627\u062f\u0633\u0627\u064b|\u0633\u0627\u0628\u0639\u0627\u064b|\u062b\u0627\u0645\u0646\u0627\u064b|\u062a\u0627\u0633\u0639\u0627\u064b|\u0639\u0627\u0634\u0631\u0627\u064b|\u0627\u0644\u062d\u0627\u062f\u064a\u060c?\s*\u0639\u0634\u0631|\u0627\u0644\u062b\u0627\u0646\u064a\s*\u0639\u0634\u0631|\u0627\u0644\u062b\u0627\u0644\u062b\s*\u0639\u0634\u0631|\u0627\u0644\u0631\u0627\u0628\u0639\s*\u0639\u0634\u0631|\u0627\u0644\u062e\u0627\u0645\u0633\s*\u0639\u0634\u0631|\u0627\u0644\u0628\u0646\u062f|\u0645\u0627\u062f\u0629|\u0627\u0644\u0644\u0627\u0626\u062d\u0629|\u0636\u0648\u0628\u0637|\d+\s*[\.\-\)])/i.test(trimmed)
-    );
-  };
-
-  lines.forEach((line) => {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed === '------------------------------------------------------------' || trimmed.startsWith('===') || trimmed.startsWith('---')) return;
-
-    if (isHeaderLine(trimmed)) {
-      if (currentSection) {
-        sections.push(currentSection);
-      }
-      currentSection = { title: trimmed, points: [] };
-    } else {
-      if (currentSection) {
-        currentSection.points.push(trimmed);
-      } else {
-        currentSection = { title: 'مقدمة اللائحة العامة', points: [trimmed] };
-      }
-    }
-  });
-
-  if (currentSection) {
-    sections.push(currentSection);
-  }
-
-  return sections;
-}
+import {
+  getBylawsSectionsFromState,
+  parseBylawsIntoSections
+} from '../../utils/bylawsDefaults';
 
 export default function EmploymentContractModule({
   state,
@@ -100,61 +62,8 @@ export default function EmploymentContractModule({
 
   const hireDate = emp?.hireDate || emp?.hiring_date || todayStr();
 
-  // Official bylaws text from state
-  const officialBylawsText = state.bylawsText || `
-اللائحة التنظيمية للعمل داخل الفروع:
-حرصاً من إدارة الصيدلية على تنظيم العمل وضمان الانضباط وحماية حقوق الصيدلية وجميع العاملين، تم اعتماد اللائحة التنظيمية التالية:
-
-أولاً: الانضباط العام
-- الالتزام بمواعيد الشيفت المحددة والحضور في الوقت المناسب للاستلام.
-- ممنوع مغادرة مكان العمل بدون إذن المشرف.
-- أي تأخير أو غياب بدون إذن يعد مخالفة إدارية.
-
-ثانياً: احترام التسلسل الإداري
-- أي شكوى أو اعتراض يتم تقديمه لمدير الفرع أولاً.
-- ممنوع تجاوز التسلسل الإداري أو إثارة الشكاوى أمام الزملاء أو العملاء.
-- أي تواصل مباشر مع الإدارة دون المرور على مدير الفرع غير معترف به.
-
-ثالثاً: الالتزام بتعليمات مدير الفرع
-- تعليمات مدير الفرع أو مشرف الشيفت واجبة التنفيذ أثناء العمل.
-- أي ملاحظات يتم مناقشتها بعد انتهاء الخدمة والأسلوب الإداري.
-- ممنوع الجدال أثناء العمل أو أثناء خدمة العملاء.
-
-رابعاً: السلوك المهني داخل الفرع
-- الالتزام بالمستوى المهني اللائق في جميع الأوقات.
-- التحدث مع الزملاء والعملاء بأسلوب محترم وهادئ.
-- ممنوع العصبية أو رفع الصوت أو أي أسلوب غير لائق.
-
-خامساً: التعامل مع العملاء
-- العميل الواقف أمامك له الأولوية القصوى في الخدمة.
-- ممنوع الانشغال بالموبايل أثناء خدمة العملاء.
-- أي مشكلة يتم الرجوع فيها فوراً لمدير الفرع.
-
-سادساً: التواصل مع العملاء (تليفون وواتس)
-- التواصل مع العملاء يتم فقط من خلال تليفون الفرع أو الواتس الرسمي.
-- ممنوع استخدام الهاتف الشخصي أو تبادل أرقام مع العملاء.
-
-سابعاً: الزي الرسمي وبطاقة التعريف
-- الالتزام بالزي الرسمي المعتمد للصيدلية وبطاقة التعريف بشكل واضح.
-- ممنوع العمل بدون زي رسمي أو بطاقة التعريف الشخصية.
-
-ثامناً: المتعلقات الشخصية
-- توضع جميع المتعلقات الشخصية في المكان المخصص لها فقط.
-- ممنوع وجود أي متعلقات داخل منطقة البيع أو على الكاونتر.
-
-تاسعاً: تنظيم وقت الصلاة والمكالمات الشخصية
-- تنظيم وقت الصلاة بما لا يؤثر على سير العمل وبحد أقصى 15 دقيقة.
-- المكالمات الشخصية للضرورة فقط وفي أضيق الحدود.
-
-عاشراً: دخول أفراد من خارج الصيدلية
-- ممنوع دخول أي فرد من خارج الصيدلية تحت أي ظرف، وأي استثناء يكون بموافقة الإدارة فقط.
-
-الحادي عشر: الأكل داخل الفرع
-- يُسمح بالأكل بما لا يؤثر على بيئة العمل وممنوع الأكل بروائح نفاذة أو في تجمعات.
-
-الثاني عشر: استخدام إمكانيات الفرع
-- أجهزة الفرع مخصصة لأغراض العمل فقط.
-  `.trim();
+  // Official bylaws structured sections from state
+  const bylawsSections = getBylawsSectionsFromState(state);
 
   // Default contract clauses generator
   const getDefaultClauses = (targetEmp) => [
@@ -290,7 +199,7 @@ export default function EmploymentContractModule({
 
     const issueDateStr = new Date().toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' });
     const contractNo = `CNT-${emp.code || emp.id}-${new Date().getFullYear()}`;
-    const bylawsSections = parseBylawsIntoSections(officialBylawsText);
+    const contractBylawsSections = getBylawsSectionsFromState(state);
 
     const html = `
       <div style="max-width: 820px; margin: 0 auto; background: #fff; font-family: 'Cairo', 'Tajawal', sans-serif; line-height: 1.5; color: #0f172a; font-size: 11.5px;">
@@ -365,22 +274,28 @@ export default function EmploymentContractModule({
         ${includeFullBylaws ? `
           <div style="page-break-inside: avoid; break-inside: avoid; border: 1.5px solid #0f766e; border-radius: 8px; overflow: hidden; margin-top: 10px; margin-bottom: 12px;">
             <div style="background: #f0fdf4; padding: 6px 12px; border-bottom: 1.5px solid #0f766e; display: flex; justify-content: space-between; align-items: center;">
-              <span style="font-weight: 800; color: #0f766e; font-size: 11.5px;">📋 ملحق نصوص وسياسات لائحة العمل والجزاءات المعتمدة للصيدلية (${bylawsSections.length} بنود):</span>
+              <span style="font-weight: 800; color: #0f766e; font-size: 11.5px;">📋 ملحق نصوص وسياسات لائحة العمل والجزاءات المعتمدة للصيدلية (${contractBylawsSections.length} بنود):</span>
               <span style="font-size: 10px; color: #166534; font-weight: bold;">(جزء لا يتجزأ ومتمم لبنود العقد)</span>
             </div>
             <div style="padding: 8px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: #ffffff;">
-              ${bylawsSections.map(sec => `
+              ${contractBylawsSections.map(sec => `
                 <div style="border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 8px; background: #f8fafc; font-size: 9.5px; page-break-inside: avoid; break-inside: avoid;">
-                  <div style="font-weight: 800; color: #0f766e; border-bottom: 1px dashed #cbd5e1; padding-bottom: 3px; margin-bottom: 3px; font-size: 10px;">
+                  <div style="font-weight: 800; color: #0f766e; border-bottom: 1px dashed #cbd5e1; padding-bottom: 3px; margin-bottom: 4px; font-size: 10px;">
                     ${sec.title}
                   </div>
-                  <div style="color: #334155; line-height: 1.4;">
-                    ${sec.points.map(p => `
-                      <div style="display: flex; gap: 4px; align-items: flex-start; margin-bottom: 2px;">
-                        <span style="color: #0f766e; font-size: 8px; margin-top: 2px;">▪</span>
-                        <span>${p}</span>
-                      </div>
-                    `).join('')}
+                  <div style="color: #334155; line-height: 1.45;">
+                    ${(sec.points || []).map(p => {
+                      const pStr = String(p || '').trim();
+                      const isWarning = pStr.startsWith('❌');
+                      const isObligation = pStr.startsWith('✔️');
+                      const cleanP = pStr.replace(/^❌\s*/, '').replace(/^✔️\s*/, '').replace(/^▪\s*/, '').replace(/^\-\s*/, '');
+                      return `
+                        <div style="display: flex; gap: 4px; align-items: flex-start; margin-bottom: 2px; ${isWarning ? 'color: #991b1b;' : isObligation ? 'color: #166534;' : ''}">
+                          <span style="font-size: 8px; margin-top: 1px; color: ${isWarning ? '#dc2626' : isObligation ? '#16a34a' : '#0f766e'};">${isWarning ? '❌' : isObligation ? '✔️' : '▪'}</span>
+                          <span>${cleanP}</span>
+                        </div>
+                      `;
+                    }).join('')}
                   </div>
                 </div>
               `).join('')}
@@ -656,28 +571,46 @@ export default function EmploymentContractModule({
               </p>
             )}
 
-            {/* If Clause 7: Adherence to Bylaws, show preview of official bylaws text */}
+            {/* If Clause 7: Adherence to Bylaws, show preview of official bylaws structured sections */}
             {clause.id === 'c7' && (
-              <div style={{ marginTop: '12px', background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: '8px', padding: '12px 16px' }}>
-                <div style={{ fontSize: '12.5px', fontWeight: 'bold', color: '#0f766e', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span>📋</span> نصوص وسياسات لائحة العمل الرسمية المعتمدة للصيدلية (مستدعاة تلقائياً من صفحة اللائحة):
+              <div style={{ marginTop: '14px', background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: '12px', padding: '16px 18px', boxShadow: '0 1px 4px rgba(0,0,0,0.02)' }}>
+                <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#0f766e', marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span>📋</span> نصوص وسياسات لائحة العمل الرسمية المعتمدة للصيدلية (مستدعاة تلقائياً من صفحة اللائحة):
+                  </div>
+                  <span style={{ background: '#ccfbf1', color: '#0f766e', border: '1px solid #99f6e4', padding: '2px 10px', borderRadius: '99px', fontSize: '11.5px', fontWeight: 'bold' }}>
+                    {bylawsSections.length} بنود معتمدة
+                  </span>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '8px' }}>
-                  {parseBylawsIntoSections(officialBylawsText).map((sec, sIdx) => (
-                    <div key={sIdx} style={{ background: '#fff', border: '1px solid #ccfbf1', borderRadius: '6px', padding: '8px 10px', fontSize: '11.5px' }}>
-                      <div style={{ fontWeight: 'bold', color: '#0f766e', marginBottom: '4px', borderBottom: '1px dashed #99f6e4', paddingBottom: '2px' }}>
-                        {sec.title}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '10px' }}>
+                  {bylawsSections.map((sec, sIdx) => {
+                    const isPreamble = sec.category === 'preamble' || sec.title?.includes('مقدمة') || sec.title?.includes('تمهيد');
+                    return (
+                      <div key={sec.id || sIdx} style={{ background: '#ffffff', border: `1px solid ${isPreamble ? '#99f6e4' : '#e2e8f0'}`, borderRadius: '8px', padding: '10px 12px', fontSize: '12px', boxShadow: '0 1px 2px rgba(0,0,0,0.02)' }}>
+                        <div style={{ fontWeight: 'bold', color: '#0f766e', marginBottom: '6px', borderBottom: '1px dashed #99f6e4', paddingBottom: '4px', fontSize: '12px' }}>
+                          {sec.title}
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', color: '#334155', lineHeight: 1.45 }}>
+                          {(sec.points || []).map((p, pIdx) => {
+                            const pStr = String(p || '').trim();
+                            const isWarning = pStr.startsWith('❌');
+                            const isObligation = pStr.startsWith('✔️');
+                            const cleanP = pStr.replace(/^❌\s*/, '').replace(/^✔️\s*/, '').replace(/^▪\s*/, '').replace(/^\-\s*/, '');
+                            return (
+                              <div key={pIdx} style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
+                                <span style={{ fontSize: '10px', marginTop: '1.5px', color: isWarning ? '#dc2626' : isObligation ? '#16a34a' : '#0f766e' }}>
+                                  {isWarning ? '❌' : isObligation ? '✔️' : '▪'}
+                                </span>
+                                <span style={{ color: isWarning ? '#991b1b' : isObligation ? '#166534' : '#334155' }}>
+                                  {cleanP}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
-                      <div style={{ color: '#334155', lineHeight: 1.4 }}>
-                        {sec.points.map((p, pIdx) => (
-                          <div key={pIdx} style={{ display: 'flex', gap: '4px', alignItems: 'flex-start', marginBottom: '2px' }}>
-                            <span style={{ color: '#0f766e', fontSize: '9px', marginTop: '2px' }}>▪</span>
-                            <span>{p}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
