@@ -43,12 +43,44 @@ export default function EmployeeResignationModule({
     return getT(b) - getT(a);
   });
 
-  const hasPendingAction = empRequests.some(r => r.adminStatus === 'approved' && r.employeeConditionStatus === 'pending');
+  const orgSettings = state.orgSettings || {};
+  const requiredNoticeDays = parseInt(orgSettings.resignationNoticeDays || 30, 10);
+  const windowStartDay = parseInt(orgSettings.resignationAllowedWindowStartDay || 1, 10);
+  const windowEndDay = parseInt(orgSettings.resignationAllowedWindowEndDay || 31, 10);
+  const allowAnytime = orgSettings.resignationAllowAnytime !== false;
+
+  // Default suggested last working date is today + requiredNoticeDays
+  const defaultLastDate = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() + requiredNoticeDays);
+    return d.toISOString().slice(0, 10);
+  })();
+
+  const [requestedLastWorkingDate, setRequestedLastWorkingDate] = useState(defaultLastDate);
+
+  // Compute notice days provided
+  const noticeDaysProvided = (() => {
+    if (!requestedLastWorkingDate) return 0;
+    const tToday = new Date(todayStr() + 'T00:00:00').getTime();
+    const tTarget = new Date(requestedLastWorkingDate + 'T00:00:00').getTime();
+    const diff = Math.round((tTarget - tToday) / (1000 * 60 * 60 * 24));
+    return diff > 0 ? diff : 0;
+  })();
+
+  const isNoticeCompliant = noticeDaysProvided >= requiredNoticeDays;
+
+  // Check if current day of month is in allowed submission window
+  const currentDayOfMonth = new Date().getDate();
+  const isInsideWindow = allowAnytime || (currentDayOfMonth >= windowStartDay && currentDayOfMonth <= windowEndDay);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!reason.trim()) {
       showToast('يرجى كتابة السبب بالتفصيل');
+      return;
+    }
+    if (requestType === 'resignation' && !requestedLastWorkingDate) {
+      showToast('يرجى تحديد تاريخ آخر يوم عمل مقترح');
       return;
     }
 
@@ -62,6 +94,10 @@ export default function EmployeeResignationModule({
       type: requestType,
       employeeReason: reason,
       requestDate: todayStr(),
+      requestedLastWorkingDate: requestType === 'resignation' ? requestedLastWorkingDate : '',
+      noticeDaysProvided: requestType === 'resignation' ? noticeDaysProvided : 0,
+      requiredNoticeDays,
+      isNoticeCompliant: requestType === 'resignation' ? isNoticeCompliant : true,
       managerStatus: isDirectAdmin ? 'skipped' : 'pending',
       managerComment: isDirectAdmin ? 'تم التحويل للإدارة العليا مباشرة (وظيفة إدارية / فرع بدون مدير)' : '',
       adminStatus: 'pending',
@@ -81,7 +117,7 @@ export default function EmployeeResignationModule({
       type: 'resignation',
       title: `📝 طلب ${requestType === 'resignation' ? 'استقالة' : 'تراجع عن استقالة'} جديد`,
       message: isDirectAdmin
-        ? `قام الموظف ${emp.name} بتقديم طلب ${requestType === 'resignation' ? 'استقالة' : 'تراجع عن استقالة'} وتم توجيهه للإدارة العليا مباشرة.`
+        ? `قام الموظف ${emp.name} بتقديم طلب ${requestType === 'resignation' ? 'استقالة' : 'تراجع عن استقالة'} (مهلة: ${noticeDaysProvided} يوم) وتم توجيهه للإدارة العليا مباشرة.`
         : `قام الموظف ${emp.name} بتقديم طلب ${requestType === 'resignation' ? 'استقالة' : 'تراجع عن استقالة'} وبانتظار رد مدير الفرع.`,
       date: todayStr(),
       timestamp: new Date().toISOString(),
@@ -211,6 +247,42 @@ export default function EmployeeResignationModule({
         )}
       </div>
 
+      {/* Notice Period & Allowed Window Info Banner */}
+      <div style={{
+        background: isInsideWindow ? '#f0fdf4' : '#fffbeb',
+        border: `1px solid ${isInsideWindow ? '#bbf7d0' : '#fde68a'}`,
+        borderRadius: '12px',
+        padding: '12px 16px',
+        marginBottom: '14px',
+        fontSize: '13px',
+        color: isInsideWindow ? '#166534' : '#92400e',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: '10px'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '18px' }}>📢</span>
+          <div>
+            <strong>ضوابط تقديم الاستقالة وفترة الإخطار القانونية:</strong>
+            <div style={{ fontSize: '12px', marginTop: '2px', opacity: 0.9 }}>
+              مهلة الإخطار المعتمدة هي <strong>({requiredNoticeDays}) يوماً</strong> قبل تاريخ ترك العمل
+              {!allowAnytime && ` · نافذة تقديم الطلبات مسموحة من يوم (${windowStartDay}) إلى يوم (${windowEndDay}) من الشهر`}.
+            </div>
+          </div>
+        </div>
+        <span style={{
+          background: isInsideWindow ? '#dcfce7' : '#fef3c7',
+          padding: '4px 10px',
+          borderRadius: '20px',
+          fontWeight: 'bold',
+          fontSize: '12px'
+        }}>
+          {isInsideWindow ? '✅ نافذة التقديم متاحة الآن' : '⚠️ خارج نافذة التقديم المحددة'}
+        </span>
+      </div>
+
       {showForm && (
         <form onSubmit={handleSubmit} className="card settings-card fade-in" style={{ padding: '18px', background: 'var(--surface-muted)', border: '1px solid var(--primary-tint)', borderRadius: '12px', marginTop: '10px', marginBottom: '20px' }}>
           <h4 style={{ margin: '0 0 14px', fontSize: '15px', color: 'var(--primary)', fontWeight: 'bold' }}>
@@ -239,6 +311,32 @@ export default function EmployeeResignationModule({
                 style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface-muted)', cursor: 'not-allowed', color: 'var(--muted)', fontFamily: 'Cairo, sans-serif' }}
               />
             </div>
+
+            {requestType === 'resignation' && (
+              <div className="field" style={{ flex: '1 1 240px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <label style={{ fontWeight: '700', margin: 0 }}>تاريخ آخر يوم عمل مقترح <span style={{ color: 'red' }}>*</span></label>
+                  <span style={{
+                    fontSize: '11px',
+                    fontWeight: 'bold',
+                    padding: '2px 8px',
+                    borderRadius: '6px',
+                    background: isNoticeCompliant ? '#dcfce7' : '#fee2e2',
+                    color: isNoticeCompliant ? '#166534' : '#991b1b'
+                  }}>
+                    مهلة الإخطار: {noticeDaysProvided} يوم ({isNoticeCompliant ? 'متوافقة ✅' : `أقل من ${requiredNoticeDays} يوم ⚠️`})
+                  </span>
+                </div>
+                <input
+                  type="date"
+                  min={todayStr()}
+                  value={requestedLastWorkingDate}
+                  onChange={(e) => setRequestedLastWorkingDate(e.target.value)}
+                  required
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: isNoticeCompliant ? '1px solid var(--border)' : '1.5px solid #f87171', background: 'var(--surface)', fontFamily: 'Cairo, sans-serif' }}
+                />
+              </div>
+            )}
           </div>
 
           <div className="field" style={{ marginBottom: '14px' }}>
@@ -289,9 +387,16 @@ export default function EmployeeResignationModule({
                 <strong style={{ fontSize: '1.05rem', color: req.type === 'resignation' ? 'var(--danger, #dc2626)' : 'var(--primary)' }}>
                   {req.type === 'resignation' ? '🚪 طلب استقالة' : '↩️ طلب تراجع عن الاستقالة'}
                 </strong>
-                <span style={{ fontSize: '0.85rem', color: 'var(--muted)', background: 'var(--surface-muted)', padding: '3px 8px', borderRadius: '6px', border: '1px solid var(--border)' }}>
-                  📅 تاريخ التقديم: {req.requestDate}
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  {req.requestedLastWorkingDate && (
+                    <span style={{ fontSize: '0.82rem', color: '#1e40af', background: '#dbeafe', padding: '3px 8px', borderRadius: '6px', fontWeight: 'bold' }}>
+                      🗓️ تاريخ الترك المقترح: {req.requestedLastWorkingDate} (مهلة: {req.noticeDaysProvided || 0} يوم)
+                    </span>
+                  )}
+                  <span style={{ fontSize: '0.85rem', color: 'var(--muted)', background: 'var(--surface-muted)', padding: '3px 8px', borderRadius: '6px', border: '1px solid var(--border)' }}>
+                    📅 تاريخ التقديم: {req.requestDate}
+                  </span>
+                </div>
               </div>
               
               <div style={{ marginBottom: '14px', lineHeight: '1.6' }}>

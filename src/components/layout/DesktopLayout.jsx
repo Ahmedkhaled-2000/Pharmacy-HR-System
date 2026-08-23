@@ -85,6 +85,14 @@ export default function DesktopLayout({
           label: 'الوظائف والأقسام',
           icon: '💼',
           desc: 'دليل وهيكلة المسميات الوظيفية وتصنيف الكوادر والبدلات'
+        },
+        {
+          id: 'employees:contracts',
+          targetTab: 'employees',
+          targetSubTab: 'contracts',
+          label: 'عقد العمل وبنود اللائحة',
+          icon: '📝',
+          desc: 'صياغة وتعديل وطباعة عقود العمل الرسمية وفق قانون العمل'
         }
       ]
     },

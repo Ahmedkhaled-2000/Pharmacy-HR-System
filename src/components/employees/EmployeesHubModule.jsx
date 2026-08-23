@@ -4,6 +4,7 @@ import AttendanceModule from '../attendance/AttendanceModule';
 import ElectronicAttendanceAdmin from '../attendance/ElectronicAttendanceAdmin';
 import RosterModule from '../roster/RosterModule';
 import JobsDepartmentsModule from './JobsDepartmentsModule';
+import EmploymentContractModule from './EmploymentContractModule';
 
 export default function EmployeesHubModule({
   subTab = 'cards',
@@ -137,6 +138,17 @@ export default function EmployeesHubModule({
       {/* ── Sub-tab 5: Jobs & Departments Module ── */}
       {currentSubTab === 'jobs' && (
         <JobsDepartmentsModule
+          state={state}
+          setState={setState}
+          saveState={saveState}
+          showToast={showToast}
+          executeWithOwnerGuard={executeWithOwnerGuard}
+        />
+      )}
+
+      {/* ── Sub-tab 6: Employment Contract Module ── */}
+      {currentSubTab === 'contracts' && (
+        <EmploymentContractModule
           state={state}
           setState={setState}
           saveState={saveState}

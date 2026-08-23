@@ -3,11 +3,85 @@ import { getEffectiveShiftHours, computeLatenessFinancialAmount, isApprovedPermi
 import { isManagementJob, getJobsList } from './jobsHelper';
 
 /**
+ * دالة مساعدة لحساب واستخراج فترة وتواريخ دورة الرواتب الدقيقة وفقاً لإعدادات المنظومة
+ */
+export function getPayrollCycleForDate(refDate = todayStr(), orgSettings = {}) {
+  const pType = orgSettings?.payrollPeriodType || 'cycle';
+  const customFrom = orgSettings?.payrollCustomFrom || '';
+  const customTo = orgSettings?.payrollCustomTo || '';
+
+  if (pType === 'custom' && customFrom && customTo) {
+    const from = customFrom <= customTo ? customFrom : customTo;
+    const to = customFrom <= customTo ? customTo : customFrom;
+    return {
+      startDate: from,
+      endDate: to,
+      cycleMonth: from.slice(0, 7),
+      periodType: 'custom',
+      label: `فترة مخصصة: من ${from} إلى ${to}`
+    };
+  }
+
+  const sDay = orgSettings?.payrollPayoutStartDay !== undefined ? parseInt(orgSettings.payrollPayoutStartDay, 10) : 21;
+  const eDay = orgSettings?.payrollPayoutEndDay !== undefined ? parseInt(orgSettings.payrollPayoutEndDay, 10) : 20;
+
+  const targetDate = new Date(refDate);
+  const y = targetDate.getFullYear();
+  const m = targetDate.getMonth() + 1; // 1-12
+  const day = targetDate.getDate();
+
+  let startYear = y;
+  let startMonth = m;
+  let endYear = y;
+  let endMonth = m;
+
+  if (sDay <= eDay) {
+    // دورة في نفس الشهر التقويمي (مثلاً من 1 إلى 30)
+    startMonth = m;
+    endMonth = m;
+  } else {
+    // دورة متداخلة بين شهرين (مثلاً من 21 في الشهر السابق إلى 20 في الشهر الحالي)
+    if (day >= sDay) {
+      startMonth = m;
+      startYear = y;
+      endMonth = m + 1;
+      if (endMonth > 12) {
+        endMonth = 1;
+        endYear = y + 1;
+      }
+    } else {
+      endMonth = m;
+      endYear = y;
+      startMonth = m - 1;
+      if (startMonth < 1) {
+        startMonth = 12;
+        startYear = y - 1;
+      }
+    }
+  }
+
+  const startDateStr = `${startYear}-${String(startMonth).padStart(2, '0')}-${String(sDay).padStart(2, '0')}`;
+  const endDateStr = `${endYear}-${String(endMonth).padStart(2, '0')}-${String(eDay).padStart(2, '0')}`;
+  const cycleMonthStr = `${endYear}-${String(endMonth).padStart(2, '0')}`;
+
+  return {
+    startDate: startDateStr,
+    endDate: endDateStr,
+    cycleMonth: cycleMonthStr,
+    periodType: 'cycle',
+    startDay: sDay,
+    endDay: eDay,
+    label: `من ${startDateStr} إلى ${endDateStr}`
+  };
+}
+
+/**
  * حساب التصفية والمخالصة المالية الشاملة للموظف عند إنهاء الخدمة
  * تشمل:
  * 1. المستحقات المكتسبة (ساعات عمل أساسية + وقت إضافي معتمد + بدلات + مكافآت)
  * 2. كامل الالتزامات والديون (كامل رصيد السلف والأدوية المتبقي بالكامل + الخصومات + الجزاءات + الغياب)
  * 3. صافي مستحقات نهاية الخدمة والتصفية
+ * 4. سجل الحضور والبصمات التفصيلي لدورة التصفية
  */
 export function computeEmployeeFinalSettlement(empId, state, terminationDate = null) {
   if (!empId || !state) return null;
@@ -16,7 +90,8 @@ export function computeEmployeeFinalSettlement(empId, state, terminationDate = n
   if (!emp) return null;
 
   const termDate = terminationDate || todayStr();
-  const currentMonthStr = termDate.slice(0, 7);
+  const orgSettings = state.orgSettings || {};
+  const payrollCycle = getPayrollCycleForDate(termDate, orgSettings);
 
   // الفروع والرواتب
   const branches = (emp.branchesDetails && emp.branchesDetails.length > 0)
@@ -34,6 +109,7 @@ export function computeEmployeeFinalSettlement(empId, state, terminationDate = n
   let totalBaseEarnings = 0;
   let totalOvertimeEarnings = 0;
   const branchBreakdown = [];
+  const cycleShiftsDetails = [];
 
   branches.forEach((b) => {
     const bId = b.branchId;
@@ -46,14 +122,13 @@ export function computeEmployeeFinalSettlement(empId, state, terminationDate = n
       ? (hourlyBase >= 200 ? (hourlyBase / workDaysPerMonth) : ((hourlyBase * workHoursPerDay) / workDaysPerMonth))
       : (workHoursPerDay > 0 ? dailyRate / workHoursPerDay : hourlyBase);
 
-    // Shifts for this branch up to termination date
+    // Shifts for this branch strictly within payroll cycle up to termination date
     const bShifts = (state.shifts || []).filter(
       (s) =>
         String(s.employeeId) === String(empId) &&
-        (s.date <= termDate) &&
-        (s.date.slice(0, 7) === currentMonthStr) &&
+        (s.date >= payrollCycle.startDate && s.date <= termDate) &&
         (s.branchId === bId || !s.branchId || branches.length === 1)
-    );
+    ).sort((a, b) => (a.date > b.date ? 1 : -1));
 
     const regularHours = bShifts.reduce((acc, s) => acc + getEffectiveShiftHours(s, state), 0);
 
@@ -75,9 +150,34 @@ export function computeEmployeeFinalSettlement(empId, state, terminationDate = n
     totalOvertimeEarnings += otEarn;
 
     const bObj = (state.branches || []).find((br) => String(br.id) === String(bId));
+    const branchName = bObj?.name || (bId === 'main' ? 'المركز الرئيسي' : `فرع ${bId}`);
+
+    // Map shifts for attendance log table
+    bShifts.forEach((s) => {
+      let dayName = '—';
+      try {
+        const dObj = new Date(s.date + 'T00:00:00');
+        dayName = dObj.toLocaleDateString('ar-EG', { weekday: 'long' });
+      } catch {}
+
+      cycleShiftsDetails.push({
+        id: s.id,
+        date: s.date,
+        dayName,
+        branchName,
+        checkIn: s.checkIn || s.actualCheckIn || s.scheduledCheckIn || s.startTime || '—',
+        checkOut: s.checkOut || s.actualCheckOut || s.scheduledCheckOut || s.endTime || '—',
+        regularHours: getEffectiveShiftHours(s, state),
+        overtimeHours: parseFloat(s.overtimeHours) || 0,
+        isOvertimeApproved: s.overtimeStatus === 'approved' || Boolean(s.adminApproved),
+        delayMinutes: parseInt(s.delayMinutes || s.lateMinutes || 0, 10),
+        status: s.status || (s.adminApproved ? 'معتمد' : 'مكتمل')
+      });
+    });
+
     branchBreakdown.push({
       branchId: bId,
-      branchName: bObj?.name || (bId === 'main' ? 'المركز الرئيسي' : `فرع ${bId}`),
+      branchName,
       hourlyRate: rate,
       regularHours,
       approvedOtHours,
@@ -112,11 +212,11 @@ export function computeEmployeeFinalSettlement(empId, state, terminationDate = n
 
   const totalAllowances = managementAllowance + transportAllowance + extraAllowance;
 
-  // المكافآت المسجلة
+  // المكافآت المسجلة خلال الدورة
   const allAdjs = [...(state.adjustments || []), ...(state.requests || [])].filter(
     (a) =>
       String(a.employeeId) === String(empId) &&
-      (a.date ? a.date.slice(0, 7) === currentMonthStr : true) &&
+      (a.date ? (a.date >= payrollCycle.startDate && a.date <= termDate) : true) &&
       (a.status === 'approved' || a.adminApproved || !a.status) &&
       a.status !== 'rejected' &&
       a.status !== 'cancelled'
@@ -166,7 +266,7 @@ export function computeEmployeeFinalSettlement(empId, state, terminationDate = n
 
   const totalRemainingLoansDebt = activeLoans.reduce((acc, l) => acc + l.remainingBalance, 0);
 
-  // 2. خصومات التأخير اللائحي
+  // 2. خصومات التأخير اللائحي خلال الدورة
   const empLateIncidents = (state.lateIncidents || []).filter(
     (inc) =>
       String(inc.employeeId) === String(empId) &&
@@ -175,7 +275,7 @@ export function computeEmployeeFinalSettlement(empId, state, terminationDate = n
       inc.actionType !== 'grace' &&
       !isApprovedPermissionForDate(empId, inc.date, state) &&
       (inc.deductionMinutes > 0 || inc.penaltyAmount > 0) &&
-      (inc.date ? inc.date.slice(0, 7) === currentMonthStr : true)
+      (inc.date ? (inc.date >= payrollCycle.startDate && inc.date <= termDate) : true)
   );
 
   const lateDeduction = empLateIncidents.reduce((acc, inc) => {
@@ -185,7 +285,7 @@ export function computeEmployeeFinalSettlement(empId, state, terminationDate = n
 
   const lateDeductionMinutes = empLateIncidents.reduce((acc, inc) => acc + (parseFloat(inc.deductionMinutes) || 0), 0);
 
-  // 3. الخصومات والجزاءات اليدوية
+  // 3. الخصومات والجزاءات اليدوية خلال الدورة
   const manualDeductionsList = allAdjs
     .filter((a) => a.type === 'deduction' || a.type === 'penalty' || a.subType === 'deduction' || a.subType === 'penalty')
     .map((d) => ({
@@ -214,7 +314,9 @@ export function computeEmployeeFinalSettlement(empId, state, terminationDate = n
     nationalId: emp.nationalId || emp.national_id || '—',
     hireDate: emp.hireDate || emp.hiring_date || '—',
     terminationDate: termDate,
-    currentMonthStr,
+    currentMonthStr: payrollCycle.cycleMonth,
+    payrollCycle,
+    cycleShiftsDetails,
     
     // Earnings
     totalRegularHours,

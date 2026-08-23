@@ -285,20 +285,137 @@ export default function AdminResignationModule({
     r.adminStatus === 'approved' || r.adminStatus === 'rejected' || r.adminStatus === 'cancelled' || r.isCancelled || r.isAdminCreated
   ).length;
 
+  // Settings Modal State
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const orgSettings = state.orgSettings || {};
+  const [tempNoticeDays, setTempNoticeDays] = useState(orgSettings.resignationNoticeDays || 30);
+  const [tempWindowStart, setTempWindowStart] = useState(orgSettings.resignationAllowedWindowStartDay || 1);
+  const [tempWindowEnd, setTempWindowEnd] = useState(orgSettings.resignationAllowedWindowEndDay || 31);
+  const [tempAllowAnytime, setTempAllowAnytime] = useState(orgSettings.resignationAllowAnytime !== false);
+
+  const handleSaveSettings = async (e) => {
+    e.preventDefault();
+    const updatedSettings = {
+      ...orgSettings,
+      resignationNoticeDays: parseInt(tempNoticeDays, 10) || 30,
+      resignationAllowedWindowStartDay: parseInt(tempWindowStart, 10) || 1,
+      resignationAllowedWindowEndDay: parseInt(tempWindowEnd, 10) || 31,
+      resignationAllowAnytime: tempAllowAnytime
+    };
+    const updatedState = { ...state, orgSettings: updatedSettings };
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+    showToast?.('✅ تم حفظ إعدادات وضوابط مهلة ونافذة الاستقالة بنجاح');
+    setShowSettingsModal(false);
+  };
+
   return (
     <div style={{ padding: '20px', background: 'var(--surface)', borderRadius: '12px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '10px' }}>
-        <h2 style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: 0 }}>
-          <span>🏢</span> طلبات استقالة الموظفين (الإدارة العليا)
-        </h2>
-        <button 
-          onClick={() => setShowManualForm(!showManualForm)}
-          className="btn btn-start"
-          style={{ padding: '8px 16px', background: showManualForm ? 'var(--danger)' : 'var(--primary)', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 'bold' }}
-        >
-          {showManualForm ? 'إلغاء' : '➕ إضافة إجراء يدوي (استقالة/رفد)'}
-        </button>
+        <div>
+          <h2 style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: 0 }}>
+            <span>🏢</span> طلبات استقالة الموظفين (الإدارة العليا)
+          </h2>
+          <span style={{ fontSize: '13px', color: 'var(--muted)', marginTop: '4px', display: 'block' }}>
+            مهلة الإخطار المعتمدة: <strong>({orgSettings.resignationNoticeDays || 30} يوماً)</strong>
+            {orgSettings.resignationAllowAnytime === false && ` · نافذة التقديم: (من يوم ${orgSettings.resignationAllowedWindowStartDay || 1} إلى ${orgSettings.resignationAllowedWindowEndDay || 31} من الشهر)`}
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button 
+            onClick={() => setShowSettingsModal(true)}
+            className="btn btn-ghost"
+            style={{ padding: '8px 14px', borderRadius: '8px', fontWeight: 'bold', fontSize: '13px', border: '1px solid var(--border)' }}
+          >
+            ⚙️ ضوابط ومهلة الاستقالة
+          </button>
+          <button 
+            onClick={() => setShowManualForm(!showManualForm)}
+            className="btn btn-start"
+            style={{ padding: '8px 16px', background: showManualForm ? 'var(--danger)' : 'var(--primary)', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold' }}
+          >
+            {showManualForm ? 'إلغاء' : '➕ إضافة إجراء يدوي (استقالة/رفد)'}
+          </button>
+        </div>
       </div>
+
+      {/* Settings Modal */}
+      {showSettingsModal && (
+        <div className="modal-backdrop" style={{ zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="modal-content" style={{ maxWidth: '500px', width: '95%', padding: '24px', borderRadius: '14px', background: 'var(--surface)' }}>
+            <h3 style={{ margin: '0 0 14px', color: 'var(--primary)', fontSize: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              ⚙️ ضبط فترة الإخطار ونافذة تقديم الاستقالة
+            </h3>
+            <form onSubmit={handleSaveSettings} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div className="field">
+                <label style={{ fontWeight: 'bold', fontSize: '13px', display: 'block', marginBottom: '4px' }}>
+                  فترة الإخطار القانونية المطلوبة لتقديم الاستقالة (بالأيام)
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="90"
+                  value={tempNoticeDays}
+                  onChange={(e) => setTempNoticeDays(e.target.value)}
+                  required
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                />
+                <small style={{ color: 'var(--muted)', fontSize: '11.5px', marginTop: '2px', display: 'block' }}>
+                  عدد الأيام التي يجب أن يسبق بها تقديم الطلب تاريخ ترك العمل المعتمد (الافتراضي: 30 يوماً).
+                </small>
+              </div>
+
+              <div style={{ background: 'var(--surface-muted)', padding: '12px', borderRadius: '10px', border: '1px solid var(--border)' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 'bold', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={tempAllowAnytime}
+                    onChange={(e) => setTempAllowAnytime(e.target.checked)}
+                  />
+                  السماح بإرسال طلبات الاستقالة في أي يوم طوال الشهر
+                </label>
+
+                {!tempAllowAnytime && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '10px' }}>
+                    <div>
+                      <label style={{ fontSize: '12px', fontWeight: 'bold' }}>من يوم (في الشهر):</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="31"
+                        value={tempWindowStart}
+                        onChange={(e) => setTempWindowStart(e.target.value)}
+                        style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '12px', fontWeight: 'bold' }}>إلى يوم (في الشهر):</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="31"
+                        value={tempWindowEnd}
+                        onChange={(e) => setTempWindowEnd(e.target.value)}
+                        style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)' }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
+                <button type="button" className="btn btn-ghost" onClick={() => setShowSettingsModal(false)}>
+                  إلغاء
+                </button>
+                <button type="submit" className="btn btn-start" style={{ background: 'var(--primary)', color: '#fff' }}>
+                  💾 حفظ الإعدادات
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* ── Tabs for filtering requests ── */}
       <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', borderBottom: '1px solid var(--border)', paddingBottom: '10px' }}>
@@ -450,7 +567,7 @@ export default function AdminResignationModule({
                       </div>
                     </div>
                   </div>
-                  <div style={{ textAlign: 'left' }}>
+                  <div style={{ textAlign: 'left', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
                     <div style={{ 
                       display: 'inline-block', 
                       padding: '4px 8px', 
@@ -462,8 +579,24 @@ export default function AdminResignationModule({
                     }}>
                       {req.type === 'resignation' ? 'طلب استقالة' : 'طلب تراجع عن الاستقالة'}
                     </div>
-                    <div style={{ color: 'var(--muted)', fontSize: '12px', marginTop: '6px' }}>
-                      {req.requestDate}
+
+                    {req.type === 'resignation' && (
+                      <div style={{
+                        fontSize: '11px',
+                        fontWeight: 'bold',
+                        padding: '2px 8px',
+                        borderRadius: '6px',
+                        background: req.isNoticeCompliant !== false ? '#dcfce7' : '#fee2e2',
+                        color: req.isNoticeCompliant !== false ? '#166534' : '#991b1b',
+                        border: `1px solid ${req.isNoticeCompliant !== false ? '#86efac' : '#fca5a5'}`
+                      }}>
+                        {req.isNoticeCompliant !== false ? '✅ إخطار نظامي متوافق' : '⚠️ إخطار عاجل'} ({req.noticeDaysProvided || 0} يوم)
+                        {req.requestedLastWorkingDate && ` · ترك مقترح: ${req.requestedLastWorkingDate}`}
+                      </div>
+                    )}
+
+                    <div style={{ color: 'var(--muted)', fontSize: '12px' }}>
+                      تاريخ التقديم: {req.requestDate}
                     </div>
                   </div>
                 </div>

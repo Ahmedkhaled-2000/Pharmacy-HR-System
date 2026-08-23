@@ -148,8 +148,11 @@ export function generateClearanceSlipHTML({
 
       <!-- Employee Profile Box -->
       <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 14px; margin-bottom: 12px;">
-        <div style="font-weight: 800; color: #0f766e; font-size: 13px; margin-bottom: 6px; border-bottom: 1px dashed #cbd5e1; padding-bottom: 4px;">
-          👤 أولاً: بيانات الموظف والسجل الوظيفي والتعاقدي
+        <div style="font-weight: 800; color: #0f766e; font-size: 13px; margin-bottom: 6px; border-bottom: 1px dashed #cbd5e1; padding-bottom: 4px; display: flex; justify-content: space-between; align-items: center;">
+          <span>👤 أولاً: بيانات الموظف والسجل الوظيفي والتعاقدي</span>
+          <span style="font-size: 11px; color: #0f766e; background: #e6fffa; border: 1px solid #99f6e4; padding: 2px 8px; borderRadius: 6px;">
+            📅 فترة التصفية: <strong>${settlement?.payrollCycle?.startDate || '—'}</strong> إلى <strong>${settlement?.payrollCycle?.endDate || terminationDate}</strong>
+          </span>
         </div>
         <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; font-size: 12px;">
           <div>اسم الموظف: <strong style="color: #0f172a;">${emp.name}</strong></div>
@@ -172,7 +175,7 @@ export function generateClearanceSlipHTML({
         <table style="font-size: 11.5px;">
           <thead>
             <tr style="background: #f0fdf4; color: #166534;">
-              <th colspan="2" style="text-align: center; padding: 5px; font-weight: 800;">➕ ثانياً: المستحقات المالية المكتسبة</th>
+              <th colspan="2" style="text-align: center; padding: 5px; font-weight: 800;">➕ ثانياً: المستحقات المالية المكتسبة (عن دورة التصفية)</th>
             </tr>
           </thead>
           <tbody>
@@ -258,10 +261,62 @@ export function generateClearanceSlipHTML({
         </div>
       ` : ''}
 
+      <!-- Detailed Punches & Shifts Table -->
+      <div style="margin-bottom: 10px; background: #fff; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px;">
+        <div style="font-weight: 800; color: #0f766e; font-size: 12px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+          <span>⏱️ رابعاً: سجل البصمات والحضور والانصراف لدورة التصفية (${settlement?.cycleShiftsDetails?.length || 0} وردية):</span>
+          <span style="font-size: 10.5px; color: #64748b; font-weight: 600;">
+            فترة الاحتساب: من ${settlement?.payrollCycle?.startDate || '—'} إلى ${settlement?.payrollCycle?.endDate || terminationDate}
+          </span>
+        </div>
+        ${(settlement?.cycleShiftsDetails && settlement.cycleShiftsDetails.length > 0) ? `
+          <table style="font-size: 10.5px; text-align: center; width: 100%;">
+            <thead>
+              <tr style="background: #f1f5f9; color: #334155; font-weight: 800;">
+                <th style="padding: 4px; width: 5%;">#</th>
+                <th style="padding: 4px; width: 22%;">اليوم والتاريخ</th>
+                <th style="padding: 4px; width: 20%;">الفرع</th>
+                <th style="padding: 4px; width: 11%;">حضور</th>
+                <th style="padding: 4px; width: 11%;">انصراف</th>
+                <th style="padding: 4px; width: 11%;">الساعات</th>
+                <th style="padding: 4px; width: 10%;">إضافي</th>
+                <th style="padding: 4px; width: 10%;">تأخير</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${settlement.cycleShiftsDetails.map((sh, idx) => `
+                <tr style="background: ${idx % 2 === 0 ? '#ffffff' : '#f8fafc'};">
+                  <td style="padding: 3px;">${idx + 1}</td>
+                  <td style="padding: 3px; font-weight: bold;">${sh.dayName} ${sh.date}</td>
+                  <td style="padding: 3px;">${sh.branchName}</td>
+                  <td style="padding: 3px; color: #0f766e; font-weight: bold;">${sh.checkIn}</td>
+                  <td style="padding: 3px; color: #0f766e; font-weight: bold;">${sh.checkOut}</td>
+                  <td style="padding: 3px; font-weight: bold;">${sh.regularHours} س</td>
+                  <td style="padding: 3px; color: ${sh.overtimeHours > 0 ? '#16a34a' : '#64748b'};">${sh.overtimeHours > 0 ? `+${sh.overtimeHours} س` : '—'}</td>
+                  <td style="padding: 3px; color: ${sh.delayMinutes > 0 ? '#dc2626' : '#64748b'};">${sh.delayMinutes > 0 ? `${sh.delayMinutes} د` : '—'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+            <tfoot>
+              <tr style="background: #e2e8f0; font-weight: 800; font-size: 11px;">
+                <td colspan="5" style="text-align: right; padding: 4px 8px;">إجمالي ساعات وحضور دورة التصفية:</td>
+                <td style="padding: 4px; color: #0f766e;">${settlement?.totalRegularHours || 0} س</td>
+                <td style="padding: 4px; color: #16a34a;">+${settlement?.totalApprovedOvertimeHours || 0} س</td>
+                <td style="padding: 4px; color: #dc2626;">${settlement?.lateDeductionMinutes || 0} د</td>
+              </tr>
+            </tfoot>
+          </table>
+        ` : `
+          <div style="text-align: center; color: #64748b; padding: 8px; font-size: 11px; background: #f8fafc; border-radius: 6px;">
+            لا توجد بصمات أو ورديات مسجلة للموظف خلال فترة هذه الدورة المالية.
+          </div>
+        `}
+      </div>
+
       <!-- Net Settlement Box -->
       <div style="background: #f8fafc; border: 2px solid ${settlement?.isPayableToEmployee !== false ? '#059669' : '#dc2626'}; border-radius: 8px; padding: 8px 14px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
         <div>
-          <span style="font-size: 12px; color: #475569; font-weight: bold;">رابعاً: النتيجة المالية الصافية للتصفية والمخالصة النهائية:</span>
+          <span style="font-size: 12px; color: #475569; font-weight: bold;">خامساً: النتيجة المالية الصافية للتصفية والمخالصة النهائية:</span>
           <div style="font-size: 13.5px; font-weight: 800; color: ${settlement?.isPayableToEmployee !== false ? '#15803d' : '#b91c1c'}; margin-top: 2px;">
             ${settlement?.settlementStatusLabel || 'صافي المستحقات'}
           </div>
@@ -274,7 +329,7 @@ export function generateClearanceSlipHTML({
       <!-- Administrative Clearance Checklist & Notes -->
       <div style="background: #fff; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 12px; margin-bottom: 10px; font-size: 11.5px;">
         <div style="font-weight: 800; color: #0f766e; margin-bottom: 4px;">
-          📋 خامساً: إخلاء العهد والتسليمات الإدارية:
+          📋 سادساً: إخلاء العهد والتسليمات الإدارية:
         </div>
         <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 6px;">
           <div>☑️ تسليم العهد والأجهزة</div>
