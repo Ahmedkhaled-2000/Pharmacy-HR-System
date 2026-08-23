@@ -28,9 +28,16 @@ export default function PayslipPrintModal({
   const fullMonthLabel = `${monthName} ${y}`;
 
   // Branches list for multi-branch employee
-  const isMultiBranch = emp.branchesDetails && emp.branchesDetails.length > 1;
-  const targetBranchDetails = selectedBranchId
-    ? emp.branchesDetails?.find((b) => String(b.branchId) === String(selectedBranchId))
+  const isMultiBranch = (emp.branchesDetails && emp.branchesDetails.length > 1);
+  const [activeBranchFilter, setActiveBranchFilter] = useState(selectedBranchId || 'all');
+  const currentBranchId = activeBranchFilter === 'all' ? null : activeBranchFilter;
+
+  const assignedBranches = (emp.branchesDetails && emp.branchesDetails.length > 0)
+    ? emp.branchesDetails
+    : [{ branchId: emp.branchId || 'default', salary: emp.salary, workHoursPerDay: emp.workHoursPerDay || 8, workDaysPerMonth: emp.workDaysPerMonth || 26 }];
+
+  const targetBranchDetails = currentBranchId
+    ? emp.branchesDetails?.find((b) => String(b.branchId) === String(currentBranchId))
     : (emp.branchesDetails?.[0] || null);
 
   const baseSalary = targetBranchDetails ? (parseFloat(targetBranchDetails.salary) || 0) : (parseFloat(emp.salary) || 0);
@@ -58,12 +65,22 @@ export default function PayslipPrintModal({
   }
 
   // Filter shifts and adjustments for this cutoff period
-  const empShifts = shifts.filter((s) => String(s.employeeId) === String(emp.id) && s.date >= startCutoff && s.date <= endCutoff);
-  const empAdjs = adjustments.filter((a) => (String(a.employeeId) === String(emp.id) || a.employeeId === 'all') && a.date >= startCutoff && a.date <= endCutoff);
+  const empShifts = shifts.filter((s) =>
+    String(s.employeeId) === String(emp.id) &&
+    s.date >= startCutoff &&
+    s.date <= endCutoff &&
+    (!currentBranchId || String(s.branchId) === String(currentBranchId))
+  );
+
+  const empAdjs = adjustments.filter((a) =>
+    (String(a.employeeId) === String(emp.id) || a.employeeId === 'all') &&
+    a.date >= startCutoff &&
+    a.date <= endCutoff
+  );
 
   // Use computeEmpSummary for accurate calculations including branch selection
   const summary = computeEmpSummary
-    ? computeEmpSummary(emp.id, null, month, selectedBranchId)
+    ? computeEmpSummary(emp.id, null, month, currentBranchId)
     : { hours: 0, dailyRate: 0, rate: 0, baseEarnings: 0, totalBonus: 0, totalDeduction: 0, absenceDeduction: 0, netSalary: 0, perBranch: {} };
 
   const totalHours = summary.hours || 0;
@@ -91,11 +108,13 @@ export default function PayslipPrintModal({
     return b ? b.name : (String(bId) === String(emp.branchId) ? (emp.branchName || 'الفرع الرئيسي') : `فرع ${bId}`);
   };
 
-  const branchNames = selectedBranchId
-    ? getBranchName(selectedBranchId)
+  const branchNames = currentBranchId
+    ? getBranchName(currentBranchId)
     : (isMultiBranch
       ? emp.branchesDetails.map(bd => getBranchName(bd.branchId)).join(' + ')
       : (emp.branchName || 'المركز الرئيسي'));
+
+  const showPerBranchBreakdown = isMultiBranch && !currentBranchId;
 
   // Prepared mapped shifts for print helper
   const mappedShiftsForPrint = empShifts.map((s) => {
@@ -182,12 +201,12 @@ export default function PayslipPrintModal({
       inc.status !== 'approved_permission_exempt' &&
       inc.actionType !== 'grace' &&
       (inc.deductionMinutes > 0 || inc.penaltyAmount > 0) &&
-      (!selectedBranchId || String(inc.branchId) === String(selectedBranchId)) &&
+      (!currentBranchId || String(inc.branchId) === String(currentBranchId)) &&
       (inc.date >= startCutoff && inc.date <= endCutoff)
   );
 
   const latePenaltyItems = empLateIncidents.map((inc) => {
-    const dayAmt = computeLatenessFinancialAmount(inc.deductionMinutes || 0, emp, inc.branchId || selectedBranchId);
+    const dayAmt = computeLatenessFinancialAmount(inc.deductionMinutes || 0, emp, inc.branchId || currentBranchId);
     const penaltyVal = dayAmt > 0 ? dayAmt : (parseFloat(inc.penaltyAmount) || 0);
     return {
       id: inc.id,
@@ -282,7 +301,7 @@ export default function PayslipPrintModal({
         startCutoff,
         endCutoff,
         fullMonthLabel,
-        selectedBranchId,
+        selectedBranchId: currentBranchId,
         state,
         printFitMode
       });
@@ -298,11 +317,11 @@ export default function PayslipPrintModal({
       <div
         className="modal-content payslip-modal-container"
         style={{
-          maxWidth: '860px',
+          maxWidth: '880px',
           width: '95%',
           background: '#ffffff',
           padding: '0',
-          maxHeight: '92vh',
+          maxHeight: '94vh',
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
@@ -316,7 +335,7 @@ export default function PayslipPrintModal({
           className="no-print"
           style={{
             background: 'var(--surface-muted, #f8fafc)',
-            padding: '14px 20px',
+            padding: '12px 20px',
             borderBottom: '1px solid var(--border, #e2e8f0)',
             display: 'flex',
             justifyContent: 'space-between',
@@ -334,12 +353,37 @@ export default function PayslipPrintModal({
                 كشف المرتب والبصمات الرسمي (A4)
               </h4>
               <span style={{ fontSize: '11.5px', color: 'var(--muted, #64748b)' }}>
-                شهر {fullMonthLabel} · {emp.name}
+                شهر {fullMonthLabel} · {emp.name} {isMultiBranch && <strong style={{ color: '#0f766e' }}>· (موظف متعدد الفروع)</strong>}
               </span>
             </div>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            {/* Multi-Branch Selector if employee works in multiple branches */}
+            {isMultiBranch && (
+              <select
+                value={activeBranchFilter}
+                onChange={(e) => setActiveBranchFilter(e.target.value)}
+                style={{
+                  padding: '6px 10px',
+                  borderRadius: '8px',
+                  border: '1.5px solid #0f766e',
+                  fontSize: '12px',
+                  fontWeight: 'bold',
+                  background: '#fff',
+                  color: '#0f766e',
+                  fontFamily: 'Cairo, sans-serif'
+                }}
+              >
+                <option value="all">🏛️ كافة الفروع مجمعة ومفصلة</option>
+                {assignedBranches.map(bd => (
+                  <option key={bd.branchId} value={bd.branchId}>
+                    📍 {getBranchName(bd.branchId)}
+                  </option>
+                ))}
+              </select>
+            )}
+
             {/* Print Scale Selector */}
             <div style={{ display: 'flex', background: 'var(--surface, #ffffff)', borderRadius: '8px', padding: '2px', border: '1px solid var(--border, #cbd5e1)' }}>
               <button
@@ -426,7 +470,7 @@ export default function PayslipPrintModal({
           <div
             id="printable-payslip"
             style={{
-              maxWidth: '800px',
+              maxWidth: '820px',
               margin: '0 auto',
               background: '#ffffff',
               padding: printFitMode === 'single_page' ? '18px 22px' : '24px 28px',
@@ -444,32 +488,32 @@ export default function PayslipPrintModal({
                 justifyContent: 'space-between',
                 alignItems: 'center',
                 borderBottom: '3px double #0f766e',
-                paddingBottom: '12px',
-                marginBottom: '14px'
+                paddingBottom: '10px',
+                marginBottom: '12px'
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                 {logoUrl ? (
-                  <img src={logoUrl} alt="Logo" style={{ height: '52px', borderRadius: '8px' }} />
+                  <img src={logoUrl} alt="Logo" style={{ height: '50px', borderRadius: '8px' }} />
                 ) : (
-                  <div style={{ width: '48px', height: '48px', background: '#0f766e', color: '#fff', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px' }}>
+                  <div style={{ width: '46px', height: '46px', background: '#0f766e', color: '#fff', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px' }}>
                     🏥
                   </div>
                 )}
                 <div>
-                  <h2 style={{ margin: 0, fontFamily: 'Cairo', color: '#0f766e', fontSize: '19px', fontWeight: 800 }}>{orgName}</h2>
-                  <span style={{ fontSize: '11.5px', color: '#64748b' }}>{gmName}</span>
+                  <h2 style={{ margin: 0, fontFamily: 'Cairo', color: '#0f766e', fontSize: '18px', fontWeight: 800 }}>{orgName}</h2>
+                  <span style={{ fontSize: '11px', color: '#64748b' }}>{gmName}</span>
                 </div>
               </div>
 
               <div style={{ textAlign: 'left' }}>
-                <div style={{ background: '#0f766e', color: '#fff', padding: '5px 16px', borderRadius: '8px', fontWeight: 'bold', fontSize: '14px', fontFamily: 'Cairo' }}>
+                <div style={{ background: '#0f766e', color: '#fff', padding: '4px 16px', borderRadius: '8px', fontWeight: 'bold', fontSize: '13.5px', fontFamily: 'Cairo' }}>
                   كشف مرتب شهر {fullMonthLabel}
                 </div>
-                <div style={{ fontSize: '11.5px', color: '#0f766e', marginTop: '3px', fontWeight: 'bold' }}>
+                <div style={{ fontSize: '11px', color: '#0f766e', marginTop: '3px', fontWeight: 'bold' }}>
                   الفترة: من {startCutoff} إلى {endCutoff}
                 </div>
-                <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '2px' }}>
+                <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>
                   تاريخ الطباعة: {new Date().toISOString().slice(0, 10)}
                 </div>
               </div>
@@ -481,15 +525,15 @@ export default function PayslipPrintModal({
                 background: '#f8fafc',
                 border: '1px solid #cbd5e1',
                 borderRadius: '8px',
-                padding: '10px 16px',
+                padding: '8px 14px',
                 marginBottom: '12px',
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-                gap: '8px',
-                fontSize: '12px'
+                gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+                gap: '6px',
+                fontSize: '11.5px'
               }}
             >
-              <div>الموظف: <strong style={{ color: '#0f766e', fontSize: '13.5px' }}>{emp.name}</strong></div>
+              <div>الموظف: <strong style={{ color: '#0f766e', fontSize: '13px' }}>{emp.name}</strong></div>
               <div>كود الموظف: <strong>{emp.code}</strong></div>
               <div>المسمى الوظيفي: <strong>{emp.jobTitle}</strong></div>
               <div>الفرع / الفروع: <strong>{branchNames}</strong></div>
@@ -497,68 +541,142 @@ export default function PayslipPrintModal({
               <div>هاتف الطوارئ: <strong>{emp.relativePhone || emp.emergencyPhone || '—'}</strong></div>
             </div>
 
-            {/* Side-by-Side Calculation Boxes (Matching Official Design) */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px', direction: 'rtl' }}>
-              {/* Right Box: احتساب سعر الساعة وأجر اليوم وفق المعادلة المعتمدة */}
-              <div style={{ border: '1.5px solid #bbf7d0', borderRadius: '10px', overflow: 'hidden', background: '#ffffff', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
-                <div style={{ background: '#f0fdf4', padding: '7px 14px', color: '#047857', fontWeight: 800, fontSize: '12px', borderBottom: '1.5px solid #bbf7d0', display: 'flex', alignItems: 'center', gap: '6px', fontFamily: 'Cairo' }}>
-                  <span>⚙️</span>
-                  <span>احتساب سعر الساعة وأجر اليوم وفق المعادلة المعتمدة</span>
+            {/* Calculation & Earnings Section (Multi-Branch Breakdown or Single Branch Card) */}
+            {showPerBranchBreakdown ? (
+              /* Multi-Branch Detailed Breakdown Grid */
+              <div style={{ marginBottom: '12px' }}>
+                <div style={{ background: '#0f766e', color: '#fff', padding: '6px 12px', borderRadius: '8px 8px 0 0', fontWeight: 800, fontSize: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>🏢 تفاصيل احتساب الأجر وسعر الساعة وساعات العمل لكل فرع على حدة ({assignedBranches.length} فروع):</span>
+                  <span style="font-size: 10px; background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 4px;">موظف متعدد الفروع</span>
                 </div>
-                <div style={{ padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px dotted #cbd5e1', paddingBottom: '5px' }}>
-                    <span style={{ color: '#334155' }}>1. سعر الساعة الشهري (المدخل من الإدارة)</span>
-                    <strong style={{ color: '#0f172a' }}>{fmt(baseSalary)} ج.م</strong>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px dotted #cbd5e1', paddingBottom: '5px' }}>
-                    <span style={{ color: '#334155' }}>2. ساعات العمل اليومية المدخلة</span>
-                    <strong style={{ color: '#0f172a' }}>{workHoursPerDay} س / يوم</strong>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px dotted #cbd5e1', paddingBottom: '5px' }}>
-                    <span style={{ color: '#334155' }}>3. أيام العمل الشهرية المدخلة</span>
-                    <strong style={{ color: '#0f172a' }}>{workDaysPerMonth} يوم / شهر</strong>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px dotted #cbd5e1', paddingBottom: '5px' }}>
-                    <span style={{ color: '#334155' }}>4. سعر اليوم = ({fmt(baseSalary)} × {workHoursPerDay}) ÷ {workDaysPerMonth}</span>
-                    <strong style={{ color: '#047857' }}>{fmt(dailyRate)} ج.م / يوم</strong>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#047857', fontWeight: 800, fontSize: '11.5px', paddingTop: '2px' }}>
-                    <span>✅ 5. سعر الساعة اليومي = {fmt(dailyRate)} ÷ {workHoursPerDay}</span>
-                    <span>{fmt(hourlyRate)} ج.م / ساعة</span>
-                  </div>
-                </div>
-              </div>
+                <div style={{ border: '1.5px solid #0f766e', borderTop: 'none', padding: '8px', background: '#f8fafc', display: 'grid', gridTemplateColumns: `repeat(${assignedBranches.length > 2 ? '3' : '2'}, 1fr)`, gap: '8px' }}>
+                  {assignedBranches.map((bd, idx) => {
+                    const bId = bd.branchId;
+                    const bName = getBranchName(bId);
+                    const bSum = summary.perBranch?.[bId] || {};
+                    const bSalary = parseFloat(bd.salary) || (parseFloat(emp.salary) || 0);
+                    const bWorkHours = parseFloat(bd.workHours || bd.workHoursPerDay) || (parseFloat(emp.workHoursPerDay) || 8);
+                    const bWorkDays = parseFloat(bd.workDays || bd.workDaysPerMonth) || (parseFloat(emp.workDaysPerMonth) || 26);
+                    const bDailyRate = bSum.dailyRate || (bWorkDays > 0 ? (bSalary * bWorkHours) / bWorkDays : 0);
+                    const bHourlyRate = bSum.rate || bSum.hourlyRate || (bWorkHours > 0 ? bDailyRate / bWorkHours : bSalary);
+                    const bHours = bSum.hours || 0;
+                    const bBaseEarn = bSum.baseEarnings || (bHours * bHourlyRate);
+                    const bOtHours = bSum.approvedOvertimeHours || 0;
+                    const bOtEarn = bSum.overtimeEarnings || 0;
 
-              {/* Left Box: ساعات العمل وأجر اليوم / المستحقات */}
-              <div style={{ border: '1.5px solid #bbf7d0', borderRadius: '10px', overflow: 'hidden', background: '#ffffff', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
-                <div style={{ background: '#f0fdf4', padding: '7px 14px', color: '#047857', fontWeight: 800, fontSize: '12px', borderBottom: '1.5px solid #bbf7d0', display: 'flex', alignItems: 'center', gap: '6px', fontFamily: 'Cairo' }}>
-                  <span>⏱️</span>
-                  <span>ساعات العمل وأجر اليوم / المستحقات</span>
+                    return (
+                      <div key={bId || idx} style={{ border: '1.5px solid #bbf7d0', borderRadius: '8px', overflow: 'hidden', background: '#ffffff', boxShadow: '0 1px 2px rgba(0,0,0,0.02)' }}>
+                        <div style={{ background: '#f0fdf4', padding: '5px 10px', color: '#047857', fontWeight: 800, fontSize: '11px', borderBottom: '1.5px solid #bbf7d0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span>📍 {bName}</span>
+                          <span style={{ fontSize: '9.5px', background: '#dcfce7', padding: '1px 6px', borderRadius: '4px', color: '#166534' }}>فرع #{idx + 1}</span>
+                        </div>
+                        <div style={{ padding: '6px 10px', display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '10px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px dotted #cbd5e1', paddingBottom: '3px' }}>
+                            <span>1. سعر الساعة الشهري (الإدارة):</span>
+                            <strong>{fmt(bSalary)} ج.م</strong>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px dotted #cbd5e1', paddingBottom: '3px' }}>
+                            <span>2. ساعات اليوم / أيام الشهر:</span>
+                            <strong>{bWorkHours} س · {bWorkDays} يوم</strong>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px dotted #cbd5e1', paddingBottom: '3px' }}>
+                            <span>3. سعر اليوم = ({fmt(bSalary)} × {bWorkHours}) ÷ {bWorkDays}:</span>
+                            <strong style={{ color: '#047857' }}>{fmt(bDailyRate)} ج.م / يوم</strong>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px dotted #cbd5e1', paddingBottom: '3px', color: '#047857', fontWeight: 'bold' }}>
+                            <span>✅ 4. سعر الساعة المعتمد:</span>
+                            <span>{fmt(bHourlyRate)} ج.م / ساعة</span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px dotted #cbd5e1', paddingBottom: '3px', color: '#1e293b' }}>
+                            <span>5. الساعات المسجلة بالفرع:</span>
+                            <strong style={{ fontSize: '11px' }}>{fmt(bHours)} ساعة</strong>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#047857', fontWeight: 800, fontSize: '11px', ...(bOtHours > 0 ? { borderBottom: '1px dotted #cbd5e1', paddingBottom: '3px' } : {}) }}>
+                            <span>6. المستحقات بالفرع:</span>
+                            <span>{fmt(bBaseEarn)} ج.م</span>
+                          </div>
+                          {bOtHours > 0 && (
+                            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#166534', fontWeight: 800, fontSize: '10px' }}>
+                              <span>⭐ إضافي الفرع ({fmt(bOtHours)} س):</span>
+                              <span>+{fmt(bOtEarn)} ج.م</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-                <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '11px', flex: 1, justifyContent: 'center' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px dotted #cbd5e1', paddingBottom: '8px' }}>
-                    <span style={{ color: '#334155', fontWeight: 600 }}>عدد ساعات العمل الأساسية المسجلة</span>
-                    <strong style={{ color: '#0f172a', fontSize: '11.5px' }}>{fmt(totalHours)} ساعة</strong>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#047857', fontWeight: 800, fontSize: '11.5px', ...(summary.approvedOvertimeHours > 0 ? { borderBottom: '1px dotted #cbd5e1', paddingBottom: '8px' } : {}) }}>
-                    <span>المستحقات الأساسية ({fmt(totalHours)} س × {fmt(hourlyRate)} ج.م)</span>
-                    <span style={{ fontSize: '12px' }}>{fmt(baseEarnings)} ج.م</span>
-                  </div>
-                  {summary.approvedOvertimeHours > 0 && (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#166534', fontWeight: 800, fontSize: '11.5px' }}>
-                      <span>⭐ أجر الوقت الإضافي المعتمد ({fmt(summary.approvedOvertimeHours)} س × {fmt(hourlyRate)} ج.م)</span>
-                      <span>+{fmt(summary.overtimeEarnings)} ج.م</span>
-                    </div>
-                  )}
+                {/* Overall Strip */}
+                <div style={{ background: '#f0fdf4', border: '1.5px solid #0f766e', borderTop: 'none', padding: '6px 12px', borderRadius: '0 0 8px 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', fontWeight: 800, color: '#047857' }}>
+                  <span>إجمالي ساعات العمل بكافة الفروع: <strong style={{ color: '#0f172a' }}>{fmt(totalHours)} ساعة</strong></span>
+                  <span>إجمالي المستحقات الأساسية: <strong style={{ color: '#0f172a' }}>{fmt(baseEarnings)} ج.م</strong></span>
+                  {summary.approvedOvertimeHours > 0 && <span>إجمالي الإضافي: <strong>+{fmt(summary.overtimeEarnings)} ج.م</strong></span>}
                 </div>
               </div>
-            </div>
+            ) : (
+              /* Single Branch Side-by-Side Calculation Boxes */
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px', direction: 'rtl' }}>
+                {/* Right Box */}
+                <div style={{ border: '1.5px solid #bbf7d0', borderRadius: '10px', overflow: 'hidden', background: '#ffffff', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
+                  <div style={{ background: '#f0fdf4', padding: '7px 14px', color: '#047857', fontWeight: 800, fontSize: '12px', borderBottom: '1.5px solid #bbf7d0', display: 'flex', alignItems: 'center', gap: '6px', fontFamily: 'Cairo' }}>
+                    <span>⚙️</span>
+                    <span>احتساب سعر الساعة وأجر اليوم وفق المعادلة المعتمدة</span>
+                  </div>
+                  <div style={{ padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px dotted #cbd5e1', paddingBottom: '5px' }}>
+                      <span style={{ color: '#334155' }}>1. سعر الساعة الشهري (المدخل من الإدارة)</span>
+                      <strong style={{ color: '#0f172a' }}>{fmt(baseSalary)} ج.م</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px dotted #cbd5e1', paddingBottom: '5px' }}>
+                      <span style={{ color: '#334155' }}>2. ساعات العمل اليومية المدخلة</span>
+                      <strong style={{ color: '#0f172a' }}>{workHoursPerDay} س / يوم</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px dotted #cbd5e1', paddingBottom: '5px' }}>
+                      <span style={{ color: '#334155' }}>3. أيام العمل الشهرية المدخلة</span>
+                      <strong style={{ color: '#0f172a' }}>{workDaysPerMonth} يوم / شهر</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px dotted #cbd5e1', paddingBottom: '5px' }}>
+                      <span style={{ color: '#334155' }}>4. سعر اليوم = ({fmt(baseSalary)} × {workHoursPerDay}) ÷ {workDaysPerMonth}</span>
+                      <strong style={{ color: '#047857' }}>{fmt(dailyRate)} ج.م / يوم</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#047857', fontWeight: 800, fontSize: '11.5px', paddingTop: '2px' }}>
+                      <span>✅ 5. سعر الساعة اليومي = {fmt(dailyRate)} ÷ {workHoursPerDay}</span>
+                      <span>{fmt(hourlyRate)} ج.م / ساعة</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Left Box */}
+                <div style={{ border: '1.5px solid #bbf7d0', borderRadius: '10px', overflow: 'hidden', background: '#ffffff', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
+                  <div style={{ background: '#f0fdf4', padding: '7px 14px', color: '#047857', fontWeight: 800, fontSize: '12px', borderBottom: '1.5px solid #bbf7d0', display: 'flex', alignItems: 'center', gap: '6px', fontFamily: 'Cairo' }}>
+                    <span>⏱️</span>
+                    <span>ساعات العمل وأجر اليوم / المستحقات</span>
+                  </div>
+                  <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '11px', flex: 1, justifyContent: 'center' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px dotted #cbd5e1', paddingBottom: '8px' }}>
+                      <span style={{ color: '#334155', fontWeight: 600 }}>عدد ساعات العمل الأساسية المسجلة</span>
+                      <strong style={{ color: '#0f172a', fontSize: '11.5px' }}>{fmt(totalHours)} ساعة</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#047857', fontWeight: 800, fontSize: '11.5px', ...(summary.approvedOvertimeHours > 0 ? { borderBottom: '1px dotted #cbd5e1', paddingBottom: '8px' } : {}) }}>
+                      <span>المستحقات الأساسية ({fmt(totalHours)} س × {fmt(hourlyRate)} ج.م)</span>
+                      <span style={{ fontSize: '12px' }}>{fmt(baseEarnings)} ج.م</span>
+                    </div>
+                    {summary.approvedOvertimeHours > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#166534', fontWeight: 800, fontSize: '11.5px' }}>
+                        <span>⭐ أجر الوقت الإضافي المعتمد ({fmt(summary.approvedOvertimeHours)} س × {fmt(hourlyRate)} ج.م)</span>
+                        <span>+{fmt(summary.overtimeEarnings)} ج.م</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Attendance Punches Table */}
             <div style={{ marginBottom: '12px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
                 <h4 style={{ margin: 0, fontFamily: 'Cairo', color: '#0f766e', borderRight: '3px solid #0f766e', paddingRight: '6px', fontSize: '12.5px', fontWeight: 800 }}>
-                  📋 تفاصيل سجل الحضور والبصمات ({empShifts.length} وردية)
+                  📋 أولاً: تفاصيل سجل الحضور والبصمات ({empShifts.length} وردية)
                 </h4>
                 <span style={{ fontSize: '10.5px', color: '#64748b' }}>
                   إجمالي الساعات: <strong>{fmt(totalHours)} س</strong> · البريك: <strong>{fmt(totalBreakHours)} س</strong>
@@ -569,18 +687,19 @@ export default function PayslipPrintModal({
                 <thead>
                   <tr style={{ background: '#f1f5f9', color: '#334155' }}>
                     <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '4%' }}>#</th>
-                    <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '22%' }}>التاريخ واليوم</th>
-                    <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '14%' }}>وقت الدخول</th>
-                    <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '14%' }}>وقت الخروج</th>
-                    <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '12%' }}>البريك</th>
-                    <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '14%' }}>ساعات العمل</th>
-                    <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '20%' }}>الأجر المستحق</th>
+                    <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: isMultiBranch ? '20%' : '22%' }}>اليوم والتاريخ</th>
+                    {isMultiBranch && <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '14%' }}>الفرع</th>}
+                    <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '13%' }}>وقت الدخول</th>
+                    <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '13%' }}>وقت الخروج</th>
+                    <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '10%' }}>البريك</th>
+                    <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '12%' }}>ساعات العمل</th>
+                    <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: isMultiBranch ? '18%' : '20%' }}>الأجر المستحق</th>
                   </tr>
                 </thead>
                 <tbody>
                   {empShifts.length === 0 ? (
                     <tr>
-                      <td colSpan="7" style={{ padding: '10px', border: '1px solid #cbd5e1', color: '#94a3b8' }}>
+                      <td colSpan={isMultiBranch ? 8 : 7} style={{ padding: '10px', border: '1px solid #cbd5e1', color: '#94a3b8' }}>
                         لا توجد بصمات مسجلة للموظف عن هذا الشهر
                       </td>
                     </tr>
@@ -589,6 +708,7 @@ export default function PayslipPrintModal({
                       const shiftRate = (summary.perBranch?.[s.branchId]?.rate) || hourlyRate;
                       const effHours = getEffectiveShiftHours(s, state);
                       const hasPerm = isApprovedPermissionForDate(emp.id, s.date, state);
+                      const bName = getBranchName(s.branchId);
                       return (
                         <tr key={s.id || idx} style={{ background: hasPerm ? '#fefce8' : (idx % 2 === 0 ? '#fff' : '#f8fafc') }}>
                           <td style={{ padding: '3px', border: '1px solid #cbd5e1' }}>{idx + 1}</td>
@@ -596,6 +716,13 @@ export default function PayslipPrintModal({
                             {arabicWeekday(s.date)} {s.date}
                             {hasPerm && <span style={{ display: 'block', color: '#b45309', fontSize: '9px' }}>⏰ إذن معتمد</span>}
                           </td>
+                          {isMultiBranch && (
+                            <td style={{ padding: '3px', border: '1px solid #cbd5e1' }}>
+                              <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '2px 6px', borderRadius: '4px', fontSize: '9.5px', fontWeight: 'bold' }}>
+                                {bName}
+                              </span>
+                            </td>
+                          )}
                           <td style={{ padding: '3px', border: '1px solid #cbd5e1', color: '#16a34a' }}>{s.timeIn || '—'}</td>
                           <td style={{ padding: '3px', border: '1px solid #cbd5e1', color: '#dc2626' }}>{s.timeOut || '—'}</td>
                           <td style={{ padding: '3px', border: '1px solid #cbd5e1' }}>{fmt(s.breakHours)} س</td>
@@ -609,7 +736,7 @@ export default function PayslipPrintModal({
                 {empShifts.length > 0 && (
                   <tfoot>
                     <tr style={{ background: '#e2e8f0', fontWeight: 'bold', fontSize: '11px' }}>
-                      <td colSpan="4" style={{ padding: '4px 8px', border: '1px solid #cbd5e1', textAlign: 'right' }}>الإجمالي:</td>
+                      <td colSpan={isMultiBranch ? 5 : 4} style={{ padding: '4px 8px', border: '1px solid #cbd5e1', textAlign: 'right' }}>الإجمالي:</td>
                       <td style={{ padding: '4px', border: '1px solid #cbd5e1' }}>{fmt(totalBreakHours)} س</td>
                       <td style={{ padding: '4px', border: '1px solid #cbd5e1', color: '#0f766e' }}>{fmt(totalHours)} س</td>
                       <td style={{ padding: '4px', border: '1px solid #cbd5e1', color: '#0f766e' }}>{fmt(baseEarnings)} ج.م</td>
@@ -743,7 +870,7 @@ export default function PayslipPrintModal({
                 </div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px', fontSize: '11px' }}>
-                <div>الأساسي: <strong>${fmt(baseEarnings)} ج.م</strong></div>
+                <div>الأساسي: <strong>{fmt(baseEarnings)} ج.م</strong></div>
                 {summary.approvedOvertimeHours > 0 && (
                   <div style={{ color: '#86efac' }}>+ الإضافي: <strong>+{fmt(summary.overtimeEarnings)} ج.م</strong></div>
                 )}

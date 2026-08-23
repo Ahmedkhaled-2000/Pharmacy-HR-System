@@ -617,62 +617,138 @@ export function generateOfficialPayslipHTML({
         </div>
       </div>
 
-      <!-- Calculation & Earnings Side-by-Side Boxes -->
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; direction: rtl;">
-        <!-- Right Box: احتساب سعر الساعة وأجر اليوم -->
-        <div style="border: 1.5px solid #bbf7d0; border-radius: 8px; overflow: hidden; background: #ffffff; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
-          <div style="background: #f0fdf4; padding: 6px 12px; color: #047857; font-weight: 800; font-size: 11.5px; border-bottom: 1.5px solid #bbf7d0; display: flex; align-items: center; gap: 6px; font-family: 'Cairo', sans-serif;">
-            <span>⚙️</span>
-            <span>احتساب سعر الساعة وأجر اليوم وفق المعادلة المعتمدة</span>
+      <!-- Calculation & Earnings Section (Single Branch or Multi-Branch Breakdown) -->
+      ${showPerBranchBreakdown ? `
+        <!-- Multi-Branch Full Breakdown -->
+        <div style="margin-bottom: 8px; page-break-inside: avoid; break-inside: avoid;">
+          <div style="background: #0f766e; color: #fff; padding: 4px 10px; border-radius: 6px 6px 0 0; font-weight: 800; font-size: 11px; display: flex; justify-content: space-between; align-items: center;">
+            <span>🏢 تفاصيل احتساب الأجر وسعر الساعة وساعات العمل لكل فرع على حدة (${assignedBranches.length} فروع):</span>
+            <span style="font-size: 9.5px; background: rgba(255,255,255,0.2); padding: 1px 6px; border-radius: 4px;">موظف متعدد الفروع</span>
           </div>
-          <div style="padding: 8px 12px; display: flex; flex-direction: column; gap: 5px; font-size: 10.5px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dotted #cbd5e1; padding-bottom: 4px;">
-              <span style="color: #334155;">1. سعر الساعة الشهري (المدخل من الإدارة)</span>
-              <strong style="color: #0f172a; direction: ltr;">${fmt(baseSalary)} ج.م</strong>
-            </div>
-            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dotted #cbd5e1; padding-bottom: 4px;">
-              <span style="color: #334155;">2. ساعات العمل اليومية المدخلة</span>
-              <strong style="color: #0f172a;">${workHoursPerDay} س / يوم</strong>
-            </div>
-            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dotted #cbd5e1; padding-bottom: 4px;">
-              <span style="color: #334155;">3. أيام العمل الشهرية المدخلة</span>
-              <strong style="color: #0f172a;">${workDaysPerMonth} يوم / شهر</strong>
-            </div>
-            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dotted #cbd5e1; padding-bottom: 4px;">
-              <span style="color: #334155;">4. سعر اليوم = (${fmt(baseSalary)} × ${workHoursPerDay}) ÷ ${workDaysPerMonth}</span>
-              <strong style="color: #047857;">${fmt(dailyRate)} ج.م / يوم</strong>
-            </div>
-            <div style="display: flex; justify-content: space-between; align-items: center; color: #047857; font-weight: 800; font-size: 11px; padding-top: 2px;">
-              <span>✅ 5. سعر الساعة اليومي = ${fmt(dailyRate)} ÷ ${workHoursPerDay}</span>
-              <span>${fmt(hourlyRate)} ج.م / ساعة</span>
-            </div>
-          </div>
-        </div>
+          
+          <div style="border: 1.5px solid #0f766e; border-top: none; padding: 6px; background: #f8fafc; display: grid; grid-template-columns: repeat(${assignedBranches.length > 2 ? '3' : '2'}, 1fr); gap: 6px;">
+            ${assignedBranches.map((bd, idx) => {
+              const bId = bd.branchId;
+              const bName = getBranchName(bId);
+              const bSum = summary.perBranch?.[bId] || {};
+              const bSalary = parseFloat(bd.salary) || (parseFloat(emp?.salary) || 0);
+              const bWorkHours = parseFloat(bd.workHours || bd.workHoursPerDay) || (parseFloat(emp?.workHoursPerDay) || 8);
+              const bWorkDays = parseFloat(bd.workDays || bd.workDaysPerMonth) || (parseFloat(emp?.workDaysPerMonth) || 26);
+              const bDailyRate = bSum.dailyRate || (bWorkDays > 0 ? (bSalary * bWorkHours) / bWorkDays : 0);
+              const bHourlyRate = bSum.rate || bSum.hourlyRate || (bWorkHours > 0 ? bDailyRate / bWorkHours : bSalary);
+              const bHours = bSum.hours || 0;
+              const bBaseEarn = bSum.baseEarnings || (bHours * bHourlyRate);
+              const bOtHours = bSum.approvedOvertimeHours || 0;
+              const bOtEarn = bSum.overtimeEarnings || 0;
 
-        <!-- Left Box: ساعات العمل وأجر اليوم / المستحقات -->
-        <div style="border: 1.5px solid #bbf7d0; border-radius: 8px; overflow: hidden; background: #ffffff; display: flex; flex-direction: column; justify-content: space-between; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
-          <div style="background: #f0fdf4; padding: 6px 12px; color: #047857; font-weight: 800; font-size: 11.5px; border-bottom: 1.5px solid #bbf7d0; display: flex; align-items: center; gap: 6px; font-family: 'Cairo', sans-serif;">
-            <span>⏱️</span>
-            <span>ساعات العمل وأجر اليوم / المستحقات</span>
+              return `
+                <div style="border: 1.5px solid #bbf7d0; border-radius: 6px; overflow: hidden; background: #ffffff; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
+                  <div style="background: #f0fdf4; padding: 4px 8px; color: #047857; font-weight: 800; font-size: 10.5px; border-bottom: 1.5px solid #bbf7d0; display: flex; justify-content: space-between; align-items: center;">
+                    <span>📍 ${bName}</span>
+                    <span style="font-size: 9px; background: #dcfce7; padding: 1px 5px; border-radius: 4px; color: #166534;">فرع #${idx + 1}</span>
+                  </div>
+                  <div style="padding: 5px 8px; display: flex; flex-direction: column; gap: 3px; font-size: 9.5px;">
+                    <div style="display: flex; justify-content: space-between; border-bottom: 1px dotted #cbd5e1; padding-bottom: 2px;">
+                      <span>1. سعر الساعة (الإدارة):</span>
+                      <strong style="direction: ltr;">${fmt(bSalary)} ج.م</strong>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; border-bottom: 1px dotted #cbd5e1; padding-bottom: 2px;">
+                      <span>2. ساعات اليوم / أيام الشهر:</span>
+                      <strong>${bWorkHours} س · ${bWorkDays} يوم</strong>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; border-bottom: 1px dotted #cbd5e1; padding-bottom: 2px;">
+                      <span>3. سعر اليوم:</span>
+                      <strong style="color: #047857;">${fmt(bDailyRate)} ج.م/يوم</strong>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; border-bottom: 1px dotted #cbd5e1; padding-bottom: 2px; color: #047857; font-weight: bold;">
+                      <span>✅ 4. سعر الساعة المعتمد:</span>
+                      <span>${fmt(bHourlyRate)} ج.م/س</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; border-bottom: 1px dotted #cbd5e1; padding-bottom: 2px; color: #1e293b;">
+                      <span>5. الساعات المسجلة بالفرع:</span>
+                      <strong style="font-size: 10px;">${fmt(bHours)} ساعة</strong>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; color: #047857; font-weight: 800; font-size: 10px; ${bOtHours > 0 ? 'border-bottom: 1px dotted #cbd5e1; padding-bottom: 2px;' : ''}">
+                      <span>6. المستحقات بالفرع:</span>
+                      <span>${fmt(bBaseEarn)} ج.م</span>
+                    </div>
+                    ${bOtHours > 0 ? `
+                      <div style="display: flex; justify-content: space-between; color: #166534; font-weight: 800; font-size: 9.5px;">
+                        <span>⭐ إضافي الفرع (${fmt(bOtHours)} س):</span>
+                        <span>+${fmt(bOtEarn)} ج.م</span>
+                      </div>
+                    ` : ''}
+                  </div>
+                </div>
+              `;
+            }).join('')}
           </div>
-          <div style="padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; font-size: 10.5px; flex: 1; justify-content: center;">
-            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dotted #cbd5e1; padding-bottom: 6px;">
-              <span style="color: #334155; font-weight: 600;">عدد ساعات العمل الأساسية المسجلة</span>
-              <strong style="color: #0f172a; font-size: 11px;">${fmt(totalHours)} ساعة</strong>
-            </div>
-            <div style="display: flex; justify-content: space-between; align-items: center; color: #047857; font-weight: 800; font-size: 11px; ${summary.approvedOvertimeHours > 0 ? 'border-bottom: 1px dotted #cbd5e1; padding-bottom: 6px;' : ''}">
-              <span>المستحقات الأساسية (${fmt(totalHours)} س × ${fmt(hourlyRate)} ج.م)</span>
-              <span style="font-size: 11.5px;">${fmt(baseEarnings)} ج.م</span>
-            </div>
-            ${summary.approvedOvertimeHours > 0 ? `
-              <div style="display: flex; justify-content: space-between; align-items: center; color: #166534; font-weight: 800; font-size: 11px;">
-                <span>⭐ أجر الوقت الإضافي (${fmt(summary.approvedOvertimeHours)} س × ${fmt(hourlyRate)} ج.م)</span>
-                <span>+${fmt(summary.overtimeEarnings)} ج.م</span>
-              </div>
-            ` : ''}
+
+          <!-- Overall Multi-branch Summary Strip -->
+          <div style="background: #f0fdf4; border: 1.5px solid #0f766e; border-top: none; padding: 4px 10px; border-radius: 0 0 6px 6px; display: flex; justify-content: space-between; align-items: center; font-size: 10px; font-weight: 800; color: #047857;">
+            <span>إجمالي ساعات العمل بكافة الفروع: <strong style="color: #0f172a;">${fmt(totalHours)} ساعة</strong></span>
+            <span>إجمالي المستحقات الأساسية: <strong style="color: #0f172a;">${fmt(baseEarnings)} ج.م</strong></span>
+            ${summary.approvedOvertimeHours > 0 ? `<span>إجمالي الإضافي: <strong>+${fmt(summary.overtimeEarnings)} ج.م</strong></span>` : ''}
           </div>
         </div>
-      </div>
+      ` : `
+        <!-- Single Branch Standard Calculation Boxes -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px; direction: rtl;">
+          <!-- Right Box: احتساب سعر الساعة وأجر اليوم -->
+          <div style="border: 1.5px solid #bbf7d0; border-radius: 8px; overflow: hidden; background: #ffffff; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
+            <div style="background: #f0fdf4; padding: 6px 12px; color: #047857; font-weight: 800; font-size: 11.5px; border-bottom: 1.5px solid #bbf7d0; display: flex; align-items: center; gap: 6px; font-family: 'Cairo', sans-serif;">
+              <span>⚙️</span>
+              <span>احتساب سعر الساعة وأجر اليوم وفق المعادلة المعتمدة</span>
+            </div>
+            <div style="padding: 8px 12px; display: flex; flex-direction: column; gap: 5px; font-size: 10.5px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dotted #cbd5e1; padding-bottom: 4px;">
+                <span style="color: #334155;">1. سعر الساعة الشهري (المدخل من الإدارة)</span>
+                <strong style="color: #0f172a; direction: ltr;">${fmt(baseSalary)} ج.م</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dotted #cbd5e1; padding-bottom: 4px;">
+                <span style="color: #334155;">2. ساعات العمل اليومية المدخلة</span>
+                <strong style="color: #0f172a;">${workHoursPerDay} س / يوم</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dotted #cbd5e1; padding-bottom: 4px;">
+                <span style="color: #334155;">3. أيام العمل الشهرية المدخلة</span>
+                <strong style="color: #0f172a;">${workDaysPerMonth} يوم / شهر</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dotted #cbd5e1; padding-bottom: 4px;">
+                <span style="color: #334155;">4. سعر اليوم = (${fmt(baseSalary)} × ${workHoursPerDay}) ÷ ${workDaysPerMonth}</span>
+                <strong style="color: #047857;">${fmt(dailyRate)} ج.م / يوم</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center; color: #047857; font-weight: 800; font-size: 11px; padding-top: 2px;">
+                <span>✅ 5. سعر الساعة اليومي = ${fmt(dailyRate)} ÷ ${workHoursPerDay}</span>
+                <span>${fmt(hourlyRate)} ج.م / ساعة</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Left Box: ساعات العمل وأجر اليوم / المستحقات -->
+          <div style="border: 1.5px solid #bbf7d0; border-radius: 8px; overflow: hidden; background: #ffffff; display: flex; flex-direction: column; justify-content: space-between; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
+            <div style="background: #f0fdf4; padding: 6px 12px; color: #047857; font-weight: 800; font-size: 11.5px; border-bottom: 1.5px solid #bbf7d0; display: flex; align-items: center; gap: 6px; font-family: 'Cairo', sans-serif;">
+              <span>⏱️</span>
+              <span>ساعات العمل وأجر اليوم / المستحقات</span>
+            </div>
+            <div style="padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; font-size: 10.5px; flex: 1; justify-content: center;">
+              <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dotted #cbd5e1; padding-bottom: 6px;">
+                <span style="color: #334155; font-weight: 600;">عدد ساعات العمل الأساسية المسجلة</span>
+                <strong style="color: #0f172a; font-size: 11px;">${fmt(totalHours)} ساعة</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center; color: #047857; font-weight: 800; font-size: 11px; ${summary.approvedOvertimeHours > 0 ? 'border-bottom: 1px dotted #cbd5e1; padding-bottom: 6px;' : ''}">
+                <span>المستحقات الأساسية (${fmt(totalHours)} س × ${fmt(hourlyRate)} ج.م)</span>
+                <span style="font-size: 11.5px;">${fmt(baseEarnings)} ج.م</span>
+              </div>
+              ${summary.approvedOvertimeHours > 0 ? `
+                <div style="display: flex; justify-content: space-between; align-items: center; color: #166534; font-weight: 800; font-size: 11px;">
+                  <span>⭐ أجر الوقت الإضافي (${fmt(summary.approvedOvertimeHours)} س × ${fmt(hourlyRate)} ج.م)</span>
+                  <span>+${fmt(summary.overtimeEarnings)} ج.م</span>
+                </div>
+              ` : ''}
+            </div>
+          </div>
+        </div>
+      `}
 
       <!-- Punches & Shifts Table -->
       <div style="margin-bottom: 8px;">
@@ -684,12 +760,13 @@ export function generateOfficialPayslipHTML({
           <thead>
             <tr style="background: #f1f5f9; color: #334155; font-weight: 800;">
               <th style="padding: 2.5px; width: 4%;">#</th>
-              <th style="padding: 2.5px; width: 22%;">اليوم والتاريخ</th>
-              <th style="padding: 2.5px; width: 14%;">وقت الدخول</th>
-              <th style="padding: 2.5px; width: 14%;">وقت الخروج</th>
-              <th style="padding: 2.5px; width: 12%;">البريك</th>
-              <th style="padding: 2.5px; width: 14%;">ساعات العمل</th>
-              <th style="padding: 2.5px; width: 20%;">الأجر المستحق</th>
+              <th style="padding: 2.5px; width: ${isMultiBranch ? '20%' : '22%'};">اليوم والتاريخ</th>
+              ${isMultiBranch ? `<th style="padding: 2.5px; width: 14%;">الفرع</th>` : ''}
+              <th style="padding: 2.5px; width: 13%;">وقت الدخول</th>
+              <th style="padding: 2.5px; width: 13%;">وقت الخروج</th>
+              <th style="padding: 2.5px; width: 10%;">البريك</th>
+              <th style="padding: 2.5px; width: 12%;">ساعات العمل</th>
+              <th style="padding: 2.5px; width: ${isMultiBranch ? '18%' : '20%'};">الأجر المستحق</th>
             </tr>
           </thead>
           <tbody>
@@ -697,10 +774,18 @@ export function generateOfficialPayslipHTML({
               const shiftRate = (summary.perBranch?.[s.branchId]?.rate) || hourlyRate;
               const effHours = parseFloat(s.hours || s.regularHours) || 0;
               const hasPerm = s.hasPermission || false;
+              const bName = getBranchName(s.branchId);
               return `
                 <tr style="background: ${hasPerm ? '#fefce8' : (idx % 2 === 0 ? '#fff' : '#f8fafc')};">
                   <td style="padding: 2px;">${idx + 1}</td>
                   <td style="padding: 2px; font-weight: bold;">${s.dayName || ''} ${s.date}</td>
+                  ${isMultiBranch ? `
+                    <td style="padding: 2px;">
+                      <span style="background: #e0f2fe; color: #0369a1; padding: 1px 5px; border-radius: 4px; font-size: 8.5px; font-weight: bold;">
+                        ${bName}
+                      </span>
+                    </td>
+                  ` : ''}
                   <td style="padding: 2px; color: #16a34a;">${s.timeIn || '—'}</td>
                   <td style="padding: 2px; color: #dc2626;">${s.timeOut || '—'}</td>
                   <td style="padding: 2px;">${fmt(s.breakHours)} س</td>
@@ -710,14 +795,14 @@ export function generateOfficialPayslipHTML({
               `;
             }).join('') : `
               <tr>
-                <td colspan="7" style="padding: 6px; color: #94a3b8;">لا توجد بصمات مسجلة للموظف عن هذا الشهر</td>
+                <td colspan="${isMultiBranch ? '8' : '7'}" style="padding: 6px; color: #94a3b8;">لا توجد بصمات مسجلة للموظف عن هذا الشهر</td>
               </tr>
             `}
           </tbody>
           ${(shifts && shifts.length > 0) ? `
             <tfoot>
               <tr style="background: #e2e8f0; font-weight: 800; font-size: 10px;">
-                <td colspan="4" style="padding: 2.5px 6px; text-align: right;">الإجمالي:</td>
+                <td colspan="${isMultiBranch ? '5' : '4'}" style="padding: 2.5px 6px; text-align: right;">الإجمالي:</td>
                 <td style="padding: 2.5px;">${fmt(totalBreakHours)} س</td>
                 <td style="padding: 2.5px; color: #0f766e;">${fmt(totalHours)} س</td>
                 <td style="padding: 2.5px; color: #0d9488;">${fmt(baseEarnings)} ج.م</td>
