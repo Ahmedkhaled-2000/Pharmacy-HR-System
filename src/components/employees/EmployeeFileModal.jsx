@@ -69,6 +69,8 @@ export default function EmployeeFileModal({
   const [branchesDetails, setBranchesDetails] = useState([
     { id: Date.now().toString(), branchId: '', salary: '4000', workHours: '8', workDays: '26' }
   ]);
+  // Preserved/Archived financial data for branches the employee was unassigned from
+  const [archivedBranchesDetails, setArchivedBranchesDetails] = useState([]);
 
   // Financial Allowances States
   const [managementAllowance, setManagementAllowance] = useState('0');
@@ -91,6 +93,75 @@ export default function EmployeeFileModal({
 
   const handleRemoveExtraAllowance = (id) => {
     setExtraAllowances(extraAllowances.filter(a => a.id !== id));
+  };
+
+  // Branch Selection & Re-activation Handler
+  const handleBranchSelectChange = (idx, selectedBranchId) => {
+    const newBd = [...branchesDetails];
+    
+    // Check if the selected branch has previously saved financial data in archivedBranchesDetails
+    const foundArchived = archivedBranchesDetails.find(ab => String(ab.branchId) === String(selectedBranchId));
+    
+    if (foundArchived) {
+      // Re-activate previously saved financial configuration!
+      newBd[idx] = {
+        ...newBd[idx],
+        branchId: selectedBranchId,
+        salary: String(foundArchived.salary || '4000'),
+        workHours: String(foundArchived.workHours || foundArchived.workHoursPerDay || '8'),
+        workDays: String(foundArchived.workDays || foundArchived.workDaysPerMonth || '26')
+      };
+      // Remove from archived list since it is now active
+      setArchivedBranchesDetails(prev => prev.filter(ab => String(ab.branchId) !== String(selectedBranchId)));
+    } else {
+      newBd[idx] = {
+        ...newBd[idx],
+        branchId: selectedBranchId
+      };
+    }
+    setBranchesDetails(newBd);
+  };
+
+  // Branch Removal Handler (Preserves financial data in archivedBranchesDetails)
+  const handleRemoveActiveBranch = (idx) => {
+    const targetBranch = branchesDetails[idx];
+    if (targetBranch && targetBranch.branchId && targetBranch.branchId.trim()) {
+      const bId = targetBranch.branchId.trim();
+      const branchObj = branches.find(b => String(b.id) === String(bId));
+      
+      // Preserve financial data in archivedBranchesDetails
+      setArchivedBranchesDetails(prev => {
+        const filtered = prev.filter(ab => String(ab.branchId) !== String(bId));
+        return [
+          ...filtered,
+          {
+            id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 4),
+            branchId: bId,
+            branchName: branchObj ? branchObj.name : (targetBranch.branchName || 'فرع غير معروف'),
+            branchCode: branchObj ? branchObj.branchCode : '',
+            salary: String(targetBranch.salary || '4000'),
+            workHours: String(targetBranch.workHours || targetBranch.workHoursPerDay || '8'),
+            workDays: String(targetBranch.workDays || targetBranch.workDaysPerMonth || '26'),
+            archivedAt: new Date().toISOString()
+          }
+        ];
+      });
+    }
+
+    if (branchesDetails.length <= 1) {
+      setBranchesDetails([{ id: Math.random().toString(), branchId: '', salary: '4000', workHours: '8', workDays: '26' }]);
+    } else {
+      setBranchesDetails(branchesDetails.filter((_, i) => i !== idx));
+    }
+  };
+
+  // Permanently delete an archived branch salary record
+  const handleDeleteArchivedBranch = (branchIdToDelete) => {
+    const target = archivedBranchesDetails.find(ab => String(ab.branchId) === String(branchIdToDelete));
+    const branchName = target?.branchName || branches.find(b => String(b.id) === String(branchIdToDelete))?.name || 'هذا الفرع';
+    if (window.confirm(`هل أنت متأكد من حذف بيانات وراتب "${branchName}" نهائياً من سجل الموظف؟`)) {
+      setArchivedBranchesDetails(prev => prev.filter(ab => String(ab.branchId) !== String(branchIdToDelete)));
+    }
   };
 
   const [hireDate, setHireDate] = useState('');
@@ -164,16 +235,17 @@ export default function EmployeeFileModal({
       }
 
       // Load branchesDetails if they exist, otherwise fallback to legacy fields
+      let loadedActiveBranches = [];
       if (editingEmp.branchesDetails && editingEmp.branchesDetails.length > 0) {
-        setBranchesDetails(editingEmp.branchesDetails.map(bd => ({
+        loadedActiveBranches = editingEmp.branchesDetails.map(bd => ({
           id: Math.random().toString(),
           branchId: bd.branchId || '',
           salary: String(bd.salary || '4000'),
           workHours: String(bd.workHoursPerDay || bd.workHours || '8'),
           workDays: String(bd.workDaysPerMonth || bd.workDays || '26')
-        })));
+        }));
       } else {
-        setBranchesDetails([
+        loadedActiveBranches = [
           { 
             id: Math.random().toString(),
             branchId: editingEmp.branchId || (branches[0]?.id || ''),
@@ -181,8 +253,29 @@ export default function EmployeeFileModal({
             workHours: String(editingEmp.workHoursPerDay || editingEmp.workHours || '8'),
             workDays: String(editingEmp.workDaysPerMonth || editingEmp.workDays || '26')
           }
-        ]);
+        ];
       }
+      setBranchesDetails(loadedActiveBranches);
+
+      // Load preserved / archived branch salaries
+      const activeIdsSet = new Set(loadedActiveBranches.map(b => String(b.branchId)).filter(Boolean));
+      const rawArchived = editingEmp.archivedBranchesDetails || editingEmp.inactiveBranchesDetails || [];
+      const cleanArchived = rawArchived
+        .filter(ab => ab.branchId && !activeIdsSet.has(String(ab.branchId)))
+        .map(ab => {
+          const bObj = branches.find(b => String(b.id) === String(ab.branchId));
+          return {
+            id: ab.id || Math.random().toString(),
+            branchId: ab.branchId,
+            branchName: ab.branchName || (bObj ? bObj.name : 'فرع غير معروف'),
+            branchCode: ab.branchCode || (bObj ? bObj.branchCode : ''),
+            salary: String(ab.salary || '4000'),
+            workHours: String(ab.workHoursPerDay || ab.workHours || '8'),
+            workDays: String(ab.workDaysPerMonth || ab.workDays || '26'),
+            archivedAt: ab.archivedAt || new Date().toISOString()
+          };
+        });
+      setArchivedBranchesDetails(cleanArchived);
 
       setHireDate(editingEmp.hireDate || '');
       setContractType(editingEmp.contractType || 'دوام كامل');
@@ -228,6 +321,7 @@ export default function EmployeeFileModal({
       setBranchesDetails([
         { id: Math.random().toString(), branchId: branches[0]?.id || '', salary: '4000', workHours: '8', workDays: '26' }
       ]);
+      setArchivedBranchesDetails([]);
       
       setHireDate(new Date().toISOString().slice(0, 10));
       setContractType('دوام كامل');
@@ -334,10 +428,23 @@ export default function EmployeeFileModal({
       };
     });
 
-    if (validBranchesDetails.length === 0) {
-      alert('يرجى اختيار فرع واحد على الأقل للموظف وتحديد بيانات الراتب وساعات العمل');
-      return;
-    }
+    const activeBranchIdsSet = new Set(validBranchesDetails.map(b => String(b.branchId)));
+
+    // Clean valid archived branch details (excluding any currently active branch)
+    const validArchivedBranchesDetails = archivedBranchesDetails
+      .filter(ab => ab.branchId && !activeBranchIdsSet.has(String(ab.branchId)))
+      .map(ab => {
+        const branchObj = branches.find(b => String(b.id) === String(ab.branchId));
+        return {
+          branchId: ab.branchId,
+          branchName: branchObj ? branchObj.name : (ab.branchName || 'فرع غير معروف'),
+          branchCode: branchObj ? branchObj.branchCode : (ab.branchCode || ''),
+          salary: String(ab.salary || '4000'),
+          workHoursPerDay: String(ab.workHours || ab.workHoursPerDay || '8'),
+          workDaysPerMonth: String(ab.workDays || ab.workDaysPerMonth || '26'),
+          archivedAt: ab.archivedAt || new Date().toISOString()
+        };
+      });
 
     const isTerminated = status === 'تم الاستقالة';
     if (isTerminated && !terminationReason.trim()) {
@@ -389,8 +496,10 @@ export default function EmployeeFileModal({
       salary: validBranchesDetails[0].salary,
       workHoursPerDay: validBranchesDetails[0].workHoursPerDay,
       workDaysPerMonth: validBranchesDetails[0].workDaysPerMonth,
-      // Store all branches details here
+      // Store all active branches details here
       branchesDetails: validBranchesDetails,
+      // Store preserved/archived branch salaries here
+      archivedBranchesDetails: validArchivedBranchesDetails,
       
       hireDate,
       contractType,
@@ -697,11 +806,7 @@ export default function EmployeeFileModal({
                   <div key={bd.id} style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'center' }}>
                     <select 
                       value={bd.branchId} 
-                      onChange={(e) => {
-                        const newBd = [...branchesDetails];
-                        newBd[idx].branchId = e.target.value;
-                        setBranchesDetails(newBd);
-                      }}
+                      onChange={(e) => handleBranchSelectChange(idx, e.target.value)}
                       style={{ flex: 1 }}
                     >
                       <option value="">-- اختر الفرع --</option>
@@ -716,16 +821,25 @@ export default function EmployeeFileModal({
                         type="button" 
                         className="del-btn" 
                         style={{ padding: '6px' }}
-                        onClick={() => {
-                          const newBd = branchesDetails.filter((_, i) => i !== idx);
-                          setBranchesDetails(newBd);
-                        }}
+                        title="إزالة الفرع من الفروع المعين بها الموظف (سيتم حفظ بيانات الراتب بالأرشيف المالي)"
+                        onClick={() => handleRemoveActiveBranch(idx)}
                       >
                         ❌
                       </button>
                     )}
                   </div>
                 ))}
+
+                {archivedBranchesDetails.length > 0 && (
+                  <div style={{ marginTop: '8px', padding: '10px 14px', background: '#f8fafc', borderRadius: '8px', border: '1px dashed #cbd5e1', fontSize: '12px', color: '#475569', lineHeight: '1.6' }}>
+                    💡 <strong>فروع سابقة محفوظة مالياً:</strong>{' '}
+                    {archivedBranchesDetails.map(ab => ab.branchName || branches.find(b => String(b.id) === String(ab.branchId))?.name).filter(Boolean).join('، ')}
+                    <br />
+                    <span style={{ color: '#0284c7' }}>
+                      (عند اختيار أي من هذه الفروع في القائمة أعلاه سيتم تفعيل واسترجاع تفاصيل راتبه وساعاته تلقائياً فوراً).
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div className="field">
@@ -831,55 +945,199 @@ export default function EmployeeFileModal({
                 3. <strong>احتساب أجر اليوم / الوردية</strong> = سعر الساعة اليومي × عدد الساعات الموضوعة في الجدول الشهري / الفعلية.
               </div>
               
-              {branchesDetails.map((bd, idx) => {
-                const branchName = branches.find(b => b.id === bd.branchId)?.name || `فرع غير محدد (${idx + 1})`;
-                const rateVal = parseFloat(bd.salary) || 0;
-                const daysVal = parseFloat(bd.workDays) || 26;
-                const hoursVal = parseFloat(bd.workHours) || 8;
-                const calcDailyRate = daysVal > 0 ? (rateVal * hoursVal) / daysVal : 0;
-                const calcDailyHourlyRate = hoursVal > 0 ? calcDailyRate / hoursVal : (daysVal > 0 ? rateVal / daysVal : rateVal);
-                const calcMonthlySalary = calcDailyRate * daysVal;
+              {/* Active Branches Financial Cards */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <h4 style={{ margin: 0, color: 'var(--primary-dark)', fontFamily: 'Cairo', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  🟢 بيانات وأجور الفروع المعين بها الموظف حالياً ({branchesDetails.filter(bd => bd.branchId).length})
+                </h4>
 
-                return (
-                  <div key={bd.id} style={{ background: 'var(--primary-tint)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>
-                    <h4 style={{ margin: '0 0 12px 0', color: 'var(--primary-dark)', fontFamily: 'Cairo' }}>💰 بيانات وأجور: {branchName}</h4>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px' }}>
-                      <div className="field">
-                        <label>سعر الساعة الشهري (الراتب الأساسي)</label>
-                        <input type="number" value={bd.salary} onChange={(e) => {
-                          const newBd = [...branchesDetails];
-                          newBd[idx].salary = e.target.value;
-                          setBranchesDetails(newBd);
-                        }} placeholder="650" required />
+                {branchesDetails.map((bd, idx) => {
+                  const branchName = branches.find(b => b.id === bd.branchId)?.name || `فرع غير محدد (${idx + 1})`;
+                  const rateVal = parseFloat(bd.salary) || 0;
+                  const daysVal = parseFloat(bd.workDays) || 26;
+                  const hoursVal = parseFloat(bd.workHours) || 8;
+                  const calcDailyRate = daysVal > 0 ? (rateVal * hoursVal) / daysVal : 0;
+                  const calcDailyHourlyRate = hoursVal > 0 ? calcDailyRate / hoursVal : (daysVal > 0 ? rateVal / daysVal : rateVal);
+                  const calcMonthlySalary = calcDailyRate * daysVal;
+
+                  return (
+                    <div key={bd.id} style={{ background: 'var(--primary-tint)', padding: '16px', borderRadius: '12px', border: '1.5px solid var(--primary-light, #bfdbfe)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                        <h4 style={{ margin: 0, color: 'var(--primary-dark)', fontFamily: 'Cairo', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          💰 بيانات وأجور: {branchName}
+                        </h4>
+                        <span className="badge badge-success" style={{ fontSize: '11.5px' }}>🟢 فرع نشط ومعين</span>
                       </div>
 
-                      <div className="field">
-                        <label>ساعات العمل اليومية المدخلة</label>
-                        <input type="number" value={bd.workHours} onChange={(e) => {
-                          const newBd = [...branchesDetails];
-                          newBd[idx].workHours = e.target.value;
-                          setBranchesDetails(newBd);
-                        }} placeholder="10" required />
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px' }}>
+                        <div className="field">
+                          <label>سعر الساعة الشهري (الراتب الأساسي)</label>
+                          <input type="number" value={bd.salary} onChange={(e) => {
+                            const newBd = [...branchesDetails];
+                            newBd[idx].salary = e.target.value;
+                            setBranchesDetails(newBd);
+                          }} placeholder="650" required />
+                        </div>
+
+                        <div className="field">
+                          <label>ساعات العمل اليومية المدخلة</label>
+                          <input type="number" value={bd.workHours} onChange={(e) => {
+                            const newBd = [...branchesDetails];
+                            newBd[idx].workHours = e.target.value;
+                            setBranchesDetails(newBd);
+                          }} placeholder="10" required />
+                        </div>
+
+                        <div className="field">
+                          <label>أيام العمل الشهرية المدخلة</label>
+                          <input type="number" value={bd.workDays} onChange={(e) => {
+                            const newBd = [...branchesDetails];
+                            newBd[idx].workDays = e.target.value;
+                            setBranchesDetails(newBd);
+                          }} placeholder="26" required />
+                        </div>
                       </div>
 
-                      <div className="field">
-                        <label>أيام العمل الشهرية المدخلة</label>
-                        <input type="number" value={bd.workDays} onChange={(e) => {
-                          const newBd = [...branchesDetails];
-                          newBd[idx].workDays = e.target.value;
-                          setBranchesDetails(newBd);
-                        }} placeholder="26" required />
+                      <div style={{ marginTop: '10px', padding: '8px 12px', background: '#fff', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '12.5px', color: '#166534', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                        <span>📅 سعر اليوم: <strong>{calcDailyRate.toLocaleString()} ج.م / يوم</strong> (({rateVal} × {hoursVal}) ÷ {daysVal})</span>
+                        <span>💵 سعر الساعة اليومي: <strong>{calcDailyHourlyRate.toLocaleString()} ج.م / ساعة</strong></span>
+                        <span>💰 الراتب الأساسي الشهري: <strong>{calcMonthlySalary.toLocaleString()} ج.م</strong></span>
                       </div>
                     </div>
+                  );
+                })}
+              </div>
 
-                    <div style={{ marginTop: '10px', padding: '8px 12px', background: '#fff', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '12.5px', color: '#166534', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
-                      <span>📅 سعر اليوم: <strong>{calcDailyRate.toLocaleString()} ج.م / يوم</strong> (({rateVal} × {hoursVal}) ÷ {daysVal})</span>
-                      <span>💵 سعر الساعة اليومي: <strong>{calcDailyHourlyRate.toLocaleString()} ج.م / ساعة</strong></span>
-                      <span>💰 الراتب الأساسي الشهري: <strong>{calcMonthlySalary.toLocaleString()} ج.م</strong></span>
-                    </div>
+              {/* Inactive / Archived Branches Financial Cards (Read-only + Permanent Delete) */}
+              {archivedBranchesDetails.length > 0 && (
+                <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '12px', padding: '12px 16px' }}>
+                    <h4 style={{ margin: '0 0 4px 0', color: '#b45309', fontFamily: 'Cairo', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      🔒 رواتب الفروع السابقة (غير مرتبط بالموظف حالياً)
+                    </h4>
+                    <p style={{ margin: 0, fontSize: '12px', color: '#92400e', lineHeight: '1.6' }}>
+                      تمت إزالة الموظف من هذه الفروع، لذلك فإن بيانات الراتب وساعات العمل محفوظة وموقوفة <strong>(غير قابلة للتعديل)</strong> ولا تدخل في احتساب المستحقات الحالية. عند إعادة تعيين الموظف بنفس الفرع سيتم تفعيل الراتب تلقائياً، أو يمكنك حذف هذا السجل نهائياً.
+                    </p>
                   </div>
-                );
-              })}
+
+                  {archivedBranchesDetails.map((ab) => {
+                    const branchName = ab.branchName || branches.find(b => String(b.id) === String(ab.branchId))?.name || 'فرع غير معروف';
+                    const rateVal = parseFloat(ab.salary) || 0;
+                    const daysVal = parseFloat(ab.workDays || ab.workDaysPerMonth) || 26;
+                    const hoursVal = parseFloat(ab.workHours || ab.workHoursPerDay) || 8;
+                    const calcDailyRate = daysVal > 0 ? (rateVal * hoursVal) / daysVal : 0;
+                    const calcDailyHourlyRate = hoursVal > 0 ? calcDailyRate / hoursVal : (daysVal > 0 ? rateVal / daysVal : rateVal);
+                    const calcMonthlySalary = calcDailyRate * daysVal;
+
+                    return (
+                      <div
+                        key={ab.id || ab.branchId}
+                        style={{
+                          background: '#f8fafc',
+                          padding: '16px',
+                          borderRadius: '12px',
+                          border: '1.5px dashed #cbd5e1',
+                          opacity: 0.96
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontSize: '16px' }}>🏢</span>
+                            <h4 style={{ margin: 0, color: '#475569', fontFamily: 'Cairo', fontSize: '14px' }}>
+                              {branchName}
+                            </h4>
+                            <span style={{ background: '#f1f5f9', color: '#64748b', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold', border: '1px solid #e2e8f0' }}>
+                              🔒 غير نشط - للقراءة فقط
+                            </span>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteArchivedBranch(ab.branchId)}
+                            style={{
+                              background: '#fef2f2',
+                              color: '#dc2626',
+                              border: '1px solid #fecaca',
+                              padding: '6px 12px',
+                              borderRadius: '8px',
+                              fontSize: '12px',
+                              fontWeight: 'bold',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              transition: 'all 0.2s ease'
+                            }}
+                            title="حذف سجل راتب هذا الفرع نهائياً"
+                          >
+                            🗑️ حذف الراتب نهائياً
+                          </button>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px' }}>
+                          <div className="field">
+                            <label style={{ color: '#64748b', fontSize: '12px' }}>سعر الساعة الشهري (محفوظ)</label>
+                            <input
+                              type="number"
+                              value={ab.salary}
+                              disabled
+                              readOnly
+                              style={{
+                                background: '#f1f5f9',
+                                color: '#64748b',
+                                borderColor: '#e2e8f0',
+                                cursor: 'not-allowed',
+                                fontWeight: 'bold'
+                              }}
+                            />
+                          </div>
+
+                          <div className="field">
+                            <label style={{ color: '#64748b', fontSize: '12px' }}>ساعات العمل اليومية (محفوظة)</label>
+                            <input
+                              type="number"
+                              value={ab.workHours || ab.workHoursPerDay || '8'}
+                              disabled
+                              readOnly
+                              style={{
+                                background: '#f1f5f9',
+                                color: '#64748b',
+                                borderColor: '#e2e8f0',
+                                cursor: 'not-allowed',
+                                fontWeight: 'bold'
+                              }}
+                            />
+                          </div>
+
+                          <div className="field">
+                            <label style={{ color: '#64748b', fontSize: '12px' }}>أيام العمل الشهرية (محفوظة)</label>
+                            <input
+                              type="number"
+                              value={ab.workDays || ab.workDaysPerMonth || '26'}
+                              disabled
+                              readOnly
+                              style={{
+                                background: '#f1f5f9',
+                                color: '#64748b',
+                                borderColor: '#e2e8f0',
+                                cursor: 'not-allowed',
+                                fontWeight: 'bold'
+                              }}
+                            />
+                          </div>
+                        </div>
+
+                        <div style={{ marginTop: '10px', padding: '8px 12px', background: '#f1f5f9', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '12px', color: '#475569', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                          <span>📅 سعر اليوم المحفوظ: <strong>{calcDailyRate.toLocaleString()} ج.م</strong></span>
+                          <span>💵 سعر الساعة: <strong>{calcDailyHourlyRate.toLocaleString()} ج.م</strong></span>
+                          <span>💰 الراتب الأساسي: <strong>{calcMonthlySalary.toLocaleString()} ج.م</strong></span>
+                          <span style={{ color: '#0284c7', fontWeight: 'bold' }}>ℹ️ لإعادة التفعيل: أضف الفرع للموظف</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
               {/* ── قسم البدلات والأجور الإضافية الشهرية الثابتة ── */}
               {(() => {
