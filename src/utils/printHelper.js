@@ -618,57 +618,58 @@ export function generateOfficialPayslipHTML({
       </div>
 
       <!-- Calculation & Earnings Side-by-Side Boxes -->
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
-        <!-- Calc Box -->
-        <div style="border: 1px solid #cbd5e1; border-radius: 6px; overflow: hidden; background: #fff;">
-          <div style="background: #f0fdf4; padding: 3px 10px; color: #166534; font-weight: 800; font-size: 11px; border-bottom: 1px solid #cbd5e1;">
-            ⚙️ احتساب سعر الساعة وأجر اليوم
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; direction: rtl;">
+        <!-- Right Box: احتساب سعر الساعة وأجر اليوم -->
+        <div style="border: 1.5px solid #bbf7d0; border-radius: 8px; overflow: hidden; background: #ffffff; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
+          <div style="background: #f0fdf4; padding: 6px 12px; color: #047857; font-weight: 800; font-size: 11.5px; border-bottom: 1.5px solid #bbf7d0; display: flex; align-items: center; gap: 6px; font-family: 'Cairo', sans-serif;">
+            <span>⚙️</span>
+            <span>احتساب سعر الساعة وأجر اليوم وفق المعادلة المعتمدة</span>
           </div>
-          <div style="padding: 5px 10px; display: flex; flex-direction: column; gap: 2px; font-size: 10px;">
-            <div style="display: flex; justify-content: space-between;">
-              <span>1. سعر الساعة الشهري (من الإدارة):</span>
-              <strong>${fmt(baseSalary)} ج.م</strong>
+          <div style="padding: 8px 12px; display: flex; flex-direction: column; gap: 5px; font-size: 10.5px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dotted #cbd5e1; padding-bottom: 4px;">
+              <span style="color: #334155;">1. سعر الساعة الشهري (المدخل من الإدارة)</span>
+              <strong style="color: #0f172a; direction: ltr;">${fmt(baseSalary)} ج.م</strong>
             </div>
-            <div style="display: flex; justify-content: space-between;">
-              <span>2. ساعات اليوم / أيام الشهر:</span>
-              <strong>${workHoursPerDay} س/يوم · ${workDaysPerMonth} يوم/شهر</strong>
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dotted #cbd5e1; padding-bottom: 4px;">
+              <span style="color: #334155;">2. ساعات العمل اليومية المدخلة</span>
+              <strong style="color: #0f172a;">${workHoursPerDay} س / يوم</strong>
             </div>
-            <div style="display: flex; justify-content: space-between;">
-              <span>3. سعر اليوم = (${fmt(baseSalary)} × ${workHoursPerDay}) ÷ ${workDaysPerMonth}:</span>
-              <strong style="color: #0f766e;">${fmt(dailyRate)} ج.م / يوم</strong>
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dotted #cbd5e1; padding-bottom: 4px;">
+              <span style="color: #334155;">3. أيام العمل الشهرية المدخلة</span>
+              <strong style="color: #0f172a;">${workDaysPerMonth} يوم / شهر</strong>
             </div>
-            <div style="display: flex; justify-content: space-between; color: #15803d; font-weight: bold; border-top: 1px dashed #cbd5e1; padding-top: 2px;">
-              <span>✅ سعر الساعة اليومي المعتمد:</span>
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dotted #cbd5e1; padding-bottom: 4px;">
+              <span style="color: #334155;">4. سعر اليوم = (${fmt(baseSalary)} × ${workHoursPerDay}) ÷ ${workDaysPerMonth}</span>
+              <strong style="color: #047857;">${fmt(dailyRate)} ج.م / يوم</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; color: #047857; font-weight: 800; font-size: 11px; padding-top: 2px;">
+              <span>✅ 5. سعر الساعة اليومي = ${fmt(dailyRate)} ÷ ${workHoursPerDay}</span>
               <span>${fmt(hourlyRate)} ج.م / ساعة</span>
             </div>
           </div>
         </div>
 
-        <!-- Earnings Box -->
-        <div style="border: 1px solid #cbd5e1; border-radius: 6px; overflow: hidden; background: #fff;">
-          <div style="background: #f0fdf4; padding: 3px 10px; color: #166534; font-weight: 800; font-size: 11px; border-bottom: 1px solid #cbd5e1;">
-            ⏱️ ساعات العمل الفعلية والمستحقات
+        <!-- Left Box: ساعات العمل وأجر اليوم / المستحقات -->
+        <div style="border: 1.5px solid #bbf7d0; border-radius: 8px; overflow: hidden; background: #ffffff; display: flex; flex-direction: column; justify-content: space-between; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
+          <div style="background: #f0fdf4; padding: 6px 12px; color: #047857; font-weight: 800; font-size: 11.5px; border-bottom: 1.5px solid #bbf7d0; display: flex; align-items: center; gap: 6px; font-family: 'Cairo', sans-serif;">
+            <span>⏱️</span>
+            <span>ساعات العمل وأجر اليوم / المستحقات</span>
           </div>
-          <div style="padding: 5px 10px; display: flex; flex-direction: column; gap: 3px; font-size: 10px;">
-            <div style="display: flex; justify-content: space-between;">
-              <span>عدد ساعات العمل الأساسية المسجلة:</span>
-              <strong>${fmt(totalHours)} ساعة</strong>
+          <div style="padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; font-size: 10.5px; flex: 1; justify-content: center;">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dotted #cbd5e1; padding-bottom: 6px;">
+              <span style="color: #334155; font-weight: 600;">عدد ساعات العمل الأساسية المسجلة</span>
+              <strong style="color: #0f172a; font-size: 11px;">${fmt(totalHours)} ساعة</strong>
             </div>
-            <div style="display: flex; justify-content: space-between; color: #15803d; font-weight: bold;">
-              <span>المستحقات الأساسية (${fmt(totalHours)} س × ${fmt(hourlyRate)} ج.م):</span>
-              <span>${fmt(baseEarnings)} ج.م</span>
+            <div style="display: flex; justify-content: space-between; align-items: center; color: #047857; font-weight: 800; font-size: 11px; ${summary.approvedOvertimeHours > 0 ? 'border-bottom: 1px dotted #cbd5e1; padding-bottom: 6px;' : ''}">
+              <span>المستحقات الأساسية (${fmt(totalHours)} س × ${fmt(hourlyRate)} ج.م)</span>
+              <span style="font-size: 11.5px;">${fmt(baseEarnings)} ج.م</span>
             </div>
             ${summary.approvedOvertimeHours > 0 ? `
-              <div style="display: flex; justify-content: space-between; color: #166534; font-weight: bold;">
-                <span>⭐ أجر الوقت الإضافي (${fmt(summary.approvedOvertimeHours)} س):</span>
+              <div style="display: flex; justify-content: space-between; align-items: center; color: #166534; font-weight: 800; font-size: 11px;">
+                <span>⭐ أجر الوقت الإضافي (${fmt(summary.approvedOvertimeHours)} س × ${fmt(hourlyRate)} ج.م)</span>
                 <span>+${fmt(summary.overtimeEarnings)} ج.م</span>
               </div>
-            ` : `
-              <div style="display: flex; justify-content: space-between; color: #64748b;">
-                <span>الوقت الإضافي المعتمد:</span>
-                <span>لا يوجد إضافي</span>
-              </div>
-            `}
+            ` : ''}
           </div>
         </div>
       </div>
