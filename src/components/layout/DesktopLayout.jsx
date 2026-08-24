@@ -34,7 +34,7 @@ export default function DesktopLayout({
   const menuContainerRef = useRef(null);
   const notifDropdownRef = useRef(null);
 
-  const unreadNotificationsCount = (notifications || []).filter(n => !n.read).length;
+  const unreadNotificationsCount = (notifications || []).filter(n => !n.read).length + (bylawsCount || 0);
 
   // Define Desktop Menu Structure for Super Admin
   const adminMenuItems = [
@@ -184,7 +184,6 @@ export default function DesktopLayout({
       id: 'system-group',
       label: 'الاتصالات واللائحة',
       icon: '💬',
-      badge: bylawsCount,
       children: [
         {
           id: 'whatsapp-center',
@@ -199,7 +198,6 @@ export default function DesktopLayout({
           targetSubTab: 'disciplinary_penalties',
           label: 'لائحة العمل والجزاءات',
           icon: '📜',
-          badge: bylawsCount,
           desc: 'تطبيق بنود لائحة العمل واحتساب الغرامات والخصومات',
           subChildren: [
             {
@@ -485,7 +483,6 @@ export default function DesktopLayout({
       id: 'bylaws',
       label: 'لائحة العمل والجزاءات',
       icon: '📜',
-      badge: bylawsCount,
       isSingle: true,
       targetTab: 'bylaws'
     }

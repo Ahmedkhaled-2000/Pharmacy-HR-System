@@ -42,7 +42,7 @@ export default function SidebarLayout({
     { id: 'adjustments-module', label: 'المكافآت والخصومات', icon: '📝' },
     { id: 'resignation', label: 'طلبات استقالة الموظفين', icon: '📝', badge: resignationCount },
     { id: 'whatsapp-center', label: 'مركز مراسلات الواتساب', icon: '💬' },
-    { id: 'bylaws', label: 'لائحة العمل والجزاءات', icon: '📜', badge: bylawsCount },
+    { id: 'bylaws', label: 'لائحة العمل والجزاءات', icon: '📜' },
     { id: 'evaluations', label: 'التقييمات', icon: '⭐️' },
     { id: 'loans-meds', label: 'السلف والأجل', icon: '💳' },
     { id: 'income-expenses', label: 'المصروفات والإيرادات', icon: '📈' },

@@ -437,6 +437,11 @@ export function generateOfficialPayslipHTML({
   const printDate = new Date().toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' });
 
   const isMultiBranch = emp?.branchesDetails && emp.branchesDetails.length > 1;
+  const assignedBranches = (emp?.branchesDetails && emp.branchesDetails.length > 0)
+    ? emp.branchesDetails
+    : (emp?.branchId ? [{ branchId: emp.branchId, salary: emp.salary, workHoursPerDay: emp.workHoursPerDay, workDaysPerMonth: emp.workDaysPerMonth }] : []);
+  const showPerBranchBreakdown = isMultiBranch && !selectedBranchId;
+
   const targetBranchDetails = selectedBranchId
     ? emp.branchesDetails?.find((b) => String(b.branchId) === String(selectedBranchId))
     : (emp.branchesDetails?.[0] || null);
