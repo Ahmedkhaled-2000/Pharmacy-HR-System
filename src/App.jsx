@@ -4762,7 +4762,14 @@ export default function App() {
           activeSubTab={activeSubTab}
           setActiveSubTab={setActiveSubTab}
           onLogout={handleLogout}
-          pendingCount={(state.requests || []).filter(r => !r.hiddenFromAdmin && (r.status === 'pending' || r.status === 'pending_admin')).length}
+          pendingCount={(() => {
+            const reqList = [...(state.requests || [])];
+            const seen = new Set(reqList.map(r => String(r.id)));
+            (state.leaveRequests || []).forEach(r => { if (r && !seen.has(String(r.id))) { reqList.push(r); seen.add(String(r.id)); } });
+            (state.shiftSwaps || []).forEach(r => { if (r && !seen.has(String(r.id))) { reqList.push(r); seen.add(String(r.id)); } });
+            (state.loans || []).forEach(r => { if (r && !seen.has(String(r.id))) { reqList.push(r); seen.add(String(r.id)); } });
+            return reqList.filter(r => (r.status === 'pending' || r.status === 'pending_admin' || (r.adminApproved !== true && r.status !== 'rejected' && r.status !== 'cancelled'))).length;
+          })()}
           resignationCount={(state.resignationRequests || []).filter(r => (r.managerStatus === 'approved' || r.managerStatus === 'rejected') && !r.isAdminCreated && (!r.adminStatus || r.adminStatus === 'pending')).length}
           bylawsCount={(() => {
             const cIdStr = String(currentBranch?.id || '');

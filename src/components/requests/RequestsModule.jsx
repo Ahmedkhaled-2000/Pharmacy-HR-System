@@ -88,26 +88,33 @@ export default function RequestsModule({
 
   const allRequests = useMemo(() => {
     const list = [...(state.requests || [])];
-    const existingIds = new Set(list.map((r) => r.id));
+    const existingIds = new Set(list.map((r) => String(r.id)));
 
     (state.leaveRequests || []).forEach((lr) => {
-      if (!existingIds.has(lr.id)) {
+      if (lr && !existingIds.has(String(lr.id))) {
         list.push({ ...lr, type: lr.type || 'leave' });
-        existingIds.add(lr.id);
+        existingIds.add(String(lr.id));
       }
     });
 
     (state.shiftSwaps || []).forEach((sw) => {
-      if (!existingIds.has(sw.id)) {
+      if (sw && !existingIds.has(String(sw.id))) {
         list.push({ ...sw, type: 'swap' });
-        existingIds.add(sw.id);
+        existingIds.add(String(sw.id));
       }
     });
 
     (state.loans || []).forEach((ln) => {
-      if (!existingIds.has(ln.id)) {
+      if (ln && !existingIds.has(String(ln.id))) {
         list.push({ ...ln, type: ln.type || 'loan' });
-        existingIds.add(ln.id);
+        existingIds.add(String(ln.id));
+      }
+    });
+
+    (state.resignationRequests || []).forEach((res) => {
+      if (res && !existingIds.has(String(res.id))) {
+        list.push({ ...res, type: 'resignation' });
+        existingIds.add(String(res.id));
       }
     });
 
@@ -121,10 +128,21 @@ export default function RequestsModule({
       }
       return true;
     });
-  }, [state.requests, state.leaveRequests, state.shiftSwaps, state.loans, state.employees, state.approvalRules, isBranch, cIdStr, branchEmpIdSet]);
+  }, [state.requests, state.leaveRequests, state.shiftSwaps, state.loans, state.resignationRequests, state.employees, state.approvalRules, isBranch, cIdStr, branchEmpIdSet]);
 
-  const hiddenAdminCount = isBranch ? 0 : allRequests.filter(r => r && r.hiddenFromAdmin).length;
-  const visibleAdminRequests = isBranch ? allRequests : allRequests.filter(r => showHiddenAdminRequests ? true : !r.hiddenFromAdmin);
+  const hiddenAdminCount = isBranch ? 0 : allRequests.filter(r => r && r.hiddenFromAdmin && r.status !== 'pending' && r.status !== 'pending_admin' && r.adminApproved !== false).length;
+  
+  // Higher management MUST ALWAYS see any pending/active requests awaiting approval
+  const visibleAdminRequests = isBranch
+    ? allRequests
+    : allRequests.filter((r) => {
+        if (!r) return false;
+        const isPendingAction = r.status === 'pending' || r.status === 'pending_admin' || r.status === 'waiting_approval' || (r.adminApproved !== true && r.status !== 'rejected' && r.status !== 'cancelled');
+        if (isPendingAction) return true;
+        if (showHiddenAdminRequests) return true;
+        return !r.hiddenFromAdmin;
+      });
+
   const requests = visibleAdminRequests;
   const employees = state.employees || [];
 
@@ -173,11 +191,14 @@ export default function RequestsModule({
     if (filterEmp !== 'all') {
       if (String(r.employeeId) !== String(filterEmp)) return false;
     }
+
+    const isPendingAction = r.status === 'pending' || r.status === 'pending_admin' || r.status === 'waiting_approval' || (r.adminApproved !== true && r.status !== 'rejected' && r.status !== 'cancelled');
     const rDate = (r.createdAt ? r.createdAt.slice(0, 10) : (r.date || r.startDate || ''));
+    
     if (filterDate) {
       if (!rDate.startsWith(filterDate)) return false;
-    } else if (typeof filterFn === 'function' && rDate && r.status !== 'pending') {
-      // Pending requests awaiting action always stay visible to prevent missing pending items
+    } else if (typeof filterFn === 'function' && rDate && !isPendingAction) {
+      // Pending requests awaiting action ALWAYS stay visible to Higher Management to prevent missed requests
       if (!filterFn(rDate)) return false;
     }
     return true;
@@ -736,22 +757,22 @@ export default function RequestsModule({
     showToast?.(isAccepted ? '✅ تم قبول الاعتراض وإلغاء الجزاء' : '❌ تم رفض الاعتراض وتثبيت الجزاء');
   };
 
-  // 1. Clear / Hide requests from Higher Management screen ONLY (Does NOT affect Employee or Branch Manager screens)
+  // 1. Clear / Hide resolved requests from Higher Management screen ONLY (Does NOT affect Employee or Branch Manager screens)
   const handleClearAdminViewOnly = async () => {
-    const currentVisible = (state.requests || []).filter((r) => !r.hiddenFromAdmin);
-    if (currentVisible.length === 0) {
-      alert('لا توجد أي طلبات ظاهرة حالياً في شاشة الإدارة العليا لمسحها');
+    const currentResolved = (state.requests || []).filter((r) => !r.hiddenFromAdmin && (r.status === 'approved' || r.status === 'rejected' || r.status === 'cancelled' || r.adminApproved === true));
+    if (currentResolved.length === 0) {
+      alert('لا توجد أي طلبات منتهية أو معتمدة ظاهرة حالياً لمسحها (الطلبات المعلقة قيد المراجعة تظل ظاهرة دائماً لضمان استلام الإدارة لها)');
       return;
     }
     const isConfirmed = window.confirm(
-      `⚠️ تأكيد مسح طلبات شاشة الإدارة العليا فقط:\n\nهل تريد مسح وإخفاء كافة الطلبات (${currentVisible.length} طلب) من صفحة الإدارة العليا فقط؟\n\n✅ ضمان الأمان الكامل:\n1. لن تُحذف الطلبات نهائياً من النظام.\n2. ستظل محفوظة وظاهرة بالكامل في شاشات وسجلات الموظفين ومديري الفروع.\n3. لن يتأثر رصيد الإجازات السنوية أو الأيام المأخوذة إطلاقاً.`
+      `⚠️ تأكيد أرشفة الطلبات المكتملة (${currentResolved.length} طلب):\n\nهل تريد إخفاء الطلبات المنتهية (المعتمدة/المرفوضة) من شاشة الإدارة العليا فقط لترتيب الشاشة؟\n\n✅ ضمان الأمان الكامل:\n1. الطلبات المعلقة قيد المراجعة ستظل ظاهرة دائماً ولن يتم إخفاؤها.\n2. لن تُحذف الطلبات نهائياً من النظام وستظل محفوظة بالكامل في سجلات الموظف والفرع.`
     );
     if (!isConfirmed) return;
 
-    const updatedRequests = (state.requests || []).map((r) => ({
-      ...r,
-      hiddenFromAdmin: true
-    }));
+    const updatedRequests = (state.requests || []).map((r) => {
+      const isResolved = r.status === 'approved' || r.status === 'rejected' || r.status === 'cancelled' || r.adminApproved === true;
+      return isResolved ? { ...r, hiddenFromAdmin: true } : r;
+    });
 
     const updatedState = {
       ...state,
@@ -760,7 +781,7 @@ export default function RequestsModule({
 
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.('🧹 تم مسح الطلبات من شاشة الإدارة العليا فقط بنجاح (محفوظة في شاشات الموظف والفرع ورصيد الإجازات)');
+    showToast?.('🧹 تم مسح الطلبات المكتملة من شاشة الإدارة العليا بنجاح');
   };
 
   // Restore Hidden Requests in Higher Management screen

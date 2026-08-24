@@ -55,7 +55,15 @@ export default function ApprovalCenterModule({
 
   const employees = state.employees || [];
   const branches = state.branches || [];
-  const requests = state.requests || [];
+  const requests = React.useMemo(() => {
+    const list = [...(state.requests || [])];
+    const seen = new Set(list.map((r) => String(r.id)));
+    (state.leaveRequests || []).forEach((r) => { if (r && !seen.has(String(r.id))) { list.push({ ...r, type: r.type || 'leave' }); seen.add(String(r.id)); } });
+    (state.shiftSwaps || []).forEach((r) => { if (r && !seen.has(String(r.id))) { list.push({ ...r, type: 'swap' }); seen.add(String(r.id)); } });
+    (state.loans || []).forEach((r) => { if (r && !seen.has(String(r.id))) { list.push({ ...r, type: r.type || 'loan' }); seen.add(String(r.id)); } });
+    (state.resignationRequests || []).forEach((r) => { if (r && !seen.has(String(r.id))) { list.push({ ...r, type: 'resignation' }); seen.add(String(r.id)); } });
+    return list;
+  }, [state.requests, state.leaveRequests, state.shiftSwaps, state.loans, state.resignationRequests]);
 
   // Filter requests based on role and double approval rules
   const filteredRequests = requests.filter(req => {

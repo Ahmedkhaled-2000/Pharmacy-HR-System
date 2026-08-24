@@ -45,7 +45,15 @@ export default function NotificationCenterModule({
   const branches = state.branches || [];
   const shifts = state.shifts || [];
   const activeShifts = state.activeShifts || {};
-  const requests = state.requests || [];
+  const requests = useMemo(() => {
+    const list = [...(state.requests || [])];
+    const seen = new Set(list.map((r) => String(r.id)));
+    (state.leaveRequests || []).forEach((r) => { if (r && !seen.has(String(r.id))) { list.push({ ...r, type: r.type || 'leave' }); seen.add(String(r.id)); } });
+    (state.shiftSwaps || []).forEach((r) => { if (r && !seen.has(String(r.id))) { list.push({ ...r, type: 'swap' }); seen.add(String(r.id)); } });
+    (state.loans || []).forEach((r) => { if (r && !seen.has(String(r.id))) { list.push({ ...r, type: r.type || 'loan' }); seen.add(String(r.id)); } });
+    (state.resignationRequests || []).forEach((r) => { if (r && !seen.has(String(r.id))) { list.push({ ...r, type: 'resignation' }); seen.add(String(r.id)); } });
+    return list;
+  }, [state.requests, state.leaveRequests, state.shiftSwaps, state.loans, state.resignationRequests]);
   const loans = state.loans || [];
   const rosters = state.rosters || [];
   const currentMonth = (monthPicker || todayDate).slice(0, 7);
