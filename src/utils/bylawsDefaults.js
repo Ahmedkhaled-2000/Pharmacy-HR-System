@@ -192,8 +192,16 @@ export function isBylawsHeaderLine(line) {
   // إذا كان السطر مجرد خط فاصل
   if (/^[\-\_\=\*\.]{3,}$/.test(t)) return false;
 
-  // فحص صيغ الأرقام والترتيب العربي الشائعة
-  const arabicOrdinalsRegex = /^(📜|📋|⚖️|🔹|🔸|▪️|📌|⭐)?\s*(مقدمة|تمهيد|اللائحة\s+التنظيمية|الائحة\s+التنظيمية|أولاً|اولاً|أولا|اولا|ثانياً|ثانيا|ثالثاً|ثالثا|رابعاً|رابعا|خامساً|خامسا|سادساً|سادسا|سابعاً|سابعا|ثامناً|ثامنا|تاسعاً|تاسعا|عاشراً|عاشرا|الحادي\s*عشر|حادي\s*عشر|الثاني\s*عشر|ثاني\s*عشر|الثالث\s*عشر|ثالث\s*عشر|الرابع\s*عشر|رابع\s*عشر|الخامس\s*عشر|خامس\s*عشر|السادس\s*عشر|سادس\s*عشر|السابع\s*عشر|سابع\s*عشر|الثامن\s*عشر|ثامن\s*عشر|التاسع\s*عشر|تاسع\s*عشر|العشرون|البند\s*(\d+|[^\s\:\-]+)|المادة\s*(\d+|[^\s\:\-]+)|بند\s*(\d+|[^\s\:\-]+)|مادة\s*(\d+|[^\s\:\-]+)|(\d+)[\.\-\:\)])/i;
+  // صيغة الترتيب والأعداد العربية الشاملة (من 1 إلى 50+ مفرد ومركب)
+  const singleOrdinals = '(مقدمة|تمهيد|اللائحة\\s+التنظيمية|الائحة\\s+التنظيمية|أولاً|اولاً|أولا|اولا|أول|الاول|الأول|ثانياً|ثانيا|ثاني|الثاني|ثالثاً|ثالثا|ثالث|الثالث|رابعاً|رابعا|رابع|الرابع|خامساً|خامسا|خامس|الخامس|سادساً|سادسا|سادس|السادس|سابعاً|سابعا|سابع|السابع|ثامناً|ثامنا|ثامن|الثامن|تاسعاً|تاسعا|تاسع|التاسع|عاشراً|عاشرا|عاشر|العاشر)';
+  const compoundTeens = '((الحادي|حادي|الثاني|ثاني|الثالث|ثالث|الرابع|رابع|الخامس|خامس|السادس|سادس|السابع|سابع|الثامن|ثامن|التاسع|تاسع)\\s*(عشر|عشرة))';
+  const decades = '(العشرون|العشرين|عشرون|عشرين|الثلاثون|الثلاثين|ثلاثون|ثلاثين|الأربعون|الأربعين|أربعون|أربعين|الخمسون|الخمسين|خمسون|خمسين)';
+  const compoundDecades = '((الحادي|حادي|الثاني|ثاني|الثالث|ثالث|الرابع|رابع|الخامس|خامس|السادس|سادس|السابع|سابع|الثامن|ثامن|التاسع|تاسع)\\s*و\\s*(العشرون|العشرين|عشرون|عشرين|الثلاثون|الثلاثين|ثلاثون|ثلاثين|الأربعون|الأربعين|الخمسون|الخمسين))';
+  const clausesPattern = '((البند|المادة|بند|مادة)\\s*(\\d+|[^\n\\:\\-]+))';
+  const numbersPattern = '(\\d+)\\s*[\\.\\-\\:\\)]';
+
+  const fullPattern = `^(📜|📋|⚖️|🔹|🔸|▪️|📌|⭐)?\\s*(${singleOrdinals}|${compoundTeens}|${compoundDecades}|${decades}|${clausesPattern}|${numbersPattern})`;
+  const arabicOrdinalsRegex = new RegExp(fullPattern, 'i');
 
   return arabicOrdinalsRegex.test(t);
 }
@@ -221,12 +229,21 @@ export function sanitizeBylawsSections(sections = []) {
       points: []
     };
 
-    const points = Array.isArray(sec.points) ? sec.points : [];
+    const rawPoints = Array.isArray(sec.points) ? sec.points : [];
+    // تفكيك أي أسطر مدمجة داخل النقطة الواحدة
+    const points = [];
+    for (const rp of rawPoints) {
+      if (typeof rp === 'string' && rp.includes('\n')) {
+        points.push(...rp.split('\n'));
+      } else {
+        points.push(rp);
+      }
+    }
 
     for (let j = 0; j < points.length; j++) {
       let pStr = String(points[j] || '').replace(/[\u200E\u200F\u200B\uFEFF\u00A0]/g, ' ').trim();
       
-      // إهمال الأسطر الفاصلة
+      // إهمال الأسطر الفاصلة والفارغة
       if (!pStr || /^[\-\_\=\*\.]{3,}$/.test(pStr) || pStr.startsWith('====') || pStr.startsWith('----') || pStr.startsWith('____')) {
         continue;
       }
@@ -234,13 +251,13 @@ export function sanitizeBylawsSections(sections = []) {
       // إذا كانت النقطة تحتوي على رأس بند جديد تم دمجه بالخطأ
       if (isBylawsHeaderLine(pStr)) {
         // حفظ القسم الحالي إذا كان يحتوي على بيانات
-        if (currentSec.points.length > 0 || currentSec.title) {
+        if (currentSec.points.length > 0 || (currentSec.title && currentSec.title !== '📜 مقدمة اللائحة التنظيمية')) {
           result.push(currentSec);
         }
         const isNextPreamble = pStr.includes('مقدمة') || pStr.includes('تمهيد') || pStr.includes('اللائحة التنظيمية');
         currentSec = {
           id: isNextPreamble ? 'bylaw_preamble' : `bylaw_${counter++}`,
-          title: pStr,
+          title: pStr.replace(/^[\-\*▪•▫]+\s*/, '').trim(),
           category: isNextPreamble ? 'preamble' : 'general',
           points: []
         };

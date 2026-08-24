@@ -270,29 +270,29 @@ export default function EmploymentContractModule({
           `).join('')}
         </div>
 
-        <!-- Attached Bylaws Section: 2-Column Side-by-Side Compact Table to save paper -->
+        <!-- Attached Bylaws Section: Elegant 2-Column Print Flow -->
         ${includeFullBylaws ? `
-          <div style="page-break-inside: avoid; break-inside: avoid; border: 1.5px solid #0f766e; border-radius: 8px; overflow: hidden; margin-top: 10px; margin-bottom: 12px;">
-            <div style="background: #f0fdf4; padding: 6px 12px; border-bottom: 1.5px solid #0f766e; display: flex; justify-content: space-between; align-items: center;">
-              <span style="font-weight: 800; color: #0f766e; font-size: 11.5px;">📋 ملحق نصوص وسياسات لائحة العمل والجزاءات المعتمدة للصيدلية (${contractBylawsSections.length} بنود):</span>
+          <div style="page-break-inside: auto; break-inside: auto; border: 1.5px solid #0f766e; border-radius: 8px; margin-top: 10px; margin-bottom: 12px; background: #ffffff;">
+            <div style="background: #f0fdf4; padding: 6px 12px; border-bottom: 1.5px solid #0f766e; display: flex; justify-content: space-between; align-items: center; page-break-inside: avoid; break-inside: avoid;">
+              <span style="font-weight: 800; color: #0f766e; font-size: 11.5px;">📋 ملحق نصوص وسياسات لائحة العمل والجزاءات المعتمدة للصيدلية (${contractBylawsSections.length} بنداً معتمداً):</span>
               <span style="font-size: 10px; color: #166534; font-weight: bold;">(جزء لا يتجزأ ومتمم لبنود العقد)</span>
             </div>
-            <div style="padding: 8px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: #ffffff;">
+            <div style="padding: 8px; column-count: 2; -webkit-column-count: 2; -moz-column-count: 2; column-gap: 8px; -webkit-column-gap: 8px; page-break-inside: auto; break-inside: auto;">
               ${contractBylawsSections.map(sec => `
-                <div style="border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 8px; background: #f8fafc; font-size: 9.5px; page-break-inside: avoid; break-inside: avoid;">
+                <div style="display: inline-block; width: 100%; box-sizing: border-box; break-inside: avoid; page-break-inside: avoid; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; background: #f8fafc; font-size: 9.5px; vertical-align: top;">
                   <div style="font-weight: 800; color: #0f766e; border-bottom: 1px dashed #cbd5e1; padding-bottom: 3px; margin-bottom: 4px; font-size: 10px;">
                     ${sec.title}
                   </div>
-                  <div style="color: #334155; line-height: 1.45;">
+                  <div style="color: #334155; line-height: 1.4;">
                     ${(sec.points || []).map(p => {
                       const pStr = String(p || '').trim();
                       const isWarning = pStr.startsWith('❌');
                       const isObligation = pStr.startsWith('✔️');
-                      const cleanP = pStr.replace(/^❌\s*/, '').replace(/^✔️\s*/, '').replace(/^▪\s*/, '').replace(/^\-\s*/, '');
+                      const cleanP = pStr.replace(/^❌\s*/, '').replace(/^✔️\s*/, '').replace(/^▪\s*/, '').replace(/^\-\s*/, '').replace(/^•\s*/, '');
                       return `
                         <div style="display: flex; gap: 4px; align-items: flex-start; margin-bottom: 2px; ${isWarning ? 'color: #991b1b;' : isObligation ? 'color: #166534;' : ''}">
-                          <span style="font-size: 8px; margin-top: 1px; color: ${isWarning ? '#dc2626' : isObligation ? '#16a34a' : '#0f766e'};">${isWarning ? '❌' : isObligation ? '✔️' : '▪'}</span>
-                          <span>${cleanP}</span>
+                          <span style="font-size: 8px; margin-top: 1.5px; color: ${isWarning ? '#dc2626' : isObligation ? '#16a34a' : '#0f766e'};">${isWarning ? '❌' : isObligation ? '✔️' : '▪'}</span>
+                          <span style="flex: 1;">${cleanP}</span>
                         </div>
                       `;
                     }).join('')}
