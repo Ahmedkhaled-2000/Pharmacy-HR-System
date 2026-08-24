@@ -149,7 +149,61 @@ try {
             break;
 
         // ==================================================================
-        // 4. فحص رقم الإصدار للمزامنة الخفيفة (Ultra-Fast Smart Polling)
+        // 4. البث الحي اللحظي للأحداث والتحديثات (Server-Sent Events / SSE)
+        // ==================================================================
+        case 'stream':
+        case 'events':
+            @ini_set('zlib.output_compression', '0');
+            @ini_set('output_buffering', '0');
+            @ini_set('implicit_flush', '1');
+            while (@ob_end_clean());
+
+            header('Content-Type: text/event-stream; charset=utf-8');
+            header('Cache-Control: no-cache, no-transform');
+            header('Connection: keep-alive');
+            header('X-Accel-Buffering: no');
+
+            $key = $_GET['key'] ?? DEFAULT_STORAGE_KEY;
+            $lastKnownVersion = (int)($_GET['last_version'] ?? 0);
+
+            // Allow stream script to run up to 25 seconds per connection, browser auto-reconnects seamlessly
+            set_time_limit(30);
+            $startTime = time();
+
+            while (time() - $startTime < 25) {
+                if (connection_aborted()) {
+                    break;
+                }
+
+                $row = Database::queryOne(
+                    "SELECT version, updated_at FROM app_settings WHERE key_name = ? LIMIT 1",
+                    [$key]
+                );
+                $curVer = (int)($row['version'] ?? 0);
+
+                if ($curVer !== $lastKnownVersion && $curVer > 0) {
+                    $lastKnownVersion = $curVer;
+                    echo "event: version_change\n";
+                    echo "data: " . json_encode([
+                        'version' => $curVer,
+                        'updated_at' => $row['updated_at'] ?? null,
+                        'key' => $key
+                    ]) . "\n\n";
+                    @ob_flush();
+                    @flush();
+                } else {
+                    echo ": ping\n\n";
+                    @ob_flush();
+                    @flush();
+                }
+
+                usleep(500000); // 500ms check interval
+            }
+            exit();
+            break;
+
+        // ==================================================================
+        // 5. فحص رقم الإصدار للمزامنة الخفيفة (Ultra-Fast Smart Polling)
         // ==================================================================
         case 'sync/version':
         case 'version':

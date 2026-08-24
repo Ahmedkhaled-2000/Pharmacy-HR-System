@@ -113,12 +113,29 @@ export async function apiSaveSettings(key = STORAGE_KEY, value, options = {}) {
   });
 }
 
-// ── 2. فحص الإصدار للمزامنة الخفيفة (Ultra-Fast Smart Polling) ────────────────
+// ── 2. فحص الإصدار للمزامنة الخفيفة (Ultra-Fast Smart Polling & Realtime SSE) ────
 export async function apiFetchVersion(key = STORAGE_KEY, options = {}) {
   return await request(`sync/version?key=${encodeURIComponent(key)}`, {
     method: 'GET',
     timeout: options.timeout || 5000
   });
+}
+
+export function apiCreateEventSource(key = STORAGE_KEY, onVersionChange) {
+  if (typeof window === 'undefined' || !('EventSource' in window)) return null;
+  const url = `${API_BASE_URL}/stream?key=${encodeURIComponent(key)}`;
+  try {
+    const es = new EventSource(url);
+    es.addEventListener('version_change', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        onVersionChange?.(data);
+      } catch {}
+    });
+    return es;
+  } catch {
+    return null;
+  }
 }
 
 // ── 3. دوال البصمات الحيوية (Biometrics / Faces & Hands) ──────────────────────

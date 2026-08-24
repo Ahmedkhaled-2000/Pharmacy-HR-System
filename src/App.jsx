@@ -9,6 +9,7 @@ import {
   WORK_HOURS_PER_DAY,
   apiFetchSettings,
   apiFetchVersion,
+  apiCreateEventSource,
 } from './utils/apiClient';
 import {
   arabicMonthLabel,
@@ -2840,7 +2841,7 @@ export default function App() {
     return unsubscribe;
   }, []);
 
-  // Cloud Synchronization with MariaDB (Adaptive Smart Polling & Instant 0ms Live Broadcast)
+  // Cloud Real-Time Push (Server-Sent Events / SSE) + Ultra-Fast 2.5s Adaptive Polling & 0ms Broadcast
   useEffect(() => {
     const applyRemoteData = (remoteData) => {
       const parsed = typeof remoteData === 'string' ? JSON.parse(remoteData) : remoteData;
@@ -2866,7 +2867,7 @@ export default function App() {
       if (isPolling || !navigator.onLine) return;
       isPolling = true;
       try {
-        const versionRes = await apiFetchVersion(STORAGE_KEY, { timeout: 4000 });
+        const versionRes = await apiFetchVersion(STORAGE_KEY, { timeout: 3500 });
         const currentVer = typeof versionRes?.version === 'number' ? versionRes.version : 0;
         const currentUpdated = versionRes?.updated_at || '';
 
@@ -2877,7 +2878,7 @@ export default function App() {
         if (hasChanged) {
           lastKnownVersion = currentVer;
           lastKnownUpdatedAt = currentUpdated;
-          const remoteData = await apiFetchSettings(STORAGE_KEY, { timeout: 8000, useETag: true });
+          const remoteData = await apiFetchSettings(STORAGE_KEY, { timeout: 6000, useETag: false });
           if (remoteData && !remoteData.notModified) {
             applyRemoteData(remoteData);
           }
@@ -2889,11 +2890,11 @@ export default function App() {
       }
     };
 
-    // Adaptive polling: 10s when tab is active, 60s when tab is in background
+    // 1. High-frequency adaptive polling: 2.5s when active tab, 15s when in background
     let timerId = null;
     const scheduleNextPoll = () => {
       const isVisible = typeof document !== 'undefined' ? document.visibilityState === 'visible' : true;
-      const delay = isVisible ? 10000 : 60000;
+      const delay = isVisible ? 2500 : 15000;
       timerId = setTimeout(async () => {
         await poll();
         scheduleNextPoll();
@@ -2902,7 +2903,12 @@ export default function App() {
 
     scheduleNextPoll();
 
-    // Instant local broadcast synchronization across tabs and windows (0ms immediate update)
+    // 2. Real-Time Push Stream via Server-Sent Events (SSE) (Instant < 500ms push on any changes)
+    const eventSource = apiCreateEventSource(STORAGE_KEY, (versionData) => {
+      poll();
+    });
+
+    // 3. Instant local broadcast synchronization across tabs in same browser (0ms immediate update)
     const unsubBroadcast = listenToLiveBroadcasts((liveState) => {
       if (liveState) {
         applyRemoteData(liveState);
@@ -2924,6 +2930,7 @@ export default function App() {
 
     return () => {
       clearTimeout(timerId);
+      if (eventSource) eventSource.close();
       unsubBroadcast();
       window.removeEventListener('focus', handleFocusOrVisible);
       window.removeEventListener('online', handleFocusOrVisible);
