@@ -1,4 +1,5 @@
-import { fmt } from './formatters';
+import { fmt, arabicWeekday, AR_MONTHS } from './formatters';
+import { getEffectiveShiftHours, isApprovedPermissionForDate } from './latePenaltyEngine';
 
 /**
  * printHelper.js
@@ -1081,5 +1082,109 @@ export function generateOfficialPayslipHTML({
     </div>
   `;
 }
+
+/**
+ * دالة الطباعة المباشرة لكشف مفردات المرتب والبصمات في نافذة منعزلة نظيفة تماماً
+ * مطابقة لنظام طباعة عقد العمل الفردي الموحد بنسبة 100%
+ */
+export function printEmployeePayslipDirect({
+  emp,
+  month,
+  shifts = [],
+  adjustments = [],
+  branches = [],
+  orgSettings = {},
+  summary = null,
+  computeEmpSummary = null,
+  selectedBranchId = null,
+  state = {},
+  printFitMode = 'single_page'
+}) {
+  if (!emp) return;
+
+  const targetMonth = month || new Date().toISOString().slice(0, 7);
+  const [y, m] = targetMonth.split('-');
+  const monthName = AR_MONTHS[parseInt(m, 10) - 1] || m;
+  const fullMonthLabel = `${monthName} ${y}`;
+
+  // Cutoff dates calculation
+  const pType = orgSettings?.payrollPeriodType || state?.orgSettings?.payrollPeriodType || 'cycle';
+  const customFrom = orgSettings?.payrollCustomFrom || state?.orgSettings?.payrollCustomFrom || '';
+  const customTo = orgSettings?.payrollCustomTo || state?.orgSettings?.payrollCustomTo || '';
+
+  let startCutoff, endCutoff;
+  if (pType === 'custom' && customFrom && customTo) {
+    startCutoff = customFrom <= customTo ? customFrom : customTo;
+    endCutoff = customFrom <= customTo ? customTo : customFrom;
+  } else {
+    const sDay = orgSettings?.payrollPayoutStartDay !== undefined ? parseInt(orgSettings.payrollPayoutStartDay, 10) : (state?.orgSettings?.payrollPayoutStartDay !== undefined ? parseInt(state.orgSettings.payrollPayoutStartDay, 10) : 21);
+    const eDay = orgSettings?.payrollPayoutEndDay !== undefined ? parseInt(orgSettings.payrollPayoutEndDay, 10) : (state?.orgSettings?.payrollPayoutEndDay !== undefined ? parseInt(state.orgSettings.payrollPayoutEndDay, 10) : 20);
+    const [cutoffY, cutoffM] = targetMonth.split('-').map(Number);
+    let prevY = cutoffY;
+    let prevM = cutoffM - 1;
+    if (prevM < 1) { prevM = 12; prevY = cutoffY - 1; }
+    startCutoff = `${prevY}-${String(prevM).padStart(2, '0')}-${String(sDay).padStart(2, '0')}`;
+    endCutoff = `${cutoffY}-${String(cutoffM).padStart(2, '0')}-${String(eDay).padStart(2, '0')}`;
+  }
+
+  // Filter shifts and adjustments
+  const allShifts = shifts.length > 0 ? shifts : (state.shifts || []);
+  const empShifts = allShifts.filter((s) =>
+    (String(s.employeeId) === String(emp.id) || (emp.code && String(s.employeeId) === String(emp.code))) &&
+    s.date >= startCutoff &&
+    s.date <= endCutoff &&
+    (!selectedBranchId || String(s.branchId) === String(selectedBranchId))
+  );
+
+  const allAdjs = adjustments.length > 0 ? adjustments : (state.adjustments || []);
+  const empAdjs = allAdjs.filter((a) =>
+    (String(a.employeeId) === String(emp.id) || a.employeeId === 'all') &&
+    a.date >= startCutoff &&
+    a.date <= endCutoff
+  );
+
+  // Compute summary if not provided
+  let calculatedSummary = summary;
+  if (!calculatedSummary && typeof computeEmpSummary === 'function') {
+    calculatedSummary = computeEmpSummary(emp.id, null, targetMonth, selectedBranchId);
+  } else if (!calculatedSummary && typeof state.computeEmpSummary === 'function') {
+    calculatedSummary = state.computeEmpSummary(emp.id, null, targetMonth, selectedBranchId);
+  }
+
+  if (!calculatedSummary) {
+    calculatedSummary = { hours: 0, dailyRate: 0, rate: 0, baseEarnings: 0, totalBonus: 0, totalDeduction: 0, absenceDeduction: 0, netSalary: 0, perBranch: {} };
+  }
+
+  const mappedShiftsForPrint = empShifts.map((s) => {
+    const effHours = getEffectiveShiftHours(s, state);
+    const hasPerm = isApprovedPermissionForDate(emp.id, s.date, state);
+    return {
+      ...s,
+      dayName: arabicWeekday(s.date),
+      hours: effHours,
+      regularHours: effHours,
+      hasPermission: hasPerm
+    };
+  });
+
+  const html = generateOfficialPayslipHTML({
+    emp,
+    month: targetMonth,
+    shifts: mappedShiftsForPrint,
+    adjustments: empAdjs,
+    branches: branches.length > 0 ? branches : (state.branches || []),
+    orgSettings: Object.keys(orgSettings).length > 0 ? orgSettings : (state.orgSettings || {}),
+    summary: calculatedSummary,
+    startCutoff,
+    endCutoff,
+    fullMonthLabel,
+    selectedBranchId,
+    state,
+    printFitMode
+  });
+
+  triggerDirectPrint(html, `كشف مرتب - ${emp.name} - ${fullMonthLabel}`);
+}
+
 
 

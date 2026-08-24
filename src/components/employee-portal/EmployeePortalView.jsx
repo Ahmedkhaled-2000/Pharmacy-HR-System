@@ -12,6 +12,7 @@ import PayslipPrintModal from '../payroll/PayslipPrintModal';
 import BylawsModule from '../bylaws/BylawsModule';
 import EmployeeResignationModule from './EmployeeResignationModule';
 import { computeLatenessFinancialAmount, isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
+import { printEmployeePayslipDirect } from '../../utils/printHelper';
 
 // ─────────────────────────────────────────
 //  Month navigation helpers
@@ -2289,12 +2290,37 @@ export default function EmployeePortalView({
           {/* ── Tab: Salary Details ── */}
           {activeTab === 'salary' && (
             <div className="card ep-tab-content fade-in">
-              <div className="ep-section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div className="ep-section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
                 <h3>💼 تفاصيل المرتب — {lbl.raw}</h3>
                 {canViewSalary && (
-                  <button className="btn btn-start" onClick={() => setShowPrintModal(true)} style={{ fontSize: '13px', padding: '6px 14px' }}>
-                    📄 تصدير PDF / طباعة كشف المرتب
-                  </button>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <button
+                      className="btn btn-start"
+                      onClick={() => {
+                        printEmployeePayslipDirect({
+                          emp,
+                          month: selectedMonth,
+                          shifts: state.shifts || [],
+                          adjustments: state.adjustments || [],
+                          branches: state.branches || [],
+                          orgSettings,
+                          computeEmpSummary,
+                          selectedBranchId: selectedBranchId || null,
+                          state
+                        });
+                      }}
+                      style={{ fontSize: '13px', padding: '6px 14px' }}
+                    >
+                      🖨️ طباعة كشف المرتب (PDF)
+                    </button>
+                    <button
+                      className="btn btn-ghost"
+                      onClick={() => setShowPrintModal(true)}
+                      style={{ fontSize: '12.5px', padding: '6px 12px' }}
+                    >
+                      👁️ معاينة الكشف
+                    </button>
+                  </div>
                 )}
               </div>
 

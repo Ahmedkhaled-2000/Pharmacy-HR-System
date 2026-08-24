@@ -4,6 +4,7 @@ import EmployeePermissionsModule from '../employee-portal/EmployeePermissionsMod
 import EmployeeLoansModule from '../employee-portal/EmployeeLoansModule';
 import EmployeeEvaluationsModule from '../employee-portal/EmployeeEvaluationsModule';
 import PayslipPrintModal from '../payroll/PayslipPrintModal';
+import { printEmployeePayslipDirect } from '../../utils/printHelper';
 import BylawsModule from '../bylaws/BylawsModule';
 import IncomeExpensesModule from '../finance/IncomeExpensesModule';
 import { getFormattedRequestBadge } from '../requests/RequestsModule';
@@ -2376,9 +2377,32 @@ export default function BranchManagerView({
             <h3 style={{ margin: 0, fontSize: '17px', color: '#1e293b' }}>
               💼 تفاصيل المرتب — مدير الفرع ({selectedMonth})
             </h3>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button className="btn btn-start" onClick={() => setShowPrintModal(true)} style={{ fontSize: '13px', padding: '6px 14px' }}>
-                📄 تصدير PDF / طباعة كشف المرتب
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <button
+                className="btn btn-start"
+                onClick={() => {
+                  printEmployeePayslipDirect({
+                    emp: managerEmp,
+                    month: selectedMonth,
+                    shifts: state.shifts || [],
+                    adjustments: state.adjustments || [],
+                    branches: state.branches || [],
+                    orgSettings: state.orgSettings || {},
+                    computeEmpSummary: state.computeEmpSummary,
+                    selectedBranchId: null,
+                    state
+                  });
+                }}
+                style={{ fontSize: '13px', padding: '6px 14px' }}
+              >
+                🖨️ طباعة كشف المرتب (PDF)
+              </button>
+              <button
+                className="btn btn-ghost"
+                onClick={() => setShowPrintModal(true)}
+                style={{ fontSize: '12.5px', padding: '6px 12px' }}
+              >
+                👁️ معاينة
               </button>
               {onExportExcel && (
                 <button className="btn btn-ghost" onClick={onExportExcel} style={{ fontSize: '13px', padding: '6px 14px' }}>

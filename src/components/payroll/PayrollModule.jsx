@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import PayslipPrintModal from './PayslipPrintModal';
 import { fmt, getEmpDisplayName } from '../../utils/formatters';
 import { computeLatenessFinancialAmount, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
+import { printEmployeePayslipDirect } from '../../utils/printHelper';
 
 export default function PayrollModule({
   state,
@@ -516,13 +517,36 @@ export default function PayrollModule({
                       {fmt(empSum.netSalary)} ج.م
                     </td>
                     <td>
-                      <button
-                        className="btn btn-start"
-                        style={{ padding: '4px 12px', fontSize: '12.5px' }}
-                        onClick={() => setSelectedEmpModal(emp)}
-                      >
-                        💵 تفاصيل المرتب وتصدير PDF
-                      </button>
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                        <button
+                          className="btn btn-start"
+                          style={{ padding: '4px 10px', fontSize: '12px', whiteSpace: 'nowrap' }}
+                          title="طباعة رسمية مباشرة (مطابقة لنظام عقد العمل)"
+                          onClick={() => {
+                            printEmployeePayslipDirect({
+                              emp,
+                              month: monthPicker,
+                              shifts: state.shifts || [],
+                              adjustments: state.adjustments || [],
+                              branches,
+                              orgSettings: state.orgSettings || {},
+                              computeEmpSummary: state.computeEmpSummary,
+                              selectedBranchId: filterBranch || null,
+                              state
+                            });
+                          }}
+                        >
+                          🖨️ طباعة الكشف
+                        </button>
+                        <button
+                          className="btn btn-ghost"
+                          style={{ padding: '4px 8px', fontSize: '12px', whiteSpace: 'nowrap' }}
+                          title="عرض تفاصيل الحساب"
+                          onClick={() => setSelectedEmpModal(emp)}
+                        >
+                          🔍 تفاصيل
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -720,12 +744,30 @@ export default function PayrollModule({
                 </h2>
               </div>
 
-              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                 <button className="btn btn-ghost" onClick={() => exportEmpExcel(selectedEmpModal.id, 'month')}>
                   📊 تصدير شيت إكسيل فردي
                 </button>
-                <button className="btn btn-start" onClick={() => setShowPrintModal(true)}>
-                  🖨️ تصدير وطباعة كشف المرتب (PDF)
+                <button
+                  className="btn btn-start"
+                  onClick={() => {
+                    printEmployeePayslipDirect({
+                      emp: selectedEmpModal,
+                      month: monthPicker,
+                      shifts: state.shifts || [],
+                      adjustments: state.adjustments || [],
+                      branches,
+                      orgSettings: state.orgSettings || {},
+                      computeEmpSummary: state.computeEmpSummary,
+                      selectedBranchId: filterBranch || null,
+                      state
+                    });
+                  }}
+                >
+                  🖨️ طباعة كشف المرتب (A4 PDF)
+                </button>
+                <button className="btn btn-ghost" onClick={() => setShowPrintModal(true)}>
+                  👁️ معاينة الكشف
                 </button>
               </div>
             </div>
