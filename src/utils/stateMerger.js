@@ -43,8 +43,19 @@ export function isItemDeleted(item, key, deletedIds) {
   if (!deletedIds || !(deletedIds instanceof Set) || deletedIds.size === 0) return false;
 
   if (key && deletedIds.has(key)) return true;
-  if (item.id !== undefined && item.id !== null && deletedIds.has(String(item.id))) return true;
-  if (item.id && deletedIds.has(`emp_${item.id}`)) return true;
+  if (item.id !== undefined && item.id !== null) {
+    const idStr = String(item.id);
+    if (deletedIds.has(idStr)) return true;
+    if (deletedIds.has(`emp_${idStr}`)) return true;
+    if (deletedIds.has(`req_${idStr}`)) return true;
+    if (deletedIds.has(`leave_${idStr}`)) return true;
+    if (deletedIds.has(`swap_${idStr}`)) return true;
+    if (deletedIds.has(`res_${idStr}`)) return true;
+    if (deletedIds.has(`loan_${idStr}`)) return true;
+    if (deletedIds.has(`shift_${idStr}`)) return true;
+    if (deletedIds.has(`adj_${idStr}`)) return true;
+    if (deletedIds.has(`branch_${idStr}`)) return true;
+  }
   if (item.code && (deletedIds.has(String(item.code)) || deletedIds.has(`emp_${item.code}`))) return true;
   if (item.deviceId && (deletedIds.has(String(item.deviceId)) || deletedIds.has(`dev_${item.deviceId}`))) return true;
   
@@ -354,13 +365,46 @@ export function smartMergeStates(localState, remoteState) {
     }
   }
 
-  // 6. الطلبات المحذوفة
+  // 6. الطلبات المحذوفة بكافة تصنيفاتها (Requests, LeaveRequests, ShiftSwaps, Resignations)
   if (Array.isArray(localState.requests) && Array.isArray(remoteState.requests)) {
     const localReqIds = new Set(localState.requests.map(r => String(r.id)));
     for (const remReq of remoteState.requests) {
       if (remReq && remReq.id && !localReqIds.has(String(remReq.id))) {
         deletedIds.add(String(remReq.id));
         deletedIds.add(`req_${remReq.id}`);
+      }
+    }
+  }
+
+  if (Array.isArray(localState.leaveRequests) && Array.isArray(remoteState.leaveRequests)) {
+    const localLeaveIds = new Set(localState.leaveRequests.map(lr => String(lr.id)));
+    for (const remLeave of remoteState.leaveRequests) {
+      if (remLeave && remLeave.id && !localLeaveIds.has(String(remLeave.id))) {
+        deletedIds.add(String(remLeave.id));
+        deletedIds.add(`leave_${remLeave.id}`);
+        deletedIds.add(`req_${remLeave.id}`);
+      }
+    }
+  }
+
+  if (Array.isArray(localState.shiftSwaps) && Array.isArray(remoteState.shiftSwaps)) {
+    const localSwapIds = new Set(localState.shiftSwaps.map(sw => String(sw.id)));
+    for (const remSwap of remoteState.shiftSwaps) {
+      if (remSwap && remSwap.id && !localSwapIds.has(String(remSwap.id))) {
+        deletedIds.add(String(remSwap.id));
+        deletedIds.add(`swap_${remSwap.id}`);
+        deletedIds.add(`req_${remSwap.id}`);
+      }
+    }
+  }
+
+  if (Array.isArray(localState.resignationRequests) && Array.isArray(remoteState.resignationRequests)) {
+    const localResignIds = new Set(localState.resignationRequests.map(rs => String(rs.id)));
+    for (const remRes of remoteState.resignationRequests) {
+      if (remRes && remRes.id && !localResignIds.has(String(remRes.id))) {
+        deletedIds.add(String(remRes.id));
+        deletedIds.add(`res_${remRes.id}`);
+        deletedIds.add(`req_${remRes.id}`);
       }
     }
   }

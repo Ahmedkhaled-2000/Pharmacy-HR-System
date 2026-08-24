@@ -130,15 +130,13 @@ export default function RequestsModule({
     });
   }, [state.requests, state.leaveRequests, state.shiftSwaps, state.loans, state.resignationRequests, state.employees, state.approvalRules, isBranch, cIdStr, branchEmpIdSet]);
 
-  const hiddenAdminCount = isBranch ? 0 : allRequests.filter(r => r && r.hiddenFromAdmin && r.status !== 'pending' && r.status !== 'pending_admin' && r.adminApproved !== false).length;
+  const hiddenAdminCount = isBranch ? 0 : allRequests.filter(r => r && r.hiddenFromAdmin).length;
   
-  // Higher management MUST ALWAYS see any pending/active requests awaiting approval
+  // Higher management view: hide items with hiddenFromAdmin unless user toggles showHiddenAdminRequests
   const visibleAdminRequests = isBranch
     ? allRequests
     : allRequests.filter((r) => {
         if (!r) return false;
-        const isPendingAction = r.status === 'pending' || r.status === 'pending_admin' || r.status === 'waiting_approval' || (r.adminApproved !== true && r.status !== 'rejected' && r.status !== 'cancelled');
-        if (isPendingAction) return true;
         if (showHiddenAdminRequests) return true;
         return !r.hiddenFromAdmin;
       });
@@ -689,14 +687,33 @@ export default function RequestsModule({
     }
   };
 
-  const handleDeleteOldRequest = async (reqId) => {
-    if (!window.confirm('هل أنت متأكد من حذف هذا الطلب القديم نهائياً من السجل؟')) return;
-    const updatedRequests = (state.requests || []).filter((r) => r.id !== reqId);
-    const updatedDeleted = Array.from(new Set([...(state._deletedIds || []), String(reqId)]));
-    const updatedState = { ...state, requests: updatedRequests, _deletedIds: updatedDeleted };
+  const handleDeleteSingleRequest = async (reqId) => {
+    if (!window.confirm('هل أنت متأكد من حذف هذا الطلب نهائياً من سجلات النظام بالكامل؟')) return;
+    const idStr = String(reqId);
+    const updatedDeleted = Array.from(new Set([
+      ...(state._deletedIds || []),
+      idStr,
+      `req_${idStr}`,
+      `leave_${idStr}`,
+      `swap_${idStr}`,
+      `res_${idStr}`,
+      `loan_${idStr}`
+    ])).slice(-5000);
+
+    const updatedState = {
+      ...state,
+      requests: (state.requests || []).filter((r) => String(r.id) !== idStr),
+      leaveRequests: (state.leaveRequests || []).filter((r) => String(r.id) !== idStr),
+      shiftSwaps: (state.shiftSwaps || []).filter((r) => String(r.id) !== idStr),
+      loans: (state.loans || []).filter((r) => String(r.id) !== idStr),
+      resignationRequests: (state.resignationRequests || []).filter((r) => String(r.id) !== idStr),
+      _deletedIds: updatedDeleted
+    };
+
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.('🗑️ تم حذف الطلب القديم بنجاح');
+    if (previewModalReq?.id === reqId) setPreviewModalReq(null);
+    showToast?.('🗑️ تم حذف الطلب نهائياً بنجاح');
   };
 
   const handleApprovePenaltyObjection = async (reqId) => {
@@ -802,43 +819,51 @@ export default function RequestsModule({
     showToast?.(isAccepted ? '✅ تم قبول الاعتراض وإلغاء الجزاء' : '❌ تم رفض الاعتراض وتثبيت الجزاء');
   };
 
-  // 1. Clear / Hide resolved requests from Higher Management screen ONLY (Does NOT affect Employee or Branch Manager screens)
+  // 1. Clear / Hide requests from Higher Management screen ONLY (Does NOT affect Employee or Branch Manager screens)
   const handleClearAdminViewOnly = async () => {
-    const currentResolved = (state.requests || []).filter((r) => !r.hiddenFromAdmin && (r.status === 'approved' || r.status === 'rejected' || r.status === 'cancelled' || r.adminApproved === true));
-    if (currentResolved.length === 0) {
-      alert('لا توجد أي طلبات منتهية أو معتمدة ظاهرة حالياً لمسحها (الطلبات المعلقة قيد المراجعة تظل ظاهرة دائماً لضمان استلام الإدارة لها)');
+    if (visibleAdminRequests.length === 0) {
+      alert('لا توجد أي طلبات ظاهرة حالياً لمسحها من شاشة الإدارة');
       return;
     }
     const isConfirmed = window.confirm(
-      `⚠️ تأكيد أرشفة الطلبات المكتملة (${currentResolved.length} طلب):\n\nهل تريد إخفاء الطلبات المنتهية (المعتمدة/المرفوضة) من شاشة الإدارة العليا فقط لترتيب الشاشة؟\n\n✅ ضمان الأمان الكامل:\n1. الطلبات المعلقة قيد المراجعة ستظل ظاهرة دائماً ولن يتم إخفاؤها.\n2. لن تُحذف الطلبات نهائياً من النظام وستظل محفوظة بالكامل في سجلات الموظف والفرع.`
+      `🧹 تأكيد تفريغ شاشة الإدارة العليا (${visibleAdminRequests.length} طلب):\n\nهل تريد مسح وإخفاء هذه الطلبات من شاشة الإدارة العليا فقط لترتيب وتنظيف الشاشة؟\n\n✅ ملاحظة هامة:\n1. لن يتم حذف الطلبات نهائياً من النظام، وتظل محفوظة في سجلات الموظف والفرع.\n2. يمكنك في أي وقت الضغط على زر "عرض المؤرشف" لاستعادتها أو معاينتها.`
     );
     if (!isConfirmed) return;
 
-    const updatedRequests = (state.requests || []).map((r) => {
-      const isResolved = r.status === 'approved' || r.status === 'rejected' || r.status === 'cancelled' || r.adminApproved === true;
-      return isResolved ? { ...r, hiddenFromAdmin: true } : r;
-    });
+    const visibleIds = new Set(visibleAdminRequests.map((r) => String(r.id)));
+
+    const hideItem = (item) => {
+      if (item && item.id && visibleIds.has(String(item.id))) {
+        return { ...item, hiddenFromAdmin: true };
+      }
+      return item;
+    };
 
     const updatedState = {
       ...state,
-      requests: updatedRequests
+      requests: (state.requests || []).map(hideItem),
+      leaveRequests: (state.leaveRequests || []).map(hideItem),
+      shiftSwaps: (state.shiftSwaps || []).map(hideItem),
+      loans: (state.loans || []).map(hideItem),
+      resignationRequests: (state.resignationRequests || []).map(hideItem)
     };
 
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.('🧹 تم مسح الطلبات المكتملة من شاشة الإدارة العليا بنجاح');
+    showToast?.('🧹 تم مسح وإخفاء الطلبات من شاشة الإدارة العليا بنجاح');
   };
 
   // Restore Hidden Requests in Higher Management screen
   const handleRestoreAdminView = async () => {
-    const updatedRequests = (state.requests || []).map((r) => ({
-      ...r,
-      hiddenFromAdmin: false
-    }));
+    const unhideItem = (item) => (item ? { ...item, hiddenFromAdmin: false } : item);
 
     const updatedState = {
       ...state,
-      requests: updatedRequests
+      requests: (state.requests || []).map(unhideItem),
+      leaveRequests: (state.leaveRequests || []).map(unhideItem),
+      shiftSwaps: (state.shiftSwaps || []).map(unhideItem),
+      loans: (state.loans || []).map(unhideItem),
+      resignationRequests: (state.resignationRequests || []).map(unhideItem)
     };
 
     if (setState) setState(updatedState);
@@ -847,9 +872,9 @@ export default function RequestsModule({
     showToast?.('↩️ تم استعادة كافة الطلبات للظهور في شاشة الإدارة العليا');
   };
 
-  // 2. Clear / Delete Requests List from the ENTIRE system with Leave History Protection
+  // 2. Clear / Delete Requests List from the ENTIRE system permanently
   const handleClearAllRequests = async () => {
-    const currentReqs = state.requests || [];
+    const currentReqs = allRequests || [];
     if (currentReqs.length === 0) {
       alert('لا توجد أي طلبات حالياً في النظام لمسحها');
       return;
@@ -860,25 +885,45 @@ export default function RequestsModule({
     if (!isConfirmed) return;
 
     const performClearAllRequests = async () => {
-      const allDeletedIds = currentReqs.map((r) => String(r.id)).filter(Boolean);
-      const updatedDeleted = Array.from(new Set([...(state._deletedIds || []), ...allDeletedIds]));
+      const allDeletedKeys = [];
+      currentReqs.forEach((r) => {
+        if (r && r.id) {
+          const idStr = String(r.id);
+          allDeletedKeys.push(idStr);
+          allDeletedKeys.push(`req_${idStr}`);
+          allDeletedKeys.push(`leave_${idStr}`);
+          allDeletedKeys.push(`swap_${idStr}`);
+          allDeletedKeys.push(`res_${idStr}`);
+          allDeletedKeys.push(`loan_${idStr}`);
+        }
+      });
+
+      const updatedDeleted = Array.from(new Set([...(state._deletedIds || []), ...allDeletedKeys])).slice(-5000);
+
+      // Preserve active financial paid/installments loans, but remove pending/loan requests that were in requests
+      const reqLoanIds = new Set(currentReqs.filter(r => r.type === 'loan' || r.type === 'advance' || r.type === 'meds').map(r => String(r.id)));
+      const updatedLoans = (state.loans || []).filter((ln) => !reqLoanIds.has(String(ln.id)));
 
       const updatedState = {
         ...state,
         requests: [],
+        leaveRequests: [],
+        shiftSwaps: [],
+        loans: updatedLoans,
+        resignationRequests: [],
         _deletedIds: updatedDeleted
       };
 
       if (setState) setState(updatedState);
       if (saveState) await saveState(updatedState);
-      showToast?.('🗑️ تم تفريغ وحذف سجل الطلبات العام بالكامل من النظام!');
+      showToast?.('🗑️ تم تفريغ وحذف سجل الطلبات العام بالكامل نهائياً من كافة الشاشات!');
     };
 
     if (executeWithOwnerGuard) {
       executeWithOwnerGuard({
         lockKey: 'lockFactoryReset',
         actionTitle: 'مسح وحذف سجل الطلبات العام نهائياً',
-        actionDetails: `إجمالي الطلبات: ${currentReqs.length} طلب`,
+        actionDetails: `إجمالي الطلبات المراد حذفها: ${currentReqs.length} طلب`,
         onExecute: performClearAllRequests
       });
     } else {
@@ -1177,16 +1222,14 @@ export default function RequestsModule({
                           </button>
                         )}
 
-                        {isOldProcessed && (
-                          <button
-                            className="del-btn"
-                            style={{ padding: '4px 8px', fontSize: '11.5px' }}
-                            title="حذف الطلب القديم من السجل"
-                            onClick={() => handleDeleteOldRequest(req.id)}
-                          >
-                            🗑️ حذف
-                          </button>
-                        )}
+                        <button
+                          className="del-btn"
+                          style={{ padding: '4px 8px', fontSize: '11.5px' }}
+                          title="حذف الطلب نهائياً من السجل"
+                          onClick={() => handleDeleteSingleRequest(req.id)}
+                        >
+                          🗑️ حذف
+                        </button>
                       </div>
                     </td>
                   </tr>
