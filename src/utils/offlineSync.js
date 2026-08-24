@@ -15,6 +15,7 @@ import {
   loadStateLocally,
   addToPendingQueue,
   clearPendingQueue,
+  getPendingCount,
 } from './offlineStorage';
 import { smartMergeStates } from './stateMerger';
 import { normalizeState } from './formatters';
@@ -189,16 +190,17 @@ export async function loadLocalStateFast() {
 export async function smartLoadState() {
   // 1. فحص وجود بيانات سريعة محلياً
   const localCache = await loadLocalStateFast();
+  const pendingCount = await getPendingCount().catch(() => 0);
 
   if (isOnline()) {
     try {
-      // محاولة جلب أحدث نسخة حية من السحابة بمهلة قصيرة ذكية (3 ثوان كحد أقصى)
-      const remoteData = await fetchRemoteState({ timeout: 3500, useETag: true });
+      // محاولة جلب أحدث نسخة حية من السحابة بمهلة قصيرة ذكية
+      const remoteData = await fetchRemoteState({ timeout: 4500, useETag: true });
       
       if (remoteData && !remoteData.notModified) {
         const normalized = normalizeState(remoteData);
-        // إذا كان لدينا كاش محلي، ندمجهما بذكاء لحماية البيانات
-        const merged = localCache ? smartMergeStates(localCache, normalized) : normalized;
+        // إذا كان هناك تعديلات أوف لاين معلقة فقط، ندمجها؛ وإلا فإن السحابة هي المصدر الموثوق
+        const merged = (localCache && pendingCount > 0) ? smartMergeStates(localCache, normalized) : normalized;
         await saveStateLocally(merged);
         return { data: merged, source: 'cloud' };
       } else if (remoteData && remoteData.notModified) {

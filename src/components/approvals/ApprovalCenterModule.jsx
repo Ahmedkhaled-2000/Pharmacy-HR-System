@@ -55,6 +55,10 @@ export default function ApprovalCenterModule({
 
   const employees = state.employees || [];
   const branches = state.branches || [];
+  const deletedIdsSet = React.useMemo(() => {
+    return new Set((state._deletedIds || []).map(String));
+  }, [state._deletedIds]);
+
   const requests = React.useMemo(() => {
     const list = [...(state.requests || [])];
     const seen = new Set(list.map((r) => String(r.id)));
@@ -62,16 +66,31 @@ export default function ApprovalCenterModule({
     (state.shiftSwaps || []).forEach((r) => { if (r && !seen.has(String(r.id))) { list.push({ ...r, type: 'swap' }); seen.add(String(r.id)); } });
     (state.loans || []).forEach((r) => { if (r && !seen.has(String(r.id))) { list.push({ ...r, type: r.type || 'loan' }); seen.add(String(r.id)); } });
     (state.resignationRequests || []).forEach((r) => { if (r && !seen.has(String(r.id))) { list.push({ ...r, type: 'resignation' }); seen.add(String(r.id)); } });
-    return list;
-  }, [state.requests, state.leaveRequests, state.shiftSwaps, state.loans, state.resignationRequests]);
+    
+    return list.filter((r) => {
+      if (!r || !r.id) return false;
+      const idStr = String(r.id);
+      const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
+      if (deletedIdsSet.has(idStr) || (rawId && (deletedIdsSet.has(rawId) || deletedIdsSet.has(`req_${rawId}`)))) {
+        return false;
+      }
+      return true;
+    });
+  }, [state.requests, state.leaveRequests, state.shiftSwaps, state.loans, state.resignationRequests, deletedIdsSet]);
 
   // Filter requests based on role and double approval rules
   const filteredRequests = requests.filter(req => {
     if (currentRole === 'branch') {
       if (!shouldShowRequestToBranch(req, state)) return false;
       if (currentBranchId) {
-        const emp = employees.find(e => e.id === req.employeeId);
-        return emp && emp.branchId === currentBranchId;
+        const cIdStr = String(currentBranchId);
+        if (req.branchId && String(req.branchId) === cIdStr) return true;
+        const emp = employees.find(e => String(e.id) === String(req.employeeId) || (req.employeeCode && String(e.code) === String(req.employeeCode)));
+        if (emp) {
+          if (emp.branchId && String(emp.branchId) === cIdStr) return true;
+          if (emp.branchesDetails && emp.branchesDetails.some(bd => String(bd.branchId) === cIdStr)) return true;
+        }
+        return false;
       }
     }
     return true;

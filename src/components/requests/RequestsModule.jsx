@@ -82,9 +82,14 @@ export default function RequestsModule({
     return new Set(
       (state.employees || [])
         .filter((e) => String(e.branchId || '') === cIdStr || (e.branchesDetails && e.branchesDetails.some((bd) => String(bd.branchId) === cIdStr)))
-        .map((e) => String(e.id))
+        .flatMap((e) => [String(e.id), String(e.code || '')])
+        .filter(Boolean)
     );
   }, [state.employees, isBranch, cIdStr]);
+
+  const deletedIdsSet = useMemo(() => {
+    return new Set((state._deletedIds || []).map(String));
+  }, [state._deletedIds]);
 
   const allRequests = useMemo(() => {
     const list = [...(state.requests || [])];
@@ -119,7 +124,12 @@ export default function RequestsModule({
     });
 
     return list.filter((r) => {
-      if (!r) return false;
+      if (!r || !r.id) return false;
+      const idStr = String(r.id);
+      const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
+      if (deletedIdsSet.has(idStr) || (rawId && (deletedIdsSet.has(rawId) || deletedIdsSet.has(`req_${rawId}`)))) {
+        return false;
+      }
       if (isBranch) {
         if (!shouldShowRequestToBranch(r, state)) return false;
         const reqBranchId = r.branchId || (state.employees || []).find((e) => String(e.id) === String(r.employeeId))?.branchId;
@@ -128,7 +138,7 @@ export default function RequestsModule({
       }
       return true;
     });
-  }, [state.requests, state.leaveRequests, state.shiftSwaps, state.loans, state.resignationRequests, state.employees, state.approvalRules, isBranch, cIdStr, branchEmpIdSet]);
+  }, [state.requests, state.leaveRequests, state.shiftSwaps, state.loans, state.resignationRequests, state.employees, state.approvalRules, isBranch, cIdStr, branchEmpIdSet, deletedIdsSet]);
 
   const hiddenAdminCount = isBranch ? 0 : allRequests.filter(r => r && r.hiddenFromAdmin).length;
   
@@ -233,16 +243,20 @@ export default function RequestsModule({
     }
 
     const rDate = getRequestDate(r);
+    const isPending = !r.status || r.status === 'pending' || r.status === 'pending_admin' || r.status === 'pending_target';
     
     // Period & Date Filtering (Custom Period / Month Cycle / Specific Date)
     if (filterDate) {
       if (rDate && !rDate.startsWith(filterDate)) return false;
-    } else if ((filterMode === 'custom' || filterMode === 'range') && customFrom && customTo) {
-      const from = customFrom <= customTo ? customFrom : customTo;
-      const to = customFrom <= customTo ? customTo : customFrom;
-      if (rDate && (rDate < from || rDate > to)) return false;
-    } else if (typeof filterFn === 'function' && rDate) {
-      if (!filterFn(rDate)) return false;
+    } else if (!isPending) {
+      // الطلبات المعالجة والمنتهية فقط تخضع لتصفية دورة الشهر عند عدم تحديد تاريخ خاص
+      if ((filterMode === 'custom' || filterMode === 'range') && customFrom && customTo) {
+        const from = customFrom <= customTo ? customFrom : customTo;
+        const to = customFrom <= customTo ? customTo : customFrom;
+        if (rDate && (rDate < from || rDate > to)) return false;
+      } else if (typeof filterFn === 'function' && rDate) {
+        if (!filterFn(rDate)) return false;
+      }
     }
     return true;
   });
@@ -690,29 +704,47 @@ export default function RequestsModule({
   const handleDeleteSingleRequest = async (reqId) => {
     if (!window.confirm('هل أنت متأكد من حذف هذا الطلب نهائياً من سجلات النظام بالكامل؟')) return;
     const idStr = String(reqId);
+    const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
     const updatedDeleted = Array.from(new Set([
       ...(state._deletedIds || []),
       idStr,
+      rawId,
       `req_${idStr}`,
+      `req_${rawId}`,
       `leave_${idStr}`,
+      `leave_${rawId}`,
       `swap_${idStr}`,
+      `swap_${rawId}`,
       `res_${idStr}`,
-      `loan_${idStr}`
-    ])).slice(-5000);
+      `res_${rawId}`,
+      `loan_${idStr}`,
+      `loan_${rawId}`,
+      `notif_${idStr}`,
+      `notif_${rawId}`
+    ])).filter(Boolean).slice(-5000);
+
+    const matchesId = (item) => {
+      if (!item) return false;
+      const itemIdStr = String(item.id || '');
+      const itemRaw = itemIdStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
+      return itemIdStr === idStr || itemIdStr === rawId || itemRaw === idStr || (rawId && itemRaw === rawId) || (item.originalRequestId && (String(item.originalRequestId) === idStr || String(item.originalRequestId) === rawId));
+    };
 
     const updatedState = {
       ...state,
-      requests: (state.requests || []).filter((r) => String(r.id) !== idStr),
-      leaveRequests: (state.leaveRequests || []).filter((r) => String(r.id) !== idStr),
-      shiftSwaps: (state.shiftSwaps || []).filter((r) => String(r.id) !== idStr),
-      loans: (state.loans || []).filter((r) => String(r.id) !== idStr),
-      resignationRequests: (state.resignationRequests || []).filter((r) => String(r.id) !== idStr),
+      requests: (state.requests || []).filter((r) => !matchesId(r)),
+      leaveRequests: (state.leaveRequests || []).filter((r) => !matchesId(r)),
+      shiftSwaps: (state.shiftSwaps || []).filter((r) => !matchesId(r)),
+      loans: (state.loans || []).filter((r) => !matchesId(r)),
+      resignationRequests: (state.resignationRequests || []).filter((r) => !matchesId(r)),
+      leaveHistory: (state.leaveHistory || []).filter((r) => !matchesId(r)),
+      notifications: (state.notifications || []).filter((n) => !matchesId(n) && String(n.requestId || '') !== idStr && String(n.requestId || '') !== rawId),
       _deletedIds: updatedDeleted
     };
 
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
-    if (previewModalReq?.id === reqId) setPreviewModalReq(null);
+    if (previewModalReq?.id === reqId || matchesId(previewModalReq)) setPreviewModalReq(null);
     showToast?.('🗑️ تم حذف الطلب نهائياً بنجاح');
   };
 
@@ -886,23 +918,38 @@ export default function RequestsModule({
 
     const performClearAllRequests = async () => {
       const allDeletedKeys = [];
+      const allReqIdsSet = new Set();
+
       currentReqs.forEach((r) => {
         if (r && r.id) {
           const idStr = String(r.id);
-          allDeletedKeys.push(idStr);
-          allDeletedKeys.push(`req_${idStr}`);
-          allDeletedKeys.push(`leave_${idStr}`);
-          allDeletedKeys.push(`swap_${idStr}`);
-          allDeletedKeys.push(`res_${idStr}`);
-          allDeletedKeys.push(`loan_${idStr}`);
+          const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
+          allReqIdsSet.add(idStr);
+          if (rawId) allReqIdsSet.add(rawId);
+          allDeletedKeys.push(
+            idStr,
+            rawId,
+            `req_${idStr}`,
+            `req_${rawId}`,
+            `leave_${idStr}`,
+            `leave_${rawId}`,
+            `swap_${idStr}`,
+            `swap_${rawId}`,
+            `res_${idStr}`,
+            `res_${rawId}`,
+            `loan_${idStr}`,
+            `loan_${rawId}`,
+            `notif_${idStr}`,
+            `notif_${rawId}`
+          );
         }
       });
 
-      const updatedDeleted = Array.from(new Set([...(state._deletedIds || []), ...allDeletedKeys])).slice(-5000);
+      const updatedDeleted = Array.from(new Set([...(state._deletedIds || []), ...allDeletedKeys])).filter(Boolean).slice(-5000);
 
-      // Preserve active financial paid/installments loans, but remove pending/loan requests that were in requests
-      const reqLoanIds = new Set(currentReqs.filter(r => r.type === 'loan' || r.type === 'advance' || r.type === 'meds').map(r => String(r.id)));
-      const updatedLoans = (state.loans || []).filter((ln) => !reqLoanIds.has(String(ln.id)));
+      // الحفاظ على السلف المالية المعتمدة فقط، ومسح الطلبات المعلقة والمسجلة كطلبات
+      const reqLoanIds = new Set(currentReqs.filter(r => r.type === 'loan' || r.type === 'advance' || r.type === 'meds' || r.type === 'credit_medicine').map(r => String(r.id)));
+      const updatedLoans = (state.loans || []).filter((ln) => !reqLoanIds.has(String(ln.id)) && !allReqIdsSet.has(String(ln.id)));
 
       const updatedState = {
         ...state,
@@ -911,6 +958,7 @@ export default function RequestsModule({
         shiftSwaps: [],
         loans: updatedLoans,
         resignationRequests: [],
+        notifications: (state.notifications || []).filter(n => !n.requestId || (!allReqIdsSet.has(String(n.requestId)) && !allReqIdsSet.has(String(n.id)))),
         _deletedIds: updatedDeleted
       };
 

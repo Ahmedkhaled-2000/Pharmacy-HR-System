@@ -1,9 +1,8 @@
 <?php
 /**
- * Archive System API Handler for Pharmacy HR System
+ * Archive System API Handler for Pharmacy HR & Archive System
  * Handles Authentication, Invoices, Suppliers, Employees, Settings, Mappings, Excel Data, Drive Sync
- * 100% Feature-Parity with Standalone Pharmacy Archive System
- * MariaDB 10.11+ via mysqli with Prepared Statements
+ * Compatible with PHP 8.1 - 8.5 & PostgreSQL 16+/18+ (Default) / MySQL via PDO
  */
 
 declare(strict_types=1);
@@ -64,7 +63,7 @@ function verifyArchiveToken(?string $token): ?array
 }
 
 /**
- * التأكد التلقائي والترقية الذاتية لجداول الأرشيف في قاعدة البيانات (Self-Healing Schema Migration)
+ * التأكد التلقائي والترقية الذاتية لجداول الأرشيف في قاعدة البيانات
  */
 function ensureArchiveTablesExist(): void
 {
@@ -73,193 +72,183 @@ function ensureArchiveTablesExist(): void
     $initialized = true;
 
     try {
+        $driver = Database::getDriver();
         $db = Database::getConnection();
 
-        // 1. archive_suppliers
-        $db->query("CREATE TABLE IF NOT EXISTS `archive_suppliers` (
-            `id` VARCHAR(36) NOT NULL PRIMARY KEY,
-            `name` VARCHAR(255) NOT NULL UNIQUE,
-            `phone` VARCHAR(50) NULL,
-            `email` VARCHAR(255) NULL,
-            `address` TEXT NULL,
-            `tax_number` VARCHAR(100) NULL,
-            `notes` TEXT NULL,
-            `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-            `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-            INDEX `idx_archive_supplier_name` (`name`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+        if ($driver === 'pgsql') {
+            $db->exec("CREATE TABLE IF NOT EXISTS archive_suppliers (
+                id VARCHAR(36) PRIMARY KEY,
+                name VARCHAR(255) NOT NULL UNIQUE,
+                phone VARCHAR(50) NULL,
+                email VARCHAR(255) NULL,
+                address TEXT NULL,
+                tax_number VARCHAR(100) NULL,
+                notes TEXT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );");
 
-        // 2. archive_employees
-        $db->query("CREATE TABLE IF NOT EXISTS `archive_employees` (
-            `id` VARCHAR(36) NOT NULL PRIMARY KEY,
-            `name` VARCHAR(255) NOT NULL UNIQUE,
-            `role` VARCHAR(100) NULL DEFAULT 'أمين مخزن',
-            `phone` VARCHAR(50) NULL,
-            `active` TINYINT(1) NOT NULL DEFAULT 1,
-            `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-            `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-            INDEX `idx_archive_emp_active` (`active`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+            $db->exec("CREATE TABLE IF NOT EXISTS archive_employees (
+                id VARCHAR(36) PRIMARY KEY,
+                name VARCHAR(255) NOT NULL UNIQUE,
+                role VARCHAR(100) NULL DEFAULT 'أمين مخزن',
+                phone VARCHAR(50) NULL,
+                active SMALLINT NOT NULL DEFAULT 1,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );");
 
-        // 3. archive_invoices
-        $db->query("CREATE TABLE IF NOT EXISTS `archive_invoices` (
-            `id` VARCHAR(36) NOT NULL PRIMARY KEY,
-            `invoice_number` VARCHAR(100) NOT NULL,
-            `supplier_id` VARCHAR(36) NOT NULL,
-            `invoice_date` DATETIME NOT NULL,
-            `total_amount` DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
-            `discount` DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
-            `net_amount` DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
-            `status` VARCHAR(50) NOT NULL DEFAULT 'ARCHIVED',
-            `file_url` LONGTEXT NULL,
-            `drive_file_id` VARCHAR(255) NULL,
-            `file_name` VARCHAR(255) NULL,
-            `file_type` VARCHAR(50) NULL,
-            `upload_mode` VARCHAR(50) NOT NULL DEFAULT 'AUTO_EXTRACT',
-            `receiver_id` VARCHAR(36) NULL,
-            `entry_clerk_id` VARCHAR(36) NULL,
-            `notes` TEXT NULL,
-            `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-            `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-            INDEX `idx_archive_inv_num` (`invoice_number`),
-            INDEX `idx_archive_inv_supplier` (`supplier_id`),
-            INDEX `idx_archive_inv_date` (`invoice_date`),
-            INDEX `idx_archive_inv_receiver` (`receiver_id`),
-            INDEX `idx_archive_inv_clerk` (`entry_clerk_id`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+            $db->exec("CREATE TABLE IF NOT EXISTS archive_invoices (
+                id VARCHAR(36) PRIMARY KEY,
+                invoice_number VARCHAR(100) NOT NULL,
+                supplier_id VARCHAR(36) NOT NULL,
+                invoice_date TIMESTAMPTZ NOT NULL,
+                total_amount NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+                discount NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+                net_amount NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+                status VARCHAR(50) NOT NULL DEFAULT 'ARCHIVED',
+                file_url TEXT NULL,
+                drive_file_id VARCHAR(255) NULL,
+                file_name VARCHAR(255) NULL,
+                file_type VARCHAR(50) NULL,
+                upload_mode VARCHAR(50) NOT NULL DEFAULT 'AUTO_EXTRACT',
+                receiver_id VARCHAR(36) NULL,
+                entry_clerk_id VARCHAR(36) NULL,
+                notes TEXT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );");
 
-        // 4. archive_invoice_items
-        $db->query("CREATE TABLE IF NOT EXISTS `archive_invoice_items` (
-            `id` VARCHAR(36) NOT NULL PRIMARY KEY,
-            `invoice_id` VARCHAR(36) NOT NULL,
-            `product_name` VARCHAR(255) NOT NULL,
-            `quantity` INT NOT NULL DEFAULT 1,
-            `unit_price` DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
-            `discount` DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
-            `total_price` DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
-            `selling_price` DECIMAL(10, 2) NULL,
-            `batch_number` VARCHAR(100) NULL,
-            `expiry_date` DATE NULL,
-            `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-            `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-            INDEX `idx_archive_item_invoice` (`invoice_id`),
-            INDEX `idx_archive_item_product` (`product_name`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+            $db->exec("CREATE TABLE IF NOT EXISTS archive_invoice_items (
+                id VARCHAR(36) PRIMARY KEY,
+                invoice_id VARCHAR(36) NOT NULL,
+                product_name VARCHAR(255) NOT NULL,
+                quantity INTEGER NOT NULL DEFAULT 1,
+                unit_price NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+                discount NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+                total_price NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+                selling_price NUMERIC(10, 2) NULL,
+                batch_number VARCHAR(100) NULL,
+                expiry_date DATE NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );");
 
-        // 5. archive_column_mappings
-        $db->query("CREATE TABLE IF NOT EXISTS `archive_column_mappings` (
-            `id` VARCHAR(36) NOT NULL PRIMARY KEY,
-            `supplier_id` VARCHAR(36) NOT NULL,
-            `raw_column_name` VARCHAR(255) NOT NULL,
-            `standard_field` VARCHAR(100) NOT NULL,
-            `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-            `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-            UNIQUE KEY `uq_archive_supp_raw_col` (`supplier_id`, `raw_column_name`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+            $db->exec("CREATE TABLE IF NOT EXISTS archive_column_mappings (
+                id VARCHAR(36) PRIMARY KEY,
+                supplier_id VARCHAR(36) NOT NULL,
+                raw_column_name VARCHAR(255) NOT NULL,
+                standard_field VARCHAR(100) NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT uq_archive_supp_raw_col UNIQUE (supplier_id, raw_column_name)
+            );");
 
-        // 6. archive_system_settings
-        $db->query("CREATE TABLE IF NOT EXISTS `archive_system_settings` (
-            `key_name` VARCHAR(100) NOT NULL PRIMARY KEY,
-            `value_data` LONGTEXT NOT NULL,
-            `description` TEXT NULL,
-            `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+            $db->exec("CREATE TABLE IF NOT EXISTS archive_system_settings (
+                key_name VARCHAR(100) PRIMARY KEY,
+                value_data TEXT NOT NULL,
+                description TEXT NULL,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );");
 
-        // 7. archive_import_logs
-        $db->query("CREATE TABLE IF NOT EXISTS `archive_import_logs` (
-            `id` VARCHAR(36) NOT NULL PRIMARY KEY,
-            `file_name` VARCHAR(255) NOT NULL,
-            `file_type` VARCHAR(50) NOT NULL,
-            `upload_mode` VARCHAR(50) NOT NULL,
-            `status` VARCHAR(50) NOT NULL,
-            `items_extracted` INT NOT NULL DEFAULT 0,
-            `error_message` TEXT NULL,
-            `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-            INDEX `idx_archive_log_created` (`created_at`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+            $db->exec("CREATE TABLE IF NOT EXISTS archive_import_logs (
+                id VARCHAR(36) PRIMARY KEY,
+                file_name VARCHAR(255) NOT NULL,
+                file_type VARCHAR(50) NOT NULL,
+                upload_mode VARCHAR(50) NOT NULL,
+                status VARCHAR(50) NOT NULL,
+                items_extracted INTEGER NOT NULL DEFAULT 0,
+                error_message TEXT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );");
+        } else {
+            $db->exec("CREATE TABLE IF NOT EXISTS archive_suppliers (
+                id VARCHAR(36) NOT NULL PRIMARY KEY,
+                name VARCHAR(255) NOT NULL UNIQUE,
+                phone VARCHAR(50) NULL,
+                email VARCHAR(255) NULL,
+                address TEXT NULL,
+                tax_number VARCHAR(100) NULL,
+                notes TEXT NULL,
+                created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+                updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+                INDEX idx_archive_supplier_name (name)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
 
-        // =====================================================================
-        // Safe Dynamic Schema Auto-Repair (Fixes column discrepancies)
-        // =====================================================================
-        
-        // Repair archive_invoices
-        $invoiceCols = [];
-        $colRes = $db->query("SHOW COLUMNS FROM `archive_invoices`");
-        if ($colRes) {
-            while ($row = $colRes->fetch_assoc()) {
-                $invoiceCols[$row['Field']] = true;
-            }
-        }
+            $db->exec("CREATE TABLE IF NOT EXISTS archive_employees (
+                id VARCHAR(36) NOT NULL PRIMARY KEY,
+                name VARCHAR(255) NOT NULL UNIQUE,
+                role VARCHAR(100) NULL DEFAULT 'أمين مخزن',
+                phone VARCHAR(50) NULL,
+                active TINYINT(1) NOT NULL DEFAULT 1,
+                created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+                updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+                INDEX idx_archive_emp_active (active)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
 
-        if (!isset($invoiceCols['discount'])) {
-            if (isset($invoiceCols['total_discount'])) {
-                $db->query("ALTER TABLE `archive_invoices` ADD COLUMN `discount` DECIMAL(10, 2) NOT NULL DEFAULT 0.00 AFTER `total_amount`");
-                $db->query("UPDATE `archive_invoices` SET `discount` = `total_discount` WHERE `discount` = 0 AND `total_discount` > 0");
-            } else {
-                $db->query("ALTER TABLE `archive_invoices` ADD COLUMN `discount` DECIMAL(10, 2) NOT NULL DEFAULT 0.00 AFTER `total_amount`");
-            }
-        }
+            $db->exec("CREATE TABLE IF NOT EXISTS archive_invoices (
+                id VARCHAR(36) NOT NULL PRIMARY KEY,
+                invoice_number VARCHAR(100) NOT NULL,
+                supplier_id VARCHAR(36) NOT NULL,
+                invoice_date DATETIME NOT NULL,
+                total_amount DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+                discount DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+                net_amount DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+                status VARCHAR(50) NOT NULL DEFAULT 'ARCHIVED',
+                file_url TEXT NULL,
+                drive_file_id VARCHAR(255) NULL,
+                file_name VARCHAR(255) NULL,
+                file_type VARCHAR(50) NULL,
+                upload_mode VARCHAR(50) NOT NULL DEFAULT 'AUTO_EXTRACT',
+                receiver_id VARCHAR(36) NULL,
+                entry_clerk_id VARCHAR(36) NULL,
+                notes TEXT NULL,
+                created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+                updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
 
-        if (!isset($invoiceCols['status'])) {
-            $db->query("ALTER TABLE `archive_invoices` ADD COLUMN `status` VARCHAR(50) NOT NULL DEFAULT 'ARCHIVED' AFTER `net_amount`");
-        }
-        if (!isset($invoiceCols['file_name'])) {
-            $db->query("ALTER TABLE `archive_invoices` ADD COLUMN `file_name` VARCHAR(255) NULL AFTER `drive_file_id`");
-        }
-        if (!isset($invoiceCols['file_type'])) {
-            $db->query("ALTER TABLE `archive_invoices` ADD COLUMN `file_type` VARCHAR(50) NULL AFTER `file_name`");
-        }
-        if (!isset($invoiceCols['upload_mode'])) {
-            $db->query("ALTER TABLE `archive_invoices` ADD COLUMN `upload_mode` VARCHAR(50) NOT NULL DEFAULT 'AUTO_EXTRACT' AFTER `file_type`");
-        }
-        if (!isset($invoiceCols['receiver_id'])) {
-            $db->query("ALTER TABLE `archive_invoices` ADD COLUMN `receiver_id` VARCHAR(36) NULL");
-        }
-        if (!isset($invoiceCols['entry_clerk_id'])) {
-            $db->query("ALTER TABLE `archive_invoices` ADD COLUMN `entry_clerk_id` VARCHAR(36) NULL");
-        }
-        if (!isset($invoiceCols['notes'])) {
-            $db->query("ALTER TABLE `archive_invoices` ADD COLUMN `notes` TEXT NULL");
-        }
+            $db->exec("CREATE TABLE IF NOT EXISTS archive_invoice_items (
+                id VARCHAR(36) NOT NULL PRIMARY KEY,
+                invoice_id VARCHAR(36) NOT NULL,
+                product_name VARCHAR(255) NOT NULL,
+                quantity INT NOT NULL DEFAULT 1,
+                unit_price DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+                discount DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+                total_price DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+                selling_price DECIMAL(10, 2) NULL,
+                batch_number VARCHAR(100) NULL,
+                expiry_date DATE NULL,
+                created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+                updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
 
-        // Repair archive_invoice_items
-        $itemCols = [];
-        $itemColRes = $db->query("SHOW COLUMNS FROM `archive_invoice_items`");
-        if ($itemColRes) {
-            while ($row = $itemColRes->fetch_assoc()) {
-                $itemCols[$row['Field']] = true;
-            }
-        }
+            $db->exec("CREATE TABLE IF NOT EXISTS archive_column_mappings (
+                id VARCHAR(36) NOT NULL PRIMARY KEY,
+                supplier_id VARCHAR(36) NOT NULL,
+                raw_column_name VARCHAR(255) NOT NULL,
+                standard_field VARCHAR(100) NOT NULL,
+                created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+                updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+                UNIQUE KEY uq_archive_supp_raw_col (supplier_id, raw_column_name)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
 
-        if (!isset($itemCols['product_name'])) {
-            if (isset($itemCols['item_name'])) {
-                $db->query("ALTER TABLE `archive_invoice_items` ADD COLUMN `product_name` VARCHAR(255) NOT NULL DEFAULT 'منتج' AFTER `invoice_id`");
-                $db->query("UPDATE `archive_invoice_items` SET `product_name` = `item_name` WHERE `item_name` IS NOT NULL");
-            } else {
-                $db->query("ALTER TABLE `archive_invoice_items` ADD COLUMN `product_name` VARCHAR(255) NOT NULL DEFAULT 'منتج' AFTER `invoice_id`");
-            }
-        }
+            $db->exec("CREATE TABLE IF NOT EXISTS archive_system_settings (
+                key_name VARCHAR(100) NOT NULL PRIMARY KEY,
+                value_data LONGTEXT NOT NULL,
+                description TEXT NULL,
+                updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
 
-        if (!isset($itemCols['selling_price'])) {
-            if (isset($itemCols['public_price'])) {
-                $db->query("ALTER TABLE `archive_invoice_items` ADD COLUMN `selling_price` DECIMAL(10, 2) NULL AFTER `total_price`");
-                $db->query("UPDATE `archive_invoice_items` SET `selling_price` = `public_price` WHERE `public_price` IS NOT NULL");
-            } else {
-                $db->query("ALTER TABLE `archive_invoice_items` ADD COLUMN `selling_price` DECIMAL(10, 2) NULL AFTER `total_price`");
-            }
-        }
-
-        if (!isset($itemCols['discount'])) {
-            $db->query("ALTER TABLE `archive_invoice_items` ADD COLUMN `discount` DECIMAL(10, 2) NOT NULL DEFAULT 0.00 AFTER `unit_price`");
-        }
-        if (!isset($itemCols['batch_number'])) {
-            $db->query("ALTER TABLE `archive_invoice_items` ADD COLUMN `batch_number` VARCHAR(100) NULL");
-        }
-        if (!isset($itemCols['expiry_date'])) {
-            $db->query("ALTER TABLE `archive_invoice_items` ADD COLUMN `expiry_date` DATE NULL");
-        }
-        if (!isset($itemCols['updated_at'])) {
-            $db->query("ALTER TABLE `archive_invoice_items` ADD COLUMN `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)");
+            $db->exec("CREATE TABLE IF NOT EXISTS archive_import_logs (
+                id VARCHAR(36) NOT NULL PRIMARY KEY,
+                file_name VARCHAR(255) NOT NULL,
+                file_type VARCHAR(50) NOT NULL,
+                upload_mode VARCHAR(50) NOT NULL,
+                status VARCHAR(50) NOT NULL,
+                items_extracted INT NOT NULL DEFAULT 0,
+                error_message TEXT NULL,
+                created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
         }
 
         // Default seeds for settings
@@ -276,13 +265,9 @@ function ensureArchiveTablesExist(): void
         ];
 
         foreach ($defaults as $k => $v) {
-            $existing = Database::queryOne("SELECT `key_name` FROM `archive_system_settings` WHERE `key_name` = ? LIMIT 1", "s", [$k]);
+            $existing = Database::queryOne("SELECT key_name FROM archive_system_settings WHERE key_name = ? LIMIT 1", [$k]);
             if (!$existing) {
-                Database::execute(
-                    "INSERT INTO `archive_system_settings` (`key_name`, `value_data`) VALUES (?, ?)",
-                    "ss",
-                    [$k, $v]
-                );
+                Database::execute("INSERT INTO archive_system_settings (key_name, value_data) VALUES (?, ?)", [$k, $v]);
             }
         }
 
@@ -293,18 +278,26 @@ function ensureArchiveTablesExist(): void
 
 function getArchiveSetting(string $key, string $default = ''): string
 {
-    $row = Database::queryOne("SELECT `value_data` FROM `archive_system_settings` WHERE `key_name` = ? LIMIT 1", "s", [$key]);
+    $row = Database::queryOne("SELECT value_data FROM archive_system_settings WHERE key_name = ? LIMIT 1", [$key]);
     return $row ? (string)$row['value_data'] : $default;
 }
 
 function setArchiveSetting(string $key, string $value): void
 {
-    Database::execute(
-        "INSERT INTO `archive_system_settings` (`key_name`, `value_data`) VALUES (?, ?)
-         ON DUPLICATE KEY UPDATE `value_data` = VALUES(`value_data`), `updated_at` = NOW(6)",
-        "ss",
-        [$key, $value]
-    );
+    $driver = Database::getDriver();
+    if ($driver === 'pgsql') {
+        Database::execute(
+            "INSERT INTO archive_system_settings (key_name, value_data, updated_at) VALUES (?, ?, NOW())
+             ON CONFLICT (key_name) DO UPDATE SET value_data = EXCLUDED.value_data, updated_at = NOW()",
+            [$key, $value]
+        );
+    } else {
+        Database::execute(
+            "INSERT INTO archive_system_settings (key_name, value_data, updated_at) VALUES (?, ?, NOW())
+             ON DUPLICATE KEY UPDATE value_data = VALUES(value_data), updated_at = NOW()",
+            [$key, $value]
+        );
+    }
 }
 
 /**
@@ -317,6 +310,8 @@ function handleArchiveApi(string $subPath, string $method): void
     $rawInput = file_get_contents('php://input');
     $requestData = !empty($rawInput) ? json_decode($rawInput, true) : [];
     if (!is_array($requestData)) $requestData = [];
+
+    $driver = Database::getDriver();
 
     // Parse subPath segments
     $segments = array_values(array_filter(explode('/', trim($subPath, '/'))));
@@ -397,21 +392,16 @@ function handleArchiveApi(string $subPath, string $method): void
             // 2. الفواتير والبنود (Invoices & Items Endpoints)
             // =================================================================
             case 'invoices':
-                // Check for sub-actions like /invoices/[id]/excel-data or /invoices/[id]/attach
                 if (!empty($action) && $action !== 'batch' && !empty($subAction)) {
                     $invoiceId = $action;
 
                     // 2.1 Excel Data Sub-route: /invoices/[id]/excel-data
                     if ($subAction === 'excel-data' && $method === 'GET') {
-                        $inv = Database::queryOne("SELECT `file_url`, `drive_file_id`, `file_name`, `file_type` FROM `archive_invoices` WHERE `id` = ? LIMIT 1", "s", [$invoiceId]);
+                        $inv = Database::queryOne("SELECT file_url, drive_file_id, file_name, file_type FROM archive_invoices WHERE id = ? LIMIT 1", [$invoiceId]);
                         if (!$inv) jsonResponse(['success' => false, 'error' => 'الفاتورة غير موجودة'], 404);
 
                         $fileUrl = (string)($inv['file_url'] ?? '');
-                        $sheets = [];
-
-                        // Parse from Base64 if available
                         if (str_starts_with($fileUrl, 'data:')) {
-                            // Can be parsed on client side or returned directly
                             jsonResponse(['success' => true, 'fileUrl' => $fileUrl, 'fileName' => $inv['file_name']]);
                         } else {
                             jsonResponse(['success' => true, 'fileUrl' => $fileUrl, 'driveFileId' => $inv['drive_file_id'], 'fileName' => $inv['file_name']]);
@@ -427,15 +417,13 @@ function handleArchiveApi(string $subPath, string $method): void
                             $fileType = (string)($requestData['fileType'] ?? '');
 
                             Database::execute(
-                                "UPDATE `archive_invoices` SET `file_url` = ?, `drive_file_id` = ?, `file_name` = ?, `file_type` = ?, `updated_at` = NOW(6) WHERE `id` = ?",
-                                "sssss",
+                                "UPDATE archive_invoices SET file_url = ?, drive_file_id = ?, file_name = ?, file_type = ?, updated_at = NOW() WHERE id = ?",
                                 [$fileUrl, $driveFileId, $fileName, $fileType, $invoiceId]
                             );
                             jsonResponse(['success' => true, 'message' => 'تم إرفاق المستند بنجاح']);
                         } elseif ($method === 'DELETE') {
                             Database::execute(
-                                "UPDATE `archive_invoices` SET `file_url` = NULL, `drive_file_id` = NULL, `file_name` = NULL, `file_type` = NULL, `updated_at` = NOW(6) WHERE `id` = ?",
-                                "s",
+                                "UPDATE archive_invoices SET file_url = NULL, drive_file_id = NULL, file_name = NULL, file_type = NULL, updated_at = NOW() WHERE id = ?",
                                 [$invoiceId]
                             );
                             jsonResponse(['success' => true, 'message' => 'تم إزالة المستند بنجاح']);
@@ -449,8 +437,7 @@ function handleArchiveApi(string $subPath, string $method): void
                     if (empty($invoicesList)) jsonResponse(['success' => false, 'error' => 'لا توجد فواتير للحفظ'], 400);
 
                     $savedInvoices = [];
-                    $db = Database::getConnection();
-                    $db->begin_transaction();
+                    Database::beginTransaction();
 
                     try {
                         foreach ($invoicesList as $singleInv) {
@@ -462,20 +449,20 @@ function handleArchiveApi(string $subPath, string $method): void
                             $suppName = trim((string)($singleInv['supplierName'] ?? $singleInv['supplier_name'] ?? ''));
 
                             if (empty($suppId) && !empty($suppName)) {
-                                $existingSup = Database::queryOne("SELECT `id` FROM `archive_suppliers` WHERE `name` = ? LIMIT 1", "s", [$suppName]);
+                                $existingSup = Database::queryOne("SELECT id FROM archive_suppliers WHERE name = ? LIMIT 1", [$suppName]);
                                 if ($existingSup) {
                                     $suppId = $existingSup['id'];
                                 } else {
                                     $suppId = generateUuid();
-                                    Database::execute("INSERT INTO `archive_suppliers` (`id`, `name`) VALUES (?, ?)", "ss", [$suppId, $suppName]);
+                                    Database::execute("INSERT INTO archive_suppliers (id, name, created_at, updated_at) VALUES (?, ?, NOW(), NOW())", [$suppId, $suppName]);
                                 }
                             } elseif (empty($suppId)) {
-                                $defaultSup = Database::queryOne("SELECT `id` FROM `archive_suppliers` LIMIT 1");
+                                $defaultSup = Database::queryOne("SELECT id FROM archive_suppliers LIMIT 1");
                                 if ($defaultSup) {
                                     $suppId = $defaultSup['id'];
                                 } else {
                                     $suppId = generateUuid();
-                                    Database::execute("INSERT INTO `archive_suppliers` (`id`, `name`) VALUES (?, 'مورد عام')", "s", [$suppId]);
+                                    Database::execute("INSERT INTO archive_suppliers (id, name, created_at, updated_at) VALUES (?, 'مورد عام', NOW(), NOW())", [$suppId]);
                                 }
                             }
 
@@ -494,23 +481,23 @@ function handleArchiveApi(string $subPath, string $method): void
                             $nts = (string)($singleInv['notes'] ?? '');
                             $itms = is_array($singleInv['items'] ?? null) ? $singleInv['items'] : [];
 
-                            $sqlInv = "INSERT INTO `archive_invoices` (
-                                `id`, `invoice_number`, `supplier_id`, `invoice_date`, `total_amount`, `discount`, `net_amount`,
-                                `status`, `file_url`, `drive_file_id`, `file_name`, `file_type`, `upload_mode`,
-                                `receiver_id`, `entry_clerk_id`, `notes`, `created_at`, `updated_at`
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(6), NOW(6))";
+                            $sqlInv = "INSERT INTO archive_invoices (
+                                id, invoice_number, supplier_id, invoice_date, total_amount, discount, net_amount,
+                                status, file_url, drive_file_id, file_name, file_type, upload_mode,
+                                receiver_id, entry_clerk_id, notes, created_at, updated_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
 
-                            Database::execute($sqlInv, "ssssdddsssssssss", [
+                            Database::execute($sqlInv, [
                                 $invId, $invNumber, $suppId, $invDate, $totAmt, $disc, $netAmt,
                                 $stat, $fUrl, $dId, $fName, $fType, $uMode,
                                 $recId, $entId, $nts
                             ]);
 
                             if (!empty($itms)) {
-                                $sqlItem = "INSERT INTO `archive_invoice_items` (
-                                    `id`, `invoice_id`, `product_name`, `quantity`, `unit_price`, `discount`,
-                                    `total_price`, `selling_price`, `batch_number`, `expiry_date`, `created_at`, `updated_at`
-                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(6), NOW(6))";
+                                $sqlItem = "INSERT INTO archive_invoice_items (
+                                    id, invoice_id, product_name, quantity, unit_price, discount,
+                                    total_price, selling_price, batch_number, expiry_date, created_at, updated_at
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
 
                                 foreach ($itms as $item) {
                                     $itemId = !empty($item['id']) && !str_starts_with((string)$item['id'], 'item_') ? (string)$item['id'] : generateUuid();
@@ -523,7 +510,7 @@ function handleArchiveApi(string $subPath, string $method): void
                                     $batchNum = (string)($item['batchNumber'] ?? $item['batch_number'] ?? '');
                                     $expiry = !empty($item['expiryDate']) ? (string)$item['expiryDate'] : (!empty($item['expiry_date']) ? (string)$item['expiry_date'] : null);
 
-                                    Database::execute($sqlItem, "sssiddssdss", [
+                                    Database::execute($sqlItem, [
                                         $itemId, $invId, $prodName, $qty, $unitPrice, $itemDisc,
                                         $totalPrice, $sellingPrice, $batchNum, $expiry
                                     ]);
@@ -532,10 +519,10 @@ function handleArchiveApi(string $subPath, string $method): void
                             $savedInvoices[] = $invId;
                         }
 
-                        $db->commit();
+                        Database::commit();
                         jsonResponse(['success' => true, 'message' => "تم حفظ " . count($savedInvoices) . " فاتورة بنجاح", 'ids' => $savedInvoices]);
                     } catch (Throwable $e) {
-                        $db->rollback();
+                        Database::rollback();
                         jsonResponse(['success' => false, 'error' => 'فشل حفظ دفعة الفواتير: ' . $e->getMessage()], 500);
                     }
                 }
@@ -552,17 +539,16 @@ function handleArchiveApi(string $subPath, string $method): void
                                     s.phone AS supplier_phone,
                                     r.name AS receiver_name,
                                     c.name AS entry_clerk_name
-                             FROM `archive_invoices` i
-                             LEFT JOIN `archive_suppliers` s ON i.supplier_id = s.id
-                             LEFT JOIN `archive_employees` r ON i.receiver_id = r.id
-                             LEFT JOIN `archive_employees` c ON i.entry_clerk_id = c.id
+                             FROM archive_invoices i
+                             LEFT JOIN archive_suppliers s ON i.supplier_id = s.id
+                             LEFT JOIN archive_employees r ON i.receiver_id = r.id
+                             LEFT JOIN archive_employees c ON i.entry_clerk_id = c.id
                              WHERE i.id = ? LIMIT 1",
-                            "s",
                             [$invoiceId]
                         );
 
                         if ($inv) {
-                            $items = Database::query("SELECT * FROM `archive_invoice_items` WHERE `invoice_id` = ? ORDER BY `created_at` ASC", "s", [$invoiceId]);
+                            $items = Database::query("SELECT * FROM archive_invoice_items WHERE invoice_id = ? ORDER BY created_at ASC", [$invoiceId]);
                             
                             $formattedItems = array_map(function($it) {
                                 return [
@@ -616,37 +602,30 @@ function handleArchiveApi(string $subPath, string $method): void
                     $endDate = trim((string)($_GET['endDate'] ?? ''));
 
                     $where = ["1=1"];
-                    $types = "";
                     $params = [];
 
                     if (!empty($supplierFilter)) {
-                        $where[] = "i.`supplier_id` = ?";
-                        $types .= "s";
+                        $where[] = "i.supplier_id = ?";
                         $params[] = $supplierFilter;
                     }
                     if (!empty($receiverFilter)) {
-                        $where[] = "i.`receiver_id` = ?";
-                        $types .= "s";
+                        $where[] = "i.receiver_id = ?";
                         $params[] = $receiverFilter;
                     }
                     if (!empty($clerkFilter)) {
-                        $where[] = "i.`entry_clerk_id` = ?";
-                        $types .= "s";
+                        $where[] = "i.entry_clerk_id = ?";
                         $params[] = $clerkFilter;
                     }
                     if (!empty($startDate)) {
-                        $where[] = "i.`invoice_date` >= ?";
-                        $types .= "s";
+                        $where[] = "i.invoice_date >= ?";
                         $params[] = $startDate . ' 00:00:00';
                     }
                     if (!empty($endDate)) {
-                        $where[] = "i.`invoice_date` <= ?";
-                        $types .= "s";
+                        $where[] = "i.invoice_date <= ?";
                         $params[] = $endDate . ' 23:59:59';
                     }
                     if (!empty($searchFilter)) {
-                        $where[] = "(i.`invoice_number` LIKE ? OR s.`name` LIKE ? OR i.`notes` LIKE ?)";
-                        $types .= "sss";
+                        $where[] = "(LOWER(i.invoice_number) LIKE LOWER(?) OR LOWER(s.name) LIKE LOWER(?) OR LOWER(COALESCE(i.notes, '')) LIKE LOWER(?))";
                         $searchTerm = "%{$searchFilter}%";
                         $params[] = $searchTerm;
                         $params[] = $searchTerm;
@@ -658,20 +637,20 @@ function handleArchiveApi(string $subPath, string $method): void
                                    s.phone AS supplier_phone,
                                    r.name AS receiver_name,
                                    c.name AS entry_clerk_name,
-                                   (SELECT COUNT(*) FROM `archive_invoice_items` WHERE `invoice_id` = i.id) AS items_count
-                            FROM `archive_invoices` i
-                            LEFT JOIN `archive_suppliers` s ON i.supplier_id = s.id
-                            LEFT JOIN `archive_employees` r ON i.receiver_id = r.id
-                            LEFT JOIN `archive_employees` c ON i.entry_clerk_id = c.id
+                                   (SELECT COUNT(*) FROM archive_invoice_items WHERE invoice_id = i.id) AS items_count
+                            FROM archive_invoices i
+                            LEFT JOIN archive_suppliers s ON i.supplier_id = s.id
+                            LEFT JOIN archive_employees r ON i.receiver_id = r.id
+                            LEFT JOIN archive_employees c ON i.entry_clerk_id = c.id
                             WHERE " . implode(" AND ", $where) . "
-                            ORDER BY i.`invoice_date` DESC, i.`created_at` DESC";
+                            ORDER BY i.invoice_date DESC, i.created_at DESC";
 
-                    $invoices = !empty($params) ? Database::query($sql, $types, $params) : Database::query($sql);
+                    $invoices = Database::query($sql, $params);
 
                     // Attach items & standardize props
                     foreach ($invoices as &$inv) {
                         $invId = $inv['id'];
-                        $items = Database::query("SELECT * FROM `archive_invoice_items` WHERE `invoice_id` = ? ORDER BY `created_at` ASC", "s", [$invId]);
+                        $items = Database::query("SELECT * FROM archive_invoice_items WHERE invoice_id = ? ORDER BY created_at ASC", [$invId]);
                         
                         $inv['items'] = array_map(function($it) {
                             return [
@@ -723,20 +702,20 @@ function handleArchiveApi(string $subPath, string $method): void
                     $supplierName = trim((string)($requestData['supplierName'] ?? $requestData['supplier_name'] ?? ''));
 
                     if (empty($supplierId) && !empty($supplierName)) {
-                        $existingSup = Database::queryOne("SELECT `id` FROM `archive_suppliers` WHERE `name` = ? LIMIT 1", "s", [$supplierName]);
+                        $existingSup = Database::queryOne("SELECT id FROM archive_suppliers WHERE name = ? LIMIT 1", [$supplierName]);
                         if ($existingSup) {
                             $supplierId = $existingSup['id'];
                         } else {
                             $supplierId = generateUuid();
-                            Database::execute("INSERT INTO `archive_suppliers` (`id`, `name`) VALUES (?, ?)", "ss", [$supplierId, $supplierName]);
+                            Database::execute("INSERT INTO archive_suppliers (id, name, created_at, updated_at) VALUES (?, ?, NOW(), NOW())", [$supplierId, $supplierName]);
                         }
                     } elseif (empty($supplierId)) {
-                        $defaultSup = Database::queryOne("SELECT `id` FROM `archive_suppliers` LIMIT 1");
+                        $defaultSup = Database::queryOne("SELECT id FROM archive_suppliers LIMIT 1");
                         if ($defaultSup) {
                             $supplierId = $defaultSup['id'];
                         } else {
                             $supplierId = generateUuid();
-                            Database::execute("INSERT INTO `archive_suppliers` (`id`, `name`) VALUES (?, 'مورد عام')", "s", [$supplierId]);
+                            Database::execute("INSERT INTO archive_suppliers (id, name, created_at, updated_at) VALUES (?, 'مورد عام', NOW(), NOW())", [$supplierId]);
                         }
                     }
 
@@ -755,27 +734,26 @@ function handleArchiveApi(string $subPath, string $method): void
                     $notes = (string)($requestData['notes'] ?? '');
                     $items = is_array($requestData['items'] ?? null) ? $requestData['items'] : [];
 
-                    $db = Database::getConnection();
-                    $db->begin_transaction();
+                    Database::beginTransaction();
 
                     try {
-                        $sqlInv = "INSERT INTO `archive_invoices` (
-                            `id`, `invoice_number`, `supplier_id`, `invoice_date`, `total_amount`, `discount`, `net_amount`,
-                            `status`, `file_url`, `drive_file_id`, `file_name`, `file_type`, `upload_mode`,
-                            `receiver_id`, `entry_clerk_id`, `notes`, `created_at`, `updated_at`
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(6), NOW(6))";
+                        $sqlInv = "INSERT INTO archive_invoices (
+                            id, invoice_number, supplier_id, invoice_date, total_amount, discount, net_amount,
+                            status, file_url, drive_file_id, file_name, file_type, upload_mode,
+                            receiver_id, entry_clerk_id, notes, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
 
-                        Database::execute($sqlInv, "ssssdddsssssssss", [
+                        Database::execute($sqlInv, [
                             $invoiceId, $invoiceNumber, $supplierId, $invoiceDate, $totalAmount, $discount, $netAmount,
                             $status, $fileUrl, $driveFileId, $fileName, $fileType, $uploadMode,
                             $receiverId, $entryClerkId, $notes
                         ]);
 
                         if (!empty($items)) {
-                            $sqlItem = "INSERT INTO `archive_invoice_items` (
-                                `id`, `invoice_id`, `product_name`, `quantity`, `unit_price`, `discount`,
-                                `total_price`, `selling_price`, `batch_number`, `expiry_date`, `created_at`, `updated_at`
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(6), NOW(6))";
+                            $sqlItem = "INSERT INTO archive_invoice_items (
+                                id, invoice_id, product_name, quantity, unit_price, discount,
+                                total_price, selling_price, batch_number, expiry_date, created_at, updated_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
 
                             foreach ($items as $item) {
                                 $itemId = !empty($item['id']) && !str_starts_with((string)$item['id'], 'item_') ? (string)$item['id'] : generateUuid();
@@ -788,17 +766,17 @@ function handleArchiveApi(string $subPath, string $method): void
                                 $batchNum = (string)($item['batchNumber'] ?? $item['batch_number'] ?? '');
                                 $expiry = !empty($item['expiryDate']) ? (string)$item['expiryDate'] : (!empty($item['expiry_date']) ? (string)$item['expiry_date'] : null);
 
-                                Database::execute($sqlItem, "sssiddssdss", [
+                                Database::execute($sqlItem, [
                                     $itemId, $invoiceId, $prodName, $qty, $unitPrice, $itemDisc,
                                     $totalPrice, $sellingPrice, $batchNum, $expiry
                                 ]);
                             }
                         }
 
-                        $db->commit();
+                        Database::commit();
                         jsonResponse(['success' => true, 'message' => 'تم حفظ الفاتورة بنجاح', 'id' => $invoiceId, 'invoice' => ['id' => $invoiceId, 'invoiceNumber' => $invoiceNumber]]);
                     } catch (Throwable $e) {
-                        $db->rollback();
+                        Database::rollback();
                         jsonResponse(['success' => false, 'error' => 'فشل حفظ الفاتورة: ' . $e->getMessage()], 500);
                     }
 
@@ -812,12 +790,12 @@ function handleArchiveApi(string $subPath, string $method): void
                     $supplierName = trim((string)($requestData['supplierName'] ?? $requestData['supplier_name'] ?? ''));
 
                     if (empty($supplierId) && !empty($supplierName)) {
-                        $existingSup = Database::queryOne("SELECT `id` FROM `archive_suppliers` WHERE `name` = ? LIMIT 1", "s", [$supplierName]);
+                        $existingSup = Database::queryOne("SELECT id FROM archive_suppliers WHERE name = ? LIMIT 1", [$supplierName]);
                         if ($existingSup) {
                             $supplierId = $existingSup['id'];
                         } else {
                             $supplierId = generateUuid();
-                            Database::execute("INSERT INTO `archive_suppliers` (`id`, `name`) VALUES (?, ?)", "ss", [$supplierId, $supplierName]);
+                            Database::execute("INSERT INTO archive_suppliers (id, name, created_at, updated_at) VALUES (?, ?, NOW(), NOW())", [$supplierId, $supplierName]);
                         }
                     }
 
@@ -831,36 +809,35 @@ function handleArchiveApi(string $subPath, string $method): void
                     $notes = (string)($requestData['notes'] ?? '');
                     $items = is_array($requestData['items'] ?? null) ? $requestData['items'] : null;
 
-                    $db = Database::getConnection();
-                    $db->begin_transaction();
+                    Database::beginTransaction();
 
                     try {
-                        $sql = "UPDATE `archive_invoices` SET
-                                `invoice_number` = ?,
-                                `supplier_id` = ?,
-                                `invoice_date` = ?,
-                                `total_amount` = ?,
-                                `discount` = ?,
-                                `net_amount` = ?,
-                                `status` = ?,
-                                `receiver_id` = ?,
-                                `entry_clerk_id` = ?,
-                                `notes` = ?,
-                                `updated_at` = NOW(6)
-                                WHERE `id` = ?";
+                        $sql = "UPDATE archive_invoices SET
+                                invoice_number = ?,
+                                supplier_id = ?,
+                                invoice_date = ?,
+                                total_amount = ?,
+                                discount = ?,
+                                net_amount = ?,
+                                status = ?,
+                                receiver_id = ?,
+                                entry_clerk_id = ?,
+                                notes = ?,
+                                updated_at = NOW()
+                                WHERE id = ?";
 
-                        Database::execute($sql, "sssdddsssss", [
+                        Database::execute($sql, [
                             $invoiceNumber, $supplierId, $invoiceDate, $totalAmount, $discount, $netAmount,
                             $status, $receiverId, $entryClerkId, $notes, $invoiceId
                         ]);
 
                         if ($items !== null) {
-                            Database::execute("DELETE FROM `archive_invoice_items` WHERE `invoice_id` = ?", "s", [$invoiceId]);
+                            Database::execute("DELETE FROM archive_invoice_items WHERE invoice_id = ?", [$invoiceId]);
 
-                            $sqlItem = "INSERT INTO `archive_invoice_items` (
-                                `id`, `invoice_id`, `product_name`, `quantity`, `unit_price`, `discount`,
-                                `total_price`, `selling_price`, `batch_number`, `expiry_date`, `created_at`, `updated_at`
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(6), NOW(6))";
+                            $sqlItem = "INSERT INTO archive_invoice_items (
+                                id, invoice_id, product_name, quantity, unit_price, discount,
+                                total_price, selling_price, batch_number, expiry_date, created_at, updated_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
 
                             foreach ($items as $item) {
                                 $itemId = !empty($item['id']) && !str_starts_with((string)$item['id'], 'item_') ? (string)$item['id'] : generateUuid();
@@ -873,17 +850,17 @@ function handleArchiveApi(string $subPath, string $method): void
                                 $batchNum = (string)($item['batchNumber'] ?? $item['batch_number'] ?? '');
                                 $expiry = !empty($item['expiryDate']) ? (string)$item['expiryDate'] : (!empty($item['expiry_date']) ? (string)$item['expiry_date'] : null);
 
-                                Database::execute($sqlItem, "sssiddssdss", [
+                                Database::execute($sqlItem, [
                                     $itemId, $invoiceId, $prodName, $qty, $unitPrice, $itemDisc,
                                     $totalPrice, $sellingPrice, $batchNum, $expiry
                                 ]);
                             }
                         }
 
-                        $db->commit();
+                        Database::commit();
                         jsonResponse(['success' => true, 'message' => 'تم تحديث بيانات الفاتورة بنجاح']);
                     } catch (Throwable $e) {
-                        $db->rollback();
+                        Database::rollback();
                         jsonResponse(['success' => false, 'error' => 'فشل تحديث الفاتورة: ' . $e->getMessage()], 500);
                     }
 
@@ -891,8 +868,8 @@ function handleArchiveApi(string $subPath, string $method): void
                     $deleteId = trim((string)($_GET['id'] ?? $action ?? $requestData['id'] ?? ''));
                     if (empty($deleteId)) jsonResponse(['success' => false, 'error' => 'Missing invoice ID'], 400);
 
-                    Database::execute("DELETE FROM `archive_invoice_items` WHERE `invoice_id` = ?", "s", [$deleteId]);
-                    Database::execute("DELETE FROM `archive_invoices` WHERE `id` = ?", "s", [$deleteId]);
+                    Database::execute("DELETE FROM archive_invoice_items WHERE invoice_id = ?", [$deleteId]);
+                    Database::execute("DELETE FROM archive_invoices WHERE id = ?", [$deleteId]);
 
                     jsonResponse(['success' => true, 'message' => 'تم حذف الفاتورة بنجاح']);
                 }
@@ -902,13 +879,12 @@ function handleArchiveApi(string $subPath, string $method): void
             // 3. الموردين وتعيين الأعمدة (Suppliers & Column Mappings)
             // =================================================================
             case 'suppliers':
-                // Sub-route: /suppliers/mappings
                 if ($action === 'mappings') {
                     if ($method === 'GET') {
                         $supplierId = trim((string)($_GET['supplierId'] ?? $_GET['supplier_id'] ?? ''));
                         if (empty($supplierId)) jsonResponse(['success' => false, 'error' => 'Missing supplier ID'], 400);
 
-                        $mappings = Database::query("SELECT * FROM `archive_column_mappings` WHERE `supplier_id` = ?", "s", [$supplierId]);
+                        $mappings = Database::query("SELECT * FROM archive_column_mappings WHERE supplier_id = ?", [$supplierId]);
                         
                         $formatted = array_map(function($m) {
                             return [
@@ -927,17 +903,17 @@ function handleArchiveApi(string $subPath, string $method): void
 
                         if (empty($supplierId)) jsonResponse(['success' => false, 'error' => 'Missing supplier ID'], 400);
 
-                        Database::execute("DELETE FROM `archive_column_mappings` WHERE `supplier_id` = ?", "s", [$supplierId]);
+                        Database::execute("DELETE FROM archive_column_mappings WHERE supplier_id = ?", [$supplierId]);
 
-                        $sql = "INSERT INTO `archive_column_mappings` (`id`, `supplier_id`, `raw_column_name`, `standard_field`, `created_at`, `updated_at`)
-                                VALUES (?, ?, ?, ?, NOW(6), NOW(6))";
+                        $sql = "INSERT INTO archive_column_mappings (id, supplier_id, raw_column_name, standard_field, created_at, updated_at)
+                                VALUES (?, ?, ?, ?, NOW(), NOW())";
 
                         foreach ($mappings as $m) {
                             $raw = trim((string)($m['rawColumnName'] ?? $m['raw_column_name'] ?? ''));
                             $std = trim((string)($m['standardField'] ?? $m['standard_field'] ?? ''));
                             if (!empty($raw) && !empty($std)) {
                                 $mapId = generateUuid();
-                                Database::execute($sql, "ssss", [$mapId, $supplierId, $raw, $std]);
+                                Database::execute($sql, [$mapId, $supplierId, $raw, $std]);
                             }
                         }
 
@@ -946,15 +922,14 @@ function handleArchiveApi(string $subPath, string $method): void
                     break;
                 }
 
-                // Standard Suppliers CRUD
                 if ($method === 'GET') {
                     $supplierId = trim((string)($_GET['id'] ?? $action ?? ''));
 
                     if (!empty($supplierId) && $supplierId !== 'suppliers') {
-                        $supplier = Database::queryOne("SELECT * FROM `archive_suppliers` WHERE `id` = ? LIMIT 1", "s", [$supplierId]);
+                        $supplier = Database::queryOne("SELECT * FROM archive_suppliers WHERE id = ? LIMIT 1", [$supplierId]);
                         if ($supplier) {
-                            $mappings = Database::query("SELECT * FROM `archive_column_mappings` WHERE `supplier_id` = ?", "s", [$supplierId]);
-                            $invoices = Database::query("SELECT * FROM `archive_invoices` WHERE `supplier_id` = ? ORDER BY `invoice_date` DESC", "s", [$supplierId]);
+                            $mappings = Database::query("SELECT * FROM archive_column_mappings WHERE supplier_id = ?", [$supplierId]);
+                            $invoices = Database::query("SELECT * FROM archive_invoices WHERE supplier_id = ? ORDER BY invoice_date DESC", [$supplierId]);
                             
                             $supplier['columnMappings'] = array_map(function($m) {
                                 return [
@@ -991,9 +966,9 @@ function handleArchiveApi(string $subPath, string $method): void
 
                     $suppliers = Database::query(
                         "SELECT s.*, 
-                                (SELECT COUNT(*) FROM `archive_invoices` WHERE `supplier_id` = s.id) AS invoices_count,
-                                (SELECT COALESCE(SUM(`net_amount`), 0) FROM `archive_invoices` WHERE `supplier_id` = s.id) AS total_invoiced
-                         FROM `archive_suppliers` s
+                                (SELECT COUNT(*) FROM archive_invoices WHERE supplier_id = s.id) AS invoices_count,
+                                (SELECT COALESCE(SUM(net_amount), 0) FROM archive_invoices WHERE supplier_id = s.id) AS total_invoiced
+                         FROM archive_suppliers s
                          ORDER BY s.name ASC"
                     );
 
@@ -1010,11 +985,29 @@ function handleArchiveApi(string $subPath, string $method): void
 
                     if (empty($name)) jsonResponse(['success' => false, 'error' => 'اسم المورد مطلوب'], 400);
 
-                    $sql = "INSERT INTO `archive_suppliers` (`id`, `name`, `phone`, `email`, `address`, `tax_number`, `notes`, `created_at`, `updated_at`)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, NOW(6), NOW(6))
-                            ON DUPLICATE KEY UPDATE `phone` = VALUES(`phone`), `email` = VALUES(`email`), `address` = VALUES(`address`), `tax_number` = VALUES(`tax_number`), `notes` = VALUES(`notes`), `updated_at` = NOW(6)";
+                    if ($driver === 'pgsql') {
+                        $sql = "INSERT INTO archive_suppliers (id, name, phone, email, address, tax_number, notes, created_at, updated_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                                ON CONFLICT (name) DO UPDATE 
+                                SET phone = EXCLUDED.phone, 
+                                    email = EXCLUDED.email, 
+                                    address = EXCLUDED.address, 
+                                    tax_number = EXCLUDED.tax_number, 
+                                    notes = EXCLUDED.notes, 
+                                    updated_at = NOW()";
+                    } else {
+                        $sql = "INSERT INTO archive_suppliers (id, name, phone, email, address, tax_number, notes, created_at, updated_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                                ON DUPLICATE KEY UPDATE 
+                                    phone = VALUES(phone), 
+                                    email = VALUES(email), 
+                                    address = VALUES(address), 
+                                    tax_number = VALUES(tax_number), 
+                                    notes = VALUES(notes), 
+                                    updated_at = NOW()";
+                    }
 
-                    Database::execute($sql, "sssssss", [$id, $name, $phone, $email, $address, $taxNumber, $notes]);
+                    Database::execute($sql, [$id, $name, $phone, $email, $address, $taxNumber, $notes]);
 
                     jsonResponse(['success' => true, 'message' => 'تم حفظ المورد بنجاح', 'id' => $id, 'supplier' => ['id' => $id, 'name' => $name]]);
 
@@ -1029,8 +1022,8 @@ function handleArchiveApi(string $subPath, string $method): void
 
                     if (empty($id) || empty($name)) jsonResponse(['success' => false, 'error' => 'البيانات غير مكتملة'], 400);
 
-                    $sql = "UPDATE `archive_suppliers` SET `name` = ?, `phone` = ?, `email` = ?, `address` = ?, `tax_number` = ?, `notes` = ?, `updated_at` = NOW(6) WHERE `id` = ?";
-                    Database::execute($sql, "sssssss", [$name, $phone, $email, $address, $taxNumber, $notes, $id]);
+                    $sql = "UPDATE archive_suppliers SET name = ?, phone = ?, email = ?, address = ?, tax_number = ?, notes = ?, updated_at = NOW() WHERE id = ?";
+                    Database::execute($sql, [$name, $phone, $email, $address, $taxNumber, $notes, $id]);
 
                     jsonResponse(['success' => true, 'message' => 'تم تعديل بيانات المورد بنجاح']);
 
@@ -1038,8 +1031,8 @@ function handleArchiveApi(string $subPath, string $method): void
                     $id = trim((string)($_GET['id'] ?? $action ?? $requestData['id'] ?? ''));
                     if (empty($id)) jsonResponse(['success' => false, 'error' => 'Missing ID'], 400);
 
-                    Database::execute("DELETE FROM `archive_column_mappings` WHERE `supplier_id` = ?", "s", [$id]);
-                    Database::execute("DELETE FROM `archive_suppliers` WHERE `id` = ?", "s", [$id]);
+                    Database::execute("DELETE FROM archive_column_mappings WHERE supplier_id = ?", [$id]);
+                    Database::execute("DELETE FROM archive_suppliers WHERE id = ?", [$id]);
                     jsonResponse(['success' => true, 'message' => 'تم حذف المورد بنجاح']);
                 }
                 break;
@@ -1048,11 +1041,10 @@ function handleArchiveApi(string $subPath, string $method): void
             // 4. موظفو الأرشيف (Employees Endpoints)
             // =================================================================
             case 'employees':
-                // Sub-route: /employees/[id]/invoices
                 if (!empty($action) && $subAction === 'invoices' && $method === 'GET') {
                     $empId = $action;
-                    $received = Database::query("SELECT * FROM `archive_invoices` WHERE `receiver_id` = ? ORDER BY `invoice_date` DESC", "s", [$empId]);
-                    $entered = Database::query("SELECT * FROM `archive_invoices` WHERE `entry_clerk_id` = ? ORDER BY `invoice_date` DESC", "s", [$empId]);
+                    $received = Database::query("SELECT * FROM archive_invoices WHERE receiver_id = ? ORDER BY invoice_date DESC", [$empId]);
+                    $entered = Database::query("SELECT * FROM archive_invoices WHERE entry_clerk_id = ? ORDER BY invoice_date DESC", [$empId]);
 
                     jsonResponse([
                         'success' => true,
@@ -1064,9 +1056,9 @@ function handleArchiveApi(string $subPath, string $method): void
                 if ($method === 'GET') {
                     $employees = Database::query(
                         "SELECT e.*,
-                                (SELECT COUNT(*) FROM `archive_invoices` WHERE `receiver_id` = e.id) AS received_count,
-                                (SELECT COUNT(*) FROM `archive_invoices` WHERE `entry_clerk_id` = e.id) AS entered_count
-                         FROM `archive_employees` e
+                                (SELECT COUNT(*) FROM archive_invoices WHERE receiver_id = e.id) AS received_count,
+                                (SELECT COUNT(*) FROM archive_invoices WHERE entry_clerk_id = e.id) AS entered_count
+                         FROM archive_employees e
                          ORDER BY e.name ASC"
                     );
                     jsonResponse(['success' => true, 'employees' => $employees]);
@@ -1080,11 +1072,25 @@ function handleArchiveApi(string $subPath, string $method): void
 
                     if (empty($name)) jsonResponse(['success' => false, 'error' => 'اسم الموظف مطلوب'], 400);
 
-                    $sql = "INSERT INTO `archive_employees` (`id`, `name`, `role`, `phone`, `active`, `created_at`, `updated_at`)
-                            VALUES (?, ?, ?, ?, ?, NOW(6), NOW(6))
-                            ON DUPLICATE KEY UPDATE `role` = VALUES(`role`), `phone` = VALUES(`phone`), `active` = VALUES(`active`), `updated_at` = NOW(6)";
+                    if ($driver === 'pgsql') {
+                        $sql = "INSERT INTO archive_employees (id, name, role, phone, active, created_at, updated_at)
+                                VALUES (?, ?, ?, ?, ?, NOW(), NOW())
+                                ON CONFLICT (name) DO UPDATE 
+                                SET role = EXCLUDED.role, 
+                                    phone = EXCLUDED.phone, 
+                                    active = EXCLUDED.active, 
+                                    updated_at = NOW()";
+                    } else {
+                        $sql = "INSERT INTO archive_employees (id, name, role, phone, active, created_at, updated_at)
+                                VALUES (?, ?, ?, ?, ?, NOW(), NOW())
+                                ON DUPLICATE KEY UPDATE 
+                                    role = VALUES(role), 
+                                    phone = VALUES(phone), 
+                                    active = VALUES(active), 
+                                    updated_at = NOW()";
+                    }
 
-                    Database::execute($sql, "ssssi", [$id, $name, $role, $phone, $active]);
+                    Database::execute($sql, [$id, $name, $role, $phone, $active]);
                     jsonResponse(['success' => true, 'message' => 'تم حفظ الموظف بنجاح', 'id' => $id]);
 
                 } elseif ($method === 'PUT') {
@@ -1096,8 +1102,8 @@ function handleArchiveApi(string $subPath, string $method): void
 
                     if (empty($id) || empty($name)) jsonResponse(['success' => false, 'error' => 'البيانات غير مكتملة'], 400);
 
-                    $sql = "UPDATE `archive_employees` SET `name` = ?, `role` = ?, `phone` = ?, `active` = ?, `updated_at` = NOW(6) WHERE `id` = ?";
-                    Database::execute($sql, "sssii", [$name, $role, $phone, $active, $id]);
+                    $sql = "UPDATE archive_employees SET name = ?, role = ?, phone = ?, active = ?, updated_at = NOW() WHERE id = ?";
+                    Database::execute($sql, [$name, $role, $phone, $active, $id]);
 
                     jsonResponse(['success' => true, 'message' => 'تم تحديث الموظف بنجاح']);
 
@@ -1105,7 +1111,7 @@ function handleArchiveApi(string $subPath, string $method): void
                     $id = trim((string)($_GET['id'] ?? $action ?? $requestData['id'] ?? ''));
                     if (empty($id)) jsonResponse(['success' => false, 'error' => 'Missing ID'], 400);
 
-                    Database::execute("DELETE FROM `archive_employees` WHERE `id` = ?", "s", [$id]);
+                    Database::execute("DELETE FROM archive_employees WHERE id = ?", [$id]);
                     jsonResponse(['success' => true, 'message' => 'تم حذف الموظف بنجاح']);
                 }
                 break;
@@ -1124,7 +1130,7 @@ function handleArchiveApi(string $subPath, string $method): void
                 }
 
                 if ($method === 'GET') {
-                    $rows = Database::query("SELECT `key_name`, `value_data` FROM `archive_system_settings`");
+                    $rows = Database::query("SELECT key_name, value_data FROM archive_system_settings");
                     $settings = [];
                     foreach ($rows as $r) {
                         $settings[$r['key_name']] = $r['value_data'];

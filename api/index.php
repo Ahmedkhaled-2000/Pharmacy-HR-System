@@ -1,7 +1,7 @@
 <?php
 /**
- * Main API Router for Pharmacy HR System
- * Handles all REST endpoints with MariaDB 10.11 & PHP 8.1-8.5
+ * Main API Router for Pharmacy HR & Archive System
+ * Compatible with PHP 8.1 - 8.5 & PostgreSQL 16+/18+ (Default) / MySQL
  */
 
 declare(strict_types=1);
@@ -31,6 +31,8 @@ if (str_starts_with($endpoint, 'archive/') || $endpoint === 'archive') {
     exit();
 }
 
+$driver = Database::getDriver();
+
 try {
     switch ($endpoint) {
         // ==================================================================
@@ -39,12 +41,19 @@ try {
         case 'health':
         case 'status':
             $db = Database::getConnection();
+            $dbVersion = 'Unknown';
+            try {
+                $vRow = Database::queryOne($driver === 'pgsql' ? "SELECT version() AS ver" : "SELECT VERSION() AS ver");
+                $dbVersion = $vRow['ver'] ?? 'Unknown';
+            } catch (Throwable) {}
+
             jsonResponse([
                 'success' => true,
                 'status' => 'online',
                 'service' => 'Pharmacy HR System API',
                 'php_version' => PHP_VERSION,
-                'mariadb_version' => $db->server_info,
+                'db_driver' => $driver,
+                'db_version' => $dbVersion,
                 'server_time' => date('Y-m-d H:i:s'),
                 'timezone' => date_default_timezone_get()
             ]);
@@ -66,13 +75,12 @@ try {
 
             if ($method === 'GET') {
                 $row = Database::queryOne(
-                    "SELECT `key_name`, `value_data`, `version`, `updated_at` FROM `app_settings` WHERE `key_name` = ? LIMIT 1",
-                    "s",
+                    "SELECT key_name, value_data, version, updated_at FROM app_settings WHERE key_name = ? LIMIT 1",
                     [$key]
                 );
 
                 if ($row) {
-                    $decodedValue = json_decode($row['value_data'], true);
+                    $decodedValue = is_string($row['value_data']) ? json_decode($row['value_data'], true) : $row['value_data'];
                     jsonResponse([
                         'success' => true,
                         'key' => $row['key_name'],
@@ -100,24 +108,33 @@ try {
 
                 $jsonString = is_string($value) ? $value : json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
-                // Upsert with version increment
-                $sql = "INSERT INTO `app_settings` (`key_name`, `value_data`, `version`, `updated_at`)
-                        VALUES (?, ?, 1, NOW(6))
-                        ON DUPLICATE KEY UPDATE
-                            `value_data` = VALUES(`value_data`),
-                            `version` = `version` + 1,
-                            `updated_at` = NOW(6)";
+                // Upsert with version increment (PostgreSQL vs MySQL)
+                if ($driver === 'pgsql') {
+                    $sql = "INSERT INTO app_settings (key_name, value_data, version, updated_at)
+                            VALUES (?, ?::jsonb, 1, NOW())
+                            ON CONFLICT (key_name) DO UPDATE
+                            SET value_data = EXCLUDED.value_data,
+                                version = app_settings.version + 1,
+                                updated_at = NOW()";
+                } else {
+                    $sql = "INSERT INTO app_settings (key_name, value_data, version, updated_at)
+                            VALUES (?, ?, 1, NOW())
+                            ON DUPLICATE KEY UPDATE
+                                value_data = VALUES(value_data),
+                                version = version + 1,
+                                updated_at = NOW()";
+                }
 
-                Database::execute($sql, "ss", [$targetKey, $jsonString]);
+                Database::execute($sql, [$targetKey, $jsonString]);
 
                 // تسجيل المزامنة في sync_logs
-                $versionRow = Database::queryOne("SELECT `version`, `updated_at` FROM `app_settings` WHERE `key_name` = ?", "s", [$targetKey]);
+                $versionRow = Database::queryOne("SELECT version, updated_at FROM app_settings WHERE key_name = ?", [$targetKey]);
                 $currentVersion = (int)($versionRow['version'] ?? 1);
                 $updatedAt = $versionRow['updated_at'] ?? date('Y-m-d H:i:s');
+                $clientIp = getClientIp();
 
                 Database::execute(
-                    "INSERT INTO `sync_logs` (`action_type`, `entity_key`, `version`, `client_ip`, `created_at`) VALUES ('SAVE_STATE', ?, ?, ?, NOW(6))",
-                    "sis",
+                    "INSERT INTO sync_logs (action_type, entity_key, version, client_ip, created_at) VALUES ('SAVE_STATE', ?, ?, ?, NOW())",
                     [$targetKey, $currentVersion, $clientIp]
                 );
 
@@ -138,8 +155,7 @@ try {
         case 'version':
             $key = $_GET['key'] ?? DEFAULT_STORAGE_KEY;
             $row = Database::queryOne(
-                "SELECT `version`, `updated_at` FROM `app_settings` WHERE `key_name` = ? LIMIT 1",
-                "s",
+                "SELECT version, updated_at FROM app_settings WHERE key_name = ? LIMIT 1",
                 [$key]
             );
 
@@ -161,23 +177,22 @@ try {
             if ($method === 'GET') {
                 if (!empty($empId)) {
                     $row = Database::queryOne(
-                        "SELECT `employee_id`, `descriptor`, `hand_descriptor`, `biometric_type`, `updated_at` FROM `employee_faces` WHERE `employee_id` = ? LIMIT 1",
-                        "s",
+                        "SELECT employee_id, descriptor, hand_descriptor, biometric_type, updated_at FROM employee_faces WHERE employee_id = ? LIMIT 1",
                         [(string)$empId]
                     );
 
                     if ($row) {
-                        $row['descriptor'] = !empty($row['descriptor']) ? json_decode($row['descriptor'], true) : null;
-                        $row['hand_descriptor'] = !empty($row['hand_descriptor']) ? json_decode($row['hand_descriptor'], true) : null;
+                        $row['descriptor'] = !empty($row['descriptor']) ? (is_string($row['descriptor']) ? json_decode($row['descriptor'], true) : $row['descriptor']) : null;
+                        $row['hand_descriptor'] = !empty($row['hand_descriptor']) ? (is_string($row['hand_descriptor']) ? json_decode($row['hand_descriptor'], true) : $row['hand_descriptor']) : null;
                     }
 
                     jsonResponse(['success' => true, 'data' => $row]);
                 } else {
-                    $rows = Database::query("SELECT `employee_id`, `descriptor`, `hand_descriptor`, `biometric_type`, `updated_at` FROM `employee_faces`");
+                    $rows = Database::query("SELECT employee_id, descriptor, hand_descriptor, biometric_type, updated_at FROM employee_faces");
                     
                     foreach ($rows as &$r) {
-                        $r['descriptor'] = !empty($r['descriptor']) ? json_decode($r['descriptor'], true) : null;
-                        $r['hand_descriptor'] = !empty($r['hand_descriptor']) ? json_decode($r['hand_descriptor'], true) : null;
+                        $r['descriptor'] = !empty($r['descriptor']) ? (is_string($r['descriptor']) ? json_decode($r['descriptor'], true) : $r['descriptor']) : null;
+                        $r['hand_descriptor'] = !empty($r['hand_descriptor']) ? (is_string($r['hand_descriptor']) ? json_decode($r['hand_descriptor'], true) : $r['hand_descriptor']) : null;
                     }
                     unset($r);
 
@@ -195,15 +210,25 @@ try {
                 $handDescriptor = isset($payload['hand_descriptor']) ? (is_string($payload['hand_descriptor']) ? $payload['hand_descriptor'] : json_encode($payload['hand_descriptor'])) : null;
                 $biometricType = (string)($payload['biometric_type'] ?? 'face');
 
-                $sql = "INSERT INTO `employee_faces` (`employee_id`, `descriptor`, `hand_descriptor`, `biometric_type`, `updated_at`)
-                        VALUES (?, ?, ?, ?, NOW(6))
-                        ON DUPLICATE KEY UPDATE
-                            `descriptor` = COALESCE(VALUES(`descriptor`), `descriptor`),
-                            `hand_descriptor` = COALESCE(VALUES(`hand_descriptor`), `hand_descriptor`),
-                            `biometric_type` = VALUES(`biometric_type`),
-                            `updated_at` = NOW(6)";
+                if ($driver === 'pgsql') {
+                    $sql = "INSERT INTO employee_faces (employee_id, descriptor, hand_descriptor, biometric_type, updated_at)
+                            VALUES (?, ?::jsonb, ?::jsonb, ?, NOW())
+                            ON CONFLICT (employee_id) DO UPDATE
+                            SET descriptor = COALESCE(EXCLUDED.descriptor, employee_faces.descriptor),
+                                hand_descriptor = COALESCE(EXCLUDED.hand_descriptor, employee_faces.hand_descriptor),
+                                biometric_type = EXCLUDED.biometric_type,
+                                updated_at = NOW()";
+                } else {
+                    $sql = "INSERT INTO employee_faces (employee_id, descriptor, hand_descriptor, biometric_type, updated_at)
+                            VALUES (?, ?, ?, ?, NOW())
+                            ON DUPLICATE KEY UPDATE
+                                descriptor = COALESCE(VALUES(descriptor), descriptor),
+                                hand_descriptor = COALESCE(VALUES(hand_descriptor), hand_descriptor),
+                                biometric_type = VALUES(biometric_type),
+                                updated_at = NOW()";
+                }
 
-                Database::execute($sql, "ssss", [$employeeId, $descriptor, $handDescriptor, $biometricType]);
+                Database::execute($sql, [$employeeId, $descriptor, $handDescriptor, $biometricType]);
 
                 jsonResponse([
                     'success' => true,
@@ -216,7 +241,7 @@ try {
                     jsonResponse(['success' => false, 'error' => 'Missing employee_id for deletion'], 400);
                 }
 
-                Database::execute("DELETE FROM `employee_faces` WHERE `employee_id` = ?", "s", [$deleteId]);
+                Database::execute("DELETE FROM employee_faces WHERE employee_id = ?", [$deleteId]);
                 jsonResponse(['success' => true, 'message' => "Biometrics deleted for employee {$deleteId}"]);
             }
             break;
@@ -225,12 +250,12 @@ try {
         // 6. النسخ الاحتياطي والاستعادة الكاملة (Full Backup & Restore)
         // ==================================================================
         case 'backup/export':
-            $settings = Database::query("SELECT * FROM `app_settings`");
-            $faces = Database::query("SELECT * FROM `employee_faces`");
+            $settings = Database::query("SELECT * FROM app_settings");
+            $faces = Database::query("SELECT * FROM employee_faces");
 
             foreach ($faces as &$f) {
-                $f['descriptor'] = !empty($f['descriptor']) ? json_decode($f['descriptor'], true) : null;
-                $f['hand_descriptor'] = !empty($f['hand_descriptor']) ? json_decode($f['hand_descriptor'], true) : null;
+                $f['descriptor'] = !empty($f['descriptor']) ? (is_string($f['descriptor']) ? json_decode($f['descriptor'], true) : $f['descriptor']) : null;
+                $f['hand_descriptor'] = !empty($f['hand_descriptor']) ? (is_string($f['hand_descriptor']) ? json_decode($f['hand_descriptor'], true) : $f['hand_descriptor']) : null;
             }
             unset($f);
 
@@ -261,13 +286,29 @@ try {
                     $hand = isset($f['hand_descriptor']) ? (is_string($f['hand_descriptor']) ? $f['hand_descriptor'] : json_encode($f['hand_descriptor'])) : null;
                     $type = (string)($f['biometric_type'] ?? 'face');
 
-                    Database::execute(
-                        "INSERT INTO `employee_faces` (`employee_id`, `descriptor`, `hand_descriptor`, `biometric_type`, `updated_at`)
-                         VALUES (?, ?, ?, ?, NOW(6))
-                         ON DUPLICATE KEY UPDATE `descriptor` = VALUES(`descriptor`), `hand_descriptor` = VALUES(`hand_descriptor`), `biometric_type` = VALUES(`biometric_type`), `updated_at` = NOW(6)",
-                        "ssss",
-                        [$empId, $desc, $hand, $type]
-                    );
+                    if ($driver === 'pgsql') {
+                        Database::execute(
+                            "INSERT INTO employee_faces (employee_id, descriptor, hand_descriptor, biometric_type, updated_at)
+                             VALUES (?, ?::jsonb, ?::jsonb, ?, NOW())
+                             ON CONFLICT (employee_id) DO UPDATE 
+                             SET descriptor = EXCLUDED.descriptor, 
+                                 hand_descriptor = EXCLUDED.hand_descriptor, 
+                                 biometric_type = EXCLUDED.biometric_type, 
+                                 updated_at = NOW()",
+                            [$empId, $desc, $hand, $type]
+                        );
+                    } else {
+                        Database::execute(
+                            "INSERT INTO employee_faces (employee_id, descriptor, hand_descriptor, biometric_type, updated_at)
+                             VALUES (?, ?, ?, ?, NOW())
+                             ON DUPLICATE KEY UPDATE 
+                             descriptor = VALUES(descriptor), 
+                             hand_descriptor = VALUES(hand_descriptor), 
+                             biometric_type = VALUES(biometric_type), 
+                             updated_at = NOW()",
+                            [$empId, $desc, $hand, $type]
+                        );
+                    }
                 }
             }
 

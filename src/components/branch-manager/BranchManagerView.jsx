@@ -308,29 +308,49 @@ export default function BranchManagerView({
     });
   }, [state.employees, currentBranch]);
 
+  const deletedIdsSet = useMemo(() => {
+    return new Set((state._deletedIds || []).map(String));
+  }, [state._deletedIds]);
+
   // Branch Requests (Filtered by Higher Management Double Approval Rules & Sorted newest first)
   const branchRequests = useMemo(() => {
     const cIdStr = currentBranch?.id ? String(currentBranch.id) : null;
-    const branchEmpIdSet = new Set(branchEmployees.map((e) => String(e.id)));
+    const branchEmpIdSet = new Set(
+      branchEmployees.flatMap((e) => [String(e.id), String(e.code || '')]).filter(Boolean)
+    );
 
     const rawList = [...(state.requests || [])];
-    const existingIds = new Set(rawList.map((r) => r.id));
+    const existingIds = new Set(rawList.map((r) => String(r.id)));
 
     (state.leaveRequests || []).forEach((lr) => {
-      if (!existingIds.has(lr.id)) {
+      if (lr && !existingIds.has(String(lr.id))) {
         rawList.push({ ...lr, type: lr.type || 'leave' });
-        existingIds.add(lr.id);
+        existingIds.add(String(lr.id));
       }
     });
 
     (state.shiftSwaps || []).forEach((sw) => {
-      if (!existingIds.has(sw.id)) {
+      if (sw && !existingIds.has(String(sw.id))) {
         rawList.push({ ...sw, type: 'swap' });
-        existingIds.add(sw.id);
+        existingIds.add(String(sw.id));
+      }
+    });
+
+    (state.resignationRequests || []).forEach((res) => {
+      if (res && !existingIds.has(String(res.id))) {
+        rawList.push({ ...res, type: 'resignation' });
+        existingIds.add(String(res.id));
       }
     });
 
     const list = rawList.filter((r) => {
+      if (!r || !r.id) return false;
+      const idStr = String(r.id);
+      const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
+      if (deletedIdsSet.has(idStr) || (rawId && (deletedIdsSet.has(rawId) || deletedIdsSet.has(`req_${rawId}`)))) {
+        return false;
+      }
+
       // 1. Must adhere strictly to Higher Management Double Approval Rules (Loans, advances, admin-only are excluded)
       if (!shouldShowRequestToBranch(r, state)) return false;
 
@@ -340,11 +360,18 @@ export default function BranchManagerView({
       if (r.branchId && String(r.branchId) === cIdStr) return true;
       // 3. Request employee belongs to this branch
       if (r.employeeId && branchEmpIdSet.has(String(r.employeeId))) return true;
+      if (r.employeeCode && branchEmpIdSet.has(String(r.employeeCode))) return true;
+      
+      const empObj = (state.employees || []).find((e) => String(e.id) === String(r.employeeId) || (r.employeeCode && String(e.code) === String(r.employeeCode)));
+      if (empObj) {
+        if (empObj.branchId && String(empObj.branchId) === cIdStr) return true;
+        if (empObj.branchesDetails && empObj.branchesDetails.some((bd) => String(bd.branchId) === cIdStr)) return true;
+      }
       return false;
     });
 
     return list.sort((a, b) => getRequestSortTime(b) - getRequestSortTime(a));
-  }, [state.requests, state.leaveRequests, state.shiftSwaps, state.approvalRules, branchEmployees, currentBranch]);
+  }, [state.requests, state.leaveRequests, state.shiftSwaps, state.resignationRequests, state.employees, state.approvalRules, branchEmployees, currentBranch, deletedIdsSet]);
 
   const filteredBranchRequests = useMemo(() => {
     const list = branchRequests.filter((r) => {

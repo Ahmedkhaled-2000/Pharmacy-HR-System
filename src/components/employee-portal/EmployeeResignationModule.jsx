@@ -99,14 +99,20 @@ export default function EmployeeResignationModule({
     const newReq = {
       id: 'res_' + Date.now() + '_' + uid(),
       employeeId: emp.id,
+      employeeName: emp.name,
+      employeeCode: emp.code,
       branchId: reqBranchId,
       type: requestType,
-      employeeReason: reason,
+      date: todayStr(),
+      reason: reason.trim(),
+      details: reason.trim(),
+      employeeReason: reason.trim(),
       requestDate: todayStr(),
       requestedLastWorkingDate: requestType === 'resignation' ? requestedLastWorkingDate : '',
       noticeDaysProvided: requestType === 'resignation' ? noticeDaysProvided : 0,
       requiredNoticeDays,
       isNoticeCompliant: requestType === 'resignation' ? isNoticeCompliant : true,
+      status: 'pending',
       managerStatus: isDirectAdmin ? 'skipped' : 'pending',
       managerComment: isDirectAdmin ? 'تم التحويل للإدارة العليا مباشرة (وظيفة إدارية / فرع بدون مدير)' : '',
       adminStatus: 'pending',
@@ -123,11 +129,15 @@ export default function EmployeeResignationModule({
 
     const newNotif = {
       id: 'notif_' + newReq.id,
+      requestId: newReq.id,
       type: 'resignation',
       title: `📝 طلب ${requestType === 'resignation' ? 'استقالة' : 'تراجع عن استقالة'} جديد`,
       message: isDirectAdmin
         ? `قام الموظف ${emp.name} بتقديم طلب ${requestType === 'resignation' ? 'استقالة' : 'تراجع عن استقالة'} (مهلة: ${noticeDaysProvided} يوم) وتم توجيهه للإدارة العليا مباشرة.`
         : `قام الموظف ${emp.name} بتقديم طلب ${requestType === 'resignation' ? 'استقالة' : 'تراجع عن استقالة'} وبانتظار رد مدير الفرع.`,
+      employeeId: emp.id,
+      employeeName: emp.name,
+      employeeCode: emp.code,
       date: todayStr(),
       timestamp: new Date().toISOString(),
       read: false,
@@ -137,6 +147,7 @@ export default function EmployeeResignationModule({
 
     const updatedState = { 
       ...state, 
+      requests: [newReq, ...(state.requests || [])],
       resignationRequests: [newReq, ...(state.resignationRequests || [])],
       notifications: [newNotif, ...(state.notifications || [])]
     };

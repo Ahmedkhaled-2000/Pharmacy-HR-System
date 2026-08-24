@@ -1,8 +1,8 @@
 <?php
 /**
- * Configuration & Core Setup for Pharmacy HR System API
+ * Configuration & Core Setup for Pharmacy HR & Archive System API
  * Compatible with PHP 8.1, 8.2, 8.3, 8.4, 8.5
- * Database Engine: MariaDB 10.11+ via mysqli
+ * Database Engine: PostgreSQL 16+ / 18+ (Default) or MariaDB/MySQL via PDO
  */
 
 declare(strict_types=1);
@@ -28,15 +28,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 }
 
 // --------------------------------------------------------------------------
-// إعدادات الاتصال بقاعدة بيانات MariaDB على استضافة Apex Thunder
-// يمكنك تعديل هذه القيم حسب بيانات قاعدة البيانات التي قمت بإنشائها
+// إعدادات الاتصال بقاعدة بيانات PostgreSQL على استضافة Apex Thunder
 // --------------------------------------------------------------------------
-define('DB_HOST', getenv('DB_HOST') ?: 'localhost');
-define('DB_PORT', (int)(getenv('DB_PORT') ?: 3306));
-define('DB_NAME', getenv('DB_NAME') ?: 'node_PharmacyHR');
-define('DB_USER', getenv('DB_USER') ?: 'node_PharmacyHR');
-define('DB_PASS', getenv('DB_PASS') ?: 'Ahmed.2000');
-define('DB_CHARSET', 'utf8mb4');
+define('DB_DRIVER', getenv('DB_DRIVER') ?: 'pgsql'); // 'pgsql' لـ PostgreSQL أو 'mysql' لـ MySQL/MariaDB
+define('DB_HOST', getenv('DB_HOST') ?: '127.0.0.1');  // PostgreSQL Host على Apex Thunder (127.0.0.1)
+define('DB_PORT', (int)(getenv('DB_PORT') ?: (DB_DRIVER === 'pgsql' ? 5432 : 3306)));
+define('DB_NAME', getenv('DB_NAME') ?: 'nodej8878_pharmacy_hr'); // اسم قاعدة البيانات من لوحة التحكم
+define('DB_USER', getenv('DB_USER') ?: 'nodej8878_pg');          // اسم مستخدم قاعدة البيانات
+define('DB_PASS', getenv('DB_PASS') ?: 'C6kMke4Uwj_dYtbCNHJx55r*'); // كلمة المرور الجديدة
+define('DB_CHARSET', 'utf8');
 
 // المفتاح الافتراضي لحفظ بيانات النظام
 define('DEFAULT_STORAGE_KEY', 'pharmacy-tracker-data');

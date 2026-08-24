@@ -86,7 +86,7 @@ export default function EmployeeShiftSwapModule({
       requestId: newSwapReq.id,
       type: 'swap',
       title: `🔄 طلب تبديل وردية جديد: ${emp.name}`,
-      message: `طلب تبديل وردية يوم ${sourceDate} مع الزميل ${targetEmpObj ? targetEmpObj.name : 'زميل'} (وردية يوم ${targetSwapDate})`,
+      message: `طلب تبديل وردية يوم ${swapDate} مع الزميل ${targetEmpObj ? targetEmpObj.name : 'زميل'} (وردية يوم ${targetSwapDate})`,
       employeeId: emp.id,
       employeeName: emp.name,
       employeeCode: emp.code,

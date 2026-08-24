@@ -55,6 +55,10 @@ export function isItemDeleted(item, key, deletedIds) {
     if (deletedIds.has(`shift_${idStr}`)) return true;
     if (deletedIds.has(`adj_${idStr}`)) return true;
     if (deletedIds.has(`branch_${idStr}`)) return true;
+
+    // فحص المعرف المجرد بدون بادئة
+    const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|emp_|shift_|adj_|branch_|dev_|notif_)/, '');
+    if (rawId && (deletedIds.has(rawId) || deletedIds.has(`req_${rawId}`))) return true;
   }
   if (item.code && (deletedIds.has(String(item.code)) || deletedIds.has(`emp_${item.code}`))) return true;
   if (item.deviceId && (deletedIds.has(String(item.deviceId)) || deletedIds.has(`dev_${item.deviceId}`))) return true;
@@ -299,127 +303,11 @@ export function smartMergeStates(localState, remoteState) {
   if (!remoteState || typeof remoteState !== 'object') return localState;
   if (!localState || typeof localState !== 'object') return remoteState;
 
+  // تجميع كافة شواهد القبور والمعرفات المحذوفة صراحة من الطرفين
   const deletedIds = new Set([
     ...toSafeArray(localState._deletedIds || []).map(String),
     ...toSafeArray(remoteState._deletedIds || []).map(String)
   ]);
-
-  // ── الكشف التلقائي الذكي عن العناصر المحذوفة محلياً (Auto-Diff Deletion Detection) ──
-  // 1. الموظفين المحذوفين
-  if (Array.isArray(localState.employees) && Array.isArray(remoteState.employees)) {
-    const localEmpIds = new Set(localState.employees.map(e => String(e.id)));
-    const localEmpCodes = new Set(localState.employees.map(e => String(e.code)));
-    for (const remEmp of remoteState.employees) {
-      if (remEmp && remEmp.id && !localEmpIds.has(String(remEmp.id)) && (!remEmp.code || !localEmpCodes.has(String(remEmp.code)))) {
-        deletedIds.add(String(remEmp.id));
-        deletedIds.add(`emp_${remEmp.id}`);
-        if (remEmp.code) {
-          deletedIds.add(String(remEmp.code));
-          deletedIds.add(`emp_${remEmp.code}`);
-        }
-      }
-    }
-  }
-
-  // 2. الفروع المحذوفة
-  if (Array.isArray(localState.branches) && Array.isArray(remoteState.branches)) {
-    const localBranchIds = new Set(localState.branches.map(b => String(b.id)));
-    for (const remBranch of remoteState.branches) {
-      if (remBranch && remBranch.id && !localBranchIds.has(String(remBranch.id))) {
-        deletedIds.add(String(remBranch.id));
-        deletedIds.add(`branch_${remBranch.id}`);
-      }
-    }
-  }
-
-  // 3. الورديات المحذوفة
-  if (Array.isArray(localState.shifts) && Array.isArray(remoteState.shifts)) {
-    const localShiftIds = new Set(localState.shifts.map(s => String(s.id)));
-    for (const remShift of remoteState.shifts) {
-      if (remShift && remShift.id && !localShiftIds.has(String(remShift.id))) {
-        deletedIds.add(String(remShift.id));
-        deletedIds.add(`shift_${remShift.id}`);
-      }
-    }
-  }
-
-  // 4. التسويات والمكافآت والخصومات المحذوفة
-  if (Array.isArray(localState.adjustments) && Array.isArray(remoteState.adjustments)) {
-    const localAdjIds = new Set(localState.adjustments.map(a => String(a.id)));
-    for (const remAdj of remoteState.adjustments) {
-      if (remAdj && remAdj.id && !localAdjIds.has(String(remAdj.id))) {
-        deletedIds.add(String(remAdj.id));
-        deletedIds.add(`adj_${remAdj.id}`);
-      }
-    }
-  }
-
-  // 5. السلف والآجل المحذوف
-  if (Array.isArray(localState.loans) && Array.isArray(remoteState.loans)) {
-    const localLoanIds = new Set(localState.loans.map(l => String(l.id)));
-    for (const remLoan of remoteState.loans) {
-      if (remLoan && remLoan.id && !localLoanIds.has(String(remLoan.id))) {
-        deletedIds.add(String(remLoan.id));
-        deletedIds.add(`loan_${remLoan.id}`);
-      }
-    }
-  }
-
-  // 6. الطلبات المحذوفة بكافة تصنيفاتها (Requests, LeaveRequests, ShiftSwaps, Resignations)
-  if (Array.isArray(localState.requests) && Array.isArray(remoteState.requests)) {
-    const localReqIds = new Set(localState.requests.map(r => String(r.id)));
-    for (const remReq of remoteState.requests) {
-      if (remReq && remReq.id && !localReqIds.has(String(remReq.id))) {
-        deletedIds.add(String(remReq.id));
-        deletedIds.add(`req_${remReq.id}`);
-      }
-    }
-  }
-
-  if (Array.isArray(localState.leaveRequests) && Array.isArray(remoteState.leaveRequests)) {
-    const localLeaveIds = new Set(localState.leaveRequests.map(lr => String(lr.id)));
-    for (const remLeave of remoteState.leaveRequests) {
-      if (remLeave && remLeave.id && !localLeaveIds.has(String(remLeave.id))) {
-        deletedIds.add(String(remLeave.id));
-        deletedIds.add(`leave_${remLeave.id}`);
-        deletedIds.add(`req_${remLeave.id}`);
-      }
-    }
-  }
-
-  if (Array.isArray(localState.shiftSwaps) && Array.isArray(remoteState.shiftSwaps)) {
-    const localSwapIds = new Set(localState.shiftSwaps.map(sw => String(sw.id)));
-    for (const remSwap of remoteState.shiftSwaps) {
-      if (remSwap && remSwap.id && !localSwapIds.has(String(remSwap.id))) {
-        deletedIds.add(String(remSwap.id));
-        deletedIds.add(`swap_${remSwap.id}`);
-        deletedIds.add(`req_${remSwap.id}`);
-      }
-    }
-  }
-
-  if (Array.isArray(localState.resignationRequests) && Array.isArray(remoteState.resignationRequests)) {
-    const localResignIds = new Set(localState.resignationRequests.map(rs => String(rs.id)));
-    for (const remRes of remoteState.resignationRequests) {
-      if (remRes && remRes.id && !localResignIds.has(String(remRes.id))) {
-        deletedIds.add(String(remRes.id));
-        deletedIds.add(`res_${remRes.id}`);
-        deletedIds.add(`req_${remRes.id}`);
-      }
-    }
-  }
-
-  // 7. الأجهزة المحذوفة
-  if (Array.isArray(localState.authorizedDevices) && Array.isArray(remoteState.authorizedDevices)) {
-    const localDevIds = new Set(localState.authorizedDevices.map(d => String(d.deviceId || d.id)));
-    for (const remDev of remoteState.authorizedDevices) {
-      const devKey = String(remDev.deviceId || remDev.id);
-      if (remDev && devKey && !localDevIds.has(devKey)) {
-        deletedIds.add(devKey);
-        deletedIds.add(`dev_${devKey}`);
-      }
-    }
-  }
 
   const mergedShifts = mergeArrays(localState.shifts, remoteState.shifts, { prefix: 'shift', deletedIds });
 
