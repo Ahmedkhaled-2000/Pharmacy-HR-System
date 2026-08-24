@@ -6,7 +6,7 @@ import { fmt } from './formatters';
  */
 
 export function triggerDirectPrint(htmlContent, documentTitle = 'طباعة مستند') {
-  // 1. Create or reuse hidden iframe
+  // 1. Create or reuse hidden isolated iframe
   const existingIframe = document.getElementById('isolated-print-frame');
   if (existingIframe) {
     existingIframe.remove();
@@ -17,11 +17,11 @@ export function triggerDirectPrint(htmlContent, documentTitle = 'طباعة مس
   iframe.style.position = 'fixed';
   iframe.style.right = '0';
   iframe.style.bottom = '0';
-  iframe.style.width = '0px';
-  iframe.style.height = '0px';
+  iframe.style.width = '10px';
+  iframe.style.height = '10px';
   iframe.style.border = 'none';
   iframe.style.zIndex = '-9999';
-  iframe.style.visibility = 'hidden';
+  iframe.style.opacity = '0.01';
   document.body.appendChild(iframe);
 
   const doc = iframe.contentWindow.document;
@@ -38,7 +38,7 @@ export function triggerDirectPrint(htmlContent, documentTitle = 'طباعة مس
       <style>
         @page {
           size: A4 portrait;
-          margin: 8mm 10mm;
+          margin: 6mm 8mm;
         }
         * {
           box-sizing: border-box;
@@ -47,13 +47,13 @@ export function triggerDirectPrint(htmlContent, documentTitle = 'طباعة مس
         }
         body {
           margin: 0;
-          padding: 10px;
+          padding: 6px;
           background: #ffffff !important;
           color: #0f172a !important;
           font-family: 'Cairo', 'Tajawal', sans-serif;
           direction: rtl;
-          font-size: 13px;
-          line-height: 1.5;
+          font-size: 11px;
+          line-height: 1.4;
         }
         table {
           width: 100%;
@@ -61,12 +61,12 @@ export function triggerDirectPrint(htmlContent, documentTitle = 'طباعة مس
         }
         th, td {
           border: 1px solid #cbd5e1;
-          padding: 5px 8px;
+          padding: 3px 5px;
         }
         .header-box {
           border-bottom: 3px double #0f766e;
-          padding-bottom: 10px;
-          margin-bottom: 14px;
+          padding-bottom: 8px;
+          margin-bottom: 10px;
           display: flex;
           justify-content: space-between;
           align-items: center;
@@ -76,7 +76,7 @@ export function triggerDirectPrint(htmlContent, documentTitle = 'طباعة مس
           padding: 2px 8px;
           border-radius: 6px;
           font-weight: bold;
-          font-size: 11.5px;
+          font-size: 11px;
         }
       </style>
     </head>
@@ -85,9 +85,13 @@ export function triggerDirectPrint(htmlContent, documentTitle = 'طباعة مس
       <script>
         window.onload = function() {
           setTimeout(function() {
-            window.focus();
-            window.print();
-          }, 250);
+            try {
+              window.focus();
+              window.print();
+            } catch(err) {
+              console.error('Print frame error:', err);
+            }
+          }, 150);
         };
       </script>
     </body>
@@ -400,8 +404,9 @@ export function generateOfficialPayslipHTML({
   const workDaysPerMonth = targetBranchDetails ? (parseFloat(targetBranchDetails.workDaysPerMonth) || 26) : (parseFloat(emp?.workDaysPerMonth) || 26);
 
   const getBranchName = (bId) => {
-    const b = (branches || orgSettings.branches || []).find((br) => String(br.id) === String(bId));
-    return b ? b.name : (bId === emp?.branchId ? (emp?.branchName || 'الفرع الرئيسي') : `فرع ${bId}`);
+    if (!bId || bId === 'undefined' || bId === 'null') return emp?.branchName || 'الفرع الرئيسي';
+    const b = (branches || orgSettings.branches || state?.branches || []).find((br) => String(br.id) === String(bId));
+    return b ? b.name : (String(bId) === String(emp?.branchId) ? (emp?.branchName || 'الفرع الرئيسي') : `فرع ${bId}`);
   };
 
   const branchNames = selectedBranchId
@@ -750,67 +755,148 @@ export function generateOfficialPayslipHTML({
         </div>
       `}
 
-      <!-- Punches & Shifts Table -->
-      <div style="margin-bottom: 8px;">
-        <div style="font-weight: 800; color: #0f766e; font-size: 11px; margin-bottom: 3px; display: flex; justify-content: space-between; align-items: center;">
-          <span>📋 أولاً: تفاصيل سجل الحضور والبصمات (${(shifts || []).length} وردية):</span>
-          <span style="font-size: 9.5px; color: #64748b;">إجمالي الساعات: ${fmt(totalHours)} س</span>
-        </div>
-        <table style="width: 100%; border-collapse: collapse; font-size: 9.5px; text-align: center;">
-          <thead>
-            <tr style="background: #f1f5f9; color: #334155; font-weight: 800;">
-              <th style="padding: 2.5px; width: 4%;">#</th>
-              <th style="padding: 2.5px; width: ${isMultiBranch ? '20%' : '22%'};">اليوم والتاريخ</th>
-              ${isMultiBranch ? `<th style="padding: 2.5px; width: 14%;">الفرع</th>` : ''}
-              <th style="padding: 2.5px; width: 13%;">وقت الدخول</th>
-              <th style="padding: 2.5px; width: 13%;">وقت الخروج</th>
-              <th style="padding: 2.5px; width: 10%;">البريك</th>
-              <th style="padding: 2.5px; width: 12%;">ساعات العمل</th>
-              <th style="padding: 2.5px; width: ${isMultiBranch ? '18%' : '20%'};">الأجر المستحق</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${(shifts && shifts.length > 0) ? shifts.map((s, idx) => {
-              const shiftRate = (summary.perBranch?.[s.branchId]?.rate) || hourlyRate;
-              const effHours = parseFloat(s.hours || s.regularHours) || 0;
-              const hasPerm = s.hasPermission || false;
-              const bName = getBranchName(s.branchId);
+      <!-- Punches & Shifts Section (Separate Table for Each Branch if Multi-Branch) -->
+      ${(showPerBranchBreakdown) ? `
+        <!-- Separate Punch Table for Each Branch Individually -->
+        <div style="margin-bottom: 8px;">
+          <div style="font-weight: 800; color: #0f766e; font-size: 11px; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center;">
+            <span>📋 أولاً: سجلات وبصمات الحضور مفصلة لكل فرع على حدة (${(shifts || []).length} وردية):</span>
+            <span style="font-size: 9.5px; color: #0f766e; font-weight: bold;">إجمالي كافة الفروع: ${fmt(totalHours)} س | ${fmt(baseEarnings)} ج.م</span>
+          </div>
+
+          ${(() => {
+            const branchMap = {};
+            (assignedBranches || []).forEach(bd => {
+              branchMap[String(bd.branchId)] = [];
+            });
+            (shifts || []).forEach(s => {
+              const bKey = String(s.branchId || emp?.branchId || assignedBranches[0]?.branchId || 'default');
+              if (!branchMap[bKey]) branchMap[bKey] = [];
+              branchMap[bKey].push(s);
+            });
+
+            return Object.entries(branchMap).map(([bId, bShifts]) => {
+              if (!bShifts || bShifts.length === 0) return '';
+              const bName = getBranchName(bId);
+              const bSum = summary.perBranch?.[bId] || {};
+              const bRate = bSum.rate || bSum.hourlyRate || (hourlyRate || (parseFloat(emp?.salary) || 0));
+              const bTotalHours = bShifts.reduce((acc, s) => acc + (parseFloat(s.hours || s.regularHours) || 0), 0);
+              const bTotalBreak = bShifts.reduce((acc, s) => acc + (parseFloat(s.breakHours) || 0), 0);
+              const bTotalEarn = bShifts.reduce((acc, s) => acc + ((parseFloat(s.hours || s.regularHours) || 0) * bRate), 0);
+
               return `
-                <tr style="background: ${hasPerm ? '#fefce8' : (idx % 2 === 0 ? '#fff' : '#f8fafc')};">
-                  <td style="padding: 2px;">${idx + 1}</td>
-                  <td style="padding: 2px; font-weight: bold;">${s.dayName || ''} ${s.date}</td>
-                  ${isMultiBranch ? `
-                    <td style="padding: 2px;">
-                      <span style="background: #e0f2fe; color: #0369a1; padding: 1px 5px; border-radius: 4px; font-size: 8.5px; font-weight: bold;">
-                        ${bName}
-                      </span>
-                    </td>
-                  ` : ''}
-                  <td style="padding: 2px; color: #16a34a;">${s.timeIn || '—'}</td>
-                  <td style="padding: 2px; color: #dc2626;">${s.timeOut || '—'}</td>
-                  <td style="padding: 2px;">${fmt(s.breakHours)} س</td>
-                  <td style="padding: 2px; font-weight: bold;">${fmt(effHours)} س</td>
-                  <td style="padding: 2px; font-weight: bold; color: #0d9488;">${fmt(effHours * shiftRate)} ج.م</td>
-                </tr>
+                <div style="margin-bottom: 6px; page-break-inside: avoid; break-inside: avoid; border: 1.5px solid #0f766e; border-radius: 6px; overflow: hidden; background: #fff;">
+                  <div style="background: #f0fdf4; padding: 4px 8px; border-bottom: 1.5px solid #0f766e; display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-weight: 800; color: #0f766e; font-size: 10.5px;">
+                      🏢 جدول بصمات: <strong>${bName}</strong> (${bShifts.length} وردية)
+                    </span>
+                    <span style="font-size: 9.5px; color: #166534; font-weight: bold;">
+                      سعر الساعة بالفرع: ${fmt(bRate)} ج.م/س
+                    </span>
+                  </div>
+                  <table style="width: 100%; border-collapse: collapse; font-size: 9.5px; text-align: center;">
+                    <thead>
+                      <tr style="background: #f1f5f9; color: #334155; font-weight: 800;">
+                        <th style="padding: 2px; width: 5%;">#</th>
+                        <th style="padding: 2px; width: 25%;">اليوم والتاريخ</th>
+                        <th style="padding: 2px; width: 15%;">وقت الدخول</th>
+                        <th style="padding: 2px; width: 15%;">وقت الخروج</th>
+                        <th style="padding: 2px; width: 12%;">البريك</th>
+                        <th style="padding: 2px; width: 13%;">ساعات العمل</th>
+                        <th style="padding: 2px; width: 15%;">المستحق بالفرع</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${bShifts.map((s, idx) => {
+                        const effHours = parseFloat(s.hours || s.regularHours) || 0;
+                        const hasPerm = s.hasPermission || false;
+                        return `
+                          <tr style="background: ${hasPerm ? '#fefce8' : (idx % 2 === 0 ? '#fff' : '#f8fafc')};">
+                            <td style="padding: 2px;">${idx + 1}</td>
+                            <td style="padding: 2px; font-weight: bold;">${s.dayName || ''} ${s.date}</td>
+                            <td style="padding: 2px; color: #16a34a;">${s.timeIn || '—'}</td>
+                            <td style="padding: 2px; color: #dc2626;">${s.timeOut || '—'}</td>
+                            <td style="padding: 2px;">${fmt(s.breakHours)} س</td>
+                            <td style="padding: 2px; font-weight: bold;">${fmt(effHours)} س</td>
+                            <td style="padding: 2px; font-weight: bold; color: #0d9488;">${fmt(effHours * bRate)} ج.م</td>
+                          </tr>
+                        `;
+                      }).join('')}
+                    </tbody>
+                    <tfoot>
+                      <tr style="background: #e2e8f0; font-weight: 800; font-size: 9.5px;">
+                        <td colspan="4" style="padding: 2px 6px; text-align: right; color: #0f766e;">إجمالي فرع (${bName}):</td>
+                        <td style="padding: 2px;">${fmt(bTotalBreak)} س</td>
+                        <td style="padding: 2px; color: #0f766e;">${fmt(bTotalHours)} س</td>
+                        <td style="padding: 2px; color: #0d9488;">${fmt(bTotalEarn)} ج.م</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
               `;
-            }).join('') : `
-              <tr>
-                <td colspan="${isMultiBranch ? '8' : '7'}" style="padding: 6px; color: #94a3b8;">لا توجد بصمات مسجلة للموظف عن هذا الشهر</td>
+            }).join('');
+          })()}
+
+          <!-- Multi-Branch Grand Total Summary Bar -->
+          <div style="background: #0f766e; color: #ffffff; padding: 4px 10px; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; font-weight: 800; font-size: 10px; margin-top: 4px;">
+            <span>📊 إجمالي البصمات وساعات العمل بكافة الفروع (${(shifts || []).length} وردية):</span>
+            <span>إجمالي الساعات: ${fmt(totalHours)} س | إجمالي المستحق: ${fmt(baseEarnings)} ج.م</span>
+          </div>
+        </div>
+      ` : `
+        <!-- Single Branch Shifts Table -->
+        <div style="margin-bottom: 8px;">
+          <div style="font-weight: 800; color: #0f766e; font-size: 11px; margin-bottom: 3px; display: flex; justify-content: space-between; align-items: center;">
+            <span>📋 أولاً: تفاصيل سجل الحضور والبصمات (${(shifts || []).length} وردية):</span>
+            <span style="font-size: 9.5px; color: #64748b;">إجمالي الساعات: ${fmt(totalHours)} س</span>
+          </div>
+          <table style="width: 100%; border-collapse: collapse; font-size: 9.5px; text-align: center;">
+            <thead>
+              <tr style="background: #f1f5f9; color: #334155; font-weight: 800;">
+                <th style="padding: 2.5px; width: 5%;">#</th>
+                <th style="padding: 2.5px; width: 25%;">اليوم والتاريخ</th>
+                <th style="padding: 2.5px; width: 15%;">وقت الدخول</th>
+                <th style="padding: 2.5px; width: 15%;">وقت الخروج</th>
+                <th style="padding: 2.5px; width: 12%;">البريك</th>
+                <th style="padding: 2.5px; width: 13%;">ساعات العمل</th>
+                <th style="padding: 2.5px; width: 15%;">الأجر المستحق</th>
               </tr>
-            `}
-          </tbody>
-          ${(shifts && shifts.length > 0) ? `
-            <tfoot>
-              <tr style="background: #e2e8f0; font-weight: 800; font-size: 10px;">
-                <td colspan="${isMultiBranch ? '5' : '4'}" style="padding: 2.5px 6px; text-align: right;">الإجمالي:</td>
-                <td style="padding: 2.5px;">${fmt(totalBreakHours)} س</td>
-                <td style="padding: 2.5px; color: #0f766e;">${fmt(totalHours)} س</td>
-                <td style="padding: 2.5px; color: #0d9488;">${fmt(baseEarnings)} ج.م</td>
-              </tr>
-            </tfoot>
-          ` : ''}
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              ${(shifts && shifts.length > 0) ? shifts.map((s, idx) => {
+                const shiftRate = (summary.perBranch?.[s.branchId]?.rate) || hourlyRate;
+                const effHours = parseFloat(s.hours || s.regularHours) || 0;
+                const hasPerm = s.hasPermission || false;
+                return `
+                  <tr style="background: ${hasPerm ? '#fefce8' : (idx % 2 === 0 ? '#fff' : '#f8fafc')};">
+                    <td style="padding: 2px;">${idx + 1}</td>
+                    <td style="padding: 2px; font-weight: bold;">${s.dayName || ''} ${s.date}</td>
+                    <td style="padding: 2px; color: #16a34a;">${s.timeIn || '—'}</td>
+                    <td style="padding: 2px; color: #dc2626;">${s.timeOut || '—'}</td>
+                    <td style="padding: 2px;">${fmt(s.breakHours)} س</td>
+                    <td style="padding: 2px; font-weight: bold;">${fmt(effHours)} س</td>
+                    <td style="padding: 2px; font-weight: bold; color: #0d9488;">${fmt(effHours * shiftRate)} ج.م</td>
+                  </tr>
+                `;
+              }).join('') : `
+                <tr>
+                  <td colspan="7" style="padding: 6px; color: #94a3b8;">لا توجد بصمات مسجلة للموظف عن هذا الشهر</td>
+                </tr>
+              `}
+            </tbody>
+            ${(shifts && shifts.length > 0) ? `
+              <tfoot>
+                <tr style="background: #e2e8f0; font-weight: 800; font-size: 10px;">
+                  <td colspan="4" style="padding: 2.5px 6px; text-align: right;">الإجمالي:</td>
+                  <td style="padding: 2.5px;">${fmt(totalBreakHours)} س</td>
+                  <td style="padding: 2.5px; color: #0f766e;">${fmt(totalHours)} س</td>
+                  <td style="padding: 2.5px; color: #0d9488;">${fmt(baseEarnings)} ج.م</td>
+                </tr>
+              </tfoot>
+            ` : ''}
+          </table>
+        </div>
+      `}
 
       <!-- Late Penalties Table (If exists) -->
       ${latePenaltyItems.length > 0 ? `

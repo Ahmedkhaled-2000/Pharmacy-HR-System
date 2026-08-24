@@ -104,7 +104,8 @@ export default function PayslipPrintModal({
   const [printFitMode, setPrintFitMode] = useState('single_page');
 
   const getBranchName = (bId) => {
-    const b = (branches || orgSettings.branches || []).find((br) => String(br.id) === String(bId));
+    if (!bId || bId === 'undefined' || bId === 'null') return emp?.branchName || 'الفرع الرئيسي';
+    const b = (branches || orgSettings.branches || state?.branches || []).find((br) => String(br.id) === String(bId));
     return b ? b.name : (String(bId) === String(emp.branchId) ? (emp.branchName || 'الفرع الرئيسي') : `فرع ${bId}`);
   };
 
@@ -672,79 +673,167 @@ export default function PayslipPrintModal({
               </div>
             )}
 
-            {/* Attendance Punches Table */}
-            <div style={{ marginBottom: '12px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
-                <h4 style={{ margin: 0, fontFamily: 'Cairo', color: '#0f766e', borderRight: '3px solid #0f766e', paddingRight: '6px', fontSize: '12.5px', fontWeight: 800 }}>
-                  📋 أولاً: تفاصيل سجل الحضور والبصمات ({empShifts.length} وردية)
-                </h4>
-                <span style={{ fontSize: '10.5px', color: '#64748b' }}>
-                  إجمالي الساعات: <strong>{fmt(totalHours)} س</strong> · البريك: <strong>{fmt(totalBreakHours)} س</strong>
-                </span>
-              </div>
+            {/* Attendance Punches Section (Separate Table for each branch if Multi-Branch) */}
+            {showPerBranchBreakdown ? (
+              <div style={{ marginBottom: '12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <h4 style={{ margin: 0, fontFamily: 'Cairo', color: '#0f766e', borderRight: '3px solid #0f766e', paddingRight: '6px', fontSize: '13px', fontWeight: 800 }}>
+                    📋 أولاً: سجلات وبصمات الحضور مفصلة لكل فرع على حدة ({empShifts.length} وردية)
+                  </h4>
+                  <span style={{ fontSize: '11px', color: '#0f766e', fontWeight: 'bold' }}>
+                    إجمالي كافة الفروع: {fmt(totalHours)} س | {fmt(baseEarnings)} ج.م
+                  </span>
+                </div>
 
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10.5px', textAlign: 'center' }}>
-                <thead>
-                  <tr style={{ background: '#f1f5f9', color: '#334155' }}>
-                    <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '4%' }}>#</th>
-                    <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: isMultiBranch ? '20%' : '22%' }}>اليوم والتاريخ</th>
-                    {isMultiBranch && <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '14%' }}>الفرع</th>}
-                    <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '13%' }}>وقت الدخول</th>
-                    <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '13%' }}>وقت الخروج</th>
-                    <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '10%' }}>البريك</th>
-                    <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '12%' }}>ساعات العمل</th>
-                    <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: isMultiBranch ? '18%' : '20%' }}>الأجر المستحق</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {empShifts.length === 0 ? (
-                    <tr>
-                      <td colSpan={isMultiBranch ? 8 : 7} style={{ padding: '10px', border: '1px solid #cbd5e1', color: '#94a3b8' }}>
-                        لا توجد بصمات مسجلة للموظف عن هذا الشهر
-                      </td>
+                {(() => {
+                  const branchMap = {};
+                  assignedBranches.forEach(bd => {
+                    branchMap[String(bd.branchId)] = [];
+                  });
+                  empShifts.forEach(s => {
+                    const bKey = String(s.branchId || emp.branchId || assignedBranches[0]?.branchId || 'default');
+                    if (!branchMap[bKey]) branchMap[bKey] = [];
+                    branchMap[bKey].push(s);
+                  });
+
+                  return Object.entries(branchMap).map(([bId, bShifts]) => {
+                    if (!bShifts || bShifts.length === 0) return null;
+                    const bName = getBranchName(bId);
+                    const bSum = summary.perBranch?.[bId] || {};
+                    const bRate = bSum.rate || bSum.hourlyRate || hourlyRate;
+                    const bTotalHours = bShifts.reduce((acc, s) => acc + (getEffectiveShiftHours(s, state) || 0), 0);
+                    const bTotalBreak = bShifts.reduce((acc, s) => acc + (parseFloat(s.breakHours) || 0), 0);
+                    const bTotalEarn = bShifts.reduce((acc, s) => acc + ((getEffectiveShiftHours(s, state) || 0) * bRate), 0);
+
+                    return (
+                      <div key={bId} style={{ marginBottom: '10px', border: '1.5px solid #0f766e', borderRadius: '8px', overflow: 'hidden', background: '#ffffff' }}>
+                        <div style={{ background: '#f0fdf4', padding: '6px 12px', borderBottom: '1.5px solid #0f766e', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontWeight: 800, color: '#0f766e', fontSize: '11.5px', fontFamily: 'Cairo' }}>
+                            🏢 جدول بصمات وحضور: <strong>{bName}</strong> ({bShifts.length} وردية)
+                          </span>
+                          <span style={{ fontSize: '10.5px', color: '#166534', fontWeight: 'bold' }}>
+                            سعر الساعة المعتمد بالفرع: {fmt(bRate)} ج.م/س
+                          </span>
+                        </div>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10.5px', textAlign: 'center' }}>
+                          <thead>
+                            <tr style={{ background: '#f1f5f9', color: '#334155' }}>
+                              <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '5%' }}>#</th>
+                              <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '25%' }}>اليوم والتاريخ</th>
+                              <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '15%' }}>وقت الدخول</th>
+                              <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '15%' }}>وقت الخروج</th>
+                              <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '12%' }}>البريك</th>
+                              <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '13%' }}>ساعات العمل</th>
+                              <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '15%' }}>الأجر المستحق بالفرع</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {bShifts.map((s, sIdx) => {
+                              const effHours = getEffectiveShiftHours(s, state);
+                              const hasPerm = isApprovedPermissionForDate(emp.id, s.date, state);
+                              return (
+                                <tr key={s.id || sIdx} style={{ background: hasPerm ? '#fefce8' : (sIdx % 2 === 0 ? '#fff' : '#f8fafc') }}>
+                                  <td style={{ padding: '3px', border: '1px solid #cbd5e1' }}>{sIdx + 1}</td>
+                                  <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>
+                                    {arabicWeekday(s.date)} {s.date}
+                                    {hasPerm && <span style={{ display: 'block', color: '#b45309', fontSize: '9px' }}>⏰ إذن معتمد</span>}
+                                  </td>
+                                  <td style={{ padding: '3px', border: '1px solid #cbd5e1', color: '#16a34a' }}>{s.timeIn || '—'}</td>
+                                  <td style={{ padding: '3px', border: '1px solid #cbd5e1', color: '#dc2626' }}>{s.timeOut || '—'}</td>
+                                  <td style={{ padding: '3px', border: '1px solid #cbd5e1' }}>{fmt(s.breakHours)} س</td>
+                                  <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>{fmt(effHours)} س</td>
+                                  <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold', color: '#0f766e' }}>{fmt(effHours * bRate)} ج.م</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                          <tfoot>
+                            <tr style={{ background: '#e2e8f0', fontWeight: 'bold', fontSize: '10.5px' }}>
+                              <td colSpan={4} style={{ padding: '4px 8px', border: '1px solid #cbd5e1', textAlign: 'right', color: '#0f766e' }}>
+                                إجمالي فرع ({bName}):
+                              </td>
+                              <td style={{ padding: '4px', border: '1px solid #cbd5e1' }}>{fmt(bTotalBreak)} س</td>
+                              <td style={{ padding: '4px', border: '1px solid #cbd5e1', color: '#0f766e' }}>{fmt(bTotalHours)} س</td>
+                              <td style={{ padding: '4px', border: '1px solid #cbd5e1', color: '#0f766e' }}>{fmt(bTotalEarn)} ج.م</td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    );
+                  });
+                })()}
+
+                {/* Multi-Branch Grand Summary Strip */}
+                <div style={{ background: '#0f766e', color: '#ffffff', padding: '6px 14px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: 'bold', fontSize: '11px' }}>
+                  <span>📊 إجمالي البصمات وساعات العمل بكافة الفروع ({empShifts.length} وردية):</span>
+                  <span>إجمالي الساعات: {fmt(totalHours)} س | إجمالي المستحق: {fmt(baseEarnings)} ج.م</span>
+                </div>
+              </div>
+            ) : (
+              <div style={{ marginBottom: '12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
+                  <h4 style={{ margin: 0, fontFamily: 'Cairo', color: '#0f766e', borderRight: '3px solid #0f766e', paddingRight: '6px', fontSize: '12.5px', fontWeight: 800 }}>
+                    📋 أولاً: تفاصيل سجل الحضور والبصمات ({empShifts.length} وردية)
+                  </h4>
+                  <span style={{ fontSize: '10.5px', color: '#64748b' }}>
+                    إجمالي الساعات: <strong>{fmt(totalHours)} س</strong> · البريك: <strong>{fmt(totalBreakHours)} س</strong>
+                  </span>
+                </div>
+
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10.5px', textAlign: 'center' }}>
+                  <thead>
+                    <tr style={{ background: '#f1f5f9', color: '#334155' }}>
+                      <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '5%' }}>#</th>
+                      <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '25%' }}>اليوم والتاريخ</th>
+                      <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '15%' }}>وقت الدخول</th>
+                      <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '15%' }}>وقت الخروج</th>
+                      <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '12%' }}>البريك</th>
+                      <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '13%' }}>ساعات العمل</th>
+                      <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '15%' }}>الأجر المستحق</th>
                     </tr>
-                  ) : (
-                    empShifts.map((s, idx) => {
-                      const shiftRate = (summary.perBranch?.[s.branchId]?.rate) || hourlyRate;
-                      const effHours = getEffectiveShiftHours(s, state);
-                      const hasPerm = isApprovedPermissionForDate(emp.id, s.date, state);
-                      const bName = getBranchName(s.branchId);
-                      return (
-                        <tr key={s.id || idx} style={{ background: hasPerm ? '#fefce8' : (idx % 2 === 0 ? '#fff' : '#f8fafc') }}>
-                          <td style={{ padding: '3px', border: '1px solid #cbd5e1' }}>{idx + 1}</td>
-                          <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>
-                            {arabicWeekday(s.date)} {s.date}
-                            {hasPerm && <span style={{ display: 'block', color: '#b45309', fontSize: '9px' }}>⏰ إذن معتمد</span>}
-                          </td>
-                          {isMultiBranch && (
-                            <td style={{ padding: '3px', border: '1px solid #cbd5e1' }}>
-                              <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '2px 6px', borderRadius: '4px', fontSize: '9.5px', fontWeight: 'bold' }}>
-                                {bName}
-                              </span>
+                  </thead>
+                  <tbody>
+                    {empShifts.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} style={{ padding: '10px', border: '1px solid #cbd5e1', color: '#94a3b8' }}>
+                          لا توجد بصمات مسجلة للموظف عن هذا الشهر
+                        </td>
+                      </tr>
+                    ) : (
+                      empShifts.map((s, idx) => {
+                        const shiftRate = (summary.perBranch?.[s.branchId]?.rate) || hourlyRate;
+                        const effHours = getEffectiveShiftHours(s, state);
+                        const hasPerm = isApprovedPermissionForDate(emp.id, s.date, state);
+                        return (
+                          <tr key={s.id || idx} style={{ background: hasPerm ? '#fefce8' : (idx % 2 === 0 ? '#fff' : '#f8fafc') }}>
+                            <td style={{ padding: '3px', border: '1px solid #cbd5e1' }}>{idx + 1}</td>
+                            <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>
+                              {arabicWeekday(s.date)} {s.date}
+                              {hasPerm && <span style={{ display: 'block', color: '#b45309', fontSize: '9px' }}>⏰ إذن معتمد</span>}
                             </td>
-                          )}
-                          <td style={{ padding: '3px', border: '1px solid #cbd5e1', color: '#16a34a' }}>{s.timeIn || '—'}</td>
-                          <td style={{ padding: '3px', border: '1px solid #cbd5e1', color: '#dc2626' }}>{s.timeOut || '—'}</td>
-                          <td style={{ padding: '3px', border: '1px solid #cbd5e1' }}>{fmt(s.breakHours)} س</td>
-                          <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>{fmt(effHours)} س</td>
-                          <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold', color: '#0f766e' }}>{fmt(effHours * shiftRate)} ج.م</td>
-                        </tr>
-                      );
-                    })
+                            <td style={{ padding: '3px', border: '1px solid #cbd5e1', color: '#16a34a' }}>{s.timeIn || '—'}</td>
+                            <td style={{ padding: '3px', border: '1px solid #cbd5e1', color: '#dc2626' }}>{s.timeOut || '—'}</td>
+                            <td style={{ padding: '3px', border: '1px solid #cbd5e1' }}>{fmt(s.breakHours)} س</td>
+                            <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>{fmt(effHours)} س</td>
+                            <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold', color: '#0f766e' }}>{fmt(effHours * shiftRate)} ج.م</td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                  {empShifts.length > 0 && (
+                    <tfoot>
+                      <tr style={{ background: '#e2e8f0', fontWeight: 'bold', fontSize: '11px' }}>
+                        <td colSpan={4} style={{ padding: '4px 8px', border: '1px solid #cbd5e1', textAlign: 'right' }}>الإجمالي:</td>
+                        <td style={{ padding: '4px', border: '1px solid #cbd5e1' }}>{fmt(totalBreakHours)} س</td>
+                        <td style={{ padding: '4px', border: '1px solid #cbd5e1', color: '#0f766e' }}>{fmt(totalHours)} س</td>
+                        <td style={{ padding: '4px', border: '1px solid #cbd5e1', color: '#0f766e' }}>{fmt(baseEarnings)} ج.م</td>
+                      </tr>
+                    </tfoot>
                   )}
-                </tbody>
-                {empShifts.length > 0 && (
-                  <tfoot>
-                    <tr style={{ background: '#e2e8f0', fontWeight: 'bold', fontSize: '11px' }}>
-                      <td colSpan={isMultiBranch ? 5 : 4} style={{ padding: '4px 8px', border: '1px solid #cbd5e1', textAlign: 'right' }}>الإجمالي:</td>
-                      <td style={{ padding: '4px', border: '1px solid #cbd5e1' }}>{fmt(totalBreakHours)} س</td>
-                      <td style={{ padding: '4px', border: '1px solid #cbd5e1', color: '#0f766e' }}>{fmt(totalHours)} س</td>
-                      <td style={{ padding: '4px', border: '1px solid #cbd5e1', color: '#0f766e' }}>{fmt(baseEarnings)} ج.م</td>
-                    </tr>
-                  </tfoot>
-                )}
-              </table>
-            </div>
+                </table>
+              </div>
+            )}
 
             {/* Late Penalties Table (If exists) */}
             {latePenaltyItems.length > 0 && (
