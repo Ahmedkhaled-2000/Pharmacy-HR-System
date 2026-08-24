@@ -1,8 +1,9 @@
 import React, { useState, useMemo } from 'react';
-import { applyShiftSwapToRosters, arabicWeekday, shouldShowRequestToBranch, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
+import { applyShiftSwapToRosters, arabicWeekday, shouldShowRequestToBranch, getEmpDisplayName, isEmployeeActive, normalizeState } from '../../utils/formatters';
 import { notifyEmployeeEarlyExitWarning } from '../../utils/gmailService';
 import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
 import { normalizeSchedule } from '../roster/RosterModule';
+import { syncNow, fetchRemoteState } from '../../utils/offlineSync';
 
 export function getFormattedRequestBadge(type, leaveType) {
   if (type === 'leave') {
@@ -57,6 +58,32 @@ export default function RequestsModule({
   const [loanCustomNotes, setLoanCustomNotes] = useState('');
   const [isEditingLoan, setIsEditingLoan] = useState(false);
 
+  const [showHiddenAdminRequests, setShowHiddenAdminRequests] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleManualRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      const res = await syncNow();
+      if (res.success && res.mergedState) {
+        if (setState) setState(normalizeState(res.mergedState));
+        showToast?.('✅ تم تحديث وجلب أحدث الطلبات بنجاح');
+      } else {
+        const remote = await fetchRemoteState();
+        if (remote && !remote.notModified) {
+          if (setState) setState(normalizeState(remote));
+          showToast?.('✅ تم تحديث وجلب أحدث الطلبات من السحابة بنجاح');
+        } else {
+          showToast?.('ℹ️ السجل محدث بالفعل مع أحدث بيانات السحابة');
+        }
+      }
+    } catch (err) {
+      showToast?.('تعذر جلب التحديثات: ' + (err.message || 'خطأ في الشبكة'));
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   const handleOpenPreview = (req) => {
     setPreviewModalReq(req);
     if (req && (req.type === 'loan' || req.type === 'advance' || req.type === 'meds' || req.type === 'credit_medicine')) {
@@ -72,8 +99,6 @@ export default function RequestsModule({
       setIsEditingLoan(false);
     }
   };
-
-  const [showHiddenAdminRequests, setShowHiddenAdminRequests] = useState(false);
 
   const isBranch = authRole === 'branch';
   const cIdStr = String(currentBranch?.id || '');
@@ -992,6 +1017,33 @@ export default function RequestsModule({
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          {/* Button: Instant Cloud Sync & Refresh */}
+          <button
+            type="button"
+            className="btn"
+            onClick={handleManualRefresh}
+            disabled={isRefreshing}
+            style={{
+              background: isRefreshing ? 'var(--surface-muted)' : '#059669',
+              color: '#ffffff',
+              border: '1px solid #047857',
+              padding: '8px 14px',
+              fontSize: '12px',
+              fontWeight: '800',
+              borderRadius: '8px',
+              cursor: isRefreshing ? 'wait' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: '0 2px 8px rgba(5, 150, 105, 0.25)',
+              transition: 'all 0.2s ease'
+            }}
+            title="تحديث ومزامنة أحدث الطلبات من قاعدة البيانات السحابية فوراً"
+          >
+            <span style={{ display: 'inline-block', transform: isRefreshing ? 'rotate(360deg)' : 'none', transition: 'transform 0.6s ease' }}>🔄</span>
+            <span>{isRefreshing ? 'جاري المزامنة...' : 'تحديث الطلبات'}</span>
+          </button>
+
           {/* Button: Toggle Hidden/Archived Requests */}
           {hiddenAdminCount > 0 && (
             <button
