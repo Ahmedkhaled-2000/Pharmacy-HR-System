@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { fmt, arabicWeekday, AR_MONTHS } from '../../utils/formatters';
 import { computeLatenessFinancialAmount, isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
 import { triggerDirectPrint, generateOfficialPayslipHTML } from '../../utils/printHelper';
@@ -102,6 +102,13 @@ export default function PayslipPrintModal({
 
   // Page Scale Fit Mode: 'single_page' (Compact Single A4) vs 'full' (Normal Extended)
   const [printFitMode, setPrintFitMode] = useState('single_page');
+  const scrollRef = useRef(null);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = 0;
+    }
+  }, [isOpen, activeBranchFilter, printFitMode]);
 
   const getBranchName = (bId) => {
     if (!bId || bId === 'undefined' || bId === 'null') return emp?.branchName || 'الفرع الرئيسي';
@@ -467,11 +474,23 @@ export default function PayslipPrintModal({
         </div>
 
         {/* ── Printable Payslip Layout Body (Preview Area) ── */}
-        <div className="payslip-scroll-area" style={{ overflowY: 'auto', flex: 1, padding: '16px 20px', background: '#f1f5f9' }}>
+        <div
+          ref={scrollRef}
+          className="payslip-scroll-area"
+          style={{
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            flex: 1,
+            padding: '16px 20px',
+            background: '#f1f5f9',
+            scrollBehavior: 'smooth'
+          }}
+        >
           <div
             id="printable-payslip"
             style={{
               maxWidth: '820px',
+              width: '100%',
               margin: '0 auto',
               background: '#ffffff',
               padding: printFitMode === 'single_page' ? '18px 22px' : '24px 28px',
@@ -479,7 +498,8 @@ export default function PayslipPrintModal({
               boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
               fontFamily: "'Cairo', 'Tajawal', sans-serif",
               color: '#1e293b',
-              direction: 'rtl'
+              direction: 'rtl',
+              boxSizing: 'border-box'
             }}
           >
             {/* Header Banner */}

@@ -5,28 +5,8 @@ import { fmt } from './formatters';
  * مُحرك طباعة احترافي معزول ومستقل بنسبة 100% يمنع تماماً أي ظهور لصفحات بيضاء أو مشاكل في الـ CSS
  */
 
-export function triggerDirectPrint(htmlContent, documentTitle = 'طباعة مستند') {
-  // 1. Create or reuse hidden isolated iframe
-  const existingIframe = document.getElementById('isolated-print-frame');
-  if (existingIframe) {
-    existingIframe.remove();
-  }
-
-  const iframe = document.createElement('iframe');
-  iframe.id = 'isolated-print-frame';
-  iframe.style.position = 'fixed';
-  iframe.style.right = '0';
-  iframe.style.bottom = '0';
-  iframe.style.width = '10px';
-  iframe.style.height = '10px';
-  iframe.style.border = 'none';
-  iframe.style.zIndex = '-9999';
-  iframe.style.opacity = '0.01';
-  document.body.appendChild(iframe);
-
-  const doc = iframe.contentWindow.document;
-  doc.open();
-  doc.write(`
+export function triggerDirectPrint(htmlContent, documentTitle = 'طباعة كشف المرتب') {
+  const fullDocumentHTML = `
     <!DOCTYPE html>
     <html dir="rtl" lang="ar">
     <head>
@@ -45,19 +25,21 @@ export function triggerDirectPrint(htmlContent, documentTitle = 'طباعة مس
           -webkit-print-color-adjust: exact !important;
           print-color-adjust: exact !important;
         }
-        body {
+        html, body {
           margin: 0;
-          padding: 6px;
+          padding: 8px 12px;
           background: #ffffff !important;
           color: #0f172a !important;
           font-family: 'Cairo', 'Tajawal', sans-serif;
           direction: rtl;
           font-size: 11px;
           line-height: 1.4;
+          width: 100%;
         }
         table {
           width: 100%;
           border-collapse: collapse;
+          page-break-inside: avoid;
         }
         th, td {
           border: 1px solid #cbd5e1;
@@ -78,25 +60,84 @@ export function triggerDirectPrint(htmlContent, documentTitle = 'طباعة مس
           font-weight: bold;
           font-size: 11px;
         }
+        .no-print {
+          display: none !important;
+        }
+        @media print {
+          body {
+            padding: 0 !important;
+          }
+          .no-print {
+            display: none !important;
+          }
+        }
       </style>
     </head>
     <body>
       ${htmlContent}
       <script>
         window.onload = function() {
-          setTimeout(function() {
-            try {
-              window.focus();
-              window.print();
-            } catch(err) {
-              console.error('Print frame error:', err);
-            }
-          }, 150);
+          if (document.fonts && document.fonts.ready) {
+            document.fonts.ready.then(function() {
+              setTimeout(function() {
+                try {
+                  window.focus();
+                  window.print();
+                } catch(e) {
+                  console.error(e);
+                }
+              }, 200);
+            });
+          } else {
+            setTimeout(function() {
+              try {
+                window.focus();
+                window.print();
+              } catch(e) {
+                console.error(e);
+              }
+            }, 300);
+          }
         };
       </script>
     </body>
     </html>
-  `);
+  `;
+
+  // 1. Try opening a clean popup window first (most reliable on desktop browsers & prevents any clipping)
+  try {
+    const printWin = window.open('', '_blank', 'width=950,height=800,top=40,left=40,menubar=no,toolbar=no,location=no,status=no');
+    if (printWin && !printWin.closed) {
+      printWin.document.open();
+      printWin.document.write(fullDocumentHTML);
+      printWin.document.close();
+      printWin.focus();
+      return;
+    }
+  } catch (e) {
+    console.warn('Popup print blocked, falling back to off-screen iframe:', e);
+  }
+
+  // 2. Fallback: Full-size offscreen iframe with standard A4 viewport dimensions
+  const existingIframe = document.getElementById('isolated-print-frame');
+  if (existingIframe) {
+    existingIframe.remove();
+  }
+
+  const iframe = document.createElement('iframe');
+  iframe.id = 'isolated-print-frame';
+  iframe.style.position = 'fixed';
+  iframe.style.top = '-10000px';
+  iframe.style.left = '-10000px';
+  iframe.style.width = '210mm';
+  iframe.style.height = '297mm';
+  iframe.style.border = 'none';
+  iframe.style.zIndex = '-9999';
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentWindow.document;
+  doc.open();
+  doc.write(fullDocumentHTML);
   doc.close();
 }
 
