@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { fmt, arabicWeekday, AR_MONTHS } from '../../utils/formatters';
 import { computeLatenessFinancialAmount, isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
 import { triggerDirectPrint, generateOfficialPayslipHTML } from '../../utils/printHelper';
+import { getCycleDateRange } from '../../utils/periodEngine';
 
 export default function PayslipPrintModal({
   isOpen,
@@ -44,25 +45,10 @@ export default function PayslipPrintModal({
   const workHoursPerDay = targetBranchDetails ? (parseFloat(targetBranchDetails.workHoursPerDay) || 8) : (parseFloat(emp.workHoursPerDay) || 8);
   const workDaysPerMonth = targetBranchDetails ? (parseFloat(targetBranchDetails.workDaysPerMonth) || 26) : (parseFloat(emp.workDaysPerMonth) || 26);
 
-  // Calculate cutoff range for this month
-  const pType = orgSettings?.payrollPeriodType || state?.orgSettings?.payrollPeriodType || (() => { try { return localStorage.getItem('payroll_period_type') || 'cycle'; } catch { return 'cycle'; } })();
-  const customFrom = orgSettings?.payrollCustomFrom || state?.orgSettings?.payrollCustomFrom || (() => { try { return localStorage.getItem('payroll_custom_from') || ''; } catch { return ''; } })();
-  const customTo = orgSettings?.payrollCustomTo || state?.orgSettings?.payrollCustomTo || (() => { try { return localStorage.getItem('payroll_custom_to') || ''; } catch { return ''; } })();
-
-  let startCutoff, endCutoff;
-  if (pType === 'custom' && customFrom && customTo) {
-    startCutoff = customFrom <= customTo ? customFrom : customTo;
-    endCutoff = customFrom <= customTo ? customTo : customFrom;
-  } else {
-    const sDay = orgSettings?.payrollPayoutStartDay || state?.orgSettings?.payrollPayoutStartDay || 26;
-    const eDay = orgSettings?.payrollPayoutEndDay || state?.orgSettings?.payrollPayoutEndDay || 25;
-    const [cutoffY, cutoffM] = (month || new Date().toISOString().slice(0, 7)).split('-').map(Number);
-    let prevY = cutoffY;
-    let prevM = cutoffM - 1;
-    if (prevM < 1) { prevM = 12; prevY = cutoffY - 1; }
-    startCutoff = `${prevY}-${String(prevM).padStart(2, '0')}-${String(sDay).padStart(2, '0')}`;
-    endCutoff = `${cutoffY}-${String(cutoffM).padStart(2, '0')}-${String(eDay).padStart(2, '0')}`;
-  }
+  // Calculate cutoff range for this month via Period Engine
+  const cycleRange = getCycleDateRange(month || new Date().toISOString().slice(0, 7), orgSettings || state?.orgSettings);
+  const startCutoff = cycleRange.startDate;
+  const endCutoff = cycleRange.endDate;
 
   // Filter shifts and adjustments for this cutoff period
   const empShifts = shifts.filter((s) =>

@@ -1,9 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
+import { useLiveRealTime } from '../../hooks/useLiveRealTime';
+import { getCycleDateRange } from '../../utils/periodEngine';
 
 export default function SidebarLayout({
   currentRole,
   currentBranch,
   userProfile,
+  orgSettings = {},
   activeTab,
   setActiveTab,
   onLogout,
@@ -25,6 +28,11 @@ export default function SidebarLayout({
   setAdminCustomTo,
   children
 }) {
+  const liveTime = useLiveRealTime(1000);
+  const currentCycleRange = useMemo(() => {
+    return getCycleDateRange(monthPicker, orgSettings);
+  }, [monthPicker, orgSettings]);
+
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const defaultAdminItems = [
@@ -273,9 +281,29 @@ export default function SidebarLayout({
             >
               ☰
             </button>
-            <div className="ep-header-date" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--muted)', fontSize: '13px', fontWeight: 600 }}>
-              <span style={{ fontSize: '16px' }}>📅</span>
-              {new Date().toLocaleDateString('ar-EG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+            <div className="ep-header-date" style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              background: 'var(--surface-muted)',
+              padding: '4px 10px',
+              borderRadius: '8px',
+              border: '1px solid var(--border)',
+              fontSize: '12px'
+            }} title={liveTime.isServerSynced ? '🌐 التوقيت الفعلي الموثق من الخادم' : '⏱️ التوقيت المباشر'}>
+              <span style={{
+                width: '7px',
+                height: '7px',
+                borderRadius: '50%',
+                background: liveTime.isServerSynced ? '#22c55e' : '#f59e0b',
+                boxShadow: liveTime.isServerSynced ? '0 0 6px #22c55e' : 'none'
+              }} />
+              <span style={{ fontWeight: 'bold', color: 'var(--primary)', fontFamily: 'monospace' }}>
+                ⏰ {liveTime.formatted12Time}
+              </span>
+              <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>
+                {liveTime.fullArabicDate}
+              </span>
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -287,14 +315,27 @@ export default function SidebarLayout({
             {setAdminFilterMode && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--surface-muted)', padding: '4px 10px', borderRadius: '10px', border: '1px solid var(--border)' }}>
                 <select value={adminFilterMode} onChange={(e) => setAdminFilterMode(e.target.value)} style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px', fontWeight: 'bold' }}>
-                  <option value="month">📅 شهر الـ 26</option>
+                  <option value="month">📅 دورة الرواتب ({currentCycleRange.shortLabel})</option>
                   <option value="custom">📆 فترة مخصصة</option>
                 </select>
 
                 {adminFilterMode === 'month' ? (
-                  setMonthPicker && (
-                    <input type="month" value={monthPicker} onChange={(e) => setMonthPicker(e.target.value)} style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px', fontWeight: 'bold' }} />
-                  )
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    {setMonthPicker && (
+                      <input type="month" value={monthPicker} onChange={(e) => setMonthPicker(e.target.value)} style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px', fontWeight: 'bold' }} />
+                    )}
+                    <span style={{
+                      fontSize: '11px',
+                      background: 'var(--surface)',
+                      padding: '2px 6px',
+                      borderRadius: '4px',
+                      border: '1px solid var(--border)',
+                      color: 'var(--primary)',
+                      fontWeight: 'bold'
+                    }}>
+                      {currentCycleRange.shortLabel}
+                    </span>
+                  </div>
                 ) : (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}>
                     <input type="date" value={adminCustomFrom} onChange={(e) => setAdminCustomFrom?.(e.target.value)} style={{ padding: '3px 6px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '11px' }} />

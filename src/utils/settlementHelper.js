@@ -1,77 +1,23 @@
 import { fmt, todayStr } from './formatters';
 import { getEffectiveShiftHours, computeLatenessFinancialAmount, isApprovedPermissionForDate } from './latePenaltyEngine';
 import { isManagementJob, getJobsList } from './jobsHelper';
+import { getCycleDateRange, getActivePayrollMonth } from './periodEngine';
 
 /**
  * دالة مساعدة لحساب واستخراج فترة وتواريخ دورة الرواتب الدقيقة وفقاً لإعدادات المنظومة
  */
 export function getPayrollCycleForDate(refDate = todayStr(), orgSettings = {}) {
-  const pType = orgSettings?.payrollPeriodType || 'cycle';
-  const customFrom = orgSettings?.payrollCustomFrom || '';
-  const customTo = orgSettings?.payrollCustomTo || '';
-
-  if (pType === 'custom' && customFrom && customTo) {
-    const from = customFrom <= customTo ? customFrom : customTo;
-    const to = customFrom <= customTo ? customTo : customFrom;
-    return {
-      startDate: from,
-      endDate: to,
-      cycleMonth: from.slice(0, 7),
-      periodType: 'custom',
-      label: `فترة مخصصة: من ${from} إلى ${to}`
-    };
-  }
-
-  const sDay = orgSettings?.payrollPayoutStartDay !== undefined ? parseInt(orgSettings.payrollPayoutStartDay, 10) : 21;
-  const eDay = orgSettings?.payrollPayoutEndDay !== undefined ? parseInt(orgSettings.payrollPayoutEndDay, 10) : 20;
-
-  const targetDate = new Date(refDate);
-  const y = targetDate.getFullYear();
-  const m = targetDate.getMonth() + 1; // 1-12
-  const day = targetDate.getDate();
-
-  let startYear = y;
-  let startMonth = m;
-  let endYear = y;
-  let endMonth = m;
-
-  if (sDay <= eDay) {
-    // دورة في نفس الشهر التقويمي (مثلاً من 1 إلى 30)
-    startMonth = m;
-    endMonth = m;
-  } else {
-    // دورة متداخلة بين شهرين (مثلاً من 21 في الشهر السابق إلى 20 في الشهر الحالي)
-    if (day >= sDay) {
-      startMonth = m;
-      startYear = y;
-      endMonth = m + 1;
-      if (endMonth > 12) {
-        endMonth = 1;
-        endYear = y + 1;
-      }
-    } else {
-      endMonth = m;
-      endYear = y;
-      startMonth = m - 1;
-      if (startMonth < 1) {
-        startMonth = 12;
-        startYear = y - 1;
-      }
-    }
-  }
-
-  const startDateStr = `${startYear}-${String(startMonth).padStart(2, '0')}-${String(sDay).padStart(2, '0')}`;
-  const endDateStr = `${endYear}-${String(endMonth).padStart(2, '0')}-${String(eDay).padStart(2, '0')}`;
-  const cycleMonthStr = `${endYear}-${String(endMonth).padStart(2, '0')}`;
+  const targetDate = refDate ? new Date(refDate + (refDate.length === 10 ? 'T12:00:00' : '')) : new Date();
+  const activeMonth = getActivePayrollMonth(orgSettings, targetDate);
+  const range = getCycleDateRange(activeMonth, orgSettings);
 
   return {
-    startDate: startDateStr,
-    endDate: endDateStr,
-    cycleMonth: cycleMonthStr,
-    periodType: 'cycle',
-    startDay: sDay,
-    endDay: eDay,
-    label: `من ${startDateStr} إلى ${endDateStr}`
+    startDate: range.startDate,
+    endDate: range.endDate,
+    cycleMonth: range.month,
+    periodType: range.isCustom ? 'custom' : 'cycle',
+    label: range.label,
+    daysCount: range.daysCount
   };
 }
 

@@ -1,9 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { useLiveRealTime } from '../../hooks/useLiveRealTime';
+import { getCycleDateRange } from '../../utils/periodEngine';
 
 export default function DesktopLayout({
   currentRole,
   currentBranch,
   userProfile,
+  orgSettings = {},
   activeTab,
   setActiveTab,
   activeSubTab = 'cards',
@@ -28,6 +31,11 @@ export default function DesktopLayout({
   setAdminCustomTo,
   children
 }) {
+  const liveTime = useLiveRealTime(1000);
+  const currentCycleRange = useMemo(() => {
+    return getCycleDateRange(monthPicker, orgSettings);
+  }, [monthPicker, orgSettings]);
+
   const [openDropdown, setOpenDropdown] = useState(null);
   const [hoveredFlyoutId, setHoveredFlyoutId] = useState(null);
   const [isNotifDropdownOpen, setIsNotifDropdownOpen] = useState(false);
@@ -307,6 +315,14 @@ export default function DesktopLayout({
               label: 'بيانات الصيدلية والمدير العام',
               icon: '🏢',
               desc: 'الاسم، الشعار، المدير العام، وحساب الأدمن'
+            },
+            {
+              id: 'settings:dates',
+              targetTab: 'settings',
+              targetSubTab: 'dates',
+              label: 'التواريخ والفترات ودورات الرواتب',
+              icon: '📅',
+              desc: 'ضبط بداية ونهاية دورة الشهر وتقفيل الرواتب'
             },
             {
               id: 'settings:permissions',
@@ -737,9 +753,39 @@ export default function DesktopLayout({
           </div>
         </div>
 
-        {/* Left Side: Quick Action Toolbar & Logout */}
+        {/* Left Side: Live Clock, Quick Action Toolbar & Logout */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           
+          {/* Live Authoritative Real-Time Clock Widget */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            background: 'var(--surface)',
+            padding: '3px 10px',
+            borderRadius: '8px',
+            border: '1px solid var(--border)',
+            fontSize: '11.5px',
+            boxShadow: '0 2px 5px rgba(0,0,0,0.03)'
+          }} title={liveTime.isServerSynced ? '🌐 التوقيت الفعلي الموثق من الخادم (مضاد للتلاعب)' : '⏱️ التوقيت المباشر'}>
+            <span style={{
+              width: '7px',
+              height: '7px',
+              borderRadius: '50%',
+              background: liveTime.isServerSynced ? '#22c55e' : '#f59e0b',
+              boxShadow: liveTime.isServerSynced ? '0 0 6px #22c55e' : 'none',
+              flexShrink: 0
+            }} />
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: '1.2' }}>
+              <span style={{ fontWeight: 'bold', color: 'var(--primary)', fontFamily: 'monospace', fontSize: '11.5px' }}>
+                ⏰ {liveTime.formatted12Time}
+              </span>
+              <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>
+                {liveTime.fullArabicDate}
+              </span>
+            </div>
+          </div>
+
           {/* Payroll Cycle / Month Filter */}
           {setAdminFilterMode && (
             <div style={{
@@ -765,27 +811,41 @@ export default function DesktopLayout({
                   cursor: 'pointer'
                 }}
               >
-                <option value="month">📅 شهر الـ 26</option>
+                <option value="month">📅 دورة الرواتب ({currentCycleRange.shortLabel})</option>
                 <option value="custom">📆 فترة مخصصة</option>
               </select>
 
               {adminFilterMode === 'month' ? (
-                setMonthPicker && (
-                  <input
-                    type="month"
-                    value={monthPicker}
-                    onChange={(e) => setMonthPicker(e.target.value)}
-                    style={{
-                      padding: '2px 6px',
-                      borderRadius: '6px',
-                      border: '1px solid var(--border)',
-                      fontSize: '11.5px',
-                      fontWeight: 'bold',
-                      background: 'var(--surface)',
-                      color: 'var(--text)'
-                    }}
-                  />
-                )
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  {setMonthPicker && (
+                    <input
+                      type="month"
+                      value={monthPicker}
+                      onChange={(e) => setMonthPicker(e.target.value)}
+                      style={{
+                        padding: '2px 6px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border)',
+                        fontSize: '11.5px',
+                        fontWeight: 'bold',
+                        background: 'var(--surface)',
+                        color: 'var(--text)'
+                      }}
+                    />
+                  )}
+                  <span style={{
+                    fontSize: '10.5px',
+                    background: 'var(--surface)',
+                    padding: '2px 6px',
+                    borderRadius: '4px',
+                    border: '1px solid var(--border)',
+                    color: 'var(--primary)',
+                    fontWeight: 'bold',
+                    whiteSpace: 'nowrap'
+                  }}>
+                    {currentCycleRange.shortLabel}
+                  </span>
+                </div>
               ) : (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
                   <input

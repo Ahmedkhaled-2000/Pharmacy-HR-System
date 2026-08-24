@@ -1,4 +1,6 @@
 import { isManagementJob, isBranchWithoutManager, getJobsList } from './jobsHelper';
+import { getActivePayrollMonth } from './periodEngine';
+import { getRealDate } from './timeEngine';
 
 export const AR_MONTHS = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
 export const AR_WEEKDAYS = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
@@ -29,40 +31,8 @@ export function nowTimeStr() {
 /**
  * دالة استخراج دورة الشهر المالية النشطة تلقائياً وفقاً لتاريخ ووقت تقفيل الرواتب
  */
-export function getActivePayrollCycleMonth(orgSettings, refDate = new Date()) {
-  const pType = orgSettings?.payrollPeriodType || 'cycle';
-  const customFrom = orgSettings?.payrollCustomFrom || '';
-
-  if (pType === 'custom' && customFrom) {
-    return customFrom.slice(0, 7);
-  }
-
-  const sDay = orgSettings?.payrollPayoutStartDay !== undefined ? parseInt(orgSettings.payrollPayoutStartDay, 10) : 21;
-  const eDay = orgSettings?.payrollPayoutEndDay !== undefined ? parseInt(orgSettings.payrollPayoutEndDay, 10) : 20;
-  const eTime = orgSettings?.payrollPayoutEndTime || '03:00';
-
-  const now = refDate instanceof Date ? refDate : new Date(refDate);
-  const y = now.getFullYear();
-  const m = now.getMonth() + 1; // 1-12
-  const day = now.getDate();
-  const timeStr = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
-
-  // إذا تجاوز اليوم يوم نهاية الدورة، أو كان في نفس يوم نهاية الدورة وتجاوز وقت الإغلاق المحدد:
-  const isPastCutoff = day > eDay || (day === eDay && timeStr >= eTime);
-
-  if (isPastCutoff) {
-    // الانتقال التلقائي لدورة الشهر الجديد
-    let nextY = y;
-    let nextM = m + 1;
-    if (nextM > 12) {
-      nextM = 1;
-      nextY = y + 1;
-    }
-    return `${nextY}-${String(nextM).padStart(2, '0')}`;
-  } else {
-    // دورة الشهر الحالي
-    return `${y}-${String(m).padStart(2, '0')}`;
-  }
+export function getActivePayrollCycleMonth(orgSettings, refDate = getRealDate()) {
+  return getActivePayrollMonth(orgSettings, refDate);
 }
 
 export function uid() {

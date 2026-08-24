@@ -23,6 +23,8 @@ import {
   applyShiftSwapToRosters,
   shouldShowRequestToBranch
 } from './utils/formatters';
+import { getRealDate, getRealTodayStr, getRealNowTimeStr } from './utils/timeEngine';
+import { getActivePayrollMonth, getCycleDateRange, createDatePredicate } from './utils/periodEngine';
 import { loadExcelJS, mergedTitle, tableHeaderRow, dataRow } from './utils/excelExport';
 import { smartSaveState, smartLoadState, loadLocalStateFast, listenToConnectionChanges, syncNow, listenToLiveBroadcasts } from './utils/offlineSync';
 import { smartMergeStates } from './utils/stateMerger';
@@ -421,9 +423,9 @@ export default function App() {
   });
   const [monthPicker, setMonthPicker] = useState(() => {
     try {
-      const activeAutoCycle = getActivePayrollCycleMonth(state?.orgSettings);
-      return activeAutoCycle || localStorage.getItem('admin_month_picker') || todayStr().slice(0, 7);
-    } catch { return todayStr().slice(0, 7); }
+      const activeAutoCycle = getActivePayrollMonth(state?.orgSettings, getRealDate());
+      return activeAutoCycle || localStorage.getItem('admin_month_picker') || getRealTodayStr().slice(0, 7);
+    } catch { return getRealTodayStr().slice(0, 7); }
   });
   const [adminCustomFrom, setAdminCustomFrom] = useState(() => {
     try { return localStorage.getItem('admin_custom_from') || ''; } catch { return ''; }
@@ -434,16 +436,20 @@ export default function App() {
 
   // Auto-sync monthPicker with active payroll cycle when cutoff settings change
   useEffect(() => {
-    const activeAutoCycle = getActivePayrollCycleMonth(state?.orgSettings);
-    if (activeAutoCycle && adminFilterMode === 'month' && activeAutoCycle !== monthPicker) {
-      setMonthPicker(activeAutoCycle);
+    const activeAutoCycle = getActivePayrollMonth(state?.orgSettings, getRealDate());
+    if (activeAutoCycle && adminFilterMode === 'month' && !localStorage.getItem('admin_month_manually_locked')) {
+      if (activeAutoCycle !== monthPicker) {
+        setMonthPicker(activeAutoCycle);
+      }
     }
   }, [
     state?.orgSettings?.payrollPayoutStartDay,
     state?.orgSettings?.payrollPayoutEndDay,
     state?.orgSettings?.payrollPayoutStartTime,
     state?.orgSettings?.payrollPayoutEndTime,
-    state?.orgSettings?.payrollPeriodType
+    state?.orgSettings?.payrollPeriodType,
+    state?.orgSettings?.payrollCustomFrom,
+    state?.orgSettings?.payrollCustomTo
   ]);
 
   React.useEffect(() => {
@@ -2285,46 +2291,17 @@ export default function App() {
   };
 
   const getPayrollCutoffRange = (monthStr) => {
-    const pType = state.orgSettings?.payrollPeriodType || (() => { try { return localStorage.getItem('payroll_period_type') || 'cycle'; } catch { return 'cycle'; } })();
-    const customFrom = state.orgSettings?.payrollCustomFrom || (() => { try { return localStorage.getItem('payroll_custom_from') || ''; } catch { return ''; } })();
-    const customTo = state.orgSettings?.payrollCustomTo || (() => { try { return localStorage.getItem('payroll_custom_to') || ''; } catch { return ''; } })();
-
-    if (pType === 'custom' && customFrom && customTo) {
-      const from = customFrom <= customTo ? customFrom : customTo;
-      const to = customFrom <= customTo ? customTo : customFrom;
-      return { startDate: from, endDate: to };
-    }
-
-    if (!monthStr || monthStr.length !== 7) return null;
-    const sDay = state.orgSettings?.payrollPayoutStartDay !== undefined 
-      ? parseInt(state.orgSettings.payrollPayoutStartDay, 10) 
-      : (() => { try { const v = localStorage.getItem('payroll_payout_start_day'); return v ? parseInt(v, 10) : 26; } catch { return 26; } })();
-    const eDay = state.orgSettings?.payrollPayoutEndDay !== undefined 
-      ? parseInt(state.orgSettings.payrollPayoutEndDay, 10) 
-      : (() => { try { const v = localStorage.getItem('payroll_payout_end_day'); return v ? parseInt(v, 10) : 25; } catch { return 25; } })();
-    const [y, m] = monthStr.split('-').map(Number);
-    let prevY = y;
-    let prevM = m - 1;
-    if (prevM < 1) { prevM = 12; prevY = y - 1; }
-    const startDate = `${prevY}-${String(prevM).padStart(2, '0')}-${String(sDay).padStart(2, '0')}`;
-    const endDate = `${y}-${String(m).padStart(2, '0')}-${String(eDay).padStart(2, '0')}`;
-    return { startDate, endDate };
+    return getCycleDateRange(monthStr, state.orgSettings);
   };
 
   const currentFilterFn = React.useCallback((dateStr) => {
-    if (!dateStr) return false;
-    const d = String(dateStr).slice(0, 10);
-    if (adminFilterMode === 'custom') {
-      if (adminCustomFrom && d < adminCustomFrom) return false;
-      if (adminCustomTo && d > adminCustomTo) return false;
-      return true;
-    }
-    const targetMonth = monthPicker || todayStr().slice(0, 7);
-    const range = getPayrollCutoffRange(targetMonth);
-    if (range) {
-      return d >= range.startDate && d <= range.endDate;
-    }
-    return d.startsWith(targetMonth);
+    return createDatePredicate({
+      filterMode: adminFilterMode,
+      selectedMonth: monthPicker,
+      customFrom: adminCustomFrom,
+      customTo: adminCustomTo,
+      orgSettings: state.orgSettings
+    })(dateStr);
   }, [adminFilterMode, adminCustomFrom, adminCustomTo, monthPicker, state.orgSettings]);
 
   // Calculations per employee

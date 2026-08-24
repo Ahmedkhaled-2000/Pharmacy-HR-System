@@ -1,5 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useLiveRealTime } from '../../hooks/useLiveRealTime';
 
 export default function GlobalNavbar({
   orgSettings,
@@ -15,6 +16,7 @@ export default function GlobalNavbar({
   const navigate = useNavigate();
   const location = useLocation();
   const [showNotifMenu, setShowNotifMenu] = React.useState(false);
+  const liveTime = useLiveRealTime(1000);
 
   const currentPath = location.pathname;
   const unreadCount = (notifications || []).filter((n) => !n.read).length;
@@ -51,7 +53,34 @@ export default function GlobalNavbar({
         </div>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        {/* Live Authoritative Clock Widget */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          background: 'var(--surface-muted)',
+          padding: '4px 12px',
+          borderRadius: '10px',
+          border: '1px solid var(--border)',
+          fontSize: '12px'
+        }} title={liveTime.isServerSynced ? '🌐 التوقيت الفعلي الموثق من الخادم' : '⏱️ التوقيت المباشر'}>
+          <span style={{
+            width: '7px',
+            height: '7px',
+            borderRadius: '50%',
+            background: liveTime.isServerSynced ? '#22c55e' : '#f59e0b',
+            boxShadow: liveTime.isServerSynced ? '0 0 6px #22c55e' : 'none'
+          }} />
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: '1.2' }}>
+            <span style={{ fontWeight: 'bold', color: 'var(--primary)', fontFamily: 'monospace', fontSize: '12px' }}>
+              ⏰ {liveTime.formatted12Time}
+            </span>
+            <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>
+              {liveTime.fullArabicDate}
+            </span>
+          </div>
+        </div>
         {/* Notification Bell Icon */}
         <div style={{ position: 'relative' }}>
           <button

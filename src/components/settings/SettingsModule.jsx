@@ -13,6 +13,7 @@ import {
 } from '../../utils/backupHelper';
 import { apiFetchFaces, apiDeleteFace } from '../../utils/apiClient';
 import GmailConfigCard from './GmailConfigCard';
+import DatesPeriodsSettingsCard from './DatesPeriodsSettingsCard';
 import { DEFAULT_JOBS, getJobsList, DEFAULT_DEPARTMENTS, getDepartmentsList } from '../../utils/jobsHelper';
 import { getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 
@@ -916,6 +917,7 @@ export default function SettingsModule({
             gap: '6px'
           }}>
             {activeTab === 'general' && '🏥 بيانات الصيدلية والمدير العام'}
+            {(activeTab === 'dates' || activeTab === 'cutoff') && '📅 التواريخ والفترات ودورات الرواتب'}
             {activeTab === 'permissions' && '🔒 إدارة الصلاحيات'}
             {activeTab === 'rules' && '🔐 قواعد الموافقة المزدوجة'}
             {activeTab === 'gmail' && '✉️ بريد Gmail والتنبيهات'}
@@ -925,6 +927,18 @@ export default function SettingsModule({
           </span>
         </div>
       </div>
+
+      {/* Tab: Dates, Periods & Payroll Cutoffs */}
+      {(activeTab === 'dates' || activeTab === 'cutoff') && (
+        <DatesPeriodsSettingsCard
+          state={state}
+          setState={setState}
+          saveState={saveState}
+          showToast={showToast}
+          executeWithOwnerGuard={executeWithOwnerGuard}
+          authRole={authRole}
+        />
+      )}
 
       {/* Tab: Gmail Config & Notifications */}
       {activeTab === 'gmail' && (

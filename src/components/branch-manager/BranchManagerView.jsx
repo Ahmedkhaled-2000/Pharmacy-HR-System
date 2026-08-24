@@ -14,6 +14,8 @@ import { normalizeSchedule } from '../roster/RosterModule';
 import { shouldShowRequestToBranch, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
 import EmployeePermissionsManagementModule from '../permissions/EmployeePermissionsManagementModule';
+import { getCycleDateRange, createDatePredicate, getActivePayrollMonth } from '../../utils/periodEngine';
+import { getRealDate, getRealTodayStr } from '../../utils/timeEngine';
 
 const WEEKDAYS_AR = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
 
@@ -169,11 +171,15 @@ export default function BranchManagerView({
   const [rosterEditDetails, setRosterEditDetails] = useState('');
 
   // Branch Manager Date Range & Month Filter State (Persistent & Synchronized with App header)
+  const activeCycleMonth = useMemo(() => {
+    return getActivePayrollMonth(state?.orgSettings, getRealDate());
+  }, [state?.orgSettings]);
+
   const [internalFilterMode, setInternalFilterMode] = useState(() => {
     try { return localStorage.getItem('bm_filter_mode') || 'month'; } catch { return 'month'; }
   });
   const [internalSelectedMonth, setInternalSelectedMonth] = useState(() => {
-    try { return localStorage.getItem('bm_selected_month') || new Date().toISOString().slice(0, 7); } catch { return new Date().toISOString().slice(0, 7); }
+    try { return localStorage.getItem('bm_selected_month') || activeCycleMonth || getRealTodayStr().slice(0, 7); } catch { return activeCycleMonth || getRealTodayStr().slice(0, 7); }
   });
   const [internalCustomFromDate, setInternalCustomFromDate] = useState(() => {
     try { return localStorage.getItem('bm_custom_from') || ''; } catch { return ''; }
@@ -200,36 +206,18 @@ export default function BranchManagerView({
     } catch {}
   }, [filterMode, selectedMonth, customFromDate, customToDate]);
 
-  const cutoffStartDay = state.orgSettings?.payrollPayoutStartDay !== undefined ? parseInt(state.orgSettings.payrollPayoutStartDay, 10) : 26;
-  const cutoffEndDay = state.orgSettings?.payrollPayoutEndDay !== undefined ? parseInt(state.orgSettings.payrollPayoutEndDay, 10) : (state.orgSettings?.payrollPayoutDay || 25);
-
-  const isCustomFilter = filterMode === 'custom' || filterMode === 'range';
-  const effectiveCustomFrom = (customFromDate && customToDate) ? (customFromDate <= customToDate ? customFromDate : customToDate) : (customFromDate || customToDate);
-  const effectiveCustomTo = (customFromDate && customToDate) ? (customFromDate <= customToDate ? customToDate : customFromDate) : (customToDate || customFromDate);
+  const cycleRange = useMemo(() => {
+    return getCycleDateRange(selectedMonth, state?.orgSettings);
+  }, [selectedMonth, state?.orgSettings]);
 
   const matchesDateRange = (dateStr) => {
-    if (!dateStr) return false;
-    const cleanDate = String(dateStr).slice(0, 10);
-    if (isCustomFilter) {
-      if (effectiveCustomFrom && cleanDate < effectiveCustomFrom) return false;
-      if (effectiveCustomTo && cleanDate > effectiveCustomTo) return false;
-      return true;
-    }
-    const pType = state.orgSettings?.payrollPeriodType || 'cycle';
-    if (pType === 'custom' && state.orgSettings?.payrollCustomFrom && state.orgSettings?.payrollCustomTo) {
-      const from = state.orgSettings.payrollCustomFrom <= state.orgSettings.payrollCustomTo ? state.orgSettings.payrollCustomFrom : state.orgSettings.payrollCustomTo;
-      const to = state.orgSettings.payrollCustomFrom <= state.orgSettings.payrollCustomTo ? state.orgSettings.payrollCustomTo : state.orgSettings.payrollCustomFrom;
-      return cleanDate >= from && cleanDate <= to;
-    }
-    if (!selectedMonth || selectedMonth.length !== 7) return true;
-    const [yStr, mStr] = selectedMonth.split('-');
-    const y = parseInt(yStr, 10);
-    const m = parseInt(mStr, 10);
-    const prevM = m === 1 ? 12 : m - 1;
-    const prevY = m === 1 ? y - 1 : y;
-    const fromDate = `${prevY}-${String(prevM).padStart(2, '0')}-${String(cutoffStartDay).padStart(2, '0')}`;
-    const toDate = `${y}-${String(m).padStart(2, '0')}-${String(cutoffEndDay).padStart(2, '0')}`;
-    return cleanDate >= fromDate && cleanDate <= toDate;
+    return createDatePredicate({
+      filterMode,
+      selectedMonth,
+      customFrom: customFromDate,
+      customTo: customToDate,
+      orgSettings: state?.orgSettings
+    })(dateStr);
   };
 
   const renderDateFilterBar = () => (
@@ -237,15 +225,26 @@ export default function BranchManagerView({
       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
         <label style={{ fontSize: '13px', fontWeight: 'bold' }}>تصفية الفترة الزمنية:</label>
         <select value={filterMode} onChange={(e) => setFilterMode(e.target.value)} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px', fontWeight: 'bold' }}>
-          <option value="month">📅 حسب الشهر (دورة تقفيل الـ 26)</option>
+          <option value="month">📅 حسب دورة الشهر المالية ({cycleRange.shortLabel})</option>
           <option value="custom">📆 فترة مخصصة (من - إلى)</option>
         </select>
       </div>
 
       {filterMode === 'month' ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <label style={{ fontSize: '13px', fontWeight: 'bold' }}>الشهر:</label>
           <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px', fontWeight: 'bold' }} />
+          <span style={{
+            fontSize: '12px',
+            background: 'var(--surface-muted)',
+            padding: '4px 10px',
+            borderRadius: '6px',
+            border: '1px solid var(--border)',
+            color: 'var(--primary)',
+            fontWeight: 'bold'
+          }}>
+            من {cycleRange.startDate} إلى {cycleRange.endDate} ({cycleRange.daysCount} يوم)
+          </span>
         </div>
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>

@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { AR_MONTHS, arabicWeekday, todayStr, fmt, arabicMonthLabel, getActivePayrollCycleMonth, getEmpDisplayName } from '../../utils/formatters';
 import { loadExcelJS, mergedTitle, tableHeaderRow, dataRow } from '../../utils/excelExport';
+import { getCycleDateRange, createDatePredicate, getActivePayrollMonth } from '../../utils/periodEngine';
+import { getRealDate, getRealTodayStr, getRealNowTimeStr } from '../../utils/timeEngine';
 
 import EmployeeLeaveModule from './EmployeeLeaveModule';
 import EmployeeLoansModule from './EmployeeLoansModule';
@@ -120,11 +122,26 @@ export default function EmployeePortalView({
     return found || currentEmpUser;
   }, [state?.employees, currentEmpUser]);
 
+  const activeAutoCycleMonth = useMemo(() => {
+    return getActivePayrollMonth(orgSettings || state?.orgSettings, getRealDate());
+  }, [
+    state?.orgSettings?.payrollPayoutStartDay,
+    state?.orgSettings?.payrollPayoutEndDay,
+    state?.orgSettings?.payrollPayoutStartTime,
+    state?.orgSettings?.payrollPayoutEndTime,
+    state?.orgSettings?.payrollPeriodType,
+    orgSettings?.payrollPayoutStartDay,
+    orgSettings?.payrollPayoutEndDay,
+    orgSettings?.payrollPayoutStartTime,
+    orgSettings?.payrollPayoutEndTime,
+    orgSettings?.payrollPeriodType
+  ]);
+
   const [selectedMonth, setSelectedMonth] = useState(() => {
     try {
-      const activeAutoCycle = getActivePayrollCycleMonth(orgSettings || state?.orgSettings);
-      return activeAutoCycle || localStorage.getItem('emp_selected_month') || CURRENT_MONTH;
-    } catch { return CURRENT_MONTH; }
+      const activeAutoCycle = getActivePayrollMonth(orgSettings || state?.orgSettings, getRealDate());
+      return activeAutoCycle || localStorage.getItem('emp_selected_month') || getRealTodayStr().slice(0, 7);
+    } catch { return getRealTodayStr().slice(0, 7); }
   });
   const [activeTab, setActiveTab] = useState(() => {
     try { return localStorage.getItem('emp_active_tab') || 'dashboard'; } catch { return 'dashboard'; }
@@ -148,28 +165,22 @@ export default function EmployeePortalView({
 
   // Auto-sync selectedMonth with active payroll cycle when cutoff settings change
   useEffect(() => {
-    const activeAutoCycle = getActivePayrollCycleMonth(orgSettings || state?.orgSettings);
-    if (activeAutoCycle && filterMode === 'month' && activeAutoCycle !== selectedMonth) {
-      setSelectedMonth(activeAutoCycle);
+    if (activeAutoCycleMonth && filterMode === 'month' && !localStorage.getItem('emp_month_manually_locked')) {
+      if (activeAutoCycleMonth !== selectedMonth) {
+        setSelectedMonth(activeAutoCycleMonth);
+      }
     }
-  }, [
-    state?.orgSettings?.payrollPayoutStartDay,
-    state?.orgSettings?.payrollPayoutEndDay,
-    state?.orgSettings?.payrollPayoutStartTime,
-    state?.orgSettings?.payrollPayoutEndTime,
-    state?.orgSettings?.payrollPeriodType,
-    orgSettings?.payrollPayoutStartDay,
-    orgSettings?.payrollPayoutEndDay,
-    orgSettings?.payrollPayoutStartTime,
-    orgSettings?.payrollPayoutEndTime,
-    orgSettings?.payrollPeriodType
-  ]);
+  }, [activeAutoCycleMonth, filterMode]);
 
   useEffect(() => { try { localStorage.setItem('emp_active_tab', activeTab); } catch {} }, [activeTab]);
   useEffect(() => { try { localStorage.setItem('emp_selected_month', selectedMonth); } catch {} }, [selectedMonth]);
   useEffect(() => { try { localStorage.setItem('emp_filter_mode', filterMode); } catch {} }, [filterMode]);
   useEffect(() => { try { localStorage.setItem('emp_range_start', rangeStart); } catch {} }, [rangeStart]);
   useEffect(() => { try { localStorage.setItem('emp_range_end', rangeEnd); } catch {} }, [rangeEnd]);
+
+  const empCycleRange = useMemo(() => {
+    return getCycleDateRange(selectedMonth, orgSettings || state?.orgSettings);
+  }, [selectedMonth, orgSettings, state?.orgSettings]);
 
   const [selectedBranchId, setSelectedBranchId] = useState('');
   const [isBranchSelected, setIsBranchSelected] = useState(false);
@@ -805,26 +816,7 @@ export default function EmployeePortalView({
   //  Core Calculations & Hooks (MUST BE UNCONDITIONAL)
   // ─────────────────────────────────────────
   const getPayrollCutoffRange = (monthStr) => {
-    const pType = orgSettings?.payrollPeriodType || state?.orgSettings?.payrollPeriodType || (() => { try { return localStorage.getItem('payroll_period_type') || 'cycle'; } catch { return 'cycle'; } })();
-    const customFrom = orgSettings?.payrollCustomFrom || state?.orgSettings?.payrollCustomFrom || (() => { try { return localStorage.getItem('payroll_custom_from') || ''; } catch { return ''; } })();
-    const customTo = orgSettings?.payrollCustomTo || state?.orgSettings?.payrollCustomTo || (() => { try { return localStorage.getItem('payroll_custom_to') || ''; } catch { return ''; } })();
-
-    if (pType === 'custom' && customFrom && customTo) {
-      const from = customFrom <= customTo ? customFrom : customTo;
-      const to = customFrom <= customTo ? customTo : customFrom;
-      return { startDate: from, endDate: to };
-    }
-
-    if (!monthStr || monthStr.length !== 7) return null;
-    const sDay = orgSettings?.payrollPayoutStartDay !== undefined ? parseInt(orgSettings.payrollPayoutStartDay, 10) : (state?.orgSettings?.payrollPayoutStartDay !== undefined ? parseInt(state.orgSettings.payrollPayoutStartDay, 10) : (() => { try { const v = localStorage.getItem('payroll_payout_start_day'); return v ? parseInt(v, 10) : 26; } catch { return 26; } })());
-    const eDay = orgSettings?.payrollPayoutEndDay !== undefined ? parseInt(orgSettings.payrollPayoutEndDay, 10) : (state?.orgSettings?.payrollPayoutEndDay !== undefined ? parseInt(state.orgSettings.payrollPayoutEndDay, 10) : (() => { try { const v = localStorage.getItem('payroll_payout_end_day'); return v ? parseInt(v, 10) : 25; } catch { return 25; } })());
-    const [y, m] = monthStr.split('-').map(Number);
-    let prevY = y;
-    let prevM = m - 1;
-    if (prevM < 1) { prevM = 12; prevY = y - 1; }
-    const startDate = `${prevY}-${String(prevM).padStart(2, '0')}-${String(sDay).padStart(2, '0')}`;
-    const endDate = `${y}-${String(m).padStart(2, '0')}-${String(eDay).padStart(2, '0')}`;
-    return { startDate, endDate };
+    return getCycleDateRange(monthStr, orgSettings || state?.orgSettings);
   };
 
   const isPermActive = (permKey, defaultVal = true) => {
@@ -1440,19 +1432,27 @@ export default function EmployeePortalView({
             <input
               type="month"
               value={selectedMonth}
-              max={CURRENT_MONTH}
               onChange={(e) => e.target.value && setSelectedMonth(e.target.value)}
               style={{ padding: '5px 10px', borderRadius: '8px', fontSize: '13px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer' }}
             />
             <button
               className="month-nav-btn"
               onClick={() => setSelectedMonth(nextMonth(selectedMonth))}
-              disabled={selectedMonth === CURRENT_MONTH}
-              style={{ opacity: selectedMonth === CURRENT_MONTH ? 0.4 : 1 }}
             >›</button>
-            {selectedMonth !== CURRENT_MONTH && (
-              <button className="emp-month-today-btn" onClick={() => setSelectedMonth(CURRENT_MONTH)}>⟳ الحالي</button>
+            {selectedMonth !== activeAutoCycleMonth && (
+              <button className="emp-month-today-btn" onClick={() => setSelectedMonth(activeAutoCycleMonth)}>⟳ الدورة الحالية</button>
             )}
+            <span style={{
+              fontSize: '11px',
+              background: 'var(--surface-muted)',
+              padding: '3px 8px',
+              borderRadius: '6px',
+              border: '1px solid var(--border)',
+              color: 'var(--primary)',
+              fontWeight: 'bold'
+            }}>
+              {empCycleRange.shortLabel}
+            </span>
           </div>
           
           {/* Branch selector if multiple branches exist */}

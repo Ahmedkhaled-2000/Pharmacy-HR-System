@@ -3,6 +3,7 @@ import PayslipPrintModal from './PayslipPrintModal';
 import { fmt, getEmpDisplayName } from '../../utils/formatters';
 import { computeLatenessFinancialAmount, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
 import { printEmployeePayslipDirect } from '../../utils/printHelper';
+import { getCycleDateRange } from '../../utils/periodEngine';
 
 export default function PayrollModule({
   state,
@@ -176,35 +177,14 @@ export default function PayrollModule({
     showToast?.(nextStatus ? `🔒 تم تجميد دورة رواتب شهر (${monthPicker}) بنجاح` : `🔓 تم فك تجميد دورة رواتب شهر (${monthPicker})`);
   };
 
-  // Helper to compute date range description for active settings
+  // Helper to compute date range description for active settings via Period Engine
   const getPeriodDesc = () => {
-    if (periodType === 'custom' && customFrom && customTo) {
-      return `فترة مخصصة يدوياً: من ${customFrom} إلى ${customTo}`;
-    }
-    if (!monthPicker || monthPicker.length !== 7) return '';
-    const [y, m] = monthPicker.split('-').map(Number);
-    let prevY = y;
-    let prevM = m - 1;
-    if (prevM < 1) { prevM = 12; prevY = y - 1; }
-    const startStr = `${prevY}-${String(prevM).padStart(2, '0')}-${String(payoutStartDay).padStart(2, '0')}`;
-    const endStr = `${y}-${String(m).padStart(2, '0')}-${String(payoutEndDay).padStart(2, '0')}`;
-    return `دورة الشهر (${monthPicker}): من ${startStr} (${payoutStartTime}) إلى ${endStr} (${payoutEndTime})`;
+    const range = getCycleDateRange(monthPicker, state.orgSettings);
+    return `${range.label} (${payoutStartTime} إلى ${payoutEndTime})`;
   };
 
   const getPayrollRangeObj = () => {
-    if (periodType === 'custom' && customFrom && customTo) {
-      const from = customFrom <= customTo ? customFrom : customTo;
-      const to = customFrom <= customTo ? customTo : customFrom;
-      return { startDate: from, endDate: to };
-    }
-    if (!monthPicker || monthPicker.length !== 7) return null;
-    const [y, m] = monthPicker.split('-').map(Number);
-    let prevY = y;
-    let prevM = m - 1;
-    if (prevM < 1) { prevM = 12; prevY = y - 1; }
-    const startStr = `${prevY}-${String(prevM).padStart(2, '0')}-${String(payoutStartDay).padStart(2, '0')}`;
-    const endStr = `${y}-${String(m).padStart(2, '0')}-${String(payoutEndDay).padStart(2, '0')}`;
-    return { startDate: startStr, endDate: endStr };
+    return getCycleDateRange(monthPicker, state.orgSettings);
   };
 
   const payrollFilterFn = (d) => {

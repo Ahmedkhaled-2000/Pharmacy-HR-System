@@ -1,5 +1,6 @@
 import { fmt, arabicWeekday, AR_MONTHS } from './formatters';
 import { getEffectiveShiftHours, isApprovedPermissionForDate } from './latePenaltyEngine';
+import { getCycleDateRange } from './periodEngine';
 
 /**
  * printHelper.js
@@ -1112,25 +1113,10 @@ export function printEmployeePayslipDirect({
   const monthName = AR_MONTHS[parseInt(m, 10) - 1] || m;
   const fullMonthLabel = `${monthName} ${y}`;
 
-  // Cutoff dates calculation
-  const pType = orgSettings?.payrollPeriodType || state?.orgSettings?.payrollPeriodType || 'cycle';
-  const customFrom = orgSettings?.payrollCustomFrom || state?.orgSettings?.payrollCustomFrom || '';
-  const customTo = orgSettings?.payrollCustomTo || state?.orgSettings?.payrollCustomTo || '';
-
-  let startCutoff, endCutoff;
-  if (pType === 'custom' && customFrom && customTo) {
-    startCutoff = customFrom <= customTo ? customFrom : customTo;
-    endCutoff = customFrom <= customTo ? customTo : customFrom;
-  } else {
-    const sDay = orgSettings?.payrollPayoutStartDay !== undefined ? parseInt(orgSettings.payrollPayoutStartDay, 10) : (state?.orgSettings?.payrollPayoutStartDay !== undefined ? parseInt(state.orgSettings.payrollPayoutStartDay, 10) : 21);
-    const eDay = orgSettings?.payrollPayoutEndDay !== undefined ? parseInt(orgSettings.payrollPayoutEndDay, 10) : (state?.orgSettings?.payrollPayoutEndDay !== undefined ? parseInt(state.orgSettings.payrollPayoutEndDay, 10) : 20);
-    const [cutoffY, cutoffM] = targetMonth.split('-').map(Number);
-    let prevY = cutoffY;
-    let prevM = cutoffM - 1;
-    if (prevM < 1) { prevM = 12; prevY = cutoffY - 1; }
-    startCutoff = `${prevY}-${String(prevM).padStart(2, '0')}-${String(sDay).padStart(2, '0')}`;
-    endCutoff = `${cutoffY}-${String(cutoffM).padStart(2, '0')}-${String(eDay).padStart(2, '0')}`;
-  }
+  // Cutoff dates calculation via Period Engine
+  const cycleRange = getCycleDateRange(targetMonth, orgSettings || state?.orgSettings);
+  const startCutoff = cycleRange.startDate;
+  const endCutoff = cycleRange.endDate;
 
   // Filter shifts and adjustments
   const allShifts = shifts.length > 0 ? shifts : (state.shifts || []);

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { arabicWeekday, todayStr, fmt } from '../../utils/formatters';
+import { createDatePredicate, getCycleDateRange } from '../../utils/periodEngine';
 
 export default function Dashboard({
   state,
@@ -57,33 +58,18 @@ export default function Dashboard({
   const todayDate = new Date().toISOString().slice(0, 10);
   const todayPunches = punches.filter((p) => (p.date || p.timestamp || '').startsWith(todayDate));
 
-  // Date Range Matcher for Financial Summary
+  const predicate = createDatePredicate({
+    filterMode,
+    selectedMonth: monthPicker,
+    customFrom: customStartDate,
+    customTo: customEndDate,
+    orgSettings
+  });
+
   const matchesFilterDate = (dateStr) => {
     if (!dateStr) return false;
-    if (filterFn) return filterFn(dateStr);
     const d = String(dateStr).slice(0, 10);
-    if (filterMode === 'custom') {
-      if (customStartDate && d < customStartDate) return false;
-      if (customEndDate && d > customEndDate) return false;
-      return true;
-    }
-    const pType = orgSettings.payrollPeriodType || 'cycle';
-    if (pType === 'custom' && orgSettings.payrollCustomFrom && orgSettings.payrollCustomTo) {
-      const from = orgSettings.payrollCustomFrom <= orgSettings.payrollCustomTo ? orgSettings.payrollCustomFrom : orgSettings.payrollCustomTo;
-      const to = orgSettings.payrollCustomFrom <= orgSettings.payrollCustomTo ? orgSettings.payrollCustomTo : orgSettings.payrollCustomFrom;
-      return d >= from && d <= to;
-    }
-    // Monthly cutoff calculation
-    const sDay = orgSettings.payrollPayoutStartDay !== undefined ? parseInt(orgSettings.payrollPayoutStartDay, 10) : 26;
-    const eDay = orgSettings.payrollPayoutEndDay !== undefined ? parseInt(orgSettings.payrollPayoutEndDay, 10) : (orgSettings.payrollPayoutDay || 25);
-    if (!monthPicker || monthPicker.length !== 7) return d.startsWith(todayDate.slice(0, 7));
-    const [y, m] = monthPicker.split('-').map(Number);
-    let prevY = y;
-    let prevM = m - 1;
-    if (prevM < 1) { prevM = 12; prevY = y - 1; }
-    const fromDate = `${prevY}-${String(prevM).padStart(2, '0')}-${String(sDay).padStart(2, '0')}`;
-    const toDate = `${y}-${String(m).padStart(2, '0')}-${String(eDay).padStart(2, '0')}`;
-    return d >= fromDate && d <= toDate;
+    return predicate(d);
   };
 
   // Filtered Shifts
