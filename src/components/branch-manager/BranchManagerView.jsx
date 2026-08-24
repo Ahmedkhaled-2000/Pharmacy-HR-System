@@ -677,8 +677,28 @@ export default function BranchManagerView({
       createdAt: new Date().toISOString()
     };
 
+    const newRosterNotif = {
+      id: `notif_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+      requestId: newReq.id,
+      type: 'roster_edit_request',
+      title: `📅 طلب تعديل جدول شهري: ${currentBranch?.name || ''}`,
+      message: `طلب مدير فرع ${currentBranch?.name || ''} تعديل الجدول للموظف ${emp?.name || ''}. التفاصيل: ${rosterEditDetails.trim()}`,
+      employeeId: rosterEditEmpId,
+      employeeName: emp?.name,
+      employeeCode: emp?.code,
+      branchId: currentBranch?.id,
+      branchName: currentBranch?.name,
+      date: new Date().toISOString().slice(0, 10),
+      timestamp: new Date().toISOString(),
+      read: false
+    };
+
     const updatedRequests = [newReq, ...(state.requests || [])];
-    const updatedState = { ...state, requests: updatedRequests };
+    const updatedState = {
+      ...state,
+      requests: updatedRequests,
+      notifications: [newRosterNotif, ...(state.notifications || [])]
+    };
     setState(updatedState);
     if (saveState) await saveState(updatedState);
     notifyAdminOnNewRequest({ state: updatedState, newRequest: newReq, empName: emp?.name, branchName: currentBranch?.name });
@@ -715,10 +735,31 @@ export default function BranchManagerView({
       createdAt: new Date().toISOString()
     };
 
+    const newAdjNotif = {
+      id: `notif_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+      requestId: newReq.id,
+      type: adjType === 'bonus' ? 'bonus' : 'penalty',
+      title: `${adjType === 'bonus' ? '🎁 طلب مكافأة' : '⚠️ طلب خصم/جزاء'}: ${emp?.name || ''}`,
+      message: `طلب مدير فرع ${currentBranch?.name || ''} ${adjType === 'bonus' ? 'صرف مكافأة' : 'تطبيق خصم'} بقيمة ${amount} ج.م للموظف ${emp?.name || ''} - السبب: ${adjReason.trim()}`,
+      employeeId: adjEmpId,
+      employeeName: emp?.name,
+      employeeCode: emp?.code,
+      branchId: currentBranch?.id,
+      branchName: currentBranch?.name,
+      date: new Date().toISOString().slice(0, 10),
+      timestamp: new Date().toISOString(),
+      read: false
+    };
+
     const updatedRequests = [newReq, ...(state.requests || [])];
-    const updatedState = { ...state, requests: updatedRequests };
+    const updatedState = {
+      ...state,
+      requests: updatedRequests,
+      notifications: [newAdjNotif, ...(state.notifications || [])]
+    };
     setState(updatedState);
     if (saveState) await saveState(updatedState);
+    notifyAdminOnNewRequest({ state: updatedState, newRequest: newReq, empName: emp?.name, branchName: currentBranch?.name });
     setAdjAmount('');
     setAdjReason('');
     showToast?.('📤 تم رفع طلب المكافأة/الخصم للإدارة العليا (لن يُطبق على أجر الموظف إلا بعد موافقة الإدارة العليا)');

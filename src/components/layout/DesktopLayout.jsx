@@ -13,6 +13,8 @@ export default function DesktopLayout({
   resignationCount = 0,
   bylawsCount = 0,
   notifications = [],
+  onMarkNotificationRead,
+  onMarkAllNotificationsRead,
   themeMode,
   toggleTheme,
   onExportExcel,
@@ -28,7 +30,9 @@ export default function DesktopLayout({
 }) {
   const [openDropdown, setOpenDropdown] = useState(null);
   const [hoveredFlyoutId, setHoveredFlyoutId] = useState(null);
+  const [isNotifDropdownOpen, setIsNotifDropdownOpen] = useState(false);
   const menuContainerRef = useRef(null);
+  const notifDropdownRef = useRef(null);
 
   const unreadNotificationsCount = (notifications || []).filter(n => !n.read).length;
 
@@ -524,11 +528,15 @@ export default function DesktopLayout({
         setOpenDropdown(null);
         setHoveredFlyoutId(null);
       }
+      if (notifDropdownRef.current && !notifDropdownRef.current.contains(e.target)) {
+        setIsNotifDropdownOpen(false);
+      }
     };
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
         setOpenDropdown(null);
         setHoveredFlyoutId(null);
+        setIsNotifDropdownOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -841,39 +849,203 @@ export default function DesktopLayout({
             </button>
           )}
 
-          {/* Notifications Button */}
-          <button
-            type="button"
-            onClick={() => setActiveTab('notifications')}
-            title="الإشعارات والتنبيهات"
-            style={{
-              position: 'relative',
-              border: '1px solid var(--border)',
-              background: activeTab === 'notifications' ? 'var(--primary-light)' : 'var(--surface)',
-              padding: '5px 9px',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontSize: '13px',
-              color: 'var(--text)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px'
-            }}
-          >
-            <span>🔔</span>
-            {unreadNotificationsCount > 0 && (
-              <span style={{
-                background: 'var(--danger)',
-                color: '#fff',
-                padding: '1px 5px',
-                borderRadius: '99px',
-                fontSize: '10px',
-                fontWeight: 800
-              }}>
-                {unreadNotificationsCount}
-              </span>
+          {/* Notifications Button & Dropdown Menu */}
+          <div style={{ position: 'relative' }} ref={notifDropdownRef}>
+            <button
+              type="button"
+              onClick={() => setIsNotifDropdownOpen(prev => !prev)}
+              title="الإشعارات والتنبيهات"
+              style={{
+                position: 'relative',
+                border: isNotifDropdownOpen ? '1.5px solid var(--primary)' : '1px solid var(--border)',
+                background: isNotifDropdownOpen || activeTab === 'notifications' ? 'var(--primary-light)' : 'var(--surface)',
+                padding: '5px 9px',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontSize: '13px',
+                color: 'var(--text)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <span>🔔</span>
+              {unreadNotificationsCount > 0 && (
+                <span style={{
+                  background: 'var(--danger)',
+                  color: '#fff',
+                  padding: '1px 5px',
+                  borderRadius: '99px',
+                  fontSize: '10px',
+                  fontWeight: 800,
+                  boxShadow: '0 1px 3px rgba(220,38,38,0.4)'
+                }}>
+                  {unreadNotificationsCount}
+                </span>
+              )}
+            </button>
+
+            {/* Notification Dropdown Panel */}
+            {isNotifDropdownOpen && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 8px)',
+                  left: 0,
+                  width: '360px',
+                  maxWidth: '92vw',
+                  background: 'var(--surface, #ffffff)',
+                  border: '1px solid var(--border, #e2e8f0)',
+                  borderRadius: '12px',
+                  boxShadow: '0 15px 35px rgba(0,0,0,0.18)',
+                  zIndex: 1000,
+                  overflow: 'hidden',
+                  direction: 'rtl',
+                  fontFamily: "'Cairo', 'Tajawal', sans-serif"
+                }}
+              >
+                {/* Dropdown Header */}
+                <div
+                  style={{
+                    padding: '10px 14px',
+                    background: 'var(--surface-muted, #f8fafc)',
+                    borderBottom: '1px solid var(--border, #e2e8f0)',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--text)' }}>🔔 أحدث الإشعارات</span>
+                    {unreadNotificationsCount > 0 && (
+                      <span style={{ background: '#fee2e2', color: '#dc2626', fontSize: '10px', fontWeight: 800, padding: '1px 6px', borderRadius: '8px' }}>
+                        {unreadNotificationsCount} غير مقروء
+                      </span>
+                    )}
+                  </div>
+                  {unreadNotificationsCount > 0 && onMarkAllNotificationsRead && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onMarkAllNotificationsRead();
+                      }}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: 'var(--primary, #0f766e)',
+                        fontSize: '11.5px',
+                        fontWeight: 'bold',
+                        cursor: 'pointer',
+                        padding: '2px 6px'
+                      }}
+                    >
+                      ✓ تحديد الكل كمقروء
+                    </button>
+                  )}
+                </div>
+
+                {/* Notifications Scrollable List */}
+                <div style={{ maxHeight: '340px', overflowY: 'auto' }}>
+                  {notifications.length === 0 ? (
+                    <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--muted)', fontSize: '12.5px' }}>
+                      🎉 لا توجد إشعارات جديدة حالياً
+                    </div>
+                  ) : (
+                    notifications.slice(0, 15).map((n) => {
+                      const isUnread = !n.read;
+                      return (
+                        <div
+                          key={n.id}
+                          style={{
+                            padding: '10px 14px',
+                            borderBottom: '1px solid var(--border, #f1f5f9)',
+                            background: isUnread ? 'rgba(13, 148, 136, 0.06)' : 'transparent',
+                            display: 'flex',
+                            gap: '10px',
+                            alignItems: 'flex-start',
+                            transition: 'background 0.15s ease'
+                          }}
+                        >
+                          <span style={{ fontSize: '16px', marginTop: '2px' }}>
+                            {n.icon || (n.type === 'loan' ? '💳' : n.type === 'leave' ? '🏖️' : n.type === 'permission' ? '⏰' : n.type === 'swap' ? '🔄' : '🔔')}
+                          </span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '4px' }}>
+                              <h5 style={{ margin: 0, fontSize: '12.5px', fontWeight: isUnread ? 800 : 600, color: 'var(--text)' }}>
+                                {n.title || n.typeLabel || 'إشعار إداري'}
+                              </h5>
+                              {isUnread && onMarkNotificationRead && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onMarkNotificationRead(n.id);
+                                  }}
+                                  title="تحديد كمقروء"
+                                  style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    color: 'var(--primary, #0f766e)',
+                                    fontSize: '11px',
+                                    cursor: 'pointer',
+                                    padding: '0 4px',
+                                    fontWeight: 'bold'
+                                  }}
+                                >
+                                  ✓ تم
+                                </button>
+                              )}
+                            </div>
+                            <p style={{ margin: '3px 0', fontSize: '11.5px', color: 'var(--text-muted, #475569)', lineHeight: 1.35 }}>
+                              {n.message || n.body || n.details || ''}
+                            </p>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px', fontSize: '10px', color: 'var(--muted, #94a3b8)' }}>
+                              <span>🕒 {n.date || (n.timestamp ? n.timestamp.slice(0, 10) : '')}</span>
+                              {n.employeeName && <span>👤 {n.employeeName}</span>}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                {/* Dropdown Footer */}
+                <div
+                  style={{
+                    padding: '8px 12px',
+                    background: 'var(--surface-muted, #f8fafc)',
+                    borderTop: '1px solid var(--border, #e2e8f0)',
+                    textAlign: 'center'
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('notifications');
+                      setIsNotifDropdownOpen(false);
+                    }}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--primary, #0f766e)',
+                      fontSize: '12px',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                  >
+                    <span>📂 الانتقال لمركز الإشعارات والرقابة الحية الكامل</span>
+                    <span>←</span>
+                  </button>
+                </div>
+              </div>
             )}
-          </button>
+          </div>
 
           {/* Dark/Light Theme Toggle */}
           <button

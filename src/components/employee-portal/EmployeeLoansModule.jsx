@@ -178,8 +178,27 @@ export default function EmployeeLoansModule({
       createdAt: new Date().toISOString()
     };
 
+    const newLoanNotif = {
+      id: `notif_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+      requestId: newLoanReq.id,
+      type: 'loan',
+      title: `💳 طلب سلفة مالية جديد: ${emp.name}`,
+      message: `طلب سلفة مالية بقيمة ${parseFloat(loanAmount).toLocaleString()} ج.م - السبب: ${loanReason.trim() || 'طلب سلفة'}`,
+      employeeId: emp.id,
+      employeeName: emp.name,
+      employeeCode: emp.code,
+      branchId: emp.branchId,
+      date: new Date().toISOString().slice(0, 10),
+      timestamp: new Date().toISOString(),
+      read: false
+    };
+
     const updatedRequests = [newLoanReq, ...(state.requests || [])];
-    const updatedState = { ...state, requests: updatedRequests };
+    const updatedState = {
+      ...state,
+      requests: updatedRequests,
+      notifications: [newLoanNotif, ...(state.notifications || [])]
+    };
 
     setState(updatedState);
     if (saveState) await saveState(updatedState);
@@ -217,8 +236,27 @@ export default function EmployeeLoansModule({
       createdAt: new Date().toISOString()
     };
 
+    const newMedNotif = {
+      id: `notif_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+      requestId: newMedReq.id,
+      type: 'credit_medicine',
+      title: `💊 طلب أدوية آجل جديد: ${emp.name}`,
+      message: `طلب أدوية بالآجل بإجمالي مبلغ ${totalCost.toLocaleString()} ج.م (${validItems.length} صنف)`,
+      employeeId: emp.id,
+      employeeName: emp.name,
+      employeeCode: emp.code,
+      branchId: selectedBranchId || emp.branchId,
+      date: new Date().toISOString().slice(0, 10),
+      timestamp: new Date().toISOString(),
+      read: false
+    };
+
     const updatedRequests = [newMedReq, ...(state.requests || [])];
-    const updatedState = { ...state, requests: updatedRequests };
+    const updatedState = {
+      ...state,
+      requests: updatedRequests,
+      notifications: [newMedNotif, ...(state.notifications || [])]
+    };
 
     setState(updatedState);
     if (saveState) await saveState(updatedState);

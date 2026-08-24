@@ -146,6 +146,59 @@ export default function RequestsModule({
   const requests = visibleAdminRequests;
   const employees = state.employees || [];
 
+  const getRequestDate = (r) => {
+    if (!r) return '';
+    if (r.createdAt && typeof r.createdAt === 'string') return r.createdAt.slice(0, 10);
+    if (r.date && typeof r.date === 'string') return r.date.slice(0, 10);
+    if (r.startDate && typeof r.startDate === 'string') return r.startDate.slice(0, 10);
+    if (r.timestamp && typeof r.timestamp === 'string') return r.timestamp.slice(0, 10);
+    if (r.requestDate && typeof r.requestDate === 'string') return r.requestDate.slice(0, 10);
+    if (r.submissionDate && typeof r.submissionDate === 'string') return r.submissionDate.slice(0, 10);
+    if (r.effectiveDate && typeof r.effectiveDate === 'string') return r.effectiveDate.slice(0, 10);
+    if (r.month && typeof r.month === 'string') return `${r.month}-01`;
+    if (r.id) {
+      const parts = String(r.id).split('_');
+      for (const p of parts) {
+        const num = parseInt(p, 10);
+        if (!isNaN(num) && num > 1000000000000) {
+          try {
+            return new Date(num).toISOString().slice(0, 10);
+          } catch {}
+        }
+      }
+    }
+    return '';
+  };
+
+  const getRequestTime = (r) => {
+    if (!r) return '—';
+    if (r.createdAt && typeof r.createdAt === 'string' && r.createdAt.includes('T')) {
+      try {
+        const d = new Date(r.createdAt);
+        if (!isNaN(d.getTime())) return d.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+      } catch {}
+    }
+    if (r.timestamp && typeof r.timestamp === 'string' && r.timestamp.includes('T')) {
+      try {
+        const d = new Date(r.timestamp);
+        if (!isNaN(d.getTime())) return d.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+      } catch {}
+    }
+    if (r.time) return String(r.time);
+    if (r.id) {
+      const parts = String(r.id).split('_');
+      for (const p of parts) {
+        const num = parseInt(p, 10);
+        if (!isNaN(num) && num > 1000000000000) {
+          try {
+            return new Date(num).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+          } catch {}
+        }
+      }
+    }
+    return '—';
+  };
+
   const formatDateStr = (dateVal) => {
     if (!dateVal) return '—';
     try {
@@ -154,17 +207,6 @@ export default function RequestsModule({
       return d.toLocaleDateString('ar-EG');
     } catch {
       return String(dateVal);
-    }
-  };
-
-  const formatTimeStr = (dateVal) => {
-    if (!dateVal) return '—';
-    try {
-      const d = new Date(dateVal);
-      if (isNaN(d.getTime())) return '—';
-      return d.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
-    } catch {
-      return '—';
     }
   };
 
@@ -192,13 +234,16 @@ export default function RequestsModule({
       if (String(r.employeeId) !== String(filterEmp)) return false;
     }
 
-    const isPendingAction = r.status === 'pending' || r.status === 'pending_admin' || r.status === 'waiting_approval' || (r.adminApproved !== true && r.status !== 'rejected' && r.status !== 'cancelled');
-    const rDate = (r.createdAt ? r.createdAt.slice(0, 10) : (r.date || r.startDate || ''));
+    const rDate = getRequestDate(r);
     
+    // Period & Date Filtering (Custom Period / Month Cycle / Specific Date)
     if (filterDate) {
-      if (!rDate.startsWith(filterDate)) return false;
-    } else if (typeof filterFn === 'function' && rDate && !isPendingAction) {
-      // Pending requests awaiting action ALWAYS stay visible to Higher Management to prevent missed requests
+      if (rDate && !rDate.startsWith(filterDate)) return false;
+    } else if ((filterMode === 'custom' || filterMode === 'range') && customFrom && customTo) {
+      const from = customFrom <= customTo ? customFrom : customTo;
+      const to = customFrom <= customTo ? customTo : customFrom;
+      if (rDate && (rDate < from || rDate > to)) return false;
+    } else if (typeof filterFn === 'function' && rDate) {
       if (!filterFn(rDate)) return false;
     }
     return true;
@@ -1071,10 +1116,10 @@ export default function RequestsModule({
                     <td style={{ whiteSpace: 'nowrap' }}>
                       <div style={{ display: 'inline-flex', flexDirection: 'column', gap: '3px', background: 'var(--surface-muted)', padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border)' }}>
                         <span style={{ fontWeight: '900', color: 'var(--primary-dark)', fontSize: '13px' }}>
-                          📅 {formatDateStr(req.createdAt || req.date || req.startDate)}
+                          📅 {formatDateStr(getRequestDate(req))}
                         </span>
                         <span style={{ fontWeight: '800', color: 'var(--primary)', fontSize: '12px' }}>
-                          ⏰ {formatTimeStr(req.createdAt || req.time)}
+                          ⏰ {getRequestTime(req)}
                         </span>
                       </div>
                     </td>

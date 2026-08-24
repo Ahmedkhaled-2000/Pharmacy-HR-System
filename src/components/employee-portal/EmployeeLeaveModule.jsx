@@ -138,10 +138,26 @@ export default function EmployeeLeaveModule({
     const updatedLeaveRequests = [newRequest, ...(state.leaveRequests || [])];
     const updatedRequests = [newRequest, ...(state.requests || [])];
 
+    const newNotif = {
+      id: `notif_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+      requestId: newRequest.id,
+      type: 'leave',
+      title: `🏖️ طلب إجازة جديد: ${emp.name}`,
+      message: `طلب إجازة (${newRequest.leaveType === 'annual' ? 'سنوية' : newRequest.leaveType === 'sick' ? 'مرضية' : 'اعتيادية'}) لمدة ${daysCount} يوم من ${startDate} إلى ${endDate}. السبب: ${reason.trim() || '—'}`,
+      employeeId: emp.id,
+      employeeName: emp.name,
+      employeeCode: emp.code,
+      branchId: emp.branchId,
+      date: new Date().toISOString().slice(0, 10),
+      timestamp: new Date().toISOString(),
+      read: false
+    };
+
     const updatedState = {
       ...state,
       leaveRequests: updatedLeaveRequests,
-      requests: updatedRequests
+      requests: updatedRequests,
+      notifications: [newNotif, ...(state.notifications || [])]
     };
 
     setState(updatedState);

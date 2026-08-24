@@ -115,8 +115,27 @@ export default function EmployeePermissionsModule({
       createdAt: new Date().toISOString()
     };
 
+    const newPermNotif = {
+      id: `notif_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+      requestId: newPermReq.id,
+      type: 'permission',
+      title: `⏰ طلب إذن جديد: ${emp.name}`,
+      message: `طلب إذن ${permType === 'late' ? 'تأخير صباحي' : 'خروج مبكر'} لمدة ${durationObj.text} بتاريخ ${date} (${startTime} - ${endTime}). السبب: ${reason.trim() || '—'}`,
+      employeeId: emp.id,
+      employeeName: emp.name,
+      employeeCode: emp.code,
+      branchId: reqBranchId,
+      date: new Date().toISOString().slice(0, 10),
+      timestamp: new Date().toISOString(),
+      read: false
+    };
+
     const updatedRequests = [newPermReq, ...(state.requests || [])];
-    const updatedState = { ...state, requests: updatedRequests };
+    const updatedState = {
+      ...state,
+      requests: updatedRequests,
+      notifications: [newPermNotif, ...(state.notifications || [])]
+    };
 
     setState(updatedState);
     if (saveState) await saveState(updatedState);

@@ -4599,9 +4599,21 @@ export default function App() {
     return d.startsWith(monthPicker);
   }, [financialRangeMode, financialStartDate, financialEndDate, monthPicker, state.orgSettings]);
 
-  const grandSummary = React.useMemo(() => {
-    return computeGrandPayroll(financialFilterFn, financialRangeMode === 'month' ? monthPicker : null);
-  }, [state.employees, state.shifts, state.adjustments, state.loans, state.requests, financialFilterFn, financialRangeMode, monthPicker]);
+  const handleMarkNotificationRead = async (notifId) => {
+    const updatedNotifs = (state.notifications || []).map((n) => (n.id === notifId ? { ...n, read: true } : n));
+    const updatedState = { ...state, notifications: updatedNotifs };
+    setState(updatedState);
+    if (saveState) await saveState(updatedState);
+  };
+
+  const handleMarkAllNotificationsRead = async () => {
+    const updatedNotifs = (state.notifications || []).map((n) => ({ ...n, read: true }));
+    const updatedLate = (state.lateIncidents || []).map((inc) => ({ ...inc, read: true }));
+    const updatedRequests = (state.requests || []).map((r) => ({ ...r, read: true }));
+    const updatedState = { ...state, notifications: updatedNotifs, lateIncidents: updatedLate, requests: updatedRequests };
+    setState(updatedState);
+    if (saveState) await saveState(updatedState);
+  };
 
   return (
     <div className={`mode-${viewMode}`}>
@@ -4745,6 +4757,8 @@ export default function App() {
           currentRole={authRole}
           currentBranch={currentBranch}
           notifications={state.notifications || []}
+          onMarkNotificationRead={handleMarkNotificationRead}
+          onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
           userProfile={
             authRole === 'owner'
               ? { name: 'المالك (Owner)', jobTitle: 'مالك المنظومة والمشرف العام', code: 'OWNER', isOwner: true }

@@ -34,11 +34,17 @@ export default function NotificationCenterModule({
     : (isCustom ? `الفترة المخصصة: من ${customFrom} إلى ${customTo}` : (monthPicker ? `دورة شهر (${monthPicker})` : todayDate));
 
   const activePeriodFn = (d) => {
-    if (!d) return false;
+    if (!d) return true;
     const dateStr = String(d).slice(0, 10);
     if (dateFilter) return dateStr.startsWith(dateFilter);
+    if (isCustom && customFrom && customTo) {
+      const from = customFrom <= customTo ? customFrom : customTo;
+      const to = customFrom <= customTo ? customTo : customFrom;
+      return dateStr >= from && dateStr <= to;
+    }
     if (typeof filterFn === 'function') return filterFn(dateStr);
-    return dateStr.startsWith(todayDate);
+    if (monthPicker) return dateStr.startsWith(monthPicker);
+    return true;
   };
 
   const employees = state.employees || [];
@@ -361,8 +367,11 @@ export default function NotificationCenterModule({
 
   // General Notification Handlers
   const notifications = (state.notifications || []).filter((n) => {
+    if (!n) return false;
     if (empFilter !== 'all' && String(n.empId || n.employeeId) !== String(empFilter)) return false;
     const nDate = (n.date || (n.timestamp ? n.timestamp.slice(0, 10) : ''));
+    // Unread notifications are ALWAYS kept visible until read
+    if (!n.read) return true;
     if (nDate && !activePeriodFn(nDate)) return false;
     return true;
   });
@@ -619,7 +628,10 @@ export default function NotificationCenterModule({
       {/* Filter Navigation Tabs */}
       <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap', borderBottom: '1px solid var(--border)', paddingBottom: '12px' }}>
         <button className={`btn ${filterType === 'all' ? 'btn-start' : 'btn-ghost'}`} onClick={() => setFilterType('all')}>
-          🌐 جميع الإشعارات والأنشطة ({presentCount + absentCount + pendingCount + penaltiesCount + notifications.length})
+          🌐 جميع الأنشطة والإشعارات ({presentCount + absentCount + pendingCount + penaltiesCount + notifications.length})
+        </button>
+        <button className={`btn ${filterType === 'system_notifs' ? 'btn-start' : 'btn-ghost'}`} onClick={() => setFilterType('system_notifs')}>
+          📢 إشعارات وتنبيهات النظام ({notifications.length})
         </button>
         <button className={`btn ${filterType === 'today_punches' ? 'btn-start' : 'btn-ghost'}`} onClick={() => setFilterType('today_punches')}>
           ⏱️ حضور وبصمات اليوم ({presentCount})
@@ -1046,7 +1058,99 @@ export default function NotificationCenterModule({
         </div>
       )}
 
-      {/* ── 5. System Notifications & Unread Bylaws Penalties ── */}
+      {/* ── 5. System Notifications Feed (إشعارات وتنبيهات النظام) ── */}
+      {(filterType === 'all' || filterType === 'system_notifs') && (
+        <div style={{ marginBottom: '24px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+            <h4 style={{ margin: 0, color: 'var(--primary-dark)', fontSize: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              📢 سجل إشعارات وتنبيهات النظام والرسائل ({notifications.length})
+            </h4>
+            {notifications.some(n => !n.read) && (
+              <button className="btn btn-ghost" style={{ fontSize: '12px', fontWeight: 'bold' }} onClick={handleMarkAllRead}>
+                ✓ تحديد الكل كمقروء
+              </button>
+            )}
+          </div>
+
+          {notifications.length === 0 ? (
+            <div style={{ padding: '24px', textAlign: 'center', color: 'var(--muted)', background: 'var(--surface)', borderRadius: '10px', border: '1px solid var(--border)' }}>
+              لا توجد إشعارات مسجلة في هذا السجل حالياً.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {notifications.map((item) => {
+                const isUnread = !item.read;
+                return (
+                  <div
+                    key={`gen_notif_${item.id}`}
+                    style={{
+                      padding: '14px 18px',
+                      borderRadius: '10px',
+                      background: isUnread ? 'rgba(13, 148, 136, 0.07)' : 'var(--surface)',
+                      border: isUnread ? '1px solid rgba(13, 148, 136, 0.4)' : '1px solid var(--border)',
+                      borderRight: isUnread ? '4px solid var(--primary)' : '4px solid var(--border)',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      gap: '10px'
+                    }}
+                  >
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                        <span style={{ fontSize: '18px' }}>{item.icon || '🔔'}</span>
+                        <h4 style={{ margin: 0, fontSize: '14.5px', color: 'var(--text)', fontWeight: isUnread ? 800 : 600 }}>
+                          {item.title || item.typeLabel || 'إشعار إداري'}
+                        </h4>
+                        {isUnread && (
+                          <span style={{ background: '#fee2e2', color: '#dc2626', fontSize: '10px', fontWeight: 800, padding: '1px 6px', borderRadius: '8px' }}>
+                            جديد
+                          </span>
+                        )}
+                        {item.employeeName && (
+                          <span style={{ fontSize: '12px', color: 'var(--muted)' }}>• 👤 {item.employeeName}</span>
+                        )}
+                        {item.branchName && (
+                          <span style={{ fontSize: '12px', color: 'var(--muted)' }}>• 🏢 {item.branchName}</span>
+                        )}
+                      </div>
+                      <p style={{ margin: '0 0 4px', fontSize: '13px', color: 'var(--text-muted)' }}>
+                        {item.message || item.body || item.details || ''}
+                      </p>
+                      <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
+                        🕒 {item.date || (item.timestamp ? item.timestamp.slice(0, 10) : todayDate)}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                      {isUnread && (
+                        <button
+                          className="btn btn-start"
+                          style={{ fontSize: '12px', padding: '5px 14px' }}
+                          onClick={() => handleMarkAsRead(item.id)}
+                        >
+                          ✓ تحديد كمقروء
+                        </button>
+                      )}
+                      {item.requestId && (
+                        <button
+                          className="btn btn-ghost"
+                          style={{ fontSize: '12px', padding: '5px 12px', border: '1px solid var(--border)' }}
+                          onClick={() => onNavigateTab?.('requests')}
+                        >
+                          عرض الطلب 🔗
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── 6. Unread Notifications & Bylaws Penalties (غير المقروء فقط) ── */}
       {filterType === 'unread' && (
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>

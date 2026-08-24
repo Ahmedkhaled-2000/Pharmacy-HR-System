@@ -81,9 +81,29 @@ export default function EmployeeShiftSwapModule({
       createdAt: new Date().toISOString()
     };
 
+    const newSwapNotif = {
+      id: `notif_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+      requestId: newSwapReq.id,
+      type: 'swap',
+      title: `🔄 طلب تبديل وردية جديد: ${emp.name}`,
+      message: `طلب تبديل وردية يوم ${sourceDate} مع الزميل ${targetEmpObj ? targetEmpObj.name : 'زميل'} (وردية يوم ${targetSwapDate})`,
+      employeeId: emp.id,
+      employeeName: emp.name,
+      employeeCode: emp.code,
+      branchId: emp.branchId,
+      date: new Date().toISOString().slice(0, 10),
+      timestamp: new Date().toISOString(),
+      read: false
+    };
+
     const updatedSwaps = [newSwapReq, ...(state.shiftSwaps || [])];
     const updatedRequests = [newSwapReq, ...(state.requests || [])];
-    const updatedState = { ...state, shiftSwaps: updatedSwaps, requests: updatedRequests };
+    const updatedState = {
+      ...state,
+      shiftSwaps: updatedSwaps,
+      requests: updatedRequests,
+      notifications: [newSwapNotif, ...(state.notifications || [])]
+    };
 
     setState(updatedState);
     if (saveState) await saveState(updatedState);
@@ -106,11 +126,33 @@ export default function EmployeeShiftSwapModule({
       r.id === swapId ? { ...r, status: targetStatus, targetRespondedAt: new Date().toISOString() } : r
     );
 
-    const updatedState = { ...state, shiftSwaps: updatedSwaps, requests: updatedRequests };
+    const targetSwapReq = (state.shiftSwaps || []).find(s => s.id === swapId);
+    let updatedNotifs = [...(state.notifications || [])];
+    if (action === 'accept' && targetSwapReq) {
+      updatedNotifs.unshift({
+        id: `notif_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+        requestId: swapId,
+        type: 'swap',
+        title: `✅ تمت موافقة الزميل على التبديل: بانتظار اعتماد الإدارة`,
+        message: `وافق الموظف ${emp.name} على طلب التبديل المحال إليه وبانتظار اعتماد الإدارة النهائي`,
+        employeeId: emp.id,
+        employeeName: emp.name,
+        branchId: emp.branchId,
+        date: new Date().toISOString().slice(0, 10),
+        timestamp: new Date().toISOString(),
+        read: false
+      });
+    }
+
+    const updatedState = {
+      ...state,
+      shiftSwaps: updatedSwaps,
+      requests: updatedRequests,
+      notifications: updatedNotifs
+    };
     setState(updatedState);
     if (saveState) await saveState(updatedState);
 
-    const targetSwapReq = (state.shiftSwaps || []).find(s => s.id === swapId);
     if (action === 'accept' && targetSwapReq) {
       notifyAdminOnNewRequest({ state: updatedState, newRequest: targetSwapReq, empName: emp.name });
     }
