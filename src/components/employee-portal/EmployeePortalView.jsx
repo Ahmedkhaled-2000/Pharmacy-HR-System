@@ -1605,9 +1605,9 @@ export default function EmployeePortalView({
       {/* ══════════════════════════════════════════════════════════════════════════════ */}
       {isMobileScreen ? (
         <>
-          {/* 📱 Mobile Compact Top Bar */}
+          {/* 📱 Mobile Clean Minimal Top Bar */}
           <header style={{
-            height: '52px',
+            height: '50px',
             background: 'var(--surface)',
             borderBottom: '1px solid var(--border)',
             display: 'flex',
@@ -1620,22 +1620,25 @@ export default function EmployeePortalView({
             zIndex: 100,
             boxShadow: '0 1px 4px rgba(0,0,0,0.03)'
           }}>
-            {/* Right: Hamburger + Logo + Avatar & First Name */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {/* Right: Hamburger + Logo + Title */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
               <button
                 type="button"
                 onClick={() => setIsMobileDrawerOpen(true)}
                 style={{
-                  background: 'none',
+                  background: 'var(--surface-muted, #f8fafc)',
                   border: '1px solid var(--border)',
                   borderRadius: '8px',
-                  padding: '5px 8px',
-                  fontSize: '17px',
+                  padding: '6px 9px',
+                  fontSize: '18px',
                   cursor: 'pointer',
                   color: 'var(--text)',
-                  lineHeight: 1
+                  lineHeight: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
                 }}
-                title="القائمة الرئيسية"
+                title="فتح القائمة"
               >
                 ☰
               </button>
@@ -1656,77 +1659,13 @@ export default function EmployeePortalView({
                 🏥
               </div>
 
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '2px 8px 2px 3px',
-                background: 'var(--surface-muted)',
-                borderRadius: '20px',
-                border: '1px solid var(--border)'
-              }}>
-                <div style={{
-                  width: '22px',
-                  height: '22px',
-                  borderRadius: '50%',
-                  background: 'var(--primary-light, #ccfbf1)',
-                  color: 'var(--primary, #0d9488)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontWeight: 800,
-                  fontSize: '11px',
-                  overflow: 'hidden',
-                  flexShrink: 0
-                }}>
-                  {emp.photoUrl ? (
-                    <img src={emp.photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  ) : (
-                    getEmpDisplayName(emp).charAt(0)
-                  )}
-                </div>
-                <span style={{ fontSize: '11.5px', fontWeight: 800, color: 'var(--text)', maxWidth: '90px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {getEmpDisplayName(emp).split(' ')[0]}
-                </span>
-              </div>
+              <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--text)', whiteSpace: 'nowrap' }}>
+                بوابة الموظف
+              </span>
             </div>
 
-            {/* Left: Leave Pill + Privacy + Notifs + Theme + Logout */}
+            {/* Left: Notifs + Theme + Logout */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <div style={{
-                background: '#f0fdf4',
-                color: '#15803d',
-                border: '1px solid #bbf7d0',
-                padding: '2px 6px',
-                borderRadius: '99px',
-                fontSize: '10.5px',
-                fontWeight: 800,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '2px'
-              }} title="رصيد الإجازات">
-                <span>🏖️</span>
-                <span>{emp.annualLeaveBalance !== undefined ? emp.annualLeaveBalance : 21}ي</span>
-              </div>
-
-              <button
-                type="button"
-                onClick={togglePrivacyMode}
-                title={isPrivacyMode ? 'إظهار الأرقام المالية' : 'وضع الخصوصية'}
-                style={{
-                  background: isPrivacyMode ? 'rgba(239, 68, 68, 0.1)' : 'var(--surface-muted)',
-                  border: '1px solid var(--border)',
-                  borderRadius: '8px',
-                  padding: '4px 6px',
-                  cursor: 'pointer',
-                  fontSize: '13px',
-                  color: isPrivacyMode ? 'var(--danger)' : 'var(--text)',
-                  lineHeight: 1
-                }}
-              >
-                {isPrivacyMode ? '🙈' : '👁️'}
-              </button>
-
               {/* Notification Bell */}
               <div style={{ position: 'relative' }} ref={notifDropdownRef}>
                 <button
@@ -1736,12 +1675,14 @@ export default function EmployeePortalView({
                     position: 'relative',
                     border: isNotifDropdownOpen ? '1.5px solid var(--primary)' : '1px solid var(--border)',
                     background: isNotifDropdownOpen ? 'var(--primary-light)' : 'var(--surface)',
-                    padding: '4px 7px',
+                    padding: '5px 8px',
                     borderRadius: '8px',
                     cursor: 'pointer',
-                    fontSize: '13px',
+                    fontSize: '14px',
                     color: 'var(--text)',
-                    lineHeight: 1
+                    lineHeight: 1,
+                    display: 'flex',
+                    alignItems: 'center'
                   }}
                   title="الإشعارات"
                 >
@@ -2731,36 +2672,125 @@ export default function EmployeePortalView({
       {/* ── 3. MOBILE OFF-CANVAS DRAWER ── */}
       {/* ══════════════════════════════════════════════════════════════════════════════ */}
       {isMobileDrawerOpen && (
-        <div className="ep-drawer-overlay" onClick={() => setIsMobileDrawerOpen(false)}>
-          <div className="ep-drawer" onClick={(e) => e.stopPropagation()}>
-            <div className="ep-drawer-header">
+        <div
+          className="ep-drawer-overlay"
+          onClick={() => setIsMobileDrawerOpen(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.65)',
+            backdropFilter: 'blur(5px)',
+            WebkitBackdropFilter: 'blur(5px)',
+            zIndex: 99999,
+            display: 'flex',
+            justifyContent: 'flex-start',
+            animation: 'epFadeIn 0.2s ease'
+          }}
+        >
+          <div
+            className="ep-drawer"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: '310px',
+              maxWidth: '85vw',
+              height: '100%',
+              background: 'var(--surface, #ffffff)',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 0 40px rgba(0, 0, 0, 0.4)',
+              overflowY: 'auto',
+              borderLeft: '1px solid var(--border)',
+              boxSizing: 'border-box'
+            }}
+          >
+            {/* Drawer Header (Solid Gradient with White Text) */}
+            <div style={{
+              padding: '22px 18px 18px',
+              background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)',
+              color: '#ffffff',
+              position: 'relative',
+              boxShadow: '0 2px 10px rgba(0,0,0,0.1)'
+            }}>
               <button
                 type="button"
-                className="ep-drawer-close-btn"
                 onClick={() => setIsMobileDrawerOpen(false)}
+                style={{
+                  position: 'absolute',
+                  top: '14px',
+                  left: '14px',
+                  background: 'rgba(255, 255, 255, 0.25)',
+                  border: 'none',
+                  color: '#ffffff',
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '50%',
+                  cursor: 'pointer',
+                  fontSize: '15px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontWeight: 'bold'
+                }}
+                title="إغلاق القائمة"
               >
                 ✕
               </button>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '6px' }}>
-                <div className="ep-profile-avatar" style={{ width: '42px', height: '42px', fontSize: '16px' }}>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{
+                  width: '46px',
+                  height: '46px',
+                  borderRadius: '50%',
+                  background: '#ffffff',
+                  color: '#0d9488',
+                  border: '2px solid rgba(255,255,255,0.8)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontWeight: 900,
+                  fontSize: '18px',
+                  overflow: 'hidden',
+                  flexShrink: 0
+                }}>
                   {emp.photoUrl ? (
                     <img src={emp.photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                   ) : (
                     getEmpDisplayName(emp).charAt(0)
                   )}
                 </div>
-                <div>
-                  <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 800, color: '#ffffff' }}>
+
+                <div style={{ flex: 1, overflow: 'hidden' }}>
+                  <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 800, color: '#ffffff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {getEmpDisplayName(emp)}
                   </h3>
-                  <p style={{ margin: '2px 0 0', fontSize: '11.5px', opacity: 0.9 }}>
-                    {emp.jobTitle} · 🆔 {emp.code}
-                  </p>
+                  <div style={{ margin: '3px 0 0', fontSize: '11.5px', color: 'rgba(255, 255, 255, 0.9)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span>{emp.jobTitle}</span>
+                    <span>·</span>
+                    <span>🆔 {emp.code}</span>
+                  </div>
+
+                  {/* Leave balance badge inside drawer */}
+                  <div style={{
+                    marginTop: '8px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    background: 'rgba(255, 255, 255, 0.2)',
+                    padding: '2px 8px',
+                    borderRadius: '99px',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    color: '#ffffff'
+                  }}>
+                    <span>🏖️ رصيد الإجازات:</span>
+                    <span>{emp.annualLeaveBalance !== undefined ? emp.annualLeaveBalance : 21} يوم</span>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div className="ep-drawer-body">
+            {/* Drawer Body (Navigation Items) */}
+            <div style={{ flex: 1, padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
               {employeeMenuItems.map((menu) => {
                 if (menu.isSingle) {
                   const isActive = activeTab === menu.targetTab;
@@ -2768,15 +2798,30 @@ export default function EmployeePortalView({
                     <button
                       key={menu.id}
                       type="button"
-                      className={`ep-drawer-sub-item ${isActive ? 'active' : ''}`}
                       onClick={() => {
                         setActiveTab(menu.targetTab);
                         setIsMobileDrawerOpen(false);
                       }}
-                      style={{ padding: '10px 14px', fontSize: '14px' }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px',
+                        padding: '11px 14px',
+                        borderRadius: '10px',
+                        border: 'none',
+                        background: isActive ? 'var(--primary-light, #ccfbf1)' : 'transparent',
+                        color: isActive ? 'var(--primary-dark, #0f766e)' : 'var(--text)',
+                        fontSize: '14px',
+                        fontWeight: isActive ? 800 : 600,
+                        cursor: 'pointer',
+                        textAlign: 'right',
+                        width: '100%',
+                        transition: 'all 0.15s ease',
+                        fontFamily: 'inherit'
+                      }}
                     >
                       <span style={{ fontSize: '18px' }}>{menu.icon}</span>
-                      <span style={{ fontWeight: 700 }}>{menu.label}</span>
+                      <span style={{ flex: 1 }}>{menu.label}</span>
                     </button>
                   );
                 }
@@ -2788,28 +2833,62 @@ export default function EmployeePortalView({
                   <div key={menu.id} style={{ borderBottom: '1px solid var(--border-light, rgba(0,0,0,0.05))', paddingBottom: '4px' }}>
                     <button
                       type="button"
-                      className={`ep-drawer-accordion-btn ${isExpanded ? 'open' : ''}`}
                       onClick={() => setDrawerExpandedGroup(prev => prev === menu.id ? null : menu.id)}
+                      style={{
+                        width: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '11px 14px',
+                        borderRadius: '10px',
+                        border: 'none',
+                        background: isGroupActive ? 'rgba(13, 148, 136, 0.08)' : (isExpanded ? 'var(--hover, rgba(0,0,0,0.03))' : 'transparent'),
+                        color: isGroupActive ? 'var(--primary, #0d9488)' : 'var(--text)',
+                        fontSize: '14px',
+                        fontWeight: isGroupActive ? 800 : 700,
+                        cursor: 'pointer',
+                        transition: 'background 0.15s ease',
+                        fontFamily: 'inherit'
+                      }}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <span style={{ fontSize: '17px' }}>{menu.icon}</span>
-                        <span style={{ color: isGroupActive ? 'var(--primary)' : 'inherit' }}>{menu.label}</span>
+                        <span style={{ fontSize: '18px' }}>{menu.icon}</span>
+                        <span>{menu.label}</span>
                       </div>
-                      <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
-                        {isExpanded ? '▲' : '▼'}
+                      <span style={{ fontSize: '11px', color: 'var(--muted)', transform: isExpanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s ease' }}>
+                        ▼
                       </span>
                     </button>
 
                     {isExpanded && menu.children && (
-                      <div className="ep-drawer-accordion-content">
+                      <div style={{ padding: '4px 10px 8px 14px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
                         {menu.children.map((child) => {
                           const isChildActive = child.targetTab === activeTab;
                           return (
                             <button
                               key={child.id}
                               type="button"
-                              className={`ep-drawer-sub-item ${isChildActive ? 'active' : ''}`}
-                              onClick={() => handleSubItemClick(child)}
+                              onClick={() => {
+                                handleSubItemClick(child);
+                                setIsMobileDrawerOpen(false);
+                              }}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '10px',
+                                padding: '9px 12px',
+                                borderRadius: '8px',
+                                border: 'none',
+                                background: isChildActive ? 'var(--primary-light, #ccfbf1)' : 'transparent',
+                                color: isChildActive ? 'var(--primary-dark, #0f766e)' : 'var(--text)',
+                                fontSize: '13px',
+                                fontWeight: isChildActive ? 800 : 600,
+                                cursor: 'pointer',
+                                textAlign: 'right',
+                                width: '100%',
+                                transition: 'all 0.15s ease',
+                                fontFamily: 'inherit'
+                              }}
                             >
                               <span style={{ fontSize: '16px' }}>{child.icon}</span>
                               <span style={{ flex: 1 }}>{child.label}</span>
@@ -2828,25 +2907,55 @@ export default function EmployeePortalView({
               })}
             </div>
 
+            {/* Drawer Footer (Privacy toggle + Logout) */}
             <div style={{ padding: '14px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <button
                 type="button"
                 onClick={togglePrivacyMode}
-                className="btn btn-outline"
-                style={{ width: '100%', justifyContent: 'center', fontSize: '13px' }}
+                style={{
+                  width: '100%',
+                  padding: '9px 14px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border)',
+                  background: isPrivacyMode ? 'rgba(239, 68, 68, 0.1)' : 'var(--surface-muted)',
+                  color: isPrivacyMode ? 'var(--danger)' : 'var(--text)',
+                  fontSize: '13px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px'
+                }}
               >
-                {isPrivacyMode ? '🙈 وضع الخصوصية مفعل' : '👁️ تفعيل وضع الخصوصية'}
+                <span>{isPrivacyMode ? '🙈' : '👁️'}</span>
+                <span>{isPrivacyMode ? 'وضع الخصوصية مفعل' : 'تفعيل وضع الخصوصية'}</span>
               </button>
+
               <button
                 type="button"
                 onClick={() => {
                   if (typeof handleLogout === 'function') handleLogout();
                   else setCurrentEmpUser(null);
                 }}
-                className="btn"
-                style={{ width: '100%', justifyContent: 'center', background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5', fontSize: '13px', fontWeight: 700 }}
+                style={{
+                  width: '100%',
+                  padding: '9px 14px',
+                  borderRadius: '8px',
+                  background: '#fee2e2',
+                  color: '#dc2626',
+                  border: '1px solid #fca5a5',
+                  fontSize: '13px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px'
+                }}
               >
-                🚪 تسجيل الخروج
+                <span>🚪</span>
+                <span>تسجيل الخروج</span>
               </button>
             </div>
           </div>
