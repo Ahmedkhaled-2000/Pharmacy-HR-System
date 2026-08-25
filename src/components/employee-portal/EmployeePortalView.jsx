@@ -1552,14 +1552,35 @@ export default function EmployeePortalView({
 
   // ── Employee Portal Modern Titlebar + Menubar + Drawer + Content Layout ──
   return (
-    <div className="ep-app-container">
+    <div className="ep-app-container" style={{
+      display: 'flex',
+      flexDirection: 'column',
+      width: '100%',
+      minHeight: '100vh',
+      background: 'var(--background)',
+      color: 'var(--text)',
+      boxSizing: 'border-box'
+    }}>
 
       {/* ══════════════════════════════════════════════════════════════════════════════ */}
       {/* ── 1. TOP TITLE BAR (Brand, Profile Badge, Synced Clock, Notif, Theme, Out) ── */}
       {/* ══════════════════════════════════════════════════════════════════════════════ */}
-      <header className="ep-titlebar">
+      <header className="ep-titlebar" style={{
+        height: '52px',
+        background: 'var(--surface)',
+        borderBottom: '1px solid var(--border)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '0 18px',
+        userSelect: 'none',
+        zIndex: 100,
+        width: '100%',
+        boxSizing: 'border-box',
+        boxShadow: '0 1px 4px rgba(0,0,0,0.03)'
+      }}>
         {/* Right Side (Start in RTL): Brand, Profile Badge & Breadcrumb */}
-        <div className="ep-titlebar-right">
+        <div className="ep-titlebar-right" style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
           {/* Mobile Hamburger Button */}
           <button
             type="button"
@@ -1573,7 +1594,20 @@ export default function EmployeePortalView({
           </button>
 
           {/* App Logo */}
-          <div className="ep-logo-badge">
+          <div className="ep-logo-badge" style={{
+            width: '32px',
+            height: '32px',
+            borderRadius: '8px',
+            background: 'linear-gradient(135deg, #0d9488, #0f766e)',
+            color: '#fff',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '16px',
+            fontWeight: 900,
+            boxShadow: '0 2px 6px rgba(13,148,136,0.3)',
+            flexShrink: 0
+          }}>
             🏥
           </div>
 
@@ -1585,8 +1619,30 @@ export default function EmployeePortalView({
             <span style={{ color: 'var(--border)', fontSize: '15px' }} className="ep-divider-slash">/</span>
 
             {/* Employee Profile Badge */}
-            <div className="ep-profile-badge">
-              <div className="ep-profile-avatar">
+            <div className="ep-profile-badge" style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '3px 10px 3px 4px',
+              background: 'var(--surface-muted)',
+              borderRadius: '24px',
+              border: '1px solid var(--border)'
+            }}>
+              <div className="ep-profile-avatar" style={{
+                width: '28px',
+                height: '28px',
+                borderRadius: '50%',
+                background: 'var(--primary-light, #ccfbf1)',
+                color: 'var(--primary, #0d9488)',
+                border: '1.5px solid var(--primary)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: 800,
+                fontSize: '12px',
+                overflow: 'hidden',
+                flexShrink: 0
+              }}>
                 {emp.photoUrl ? (
                   <img src={emp.photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                 ) : (
@@ -1594,18 +1650,29 @@ export default function EmployeePortalView({
                 )}
               </div>
 
-              <div className="ep-profile-info">
-                <span className="ep-profile-name">
+              <div className="ep-profile-info" style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2 }}>
+                <span className="ep-profile-name" style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text)', whiteSpace: 'nowrap', maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   👤 {getEmpDisplayName(emp)}
                 </span>
-                <span className="ep-profile-title">
+                <span className="ep-profile-title" style={{ fontSize: '10px', color: 'var(--muted)', fontWeight: 600, whiteSpace: 'nowrap' }}>
                   {emp.jobTitle} · 🆔 {emp.code}
                 </span>
               </div>
             </div>
 
             {/* Leave Balance Pill */}
-            <div className="ep-leave-pill" title="رصيد الإجازات السنوية المتاح">
+            <div className="ep-leave-pill" title="رصيد الإجازات السنوية المتاح" style={{
+              background: '#f0fdf4',
+              color: '#15803d',
+              border: '1px solid #bbf7d0',
+              padding: '2px 8px',
+              borderRadius: '99px',
+              fontSize: '11px',
+              fontWeight: 800,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px'
+            }}>
               <span>🏖️</span>
               <span>{emp.annualLeaveBalance !== undefined ? emp.annualLeaveBalance : 21} يوم</span>
             </div>
@@ -1660,7 +1727,7 @@ export default function EmployeePortalView({
             <span style={{ color: 'var(--border)', fontSize: '15px' }} className="ep-breadcrumb-bar">/</span>
 
             {/* Active Breadcrumb */}
-            <div className="ep-breadcrumb-bar">
+            <div className="ep-breadcrumb-bar" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', color: 'var(--muted)' }}>
               <span>{breadcrumb.icon}</span>
               <span style={{ fontWeight: 700, color: 'var(--primary)' }}>{breadcrumb.group}</span>
               {breadcrumb.item && (
@@ -1673,11 +1740,28 @@ export default function EmployeePortalView({
           </div>
         </div>
 
-        {/* Left Side: Live Synced Clock, Period Filter, Excel Export, Notifs, Theme, Logout */}
-        <div className="ep-titlebar-left">
+        {/* Left Side: Live Synced Clock, Period Filter, Notifs, Theme, Logout */}
+        <div className="ep-titlebar-left" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           {/* Synced Real-time Live Clock */}
-          <div className="ep-live-clock" title={liveTime.isServerSynced ? '🌐 التوقيت الفعلي الموثق من الخادم' : '⏱️ التوقيت المباشر'}>
-            <span className="ep-clock-dot" style={{ background: liveTime.isServerSynced ? '#22c55e' : '#f59e0b' }} />
+          <div className="ep-live-clock" title={liveTime.isServerSynced ? '🌐 التوقيت الفعلي الموثق من الخادم' : '⏱️ التوقيت المباشر'} style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            background: 'var(--surface)',
+            padding: '4px 10px',
+            borderRadius: '8px',
+            border: '1px solid var(--border)',
+            fontSize: '11px',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
+          }}>
+            <span className="ep-clock-dot" style={{
+              width: '7px',
+              height: '7px',
+              borderRadius: '50%',
+              background: liveTime.isServerSynced ? '#22c55e' : '#f59e0b',
+              boxShadow: liveTime.isServerSynced ? '0 0 6px #22c55e' : '0 0 6px #f59e0b',
+              flexShrink: 0
+            }} />
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: '1.2' }}>
               <span style={{ fontWeight: 'bold', color: 'var(--primary)', fontFamily: 'monospace', fontSize: '11px' }}>
                 ⏰ {liveTime.formatted12Time}
@@ -1757,8 +1841,27 @@ export default function EmployeePortalView({
 
             {/* Notification Dropdown Panel */}
             {isNotifDropdownOpen && (
-              <div className="ep-notif-panel">
-                <div className="ep-notif-header">
+              <div className="ep-notif-panel" style={{
+                position: 'absolute',
+                top: 'calc(100% + 8px)',
+                left: 0,
+                width: '360px',
+                maxWidth: '92vw',
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                borderRadius: '12px',
+                boxShadow: '0 12px 35px rgba(0,0,0,0.15)',
+                zIndex: 1100,
+                overflow: 'hidden'
+              }}>
+                <div className="ep-notif-header" style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '10px 14px',
+                  background: 'var(--surface-muted)',
+                  borderBottom: '1px solid var(--border)'
+                }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--text)' }}>
                       🔔 إشعارات الموظف
@@ -1788,7 +1891,7 @@ export default function EmployeePortalView({
                   )}
                 </div>
 
-                <div className="ep-notif-list">
+                <div className="ep-notif-list" style={{ maxHeight: '340px', overflowY: 'auto', padding: '6px' }}>
                   {empNotifications.length === 0 ? (
                     <div style={{ padding: '28px 16px', textAlign: 'center', color: 'var(--muted)', fontSize: '12.5px' }}>
                       🎉 لا توجد إشعارات جديدة حالياً
@@ -1797,13 +1900,22 @@ export default function EmployeePortalView({
                     empNotifications.slice(0, 20).map((n) => {
                       const isUnread = !n.read;
                       return (
-                        <div key={n.id} className={`ep-notif-card ${isUnread ? 'unread' : ''}`}>
+                        <div key={n.id} className={`ep-notif-card ${isUnread ? 'unread' : ''}`} style={{
+                          display: 'flex',
+                          gap: '10px',
+                          padding: '10px',
+                          borderRadius: '8px',
+                          background: isUnread ? 'rgba(15, 118, 110, 0.05)' : 'transparent',
+                          borderRight: isUnread ? '3px solid var(--primary)' : '3px solid transparent',
+                          marginBottom: '4px',
+                          borderBottom: '1px solid var(--border-light, rgba(0,0,0,0.04))'
+                        }}>
                           <span style={{ fontSize: '18px', marginTop: '2px' }}>
                             {n.icon || (n.type === 'loan' ? '💳' : n.type === 'leave' ? '🏖️' : n.type === 'permission' ? '⏰' : n.type === 'swap' ? '🔄' : '🔔')}
                           </span>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '6px' }}>
-                              <h5 className="ep-notif-title">
+                              <h5 className="ep-notif-title" style={{ margin: 0, fontSize: '12.5px', fontWeight: 800, color: 'var(--text)' }}>
                                 <span>{n.title || n.typeLabel || 'إشعار إداري'}</span>
                                 {n.approverRole && (
                                   <span style={{
@@ -1839,10 +1951,10 @@ export default function EmployeePortalView({
                                 </button>
                               )}
                             </div>
-                            <p className="ep-notif-body">
+                            <p className="ep-notif-body" style={{ margin: '3px 0', fontSize: '11.5px', color: 'var(--text-muted)', lineHeight: 1.35 }}>
                               {n.message || n.body || n.details || ''}
                             </p>
-                            <div className="ep-notif-meta">
+                            <div className="ep-notif-meta" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px', fontSize: '10px', color: 'var(--muted)' }}>
                               <span>🕒 {n.date || (n.timestamp ? n.timestamp.slice(0, 10) : '')}</span>
                               {n.typeLabel && <span>📂 {n.typeLabel}</span>}
                             </div>
@@ -1910,7 +2022,20 @@ export default function EmployeePortalView({
       {/* ══════════════════════════════════════════════════════════════════════════════ */}
       {/* ── 2. TOP RIBBON MENUBAR (Categorized Dropdown Navigation) ── */}
       {/* ══════════════════════════════════════════════════════════════════════════════ */}
-      <nav ref={menuContainerRef} className="ep-menubar">
+      <nav ref={menuContainerRef} className="ep-menubar" style={{
+        background: 'var(--surface)',
+        borderBottom: '1px solid var(--border)',
+        padding: '4px 18px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+        position: 'sticky',
+        top: 0,
+        zIndex: 90,
+        width: '100%',
+        boxSizing: 'border-box',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.03)'
+      }}>
         {employeeMenuItems.map((menu) => {
           const isActive = isMenuGroupActive(menu);
           const isOpen = openDropdown === menu.id;
@@ -1921,6 +2046,23 @@ export default function EmployeePortalView({
                 type="button"
                 className={`ep-menu-btn ${isActive ? 'active' : ''} ${isOpen ? 'open' : ''}`}
                 onClick={() => handleMenuClick(menu)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '7px',
+                  padding: '6px 13px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  background: isActive ? 'var(--primary, #0f766e)' : (isOpen ? 'var(--hover, rgba(0,0,0,0.05))' : 'transparent'),
+                  color: isActive ? '#ffffff' : 'var(--text)',
+                  fontSize: '13px',
+                  fontWeight: isActive ? 800 : 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s cubic-bezier(0.4, 0, 0.2, 1)',
+                  position: 'relative',
+                  fontFamily: 'inherit',
+                  boxShadow: isActive ? '0 2px 6px rgba(13, 148, 136, 0.3)' : 'none'
+                }}
               >
                 <span style={{ fontSize: '15px' }}>{menu.icon}</span>
                 <span>{menu.label}</span>
@@ -1937,7 +2079,14 @@ export default function EmployeePortalView({
                 )}
 
                 {menu.badge > 0 && (
-                  <span className="ep-menu-badge">
+                  <span className="ep-menu-badge" style={{
+                    background: isActive ? 'rgba(255,255,255,0.3)' : 'var(--danger)',
+                    color: '#ffffff',
+                    fontSize: '10px',
+                    fontWeight: 800,
+                    padding: '1px 6px',
+                    borderRadius: '99px'
+                  }}>
                     {menu.badge}
                   </span>
                 )}
@@ -1945,7 +2094,22 @@ export default function EmployeePortalView({
 
               {/* Dropdown Popup Menu */}
               {!menu.isSingle && isOpen && menu.children && (
-                <div className="ep-dropdown-panel">
+                <div className="ep-dropdown-panel" style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 4px)',
+                  right: 0,
+                  minWidth: '290px',
+                  maxWidth: '350px',
+                  background: 'var(--surface)',
+                  border: '1px solid var(--border)',
+                  borderRadius: '12px',
+                  boxShadow: '0 12px 35px rgba(0,0,0,0.15)',
+                  zIndex: 1000,
+                  padding: '6px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '3px'
+                }}>
                   {menu.children.map((child) => {
                     const isChildActive = child.targetTab === activeTab;
 
@@ -1955,10 +2119,25 @@ export default function EmployeePortalView({
                         type="button"
                         className={`ep-dropdown-item ${isChildActive ? 'active' : ''}`}
                         onClick={() => handleSubItemClick(child)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: '10px',
+                          padding: '8px 10px',
+                          borderRadius: '8px',
+                          border: 'none',
+                          background: isChildActive ? 'var(--primary-light, #ccfbf1)' : 'transparent',
+                          color: isChildActive ? 'var(--primary-dark, #0f766e)' : 'var(--text)',
+                          textAlign: 'right',
+                          width: '100%',
+                          cursor: 'pointer',
+                          transition: 'all 0.12s ease',
+                          fontFamily: 'inherit'
+                        }}
                       >
-                        <span className="ep-dropdown-item-icon">{child.icon}</span>
+                        <span className="ep-dropdown-item-icon" style={{ fontSize: '16px', marginTop: '2px' }}>{child.icon}</span>
                         <div style={{ flex: 1, overflow: 'hidden' }}>
-                          <div className="ep-dropdown-item-title">
+                          <div className="ep-dropdown-item-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontWeight: isChildActive ? 800 : 700, fontSize: '13px' }}>
                             <span>{child.label}</span>
                             {child.badge > 0 && (
                               <span style={{ background: 'var(--danger)', color: '#fff', fontSize: '10px', fontWeight: 800, padding: '1px 5px', borderRadius: '99px' }}>
@@ -1967,7 +2146,7 @@ export default function EmployeePortalView({
                             )}
                           </div>
                           {child.desc && (
-                            <p className="ep-dropdown-item-desc">{child.desc}</p>
+                            <p className="ep-dropdown-item-desc" style={{ margin: '2px 0 0', fontSize: '11px', color: 'var(--muted)', fontWeight: 500, lineHeight: 1.3 }}>{child.desc}</p>
                           )}
                         </div>
                       </button>
@@ -2159,7 +2338,7 @@ export default function EmployeePortalView({
       {/* ══════════════════════════════════════════════════════════════════════════════ */}
       {/* ── 5. MAIN WORKSPACE CANVAS ── */}
       {/* ══════════════════════════════════════════════════════════════════════════════ */}
-      <main className="ep-workspace">
+      <main className="ep-workspace" style={{ flex: 1, padding: '16px 20px', width: '100%', maxWidth: '100%', boxSizing: 'border-box' }}>
 
           {/* ── Active Resignation Notice Period Banner ── */}
           {activeResignationNotice && activeResignationNotice.remainingDays > 0 && (
