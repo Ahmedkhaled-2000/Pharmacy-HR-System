@@ -34,6 +34,7 @@ import { getPendingCount } from './utils/offlineStorage';
 import { saveAutoBackupOnModification } from './utils/backupHelper';
 import ErrorBoundary from './components/common/ErrorBoundary';
 import { normalizeSchedule } from './components/roster/RosterModule';
+import { playNotificationChime } from './hooks/useAudio';
 
 // Modular Components
 import GlobalNavbar from './components/navbar/GlobalNavbar';
