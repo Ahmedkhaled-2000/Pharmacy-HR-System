@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { AR_MONTHS, arabicWeekday, todayStr, fmt, arabicMonthLabel, getActivePayrollCycleMonth, getEmpDisplayName } from '../../utils/formatters';
+import { AR_MONTHS, arabicWeekday, todayStr, fmt, arabicMonthLabel, getActivePayrollCycleMonth, getEmpDisplayName, getEmployeeManualPunchesCount, isShiftManualPunch } from '../../utils/formatters';
 import { loadExcelJS, mergedTitle, tableHeaderRow, dataRow } from '../../utils/excelExport';
 import { getCycleDateRange, createDatePredicate, getActivePayrollMonth } from '../../utils/periodEngine';
 import { getRealDate, getRealTodayStr, getRealNowTimeStr } from '../../utils/timeEngine';
@@ -2001,9 +2001,17 @@ export default function EmployeePortalView({
           {activeTab === 'shifts' && (
             <div className="card ep-tab-content fade-in">
               <div className="ep-section-header" style={{ flexWrap: 'wrap', gap: '10px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                   <h3>📋 سجل البصمات والورديات — {lbl.raw}</h3>
                   <span className="ep-count-badge">{empShifts.length} وردية</span>
+                  {(() => {
+                    const empManualCount = getEmployeeManualPunchesCount(emp.id, state, matchesCycle);
+                    return (
+                      <span style={{ background: empManualCount > 0 ? '#fef3c7' : '#f1f5f9', color: empManualCount > 0 ? '#b45309' : '#64748b', border: '1px solid ' + (empManualCount > 0 ? '#fcd34d' : '#e2e8f0'), padding: '4px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: 800 }}>
+                        🖐️ تسجيل البصمات يدوياً هذا الشهر: {empManualCount}
+                      </span>
+                    );
+                  })()}
                 </div>
                 {canManualShift && (
                   <button className="btn btn-start" onClick={() => setShowManualForm(!showManualForm)} style={{ fontSize: '13px', padding: '6px 14px' }}>
@@ -2211,6 +2219,11 @@ export default function EmployeePortalView({
                                 {hasPerm && (
                                   <span style={{ display: 'block', marginTop: '2px', background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
                                     ⏰ معدلة بإذن (+{permHours} س)
+                                  </span>
+                                )}
+                                {isShiftManualPunch(s) && (
+                                  <span style={{ display: 'block', marginTop: '2px', background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
+                                    🖐️ بصمة يدوية معتمدة
                                   </span>
                                 )}
                                 {s.overtimeStatus === 'approved' && (

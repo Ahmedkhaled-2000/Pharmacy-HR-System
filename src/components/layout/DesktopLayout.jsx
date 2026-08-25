@@ -431,6 +431,13 @@ export default function DesktopLayout({
           desc: 'موافقة وتوقيع طلبات موظفي الفرع'
         },
         {
+          id: 'leaves',
+          targetTab: 'leaves',
+          label: 'طلبات إجازات الموظفين',
+          icon: '🏖️',
+          desc: 'متابعة وطلب إجازات موظفي الفرع والأرصدة'
+        },
+        {
           id: 'permissions-management',
           targetTab: 'permissions-management',
           label: 'أذونات الموظفين',

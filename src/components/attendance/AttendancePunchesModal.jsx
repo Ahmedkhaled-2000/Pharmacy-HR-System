@@ -1,5 +1,6 @@
 import React from 'react';
 import { isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
+import { getEmployeeManualPunchesCount, isShiftManualPunch } from '../../utils/formatters';
 
 export default function AttendancePunchesModal({
   employee,
@@ -29,6 +30,7 @@ export default function AttendancePunchesModal({
 
   // Group or process punches into rows
   const shiftsCount = monthPunches.length;
+  const manualCount = getEmployeeManualPunchesCount(employee.id, state, activePeriodFilter);
 
   const totalBreakHours = monthPunches
     .reduce((acc, p) => acc + (parseFloat(p.breakHours) || 0), 0)
@@ -71,8 +73,11 @@ export default function AttendancePunchesModal({
       <div className="modal-content card" style={{ maxWidth: '1150px', width: '96%', padding: '28px', maxHeight: '90vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
           <div>
-            <h3 style={{ margin: 0, color: '#0d9488', fontSize: '18px' }}>
+            <h3 style={{ margin: 0, color: '#0d9488', fontSize: '18px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               📋 سجل البصمات والورديات — {employee.name} (كود: {employee.code})
+              <span style={{ background: manualCount > 0 ? '#fef3c7' : '#f1f5f9', color: manualCount > 0 ? '#b45309' : '#64748b', border: '1px solid ' + (manualCount > 0 ? '#fcd34d' : '#e2e8f0'), padding: '3px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: 800 }}>
+                🖐️ بصمات يدوية هذا الشهر: {manualCount}
+              </span>
             </h3>
             <span style={{ fontSize: '13px', color: 'var(--muted)' }}>
               {isMultiBranch ? `مسجل في ${employee.branchesDetails.length} فروع` : `الفرع: ${employee.branchName || 'الرئيسي'}`} | المسمى الوظيفي: {employee.jobTitle} {periodLabel ? ` • (${periodLabel})` : ''}
@@ -152,6 +157,11 @@ export default function AttendancePunchesModal({
                                   {hasPerm && (
                                     <span style={{ display: 'block', marginTop: '2px', background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
                                       ⏰ معدلة بإذن (+{permHours} س)
+                                    </span>
+                                  )}
+                                  {isShiftManualPunch(p) && (
+                                    <span style={{ display: 'block', marginTop: '2px', background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
+                                      🖐️ بصمة يدوية
                                     </span>
                                   )}
                                 </td>
@@ -255,6 +265,11 @@ export default function AttendancePunchesModal({
                           {hasPerm && (
                             <span style={{ display: 'block', marginTop: '2px', background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
                               ⏰ معدلة بإذن (+{permHours} س)
+                            </span>
+                          )}
+                          {isShiftManualPunch(p) && (
+                            <span style={{ display: 'block', marginTop: '2px', background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
+                              🖐️ بصمة يدوية
                             </span>
                           )}
                         </td>

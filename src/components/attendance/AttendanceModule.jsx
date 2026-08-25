@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import AttendancePunchesModal from './AttendancePunchesModal';
 import { recalculateEmployeeCycleLateness } from '../../utils/latePenaltyEngine';
-import { getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
+import { getEmpDisplayName, isEmployeeActive, getEmployeeManualPunchesCount } from '../../utils/formatters';
 
 export default function AttendanceModule({
   state,
@@ -142,9 +142,14 @@ export default function AttendanceModule({
             <label>اختر الموظف</label>
             <select value={manualEmpId} onChange={(e) => setManualEmpId(e.target.value)} required>
               <option value="">-- اختر الموظف --</option>
-              {employees.filter(isEmployeeActive).map((e) => (
-                <option key={e.id} value={e.id}>{getEmpDisplayName(e)} (كود: {e.code})</option>
-              ))}
+              {employees.filter(isEmployeeActive).map((e) => {
+                const count = getEmployeeManualPunchesCount(e.id, state, activePeriodFilter);
+                return (
+                  <option key={e.id} value={e.id}>
+                    {getEmpDisplayName(e)} (كود: {e.code}) — [مسجل له {count} بصمات يدوية هذا الشهر]
+                  </option>
+                );
+              })}
             </select>
           </div>
 
@@ -216,13 +221,14 @@ export default function AttendanceModule({
               <th>الفرع</th>
               <th>المسمى الوظيفي</th>
               <th>عدد بصمات الفترة {periodLabel ? `(${periodLabel})` : ''}</th>
+              <th>بصمات يدوية هذا الشهر</th>
               <th>ساعات العمل المسجلة</th>
               <th>المعاينة والسجل</th>
             </tr>
           </thead>
           <tbody>
             {filteredEmployees.length === 0 ? (
-              <tr><td colSpan="7" style={{ textAlign: 'center', color: 'var(--muted)', padding: '24px' }}>لا يوجد موظفين يطابقون خيارات البحث.</td></tr>
+              <tr><td colSpan="8" style={{ textAlign: 'center', color: 'var(--muted)', padding: '24px' }}>لا يوجد موظفين يطابقون خيارات البحث.</td></tr>
             ) : (
               filteredEmployees.map((emp) => {
                 const b = branches.find((br) => br.id === emp.branchId);
@@ -231,6 +237,7 @@ export default function AttendanceModule({
                   return isMatch && activePeriodFilter(p.date);
                 });
                 const totalHours = empPunches.reduce((acc, p) => acc + (parseFloat(p.hours) || parseFloat(p.workHours) || 8), 0).toFixed(1);
+                const manualCount = getEmployeeManualPunchesCount(emp.id, state, activePeriodFilter);
 
                 return (
                   <tr key={emp.id}>
@@ -239,6 +246,15 @@ export default function AttendanceModule({
                     <td>{b?.name || 'المركز الرئيسي'}</td>
                     <td>{emp.jobTitle}</td>
                     <td><span className="badge badge-primary">{empPunches.length} وردية</span></td>
+                    <td>
+                      {manualCount > 0 ? (
+                        <span style={{ background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '3px 10px', borderRadius: '8px', fontWeight: '800', fontSize: '12px' }}>
+                          🖐️ {manualCount} يدوي
+                        </span>
+                      ) : (
+                        <span style={{ color: 'var(--muted)', fontSize: '12px' }}>0</span>
+                      )}
+                    </td>
                     <td style={{ color: '#0d9488', fontWeight: '800' }}>{totalHours} ساعة</td>
                     <td>
                       <button

@@ -11,7 +11,7 @@ import { getFormattedRequestBadge } from '../requests/RequestsModule';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import BranchResignationModule from '../resignation/BranchResignationModule';
 import { normalizeSchedule } from '../roster/RosterModule';
-import { shouldShowRequestToBranch, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
+import { shouldShowRequestToBranch, getEmpDisplayName, isEmployeeActive, getEmployeeManualPunchesCount, calculateEmployeeLeaveStats, getEmployeeApprovedLeaves } from '../../utils/formatters';
 import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
 import EmployeePermissionsManagementModule from '../permissions/EmployeePermissionsManagementModule';
 import { getCycleDateRange, createDatePredicate, getActivePayrollMonth } from '../../utils/periodEngine';
@@ -158,6 +158,37 @@ export default function BranchManagerView({
   const [previewModalReq, setPreviewModalReq] = useState(null);
   const [branchReqEmpFilter, setBranchReqEmpFilter] = useState('all');
   const [branchReqDateFilter, setBranchReqDateFilter] = useState('');
+
+  // 1. Manual Punch Request State
+  const [showManualPunchModal, setShowManualPunchModal] = useState(false);
+  const [manualPunchData, setManualPunchData] = useState({
+    employeeId: '',
+    date: getRealTodayStr(),
+    punchType: 'full', // 'full' | 'in' | 'out' | 'correction'
+    timeIn: '09:00',
+    timeOut: '17:00',
+    reason: ''
+  });
+
+  // 2. Bonus Request State
+  const [showBonusModal, setShowBonusModal] = useState(false);
+  const [bonusData, setBonusData] = useState({
+    employeeId: '',
+    amount: '',
+    reason: ''
+  });
+
+  // 3. Leave Request by Manager State
+  const [showLeaveModal, setShowLeaveModal] = useState(false);
+  const [leaveData, setLeaveData] = useState({
+    employeeId: '',
+    leaveType: 'annual', // 'annual' | 'sick' | 'unpaid' | 'casual' | 'marriage' | 'maternity' | 'bereavement'
+    startDate: getRealTodayStr(),
+    endDate: getRealTodayStr(),
+    reason: ''
+  });
+  const [leaveEmpFilter, setLeaveEmpFilter] = useState('all');
+  const [leaveStatusFilter, setLeaveStatusFilter] = useState('all');
 
   // Propose Employee Adjustment Form state
   const [adjEmpId, setAdjEmpId] = useState('');
@@ -792,6 +823,231 @@ export default function BranchManagerView({
     showToast?.('📤 تم رفع طلب المكافأة/الخصم للإدارة العليا (لن يُطبق على أجر الموظف إلا بعد موافقة الإدارة العليا)');
   };
 
+  // Handle Manual Punch Request Submission
+  const handleSubmitManualPunchRequest = async (e) => {
+    e.preventDefault();
+    if (!manualPunchData.employeeId || !manualPunchData.date || !manualPunchData.reason.trim()) {
+      showToast?.('يرجى ملء كافة حقول طلب البصمة اليدوية وكتابة السبب');
+      return;
+    }
+
+    const emp = (state.employees || []).find((e) => String(e.id) === String(manualPunchData.employeeId));
+    if (!emp) return;
+
+    let calcHours = 0;
+    if (manualPunchData.timeIn && manualPunchData.timeOut) {
+      const [inH, inM] = manualPunchData.timeIn.split(':').map(Number);
+      const [outH, outM] = manualPunchData.timeOut.split(':').map(Number);
+      let diff = (outH * 60 + outM) - (inH * 60 + inM);
+      if (diff < 0) diff += 24 * 60;
+      calcHours = Math.round((diff / 60) * 100) / 100;
+    }
+
+    const reqId = `req_punch_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+    const newReq = {
+      id: reqId,
+      employeeId: emp.id,
+      employeeName: emp.name,
+      employeeCode: emp.code,
+      branchId: currentBranch?.id || emp.branchId,
+      branchName: currentBranch?.name || 'الفرع',
+      type: 'punch_correction',
+      subType: 'manual_punch_request',
+      typeLabel: 'طلب إضافة/تعديل بصمة يدوي',
+      date: manualPunchData.date,
+      timeIn: manualPunchData.timeIn || '',
+      timeOut: manualPunchData.timeOut || '',
+      hours: calcHours,
+      punchType: manualPunchData.punchType,
+      reason: manualPunchData.reason.trim(),
+      details: `طلب تسجيل بصمة يدوي من مدير الفرع (${manualPunchData.punchType === 'full' ? 'وردية كاملة' : manualPunchData.punchType === 'in' ? 'حضور فقط' : manualPunchData.punchType === 'out' ? 'انصراف فقط' : 'تعديل بصمة'}) | التاريخ: ${manualPunchData.date} | من ${manualPunchData.timeIn || '—'} إلى ${manualPunchData.timeOut || '—'} (${calcHours} س) | السبب: ${manualPunchData.reason.trim()}`,
+      status: 'pending_admin',
+      branchApproved: true,
+      adminApproved: false,
+      targetApproval: 'admin_only',
+      submittedByBranchManager: true,
+      createdAt: new Date().toISOString()
+    };
+
+    const newNotif = {
+      id: `notif_${reqId}`,
+      requestId: reqId,
+      type: 'punch_correction',
+      title: `🖐️ طلب تسجيل بصمة يدوي: ${emp.name}`,
+      message: `طلب مدير فرع ${currentBranch?.name || ''} اعتماد بصمة يدوي للموظف ${emp.name} بتاريخ ${manualPunchData.date} (${manualPunchData.timeIn} ➔ ${manualPunchData.timeOut}) - السبب: ${manualPunchData.reason.trim()}`,
+      employeeId: emp.id,
+      employeeName: emp.name,
+      employeeCode: emp.code,
+      branchId: currentBranch?.id,
+      branchName: currentBranch?.name,
+      date: new Date().toISOString().slice(0, 10),
+      timestamp: new Date().toISOString(),
+      read: false,
+      targetRole: 'admin'
+    };
+
+    const updatedRequests = [newReq, ...(state.requests || [])];
+    const updatedState = {
+      ...state,
+      requests: updatedRequests,
+      notifications: [newNotif, ...(state.notifications || [])]
+    };
+
+    setState(updatedState);
+    if (saveState) await saveState(updatedState);
+    notifyAdminOnNewRequest({ state: updatedState, newRequest: newReq, empName: emp.name, branchName: currentBranch?.name });
+
+    setShowManualPunchModal(false);
+    setManualPunchData({ employeeId: '', date: getRealTodayStr(), punchType: 'full', timeIn: '09:00', timeOut: '17:00', reason: '' });
+    showToast?.('📤 تم إرسال طلب البصمة اليدوية إلى الإدارة العليا للاعتماد بنجاح');
+  };
+
+  // Handle Bonus Request Submission
+  const handleSubmitBonusRequest = async (e) => {
+    e.preventDefault();
+    const amount = parseFloat(bonusData.amount);
+    if (!bonusData.employeeId || !amount || amount <= 0 || !bonusData.reason.trim()) {
+      showToast?.('يرجى تحديد الموظف والمبلغ والسبب بشكل صحيح');
+      return;
+    }
+
+    const emp = (state.employees || []).find((e) => String(e.id) === String(bonusData.employeeId));
+    if (!emp) return;
+
+    const reqId = `req_bonus_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+    const newReq = {
+      id: reqId,
+      employeeId: emp.id,
+      employeeName: emp.name,
+      employeeCode: emp.code,
+      branchId: currentBranch?.id || emp.branchId,
+      branchName: currentBranch?.name || 'الفرع',
+      type: 'bonus',
+      typeLabel: 'طلب صرف مكافأة / حافز',
+      amount,
+      reason: bonusData.reason.trim(),
+      details: bonusData.reason.trim(),
+      status: 'pending_admin',
+      branchApproved: true,
+      adminApproved: false,
+      targetApproval: 'admin_only',
+      submittedByBranchManager: true,
+      createdAt: new Date().toISOString()
+    };
+
+    const newNotif = {
+      id: `notif_${reqId}`,
+      requestId: reqId,
+      type: 'bonus',
+      title: `🎁 طلب مكافأة موظف: ${emp.name}`,
+      message: `طلب مدير فرع ${currentBranch?.name || ''} صرف مكافأة بقيمة ${amount} ج.م للموظف ${emp.name} - السبب: ${bonusData.reason.trim()}`,
+      employeeId: emp.id,
+      employeeName: emp.name,
+      employeeCode: emp.code,
+      branchId: currentBranch?.id,
+      branchName: currentBranch?.name,
+      date: new Date().toISOString().slice(0, 10),
+      timestamp: new Date().toISOString(),
+      read: false,
+      targetRole: 'admin'
+    };
+
+    const updatedRequests = [newReq, ...(state.requests || [])];
+    const updatedState = {
+      ...state,
+      requests: updatedRequests,
+      notifications: [newNotif, ...(state.notifications || [])]
+    };
+
+    setState(updatedState);
+    if (saveState) await saveState(updatedState);
+    notifyAdminOnNewRequest({ state: updatedState, newRequest: newReq, empName: emp.name, branchName: currentBranch?.name });
+
+    setShowBonusModal(false);
+    setBonusData({ employeeId: '', amount: '', reason: '' });
+    showToast?.('📤 تم إرسال طلب المكافأة إلى الإدارة العليا للاعتماد بنجاح');
+  };
+
+  // Handle Leave Request Submission by Branch Manager
+  const handleSubmitLeaveRequest = async (e) => {
+    e.preventDefault();
+    if (!leaveData.employeeId || !leaveData.startDate || !leaveData.endDate || !leaveData.reason.trim()) {
+      showToast?.('يرجى ملء كافة بيانات طلب الإجازة');
+      return;
+    }
+
+    const emp = (state.employees || []).find((e) => String(e.id) === String(leaveData.employeeId));
+    if (!emp) return;
+
+    const start = new Date(leaveData.startDate);
+    const end = new Date(leaveData.endDate);
+    if (end < start) {
+      showToast?.('تاريخ نهاية الإجازة يجب أن يكون بعد تاريخ البداية');
+      return;
+    }
+
+    const diffDays = Math.round((end - start) / (1000 * 60 * 60 * 24)) + 1;
+    const reqId = `req_leave_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+
+    const newReq = {
+      id: reqId,
+      employeeId: emp.id,
+      employeeName: emp.name,
+      employeeCode: emp.code,
+      branchId: currentBranch?.id || emp.branchId,
+      branchName: currentBranch?.name || 'الفرع',
+      type: 'leave',
+      leaveType: leaveData.leaveType,
+      typeLabel: `طلب إجازة (${leaveData.leaveType === 'annual' ? 'سنوية' : leaveData.leaveType === 'sick' ? 'مرضية' : leaveData.leaveType === 'unpaid' ? 'بدون أجر' : 'اعتيادية'})`,
+      startDate: leaveData.startDate,
+      endDate: leaveData.endDate,
+      daysCount: diffDays,
+      days: diffDays,
+      reason: leaveData.reason.trim(),
+      details: leaveData.reason.trim(),
+      status: 'pending_admin',
+      branchApproved: true,
+      adminApproved: false,
+      targetApproval: 'admin_only',
+      submittedByBranchManager: true,
+      createdAt: new Date().toISOString()
+    };
+
+    const newNotif = {
+      id: `notif_${reqId}`,
+      requestId: reqId,
+      type: 'leave',
+      title: `🏖️ طلب إجازة لموظف: ${emp.name}`,
+      message: `رفع مدير فرع ${currentBranch?.name || ''} طلب إجازة (${diffDays} يوم) للموظف ${emp.name} من ${leaveData.startDate} إلى ${leaveData.endDate} - السبب: ${leaveData.reason.trim()}`,
+      employeeId: emp.id,
+      employeeName: emp.name,
+      employeeCode: emp.code,
+      branchId: currentBranch?.id,
+      branchName: currentBranch?.name,
+      date: new Date().toISOString().slice(0, 10),
+      timestamp: new Date().toISOString(),
+      read: false,
+      targetRole: 'admin'
+    };
+
+    const updatedRequests = [newReq, ...(state.requests || [])];
+    const updatedLeaveRequests = [newReq, ...(state.leaveRequests || [])];
+    const updatedState = {
+      ...state,
+      requests: updatedRequests,
+      leaveRequests: updatedLeaveRequests,
+      notifications: [newNotif, ...(state.notifications || [])]
+    };
+
+    setState(updatedState);
+    if (saveState) await saveState(updatedState);
+    notifyAdminOnNewRequest({ state: updatedState, newRequest: newReq, empName: emp.name, branchName: currentBranch?.name });
+
+    setShowLeaveModal(false);
+    setLeaveData({ employeeId: '', leaveType: 'annual', startDate: getRealTodayStr(), endDate: getRealTodayStr(), reason: '' });
+    showToast?.('📤 تم إرسال طلب الإجازة إلى الإدارة العليا للاعتماد بنجاح');
+  };
+
   // Dynamic evaluation criteria handlers
   const handleAddEvalItem = () => {
     const newId = String(Date.now());
@@ -998,6 +1254,41 @@ export default function BranchManagerView({
       {activeTab === 'dashboard' && (
         <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
           
+          {/* Quick Actions Bar */}
+          <div className="card settings-card" style={{ padding: '16px 20px', background: 'linear-gradient(135deg, #f0fdf4, #e6f7f5)', border: '1px solid #99f6e4', borderRadius: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+            <div>
+              <h4 style={{ margin: '0 0 4px', fontSize: '15px', color: '#0f766e', fontWeight: '800' }}>
+                ⚡ الإجراءات والطلبات السريعة لمدير الفرع
+              </h4>
+              <p style={{ margin: 0, fontSize: '12.5px', color: '#115e59' }}>
+                رفع طلبات البصمات اليدوية، المكافآت، والإجازات مباشرة للاعتماد من الإدارة العليا
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+              <button
+                className="btn btn-start"
+                style={{ padding: '8px 16px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', background: '#0d9488' }}
+                onClick={() => setShowManualPunchModal(true)}
+              >
+                🖐️ طلب بصمة يدوي
+              </button>
+              <button
+                className="btn btn-start"
+                style={{ padding: '8px 16px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', background: '#16a34a' }}
+                onClick={() => setShowBonusModal(true)}
+              >
+                🎁 طلب مكافأة لموظف
+              </button>
+              <button
+                className="btn btn-start"
+                style={{ padding: '8px 16px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', background: '#0284c7' }}
+                onClick={() => setShowLeaveModal(true)}
+              >
+                🏖️ طلب إجازة لموظف
+              </button>
+            </div>
+          </div>
+
           {/* Branch Employees Live Punch Status Grid */}
           <div className="card settings-card" style={{ padding: '20px' }}>
             <h3 style={{ margin: '0 0 16px', fontSize: '16px', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -2152,13 +2443,22 @@ export default function BranchManagerView({
             <h3 style={{ margin: 0, fontSize: '17px', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '8px' }}>
               📋 سجل البصمات والورديات — موظفي الفرع ({selectedMonth})
             </h3>
-            <div style={{ maxWidth: '240px' }}>
-              <select value={selectedPunchEmpId} onChange={(e) => setSelectedPunchEmpId(e.target.value)} style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}>
-                <option value="">-- جميع موظفي الفرع --</option>
-                {branchEmployees.map((e) => (
-                  <option key={e.id} value={e.id}>{e.name} ({e.code})</option>
-                ))}
-              </select>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <button
+                className="btn btn-start"
+                style={{ padding: '6px 14px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                onClick={() => setShowManualPunchModal(true)}
+              >
+                🖐️ طلب إضافة / تعديل بصمة يدوي لموظف
+              </button>
+              <div style={{ maxWidth: '240px' }}>
+                <select value={selectedPunchEmpId} onChange={(e) => setSelectedPunchEmpId(e.target.value)} style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                  <option value="">-- جميع موظفي الفرع --</option>
+                  {branchEmployees.map((e) => (
+                    <option key={e.id} value={e.id}>{e.name} ({e.code})</option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
 
@@ -2186,6 +2486,7 @@ export default function BranchManagerView({
                     <tr style={{ background: '#f0fdf4', color: '#166534' }}>
                       <th>#</th>
                       <th>اسم الموظف</th>
+                      <th>بصمات يدوية هذا الشهر</th>
                       <th>التاريخ</th>
                       <th>اليوم</th>
                       <th>وقت الدخول</th>
@@ -2197,7 +2498,7 @@ export default function BranchManagerView({
                   </thead>
                   <tbody>
                     {filteredShifts.length === 0 ? (
-                      <tr><td colSpan="9" style={{ textAlign: 'center', padding: '24px', color: 'var(--muted)' }}>لا توجد بصمات مسجلة لهؤلاء الموظفين بهذا الفرع لهذه الفترة.</td></tr>
+                      <tr><td colSpan="10" style={{ textAlign: 'center', padding: '24px', color: 'var(--muted)' }}>لا توجد بصمات مسجلة لهؤلاء الموظفين بهذا الفرع لهذه الفترة.</td></tr>
                     ) : (
                       filteredShifts.map((s, idx) => {
                         const empObj = allEmps.find((e) => String(e.id) === String(s.employeeId)) || branchEmployees.find((e) => String(e.id) === String(s.employeeId));
@@ -2205,6 +2506,8 @@ export default function BranchManagerView({
                         const hasPerm = s.hasApprovedPermission || !!perm;
                         const permHours = s.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
                         const effHours = getEffectiveShiftHours(s, state);
+                        const manualPunchesMonthCount = getEmployeeManualPunchesCount(s.employeeId, state, matchesDateRange);
+                        const isManualShift = isShiftManualPunch(s);
 
                         return (
                           <tr key={s.id} style={{ background: hasPerm ? 'rgba(254, 243, 199, 0.25)' : 'transparent' }}>
@@ -2212,11 +2515,25 @@ export default function BranchManagerView({
                             <td style={{ fontWeight: '800', color: 'var(--primary-dark)' }}>
                               {empObj ? `${empObj.name} (${empObj.code})` : (s.employeeName || 'موظف')}
                             </td>
+                            <td>
+                              {manualPunchesMonthCount > 0 ? (
+                                <span style={{ background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '2px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 800 }}>
+                                  🖐️ {manualPunchesMonthCount} يدوي
+                                </span>
+                              ) : (
+                                <span style={{ color: 'var(--muted)', fontSize: '12px' }}>0</span>
+                              )}
+                            </td>
                             <td style={{ fontWeight: '700' }}>
                               {s.date}
                               {hasPerm && (
                                 <span style={{ display: 'block', marginTop: '2px', background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
                                   ⏰ معدلة بإذن (+{permHours} س)
+                                </span>
+                              )}
+                              {isManualShift && (
+                                <span style={{ display: 'block', marginTop: '2px', background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
+                                  🖐️ بصمة يدوية
                                 </span>
                               )}
                             </td>
@@ -2250,7 +2567,7 @@ export default function BranchManagerView({
                                   {s.note && !s.note.includes('⏰ تم تعديل البصمة') && <div style={{ fontSize: '11px', color: 'var(--muted)' }}>{s.note}</div>}
                                 </div>
                               ) : (
-                                s.note || 'تسجيل بصمة عادية'
+                                s.note || (isManualShift ? 'بصمة يدوية مسجلة' : 'تسجيل بصمة عادية')
                               )}
                             </td>
                           </tr>
@@ -2261,7 +2578,7 @@ export default function BranchManagerView({
                   {filteredShifts.length > 0 && (
                     <tfoot>
                       <tr style={{ fontWeight: '800', background: '#f8fafc' }}>
-                        <td colSpan="6" style={{ textAlign: 'right', paddingRight: '12px' }}>
+                        <td colSpan="7" style={{ textAlign: 'right', paddingRight: '12px' }}>
                           الإجمالي ({filteredShifts.length} وردية)
                         </td>
                         <td>
@@ -2836,6 +3153,475 @@ export default function BranchManagerView({
           showToast={showToast}
           currentBranch={currentBranch}
         />
+      )}
+
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* ── 12. BRANCH LEAVES MANAGEMENT TAB ── */}
+      {/* ───────────────────────────────────────────────────────────── */}
+      {activeTab === 'leaves' && (
+        <div className="card settings-card fade-in" style={{ padding: '20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: '18px', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                🏖️ كشوف وإجازات موظفي الفرع ورصيد الإجازات السنوية
+              </h3>
+              <p style={{ margin: '4px 0 0', color: 'var(--muted)', fontSize: '13px' }}>
+                متابعة سجل الإجازات المأخوذة بكل موظف بالفرع، الاستعلام عن الرصيد، ورفع طلب إجازة جديد للإدارة العليا
+              </p>
+            </div>
+            <button
+              className="btn btn-start"
+              style={{ padding: '8px 18px', fontSize: '13.5px', display: 'flex', alignItems: 'center', gap: '8px', background: '#0284c7' }}
+              onClick={() => setShowLeaveModal(true)}
+            >
+              ➕ طلب إجازة لموظف
+            </button>
+          </div>
+
+          {/* Employee Balances Cards Grid */}
+          <div style={{ marginBottom: '24px' }}>
+            <h4 style={{ margin: '0 0 12px', fontSize: '14.5px', color: '#0369a1', fontWeight: '800' }}>
+              📊 أرصدة الإجازات السنوية لموظفي الفرع ({branchEmployees.length} موظف):
+            </h4>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '12px' }}>
+              {branchEmployees.map((emp) => {
+                const { annualTotal, takenAnnualDays, remainingAnnualDays } = calculateEmployeeLeaveStats(emp, state);
+                return (
+                  <div key={emp.id} style={{ background: '#f8fafc', border: '1px solid var(--border)', borderRadius: '12px', padding: '14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontWeight: '800', color: 'var(--text)', fontSize: '14px' }}>{emp.name}</span>
+                      <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>{emp.code}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', borderTop: '1px dashed #e2e8f0', paddingTop: '6px' }}>
+                      <span style={{ color: 'var(--muted)' }}>الرصيد الكلي:</span>
+                      <span style={{ fontWeight: '700' }}>{annualTotal} يوم</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                      <span style={{ color: '#d97706' }}>المأخوذ:</span>
+                      <span style={{ fontWeight: '700', color: '#d97706' }}>{takenAnnualDays} يوم</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', background: remainingAnnualDays > 0 ? '#dcfce7' : '#fee2e2', padding: '4px 8px', borderRadius: '6px' }}>
+                      <span style={{ color: remainingAnnualDays > 0 ? '#15803d' : '#b91c1c', fontWeight: 'bold' }}>المتبقي:</span>
+                      <span style={{ fontWeight: '900', color: remainingAnnualDays > 0 ? '#15803d' : '#b91c1c' }}>{remainingAnnualDays} يوم</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Filters Bar for Requests */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+            <h4 style={{ margin: 0, fontSize: '15px', color: '#1e293b' }}>📋 سجل طلبات إجازات موظفي الفرع:</h4>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+              <select
+                value={leaveEmpFilter}
+                onChange={(e) => setLeaveEmpFilter(e.target.value)}
+                style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px' }}
+              >
+                <option value="all">-- جميع موظفي الفرع --</option>
+                {branchEmployees.map((e) => (
+                  <option key={e.id} value={e.id}>{e.name} ({e.code})</option>
+                ))}
+              </select>
+              <select
+                value={leaveStatusFilter}
+                onChange={(e) => setLeaveStatusFilter(e.target.value)}
+                style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px' }}
+              >
+                <option value="all">-- جميع الحالات --</option>
+                <option value="pending">قيد المراجعة والانتظار</option>
+                <option value="approved">معتمدة ومقبولة</option>
+                <option value="rejected">مرفوضة</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Leave Requests Table */}
+          {(() => {
+            const allLeavesList = [...(state.leaveRequests || []), ...(state.requests || []).filter(r => r.type === 'leave' || r.type === 'leave_request')];
+            const map = new Map();
+            allLeavesList.forEach(lr => {
+              if (!lr) return;
+              const isMatchBranch = String(lr.branchId) === String(currentBranch?.id) || branchEmployees.some(e => String(e.id) === String(lr.employeeId));
+              if (!isMatchBranch) return;
+              if (leaveEmpFilter !== 'all' && String(lr.employeeId) !== String(leaveEmpFilter)) return;
+              if (leaveStatusFilter === 'approved' && !(lr.status === 'approved' || lr.adminApproved)) return;
+              if (leaveStatusFilter === 'rejected' && lr.status !== 'rejected') return;
+              if (leaveStatusFilter === 'pending' && (lr.status === 'approved' || lr.adminApproved || lr.status === 'rejected')) return;
+
+              const key = lr.id || `${lr.employeeId}_${lr.startDate}_${lr.endDate}`;
+              if (!map.has(key)) map.set(key, lr);
+            });
+
+            const displayedLeaves = Array.from(map.values()).sort((a, b) => (b.createdAt || b.startDate || '').localeCompare(a.createdAt || a.startDate || ''));
+
+            return (
+              <div className="table-responsive">
+                <table className="bylaws-table" style={{ fontSize: '13px' }}>
+                  <thead>
+                    <tr style={{ background: '#f0fdf4', color: '#166534' }}>
+                      <th>#</th>
+                      <th>اسم الموظف</th>
+                      <th>نوع الإجازة</th>
+                      <th>من تاريخ</th>
+                      <th>إلى تاريخ</th>
+                      <th>عدد الأيام</th>
+                      <th>السبب والملاحظات</th>
+                      <th>موقف الفرع</th>
+                      <th>موقف الإدارة العليا</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {displayedLeaves.length === 0 ? (
+                      <tr><td colSpan="9" style={{ textAlign: 'center', padding: '24px', color: 'var(--muted)' }}>لا توجد طلبات إجازات مسجلة تطابق خيارات البحث.</td></tr>
+                    ) : (
+                      displayedLeaves.map((lr, idx) => {
+                        const empObj = branchEmployees.find(e => String(e.id) === String(lr.employeeId)) || (state.employees || []).find(e => String(e.id) === String(lr.employeeId));
+                        const days = lr.daysCount || lr.days || 1;
+                        const leaveTypeLabel = lr.leaveType === 'annual' ? 'إجازة سنوية' : lr.leaveType === 'sick' ? 'إجازة مرضية' : lr.leaveType === 'unpaid' ? 'بدون أجر' : lr.leaveType === 'casual' ? 'إجازة عارضة' : 'إجازة اعتيادية';
+
+                        return (
+                          <tr key={lr.id || idx}>
+                            <td style={{ color: 'var(--muted)', fontWeight: 'bold' }}>{idx + 1}</td>
+                            <td style={{ fontWeight: '800', color: 'var(--primary-dark)' }}>{empObj ? `${empObj.name} (${empObj.code})` : (lr.employeeName || 'موظف')}</td>
+                            <td><span className="badge" style={{ background: '#e0f2fe', color: '#0369a1' }}>{leaveTypeLabel}</span></td>
+                            <td style={{ fontWeight: '700' }}>📅 {lr.startDate || '—'} {lr.startDate && `(${getArabicWeekday(lr.startDate)})`}</td>
+                            <td style={{ fontWeight: '700' }}>📅 {lr.endDate || '—'} {lr.endDate && `(${getArabicWeekday(lr.endDate)})`}</td>
+                            <td style={{ fontWeight: '900', color: '#15803d' }}>⏱️ {days} يوم</td>
+                            <td style={{ fontSize: '12px' }}>{lr.reason || lr.details || '—'}</td>
+                            <td>
+                              {lr.branchApproved ? (
+                                <span style={{ color: '#16a34a', fontWeight: 'bold' }}>🟢 معتمد ومقدم من الفرع</span>
+                              ) : (
+                                <span style={{ color: '#d97706', fontWeight: 'bold' }}>⏳ بانتظار قرارك</span>
+                              )}
+                            </td>
+                            <td>
+                              {(lr.status === 'approved' || lr.adminApproved) ? (
+                                <span className="approval-status-badge approved">🟢 معتمد ومخصوم من الرصيد</span>
+                              ) : lr.status === 'rejected' ? (
+                                <span className="approval-status-badge rejected">🔴 مرفوض من الإدارة</span>
+                              ) : (
+                                <span className="approval-status-badge pending">🟡 بانتظار اعتماد الإدارة العليا</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* ── MODAL 1: MANUAL PUNCH REQUEST MODAL ── */}
+      {/* ───────────────────────────────────────────────────────────── */}
+      {showManualPunchModal && (
+        <div className="modal-backdrop" onClick={() => setShowManualPunchModal(false)}>
+          <div className="modal-content card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px', width: '92%', padding: '24px', borderRadius: '16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '12px' }}>
+              <h3 style={{ margin: 0, fontSize: '17px', color: '#0d9488', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                🖐️ طلب إضافة / تعديل بصمة يدوي لموظف
+              </h3>
+              <button type="button" className="btn btn-ghost" style={{ padding: '4px 8px' }} onClick={() => setShowManualPunchModal(false)}>✕</button>
+            </div>
+
+            <form onSubmit={handleSubmitManualPunchRequest} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div className="field">
+                <label style={{ fontWeight: 'bold', fontSize: '13px' }}>اختر الموظف:</label>
+                <select
+                  value={manualPunchData.employeeId}
+                  onChange={(e) => setManualPunchData({ ...manualPunchData, employeeId: e.target.value })}
+                  required
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                >
+                  <option value="">-- اختر موظف من الفرع --</option>
+                  {branchEmployees.map((e) => {
+                    const count = getEmployeeManualPunchesCount(e.id, state, matchesDateRange);
+                    return (
+                      <option key={e.id} value={e.id}>
+                        {e.name} ({e.code}) — [مسجل له {count} بصمة يدوية هذا الشهر]
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
+              {manualPunchData.employeeId && (() => {
+                const count = getEmployeeManualPunchesCount(manualPunchData.employeeId, state, matchesDateRange);
+                return (
+                  <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '10px 14px', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px' }}>
+                    <span style={{ color: '#166534', fontWeight: 'bold' }}>🖐️ إجمالي البصمات اليدوية المسجلة للموظف خلال دورة الشهر الحالية:</span>
+                    <span style={{ background: '#16a34a', color: '#fff', padding: '2px 10px', borderRadius: '12px', fontWeight: '900' }}>
+                      {count} مرات
+                    </span>
+                  </div>
+                );
+              })()}
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div className="field">
+                  <label style={{ fontWeight: 'bold', fontSize: '13px' }}>تاريخ البصمة:</label>
+                  <input
+                    type="date"
+                    value={manualPunchData.date}
+                    onChange={(e) => setManualPunchData({ ...manualPunchData, date: e.target.value })}
+                    required
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                  />
+                </div>
+                <div className="field">
+                  <label style={{ fontWeight: 'bold', fontSize: '13px' }}>نوع التسجيل:</label>
+                  <select
+                    value={manualPunchData.punchType}
+                    onChange={(e) => setManualPunchData({ ...manualPunchData, punchType: e.target.value })}
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                  >
+                    <option value="full">حضور وانصراف (وردية كاملة)</option>
+                    <option value="in">تسجيل حضور فقط</option>
+                    <option value="out">تسجيل انصراف فقط</option>
+                    <option value="correction">تعديل توقيت بصمة سابقة</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div className="field">
+                  <label style={{ fontWeight: 'bold', fontSize: '13px' }}>وقت الحضور (الدخول):</label>
+                  <input
+                    type="time"
+                    value={manualPunchData.timeIn}
+                    onChange={(e) => setManualPunchData({ ...manualPunchData, timeIn: e.target.value })}
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                  />
+                </div>
+                <div className="field">
+                  <label style={{ fontWeight: 'bold', fontSize: '13px' }}>وقت الانصراف (الخروج):</label>
+                  <input
+                    type="time"
+                    value={manualPunchData.timeOut}
+                    onChange={(e) => setManualPunchData({ ...manualPunchData, timeOut: e.target.value })}
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                  />
+                </div>
+              </div>
+
+              <div className="field">
+                <label style={{ fontWeight: 'bold', fontSize: '13px' }}>سبب التسجيل / التعديل اليدوي وملاحظات مدير الفرع:</label>
+                <textarea
+                  rows="3"
+                  placeholder="مثال: نسيان تسجيل البصمة بجهاز الفرع، عطل فني مؤقت بالجهاز، تكليف رسمي من الإدارة..."
+                  value={manualPunchData.reason}
+                  onChange={(e) => setManualPunchData({ ...manualPunchData, reason: e.target.value })}
+                  required
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
+                <button type="button" className="btn btn-ghost" onClick={() => setShowManualPunchModal(false)}>إلغاء</button>
+                <button type="submit" className="btn btn-start" style={{ background: '#0d9488' }}>
+                  📤 إرسال طلب البصمة للإدارة العليا للاعتماد
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* ── MODAL 2: BONUS REQUEST MODAL ── */}
+      {/* ───────────────────────────────────────────────────────────── */}
+      {showBonusModal && (
+        <div className="modal-backdrop" onClick={() => setShowBonusModal(false)}>
+          <div className="modal-content card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '540px', width: '92%', padding: '24px', borderRadius: '16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '12px' }}>
+              <h3 style={{ margin: 0, fontSize: '17px', color: '#16a34a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                🎁 طلب مكافأة / حافز لموظف بالفرع
+              </h3>
+              <button type="button" className="btn btn-ghost" style={{ padding: '4px 8px' }} onClick={() => setShowBonusModal(false)}>✕</button>
+            </div>
+
+            <form onSubmit={handleSubmitBonusRequest} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div className="field">
+                <label style={{ fontWeight: 'bold', fontSize: '13px' }}>اختر الموظف:</label>
+                <select
+                  value={bonusData.employeeId}
+                  onChange={(e) => setBonusData({ ...bonusData, employeeId: e.target.value })}
+                  required
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                >
+                  <option value="">-- اختر موظف من الفرع --</option>
+                  {branchEmployees.map((e) => (
+                    <option key={e.id} value={e.id}>{e.name} ({e.code})</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="field">
+                <label style={{ fontWeight: 'bold', fontSize: '13px' }}>مبلغ المكافأة المقترح (ج.م):</label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  placeholder="مثال: 500"
+                  value={bonusData.amount}
+                  onChange={(e) => setBonusData({ ...bonusData, amount: e.target.value })}
+                  required
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                />
+              </div>
+
+              <div className="field">
+                <label style={{ fontWeight: 'bold', fontSize: '13px' }}>سبب استحقاق المكافأة ومبررات مدير الفرع:</label>
+                <textarea
+                  rows="3"
+                  placeholder="اكتب أسباب تميز الموظف، تغطية نوبتجية، تحقيق تارجت مبيعات..."
+                  value={bonusData.reason}
+                  onChange={(e) => setBonusData({ ...bonusData, reason: e.target.value })}
+                  required
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
+                <button type="button" className="btn btn-ghost" onClick={() => setShowBonusModal(false)}>إلغاء</button>
+                <button type="submit" className="btn btn-start" style={{ background: '#16a34a' }}>
+                  📤 إرسال طلب المكافأة للإدارة العليا للاعتماد
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* ── MODAL 3: LEAVE REQUEST ON BEHALF OF EMPLOYEE MODAL ── */}
+      {/* ───────────────────────────────────────────────────────────── */}
+      {showLeaveModal && (
+        <div className="modal-backdrop" onClick={() => setShowLeaveModal(false)}>
+          <div className="modal-content card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px', width: '92%', padding: '24px', borderRadius: '16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '12px' }}>
+              <h3 style={{ margin: 0, fontSize: '17px', color: '#0284c7', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                🏖️ طلب إجازة لموظف بالفرع
+              </h3>
+              <button type="button" className="btn btn-ghost" style={{ padding: '4px 8px' }} onClick={() => setShowLeaveModal(false)}>✕</button>
+            </div>
+
+            <form onSubmit={handleSubmitLeaveRequest} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div className="field">
+                <label style={{ fontWeight: 'bold', fontSize: '13px' }}>اختر الموظف:</label>
+                <select
+                  value={leaveData.employeeId}
+                  onChange={(e) => setLeaveData({ ...leaveData, employeeId: e.target.value })}
+                  required
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                >
+                  <option value="">-- اختر موظف من الفرع --</option>
+                  {branchEmployees.map((e) => {
+                    const stats = calculateEmployeeLeaveStats(e, state);
+                    return (
+                      <option key={e.id} value={e.id}>
+                        {e.name} ({e.code}) — [الرصيد المتبقي: {stats.remainingAnnualDays} يوم]
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
+              {leaveData.employeeId && (() => {
+                const selectedEmp = branchEmployees.find(e => String(e.id) === String(leaveData.employeeId));
+                const stats = calculateEmployeeLeaveStats(selectedEmp, state);
+                return (
+                  <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', padding: '10px 14px', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px' }}>
+                    <span style={{ color: '#0369a1', fontWeight: 'bold' }}>رصيد الإجازات السنوية المتبقي للموظف:</span>
+                    <span style={{ background: stats.remainingAnnualDays > 0 ? '#0284c7' : '#dc2626', color: '#fff', padding: '2px 10px', borderRadius: '12px', fontWeight: '900' }}>
+                      {stats.remainingAnnualDays} يوم متبقي (من إجمالي {stats.annualTotal})
+                    </span>
+                  </div>
+                );
+              })()}
+
+              <div className="field">
+                <label style={{ fontWeight: 'bold', fontSize: '13px' }}>نوع الإجازة:</label>
+                <select
+                  value={leaveData.leaveType}
+                  onChange={(e) => setLeaveData({ ...leaveData, leaveType: e.target.value })}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                >
+                  <option value="annual">إجازة سنوية اعتيادية (تُخصم من الرصيد السنوي)</option>
+                  <option value="sick">إجازة مرضية (بتقرير طبي)</option>
+                  <option value="casual">إجازة عارضة</option>
+                  <option value="unpaid">إجازة بدون أجر</option>
+                  <option value="marriage">إجازة زواج</option>
+                  <option value="maternity">إجازة وضع / رعاية طفل</option>
+                  <option value="bereavement">إجازة وفاة</option>
+                </select>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div className="field">
+                  <label style={{ fontWeight: 'bold', fontSize: '13px' }}>من تاريخ (بداية الإجازة):</label>
+                  <input
+                    type="date"
+                    value={leaveData.startDate}
+                    onChange={(e) => setLeaveData({ ...leaveData, startDate: e.target.value })}
+                    required
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                  />
+                </div>
+                <div className="field">
+                  <label style={{ fontWeight: 'bold', fontSize: '13px' }}>إلى تاريخ (نهاية الإجازة):</label>
+                  <input
+                    type="date"
+                    value={leaveData.endDate}
+                    onChange={(e) => setLeaveData({ ...leaveData, endDate: e.target.value })}
+                    required
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                  />
+                </div>
+              </div>
+
+              {leaveData.startDate && leaveData.endDate && (() => {
+                const s = new Date(leaveData.startDate);
+                const e = new Date(leaveData.endDate);
+                const days = Math.round((e - s) / (1000 * 60 * 60 * 24)) + 1;
+                if (days > 0) {
+                  return (
+                    <div style={{ background: '#f8fafc', padding: '8px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', fontWeight: 'bold', color: '#0284c7' }}>
+                      ⏱️ إجمالي مدة الإجازة المحسوبة: {days} يوم
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+
+              <div className="field">
+                <label style={{ fontWeight: 'bold', fontSize: '13px' }}>سبب وسبب طلب الإجازة:</label>
+                <textarea
+                  rows="3"
+                  placeholder="اكتب أسباب الإجازة أو تفاصيل التنسيق مع الفرع..."
+                  value={leaveData.reason}
+                  onChange={(e) => setLeaveData({ ...leaveData, reason: e.target.value })}
+                  required
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
+                <button type="button" className="btn btn-ghost" onClick={() => setShowLeaveModal(false)}>إلغاء</button>
+                <button type="submit" className="btn btn-start" style={{ background: '#0284c7' }}>
+                  📤 إرسال طلب الإجازة للإدارة العليا للاعتماد
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
     </div>

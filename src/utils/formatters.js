@@ -664,4 +664,43 @@ export function getRequestTypeArabicName(type, leaveType) {
   return type || 'طلب إداري';
 }
 
+/**
+ * Checks if a shift was registered manually
+ */
+export function isShiftManualPunch(shift) {
+  if (!shift) return false;
+  if (shift.isManual || shift.manualPunch || shift.source === 'manual' || shift.source === 'manual_admin') {
+    return true;
+  }
+  const note = String(shift.note || '');
+  const statusLabel = String(shift.statusLabel || '');
+  if (note.includes('بصمة يدوية') || note.includes('تسجيل يدوي') || note.includes('يدوياً') || note.includes('يدوي')) {
+    return true;
+  }
+  if (statusLabel.includes('يدوي') || statusLabel.includes('بصمة يدوية')) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Calculates total manual punches registered for an employee in the specified monthly cycle / filter
+ */
+export function getEmployeeManualPunchesCount(empId, state, filterFn) {
+  if (!empId || !state) return 0;
+  const empIdStr = String(empId);
+  const emp = (state.employees || []).find(e => String(e.id) === empIdStr || (e.code && String(e.code) === empIdStr));
+  const empCodeStr = emp?.code ? String(emp.code) : '';
+
+  const shifts = (state.shifts || []).filter(s => {
+    if (!s || !s.date) return false;
+    const matchEmp = String(s.employeeId) === empIdStr || (empCodeStr && String(s.employeeCode || s.employeeId) === empCodeStr);
+    if (!matchEmp) return false;
+    if (filterFn && typeof filterFn === 'function' && !filterFn(s.date)) return false;
+    return isShiftManualPunch(s);
+  });
+
+  return shifts.length;
+}
+
 

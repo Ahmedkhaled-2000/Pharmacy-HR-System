@@ -441,6 +441,63 @@ export default function RequestsModule({
         });
       }
 
+      // 0.1 Manual Punch / Punch Correction Request Approval
+      if (approvedTargetReq.type === 'punch_correction' || approvedTargetReq.type === 'attendance_punch' || approvedTargetReq.type === 'manual_punch') {
+        const emp = (state.employees || []).find(e => String(e.id) === String(approvedTargetReq.employeeId));
+        const punchDate = approvedTargetReq.date || approvedTargetReq.punchDate || new Date().toISOString().slice(0, 10);
+        const timeIn = approvedTargetReq.timeIn || '09:00';
+        const timeOut = approvedTargetReq.timeOut || '17:00';
+        let hrs = parseFloat(approvedTargetReq.hours);
+        if (isNaN(hrs) || hrs <= 0) {
+          const [inH, inM] = timeIn.split(':').map(Number);
+          const [outH, outM] = timeOut.split(':').map(Number);
+          let diff = (outH * 60 + outM) - (inH * 60 + inM);
+          if (diff < 0) diff += 24 * 60;
+          hrs = Math.round((diff / 60) * 100) / 100;
+        }
+
+        const existingShiftIndex = updatedShifts.findIndex(s => 
+          (String(s.employeeId) === String(approvedTargetReq.employeeId) || (emp?.code && String(s.employeeCode) === String(emp.code))) &&
+          s.date === punchDate
+        );
+
+        if (existingShiftIndex >= 0) {
+          updatedShifts[existingShiftIndex] = {
+            ...updatedShifts[existingShiftIndex],
+            timeIn,
+            timeOut,
+            hours: hrs,
+            actualWorkedHours: hrs,
+            isManual: true,
+            manualPunch: true,
+            source: 'manual_admin',
+            adminApproved: true,
+            note: `بصمة يدوية معتمدة من الإدارة العليا (${approvedTargetReq.reason || 'بناءً على طلب مدير الفرع'})`,
+            updatedAt: new Date().toISOString()
+          };
+        } else {
+          updatedShifts.unshift({
+            id: `shift_manual_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+            employeeId: approvedTargetReq.employeeId,
+            employeeCode: emp?.code || approvedTargetReq.employeeCode || '',
+            employeeName: emp?.name || approvedTargetReq.employeeName || 'موظف',
+            branchId: approvedTargetReq.branchId || emp?.branchId || '',
+            date: punchDate,
+            timeIn,
+            timeOut,
+            hours: hrs,
+            actualWorkedHours: hrs,
+            isManual: true,
+            manualPunch: true,
+            source: 'manual_admin',
+            adminApproved: true,
+            statusLabel: 'بصمة يدوية معتمدة',
+            note: `بصمة يدوية معتمدة من الإدارة العليا (${approvedTargetReq.reason || 'بناءً على طلب مدير الفرع'})`,
+            createdAt: new Date().toISOString()
+          });
+        }
+      }
+
       if (approvedTargetReq.type === 'penalty' || approvedTargetReq.type === 'early_exit') {
         const emp = (state.employees || []).find((e) => String(e.id) === String(approvedTargetReq.employeeId));
         let amount = 0;
@@ -1918,23 +1975,66 @@ export default function RequestsModule({
                   </div>
                 )}
 
-                {/* ── PUNCH CORRECTION DETAILS ── */}
+                {/* ── PUNCH CORRECTION / MANUAL PUNCH DETAILS ── */}
                 {isPunch && (
-                  <div style={{ background: '#fdf2f8', padding: '16px', borderRadius: '12px', border: '1px solid #fbcfe8' }}>
-                    <h4 style={{ margin: '0 0 10px', color: '#9d174d', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      📸 تفاصيل بصمة الوجه / الحضور:
+                  <div style={{ background: '#f0fdf4', padding: '16px', borderRadius: '12px', border: '1px solid #bbf7d0' }}>
+                    <h4 style={{ margin: '0 0 10px', color: '#166534', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      🖐️ تفاصيل تسجيل / تعديل البصمة اليدوية:
                     </h4>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
                       <div>
-                        <span style={{ fontSize: '12px', color: '#9d174d' }}>نوع العملية:</span>
-                        <div style={{ fontWeight: 'bold', color: '#831843' }}>
-                          {previewModalReq.targetAction === 'shift_start' ? 'تسجيل بداية وردية (حضور)' : previewModalReq.targetAction === 'shift_end' ? 'تسجيل نهاية وردية (انصراف)' : previewModalReq.targetAction === 'break_start' ? 'بدء استراحة' : previewModalReq.targetAction === 'break_end' ? 'عودة من استراحة' : 'بصمة حضور وانصراف'}
+                        <span style={{ fontSize: '12px', color: '#166534' }}>نوع البصمة:</span>
+                        <div style={{ fontWeight: 'bold', color: '#14532d' }}>
+                          {previewModalReq.punchType === 'full' ? 'حضور وانصراف (وردية كاملة)' : previewModalReq.punchType === 'in' ? 'تسجيل حضور فقط' : previewModalReq.punchType === 'out' ? 'تسجيل انصراف فقط' : 'تعديل توقيت بصمة'}
                         </div>
                       </div>
                       <div>
-                        <span style={{ fontSize: '12px', color: '#9d174d' }}>توقيت التقاط البصمة:</span>
-                        <div style={{ fontWeight: 'bold', color: '#831843' }}>
-                          ⏰ {previewModalReq.time || formatTimeStr(previewModalReq.createdAt)}
+                        <span style={{ fontSize: '12px', color: '#166534' }}>تاريخ البصمة:</span>
+                        <div style={{ fontWeight: 'bold', color: '#14532d' }}>
+                          📅 {previewModalReq.date || '—'} {previewModalReq.date && `(${arabicWeekday(previewModalReq.date)})`}
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#166534' }}>وقت الحضور والانصراف:</span>
+                        <div style={{ fontWeight: 'bold', color: '#14532d' }}>
+                          من <strong>{previewModalReq.timeIn || '—'}</strong> إلى <strong>{previewModalReq.timeOut || '—'}</strong>
+                        </div>
+                      </div>
+                      {previewModalReq.hours && (
+                        <div style={{ background: '#dcfce7', padding: '8px 12px', borderRadius: '8px', border: '1px solid #86efac' }}>
+                          <span style={{ fontSize: '12px', color: '#166534', fontWeight: 'bold' }}>ساعات العمل المحسوبة:</span>
+                          <div style={{ fontWeight: '900', color: '#15803d', fontSize: '16px' }}>
+                            ⏱️ {previewModalReq.hours} ساعة
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── BONUS DETAILS ── */}
+                {previewModalReq.type === 'bonus' && (
+                  <div style={{ background: '#f0fdf4', padding: '16px', borderRadius: '12px', border: '1px solid #86efac' }}>
+                    <h4 style={{ margin: '0 0 10px', color: '#15803d', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      🎁 تفاصيل طلب المكافأة / الحافز:
+                    </h4>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+                      <div style={{ background: '#dcfce7', padding: '10px 14px', borderRadius: '8px', border: '1px solid #86efac' }}>
+                        <span style={{ fontSize: '12px', color: '#15803d', fontWeight: 'bold' }}>مبلغ المكافأة المقترح:</span>
+                        <div style={{ fontWeight: '900', color: '#166534', fontSize: '18px' }}>
+                          💰 {previewModalReq.amount} ج.م
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#15803d' }}>تاريخ الاستحقاق:</span>
+                        <div style={{ fontWeight: 'bold', color: '#14532d' }}>
+                          📅 {previewModalReq.date || previewModalReq.createdAt?.slice(0, 10) || '—'}
+                        </div>
+                      </div>
+                      <div style={{ gridColumn: '1 / -1' }}>
+                        <span style={{ fontSize: '12px', color: '#15803d' }}>مبررات وأسباب المكافأة:</span>
+                        <div style={{ fontWeight: 'bold', color: '#14532d', background: '#fff', padding: '8px 12px', borderRadius: '6px', border: '1px solid #bbf7d0', marginTop: '4px' }}>
+                          {previewModalReq.reason || previewModalReq.details || '—'}
                         </div>
                       </div>
                     </div>
