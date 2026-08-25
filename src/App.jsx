@@ -1335,18 +1335,25 @@ export default function App() {
         (s) => String(s.employeeId) === String(employeeId) && s.date === targetDate
       );
 
+      const empBreak = parseFloat(emp?.breakHours || emp?.defaultBreakHours || emp?.branchesDetails?.[0]?.breakHours) || 0;
+
       let updatedShifts;
       if (existingShift) {
         updatedShifts = (state.shifts || []).map((s) => {
           if (s.id === existingShift.id) {
             const timeIn = isCheckIn ? time : (s.timeIn || '09:00');
             const timeOut = !isCheckIn ? time : (s.timeOut || '17:00');
-            const hours = computeHours(targetDate, timeIn, timeOut, s.breakHours || 0);
+            const currentBreak = s.breakHours !== undefined && s.breakHours !== null ? parseFloat(s.breakHours) : empBreak;
+            const hours = computeHours(targetDate, timeIn, timeOut, currentBreak);
             return {
               ...s,
               timeIn,
               timeOut,
               hours,
+              workHours: hours,
+              netHours: hours,
+              actualWorkedHours: hours,
+              breakHours: currentBreak,
               note: (s.note || '') + ' (تحديث بصمة يدوية)'
             };
           }
@@ -1355,7 +1362,7 @@ export default function App() {
       } else {
         const timeIn = isCheckIn ? time : '09:00';
         const timeOut = !isCheckIn ? time : '17:00';
-        const hours = computeHours(targetDate, timeIn, timeOut, 0);
+        const hours = computeHours(targetDate, timeIn, timeOut, empBreak);
         const newShift = {
           id: `punch_${Date.now()}`,
           employeeId,
@@ -1366,8 +1373,11 @@ export default function App() {
           timeIn,
           timeOut,
           hours,
-          breakHours: 0,
-          note: 'تسجيل بصمة يدوية مباشرة'
+          workHours: hours,
+          netHours: hours,
+          actualWorkedHours: hours,
+          breakHours: empBreak,
+          note: empBreak > 0 ? `تسجيل بصمة يدوية مباشرة (بريك: ${empBreak} س)` : 'تسجيل بصمة يدوية مباشرة'
         };
         updatedShifts = [newShift, ...(state.shifts || [])];
       }

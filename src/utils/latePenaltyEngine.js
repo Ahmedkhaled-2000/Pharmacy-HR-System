@@ -644,28 +644,50 @@ export const DEFAULT_PERMISSION_POLICY = {
 };
 
 /**
- * حساب صافي الساعات الفعلية المستحقة للوردية مع تعويض ساعات الإذن المعتمد بالكامل
+ * حساب صافي الساعات الفعلية المستحقة للوردية مع خصم ساعات البريك وتعويض ساعات الإذن المعتمد بالكامل
  */
 export function getEffectiveShiftHours(shift, state) {
   if (!shift) return 0;
   
-  // 1. حساب الساعات الفعلية المجردة من أوقات الدخول والخروج
-  let rawHours = 0;
-  if (shift.timeIn && shift.timeOut && String(shift.timeOut).trim() !== '' && String(shift.timeOut).trim() !== '—') {
-    const [inH, inM] = String(shift.timeIn).split(':').map(Number);
-    const [outH, outM] = String(shift.timeOut).split(':').map(Number);
+  // Find employee to check default break hours if shift.breakHours is not explicitly set
+  const emp = (state?.employees || []).find(
+    (e) => String(e.id) === String(shift.employeeId) || (shift.employeeCode && String(e.code) === String(shift.employeeCode))
+  );
+  const empBreak = emp?.breakHours || emp?.defaultBreakHours || (emp?.branchesDetails && emp.branchesDetails[0]?.breakHours) || 0;
+  const breakHours = Math.max(0, parseFloat(shift.breakHours !== undefined && shift.breakHours !== null ? shift.breakHours : empBreak) || 0);
+
+  // 1. حساب الساعات الفعلية المجردة من أوقات الدخول والخروج مع خصم ساعات البريك
+  let rawHours = -1;
+  const timeIn = shift.timeIn || shift.checkIn || shift.inTime || shift.startTime;
+  const timeOut = shift.timeOut || shift.checkOut || shift.outTime || shift.endTime;
+
+  if (timeIn && timeOut && String(timeOut).trim() !== '' && String(timeOut).trim() !== '—') {
+    const [inH, inM] = String(timeIn).split(':').map(Number);
+    const [outH, outM] = String(timeOut).split(':').map(Number);
     if (!isNaN(inH) && !isNaN(outH)) {
       let start = inH * 60 + (inM || 0);
       let end = outH * 60 + (outM || 0);
       if (end <= start) end += 24 * 60;
       const totalHours = (end - start) / 60;
-      const parsedBreak = Math.max(0, parseFloat(shift.breakHours) || 0);
-      rawHours = Math.max(0, totalHours - parsedBreak);
+      rawHours = Math.max(0, Math.round((totalHours - breakHours) * 100) / 100);
     }
   }
   
-  if (rawHours <= 0) {
-    rawHours = parseFloat(shift._baseRawHours !== undefined ? shift._baseRawHours : (shift.hours || shift.workHours || 0)) || 0;
+  if (rawHours < 0) {
+    const base = parseFloat(
+      shift._baseRawHours !== undefined
+        ? shift._baseRawHours
+        : shift.actualWorkedHours !== undefined
+        ? shift.actualWorkedHours
+        : shift.netHours !== undefined
+        ? shift.netHours
+        : shift.hours !== undefined
+        ? shift.hours
+        : shift.workHours || 0
+    ) || 0;
+    rawHours = (shift.actualWorkedHours !== undefined || shift.netHours !== undefined)
+      ? Math.max(0, base)
+      : Math.max(0, Math.round((base - breakHours) * 100) / 100);
   }
 
   // 2. فحص الإذن المعتمد لهذا اليوم
@@ -688,7 +710,7 @@ export function getEffectiveShiftHours(shift, state) {
   }
 
   if (permHours > 0) {
-    // تعويض ساعات الإذن المعتمد فوق ساعات العمل الفعلية لاكتمال اليوم
+    // تعويض ساعات الإذن المعتمد فوق ساعات العمل الفعلية (مع بقاء خصم البريك سارياً على ساعات الحضور)
     return Math.round((rawHours + permHours) * 100) / 100;
   }
 
@@ -698,8 +720,7 @@ export function getEffectiveShiftHours(shift, state) {
     return parseFloat(shift.regularHours) || 0;
   }
 
-  const currentStored = parseFloat(shift.hours !== undefined ? shift.hours : shift.workHours);
-  return !isNaN(currentStored) && currentStored > 0 ? currentStored : Math.round(rawHours * 100) / 100;
+  return Math.round(rawHours * 100) / 100;
 }
 
 /**
@@ -708,7 +729,19 @@ export function getEffectiveShiftHours(shift, state) {
  * 2. وضع إشعار وملاحظة واضحة على البصمة بأنها معدلة بإذن معتمد.
  * 3. تمكين ظهورها في شاشات الإدارة والفرع والموظف.
  */
-export function applyApprovedPermissionsToShifts(state) {
+export function applyApprovedPermissionsToShifts(stateOrPerms, maybeShifts, maybeBylaws, maybeEmps) {
+  let state;
+  if (Array.isArray(stateOrPerms)) {
+    state = {
+      requests: stateOrPerms,
+      shifts: maybeShifts || [],
+      bylaws: maybeBylaws || {},
+      employees: maybeEmps || []
+    };
+  } else {
+    state = stateOrPerms;
+  }
+
   if (!state || !state.shifts) return state?.shifts || [];
 
   return (state.shifts || []).map((shift) => {
@@ -739,6 +772,7 @@ export function applyApprovedPermissionsToShifts(state) {
       hours: effectiveHours,
       workHours: effectiveHours,
       netHours: effectiveHours,
+      actualWorkedHours: Math.max(0, Math.round((effectiveHours - permHours) * 100) / 100),
       hasApprovedPermission: true,
       permissionId: perm.id,
       permissionType: perm.permType || 'late',

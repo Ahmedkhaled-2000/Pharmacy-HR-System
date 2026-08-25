@@ -2150,7 +2150,14 @@ export default function EmployeePortalView({
                                       <td><span className="ep-time-badge ep-time-in">{s.timeIn}</span></td>
                                       <td><span className="ep-time-badge ep-time-out">{s.timeOut || '—'}</span></td>
                                       <td>{(s.breakHours || 0) > 0 ? <span className="ep-break-badge">{fmt(s.breakHours)} س</span> : <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
-                                      <td className="money" style={{ color: 'var(--primary-dark)', fontWeight: 700 }}>{fmt(effHours)} ساعة</td>
+                                      <td className="money" style={{ color: 'var(--primary-dark)', fontWeight: 700 }}>
+                                        {fmt(effHours)} ساعة
+                                        {hasPerm && permHours > 0 && (
+                                          <div style={{ fontSize: '10px', color: '#b45309', fontWeight: 700, marginTop: '2px' }}>
+                                            (فعلي: {fmt(Math.max(0, effHours - permHours))} س + إذن: {fmt(permHours)} س)
+                                          </div>
+                                        )}
+                                      </td>
                                       <td className="money" style={{ color: 'var(--success)', fontWeight: 600 }}>{canViewSalary ? `${fmt(effHours * bRate)} ج.م` : '🔒 مقيد'}</td>
                                       <td style={{ color: hasPerm ? '#047857' : 'var(--text-muted)', fontSize: '0.88rem' }}>
                                         {hasPerm ? (
@@ -2253,6 +2260,11 @@ export default function EmployeePortalView({
                               </td>
                               <td className="money" style={{ color: 'var(--primary-dark)', fontWeight: 700 }}>
                                 {fmt(effHours)} ساعة
+                                {hasPerm && permHours > 0 && (
+                                  <div style={{ fontSize: '10px', color: '#b45309', fontWeight: 700, marginTop: '2px' }}>
+                                    (فعلي: {fmt(Math.max(0, effHours - permHours))} س + إذن: {fmt(permHours)} س)
+                                  </div>
+                                )}
                               </td>
                               <td className="money" style={{ color: 'var(--success)', fontWeight: 600 }}>
                                 {canViewSalary ? `${fmt(effHours * (summary.perBranch?.[s.branchId]?.rate || summary.rate))} ج.م` : '🔒 مقيد'}

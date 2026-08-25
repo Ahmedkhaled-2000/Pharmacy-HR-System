@@ -447,15 +447,15 @@ export default function RequestsModule({
         const punchDate = approvedTargetReq.date || approvedTargetReq.punchDate || new Date().toISOString().slice(0, 10);
         const timeIn = approvedTargetReq.timeIn || '09:00';
         const timeOut = approvedTargetReq.timeOut || '17:00';
-        const bH = Math.max(0, parseFloat(approvedTargetReq.breakHours) || 0);
-        let hrs = parseFloat(approvedTargetReq.hours);
-        if (isNaN(hrs) || hrs <= 0) {
-          const [inH, inM] = timeIn.split(':').map(Number);
-          const [outH, outM] = timeOut.split(':').map(Number);
-          let diff = ((outH || 0) * 60 + (outM || 0)) - ((inH || 0) * 60 + (inM || 0));
-          if (diff < 0) diff += 24 * 60;
-          hrs = Math.max(0, Math.round(((diff / 60) - bH) * 100) / 100);
-        }
+        const empBreak = emp?.breakHours || emp?.defaultBreakHours || (emp?.branchesDetails && emp.branchesDetails[0]?.breakHours) || 0;
+        const bH = Math.max(0, parseFloat(approvedTargetReq.breakHours !== undefined && approvedTargetReq.breakHours !== null ? approvedTargetReq.breakHours : empBreak) || 0);
+
+        const [inH, inM] = timeIn.split(':').map(Number);
+        const [outH, outM] = timeOut.split(':').map(Number);
+        let diff = ((outH || 0) * 60 + (outM || 0)) - ((inH || 0) * 60 + (inM || 0));
+        if (diff < 0) diff += 24 * 60;
+        const grossHrs = Math.round((diff / 60) * 100) / 100;
+        const hrs = Math.max(0, Math.round((grossHrs - bH) * 100) / 100);
 
         const existingShiftIndex = updatedShifts.findIndex(s => 
           (String(s.employeeId) === String(approvedTargetReq.employeeId) || (emp?.code && String(s.employeeCode) === String(emp.code))) &&
@@ -469,7 +469,10 @@ export default function RequestsModule({
             timeOut,
             breakHours: bH,
             hours: hrs,
+            workHours: hrs,
+            netHours: hrs,
             actualWorkedHours: hrs,
+            grossHours: grossHrs,
             isManual: true,
             manualPunch: true,
             source: 'manual_admin',
@@ -489,7 +492,10 @@ export default function RequestsModule({
             timeOut,
             breakHours: bH,
             hours: hrs,
+            workHours: hrs,
+            netHours: hrs,
             actualWorkedHours: hrs,
+            grossHours: grossHrs,
             isManual: true,
             manualPunch: true,
             source: 'manual_admin',

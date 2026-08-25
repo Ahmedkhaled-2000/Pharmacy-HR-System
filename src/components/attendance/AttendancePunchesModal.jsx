@@ -308,7 +308,14 @@ export default function AttendancePunchesModal({
                                 <td style={{ textAlign: 'center' }}>
                                   {breakH ? <span style={{ background: '#fef3c7', color: '#b45309', padding: '4px 8px', borderRadius: '10px', fontWeight: '700', fontSize: '12px' }}>{breakH} س</span> : <span style={{ color: 'var(--muted)' }}>—</span>}
                                 </td>
-                                <td style={{ textAlign: 'center', color: '#0d9488', fontWeight: '800' }}>{netH} ساعة</td>
+                                 <td style={{ textAlign: 'center', color: '#0d9488', fontWeight: '800' }}>
+                                   {netH} ساعة
+                                   {hasPerm && permHours > 0 && (
+                                     <div style={{ fontSize: '10px', color: '#b45309', fontWeight: 700, marginTop: '2px' }}>
+                                       (فعلي: {(Math.max(0, parseFloat(netH) - permHours)).toFixed(2)} س + إذن: {permHours} س)
+                                     </div>
+                                   )}
+                                 </td>
                                 <td style={{ textAlign: 'center', color: '#16a34a', fontWeight: '700' }}>
                                   {shiftEarned} ج.م
                                 </td>
@@ -477,6 +484,11 @@ export default function AttendancePunchesModal({
                         {/* Net Hours */}
                         <td style={{ textAlign: 'center', color: '#0d9488', fontWeight: '800' }}>
                           {netH} ساعة
+                          {hasPerm && permHours > 0 && (
+                            <div style={{ fontSize: '10px', color: '#b45309', fontWeight: 700, marginTop: '2px' }}>
+                              (فعلي: {(Math.max(0, parseFloat(netH) - permHours)).toFixed(2)} س + إذن: {permHours} س)
+                            </div>
+                          )}
                         </td>
 
                         {/* Amount Due */}

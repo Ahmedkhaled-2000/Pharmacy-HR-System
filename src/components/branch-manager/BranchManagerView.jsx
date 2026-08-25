@@ -433,7 +433,7 @@ export default function BranchManagerView({
     const managerShifts = (state.shifts || []).filter(
       (s) => s && s.employeeId === managerEmp?.id && matchesDateRange(s.date)
     );
-    const totalHours = Math.round(managerShifts.reduce((acc, s) => acc + (s.hours || 0), 0) * 100) / 100;
+    const totalHours = Math.round(managerShifts.reduce((acc, s) => acc + getEffectiveShiftHours(s, state), 0) * 100) / 100;
     // 3. أجر الساعات والمستحقات
     const baseEarnings = Math.round(totalHours * rate * 100) / 100;
 
@@ -2572,6 +2572,11 @@ export default function BranchManagerView({
                             </td>
                             <td style={{ fontWeight: '700', color: '#0d9488' }}>
                               {formatMoney(effHours)} ساعة
+                              {hasPerm && permHours > 0 && (
+                                <div style={{ fontSize: '10.5px', color: '#b45309', fontWeight: 700, marginTop: '2px' }}>
+                                  (فعلي: {formatMoney(Math.max(0, effHours - permHours))} س + إذن: {formatMoney(permHours)} س)
+                                </div>
+                              )}
                             </td>
                             <td style={{ fontSize: '12px', color: hasPerm ? '#047857' : 'var(--muted)' }}>
                               {hasPerm ? (

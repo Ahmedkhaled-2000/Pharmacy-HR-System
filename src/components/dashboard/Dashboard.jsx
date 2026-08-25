@@ -1,6 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { arabicWeekday, todayStr, fmt } from '../../utils/formatters';
 import { createDatePredicate, getCycleDateRange } from '../../utils/periodEngine';
+import {
+  DEFAULT_LATE_PENALTY_POLICY,
+  getEffectiveLatePolicy,
+  classifyLateTier,
+  getPenaltyForOccurrence,
+  computeLatenessFinancialAmount,
+  isApprovedPermissionForDate,
+  getScheduledShiftForDate,
+  calculateLatenessMinutes
+} from '../../utils/latePenaltyEngine';
 
 export default function Dashboard({
   state,
@@ -25,6 +35,13 @@ export default function Dashboard({
   const activeFilterPeriod = filterMode === 'custom' ? 'custom' : 'current';
   const customStartDate = customFrom;
   const customEndDate = customTo;
+
+  // Lateness Card filter and search states
+  const [lateFilterMode, setLateFilterMode] = useState('all'); // 'all' | 'deduction' | 'grace' | 'exempt'
+  const [lateSearchQuery, setLateSearchQuery] = useState('');
+  const [lateEditModalItem, setLateEditModalItem] = useState(null);
+  const [lateEditDeductionMins, setLateEditDeductionMins] = useState(0);
+  const [lateEditReason, setLateEditReason] = useState('');
 
   const orgSettings = state.orgSettings || {};
   const employees = state.employees || [];
@@ -285,11 +302,11 @@ export default function Dashboard({
         );
       })()}
 
-      {/* ── 3.5 Today's Late Employees Card (تتجدد بتغير اليوم وتجاوز فترة السماح) ── */}
+      {/* ── 3.5 Today's Late Employees Card (مطابقة لائحة التأخيرات الرسمية 5 فئات وإظهار تفاصيل التأخير) ── */}
       {(() => {
-        const gracePeriod = orgSettings.latenessGracePeriodMinutes !== undefined
-          ? parseInt(orgSettings.latenessGracePeriodMinutes)
-          : 15;
+        const latePolicy = getEffectiveLatePolicy(state);
+        const permanentGraceTier = latePolicy?.tiers?.[0] || DEFAULT_LATE_PENALTY_POLICY.tiers[0];
+        const permanentGraceMax = permanentGraceTier?.maxMinutes !== undefined ? permanentGraceTier.maxMinutes : 10;
         const monthKey = todayDate.slice(0, 7);
         const arDay = arabicWeekday(todayDate);
 
@@ -303,196 +320,841 @@ export default function Dashboard({
 
           if (!timeIn) return;
 
-          // Find approved roster
-          const approvedRosters = (state.rosters || []).filter(
-            (r) => String(r.employeeId) === String(emp.id) && (r.month === monthKey || !r.month) && r.status === 'approved'
+          // Find scheduled shift
+          const sched = getScheduledShiftForDate(emp.id, todayDate, state);
+          if (!sched || !sched.start) return;
+
+          const diffMinutes = calculateLatenessMinutes(sched.start, timeIn);
+          if (diffMinutes <= 0) return; // حضر في الموعد أو مبكراً
+
+          // Classify into Late Penalty Policy Tier
+          const tier = classifyLateTier(diffMinutes, latePolicy);
+          const approvedPerm = isApprovedPermissionForDate(emp.id, todayDate, state);
+
+          // Calculate occurrences in this tier for the current month
+          const pastCycleIncidents = (state.lateIncidents || []).filter((inc) => {
+            if (String(inc.employeeId) !== String(emp.id)) return false;
+            if (inc.status === 'cancelled') return false;
+            if (inc.date === todayDate) return false; // exclude today's current record
+            if (filterFn && !filterFn(inc.date)) return false;
+            const incTier = inc.tierKey || inc.tierId;
+            return incTier === tier.id || incTier === tier.key;
+          });
+          const occurrenceNumber = pastCycleIncidents.length + 1;
+
+          // Fetch rule for this occurrence
+          const rule = getPenaltyForOccurrence(tier, occurrenceNumber);
+
+          const effectiveBranchId = sched.branchId || emp.branchId;
+          const branchObj = branches.find((b) => String(b.id) === String(effectiveBranchId)) || branches.find((b) => empBelongsToBranch(emp, b.id));
+          const branchName = branchObj ? branchObj.name : 'الفرع الرئيسي';
+
+          const incId = `late_inc_${emp.id}_${todayDate}_${timeIn.replace(':', '')}`;
+          const existingInc = (state.lateIncidents || []).find((i) => i.id === incId || (String(i.employeeId) === String(emp.id) && i.date === todayDate));
+
+          const reqId = `req_late_${emp.id}_${todayDate}`;
+          const penaltyReq = (state.requests || []).find(
+            (r) => r.id === reqId || r.id === `req_${incId}` || (String(r.employeeId) === String(emp.id) && r.date === todayDate && (r.subType === 'lateness' || r.type === 'penalty'))
           );
-          if (approvedRosters.length === 0) return;
 
-          let daySchedule = null;
-          let targetRoster = null;
-          for (const ros of approvedRosters) {
-            if (ros.schedule) {
-              const sched = ros.schedule[arDay] || Object.entries(ros.schedule).find(([k]) => k.replace(/[\u0625\u0623\u0622]/g, 'ا') === arDay.replace(/[\u0625\u0623\u0622]/g, 'ا'))?.[1];
-              if (sched && sched.type !== 'off' && sched.start) {
-                daySchedule = sched;
-                targetRoster = ros;
-                break;
-              }
-            }
+          let actionType = 'grace';
+          let actionTitle = 'سماح';
+          let deductionMinutes = 0;
+          let penaltyAmount = 0;
+          let status = 'pending'; // 'grace_allowed' | 'approved_permission_exempt' | 'approved' | 'waived' | 'pending'
+
+          if (approvedPerm) {
+            actionType = 'grace';
+            actionTitle = `سماح (${approvedPerm.permType === 'early' ? 'إذن خروج مبكر معتمد' : 'إذن تأخير معتمد'})`;
+            deductionMinutes = 0;
+            penaltyAmount = 0;
+            status = 'approved_permission_exempt';
+          } else if (existingInc && (existingInc.status === 'waived' || existingInc.status === 'overridden' || existingInc.overrideReason)) {
+            actionType = existingInc.actionType || 'grace';
+            actionTitle = existingInc.actionLabel || 'سماح (استثناء إداري)';
+            deductionMinutes = parseFloat(existingInc.deductionMinutes) || 0;
+            penaltyAmount = computeLatenessFinancialAmount(deductionMinutes, emp, effectiveBranchId);
+            status = 'waived';
+          } else if (existingInc && existingInc.status === 'approved') {
+            actionType = existingInc.actionType;
+            actionTitle = existingInc.actionLabel;
+            deductionMinutes = parseFloat(existingInc.deductionMinutes) || 0;
+            penaltyAmount = computeLatenessFinancialAmount(deductionMinutes, emp, effectiveBranchId);
+            status = 'approved';
+          } else if (penaltyReq && (penaltyReq.status === 'approved' || penaltyReq.adminApproved)) {
+            actionType = rule.action;
+            actionTitle = penaltyReq.suggestedAction || rule.label;
+            deductionMinutes = parseFloat(penaltyReq.deductionMinutes !== undefined ? penaltyReq.deductionMinutes : rule.deductionMinutes) || 0;
+            penaltyAmount = computeLatenessFinancialAmount(deductionMinutes, emp, effectiveBranchId);
+            status = 'approved';
+          } else if (penaltyReq && (penaltyReq.status === 'rejected' || penaltyReq.status === 'waived')) {
+            actionType = 'grace';
+            actionTitle = 'سماح (قبول عذر)';
+            deductionMinutes = 0;
+            penaltyAmount = 0;
+            status = 'waived';
+          } else if (tier.id === 'tier_0_10' || rule.action === 'grace') {
+            actionType = 'grace';
+            actionTitle = tier.id === 'tier_0_10' ? 'سماح دائم باللائحة (بدون خصم)' : `سماح لائحي (المرة #${occurrenceNumber} في الفئة)`;
+            deductionMinutes = 0;
+            penaltyAmount = 0;
+            status = 'grace_allowed';
+          } else {
+            actionType = rule.action;
+            actionTitle = rule.label;
+            deductionMinutes = rule.deductionMinutes || 0;
+            penaltyAmount = computeLatenessFinancialAmount(deductionMinutes, emp, effectiveBranchId);
+            status = 'pending';
           }
 
-          if (!daySchedule || !daySchedule.start) return;
+          // Allowed grace count in this tier
+          const graceCountInTier = (tier.penalties || []).filter((p) => p.action === 'grace').length;
 
-          const [sH, sM] = daySchedule.start.split(':').map(Number);
-          const [iH, iM] = timeIn.split(':').map(Number);
-          const diffMinutes = (iH * 60 + iM) - (sH * 60 + sM);
-
-          if (diffMinutes > gracePeriod) {
-            const reqId = `req_late_${emp.id}_${todayDate}`;
-            const penaltyReq = (state.requests || []).find((r) => r.id === reqId || (r.employeeId === emp.id && r.date === todayDate && r.subType === 'lateness'));
-
-            // Calculate penalty from bylaws rules or request
-            const resetDays = state.bylaws?.resetPeriodDays || 30;
-            const cutoffDate = new Date(Date.now() - resetDays * 86400000).toISOString().slice(0, 10);
-            const pastOccurrences = (state.requests || []).filter(
-              (r) => String(r.employeeId) === String(emp.id) && (r.subType === 'lateness' || (r.type === 'penalty' && r.subType === 'lateness')) && (r.date >= cutoffDate || r.createdAt >= cutoffDate)
-            ).length;
-            const occurrenceNumber = pastOccurrences + 1;
-            const penaltyRules = state.bylaws?.latePenalties || [
-              { occurrence: 1, action: 'تنبيه', deductionFraction: 0 },
-              { occurrence: 2, action: 'إنذار كتابي', deductionFraction: 0 },
-              { occurrence: 3, action: 'خصم ¼ يوم', deductionFraction: 0.25 },
-              { occurrence: 4, action: 'خصم ½ يوم', deductionFraction: 0.5 },
-              { occurrence: 5, action: 'خصم يوم', deductionFraction: 1.0 }
-            ];
-            const rule = penaltyRules.find((p) => p.occurrence === occurrenceNumber) || penaltyRules[penaltyRules.length - 1];
-            const impactVal = penaltyReq?.impactVal !== undefined ? penaltyReq.impactVal : (rule ? rule.deductionFraction : (diffMinutes > 30 ? 0.5 : 0.25));
-            const actionTitle = penaltyReq?.suggestedAction || (rule ? rule.action : 'خصم جزاء تأخير');
-
-            const salary = parseFloat(emp.salary) || 0;
-            const workHours = parseFloat(emp.workHoursPerDay) || 8;
-            const workDays = parseFloat(emp.workDaysPerMonth) || 26;
-            const dailyRate = workDays > 0 ? (salary * workHours) / workDays : 0;
-            const penaltyAmount = penaltyReq?.amount !== undefined ? penaltyReq.amount : Math.round(dailyRate * impactVal * 100) / 100;
-
-            const branchObj = branches.find((b) => b.id === (targetRoster?.branchId || emp.branchId)) || branches.find((b) => empBelongsToBranch(emp, b.id));
-
-            lateEmployeesToday.push({
-              emp,
-              branchName: branchObj ? branchObj.name : 'الفرع الرئيسي',
-              scheduledStart: daySchedule.start,
-              timeIn,
-              diffMinutes,
-              exceededMinutes: diffMinutes - gracePeriod,
-              impactVal,
-              penaltyAmount,
-              actionTitle,
-              penaltyReq,
-              reqId
-            });
-          }
+          lateEmployeesToday.push({
+            emp,
+            incId,
+            reqId,
+            shiftId: punchToday?.id || activeShiftToday?.id || '',
+            date: todayDate,
+            branchId: effectiveBranchId,
+            branchName,
+            scheduledStart: sched.start,
+            timeIn,
+            diffMinutes,
+            tier,
+            occurrenceNumber,
+            graceCountInTier,
+            rule,
+            actionType,
+            actionTitle,
+            deductionMinutes,
+            penaltyAmount,
+            status,
+            approvedPerm,
+            penaltyReq,
+            existingInc
+          });
         });
 
+        // Summary Counts
+        const totalLate = lateEmployeesToday.length;
+        const permanentGraceCount = lateEmployeesToday.filter((i) => i.tier.id === 'tier_0_10').length;
+        const conditionalGraceCount = lateEmployeesToday.filter((i) => i.tier.id !== 'tier_0_10' && (i.actionType === 'grace' || i.status === 'grace_allowed') && !i.approvedPerm).length;
+        const deductionCount = lateEmployeesToday.filter((i) => i.deductionMinutes > 0 && !i.approvedPerm && i.status !== 'waived').length;
+        const permissionCount = lateEmployeesToday.filter((i) => i.approvedPerm).length;
+        const totalDeductionMinutes = lateEmployeesToday.reduce((acc, i) => acc + (i.status !== 'waived' && !i.approvedPerm ? (i.deductionMinutes || 0) : 0), 0);
+        const totalPenaltyAmount = lateEmployeesToday.reduce((acc, i) => acc + (i.status !== 'waived' && !i.approvedPerm ? (i.penaltyAmount || 0) : 0), 0);
+
+        // Filtered list by Tab and Search
+        const filteredLateEmployees = lateEmployeesToday.filter((item) => {
+          if (lateFilterMode === 'deduction') {
+            if (item.deductionMinutes <= 0 || item.approvedPerm || item.status === 'waived') return false;
+          } else if (lateFilterMode === 'grace') {
+            if (item.deductionMinutes > 0 || item.approvedPerm) return false;
+          } else if (lateFilterMode === 'exempt') {
+            if (!item.approvedPerm) return false;
+          }
+
+          if (lateSearchQuery.trim()) {
+            const q = lateSearchQuery.toLowerCase().trim();
+            const matchesName = (item.emp.name || '').toLowerCase().includes(q);
+            const matchesCode = (item.emp.code || '').includes(q);
+            if (!matchesName && !matchesCode) return false;
+          }
+
+          return true;
+        });
+
+        // Handlers
+        const handleApplyLatePenalty = async (item) => {
+          const targetIncId = item.incId;
+          const targetReqId = item.reqId;
+          const emp = item.emp;
+
+          const updatedInc = {
+            id: targetIncId,
+            employeeId: emp.id,
+            employeeCode: emp.code || '',
+            employeeName: emp.name || '',
+            jobTitle: emp.jobTitle || '',
+            branchId: item.branchId,
+            branchName: item.branchName,
+            shiftId: item.shiftId,
+            date: item.date,
+            scheduledStartTime: item.scheduledStart,
+            actualPunchInTime: item.timeIn,
+            lateMinutes: item.diffMinutes,
+            tierId: item.tier.id,
+            tierKey: item.tier.key || item.tier.id,
+            tierName: item.tier.name,
+            tierColor: item.tier.color,
+            occurrenceNumber: item.occurrenceNumber,
+            actionType: item.rule.action,
+            actionLabel: item.rule.label,
+            deductionMinutes: item.rule.deductionMinutes || 0,
+            deductionHours: Math.round(((item.rule.deductionMinutes || 0) / 60) * 100) / 100,
+            penaltyAmount: item.penaltyAmount,
+            payrollCycleId: item.date.slice(0, 7),
+            status: 'approved',
+            overrideReason: '',
+            permissionRequestId: null,
+            updatedAt: new Date().toISOString()
+          };
+
+          const existingIncidents = state.lateIncidents || [];
+          let foundInc = false;
+          const updatedIncidents = existingIncidents.map((inc) => {
+            if (inc.id === targetIncId || (String(inc.employeeId) === String(emp.id) && inc.date === item.date)) {
+              foundInc = true;
+              return { ...inc, ...updatedInc };
+            }
+            return inc;
+          });
+          if (!foundInc) updatedIncidents.unshift(updatedInc);
+
+          const updatedReq = {
+            id: targetReqId,
+            employeeId: emp.id,
+            employeeName: emp.name,
+            employeeCode: emp.code,
+            jobTitle: emp.jobTitle,
+            branchId: item.branchId,
+            branchName: item.branchName,
+            type: 'penalty',
+            subType: 'lateness',
+            ruleTitle: `جزاء تأخير: ${item.tier.name} (${item.diffMinutes} دقيقة - المرة ${item.occurrenceNumber})`,
+            impactType: 'time_deduction',
+            deductionMinutes: item.rule.deductionMinutes || 0,
+            impactVal: item.rule.deductionMinutes || 0,
+            amount: item.penaltyAmount,
+            scheduledStart: item.scheduledStart,
+            actualIn: item.timeIn,
+            latenessMinutes: item.diffMinutes,
+            occurrenceNumber: item.occurrenceNumber,
+            suggestedAction: item.rule.label,
+            reason: `تأخر الموظف بمقدار ${item.diffMinutes} دقيقة عن موعد الوردية (${item.scheduledStart}). المرة #${item.occurrenceNumber} في ${item.tier.name}.`,
+            details: `${item.rule.label} | خصم: ${item.rule.deductionMinutes || 0} دقيقة (${item.penaltyAmount} ج.م)`,
+            date: item.date,
+            payrollCycleId: item.date.slice(0, 7),
+            createdAt: new Date().toISOString(),
+            targetApproval: 'admin_only',
+            branchApproved: true,
+            adminApproved: true,
+            status: 'approved',
+            source: 'dashboard_late_card'
+          };
+
+          const existingRequests = state.requests || [];
+          let foundReq = false;
+          const updatedRequestsList = existingRequests.map((r) => {
+            if (r.id === targetReqId || (String(r.employeeId) === String(emp.id) && r.date === item.date && (r.subType === 'lateness' || r.type === 'penalty'))) {
+              foundReq = true;
+              return { ...r, ...updatedReq };
+            }
+            return r;
+          });
+          if (!foundReq) updatedRequestsList.unshift(updatedReq);
+
+          const updatedState = {
+            ...state,
+            lateIncidents: updatedIncidents,
+            requests: updatedRequestsList
+          };
+
+          if (setState) setState(updatedState);
+          if (saveState) await saveState(updatedState);
+          showToast?.(`✅ تم تطبيق الخصم اللائحي (${item.rule.deductionMinutes || 0} دقيقة ~ ${fmt(item.penaltyAmount)} ج.م) على راتب ${emp.name}`);
+        };
+
+        const handleWaiveLatePenalty = async (item) => {
+          const targetIncId = item.incId;
+          const targetReqId = item.reqId;
+          const emp = item.emp;
+
+          const updatedInc = {
+            id: targetIncId,
+            employeeId: emp.id,
+            employeeCode: emp.code || '',
+            employeeName: emp.name || '',
+            jobTitle: emp.jobTitle || '',
+            branchId: item.branchId,
+            branchName: item.branchName,
+            shiftId: item.shiftId,
+            date: item.date,
+            scheduledStartTime: item.scheduledStart,
+            actualPunchInTime: item.timeIn,
+            lateMinutes: item.diffMinutes,
+            tierId: item.tier.id,
+            tierKey: item.tier.key || item.tier.id,
+            tierName: item.tier.name,
+            tierColor: item.tier.color,
+            occurrenceNumber: item.occurrenceNumber,
+            actionType: 'grace',
+            actionLabel: 'سماح (استثناء إداري)',
+            deductionMinutes: 0,
+            deductionHours: 0,
+            penaltyAmount: 0,
+            payrollCycleId: item.date.slice(0, 7),
+            status: 'waived',
+            overrideReason: 'تم قبول العذر واستثناء الموظف من الإدارة العليا بدون خصم',
+            permissionRequestId: null,
+            updatedAt: new Date().toISOString()
+          };
+
+          const existingIncidents = state.lateIncidents || [];
+          let foundInc = false;
+          const updatedIncidents = existingIncidents.map((inc) => {
+            if (inc.id === targetIncId || (String(inc.employeeId) === String(emp.id) && inc.date === item.date)) {
+              foundInc = true;
+              return { ...inc, ...updatedInc };
+            }
+            return inc;
+          });
+          if (!foundInc) updatedIncidents.unshift(updatedInc);
+
+          const updatedReq = {
+            id: targetReqId,
+            employeeId: emp.id,
+            employeeName: emp.name,
+            employeeCode: emp.code,
+            jobTitle: emp.jobTitle,
+            branchId: item.branchId,
+            branchName: item.branchName,
+            type: 'penalty',
+            subType: 'lateness',
+            ruleTitle: `استثناء جزاء تأخير: ${item.tier.name}`,
+            impactType: 'time_deduction',
+            deductionMinutes: 0,
+            impactVal: 0,
+            amount: 0,
+            scheduledStart: item.scheduledStart,
+            actualIn: item.timeIn,
+            latenessMinutes: item.diffMinutes,
+            occurrenceNumber: item.occurrenceNumber,
+            suggestedAction: 'سماح (قبول عذر)',
+            reason: `تم قبول عذر التأخير واستثناء الموظف بدون تطبيق خصم مالي.`,
+            details: `تم الإعفاء من الخصم وقبول العذر`,
+            date: item.date,
+            payrollCycleId: item.date.slice(0, 7),
+            createdAt: new Date().toISOString(),
+            targetApproval: 'admin_only',
+            branchApproved: true,
+            adminApproved: true,
+            status: 'waived',
+            source: 'dashboard_late_card'
+          };
+
+          const existingRequests = state.requests || [];
+          let foundReq = false;
+          const updatedRequestsList = existingRequests.map((r) => {
+            if (r.id === targetReqId || (String(r.employeeId) === String(emp.id) && r.date === item.date && (r.subType === 'lateness' || r.type === 'penalty'))) {
+              foundReq = true;
+              return { ...r, ...updatedReq };
+            }
+            return r;
+          });
+          if (!foundReq) updatedRequestsList.unshift(updatedReq);
+
+          const updatedState = {
+            ...state,
+            lateIncidents: updatedIncidents,
+            requests: updatedRequestsList
+          };
+
+          if (setState) setState(updatedState);
+          if (saveState) await saveState(updatedState);
+          showToast?.(`🛡️ تم قبول العذر واستثناء الموظف ${emp.name} بدون أي خصم مالي`);
+        };
+
+        const openLateEditModal = (item) => {
+          setLateEditModalItem(item);
+          setLateEditDeductionMins(item.deductionMinutes || 0);
+          setLateEditReason(item.existingInc?.overrideReason || '');
+        };
+
+        const handleSaveCustomPenalty = async () => {
+          if (!lateEditModalItem) return;
+          const item = lateEditModalItem;
+          const emp = item.emp;
+          const mins = parseFloat(lateEditDeductionMins) || 0;
+          const penaltyAmt = computeLatenessFinancialAmount(mins, emp, item.branchId);
+
+          const targetIncId = item.incId;
+          const targetReqId = item.reqId;
+
+          const updatedInc = {
+            id: targetIncId,
+            employeeId: emp.id,
+            employeeCode: emp.code || '',
+            employeeName: emp.name || '',
+            jobTitle: emp.jobTitle || '',
+            branchId: item.branchId,
+            branchName: item.branchName,
+            shiftId: item.shiftId,
+            date: item.date,
+            scheduledStartTime: item.scheduledStart,
+            actualPunchInTime: item.timeIn,
+            lateMinutes: item.diffMinutes,
+            tierId: item.tier.id,
+            tierKey: item.tier.key || item.tier.id,
+            tierName: item.tier.name,
+            tierColor: item.tier.color,
+            occurrenceNumber: item.occurrenceNumber,
+            actionType: mins > 0 ? 'deduction' : 'grace',
+            actionLabel: mins > 0 ? `خصم ${mins} دقيقة (تعديل إداري)` : 'سماح (استثناء إداري)',
+            deductionMinutes: mins,
+            deductionHours: Math.round((mins / 60) * 100) / 100,
+            penaltyAmount: penaltyAmt,
+            payrollCycleId: item.date.slice(0, 7),
+            status: 'modified',
+            overrideReason: lateEditReason.trim() || 'تعديل إداري مخصص من لوحة التحكم',
+            updatedAt: new Date().toISOString()
+          };
+
+          const existingIncidents = state.lateIncidents || [];
+          let foundInc = false;
+          const updatedIncidents = existingIncidents.map((inc) => {
+            if (inc.id === targetIncId || (String(inc.employeeId) === String(emp.id) && inc.date === item.date)) {
+              foundInc = true;
+              return { ...inc, ...updatedInc };
+            }
+            return inc;
+          });
+          if (!foundInc) updatedIncidents.unshift(updatedInc);
+
+          const updatedReq = {
+            id: targetReqId,
+            employeeId: emp.id,
+            employeeName: emp.name,
+            employeeCode: emp.code,
+            jobTitle: emp.jobTitle,
+            branchId: item.branchId,
+            branchName: item.branchName,
+            type: 'penalty',
+            subType: 'lateness',
+            ruleTitle: `جزاء تأخير مخصص: ${item.tier.name}`,
+            impactType: 'time_deduction',
+            deductionMinutes: mins,
+            impactVal: mins,
+            amount: penaltyAmt,
+            scheduledStart: item.scheduledStart,
+            actualIn: item.timeIn,
+            latenessMinutes: item.diffMinutes,
+            occurrenceNumber: item.occurrenceNumber,
+            suggestedAction: `خصم ${mins} دقيقة`,
+            reason: lateEditReason.trim() || `تعديل إداري: خصم ${mins} دقيقة`,
+            details: `خصم ${mins} دقيقة (${penaltyAmt} ج.م)`,
+            date: item.date,
+            payrollCycleId: item.date.slice(0, 7),
+            createdAt: new Date().toISOString(),
+            targetApproval: 'admin_only',
+            branchApproved: true,
+            adminApproved: true,
+            status: 'approved',
+            source: 'dashboard_late_card'
+          };
+
+          const existingRequests = state.requests || [];
+          let foundReq = false;
+          const updatedRequestsList = existingRequests.map((r) => {
+            if (r.id === targetReqId || (String(r.employeeId) === String(emp.id) && r.date === item.date && (r.subType === 'lateness' || r.type === 'penalty'))) {
+              foundReq = true;
+              return { ...r, ...updatedReq };
+            }
+            return r;
+          });
+          if (!foundReq) updatedRequestsList.unshift(updatedReq);
+
+          const updatedState = {
+            ...state,
+            lateIncidents: updatedIncidents,
+            requests: updatedRequestsList
+          };
+
+          if (setState) setState(updatedState);
+          if (saveState) await saveState(updatedState);
+          setLateEditModalItem(null);
+          showToast?.(`✅ تم حفظ التعديل اللائحي وتحديث الخصم إلى ${mins} دقيقة (~ ${fmt(penaltyAmt)} ج.م)`);
+        };
+
         return (
-          <div className="card settings-card" style={{ padding: '20px', marginBottom: '24px', border: '2px solid #fdba74', background: '#fffaf5' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+          <div className="card settings-card" style={{ padding: '22px', marginBottom: '24px', border: '2px solid #fed7aa', background: 'linear-gradient(180deg, #fffaf5 0%, #ffffff 100%)', borderRadius: '16px', boxShadow: '0 4px 20px rgba(234, 88, 12, 0.08)' }}>
+            
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
               <div>
-                <h4 style={{ margin: 0, fontSize: '16px', color: '#c2410c', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <h4 style={{ margin: 0, fontSize: '17px', color: '#c2410c', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '800' }}>
                   🏃‍♂️ موظفو اليوم المتأخرون عن مواعيد العمل المجدولة ({todayDate})
                 </h4>
-                <span style={{ fontSize: '12.5px', color: '#9a3412', marginTop: '3px', display: 'block' }}>
-                  فترة السماح المعتمدة من الإدارة: <strong>{gracePeriod} دقيقة</strong> (تحديد نوع الإجراء: تطبيق الخصم الجزاء أو عدم تطبيق الخصم وقبول العذر)
-                </span>
+                <div style={{ fontSize: '13px', color: '#9a3412', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <span>⏱️ فترة السماح الدائم باللائحة: <strong>حتى {permanentGraceMax} دقائق</strong> (سماح دائم بدون أي خصم).</span>
+                  <span style={{ background: '#ffedd5', color: '#c2410c', padding: '2px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: '700' }}>
+                    تكرارات الفئات الأعلى تخضع للسماح المشروط والخصم اللائحي (5 فئات)
+                  </span>
+                </div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ background: lateEmployeesToday.length > 0 ? '#ea580c' : '#16a34a', color: '#ffffff', padding: '4px 14px', borderRadius: '99px', fontSize: '13px', fontWeight: 'bold' }}>
-                  {lateEmployeesToday.length} موظف متأخر اليوم
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span style={{ background: lateEmployeesToday.length > 0 ? '#ea580c' : '#16a34a', color: '#ffffff', padding: '5px 16px', borderRadius: '99px', fontSize: '13.5px', fontWeight: 'bold', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
+                  {lateEmployeesToday.length} موظف تأخر اليوم
                 </span>
+                {deductionCount > 0 && (
+                  <span style={{ background: '#dc2626', color: '#ffffff', padding: '5px 14px', borderRadius: '99px', fontSize: '13px', fontWeight: 'bold' }}>
+                    ⚠️ {deductionCount} مستحق خصم
+                  </span>
+                )}
               </div>
             </div>
 
+            {/* 5-Tier Policy Metrics Mini-Cards Banner */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '10px', marginBottom: '18px' }}>
+              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '10px 12px', borderRight: '4px solid #10b981' }}>
+                <div style={{ fontSize: '11.5px', color: '#15803d', fontWeight: '700' }}>🟢 0 – 10 دقائق</div>
+                <div style={{ fontSize: '18px', fontWeight: '800', color: '#14532d', margin: '2px 0' }}>{permanentGraceCount} <span style={{ fontSize: '11px', fontWeight: '500', color: '#4b5563' }}>حالة</span></div>
+                <div style={{ fontSize: '11px', color: '#16a34a' }}>سماح دائم (بدون خصم)</div>
+              </div>
+
+              <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '10px', padding: '10px 12px', borderRight: '4px solid #3b82f6' }}>
+                <div style={{ fontSize: '11.5px', color: '#1d4ed8', fontWeight: '700' }}>🔵 11 – 15 دقيقة</div>
+                <div style={{ fontSize: '18px', fontWeight: '800', color: '#1e3a8a', margin: '2px 0' }}>
+                  {lateEmployeesToday.filter((i) => i.tier.id === 'tier_11_15').length} <span style={{ fontSize: '11px', fontWeight: '500', color: '#4b5563' }}>حالة</span>
+                </div>
+                <div style={{ fontSize: '11px', color: '#2563eb' }}>سماح حتى 3 مرات</div>
+              </div>
+
+              <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '10px', padding: '10px 12px', borderRight: '4px solid #f59e0b' }}>
+                <div style={{ fontSize: '11.5px', color: '#b45309', fontWeight: '700' }}>🟠 16 – 30 دقيقة</div>
+                <div style={{ fontSize: '18px', fontWeight: '800', color: '#78350f', margin: '2px 0' }}>
+                  {lateEmployeesToday.filter((i) => i.tier.id === 'tier_16_30').length} <span style={{ fontSize: '11px', fontWeight: '500', color: '#4b5563' }}>حالة</span>
+                </div>
+                <div style={{ fontSize: '11px', color: '#d97706' }}>سماح حتى مرتين</div>
+              </div>
+
+              <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '10px', padding: '10px 12px', borderRight: '4px solid #ea580c' }}>
+                <div style={{ fontSize: '11.5px', color: '#c2410c', fontWeight: '700' }}>🔴 31 – 60 دقيقة</div>
+                <div style={{ fontSize: '18px', fontWeight: '800', color: '#7c2d12', margin: '2px 0' }}>
+                  {lateEmployeesToday.filter((i) => i.tier.id === 'tier_31_60').length} <span style={{ fontSize: '11px', fontWeight: '500', color: '#4b5563' }}>حالة</span>
+                </div>
+                <div style={{ fontSize: '11px', color: '#ea580c' }}>سماح مرة واحدة</div>
+              </div>
+
+              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', padding: '10px 12px', borderRight: '4px solid #dc2626' }}>
+                <div style={{ fontSize: '11.5px', color: '#b91c1c', fontWeight: '700' }}>🟣 أكثر من 60 دقيقة</div>
+                <div style={{ fontSize: '18px', fontWeight: '800', color: '#7f1d1d', margin: '2px 0' }}>
+                  {lateEmployeesToday.filter((i) => i.tier.id === 'tier_over_60').length} <span style={{ fontSize: '11px', fontWeight: '500', color: '#4b5563' }}>حالة</span>
+                </div>
+                <div style={{ fontSize: '11px', color: '#dc2626' }}>خصم فوري مباشر</div>
+              </div>
+
+              <div style={{ background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: '10px', padding: '10px 12px', borderRight: '4px solid #9333ea' }}>
+                <div style={{ fontSize: '11.5px', color: '#7e22ce', fontWeight: '700' }}>💸 إجمالي الخصم المالي لليوم</div>
+                <div style={{ fontSize: '17px', fontWeight: '800', color: '#581c87', margin: '2px 0' }}>
+                  {totalDeductionMinutes} دقيقة
+                </div>
+                <div style={{ fontSize: '11.5px', color: '#9333ea', fontWeight: '700' }}>
+                  ~ {fmt(totalPenaltyAmount)} ج.م
+                </div>
+              </div>
+            </div>
+
+            {/* Filter Tabs & Search Bar */}
+            {lateEmployeesToday.length > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  <button
+                    className={`btn ${lateFilterMode === 'all' ? 'btn-primary' : 'btn-ghost'}`}
+                    onClick={() => setLateFilterMode('all')}
+                    style={{ padding: '6px 14px', fontSize: '12.5px', borderRadius: '8px' }}
+                  >
+                    الكل ({totalLate})
+                  </button>
+                  <button
+                    className={`btn ${lateFilterMode === 'deduction' ? 'btn-primary' : 'btn-ghost'}`}
+                    onClick={() => setLateFilterMode('deduction')}
+                    style={{ padding: '6px 14px', fontSize: '12.5px', borderRadius: '8px', background: lateFilterMode === 'deduction' ? '#dc2626' : undefined, color: lateFilterMode === 'deduction' ? '#fff' : undefined }}
+                  >
+                    ⚠️ مستحق عليهم خصم ({deductionCount})
+                  </button>
+                  <button
+                    className={`btn ${lateFilterMode === 'grace' ? 'btn-primary' : 'btn-ghost'}`}
+                    onClick={() => setLateFilterMode('grace')}
+                    style={{ padding: '6px 14px', fontSize: '12.5px', borderRadius: '8px', background: lateFilterMode === 'grace' ? '#16a34a' : undefined, color: lateFilterMode === 'grace' ? '#fff' : undefined }}
+                  >
+                    🟢 حالات السماح ({permanentGraceCount + conditionalGraceCount})
+                  </button>
+                  {permissionCount > 0 && (
+                    <button
+                      className={`btn ${lateFilterMode === 'exempt' ? 'btn-primary' : 'btn-ghost'}`}
+                      onClick={() => setLateFilterMode('exempt')}
+                      style={{ padding: '6px 14px', fontSize: '12.5px', borderRadius: '8px' }}
+                    >
+                      🛡️ أذونات معتمدة ({permissionCount})
+                    </button>
+                  )}
+                </div>
+
+                <div style={{ position: 'relative', minWidth: '220px' }}>
+                  <input
+                    type="text"
+                    placeholder="🔍 بحث باسم الموظف أو الكود..."
+                    value={lateSearchQuery}
+                    onChange={(e) => setLateSearchQuery(e.target.value)}
+                    style={{ width: '100%', padding: '6px 12px', borderRadius: '8px', border: '1px solid #fed7aa', fontSize: '12.5px' }}
+                  />
+                  {lateSearchQuery && (
+                    <button
+                      onClick={() => setLateSearchQuery('')}
+                      style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '13px' }}
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Empty State */}
             {lateEmployeesToday.length === 0 ? (
-              <div style={{ background: '#dcfce7', color: '#166534', padding: '14px 18px', borderRadius: '10px', fontSize: '14px', fontWeight: 'bold', textAlign: 'center' }}>
-                🟢 ممتاز! لا توجد أي حالات تأخير مسجلة اليوم — جميع الموظفين الذين حضروا التزموا بالمواعيد وفترة السماح المعتمدة ({gracePeriod} دقيقة).
+              <div style={{ background: '#dcfce7', color: '#166534', padding: '16px 20px', borderRadius: '12px', fontSize: '14px', fontWeight: 'bold', textAlign: 'center', border: '1px solid #bbf7d0', boxShadow: '0 2px 6px rgba(22, 101, 52, 0.05)' }}>
+                🟢 ممتاز! لا توجد أي حالات تأخير مسجلة اليوم — جميع الموظفين الذين حضروا التزموا بالمواعيد وفترة السماح المعتمدة باللائحة (حتى {permanentGraceMax} دقائق).
+              </div>
+            ) : filteredLateEmployees.length === 0 ? (
+              <div style={{ background: '#f8fafc', color: '#64748b', padding: '16px', borderRadius: '10px', textAlign: 'center', fontSize: '13px', border: '1px dashed #cbd5e1' }}>
+                لا توجد حالات تأخير مطابقة لخيارات التصفية الحالية.
               </div>
             ) : (
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'center', background: '#ffffff', borderRadius: '10px', overflow: 'hidden', border: '1px solid #fed7aa' }}>
+              /* Late Employees Details Table */
+              <div style={{ overflowX: 'auto', borderRadius: '12px', border: '1px solid #fed7aa', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'center', background: '#ffffff' }}>
                   <thead>
                     <tr style={{ background: '#ffedd5', color: '#9a3412', fontWeight: 'bold' }}>
-                      <th style={{ padding: '10px 8px', borderBottom: '2px solid #fdba74' }}>#</th>
-                      <th style={{ padding: '10px 8px', borderBottom: '2px solid #fdba74' }}>الموظف</th>
-                      <th style={{ padding: '10px 8px', borderBottom: '2px solid #fdba74' }}>المسمى والفرع</th>
-                      <th style={{ padding: '10px 8px', borderBottom: '2px solid #fdba74' }}>الموعد المجدول</th>
-                      <th style={{ padding: '10px 8px', borderBottom: '2px solid #fdba74' }}>وقت البصمة</th>
-                      <th style={{ padding: '10px 8px', borderBottom: '2px solid #fdba74' }}>مقدار التأخير</th>
-                      <th style={{ padding: '10px 8px', borderBottom: '2px solid #fdba74' }}>الجزاء والخصم المقترح</th>
-                      <th style={{ padding: '10px 8px', borderBottom: '2px solid #fdba74' }}>حالة الطلب</th>
-                      <th style={{ padding: '10px 8px', borderBottom: '2px solid #fdba74' }}>إجراء الإدارة العليا</th>
+                      <th style={{ padding: '12px 8px', borderBottom: '2px solid #fdba74' }}>#</th>
+                      <th style={{ padding: '12px 8px', borderBottom: '2px solid #fdba74', textAlign: 'right' }}>الموظف</th>
+                      <th style={{ padding: '12px 8px', borderBottom: '2px solid #fdba74' }}>الفرع المجدول</th>
+                      <th style={{ padding: '12px 8px', borderBottom: '2px solid #fdba74' }}>الموعد المجدول</th>
+                      <th style={{ padding: '12px 8px', borderBottom: '2px solid #fdba74' }}>وقت البصمة</th>
+                      <th style={{ padding: '12px 8px', borderBottom: '2px solid #fdba74' }}>مقدار التأخير والتصنيف</th>
+                      <th style={{ padding: '12px 8px', borderBottom: '2px solid #fdba74' }}>سجل التكرار بالفئة</th>
+                      <th style={{ padding: '12px 8px', borderBottom: '2px solid #fdba74' }}>الجزاء والخصم اللائحي</th>
+                      <th style={{ padding: '12px 8px', borderBottom: '2px solid #fdba74' }}>حالة الإجراء</th>
+                      <th style={{ padding: '12px 8px', borderBottom: '2px solid #fdba74' }}>إجراء الإدارة العليا</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {lateEmployeesToday.map((item, idx) => {
-                      const isApproved = item.penaltyReq?.status === 'approved' || item.penaltyReq?.adminApproved;
-                      const isRejected = item.penaltyReq?.status === 'rejected' || item.penaltyReq?.status === 'waived';
-                      const isPending = !isApproved && !isRejected;
+                    {filteredLateEmployees.map((item, idx) => {
+                      const isPerm = Boolean(item.approvedPerm);
+                      const isApproved = item.status === 'approved';
+                      const isWaived = item.status === 'waived';
+                      const isGraceAllowed = item.status === 'grace_allowed';
+                      const isPending = item.status === 'pending';
 
                       return (
-                        <tr key={item.emp.id} style={{ borderBottom: '1px solid #ffedd5' }}>
-                          <td style={{ padding: '10px 8px', color: 'var(--muted)', fontWeight: 'bold' }}>{idx + 1}</td>
-                          <td style={{ padding: '10px 8px', fontWeight: '800', color: '#9a3412' }}>
-                            {item.emp.name} ({item.emp.code})
+                        <tr key={item.emp.id} style={{ borderBottom: '1px solid #ffedd5', background: isPending && item.deductionMinutes > 0 ? '#fffaf5' : undefined }}>
+                          <td style={{ padding: '12px 8px', color: 'var(--muted)', fontWeight: 'bold' }}>{idx + 1}</td>
+                          
+                          {/* Employee info with avatar */}
+                          <td style={{ padding: '12px 8px', textAlign: 'right' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <div style={{
+                                width: '32px',
+                                height: '32px',
+                                borderRadius: '50%',
+                                background: item.tier.color ? `${item.tier.color}22` : '#fee2e2',
+                                color: item.tier.color || '#c2410c',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontWeight: '800',
+                                fontSize: '13px',
+                                flexShrink: 0
+                              }}>
+                                {item.emp.name.charAt(0)}
+                              </div>
+                              <div>
+                                <div style={{ fontWeight: '800', color: '#1e293b', fontSize: '13.5px' }}>
+                                  {item.emp.name}
+                                </div>
+                                <div style={{ fontSize: '11.5px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                  <span style={{ background: '#f1f5f9', padding: '1px 5px', borderRadius: '4px', fontWeight: 'bold' }}>#{item.emp.code}</span>
+                                  <span>{item.emp.jobTitle}</span>
+                                </div>
+                              </div>
+                            </div>
                           </td>
-                          <td style={{ padding: '10px 8px' }}>
-                            <span style={{ display: 'block', fontWeight: '600' }}>{item.emp.jobTitle}</span>
-                            <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>📍 {item.branchName}</span>
+
+                          {/* Branch */}
+                          <td style={{ padding: '12px 8px' }}>
+                            <span style={{ background: '#f8fafc', border: '1px solid #e2e8f0', color: '#334155', padding: '3px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: '600' }}>
+                              📍 {item.branchName}
+                            </span>
                           </td>
-                          <td style={{ padding: '10px 8px' }}>
-                            <span style={{ background: '#f1f5f9', color: '#334155', padding: '3px 8px', borderRadius: '6px', fontWeight: '700' }}>
+
+                          {/* Scheduled Start */}
+                          <td style={{ padding: '12px 8px' }}>
+                            <span style={{ background: '#f1f5f9', color: '#334155', padding: '3px 8px', borderRadius: '6px', fontWeight: '700', fontSize: '12.5px' }}>
                               {item.scheduledStart}
                             </span>
                           </td>
-                          <td style={{ padding: '10px 8px' }}>
-                            <span style={{ background: '#fee2e2', color: '#b91c1c', padding: '3px 8px', borderRadius: '6px', fontWeight: '700' }}>
+
+                          {/* Punch Time */}
+                          <td style={{ padding: '12px 8px' }}>
+                            <span style={{ background: '#fee2e2', color: '#b91c1c', padding: '3px 8px', borderRadius: '6px', fontWeight: '700', fontSize: '12.5px' }}>
                               {item.timeIn}
                             </span>
                           </td>
-                          <td style={{ padding: '10px 8px', color: '#c2410c', fontWeight: '800' }}>
-                            +{item.diffMinutes} دقيقة
-                            <span style={{ display: 'block', fontSize: '11px', color: '#ea580c', fontWeight: 'normal' }}>
-                              (تجاوز السماح بـ {item.exceededMinutes} دقيقة)
+
+                          {/* Lateness & Tier Badge */}
+                          <td style={{ padding: '12px 8px' }}>
+                            <div style={{ fontWeight: '800', color: item.tier.color || '#c2410c', fontSize: '13.5px' }}>
+                              +{item.diffMinutes} دقيقة
+                            </div>
+                            <span style={{
+                              display: 'inline-block',
+                              marginTop: '3px',
+                              fontSize: '11px',
+                              fontWeight: '700',
+                              padding: '2px 8px',
+                              borderRadius: '12px',
+                              background: item.tier.badgeBg || '#ffedd5',
+                              color: item.tier.badgeText || item.tier.color || '#c2410c'
+                            }}>
+                              {item.tier.name}
                             </span>
                           </td>
-                          <td style={{ padding: '10px 8px', fontWeight: '800', color: '#b91c1c' }}>
-                            {item.actionTitle} {item.penaltyAmount > 0 ? `(خصم ${item.penaltyAmount} ج.م)` : '(بدون خصم)'}
-                          </td>
-                          <td style={{ padding: '10px 8px' }}>
-                            {isApproved ? (
-                              <span className="badge badge-success" style={{ background: '#dcfce7', color: '#15803d', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold' }}>
-                                ✅ تم تطبيق الخصم الجزاء
-                              </span>
-                            ) : isRejected ? (
-                              <span className="badge badge-secondary" style={{ background: '#f1f5f9', color: '#64748b', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold' }}>
-                                🛡️ تم قبول العذر (بدون خصم)
+
+                          {/* Tier Occurrence History */}
+                          <td style={{ padding: '12px 8px' }}>
+                            {item.tier.id === 'tier_0_10' ? (
+                              <span style={{ background: '#dcfce7', color: '#15803d', padding: '3px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: '700' }}>
+                                🟢 سماح دائم
                               </span>
                             ) : (
-                              <span className="badge badge-warning" style={{ background: '#fef3c7', color: '#b45309', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold' }}>
-                                ⏳ قيد انتظار قرار الإدارة
+                              <div>
+                                <span style={{ fontWeight: '700', fontSize: '12.5px', color: '#334155' }}>
+                                  المرة #{item.occurrenceNumber} بالدورة
+                                </span>
+                                <span style={{ display: 'block', fontSize: '11px', color: item.actionType === 'grace' ? '#16a34a' : '#dc2626', fontWeight: '600', marginTop: '2px' }}>
+                                  {item.actionType === 'grace'
+                                    ? `(سماح متبقي: ${Math.max(0, item.graceCountInTier - item.occurrenceNumber)})`
+                                    : `(تجاوز حد السماح ${item.graceCountInTier})`}
+                                </span>
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Action & Financial Deduction */}
+                          <td style={{ padding: '12px 8px' }}>
+                            {isPerm ? (
+                              <span style={{ background: '#eff6ff', color: '#1d4ed8', padding: '4px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: '700' }}>
+                                🛡️ إذن معتمد (معفى)
+                              </span>
+                            ) : item.deductionMinutes > 0 && !isWaived ? (
+                              <div>
+                                <span style={{ color: '#dc2626', fontWeight: '800', fontSize: '13px', display: 'block' }}>
+                                  ⚠️ {item.actionTitle}
+                                </span>
+                                <span style={{ color: '#b91c1c', fontSize: '11.5px', fontWeight: '700' }}>
+                                  خصم {item.deductionMinutes} دقيقة (~ {fmt(item.penaltyAmount)} ج.م)
+                                </span>
+                              </div>
+                            ) : (
+                              <span style={{ background: '#dcfce7', color: '#15803d', padding: '4px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: '700' }}>
+                                🟢 سماح (0 دقيقة - 0 ج.م)
                               </span>
                             )}
                           </td>
-                          <td style={{ padding: '10px 8px' }}>
-                            {isPending && item.penaltyReq && (
-                              <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', flexWrap: 'wrap' }}>
+
+                          {/* Decision Status Badge */}
+                          <td style={{ padding: '12px 8px' }}>
+                            {isPerm ? (
+                              <span style={{ background: '#eff6ff', color: '#2563eb', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11.5px', display: 'inline-block' }}>
+                                🛡️ إذن تأخير معتمد
+                              </span>
+                            ) : isApproved ? (
+                              <span style={{ background: '#dcfce7', color: '#15803d', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11.5px', display: 'inline-block' }}>
+                                ✅ تم تطبيق الخصم اللائحي
+                              </span>
+                            ) : isWaived ? (
+                              <span style={{ background: '#f1f5f9', color: '#475569', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11.5px', display: 'inline-block' }}>
+                                🕊️ تم قبول العذر (استثناء)
+                              </span>
+                            ) : isGraceAllowed ? (
+                              <span style={{ background: '#dcfce7', color: '#166534', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11.5px', display: 'inline-block' }}>
+                                🟢 سماح لائحي نظامي
+                              </span>
+                            ) : (
+                              <span style={{ background: '#fef3c7', color: '#b45309', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11.5px', display: 'inline-block' }}>
+                                ⏳ بانتظار اعتماد الإدارة
+                              </span>
+                            )}
+                          </td>
+
+                          {/* Admin Action Buttons */}
+                          <td style={{ padding: '12px 8px' }}>
+                            {isPerm ? (
+                              <span style={{ fontSize: '11.5px', color: '#2563eb', fontWeight: '600' }}>
+                                معفى رسمياً
+                              </span>
+                            ) : isGraceAllowed ? (
+                              <span style={{ fontSize: '11.5px', color: '#16a34a', fontWeight: '600' }}>
+                                نظامي طبقاً للائحة
+                              </span>
+                            ) : isPending && item.deductionMinutes > 0 ? (
+                              <div style={{ display: 'flex', gap: '4px', justifyContent: 'center', flexWrap: 'wrap' }}>
                                 <button
                                   className="btn btn-start"
-                                  style={{ padding: '4px 10px', fontSize: '12px', background: '#dc2626' }}
-                                  onClick={() => onApproveRequest?.(item.penaltyReq.id)}
-                                  title="تطبيق الخصم الجزاء الموضوع من قائمة الجزاءات فوراً على راتب الموظف"
+                                  style={{ padding: '4px 8px', fontSize: '11.5px', background: '#dc2626' }}
+                                  onClick={() => handleApplyLatePenalty(item)}
+                                  title="تطبيق الخصم اللائحي الفوري على الراتب"
                                 >
-                                  ⚖️ تطبيق الخصم الجزاء {item.penaltyAmount > 0 ? `(${item.penaltyAmount} ج.م)` : ''}
+                                  ⚖️ تطبيق الخصم ({fmt(item.penaltyAmount)} ج.م)
                                 </button>
                                 <button
                                   className="btn btn-ghost"
-                                  style={{ padding: '4px 10px', fontSize: '12px', border: '1px solid #cbd5e1' }}
-                                  onClick={() => onRejectRequest?.(item.penaltyReq.id)}
-                                  title="عدم تطبيق الخصم وقبول العذر بدون أي استقطاع مالي"
+                                  style={{ padding: '4px 8px', fontSize: '11.5px', border: '1px solid #cbd5e1' }}
+                                  onClick={() => handleWaiveLatePenalty(item)}
+                                  title="قبول العذر واستثناء الموظف بدون خصم مالي"
                                 >
-                                  🛡️ عدم تطبيق الخصم (قبول العذر)
+                                  🛡️ قبول العذر
+                                </button>
+                                <button
+                                  className="btn btn-ghost"
+                                  style={{ padding: '4px 6px', fontSize: '11px', border: '1px solid #fed7aa', color: '#c2410c' }}
+                                  onClick={() => openLateEditModal(item)}
+                                  title="تخصيص دقائق أو سبب الخصم"
+                                >
+                                  ✏️ تعديل
                                 </button>
                               </div>
-                            )}
-                            {isApproved && (
-                              <span style={{ fontSize: '12px', color: '#166534', fontWeight: 'bold' }}>
-                                💸 تم خصم {item.penaltyAmount} ج.م بنجاح
-                              </span>
-                            )}
-                            {isRejected && (
-                              <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>
-                                🕊️ معفى — لا يوجد خصم
-                              </span>
-                            )}
+                            ) : isApproved ? (
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                                <span style={{ fontSize: '11.5px', color: '#166534', fontWeight: 'bold' }}>
+                                  💸 خصم {item.deductionMinutes} د (~{fmt(item.penaltyAmount)} ج.م)
+                                </span>
+                                <button
+                                  onClick={() => handleWaiveLatePenalty(item)}
+                                  style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '11px', textDecoration: 'underline' }}
+                                  title="إلغاء الخصم وقبول العذر"
+                                >
+                                  إعفاء
+                                </button>
+                              </div>
+                            ) : isWaived ? (
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                                <span style={{ fontSize: '11.5px', color: '#64748b', fontWeight: 'bold' }}>
+                                  🕊️ معفى بدون خصم
+                                </span>
+                                {item.deductionMinutes > 0 && (
+                                  <button
+                                    onClick={() => handleApplyLatePenalty(item)}
+                                    style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '11px', textDecoration: 'underline' }}
+                                    title="إعادة تطبيق الخصم"
+                                  >
+                                    تطبيق
+                                  </button>
+                                )}
+                              </div>
+                            ) : null}
                           </td>
                         </tr>
                       );
@@ -501,6 +1163,72 @@ export default function Dashboard({
                 </table>
               </div>
             )}
+
+            {/* Custom Penalty Override Modal */}
+            {lateEditModalItem && (
+              <div className="modal-backdrop" onClick={() => setLateEditModalItem(null)} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+                <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ background: '#fff', padding: '24px', borderRadius: '16px', maxWidth: '480px', width: '92%', boxShadow: '0 20px 40px rgba(0,0,0,0.2)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #f1f5f9', paddingBottom: '12px' }}>
+                    <h3 style={{ margin: 0, fontSize: '16px', color: '#c2410c', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      ✏️ تخصيص وتعديل جزاء التأخير للموظف
+                    </h3>
+                    <button onClick={() => setLateEditModalItem(null)} style={{ background: 'none', border: 'none', fontSize: '16px', cursor: 'pointer', color: '#94a3b8' }}>✕</button>
+                  </div>
+
+                  <div style={{ fontSize: '13px', color: '#334155', marginBottom: '14px' }}>
+                    <div>الموظف: <strong>{lateEditModalItem.emp.name} ({lateEditModalItem.emp.code})</strong></div>
+                    <div>التأخير المسجل: <strong>+{lateEditModalItem.diffMinutes} دقيقة</strong> ({lateEditModalItem.tier.name})</div>
+                  </div>
+
+                  <div style={{ marginBottom: '14px' }}>
+                    <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 'bold', marginBottom: '6px', color: '#1e293b' }}>
+                      دقائق الخصم المعتمدة:
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={lateEditDeductionMins}
+                      onChange={(e) => setLateEditDeductionMins(e.target.value)}
+                      style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                    />
+                    <span style={{ fontSize: '11.5px', color: '#64748b', marginTop: '4px', display: 'block' }}>
+                      القيمة المالية المقدرة: ~ {fmt(computeLatenessFinancialAmount(lateEditDeductionMins, lateEditModalItem.emp, lateEditModalItem.branchId))} ج.م
+                    </span>
+                  </div>
+
+                  <div style={{ marginBottom: '18px' }}>
+                    <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 'bold', marginBottom: '6px', color: '#1e293b' }}>
+                      سبب التعديل أو الاستثناء:
+                    </label>
+                    <textarea
+                      rows="3"
+                      value={lateEditReason}
+                      onChange={(e) => setLateEditReason(e.target.value)}
+                      placeholder="اكتب سبب تعديل الجزاء أو الاستثناء لتوثيقه في السجل..."
+                      style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '12.5px', resize: 'vertical' }}
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                    <button
+                      className="btn btn-ghost"
+                      onClick={() => setLateEditModalItem(null)}
+                      style={{ padding: '8px 16px', fontSize: '13px' }}
+                    >
+                      إلغاء
+                    </button>
+                    <button
+                      className="btn btn-primary"
+                      onClick={handleSaveCustomPenalty}
+                      style={{ padding: '8px 18px', fontSize: '13px', background: '#c2410c', borderColor: '#c2410c' }}
+                    >
+                      💾 حفظ التعديل اللائحي
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
           </div>
         );
       })()}
