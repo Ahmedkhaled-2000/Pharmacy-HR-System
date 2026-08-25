@@ -178,6 +178,18 @@ export default function EmployeePortalView({
   const [isNotifDropdownOpen, setIsNotifDropdownOpen] = useState(false);
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
   const [drawerExpandedGroup, setDrawerExpandedGroup] = useState(null);
+  const [isMobileScreen, setIsMobileScreen] = useState(() => {
+    try { return typeof window !== 'undefined' && window.innerWidth <= 768; } catch { return false; }
+  });
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobileScreen(window.innerWidth <= 768);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const [isPrivacyMode, setIsPrivacyMode] = useState(() => {
     try { return localStorage.getItem('emp_privacy_mode') === 'true'; } catch { return false; }
   });
@@ -1582,16 +1594,18 @@ export default function EmployeePortalView({
         {/* Right Side (Start in RTL): Brand, Profile Badge & Breadcrumb */}
         <div className="ep-titlebar-right" style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
           {/* Mobile Hamburger Button */}
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={() => setIsMobileDrawerOpen(true)}
-            style={{ display: 'none', padding: '6px 9px', fontSize: '18px', border: '1px solid var(--border)' }}
-            title="فتح القائمة"
-            id="ep-mobile-hamburger-btn"
-          >
-            ☰
-          </button>
+          {isMobileScreen && (
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => setIsMobileDrawerOpen(true)}
+              style={{ padding: '6px 9px', fontSize: '18px', border: '1px solid var(--border)' }}
+              title="فتح القائمة"
+              id="ep-mobile-hamburger-btn"
+            >
+              ☰
+            </button>
+          )}
 
           {/* App Logo */}
           <div className="ep-logo-badge" style={{
@@ -2286,54 +2300,56 @@ export default function EmployeePortalView({
       )}
 
       {/* ══════════════════════════════════════════════════════════════════════════════ */}
-      {/* ── 4. MOBILE BOTTOM NAVIGATION BAR ── */}
+      {/* ── 4. MOBILE BOTTOM NAVIGATION BAR (Only on Mobile Screens) ── */}
       {/* ══════════════════════════════════════════════════════════════════════════════ */}
-      <nav className="ep-bottom-nav">
-        <button
-          type="button"
-          className={`ep-bottom-nav-btn ${activeTab === 'dashboard' ? 'active' : ''}`}
-          onClick={() => setActiveTab('dashboard')}
-        >
-          <span className="ep-bottom-nav-icon">🏠</span>
-          <span>الرئيسية</span>
-        </button>
+      {isMobileScreen && (
+        <nav className="ep-bottom-nav">
+          <button
+            type="button"
+            className={`ep-bottom-nav-btn ${activeTab === 'dashboard' ? 'active' : ''}`}
+            onClick={() => setActiveTab('dashboard')}
+          >
+            <span className="ep-bottom-nav-icon">🏠</span>
+            <span>الرئيسية</span>
+          </button>
 
-        <button
-          type="button"
-          className={`ep-bottom-nav-btn ${activeTab === 'shifts' ? 'active' : ''}`}
-          onClick={() => setActiveTab('shifts')}
-        >
-          <span className="ep-bottom-nav-icon">⏱️</span>
-          <span>الدوام</span>
-        </button>
+          <button
+            type="button"
+            className={`ep-bottom-nav-btn ${activeTab === 'shifts' ? 'active' : ''}`}
+            onClick={() => setActiveTab('shifts')}
+          >
+            <span className="ep-bottom-nav-icon">⏱️</span>
+            <span>الدوام</span>
+          </button>
 
-        <button
-          type="button"
-          className={`ep-bottom-nav-btn ${activeTab === 'salary' ? 'active' : ''}`}
-          onClick={() => setActiveTab('salary')}
-        >
-          <span className="ep-bottom-nav-icon">💰</span>
-          <span>الراتب</span>
-        </button>
+          <button
+            type="button"
+            className={`ep-bottom-nav-btn ${activeTab === 'salary' ? 'active' : ''}`}
+            onClick={() => setActiveTab('salary')}
+          >
+            <span className="ep-bottom-nav-icon">💰</span>
+            <span>الراتب</span>
+          </button>
 
-        <button
-          type="button"
-          className={`ep-bottom-nav-btn ${['leaves', 'permissions', 'loans'].includes(activeTab) ? 'active' : ''}`}
-          onClick={() => setActiveTab('leaves')}
-        >
-          <span className="ep-bottom-nav-icon">📋</span>
-          <span>الطلبات</span>
-        </button>
+          <button
+            type="button"
+            className={`ep-bottom-nav-btn ${['leaves', 'permissions', 'loans'].includes(activeTab) ? 'active' : ''}`}
+            onClick={() => setActiveTab('leaves')}
+          >
+            <span className="ep-bottom-nav-icon">📋</span>
+            <span>الطلبات</span>
+          </button>
 
-        <button
-          type="button"
-          className="ep-bottom-nav-btn"
-          onClick={() => setIsMobileDrawerOpen(true)}
-        >
-          <span className="ep-bottom-nav-icon">☰</span>
-          <span>المزيد</span>
-        </button>
-      </nav>
+          <button
+            type="button"
+            className="ep-bottom-nav-btn"
+            onClick={() => setIsMobileDrawerOpen(true)}
+          >
+            <span className="ep-bottom-nav-icon">☰</span>
+            <span>المزيد</span>
+          </button>
+        </nav>
+      )}
 
       {/* ══════════════════════════════════════════════════════════════════════════════ */}
       {/* ── 5. MAIN WORKSPACE CANVAS ── */}
