@@ -1,8 +1,10 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { AR_MONTHS, arabicWeekday, todayStr, fmt, arabicMonthLabel, getActivePayrollCycleMonth, getEmpDisplayName, getEmployeeManualPunchesCount, isShiftManualPunch } from '../../utils/formatters';
 import { loadExcelJS, mergedTitle, tableHeaderRow, dataRow } from '../../utils/excelExport';
 import { getCycleDateRange, createDatePredicate, getActivePayrollMonth } from '../../utils/periodEngine';
 import { getRealDate, getRealTodayStr, getRealNowTimeStr } from '../../utils/timeEngine';
+import { useLiveRealTime } from '../../hooks/useLiveRealTime';
+import { filterEmployeeNotifications, countUnreadEmployeeNotifications } from '../../utils/notificationEngine';
 
 import EmployeeLeaveModule from './EmployeeLeaveModule';
 import EmployeeLoansModule from './EmployeeLoansModule';
@@ -53,16 +55,16 @@ const WEEKDAY_AR_MAP = {
 // ─────────────────────────────────────────
 //  Summary Card
 // ─────────────────────────────────────────
-function SummaryCard({ icon, label, value, colorVar, sub }) {
+function SummaryCard({ icon, label, value, colorVar, sub, isPrivacy = false }) {
   return (
     <div className="ep-summary-card">
       <div className="ep-summary-icon">{icon}</div>
       <div className="ep-summary-body">
         <div className="ep-summary-label">{label}</div>
-        <div className="ep-summary-value" style={colorVar ? { color: `var(${colorVar})` } : {}}>
+        <div className={`ep-summary-value ${isPrivacy ? 'ep-privacy-blurred' : ''}`} style={colorVar ? { color: `var(${colorVar})` } : {}}>
           {value}
         </div>
-        {sub && <div className="ep-summary-sub">{sub}</div>}
+        {sub && <div className={`ep-summary-sub ${isPrivacy ? 'ep-privacy-blurred' : ''}`}>{sub}</div>}
       </div>
     </div>
   );
@@ -111,6 +113,13 @@ export default function EmployeePortalView({
   getActiveElapsedStr,
   getActiveBreakStr,
   openEditShift,
+  handleLogout,
+  deleteShift,
+  themeMode,
+  toggleTheme,
+  notifications = [],
+  onMarkNotificationRead,
+  onMarkAllNotificationsRead,
 }) {
   const emp = useMemo(() => {
     if (!currentEmpUser) return null;
@@ -162,6 +171,52 @@ export default function EmployeePortalView({
   const [rangeEnd, setRangeEnd] = useState(() => {
     try { return localStorage.getItem('emp_range_end') || ''; } catch { return ''; }
   });
+
+  // Modern Navigation & UI States
+  const [openDropdown, setOpenDropdown] = useState(null);
+  const [isNotifDropdownOpen, setIsNotifDropdownOpen] = useState(false);
+  const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
+  const [drawerExpandedGroup, setDrawerExpandedGroup] = useState(null);
+  const [isPrivacyMode, setIsPrivacyMode] = useState(() => {
+    try { return localStorage.getItem('emp_privacy_mode') === 'true'; } catch { return false; }
+  });
+
+  const togglePrivacyMode = () => {
+    setIsPrivacyMode((prev) => {
+      const next = !prev;
+      try { localStorage.setItem('emp_privacy_mode', String(next)); } catch {}
+      return next;
+    });
+  };
+
+  const liveTime = useLiveRealTime(1000);
+  const menuContainerRef = useRef(null);
+  const notifDropdownRef = useRef(null);
+
+  // Close menus on outside click or escape
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (menuContainerRef.current && !menuContainerRef.current.contains(e.target)) {
+        setOpenDropdown(null);
+      }
+      if (notifDropdownRef.current && !notifDropdownRef.current.contains(e.target)) {
+        setIsNotifDropdownOpen(false);
+      }
+    };
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setOpenDropdown(null);
+        setIsNotifDropdownOpen(false);
+        setIsMobileDrawerOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
 
   // Auto-sync selectedMonth with active payroll cycle when cutoff settings change
   useEffect(() => {
@@ -1212,271 +1267,924 @@ export default function EmployeePortalView({
     );
   }
 
-  // ── Inline Sidebar Nav + Main Content Layout ──
+  // ── Employee Notifications Logic ──
+  const empNotifications = useMemo(() => {
+    return filterEmployeeNotifications(notifications || state?.notifications || [], emp?.id);
+  }, [notifications, state?.notifications, emp?.id]);
+
+  const empUnreadNotifsCount = useMemo(() => {
+    return empNotifications.filter(n => !n.read).length;
+  }, [empNotifications]);
+
+  const handleMarkNotifRead = async (notifId) => {
+    if (typeof onMarkNotificationRead === 'function') {
+      onMarkNotificationRead(notifId);
+    } else {
+      const updated = (state.notifications || []).map(n => n.id === notifId ? { ...n, read: true } : n);
+      const updatedState = { ...state, notifications: updated };
+      setState(updatedState);
+      if (saveState) await saveState(updatedState);
+    }
+  };
+
+  const handleMarkAllNotifsRead = async () => {
+    if (typeof onMarkAllNotificationsRead === 'function') {
+      onMarkAllNotificationsRead();
+    } else {
+      const updated = (state.notifications || []).map(n => {
+        if (String(n.targetEmployeeId) === String(emp?.id) || String(n.employeeId) === String(emp?.id)) {
+          return { ...n, read: true };
+        }
+        return n;
+      });
+      const updatedState = { ...state, notifications: updated };
+      setState(updatedState);
+      if (saveState) await saveState(updatedState);
+    }
+  };
+
+  // Penalties count for bylaws badge
+  const empPenaltiesCount = useMemo(() => {
+    if (!emp?.id) return 0;
+    return (state.lateIncidents || []).filter(inc => 
+      String(inc.employeeId) === String(emp.id) &&
+      inc.status !== 'cancelled' &&
+      inc.status !== 'approved_permission_exempt' &&
+      inc.actionType !== 'grace' &&
+      (inc.deductionMinutes > 0 || inc.penaltyAmount > 0) &&
+      filterFn(inc.date)
+    ).length;
+  }, [state.lateIncidents, emp?.id, filterFn]);
+
+  // Categorized Menu Items (Matching Senior Management Style)
+  const employeeMenuItems = useMemo(() => {
+    const isMultiBranchEmp = emp?.branchesDetails && emp.branchesDetails.length > 1;
+    const isAllBranchesSelected = isMultiBranchEmp && !selectedBranchId;
+
+    return [
+      {
+        id: 'dashboard',
+        label: 'لوحة التحكم',
+        icon: '📊',
+        isSingle: true,
+        targetTab: 'dashboard'
+      },
+      {
+        id: 'finance-group',
+        label: 'الرواتب والمالية',
+        icon: '💼',
+        children: [
+          {
+            id: 'salary',
+            targetTab: 'salary',
+            label: 'تفاصيل ومسير الراتب',
+            icon: '💵',
+            desc: 'حساب صافي الأجور والبدلات وأجر الساعات الحية',
+            visible: canViewSalary !== false
+          },
+          {
+            id: 'adjustments',
+            targetTab: 'adjustments',
+            label: 'المكافآت والخصومات والتسويات',
+            icon: '🎁',
+            badge: empAdjs.length,
+            desc: 'سجل الحوافز والمكافآت والخصومات المعتمدة',
+            visible: !isAllBranchesSelected && canViewAdjustments !== false
+          },
+          {
+            id: 'loans',
+            targetTab: 'loans',
+            label: 'السلف ومشتريات الأدوية الآجل',
+            icon: '💳',
+            desc: 'تقديم ومتابعة السلف النقدية والأقساط والأدوية',
+            visible: !isAllBranchesSelected && canApplyLoan !== false
+          },
+          {
+            id: 'payslip_action',
+            action: 'print_payslip',
+            label: 'طباعة ومعاينة قسيمة الراتب',
+            icon: '📄',
+            desc: 'استعراض وتحميل قسيمة الراتب الرسمية بتنسيق معتمد',
+            visible: canViewSalary !== false
+          }
+        ].filter(item => item.visible)
+      },
+      {
+        id: 'attendance-group',
+        label: 'الدوام والورديات',
+        icon: '⏱️',
+        children: [
+          {
+            id: 'shifts',
+            targetTab: 'shifts',
+            label: 'سجل البصمات وساعات العمل',
+            icon: '📋',
+            badge: empShifts.length,
+            desc: 'سجل الحضور والانصراف، البريك، واحتساب ساعات العمل',
+            visible: !isAllBranchesSelected
+          },
+          {
+            id: 'roster',
+            targetTab: 'roster',
+            label: 'الجدول الشهري ومناوبات العمل',
+            icon: '🗓️',
+            desc: 'استعراض وتصميم جدول الورديات ومناوبات الفرع',
+            visible: !isAllBranchesSelected && canViewRoster !== false
+          },
+          {
+            id: 'swaps',
+            targetTab: 'swaps',
+            label: 'تبديل ونقل الشيفتات',
+            icon: '🔄',
+            desc: 'تقديم ومتابعة طلبات تبديل الورديات مع الزملاء',
+            visible: !isAllBranchesSelected && canApplySwap !== false
+          }
+        ].filter(item => item.visible !== false)
+      },
+      {
+        id: 'requests-group',
+        label: 'الطلبات والإجازات',
+        icon: '📋',
+        badge: resignationBadgeCount,
+        children: [
+          {
+            id: 'leaves',
+            targetTab: 'leaves',
+            label: 'رصيد وسجل الإجازات',
+            icon: '🏖️',
+            desc: 'تقديم ومتابعة الإجازات السنوية والرصيد المتبقي',
+            visible: !isAllBranchesSelected && canApplyLeave !== false
+          },
+          {
+            id: 'permissions',
+            targetTab: 'permissions',
+            label: 'أذونات وساعات الاستئذان',
+            icon: '⏰',
+            desc: 'طلب إذن استئذان رسمي وتتبع الساعات المعتمدة',
+            visible: !isAllBranchesSelected && canApplyPermission !== false
+          },
+          {
+            id: 'resignations',
+            targetTab: 'resignations',
+            label: 'طلبات الاستقالة وإخلاء الطرف',
+            icon: '🚪',
+            badge: resignationBadgeCount,
+            desc: 'تقديم طلب الاستقالة ومتابعة فترة الإشعار',
+            visible: !isAllBranchesSelected
+          }
+        ].filter(item => item.visible !== false)
+      },
+      {
+        id: 'bylaws-group',
+        label: 'التقييمات واللائحة',
+        icon: '📜',
+        badge: empPenaltiesCount,
+        children: [
+          {
+            id: 'evaluations',
+            targetTab: 'evaluations',
+            label: 'تقييمات الأداء والشكاوى',
+            icon: '⭐',
+            desc: 'متابعة تقييم الأداء الشهري وتقديم الشكاوى والتظلمات',
+            visible: canSubmitComplaint !== false
+          },
+          {
+            id: 'bylaws',
+            targetTab: 'bylaws',
+            label: 'لائحة العمل والجزاءات',
+            icon: '⚖️',
+            badge: empPenaltiesCount,
+            desc: 'بنود اللائحة المعتمدة، شرائح التأخير، وسجل المخالفات',
+            visible: canViewBylaws !== false
+          }
+        ].filter(item => item.visible !== false)
+      }
+    ];
+  }, [
+    emp,
+    selectedBranchId,
+    canViewSalary,
+    canViewAdjustments,
+    canApplyLoan,
+    canViewRoster,
+    canApplySwap,
+    canApplyLeave,
+    canApplyPermission,
+    canSubmitComplaint,
+    canViewBylaws,
+    empAdjs.length,
+    empShifts.length,
+    resignationBadgeCount,
+    empPenaltiesCount
+  ]);
+
+  const handleMenuClick = (menu) => {
+    if (menu.isSingle) {
+      setActiveTab(menu.targetTab);
+      setOpenDropdown(null);
+    } else {
+      setOpenDropdown(prev => (prev === menu.id ? null : menu.id));
+    }
+  };
+
+  const handleSubItemClick = (subItem) => {
+    if (subItem.action === 'print_payslip') {
+      setShowPrintModal(true);
+      setOpenDropdown(null);
+      setIsMobileDrawerOpen(false);
+      return;
+    }
+    if (subItem.targetTab) {
+      setActiveTab(subItem.targetTab);
+      setOpenDropdown(null);
+      setIsMobileDrawerOpen(false);
+    }
+  };
+
+  const isMenuGroupActive = (menu) => {
+    if (menu.isSingle) {
+      return activeTab === menu.targetTab;
+    }
+    if (menu.children) {
+      return menu.children.some(child => child.targetTab === activeTab);
+    }
+    return false;
+  };
+
+  const getActiveBreadcrumb = () => {
+    if (activeTab === 'dashboard') return { group: 'لوحة التحكم', item: 'الرئيسية', icon: '📊' };
+    if (['salary', 'adjustments', 'loans'].includes(activeTab)) {
+      const itemMap = {
+        salary: { name: 'تفاصيل ومسير الراتب', icon: '💵' },
+        adjustments: { name: 'المكافآت والخصومات والتسويات', icon: '🎁' },
+        loans: { name: 'السلف والأدوية الآجل', icon: '💳' }
+      };
+      return { group: 'الرواتب والمالية', item: itemMap[activeTab]?.name || activeTab, icon: itemMap[activeTab]?.icon || '💼' };
+    }
+    if (['shifts', 'roster', 'swaps'].includes(activeTab)) {
+      const itemMap = {
+        shifts: { name: 'سجل البصمات وساعات العمل', icon: '📋' },
+        roster: { name: 'الجدول الشهري ومناوبات العمل', icon: '🗓️' },
+        swaps: { name: 'تبديل ونقل الشيفتات', icon: '🔄' }
+      };
+      return { group: 'الدوام والورديات', item: itemMap[activeTab]?.name || activeTab, icon: itemMap[activeTab]?.icon || '⏱️' };
+    }
+    if (['leaves', 'permissions', 'resignations'].includes(activeTab)) {
+      const itemMap = {
+        leaves: { name: 'رصيد وسجل الإجازات', icon: '🏖️' },
+        permissions: { name: 'أذونات وساعات الاستئذان', icon: '⏰' },
+        resignations: { name: 'طلبات الاستقالة وإخلاء الطرف', icon: '🚪' }
+      };
+      return { group: 'الطلبات والإجازات', item: itemMap[activeTab]?.name || activeTab, icon: itemMap[activeTab]?.icon || '📋' };
+    }
+    if (['evaluations', 'bylaws'].includes(activeTab)) {
+      const itemMap = {
+        evaluations: { name: 'تقييمات الأداء والشكاوى', icon: '⭐' },
+        bylaws: { name: 'لائحة العمل والجزاءات', icon: '⚖️' }
+      };
+      return { group: 'التقييمات واللائحة', item: itemMap[activeTab]?.name || activeTab, icon: itemMap[activeTab]?.icon || '📜' };
+    }
+    return { group: 'بوابة الموظف', item: activeTab, icon: '👤' };
+  };
+
+  const breadcrumb = getActiveBreadcrumb();
+
+  // ── Employee Portal Modern Titlebar + Menubar + Drawer + Content Layout ──
   return (
-    <div className="ep-layout" style={{
-      display: 'flex',
-      gap: 0,
-      minHeight: '80vh',
-      background: 'var(--background)',
-      borderRadius: '16px',
-      overflow: 'hidden',
-      border: '1px solid var(--border)',
-      boxShadow: '0 4px 24px rgba(0,0,0,0.06)'
-    }}>
+    <div className="ep-app-container">
 
-      {/* ── Sidebar ── */}
-      <aside
-        className="ep-sidebar"
-        style={{
-          width: sidebarOpen ? '220px' : '60px',
-          minWidth: sidebarOpen ? '220px' : '60px',
-          background: 'var(--surface)',
-          borderLeft: '1px solid var(--border)',
-          display: 'flex',
-          flexDirection: 'column',
-          transition: 'width 0.25s ease, min-width 0.25s ease',
-          overflow: 'hidden',
-          flexShrink: 0
-        }}
-      >
-        {/* Sidebar Header (Employee Info) */}
-        <div style={{
-          padding: sidebarOpen ? '18px 16px 14px' : '18px 8px 14px',
-          borderBottom: '1px solid var(--border)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px',
-          flexWrap: 'nowrap',
-          overflow: 'hidden'
-        }}>
-          <div
-            className="emp-avatar-circle"
-            style={{ width: '40px', height: '40px', fontSize: '18px', flexShrink: 0, cursor: 'pointer' }}
-            onClick={() => setSidebarOpen(v => !v)}
-            title={sidebarOpen ? 'طيّ القائمة' : 'توسيع القائمة'}
-          >
-            {emp.photoUrl
-              ? <img src={emp.photoUrl} alt={getEmpDisplayName(emp)} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
-              : <span>{getEmpDisplayName(emp).charAt(0)}</span>
-            }
-          </div>
-          {sidebarOpen && (
-            <div style={{ overflow: 'hidden', minWidth: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: '13px', color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {getEmpDisplayName(emp)}
-              </div>
-              <div style={{ fontSize: '11px', color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {emp.jobTitle} · {emp.code}
-                {emp.nickname && emp.nickname.trim() !== emp.name?.trim() && ` (${emp.name})`}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Nav Items & Direct Actions */}
-        <nav style={{ flex: 1, padding: '10px 0', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            {NAV_ITEMS.filter((item) => {
-              const isMultiBranchEmp = emp?.branchesDetails && emp.branchesDetails.length > 1;
-              // Requirement 3: When All Branches is selected, ONLY show dashboard, salary, evaluations, bylaws
-              if (isMultiBranchEmp && !selectedBranchId) {
-                return ['dashboard', 'salary', 'evaluations', 'bylaws'].includes(item.id);
-              }
-              if (item.id === 'salary' && canViewSalary === false) return false;
-              if (item.id === 'adjustments' && canViewAdjustments === false) return false;
-              if (item.id === 'loans' && canApplyLoan === false) return false;
-              if (item.id === 'leaves' && canApplyLeave === false) return false;
-              if (item.id === 'permissions' && canApplyPermission === false) return false;
-              if ((item.id === 'swap' || item.id === 'swaps') && canApplySwap === false) return false;
-              if (item.id === 'bylaws' && canViewBylaws === false) return false;
-              if (item.id === 'evaluations' && canSubmitComplaint === false) return false;
-              if (item.id === 'roster' && canViewRoster === false) return false;
-              return true;
-            }).map((item) => {
-              const isActive = activeTab === item.id;
-              // Badge count
-              let badge = 0;
-              if (item.id === 'adjustments') badge = empAdjs.length;
-              if (item.id === 'shifts') badge = empShifts.length;
-              if (item.id === 'resignations') badge = resignationBadgeCount;
-
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => setActiveTab(item.id)}
-                  title={item.label}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '10px',
-                    width: '100%',
-                    padding: sidebarOpen ? '10px 16px' : '10px',
-                    justifyContent: sidebarOpen ? 'flex-start' : 'center',
-                    background: isActive ? 'var(--primary)' : 'transparent',
-                    color: isActive ? '#fff' : 'var(--text)',
-                    border: 'none',
-                    borderRadius: '0',
-                    cursor: 'pointer',
-                    fontSize: '13px',
-                    fontWeight: isActive ? 700 : 500,
-                    transition: 'background 0.15s, color 0.15s',
-                    textAlign: 'right',
-                    position: 'relative',
-                    borderRight: isActive ? '3px solid var(--primary-dark)' : '3px solid transparent',
-                  }}
-                  onMouseEnter={(e) => { if (!isActive) { e.currentTarget.style.background = 'var(--hover)'; } }}
-                  onMouseLeave={(e) => { if (!isActive) { e.currentTarget.style.background = 'transparent'; } }}
-                >
-                  <span style={{ fontSize: '17px', flexShrink: 0 }}>{item.icon}</span>
-                  {sidebarOpen && (
-                    <>
-                      <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.label}</span>
-                      {badge > 0 && (
-                        <span style={{ background: isActive ? 'rgba(255,255,255,0.3)' : 'var(--primary)', color: isActive ? '#fff' : '#fff', fontSize: '10px', fontWeight: 700, padding: '1px 6px', borderRadius: '99px', flexShrink: 0 }}>
-                          {badge}
-                        </span>
-                      )}
-                    </>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Action Buttons directly below menu items */}
-          <div style={{
-            padding: sidebarOpen ? '12px 10px 8px' : '12px 6px 8px',
-            marginTop: '8px',
-            borderTop: '1px solid var(--border)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '6px'
-          }}>
-            {/* Export button */}
-            <button
-              onClick={() => {
-                if (!canExportExcel) { showToast('❌ تصدير Excel مقيد من الأدمن'); return; }
-                setShowExportModal(true);
-              }}
-              title="تصدير كشف المرتب Excel"
-              style={{
-                display: 'flex', alignItems: 'center', gap: '8px',
-                justifyContent: sidebarOpen ? 'flex-start' : 'center',
-                padding: sidebarOpen ? '8px 12px' : '8px',
-                background: 'var(--surface-muted)', border: '1px solid var(--border)',
-                borderRadius: '8px', cursor: canExportExcel ? 'pointer' : 'not-allowed',
-                opacity: canExportExcel ? 1 : 0.5, fontSize: '12.5px', color: 'var(--text)',
-                fontWeight: 600, transition: 'all 0.15s'
-              }}
-            >
-              <span>📥</span>
-              {sidebarOpen && <span>تصدير Excel</span>}
-            </button>
-
-            {/* Logout button */}
-            <button
-              onClick={() => {
-                if (typeof handleLogout === 'function') {
-                  handleLogout();
-                } else {
-                  setCurrentEmpUser(null);
-                }
-              }}
-              title="تسجيل الخروج"
-              style={{
-                display: 'flex', alignItems: 'center', gap: '8px',
-                justifyContent: sidebarOpen ? 'flex-start' : 'center',
-                padding: sidebarOpen ? '8px 12px' : '8px',
-                background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
-                borderRadius: '8px', cursor: 'pointer', fontSize: '12.5px', color: 'var(--danger)',
-                fontWeight: 600, transition: 'all 0.15s'
-              }}
-            >
-              <span>🚪</span>
-              {sidebarOpen && <span>تسجيل الخروج</span>}
-            </button>
-          </div>
-        </nav>
-      </aside>
-
-      {/* ── Main Content ── */}
-      <main style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-
-        {/* Top bar */}
-        <div style={{
-          padding: '14px 20px',
-          borderBottom: '1px solid var(--border)',
-          background: 'var(--surface)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '12px',
-          flexWrap: 'wrap'
-        }}>
+      {/* ══════════════════════════════════════════════════════════════════════════════ */}
+      {/* ── 1. TOP TITLE BAR (Brand, Profile Badge, Synced Clock, Notif, Theme, Out) ── */}
+      {/* ══════════════════════════════════════════════════════════════════════════════ */}
+      <header className="ep-titlebar">
+        {/* Right Side (Start in RTL): Brand, Profile Badge & Breadcrumb */}
+        <div className="ep-titlebar-right">
+          {/* Mobile Hamburger Button */}
           <button
-            onClick={() => setSidebarOpen(v => !v)}
-            style={{ background: 'none', border: '1px solid var(--border)', borderRadius: '6px', padding: '5px 10px', cursor: 'pointer', fontSize: '16px', color: 'var(--text)' }}
-            title={sidebarOpen ? 'إخفاء القائمة' : 'إظهار القائمة'}
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => setIsMobileDrawerOpen(true)}
+            style={{ display: 'none', padding: '6px 9px', fontSize: '18px', border: '1px solid var(--border)' }}
+            title="فتح القائمة"
+            id="ep-mobile-hamburger-btn"
           >
             ☰
           </button>
-          <div style={{ flex: 1 }}>
-            <h2 style={{ margin: 0, fontSize: '16px', fontWeight: 700 }}>
-              {NAV_ITEMS.find(n => n.id === activeTab)?.icon}{' '}
-              {NAV_ITEMS.find(n => n.id === activeTab)?.label}
-            </h2>
+
+          {/* App Logo */}
+          <div className="ep-logo-badge">
+            🏥
           </div>
-          {/* Month selector in top bar */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <button className="month-nav-btn" onClick={() => setSelectedMonth(prevMonth(selectedMonth))} title="الشهر السابق">‹</button>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--text)', whiteSpace: 'nowrap' }}>
+              منظومة الموارد البشرية
+            </span>
+
+            <span style={{ color: 'var(--border)', fontSize: '15px' }} className="ep-divider-slash">/</span>
+
+            {/* Employee Profile Badge */}
+            <div className="ep-profile-badge">
+              <div className="ep-profile-avatar">
+                {emp.photoUrl ? (
+                  <img src={emp.photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ) : (
+                  getEmpDisplayName(emp).charAt(0)
+                )}
+              </div>
+
+              <div className="ep-profile-info">
+                <span className="ep-profile-name">
+                  👤 {getEmpDisplayName(emp)}
+                </span>
+                <span className="ep-profile-title">
+                  {emp.jobTitle} · 🆔 {emp.code}
+                </span>
+              </div>
+            </div>
+
+            {/* Leave Balance Pill */}
+            <div className="ep-leave-pill" title="رصيد الإجازات السنوية المتاح">
+              <span>🏖️</span>
+              <span>{emp.annualLeaveBalance !== undefined ? emp.annualLeaveBalance : 21} يوم</span>
+            </div>
+
+            {/* Privacy Mode Toggle */}
+            <button
+              type="button"
+              onClick={togglePrivacyMode}
+              title={isPrivacyMode ? 'إظهار الأرقام المالية' : 'إخفاء الأرقام المالية (وضع الخصوصية)'}
+              style={{
+                background: isPrivacyMode ? 'rgba(239, 68, 68, 0.1)' : 'var(--surface-muted)',
+                border: '1px solid var(--border)',
+                borderRadius: '8px',
+                padding: '4px 8px',
+                cursor: 'pointer',
+                fontSize: '13px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                color: isPrivacyMode ? 'var(--danger)' : 'var(--text)'
+              }}
+            >
+              <span>{isPrivacyMode ? '🙈' : '👁️'}</span>
+            </button>
+
+            {/* Multi-Branch Selector if applicable */}
+            {emp.branchesDetails && emp.branchesDetails.length > 1 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <select
+                  value={selectedBranchId}
+                  onChange={(e) => setSelectedBranchId(e.target.value)}
+                  style={{
+                    padding: '4px 10px',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                    border: '1px solid var(--primary)',
+                    background: 'var(--primary-tint)',
+                    color: 'var(--primary-dark)',
+                    cursor: 'pointer',
+                    fontWeight: 700
+                  }}
+                >
+                  <option value="">🌐 جميع الفروع (ملخص شامل)</option>
+                  {emp.branchesDetails.map((bd) => {
+                    const b = state.branches?.find((br) => br.id === bd.branchId);
+                    return <option key={bd.branchId} value={bd.branchId}>📍 فرع {b?.name || bd.branchId}</option>;
+                  })}
+                </select>
+              </div>
+            )}
+
+            <span style={{ color: 'var(--border)', fontSize: '15px' }} className="ep-breadcrumb-bar">/</span>
+
+            {/* Active Breadcrumb */}
+            <div className="ep-breadcrumb-bar">
+              <span>{breadcrumb.icon}</span>
+              <span style={{ fontWeight: 700, color: 'var(--primary)' }}>{breadcrumb.group}</span>
+              {breadcrumb.item && (
+                <>
+                  <span style={{ fontSize: '11px' }}>›</span>
+                  <span style={{ fontWeight: 600, color: 'var(--text)' }}>{breadcrumb.item}</span>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Left Side: Live Synced Clock, Period Filter, Excel Export, Notifs, Theme, Logout */}
+        <div className="ep-titlebar-left">
+          {/* Synced Real-time Live Clock */}
+          <div className="ep-live-clock" title={liveTime.isServerSynced ? '🌐 التوقيت الفعلي الموثق من الخادم' : '⏱️ التوقيت المباشر'}>
+            <span className="ep-clock-dot" style={{ background: liveTime.isServerSynced ? '#22c55e' : '#f59e0b' }} />
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: '1.2' }}>
+              <span style={{ fontWeight: 'bold', color: 'var(--primary)', fontFamily: 'monospace', fontSize: '11px' }}>
+                ⏰ {liveTime.formatted12Time}
+              </span>
+              <span style={{ color: 'var(--text-muted)', fontSize: '9.5px' }}>
+                {liveTime.fullArabicDate}
+              </span>
+            </div>
+          </div>
+
+          {/* Month / Period Picker in Titlebar */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            background: 'var(--surface-muted)',
+            padding: '3px 8px',
+            borderRadius: '8px',
+            border: '1px solid var(--border)'
+          }}>
+            <button className="month-nav-btn" style={{ width: '24px', height: '24px', fontSize: '1rem' }} onClick={() => setSelectedMonth(prevMonth(selectedMonth))} title="الشهر السابق">‹</button>
             <input
               type="month"
               value={selectedMonth}
               onChange={(e) => e.target.value && setSelectedMonth(e.target.value)}
-              style={{ padding: '5px 10px', borderRadius: '8px', fontSize: '13px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer' }}
+              style={{ padding: '2px 6px', borderRadius: '6px', fontSize: '11.5px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer', fontWeight: 'bold' }}
             />
-            <button
-              className="month-nav-btn"
-              onClick={() => setSelectedMonth(nextMonth(selectedMonth))}
-            >›</button>
+            <button className="month-nav-btn" style={{ width: '24px', height: '24px', fontSize: '1rem' }} onClick={() => setSelectedMonth(nextMonth(selectedMonth))} title="الشهر التالي">›</button>
             {selectedMonth !== activeAutoCycleMonth && (
-              <button className="emp-month-today-btn" onClick={() => setSelectedMonth(activeAutoCycleMonth)}>⟳ الدورة الحالية</button>
+              <button
+                className="emp-month-today-btn"
+                style={{ padding: '2px 8px', fontSize: '11px', borderRadius: '6px' }}
+                onClick={() => setSelectedMonth(activeAutoCycleMonth)}
+              >
+                ⟳ الدورة
+              </button>
             )}
-            <span style={{
-              fontSize: '11px',
-              background: 'var(--surface-muted)',
-              padding: '3px 8px',
-              borderRadius: '6px',
-              border: '1px solid var(--border)',
-              color: 'var(--primary)',
-              fontWeight: 'bold'
-            }}>
-              {empCycleRange.shortLabel}
-            </span>
           </div>
-          
-          {/* Branch selector if multiple branches exist */}
-          {emp.branchesDetails && emp.branchesDetails.length > 1 && (
-             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-               <select 
-                 value={selectedBranchId}
-                 onChange={(e) => setSelectedBranchId(e.target.value)}
-                 style={{ padding: '6px 12px', borderRadius: '8px', fontSize: '13px', border: '1px solid var(--primary)', background: 'var(--primary-tint)', color: 'var(--primary-dark)', cursor: 'pointer', fontWeight: 600 }}
-               >
-                 <option value="">جميع الفروع (ملخص شامل)</option>
-                 {emp.branchesDetails.map(bd => {
-                   const b = state.branches?.find(br => br.id === bd.branchId);
-                   const manager = state.employees?.find(e => e.id === b?.managerId);
-                   const label = b?.name ? `${b.name} (مدير الفرع: ${manager?.name || 'غير محدد'})` : 'فرع غير معروف';
-                   return <option key={bd.branchId} value={bd.branchId}>{label}</option>;
-                 })}
-               </select>
-             </div>
-          )}
-        </div>
 
-        {/* Scrollable content area */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
+          {/* Excel Export Quick Button */}
+          {canExportExcel && (
+            <button
+              type="button"
+              onClick={() => setShowExportModal(true)}
+              title="تصدير كشف الراتب Excel"
+              style={{
+                background: 'var(--success-tint, #dcfce7)',
+                color: 'var(--success-dark, #15803d)',
+                border: '1px solid var(--success-border, #86efac)',
+                padding: '5px 10px',
+                borderRadius: '8px',
+                fontSize: '12px',
+                fontWeight: 700,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                cursor: 'pointer',
+                transition: 'all 0.15s'
+              }}
+            >
+              <span>📥</span>
+              <span className="ep-btn-label">تصدير Excel</span>
+            </button>
+          )}
+
+          {/* 🔔 Notification Bell & Interactive Dropdown Menu */}
+          <div style={{ position: 'relative' }} ref={notifDropdownRef}>
+            <button
+              type="button"
+              onClick={() => setIsNotifDropdownOpen(prev => !prev)}
+              title="الإشعارات والتنبيهات"
+              style={{
+                position: 'relative',
+                border: isNotifDropdownOpen ? '1.5px solid var(--primary)' : '1px solid var(--border)',
+                background: isNotifDropdownOpen ? 'var(--primary-light)' : 'var(--surface)',
+                padding: '5px 9px',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontSize: '13px',
+                color: 'var(--text)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <span>🔔</span>
+              {empUnreadNotifsCount > 0 && (
+                <span style={{
+                  background: 'var(--danger, #dc2626)',
+                  color: '#ffffff',
+                  padding: '1px 6px',
+                  borderRadius: '99px',
+                  fontSize: '10px',
+                  fontWeight: 800,
+                  boxShadow: '0 1px 4px rgba(220,38,38,0.4)',
+                  animation: 'pulse 2s infinite'
+                }}>
+                  {empUnreadNotifsCount}
+                </span>
+              )}
+            </button>
+
+            {/* Notification Dropdown Panel */}
+            {isNotifDropdownOpen && (
+              <div className="ep-notif-panel">
+                <div className="ep-notif-header">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--text)' }}>
+                      🔔 إشعارات الموظف
+                    </span>
+                    {empUnreadNotifsCount > 0 && (
+                      <span style={{ background: '#fee2e2', color: '#dc2626', fontSize: '10.5px', fontWeight: 800, padding: '1px 6px', borderRadius: '8px' }}>
+                        {empUnreadNotifsCount} غير مقروء
+                      </span>
+                    )}
+                  </div>
+                  {empUnreadNotifsCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleMarkAllNotifsRead}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: 'var(--primary, #0f766e)',
+                        fontSize: '11.5px',
+                        fontWeight: 'bold',
+                        cursor: 'pointer',
+                        padding: '2px 6px'
+                      }}
+                    >
+                      ✓ تحديد الكل كمقروء
+                    </button>
+                  )}
+                </div>
+
+                <div className="ep-notif-list">
+                  {empNotifications.length === 0 ? (
+                    <div style={{ padding: '28px 16px', textAlign: 'center', color: 'var(--muted)', fontSize: '12.5px' }}>
+                      🎉 لا توجد إشعارات جديدة حالياً
+                    </div>
+                  ) : (
+                    empNotifications.slice(0, 20).map((n) => {
+                      const isUnread = !n.read;
+                      return (
+                        <div key={n.id} className={`ep-notif-card ${isUnread ? 'unread' : ''}`}>
+                          <span style={{ fontSize: '18px', marginTop: '2px' }}>
+                            {n.icon || (n.type === 'loan' ? '💳' : n.type === 'leave' ? '🏖️' : n.type === 'permission' ? '⏰' : n.type === 'swap' ? '🔄' : '🔔')}
+                          </span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '6px' }}>
+                              <h5 className="ep-notif-title">
+                                <span>{n.title || n.typeLabel || 'إشعار إداري'}</span>
+                                {n.approverRole && (
+                                  <span style={{
+                                    fontSize: '10px',
+                                    fontWeight: 700,
+                                    padding: '1px 6px',
+                                    borderRadius: '6px',
+                                    background: n.action === 'rejected' ? '#fee2e2' : '#dcfce7',
+                                    color: n.action === 'rejected' ? '#dc2626' : '#15803d',
+                                    marginRight: '6px'
+                                  }}>
+                                    {n.approverRole === 'admin' ? 'الإدارة العليا' : 'مدير الفرع'}
+                                  </span>
+                                )}
+                              </h5>
+                              {isUnread && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleMarkNotifRead(n.id)}
+                                  title="تحديد كمقروء"
+                                  style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    color: 'var(--primary, #0f766e)',
+                                    fontSize: '11.5px',
+                                    cursor: 'pointer',
+                                    padding: '0 4px',
+                                    fontWeight: 'bold',
+                                    whiteSpace: 'nowrap'
+                                  }}
+                                >
+                                  ✓ تم
+                                </button>
+                              )}
+                            </div>
+                            <p className="ep-notif-body">
+                              {n.message || n.body || n.details || ''}
+                            </p>
+                            <div className="ep-notif-meta">
+                              <span>🕒 {n.date || (n.timestamp ? n.timestamp.slice(0, 10) : '')}</span>
+                              {n.typeLabel && <span>📂 {n.typeLabel}</span>}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Theme Toggle Button */}
+          {toggleTheme && (
+            <button
+              type="button"
+              onClick={toggleTheme}
+              title={themeMode === 'dark' ? 'التحويل للوضع الفاتح' : 'التحويل للوضع الداكن'}
+              style={{
+                border: '1px solid var(--border)',
+                background: 'var(--surface)',
+                padding: '5px 9px',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontSize: '13px',
+                color: 'var(--text)',
+                display: 'flex',
+                alignItems: 'center'
+              }}
+            >
+              <span>{themeMode === 'dark' ? '☀️' : '🌙'}</span>
+            </button>
+          )}
+
+          {/* Logout Button */}
+          <button
+            type="button"
+            onClick={() => {
+              if (typeof handleLogout === 'function') handleLogout();
+              else setCurrentEmpUser(null);
+            }}
+            title="تسجيل الخروج"
+            style={{
+              border: '1px solid var(--danger-border, #fca5a5)',
+              background: 'var(--danger-light, #fee2e2)',
+              color: 'var(--danger, #dc2626)',
+              padding: '5px 10px',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontSize: '12px',
+              fontWeight: 700,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              transition: 'all 0.15s'
+            }}
+          >
+            <span>🚪</span>
+            <span className="ep-btn-label">خروج</span>
+          </button>
+        </div>
+      </header>
+
+      {/* ══════════════════════════════════════════════════════════════════════════════ */}
+      {/* ── 2. TOP RIBBON MENUBAR (Categorized Dropdown Navigation) ── */}
+      {/* ══════════════════════════════════════════════════════════════════════════════ */}
+      <nav ref={menuContainerRef} className="ep-menubar">
+        {employeeMenuItems.map((menu) => {
+          const isActive = isMenuGroupActive(menu);
+          const isOpen = openDropdown === menu.id;
+
+          return (
+            <div key={menu.id} style={{ position: 'relative' }}>
+              <button
+                type="button"
+                className={`ep-menu-btn ${isActive ? 'active' : ''} ${isOpen ? 'open' : ''}`}
+                onClick={() => handleMenuClick(menu)}
+              >
+                <span style={{ fontSize: '15px' }}>{menu.icon}</span>
+                <span>{menu.label}</span>
+
+                {!menu.isSingle && (
+                  <span style={{
+                    fontSize: '10px',
+                    opacity: isActive ? 0.9 : 0.6,
+                    transform: isOpen ? 'rotate(180deg)' : 'none',
+                    transition: 'transform 0.2s ease'
+                  }}>
+                    ▼
+                  </span>
+                )}
+
+                {menu.badge > 0 && (
+                  <span className="ep-menu-badge">
+                    {menu.badge}
+                  </span>
+                )}
+              </button>
+
+              {/* Dropdown Popup Menu */}
+              {!menu.isSingle && isOpen && menu.children && (
+                <div className="ep-dropdown-panel">
+                  {menu.children.map((child) => {
+                    const isChildActive = child.targetTab === activeTab;
+
+                    return (
+                      <button
+                        key={child.id}
+                        type="button"
+                        className={`ep-dropdown-item ${isChildActive ? 'active' : ''}`}
+                        onClick={() => handleSubItemClick(child)}
+                      >
+                        <span className="ep-dropdown-item-icon">{child.icon}</span>
+                        <div style={{ flex: 1, overflow: 'hidden' }}>
+                          <div className="ep-dropdown-item-title">
+                            <span>{child.label}</span>
+                            {child.badge > 0 && (
+                              <span style={{ background: 'var(--danger)', color: '#fff', fontSize: '10px', fontWeight: 800, padding: '1px 5px', borderRadius: '99px' }}>
+                                {child.badge}
+                              </span>
+                            )}
+                          </div>
+                          {child.desc && (
+                            <p className="ep-dropdown-item-desc">{child.desc}</p>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </nav>
+
+      {/* ══════════════════════════════════════════════════════════════════════════════ */}
+      {/* ── 3. MOBILE OFF-CANVAS DRAWER ── */}
+      {/* ══════════════════════════════════════════════════════════════════════════════ */}
+      {isMobileDrawerOpen && (
+        <div className="ep-drawer-overlay" onClick={() => setIsMobileDrawerOpen(false)}>
+          <div className="ep-drawer" onClick={(e) => e.stopPropagation()}>
+            <div className="ep-drawer-header">
+              <button
+                type="button"
+                className="ep-drawer-close-btn"
+                onClick={() => setIsMobileDrawerOpen(false)}
+              >
+                ✕
+              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '6px' }}>
+                <div className="ep-profile-avatar" style={{ width: '42px', height: '42px', fontSize: '16px' }}>
+                  {emp.photoUrl ? (
+                    <img src={emp.photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ) : (
+                    getEmpDisplayName(emp).charAt(0)
+                  )}
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 800, color: '#ffffff' }}>
+                    {getEmpDisplayName(emp)}
+                  </h3>
+                  <p style={{ margin: '2px 0 0', fontSize: '11.5px', opacity: 0.9 }}>
+                    {emp.jobTitle} · 🆔 {emp.code}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="ep-drawer-body">
+              {employeeMenuItems.map((menu) => {
+                if (menu.isSingle) {
+                  const isActive = activeTab === menu.targetTab;
+                  return (
+                    <button
+                      key={menu.id}
+                      type="button"
+                      className={`ep-drawer-sub-item ${isActive ? 'active' : ''}`}
+                      onClick={() => {
+                        setActiveTab(menu.targetTab);
+                        setIsMobileDrawerOpen(false);
+                      }}
+                      style={{ padding: '10px 14px', fontSize: '14px' }}
+                    >
+                      <span style={{ fontSize: '18px' }}>{menu.icon}</span>
+                      <span style={{ fontWeight: 700 }}>{menu.label}</span>
+                    </button>
+                  );
+                }
+
+                const isExpanded = drawerExpandedGroup === menu.id;
+                const isGroupActive = isMenuGroupActive(menu);
+
+                return (
+                  <div key={menu.id} style={{ borderBottom: '1px solid var(--border-light, rgba(0,0,0,0.05))', paddingBottom: '4px' }}>
+                    <button
+                      type="button"
+                      className={`ep-drawer-accordion-btn ${isExpanded ? 'open' : ''}`}
+                      onClick={() => setDrawerExpandedGroup(prev => prev === menu.id ? null : menu.id)}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <span style={{ fontSize: '17px' }}>{menu.icon}</span>
+                        <span style={{ color: isGroupActive ? 'var(--primary)' : 'inherit' }}>{menu.label}</span>
+                      </div>
+                      <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
+                        {isExpanded ? '▲' : '▼'}
+                      </span>
+                    </button>
+
+                    {isExpanded && menu.children && (
+                      <div className="ep-drawer-accordion-content">
+                        {menu.children.map((child) => {
+                          const isChildActive = child.targetTab === activeTab;
+                          return (
+                            <button
+                              key={child.id}
+                              type="button"
+                              className={`ep-drawer-sub-item ${isChildActive ? 'active' : ''}`}
+                              onClick={() => handleSubItemClick(child)}
+                            >
+                              <span style={{ fontSize: '16px' }}>{child.icon}</span>
+                              <span style={{ flex: 1 }}>{child.label}</span>
+                              {child.badge > 0 && (
+                                <span style={{ background: 'var(--danger)', color: '#fff', fontSize: '10px', fontWeight: 800, padding: '1px 5px', borderRadius: '99px' }}>
+                                  {child.badge}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{ padding: '14px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <button
+                type="button"
+                onClick={togglePrivacyMode}
+                className="btn btn-outline"
+                style={{ width: '100%', justifyContent: 'center', fontSize: '13px' }}
+              >
+                {isPrivacyMode ? '🙈 وضع الخصوصية مفعل' : '👁️ تفعيل وضع الخصوصية'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (typeof handleLogout === 'function') handleLogout();
+                  else setCurrentEmpUser(null);
+                }}
+                className="btn"
+                style={{ width: '100%', justifyContent: 'center', background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5', fontSize: '13px', fontWeight: 700 }}
+              >
+                🚪 تسجيل الخروج
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════════════════ */}
+      {/* ── 4. MOBILE BOTTOM NAVIGATION BAR ── */}
+      {/* ══════════════════════════════════════════════════════════════════════════════ */}
+      <nav className="ep-bottom-nav">
+        <button
+          type="button"
+          className={`ep-bottom-nav-btn ${activeTab === 'dashboard' ? 'active' : ''}`}
+          onClick={() => setActiveTab('dashboard')}
+        >
+          <span className="ep-bottom-nav-icon">🏠</span>
+          <span>الرئيسية</span>
+        </button>
+
+        <button
+          type="button"
+          className={`ep-bottom-nav-btn ${activeTab === 'shifts' ? 'active' : ''}`}
+          onClick={() => setActiveTab('shifts')}
+        >
+          <span className="ep-bottom-nav-icon">⏱️</span>
+          <span>الدوام</span>
+        </button>
+
+        <button
+          type="button"
+          className={`ep-bottom-nav-btn ${activeTab === 'salary' ? 'active' : ''}`}
+          onClick={() => setActiveTab('salary')}
+        >
+          <span className="ep-bottom-nav-icon">💰</span>
+          <span>الراتب</span>
+        </button>
+
+        <button
+          type="button"
+          className={`ep-bottom-nav-btn ${['leaves', 'permissions', 'loans'].includes(activeTab) ? 'active' : ''}`}
+          onClick={() => setActiveTab('leaves')}
+        >
+          <span className="ep-bottom-nav-icon">📋</span>
+          <span>الطلبات</span>
+        </button>
+
+        <button
+          type="button"
+          className="ep-bottom-nav-btn"
+          onClick={() => setIsMobileDrawerOpen(true)}
+        >
+          <span className="ep-bottom-nav-icon">☰</span>
+          <span>المزيد</span>
+        </button>
+      </nav>
+
+      {/* ══════════════════════════════════════════════════════════════════════════════ */}
+      {/* ── 5. MAIN WORKSPACE CANVAS ── */}
+      {/* ══════════════════════════════════════════════════════════════════════════════ */}
+      <main className="ep-workspace">
 
           {/* ── Active Resignation Notice Period Banner ── */}
           {activeResignationNotice && activeResignationNotice.remainingDays > 0 && (
@@ -1938,13 +2646,13 @@ export default function EmployeePortalView({
 
                         <div className="ep-summary-grid">
                           <SummaryCard icon="⏱️" label="إجمالي ساعات العمل" value={`${fmt(bSummary.hours)} ساعة`} sub={`من أصل ${bReqHours} ساعة مطلوبة بالفرع`} />
-                          <SummaryCard icon="💰" label="سعر الساعة الشهرية (المدخل)" value={canViewSalary ? `${fmt(bSalary)} ج.م / س` : '🔒 مقيد'} sub={canViewSalary ? `الراتب الشهري: ${fmt(bMonthlySalary)} ج.م` : '🔒 مقيد'} />
-                          <SummaryCard icon="📅" label="سعر اليوم (المحسوب)" value={canViewSalary ? `${fmt(bSummary.dailyRate)} ج.م / يوم` : '🔒 مقيد'} sub={canViewSalary ? `(الراتب الشهري ÷ ${bDaysPerMonth} يوم)` : '🔒 مقيد'} />
-                          <SummaryCard icon="💵" label="سعر الساعة اليومي" value={canViewSalary ? `${fmt(bSummary.rate || bSalary)} ج.م / س` : '🔒 مقيد'} sub={canViewSalary ? "المُدخل من الإدارة العليا" : '🔒 مقيد'} />
-                          <SummaryCard icon="💰" label="المستحقات الأساسية (أجر الساعات)" value={canViewSalary ? `${fmt(bSummary.baseEarnings)} ج.م` : '🔒 مقيد'} sub={canViewSalary ? `${fmt(bSummary.hours)} س × ${fmt(bSummary.rate || bSalary)} ج.م` : '🔒 مقيد'} />
-                          <SummaryCard icon="🎁" label="إجمالي المكافآت" value={canViewAdjustments ? `+${fmt(bSummary.totalBonus)} ج.م` : '🔒 مقيد'} colorVar="--success" />
-                          <SummaryCard icon="✂️" label="إجمالي الخصومات" value={canViewAdjustments ? `-${fmt(bSummary.totalDeduction)} ج.م` : '🔒 مقيد'} colorVar="--danger" />
-                          <SummaryCard icon="🏆" label={`صافي المرتب — فرع ${bName}`} value={canViewSalary ? `${fmt(bSummary.netSalary)} ج.م` : '🔒 مقيد'} colorVar="--primary" />
+                          <SummaryCard icon="💰" label="سعر الساعة الشهرية (المدخل)" value={canViewSalary ? `${fmt(bSalary)} ج.م / س` : '🔒 مقيد'} sub={canViewSalary ? `الراتب الشهري: ${fmt(bMonthlySalary)} ج.م` : '🔒 مقيد'} isPrivacy={isPrivacyMode} />
+                          <SummaryCard icon="📅" label="سعر اليوم (المحسوب)" value={canViewSalary ? `${fmt(bSummary.dailyRate)} ج.م / يوم` : '🔒 مقيد'} sub={canViewSalary ? `(الراتب الشهري ÷ ${bDaysPerMonth} يوم)` : '🔒 مقيد'} isPrivacy={isPrivacyMode} />
+                          <SummaryCard icon="💵" label="سعر الساعة اليومي" value={canViewSalary ? `${fmt(bSummary.rate || bSalary)} ج.م / س` : '🔒 مقيد'} sub={canViewSalary ? "المُدخل من الإدارة العليا" : '🔒 مقيد'} isPrivacy={isPrivacyMode} />
+                          <SummaryCard icon="💰" label="المستحقات الأساسية (أجر الساعات)" value={canViewSalary ? `${fmt(bSummary.baseEarnings)} ج.م` : '🔒 مقيد'} sub={canViewSalary ? `${fmt(bSummary.hours)} س × ${fmt(bSummary.rate || bSalary)} ج.م` : '🔒 مقيد'} isPrivacy={isPrivacyMode} />
+                          <SummaryCard icon="🎁" label="إجمالي المكافآت" value={canViewAdjustments ? `+${fmt(bSummary.totalBonus)} ج.م` : '🔒 مقيد'} colorVar="--success" isPrivacy={isPrivacyMode} />
+                          <SummaryCard icon="✂️" label="إجمالي الخصومات" value={canViewAdjustments ? `-${fmt(bSummary.totalDeduction)} ج.م` : '🔒 مقيد'} colorVar="--danger" isPrivacy={isPrivacyMode} />
+                          <SummaryCard icon="🏆" label={`صافي المرتب — فرع ${bName}`} value={canViewSalary ? `${fmt(bSummary.netSalary)} ج.م` : '🔒 مقيد'} colorVar="--primary" isPrivacy={isPrivacyMode} />
                         </div>
                       </div>
                     );
@@ -1953,16 +2661,17 @@ export default function EmployeePortalView({
               ) : (
                 <div className="ep-summary-grid">
                   <SummaryCard icon="⏱️" label="إجمالي ساعات العمل" value={`${fmt(summary.hours)} ساعة`} sub={`من أصل ${monthlyRequiredHours} ساعة مطلوبة شهرياً`} />
-                  <SummaryCard icon="💰" label="سعر الساعة الشهرية (المدخل)" value={canViewSalary ? `${fmt(currentHourlyRate)} ج.م / س` : '🔒 مقيد'} sub={canViewSalary ? `الراتب الشهري: ${fmt(currentMonthlySalary)} ج.م` : '🔒 مقيد'} />
-                  <SummaryCard icon="📅" label="سعر اليوم (المحسوب)" value={canViewSalary ? `${fmt(summary.dailyRate)} ج.م / يوم` : '🔒 مقيد'} sub={canViewSalary ? `(الراتب الشهري ÷ ${workDaysPerMonth || 26} يوم)` : '🔒 مقيد'} />
-                  <SummaryCard icon="💵" label="سعر الساعة اليومي" value={canViewSalary ? `${fmt(summary.rate || currentHourlyRate)} ج.م / س` : '🔒 مقيد'} sub={canViewSalary ? "المُدخل من الإدارة العليا" : '🔒 مقيد'} />
-                  <SummaryCard icon="💰" label="المستحقات الأساسية (أجر الساعات)" value={canViewSalary ? `${fmt(summary.baseEarnings)} ج.م` : '🔒 مقيد'} sub={canViewSalary ? `${fmt(summary.hours)} س × ${fmt(summary.rate || currentHourlyRate)} ج.م` : '🔒 مقيد'} />
+                  <SummaryCard icon="💰" label="سعر الساعة الشهرية (المدخل)" value={canViewSalary ? `${fmt(currentHourlyRate)} ج.م / س` : '🔒 مقيد'} sub={canViewSalary ? `الراتب الشهري: ${fmt(currentMonthlySalary)} ج.م` : '🔒 مقيد'} isPrivacy={isPrivacyMode} />
+                  <SummaryCard icon="📅" label="سعر اليوم (المحسوب)" value={canViewSalary ? `${fmt(summary.dailyRate)} ج.م / يوم` : '🔒 مقيد'} sub={canViewSalary ? `(الراتب الشهري ÷ ${workDaysPerMonth || 26} يوم)` : '🔒 مقيد'} isPrivacy={isPrivacyMode} />
+                  <SummaryCard icon="💵" label="سعر الساعة اليومي" value={canViewSalary ? `${fmt(summary.rate || currentHourlyRate)} ج.م / س` : '🔒 مقيد'} sub={canViewSalary ? "المُدخل من الإدارة العليا" : '🔒 مقيد'} isPrivacy={isPrivacyMode} />
+                  <SummaryCard icon="💰" label="المستحقات الأساسية (أجر الساعات)" value={canViewSalary ? `${fmt(summary.baseEarnings)} ج.م` : '🔒 مقيد'} sub={canViewSalary ? `${fmt(summary.hours)} س × ${fmt(summary.rate || currentHourlyRate)} ج.م` : '🔒 مقيد'} isPrivacy={isPrivacyMode} />
                   {(summary.approvedOvertimeHours > 0 || summary.pendingOvertimeHours > 0) && (
                     <SummaryCard
                       icon="⭐"
                       label="الوقت الإضافي"
                       value={canViewSalary ? (summary.approvedOvertimeHours > 0 ? `+${fmt(summary.overtimeEarnings)} ج.م` : 'معلق') : '🔒 مقيد'}
                       colorVar="--success"
+                      isPrivacy={isPrivacyMode}
                       sub={canViewSalary ? (
                         [
                           summary.approvedOvertimeHours > 0 && `معتمد: ${fmt(summary.approvedOvertimeHours)} س (+${fmt(summary.overtimeEarnings)} ج.م)`,
@@ -1977,6 +2686,7 @@ export default function EmployeePortalView({
                       label="إجمالي البدلات الثابتة"
                       value={canViewSalary ? `+${fmt(summary.totalAllowances)} ج.م` : '🔒 مقيد'}
                       colorVar="--success"
+                      isPrivacy={isPrivacyMode}
                       sub={canViewSalary ? [
                         summary.managementAllowance > 0 && `إدارة: ${fmt(summary.managementAllowance)}`,
                         summary.transportAllowance > 0 && `مواصلات: ${fmt(summary.transportAllowance)}`,
@@ -1986,12 +2696,12 @@ export default function EmployeePortalView({
                       ].filter(Boolean).join(' | ') : '🔒 مقيد'}
                     />
                   )}
-                  <SummaryCard icon="🎁" label="إجمالي المكافآت" value={canViewAdjustments ? `+${fmt(summary.totalBonus)} ج.م` : '🔒 مقيد'} colorVar="--success" />
-                  <SummaryCard icon="✂️" label="إجمالي الخصومات" value={canViewAdjustments ? `-${fmt(summary.totalDeduction)} ج.م` : '🔒 مقيد'} colorVar="--danger" />
+                  <SummaryCard icon="🎁" label="إجمالي المكافآت" value={canViewAdjustments ? `+${fmt(summary.totalBonus)} ج.م` : '🔒 مقيد'} colorVar="--success" isPrivacy={isPrivacyMode} />
+                  <SummaryCard icon="✂️" label="إجمالي الخصومات" value={canViewAdjustments ? `-${fmt(summary.totalDeduction)} ج.م` : '🔒 مقيد'} colorVar="--danger" isPrivacy={isPrivacyMode} />
                   {absenceDays.length > 0 && (
-                    <SummaryCard icon="🚫" label={`خصم الغياب (${absenceDays.length} يوم)`} value={canViewSalary ? `-${fmt(absenceDeduction)} ج.م` : '🔒 مقيد'} colorVar="--danger" sub="يُلغى عند اعتماد إجازة" />
+                    <SummaryCard icon="🚫" label={`خصم الغياب (${absenceDays.length} يوم)`} value={canViewSalary ? `-${fmt(absenceDeduction)} ج.م` : '🔒 مقيد'} colorVar="--danger" sub="يُلغى عند اعتماد إجازة" isPrivacy={isPrivacyMode} />
                   )}
-                  <SummaryCard icon="🏆" label={`صافي المرتب — ${lbl.arabic}`} value={canViewSalary ? `${fmt(summary.netSalary)} ج.م` : '🔒 مقيد'} colorVar="--primary" />
+                  <SummaryCard icon="🏆" label={`صافي المرتب — ${lbl.arabic}`} value={canViewSalary ? `${fmt(summary.netSalary)} ج.م` : '🔒 مقيد'} colorVar="--primary" isPrivacy={isPrivacyMode} />
                 </div>
               )}
             </div>
@@ -2755,41 +3465,55 @@ export default function EmployeePortalView({
               selectedBranchId={selectedBranchId || null}
             />
           )}
-        </div>
-      </main>
+        </main>
 
-      {/* ── Export Modal ── */}
-      {showExportModal && (
-        <div className="modal-overlay" onClick={() => setShowExportModal(false)}>
-          <div className="modal-card" style={{ maxWidth: '460px' }} onClick={(e) => e.stopPropagation()}>
-            <div className="badge-header">
-              <h3>📥 تصدير كشف المرتب — {emp.name}</h3>
-              <button className="close-btn" onClick={() => setShowExportModal(false)}>✕</button>
-            </div>
-            <div style={{ padding: '20px 0 8px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div className="field">
-                <label>نوع التصدير</label>
-                <select value={exportRangeMode} onChange={(e) => setExportRangeMode(e.target.value)}>
-                  <option value="month">الشهر المحدد حالياً ({lbl.arabic})</option>
-                  <option value="custom">فترة مخصصة</option>
-                </select>
+        {/* ── Payslip Print Modal (Global to portal) ── */}
+        <PayslipPrintModal
+          isOpen={showPrintModal}
+          onClose={() => setShowPrintModal(false)}
+          emp={emp}
+          month={selectedMonth}
+          shifts={state.shifts || []}
+          adjustments={state.adjustments || []}
+          branches={state.branches || []}
+          orgSettings={orgSettings}
+          computeEmpSummary={computeEmpSummary}
+          selectedBranchId={selectedBranchId || null}
+          state={state}
+        />
+
+        {/* ── Export Modal ── */}
+        {showExportModal && (
+          <div className="modal-overlay" onClick={() => setShowExportModal(false)}>
+            <div className="modal-card" style={{ maxWidth: '460px' }} onClick={(e) => e.stopPropagation()}>
+              <div className="badge-header">
+                <h3>📥 تصدير كشف المرتب — {emp.name}</h3>
+                <button className="close-btn" onClick={() => setShowExportModal(false)}>✕</button>
               </div>
-              {exportRangeMode === 'custom' && (
-                <>
-                  <div className="field"><label>تاريخ البداية</label><input type="date" value={exportStart} onChange={(e) => setExportStart(e.target.value)} /></div>
-                  <div className="field"><label>تاريخ النهاية</label><input type="date" value={exportEnd} onChange={(e) => setExportEnd(e.target.value)} /></div>
-                </>
-              )}
-            </div>
-            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '8px' }}>
-              <button className="btn btn-ghost" onClick={() => setShowExportModal(false)}>إلغاء</button>
-              <button className="btn btn-start" onClick={handleExportSubmit} disabled={exporting}>
-                {exporting ? '⏳ جاري التصدير...' : '📥 تصدير الملف'}
-              </button>
+              <div style={{ padding: '20px 0 8px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div className="field">
+                  <label>نوع التصدير</label>
+                  <select value={exportRangeMode} onChange={(e) => setExportRangeMode(e.target.value)}>
+                    <option value="month">الشهر المحدد حالياً ({lbl.arabic})</option>
+                    <option value="custom">فترة مخصصة</option>
+                  </select>
+                </div>
+                {exportRangeMode === 'custom' && (
+                  <>
+                    <div className="field"><label>تاريخ البداية</label><input type="date" value={exportStart} onChange={(e) => setExportStart(e.target.value)} /></div>
+                    <div className="field"><label>تاريخ النهاية</label><input type="date" value={exportEnd} onChange={(e) => setExportEnd(e.target.value)} /></div>
+                  </>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '8px' }}>
+                <button className="btn btn-ghost" onClick={() => setShowExportModal(false)}>إلغاء</button>
+                <button className="btn btn-start" onClick={handleExportSubmit} disabled={exporting}>
+                  {exporting ? '⏳ جاري التصدير...' : '📥 تصدير الملف'}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
-    </div>
-  );
-}
+        )}
+      </div>
+    );
+  }

@@ -1,107 +1,785 @@
+/* ══════════════════════════════════════════════════════════════════════════════ */
+/* ─── EMPLOYEE PORTAL MODERN DESIGN SYSTEM (Matching Senior Management) ─── */
+/* ══════════════════════════════════════════════════════════════════════════════ */
 
-/* ═══ EMPLOYEE PORTAL STYLES ═══ */
-.emp-month-bar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 22px;margin:18px 0;box-shadow:var(--shadow)}
-.emp-month-label-group{display:flex;flex-direction:column;gap:2px}
-.emp-month-label-text{font-size:.78rem;color:var(--muted);font-weight:500}
-.emp-month-name{font-family:Cairo,sans-serif;font-size:1.1rem;font-weight:700;color:var(--text);display:flex;align-items:center;gap:8px}
-.emp-month-num-badge{background:var(--primary);color:#fff;border-radius:8px;padding:1px 10px;font-size:.78rem;font-weight:600}
-.emp-month-nav{display:flex;align-items:center;gap:10px}
-.month-nav-btn{background:var(--primary-tint);border:1px solid var(--border);color:var(--primary-dark);border-radius:8px;width:34px;height:34px;font-size:1.3rem;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .2s}
-.month-nav-btn:hover:not(:disabled){background:var(--primary);color:#fff;transform:scale(1.08)}
-.month-nav-btn:disabled{cursor:not-allowed;opacity:.4}
-.month-nav-display{font-weight:600;font-size:.95rem;color:var(--muted);min-width:70px;text-align:center}
-.ep-summary-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;margin-bottom:18px}
-.ep-summary-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;display:flex;align-items:center;gap:14px;box-shadow:var(--shadow);transition:transform .2s ease}
-.ep-summary-card:hover{transform:translateY(-2px)}
-.ep-summary-icon{font-size:1.7rem;flex-shrink:0}
-.ep-summary-body{flex:1;min-width:0}
-.ep-summary-label{font-size:.78rem;color:var(--muted);margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ep-summary-value{font-size:1.15rem;font-weight:700;font-family:Cairo,sans-serif;color:var(--text)}
-.ep-summary-sub{font-size:.74rem;color:var(--muted);margin-top:2px}
-.ep-tabs{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
-.ep-tab{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:9px 18px;font-family:Tajawal,sans-serif;font-size:.92rem;font-weight:600;color:var(--muted);cursor:pointer;display:flex;align-items:center;gap:6px;transition:all .2s ease}
-.ep-tab:hover{color:var(--primary);border-color:var(--primary)}
-.ep-tab.active{background:var(--primary);color:#fff;border-color:var(--primary);box-shadow:0 4px 12px rgba(13,148,136,.3)}
-.ep-tab-badge{background:rgba(255,255,255,.3);color:#fff;border-radius:20px;padding:0 7px;font-size:.75rem;font-weight:700}
-.ep-tab:not(.active) .ep-tab-badge{background:var(--primary-tint);color:var(--primary-dark)}
-.ep-tab-content{margin-top:0}
-.ep-section-header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
-.ep-section-header h3{font-size:1rem;font-weight:700;color:var(--text)}
-.ep-count-badge{background:var(--primary-tint);color:var(--primary-dark);border-radius:20px;padding:3px 12px;font-size:.82rem;font-weight:600}
-.ep-time-badge{border-radius:6px;padding:2px 8px;font-size:.9rem;font-weight:600;font-family:monospace}
-.ep-time-in{background:var(--success-tint);color:var(--success)}
-.ep-time-out{background:var(--danger-tint);color:var(--danger)}
-.ep-break-badge{background:var(--accent-tint);color:var(--accent);border-radius:6px;padding:2px 8px;font-size:.85rem;font-weight:600}
-.ep-salary-breakdown{display:flex;flex-direction:column;gap:16px;margin-top:16px}
-.ep-breakdown-section{background:var(--bg);border:1px solid var(--border);border-radius:12px;overflow:hidden}
-.ep-breakdown-title{background:var(--primary-tint);color:var(--primary-dark);padding:10px 18px;font-weight:700;font-size:.95rem;display:flex;align-items:center;gap:8px;font-family:Cairo,sans-serif}
-.ep-breakdown-rows{padding:10px 0}
-.ep-breakdown-row{display:flex;align-items:center;justify-content:space-between;padding:8px 18px;font-size:.9rem;border-bottom:1px solid var(--border)}
-.ep-breakdown-row:last-child{border-bottom:none}
-.ep-breakdown-label{color:var(--muted);flex:1}
-.ep-breakdown-value{font-weight:600;color:var(--text);text-align:left}
-.ep-breakdown-value.highlight{color:var(--primary);font-size:1.05rem}
-.ep-breakdown-total{background:var(--primary-tint)}
-.ep-breakdown-total .ep-breakdown-label{color:var(--primary-dark);font-weight:600}
-.ep-breakdown-total .ep-breakdown-value{color:var(--primary-dark)}
-.ep-breakdown-result{background:linear-gradient(90deg,var(--primary-tint),transparent)}
-.ep-breakdown-formula{padding:6px 18px;font-size:.8rem;color:var(--muted);font-style:italic;border-top:1px dashed var(--border);direction:ltr;text-align:left}
-.ep-breakdown-net-section{border:2px solid var(--primary)}
-.ep-breakdown-net-section .ep-breakdown-title{background:var(--primary);color:#fff}
-.ep-net-salary-box{margin:16px 18px;background:linear-gradient(135deg,var(--primary),var(--primary-dark));border-radius:14px;padding:20px 24px;text-align:center;color:#fff;box-shadow:0 6px 24px rgba(13,148,136,.35)}
-.ep-net-label{font-size:.88rem;opacity:.85;margin-bottom:2px}
-.ep-net-month{font-size:.92rem;font-weight:600;opacity:.9;margin-bottom:8px}
-.ep-net-amount{font-family:Cairo,sans-serif;font-size:2.4rem;font-weight:700;line-height:1.1}
-.ep-net-currency{font-size:1.1rem;font-weight:500;opacity:.85}
-.ep-adj-sub-title{font-weight:700;font-size:.98rem;margin-bottom:10px;padding-bottom:6px;border-bottom:2px solid var(--border);font-family:Cairo,sans-serif}
-.ep-empty-msg{color:var(--muted);font-style:italic;padding:14px 0;font-size:.9rem}
-.ep-header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px}
-:root{--warning:#D97706;--primary-ultra-light:#f0fdf9}
-[data-theme=dark]{--warning:#F59E0B;--primary-ultra-light:#0d2920}
+:root {
+  --warning: #D97706;
+  --primary-ultra-light: #f0fdf9;
+}
 
-/* Employee Portal Responsive Enhancements */
-@media (max-width: 640px) {
-  .emp-month-bar {
-    padding: 12px 14px;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 10px;
+[data-theme="dark"] {
+  --warning: #F59E0B;
+  --primary-ultra-light: #0d2920;
+}
+
+/* ── 1. App Layout Container ── */
+.ep-app-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--background);
+  color: var(--text);
+  font-family: 'Cairo', 'Tajawal', -apple-system, BlinkMacSystemFont, sans-serif;
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* ── 2. Top Title Bar (Glassmorphism Header) ── */
+.ep-titlebar {
+  height: 52px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  user-select: none;
+  z-index: 120;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.ep-titlebar-right,
+.ep-titlebar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ep-logo-badge {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #0d9488, #0f766e);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 900;
+  box-shadow: 0 2px 6px rgba(13, 148, 136, 0.3);
+  flex-shrink: 0;
+}
+
+.ep-profile-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 10px 3px 4px;
+  background: var(--surface-muted);
+  border-radius: 24px;
+  border: 1px solid var(--border);
+  transition: all 0.2s ease;
+}
+
+.ep-profile-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--primary-light, #ccfbf1);
+  color: var(--primary, #0d9488);
+  border: 1.5px solid var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 12px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.ep-profile-info {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.ep-profile-name {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--text);
+  white-space: nowrap;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ep-profile-title {
+  font-size: 10px;
+  color: var(--muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ep-leave-pill {
+  background: #f0fdf4;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+[data-theme="dark"] .ep-leave-pill {
+  background: rgba(22, 101, 52, 0.25);
+  color: #86efac;
+  border-color: rgba(34, 197, 94, 0.3);
+}
+
+.ep-breadcrumb-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* ── 3. Live Clock Widget ── */
+.ep-live-clock {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface);
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 11px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.ep-clock-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 6px #22c55e;
+  flex-shrink: 0;
+}
+
+/* ── 4. Ribbon Top Menubar (Categorized Dropdowns) ── */
+.ep-menubar {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 4px 18px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  position: sticky;
+  top: 0;
+  z-index: 110;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+}
+
+.ep-menu-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  font-family: inherit;
+}
+
+.ep-menu-btn:hover {
+  background: var(--hover);
+}
+
+.ep-menu-btn.active {
+  background: var(--primary);
+  color: #ffffff !important;
+  font-weight: 800;
+  box-shadow: 0 2px 6px rgba(13, 148, 136, 0.3);
+}
+
+.ep-menu-btn.open {
+  background: var(--hover);
+}
+
+.ep-menu-badge {
+  background: var(--danger);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 99px;
+}
+
+.ep-menu-btn.active .ep-menu-badge {
+  background: rgba(255, 255, 255, 0.3);
+  color: #ffffff;
+}
+
+/* ── 5. Dropdown Popup Menus ── */
+.ep-dropdown-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 290px;
+  max-width: 350px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 14px 35px rgba(0, 0, 0, 0.16);
+  padding: 6px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  animation: epFadeDown 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes epFadeDown {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
   }
-  .emp-month-nav {
-    justify-content: space-between;
-  }
-  .ep-summary-grid {
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-  }
-  .ep-summary-card {
-    padding: 12px 14px;
-    gap: 10px;
-  }
-  .ep-summary-icon {
-    font-size: 1.4rem;
-  }
-  .ep-summary-value {
-    font-size: 1.05rem;
-  }
-  .ep-tabs {
-    overflow-x: auto;
-    white-space: nowrap;
-    padding-bottom: 6px;
-    flex-wrap: nowrap;
-    -webkit-overflow-scrolling: touch;
-  }
-  .ep-tab {
-    padding: 8px 14px;
-    font-size: 0.85rem;
-    flex-shrink: 0;
-  }
-  .ep-net-salary-box {
-    margin: 12px 10px;
-    padding: 16px;
-  }
-  .ep-net-amount {
-    font-size: 1.8rem;
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
+.ep-dropdown-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: right;
+  width: 100%;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.ep-dropdown-item:hover {
+  background: var(--hover);
+}
+
+.ep-dropdown-item.active {
+  background: var(--primary-light, #ccfbf1);
+  color: var(--primary-dark, #0f766e);
+}
+
+[data-theme="dark"] .ep-dropdown-item.active {
+  background: rgba(13, 148, 136, 0.25);
+  color: #5eead4;
+}
+
+.ep-dropdown-item-icon {
+  font-size: 18px;
+  margin-top: 1px;
+  flex-shrink: 0;
+}
+
+.ep-dropdown-item-title {
+  font-weight: 700;
+  font-size: 13px;
+  color: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.ep-dropdown-item-desc {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.35;
+  white-space: normal;
+}
+
+/* ── 6. Notification Center Dropdown Panel ── */
+.ep-notif-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 380px;
+  max-width: 92vw;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 14px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.2);
+  z-index: 1000;
+  overflow: hidden;
+  direction: rtl;
+  animation: epFadeDown 0.18s ease;
+}
+
+.ep-notif-header {
+  padding: 12px 16px;
+  background: var(--surface-muted, #f8fafc);
+  border-bottom: 1px solid var(--border, #e2e8f0);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.ep-notif-list {
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.ep-notif-card {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border, #f1f5f9);
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  transition: background 0.15s ease;
+}
+
+.ep-notif-card.unread {
+  background: rgba(13, 148, 136, 0.08);
+}
+
+.ep-notif-card:hover {
+  background: var(--hover);
+}
+
+.ep-notif-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ep-notif-body {
+  margin: 4px 0 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.ep-notif-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+/* ── 7. Workspace Canvas ── */
+.ep-workspace {
+  flex: 1;
+  padding: 22px 24px 40px;
+  background: var(--background);
+  min-width: 0;
+  overflow-y: auto;
+}
+
+/* ── 8. Summary Cards Grid ── */
+.ep-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.ep-summary-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px 18px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.ep-summary-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.06);
+}
+
+.ep-summary-icon {
+  font-size: 1.8rem;
+  flex-shrink: 0;
+}
+
+.ep-summary-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.ep-summary-label {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-bottom: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+
+.ep-summary-value {
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1.2;
+}
+
+.ep-summary-sub {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-top: 4px;
+  line-height: 1.3;
+}
+
+/* ── 9. Privacy Mode Blur ── */
+.ep-privacy-blurred {
+  filter: blur(6px);
+  user-select: none;
+  transition: filter 0.2s ease;
+}
+
+.ep-privacy-blurred:hover {
+  filter: blur(2px);
+}
+
+/* ── 10. Live Punch Widget ── */
+.ep-punch-widget {
+  background: linear-gradient(135deg, var(--surface), var(--background));
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 18px 24px;
+  margin-bottom: 22px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.04);
+}
+
+/* ── 11. Mobile Off-Canvas Drawer ── */
+.ep-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  z-index: 9999;
+  display: flex;
+  justify-content: flex-end;
+  animation: epFadeIn 0.2s ease;
+}
+
+@keyframes epFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.ep-drawer {
+  width: 310px;
+  max-width: 85vw;
+  height: 100%;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  box-shadow: -6px 0 25px rgba(0, 0, 0, 0.25);
+  animation: epSlideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow-y: auto;
+}
+
+@keyframes epSlideIn {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+.ep-drawer-header {
+  padding: 18px 18px 14px;
+  background: linear-gradient(135deg, #0d9488, #0f766e);
+  color: #ffffff;
+  position: relative;
+}
+
+.ep-drawer-close-btn {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: #ffffff;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ep-drawer-body {
+  flex: 1;
+  padding: 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ep-drawer-accordion-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  font-family: inherit;
+}
+
+.ep-drawer-accordion-btn:hover,
+.ep-drawer-accordion-btn.open {
+  background: var(--hover);
+}
+
+.ep-drawer-accordion-content {
+  padding: 4px 10px 8px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ep-drawer-sub-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: right;
+  width: 100%;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.ep-drawer-sub-item:hover {
+  background: var(--hover);
+}
+
+.ep-drawer-sub-item.active {
+  background: var(--primary-light, #ccfbf1);
+  color: var(--primary-dark, #0f766e);
+  font-weight: 800;
+}
+
+/* ── 12. Mobile Bottom Navigation Bar ── */
+.ep-bottom-nav {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .ep-bottom-nav {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 64px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.08);
+    z-index: 200;
+    align-items: center;
+    justify-content: space-around;
+    padding: 0 4px calc(env(safe-area-inset-bottom, 0px));
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+
+  .ep-bottom-nav-btn {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    height: 100%;
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: color 0.15s ease;
+    padding: 4px 0;
+    font-family: inherit;
+    position: relative;
+  }
+
+  .ep-bottom-nav-btn.active {
+    color: var(--primary);
+    font-weight: 800;
+  }
+
+  .ep-bottom-nav-btn.active::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    width: 32px;
+    height: 3px;
+    background: var(--primary);
+    border-radius: 0 0 4px 4px;
+  }
+
+  .ep-bottom-nav-icon {
+    font-size: 19px;
+    line-height: 1;
+  }
+
+  /* Responsive padding for workspace when bottom nav is active */
+  .ep-workspace {
+    padding: 14px 14px 85px !important;
+  }
+
+  #ep-mobile-hamburger-btn {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .ep-btn-label {
+    display: none !important;
+  }
+
+  .ep-divider-slash {
+    display: none !important;
+  }
+
+  .ep-menubar {
+    display: none !important;
+  }
+
+  .ep-titlebar {
+    padding: 0 10px;
+    height: auto;
+    min-height: 52px;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .ep-titlebar-right {
+    gap: 6px;
+  }
+
+  .ep-titlebar-left {
+    gap: 5px;
+    flex-wrap: wrap;
+  }
+
+  .ep-profile-title {
+    display: none;
+  }
+
+  .ep-live-clock span:last-child {
+    display: none;
+  }
+
+  .ep-breadcrumb-bar {
+    display: none !important;
+  }
+
+  .ep-summary-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 10px !important;
+  }
+
+  .ep-summary-card {
+    padding: 12px 14px !important;
+    gap: 10px !important;
+  }
+
+  .ep-summary-icon {
+    font-size: 1.4rem !important;
+  }
+
+  .ep-summary-value {
+    font-size: 1.1rem !important;
+  }
+
+  .ep-summary-label {
+    font-size: 0.75rem !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .ep-summary-grid {
+    grid-template-columns: 1fr 1fr !important;
+  }
+  .ep-titlebar-right span:first-of-type {
+    display: none;
+  }
+  .ep-leave-pill {
+    display: none;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.15);
+  }
+}
+
+/* ── 13. Financial Table and Breakdown Polish ── */
+.ep-table-container {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.ep-table-container table {
+  width: 100%;
+  min-width: 600px;
+  border-collapse: collapse;
+}
+
+.ep-table-container th {
+  background: var(--surface-muted);
+  padding: 10px 14px;
+  font-weight: 700;
+  font-size: 12.5px;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.ep-table-container td {
+  padding: 10px 14px;
+  font-size: 12.5px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  vertical-align: middle;
+}

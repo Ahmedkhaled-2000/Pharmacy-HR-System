@@ -35,6 +35,7 @@ import { saveAutoBackupOnModification } from './utils/backupHelper';
 import ErrorBoundary from './components/common/ErrorBoundary';
 import { normalizeSchedule } from './components/roster/RosterModule';
 import { playNotificationChime } from './hooks/useAudio';
+import { createRequestDecisionNotification } from './utils/notificationEngine';
 
 // Modular Components
 import GlobalNavbar from './components/navbar/GlobalNavbar';
@@ -1200,6 +1201,21 @@ export default function App() {
         }
       }
 
+      // Create Decision Notification for the Employee
+      const decisionNotif = createRequestDecisionNotification({
+        requestId: target.id,
+        employeeId: target.employeeId,
+        type: target.type,
+        action: 'approved',
+        approverRole: role,
+        details: target.details || target.reason || (target.amount ? `${target.amount} ج.م` : '')
+      });
+
+      const updatedNotifications = [
+        decisionNotif,
+        ...(state.notifications || []).map(n => String(n.requestId) === String(requestId) ? { ...n, read: true } : n)
+      ];
+
       const updatedState = {
         ...state,
         requests: updatedRequests,
@@ -1207,7 +1223,8 @@ export default function App() {
         rosters: updatedRosters,
         shiftSwaps: updatedSwaps,
         employees: updatedEmps,
-        shifts: updatedShifts
+        shifts: updatedShifts,
+        notifications: updatedNotifications
       };
 
       setState(updatedState);
@@ -1284,9 +1301,21 @@ export default function App() {
       l.id === requestId || l.requestId === requestId ? { ...l, status: 'rejected', adminApproved: false } : l
     );
 
-    const updatedNotifications = (state.notifications || []).map((n) =>
-      n.requestId === requestId ? { ...n, read: true } : n
-    );
+    const decisionNotif = createRequestDecisionNotification({
+      requestId: targetReq?.id || requestId,
+      employeeId: targetReq?.employeeId,
+      type: targetReq?.type,
+      action: 'rejected',
+      approverRole: role,
+      details: targetReq?.reason || targetReq?.details || ''
+    });
+
+    const updatedNotifications = [
+      decisionNotif,
+      ...(state.notifications || []).map((n) =>
+        String(n.requestId) === String(requestId) ? { ...n, read: true } : n
+      )
+    ];
 
     const updatedState = {
       ...state,
@@ -1530,10 +1559,13 @@ export default function App() {
 
       const notif = {
         id: `notif_${Date.now()}`,
+        targetEmployeeId: String(loan.employeeId),
+        employeeId: String(loan.employeeId),
         type: 'loan',
         title: `💳 تم اعتماد ${loanTypeTitle}`,
-        message: `تم اعتماد طلب ${loanTypeTitle} للموظف بمبلغ ${monthlyInstallment} ج.م وتطبيقه في الرواتب`,
+        message: `تم اعتماد طلب ${loanTypeTitle} الخاص بك بمبلغ ${monthlyInstallment} ج.م وتطبيقه في الرواتب`,
         date: todayStr(),
+        timestamp: new Date().toISOString(),
         read: false
       };
 
@@ -4746,6 +4778,11 @@ export default function App() {
             openEditShift={openEditShift}
             handleLogout={handleLogout}
             deleteShift={deleteShift}
+            themeMode={themeMode}
+            toggleTheme={toggleTheme}
+            notifications={state.notifications || []}
+            onMarkNotificationRead={handleMarkNotificationRead}
+            onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
           />
         </ErrorBoundary>
       ) : (

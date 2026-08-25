@@ -4,6 +4,7 @@ import { notifyEmployeeEarlyExitWarning } from '../../utils/gmailService';
 import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
 import { normalizeSchedule } from '../roster/RosterModule';
 import { syncNow, fetchRemoteState } from '../../utils/offlineSync';
+import { createRequestDecisionNotification } from '../../utils/notificationEngine';
 
 export function getFormattedRequestBadge(type, leaveType) {
   const cleanType = String(type || '').trim().toLowerCase();
@@ -694,6 +695,20 @@ export default function RequestsModule({
         }
       }
 
+      const decisionNotif = createRequestDecisionNotification({
+        requestId: approvedTargetReq.id,
+        employeeId: approvedTargetReq.employeeId,
+        type: approvedTargetReq.type,
+        action: 'approved',
+        approverRole: 'admin',
+        details: approvedTargetReq.details || approvedTargetReq.reason || (approvedTargetReq.amount ? `${approvedTargetReq.amount} ج.م` : '')
+      });
+
+      const updatedNotifications = [
+        decisionNotif,
+        ...(state.notifications || []).map(n => String(n.requestId) === String(reqId) ? { ...n, read: true } : n)
+      ];
+
       const updatedState = {
         ...state,
         requests: updatedRequests,
@@ -704,7 +719,8 @@ export default function RequestsModule({
         leaveRequests: updatedLeaveRequests,
         leaveHistory: updatedLeaveHistory,
         shiftSwaps: updatedShiftSwaps,
-        lateIncidents: updatedLateIncidents
+        lateIncidents: updatedLateIncidents,
+        notifications: updatedNotifications
       };
       if (setState) setState(updatedState);
       if (saveState) await saveState(updatedState);
@@ -805,12 +821,29 @@ export default function RequestsModule({
       s.id === reqId ? { ...s, status: 'rejected', adminApproved: false } : s
     );
 
+    const decisionNotif = createRequestDecisionNotification({
+      requestId: targetReq?.id || reqId,
+      employeeId: targetReq?.employeeId,
+      type: targetReq?.type,
+      action: 'rejected',
+      approverRole: 'admin',
+      details: targetReq?.reason || targetReq?.details || ''
+    });
+
+    const updatedNotifications = [
+      decisionNotif,
+      ...(state.notifications || []).map((n) =>
+        String(n.requestId) === String(reqId) ? { ...n, read: true } : n
+      )
+    ];
+
     const updatedState = {
       ...state,
       requests: updatedRequests,
       shifts: updatedShifts,
       leaveRequests: updatedLeaveRequests,
-      shiftSwaps: updatedShiftSwaps
+      shiftSwaps: updatedShiftSwaps,
+      notifications: updatedNotifications
     };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
