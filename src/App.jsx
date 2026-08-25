@@ -4762,6 +4762,48 @@ export default function App() {
           setActiveSubTab={setActiveSubTab}
           onLogout={handleLogout}
           pendingCount={(() => {
+            if (authRole === 'branch') {
+              const cIdStr = currentBranch?.id ? String(currentBranch.id) : null;
+              const branchEmployees = (state.employees || []).filter(e => {
+                if (!cIdStr) return true;
+                return (e.branchId && String(e.branchId) === cIdStr) ||
+                       (e.branchesDetails && e.branchesDetails.some(bd => String(bd.branchId) === cIdStr));
+              });
+              const branchEmpIdSet = new Set(
+                branchEmployees.flatMap(e => [String(e.id), String(e.code || '')]).filter(Boolean)
+              );
+              const deletedIdsSet = new Set((state._deletedIds || []).map(String));
+
+              const rawList = [...(state.requests || [])];
+              const seen = new Set(rawList.map(r => String(r.id)));
+              (state.leaveRequests || []).forEach(r => { if (r && !seen.has(String(r.id))) { rawList.push(r); seen.add(String(r.id)); } });
+              (state.shiftSwaps || []).forEach(r => { if (r && !seen.has(String(r.id))) { rawList.push(r); seen.add(String(r.id)); } });
+
+              return rawList.filter(r => {
+                if (!r || !r.id) return false;
+                const idStr = String(r.id);
+                if (deletedIdsSet.has(idStr)) return false;
+
+                // 1. Must be relevant to branch according to double approval rules
+                if (!shouldShowRequestToBranch(r, state)) return false;
+
+                // 2. Branch match
+                const matchesBranch = (!cIdStr) ||
+                  (r.branchId && String(r.branchId) === cIdStr) ||
+                  (r.employeeId && branchEmpIdSet.has(String(r.employeeId))) ||
+                  (r.employeeCode && branchEmpIdSet.has(String(r.employeeCode)));
+                if (!matchesBranch) return false;
+
+                // 3. Must be waiting for Branch Manager action (not submitted by BM, not approved by BM, not pending_admin)
+                if (r.submittedByBranchManager || r.createdRole === 'branch' || r.createdRole === 'branch_manager') return false;
+                if (r.branchApproved || r.branchApprovalStatus === 'approved' || r.branchApprovalStatus === 'rejected') return false;
+                if (r.status === 'pending_admin' || r.status === 'approved' || r.status === 'rejected' || r.status === 'cancelled') return false;
+
+                return r.status === 'pending';
+              }).length;
+            }
+
+            // Super Admin / Owner formula
             const reqList = [...(state.requests || [])];
             const seen = new Set(reqList.map(r => String(r.id)));
             (state.leaveRequests || []).forEach(r => { if (r && !seen.has(String(r.id))) { reqList.push(r); seen.add(String(r.id)); } });
@@ -4778,6 +4820,47 @@ export default function App() {
                 list.push(r);
               }
             });
+
+            if (authRole === 'branch') {
+              const cIdStr = currentBranch?.id ? String(currentBranch.id) : null;
+              const branchEmployees = (state.employees || []).filter(e => {
+                if (!cIdStr) return true;
+                return (e.branchId && String(e.branchId) === cIdStr) ||
+                       (e.branchesDetails && e.branchesDetails.some(bd => String(bd.branchId) === cIdStr));
+              });
+              const branchEmpIdSet = new Set(
+                branchEmployees.flatMap(e => [String(e.id), String(e.code || '')]).filter(Boolean)
+              );
+
+              list.forEach(r => {
+                if (!r || !r.id || seen.has(String(r.id))) return;
+                seen.add(String(r.id));
+
+                const matchesBranch = (!cIdStr) ||
+                  (r.branchId && String(r.branchId) === cIdStr) ||
+                  (r.employeeId && branchEmpIdSet.has(String(r.employeeId))) ||
+                  (r.employeeCode && branchEmpIdSet.has(String(r.employeeCode)));
+                if (!matchesBranch) return false;
+
+                const isWaitingBranch = (!r.managerStatus || r.managerStatus === 'pending') &&
+                                        !r.branchApproved &&
+                                        r.branchApprovalStatus !== 'approved' &&
+                                        r.branchApprovalStatus !== 'rejected' &&
+                                        !r.submittedByBranchManager &&
+                                        !r.isDirectToAdmin &&
+                                        !r.branchNotRequired &&
+                                        !r.isCancelled &&
+                                        r.status !== 'approved' &&
+                                        r.status !== 'rejected' &&
+                                        r.status !== 'cancelled';
+                if (isWaitingBranch) {
+                  count++;
+                }
+              });
+              return count;
+            }
+
+            // Super Admin / Owner
             list.forEach(r => {
               if (!r || !r.id || seen.has(String(r.id))) return;
               seen.add(String(r.id));

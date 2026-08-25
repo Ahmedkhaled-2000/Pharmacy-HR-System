@@ -806,7 +806,8 @@ export default function BranchManagerView({
       branchName: currentBranch?.name,
       date: new Date().toISOString().slice(0, 10),
       timestamp: new Date().toISOString(),
-      read: false
+      read: false,
+      targetRole: 'admin'
     };
 
     const updatedRequests = [newReq, ...(state.requests || [])];
@@ -1239,7 +1240,12 @@ export default function BranchManagerView({
           <div style={{ background: 'rgba(255,255,255,0.15)', padding: '8px 16px', borderRadius: '12px', textAlign: 'center' }}>
             <span style={{ fontSize: '12px', display: 'block', opacity: 0.85 }}>طلبات تنتظر الاعتماد</span>
             <span style={{ fontSize: '18px', fontWeight: '800' }}>
-              {branchRequests.filter((r) => r.status === 'pending' || r.status === 'pending_admin').length}
+              {branchRequests.filter((r) => {
+                if (r.submittedByBranchManager || r.createdRole === 'branch' || r.createdRole === 'branch_manager') return false;
+                if (r.branchApproved || r.branchApprovalStatus === 'approved' || r.branchApprovalStatus === 'rejected') return false;
+                if (r.status === 'pending_admin' || r.status === 'approved' || r.status === 'rejected' || r.status === 'cancelled') return false;
+                return r.status === 'pending';
+              }).length}
             </span>
           </div>
         </div>
