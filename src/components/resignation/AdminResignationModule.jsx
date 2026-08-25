@@ -77,17 +77,41 @@ export default function AdminResignationModule({
     return 0;
   };
 
-  // Sort descending by newest time first
-  rawList.sort((a, b) => getReqSortTime(b) - getReqSortTime(a));
+  // Helpers for request state classification
+  const isBranchResolved = (r) => {
+    return (
+      r.managerStatus === 'approved' || 
+      r.managerStatus === 'rejected' || 
+      r.isDirectToAdmin || 
+      r.branchNotRequired || 
+      r.createdRole === 'branch' || 
+      r.submittedByBranchManager ||
+      !r.branchId
+    );
+  };
+
+  const isReadyForAdmin = (r) => {
+    const isPendingAdmin = !r.adminStatus || r.adminStatus === 'pending' || r.status === 'pending' || r.status === 'pending_admin';
+    return isPendingAdmin && isBranchResolved(r) && !r.isCancelled && !r.hiddenFromAdmin;
+  };
+
+  const isWaitingBranch = (r) => {
+    const isPendingAdmin = !r.adminStatus || r.adminStatus === 'pending' || r.status === 'pending' || r.status === 'pending_admin';
+    return isPendingAdmin && !isBranchResolved(r) && !r.isCancelled && !r.hiddenFromAdmin;
+  };
 
   // 2. Filter requests based on selected tab
   const allRequests = rawList.filter(r => {
-    const isPending = !r.adminStatus || r.adminStatus === 'pending' || r.status === 'pending' || r.status === 'pending_admin';
     const isApproved = r.adminStatus === 'approved' || r.status === 'approved' || r.adminApproved === true;
     const isRejected = r.adminStatus === 'rejected' || r.status === 'rejected';
 
     if (filterTab === 'pending' || filterTab === 'ready') {
-      return isPending && !r.isCancelled && !r.hiddenFromAdmin;
+      // فقط الطلبات التي بت فيها مدير الفرع وبانتظار قرار الإدارة العليا
+      return isReadyForAdmin(r);
+    }
+    if (filterTab === 'waiting_branch') {
+      // الطلبات التي ما زالت بانتظار رد مدير الفرع أولاً
+      return isWaitingBranch(r);
     }
     if (filterTab === 'approved') {
       return isApproved && !r.isCancelled;
@@ -498,9 +522,32 @@ export default function AdminResignationModule({
             gap: '6px'
           }}
         >
-          <span>⏳ طلبات قيد المراجعة والاعتماد</span>
+          <span>📥 طلبات محالة من الفرع بانتظار القرار</span>
           <span style={{ background: (filterTab === 'pending' || filterTab === 'ready') ? 'rgba(255,255,255,0.25)' : 'var(--danger)', color: '#fff', padding: '1px 6px', borderRadius: '99px', fontSize: '11px' }}>
-            {rawList.filter(r => !r.hiddenFromAdmin && !r.isCancelled && (!r.adminStatus || r.adminStatus === 'pending' || r.status === 'pending' || r.status === 'pending_admin')).length}
+            {rawList.filter(isReadyForAdmin).length}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setFilterTab('waiting_branch')}
+          style={{
+            padding: '8px 16px',
+            borderRadius: '8px',
+            border: 'none',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+            fontSize: '13.5px',
+            background: filterTab === 'waiting_branch' ? 'var(--primary)' : 'var(--surface-muted)',
+            color: filterTab === 'waiting_branch' ? '#ffffff' : 'var(--text)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}
+        >
+          <span>⏳ بانتظار رد مدير الفرع</span>
+          <span style={{ background: filterTab === 'waiting_branch' ? 'rgba(255,255,255,0.25)' : 'var(--surface)', color: 'var(--text)', padding: '1px 6px', borderRadius: '99px', fontSize: '11px', border: '1px solid var(--border)' }}>
+            {rawList.filter(isWaitingBranch).length}
           </span>
         </button>
 
@@ -658,7 +705,8 @@ export default function AdminResignationModule({
       {allRequests.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '40px', background: 'var(--surface-muted)', borderRadius: '12px', color: 'var(--muted)' }}>
           <div style={{ fontSize: '40px', marginBottom: '10px' }}>📁</div>
-          {(filterTab === 'pending' || filterTab === 'ready') && 'لا توجد طلبات استقالة أو تراجع قيد المراجعة والاعتماد حالياً.'}
+          {(filterTab === 'pending' || filterTab === 'ready') && 'لا توجد طلبات استقالة محالة من الفرع بانتظار قرار الإدارة العليا حالياً.'}
+          {filterTab === 'waiting_branch' && 'لا توجد طلبات استقالة بانتظار رد مدراء الفروع حالياً.'}
           {filterTab === 'approved' && 'لا توجد طلبات استقالة معتمدة في هذا السجل.'}
           {filterTab === 'rejected' && 'لا توجد طلبات استقالة مرفوضة في هذا السجل.'}
           {filterTab === 'all' && 'لا توجد طلبات في السجل العام.'}
@@ -766,10 +814,18 @@ export default function AdminResignationModule({
 
                 {/* Admin Action Area */}
                 {req.adminStatus === 'pending' ? (
-                  <div style={{ background: req.type === 'withdraw' ? 'var(--surface-muted)' : 'var(--primary-light)', padding: '15px', borderRadius: '8px', border: req.type === 'withdraw' ? '1px solid var(--border)' : '1px solid var(--primary)' }}>
-                    <h4 style={{ margin: '0 0 15px 0', color: 'var(--primary-dark)' }}>
-                      {req.type === 'withdraw' ? '↩️ قرار الإدارة العليا بشأن طلب التراجع والعودة للعمل' : '🚪 قرار الإدارة العليا والشروط'}
-                    </h4>
+                  !isBranchResolved(req) ? (
+                    <div style={{ background: '#fef3c7', border: '1px solid #fde68a', borderRadius: '8px', padding: '14px 18px', color: '#92400e', fontSize: '13.5px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontSize: '20px' }}>⏳</span>
+                      <div>
+                        <strong>الطلب قيد مراجعة مدير الفرع أولاً:</strong> بانتظار قرار وملاحظات مدير الفرع. سيتم تحويل الطلب وتفعيل أزرار البت للإدارة العليا فور قيام مدير الفرع بالموافقة أو الرفض.
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ background: req.type === 'withdraw' ? 'var(--surface-muted)' : 'var(--primary-light)', padding: '15px', borderRadius: '8px', border: req.type === 'withdraw' ? '1px solid var(--border)' : '1px solid var(--primary)' }}>
+                      <h4 style={{ margin: '0 0 15px 0', color: 'var(--primary-dark)' }}>
+                        {req.type === 'withdraw' ? '↩️ قرار الإدارة العليا بشأن طلب التراجع والعودة للعمل' : '🚪 قرار الإدارة العليا والشروط'}
+                      </h4>
                     
                     <div style={{ display: 'grid', gridTemplateColumns: req.type === 'withdraw' ? '1fr' : '1fr 1fr', gap: '15px', marginBottom: '15px' }}>
                       <div>
@@ -834,6 +890,7 @@ export default function AdminResignationModule({
                       </div>
                     )}
                   </div>
+                  )
                 ) : (
                   <div style={{ background: 'var(--surface)', padding: '15px', borderRadius: '8px', border: '1px solid var(--border)' }}>
                     <h4 style={{ margin: '0 0 10px 0', color: 'var(--text)' }}>القرار النهائي للإدارة</h4>

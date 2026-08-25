@@ -273,6 +273,13 @@ export default function NotificationCenterModule({
         } else if (r.type === 'roster_update') {
           typeLabel = 'طلب اعتماد جدول شهري';
           icon = '🗓️';
+        } else if (r.type === 'resignation' || r.type === 'resignation_request') {
+          const mgrDecided = r.managerStatus === 'approved' || r.managerStatus === 'rejected';
+          typeLabel = `🚪 طلب استقالة (${mgrDecided ? (r.managerStatus === 'approved' ? 'موافق عليه من الفرع' : 'مرفوض من الفرع') : 'بانتظار رد مدير الفرع'})`;
+          icon = '🚪';
+        } else if (r.type === 'withdraw' || r.type === 'resignation_withdraw') {
+          typeLabel = '↩️ طلب تراجع عن استقالة';
+          icon = '↩️';
         }
 
         return {

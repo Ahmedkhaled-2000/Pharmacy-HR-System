@@ -4781,9 +4781,10 @@ export default function App() {
             list.forEach(r => {
               if (!r || !r.id || seen.has(String(r.id))) return;
               seen.add(String(r.id));
+              const isBranchResolved = r.managerStatus === 'approved' || r.managerStatus === 'rejected' || r.isDirectToAdmin || r.branchNotRequired || r.createdRole === 'branch' || r.submittedByBranchManager;
               const isPendingAdmin = !r.adminStatus || r.adminStatus === 'pending' || r.status === 'pending' || r.status === 'pending_admin';
               const isNotDecided = r.adminApproved !== true && r.status !== 'approved' && r.status !== 'rejected' && r.status !== 'cancelled';
-              if (!r.hiddenFromAdmin && !r.isCancelled && (isPendingAdmin || isNotDecided)) {
+              if (!r.hiddenFromAdmin && !r.isCancelled && isBranchResolved && (isPendingAdmin || isNotDecided)) {
                 count++;
               }
             });
