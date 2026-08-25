@@ -1601,677 +1601,1131 @@ export default function EmployeePortalView({
     }}>
 
       {/* ══════════════════════════════════════════════════════════════════════════════ */}
-      {/* ── 1. TOP TITLE BAR (Brand, Profile Badge, Synced Clock, Notif, Theme, Out) ── */}
+      {/* ── 1. TOP HEADER (Responsive Desktop vs Mobile) ── */}
       {/* ══════════════════════════════════════════════════════════════════════════════ */}
-      <header className="ep-titlebar" style={{
-        height: '52px',
-        background: 'var(--surface)',
-        borderBottom: '1px solid var(--border)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '0 18px',
-        userSelect: 'none',
-        zIndex: 100,
-        width: '100%',
-        boxSizing: 'border-box',
-        boxShadow: '0 1px 4px rgba(0,0,0,0.03)'
-      }}>
-        {/* Right Side (Start in RTL): Brand, Profile Badge & Breadcrumb */}
-        <div className="ep-titlebar-right" style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-          {/* Mobile Hamburger Button */}
-          {isMobileScreen && (
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() => setIsMobileDrawerOpen(true)}
-              style={{ padding: '6px 9px', fontSize: '18px', border: '1px solid var(--border)' }}
-              title="فتح القائمة"
-              id="ep-mobile-hamburger-btn"
-            >
-              ☰
-            </button>
-          )}
-
-          {/* App Logo */}
-          <div className="ep-logo-badge" style={{
-            width: '32px',
-            height: '32px',
-            borderRadius: '8px',
-            background: 'linear-gradient(135deg, #0d9488, #0f766e)',
-            color: '#fff',
+      {isMobileScreen ? (
+        <>
+          {/* 📱 Mobile Compact Top Bar */}
+          <header style={{
+            height: '52px',
+            background: 'var(--surface)',
+            borderBottom: '1px solid var(--border)',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '16px',
-            fontWeight: 900,
-            boxShadow: '0 2px 6px rgba(13,148,136,0.3)',
-            flexShrink: 0
+            justifyContent: 'space-between',
+            padding: '0 12px',
+            userSelect: 'none',
+            position: 'sticky',
+            top: 0,
+            zIndex: 100,
+            boxShadow: '0 1px 4px rgba(0,0,0,0.03)'
           }}>
-            🏥
-          </div>
+            {/* Right: Hamburger + Logo + Avatar & First Name */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <button
+                type="button"
+                onClick={() => setIsMobileDrawerOpen(true)}
+                style={{
+                  background: 'none',
+                  border: '1px solid var(--border)',
+                  borderRadius: '8px',
+                  padding: '5px 8px',
+                  fontSize: '17px',
+                  cursor: 'pointer',
+                  color: 'var(--text)',
+                  lineHeight: 1
+                }}
+                title="القائمة الرئيسية"
+              >
+                ☰
+              </button>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--text)', whiteSpace: 'nowrap' }}>
-              منظومة الموارد البشرية
-            </span>
-
-            <span style={{ color: 'var(--border)', fontSize: '15px' }} className="ep-divider-slash">/</span>
-
-            {/* Employee Profile Badge */}
-            <div className="ep-profile-badge" style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '3px 10px 3px 4px',
-              background: 'var(--surface-muted)',
-              borderRadius: '24px',
-              border: '1px solid var(--border)'
-            }}>
-              <div className="ep-profile-avatar" style={{
+              <div style={{
                 width: '28px',
                 height: '28px',
-                borderRadius: '50%',
-                background: 'var(--primary-light, #ccfbf1)',
-                color: 'var(--primary, #0d9488)',
-                border: '1.5px solid var(--primary)',
+                borderRadius: '7px',
+                background: 'linear-gradient(135deg, #0d9488, #0f766e)',
+                color: '#fff',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                fontWeight: 800,
-                fontSize: '12px',
-                overflow: 'hidden',
+                fontSize: '14px',
+                fontWeight: 900,
                 flexShrink: 0
               }}>
-                {emp.photoUrl ? (
-                  <img src={emp.photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                ) : (
-                  getEmpDisplayName(emp).charAt(0)
+                🏥
+              </div>
+
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '2px 8px 2px 3px',
+                background: 'var(--surface-muted)',
+                borderRadius: '20px',
+                border: '1px solid var(--border)'
+              }}>
+                <div style={{
+                  width: '22px',
+                  height: '22px',
+                  borderRadius: '50%',
+                  background: 'var(--primary-light, #ccfbf1)',
+                  color: 'var(--primary, #0d9488)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontWeight: 800,
+                  fontSize: '11px',
+                  overflow: 'hidden',
+                  flexShrink: 0
+                }}>
+                  {emp.photoUrl ? (
+                    <img src={emp.photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ) : (
+                    getEmpDisplayName(emp).charAt(0)
+                  )}
+                </div>
+                <span style={{ fontSize: '11.5px', fontWeight: 800, color: 'var(--text)', maxWidth: '90px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {getEmpDisplayName(emp).split(' ')[0]}
+                </span>
+              </div>
+            </div>
+
+            {/* Left: Leave Pill + Privacy + Notifs + Theme + Logout */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <div style={{
+                background: '#f0fdf4',
+                color: '#15803d',
+                border: '1px solid #bbf7d0',
+                padding: '2px 6px',
+                borderRadius: '99px',
+                fontSize: '10.5px',
+                fontWeight: 800,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '2px'
+              }} title="رصيد الإجازات">
+                <span>🏖️</span>
+                <span>{emp.annualLeaveBalance !== undefined ? emp.annualLeaveBalance : 21}ي</span>
+              </div>
+
+              <button
+                type="button"
+                onClick={togglePrivacyMode}
+                title={isPrivacyMode ? 'إظهار الأرقام المالية' : 'وضع الخصوصية'}
+                style={{
+                  background: isPrivacyMode ? 'rgba(239, 68, 68, 0.1)' : 'var(--surface-muted)',
+                  border: '1px solid var(--border)',
+                  borderRadius: '8px',
+                  padding: '4px 6px',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  color: isPrivacyMode ? 'var(--danger)' : 'var(--text)',
+                  lineHeight: 1
+                }}
+              >
+                {isPrivacyMode ? '🙈' : '👁️'}
+              </button>
+
+              {/* Notification Bell */}
+              <div style={{ position: 'relative' }} ref={notifDropdownRef}>
+                <button
+                  type="button"
+                  onClick={() => setIsNotifDropdownOpen(prev => !prev)}
+                  style={{
+                    position: 'relative',
+                    border: isNotifDropdownOpen ? '1.5px solid var(--primary)' : '1px solid var(--border)',
+                    background: isNotifDropdownOpen ? 'var(--primary-light)' : 'var(--surface)',
+                    padding: '4px 7px',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                    color: 'var(--text)',
+                    lineHeight: 1
+                  }}
+                  title="الإشعارات"
+                >
+                  🔔
+                  {empUnreadNotifsCount > 0 && (
+                    <span style={{
+                      position: 'absolute',
+                      top: '-4px',
+                      right: '-4px',
+                      background: 'var(--danger, #dc2626)',
+                      color: '#ffffff',
+                      padding: '1px 5px',
+                      borderRadius: '99px',
+                      fontSize: '9px',
+                      fontWeight: 800,
+                      boxShadow: '0 1px 3px rgba(220,38,38,0.4)'
+                    }}>
+                      {empUnreadNotifsCount}
+                    </span>
+                  )}
+                </button>
+
+                {isNotifDropdownOpen && (
+                  <div style={{
+                    position: 'fixed',
+                    top: '56px',
+                    left: '10px',
+                    right: '10px',
+                    maxWidth: '420px',
+                    margin: '0 auto',
+                    background: 'var(--surface)',
+                    border: '1px solid var(--border)',
+                    borderRadius: '12px',
+                    boxShadow: '0 12px 35px rgba(0,0,0,0.2)',
+                    zIndex: 1100,
+                    overflow: 'hidden'
+                  }}>
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '10px 14px',
+                      background: 'var(--surface-muted)',
+                      borderBottom: '1px solid var(--border)'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--text)' }}>
+                          🔔 إشعارات الموظف
+                        </span>
+                        {empUnreadNotifsCount > 0 && (
+                          <span style={{ background: '#fee2e2', color: '#dc2626', fontSize: '10.5px', fontWeight: 800, padding: '1px 6px', borderRadius: '8px' }}>
+                            {empUnreadNotifsCount} غير مقروء
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {empUnreadNotifsCount > 0 && (
+                          <button
+                            type="button"
+                            onClick={handleMarkAllNotifsRead}
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              color: 'var(--primary, #0f766e)',
+                              fontSize: '11px',
+                              fontWeight: 'bold',
+                              cursor: 'pointer',
+                              padding: '2px 5px'
+                            }}
+                          >
+                            ✓ تحديد الكل
+                          </button>
+                        )}
+                        {empReadNotifsCount > 0 && (
+                          <button
+                            type="button"
+                            onClick={handleClearReadNotifs}
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              color: 'var(--danger, #dc2626)',
+                              fontSize: '11px',
+                              fontWeight: 'bold',
+                              cursor: 'pointer',
+                              padding: '2px 5px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '2px'
+                            }}
+                          >
+                            <span>🗑️</span>
+                            <span>مسح المقروء</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div style={{ maxHeight: '320px', overflowY: 'auto', padding: '6px' }}>
+                      {empNotifications.length === 0 ? (
+                        <div style={{ padding: '28px 16px', textAlign: 'center', color: 'var(--muted)', fontSize: '12.5px' }}>
+                          🎉 لا توجد إشعارات حالياً
+                        </div>
+                      ) : (
+                        empNotifications.slice(0, 20).map((n) => {
+                          const isUnread = !n.read;
+                          return (
+                            <div key={n.id} style={{
+                              display: 'flex',
+                              gap: '10px',
+                              padding: '10px',
+                              borderRadius: '8px',
+                              background: isUnread ? 'rgba(15, 118, 110, 0.05)' : 'transparent',
+                              borderRight: isUnread ? '3px solid var(--primary)' : '3px solid transparent',
+                              marginBottom: '4px',
+                              borderBottom: '1px solid var(--border-light, rgba(0,0,0,0.04))'
+                            }}>
+                              <span style={{ fontSize: '18px', marginTop: '2px' }}>
+                                {n.icon || (n.type === 'loan' ? '💳' : n.type === 'leave' ? '🏖️' : n.type === 'permission' ? '⏰' : n.type === 'swap' ? '🔄' : '🔔')}
+                              </span>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '6px' }}>
+                                  <h5 style={{ margin: 0, fontSize: '12.5px', fontWeight: 800, color: 'var(--text)' }}>
+                                    <span>{n.title || n.typeLabel || 'إشعار إداري'}</span>
+                                    {n.approverRole && (
+                                      <span style={{
+                                        fontSize: '10px',
+                                        fontWeight: 700,
+                                        padding: '1px 6px',
+                                        borderRadius: '6px',
+                                        background: n.action === 'rejected' ? '#fee2e2' : '#dcfce7',
+                                        color: n.action === 'rejected' ? '#dc2626' : '#15803d',
+                                        marginRight: '6px'
+                                      }}>
+                                        {n.approverRole === 'admin' ? 'الإدارة العليا' : 'مدير الفرع'}
+                                      </span>
+                                    )}
+                                  </h5>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                    {isUnread && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleMarkNotifRead(n.id)}
+                                        style={{
+                                          background: 'none',
+                                          border: 'none',
+                                          color: 'var(--primary, #0f766e)',
+                                          fontSize: '11px',
+                                          cursor: 'pointer',
+                                          padding: '0 4px',
+                                          fontWeight: 'bold',
+                                          whiteSpace: 'nowrap'
+                                        }}
+                                      >
+                                        ✓ تم
+                                      </button>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteNotif(n.id)}
+                                      title="حذف الإشعار"
+                                      style={{
+                                        background: 'none',
+                                        border: 'none',
+                                        color: 'var(--muted, #94a3b8)',
+                                        fontSize: '12px',
+                                        cursor: 'pointer',
+                                        padding: '0 3px'
+                                      }}
+                                    >
+                                      🗑️
+                                    </button>
+                                  </div>
+                                </div>
+                                <p style={{ margin: '3px 0', fontSize: '11.5px', color: 'var(--text-muted)', lineHeight: 1.35 }}>
+                                  {n.message || n.body || n.details || ''}
+                                </p>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px', fontSize: '10px', color: 'var(--muted)' }}>
+                                  <span>🕒 {n.date || (n.timestamp ? n.timestamp.slice(0, 10) : '')}</span>
+                                  {n.typeLabel && <span>📂 {n.typeLabel}</span>}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    {empReadNotifsCount > 0 && (
+                      <div style={{ padding: '8px 12px', background: 'var(--surface-muted)', borderTop: '1px solid var(--border)', textAlign: 'center' }}>
+                        <button
+                          type="button"
+                          onClick={handleClearReadNotifs}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: 'var(--danger, #dc2626)',
+                            fontSize: '11.5px',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}
+                        >
+                          <span>🗑️</span>
+                          <span>حذف كافة الإشعارات المقروءة ({empReadNotifsCount})</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
 
-              <div className="ep-profile-info" style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2 }}>
-                <span className="ep-profile-name" style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text)', whiteSpace: 'nowrap', maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  👤 {getEmpDisplayName(emp)}
-                </span>
-                <span className="ep-profile-title" style={{ fontSize: '10px', color: 'var(--muted)', fontWeight: 600, whiteSpace: 'nowrap' }}>
-                  {emp.jobTitle} · 🆔 {emp.code}
-                </span>
-              </div>
-            </div>
-
-            {/* Leave Balance Pill */}
-            <div className="ep-leave-pill" title="رصيد الإجازات السنوية المتاح" style={{
-              background: '#f0fdf4',
-              color: '#15803d',
-              border: '1px solid #bbf7d0',
-              padding: '2px 8px',
-              borderRadius: '99px',
-              fontSize: '11px',
-              fontWeight: 800,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px'
-            }}>
-              <span>🏖️</span>
-              <span>{emp.annualLeaveBalance !== undefined ? emp.annualLeaveBalance : 21} يوم</span>
-            </div>
-
-            {/* Privacy Mode Toggle */}
-            <button
-              type="button"
-              onClick={togglePrivacyMode}
-              title={isPrivacyMode ? 'إظهار الأرقام المالية' : 'إخفاء الأرقام المالية (وضع الخصوصية)'}
-              style={{
-                background: isPrivacyMode ? 'rgba(239, 68, 68, 0.1)' : 'var(--surface-muted)',
-                border: '1px solid var(--border)',
-                borderRadius: '8px',
-                padding: '4px 8px',
-                cursor: 'pointer',
-                fontSize: '13px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-                color: isPrivacyMode ? 'var(--danger)' : 'var(--text)'
-              }}
-            >
-              <span>{isPrivacyMode ? '🙈' : '👁️'}</span>
-            </button>
-
-            {/* Multi-Branch Selector if applicable */}
-            {emp.branchesDetails && emp.branchesDetails.length > 1 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <select
-                  value={selectedBranchId}
-                  onChange={(e) => setSelectedBranchId(e.target.value)}
+              {toggleTheme && (
+                <button
+                  type="button"
+                  onClick={toggleTheme}
                   style={{
-                    padding: '4px 10px',
+                    border: '1px solid var(--border)',
+                    background: 'var(--surface)',
+                    padding: '4px 6px',
                     borderRadius: '8px',
-                    fontSize: '12px',
-                    border: '1px solid var(--primary)',
-                    background: 'var(--primary-tint)',
-                    color: 'var(--primary-dark)',
                     cursor: 'pointer',
-                    fontWeight: 700
+                    fontSize: '12px',
+                    lineHeight: 1
                   }}
                 >
-                  <option value="">🌐 جميع الفروع (ملخص شامل)</option>
-                  {emp.branchesDetails.map((bd) => {
-                    const b = state.branches?.find((br) => br.id === bd.branchId);
-                    return <option key={bd.branchId} value={bd.branchId}>📍 فرع {b?.name || bd.branchId}</option>;
-                  })}
-                </select>
-              </div>
-            )}
-
-            <span style={{ color: 'var(--border)', fontSize: '15px' }} className="ep-breadcrumb-bar">/</span>
-
-            {/* Active Breadcrumb */}
-            <div className="ep-breadcrumb-bar" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', color: 'var(--muted)' }}>
-              <span>{breadcrumb.icon}</span>
-              <span style={{ fontWeight: 700, color: 'var(--primary)' }}>{breadcrumb.group}</span>
-              {breadcrumb.item && (
-                <>
-                  <span style={{ fontSize: '11px' }}>›</span>
-                  <span style={{ fontWeight: 600, color: 'var(--text)' }}>{breadcrumb.item}</span>
-                </>
+                  {themeMode === 'dark' ? '☀️' : '🌙'}
+                </button>
               )}
-            </div>
-          </div>
-        </div>
 
-        {/* Left Side: Live Synced Clock, Period Filter, Notifs, Theme, Logout */}
-        <div className="ep-titlebar-left" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          {/* Synced Real-time Live Clock */}
-          <div className="ep-live-clock" title={liveTime.isServerSynced ? '🌐 التوقيت الفعلي الموثق من الخادم' : '⏱️ التوقيت المباشر'} style={{
+              <button
+                type="button"
+                onClick={() => {
+                  if (typeof handleLogout === 'function') handleLogout();
+                  else setCurrentEmpUser(null);
+                }}
+                style={{
+                  border: '1px solid #fca5a5',
+                  background: '#fee2e2',
+                  color: '#dc2626',
+                  padding: '4px 7px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  lineHeight: 1
+                }}
+                title="تسجيل الخروج"
+              >
+                🚪
+              </button>
+            </div>
+          </header>
+
+          {/* 📱 Mobile Secondary Status & Period Bar */}
+          <div style={{
+            background: 'var(--surface-muted)',
+            borderBottom: '1px solid var(--border)',
+            padding: '5px 12px',
             display: 'flex',
             alignItems: 'center',
+            justifyContent: 'space-between',
             gap: '8px',
-            background: 'var(--surface)',
-            padding: '4px 10px',
-            borderRadius: '8px',
-            border: '1px solid var(--border)',
             fontSize: '11px',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
+            boxSizing: 'border-box'
           }}>
-            <span className="ep-clock-dot" style={{
-              width: '7px',
-              height: '7px',
-              borderRadius: '50%',
-              background: liveTime.isServerSynced ? '#22c55e' : '#f59e0b',
-              boxShadow: liveTime.isServerSynced ? '0 0 6px #22c55e' : '0 0 6px #f59e0b',
-              flexShrink: 0
-            }} />
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: '1.2' }}>
-              <span style={{ fontWeight: 'bold', color: 'var(--primary)', fontFamily: 'monospace', fontSize: '11px' }}>
+            {/* Realtime Live Clock */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+              <span style={{
+                width: '6px',
+                height: '6px',
+                borderRadius: '50%',
+                background: liveTime.isServerSynced ? '#22c55e' : '#f59e0b',
+                flexShrink: 0
+              }} />
+              <span style={{ fontWeight: 800, color: 'var(--primary)', fontFamily: 'monospace' }}>
                 ⏰ {liveTime.formatted12Time}
               </span>
-              <span style={{ color: 'var(--text-muted)', fontSize: '9.5px' }}>
-                {liveTime.fullArabicDate}
-              </span>
             </div>
-          </div>
 
-          {/* Month / Period Picker in Titlebar */}
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '4px',
-            background: 'var(--surface-muted)',
-            padding: '3px 8px',
-            borderRadius: '8px',
-            border: '1px solid var(--border)'
-          }}>
-            <button className="month-nav-btn" style={{ width: '24px', height: '24px', fontSize: '1rem' }} onClick={() => setSelectedMonth(prevMonth(selectedMonth))} title="الشهر السابق">‹</button>
-            <input
-              type="month"
-              value={selectedMonth}
-              onChange={(e) => e.target.value && setSelectedMonth(e.target.value)}
-              style={{ padding: '2px 6px', borderRadius: '6px', fontSize: '11.5px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer', fontWeight: 'bold' }}
-            />
-            <button className="month-nav-btn" style={{ width: '24px', height: '24px', fontSize: '1rem' }} onClick={() => setSelectedMonth(nextMonth(selectedMonth))} title="الشهر التالي">›</button>
-            {selectedMonth !== activeAutoCycleMonth && (
-              <button
-                className="emp-month-today-btn"
-                style={{ padding: '2px 8px', fontSize: '11px', borderRadius: '6px' }}
-                onClick={() => setSelectedMonth(activeAutoCycleMonth)}
+            {/* Month Navigator */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+              <button className="month-nav-btn" style={{ width: '22px', height: '22px', fontSize: '0.9rem' }} onClick={() => setSelectedMonth(prevMonth(selectedMonth))}>‹</button>
+              <input
+                type="month"
+                value={selectedMonth}
+                onChange={(e) => e.target.value && setSelectedMonth(e.target.value)}
+                style={{ padding: '1px 4px', borderRadius: '5px', fontSize: '11px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontWeight: 'bold' }}
+              />
+              <button className="month-nav-btn" style={{ width: '22px', height: '22px', fontSize: '0.9rem' }} onClick={() => setSelectedMonth(nextMonth(selectedMonth))}>›</button>
+              {selectedMonth !== activeAutoCycleMonth && (
+                <button
+                  className="emp-month-today-btn"
+                  style={{ padding: '1px 5px', fontSize: '10px', borderRadius: '4px' }}
+                  onClick={() => setSelectedMonth(activeAutoCycleMonth)}
+                >
+                  ⟳
+                </button>
+              )}
+            </div>
+
+            {/* Multi Branch Selector if any */}
+            {emp.branchesDetails && emp.branchesDetails.length > 1 && (
+              <select
+                value={selectedBranchId}
+                onChange={(e) => setSelectedBranchId(e.target.value)}
+                style={{
+                  padding: '2px 6px',
+                  borderRadius: '6px',
+                  fontSize: '10.5px',
+                  border: '1px solid var(--primary)',
+                  background: 'var(--primary-tint)',
+                  color: 'var(--primary-dark)',
+                  maxWidth: '105px'
+                }}
               >
-                ⟳ الدورة
-              </button>
+                <option value="">🌐 الكل</option>
+                {emp.branchesDetails.map((bd) => {
+                  const b = state.branches?.find((br) => br.id === bd.branchId);
+                  return <option key={bd.branchId} value={bd.branchId}>📍 {b?.name || bd.branchId}</option>;
+                })}
+              </select>
             )}
           </div>
+        </>
+      ) : (
+        /* 💻 Desktop Titlebar (Only on Desktop Screens) */
+        <header className="ep-titlebar" style={{
+          height: '52px',
+          background: 'var(--surface)',
+          borderBottom: '1px solid var(--border)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '0 18px',
+          userSelect: 'none',
+          zIndex: 100,
+          width: '100%',
+          boxSizing: 'border-box',
+          boxShadow: '0 1px 4px rgba(0,0,0,0.03)'
+        }}>
+          {/* Right Side: Brand, Profile Badge & Breadcrumb */}
+          <div className="ep-titlebar-right" style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <div className="ep-logo-badge" style={{
+              width: '32px',
+              height: '32px',
+              borderRadius: '8px',
+              background: 'linear-gradient(135deg, #0d9488, #0f766e)',
+              color: '#fff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '16px',
+              fontWeight: 900,
+              boxShadow: '0 2px 6px rgba(13,148,136,0.3)',
+              flexShrink: 0
+            }}>
+              🏥
+            </div>
 
-          {/* 🔔 Notification Bell & Interactive Dropdown Menu */}
-          <div style={{ position: 'relative' }} ref={notifDropdownRef}>
-            <button
-              type="button"
-              onClick={() => setIsNotifDropdownOpen(prev => !prev)}
-              title="الإشعارات والتنبيهات"
-              style={{
-                position: 'relative',
-                border: isNotifDropdownOpen ? '1.5px solid var(--primary)' : '1px solid var(--border)',
-                background: isNotifDropdownOpen ? 'var(--primary-light)' : 'var(--surface)',
-                padding: '5px 9px',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontSize: '13px',
-                color: 'var(--text)',
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--text)', whiteSpace: 'nowrap' }}>
+                منظومة الموارد البشرية
+              </span>
+
+              <span style={{ color: 'var(--border)', fontSize: '15px' }} className="ep-divider-slash">/</span>
+
+              {/* Employee Profile Badge */}
+              <div className="ep-profile-badge" style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '4px',
-                transition: 'all 0.15s ease'
-              }}
-            >
-              <span>🔔</span>
-              {empUnreadNotifsCount > 0 && (
-                <span style={{
-                  background: 'var(--danger, #dc2626)',
-                  color: '#ffffff',
-                  padding: '1px 6px',
-                  borderRadius: '99px',
-                  fontSize: '10px',
-                  fontWeight: 800,
-                  boxShadow: '0 1px 4px rgba(220,38,38,0.4)',
-                  animation: 'pulse 2s infinite'
-                }}>
-                  {empUnreadNotifsCount}
-                </span>
-              )}
-            </button>
-
-            {/* Notification Dropdown Panel */}
-            {isNotifDropdownOpen && (
-              <div className="ep-notif-panel" style={{
-                position: 'absolute',
-                top: 'calc(100% + 8px)',
-                left: 0,
-                width: '360px',
-                maxWidth: '92vw',
-                background: 'var(--surface)',
-                border: '1px solid var(--border)',
-                borderRadius: '12px',
-                boxShadow: '0 12px 35px rgba(0,0,0,0.15)',
-                zIndex: 1100,
-                overflow: 'hidden'
+                gap: '8px',
+                padding: '3px 10px 3px 4px',
+                background: 'var(--surface-muted)',
+                borderRadius: '24px',
+                border: '1px solid var(--border)'
               }}>
-                <div className="ep-notif-header" style={{
+                <div className="ep-profile-avatar" style={{
+                  width: '28px',
+                  height: '28px',
+                  borderRadius: '50%',
+                  background: 'var(--primary-light, #ccfbf1)',
+                  color: 'var(--primary, #0d9488)',
+                  border: '1.5px solid var(--primary)',
                   display: 'flex',
                   alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '10px 14px',
-                  background: 'var(--surface-muted)',
-                  borderBottom: '1px solid var(--border)'
+                  justifyContent: 'center',
+                  fontWeight: 800,
+                  fontSize: '12px',
+                  overflow: 'hidden',
+                  flexShrink: 0
                 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--text)' }}>
-                      🔔 إشعارات الموظف
-                    </span>
-                    {empUnreadNotifsCount > 0 && (
-                      <span style={{ background: '#fee2e2', color: '#dc2626', fontSize: '10.5px', fontWeight: 800, padding: '1px 6px', borderRadius: '8px' }}>
-                        {empUnreadNotifsCount} غير مقروء
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    {empUnreadNotifsCount > 0 && (
-                      <button
-                        type="button"
-                        onClick={handleMarkAllNotifsRead}
-                        style={{
-                          background: 'transparent',
-                          border: 'none',
-                          color: 'var(--primary, #0f766e)',
-                          fontSize: '11px',
-                          fontWeight: 'bold',
-                          cursor: 'pointer',
-                          padding: '2px 5px'
-                        }}
-                        title="تحديد كافة الإشعارات كمقروءة"
-                      >
-                        ✓ تحديد الكل
-                      </button>
-                    )}
-                    {empReadNotifsCount > 0 && (
-                      <button
-                        type="button"
-                        onClick={handleClearReadNotifs}
-                        style={{
-                          background: 'transparent',
-                          border: 'none',
-                          color: 'var(--danger, #dc2626)',
-                          fontSize: '11px',
-                          fontWeight: 'bold',
-                          cursor: 'pointer',
-                          padding: '2px 5px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '2px'
-                        }}
-                        title="حذف جميع الإشعارات المقروءة"
-                      >
-                        <span>🗑️</span>
-                        <span>مسح المقروء</span>
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                <div className="ep-notif-list" style={{ maxHeight: '340px', overflowY: 'auto', padding: '6px' }}>
-                  {empNotifications.length === 0 ? (
-                    <div style={{ padding: '28px 16px', textAlign: 'center', color: 'var(--muted)', fontSize: '12.5px' }}>
-                      🎉 لا توجد إشعارات حالياً
-                    </div>
+                  {emp.photoUrl ? (
+                    <img src={emp.photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                   ) : (
-                    empNotifications.slice(0, 20).map((n) => {
-                      const isUnread = !n.read;
-                      return (
-                        <div key={n.id} className={`ep-notif-card ${isUnread ? 'unread' : ''}`} style={{
-                          display: 'flex',
-                          gap: '10px',
-                          padding: '10px',
-                          borderRadius: '8px',
-                          background: isUnread ? 'rgba(15, 118, 110, 0.05)' : 'transparent',
-                          borderRight: isUnread ? '3px solid var(--primary)' : '3px solid transparent',
-                          marginBottom: '4px',
-                          borderBottom: '1px solid var(--border-light, rgba(0,0,0,0.04))'
-                        }}>
-                          <span style={{ fontSize: '18px', marginTop: '2px' }}>
-                            {n.icon || (n.type === 'loan' ? '💳' : n.type === 'leave' ? '🏖️' : n.type === 'permission' ? '⏰' : n.type === 'swap' ? '🔄' : '🔔')}
-                          </span>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '6px' }}>
-                              <h5 className="ep-notif-title" style={{ margin: 0, fontSize: '12.5px', fontWeight: 800, color: 'var(--text)' }}>
-                                <span>{n.title || n.typeLabel || 'إشعار إداري'}</span>
-                                {n.approverRole && (
-                                  <span style={{
-                                    fontSize: '10px',
-                                    fontWeight: 700,
-                                    padding: '1px 6px',
-                                    borderRadius: '6px',
-                                    background: n.action === 'rejected' ? '#fee2e2' : '#dcfce7',
-                                    color: n.action === 'rejected' ? '#dc2626' : '#15803d',
-                                    marginRight: '6px'
-                                  }}>
-                                    {n.approverRole === 'admin' ? 'الإدارة العليا' : 'مدير الفرع'}
-                                  </span>
-                                )}
-                              </h5>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                {isUnread && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleMarkNotifRead(n.id)}
-                                    title="تحديد كمقروء"
-                                    style={{
-                                      background: 'none',
-                                      border: 'none',
-                                      color: 'var(--primary, #0f766e)',
-                                      fontSize: '11px',
-                                      cursor: 'pointer',
-                                      padding: '0 4px',
-                                      fontWeight: 'bold',
-                                      whiteSpace: 'nowrap'
-                                    }}
-                                  >
-                                    ✓ تم
-                                  </button>
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteNotif(n.id)}
-                                  title="حذف الإشعار"
-                                  style={{
-                                    background: 'none',
-                                    border: 'none',
-                                    color: 'var(--muted, #94a3b8)',
-                                    fontSize: '12px',
-                                    cursor: 'pointer',
-                                    padding: '0 3px',
-                                    transition: 'color 0.15s'
-                                  }}
-                                  onMouseEnter={(e) => { e.currentTarget.style.color = '#dc2626'; }}
-                                  onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--muted, #94a3b8)'; }}
-                                >
-                                  🗑️
-                                </button>
-                              </div>
-                            </div>
-                            <p className="ep-notif-body" style={{ margin: '3px 0', fontSize: '11.5px', color: 'var(--text-muted)', lineHeight: 1.35 }}>
-                              {n.message || n.body || n.details || ''}
-                            </p>
-                            <div className="ep-notif-meta" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px', fontSize: '10px', color: 'var(--muted)' }}>
-                              <span>🕒 {n.date || (n.timestamp ? n.timestamp.slice(0, 10) : '')}</span>
-                              {n.typeLabel && <span>📂 {n.typeLabel}</span>}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })
+                    getEmpDisplayName(emp).charAt(0)
                   )}
                 </div>
 
-                {/* Dropdown Footer (Clear all read notifications) */}
-                {empReadNotifsCount > 0 && (
-                  <div style={{
-                    padding: '8px 12px',
-                    background: 'var(--surface-muted)',
-                    borderTop: '1px solid var(--border)',
-                    textAlign: 'center'
-                  }}>
-                    <button
-                      type="button"
-                      onClick={handleClearReadNotifs}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        color: 'var(--danger, #dc2626)',
-                        fontSize: '11.5px',
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '4px'
-                      }}
-                    >
-                      <span>🗑️</span>
-                      <span>حذف كافة الإشعارات المقروءة ({empReadNotifsCount})</span>
-                    </button>
-                  </div>
+                <div className="ep-profile-info" style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2 }}>
+                  <span className="ep-profile-name" style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text)', whiteSpace: 'nowrap', maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    👤 {getEmpDisplayName(emp)}
+                  </span>
+                  <span className="ep-profile-title" style={{ fontSize: '10px', color: 'var(--muted)', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                    {emp.jobTitle} · 🆔 {emp.code}
+                  </span>
+                </div>
+              </div>
+
+              {/* Leave Balance Pill */}
+              <div className="ep-leave-pill" title="رصيد الإجازات السنوية المتاح" style={{
+                background: '#f0fdf4',
+                color: '#15803d',
+                border: '1px solid #bbf7d0',
+                padding: '2px 8px',
+                borderRadius: '99px',
+                fontSize: '11px',
+                fontWeight: 800,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px'
+              }}>
+                <span>🏖️</span>
+                <span>{emp.annualLeaveBalance !== undefined ? emp.annualLeaveBalance : 21} يوم</span>
+              </div>
+
+              {/* Privacy Mode Toggle */}
+              <button
+                type="button"
+                onClick={togglePrivacyMode}
+                title={isPrivacyMode ? 'إظهار الأرقام المالية' : 'إخفاء الأرقام المالية (وضع الخصوصية)'}
+                style={{
+                  background: isPrivacyMode ? 'rgba(239, 68, 68, 0.1)' : 'var(--surface-muted)',
+                  border: '1px solid var(--border)',
+                  borderRadius: '8px',
+                  padding: '4px 8px',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  color: isPrivacyMode ? 'var(--danger)' : 'var(--text)'
+                }}
+              >
+                <span>{isPrivacyMode ? '🙈' : '👁️'}</span>
+              </button>
+
+              {/* Multi-Branch Selector if applicable */}
+              {emp.branchesDetails && emp.branchesDetails.length > 1 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <select
+                    value={selectedBranchId}
+                    onChange={(e) => setSelectedBranchId(e.target.value)}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: '8px',
+                      fontSize: '12px',
+                      border: '1px solid var(--primary)',
+                      background: 'var(--primary-tint)',
+                      color: 'var(--primary-dark)',
+                      cursor: 'pointer',
+                      fontWeight: 700
+                    }}
+                  >
+                    <option value="">🌐 جميع الفروع (ملخص شامل)</option>
+                    {emp.branchesDetails.map((bd) => {
+                      const b = state.branches?.find((br) => br.id === bd.branchId);
+                      return <option key={bd.branchId} value={bd.branchId}>📍 فرع {b?.name || bd.branchId}</option>;
+                    })}
+                  </select>
+                </div>
+              )}
+
+              <span style={{ color: 'var(--border)', fontSize: '15px' }} className="ep-breadcrumb-bar">/</span>
+
+              {/* Active Breadcrumb */}
+              <div className="ep-breadcrumb-bar" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', color: 'var(--muted)' }}>
+                <span>{breadcrumb.icon}</span>
+                <span style={{ fontWeight: 700, color: 'var(--primary)' }}>{breadcrumb.group}</span>
+                {breadcrumb.item && (
+                  <>
+                    <span style={{ fontSize: '11px' }}>›</span>
+                    <span style={{ fontWeight: 600, color: 'var(--text)' }}>{breadcrumb.item}</span>
+                  </>
                 )}
               </div>
-            )}
+            </div>
           </div>
 
-          {/* Theme Toggle Button */}
-          {toggleTheme && (
-            <button
-              type="button"
-              onClick={toggleTheme}
-              title={themeMode === 'dark' ? 'التحويل للوضع الفاتح' : 'التحويل للوضع الداكن'}
-              style={{
-                border: '1px solid var(--border)',
-                background: 'var(--surface)',
-                padding: '5px 9px',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontSize: '13px',
-                color: 'var(--text)',
-                display: 'flex',
-                alignItems: 'center'
-              }}
-            >
-              <span>{themeMode === 'dark' ? '☀️' : '🌙'}</span>
-            </button>
-          )}
-
-          {/* Logout Button */}
-          <button
-            type="button"
-            onClick={() => {
-              if (typeof handleLogout === 'function') handleLogout();
-              else setCurrentEmpUser(null);
-            }}
-            title="تسجيل الخروج"
-            style={{
-              border: '1px solid var(--danger-border, #fca5a5)',
-              background: 'var(--danger-light, #fee2e2)',
-              color: 'var(--danger, #dc2626)',
-              padding: '5px 10px',
+          {/* Left Side: Live Synced Clock, Period Filter, Notifs, Theme, Logout */}
+          <div className="ep-titlebar-left" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {/* Synced Real-time Live Clock */}
+            <div className="ep-live-clock" title={liveTime.isServerSynced ? '🌐 التوقيت الفعلي الموثق من الخادم' : '⏱️ التوقيت المباشر'} style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              background: 'var(--surface)',
+              padding: '4px 10px',
               borderRadius: '8px',
-              cursor: 'pointer',
-              fontSize: '12px',
-              fontWeight: 700,
+              border: '1px solid var(--border)',
+              fontSize: '11px',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
+            }}>
+              <span className="ep-clock-dot" style={{
+                width: '7px',
+                height: '7px',
+                borderRadius: '50%',
+                background: liveTime.isServerSynced ? '#22c55e' : '#f59e0b',
+                boxShadow: liveTime.isServerSynced ? '0 0 6px #22c55e' : '0 0 6px #f59e0b',
+                flexShrink: 0
+              }} />
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: '1.2' }}>
+                <span style={{ fontWeight: 'bold', color: 'var(--primary)', fontFamily: 'monospace', fontSize: '11px' }}>
+                  ⏰ {liveTime.formatted12Time}
+                </span>
+                <span style={{ color: 'var(--text-muted)', fontSize: '9.5px' }}>
+                  {liveTime.fullArabicDate}
+                </span>
+              </div>
+            </div>
+
+            {/* Month / Period Picker in Titlebar */}
+            <div style={{
               display: 'flex',
               alignItems: 'center',
               gap: '4px',
-              transition: 'all 0.15s'
-            }}
-          >
-            <span>🚪</span>
-            <span className="ep-btn-label">خروج</span>
-          </button>
-        </div>
-      </header>
+              background: 'var(--surface-muted)',
+              padding: '3px 8px',
+              borderRadius: '8px',
+              border: '1px solid var(--border)'
+            }}>
+              <button className="month-nav-btn" style={{ width: '24px', height: '24px', fontSize: '1rem' }} onClick={() => setSelectedMonth(prevMonth(selectedMonth))} title="الشهر السابق">‹</button>
+              <input
+                type="month"
+                value={selectedMonth}
+                onChange={(e) => e.target.value && setSelectedMonth(e.target.value)}
+                style={{ padding: '2px 6px', borderRadius: '6px', fontSize: '11.5px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer', fontWeight: 'bold' }}
+              />
+              <button className="month-nav-btn" style={{ width: '24px', height: '24px', fontSize: '1rem' }} onClick={() => setSelectedMonth(nextMonth(selectedMonth))} title="الشهر التالي">›</button>
+              {selectedMonth !== activeAutoCycleMonth && (
+                <button
+                  className="emp-month-today-btn"
+                  style={{ padding: '2px 8px', fontSize: '11px', borderRadius: '6px' }}
+                  onClick={() => setSelectedMonth(activeAutoCycleMonth)}
+                >
+                  ⟳ الدورة
+                </button>
+              )}
+            </div>
 
-      {/* ══════════════════════════════════════════════════════════════════════════════ */}
-      {/* ── 2. TOP RIBBON MENUBAR (Categorized Dropdown Navigation) ── */}
-      {/* ══════════════════════════════════════════════════════════════════════════════ */}
-      <nav ref={menuContainerRef} className="ep-menubar" style={{
-        background: 'var(--surface)',
-        borderBottom: '1px solid var(--border)',
-        padding: '4px 18px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '6px',
-        position: 'sticky',
-        top: 0,
-        zIndex: 90,
-        width: '100%',
-        boxSizing: 'border-box',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.03)'
-      }}>
-        {employeeMenuItems.map((menu) => {
-          const isActive = isMenuGroupActive(menu);
-          const isOpen = openDropdown === menu.id;
-
-          return (
-            <div key={menu.id} style={{ position: 'relative' }}>
+            {/* 🔔 Notification Bell & Interactive Dropdown Menu */}
+            <div style={{ position: 'relative' }} ref={notifDropdownRef}>
               <button
                 type="button"
-                className={`ep-menu-btn ${isActive ? 'active' : ''} ${isOpen ? 'open' : ''}`}
-                onClick={() => handleMenuClick(menu)}
+                onClick={() => setIsNotifDropdownOpen(prev => !prev)}
+                title="الإشعارات والتنبيهات"
                 style={{
+                  position: 'relative',
+                  border: isNotifDropdownOpen ? '1.5px solid var(--primary)' : '1px solid var(--border)',
+                  background: isNotifDropdownOpen ? 'var(--primary-light)' : 'var(--surface)',
+                  padding: '5px 9px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  color: 'var(--text)',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '7px',
-                  padding: '6px 13px',
-                  borderRadius: '8px',
-                  border: 'none',
-                  background: isActive ? 'var(--primary, #0f766e)' : (isOpen ? 'var(--hover, rgba(0,0,0,0.05))' : 'transparent'),
-                  color: isActive ? '#ffffff' : 'var(--text)',
-                  fontSize: '13px',
-                  fontWeight: isActive ? 800 : 600,
-                  cursor: 'pointer',
-                  transition: 'all 0.15s cubic-bezier(0.4, 0, 0.2, 1)',
-                  position: 'relative',
-                  fontFamily: 'inherit',
-                  boxShadow: isActive ? '0 2px 6px rgba(13, 148, 136, 0.3)' : 'none'
+                  gap: '4px',
+                  transition: 'all 0.15s ease'
                 }}
               >
-                <span style={{ fontSize: '15px' }}>{menu.icon}</span>
-                <span>{menu.label}</span>
-
-                {!menu.isSingle && (
+                <span>🔔</span>
+                {empUnreadNotifsCount > 0 && (
                   <span style={{
-                    fontSize: '10px',
-                    opacity: isActive ? 0.9 : 0.6,
-                    transform: isOpen ? 'rotate(180deg)' : 'none',
-                    transition: 'transform 0.2s ease'
-                  }}>
-                    ▼
-                  </span>
-                )}
-
-                {menu.badge > 0 && (
-                  <span className="ep-menu-badge" style={{
-                    background: isActive ? 'rgba(255,255,255,0.3)' : 'var(--danger)',
+                    background: 'var(--danger, #dc2626)',
                     color: '#ffffff',
+                    padding: '1px 6px',
+                    borderRadius: '99px',
                     fontSize: '10px',
                     fontWeight: 800,
-                    padding: '1px 6px',
-                    borderRadius: '99px'
+                    boxShadow: '0 1px 4px rgba(220,38,38,0.4)',
+                    animation: 'pulse 2s infinite'
                   }}>
-                    {menu.badge}
+                    {empUnreadNotifsCount}
                   </span>
                 )}
               </button>
 
-              {/* Dropdown Popup Menu */}
-              {!menu.isSingle && isOpen && menu.children && (
-                <div className="ep-dropdown-panel" style={{
+              {/* Notification Dropdown Panel */}
+              {isNotifDropdownOpen && (
+                <div className="ep-notif-panel" style={{
                   position: 'absolute',
-                  top: 'calc(100% + 4px)',
-                  right: 0,
-                  minWidth: '290px',
-                  maxWidth: '350px',
+                  top: 'calc(100% + 8px)',
+                  left: 0,
+                  width: '360px',
+                  maxWidth: '92vw',
                   background: 'var(--surface)',
                   border: '1px solid var(--border)',
                   borderRadius: '12px',
                   boxShadow: '0 12px 35px rgba(0,0,0,0.15)',
-                  zIndex: 1000,
-                  padding: '6px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '3px'
+                  zIndex: 1100,
+                  overflow: 'hidden'
                 }}>
-                  {menu.children.map((child) => {
-                    const isChildActive = child.targetTab === activeTab;
+                  <div className="ep-notif-header" style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '10px 14px',
+                    background: 'var(--surface-muted)',
+                    borderBottom: '1px solid var(--border)'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--text)' }}>
+                        🔔 إشعارات الموظف
+                      </span>
+                      {empUnreadNotifsCount > 0 && (
+                        <span style={{ background: '#fee2e2', color: '#dc2626', fontSize: '10.5px', fontWeight: 800, padding: '1px 6px', borderRadius: '8px' }}>
+                          {empUnreadNotifsCount} غير مقروء
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      {empUnreadNotifsCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleMarkAllNotifsRead}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: 'var(--primary, #0f766e)',
+                            fontSize: '11px',
+                            fontWeight: 'bold',
+                            cursor: 'pointer',
+                            padding: '2px 5px'
+                          }}
+                          title="تحديد كافة الإشعارات كمقروءة"
+                        >
+                          ✓ تحديد الكل
+                        </button>
+                      )}
+                      {empReadNotifsCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleClearReadNotifs}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: 'var(--danger, #dc2626)',
+                            fontSize: '11px',
+                            fontWeight: 'bold',
+                            cursor: 'pointer',
+                            padding: '2px 5px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '2px'
+                          }}
+                          title="حذف جميع الإشعارات المقروءة"
+                        >
+                          <span>🗑️</span>
+                          <span>مسح المقروء</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
 
-                    return (
+                  <div className="ep-notif-list" style={{ maxHeight: '340px', overflowY: 'auto', padding: '6px' }}>
+                    {empNotifications.length === 0 ? (
+                      <div style={{ padding: '28px 16px', textAlign: 'center', color: 'var(--muted)', fontSize: '12.5px' }}>
+                        🎉 لا توجد إشعارات حالياً
+                      </div>
+                    ) : (
+                      empNotifications.slice(0, 20).map((n) => {
+                        const isUnread = !n.read;
+                        return (
+                          <div key={n.id} className={`ep-notif-card ${isUnread ? 'unread' : ''}`} style={{
+                            display: 'flex',
+                            gap: '10px',
+                            padding: '10px',
+                            borderRadius: '8px',
+                            background: isUnread ? 'rgba(15, 118, 110, 0.05)' : 'transparent',
+                            borderRight: isUnread ? '3px solid var(--primary)' : '3px solid transparent',
+                            marginBottom: '4px',
+                            borderBottom: '1px solid var(--border-light, rgba(0,0,0,0.04))'
+                          }}>
+                            <span style={{ fontSize: '18px', marginTop: '2px' }}>
+                              {n.icon || (n.type === 'loan' ? '💳' : n.type === 'leave' ? '🏖️' : n.type === 'permission' ? '⏰' : n.type === 'swap' ? '🔄' : '🔔')}
+                            </span>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '6px' }}>
+                                <h5 className="ep-notif-title" style={{ margin: 0, fontSize: '12.5px', fontWeight: 800, color: 'var(--text)' }}>
+                                  <span>{n.title || n.typeLabel || 'إشعار إداري'}</span>
+                                  {n.approverRole && (
+                                    <span style={{
+                                      fontSize: '10px',
+                                      fontWeight: 700,
+                                      padding: '1px 6px',
+                                      borderRadius: '6px',
+                                      background: n.action === 'rejected' ? '#fee2e2' : '#dcfce7',
+                                      color: n.action === 'rejected' ? '#dc2626' : '#15803d',
+                                      marginRight: '6px'
+                                    }}>
+                                      {n.approverRole === 'admin' ? 'الإدارة العليا' : 'مدير الفرع'}
+                                    </span>
+                                  )}
+                                </h5>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                  {isUnread && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleMarkNotifRead(n.id)}
+                                      title="تحديد كمقروء"
+                                      style={{
+                                        background: 'none',
+                                        border: 'none',
+                                        color: 'var(--primary, #0f766e)',
+                                        fontSize: '11px',
+                                        cursor: 'pointer',
+                                        padding: '0 4px',
+                                        fontWeight: 'bold',
+                                        whiteSpace: 'nowrap'
+                                      }}
+                                    >
+                                      ✓ تم
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteNotif(n.id)}
+                                    title="حذف الإشعار"
+                                    style={{
+                                      background: 'none',
+                                      border: 'none',
+                                      color: 'var(--muted, #94a3b8)',
+                                      fontSize: '12px',
+                                      cursor: 'pointer',
+                                      padding: '0 3px',
+                                      transition: 'color 0.15s'
+                                    }}
+                                    onMouseEnter={(e) => { e.currentTarget.style.color = '#dc2626'; }}
+                                    onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--muted, #94a3b8)'; }}
+                                  >
+                                    🗑️
+                                  </button>
+                                </div>
+                              </div>
+                              <p className="ep-notif-body" style={{ margin: '3px 0', fontSize: '11.5px', color: 'var(--text-muted)', lineHeight: 1.35 }}>
+                                {n.message || n.body || n.details || ''}
+                              </p>
+                              <div className="ep-notif-meta" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px', fontSize: '10px', color: 'var(--muted)' }}>
+                                <span>🕒 {n.date || (n.timestamp ? n.timestamp.slice(0, 10) : '')}</span>
+                                {n.typeLabel && <span>📂 {n.typeLabel}</span>}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  {/* Dropdown Footer (Clear all read notifications) */}
+                  {empReadNotifsCount > 0 && (
+                    <div style={{
+                      padding: '8px 12px',
+                      background: 'var(--surface-muted)',
+                      borderTop: '1px solid var(--border)',
+                      textAlign: 'center'
+                    }}>
                       <button
-                        key={child.id}
                         type="button"
-                        className={`ep-dropdown-item ${isChildActive ? 'active' : ''}`}
-                        onClick={() => handleSubItemClick(child)}
+                        onClick={handleClearReadNotifs}
                         style={{
-                          display: 'flex',
-                          alignItems: 'flex-start',
-                          gap: '10px',
-                          padding: '8px 10px',
-                          borderRadius: '8px',
+                          background: 'none',
                           border: 'none',
-                          background: isChildActive ? 'var(--primary-light, #ccfbf1)' : 'transparent',
-                          color: isChildActive ? 'var(--primary-dark, #0f766e)' : 'var(--text)',
-                          textAlign: 'right',
-                          width: '100%',
+                          color: 'var(--danger, #dc2626)',
+                          fontSize: '11.5px',
+                          fontWeight: 700,
                           cursor: 'pointer',
-                          transition: 'all 0.12s ease',
-                          fontFamily: 'inherit'
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px'
                         }}
                       >
-                        <span className="ep-dropdown-item-icon" style={{ fontSize: '16px', marginTop: '2px' }}>{child.icon}</span>
-                        <div style={{ flex: 1, overflow: 'hidden' }}>
-                          <div className="ep-dropdown-item-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontWeight: isChildActive ? 800 : 700, fontSize: '13px' }}>
-                            <span>{child.label}</span>
-                            {child.badge > 0 && (
-                              <span style={{ background: 'var(--danger)', color: '#fff', fontSize: '10px', fontWeight: 800, padding: '1px 5px', borderRadius: '99px' }}>
-                                {child.badge}
-                              </span>
-                            )}
-                          </div>
-                          {child.desc && (
-                            <p className="ep-dropdown-item-desc" style={{ margin: '2px 0 0', fontSize: '11px', color: 'var(--muted)', fontWeight: 500, lineHeight: 1.3 }}>{child.desc}</p>
-                          )}
-                        </div>
+                        <span>🗑️</span>
+                        <span>حذف كافة الإشعارات المقروءة ({empReadNotifsCount})</span>
                       </button>
-                    );
-                  })}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
-          );
-        })}
-      </nav>
+
+            {/* Theme Toggle Button */}
+            {toggleTheme && (
+              <button
+                type="button"
+                onClick={toggleTheme}
+                title={themeMode === 'dark' ? 'التحويل للوضع الفاتح' : 'التحويل للوضع الداكن'}
+                style={{
+                  border: '1px solid var(--border)',
+                  background: 'var(--surface)',
+                  padding: '5px 9px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  color: 'var(--text)',
+                  display: 'flex',
+                  alignItems: 'center'
+                }}
+              >
+                <span>{themeMode === 'dark' ? '☀️' : '🌙'}</span>
+              </button>
+            )}
+
+            {/* Logout Button */}
+            <button
+              type="button"
+              onClick={() => {
+                if (typeof handleLogout === 'function') handleLogout();
+                else setCurrentEmpUser(null);
+              }}
+              title="تسجيل الخروج"
+              style={{
+                border: '1px solid var(--danger-border, #fca5a5)',
+                background: 'var(--danger-light, #fee2e2)',
+                color: 'var(--danger, #dc2626)',
+                padding: '5px 10px',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontSize: '12px',
+                fontWeight: 700,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                transition: 'all 0.15s'
+              }}
+            >
+              <span>🚪</span>
+              <span className="ep-btn-label">خروج</span>
+            </button>
+          </div>
+        </header>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════════════════ */}
+      {/* ── 2. TOP RIBBON MENUBAR (Strictly Desktop Only) ── */}
+      {/* ══════════════════════════════════════════════════════════════════════════════ */}
+      {!isMobileScreen && (
+        <nav ref={menuContainerRef} className="ep-menubar" style={{
+          background: 'var(--surface)',
+          borderBottom: '1px solid var(--border)',
+          padding: '4px 18px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          position: 'sticky',
+          top: 0,
+          zIndex: 90,
+          width: '100%',
+          boxSizing: 'border-box',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.03)'
+        }}>
+          {employeeMenuItems.map((menu) => {
+            const isActive = isMenuGroupActive(menu);
+            const isOpen = openDropdown === menu.id;
+
+            return (
+              <div key={menu.id} style={{ position: 'relative' }}>
+                <button
+                  type="button"
+                  className={`ep-menu-btn ${isActive ? 'active' : ''} ${isOpen ? 'open' : ''}`}
+                  onClick={() => handleMenuClick(menu)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '7px',
+                    padding: '6px 13px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    background: isActive ? 'var(--primary, #0f766e)' : (isOpen ? 'var(--hover, rgba(0,0,0,0.05))' : 'transparent'),
+                    color: isActive ? '#ffffff' : 'var(--text)',
+                    fontSize: '13px',
+                    fontWeight: isActive ? 800 : 600,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s cubic-bezier(0.4, 0, 0.2, 1)',
+                    position: 'relative',
+                    fontFamily: 'inherit',
+                    boxShadow: isActive ? '0 2px 6px rgba(13, 148, 136, 0.3)' : 'none'
+                  }}
+                >
+                  <span style={{ fontSize: '15px' }}>{menu.icon}</span>
+                  <span>{menu.label}</span>
+
+                  {!menu.isSingle && (
+                    <span style={{
+                      fontSize: '10px',
+                      opacity: isActive ? 0.9 : 0.6,
+                      transform: isOpen ? 'rotate(180deg)' : 'none',
+                      transition: 'transform 0.2s ease'
+                    }}>
+                      ▼
+                    </span>
+                  )}
+
+                  {menu.badge > 0 && (
+                    <span className="ep-menu-badge" style={{
+                      background: isActive ? 'rgba(255,255,255,0.3)' : 'var(--danger)',
+                      color: '#ffffff',
+                      fontSize: '10px',
+                      fontWeight: 800,
+                      padding: '1px 6px',
+                      borderRadius: '99px'
+                    }}>
+                      {menu.badge}
+                    </span>
+                  )}
+                </button>
+
+                {/* Dropdown Popup Menu */}
+                {!menu.isSingle && isOpen && menu.children && (
+                  <div className="ep-dropdown-panel" style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 4px)',
+                    right: 0,
+                    minWidth: '290px',
+                    maxWidth: '350px',
+                    background: 'var(--surface)',
+                    border: '1px solid var(--border)',
+                    borderRadius: '12px',
+                    boxShadow: '0 12px 35px rgba(0,0,0,0.15)',
+                    zIndex: 1000,
+                    padding: '6px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '3px'
+                  }}>
+                    {menu.children.map((child) => {
+                      const isChildActive = child.targetTab === activeTab;
+
+                      return (
+                        <button
+                          key={child.id}
+                          type="button"
+                          className={`ep-dropdown-item ${isChildActive ? 'active' : ''}`}
+                          onClick={() => handleSubItemClick(child)}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'flex-start',
+                            gap: '10px',
+                            padding: '8px 10px',
+                            borderRadius: '8px',
+                            border: 'none',
+                            background: isChildActive ? 'var(--primary-light, #ccfbf1)' : 'transparent',
+                            color: isChildActive ? 'var(--primary-dark, #0f766e)' : 'var(--text)',
+                            textAlign: 'right',
+                            width: '100%',
+                            cursor: 'pointer',
+                            transition: 'all 0.12s ease',
+                            fontFamily: 'inherit'
+                          }}
+                        >
+                          <span className="ep-dropdown-item-icon" style={{ fontSize: '16px', marginTop: '2px' }}>{child.icon}</span>
+                          <div style={{ flex: 1, overflow: 'hidden' }}>
+                            <div className="ep-dropdown-item-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontWeight: isChildActive ? 800 : 700, fontSize: '13px' }}>
+                              <span>{child.label}</span>
+                              {child.badge > 0 && (
+                                <span style={{ background: 'var(--danger)', color: '#fff', fontSize: '10px', fontWeight: 800, padding: '1px 5px', borderRadius: '99px' }}>
+                                  {child.badge}
+                                </span>
+                              )}
+                            </div>
+                            {child.desc && (
+                              <p className="ep-dropdown-item-desc" style={{ margin: '2px 0 0', fontSize: '11px', color: 'var(--muted)', fontWeight: 500, lineHeight: 1.3 }}>{child.desc}</p>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </nav>
+      )}
 
       {/* ══════════════════════════════════════════════════════════════════════════════ */}
       {/* ── 3. MOBILE OFF-CANVAS DRAWER ── */}
@@ -2400,16 +2854,50 @@ export default function EmployeePortalView({
       )}
 
       {/* ══════════════════════════════════════════════════════════════════════════════ */}
-      {/* ── 4. MOBILE BOTTOM NAVIGATION BAR (Only on Mobile Screens) ── */}
+      {/* ── 4. MOBILE BOTTOM NAVIGATION BAR (Fixed at bottom on Mobile Screens) ── */}
       {/* ══════════════════════════════════════════════════════════════════════════════ */}
       {isMobileScreen && (
-        <nav className="ep-bottom-nav">
+        <nav className="ep-bottom-nav" style={{
+          display: 'flex',
+          position: 'fixed',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: '60px',
+          background: 'var(--surface)',
+          borderTop: '1px solid var(--border)',
+          boxShadow: '0 -4px 20px rgba(0, 0, 0, 0.08)',
+          zIndex: 1000,
+          alignItems: 'center',
+          justifyContent: 'space-around',
+          padding: '0 4px calc(env(safe-area-inset-bottom, 0px))',
+          backdropFilter: 'blur(10px)',
+          WebkitBackdropFilter: 'blur(10px)'
+        }}>
           <button
             type="button"
             className={`ep-bottom-nav-btn ${activeTab === 'dashboard' ? 'active' : ''}`}
             onClick={() => setActiveTab('dashboard')}
+            style={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '2px',
+              height: '100%',
+              background: 'none',
+              border: 'none',
+              color: activeTab === 'dashboard' ? 'var(--primary, #0d9488)' : 'var(--muted)',
+              fontSize: '11px',
+              fontWeight: activeTab === 'dashboard' ? 800 : 600,
+              cursor: 'pointer',
+              padding: '4px 0',
+              fontFamily: 'inherit',
+              position: 'relative'
+            }}
           >
-            <span className="ep-bottom-nav-icon">🏠</span>
+            <span style={{ fontSize: '18px' }}>🏠</span>
             <span>الرئيسية</span>
           </button>
 
@@ -2417,8 +2905,26 @@ export default function EmployeePortalView({
             type="button"
             className={`ep-bottom-nav-btn ${activeTab === 'shifts' ? 'active' : ''}`}
             onClick={() => setActiveTab('shifts')}
+            style={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '2px',
+              height: '100%',
+              background: 'none',
+              border: 'none',
+              color: activeTab === 'shifts' ? 'var(--primary, #0d9488)' : 'var(--muted)',
+              fontSize: '11px',
+              fontWeight: activeTab === 'shifts' ? 800 : 600,
+              cursor: 'pointer',
+              padding: '4px 0',
+              fontFamily: 'inherit',
+              position: 'relative'
+            }}
           >
-            <span className="ep-bottom-nav-icon">⏱️</span>
+            <span style={{ fontSize: '18px' }}>⏱️</span>
             <span>الدوام</span>
           </button>
 
@@ -2426,8 +2932,26 @@ export default function EmployeePortalView({
             type="button"
             className={`ep-bottom-nav-btn ${activeTab === 'salary' ? 'active' : ''}`}
             onClick={() => setActiveTab('salary')}
+            style={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '2px',
+              height: '100%',
+              background: 'none',
+              border: 'none',
+              color: activeTab === 'salary' ? 'var(--primary, #0d9488)' : 'var(--muted)',
+              fontSize: '11px',
+              fontWeight: activeTab === 'salary' ? 800 : 600,
+              cursor: 'pointer',
+              padding: '4px 0',
+              fontFamily: 'inherit',
+              position: 'relative'
+            }}
           >
-            <span className="ep-bottom-nav-icon">💰</span>
+            <span style={{ fontSize: '18px' }}>💰</span>
             <span>الراتب</span>
           </button>
 
@@ -2435,8 +2959,26 @@ export default function EmployeePortalView({
             type="button"
             className={`ep-bottom-nav-btn ${['leaves', 'permissions', 'loans'].includes(activeTab) ? 'active' : ''}`}
             onClick={() => setActiveTab('leaves')}
+            style={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '2px',
+              height: '100%',
+              background: 'none',
+              border: 'none',
+              color: ['leaves', 'permissions', 'loans'].includes(activeTab) ? 'var(--primary, #0d9488)' : 'var(--muted)',
+              fontSize: '11px',
+              fontWeight: ['leaves', 'permissions', 'loans'].includes(activeTab) ? 800 : 600,
+              cursor: 'pointer',
+              padding: '4px 0',
+              fontFamily: 'inherit',
+              position: 'relative'
+            }}
           >
-            <span className="ep-bottom-nav-icon">📋</span>
+            <span style={{ fontSize: '18px' }}>📋</span>
             <span>الطلبات</span>
           </button>
 
@@ -2444,8 +2986,26 @@ export default function EmployeePortalView({
             type="button"
             className="ep-bottom-nav-btn"
             onClick={() => setIsMobileDrawerOpen(true)}
+            style={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '2px',
+              height: '100%',
+              background: 'none',
+              border: 'none',
+              color: 'var(--muted)',
+              fontSize: '11px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              padding: '4px 0',
+              fontFamily: 'inherit',
+              position: 'relative'
+            }}
           >
-            <span className="ep-bottom-nav-icon">☰</span>
+            <span style={{ fontSize: '18px' }}>☰</span>
             <span>المزيد</span>
           </button>
         </nav>
@@ -2454,7 +3014,13 @@ export default function EmployeePortalView({
       {/* ══════════════════════════════════════════════════════════════════════════════ */}
       {/* ── 5. MAIN WORKSPACE CANVAS ── */}
       {/* ══════════════════════════════════════════════════════════════════════════════ */}
-      <main className="ep-workspace" style={{ flex: 1, padding: '16px 20px', width: '100%', maxWidth: '100%', boxSizing: 'border-box' }}>
+      <main className="ep-workspace" style={{
+        flex: 1,
+        padding: isMobileScreen ? '12px 10px 85px 10px' : '16px 20px',
+        width: '100%',
+        maxWidth: '100%',
+        boxSizing: 'border-box'
+      }}>
 
           {/* ── Active Resignation Notice Period Banner ── */}
           {activeResignationNotice && activeResignationNotice.remainingDays > 0 && (
