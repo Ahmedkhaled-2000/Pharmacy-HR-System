@@ -340,6 +340,7 @@ export default function EmployeeComprehensiveDossierModal({
                 <div>اسم المستخدم للنظام: <strong>{emp.username || '—'}</strong></div>
                 <div>أجر الساعة / الراتب: <strong>{fmt(emp.salary)} ج.م</strong></div>
                 <div>ساعات العمل باليوم: <strong>{emp.workHoursPerDay || 8} س</strong></div>
+                <div>ساعات البريك اليومية: <strong>{emp.breakHours || emp.defaultBreakHours || 0} س</strong></div>
                 <div>أيام العمل بالشهر: <strong>{emp.workDaysPerMonth || 26} يوم</strong></div>
                 <div>بدل الإدارة: <strong>{fmt(emp.managementAllowance || 0)} ج.م</strong></div>
                 <div>بدل الانتقال: <strong>{fmt(emp.transportAllowance || 0)} ج.م</strong></div>

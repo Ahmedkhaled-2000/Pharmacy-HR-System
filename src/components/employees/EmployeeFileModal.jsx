@@ -109,7 +109,8 @@ export default function EmployeeFileModal({
         branchId: selectedBranchId,
         salary: String(foundArchived.salary || '4000'),
         workHours: String(foundArchived.workHours || foundArchived.workHoursPerDay || '8'),
-        workDays: String(foundArchived.workDays || foundArchived.workDaysPerMonth || '26')
+        workDays: String(foundArchived.workDays || foundArchived.workDaysPerMonth || '26'),
+        breakHours: String(foundArchived.breakHours || foundArchived.defaultBreakHours || '0')
       };
       // Remove from archived list since it is now active
       setArchivedBranchesDetails(prev => prev.filter(ab => String(ab.branchId) !== String(selectedBranchId)));
@@ -142,6 +143,7 @@ export default function EmployeeFileModal({
             salary: String(targetBranch.salary || '4000'),
             workHours: String(targetBranch.workHours || targetBranch.workHoursPerDay || '8'),
             workDays: String(targetBranch.workDays || targetBranch.workDaysPerMonth || '26'),
+            breakHours: String(targetBranch.breakHours || targetBranch.defaultBreakHours || '0'),
             archivedAt: new Date().toISOString()
           }
         ];
@@ -149,7 +151,7 @@ export default function EmployeeFileModal({
     }
 
     if (branchesDetails.length <= 1) {
-      setBranchesDetails([{ id: Math.random().toString(), branchId: '', salary: '4000', workHours: '8', workDays: '26' }]);
+      setBranchesDetails([{ id: Math.random().toString(), branchId: '', salary: '4000', workHours: '8', workDays: '26', breakHours: '0' }]);
     } else {
       setBranchesDetails(branchesDetails.filter((_, i) => i !== idx));
     }
@@ -242,7 +244,8 @@ export default function EmployeeFileModal({
           branchId: bd.branchId || '',
           salary: String(bd.salary || '4000'),
           workHours: String(bd.workHoursPerDay || bd.workHours || '8'),
-          workDays: String(bd.workDaysPerMonth || bd.workDays || '26')
+          workDays: String(bd.workDaysPerMonth || bd.workDays || '26'),
+          breakHours: String(bd.breakHours || bd.defaultBreakHours || editingEmp.breakHours || editingEmp.defaultBreakHours || '0')
         }));
       } else {
         loadedActiveBranches = [
@@ -251,7 +254,8 @@ export default function EmployeeFileModal({
             branchId: editingEmp.branchId || (branches[0]?.id || ''),
             salary: String(editingEmp.salary || '4000'),
             workHours: String(editingEmp.workHoursPerDay || editingEmp.workHours || '8'),
-            workDays: String(editingEmp.workDaysPerMonth || editingEmp.workDays || '26')
+            workDays: String(editingEmp.workDaysPerMonth || editingEmp.workDays || '26'),
+            breakHours: String(editingEmp.breakHours || editingEmp.defaultBreakHours || '0')
           }
         ];
       }
@@ -272,6 +276,7 @@ export default function EmployeeFileModal({
             salary: String(ab.salary || '4000'),
             workHours: String(ab.workHoursPerDay || ab.workHours || '8'),
             workDays: String(ab.workDaysPerMonth || ab.workDays || '26'),
+            breakHours: String(ab.breakHours || ab.defaultBreakHours || '0'),
             archivedAt: ab.archivedAt || new Date().toISOString()
           };
         });
@@ -418,13 +423,16 @@ export default function EmployeeFileModal({
       const salary = parseFloat(bd.salary) || 0;
       const workHours = parseFloat(bd.workHours) || 8;
       const workDays = parseFloat(bd.workDays) || 26;
+      const breakHours = parseFloat(bd.breakHours) || 0;
       return {
         branchId: bd.branchId,
         branchName: branchObj ? branchObj.name : 'فرع غير معروف',
         branchCode: branchObj ? branchObj.branchCode : '',
         salary: String(salary),
         workHoursPerDay: String(workHours),
-        workDaysPerMonth: String(workDays)
+        workDaysPerMonth: String(workDays),
+        breakHours: String(breakHours),
+        defaultBreakHours: breakHours
       };
     });
 
@@ -442,6 +450,8 @@ export default function EmployeeFileModal({
           salary: String(ab.salary || '4000'),
           workHoursPerDay: String(ab.workHours || ab.workHoursPerDay || '8'),
           workDaysPerMonth: String(ab.workDays || ab.workDaysPerMonth || '26'),
+          breakHours: String(ab.breakHours || ab.defaultBreakHours || '0'),
+          defaultBreakHours: parseFloat(ab.breakHours || ab.defaultBreakHours) || 0,
           archivedAt: ab.archivedAt || new Date().toISOString()
         };
       });
@@ -496,6 +506,8 @@ export default function EmployeeFileModal({
       salary: validBranchesDetails[0].salary,
       workHoursPerDay: validBranchesDetails[0].workHoursPerDay,
       workDaysPerMonth: validBranchesDetails[0].workDaysPerMonth,
+      breakHours: validBranchesDetails[0].breakHours,
+      defaultBreakHours: validBranchesDetails[0].defaultBreakHours,
       // Store all active branches details here
       branchesDetails: validBranchesDetails,
       // Store preserved/archived branch salaries here
@@ -969,7 +981,7 @@ export default function EmployeeFileModal({
                         <span className="badge badge-success" style={{ fontSize: '11.5px' }}>🟢 فرع نشط ومعين</span>
                       </div>
 
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px' }}>
                         <div className="field">
                           <label>سعر الساعة الشهري (الراتب الأساسي)</label>
                           <input type="number" value={bd.salary} onChange={(e) => {
@@ -996,11 +1008,29 @@ export default function EmployeeFileModal({
                             setBranchesDetails(newBd);
                           }} placeholder="26" required />
                         </div>
+
+                        <div className="field">
+                          <label>ساعات البريك اليومية (تخصم تلقائياً)</label>
+                          <input
+                            type="number"
+                            step="0.25"
+                            min="0"
+                            max="12"
+                            value={bd.breakHours || '0'}
+                            onChange={(e) => {
+                              const newBd = [...branchesDetails];
+                              newBd[idx].breakHours = e.target.value;
+                              setBranchesDetails(newBd);
+                            }}
+                            placeholder="0"
+                          />
+                        </div>
                       </div>
 
                       <div style={{ marginTop: '10px', padding: '8px 12px', background: '#fff', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '12.5px', color: '#166534', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
                         <span>📅 سعر اليوم: <strong>{calcDailyRate.toLocaleString()} ج.م / يوم</strong> (({rateVal} × {hoursVal}) ÷ {daysVal})</span>
                         <span>💵 سعر الساعة اليومي: <strong>{calcDailyHourlyRate.toLocaleString()} ج.م / ساعة</strong></span>
+                        <span>☕ ساعات البريك: <strong>{bd.breakHours || '0'} س</strong></span>
                         <span>💰 الراتب الأساسي الشهري: <strong>{calcMonthlySalary.toLocaleString()} ج.م</strong></span>
                       </div>
                     </div>
@@ -1074,7 +1104,7 @@ export default function EmployeeFileModal({
                           </button>
                         </div>
 
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '14px' }}>
                           <div className="field">
                             <label style={{ color: '#64748b', fontSize: '12px' }}>سعر الساعة الشهري (محفوظ)</label>
                             <input
@@ -1114,6 +1144,23 @@ export default function EmployeeFileModal({
                             <input
                               type="number"
                               value={ab.workDays || ab.workDaysPerMonth || '26'}
+                              disabled
+                              readOnly
+                              style={{
+                                background: '#f1f5f9',
+                                color: '#64748b',
+                                borderColor: '#e2e8f0',
+                                cursor: 'not-allowed',
+                                fontWeight: 'bold'
+                              }}
+                            />
+                          </div>
+
+                          <div className="field">
+                            <label style={{ color: '#64748b', fontSize: '12px' }}>ساعات البريك (محفوظة)</label>
+                            <input
+                              type="number"
+                              value={ab.breakHours || ab.defaultBreakHours || '0'}
                               disabled
                               readOnly
                               style={{

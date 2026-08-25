@@ -167,6 +167,7 @@ export default function BranchManagerView({
     punchType: 'full', // 'full' | 'in' | 'out' | 'correction'
     timeIn: '09:00',
     timeOut: '17:00',
+    breakHours: '0',
     reason: ''
   });
 
@@ -835,13 +836,16 @@ export default function BranchManagerView({
     const emp = (state.employees || []).find((e) => String(e.id) === String(manualPunchData.employeeId));
     if (!emp) return;
 
-    let calcHours = 0;
+    let calcGrossHours = 0;
+    let calcNetHours = 0;
+    const bH = Math.max(0, parseFloat(manualPunchData.breakHours) || 0);
     if (manualPunchData.timeIn && manualPunchData.timeOut) {
       const [inH, inM] = manualPunchData.timeIn.split(':').map(Number);
       const [outH, outM] = manualPunchData.timeOut.split(':').map(Number);
-      let diff = (outH * 60 + outM) - (inH * 60 + inM);
+      let diff = ((outH || 0) * 60 + (outM || 0)) - ((inH || 0) * 60 + (inM || 0));
       if (diff < 0) diff += 24 * 60;
-      calcHours = Math.round((diff / 60) * 100) / 100;
+      calcGrossHours = Math.round((diff / 60) * 100) / 100;
+      calcNetHours = Math.max(0, Math.round((calcGrossHours - bH) * 100) / 100);
     }
 
     const reqId = `req_punch_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
@@ -858,10 +862,12 @@ export default function BranchManagerView({
       date: manualPunchData.date,
       timeIn: manualPunchData.timeIn || '',
       timeOut: manualPunchData.timeOut || '',
-      hours: calcHours,
+      hours: calcNetHours,
+      grossHours: calcGrossHours,
+      breakHours: bH,
       punchType: manualPunchData.punchType,
       reason: manualPunchData.reason.trim(),
-      details: `طلب تسجيل بصمة يدوي من مدير الفرع (${manualPunchData.punchType === 'full' ? 'وردية كاملة' : manualPunchData.punchType === 'in' ? 'حضور فقط' : manualPunchData.punchType === 'out' ? 'انصراف فقط' : 'تعديل بصمة'}) | التاريخ: ${manualPunchData.date} | من ${manualPunchData.timeIn || '—'} إلى ${manualPunchData.timeOut || '—'} (${calcHours} س) | السبب: ${manualPunchData.reason.trim()}`,
+      details: `طلب تسجيل بصمة يدوي من مدير الفرع (${manualPunchData.punchType === 'full' ? 'وردية كاملة' : manualPunchData.punchType === 'in' ? 'حضور فقط' : manualPunchData.punchType === 'out' ? 'انصراف فقط' : 'تعديل بصمة'}) | التاريخ: ${manualPunchData.date} | من ${manualPunchData.timeIn || '—'} إلى ${manualPunchData.timeOut || '—'} (صافي: ${calcNetHours} س - بريك: ${bH} س) | السبب: ${manualPunchData.reason.trim()}`,
       status: 'pending_admin',
       branchApproved: true,
       adminApproved: false,
@@ -875,7 +881,7 @@ export default function BranchManagerView({
       requestId: reqId,
       type: 'punch_correction',
       title: `🖐️ طلب تسجيل بصمة يدوي: ${emp.name}`,
-      message: `طلب مدير فرع ${currentBranch?.name || ''} اعتماد بصمة يدوي للموظف ${emp.name} بتاريخ ${manualPunchData.date} (${manualPunchData.timeIn} ➔ ${manualPunchData.timeOut}) - السبب: ${manualPunchData.reason.trim()}`,
+      message: `طلب مدير فرع ${currentBranch?.name || ''} اعتماد بصمة يدوي للموظف ${emp.name} بتاريخ ${manualPunchData.date} (${manualPunchData.timeIn} ➔ ${manualPunchData.timeOut} | صافي: ${calcNetHours} س) - السبب: ${manualPunchData.reason.trim()}`,
       employeeId: emp.id,
       employeeName: emp.name,
       employeeCode: emp.code,
@@ -899,7 +905,8 @@ export default function BranchManagerView({
     notifyAdminOnNewRequest({ state: updatedState, newRequest: newReq, empName: emp.name, branchName: currentBranch?.name });
 
     setShowManualPunchModal(false);
-    setManualPunchData({ employeeId: '', date: getRealTodayStr(), punchType: 'full', timeIn: '09:00', timeOut: '17:00', reason: '' });
+    setManualPunchData({ employeeId: '', date: getRealTodayStr(), punchType: 'full', timeIn: '09:00', timeOut: '17:00', breakHours: '0', reason: '' });
+    showToast?.('📤 تم إرسال طلب البصمة اليدوية إلى الإدارة العليا للاعتماد بنجاح');
     showToast?.('📤 تم إرسال طلب البصمة اليدوية إلى الإدارة العليا للاعتماد بنجاح');
   };
 
@@ -3342,7 +3349,12 @@ export default function BranchManagerView({
                 <label style={{ fontWeight: 'bold', fontSize: '13px' }}>اختر الموظف:</label>
                 <select
                   value={manualPunchData.employeeId}
-                  onChange={(e) => setManualPunchData({ ...manualPunchData, employeeId: e.target.value })}
+                  onChange={(e) => {
+                    const empId = e.target.value;
+                    const emp = branchEmployees.find(em => String(em.id) === String(empId));
+                    const bH = emp?.breakHours || emp?.defaultBreakHours || emp?.branchesDetails?.[0]?.breakHours || '0';
+                    setManualPunchData({ ...manualPunchData, employeeId: empId, breakHours: String(bH) });
+                  }}
                   required
                   style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
                 >
@@ -3396,7 +3408,7 @@ export default function BranchManagerView({
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
                 <div className="field">
                   <label style={{ fontWeight: 'bold', fontSize: '13px' }}>وقت الحضور (الدخول):</label>
                   <input
@@ -3415,7 +3427,35 @@ export default function BranchManagerView({
                     style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
                   />
                 </div>
+                <div className="field">
+                  <label style={{ fontWeight: 'bold', fontSize: '13px' }}>ساعات البريك (تخصم):</label>
+                  <input
+                    type="number"
+                    step="0.25"
+                    min="0"
+                    max="12"
+                    value={manualPunchData.breakHours}
+                    onChange={(e) => setManualPunchData({ ...manualPunchData, breakHours: e.target.value })}
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                  />
+                </div>
               </div>
+
+              {manualPunchData.timeIn && manualPunchData.timeOut && (() => {
+                const [inH, inM] = manualPunchData.timeIn.split(':').map(Number);
+                const [outH, outM] = manualPunchData.timeOut.split(':').map(Number);
+                let diff = ((outH || 0) * 60 + (outM || 0)) - ((inH || 0) * 60 + (inM || 0));
+                if (diff < 0) diff += 24 * 60;
+                const gross = Math.round((diff / 60) * 100) / 100;
+                const bH = Math.max(0, parseFloat(manualPunchData.breakHours) || 0);
+                const net = Math.max(0, Math.round((gross - bH) * 100) / 100);
+                return (
+                  <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '10px 14px', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px' }}>
+                    <span>⏱️ إجمالي التواجد: <strong>{gross} س</strong> (بريك: {bH} س)</span>
+                    <span style={{ color: '#16a34a', fontWeight: '900' }}>✅ صافي ساعات العمل: {net} ساعة</span>
+                  </div>
+                );
+              })()}
 
               <div className="field">
                 <label style={{ fontWeight: 'bold', fontSize: '13px' }}>سبب التسجيل / التعديل اليدوي وملاحظات مدير الفرع:</label>

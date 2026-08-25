@@ -35,6 +35,7 @@ export default function AttendanceModule({
   const [manualDate, setManualDate] = useState(() => (customFrom ? customFrom : new Date().toISOString().slice(0, 10)));
   const [manualInTime, setManualInTime] = useState('');
   const [manualOutTime, setManualOutTime] = useState('');
+  const [manualBreakHours, setManualBreakHours] = useState('0');
   const [manualNotes, setManualNotes] = useState('');
   const [manualBranchId, setManualBranchId] = useState('');
 
@@ -63,9 +64,13 @@ export default function AttendanceModule({
 
     const empObj = employees.find((e) => e.id === manualEmpId);
 
-    const inHour = parseInt(manualInTime.split(':')[0]) || 9;
-    const outHour = parseInt(manualOutTime.split(':')[0]) || 17;
-    const workHours = Math.max(1, outHour - inHour);
+    const inParts = manualInTime.split(':').map(Number);
+    const outParts = manualOutTime.split(':').map(Number);
+    let diffMinutes = ((outParts[0] || 0) * 60 + (outParts[1] || 0)) - ((inParts[0] || 0) * 60 + (inParts[1] || 0));
+    if (diffMinutes <= 0) diffMinutes += 24 * 60;
+    const elapsedHours = diffMinutes / 60;
+    const bH = Math.max(0, parseFloat(manualBreakHours) || 0);
+    const workHours = Math.max(0, Math.round((elapsedHours - bH) * 100) / 100);
 
     const performAdd = async () => {
       const newPunch = {
@@ -77,8 +82,12 @@ export default function AttendanceModule({
         date: manualDate,
         timeIn: manualInTime,
         timeOut: manualOutTime,
+        breakHours: bH,
         hours: workHours,
-        note: manualNotes.trim() || 'تسجيل بصمة يدوية من الأدمن',
+        actualWorkedHours: workHours,
+        isManual: true,
+        manualPunch: true,
+        note: manualNotes.trim() || (bH > 0 ? `تسجيل بصمة يدوية من الأدمن (بريك: ${bH} س)` : 'تسجيل بصمة يدوية من الأدمن'),
         statusLabel: 'تسجيل يدوي',
         createdAt: new Date().toISOString()
       };
@@ -102,6 +111,7 @@ export default function AttendanceModule({
       if (saveState) await saveState(updatedState);
       setManualInTime('');
       setManualOutTime('');
+      setManualBreakHours('0');
       setManualNotes('');
       setManualBranchId('');
       showToast?.('✅ تم إضافة البصمة اليدوية للموظف بنجاح!');
@@ -140,7 +150,21 @@ export default function AttendanceModule({
         <form onSubmit={handleAddManualPunch} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px' }}>
           <div className="field">
             <label>اختر الموظف</label>
-            <select value={manualEmpId} onChange={(e) => setManualEmpId(e.target.value)} required>
+            <select
+              value={manualEmpId}
+              onChange={(e) => {
+                const id = e.target.value;
+                setManualEmpId(id);
+                const emp = employees.find(em => String(em.id) === String(id));
+                if (emp) {
+                  const bH = emp.breakHours || emp.defaultBreakHours || emp.branchesDetails?.[0]?.breakHours || '0';
+                  setManualBreakHours(String(bH));
+                } else {
+                  setManualBreakHours('0');
+                }
+              }}
+              required
+            >
               <option value="">-- اختر الموظف --</option>
               {employees.filter(isEmployeeActive).map((e) => {
                 const count = getEmployeeManualPunchesCount(e.id, state, activePeriodFilter);
@@ -180,6 +204,36 @@ export default function AttendanceModule({
             <label>وقت الخروج</label>
             <input type="time" value={manualOutTime} onChange={(e) => setManualOutTime(e.target.value)} required />
           </div>
+
+          <div className="field">
+            <label>ساعات البريك (تخصم من اليوم)</label>
+            <input
+              type="number"
+              step="0.25"
+              min="0"
+              max="12"
+              value={manualBreakHours}
+              onChange={(e) => setManualBreakHours(e.target.value)}
+              placeholder="0"
+            />
+          </div>
+
+          {manualInTime && manualOutTime && (() => {
+            const inParts = manualInTime.split(':').map(Number);
+            const outParts = manualOutTime.split(':').map(Number);
+            let diffMinutes = ((outParts[0] || 0) * 60 + (outParts[1] || 0)) - ((inParts[0] || 0) * 60 + (inParts[1] || 0));
+            if (diffMinutes <= 0) diffMinutes += 24 * 60;
+            const gross = Math.round((diffMinutes / 60) * 100) / 100;
+            const bH = Math.max(0, parseFloat(manualBreakHours) || 0);
+            const net = Math.max(0, Math.round((gross - bH) * 100) / 100);
+            return (
+              <div style={{ gridColumn: '1 / -1', background: '#f0fdf4', padding: '10px 14px', borderRadius: '10px', border: '1px solid #bbf7d0', fontSize: '13px', display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <span>⏱️ إجمالي وقت التواجد: <strong>{gross} س</strong></span>
+                <span>☕ ساعات البريك المخصومة: <strong>{bH} س</strong></span>
+                <span style={{ color: '#16a34a', fontWeight: '800' }}>✅ صافي ساعات العمل المحسوبة: <strong>{net} ساعة</strong></span>
+              </div>
+            );
+          })()}
 
           <div className="field" style={{ gridColumn: '1 / -1' }}>
             <label>ملاحظات ومبرر البصمة اليدوية</label>

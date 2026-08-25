@@ -3613,10 +3613,12 @@ export default function App() {
       currentPauseMs += (nowMs - active.pauseStartEpoch);
     }
     const totalElapsedMs = nowMs - (active.startEpoch || (nowMs - 60000));
-    const netActiveMs = Math.max(0, totalElapsedMs - currentPauseMs);
-
-    const breakHours = Math.round((currentPauseMs / 3600000) * 100) / 100;
-    const netHours = Math.round((netActiveMs / 3600000) * 100) / 100;
+    const totalElapsedHours = Math.round((totalElapsedMs / 3600000) * 100) / 100;
+    const trackedBreak = Math.round((currentPauseMs / 3600000) * 100) / 100;
+    const configuredBreak = parseFloat(emp?.breakHours || emp?.defaultBreakHours || emp?.branchesDetails?.[0]?.breakHours) || 0;
+    const effectiveBreak = trackedBreak > 0 ? trackedBreak : (totalElapsedHours > configuredBreak ? configuredBreak : 0);
+    const breakHours = effectiveBreak;
+    const netHours = Math.max(0, Math.round((totalElapsedHours - effectiveBreak) * 100) / 100);
 
     const bId = active.branchId || emp?.branchId || (emp?.branchesDetails && emp.branchesDetails[0]?.branchId) || '';
     const bObj = (state.branches || []).find((b) => String(b.id) === String(bId));

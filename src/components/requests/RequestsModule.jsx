@@ -447,13 +447,14 @@ export default function RequestsModule({
         const punchDate = approvedTargetReq.date || approvedTargetReq.punchDate || new Date().toISOString().slice(0, 10);
         const timeIn = approvedTargetReq.timeIn || '09:00';
         const timeOut = approvedTargetReq.timeOut || '17:00';
+        const bH = Math.max(0, parseFloat(approvedTargetReq.breakHours) || 0);
         let hrs = parseFloat(approvedTargetReq.hours);
         if (isNaN(hrs) || hrs <= 0) {
           const [inH, inM] = timeIn.split(':').map(Number);
           const [outH, outM] = timeOut.split(':').map(Number);
-          let diff = (outH * 60 + outM) - (inH * 60 + inM);
+          let diff = ((outH || 0) * 60 + (outM || 0)) - ((inH || 0) * 60 + (inM || 0));
           if (diff < 0) diff += 24 * 60;
-          hrs = Math.round((diff / 60) * 100) / 100;
+          hrs = Math.max(0, Math.round(((diff / 60) - bH) * 100) / 100);
         }
 
         const existingShiftIndex = updatedShifts.findIndex(s => 
@@ -466,6 +467,7 @@ export default function RequestsModule({
             ...updatedShifts[existingShiftIndex],
             timeIn,
             timeOut,
+            breakHours: bH,
             hours: hrs,
             actualWorkedHours: hrs,
             isManual: true,
@@ -485,6 +487,7 @@ export default function RequestsModule({
             date: punchDate,
             timeIn,
             timeOut,
+            breakHours: bH,
             hours: hrs,
             actualWorkedHours: hrs,
             isManual: true,
@@ -2000,9 +2003,15 @@ export default function RequestsModule({
                           من <strong>{previewModalReq.timeIn || '—'}</strong> إلى <strong>{previewModalReq.timeOut || '—'}</strong>
                         </div>
                       </div>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#166534' }}>ساعات البريك المخصومة:</span>
+                        <div style={{ fontWeight: 'bold', color: '#14532d' }}>
+                          ☕ {previewModalReq.breakHours !== undefined ? previewModalReq.breakHours : 0} ساعة
+                        </div>
+                      </div>
                       {previewModalReq.hours && (
                         <div style={{ background: '#dcfce7', padding: '8px 12px', borderRadius: '8px', border: '1px solid #86efac' }}>
-                          <span style={{ fontSize: '12px', color: '#166534', fontWeight: 'bold' }}>ساعات العمل المحسوبة:</span>
+                          <span style={{ fontSize: '12px', color: '#166534', fontWeight: 'bold' }}>صافي ساعات العمل المحسوبة:</span>
                           <div style={{ fontWeight: '900', color: '#15803d', fontSize: '16px' }}>
                             ⏱️ {previewModalReq.hours} ساعة
                           </div>
