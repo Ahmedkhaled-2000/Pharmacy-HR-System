@@ -14,9 +14,13 @@
 
 /* ── 1. App Layout Container ── */
 .ep-app-container {
-  display: flex;
-  flex-direction: column;
+  display: flex !important;
+  flex-direction: column !important;
+  width: 100% !important;
+  max-width: 100% !important;
   min-height: 100vh;
+  margin: 0 !important;
+  box-sizing: border-box !important;
   background: var(--background);
   color: var(--text);
   font-family: 'Cairo', 'Tajawal', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -27,11 +31,14 @@
 /* ── 2. Top Title Bar (Glassmorphism Header) ── */
 .ep-titlebar {
   height: 52px;
+  width: 100% !important;
+  box-sizing: border-box !important;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: space-between !important;
   padding: 0 20px;
   user-select: none;
   z-index: 120;
@@ -42,8 +49,9 @@
 
 .ep-titlebar-right,
 .ep-titlebar-left {
-  display: flex;
-  align-items: center;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
   gap: 10px;
 }
 
@@ -166,9 +174,12 @@
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   padding: 4px 18px;
-  display: flex;
-  align-items: center;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
   gap: 6px;
+  width: 100% !important;
+  box-sizing: border-box !important;
   position: sticky;
   top: 0;
   z-index: 110;
@@ -592,12 +603,12 @@
 
 /* ── 12. Mobile Bottom Navigation Bar ── */
 .ep-bottom-nav {
-  display: none;
+  display: none !important;
 }
 
 @media (max-width: 768px) {
   .ep-bottom-nav {
-    display: flex;
+    display: flex !important;
     position: fixed;
     bottom: 0;
     left: 0;

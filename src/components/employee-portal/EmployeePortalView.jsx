@@ -17,6 +17,7 @@ import BylawsModule from '../bylaws/BylawsModule';
 import EmployeeResignationModule from './EmployeeResignationModule';
 import { computeLatenessFinancialAmount, isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
 import { printEmployeePayslipDirect } from '../../utils/printHelper';
+import '../../portal.css';
 
 // ─────────────────────────────────────────
 //  Month navigation helpers
@@ -1715,32 +1716,6 @@ export default function EmployeePortalView({
               </button>
             )}
           </div>
-
-          {/* Excel Export Quick Button */}
-          {canExportExcel && (
-            <button
-              type="button"
-              onClick={() => setShowExportModal(true)}
-              title="تصدير كشف الراتب Excel"
-              style={{
-                background: 'var(--success-tint, #dcfce7)',
-                color: 'var(--success-dark, #15803d)',
-                border: '1px solid var(--success-border, #86efac)',
-                padding: '5px 10px',
-                borderRadius: '8px',
-                fontSize: '12px',
-                fontWeight: 700,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '5px',
-                cursor: 'pointer',
-                transition: 'all 0.15s'
-              }}
-            >
-              <span>📥</span>
-              <span className="ep-btn-label">تصدير Excel</span>
-            </button>
-          )}
 
           {/* 🔔 Notification Bell & Interactive Dropdown Menu */}
           <div style={{ position: 'relative' }} ref={notifDropdownRef}>
