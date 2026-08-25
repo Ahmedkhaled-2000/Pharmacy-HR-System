@@ -243,6 +243,18 @@ export default function RequestsModule({
     }
   };
 
+  const formatTimeStr = (timeVal) => {
+    if (!timeVal) return '—';
+    if (typeof timeVal === 'object') return getRequestTime(timeVal);
+    if (typeof timeVal === 'string' && timeVal.includes('T')) {
+      try {
+        const d = new Date(timeVal);
+        if (!isNaN(d.getTime())) return d.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+      } catch {}
+    }
+    return String(timeVal);
+  };
+
   const filteredRequests = requests.filter((r) => {
     if (!r) return false;
     if (filterType !== 'all') {
