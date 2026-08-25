@@ -2005,7 +2005,7 @@ export default function EmployeePortalView({
                   <h3>📋 سجل البصمات والورديات — {lbl.raw}</h3>
                   <span className="ep-count-badge">{empShifts.length} وردية</span>
                   {(() => {
-                    const empManualCount = getEmployeeManualPunchesCount(emp.id, state, matchesCycle);
+                    const empManualCount = getEmployeeManualPunchesCount(emp.id, state, filterFn);
                     return (
                       <span style={{ background: empManualCount > 0 ? '#fef3c7' : '#f1f5f9', color: empManualCount > 0 ? '#b45309' : '#64748b', border: '1px solid ' + (empManualCount > 0 ? '#fcd34d' : '#e2e8f0'), padding: '4px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: 800 }}>
                         🖐️ تسجيل البصمات يدوياً هذا الشهر: {empManualCount}
