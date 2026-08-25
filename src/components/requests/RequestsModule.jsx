@@ -954,12 +954,72 @@ export default function RequestsModule({
     if (!isConfirmed) return;
 
     const performClearAllRequests = async () => {
+      // 1. استخراج وأرشفة كافة الإجازات المعتمدة في leaveHistory لضمان عدم تصفير رصيد الإجازات المأخوذة
+      const existingLeaveHistory = state.leaveHistory || [];
+      const leaveMap = new Map();
+      existingLeaveHistory.forEach(lh => { if (lh && lh.id) leaveMap.set(String(lh.id), lh); });
+
+      // فحص كافة الطلبات قبل مسحها وحفظ المعتمد منها في الأرشيف الدائم
+      const allCandidateLeaves = [...(state.leaveRequests || []), ...(state.requests || []), ...currentReqs];
+      allCandidateLeaves.forEach((r) => {
+        if (!r) return;
+        const isLeave = r.type === 'leave' || r.type === 'leave_request' || r.leaveType || r.type === 'annual_leave';
+        const isApproved = r.status === 'approved' || r.adminApproved;
+        if (isLeave && isApproved) {
+          const leaveId = r.id || `lhist_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+          const archivedLeave = {
+            ...r,
+            id: leaveId,
+            status: 'approved',
+            adminApproved: true,
+            archivedAt: r.archivedAt || new Date().toISOString()
+          };
+          leaveMap.set(String(leaveId), archivedLeave);
+        }
+      });
+      const updatedLeaveHistory = Array.from(leaveMap.values());
+      const preservedLeaveIds = new Set(updatedLeaveHistory.map(lh => String(lh.id)));
+
+      // 2. استخراج وأرشفة الاستئذانات المعتمدة لضمان عدم إلغاء الإعفاءات
+      const existingPermissions = state.permissions || [];
+      const permMap = new Map();
+      existingPermissions.forEach(p => { if (p && p.id) permMap.set(String(p.id), p); });
+
+      allCandidateLeaves.forEach((r) => {
+        if (!r) return;
+        const isPerm = r.type === 'permission' || r.type === 'late_permission' || r.type === 'early_leave' || r.type === 'إذن';
+        const isApproved = r.status === 'approved' || r.adminApproved;
+        if (isPerm && isApproved) {
+          const permId = r.id || `perm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+          const archivedPerm = {
+            ...r,
+            id: permId,
+            status: 'approved',
+            adminApproved: true,
+            archivedAt: r.archivedAt || new Date().toISOString()
+          };
+          permMap.set(String(permId), archivedPerm);
+        }
+      });
+      const updatedPermissions = Array.from(permMap.values());
+      const preservedPermIds = new Set(updatedPermissions.map(p => String(p.id)));
+
+      // 3. الحفاظ على السلف المالية المعتمدة
+      const reqLoanIds = new Set(currentReqs.filter(r => r.type === 'loan' || r.type === 'advance' || r.type === 'meds' || r.type === 'credit_medicine').map(r => String(r.id)));
+      const updatedLoans = state.loans || [];
+      const preservedLoanIds = new Set(updatedLoans.map(ln => String(ln.id)));
+
+      // 4. بناء قائمة المعرفات المحذوفة مع حماية الإجازات والاستئذانات والسلف المحفوظة
       const allDeletedKeys = [];
       const allReqIdsSet = new Set();
 
       currentReqs.forEach((r) => {
         if (r && r.id) {
           const idStr = String(r.id);
+          // إذا كان الطلب معتمداً وتم حفظه في الإجازات أو الاستئذانات أو السلف، لا نضيفه لـ _deletedIds
+          if (preservedLeaveIds.has(idStr) || preservedPermIds.has(idStr) || preservedLoanIds.has(idStr)) {
+            return;
+          }
           const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
           allReqIdsSet.add(idStr);
           if (rawId) allReqIdsSet.add(rawId);
@@ -968,14 +1028,10 @@ export default function RequestsModule({
             rawId,
             `req_${idStr}`,
             `req_${rawId}`,
-            `leave_${idStr}`,
-            `leave_${rawId}`,
             `swap_${idStr}`,
             `swap_${rawId}`,
             `res_${idStr}`,
             `res_${rawId}`,
-            `loan_${idStr}`,
-            `loan_${rawId}`,
             `notif_${idStr}`,
             `notif_${rawId}`
           );
@@ -984,16 +1040,26 @@ export default function RequestsModule({
 
       const updatedDeleted = Array.from(new Set([...(state._deletedIds || []), ...allDeletedKeys])).filter(Boolean).slice(-5000);
 
-      // الحفاظ على السلف المالية المعتمدة فقط، ومسح الطلبات المعلقة والمسجلة كطلبات
-      const reqLoanIds = new Set(currentReqs.filter(r => r.type === 'loan' || r.type === 'advance' || r.type === 'meds' || r.type === 'credit_medicine').map(r => String(r.id)));
-      const updatedLoans = (state.loans || []).filter((ln) => !reqLoanIds.has(String(ln.id)) && !allReqIdsSet.has(String(ln.id)));
+      // 5. ربط الإجازات المعتمدة بملفات الموظفين
+      const updatedEmployees = (state.employees || []).map(emp => {
+        const empApprovedLeaves = updatedLeaveHistory.filter(lh =>
+          String(lh.employeeId) === String(emp.id) || (emp.code && String(lh.employeeCode) === String(emp.code))
+        );
+        return {
+          ...emp,
+          leaveHistory: empApprovedLeaves
+        };
+      });
 
       const updatedState = {
         ...state,
+        employees: updatedEmployees,
         requests: [],
         leaveRequests: [],
         shiftSwaps: [],
         loans: updatedLoans,
+        leaveHistory: updatedLeaveHistory,
+        permissions: updatedPermissions,
         resignationRequests: [],
         notifications: (state.notifications || []).filter(n => !n.requestId || (!allReqIdsSet.has(String(n.requestId)) && !allReqIdsSet.has(String(n.id)))),
         _deletedIds: updatedDeleted
@@ -1001,7 +1067,7 @@ export default function RequestsModule({
 
       if (setState) setState(updatedState);
       if (saveState) await saveState(updatedState);
-      showToast?.('🗑️ تم تفريغ وحذف سجل الطلبات العام بالكامل نهائياً من كافة الشاشات!');
+      showToast?.('🗑️ تم مسح وتفريغ قائمة الطلبات بنجاح مع الاحتفاظ التام برصيد وسجلات الإجازات والاستئذانات المعتمدة!');
     };
 
     if (executeWithOwnerGuard) {

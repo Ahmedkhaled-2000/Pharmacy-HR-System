@@ -489,7 +489,7 @@ export function shouldShowRequestToBranch(req, state) {
 
 /**
  * Returns all approved leaves for an employee from all historical and active sources
- * (state.leaveHistory, state.leaveRequests, and state.requests)
+ * (state.leaveHistory, emp.leaveHistory, emp.approvedLeaves, state.leaveRequests, and state.requests)
  */
 export function getEmployeeApprovedLeaves(emp, state) {
   if (!emp) return [];
@@ -499,7 +499,7 @@ export function getEmployeeApprovedLeaves(emp, state) {
   const fromRequests = (state?.requests || []).filter(
     (r) =>
       (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode) === empCodeStr)) &&
-      (r.type === 'leave' || r.type === 'leave_request')
+      (r.type === 'leave' || r.type === 'leave_request' || r.type === 'annual_leave' || r.leaveType)
   );
 
   const fromLeaveRequests = (state?.leaveRequests || []).filter(
@@ -512,8 +512,11 @@ export function getEmployeeApprovedLeaves(emp, state) {
       String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode) === empCodeStr)
   );
 
+  const fromEmpHistory = Array.isArray(emp?.leaveHistory) ? emp.leaveHistory : [];
+  const fromEmpLeaves = Array.isArray(emp?.approvedLeaves) ? emp.approvedLeaves : [];
+
   const map = new Map();
-  [...fromLeaveHistory, ...fromLeaveRequests, ...fromRequests].forEach((r) => {
+  [...fromLeaveHistory, ...fromEmpHistory, ...fromEmpLeaves, ...fromLeaveRequests, ...fromRequests].forEach((r) => {
     if (!r) return;
     const isApproved = r.status === 'approved' || r.adminApproved || !r.status;
     const key = r.id || `${r.employeeId}_${r.startDate}_${r.endDate}_${r.daysCount || 1}`;
@@ -547,14 +550,16 @@ export function calculateEmployeeLeaveStats(emp, state, targetYear = '') {
   const allLeaves = getEmployeeApprovedLeaves(emp, state);
 
   const approvedAnnualLeaves = allLeaves.filter((r) => {
-    const isAnnual = !r.leaveType || r.leaveType === 'annual' || r.type === 'annual_leave';
+    const isAnnual = !r.leaveType || r.leaveType === 'annual' || r.type === 'annual_leave' || r.type === 'leave';
     const isAppr = r.status === 'approved' || r.adminApproved;
     const start = String(r.startDate || r.date || '');
     const inYear = !year || start.startsWith(year);
     return isAnnual && isAppr && inYear;
   });
 
-  const takenAnnualDays = approvedAnnualLeaves.reduce((acc, r) => acc + (parseInt(r.daysCount || r.days || 1, 10)), 0);
+  const leavesSum = approvedAnnualLeaves.reduce((acc, r) => acc + (parseInt(r.daysCount || r.days || 1, 10)), 0);
+  const manualTaken = parseInt(emp.manualTakenAnnualDays || emp.takenAnnualLeaves || emp.usedAnnualDays || 0, 10) || 0;
+  const takenAnnualDays = leavesSum + manualTaken;
   const remainingAnnualDays = Math.max(0, annualTotal - takenAnnualDays);
 
   return {
