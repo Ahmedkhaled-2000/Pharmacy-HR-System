@@ -121,6 +121,8 @@ export default function EmployeePortalView({
   notifications = [],
   onMarkNotificationRead,
   onMarkAllNotificationsRead,
+  onDeleteNotification,
+  onClearReadNotifications,
 }) {
   const emp = useMemo(() => {
     if (!currentEmpUser) return null;
@@ -1243,6 +1245,10 @@ export default function EmployeePortalView({
     return empNotifications.filter(n => !n.read).length;
   }, [empNotifications]);
 
+  const empReadNotifsCount = useMemo(() => {
+    return empNotifications.filter(n => n.read).length;
+  }, [empNotifications]);
+
   const handleMarkNotifRead = async (notifId) => {
     if (typeof onMarkNotificationRead === 'function') {
       onMarkNotificationRead(notifId);
@@ -1268,6 +1274,26 @@ export default function EmployeePortalView({
       setState(updatedState);
       if (saveState) await saveState(updatedState);
     }
+  };
+
+  const handleDeleteNotif = async (notifId) => {
+    const updated = (state.notifications || []).filter(n => n.id !== notifId);
+    const updatedState = { ...state, notifications: updated };
+    setState(updatedState);
+    if (saveState) await saveState(updatedState);
+    showToast?.('🗑️ تم حذف الإشعار بنجاح');
+  };
+
+  const handleClearReadNotifs = async () => {
+    const empNotifIdsToDelete = new Set(
+      empNotifications.filter(n => n.read).map(n => n.id)
+    );
+    if (empNotifIdsToDelete.size === 0) return;
+    const updated = (state.notifications || []).filter(n => !empNotifIdsToDelete.has(n.id));
+    const updatedState = { ...state, notifications: updated };
+    setState(updatedState);
+    if (saveState) await saveState(updatedState);
+    showToast?.(`🗑️ تم مسح ${empNotifIdsToDelete.size} إشعار مقروء`);
   };
 
   // Penalties count for bylaws badge
@@ -1886,29 +1912,54 @@ export default function EmployeePortalView({
                       </span>
                     )}
                   </div>
-                  {empUnreadNotifsCount > 0 && (
-                    <button
-                      type="button"
-                      onClick={handleMarkAllNotifsRead}
-                      style={{
-                        background: 'transparent',
-                        border: 'none',
-                        color: 'var(--primary, #0f766e)',
-                        fontSize: '11.5px',
-                        fontWeight: 'bold',
-                        cursor: 'pointer',
-                        padding: '2px 6px'
-                      }}
-                    >
-                      ✓ تحديد الكل كمقروء
-                    </button>
-                  )}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {empUnreadNotifsCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleMarkAllNotifsRead}
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          color: 'var(--primary, #0f766e)',
+                          fontSize: '11px',
+                          fontWeight: 'bold',
+                          cursor: 'pointer',
+                          padding: '2px 5px'
+                        }}
+                        title="تحديد كافة الإشعارات كمقروءة"
+                      >
+                        ✓ تحديد الكل
+                      </button>
+                    )}
+                    {empReadNotifsCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleClearReadNotifs}
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          color: 'var(--danger, #dc2626)',
+                          fontSize: '11px',
+                          fontWeight: 'bold',
+                          cursor: 'pointer',
+                          padding: '2px 5px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '2px'
+                        }}
+                        title="حذف جميع الإشعارات المقروءة"
+                      >
+                        <span>🗑️</span>
+                        <span>مسح المقروء</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="ep-notif-list" style={{ maxHeight: '340px', overflowY: 'auto', padding: '6px' }}>
                   {empNotifications.length === 0 ? (
                     <div style={{ padding: '28px 16px', textAlign: 'center', color: 'var(--muted)', fontSize: '12.5px' }}>
-                      🎉 لا توجد إشعارات جديدة حالياً
+                      🎉 لا توجد إشعارات حالياً
                     </div>
                   ) : (
                     empNotifications.slice(0, 20).map((n) => {
@@ -1945,25 +1996,45 @@ export default function EmployeePortalView({
                                   </span>
                                 )}
                               </h5>
-                              {isUnread && (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                {isUnread && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMarkNotifRead(n.id)}
+                                    title="تحديد كمقروء"
+                                    style={{
+                                      background: 'none',
+                                      border: 'none',
+                                      color: 'var(--primary, #0f766e)',
+                                      fontSize: '11px',
+                                      cursor: 'pointer',
+                                      padding: '0 4px',
+                                      fontWeight: 'bold',
+                                      whiteSpace: 'nowrap'
+                                    }}
+                                  >
+                                    ✓ تم
+                                  </button>
+                                )}
                                 <button
                                   type="button"
-                                  onClick={() => handleMarkNotifRead(n.id)}
-                                  title="تحديد كمقروء"
+                                  onClick={() => handleDeleteNotif(n.id)}
+                                  title="حذف الإشعار"
                                   style={{
                                     background: 'none',
                                     border: 'none',
-                                    color: 'var(--primary, #0f766e)',
-                                    fontSize: '11.5px',
+                                    color: 'var(--muted, #94a3b8)',
+                                    fontSize: '12px',
                                     cursor: 'pointer',
-                                    padding: '0 4px',
-                                    fontWeight: 'bold',
-                                    whiteSpace: 'nowrap'
+                                    padding: '0 3px',
+                                    transition: 'color 0.15s'
                                   }}
+                                  onMouseEnter={(e) => { e.currentTarget.style.color = '#dc2626'; }}
+                                  onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--muted, #94a3b8)'; }}
                                 >
-                                  ✓ تم
+                                  🗑️
                                 </button>
-                              )}
+                              </div>
                             </div>
                             <p className="ep-notif-body" style={{ margin: '3px 0', fontSize: '11.5px', color: 'var(--text-muted)', lineHeight: 1.35 }}>
                               {n.message || n.body || n.details || ''}
@@ -1978,6 +2049,35 @@ export default function EmployeePortalView({
                     })
                   )}
                 </div>
+
+                {/* Dropdown Footer (Clear all read notifications) */}
+                {empReadNotifsCount > 0 && (
+                  <div style={{
+                    padding: '8px 12px',
+                    background: 'var(--surface-muted)',
+                    borderTop: '1px solid var(--border)',
+                    textAlign: 'center'
+                  }}>
+                    <button
+                      type="button"
+                      onClick={handleClearReadNotifs}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--danger, #dc2626)',
+                        fontSize: '11.5px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}
+                    >
+                      <span>🗑️</span>
+                      <span>حذف كافة الإشعارات المقروءة ({empReadNotifsCount})</span>
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>

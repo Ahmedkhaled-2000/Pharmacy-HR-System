@@ -18,6 +18,8 @@ export default function DesktopLayout({
   notifications = [],
   onMarkNotificationRead,
   onMarkAllNotificationsRead,
+  onDeleteNotification,
+  onClearReadNotifications,
   themeMode,
   toggleTheme,
   onExportExcel,
@@ -977,36 +979,63 @@ export default function DesktopLayout({
                       </span>
                     )}
                   </div>
-                  {unreadNotificationsCount > 0 && onMarkAllNotificationsRead && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onMarkAllNotificationsRead();
-                      }}
-                      style={{
-                        background: 'transparent',
-                        border: 'none',
-                        color: 'var(--primary, #0f766e)',
-                        fontSize: '11.5px',
-                        fontWeight: 'bold',
-                        cursor: 'pointer',
-                        padding: '2px 6px'
-                      }}
-                    >
-                      ✓ تحديد الكل كمقروء
-                    </button>
-                  )}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {unreadNotificationsCount > 0 && onMarkAllNotificationsRead && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onMarkAllNotificationsRead();
+                        }}
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          color: 'var(--primary, #0f766e)',
+                          fontSize: '11px',
+                          fontWeight: 'bold',
+                          cursor: 'pointer',
+                          padding: '2px 5px'
+                        }}
+                      >
+                        ✓ تحديد الكل
+                      </button>
+                    )}
+                    {onClearReadNotifications && (notifications || []).some(n => n.read) && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onClearReadNotifications();
+                        }}
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          color: 'var(--danger, #dc2626)',
+                          fontSize: '11px',
+                          fontWeight: 'bold',
+                          cursor: 'pointer',
+                          padding: '2px 5px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '2px'
+                        }}
+                        title="حذف جميع الإشعارات المقروءة"
+                      >
+                        <span>🗑️</span>
+                        <span>مسح المقروء</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {/* Notifications Scrollable List */}
                 <div style={{ maxHeight: '340px', overflowY: 'auto' }}>
                   {notifications.length === 0 ? (
                     <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--muted)', fontSize: '12.5px' }}>
-                      🎉 لا توجد إشعارات جديدة حالياً
+                      🎉 لا توجد إشعارات حالياً
                     </div>
                   ) : (
-                    notifications.slice(0, 15).map((n) => {
+                    notifications.slice(0, 20).map((n) => {
                       const isUnread = !n.read;
                       return (
                         <div
@@ -1029,27 +1058,52 @@ export default function DesktopLayout({
                               <h5 style={{ margin: 0, fontSize: '12.5px', fontWeight: isUnread ? 800 : 600, color: 'var(--text)' }}>
                                 {n.title || n.typeLabel || 'إشعار إداري'}
                               </h5>
-                              {isUnread && onMarkNotificationRead && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    onMarkNotificationRead(n.id);
-                                  }}
-                                  title="تحديد كمقروء"
-                                  style={{
-                                    background: 'none',
-                                    border: 'none',
-                                    color: 'var(--primary, #0f766e)',
-                                    fontSize: '11px',
-                                    cursor: 'pointer',
-                                    padding: '0 4px',
-                                    fontWeight: 'bold'
-                                  }}
-                                >
-                                  ✓ تم
-                                </button>
-                              )}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                {isUnread && onMarkNotificationRead && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onMarkNotificationRead(n.id);
+                                    }}
+                                    title="تحديد كمقروء"
+                                    style={{
+                                      background: 'none',
+                                      border: 'none',
+                                      color: 'var(--primary, #0f766e)',
+                                      fontSize: '11px',
+                                      cursor: 'pointer',
+                                      padding: '0 4px',
+                                      fontWeight: 'bold'
+                                    }}
+                                  >
+                                    ✓ تم
+                                  </button>
+                                )}
+                                {onDeleteNotification && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onDeleteNotification(n.id);
+                                    }}
+                                    title="حذف الإشعار"
+                                    style={{
+                                      background: 'none',
+                                      border: 'none',
+                                      color: 'var(--muted, #94a3b8)',
+                                      fontSize: '12px',
+                                      cursor: 'pointer',
+                                      padding: '0 3px',
+                                      transition: 'color 0.15s'
+                                    }}
+                                    onMouseEnter={(e) => { e.currentTarget.style.color = '#dc2626'; }}
+                                    onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--muted, #94a3b8)'; }}
+                                  >
+                                    🗑️
+                                  </button>
+                                )}
+                              </div>
                             </div>
                             <p style={{ margin: '3px 0', fontSize: '11.5px', color: 'var(--text-muted, #475569)', lineHeight: 1.35 }}>
                               {n.message || n.body || n.details || ''}

@@ -4644,6 +4644,20 @@ export default function App() {
     if (saveState) await saveState(updatedState);
   };
 
+  const handleDeleteNotification = async (notifId) => {
+    const updatedNotifs = (state.notifications || []).filter((n) => n.id !== notifId);
+    const updatedState = { ...state, notifications: updatedNotifs };
+    setState(updatedState);
+    if (saveState) await saveState(updatedState);
+  };
+
+  const handleClearReadNotifications = async () => {
+    const updatedNotifs = (state.notifications || []).filter((n) => !n.read);
+    const updatedState = { ...state, notifications: updatedNotifs };
+    setState(updatedState);
+    if (saveState) await saveState(updatedState);
+  };
+
   return (
     <div className={`mode-${viewMode}`}>
       {isLoading && (
@@ -4783,6 +4797,8 @@ export default function App() {
             notifications={state.notifications || []}
             onMarkNotificationRead={handleMarkNotificationRead}
             onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
+            onDeleteNotification={handleDeleteNotification}
+            onClearReadNotifications={handleClearReadNotifications}
           />
         </ErrorBoundary>
       ) : (
@@ -4793,6 +4809,8 @@ export default function App() {
           notifications={state.notifications || []}
           onMarkNotificationRead={handleMarkNotificationRead}
           onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
+          onDeleteNotification={handleDeleteNotification}
+          onClearReadNotifications={handleClearReadNotifications}
           userProfile={
             authRole === 'owner'
               ? { name: 'المالك (Owner)', jobTitle: 'مالك المنظومة والمشرف العام', code: 'OWNER', isOwner: true }

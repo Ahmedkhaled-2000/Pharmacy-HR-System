@@ -105,16 +105,55 @@ export function createRequestDecisionNotification({
 }
 
 /**
- * Filter notifications meant for a specific employee
+ * Filter notifications strictly meant for a specific employee
  */
 export function filterEmployeeNotifications(notifications = [], employeeId = null) {
   if (!employeeId) return [];
-  const empIdStr = String(employeeId);
+  const empIdStr = String(employeeId).trim();
   return (notifications || []).filter((n) => {
     if (!n) return false;
-    const targetId = n.targetEmployeeId ? String(n.targetEmployeeId) : (n.employeeId ? String(n.employeeId) : null);
-    if (!targetId) return false;
-    return targetId === empIdStr;
+
+    // 1. Explicit admin or branch manager operational alerts should NEVER show to employees
+    if (n.targetRole === 'admin' || n.targetRole === 'branch' || n.targetRole === 'branch_manager' || n.targetRole === 'manager') {
+      return false;
+    }
+    if (n.targetApproval === 'admin_only' || n.submittedByBranchManager) {
+      return false;
+    }
+
+    // 2. Direct match by targetEmployeeId (standard for employee decision notifications)
+    if (n.targetEmployeeId && String(n.targetEmployeeId).trim() === empIdStr) {
+      return true;
+    }
+
+    // 3. Targeted specifically to employee role
+    if (n.targetRole === 'employee' && (String(n.employeeId).trim() === empIdStr || String(n.targetEmployeeId).trim() === empIdStr)) {
+      return true;
+    }
+
+    // 4. Decision notifications (approvals / rejections) for this employee
+    if ((n.action === 'approved' || n.action === 'rejected' || n.action === 'decision') && (String(n.employeeId).trim() === empIdStr || String(n.targetEmployeeId).trim() === empIdStr)) {
+      return true;
+    }
+
+    return false;
+  }).sort((a, b) => {
+    const tA = new Date(a.timestamp || a.date || 0).getTime();
+    const tB = new Date(b.timestamp || b.date || 0).getTime();
+    return tB - tA;
+  });
+}
+
+/**
+ * Filter notifications meant for Senior Management / Admins
+ */
+export function filterAdminNotifications(notifications = []) {
+  return (notifications || []).filter((n) => {
+    if (!n) return false;
+    if (n.targetRole === 'admin') return true;
+    if (n.targetRole === 'employee' && n.targetRole !== 'admin') return false;
+    if (!n.targetEmployeeId && n.targetRole !== 'employee') return true;
+    return false;
   }).sort((a, b) => {
     const tA = new Date(a.timestamp || a.date || 0).getTime();
     const tB = new Date(b.timestamp || b.date || 0).getTime();
