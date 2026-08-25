@@ -1221,52 +1221,6 @@ export default function EmployeePortalView({
     ).length;
   }, [emp, state?.resignationRequests]);
 
-  // ─────────────────────────────────────────
-  //  Conditional Renders
-  // ─────────────────────────────────────────
-  if (!currentEmpUser || !emp) {
-    return null;
-  }
-
-  // ── Pre-entry Branch Selection Screen ──
-  if (emp.branchesDetails && emp.branchesDetails.length > 1 && !isBranchSelected) {
-    return (
-      <div className="ep-layout" style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '80vh',
-        background: 'var(--background)', borderRadius: '16px', border: '1px solid var(--border)'
-      }}>
-        <div style={{ background: 'var(--surface)', padding: '40px', borderRadius: '16px', boxShadow: '0 8px 32px rgba(0,0,0,0.1)', textAlign: 'center', maxWidth: '400px', width: '100%' }}>
-          <div style={{ fontSize: '48px', marginBottom: '16px' }}>🏢</div>
-          <h2 style={{ margin: '0 0 10px', color: 'var(--text)' }}>مرحباً {emp.name}</h2>
-          <p style={{ color: 'var(--muted)', marginBottom: '24px' }}>أنت مسجل في أكثر من فرع. يرجى اختيار الفرع الذي ترغب بمتابعة بياناتك وطلباتك من خلاله:</p>
-          
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <button
-              className="btn btn-outline"
-              style={{ justifyContent: 'center', padding: '12px', fontSize: '15px' }}
-              onClick={() => { setSelectedBranchId(''); setIsBranchSelected(true); }}
-            >
-              🌐 جميع الفروع (ملخص شامل)
-            </button>
-            {emp.branchesDetails.map(bd => {
-              const b = state.branches?.find(br => br.id === bd.branchId);
-              return (
-                <button
-                  key={bd.branchId}
-                  className="btn btn-start"
-                  style={{ justifyContent: 'center', padding: '12px', fontSize: '15px' }}
-                  onClick={() => { setSelectedBranchId(bd.branchId); setIsBranchSelected(true); }}
-                >
-                  📍 {b?.name || 'فرع غير معروف'}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   // ── Employee Notifications Logic ──
   const empNotifications = useMemo(() => {
     return filterEmployeeNotifications(notifications || state?.notifications || [], emp?.id);
@@ -1548,6 +1502,52 @@ export default function EmployeePortalView({
   };
 
   const breadcrumb = getActiveBreadcrumb();
+
+  // ─────────────────────────────────────────
+  //  Conditional Renders
+  // ─────────────────────────────────────────
+  if (!currentEmpUser || !emp) {
+    return null;
+  }
+
+  // ── Pre-entry Branch Selection Screen ──
+  if (emp.branchesDetails && emp.branchesDetails.length > 1 && !isBranchSelected) {
+    return (
+      <div className="ep-layout" style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '80vh',
+        background: 'var(--background)', borderRadius: '16px', border: '1px solid var(--border)'
+      }}>
+        <div style={{ background: 'var(--surface)', padding: '40px', borderRadius: '16px', boxShadow: '0 8px 32px rgba(0,0,0,0.1)', textAlign: 'center', maxWidth: '400px', width: '100%' }}>
+          <div style={{ fontSize: '48px', marginBottom: '16px' }}>🏢</div>
+          <h2 style={{ margin: '0 0 10px', color: 'var(--text)' }}>مرحباً {emp.name}</h2>
+          <p style={{ color: 'var(--muted)', marginBottom: '24px' }}>أنت مسجل في أكثر من فرع. يرجى اختيار الفرع الذي ترغب بمتابعة بياناتك وطلباتك من خلاله:</p>
+          
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <button
+              className="btn btn-outline"
+              style={{ justifyContent: 'center', padding: '12px', fontSize: '15px' }}
+              onClick={() => { setSelectedBranchId(''); setIsBranchSelected(true); }}
+            >
+              🌐 جميع الفروع (ملخص شامل)
+            </button>
+            {emp.branchesDetails.map(bd => {
+              const b = state.branches?.find(br => br.id === bd.branchId);
+              return (
+                <button
+                  key={bd.branchId}
+                  className="btn btn-start"
+                  style={{ justifyContent: 'center', padding: '12px', fontSize: '15px' }}
+                  onClick={() => { setSelectedBranchId(bd.branchId); setIsBranchSelected(true); }}
+                >
+                  📍 {b?.name || 'فرع غير معروف'}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // ── Employee Portal Modern Titlebar + Menubar + Drawer + Content Layout ──
   return (
