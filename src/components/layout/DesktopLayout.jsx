@@ -881,7 +881,7 @@ export default function DesktopLayout({
           )}
 
           {/* Quick Excel Export */}
-          {onExportExcel && (
+          {onExportExcel && currentRole !== 'branch' && (
             <button
               type="button"
               onClick={onExportExcel}
@@ -907,41 +907,42 @@ export default function DesktopLayout({
           )}
 
           {/* Notifications Button & Dropdown Menu */}
-          <div style={{ position: 'relative' }} ref={notifDropdownRef}>
-            <button
-              type="button"
-              onClick={() => setIsNotifDropdownOpen(prev => !prev)}
-              title="الإشعارات والتنبيهات"
-              style={{
-                position: 'relative',
-                border: isNotifDropdownOpen ? '1.5px solid var(--primary)' : '1px solid var(--border)',
-                background: isNotifDropdownOpen || activeTab === 'notifications' ? 'var(--primary-light)' : 'var(--surface)',
-                padding: '5px 9px',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontSize: '13px',
-                color: 'var(--text)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-                transition: 'all 0.15s ease'
-              }}
-            >
-              <span>🔔</span>
-              {unreadNotificationsCount > 0 && (
-                <span style={{
-                  background: 'var(--danger)',
-                  color: '#fff',
-                  padding: '1px 5px',
-                  borderRadius: '99px',
-                  fontSize: '10px',
-                  fontWeight: 800,
-                  boxShadow: '0 1px 3px rgba(220,38,38,0.4)'
-                }}>
-                  {unreadNotificationsCount}
-                </span>
-              )}
-            </button>
+          {currentRole !== 'branch' && (
+            <div style={{ position: 'relative' }} ref={notifDropdownRef}>
+              <button
+                type="button"
+                onClick={() => setIsNotifDropdownOpen(prev => !prev)}
+                title="الإشعارات والتنبيهات"
+                style={{
+                  position: 'relative',
+                  border: isNotifDropdownOpen ? '1.5px solid var(--primary)' : '1px solid var(--border)',
+                  background: isNotifDropdownOpen || activeTab === 'notifications' ? 'var(--primary-light)' : 'var(--surface)',
+                  padding: '5px 9px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  color: 'var(--text)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <span>🔔</span>
+                {unreadNotificationsCount > 0 && (
+                  <span style={{
+                    background: 'var(--danger)',
+                    color: '#fff',
+                    padding: '1px 5px',
+                    borderRadius: '99px',
+                    fontSize: '10px',
+                    fontWeight: 800,
+                    boxShadow: '0 1px 3px rgba(220,38,38,0.4)'
+                  }}>
+                    {unreadNotificationsCount}
+                  </span>
+                )}
+              </button>
 
             {/* Notification Dropdown Panel */}
             {isNotifDropdownOpen && (
@@ -1103,6 +1104,7 @@ export default function DesktopLayout({
               </div>
             )}
           </div>
+          )}
 
           {/* Dark/Light Theme Toggle */}
           <button

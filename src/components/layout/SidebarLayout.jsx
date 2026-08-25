@@ -196,7 +196,7 @@ export default function SidebarLayout({
             flexDirection: 'column',
             gap: '6px'
           }}>
-            {onExportExcel && (
+            {onExportExcel && currentRole !== 'branch' && (
               <button
                 onClick={onExportExcel}
                 title="تصدير كشف المرتب"

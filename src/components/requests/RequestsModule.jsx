@@ -6,23 +6,66 @@ import { normalizeSchedule } from '../roster/RosterModule';
 import { syncNow, fetchRemoteState } from '../../utils/offlineSync';
 
 export function getFormattedRequestBadge(type, leaveType) {
-  if (type === 'leave') {
-    if (leaveType === 'annual') return <span className="badge badge-success">🏖️ إجازة سنوية</span>;
-    if (leaveType === 'unpaid') return <span className="badge badge-warning">⏱️ إجازة غير مدفوعة</span>;
-    if (leaveType === 'sick') return <span className="badge badge-danger">🏥 إجازة مرضية</span>;
+  const cleanType = String(type || '').trim().toLowerCase();
+  const cleanLeaveType = String(leaveType || '').trim().toLowerCase();
+
+  if (cleanType === 'leave' || cleanType === 'leave_request' || cleanType === 'annual_leave' || cleanType === 'sick_leave' || cleanType === 'unpaid_leave') {
+    if (cleanLeaveType === 'annual' || cleanType === 'annual_leave') return <span className="badge badge-success">🏖️ إجازة سنوية</span>;
+    if (cleanLeaveType === 'unpaid' || cleanType === 'unpaid_leave') return <span className="badge badge-warning">⏱️ إجازة غير مدفوعة</span>;
+    if (cleanLeaveType === 'sick' || cleanType === 'sick_leave') return <span className="badge badge-danger">🏥 إجازة مرضية</span>;
+    if (cleanLeaveType === 'casual') return <span className="badge badge-info">🌴 إجازة عارضة</span>;
+    if (cleanLeaveType === 'marriage') return <span className="badge badge-primary">💍 إجازة زواج</span>;
+    if (cleanLeaveType === 'maternity') return <span className="badge badge-primary">👶 إجازة وضع</span>;
+    if (cleanLeaveType === 'bereavement') return <span className="badge badge-secondary">🖤 إجازة وفاة</span>;
     return <span className="badge badge-success">🏖️ طلب إجازة</span>;
   }
-  if (type === 'loan' || type === 'advance') return <span className="badge badge-primary">💳 سلفة مالية</span>;
-  if (type === 'meds' || type === 'credit_medicine') return <span className="badge badge-primary">💊 أدوية آجل</span>;
-  if (type === 'permission') return <span className="badge badge-warning">⏰ إذن / خروج</span>;
-  if (type === 'swap' || type === 'shift_swap') return <span className="badge badge-primary">🔄 تبديل شيفت</span>;
-  if (type === 'roster_update' || type === 'roster_edit' || type === 'roster_edit_request') return <span className="badge badge-warning">📅 تعديل جدول شهري</span>;
-  if (type === 'bonus') return <span className="badge badge-success">🏆 إضافة مكافأة</span>;
-  if (type === 'penalty') return <span className="badge badge-danger">⚠️ خصم / جزاء مالي</span>;
-  if (type === 'early_exit') return <span className="badge badge-danger">⚠️ انصراف مبكر</span>;
-  if (type === 'overtime') return <span className="badge badge-success">⭐ ساعات إضافية</span>;
-  if (type === 'eval_edit_request' || type === 'complaint') return <span className="badge badge-warning">📋 شكوى / ملاحظة</span>;
-  if (type === 'punch_correction' || type === 'تأكيد بصمة الوجه') return <span className="badge badge-primary">📸 تأكيد بصمة الوجه</span>;
+
+  if (cleanType === 'disciplinary_penalty' || cleanType === 'violation' || cleanType === 'disciplinary') {
+    return <span className="badge badge-danger">⚠️ جزاء تأديبي لائحي</span>;
+  }
+  if (cleanType === 'penalty' || cleanType === 'deduction' || cleanType === 'late_penalty') {
+    return <span className="badge badge-danger">⚠️ خصم / جزاء مالي</span>;
+  }
+  if (cleanType === 'early_exit' || cleanType === 'early_leave') {
+    return <span className="badge badge-danger">⚠️ انصراف مبكر</span>;
+  }
+  if (cleanType === 'late_permission' || cleanType === 'late_excuse') {
+    return <span className="badge badge-warning">⏰ إذن تأخير صباحي</span>;
+  }
+  if (cleanType === 'permission' || cleanType === 'إذن') {
+    return <span className="badge badge-warning">⏰ إذن خروج / تأخير</span>;
+  }
+  if (cleanType === 'loan' || cleanType === 'advance' || cleanType === 'سلفة') {
+    return <span className="badge badge-primary">💳 سلفة مالية</span>;
+  }
+  if (cleanType === 'meds' || cleanType === 'credit_medicine' || cleanType === 'أدوية') {
+    return <span className="badge badge-primary">💊 أدوية آجل</span>;
+  }
+  if (cleanType === 'swap' || cleanType === 'shift_swap' || cleanType === 'تبديل') {
+    return <span className="badge badge-primary">🔄 تبديل وردية</span>;
+  }
+  if (cleanType === 'roster_update' || cleanType === 'roster_edit' || cleanType === 'roster_edit_request' || cleanType === 'schedule_edit') {
+    return <span className="badge badge-warning">📅 تعديل جدول شهري</span>;
+  }
+  if (cleanType === 'bonus' || cleanType === 'reward' || cleanType === 'مكافأة') {
+    return <span className="badge badge-success">🏆 إضافة مكافأة</span>;
+  }
+  if (cleanType === 'overtime' || cleanType === 'overtime_request' || cleanType === 'إضافي') {
+    return <span className="badge badge-success">⭐ ساعات إضافية</span>;
+  }
+  if (cleanType === 'eval_edit_request' || cleanType === 'complaint' || cleanType === 'شكوى') {
+    return <span className="badge badge-warning">📋 شكوى / ملاحظة</span>;
+  }
+  if (cleanType === 'resignation' || cleanType === 'resignation_request' || cleanType === 'استقالة') {
+    return <span className="badge badge-danger">📄 طلب استقالة</span>;
+  }
+  if (cleanType === 'punch_correction' || cleanType === 'attendance_punch' || cleanType === 'تأكيد بصمة الوجه') {
+    return <span className="badge badge-primary">📸 تأكيد بصمة الوجه</span>;
+  }
+  if (cleanType === 'adjustment') {
+    return <span className="badge badge-info">⚖️ تعديل إداري / مالي</span>;
+  }
+
   return <span className="badge badge-primary">{type || 'طلب إداري'}</span>;
 }
 
@@ -1354,7 +1397,11 @@ export default function RequestsModule({
                     </td>
                     <td>{getFormattedRequestBadge(req.type, req.leaveType)}</td>
                     <td>
-                      {(req.targetApproval === 'admin_only' || req.targetApproval === 'admin' || ['loan', 'advance', 'credit_medicine', 'eval_edit_request', 'complaint'].includes(req.type) || req.branchNotRequired || req.isDirectToAdmin) ? (
+                      {(req.type === 'disciplinary_penalty' || req.createdRole === 'branch' || req.createdRole === 'branch_manager' || req.submittedByBranchManager || req.branchApprovalStatus === 'approved') ? (
+                        <span style={{ color: '#15803d', fontWeight: '800', background: '#f0fdf4', padding: '4px 8px', borderRadius: '6px', border: '1px solid #bbf7d0', fontSize: '12px' }}>
+                          ✓ مرسل من مدير الفرع
+                        </span>
+                      ) : (req.targetApproval === 'admin_only' || req.targetApproval === 'admin' || ['loan', 'advance', 'credit_medicine', 'eval_edit_request', 'complaint'].includes(req.type) || req.branchNotRequired || req.isDirectToAdmin) ? (
                         <span style={{ color: 'var(--muted)', fontSize: '12px', background: 'rgba(148, 163, 184, 0.14)', padding: '4px 8px', borderRadius: '6px', fontWeight: '700', border: '1px solid var(--border)' }}>
                           🔒 غير موجهة لمدير الفرع
                         </span>

@@ -986,27 +986,6 @@ export default function BranchManagerView({
               {branchRequests.filter((r) => r.status === 'pending' || r.status === 'pending_admin').length}
             </span>
           </div>
-          {onExportExcel && (
-            <button
-              onClick={onExportExcel}
-              style={{
-                background: '#ffffff',
-                color: '#0d9488',
-                border: 'none',
-                padding: '10px 18px',
-                borderRadius: '10px',
-                fontWeight: '800',
-                fontSize: '13.5px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.12)'
-              }}
-            >
-              📊 تصدير Excel
-            </button>
-          )}
         </div>
       </div>
 
@@ -2311,11 +2290,6 @@ export default function BranchManagerView({
             <h3 style={{ margin: 0, fontSize: '17px', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '8px' }}>
               📋 سجل البصمات والورديات — مدير الفرع ({managerSalaryMetrics.shiftsCount} وردية)
             </h3>
-            {onExportExcel && (
-              <button className="btn btn-start" onClick={onExportExcel} style={{ fontSize: '13px', padding: '6px 14px' }}>
-                📊 تصدير Excel
-              </button>
-            )}
           </div>
 
           <div className="table-responsive">

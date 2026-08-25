@@ -81,108 +81,110 @@ export default function GlobalNavbar({
             </span>
           </div>
         </div>
-        {/* Notification Bell Icon */}
-        <div style={{ position: 'relative' }}>
-          <button
-            onClick={() => setShowNotifMenu(!showNotifMenu)}
-            title="الإشعارات والتنبيهات الفورية"
-            style={{
-              position: 'relative',
-              background: 'var(--surface-muted)',
-              border: '1px solid var(--border)',
-              borderRadius: '50%',
-              width: '40px',
-              height: '40px',
-              cursor: 'pointer',
-              fontSize: '18px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center'
-            }}
-          >
-            🔔
-            {unreadCount > 0 && (
-              <span
-                style={{
-                  position: 'absolute',
-                  top: '-4px',
-                  right: '-4px',
-                  background: '#dc2626',
-                  color: '#ffffff',
-                  borderRadius: '50%',
-                  width: '18px',
-                  height: '18px',
-                  fontSize: '11px',
-                  fontWeight: 'bold',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  boxShadow: '0 2px 6px rgba(220,38,38,0.4)'
-                }}
-              >
-                {unreadCount > 9 ? '9+' : unreadCount}
-              </span>
-            )}
-          </button>
-
-          {/* Dropdown Menu Overlay */}
-          {showNotifMenu && (
-            <div
+        {/* Notification Bell Icon (Hidden for Branch Manager) */}
+        {authRole !== 'branch' && currentPath !== '/branch' && (
+          <div style={{ position: 'relative' }}>
+            <button
+              onClick={() => setShowNotifMenu(!showNotifMenu)}
+              title="الإشعارات والتنبيهات الفورية"
               style={{
-                position: 'absolute',
-                top: '48px',
-                left: '0',
-                width: '320px',
-                background: 'var(--surface)',
+                position: 'relative',
+                background: 'var(--surface-muted)',
                 border: '1px solid var(--border)',
-                borderRadius: '14px',
-                boxShadow: '0 10px 25px rgba(0,0,0,0.15)',
-                zIndex: 999,
-                padding: '12px',
-                direction: 'rtl'
+                borderRadius: '50%',
+                width: '40px',
+                height: '40px',
+                cursor: 'pointer',
+                fontSize: '18px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
               }}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
-                <h4 style={{ margin: 0, fontSize: '14px', color: 'var(--text)' }}>🔔 أحدث الإشعارات</h4>
-                <button
-                  onClick={() => {
-                    setShowNotifMenu(false);
-                    if (onNavigateTab) onNavigateTab('notifications');
+              🔔
+              {unreadCount > 0 && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: '-4px',
+                    right: '-4px',
+                    background: '#dc2626',
+                    color: '#ffffff',
+                    borderRadius: '50%',
+                    width: '18px',
+                    height: '18px',
+                    fontSize: '11px',
+                    fontWeight: 'bold',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: '0 2px 6px rgba(220,38,38,0.4)'
                   }}
-                  style={{ border: 'none', background: 'transparent', color: 'var(--primary)', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}
                 >
-                  عرض الكل
-                </button>
-              </div>
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              )}
+            </button>
 
-              <div style={{ maxHeight: '250px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {notifications.length === 0 ? (
-                  <p style={{ fontSize: '13px', color: 'var(--muted)', textAlign: 'center', margin: '14px 0' }}>لا توجد إشعارات حالياً</p>
-                ) : (
-                  notifications.slice(0, 5).map((n) => (
-                    <div
-                      key={n.id}
-                      onClick={() => {
-                        setShowNotifMenu(false);
-                        if (onNavigateTab && n.linkTab) onNavigateTab(n.linkTab);
-                      }}
-                      style={{
-                        padding: '8px 10px',
-                        borderRadius: '8px',
-                        background: n.read ? 'transparent' : 'rgba(13, 148, 136, 0.08)',
-                        cursor: 'pointer',
-                        fontSize: '12.5px'
-                      }}
-                    >
-                      <div style={{ fontWeight: 'bold', color: 'var(--text)' }}>{n.title}</div>
-                      <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{n.message}</div>
-                    </div>
-                  ))
-                )}
+            {/* Dropdown Menu Overlay */}
+            {showNotifMenu && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '48px',
+                  left: '0',
+                  width: '320px',
+                  background: 'var(--surface)',
+                  border: '1px solid var(--border)',
+                  borderRadius: '14px',
+                  boxShadow: '0 10px 25px rgba(0,0,0,0.15)',
+                  zIndex: 999,
+                  padding: '12px',
+                  direction: 'rtl'
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
+                  <h4 style={{ margin: 0, fontSize: '14px', color: 'var(--text)' }}>🔔 أحدث الإشعارات</h4>
+                  <button
+                    onClick={() => {
+                      setShowNotifMenu(false);
+                      if (onNavigateTab) onNavigateTab('notifications');
+                    }}
+                    style={{ border: 'none', background: 'transparent', color: 'var(--primary)', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}
+                  >
+                    عرض الكل
+                  </button>
+                </div>
+
+                <div style={{ maxHeight: '250px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {notifications.length === 0 ? (
+                    <p style={{ fontSize: '13px', color: 'var(--muted)', textAlign: 'center', margin: '14px 0' }}>لا توجد إشعارات حالياً</p>
+                  ) : (
+                    notifications.slice(0, 5).map((n) => (
+                      <div
+                        key={n.id}
+                        onClick={() => {
+                          setShowNotifMenu(false);
+                          if (onNavigateTab && n.linkTab) onNavigateTab(n.linkTab);
+                        }}
+                        style={{
+                          padding: '8px 10px',
+                          borderRadius: '8px',
+                          background: n.read ? 'transparent' : 'rgba(13, 148, 136, 0.08)',
+                          cursor: 'pointer',
+                          fontSize: '12.5px'
+                        }}
+                      >
+                        <div style={{ fontWeight: 'bold', color: 'var(--text)' }}>{n.title}</div>
+                        <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{n.message}</div>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
 
         <button className="theme-toggle-btn" onClick={toggleTheme} title="تبديل وضع الألوان">
           {themeMode === 'light' ? '🌙 الوضع الداكن' : '☀️ الوضع الفاتح'}

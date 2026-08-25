@@ -45,7 +45,7 @@ export function extractPayrollSettings(orgSettings = {}) {
         }
       })();
 
-  const eDay = orgSettings?.payrollPayoutEndDay !== undefined
+  const rawEnd = orgSettings?.payrollPayoutEndDay !== undefined
     ? parseInt(orgSettings.payrollPayoutEndDay, 10)
     : (orgSettings?.payrollPayoutDay !== undefined
         ? parseInt(orgSettings.payrollPayoutDay, 10)
@@ -57,6 +57,14 @@ export function extractPayrollSettings(orgSettings = {}) {
               return 25;
             }
           })());
+
+  const startDay = isNaN(sDay) ? 26 : sDay;
+  let endDay = isNaN(rawEnd) ? 25 : rawEnd;
+
+  // إذا كانت بداية الدورة أكبر من 1 وكانت النهاية مساوية للبداية (مثلاً 21 و 21)، نجعل النهاية تلقائياً 20 (اليوم السابق) لتطابق الدورة الشهرية
+  if (startDay > 1 && endDay === startDay) {
+    endDay = startDay - 1;
+  }
 
   const sTime = orgSettings?.payrollPayoutStartTime || (() => {
     try { return localStorage.getItem('payroll_payout_start_time') || '00:00'; } catch { return '00:00'; }
@@ -79,8 +87,8 @@ export function extractPayrollSettings(orgSettings = {}) {
   })();
 
   return {
-    startDay: isNaN(sDay) ? 26 : sDay,
-    endDay: isNaN(eDay) ? 25 : eDay,
+    startDay,
+    endDay,
     startTime: sTime,
     endTime: eTime,
     periodType: pType,

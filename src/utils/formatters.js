@@ -180,20 +180,27 @@ export function normalizeState(parsed) {
     return null;
   })();
 
-  const effectiveStartDay = (savedStartDay !== null && savedStartDay !== undefined) 
-    ? savedStartDay 
-    : (parsed.orgSettings?.payrollPayoutStartDay !== undefined ? parseInt(parsed.orgSettings.payrollPayoutStartDay, 10) : 26);
+  const effectiveStartDay = (parsed.orgSettings?.payrollPayoutStartDay !== undefined)
+    ? parseInt(parsed.orgSettings.payrollPayoutStartDay, 10)
+    : (savedStartDay !== null && savedStartDay !== undefined ? savedStartDay : 26);
 
-  const effectiveEndDay = (savedEndDay !== null && savedEndDay !== undefined) 
-    ? savedEndDay 
-    : (parsed.orgSettings?.payrollPayoutEndDay !== undefined ? parseInt(parsed.orgSettings.payrollPayoutEndDay, 10) : 25);
+  let rawEndDay = (parsed.orgSettings?.payrollPayoutEndDay !== undefined)
+    ? parseInt(parsed.orgSettings.payrollPayoutEndDay, 10)
+    : (parsed.orgSettings?.payrollPayoutDay !== undefined
+        ? parseInt(parsed.orgSettings.payrollPayoutDay, 10)
+        : (savedEndDay !== null && savedEndDay !== undefined ? savedEndDay : 25));
+
+  if (effectiveStartDay > 1 && (rawEndDay === effectiveStartDay || isNaN(rawEndDay))) {
+    rawEndDay = effectiveStartDay - 1;
+  }
+  const effectiveEndDay = rawEndDay;
 
   const effectivePeriodType = savedPeriodType || parsed.orgSettings?.payrollPeriodType || 'cycle';
   const effectiveCustomFrom = (savedCustomFrom !== null && savedCustomFrom !== undefined) ? savedCustomFrom : (parsed.orgSettings?.payrollCustomFrom || '');
   const effectiveCustomTo = (savedCustomTo !== null && savedCustomTo !== undefined) ? savedCustomTo : (parsed.orgSettings?.payrollCustomTo || '');
 
   const orgSettings = {
-    orgName: 'مؤسسة الموارد البشرية والبصمات',
+    orgName: 'نظام إدارة الموارد البشرية - صيدليات مداواة',
     logoUrl: '',
     waServerUrl: 'https://funny-sloth-89.loca.lt',
     adminUsername: 'admin',
