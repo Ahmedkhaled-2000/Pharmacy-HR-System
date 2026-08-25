@@ -1,0 +1,24 @@
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # 1. خدمة الملفات والمجلدات الحقيقية مباشرة (ملفات assets والـ PHP والصور)
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # 2. توجيه طلبات /api/ إلى api/index.php
+  RewriteRule ^api/(.*)$ api/index.php?endpoint=$1 [QSA,L]
+  RewriteRule ^api/?$ api/index.php?endpoint=health [QSA,L]
+
+  # 3. توجيه جميع صفحات الواجهة إلى index.html
+  RewriteRule ^index\.html$ - [L]
+  RewriteRule . /index.html [L]
+</IfModule>
+
+# تفعيل ضغط الملفات
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css text/javascript application/javascript application/json
+</IfModule>
+
+Options -Indexes

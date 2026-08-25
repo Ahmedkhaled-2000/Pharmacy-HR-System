@@ -1,0 +1,11 @@
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /api/
+
+  # إذا كان الملف موجوداً كملف php أو غيره، اتركه يعمل
+  RewriteCond %{REQUEST_FILENAME} -f
+  RewriteRule ^ - [L]
+
+  # توجيه أي endpoint غير موجود إلى index.php
+  RewriteRule ^(.*)$ index.php?endpoint=$1 [QSA,L]
+</IfModule>

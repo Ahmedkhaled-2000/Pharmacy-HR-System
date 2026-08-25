@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>بوابة الموظف - غير متصل</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Cairo', sans-serif;
+      background: #0f172a;
+      color: #f1f5f9;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 24px;
+      text-align: center;
+    }
+    .icon { font-size: 80px; margin-bottom: 24px; }
+    h1 { font-size: 28px; font-weight: 700; color: #3b82f6; margin-bottom: 12px; }
+    p { font-size: 16px; color: #94a3b8; margin-bottom: 32px; line-height: 1.7; }
+    button {
+      background: #3b82f6;
+      color: white;
+      border: none;
+      padding: 14px 32px;
+      border-radius: 12px;
+      font-size: 16px;
+      font-family: 'Cairo', sans-serif;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button:hover { background: #2563eb; }
+  </style>
+</head>
+<body>
+  <div class="icon">📵</div>
+  <h1>لا يوجد اتصال بالإنترنت</h1>
+  <p>يبدو أنك غير متصل بالإنترنت حالياً.<br>تحقق من اتصالك ثم حاول مرة أخرى.</p>
+  <button onclick="window.location.reload()">🔄 حاول مرة أخرى</button>
+</body>
+</html>
