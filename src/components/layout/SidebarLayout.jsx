@@ -315,7 +315,7 @@ export default function SidebarLayout({
             {setAdminFilterMode && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--surface-muted)', padding: '4px 10px', borderRadius: '10px', border: '1px solid var(--border)' }}>
                 <select value={adminFilterMode} onChange={(e) => setAdminFilterMode(e.target.value)} style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px', fontWeight: 'bold' }}>
-                  <option value="month">📅 دورة الرواتب ({currentCycleRange.shortLabel})</option>
+                  <option value="month">📅 دورة الرواتب</option>
                   <option value="custom">📆 فترة مخصصة</option>
                 </select>
 
@@ -324,17 +324,6 @@ export default function SidebarLayout({
                     {setMonthPicker && (
                       <input type="month" value={monthPicker} onChange={(e) => setMonthPicker(e.target.value)} style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px', fontWeight: 'bold' }} />
                     )}
-                    <span style={{
-                      fontSize: '11px',
-                      background: 'var(--surface)',
-                      padding: '2px 6px',
-                      borderRadius: '4px',
-                      border: '1px solid var(--border)',
-                      color: 'var(--primary)',
-                      fontWeight: 'bold'
-                    }}>
-                      {currentCycleRange.shortLabel}
-                    </span>
                   </div>
                 ) : (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}>

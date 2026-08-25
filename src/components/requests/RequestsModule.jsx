@@ -57,13 +57,21 @@ export function getFormattedRequestBadge(type, leaveType) {
     return <span className="badge badge-warning">📋 شكوى / ملاحظة</span>;
   }
   if (cleanType === 'resignation' || cleanType === 'resignation_request' || cleanType === 'استقالة') {
-    return <span className="badge badge-danger">📄 طلب استقالة</span>;
+    return <span className="badge badge-danger">🚪 طلب استقالة</span>;
+  }
+  if (cleanType === 'withdraw' || cleanType === 'resignation_withdraw' || cleanType === 'تراجع') {
+    return <span className="badge badge-primary">↩️ تراجع عن استقالة</span>;
   }
   if (cleanType === 'punch_correction' || cleanType === 'attendance_punch' || cleanType === 'تأكيد بصمة الوجه') {
     return <span className="badge badge-primary">📸 تأكيد بصمة الوجه</span>;
   }
   if (cleanType === 'adjustment') {
     return <span className="badge badge-info">⚖️ تعديل إداري / مالي</span>;
+  }
+
+  // إذا كان النص يحتوي على حروف إنجليزية ولم يطابق ما سبق
+  if (/[a-zA-Z]/.test(type)) {
+    return <span className="badge badge-primary">📋 طلب إداري</span>;
   }
 
   return <span className="badge badge-primary">{type || 'طلب إداري'}</span>;

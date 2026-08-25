@@ -11,7 +11,7 @@ export default function AdminResignationModule({
   const [adminComment, setAdminComment] = useState({});
   const [noticeDays, setNoticeDays] = useState({});
   const [noticeStart, setNoticeStart] = useState({});
-  const [filterTab, setFilterTab] = useState('ready'); // 'ready' | 'all'
+  const [filterTab, setFilterTab] = useState('pending'); // 'pending' | 'approved' | 'rejected' | 'all'
 
   // Manual Form State
   const [showManualForm, setShowManualForm] = useState(false);
@@ -23,20 +23,34 @@ export default function AdminResignationModule({
     noticeStart: todayStr()
   });
 
-  // Filter requests based on selected tab
-  const allRequests = (state.resignationRequests || []).filter(r => {
-    // 1. طلبات محالة من الفرع: فقط الطلبات التي رد عليها مدير الفرع وما زالت بانتظار قرار الإدارة العليا
-    if (filterTab === 'ready') {
-      const isForwardedFromBranch = r.managerStatus === 'approved' || r.managerStatus === 'rejected';
-      const isPendingAdmin = !r.adminStatus || r.adminStatus === 'pending';
-      return isForwardedFromBranch && isPendingAdmin && !r.isAdminCreated && !r.isCancelled;
+  // 1. Gather all resignation & withdraw requests from both stores without duplicates
+  const rawList = [];
+  const seenIds = new Set();
+
+  (state.resignationRequests || []).forEach(r => {
+    if (r && r.id && !seenIds.has(String(r.id))) {
+      seenIds.add(String(r.id));
+      rawList.push({
+        ...r,
+        employeeReason: r.employeeReason || r.reason || r.notes || 'طلب استقالة',
+        requestDate: r.requestDate || r.date || r.createdAt?.slice(0, 10) || todayStr(),
+        managerStatus: r.managerStatus || (r.branchApproved ? 'approved' : (r.branchApprovalStatus || 'pending')),
+        adminStatus: r.adminStatus || (r.status === 'approved' ? 'approved' : r.status === 'rejected' ? 'rejected' : 'pending')
+      });
     }
-    // 2. كافة الطلبات: الطلبات التي اتخذت فيها الإدارة العليا قراراً (معتمدة، مرفوضة، أو ملغاة) بالإضافة إلى الإجراءات اليدوية من الإدارة
-    if (filterTab === 'all') {
-      const isAdminDecided = r.adminStatus === 'approved' || r.adminStatus === 'rejected' || r.adminStatus === 'cancelled' || r.isCancelled;
-      return isAdminDecided || r.isAdminCreated;
+  });
+
+  (state.requests || []).forEach(r => {
+    if (r && (r.type === 'resignation' || r.type === 'withdraw' || r.type === 'resignation_request') && !seenIds.has(String(r.id))) {
+      seenIds.add(String(r.id));
+      rawList.push({
+        ...r,
+        employeeReason: r.employeeReason || r.reason || r.notes || 'طلب استقالة',
+        requestDate: r.requestDate || r.date || r.createdAt?.slice(0, 10) || todayStr(),
+        managerStatus: r.managerStatus || (r.branchApproved ? 'approved' : (r.branchApprovalStatus || 'pending')),
+        adminStatus: r.adminStatus || (r.status === 'approved' ? 'approved' : r.status === 'rejected' ? 'rejected' : 'pending')
+      });
     }
-    return false;
   });
 
   // Helper to extract numeric timestamp for accurate descending sort
@@ -49,6 +63,10 @@ export default function AdminResignationModule({
       const t = new Date(r.updatedAt).getTime();
       if (!isNaN(t) && t > 0) return t;
     }
+    if (r.requestDate) {
+      const t = new Date(r.requestDate).getTime();
+      if (!isNaN(t) && t > 0) return t;
+    }
     if (r.id) {
       const parts = String(r.id).split('_');
       for (const p of parts) {
@@ -56,15 +74,32 @@ export default function AdminResignationModule({
         if (!isNaN(num) && num > 1000000000000) return num;
       }
     }
-    if (r.requestDate) {
-      const t = new Date(r.requestDate).getTime();
-      if (!isNaN(t) && t > 0) return t;
-    }
     return 0;
   };
 
   // Sort descending by newest time first
-  allRequests.sort((a, b) => getReqSortTime(b) - getReqSortTime(a));
+  rawList.sort((a, b) => getReqSortTime(b) - getReqSortTime(a));
+
+  // 2. Filter requests based on selected tab
+  const allRequests = rawList.filter(r => {
+    const isPending = !r.adminStatus || r.adminStatus === 'pending' || r.status === 'pending' || r.status === 'pending_admin';
+    const isApproved = r.adminStatus === 'approved' || r.status === 'approved' || r.adminApproved === true;
+    const isRejected = r.adminStatus === 'rejected' || r.status === 'rejected';
+
+    if (filterTab === 'pending' || filterTab === 'ready') {
+      return isPending && !r.isCancelled && !r.hiddenFromAdmin;
+    }
+    if (filterTab === 'approved') {
+      return isApproved && !r.isCancelled;
+    }
+    if (filterTab === 'rejected') {
+      return isRejected;
+    }
+    if (filterTab === 'all') {
+      return !r.hiddenFromAdmin;
+    }
+    return true;
+  });
 
   const handleAction = async (reqId, status) => {
     const comment = adminComment[reqId] || '';
@@ -73,7 +108,7 @@ export default function AdminResignationModule({
       return;
     }
 
-    const targetReq = (state.resignationRequests || []).find(r => r.id === reqId);
+    const targetReq = rawList.find(r => String(r.id) === String(reqId));
     if (!targetReq) return;
     const isWithdraw = targetReq.type === 'withdraw';
 
@@ -81,11 +116,13 @@ export default function AdminResignationModule({
     const nStart = noticeStart[reqId] || todayStr();
 
     const performAction = async () => {
-      let updatedReqs = (state.resignationRequests || []).map(r => {
-        if (r.id === reqId) {
+      let updatedResignations = (state.resignationRequests || []).map(r => {
+        if (String(r.id) === String(reqId)) {
           return { 
             ...r, 
+            status: status,
             adminStatus: status, 
+            adminApproved: status === 'approved',
             adminComment: comment,
             conditionsDaysRemaining: (!isWithdraw && status === 'approved') ? nDays : 0,
             conditionsStartDate: (!isWithdraw && status === 'approved' && nDays > 0) ? nStart : '',
@@ -96,14 +133,38 @@ export default function AdminResignationModule({
         return r;
       });
 
+      // If it existed in requests but not in resignationRequests, ensure it is added to resignationRequests
+      if (!updatedResignations.some(r => String(r.id) === String(reqId))) {
+        updatedResignations.push({
+          ...targetReq,
+          status: status,
+          adminStatus: status,
+          adminApproved: status === 'approved',
+          adminComment: comment,
+          updatedAt: new Date().toISOString()
+        });
+      }
+
+      let updatedGeneralRequests = (state.requests || []).map(r => {
+        if (String(r.id) === String(reqId)) {
+          return {
+            ...r,
+            status: status,
+            adminStatus: status,
+            adminApproved: status === 'approved',
+            adminComment: comment,
+            updatedAt: new Date().toISOString()
+          };
+        }
+        return r;
+      });
+
       let updatedEmployees = state.employees || [];
       let updatedActiveShifts = { ...(state.activeShifts || {}) };
       
-      // Case 1: If approved and it is a WITHDRAW request:
-      // 1. Cancel ALL previous resignation requests for this employee and reset their remaining days/conditions to 0/empty
-      // 2. Reactivate employee back to "على رأس العمل" and enable fingerprint and clear suspension reason
+      // Case 1: If approved and it is a WITHDRAW request
       if (status === 'approved' && isWithdraw) {
-        updatedReqs = updatedReqs.map(r => {
+        updatedResignations = updatedResignations.map(r => {
           const isSameEmp = String(r.employeeId) === String(targetReq.employeeId);
           if (isSameEmp && r.type === 'resignation') {
             return {
@@ -111,6 +172,7 @@ export default function AdminResignationModule({
               isCancelled: true,
               cancelledReason: `تم إلغاء الاستقالة بسبب قبول طلب التراجع عن الاستقالة: ${comment}`,
               adminStatus: 'cancelled',
+              status: 'cancelled',
               conditionsDaysRemaining: 0,
               conditionsStartDate: '',
               employeeConditionStatus: 'cancelled',
@@ -136,8 +198,7 @@ export default function AdminResignationModule({
         });
       }
 
-      // Case 2: ONLY for resignation requests with 0 notice days (immediate effect):
-      // -> Deactivate employee, stop fingerprint & remove active shift
+      // Case 2: For resignation requests with 0 notice days (immediate effect)
       if (status === 'approved' && !isWithdraw && nDays === 0) {
         delete updatedActiveShifts[targetReq.employeeId];
         if (targetReq.employeeId) delete updatedActiveShifts[String(targetReq.employeeId)];
@@ -160,7 +221,8 @@ export default function AdminResignationModule({
 
       const updatedState = { 
         ...state, 
-        resignationRequests: updatedReqs, 
+        resignationRequests: updatedResignations,
+        requests: updatedGeneralRequests,
         employees: updatedEmployees,
         activeShifts: updatedActiveShifts
       };
@@ -418,10 +480,10 @@ export default function AdminResignationModule({
       )}
 
       {/* ── Tabs for filtering requests ── */}
-      <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', borderBottom: '1px solid var(--border)', paddingBottom: '10px' }}>
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', borderBottom: '1px solid var(--border)', paddingBottom: '10px', flexWrap: 'wrap' }}>
         <button
           type="button"
-          onClick={() => setFilterTab('ready')}
+          onClick={() => setFilterTab('pending')}
           style={{
             padding: '8px 16px',
             borderRadius: '8px',
@@ -429,12 +491,65 @@ export default function AdminResignationModule({
             cursor: 'pointer',
             fontWeight: 'bold',
             fontSize: '13.5px',
-            background: filterTab === 'ready' ? 'var(--primary)' : 'var(--surface-muted)',
-            color: filterTab === 'ready' ? '#ffffff' : 'var(--text)'
+            background: (filterTab === 'pending' || filterTab === 'ready') ? 'var(--primary)' : 'var(--surface-muted)',
+            color: (filterTab === 'pending' || filterTab === 'ready') ? '#ffffff' : 'var(--text)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
           }}
         >
-          📥 طلبات محالة من الفرع ({readyCount})
+          <span>⏳ طلبات قيد المراجعة والاعتماد</span>
+          <span style={{ background: (filterTab === 'pending' || filterTab === 'ready') ? 'rgba(255,255,255,0.25)' : 'var(--danger)', color: '#fff', padding: '1px 6px', borderRadius: '99px', fontSize: '11px' }}>
+            {rawList.filter(r => !r.hiddenFromAdmin && !r.isCancelled && (!r.adminStatus || r.adminStatus === 'pending' || r.status === 'pending' || r.status === 'pending_admin')).length}
+          </span>
         </button>
+
+        <button
+          type="button"
+          onClick={() => setFilterTab('approved')}
+          style={{
+            padding: '8px 16px',
+            borderRadius: '8px',
+            border: 'none',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+            fontSize: '13.5px',
+            background: filterTab === 'approved' ? 'var(--primary)' : 'var(--surface-muted)',
+            color: filterTab === 'approved' ? '#ffffff' : 'var(--text)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}
+        >
+          <span>🟢 طلبات معتمدة</span>
+          <span style={{ background: filterTab === 'approved' ? 'rgba(255,255,255,0.25)' : 'var(--surface)', color: 'var(--text)', padding: '1px 6px', borderRadius: '99px', fontSize: '11px', border: '1px solid var(--border)' }}>
+            {rawList.filter(r => !r.isCancelled && (r.adminStatus === 'approved' || r.status === 'approved' || r.adminApproved === true)).length}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setFilterTab('rejected')}
+          style={{
+            padding: '8px 16px',
+            borderRadius: '8px',
+            border: 'none',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+            fontSize: '13.5px',
+            background: filterTab === 'rejected' ? 'var(--primary)' : 'var(--surface-muted)',
+            color: filterTab === 'rejected' ? '#ffffff' : 'var(--text)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}
+        >
+          <span>🔴 طلبات مرفوضة</span>
+          <span style={{ background: filterTab === 'rejected' ? 'rgba(255,255,255,0.25)' : 'var(--surface)', color: 'var(--text)', padding: '1px 6px', borderRadius: '99px', fontSize: '11px', border: '1px solid var(--border)' }}>
+            {rawList.filter(r => r.adminStatus === 'rejected' || r.status === 'rejected').length}
+          </span>
+        </button>
+
         <button
           type="button"
           onClick={() => setFilterTab('all')}
@@ -446,10 +561,16 @@ export default function AdminResignationModule({
             fontWeight: 'bold',
             fontSize: '13.5px',
             background: filterTab === 'all' ? 'var(--primary)' : 'var(--surface-muted)',
-            color: filterTab === 'all' ? '#ffffff' : 'var(--text)'
+            color: filterTab === 'all' ? '#ffffff' : 'var(--text)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
           }}
         >
-          📋 كافة الطلبات ({totalCount})
+          <span>📋 كافة الطلبات والسجلات</span>
+          <span style={{ background: filterTab === 'all' ? 'rgba(255,255,255,0.25)' : 'var(--surface)', color: 'var(--text)', padding: '1px 6px', borderRadius: '99px', fontSize: '11px', border: '1px solid var(--border)' }}>
+            {rawList.filter(r => !r.hiddenFromAdmin).length}
+          </span>
         </button>
       </div>
 
@@ -537,19 +658,33 @@ export default function AdminResignationModule({
       {allRequests.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '40px', background: 'var(--surface-muted)', borderRadius: '12px', color: 'var(--muted)' }}>
           <div style={{ fontSize: '40px', marginBottom: '10px' }}>📁</div>
-          {filterTab === 'ready' && 'لا توجد طلبات محالة من الفرع بانتظار قرار الإدارة حالياً.'}
-          {filterTab === 'all' && 'لا توجد طلبات منتهية أو سابقة في السجل.'}
+          {(filterTab === 'pending' || filterTab === 'ready') && 'لا توجد طلبات استقالة أو تراجع قيد المراجعة والاعتماد حالياً.'}
+          {filterTab === 'approved' && 'لا توجد طلبات استقالة معتمدة في هذا السجل.'}
+          {filterTab === 'rejected' && 'لا توجد طلبات استقالة مرفوضة في هذا السجل.'}
+          {filterTab === 'all' && 'لا توجد طلبات في السجل العام.'}
         </div>
       ) : (
         <div style={{ display: 'grid', gap: '20px' }}>
-          {allRequests.map(req => {
-            const emp = state.employees.find(e => e.id === req.employeeId);
-            const branch = state.branches?.find(b => b.id === req.branchId);
+          {allRequests.map((req, index) => {
+            const emp = state.employees?.find(e => e.id === req.employeeId || e.code === req.employeeCode);
+            const branch = state.branches?.find(b => b.id === req.branchId || b.id === emp?.branchId);
 
             return (
-              <div key={req.id} style={{ padding: '20px', border: '1px solid var(--border)', borderRadius: '12px', background: 'var(--background)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', paddingBottom: '15px', marginBottom: '15px' }}>
+              <div key={req.id || `res_${index}`} style={{ padding: '20px', border: '1px solid var(--border)', borderRadius: '12px', background: 'var(--background)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', paddingBottom: '15px', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <span style={{
+                      background: 'linear-gradient(135deg, var(--primary), #0f766e)',
+                      color: '#ffffff',
+                      padding: '4px 10px',
+                      borderRadius: '8px',
+                      fontSize: '13px',
+                      fontWeight: '800',
+                      boxShadow: '0 2px 6px rgba(13,148,136,0.3)',
+                      flexShrink: 0
+                    }}>
+                      #{index + 1}
+                    </span>
                     <div className="emp-avatar-circle" style={{ width: '45px', height: '45px' }}>
                       {emp?.photoUrl ? <img src={emp.photoUrl} alt={getEmpDisplayName(emp)} /> : <span>{getEmpDisplayName(emp)?.charAt(0) || '?'}</span>}
                     </div>
@@ -563,7 +698,7 @@ export default function AdminResignationModule({
                         )}
                       </div>
                       <div style={{ color: 'var(--muted)', fontSize: '13px', marginTop: '4px' }}>
-                        الفرع: <strong>{branch?.name || 'الرئيسي'}</strong> | كود: {emp?.code || '-'} | {emp?.jobTitle || '-'}
+                        الفرع: <strong>{branch?.name || 'الفرع الرئيسي'}</strong> | كود: {emp?.code || '-'} | {emp?.jobTitle || '-'}
                       </div>
                     </div>
                   </div>

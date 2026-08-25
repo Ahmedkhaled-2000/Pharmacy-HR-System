@@ -591,4 +591,77 @@ export function isEmployeeActive(emp) {
   return true;
 }
 
+/**
+ * مترجم موحد لكافة أنواع الطلبات في النظام لضمان عدم ظهور أي نصوص إنجليزية
+ */
+export function getRequestTypeArabicName(type, leaveType) {
+  const cleanType = String(type || '').trim().toLowerCase();
+  const cleanLeaveType = String(leaveType || '').trim().toLowerCase();
+
+  if (cleanType === 'leave' || cleanType === 'leave_request' || cleanType === 'annual_leave' || cleanType === 'sick_leave' || cleanType === 'unpaid_leave') {
+    if (cleanLeaveType === 'annual' || cleanType === 'annual_leave') return '🏖️ إجازة سنوية';
+    if (cleanLeaveType === 'unpaid' || cleanType === 'unpaid_leave') return '⏱️ إجازة غير مدفوعة';
+    if (cleanLeaveType === 'sick' || cleanType === 'sick_leave') return '🏥 إجازة مرضية';
+    if (cleanLeaveType === 'casual') return '🌴 إجازة عارضة';
+    if (cleanLeaveType === 'marriage') return '💍 إجازة زواج';
+    if (cleanLeaveType === 'maternity') return '👶 إجازة وضع';
+    if (cleanLeaveType === 'bereavement') return '🖤 إجازة وفاة';
+    return '🏖️ طلب إجازة';
+  }
+
+  if (cleanType === 'disciplinary_penalty' || cleanType === 'violation' || cleanType === 'disciplinary') {
+    return '⚠️ جزاء تأديبي لائحي';
+  }
+  if (cleanType === 'penalty' || cleanType === 'deduction' || cleanType === 'late_penalty') {
+    return '⚠️ خصم / جزاء مالي';
+  }
+  if (cleanType === 'early_exit' || cleanType === 'early_leave') {
+    return '⚠️ انصراف مبكر';
+  }
+  if (cleanType === 'late_permission' || cleanType === 'late_excuse') {
+    return '⏰ إذن تأخير صباحي';
+  }
+  if (cleanType === 'permission' || cleanType === 'إذن') {
+    return '⏰ إذن خروج / تأخير';
+  }
+  if (cleanType === 'loan' || cleanType === 'advance' || cleanType === 'سلفة') {
+    return '💳 سلفة مالية';
+  }
+  if (cleanType === 'meds' || cleanType === 'credit_medicine' || cleanType === 'أدوية') {
+    return '💊 أدوية آجل';
+  }
+  if (cleanType === 'swap' || cleanType === 'shift_swap' || cleanType === 'تبديل') {
+    return '🔄 تبديل وردية';
+  }
+  if (cleanType === 'roster_update' || cleanType === 'roster_edit' || cleanType === 'roster_edit_request' || cleanType === 'schedule_edit') {
+    return '📅 تعديل جدول شهري';
+  }
+  if (cleanType === 'bonus' || cleanType === 'reward' || cleanType === 'مكافأة') {
+    return '🏆 إضافة مكافأة';
+  }
+  if (cleanType === 'overtime' || cleanType === 'overtime_request' || cleanType === 'إضافي') {
+    return '⭐ ساعات إضافية';
+  }
+  if (cleanType === 'eval_edit_request' || cleanType === 'complaint' || cleanType === 'شكوى') {
+    return '📋 شكوى / ملاحظة';
+  }
+  if (cleanType === 'resignation' || cleanType === 'resignation_request' || cleanType === 'استقالة') {
+    return '🚪 طلب استقالة';
+  }
+  if (cleanType === 'withdraw' || cleanType === 'resignation_withdraw') {
+    return '↩️ تراجع عن استقالة';
+  }
+  if (cleanType === 'punch_correction' || cleanType === 'attendance_punch' || cleanType === 'تأكيد بصمة الوجه') {
+    return '📸 تأكيد بصمة الوجه';
+  }
+  if (cleanType === 'adjustment') {
+    return '⚖️ تعديل إداري / مالي';
+  }
+
+  if (/[a-zA-Z]/.test(type)) {
+    return 'طلب إداري';
+  }
+  return type || 'طلب إداري';
+}
+
 

@@ -225,7 +225,7 @@ export default function BranchManagerView({
       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
         <label style={{ fontSize: '13px', fontWeight: 'bold' }}>تصفية الفترة الزمنية:</label>
         <select value={filterMode} onChange={(e) => setFilterMode(e.target.value)} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px', fontWeight: 'bold' }}>
-          <option value="month">📅 حسب دورة الشهر المالية ({cycleRange.shortLabel})</option>
+          <option value="month">📅 حسب دورة الشهر المالية</option>
           <option value="custom">📆 فترة مخصصة (من - إلى)</option>
         </select>
       </div>

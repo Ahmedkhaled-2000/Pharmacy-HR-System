@@ -4769,7 +4769,26 @@ export default function App() {
             (state.loans || []).forEach(r => { if (r && !seen.has(String(r.id))) { reqList.push(r); seen.add(String(r.id)); } });
             return reqList.filter(r => !r.hiddenFromAdmin && (r.status === 'pending' || r.status === 'pending_admin' || (r.adminApproved !== true && r.status !== 'rejected' && r.status !== 'cancelled'))).length;
           })()}
-          resignationCount={(state.resignationRequests || []).filter(r => !r.hiddenFromAdmin && (r.managerStatus === 'approved' || r.managerStatus === 'rejected') && !r.isAdminCreated && (!r.adminStatus || r.adminStatus === 'pending')).length}
+          resignationCount={(() => {
+            const seen = new Set();
+            let count = 0;
+            const list = [...(state.resignationRequests || [])];
+            (state.requests || []).forEach(r => {
+              if (r && (r.type === 'resignation' || r.type === 'withdraw' || r.type === 'resignation_request')) {
+                list.push(r);
+              }
+            });
+            list.forEach(r => {
+              if (!r || !r.id || seen.has(String(r.id))) return;
+              seen.add(String(r.id));
+              const isPendingAdmin = !r.adminStatus || r.adminStatus === 'pending' || r.status === 'pending' || r.status === 'pending_admin';
+              const isNotDecided = r.adminApproved !== true && r.status !== 'approved' && r.status !== 'rejected' && r.status !== 'cancelled';
+              if (!r.hiddenFromAdmin && !r.isCancelled && (isPendingAdmin || isNotDecided)) {
+                count++;
+              }
+            });
+            return count;
+          })()}
           bylawsCount={(() => {
             const cIdStr = String(currentBranch?.id || '');
             const unreadLate = (state.lateIncidents || []).filter((inc) => {

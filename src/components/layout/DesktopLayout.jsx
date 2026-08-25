@@ -811,7 +811,7 @@ export default function DesktopLayout({
                   cursor: 'pointer'
                 }}
               >
-                <option value="month">📅 دورة الرواتب ({currentCycleRange.shortLabel})</option>
+                <option value="month">📅 دورة الرواتب</option>
                 <option value="custom">📆 فترة مخصصة</option>
               </select>
 
@@ -833,18 +833,6 @@ export default function DesktopLayout({
                       }}
                     />
                   )}
-                  <span style={{
-                    fontSize: '10.5px',
-                    background: 'var(--surface)',
-                    padding: '2px 6px',
-                    borderRadius: '4px',
-                    border: '1px solid var(--border)',
-                    color: 'var(--primary)',
-                    fontWeight: 'bold',
-                    whiteSpace: 'nowrap'
-                  }}>
-                    {currentCycleRange.shortLabel}
-                  </span>
                 </div>
               ) : (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
@@ -1323,9 +1311,35 @@ export default function DesktopLayout({
                             }
                           }}
                         >
-                          <span style={{ fontSize: '18px', marginTop: '1px', flexShrink: 0 }}>
-                            {child.icon}
-                          </span>
+                          <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                            <span style={{ fontSize: '18px', marginTop: '1px' }}>
+                              {child.icon}
+                            </span>
+                            {child.badge > 0 && (
+                              <span
+                                style={{
+                                  position: 'absolute',
+                                  top: '-4px',
+                                  right: '-4px',
+                                  background: '#dc2626',
+                                  color: '#ffffff',
+                                  borderRadius: '50%',
+                                  minWidth: '16px',
+                                  height: '16px',
+                                  padding: '0 3px',
+                                  fontSize: '10px',
+                                  fontWeight: '900',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  boxShadow: '0 0 6px rgba(220, 38, 38, 0.6)',
+                                  border: '1.5px solid var(--surface)'
+                                }}
+                              >
+                                {child.badge > 99 ? '99+' : child.badge}
+                              </span>
+                            )}
+                          </div>
 
                           <div style={{ flex: 1, overflow: 'hidden' }}>
                             <div style={{

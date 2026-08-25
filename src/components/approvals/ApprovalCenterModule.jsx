@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { shouldShowRequestToBranch } from '../../utils/formatters';
+import { getFormattedRequestBadge } from '../requests/RequestsModule';
 
 export default function ApprovalCenterModule({
   state,
@@ -200,9 +201,7 @@ export default function ApprovalCenterModule({
                 <div key={req.id} className="approval-card-item">
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <span className="badge badge-primary" style={{ fontSize: '13px' }}>
-                        {req.typeLabel || req.type}
-                      </span>
+                      {getFormattedRequestBadge(req.type, req.leaveType)}
                       <strong style={{ fontSize: '16px', color: 'var(--text)' }}>
                         {emp ? emp.name : 'موظف غير محدد'} ({emp?.code})
                       </strong>
