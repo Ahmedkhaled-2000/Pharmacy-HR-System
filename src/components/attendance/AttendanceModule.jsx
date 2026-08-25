@@ -278,6 +278,10 @@ export default function AttendanceModule({
         <AttendancePunchesModal
           employee={selectedPunchEmp}
           state={state}
+          setState={setState}
+          saveState={saveState}
+          showToast={showToast}
+          executeWithOwnerGuard={executeWithOwnerGuard}
           filterFn={filterFn}
           monthPicker={monthPicker}
           filterMode={filterMode}

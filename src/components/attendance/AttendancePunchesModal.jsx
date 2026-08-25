@@ -1,10 +1,14 @@
-import React from 'react';
-import { isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
-import { getEmployeeManualPunchesCount, isShiftManualPunch } from '../../utils/formatters';
+import React, { useState } from 'react';
+import { isApprovedPermissionForDate, getEffectiveShiftHours, recalculateEmployeeCycleLateness } from '../../utils/latePenaltyEngine';
+import { getEmployeeManualPunchesCount, isShiftManualPunch, arabicWeekday } from '../../utils/formatters';
 
 export default function AttendancePunchesModal({
   employee,
   state,
+  setState,
+  saveState,
+  showToast,
+  executeWithOwnerGuard,
   filterFn = null,
   monthPicker = null,
   filterMode = 'month',
@@ -13,6 +17,14 @@ export default function AttendancePunchesModal({
   onClose
 }) {
   if (!employee) return null;
+
+  const [editingPunch, setEditingPunch] = useState(null);
+  const [editDate, setEditDate] = useState('');
+  const [editTimeIn, setEditTimeIn] = useState('');
+  const [editTimeOut, setEditTimeOut] = useState('');
+  const [editBreakHours, setEditBreakHours] = useState('0');
+  const [editBranchId, setEditBranchId] = useState('');
+  const [editNotes, setEditNotes] = useState('');
 
   const activePeriodFilter = (d) => {
     if (!d) return false;
@@ -68,9 +80,125 @@ export default function AttendancePunchesModal({
     }, 0)
     .toFixed(2);
 
+  const handleOpenEdit = (punch) => {
+    setEditingPunch(punch);
+    setEditDate(punch.date || new Date().toISOString().slice(0, 10));
+    setEditTimeIn(punch.timeIn || punch.checkIn || punch.inTime || '09:00');
+    setEditTimeOut(punch.timeOut || punch.checkOut || punch.outTime || '17:00');
+    setEditBreakHours(String(punch.breakHours || 0));
+    setEditBranchId(punch.branchId || employee.branchId || '');
+    setEditNotes(punch.note || punch.notes || '');
+  };
+
+  const handleSaveEdit = async (e) => {
+    e.preventDefault();
+    if (!editingPunch) return;
+
+    const performSave = async () => {
+      const inParts = (editTimeIn || '09:00').split(':').map(Number);
+      const outParts = (editTimeOut || '17:00').split(':').map(Number);
+      let diff = ((outParts[0] || 0) + (outParts[1] || 0) / 60) - ((inParts[0] || 0) + (inParts[1] || 0) / 60);
+      if (diff <= 0) diff += 24;
+      const bH = parseFloat(editBreakHours) || 0;
+      const calculatedHours = Math.max(0, Math.round((diff - bH) * 100) / 100);
+
+      const updatedShifts = (state.shifts || []).map((s) => {
+        if (s.id === editingPunch.id) {
+          return {
+            ...s,
+            date: editDate,
+            timeIn: editTimeIn,
+            timeOut: editTimeOut,
+            breakHours: bH,
+            hours: calculatedHours,
+            workHours: calculatedHours,
+            netHours: calculatedHours,
+            branchId: editBranchId || s.branchId || employee.branchId || '',
+            note: editNotes.trim() || s.note || 'تم تعديل البصمة بواسطة الإدارة العليا',
+            notes: editNotes.trim() || s.notes || 'تم تعديل البصمة بواسطة الإدارة العليا',
+            statusLabel: 'معدلة من الإدارة',
+            isManual: true,
+            manualPunch: true,
+            editedByAdmin: true,
+            editedAt: new Date().toISOString()
+          };
+        }
+        return s;
+      });
+
+      let updatedState = { ...state, shifts: updatedShifts };
+
+      // Auto recalculate late incidents
+      const recRes = recalculateEmployeeCycleLateness({
+        employeeId: employee.id,
+        state: updatedState,
+        payrollCycleId: editDate.slice(0, 7)
+      });
+      updatedState = {
+        ...updatedState,
+        lateIncidents: recRes.incidents,
+        requests: recRes.updatedRequests
+      };
+
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+
+      setEditingPunch(null);
+      showToast?.('✅ تم حفظ وتعديل بيانات البصمة بنجاح!');
+    };
+
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockEditPastShifts',
+        actionTitle: `تعديل بصمة الموظف (${employee.name})`,
+        actionDetails: `تاريخ البصمة: ${editDate} | التوقيت الجديد: من ${editTimeIn} إلى ${editTimeOut}`,
+        onExecute: performSave
+      });
+    } else {
+      await performSave();
+    }
+  };
+
+  const handleDeletePunch = async (punch) => {
+    const performDelete = async () => {
+      const updatedShifts = (state.shifts || []).filter((s) => s.id !== punch.id);
+      let updatedState = { ...state, shifts: updatedShifts };
+
+      // Auto recalculate late incidents
+      const recRes = recalculateEmployeeCycleLateness({
+        employeeId: employee.id,
+        state: updatedState,
+        payrollCycleId: (punch.date || '').slice(0, 7)
+      });
+      updatedState = {
+        ...updatedState,
+        lateIncidents: recRes.incidents,
+        requests: recRes.updatedRequests
+      };
+
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+
+      showToast?.('🗑️ تم حذف البصمة بنجاح!');
+    };
+
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockDeleteShifts',
+        actionTitle: `حذف بصمة الموظف (${employee.name})`,
+        actionDetails: `تاريخ البصمة: ${punch.date} | ${punch.timeIn} - ${punch.timeOut}`,
+        onExecute: performDelete
+      });
+    } else {
+      if (window.confirm(`هل أنت متأكد من حذف بصمة يوم ${punch.date} للموظف ${employee.name}؟`)) {
+        await performDelete();
+      }
+    }
+  };
+
   return (
     <div className="modal-backdrop">
-      <div className="modal-content card" style={{ maxWidth: '1150px', width: '96%', padding: '28px', maxHeight: '90vh', overflowY: 'auto' }}>
+      <div className="modal-content card" style={{ maxWidth: '1200px', width: '96%', padding: '28px', maxHeight: '90vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
           <div>
             <h3 style={{ margin: 0, color: '#0d9488', fontSize: '18px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
@@ -127,12 +255,13 @@ export default function AttendancePunchesModal({
                           <th style={{ textAlign: 'center' }}>صافي ساعات العمل</th>
                           <th style={{ textAlign: 'center' }}>المبلغ المستحق</th>
                           <th>الملاحظات</th>
+                          <th style={{ textAlign: 'center' }}>الإجراءات</th>
                         </tr>
                       </thead>
                       <tbody>
                         {bPunches.length === 0 ? (
                           <tr>
-                            <td colSpan="9" style={{ textAlign: 'center', color: 'var(--muted)', padding: '20px' }}>
+                            <td colSpan="10" style={{ textAlign: 'center', color: 'var(--muted)', padding: '20px' }}>
                               لا توجد بصمات مسجلة بهذا الفرع في هذا الشهر.
                             </td>
                           </tr>
@@ -193,6 +322,26 @@ export default function AttendancePunchesModal({
                                     p.notes || p.statusLabel || 'تسجيل بصمة عادية'
                                   )}
                                 </td>
+                                <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
+                                  <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
+                                    <button
+                                      className="btn btn-ghost"
+                                      style={{ padding: '3px 8px', fontSize: '11.5px', color: '#0284c7', border: '1px solid #bae6fd', background: '#f0f9ff' }}
+                                      title="تعديل البصمة"
+                                      onClick={() => handleOpenEdit(p)}
+                                    >
+                                      ✏️ تعديل
+                                    </button>
+                                    <button
+                                      className="del-btn"
+                                      style={{ padding: '3px 6px', fontSize: '11px' }}
+                                      title="حذف البصمة"
+                                      onClick={() => handleDeletePunch(p)}
+                                    >
+                                      🗑️
+                                    </button>
+                                  </div>
+                                </td>
                               </tr>
                             );
                           })
@@ -209,6 +358,7 @@ export default function AttendancePunchesModal({
                             <td style={{ textAlign: 'center', color: '#16a34a', fontWeight: '800' }}>
                               {bTotalEarned} ج.م
                             </td>
+                            <td></td>
                             <td></td>
                           </tr>
                         </tfoot>
@@ -234,12 +384,13 @@ export default function AttendancePunchesModal({
                   <th style={{ textAlign: 'center' }}>صافي ساعات العمل</th>
                   <th style={{ textAlign: 'center' }}>المبلغ المستحق</th>
                   <th>الملاحظات</th>
+                  <th style={{ textAlign: 'center' }}>الإجراءات</th>
                 </tr>
               </thead>
               <tbody>
                 {monthPunches.length === 0 ? (
                   <tr>
-                    <td colSpan="9" style={{ textAlign: 'center', color: 'var(--muted)', padding: '24px' }}>
+                    <td colSpan="10" style={{ textAlign: 'center', color: 'var(--muted)', padding: '24px' }}>
                       لا توجد بصمات مسجلة لهذا الموظف في هذا الشهر.
                     </td>
                   </tr>
@@ -344,6 +495,28 @@ export default function AttendancePunchesModal({
                             p.notes || p.statusLabel || 'تسجيل بصمة عادية'
                           )}
                         </td>
+
+                        {/* Actions */}
+                        <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
+                          <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
+                            <button
+                              className="btn btn-ghost"
+                              style={{ padding: '3px 8px', fontSize: '11.5px', color: '#0284c7', border: '1px solid #bae6fd', background: '#f0f9ff' }}
+                              title="تعديل البصمة"
+                              onClick={() => handleOpenEdit(p)}
+                            >
+                              ✏️ تعديل
+                            </button>
+                            <button
+                              className="del-btn"
+                              style={{ padding: '3px 6px', fontSize: '11px' }}
+                              title="حذف البصمة"
+                              onClick={() => handleDeletePunch(p)}
+                            >
+                              🗑️
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     );
                   })
@@ -371,10 +544,110 @@ export default function AttendancePunchesModal({
                       {totalEarned} ج.م
                     </td>
                     <td></td>
+                    <td></td>
                   </tr>
                 </tfoot>
               )}
             </table>
+          </div>
+        )}
+
+        {/* ── Edit Punch Modal ── */}
+        {editingPunch && (
+          <div className="modal-backdrop" style={{ zIndex: 1100 }}>
+            <div className="modal-content card" style={{ maxWidth: '520px', width: '90%', padding: '24px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <h4 style={{ margin: 0, color: '#0284c7', fontSize: '16px' }}>
+                  ✏️ تعديل بصمة ووردية — {employee.name}
+                </h4>
+                <button className="btn btn-ghost" onClick={() => setEditingPunch(null)}>✕</button>
+              </div>
+
+              <form onSubmit={handleSaveEdit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <div className="field">
+                  <label>تاريخ البصمة</label>
+                  <input
+                    type="date"
+                    value={editDate}
+                    onChange={(e) => setEditDate(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div className="field">
+                    <label>وقت الحضور (الدخول)</label>
+                    <input
+                      type="time"
+                      value={editTimeIn}
+                      onChange={(e) => setEditTimeIn(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="field">
+                    <label>وقت الانصراف (الخروج)</label>
+                    <input
+                      type="time"
+                      value={editTimeOut}
+                      onChange={(e) => setEditTimeOut(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: isMultiBranch ? '1fr 1fr' : '1fr', gap: '12px' }}>
+                  <div className="field">
+                    <label>ساعات البريك (استراحة)</label>
+                    <input
+                      type="number"
+                      step="0.25"
+                      min="0"
+                      max="12"
+                      value={editBreakHours}
+                      onChange={(e) => setEditBreakHours(e.target.value)}
+                    />
+                  </div>
+
+                  {isMultiBranch && (
+                    <div className="field">
+                      <label>الفرع</label>
+                      <select
+                        value={editBranchId}
+                        onChange={(e) => setEditBranchId(e.target.value)}
+                      >
+                        {employee.branchesDetails.map((bd) => {
+                          const br = (state.branches || []).find((b) => b.id === bd.branchId);
+                          return (
+                            <option key={bd.branchId} value={bd.branchId}>
+                              {br?.name || `فرع ${bd.branchId}`}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+                  )}
+                </div>
+
+                <div className="field">
+                  <label>ملاحظات ومبرر التعديل</label>
+                  <input
+                    type="text"
+                    placeholder="سبب تعديل أوقات البصمة..."
+                    value={editNotes}
+                    onChange={(e) => setEditNotes(e.target.value)}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '10px' }}>
+                  <button type="button" className="btn btn-ghost" onClick={() => setEditingPunch(null)}>
+                    إلغاء
+                  </button>
+                  <button type="submit" className="btn btn-start">
+                    💾 حفظ التعديلات
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         )}
       </div>
