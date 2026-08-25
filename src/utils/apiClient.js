@@ -108,8 +108,7 @@ export async function apiSaveSettings(key = STORAGE_KEY, value, options = {}) {
   return await request('settings', {
     method: 'POST',
     body: JSON.stringify({ key, value }),
-    timeout: options.timeout || 15000,
-    keepalive: true
+    timeout: options.timeout || 25000
   });
 }
 
