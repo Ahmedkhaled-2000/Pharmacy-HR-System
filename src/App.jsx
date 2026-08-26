@@ -35,7 +35,7 @@ import { saveAutoBackupOnModification } from './utils/backupHelper';
 import ErrorBoundary from './components/common/ErrorBoundary';
 import { normalizeSchedule } from './components/roster/RosterModule';
 import { playNotificationChime } from './hooks/useAudio';
-import { createRequestDecisionNotification } from './utils/notificationEngine';
+import { createRequestDecisionNotification, filterAdminNotifications, filterEmployeeNotifications } from './utils/notificationEngine';
 
 // Modular Components
 import GlobalNavbar from './components/navbar/GlobalNavbar';
@@ -4868,7 +4868,7 @@ export default function App() {
                   (state.employees || []).find((e) => e.id === currentBranch?.managerId)?.id,
                   state
                 )
-              : (state.notifications || [])
+              : filterAdminNotifications(state.notifications || [])
           }
           onMarkNotificationRead={handleMarkNotificationRead}
           onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
@@ -4965,6 +4965,9 @@ export default function App() {
               list.forEach(r => {
                 if (!r || !r.id || seen.has(String(r.id))) return;
                 seen.add(String(r.id));
+                if (r.isAdminCreated || r.isManualAdmin) return;
+                if (r.status === 'approved' || r.adminStatus === 'approved' || r.adminApproved === true) return;
+                if (r.status === 'rejected' || r.adminStatus === 'rejected' || r.isCancelled || r.status === 'cancelled') return;
 
                 const matchesBranch = (!cIdStr) ||
                   (r.branchId && String(r.branchId) === cIdStr) ||
@@ -4979,10 +4982,7 @@ export default function App() {
                                         !r.submittedByBranchManager &&
                                         !r.isDirectToAdmin &&
                                         !r.branchNotRequired &&
-                                        !r.isCancelled &&
-                                        r.status !== 'approved' &&
-                                        r.status !== 'rejected' &&
-                                        r.status !== 'cancelled';
+                                        !r.isCancelled;
                 if (isWaitingBranch) {
                   count++;
                 }
@@ -4994,10 +4994,14 @@ export default function App() {
             list.forEach(r => {
               if (!r || !r.id || seen.has(String(r.id))) return;
               seen.add(String(r.id));
+              if (r.isAdminCreated || r.isManualAdmin) return;
+              if (r.adminStatus === 'approved' || r.status === 'approved' || r.adminApproved === true) return;
+              if (r.adminStatus === 'rejected' || r.status === 'rejected' || r.isCancelled || r.status === 'cancelled') return;
+
               const isBranchResolved = r.managerStatus === 'approved' || r.managerStatus === 'rejected' || r.isDirectToAdmin || r.branchNotRequired || r.createdRole === 'branch' || r.submittedByBranchManager;
-              const isPendingAdmin = !r.adminStatus || r.adminStatus === 'pending' || r.status === 'pending' || r.status === 'pending_admin';
-              const isNotDecided = r.adminApproved !== true && r.status !== 'approved' && r.status !== 'rejected' && r.status !== 'cancelled';
-              if (!r.hiddenFromAdmin && !r.isCancelled && isBranchResolved && (isPendingAdmin || isNotDecided)) {
+              const isPendingAdmin = (!r.adminStatus || r.adminStatus === 'pending') && (!r.status || r.status === 'pending' || r.status === 'pending_admin');
+
+              if (!r.hiddenFromAdmin && isBranchResolved && isPendingAdmin) {
                 count++;
               }
             });

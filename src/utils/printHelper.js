@@ -634,7 +634,7 @@ export function generateOfficialPayslipHTML({
     color: '#b91c1c'
   }] : [];
 
-  // 6. Leaves (إجازات الشهر المعتمدة - السنوية وغير المدفوعة)
+  // 6. Leaves and Rest Days (سجل أيام الإجازات والراحات المأخوذة بالشهر)
   const allLeaveRequests = [...(state?.leaveRequests || []), ...(state?.requests || [])];
   const empApprovedLeaves = allLeaveRequests.filter(
     (r) =>
@@ -644,26 +644,199 @@ export function generateOfficialPayslipHTML({
       ((r.startDate && r.startDate <= endCutoff && r.endDate >= startCutoff) || (r.date && r.date >= startCutoff && r.date <= endCutoff) || (r.createdAt && r.createdAt.slice(0, 7) === month))
   );
 
-  const mappedLeaves = empApprovedLeaves.map((l) => {
+  // Generate date list for cycle
+  const cycleDates = [];
+  if (startCutoff && endCutoff) {
+    let cur = new Date(startCutoff);
+    const endD = new Date(endCutoff);
+    if (!isNaN(cur) && !isNaN(endD) && cur <= endD) {
+      while (cur <= endD) {
+        const cy = cur.getFullYear();
+        const cm = cur.getMonth() + 1;
+        const cd = cur.getDate();
+        cycleDates.push(`${cy}-${String(cm).padStart(2, '0')}-${String(cd).padStart(2, '0')}`);
+        cur.setDate(cur.getDate() + 1);
+      }
+    }
+  }
+
+  const empIdStr = String(emp?.id || '');
+  const empCodeStr = String(emp?.code || '');
+  const empRoster = (state?.rosters || []).find(
+    r => (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeId) === empCodeStr)) &&
+         (r.month === month || !r.month) && r.status === 'approved'
+  ) || (state?.rosters || []).find(
+    r => (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeId) === empCodeStr)) &&
+         (r.month === month || !r.month)
+  ) || (state?.requests || []).find(
+    r => (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeId) === empCodeStr)) &&
+         (r.type === 'roster_update' || r.type === 'roster_edit' || r.type === 'roster_edit_request') &&
+         (r.month === month || !r.month) && (r.status === 'approved' || r.adminApproved)
+  );
+
+  const getDayScheduleFromRoster = (scheduleMap, jsDay, dateStr) => {
+    if (!scheduleMap) {
+      return jsDay === 5 ? { type: 'off', isOff: true } : { type: 'shift', start: '08:00', end: '16:00' };
+    }
+    if (scheduleMap[dateStr]) return scheduleMap[dateStr];
+    const dayNames = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+    const dName = dayNames[jsDay];
+    const dNameAlt = jsDay === 1 ? 'الإثنين' : dName;
+    const keys = [dateStr, String(jsDay), dName, dNameAlt];
+    for (const k of keys) {
+      if (scheduleMap[k]) return scheduleMap[k];
+    }
+    return jsDay === 5 ? { type: 'off', isOff: true } : { type: 'shift', start: '08:00', end: '16:00' };
+  };
+
+  // 1. Rest days (الراحات الأسبوعية والمجدولة المأخوذة)
+  const restDayItems = [];
+  const shiftDatesSet = new Set((shifts || []).map(s => s.date));
+  const leaveDatesSet = new Set();
+
+  empApprovedLeaves.forEach(l => {
+    const lStart = l.startDate || l.date;
+    const lEnd = l.endDate || l.date || lStart;
+    if (lStart && lEnd) {
+      let cur = new Date(lStart);
+      const endD = new Date(lEnd);
+      while (cur <= endD) {
+        const cy = cur.getFullYear();
+        const cm = cur.getMonth() + 1;
+        const cd = cur.getDate();
+        leaveDatesSet.add(`${cy}-${String(cm).padStart(2, '0')}-${String(cd).padStart(2, '0')}`);
+        cur.setDate(cur.getDate() + 1);
+      }
+    }
+  });
+
+  cycleDates.forEach(dateStr => {
+    if (shiftDatesSet.has(dateStr) || leaveDatesSet.has(dateStr)) return;
+    const jsDay = new Date(dateStr).getDay();
+    const daySched = getDayScheduleFromRoster(empRoster?.schedule, jsDay, dateStr);
+    if (daySched && (daySched.type === 'off' || daySched.isOff)) {
+      restDayItems.push({
+        id: `rest_${dateStr}`,
+        date: dateStr,
+        dateRangeLabel: `${arabicWeekday(dateStr)} ${dateStr}`,
+        dayName: arabicWeekday(dateStr),
+        category: 'rest',
+        categoryBadge: '<span style="background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 9px;">🛋️ راحة أسبوعية</span>',
+        typeLabel: 'راحة أسبوعية / مجدولة',
+        daysCount: 1,
+        effectLabel: '🟢 راحة مجدولة معتمدة',
+        effectColor: '#0284c7',
+        financialStatus: 'مدفوعة (ضمن الراتب)',
+        reason: 'يوم راحة أسبوعية مجدولة بالجدول الشهري'
+      });
+    }
+  });
+
+  // 2. Approved leave days (سنوي / اعتيادي / بدون أجر / مرضي)
+  const leaveDayItems = [];
+  empApprovedLeaves.forEach(l => {
     const isUnpaid = l.leaveType === 'unpaid' || l.type === 'unpaid_leave' || l.isUnpaid === true;
+    const isSick = l.leaveType === 'sick' || l.type === 'sick_leave';
+    const isAnnual = !isUnpaid && !isSick;
     const days = parseFloat(l.daysCount || l.days || 1) || 1;
     const deductionAmt = isUnpaid ? Math.round(days * dailyRate * 100) / 100 : 0;
 
-    return {
+    let category = 'annual';
+    let categoryBadge = '<span style="background: #dcfce7; color: #15803d; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 9px;">🌴 إجازة سنوية</span>';
+    let typeLabel = 'إجازة سنوية / اعتيادية';
+    let effectLabel = '🟢 مدفوعة الأجر (لا خصم)';
+    let effectColor = '#15803d';
+    let financialStatus = 'مدفوعة الأجر بالكامل';
+
+    if (isUnpaid) {
+      category = 'unpaid';
+      categoryBadge = '<span style="background: #fee2e2; color: #991b1b; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 9px;">💸 إجازة بدون أجر</span>';
+      typeLabel = 'إجازة بدون أجر';
+      effectLabel = `🔴 مخصوم (-${fmt(deductionAmt)} ج.م)`;
+      effectColor = '#dc2626';
+      financialStatus = `مخصومة (-${fmt(deductionAmt)} ج.م)`;
+    } else if (isSick) {
+      category = 'sick';
+      categoryBadge = '<span style="background: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 9px;">🤒 إجازة مرضية</span>';
+      typeLabel = 'إجازة مرضية معتمدة';
+      effectLabel = '🟢 مدفوعة الأجر معتمدة';
+      effectColor = '#b45309';
+      financialStatus = 'مدفوعة الأجر';
+    }
+
+    const startDateStr = l.startDate || l.date || '—';
+    const endDateStr = l.endDate || l.date || startDateStr;
+    const dateRangeLabel = startDateStr === endDateStr ? `${arabicWeekday(startDateStr)} ${startDateStr}` : `من ${startDateStr} إلى ${endDateStr}`;
+
+    leaveDayItems.push({
       id: l.id,
-      leaveType: l.leaveType || (isUnpaid ? 'unpaid' : 'annual'),
-      leaveTypeLabel: isUnpaid ? '💸 إجازة غير مدفوعة الأجر' : (l.leaveType === 'sick' ? '🤒 إجازة مرضية' : '🌴 إجازة سنوية اعتيادية'),
-      startDate: l.startDate || l.date || '—',
-      endDate: l.endDate || l.date || '—',
+      date: startDateStr,
+      dateRangeLabel,
+      dayName: arabicWeekday(startDateStr),
+      category,
+      categoryBadge,
+      typeLabel,
       daysCount: days,
-      isUnpaid,
       deductionAmt,
-      effectLabel: isUnpaid ? `🔴 مخصوم (-${fmt(deductionAmt)} ج.م)` : '🟢 مدفوعة الأجر (لا خصم)',
-      reason: l.reason || l.details || l.notes || '—'
-    };
+      isUnpaid,
+      effectLabel,
+      effectColor,
+      financialStatus,
+      reason: l.reason || l.details || l.notes || (isAnnual ? 'إجازة سنوية اعتيادية معتمدة' : (isUnpaid ? 'إجازة بدون أجر معتمدة' : 'إجازة مرضية معتمدة'))
+    });
   });
 
-  const unpaidLeavesCount = summary.unpaidLeaveDaysCount || mappedLeaves.filter(l => l.isUnpaid).reduce((acc, l) => acc + l.daysCount, 0);
+  const allTakenDays = [...restDayItems, ...leaveDayItems].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  const totalRestDaysCount = restDayItems.length;
+  const totalAnnualLeaveDays = leaveDayItems.filter(l => l.category === 'annual').reduce((acc, l) => acc + l.daysCount, 0);
+  const totalUnpaidLeaveDays = leaveDayItems.filter(l => l.category === 'unpaid').reduce((acc, l) => acc + l.daysCount, 0);
+  const totalSickLeaveDays = leaveDayItems.filter(l => l.category === 'sick').reduce((acc, l) => acc + l.daysCount, 0);
+
+  // 3. Absence days (أيام الغياب غير المبرر عن الورديات المجدولة)
+  const absenceDayItems = [];
+  const today = todayStr();
+  cycleDates.forEach(dateStr => {
+    if (month === today.slice(0, 7) && dateStr >= today) return; // Only count past days in current cycle
+    if (shiftDatesSet.has(dateStr) || leaveDatesSet.has(dateStr)) return;
+    const jsDay = new Date(dateStr).getDay();
+    const daySched = getDayScheduleFromRoster(empRoster?.schedule, jsDay, dateStr);
+    if (daySched && daySched.type !== 'off' && !daySched.isOff) {
+      const shiftBranch = daySched.branchId ? getBranchName(daySched.branchId) : '';
+      const shiftTime = (daySched.start && daySched.end) ? `${daySched.start} - ${daySched.end}` : 'وردية كاملة';
+      absenceDayItems.push({
+        id: `abs_${dateStr}`,
+        date: dateStr,
+        dateRangeLabel: `${arabicWeekday(dateStr)} ${dateStr}`,
+        dayName: arabicWeekday(dateStr),
+        scheduledShift: `${shiftTime}${shiftBranch ? ` (${shiftBranch})` : ''}`,
+        deductionAmt: dailyRate,
+        effectLabel: `🔴 مخصوم (-${fmt(dailyRate)} ج.م)`,
+        effectColor: '#dc2626',
+        reason: 'غياب بدون إذن رسمي / عدم تسجيل بصمة حضور أو تقديم طلب إجازة'
+      });
+    }
+  });
+
+  const totalAbsenceDaysCount = Math.max(summary.absenceDaysCount || 0, absenceDayItems.length);
+  const totalAbsenceDeductionAmt = summary.absenceDeduction !== undefined ? summary.absenceDeduction : Math.round(totalAbsenceDaysCount * dailyRate * 100) / 100;
+
+  if (absenceDayItems.length === 0 && totalAbsenceDaysCount > 0) {
+    for (let i = 0; i < totalAbsenceDaysCount; i++) {
+      absenceDayItems.push({
+        id: `abs_sum_${i + 1}`,
+        date: `${month}`,
+        dateRangeLabel: `يوم غياب مسجل بالشهر (#${i + 1})`,
+        dayName: 'غياب',
+        scheduledShift: 'وردية عمل مجدولة',
+        deductionAmt: dailyRate,
+        effectLabel: `🔴 مخصوم (-${fmt(dailyRate)} ج.م)`,
+        effectColor: '#dc2626',
+        reason: 'غياب بدون إذن رسمي مسجل في نظام المرتبات'
+      });
+    }
+  }
+
+  const unpaidLeavesCount = summary.unpaidLeaveDaysCount || totalUnpaidLeaveDays;
   const unpaidLeaveDeductionTotal = summary.unpaidLeaveDeduction !== undefined ? summary.unpaidLeaveDeduction : Math.round(unpaidLeavesCount * dailyRate * 100) / 100;
 
   const unpaidLeaveItem = (unpaidLeavesCount > 0 || unpaidLeaveDeductionTotal > 0) ? [{
@@ -1060,37 +1233,69 @@ export function generateOfficialPayslipHTML({
         </div>
       ` : ''}
 
-      <!-- Leaves Record Table (If exists) -->
-      ${mappedLeaves.length > 0 ? `
+      <!-- Leaves and Rest Days Record Table -->
+      ${allTakenDays.length > 0 ? `
         <div style="margin-bottom: 8px; page-break-inside: avoid;">
           <div style="font-weight: 800; color: #0284c7; font-size: 11px; margin-bottom: 3px; display: flex; justify-content: space-between; align-items: center;">
-            <span>🌴 رابعاً: سجل الإجازات المعتمدة بالشهر (${mappedLeaves.length} طلب):</span>
-            <span style="font-size: 9.5px; color: #0284c7; font-weight: bold;">
-              ${unpaidLeavesCount > 0 ? `إجازات غير مدفوعة: ${unpaidLeavesCount} يوم (خصم -${fmt(unpaidLeaveDeductionTotal)} ج.م)` : 'جميع الإجازات مدفوعة بالكامل'}
+            <span>🌴 رابعاً: سجل أيام الإجازات والراحات الأسبوعية المأخوذة بالشهر (${allTakenDays.length} يوم/بند):</span>
+            <span style="font-size: 9px; color: #0369a1; font-weight: bold; background: #e0f2fe; padding: 2px 8px; border-radius: 4px;">
+              🛋️ راحة: ${totalRestDaysCount} يوم · 🌴 سنوي: ${totalAnnualLeaveDays} يوم · 💸 بدون أجر: ${totalUnpaidLeaveDays} يوم ${totalSickLeaveDays > 0 ? `· 🤒 مرضي: ${totalSickLeaveDays} يوم` : ''}
             </span>
           </div>
           <table style="width: 100%; border-collapse: collapse; font-size: 9.5px; text-align: center;">
             <thead>
               <tr style="background: #e0f2fe; color: #0369a1; font-weight: 800;">
-                <th style="padding: 2.5px; width: 22%;">نوع الإجازة</th>
-                <th style="padding: 2.5px; width: 15%;">من تاريخ</th>
-                <th style="padding: 2.5px; width: 15%;">إلى تاريخ</th>
-                <th style="padding: 2.5px; width: 12%;">عدد الأيام</th>
-                <th style="padding: 2.5px; width: 22%;">الأثر المالي</th>
-                <th style="padding: 2.5px; width: 14%;">السبب / البيان</th>
+                <th style="padding: 2.5px; width: 5%;">#</th>
+                <th style="padding: 2.5px; width: 24%;">اليوم والتاريخ / الفترة</th>
+                <th style="padding: 2.5px; width: 18%;">نوع الإجازة / الراحة</th>
+                <th style="padding: 2.5px; width: 10%;">المدة</th>
+                <th style="padding: 2.5px; width: 18%;">الأثر المالي</th>
+                <th style="padding: 2.5px; width: 25%;">البيان / ملاحظات</th>
               </tr>
             </thead>
             <tbody>
-              ${mappedLeaves.map((l) => `
-                <tr style="background: ${l.isUnpaid ? '#fef2f2' : '#f0fdf4'};">
-                  <td style="padding: 2px; border: 1px solid #bae6fd; font-weight: bold; color: ${l.isUnpaid ? '#dc2626' : '#15803d'};">${l.leaveTypeLabel}</td>
-                  <td style="padding: 2px; border: 1px solid #bae6fd;">${l.startDate}</td>
-                  <td style="padding: 2px; border: 1px solid #bae6fd;">${l.endDate}</td>
-                  <td style="padding: 2px; border: 1px solid #bae6fd; font-weight: bold;">${l.daysCount} يوم</td>
-                  <td style="padding: 2px; border: 1px solid #bae6fd; font-weight: bold; color: ${l.isUnpaid ? '#dc2626' : '#15803d'};">
-                    ${l.effectLabel}
-                  </td>
-                  <td style="padding: 2px; border: 1px solid #bae6fd; font-size: 9px;">${l.reason}</td>
+              ${allTakenDays.map((item, idx) => `
+                <tr style="background: ${item.category === 'unpaid' ? '#fef2f2' : (item.category === 'rest' ? '#f0f9ff' : '#f0fdf4')};">
+                  <td style="padding: 2px; border: 1px solid #bae6fd;">${idx + 1}</td>
+                  <td style="padding: 2px; border: 1px solid #bae6fd; font-weight: bold;">${item.dateRangeLabel || `${item.dayName} ${item.date}`}</td>
+                  <td style="padding: 2px; border: 1px solid #bae6fd;">${item.categoryBadge}</td>
+                  <td style="padding: 2px; border: 1px solid #bae6fd; font-weight: bold;">${item.daysCount} يوم</td>
+                  <td style="padding: 2px; border: 1px solid #bae6fd; font-weight: bold; color: ${item.effectColor};">${item.effectLabel}</td>
+                  <td style="padding: 2px; border: 1px solid #bae6fd; font-size: 9px; text-align: right; padding-right: 4px;">${item.reason}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      ` : ''}
+
+      <!-- Absences Record Table (If exists) -->
+      ${absenceDayItems.length > 0 ? `
+        <div style="margin-bottom: 8px; page-break-inside: avoid;">
+          <div style="font-weight: 800; color: #b91c1c; font-size: 11px; margin-bottom: 3px; display: flex; justify-content: space-between; align-items: center;">
+            <span>🚫 خامساً: سجل أيام الغياب غير المبرر عن العمل (${absenceDayItems.length} يوم):</span>
+            <span style="font-size: 9px; color: #b91c1c; font-weight: bold; background: #fee2e2; padding: 2px 8px; border-radius: 4px;">
+              إجمالي خصم الغياب: -${fmt(totalAbsenceDeductionAmt)} ج.م (${totalAbsenceDaysCount} يوم)
+            </span>
+          </div>
+          <table style="width: 100%; border-collapse: collapse; font-size: 9.5px; text-align: center;">
+            <thead>
+              <tr style="background: #fee2e2; color: #991b1b; font-weight: 800;">
+                <th style="padding: 2.5px; width: 5%;">#</th>
+                <th style="padding: 2.5px; width: 25%;">اليوم والتاريخ</th>
+                <th style="padding: 2.5px; width: 22%;">الوردية المجدولة</th>
+                <th style="padding: 2.5px; width: 18%;">قيمة الخصم</th>
+                <th style="padding: 2.5px; width: 30%;">البيان / السبب</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${absenceDayItems.map((item, idx) => `
+                <tr style="background: #fff5f5;">
+                  <td style="padding: 2px; border: 1px solid #fca5a5;">${idx + 1}</td>
+                  <td style="padding: 2px; border: 1px solid #fca5a5; font-weight: bold; color: #b91c1c;">${item.dateRangeLabel || `${item.dayName} ${item.date}`}</td>
+                  <td style="padding: 2px; border: 1px solid #fca5a5;">${item.scheduledShift}</td>
+                  <td style="padding: 2px; border: 1px solid #fca5a5; font-weight: bold; color: ${item.effectColor};">${item.effectLabel}</td>
+                  <td style="padding: 2px; border: 1px solid #fca5a5; font-size: 9px; text-align: right; padding-right: 4px; color: #7f1d1d;">${item.reason}</td>
                 </tr>
               `).join('')}
             </tbody>
@@ -1102,7 +1307,7 @@ export function generateOfficialPayslipHTML({
       ${generalFinancialItems.length > 0 ? `
         <div style="margin-bottom: 8px; page-break-inside: avoid;">
           <div style="font-weight: 800; color: #0f766e; font-size: 11px; margin-bottom: 3px;">
-            📝 خامساً: بيان البدلات الثابتة والمكافآت والجزاءات والغياب والإجازات (${generalFinancialItems.length} بند):
+            📝 ${absenceDayItems.length > 0 ? 'سادساً' : 'خامساً'}: بيان البدلات الثابتة والمكافآت والجزاءات والغياب والإجازات (${generalFinancialItems.length} بند):
           </div>
           <table style="width: 100%; border-collapse: collapse; font-size: 9.5px; text-align: center;">
             <thead>

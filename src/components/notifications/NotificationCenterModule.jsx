@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { fmt, todayStr, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 import { isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
+import { filterAdminNotifications, filterBranchManagerNotifications } from '../../utils/notificationEngine';
 
 export default function NotificationCenterModule({
   state,
@@ -373,7 +374,16 @@ export default function NotificationCenterModule({
   }, [allBylawsPenalties]);
 
   // General Notification Handlers
-  const notifications = (state.notifications || []).filter((n) => {
+  const baseNotifications = authRole === 'branch'
+    ? filterBranchManagerNotifications(
+        state.notifications || [],
+        currentBranch,
+        (state.employees || []).find((e) => e.id === currentBranch?.managerId)?.id,
+        state
+      )
+    : filterAdminNotifications(state.notifications || []);
+
+  const notifications = baseNotifications.filter((n) => {
     if (!n) return false;
     if (empFilter !== 'all' && String(n.empId || n.employeeId) !== String(empFilter)) return false;
     const nDate = (n.date || (n.timestamp ? n.timestamp.slice(0, 10) : ''));

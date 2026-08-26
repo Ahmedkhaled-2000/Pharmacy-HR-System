@@ -141,7 +141,7 @@ export default function EmployeeResignationModule({
       date: todayStr(),
       timestamp: new Date().toISOString(),
       read: false,
-      targetRole: 'all',
+      targetRole: isDirectAdmin ? 'admin' : 'branch_and_admin',
       linkTab: 'notifications',
       branchId: reqBranchId,
     };

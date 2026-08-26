@@ -89,6 +89,7 @@ export function createRequestDecisionNotification({
     requestId: requestId || null,
     employeeId: employeeId ? String(employeeId) : null,
     targetEmployeeId: employeeId ? String(employeeId) : null,
+    targetRole: 'employee',
     type: type || 'request',
     typeLabel: typeName,
     icon,
@@ -114,25 +115,32 @@ export function filterEmployeeNotifications(notifications = [], employeeId = nul
     if (!n) return false;
 
     // 1. Explicit admin or branch manager operational alerts should NEVER show to employees
-    if (n.targetRole === 'admin' || n.targetRole === 'branch' || n.targetRole === 'branch_manager' || n.targetRole === 'manager') {
+    if (n.targetRole === 'admin' || n.targetRole === 'owner' || n.targetRole === 'branch' || n.targetRole === 'branch_manager' || n.targetRole === 'manager' || n.targetRole === 'branch_and_admin') {
       return false;
     }
     if (n.targetApproval === 'admin_only' || n.submittedByBranchManager) {
       return false;
     }
 
-    // 2. Direct match by targetEmployeeId (standard for employee decision notifications)
+    // 2. Direct match by targetEmployeeId (standard for employee decision notifications and shift swaps)
     if (n.targetEmployeeId && String(n.targetEmployeeId).trim() === empIdStr) {
       return true;
     }
 
     // 3. Targeted specifically to employee role
-    if (n.targetRole === 'employee' && (String(n.employeeId).trim() === empIdStr || String(n.targetEmployeeId).trim() === empIdStr)) {
-      return true;
+    if (n.targetRole === 'employee') {
+      if (n.targetEmployeeId && String(n.targetEmployeeId).trim() === empIdStr) return true;
+      if (n.employeeId && String(n.employeeId).trim() === empIdStr) return true;
+      return false;
     }
 
     // 4. Decision notifications (approvals / rejections) for this employee
     if ((n.action === 'approved' || n.action === 'rejected' || n.action === 'decision') && (String(n.employeeId).trim() === empIdStr || String(n.targetEmployeeId).trim() === empIdStr)) {
+      return true;
+    }
+
+    // 5. Broadcasts to all employees
+    if (n.targetRole === 'all_employees' || n.type === 'broadcast' || n.type === 'announcement') {
       return true;
     }
 
@@ -150,9 +158,33 @@ export function filterEmployeeNotifications(notifications = [], employeeId = nul
 export function filterAdminNotifications(notifications = []) {
   return (notifications || []).filter((n) => {
     if (!n) return false;
-    if (n.targetRole === 'admin') return true;
-    if (n.targetRole === 'employee' && n.targetRole !== 'admin') return false;
-    if (!n.targetEmployeeId && n.targetRole !== 'employee') return true;
+
+    // 1. Never show employee-targeted decision confirmations (e.g. "موافقة الإدارة العليا... الخاص بك") to Admin
+    if (n.targetRole === 'employee' || n.targetRole === 'all_employees') {
+      return false;
+    }
+    if (n.targetEmployeeId && (n.action === 'approved' || n.action === 'rejected' || n.action === 'decision')) {
+      return false;
+    }
+    if (n.title && (n.title.includes('الخاص بك') || n.message?.includes('الخاص بك') || n.title.includes('موافقة الإدارة العليا') || n.title.includes('رفض الطلب من الإدارة العليا'))) {
+      return false;
+    }
+
+    // 2. Never show branch-only alerts to Senior Admin
+    if (n.targetRole === 'branch_manager' || n.targetRole === 'branch') {
+      return false;
+    }
+
+    // 3. Explicitly targeted to Admin / Owner / Management
+    if (n.targetRole === 'admin' || n.targetRole === 'owner' || n.targetRole === 'branch_and_admin') {
+      return true;
+    }
+
+    // 4. Default incoming request notifications (without decision action)
+    if (!n.action || n.action === 'pending' || n.action === 'submitted') {
+      return true;
+    }
+
     return false;
   }).sort((a, b) => {
     const tA = new Date(a.timestamp || a.date || 0).getTime();

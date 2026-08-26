@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { todayStr } from '../../utils/formatters';
+import { todayStr, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import { shouldRouteDirectToAdmin } from '../../utils/jobsHelper';
 
@@ -26,8 +26,19 @@ export default function EmployeeShiftSwapModule({
   const [swapNotes, setSwapNotes] = useState('');
 
   const employees = state.employees || [];
+  const branches = state.branches || [];
   const currentBranchId = selectedBranchId || emp.branchId;
-  const colleagues = employees.filter((e) => e.id !== emp.id && (e.branchId === currentBranchId || (e.branchesDetails && e.branchesDetails.some(bd => bd.branchId === currentBranchId))));
+
+  const getBranchLabel = (bId) => {
+    if (!bId) return '';
+    const b = branches.find(br => String(br.id) === String(bId));
+    return b ? b.name : `فرع ${bId}`;
+  };
+
+  // Allow swapping with ANY active employee in the company (not just current branch)
+  const colleagues = employees
+    .filter((e) => e.id !== emp.id && isEmployeeActive(e))
+    .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ar'));
 
   const empIdStr = String(emp.id || '').trim();
   const empCodeStr = String(emp.code || '').trim();
@@ -55,7 +66,7 @@ export default function EmployeeShiftSwapModule({
   });
 
   const incomingSwaps = swapRequests.filter(
-    (r) => r.targetEmpId === emp.id && r.status === 'pending_target'
+    (r) => (String(r.targetEmpId) === empIdStr || (empCodeStr && String(r.targetEmpId) === empCodeStr)) && r.status === 'pending_target'
   );
 
   // Submit Shift Swap Request
@@ -65,8 +76,8 @@ export default function EmployeeShiftSwapModule({
       showToast('يرجى اختيار الزميل المراد تبديل الشيفت معه');
       return;
     }
-    const targetEmpObj = employees.find((e) => e.id === targetEmpId);
-    const isDirectAdmin = shouldRouteDirectToAdmin(emp, currentBranchId, state) || (targetEmpObj && shouldRouteDirectToAdmin(targetEmpObj, currentBranchId, state));
+    const targetEmpObj = employees.find((e) => String(e.id) === String(targetEmpId));
+    const isDirectAdmin = shouldRouteDirectToAdmin(emp, currentBranchId, state) || (targetEmpObj && shouldRouteDirectToAdmin(targetEmpObj, targetEmpObj.branchId || currentBranchId, state));
     const targetApproval = isDirectAdmin ? 'admin_only' : 'branch_and_admin';
 
     const newSwapReq = {
@@ -77,6 +88,7 @@ export default function EmployeeShiftSwapModule({
       requesterEmpName: emp.name,
       targetEmpId,
       targetEmpName: targetEmpObj ? targetEmpObj.name : '',
+      targetBranchId: targetEmpObj?.branchId || currentBranchId,
       branchId: currentBranchId,
       requesterDate: swapDate,
       targetDate: targetSwapDate,
@@ -92,11 +104,13 @@ export default function EmployeeShiftSwapModule({
       id: `notif_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
       requestId: newSwapReq.id,
       type: 'swap',
-      title: `🔄 طلب تبديل وردية جديد: ${emp.name}`,
-      message: `طلب تبديل وردية يوم ${swapDate} مع الزميل ${targetEmpObj ? targetEmpObj.name : 'زميل'} (وردية يوم ${targetSwapDate})`,
+      title: `🔄 طلب تبديل وردية جديد من: ${emp.name}`,
+      message: `يطلب الزميل ${emp.name} تبديل وردية يوم ${swapDate} مع ورديتك يوم ${targetSwapDate}`,
       employeeId: emp.id,
       employeeName: emp.name,
       employeeCode: emp.code,
+      targetEmployeeId: targetEmpId,
+      targetRole: 'employee',
       branchId: emp.branchId,
       date: new Date().toISOString().slice(0, 10),
       timestamp: new Date().toISOString(),
@@ -136,12 +150,14 @@ export default function EmployeeShiftSwapModule({
     const targetSwapReq = (state.shiftSwaps || []).find(s => s.id === swapId);
     let updatedNotifs = [...(state.notifications || [])];
     if (action === 'accept' && targetSwapReq) {
+      // 1. Notification to Admin for final approval
       updatedNotifs.unshift({
         id: `notif_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
         requestId: swapId,
         type: 'swap',
+        targetRole: 'admin',
         title: `✅ تمت موافقة الزميل على التبديل: بانتظار اعتماد الإدارة`,
-        message: `وافق الموظف ${emp.name} على طلب التبديل المحال إليه وبانتظار اعتماد الإدارة النهائي`,
+        message: `وافق الموظف ${emp.name} على طلب التبديل المحال إليه من ${targetSwapReq.requesterEmpName || 'الزميل'} وبانتظار اعتماد الإدارة النهائي`,
         employeeId: emp.id,
         employeeName: emp.name,
         branchId: emp.branchId,
@@ -149,6 +165,24 @@ export default function EmployeeShiftSwapModule({
         timestamp: new Date().toISOString(),
         read: false
       });
+      // 2. Notification to original requester (Employee A)
+      if (targetSwapReq.requesterEmpId) {
+        updatedNotifs.unshift({
+          id: `notif_${Date.now()}_${Math.random().toString(36).substr(2, 5)}_req`,
+          requestId: swapId,
+          type: 'swap',
+          targetRole: 'employee',
+          targetEmployeeId: targetSwapReq.requesterEmpId,
+          title: `🔄 وافق الزميل على طلب التبديل`,
+          message: `وافق الزميل ${emp.name} على طلب تبديل الوردية وتمت إحالته للإدارة للاعتماد النهائي`,
+          employeeId: emp.id,
+          employeeName: emp.name,
+          branchId: emp.branchId,
+          date: new Date().toISOString().slice(0, 10),
+          timestamp: new Date().toISOString(),
+          read: false
+        });
+      }
     }
 
     const updatedState = {
@@ -246,12 +280,15 @@ export default function EmployeeShiftSwapModule({
             <div className="field" style={{ flex: '1 1 220px' }}>
               <label style={{ fontWeight: '700' }}>الزميل المراد التبديل معه</label>
               <select value={targetEmpId} onChange={(e) => setTargetEmpId(e.target.value)} required>
-                <option value="">-- اختر الزميل --</option>
-                {colleagues.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} ({c.jobTitle})
-                  </option>
-                ))}
+                <option value="">-- اختر الزميل (كافة فروع الشركة) --</option>
+                {colleagues.map((c) => {
+                  const bLabel = getBranchLabel(c.branchId);
+                  return (
+                    <option key={c.id} value={c.id}>
+                      {getEmpDisplayName(c)} ({c.jobTitle || 'موظف'}{bLabel ? ` · ${bLabel}` : ''})
+                    </option>
+                  );
+                })}
               </select>
             </div>
 

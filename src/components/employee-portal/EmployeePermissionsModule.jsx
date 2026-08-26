@@ -126,6 +126,7 @@ export default function EmployeePermissionsModule({
       id: `notif_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
       requestId: newPermReq.id,
       type: 'permission',
+      targetRole: isDirectAdmin ? 'admin' : 'branch_and_admin',
       title: `⏰ طلب إذن جديد: ${emp.name}`,
       message: `طلب إذن ${permType === 'late' ? 'تأخير صباحي' : 'خروج مبكر'} لمدة ${durationObj.text} بتاريخ ${date} (${startTime} - ${endTime}). السبب: ${reason.trim() || '—'}`,
       employeeId: emp.id,
