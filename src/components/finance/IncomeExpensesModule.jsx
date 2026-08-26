@@ -13,6 +13,13 @@ export default function IncomeExpensesModule({
   customFrom,
   customTo
 }) {
+  const [isMobileScreen, setIsMobileScreen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth <= 768 : false));
+  React.useEffect(() => {
+    const handleResize = () => setIsMobileScreen(window.innerWidth <= 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const isBranchRole = userRole === 'branch' || !!currentBranch;
   const [activeTab, setActiveTab] = useState('all'); // 'all' | 'expense' | 'income'
   const [selectedBranch, setSelectedBranch] = useState(currentBranch?.id || '');
@@ -259,56 +266,120 @@ export default function IncomeExpensesModule({
         )}
       </div>
 
-      <div className="table-responsive">
-        <table className="bylaws-table">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>التاريخ</th>
-              <th>النوع</th>
-              <th>التصنيف / البيان</th>
-              <th>الفرع</th>
-              <th>المبلغ</th>
-              <th>الملاحظات</th>
-              <th>الإجراءات</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredList.length === 0 ? (
-              <tr><td colSpan="8" style={{ textAlign: 'center', color: 'var(--muted)', padding: '24px' }}>لا توجد حركات مالية مسجلة حتى الآن.</td></tr>
-            ) : (
-              filteredList.map((t, idx) => (
-                <tr key={t.id}>
-                  <td>{idx + 1}</td>
-                  <td>{t.date}</td>
-                  <td>
+      {isMobileScreen ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {filteredList.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '24px', color: 'var(--muted)', background: 'var(--surface-muted)', borderRadius: '12px', border: '1px solid var(--border)' }}>
+              لا توجد حركات مالية مسجلة حتى الآن.
+            </div>
+          ) : (
+            filteredList.map((t, idx) => (
+              <div
+                key={t.id}
+                style={{
+                  background: 'var(--surface)',
+                  border: '1px solid var(--border)',
+                  borderRadius: '14px',
+                  padding: '14px 16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px',
+                  boxShadow: '0 2px 5px rgba(0,0,0,0.03)'
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--muted)' }}>#{idx + 1}</span>
                     {t.type === 'income' ? (
-                      <span className="badge badge-success">🟢 إيراد</span>
+                      <span className="badge badge-success" style={{ fontSize: '11.5px' }}>🟢 إيراد</span>
                     ) : (
-                      <span className="badge badge-danger">🔴 مصروف</span>
+                      <span className="badge badge-danger" style={{ fontSize: '11.5px' }}>🔴 مصروف</span>
                     )}
-                  </td>
-                  <td style={{ fontWeight: '700' }}>{t.category}</td>
-                  <td>{t.branchName || 'عام'}</td>
-                  <td style={{ fontWeight: '800', color: t.type === 'income' ? '#16a34a' : '#dc2626' }}>
+                  </div>
+                  <strong style={{ fontSize: '14px', color: t.type === 'income' ? '#16a34a' : '#dc2626' }}>
                     {t.type === 'income' ? '+' : '-'}{parseFloat(t.amount).toLocaleString()} ج.م
-                  </td>
-                  <td style={{ fontSize: '12.5px' }}>{t.notes || '—'}</td>
-                  <td>
-                    <button
-                      className="btn btn-ghost"
-                      style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--danger)' }}
-                      onClick={() => handleDelete(t.id)}
-                    >
-                      🗑️ حذف
-                    </button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+                  </strong>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px' }}>
+                  <div>
+                    <span style={{ fontWeight: 800, color: 'var(--text)' }}>{t.category}</span>
+                    <span style={{ fontSize: '11.5px', color: 'var(--muted)', display: 'block' }}>🏢 {t.branchName || 'عام'}</span>
+                  </div>
+                  <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>📅 {t.date}</span>
+                </div>
+
+                {t.notes && (
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', background: 'var(--surface-muted)', padding: '6px 10px', borderRadius: '6px' }}>
+                    💬 {t.notes}
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: '4px' }}>
+                  <button
+                    className="btn btn-ghost"
+                    style={{ padding: '4px 10px', fontSize: '11.5px', color: '#dc2626', fontWeight: 'bold', border: '1px solid rgba(220,38,38,0.2)', borderRadius: '6px' }}
+                    onClick={() => handleDelete(t.id)}
+                  >
+                    🗑️ حذف الحركة
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      ) : (
+        <div className="table-responsive">
+          <table className="bylaws-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>التاريخ</th>
+                <th>النوع</th>
+                <th>التصنيف / البيان</th>
+                <th>الفرع</th>
+                <th>المبلغ</th>
+                <th>الملاحظات</th>
+                <th>الإجراءات</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredList.length === 0 ? (
+                <tr><td colSpan="8" style={{ textAlign: 'center', color: 'var(--muted)', padding: '24px' }}>لا توجد حركات مالية مسجلة حتى الآن.</td></tr>
+              ) : (
+                filteredList.map((t, idx) => (
+                  <tr key={t.id}>
+                    <td>{idx + 1}</td>
+                    <td>{t.date}</td>
+                    <td>
+                      {t.type === 'income' ? (
+                        <span className="badge badge-success">🟢 إيراد</span>
+                      ) : (
+                        <span className="badge badge-danger">🔴 مصروف</span>
+                      )}
+                    </td>
+                    <td style={{ fontWeight: '700' }}>{t.category}</td>
+                    <td>{t.branchName || 'عام'}</td>
+                    <td style={{ fontWeight: '800', color: t.type === 'income' ? '#16a34a' : '#dc2626' }}>
+                      {t.type === 'income' ? '+' : '-'}{parseFloat(t.amount).toLocaleString()} ج.م
+                    </td>
+                    <td style={{ fontSize: '12.5px' }}>{t.notes || '—'}</td>
+                    <td>
+                      <button
+                        className="btn btn-ghost"
+                        style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--danger)' }}
+                        onClick={() => handleDelete(t.id)}
+                      >
+                        🗑️ حذف
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

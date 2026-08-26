@@ -12,6 +12,13 @@ export default function EmployeeShiftSwapModule({
   selectedMonth,
   selectedBranchId
 }) {
+  const [isMobileScreen, setIsMobileScreen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth <= 768 : false));
+  React.useEffect(() => {
+    const handleResize = () => setIsMobileScreen(window.innerWidth <= 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const [showSwapModal, setShowSwapModal] = useState(false);
   const [targetEmpId, setTargetEmpId] = useState('');
   const [swapDate, setSwapDate] = useState(todayStr());
@@ -283,44 +290,100 @@ export default function EmployeeShiftSwapModule({
       {/* Swap Requests Log Table */}
       <div style={{ marginTop: '20px' }}>
         <h4 style={{ margin: '0 0 12px', fontSize: '15px' }}>📋 سجل طلبات التبديل</h4>
-        <div className="table-responsive">
-          <table>
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>الموظف الطالب</th>
-                <th>الزميل البديل</th>
-                <th>شيفت الطالب</th>
-                <th>شيفت البديل</th>
-                <th>حالة الطلب</th>
-                <th>ملاحظات</th>
-                <th>التاريخ</th>
-              </tr>
-            </thead>
-            <tbody>
-              {swapRequests.length === 0 ? (
-                <tr className="empty-row">
-                  <td colSpan="8">لا توجد طلبات تبديل شيفتات مسجلة</td>
-                </tr>
-              ) : (
-                swapRequests.map((s, idx) => (
-                  <tr key={s.id}>
-                    <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{idx + 1}</td>
-                    <td style={{ fontWeight: 'bold' }}>{s.requesterEmpName || emp.name}</td>
-                    <td>{s.targetEmpName || '—'}</td>
-                    <td>{s.requesterDate || '—'}</td>
-                    <td>{s.targetDate || '—'}</td>
-                    <td>{statusBadge(s.status)}</td>
-                    <td style={{ color: 'var(--text-muted)', fontSize: '0.88rem' }}>{s.notes || '—'}</td>
-                    <td style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+        {isMobileScreen ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {swapRequests.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '24px', color: 'var(--muted)', background: 'var(--surface-muted)', borderRadius: '12px', border: '1px solid var(--border)' }}>
+                لا توجد طلبات تبديل شيفتات مسجلة
+              </div>
+            ) : (
+              swapRequests.map((s, idx) => (
+                <div
+                  key={s.id}
+                  style={{
+                    background: 'var(--surface)',
+                    border: '1px solid var(--border)',
+                    borderRadius: '14px',
+                    padding: '14px 16px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '10px',
+                    boxShadow: '0 2px 5px rgba(0,0,0,0.03)'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--muted)' }}>#{idx + 1}</span>
+                      {statusBadge(s.status)}
+                    </div>
+                    <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>
                       {s.createdAt ? s.createdAt.slice(0, 10) : '—'}
-                    </td>
+                    </span>
+                  </div>
+
+                  {/* Swap comparison box */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', background: 'var(--surface-muted)', padding: '10px', borderRadius: '10px' }}>
+                    <div>
+                      <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>الموظف الطالب</span>
+                      <strong style={{ fontSize: '13px', color: 'var(--primary-dark)', display: 'block' }}>{s.requesterEmpName || emp.name}</strong>
+                      <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>📅 وردية: {s.requesterDate || '—'}</span>
+                    </div>
+                    <div style={{ borderRight: '1px solid var(--border)', paddingRight: '8px' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>الزميل البديل</span>
+                      <strong style={{ fontSize: '13px', color: 'var(--text)', display: 'block' }}>{s.targetEmpName || '—'}</strong>
+                      <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>📅 وردية: {s.targetDate || '—'}</span>
+                    </div>
+                  </div>
+
+                  {s.notes && (
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', background: 'var(--surface)', padding: '6px 10px', borderRadius: '6px', border: '1px dashed var(--border)' }}>
+                      💬 <strong>ملاحظات:</strong> {s.notes}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        ) : (
+          <div className="table-responsive">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>الموظف الطالب</th>
+                  <th>الزميل البديل</th>
+                  <th>شيفت الطالب</th>
+                  <th>شيفت البديل</th>
+                  <th>حالة الطلب</th>
+                  <th>ملاحظات</th>
+                  <th>التاريخ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {swapRequests.length === 0 ? (
+                  <tr className="empty-row">
+                    <td colSpan="8">لا توجد طلبات تبديل شيفتات مسجلة</td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                ) : (
+                  swapRequests.map((s, idx) => (
+                    <tr key={s.id}>
+                      <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{idx + 1}</td>
+                      <td style={{ fontWeight: 'bold' }}>{s.requesterEmpName || emp.name}</td>
+                      <td>{s.targetEmpName || '—'}</td>
+                      <td>{s.requesterDate || '—'}</td>
+                      <td>{s.targetDate || '—'}</td>
+                      <td>{statusBadge(s.status)}</td>
+                      <td style={{ color: 'var(--text-muted)', fontSize: '0.88rem' }}>{s.notes || '—'}</td>
+                      <td style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                        {s.createdAt ? s.createdAt.slice(0, 10) : '—'}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

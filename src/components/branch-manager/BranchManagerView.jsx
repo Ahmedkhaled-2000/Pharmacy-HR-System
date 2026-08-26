@@ -3395,37 +3395,58 @@ export default function BranchManagerView({
 
                       {/* Criteria items table */}
                       {ev.items && ev.items.length > 0 && (
-                        <div className="table-responsive" style={{ margin: '12px 0' }}>
-                          <table className="bylaws-table" style={{ fontSize: '13px' }}>
-                            <thead>
-                              <tr style={{ background: 'var(--surface-muted)' }}>
-                                <th>بند التقييم</th>
-                                <th>الدرجة المكتسبة</th>
-                                <th>الدرجة القصوى</th>
-                                <th>النسبة والتعديل</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {ev.items.map((item, idx) => {
-                                const itemScore = parseFloat(item.score) || 0;
-                                const itemMax = parseFloat(item.maxScore) || 10;
-                                const pct = itemMax > 0 ? Math.round((itemScore / itemMax) * 100) : 0;
-                                return (
-                                  <tr key={idx}>
-                                    <td style={{ fontWeight: '700' }}>{item.title || `بند #${idx + 1}`}</td>
-                                    <td style={{ color: '#0d9488', fontWeight: '800' }}>{itemScore}</td>
-                                    <td style={{ color: 'var(--muted)' }}>{itemMax}</td>
-                                    <td>
-                                      <span className={`badge ${pct >= 85 ? 'badge-success' : pct >= 70 ? 'badge-warning' : 'badge-danger'}`}>
-                                        {pct}%
-                                      </span>
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
+                        isMobileScreen ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', margin: '10px 0' }}>
+                            {ev.items.map((item, idx) => {
+                              const itemScore = parseFloat(item.score) || 0;
+                              const itemMax = parseFloat(item.maxScore) || 10;
+                              const pct = itemMax > 0 ? Math.round((itemScore / itemMax) * 100) : 0;
+                              return (
+                                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface-muted)', padding: '8px 12px', borderRadius: '8px', fontSize: '12.5px' }}>
+                                  <span style={{ fontWeight: 700 }}>{item.title || `بند #${idx + 1}`}</span>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <span style={{ fontWeight: 800, color: '#0d9488' }}>{itemScore} / {itemMax}</span>
+                                    <span className={`badge ${pct >= 85 ? 'badge-success' : pct >= 70 ? 'badge-warning' : 'badge-danger'}`} style={{ fontSize: '11px' }}>
+                                      {pct}%
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div className="table-responsive" style={{ margin: '12px 0' }}>
+                            <table className="bylaws-table" style={{ fontSize: '13px' }}>
+                              <thead>
+                                <tr style={{ background: 'var(--surface-muted)' }}>
+                                  <th>بند التقييم</th>
+                                  <th>الدرجة المكتسبة</th>
+                                  <th>الدرجة القصوى</th>
+                                  <th>النسبة والتعديل</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {ev.items.map((item, idx) => {
+                                  const itemScore = parseFloat(item.score) || 0;
+                                  const itemMax = parseFloat(item.maxScore) || 10;
+                                  const pct = itemMax > 0 ? Math.round((itemScore / itemMax) * 100) : 0;
+                                  return (
+                                    <tr key={idx}>
+                                      <td style={{ fontWeight: '700' }}>{item.title || `بند #${idx + 1}`}</td>
+                                      <td style={{ color: '#0d9488', fontWeight: '800' }}>{itemScore}</td>
+                                      <td style={{ color: 'var(--muted)' }}>{itemMax}</td>
+                                      <td>
+                                        <span className={`badge ${pct >= 85 ? 'badge-success' : pct >= 70 ? 'badge-warning' : 'badge-danger'}`}>
+                                          {pct}%
+                                        </span>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )
                       )}
 
                       {ev.notes && (
@@ -3543,6 +3564,7 @@ export default function BranchManagerView({
           saveState={saveState}
           currentBranch={currentBranch}
           authRole="branch"
+          hidePolicySettings={true}
           currentEmployee={null}
           showToast={showToast}
         />
@@ -3694,7 +3716,85 @@ export default function BranchManagerView({
 
             const displayedLeaves = Array.from(map.values()).sort((a, b) => (b.createdAt || b.startDate || '').localeCompare(a.createdAt || a.startDate || ''));
 
-            return (
+            return isMobileScreen ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {displayedLeaves.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '24px', color: 'var(--muted)', background: 'var(--surface-muted)', borderRadius: '12px', border: '1px solid var(--border)' }}>
+                    لا توجد طلبات إجازات مسجلة تطابق خيارات البحث.
+                  </div>
+                ) : (
+                  displayedLeaves.map((lr, idx) => {
+                    const empObj = branchEmployees.find(e => String(e.id) === String(lr.employeeId)) || (state.employees || []).find(e => String(e.id) === String(lr.employeeId));
+                    const days = lr.daysCount || lr.days || 1;
+                    const leaveTypeLabel = lr.leaveType === 'annual' ? 'إجازة سنوية' : lr.leaveType === 'sick' ? 'إجازة مرضية' : lr.leaveType === 'unpaid' ? 'بدون أجر' : lr.leaveType === 'casual' ? 'إجازة عارضة' : 'إجازة اعتيادية';
+
+                    return (
+                      <div
+                        key={lr.id || idx}
+                        style={{
+                          background: 'var(--surface)',
+                          border: '1px solid var(--border)',
+                          borderRadius: '14px',
+                          padding: '14px 16px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '10px',
+                          boxShadow: '0 2px 5px rgba(0,0,0,0.03)'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
+                          <div>
+                            <strong style={{ fontSize: '13.5px', color: 'var(--primary-dark)' }}>
+                              {empObj ? `${empObj.name} (${empObj.code})` : (lr.employeeName || 'موظف')}
+                            </strong>
+                            <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>
+                              #{idx + 1} | {lr.createdAt ? lr.createdAt.slice(0, 10) : '—'}
+                            </span>
+                          </div>
+                          <span className="badge" style={{ background: '#e0f2fe', color: '#0369a1', fontSize: '11.5px' }}>
+                            {leaveTypeLabel}
+                          </span>
+                        </div>
+
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface-muted)', padding: '10px 12px', borderRadius: '10px' }}>
+                          <div>
+                            <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>فترة الإجازة</span>
+                            <strong style={{ fontSize: '12.5px', color: 'var(--text)' }}>
+                              {lr.startDate} ➔ {lr.endDate}
+                            </strong>
+                          </div>
+                          <div style={{ textAlign: 'left' }}>
+                            <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>المدة</span>
+                            <strong style={{ fontSize: '13.5px', color: '#15803d' }}>⏱️ {days} يوم</strong>
+                          </div>
+                        </div>
+
+                        {lr.reason && (
+                          <div style={{ fontSize: '12px', color: 'var(--text-muted)', background: 'var(--surface)', padding: '6px 10px', borderRadius: '6px', border: '1px dashed var(--border)' }}>
+                            💬 {lr.reason}
+                          </div>
+                        )}
+
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px', paddingTop: '2px' }}>
+                          <span style={{ fontSize: '11.5px', fontWeight: 'bold' }}>
+                            موقف الفرع: {lr.branchApproved ? <span style={{ color: '#16a34a' }}>🟢 معتمد</span> : <span style={{ color: '#d97706' }}>⏳ بانتظار قرارك</span>}
+                          </span>
+                          <div>
+                            {(lr.status === 'approved' || lr.adminApproved) ? (
+                              <span className="approval-status-badge approved" style={{ fontSize: '11px' }}>🟢 معتمد ومخصوم</span>
+                            ) : lr.status === 'rejected' ? (
+                              <span className="approval-status-badge rejected" style={{ fontSize: '11px' }}>🔴 مرفوض</span>
+                            ) : (
+                              <span className="approval-status-badge pending" style={{ fontSize: '11px' }}>🟡 بانتظار الإدارة العليا</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            ) : (
               <div className="table-responsive">
                 <table className="bylaws-table" style={{ fontSize: '13px' }}>
                   <thead>

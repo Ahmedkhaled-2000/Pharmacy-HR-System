@@ -103,6 +103,7 @@ import {
   notifyAdminOnOvertime
 } from './utils/gmailService';
 import EmployeePermissionsManagementModule from './components/permissions/EmployeePermissionsManagementModule';
+import { filterBranchManagerNotifications } from './utils/notificationEngine';
 import {
   DEFAULT_LATE_PENALTY_POLICY,
   DEFAULT_PERMISSION_POLICY,
@@ -2324,7 +2325,7 @@ export default function App() {
       const allLeaveRequests = [...(state.leaveRequests || []), ...(state.requests || [])];
       const hasLeave = allLeaveRequests.some(
         r => String(r.employeeId) === empIdStr && (r.status === 'approved' || r.adminApproved) &&
-        (r.type === 'leave' || r.type === 'leave_request' || r.type === 'annual_leave' || r.type === 'sick_leave' || r.type === 'emergency_leave') &&
+        (r.type === 'leave' || r.type === 'leave_request' || r.type === 'annual_leave' || r.type === 'sick_leave' || r.type === 'emergency_leave' || r.type === 'unpaid_leave' || r.leaveType === 'unpaid' || r.leaveType === 'annual' || r.leaveType === 'sick' || r.leaveType === 'casual') &&
         r.startDate <= dateStr && r.endDate >= dateStr
       );
       if (hasLeave) continue;
@@ -2551,7 +2552,59 @@ export default function App() {
       return acc + Math.min(rem, monthlyDeduction);
     }, 0);
 
-    const totalDeduction = manualDeduction + loanDeduction + totalAbsenceDeduction + lateDeduction;
+    // Calculate Approved Unpaid Leaves & Annual Leaves in period
+    const allLeaveRequests = [...(state.leaveRequests || []), ...(state.requests || [])];
+    const empApprovedLeaves = allLeaveRequests.filter(
+      (r) =>
+        String(r.employeeId) === String(empId) &&
+        (r.status === 'approved' || r.adminApproved) &&
+        (r.type === 'leave' || r.type === 'leave_request' || r.type === 'annual_leave' || r.type === 'sick_leave' || r.type === 'emergency_leave' || r.type === 'unpaid_leave')
+    );
+
+    let unpaidLeaveDaysCount = 0;
+    let annualLeaveDaysCount = 0;
+    const unpaidLeavesList = [];
+    const annualLeavesList = [];
+
+    empApprovedLeaves.forEach((l) => {
+      const isUnpaid = l.leaveType === 'unpaid' || l.type === 'unpaid_leave' || l.isUnpaid === true;
+      let daysCountInPeriod = 0;
+
+      if (l.startDate && l.endDate) {
+        let cur = new Date(l.startDate);
+        const end = new Date(l.endDate);
+        if (!isNaN(cur) && !isNaN(end) && cur <= end) {
+          while (cur <= end) {
+            const cy = cur.getFullYear();
+            const cm = cur.getMonth() + 1;
+            const cd = cur.getDate();
+            const dStr = `${cy}-${String(cm).padStart(2, '0')}-${String(cd).padStart(2, '0')}`;
+            if (effectiveFilterFn(dStr)) {
+              daysCountInPeriod++;
+            }
+            cur.setDate(cur.getDate() + 1);
+          }
+        }
+      } else if (effectiveFilterFn(l.date || (l.createdAt ? l.createdAt.slice(0, 10) : ''))) {
+        daysCountInPeriod = parseFloat(l.daysCount || l.days || 1) || 1;
+      }
+
+      if (daysCountInPeriod > 0) {
+        if (isUnpaid) {
+          unpaidLeaveDaysCount += daysCountInPeriod;
+          unpaidLeavesList.push({ ...l, periodDays: daysCountInPeriod });
+        } else {
+          annualLeaveDaysCount += daysCountInPeriod;
+          annualLeavesList.push({ ...l, periodDays: daysCountInPeriod });
+        }
+      }
+    });
+
+    let rate = branches.length === 1 ? perBranch[branches[0].branchId].rate : (totalHours > 0 ? totalBaseEarnings / totalHours : (parseFloat(branches[0]?.salary) || 0));
+    let dailyRate = branches.length === 1 ? perBranch[branches[0].branchId].dailyRate : (rate * (parseFloat(branches[0]?.workHoursPerDay) || WORK_HOURS_PER_DAY));
+    const unpaidLeaveDeduction = Math.round(unpaidLeaveDaysCount * dailyRate * 100) / 100;
+
+    const totalDeduction = manualDeduction + loanDeduction + totalAbsenceDeduction + lateDeduction + unpaidLeaveDeduction;
 
     // Allowances calculation:
     // 1. Management Allowance: Calculated if set or if employee is in a management role
@@ -2581,9 +2634,6 @@ export default function App() {
     const totalAllowances = managementAllowance + transportAllowance + extraAllowance;
     const totalEarnings = totalBaseEarnings + totalOvertimeEarnings;
     const netSalary = totalBaseEarnings + totalOvertimeEarnings + totalBonus + totalAllowances - totalDeduction;
-
-    let rate = branches.length === 1 ? perBranch[branches[0].branchId].rate : (totalHours > 0 ? totalBaseEarnings / totalHours : (parseFloat(branches[0]?.salary) || 0));
-    let dailyRate = branches.length === 1 ? perBranch[branches[0].branchId].dailyRate : (rate * (parseFloat(branches[0]?.workHoursPerDay) || WORK_HOURS_PER_DAY));
 
     return { 
       hours: totalHours, 
@@ -2616,9 +2666,13 @@ export default function App() {
       manualDeduction,
       loanDeduction,
       absenceDeduction: totalAbsenceDeduction, 
-      netSalary, 
       absenceDaysCount: totalAbsenceDaysCount,
-      perBranch
+      unpaidLeaveDaysCount,
+      unpaidLeaveDeduction,
+      annualLeaveDaysCount,
+      unpaidLeavesList,
+      netSalary, 
+      perBranch 
     };
   };
 
@@ -4808,13 +4862,12 @@ export default function App() {
           currentBranch={currentBranch}
           notifications={
             authRole === 'branch'
-              ? (state.notifications || []).filter(n => {
-                  if (!n) return false;
-                  const cIdStr = currentBranch?.id ? String(currentBranch.id) : null;
-                  if (n.targetRole === 'employee') return false;
-                  if (n.branchId && cIdStr && String(n.branchId) !== cIdStr) return false;
-                  return true;
-                })
+              ? filterBranchManagerNotifications(
+                  state.notifications || [],
+                  currentBranch,
+                  (state.employees || []).find((e) => e.id === currentBranch?.managerId)?.id,
+                  state
+                )
               : (state.notifications || [])
           }
           onMarkNotificationRead={handleMarkNotificationRead}

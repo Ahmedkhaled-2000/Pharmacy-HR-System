@@ -10,6 +10,13 @@ export default function EmployeeLoansModule({
   showToast,
   selectedBranchId
 }) {
+  const [isMobileScreen, setIsMobileScreen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth <= 768 : false));
+  React.useEffect(() => {
+    const handleResize = () => setIsMobileScreen(window.innerWidth <= 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const [activeTab, setActiveTab] = useState('loans'); // 'loans' | 'medicines'
   const [showLoanForm, setShowLoanForm] = useState(false);
   const [showMedForm, setShowMedForm] = useState(false);
@@ -533,74 +540,160 @@ export default function EmployeeLoansModule({
 
       {/* ── Table of Loan & Medicine Requests ── */}
       <h4 style={{ margin: '20px 0 12px', fontSize: '15px' }}>📋 سجل السلف والأدوية الآجل المسجلة للدفع والتحصيل</h4>
-      <div className="table-responsive">
-        <table className="bylaws-table">
-          <thead>
-            <tr style={{ background: 'var(--surface-muted)' }}>
-              <th>#</th>
-              <th>نوع الطلب</th>
-              <th>المبلغ الكلي</th>
-              <th>المدفوع</th>
-              <th>المتبقي للسداد</th>
-              <th>حالة الاعتماد والسداد</th>
-              <th>تفاصيل الدفعات المسددة</th>
-              <th>التاريخ</th>
-            </tr>
-          </thead>
-          <tbody>
-            {employeeRequests.length === 0 ? (
-              <tr className="empty-row">
-                <td colSpan="8">لا توجد طلبات سلف أو أدوية آجل مسجلة سابقاً</td>
-              </tr>
-            ) : (
-              employeeRequests.map((r, idx) => {
-                const total = parseFloat(r.amount || r.totalAmount) || 0;
-                const paid = parseFloat(r.paidAmount) || 0;
-                const rem = Math.max(0, total - paid);
-                const history = r.paymentsHistory || [];
+      {isMobileScreen ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {employeeRequests.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '24px', color: 'var(--muted)', background: 'var(--surface-muted)', borderRadius: '12px', border: '1px solid var(--border)' }}>
+              لا توجد طلبات سلف أو أدوية آجل مسجلة سابقاً
+            </div>
+          ) : (
+            employeeRequests.map((r, idx) => {
+              const total = parseFloat(r.amount || r.totalAmount) || 0;
+              const paid = parseFloat(r.paidAmount) || 0;
+              const rem = Math.max(0, total - paid);
+              const history = r.paymentsHistory || [];
+              const isLoan = r.type === 'loan' || r.type === 'advance';
 
-                return (
-                  <tr key={r.id}>
-                    <td>{idx + 1}</td>
-                    <td>
-                      {r.type === 'loan' || r.type === 'advance' ? (
-                        <span className="badge info">💳 سلفة مالية ({r.loanType === 'installment' ? 'مقسمة' : 'شهرية'})</span>
+              return (
+                <div
+                  key={r.id}
+                  style={{
+                    background: 'var(--surface)',
+                    border: '1px solid var(--border)',
+                    borderRadius: '14px',
+                    padding: '14px 16px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '10px',
+                    boxShadow: '0 2px 5px rgba(0,0,0,0.03)'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--muted)' }}>#{idx + 1}</span>
+                      {isLoan ? (
+                        <span className="badge info" style={{ fontSize: '11.5px' }}>💳 سلفة ({r.loanType === 'installment' ? 'مقسمة' : 'شهرية'})</span>
                       ) : (
-                        <span className="badge success">💊 أدوية بالآجل</span>
+                        <span className="badge success" style={{ fontSize: '11.5px' }}>💊 أدوية بالآجل</span>
                       )}
-                    </td>
-                    <td style={{ fontWeight: '800' }}>{fmt(total)} ج.م</td>
-                    <td style={{ color: '#16a34a', fontWeight: 'bold' }}>{fmt(paid)} ج.م</td>
-                    <td style={{ color: rem > 0 ? '#dc2626' : '#16a34a', fontWeight: '900' }}>{fmt(rem)} ج.م</td>
-                    <td>
-                      {(r.status === 'approved' || r.adminApproved) && rem > 0 && <span className="badge warning">⏳ جاري سداد الأقساط</span>}
-                      {(r.status === 'approved' || r.adminApproved) && rem === 0 && <span className="badge success">✅ مسددة بالكامل</span>}
-                      {r.status === 'rejected' && <span className="badge danger">❌ مرفوضة</span>}
+                    </div>
+                    <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>
+                      {r.createdAt ? r.createdAt.slice(0, 10) : (r.date || '—')}
+                    </span>
+                  </div>
+
+                  {/* 3 Stats Grid */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', background: 'var(--surface-muted)', padding: '10px', borderRadius: '10px', textAlign: 'center' }}>
+                    <div>
+                      <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>المبلغ الكلي</span>
+                      <strong style={{ fontSize: '13px', color: 'var(--text)' }}>{fmt(total)} ج.م</strong>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: '11px', color: '#16a34a', display: 'block' }}>المدفوع</span>
+                      <strong style={{ fontSize: '13px', color: '#16a34a' }}>{fmt(paid)} ج.م</strong>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: '11px', color: rem > 0 ? '#dc2626' : '#16a34a', display: 'block' }}>المتبقي</span>
+                      <strong style={{ fontSize: '13px', color: rem > 0 ? '#dc2626' : '#16a34a', fontWeight: 900 }}>{fmt(rem)} ج.م</strong>
+                    </div>
+                  </div>
+
+                  {/* Status and Action */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', paddingTop: '4px' }}>
+                    <div>
+                      {(r.status === 'approved' || r.adminApproved) && rem > 0 && <span className="badge warning" style={{ fontSize: '11px' }}>⏳ جاري سداد الأقساط</span>}
+                      {(r.status === 'approved' || r.adminApproved) && rem === 0 && <span className="badge success" style={{ fontSize: '11px' }}>✅ مسددة بالكامل</span>}
+                      {r.status === 'rejected' && <span className="badge danger" style={{ fontSize: '11px' }}>❌ مرفوضة</span>}
                       {(r.status === 'pending' || r.status === 'pending_admin' || !r.status) && (
-                        <span className="badge warning" style={{ background: '#fef3c7', color: '#92400e', fontWeight: 'bold' }}>
+                        <span className="badge warning" style={{ fontSize: '11px', background: '#fef3c7', color: '#92400e', fontWeight: 'bold' }}>
                           ⏳ قيد مراجعة الإدارة
                         </span>
                       )}
-                    </td>
-                    <td>
-                      <button
-                        className="btn btn-ghost"
-                        style={{ padding: '3px 8px', fontSize: '11.5px', color: '#0f766e', fontWeight: 'bold' }}
-                        onClick={() => setViewingPaymentsReq(r)}
-                      >
-                        📜 كشف الدفعات ({history.length})
-                      </button>
-                    </td>
-                    <td style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>
-                      {r.createdAt ? r.createdAt.slice(0, 10) : (r.date || '—')}
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
+                    </div>
+
+                    <button
+                      className="btn btn-ghost"
+                      style={{ padding: '4px 10px', fontSize: '12px', color: '#0f766e', fontWeight: 'bold', background: 'var(--primary-tint)' }}
+                      onClick={() => setViewingPaymentsReq(r)}
+                    >
+                      📜 كشف الدفعات ({history.length})
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      ) : (
+        <div className="table-responsive">
+          <table className="bylaws-table">
+            <thead>
+              <tr style={{ background: 'var(--surface-muted)' }}>
+                <th>#</th>
+                <th>نوع الطلب</th>
+                <th>المبلغ الكلي</th>
+                <th>المدفوع</th>
+                <th>المتبقي للسداد</th>
+                <th>حالة الاعتماد والسداد</th>
+                <th>تفاصيل الدفعات المسددة</th>
+                <th>التاريخ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {employeeRequests.length === 0 ? (
+                <tr className="empty-row">
+                  <td colSpan="8">لا توجد طلبات سلف أو أدوية آجل مسجلة سابقاً</td>
+                </tr>
+              ) : (
+                employeeRequests.map((r, idx) => {
+                  const total = parseFloat(r.amount || r.totalAmount) || 0;
+                  const paid = parseFloat(r.paidAmount) || 0;
+                  const rem = Math.max(0, total - paid);
+                  const history = r.paymentsHistory || [];
+
+                  return (
+                    <tr key={r.id}>
+                      <td>{idx + 1}</td>
+                      <td>
+                        {r.type === 'loan' || r.type === 'advance' ? (
+                          <span className="badge info">💳 سلفة مالية ({r.loanType === 'installment' ? 'مقسمة' : 'شهرية'})</span>
+                        ) : (
+                          <span className="badge success">💊 أدوية بالآجل</span>
+                        )}
+                      </td>
+                      <td style={{ fontWeight: '800' }}>{fmt(total)} ج.م</td>
+                      <td style={{ color: '#16a34a', fontWeight: 'bold' }}>{fmt(paid)} ج.م</td>
+                      <td style={{ color: rem > 0 ? '#dc2626' : '#16a34a', fontWeight: '900' }}>{fmt(rem)} ج.م</td>
+                      <td>
+                        {(r.status === 'approved' || r.adminApproved) && rem > 0 && <span className="badge warning">⏳ جاري سداد الأقساط</span>}
+                        {(r.status === 'approved' || r.adminApproved) && rem === 0 && <span className="badge success">✅ مسددة بالكامل</span>}
+                        {r.status === 'rejected' && <span className="badge danger">❌ مرفوضة</span>}
+                        {(r.status === 'pending' || r.status === 'pending_admin' || !r.status) && (
+                          <span className="badge warning" style={{ background: '#fef3c7', color: '#92400e', fontWeight: 'bold' }}>
+                            ⏳ قيد مراجعة الإدارة
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        <button
+                          className="btn btn-ghost"
+                          style={{ padding: '3px 8px', fontSize: '11.5px', color: '#0f766e', fontWeight: 'bold' }}
+                          onClick={() => setViewingPaymentsReq(r)}
+                        >
+                          📜 كشف الدفعات ({history.length})
+                        </button>
+                      </td>
+                      <td style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>
+                        {r.createdAt ? r.createdAt.slice(0, 10) : (r.date || '—')}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Employee Payments Detail Modal */}
       {viewingPaymentsReq && (

@@ -18,7 +18,8 @@ export default function EmployeePermissionsManagementModule({
   monthPicker = null,
   filterMode = 'month',
   customFrom = '',
-  customTo = ''
+  customTo = '',
+  hidePolicySettings = false
 }) {
   const isBranchManager = authRole === 'branch';
   const effectiveBranchId = isBranchManager ? currentBranch?.id : null;
@@ -467,93 +468,95 @@ export default function EmployeePermissionsManagementModule({
         </div>
       </div>
 
-      {/* ── Policy Settings Box ── */}
-      <div style={{ background: 'linear-gradient(135deg, rgba(37, 99, 235, 0.04) 0%, rgba(13, 148, 136, 0.04) 100%)', borderRadius: '16px', border: '1px solid rgba(37, 99, 235, 0.15)', padding: '20px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
-          <h3 style={{ margin: 0, fontFamily: 'Cairo', fontSize: '16px', color: 'var(--primary-dark)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span>⚙️</span> ضوابط وسياسة الأذونات الشهرية العامة
-          </h3>
-          <span style={{ fontSize: '12px', color: 'var(--muted)', background: '#fff', padding: '4px 10px', borderRadius: '8px', border: '1px solid var(--border)' }}>
-            تطبق تلقائياً على كافة نماذج تقديم الأذونات
-          </span>
+      {/* ── Policy Settings Box (Visible only for Admin / Super Admin, hidden from Branch Manager) ── */}
+      {!isBranchManager && !hidePolicySettings && (
+        <div style={{ background: 'linear-gradient(135deg, rgba(37, 99, 235, 0.04) 0%, rgba(13, 148, 136, 0.04) 100%)', borderRadius: '16px', border: '1px solid rgba(37, 99, 235, 0.15)', padding: '20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+            <h3 style={{ margin: 0, fontFamily: 'Cairo', fontSize: '16px', color: 'var(--primary-dark)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span>⚙️</span> ضوابط وسياسة الأذونات الشهرية العامة
+            </h3>
+            <span style={{ fontSize: '12px', color: 'var(--muted)', background: '#fff', padding: '4px 10px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+              تطبق تلقائياً على كافة نماذج تقديم الأذونات
+            </span>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '16px', alignItems: 'flex-end' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--text)', marginBottom: '6px' }}>
+                ⏱️ أقصى مدة مسموحة للإذن الواحد:
+              </label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <input
+                  type="number"
+                  min="0.5"
+                  max="8"
+                  step="0.5"
+                  value={maxHours}
+                  onChange={(e) => setMaxHours(e.target.value)}
+                  style={{ width: '100px', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontWeight: 800, textAlign: 'center', fontSize: '15px' }}
+                />
+                <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--muted)' }}>ساعة (كحد أقصى للطلب الواحد)</span>
+              </div>
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--text)', marginBottom: '6px' }}>
+                🔢 أقصى عدد مرات مسموح بها شهرياً لكل موظف:
+              </label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <input
+                  type="number"
+                  min="1"
+                  max="10"
+                  step="1"
+                  value={maxMonthlyCount}
+                  onChange={(e) => setMaxMonthlyCount(e.target.value)}
+                  style={{ width: '100px', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontWeight: 800, textAlign: 'center', fontSize: '15px' }}
+                />
+                <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--muted)' }}>مرات شهرياً (الرصيد المتاح)</span>
+              </div>
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--text)', marginBottom: '6px' }}>
+                🗓️ فترة احتساب الأذونات الشهرية:
+              </label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--muted)' }}>من يوم</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="31"
+                  value={cycleStartDay}
+                  onChange={(e) => setCycleStartDay(e.target.value)}
+                  style={{ width: '65px', padding: '9px 8px', borderRadius: '8px', border: '1px solid var(--border)', fontWeight: 800, textAlign: 'center', fontSize: '14px' }}
+                />
+                <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--muted)' }}>إلى يوم</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="31"
+                  value={cycleEndDay}
+                  onChange={(e) => setCycleEndDay(e.target.value)}
+                  style={{ width: '65px', padding: '9px 8px', borderRadius: '8px', border: '1px solid var(--border)', fontWeight: 800, textAlign: 'center', fontSize: '14px' }}
+                />
+              </div>
+            </div>
+
+            <div>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleSavePolicy}
+                disabled={isSavingPolicy}
+                style={{ padding: '10px 22px', borderRadius: '8px', fontWeight: 800, fontSize: '13.5px', height: '42px' }}
+              >
+                {isSavingPolicy ? 'جاري الحفظ...' : '💾 حفظ وتعميم السياسة'}
+              </button>
+            </div>
+          </div>
         </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '16px', alignItems: 'flex-end' }}>
-          <div>
-            <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--text)', marginBottom: '6px' }}>
-              ⏱️ أقصى مدة مسموحة للإذن الواحد:
-            </label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <input
-                type="number"
-                min="0.5"
-                max="8"
-                step="0.5"
-                value={maxHours}
-                onChange={(e) => setMaxHours(e.target.value)}
-                style={{ width: '100px', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontWeight: 800, textAlign: 'center', fontSize: '15px' }}
-              />
-              <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--muted)' }}>ساعة (كحد أقصى للطلب الواحد)</span>
-            </div>
-          </div>
-
-          <div>
-            <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--text)', marginBottom: '6px' }}>
-              🔢 أقصى عدد مرات مسموح بها شهرياً لكل موظف:
-            </label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <input
-                type="number"
-                min="1"
-                max="10"
-                step="1"
-                value={maxMonthlyCount}
-                onChange={(e) => setMaxMonthlyCount(e.target.value)}
-                style={{ width: '100px', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontWeight: 800, textAlign: 'center', fontSize: '15px' }}
-              />
-              <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--muted)' }}>مرات شهرياً (الرصيد المتاح)</span>
-            </div>
-          </div>
-
-          <div>
-            <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--text)', marginBottom: '6px' }}>
-              🗓️ فترة احتساب الأذونات الشهرية:
-            </label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--muted)' }}>من يوم</span>
-              <input
-                type="number"
-                min="1"
-                max="31"
-                value={cycleStartDay}
-                onChange={(e) => setCycleStartDay(e.target.value)}
-                style={{ width: '65px', padding: '9px 8px', borderRadius: '8px', border: '1px solid var(--border)', fontWeight: 800, textAlign: 'center', fontSize: '14px' }}
-              />
-              <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--muted)' }}>إلى يوم</span>
-              <input
-                type="number"
-                min="1"
-                max="31"
-                value={cycleEndDay}
-                onChange={(e) => setCycleEndDay(e.target.value)}
-                style={{ width: '65px', padding: '9px 8px', borderRadius: '8px', border: '1px solid var(--border)', fontWeight: 800, textAlign: 'center', fontSize: '14px' }}
-              />
-            </div>
-          </div>
-
-          <div>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={handleSavePolicy}
-              disabled={isSavingPolicy}
-              style={{ padding: '10px 22px', borderRadius: '8px', fontWeight: 800, fontSize: '13.5px', height: '42px' }}
-            >
-              {isSavingPolicy ? 'جاري الحفظ...' : '💾 حفظ وتعميم السياسة'}
-            </button>
-          </div>
-        </div>
-      </div>
+      )}
 
       {/* ── Filters & Search Toolbar ── */}
       <div style={{ background: 'var(--surface)', padding: '16px', borderRadius: '14px', border: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>

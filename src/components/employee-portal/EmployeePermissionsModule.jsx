@@ -11,6 +11,13 @@ export default function EmployeePermissionsModule({
   showToast,
   selectedBranchId
 }) {
+  const [isMobileScreen, setIsMobileScreen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth <= 768 : false));
+  React.useEffect(() => {
+    const handleResize = () => setIsMobileScreen(window.innerWidth <= 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const [permType, setPermType] = useState('late'); // 'late' | 'early'
   const [date, setDate] = useState(todayStr());
   const [startTime, setStartTime] = useState('08:00');
@@ -262,62 +269,134 @@ export default function EmployeePermissionsModule({
 
       {/* ── Table of Permission Requests ── */}
       <h4 style={{ margin: '20px 0 12px', fontSize: '15px' }}>📋 سجل طلبات الأذونات المقدمة</h4>
-      <div className="table-responsive">
-        <table>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>نوع الإذن</th>
-              <th>التاريخ</th>
-              <th>من - إلى</th>
-              <th>المدة</th>
-              <th>حالة الأثر المالي</th>
-              <th>حالة الطلب</th>
-              <th>السبب</th>
-              <th>تاريخ التقديم</th>
-            </tr>
-          </thead>
-          <tbody>
-            {employeePermRequests.length === 0 ? (
-              <tr className="empty-row">
-                <td colSpan="9">لا توجد طلبات أذونات مسجلة سابقاً</td>
-              </tr>
-            ) : (
-              employeePermRequests.map((r, idx) => (
-                <tr key={r.id}>
-                  <td>{idx + 1}</td>
-                  <td>
+      {isMobileScreen ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {employeePermRequests.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '24px', color: 'var(--muted)', background: 'var(--surface-muted)', borderRadius: '12px', border: '1px solid var(--border)' }}>
+              لا توجد طلبات أذونات مسجلة سابقاً
+            </div>
+          ) : (
+            employeePermRequests.map((r, idx) => (
+              <div
+                key={r.id}
+                style={{
+                  background: 'var(--surface)',
+                  border: '1px solid var(--border)',
+                  borderRadius: '14px',
+                  padding: '14px 16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '10px',
+                  boxShadow: '0 2px 5px rgba(0,0,0,0.03)'
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--muted)' }}>#{idx + 1}</span>
                     {r.permType === 'late' ? (
-                      <span className="badge warning">🚶‍♂️ إذن تأخير</span>
+                      <span className="badge warning" style={{ fontSize: '11.5px' }}>🚶‍♂️ إذن تأخير</span>
                     ) : (
-                      <span className="badge info">🏃‍♂️ إذن خروج مبكر</span>
+                      <span className="badge info" style={{ fontSize: '11.5px' }}>🏃‍♂️ إذن خروج مبكر</span>
                     )}
-                  </td>
-                  <td>{r.date}</td>
-                  <td style={{ fontWeight: 'bold' }}>{r.startTime} ➔ {r.endTime}</td>
-                  <td>{r.durationText || `${r.durationMinutes} دقيقة`}</td>
-                  <td>
-                    {r.status === 'approved' ? (
-                      <span className="badge success">🟢 محتسبة وردية كاملة (لا خصم)</span>
-                    ) : (
-                      <span className="badge secondary">قيد الاعتماد</span>
-                    )}
-                  </td>
-                  <td>
-                    {r.status === 'approved' && <span className="badge success">✅ معتمد</span>}
-                    {r.status === 'rejected' && <span className="badge danger">❌ مرفوض</span>}
-                    {r.status === 'pending' && <span className="badge warning">⏳ قيد الانتظار</span>}
-                  </td>
-                  <td style={{ color: 'var(--muted)', fontSize: '0.88rem' }}>{r.reason || '—'}</td>
-                  <td style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>
+                  </div>
+                  <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>
                     {r.createdAt ? r.createdAt.slice(0, 10) : '—'}
-                  </td>
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface-muted)', padding: '10px 14px', borderRadius: '10px' }}>
+                  <div>
+                    <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>التاريخ والموعد</span>
+                    <strong style={{ fontSize: '13px', color: 'var(--text)' }}>📅 {r.date} ({r.startTime} ➔ {r.endTime})</strong>
+                  </div>
+                  <div style={{ textAlign: 'left' }}>
+                    <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>المدة</span>
+                    <strong style={{ fontSize: '13px', color: 'var(--primary-dark)' }}>{r.durationText || `${r.durationMinutes} دقيقة`}</strong>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                  <div>
+                    {r.status === 'approved' ? (
+                      <span className="badge success" style={{ fontSize: '11px' }}>🟢 محتسبة كاملة (لا خصم)</span>
+                    ) : (
+                      <span className="badge secondary" style={{ fontSize: '11px' }}>قيد الاعتماد</span>
+                    )}
+                  </div>
+                  <div>
+                    {r.status === 'approved' && <span className="badge success" style={{ fontSize: '11px' }}>✅ معتمد</span>}
+                    {r.status === 'rejected' && <span className="badge danger" style={{ fontSize: '11px' }}>❌ مرفوض</span>}
+                    {r.status === 'pending' && <span className="badge warning" style={{ fontSize: '11px' }}>⏳ قيد الانتظار</span>}
+                  </div>
+                </div>
+
+                {r.reason && (
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', background: 'var(--surface)', padding: '6px 10px', borderRadius: '6px', border: '1px dashed var(--border)' }}>
+                    💬 <strong>السبب:</strong> {r.reason}
+                  </div>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      ) : (
+        <div className="table-responsive">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>نوع الإذن</th>
+                <th>التاريخ</th>
+                <th>من - إلى</th>
+                <th>المدة</th>
+                <th>حالة الأثر المالي</th>
+                <th>حالة الطلب</th>
+                <th>السبب</th>
+                <th>تاريخ التقديم</th>
+              </tr>
+            </thead>
+            <tbody>
+              {employeePermRequests.length === 0 ? (
+                <tr className="empty-row">
+                  <td colSpan="9">لا توجد طلبات أذونات مسجلة سابقاً</td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+              ) : (
+                employeePermRequests.map((r, idx) => (
+                  <tr key={r.id}>
+                    <td>{idx + 1}</td>
+                    <td>
+                      {r.permType === 'late' ? (
+                        <span className="badge warning">🚶‍♂️ إذن تأخير</span>
+                      ) : (
+                        <span className="badge info">🏃‍♂️ إذن خروج مبكر</span>
+                      )}
+                    </td>
+                    <td>{r.date}</td>
+                    <td style={{ fontWeight: 'bold' }}>{r.startTime} ➔ {r.endTime}</td>
+                    <td>{r.durationText || `${r.durationMinutes} دقيقة`}</td>
+                    <td>
+                      {r.status === 'approved' ? (
+                        <span className="badge success">🟢 محتسبة وردية كاملة (لا خصم)</span>
+                      ) : (
+                        <span className="badge secondary">قيد الاعتماد</span>
+                      )}
+                    </td>
+                    <td>
+                      {r.status === 'approved' && <span className="badge success">✅ معتمد</span>}
+                      {r.status === 'rejected' && <span className="badge danger">❌ مرفوض</span>}
+                      {r.status === 'pending' && <span className="badge warning">⏳ قيد الانتظار</span>}
+                    </td>
+                    <td style={{ color: 'var(--muted)', fontSize: '0.88rem' }}>{r.reason || '—'}</td>
+                    <td style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>
+                      {r.createdAt ? r.createdAt.slice(0, 10) : '—'}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

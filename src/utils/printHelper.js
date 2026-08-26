@@ -634,7 +634,49 @@ export function generateOfficialPayslipHTML({
     color: '#b91c1c'
   }] : [];
 
-  const generalFinancialItems = [...allowanceItems, ...manualItems, ...absenceItem];
+  // 6. Leaves (إجازات الشهر المعتمدة - السنوية وغير المدفوعة)
+  const allLeaveRequests = [...(state?.leaveRequests || []), ...(state?.requests || [])];
+  const empApprovedLeaves = allLeaveRequests.filter(
+    (r) =>
+      (String(r.employeeId) === String(emp?.id) || (emp.code && String(r.employeeId) === String(emp.code))) &&
+      (r.status === 'approved' || r.adminApproved) &&
+      (r.type === 'leave' || r.type === 'leave_request' || r.type === 'annual_leave' || r.type === 'sick_leave' || r.type === 'emergency_leave' || r.type === 'unpaid_leave') &&
+      ((r.startDate && r.startDate <= endCutoff && r.endDate >= startCutoff) || (r.date && r.date >= startCutoff && r.date <= endCutoff) || (r.createdAt && r.createdAt.slice(0, 7) === month))
+  );
+
+  const mappedLeaves = empApprovedLeaves.map((l) => {
+    const isUnpaid = l.leaveType === 'unpaid' || l.type === 'unpaid_leave' || l.isUnpaid === true;
+    const days = parseFloat(l.daysCount || l.days || 1) || 1;
+    const deductionAmt = isUnpaid ? Math.round(days * dailyRate * 100) / 100 : 0;
+
+    return {
+      id: l.id,
+      leaveType: l.leaveType || (isUnpaid ? 'unpaid' : 'annual'),
+      leaveTypeLabel: isUnpaid ? '💸 إجازة غير مدفوعة الأجر' : (l.leaveType === 'sick' ? '🤒 إجازة مرضية' : '🌴 إجازة سنوية اعتيادية'),
+      startDate: l.startDate || l.date || '—',
+      endDate: l.endDate || l.date || '—',
+      daysCount: days,
+      isUnpaid,
+      deductionAmt,
+      effectLabel: isUnpaid ? `🔴 مخصوم (-${fmt(deductionAmt)} ج.م)` : '🟢 مدفوعة الأجر (لا خصم)',
+      reason: l.reason || l.details || l.notes || '—'
+    };
+  });
+
+  const unpaidLeavesCount = summary.unpaidLeaveDaysCount || mappedLeaves.filter(l => l.isUnpaid).reduce((acc, l) => acc + l.daysCount, 0);
+  const unpaidLeaveDeductionTotal = summary.unpaidLeaveDeduction !== undefined ? summary.unpaidLeaveDeduction : Math.round(unpaidLeavesCount * dailyRate * 100) / 100;
+
+  const unpaidLeaveItem = (unpaidLeavesCount > 0 || unpaidLeaveDeductionTotal > 0) ? [{
+    id: 'unpaid_leave_summary',
+    date: `${month} (إجازة غير مدفوعة)`,
+    typeLabel: '💸 إجازة غير مدفوعة الأجر',
+    amount: unpaidLeaveDeductionTotal,
+    isPositive: false,
+    details: `خصم عدد (${unpaidLeavesCount}) يوم إجازة غير مدفوعة الأجر بسعر اليوم (${fmt(dailyRate)} ج.م)`,
+    color: '#dc2626'
+  }] : [];
+
+  const generalFinancialItems = [...allowanceItems, ...manualItems, ...absenceItem, ...unpaidLeaveItem];
   const isCompact = printFitMode === 'single_page';
 
   return `
@@ -1018,11 +1060,49 @@ export function generateOfficialPayslipHTML({
         </div>
       ` : ''}
 
+      <!-- Leaves Record Table (If exists) -->
+      ${mappedLeaves.length > 0 ? `
+        <div style="margin-bottom: 8px; page-break-inside: avoid;">
+          <div style="font-weight: 800; color: #0284c7; font-size: 11px; margin-bottom: 3px; display: flex; justify-content: space-between; align-items: center;">
+            <span>🌴 رابعاً: سجل الإجازات المعتمدة بالشهر (${mappedLeaves.length} طلب):</span>
+            <span style="font-size: 9.5px; color: #0284c7; font-weight: bold;">
+              ${unpaidLeavesCount > 0 ? `إجازات غير مدفوعة: ${unpaidLeavesCount} يوم (خصم -${fmt(unpaidLeaveDeductionTotal)} ج.م)` : 'جميع الإجازات مدفوعة بالكامل'}
+            </span>
+          </div>
+          <table style="width: 100%; border-collapse: collapse; font-size: 9.5px; text-align: center;">
+            <thead>
+              <tr style="background: #e0f2fe; color: #0369a1; font-weight: 800;">
+                <th style="padding: 2.5px; width: 22%;">نوع الإجازة</th>
+                <th style="padding: 2.5px; width: 15%;">من تاريخ</th>
+                <th style="padding: 2.5px; width: 15%;">إلى تاريخ</th>
+                <th style="padding: 2.5px; width: 12%;">عدد الأيام</th>
+                <th style="padding: 2.5px; width: 22%;">الأثر المالي</th>
+                <th style="padding: 2.5px; width: 14%;">السبب / البيان</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${mappedLeaves.map((l) => `
+                <tr style="background: ${l.isUnpaid ? '#fef2f2' : '#f0fdf4'};">
+                  <td style="padding: 2px; border: 1px solid #bae6fd; font-weight: bold; color: ${l.isUnpaid ? '#dc2626' : '#15803d'};">${l.leaveTypeLabel}</td>
+                  <td style="padding: 2px; border: 1px solid #bae6fd;">${l.startDate}</td>
+                  <td style="padding: 2px; border: 1px solid #bae6fd;">${l.endDate}</td>
+                  <td style="padding: 2px; border: 1px solid #bae6fd; font-weight: bold;">${l.daysCount} يوم</td>
+                  <td style="padding: 2px; border: 1px solid #bae6fd; font-weight: bold; color: ${l.isUnpaid ? '#dc2626' : '#15803d'};">
+                    ${l.effectLabel}
+                  </td>
+                  <td style="padding: 2px; border: 1px solid #bae6fd; font-size: 9px;">${l.reason}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      ` : ''}
+
       <!-- Allowances, Bonuses, & Deductions Table (If exists) -->
       ${generalFinancialItems.length > 0 ? `
         <div style="margin-bottom: 8px; page-break-inside: avoid;">
           <div style="font-weight: 800; color: #0f766e; font-size: 11px; margin-bottom: 3px;">
-            📝 رابعاً: بيان البدلات الثابتة والمكافآت والجزاءات والغياب (${generalFinancialItems.length} بند):
+            📝 خامساً: بيان البدلات الثابتة والمكافآت والجزاءات والغياب والإجازات (${generalFinancialItems.length} بند):
           </div>
           <table style="width: 100%; border-collapse: collapse; font-size: 9.5px; text-align: center;">
             <thead>

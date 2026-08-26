@@ -9,7 +9,7 @@ import { filterEmployeeNotifications, countUnreadEmployeeNotifications } from '.
 import EmployeeLeaveModule from './EmployeeLeaveModule';
 import EmployeeLoansModule from './EmployeeLoansModule';
 import EmployeePermissionsModule from './EmployeePermissionsModule';
-import EmployeeRosterModule from './EmployeeRosterModule';
+import EmployeeRosterModule, { getResolvedEmployeeRoster } from './EmployeeRosterModule';
 import EmployeeShiftSwapModule from './EmployeeShiftSwapModule';
 import EmployeeEvaluationsModule from './EmployeeEvaluationsModule';
 import PayslipPrintModal from '../payroll/PayslipPrintModal';
@@ -1024,8 +1024,65 @@ export default function EmployeePortalView({
     penaltyReqs.forEach((p) => {
       if (!map.has(String(p.id))) map.set(String(p.id), p);
     });
+
+    // Include approved unpaid leaves for the period as explicit deduction items
+    const allLeaveRequests = [...(state.leaveRequests || []), ...(state.requests || [])];
+    const approvedUnpaidLeaves = allLeaveRequests.filter(
+      (r) =>
+        String(r.employeeId) === String(emp.id) &&
+        (r.status === 'approved' || r.adminApproved) &&
+        (r.leaveType === 'unpaid' || r.type === 'unpaid_leave' || r.isUnpaid === true)
+    );
+
+    const bDetail = selectedBranchId
+      ? emp.branchesDetails?.find((b) => String(b.branchId) === String(selectedBranchId))
+      : (emp?.branchesDetails && emp.branchesDetails.length === 1 ? emp.branchesDetails[0] : null);
+    const hrRate = bDetail ? (parseFloat(bDetail.salary) || 0) : (parseFloat(emp?.salary) || 0);
+    const wHours = bDetail ? (parseFloat(bDetail.workHoursPerDay) || 8) : (parseFloat(emp?.workHoursPerDay) || 8);
+    const wDays = bDetail ? (parseFloat(bDetail.workDaysPerMonth) || 26) : (parseFloat(emp?.workDaysPerMonth) || 26);
+    const calcDailyRate = wDays > 0 ? (hrRate * wHours) / wDays : (hrRate * wHours);
+
+    approvedUnpaidLeaves.forEach((l) => {
+      let daysInPeriod = 0;
+      if (l.startDate && l.endDate) {
+        let cur = new Date(l.startDate);
+        const end = new Date(l.endDate);
+        if (!isNaN(cur) && !isNaN(end) && cur <= end) {
+          while (cur <= end) {
+            const cy = cur.getFullYear();
+            const cm = cur.getMonth() + 1;
+            const cd = cur.getDate();
+            const dStr = `${cy}-${String(cm).padStart(2, '0')}-${String(cd).padStart(2, '0')}`;
+            if (filterFn(dStr)) {
+              daysInPeriod++;
+            }
+            cur.setDate(cur.getDate() + 1);
+          }
+        }
+      } else if (filterFn(l.date || l.createdAt?.slice(0, 10))) {
+        daysInPeriod = parseFloat(l.daysCount || l.days || 1) || 1;
+      }
+
+      if (daysInPeriod > 0) {
+        const amt = Math.round(daysInPeriod * calcDailyRate * 100) / 100;
+        const leaveId = `unpaid_leave_${l.id}`;
+        if (!map.has(leaveId)) {
+          map.set(leaveId, {
+            id: leaveId,
+            employeeId: emp.id,
+            type: 'deduction',
+            amount: amt,
+            date: l.startDate || l.date || l.createdAt?.slice(0, 10),
+            reason: `💸 إجازة غير مدفوعة (${daysInPeriod} يوم)`,
+            details: `خصم عدد (${daysInPeriod}) يوم إجازة غير مدفوعة الأجر بسعر اليوم (${fmt(calcDailyRate)} ج.م)`,
+            createdAt: l.createdAt
+          });
+        }
+      }
+    });
+
     return Array.from(map.values());
-  }, [emp, state.adjustments, state.requests, filterFn]);
+  }, [emp, state.adjustments, state.requests, state.leaveRequests, filterFn, selectedBranchId]);
 
   const bonuses = empAdjs.filter((a) => a.type === 'bonus');
   const deductions = empAdjs.filter((a) => a.type === 'deduction' || a.type === 'penalty');
@@ -1055,31 +1112,39 @@ export default function EmployeePortalView({
 
   const hasApprovedRosterForActiveMonth = useMemo(() => {
     if (!emp) return true;
-    const empIdStr = String(emp.id);
-    const targetBId = selectedBranchId || emp.branchId;
+    const targetBId = selectedBranchId || (emp.branchesDetails?.[0]?.branchId) || emp.branchId;
 
-    // Check state.rosters
-    const inRosters = (state.rosters || []).some(
-      (r) => String(r.employeeId) === empIdStr && (r.month === activeMonthStr || !r.month) && r.status === 'approved' && (String(r.branchId || '') === String(targetBId || '') || !r.branchId)
+    // 1. Check resolved roster for active calendar month
+    const resolvedActive = getResolvedEmployeeRoster(emp, targetBId, activeMonthStr, state);
+    if (resolvedActive) return true;
+
+    // 2. Check resolved roster for selectedMonth
+    if (selectedMonth && selectedMonth !== activeMonthStr) {
+      const resolvedSelected = getResolvedEmployeeRoster(emp, targetBId, selectedMonth, state);
+      if (resolvedSelected) return true;
+    }
+
+    // 3. Check any approved roster in state covering activeMonthStr or selectedMonth
+    const anyApprovedRoster = (state.rosters || []).some(
+      (r) => String(r.employeeId) === String(emp.id) && r.status === 'approved' && (r.month === activeMonthStr || r.month === selectedMonth || !r.month)
     );
-    if (inRosters) return true;
+    if (anyApprovedRoster) return true;
 
-    // Check state.requests
-    const inRequests = (state.requests || []).some(
+    const anyApprovedReq = (state.requests || []).some(
       (r) =>
-        String(r.employeeId) === empIdStr &&
+        String(r.employeeId) === String(emp.id) &&
         (r.type === 'roster_update' || r.type === 'roster_edit' || r.type === 'roster_edit_request') &&
-        (r.month === activeMonthStr || !r.month) &&
         (r.status === 'approved' || r.adminApproved) &&
-        (String(r.branchId || '') === String(targetBId || '') || !r.branchId)
+        (r.month === activeMonthStr || r.month === selectedMonth || !r.month)
     );
-    return inRequests;
-  }, [emp, state.rosters, state.requests, selectedBranchId, activeMonthStr]);
+    return anyApprovedReq;
+  }, [emp, state.rosters, state.requests, selectedBranchId, activeMonthStr, selectedMonth]);
 
   // ── Compute automatic absence shifts for the selected month ──
-  const approvedRoster = (state.rosters || []).find(
-    (r) => emp && String(r.employeeId) === String(emp.id) && (r.month === selectedMonth || !r.month) && r.status === 'approved'
-  );
+  const approvedRoster = useMemo(() => {
+    const targetBId = selectedBranchId || (emp?.branchesDetails?.[0]?.branchId) || emp?.branchId;
+    return getResolvedEmployeeRoster(emp, targetBId, selectedMonth, state);
+  }, [emp, selectedBranchId, selectedMonth, state.rosters, state.requests]);
 
   // Build list of absence days (work day in roster, no punch recorded, not a leave day)
   const absenceDays = useMemo(() => {
@@ -3513,6 +3578,16 @@ export default function EmployeePortalView({
                   )}
                   <SummaryCard icon="🎁" label="إجمالي المكافآت" value={canViewAdjustments ? `+${fmt(summary.totalBonus)} ج.م` : '🔒 مقيد'} colorVar="--success" isPrivacy={isPrivacyMode} />
                   <SummaryCard icon="✂️" label="إجمالي الخصومات" value={canViewAdjustments ? `-${fmt(summary.totalDeduction)} ج.م` : '🔒 مقيد'} colorVar="--danger" isPrivacy={isPrivacyMode} />
+                  {summary.unpaidLeaveDaysCount > 0 && (
+                    <SummaryCard
+                      icon="💸"
+                      label={`إجازة غير مدفوعة (${summary.unpaidLeaveDaysCount} يوم)`}
+                      value={canViewSalary ? `-${fmt(summary.unpaidLeaveDeduction)} ج.م` : '🔒 مقيد'}
+                      colorVar="--danger"
+                      sub={canViewSalary ? `مخصومة بسعر اليوم (${fmt(summary.dailyRate)} ج.م)` : '🔒 مقيد'}
+                      isPrivacy={isPrivacyMode}
+                    />
+                  )}
                   {absenceDays.length > 0 && (
                     <SummaryCard icon="🚫" label={`خصم الغياب (${absenceDays.length} يوم)`} value={canViewSalary ? `-${fmt(absenceDeduction)} ج.م` : '🔒 مقيد'} colorVar="--danger" sub="يُلغى عند اعتماد إجازة" isPrivacy={isPrivacyMode} />
                   )}
@@ -4346,6 +4421,37 @@ export default function EmployeePortalView({
                     <div className="ep-adj-sub-title" style={{ color: 'var(--success)' }}>🎁 المكافآت ({bonuses.length})</div>
                     {bonuses.length === 0 ? (
                       <p className="ep-empty-msg">لا توجد مكافآت مسجلة لهذا الشهر</p>
+                    ) : isMobileScreen ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {bonuses.map((a) => (
+                          <div
+                            key={a.id}
+                            style={{
+                              background: 'var(--surface)',
+                              border: '1px solid rgba(22,163,74,0.2)',
+                              borderRadius: '12px',
+                              padding: '12px 14px',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center'
+                            }}
+                          >
+                            <div>
+                              <div style={{ fontWeight: 800, fontSize: '13.5px', color: 'var(--text)' }}>
+                                {a.reason || a.description || a.notes || a.details || 'مكافأة'}
+                              </div>
+                              <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>📅 {a.date}</span>
+                            </div>
+                            <div style={{ color: 'var(--success)', fontWeight: 800, fontSize: '14px' }}>
+                              +{fmt(a.amount)} ج.م
+                            </div>
+                          </div>
+                        ))}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: 'var(--surface-muted)', borderRadius: '10px', fontWeight: 800 }}>
+                          <span>إجمالي المكافآت:</span>
+                          <span style={{ color: 'var(--success)', fontSize: '15px' }}>+{fmt(summary.totalBonus)} ج.م</span>
+                        </div>
+                      </div>
                     ) : (
                       <div className="table-responsive">
                         <table>
@@ -4375,6 +4481,37 @@ export default function EmployeePortalView({
                     <div className="ep-adj-sub-title" style={{ color: 'var(--danger)' }}>✂️ الخصومات ({deductions.length})</div>
                     {deductions.length === 0 ? (
                       <p className="ep-empty-msg">لا توجد خصومات مسجلة لهذا الشهر</p>
+                    ) : isMobileScreen ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {deductions.map((a) => (
+                          <div
+                            key={a.id}
+                            style={{
+                              background: 'var(--surface)',
+                              border: '1px solid rgba(220,38,38,0.2)',
+                              borderRadius: '12px',
+                              padding: '12px 14px',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center'
+                            }}
+                          >
+                            <div>
+                              <div style={{ fontWeight: 800, fontSize: '13.5px', color: 'var(--text)' }}>
+                                {a.reason || a.description || a.notes || a.details || 'خصم'}
+                              </div>
+                              <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>📅 {a.date}</span>
+                            </div>
+                            <div style={{ color: 'var(--danger)', fontWeight: 800, fontSize: '14px' }}>
+                              -{fmt(a.amount)} ج.م
+                            </div>
+                          </div>
+                        ))}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: 'var(--surface-muted)', borderRadius: '10px', fontWeight: 800 }}>
+                          <span>إجمالي الخصومات:</span>
+                          <span style={{ color: 'var(--danger)', fontSize: '15px' }}>-{fmt(summary.totalDeduction)} ج.م</span>
+                        </div>
+                      </div>
                     ) : (
                       <div className="table-responsive">
                         <table>

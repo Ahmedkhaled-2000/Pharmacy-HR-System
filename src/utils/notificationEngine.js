@@ -162,9 +162,80 @@ export function filterAdminNotifications(notifications = []) {
 }
 
 /**
+ * Filter notifications strictly meant for Branch Managers
+ * Isolates branch manager notifications completely from Admin / Super Admin and other branches
+ */
+export function filterBranchManagerNotifications(notifications = [], currentBranch = null, managerEmpId = null, state = null) {
+  const branchIdStr = currentBranch?.id ? String(currentBranch.id).trim() : null;
+  const branchName = currentBranch?.name ? currentBranch.name.trim() : null;
+  const mgrIdStr = managerEmpId ? String(managerEmpId).trim() : null;
+
+  // Set of employee IDs belonging to this branch
+  const branchEmpIds = new Set();
+  if (state?.employees && branchIdStr) {
+    state.employees.forEach((emp) => {
+      if (String(emp.branchId) === branchIdStr || (emp.branchesDetails && emp.branchesDetails.some(bd => String(bd.branchId) === branchIdStr))) {
+        branchEmpIds.add(String(emp.id));
+        if (emp.code) branchEmpIds.add(String(emp.code));
+      }
+    });
+  }
+
+  return (notifications || []).filter((n) => {
+    if (!n) return false;
+
+    // 1. Strictly block notifications aimed exclusively at senior management / super admin / owner
+    if (n.targetRole === 'admin' || n.targetRole === 'owner' || n.targetApproval === 'admin_only') {
+      return false;
+    }
+
+    // 2. Block general employee personal decisions unless targeted to this manager directly
+    if (n.targetRole === 'employee') {
+      if (mgrIdStr && (String(n.targetEmployeeId).trim() === mgrIdStr || String(n.employeeId).trim() === mgrIdStr)) {
+        return true;
+      }
+      return false;
+    }
+
+    // 3. Notifications explicitly targeted to branch manager
+    if (n.targetRole === 'branch' || n.targetRole === 'branch_manager' || n.targetRole === 'manager') {
+      if (!branchIdStr) return true;
+      if (n.branchId && String(n.branchId).trim() === branchIdStr) return true;
+      if (n.branchName && branchName && n.branchName === branchName) return true;
+      if (n.employeeId && branchEmpIds.has(String(n.employeeId).trim())) return true;
+      if (!n.branchId && !n.branchName) return true; // General branch update
+      return false;
+    }
+
+    // 4. Branch-specific operational notifications or requests from employees of this branch
+    if (n.branchId && branchIdStr && String(n.branchId).trim() === branchIdStr) {
+      return true;
+    }
+    if (n.employeeId && branchEmpIds.has(String(n.employeeId).trim())) {
+      return true;
+    }
+
+    return false;
+  }).sort((a, b) => {
+    const tA = new Date(a.timestamp || a.date || 0).getTime();
+    const tB = new Date(b.timestamp || b.date || 0).getTime();
+    return tB - tA;
+  });
+}
+
+/**
  * Count unread notifications for a specific employee
  */
 export function countUnreadEmployeeNotifications(notifications = [], employeeId = null) {
   const empNotifs = filterEmployeeNotifications(notifications, employeeId);
   return empNotifs.filter((n) => !n.read).length;
 }
+
+/**
+ * Count unread notifications for a branch manager
+ */
+export function countUnreadBranchManagerNotifications(notifications = [], currentBranch = null, managerEmpId = null, state = null) {
+  const branchNotifs = filterBranchManagerNotifications(notifications, currentBranch, managerEmpId, state);
+  return branchNotifs.filter((n) => !n.read).length;
+}
+

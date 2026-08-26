@@ -26,6 +26,13 @@ export default function BylawsModule({
   customTo = '',
   executeWithOwnerGuard
 }) {
+  const [isMobileScreen, setIsMobileScreen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth <= 768 : false));
+  useEffect(() => {
+    const handleResize = () => setIsMobileScreen(window.innerWidth <= 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const [activeTab, setActiveTab] = useState(activeSubTab || 'disciplinary_penalties'); // 'disciplinary_penalties' | 'text' | 'records' | 'late_penalties'
 
   useEffect(() => {
@@ -1216,137 +1223,263 @@ export default function BylawsModule({
           </div>
 
           {/* Records Table */}
-          <div className="table-responsive">
-            <table className="bylaws-table">
-              <thead>
-                <tr>
-                  <th>التاريخ</th>
-                  <th>الموظف</th>
-                  <th>الفرع</th>
-                  <th>بند ونوع الجزاء</th>
-                  <th>المقدار المالي</th>
-                  <th>البيان والتفاصيل</th>
-                  <th>الحالة</th>
-                  <th>الاعتراضات والإجراءات</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredPenalties.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} style={{ textAlign: 'center', padding: '30px', color: 'var(--muted)' }}>
-                      لا توجد جزاءات أو خصومات مسجلة في هذا النطاق.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredPenalties.map((p) => {
-                    const isApproved = p.status === 'approved' || p.adminApproved;
-                    const isRejected = p.status === 'rejected';
-                    const isCancelled = p.status === 'cancelled';
-                    const hasObjection = Boolean(p.objection);
-                    const objStatus = p.objection?.status;
+          {isMobileScreen ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {filteredPenalties.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '24px', color: 'var(--muted)', background: 'var(--surface-muted)', borderRadius: '12px', border: '1px solid var(--border)' }}>
+                  لا توجد جزاءات أو خصومات مسجلة في هذا النطاق.
+                </div>
+              ) : (
+                filteredPenalties.map((p) => {
+                  const isApproved = p.status === 'approved' || p.adminApproved;
+                  const isRejected = p.status === 'rejected';
+                  const isCancelled = p.status === 'cancelled';
+                  const hasObjection = Boolean(p.objection);
+                  const objStatus = p.objection?.status;
 
-                    return (
-                      <tr key={p.id}>
-                        <td>{p.date}</td>
-                        <td>
-                          <strong>{p.employeeName}</strong>
-                          <span style={{ display: 'block', fontSize: '11px', color: 'var(--muted)' }}>
-                            {p.employeeCode}
+                  return (
+                    <div
+                      key={p.id}
+                      style={{
+                        background: 'var(--surface)',
+                        border: '1px solid var(--border)',
+                        borderRadius: '14px',
+                        padding: '14px 16px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '10px',
+                        boxShadow: '0 2px 5px rgba(0,0,0,0.03)'
+                      }}
+                    >
+                      {/* Card Header: Employee + Date + Amount */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
+                        <div>
+                          <strong style={{ fontSize: '14px', color: 'var(--text)' }}>{p.employeeName}</strong>
+                          <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>
+                            كود: {p.employeeCode} {p.branchName ? `| فرع: ${p.branchName}` : ''}
                           </span>
-                        </td>
-                        <td>{p.branchName}</td>
-                        <td>
-                          <span className="badge badge-primary">{p.category}</span>
-                          <strong style={{ display: 'block', fontSize: '13px', marginTop: '2px' }}>{p.ruleTitle}</strong>
-                        </td>
-                        <td style={{ fontWeight: '800', color: p.amount > 0 ? '#dc2626' : 'var(--muted)' }}>
-                          {p.amount > 0 ? `${p.amount} ج.م` : 'بدون خصم مالي'}
-                        </td>
-                        <td style={{ maxWidth: '240px', fontSize: '12.5px' }}>
-                          <div>{p.reason}</div>
-                          {p.details && p.details !== p.reason && (
-                            <span style={{ fontSize: '11px', color: 'var(--muted)' }}>{p.details}</span>
-                          )}
-                        </td>
-                        <td>
+                        </div>
+                        <div style={{ textAlign: 'left' }}>
+                          <span style={{
+                            display: 'inline-block',
+                            padding: '3px 8px',
+                            borderRadius: '6px',
+                            background: p.amount > 0 ? 'rgba(220,38,38,0.1)' : 'var(--surface-muted)',
+                            color: p.amount > 0 ? '#dc2626' : 'var(--muted)',
+                            fontWeight: 800,
+                            fontSize: '13px'
+                          }}>
+                            {p.amount > 0 ? `${p.amount} ج.م` : 'بدون خصم'}
+                          </span>
+                          <span style={{ display: 'block', fontSize: '11px', color: 'var(--muted)', marginTop: '2px' }}>📅 {p.date}</span>
+                        </div>
+                      </div>
+
+                      {/* Rule details */}
+                      <div style={{ background: 'var(--surface-muted)', padding: '10px 12px', borderRadius: '10px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                          <span className="badge badge-primary" style={{ fontSize: '11px' }}>{p.category}</span>
+                          <strong style={{ fontSize: '12.5px', color: 'var(--primary-dark)' }}>{p.ruleTitle}</strong>
+                        </div>
+                        <div style={{ fontSize: '12.5px', color: 'var(--text)' }}>{p.reason}</div>
+                        {p.details && p.details !== p.reason && (
+                          <div style={{ fontSize: '11.5px', color: 'var(--muted)', marginTop: '4px' }}>{p.details}</div>
+                        )}
+                      </div>
+
+                      {/* Status & Actions Footer */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', paddingTop: '2px' }}>
+                        <div>
                           {isCancelled ? (
-                            <span className="badge badge-danger">ملغي ومسترد</span>
+                            <span className="badge badge-danger" style={{ fontSize: '11px' }}>ملغي ومسترد</span>
                           ) : isRejected ? (
-                            <span className="badge badge-danger">مرفوض</span>
+                            <span className="badge badge-danger" style={{ fontSize: '11px' }}>مرفوض</span>
                           ) : isApproved ? (
-                            <span className="badge badge-success">معتمد ومخصوم</span>
+                            <span className="badge badge-success" style={{ fontSize: '11px' }}>معتمد ومخصوم</span>
                           ) : (
-                            <span className="badge badge-warning">معلق بانتظار الإدارة</span>
+                            <span className="badge badge-warning" style={{ fontSize: '11px' }}>معلق بانتظار الإدارة</span>
                           )}
-                        </td>
-                        <td>
+                        </div>
+
+                        <div>
                           {isAdmin ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                              {hasObjection && objStatus === 'pending' && (
-                                <div style={{ background: '#fffbeb', border: '1px solid #fde68a', padding: '6px 8px', borderRadius: '6px', fontSize: '11px' }}>
-                                  <strong style={{ color: '#b45309', display: 'block' }}>اعتراض مقدم:</strong>
-                                  <span style={{ display: 'block', margin: '2px 0' }}>"{p.objection.reason}"</span>
-                                  <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
-                                    <button
-                                      className="btn btn-start"
-                                      style={{ fontSize: '10.5px', padding: '2px 6px', background: '#16a34a' }}
-                                      onClick={() => handleAdminApproveObjection(p.id)}
-                                      title="قبول الاعتراض وإلغاء الجزاء"
-                                    >
-                                      قبول وإلغاء
-                                    </button>
-                                    <button
-                                      className="btn btn-ghost"
-                                      style={{ fontSize: '10.5px', padding: '2px 6px', color: '#dc2626' }}
-                                      onClick={() => { setAdminRejectReplyReq(p); setAdminRejectReplyText(''); }}
-                                      title="رفض الاعتراض وتثبيت الجزاء"
-                                    >
-                                      رفض
-                                    </button>
-                                  </div>
-                                </div>
-                              )}
-                              {hasObjection && objStatus === 'approved' && (
-                                <span className="badge badge-success" style={{ fontSize: '11px' }}>✅ تم قبول الاعتراض</span>
-                              )}
-                              {hasObjection && objStatus === 'rejected' && (
-                                <span className="badge badge-danger" style={{ fontSize: '11px' }}>❌ تم رفض الاعتراض</span>
-                              )}
-                              {!hasObjection && (
-                                <span style={{ color: 'var(--muted)', fontSize: '12px' }}>—</span>
-                              )}
-                            </div>
-                          ) : (
-                            userRole === 'employee' ? (
-                              hasObjection ? (
-                                <div>
-                                  <span className={`badge ${objStatus === 'approved' ? 'badge-success' : objStatus === 'rejected' ? 'badge-danger' : 'badge-warning'}`} style={{ fontSize: '11px' }}>
-                                    {objStatus === 'approved' ? 'تم قبول الاعتراض' : objStatus === 'rejected' ? 'تم رفض الاعتراض' : 'الاعتراض قيد المراجعة'}
-                                  </span>
-                                </div>
-                              ) : !isCancelled ? (
+                            hasObjection && objStatus === 'pending' ? (
+                              <div style={{ display: 'flex', gap: '4px' }}>
                                 <button
-                                  className="btn btn-outline"
-                                  style={{ color: '#dc2626', borderColor: '#dc2626', fontSize: '11.5px', padding: '4px 8px' }}
-                                  onClick={() => { setObjectionTargetReq(p); setObjectionReason(''); }}
+                                  className="btn btn-start"
+                                  style={{ fontSize: '11px', padding: '3px 8px', background: '#16a34a' }}
+                                  onClick={() => handleAdminApproveObjection(p.id)}
                                 >
-                                  ✋ تقديم اعتراض
+                                  قبول وإلغاء
                                 </button>
-                              ) : (
-                                <span style={{ color: 'var(--muted)', fontSize: '12px' }}>—</span>
-                              )
+                                <button
+                                  className="btn btn-ghost"
+                                  style={{ fontSize: '11px', padding: '3px 8px', color: '#dc2626' }}
+                                  onClick={() => { setAdminRejectReplyReq(p); setAdminRejectReplyText(''); }}
+                                >
+                                  رفض
+                                </button>
+                              </div>
+                            ) : hasObjection && objStatus === 'approved' ? (
+                              <span className="badge badge-success" style={{ fontSize: '11px' }}>✅ قُبل الاعتراض</span>
+                            ) : hasObjection && objStatus === 'rejected' ? (
+                              <span className="badge badge-danger" style={{ fontSize: '11px' }}>❌ رُفض الاعتراض</span>
+                            ) : null
+                          ) : userRole === 'employee' ? (
+                            hasObjection ? (
+                              <span className={`badge ${objStatus === 'approved' ? 'badge-success' : objStatus === 'rejected' ? 'badge-danger' : 'badge-warning'}`} style={{ fontSize: '11px' }}>
+                                {objStatus === 'approved' ? 'تم قبول الاعتراض' : objStatus === 'rejected' ? 'تم رفض الاعتراض' : 'الاعتراض قيد المراجعة'}
+                              </span>
+                            ) : !isCancelled ? (
+                              <button
+                                className="btn btn-outline"
+                                style={{ color: '#dc2626', borderColor: '#dc2626', fontSize: '11px', padding: '3px 8px' }}
+                                onClick={() => { setObjectionTargetReq(p); setObjectionReason(''); }}
+                              >
+                                ✋ تقديم اعتراض
+                              </button>
+                            ) : null
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          ) : (
+            <div className="table-responsive">
+              <table className="bylaws-table">
+                <thead>
+                  <tr>
+                    <th>التاريخ</th>
+                    <th>الموظف</th>
+                    <th>الفرع</th>
+                    <th>بند ونوع الجزاء</th>
+                    <th>المقدار المالي</th>
+                    <th>البيان والتفاصيل</th>
+                    <th>الحالة</th>
+                    <th>الاعتراضات والإجراءات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredPenalties.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} style={{ textAlign: 'center', padding: '30px', color: 'var(--muted)' }}>
+                        لا توجد جزاءات أو خصومات مسجلة في هذا النطاق.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredPenalties.map((p) => {
+                      const isApproved = p.status === 'approved' || p.adminApproved;
+                      const isRejected = p.status === 'rejected';
+                      const isCancelled = p.status === 'cancelled';
+                      const hasObjection = Boolean(p.objection);
+                      const objStatus = p.objection?.status;
+
+                      return (
+                        <tr key={p.id}>
+                          <td>{p.date}</td>
+                          <td>
+                            <strong>{p.employeeName}</strong>
+                            <span style={{ display: 'block', fontSize: '11px', color: 'var(--muted)' }}>
+                              {p.employeeCode}
+                            </span>
+                          </td>
+                          <td>{p.branchName}</td>
+                          <td>
+                            <span className="badge badge-primary">{p.category}</span>
+                            <strong style={{ display: 'block', fontSize: '13px', marginTop: '2px' }}>{p.ruleTitle}</strong>
+                          </td>
+                          <td style={{ fontWeight: '800', color: p.amount > 0 ? '#dc2626' : 'var(--muted)' }}>
+                            {p.amount > 0 ? `${p.amount} ج.م` : 'بدون خصم مالي'}
+                          </td>
+                          <td style={{ maxWidth: '240px', fontSize: '12.5px' }}>
+                            <div>{p.reason}</div>
+                            {p.details && p.details !== p.reason && (
+                              <span style={{ fontSize: '11px', color: 'var(--muted)' }}>{p.details}</span>
+                            )}
+                          </td>
+                          <td>
+                            {isCancelled ? (
+                              <span className="badge badge-danger">ملغي ومسترد</span>
+                            ) : isRejected ? (
+                              <span className="badge badge-danger">مرفوض</span>
+                            ) : isApproved ? (
+                              <span className="badge badge-success">معتمد ومخصوم</span>
                             ) : (
-                              <span style={{ color: 'var(--muted)', fontSize: '12px' }}>{isApproved ? 'معتمد' : isRejected ? 'مرفوض' : 'معلق'}</span>
-                            )
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+                              <span className="badge badge-warning">معلق بانتظار الإدارة</span>
+                            )}
+                          </td>
+                          <td>
+                            {isAdmin ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                {hasObjection && objStatus === 'pending' && (
+                                  <div style={{ background: '#fffbeb', border: '1px solid #fde68a', padding: '6px 8px', borderRadius: '6px', fontSize: '11px' }}>
+                                    <strong style={{ color: '#b45309', display: 'block' }}>اعتراض مقدم:</strong>
+                                    <span style={{ display: 'block', margin: '2px 0' }}>"{p.objection.reason}"</span>
+                                    <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
+                                      <button
+                                        className="btn btn-start"
+                                        style={{ fontSize: '10.5px', padding: '2px 6px', background: '#16a34a' }}
+                                        onClick={() => handleAdminApproveObjection(p.id)}
+                                        title="قبول الاعتراض وإلغاء الجزاء"
+                                      >
+                                        قبول وإلغاء
+                                      </button>
+                                      <button
+                                        className="btn btn-ghost"
+                                        style={{ fontSize: '10.5px', padding: '2px 6px', color: '#dc2626' }}
+                                        onClick={() => { setAdminRejectReplyReq(p); setAdminRejectReplyText(''); }}
+                                        title="رفض الاعتراض وتثبيت الجزاء"
+                                      >
+                                        رفض
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                                {hasObjection && objStatus === 'approved' && (
+                                  <span className="badge badge-success" style={{ fontSize: '11px' }}>✅ تم قبول الاعتراض</span>
+                                )}
+                                {hasObjection && objStatus === 'rejected' && (
+                                  <span className="badge badge-danger" style={{ fontSize: '11px' }}>❌ تم رفض الاعتراض</span>
+                                )}
+                                {!hasObjection && (
+                                  <span style={{ color: 'var(--muted)', fontSize: '12px' }}>—</span>
+                                )}
+                              </div>
+                            ) : (
+                              userRole === 'employee' ? (
+                                hasObjection ? (
+                                  <div>
+                                    <span className={`badge ${objStatus === 'approved' ? 'badge-success' : objStatus === 'rejected' ? 'badge-danger' : 'badge-warning'}`} style={{ fontSize: '11px' }}>
+                                      {objStatus === 'approved' ? 'تم قبول الاعتراض' : objStatus === 'rejected' ? 'تم رفض الاعتراض' : 'الاعتراض قيد المراجعة'}
+                                    </span>
+                                  </div>
+                                ) : !isCancelled ? (
+                                  <button
+                                    className="btn btn-outline"
+                                    style={{ color: '#dc2626', borderColor: '#dc2626', fontSize: '11.5px', padding: '4px 8px' }}
+                                    onClick={() => { setObjectionTargetReq(p); setObjectionReason(''); }}
+                                  >
+                                    ✋ تقديم اعتراض
+                                  </button>
+                                ) : (
+                                  <span style={{ color: 'var(--muted)', fontSize: '12px' }}>—</span>
+                                )
+                              ) : (
+                                <span style={{ color: 'var(--muted)', fontSize: '12px' }}>{isApproved ? 'معتمد' : isRejected ? 'مرفوض' : 'معلق'}</span>
+                              )
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 

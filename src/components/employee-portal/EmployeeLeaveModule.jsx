@@ -12,6 +12,13 @@ export default function EmployeeLeaveModule({
   selectedMonth,
   selectedBranchId
 }) {
+  const [isMobileScreen, setIsMobileScreen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth <= 768 : false));
+  React.useEffect(() => {
+    const handleResize = () => setIsMobileScreen(window.innerWidth <= 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const annualQuota = emp.annualLeaveBalance !== undefined ? Number(emp.annualLeaveBalance) : 21;
   const [leaveType, setLeaveType] = useState(annualQuota > 0 ? 'annual' : 'unpaid'); // 'annual' | 'unpaid'
   const [startDate, setStartDate] = useState(todayStr());
@@ -298,62 +305,134 @@ export default function EmployeeLeaveModule({
 
       {/* ── Leave Requests Table ── */}
       <h4 style={{ margin: '20px 0 12px', fontSize: '15px' }}>📋 سجل طلبات الإجازات المقدمة</h4>
-      <div className="table-responsive">
-        <table>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>نوع الإجازة</th>
-              <th>من تاريخ</th>
-              <th>إلى تاريخ</th>
-              <th>عدد الأيام</th>
-              <th>مسار الاعتماد</th>
-              <th>حالة الطلب</th>
-              <th>السبب</th>
-              <th>تاريخ التقديم</th>
-            </tr>
-          </thead>
-          <tbody>
-            {employeeLeaveRequests.length === 0 ? (
-              <tr className="empty-row">
-                <td colSpan="9">لا توجد طلبات إجازات مسجلة سابقاً</td>
-              </tr>
-            ) : (
-              employeeLeaveRequests.map((r, idx) => (
-                <tr key={r.id}>
-                  <td>{idx + 1}</td>
-                  <td>
+      {isMobileScreen ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {employeeLeaveRequests.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '24px', color: 'var(--muted)', background: 'var(--surface-muted)', borderRadius: '12px', border: '1px solid var(--border)' }}>
+              لا توجد طلبات إجازات مسجلة سابقاً
+            </div>
+          ) : (
+            employeeLeaveRequests.map((r, idx) => (
+              <div
+                key={r.id}
+                style={{
+                  background: 'var(--surface)',
+                  border: '1px solid var(--border)',
+                  borderRadius: '14px',
+                  padding: '14px 16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '10px',
+                  boxShadow: '0 2px 5px rgba(0,0,0,0.03)'
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--muted)' }}>#{idx + 1}</span>
                     {r.leaveType === 'annual' ? (
-                      <span className="badge success">🌴 سنوي (مدفوعة)</span>
+                      <span className="badge success" style={{ fontSize: '11.5px' }}>🌴 سنوي (مدفوعة)</span>
                     ) : (
-                      <span className="badge danger">💸 غير مدفوعة الأجر</span>
+                      <span className="badge danger" style={{ fontSize: '11.5px' }}>💸 غير مدفوعة الأجر</span>
                     )}
-                  </td>
-                  <td>{r.startDate}</td>
-                  <td>{r.endDate}</td>
-                  <td style={{ fontWeight: 'bold' }}>{r.daysCount || 1} يوم</td>
-                  <td>
+                  </div>
+                  <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>
+                    {r.createdAt ? r.createdAt.slice(0, 10) : '—'}
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface-muted)', padding: '10px 14px', borderRadius: '10px' }}>
+                  <div>
+                    <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>فترة الإجازة</span>
+                    <strong style={{ fontSize: '13px', color: 'var(--text)' }}>{r.startDate} ➔ {r.endDate}</strong>
+                  </div>
+                  <div style={{ textAlign: 'left' }}>
+                    <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>المدة الإجمالية</span>
+                    <strong style={{ fontSize: '13.5px', color: 'var(--primary-dark)' }}>{r.daysCount || 1} يوم</strong>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                  <div>
                     {r.targetApproval === 'admin_only' ? (
                       <span className="badge warning" style={{ fontSize: '11px' }}>🏢 الإدارة العليا فقط (&gt;3 أيام)</span>
                     ) : (
                       <span className="badge info" style={{ fontSize: '11px' }}>👥 مدير الفرع + الإدارة</span>
                     )}
-                  </td>
-                  <td>
-                    {r.status === 'approved' && <span className="badge success">✅ معتمد</span>}
-                    {r.status === 'rejected' && <span className="badge danger">❌ مرفوض</span>}
-                    {r.status === 'pending' && <span className="badge warning">⏳ قيد الانتظار</span>}
-                  </td>
-                  <td style={{ color: 'var(--muted)', fontSize: '0.88rem' }}>{r.reason || '—'}</td>
-                  <td style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>
-                    {r.createdAt ? r.createdAt.slice(0, 10) : '—'}
-                  </td>
+                  </div>
+                  <div>
+                    {r.status === 'approved' && <span className="badge success" style={{ fontSize: '11px' }}>✅ معتمد</span>}
+                    {r.status === 'rejected' && <span className="badge danger" style={{ fontSize: '11px' }}>❌ مرفوض</span>}
+                    {r.status === 'pending' && <span className="badge warning" style={{ fontSize: '11px' }}>⏳ قيد الانتظار</span>}
+                  </div>
+                </div>
+
+                {r.reason && (
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', background: 'var(--surface)', padding: '6px 10px', borderRadius: '6px', border: '1px dashed var(--border)' }}>
+                    💬 <strong>السبب:</strong> {r.reason}
+                  </div>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      ) : (
+        <div className="table-responsive">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>نوع الإجازة</th>
+                <th>من تاريخ</th>
+                <th>إلى تاريخ</th>
+                <th>عدد الأيام</th>
+                <th>مسار الاعتماد</th>
+                <th>حالة الطلب</th>
+                <th>السبب</th>
+                <th>تاريخ التقديم</th>
+              </tr>
+            </thead>
+            <tbody>
+              {employeeLeaveRequests.length === 0 ? (
+                <tr className="empty-row">
+                  <td colSpan="9">لا توجد طلبات إجازات مسجلة سابقاً</td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+              ) : (
+                employeeLeaveRequests.map((r, idx) => (
+                  <tr key={r.id}>
+                    <td>{idx + 1}</td>
+                    <td>
+                      {r.leaveType === 'annual' ? (
+                        <span className="badge success">🌴 سنوي (مدفوعة)</span>
+                      ) : (
+                        <span className="badge danger">💸 غير مدفوعة الأجر</span>
+                      )}
+                    </td>
+                    <td>{r.startDate}</td>
+                    <td>{r.endDate}</td>
+                    <td style={{ fontWeight: 'bold' }}>{r.daysCount || 1} يوم</td>
+                    <td>
+                      {r.targetApproval === 'admin_only' ? (
+                        <span className="badge warning" style={{ fontSize: '11px' }}>🏢 الإدارة العليا فقط (&gt;3 أيام)</span>
+                      ) : (
+                        <span className="badge info" style={{ fontSize: '11px' }}>👥 مدير الفرع + الإدارة</span>
+                      )}
+                    </td>
+                    <td>
+                      {r.status === 'approved' && <span className="badge success">✅ معتمد</span>}
+                      {r.status === 'rejected' && <span className="badge danger">❌ مرفوض</span>}
+                      {r.status === 'pending' && <span className="badge warning">⏳ قيد الانتظار</span>}
+                    </td>
+                    <td style={{ color: 'var(--muted)', fontSize: '0.88rem' }}>{r.reason || '—'}</td>
+                    <td style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>
+                      {r.createdAt ? r.createdAt.slice(0, 10) : '—'}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

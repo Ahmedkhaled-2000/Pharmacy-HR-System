@@ -216,6 +216,13 @@ export default function EmployeeRosterModule({
 }) {
   const isMultiBranch = emp.branchesDetails && emp.branchesDetails.length > 1;
 
+  const [isMobileScreen, setIsMobileScreen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth <= 768 : false));
+  useEffect(() => {
+    const handleResize = () => setIsMobileScreen(window.innerWidth <= 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const [showRosterModal, setShowRosterModal] = useState(false);
   const [viewMode, setViewMode] = useState('calendar'); // 'calendar' | 'week'
   const [activeFormBranchId, setActiveFormBranchId] = useState(selectedBranchId || '');
@@ -506,39 +513,92 @@ export default function EmployeeRosterModule({
                 </div>
               </div>
 
-              <div className="table-responsive">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>التاريخ</th>
-                      <th>اليوم</th>
-                      <th>نوع اليوم</th>
-                      <th>أوقات الشيفت</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {bCalendar.map(({ date, day, arDayName, daySchedule }) => {
-                      const isOff = daySchedule?.type === 'off';
-                      return (
-                        <tr key={date} style={{ background: isOff ? 'rgba(100,116,139,0.06)' : undefined, opacity: isOff ? 0.75 : 1 }}>
-                          <td style={{ fontWeight: 600 }}>{date}</td>
-                          <td>
-                            <span style={{ padding: '2px 8px', borderRadius: '99px', fontSize: '12px', background: isOff ? 'var(--surface)' : 'var(--primary-tint)', color: isOff ? 'var(--muted)' : 'var(--primary-dark)', fontWeight: 600 }}>
-                              {arDayName}
-                            </span>
-                          </td>
-                          <td>
-                            {isOff ? <span className="badge secondary">💤 راحة (OFF)</span> : <span className="badge success">⏰ وردية عمل</span>}
-                          </td>
-                          <td style={{ color: isOff ? 'var(--muted)' : 'var(--primary)', fontWeight: isOff ? 400 : 600 }}>
-                            {isOff ? '—' : `${daySchedule?.start} – ${daySchedule?.end}`}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              {isMobileScreen ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {bCalendar.map(({ date, day, arDayName, daySchedule }) => {
+                    const isOff = daySchedule?.type === 'off';
+                    return (
+                      <div
+                        key={date}
+                        style={{
+                          background: isOff ? 'var(--surface-muted)' : 'var(--surface)',
+                          border: isOff ? '1px dashed var(--border)' : '1px solid var(--border)',
+                          borderRadius: '12px',
+                          padding: '12px 14px',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          boxShadow: isOff ? 'none' : '0 1px 3px rgba(0,0,0,0.04)',
+                          opacity: isOff ? 0.8 : 1
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <span style={{
+                            padding: '4px 10px',
+                            borderRadius: '8px',
+                            fontSize: '12px',
+                            background: isOff ? 'var(--surface)' : 'var(--primary-tint)',
+                            color: isOff ? 'var(--muted)' : 'var(--primary-dark)',
+                            fontWeight: 700
+                          }}>
+                            {arDayName}
+                          </span>
+                          <div>
+                            <div style={{ fontWeight: 800, fontSize: '13.5px', color: 'var(--text)' }}>{date}</div>
+                            <div style={{ fontSize: '11.5px', color: 'var(--muted)', marginTop: '2px' }}>اليوم {day} من الشهر</div>
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'left' }}>
+                          {isOff ? (
+                            <span className="badge secondary" style={{ fontSize: '11.5px' }}>💤 راحة (OFF)</span>
+                          ) : (
+                            <div>
+                              <span className="badge success" style={{ fontSize: '11px', display: 'inline-block', marginBottom: '3px' }}>⏰ وردية عمل</span>
+                              <div style={{ fontSize: '12.5px', fontWeight: 800, color: 'var(--primary-dark)' }}>
+                                {daySchedule?.start} – {daySchedule?.end}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="table-responsive">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>التاريخ</th>
+                        <th>اليوم</th>
+                        <th>نوع اليوم</th>
+                        <th>أوقات الشيفت</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bCalendar.map(({ date, day, arDayName, daySchedule }) => {
+                        const isOff = daySchedule?.type === 'off';
+                        return (
+                          <tr key={date} style={{ background: isOff ? 'rgba(100,116,139,0.06)' : undefined, opacity: isOff ? 0.75 : 1 }}>
+                            <td style={{ fontWeight: 600 }}>{date}</td>
+                            <td>
+                              <span style={{ padding: '2px 8px', borderRadius: '99px', fontSize: '12px', background: isOff ? 'var(--surface)' : 'var(--primary-tint)', color: isOff ? 'var(--muted)' : 'var(--primary-dark)', fontWeight: 600 }}>
+                                {arDayName}
+                              </span>
+                            </td>
+                            <td>
+                              {isOff ? <span className="badge secondary">💤 راحة (OFF)</span> : <span className="badge success">⏰ وردية عمل</span>}
+                            </td>
+                            <td style={{ color: isOff ? 'var(--muted)' : 'var(--primary)', fontWeight: isOff ? 400 : 600 }}>
+                              {isOff ? '—' : `${daySchedule?.start} – ${daySchedule?.end}`}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           );
         })}
@@ -653,56 +713,109 @@ export default function EmployeeRosterModule({
           <h4 style={{ margin: '0 0 12px', fontSize: '15px' }}>
             📅 تقويم شهر {selectedMonth} — مطابق للأيام الفعلية ({currentBranchName})
           </h4>
-          <div className="table-responsive">
-            <table>
-              <thead>
-                <tr>
-                  <th>التاريخ</th>
-                  <th>اليوم</th>
-                  <th>نوع اليوم</th>
-                  <th>أوقات الشيفت</th>
-                </tr>
-              </thead>
-              <tbody>
-                {monthCalendar.map(({ date, day, arDayName, daySchedule }) => {
-                  const isOff = daySchedule?.type === 'off';
-                  return (
-                    <tr
-                      key={date}
-                      style={{
-                        background: isOff ? 'rgba(100,116,139,0.06)' : undefined,
-                        opacity: isOff ? 0.75 : 1
-                      }}
-                    >
-                      <td style={{ fontWeight: 600 }}>{date}</td>
-                      <td>
-                        <span style={{
-                          padding: '2px 8px',
-                          borderRadius: '99px',
-                          fontSize: '12px',
-                          background: isOff ? 'var(--surface)' : 'var(--primary-tint)',
-                          color: isOff ? 'var(--muted)' : 'var(--primary-dark)',
-                          fontWeight: 600
-                        }}>
-                          {arDayName}
-                        </span>
-                      </td>
-                      <td>
-                        {isOff ? (
-                          <span className="badge secondary">💤 راحة (OFF)</span>
-                        ) : (
-                          <span className="badge success">⏰ وردية عمل</span>
-                        )}
-                      </td>
-                      <td style={{ color: isOff ? 'var(--muted)' : 'var(--primary)', fontWeight: isOff ? 400 : 600 }}>
-                        {isOff ? '—' : `${daySchedule?.start} – ${daySchedule?.end}`}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          {isMobileScreen ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {monthCalendar.map(({ date, day, arDayName, daySchedule }) => {
+                const isOff = daySchedule?.type === 'off';
+                return (
+                  <div
+                    key={date}
+                    style={{
+                      background: isOff ? 'var(--surface-muted)' : 'var(--surface)',
+                      border: isOff ? '1px dashed var(--border)' : '1px solid var(--border)',
+                      borderRadius: '12px',
+                      padding: '12px 14px',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      boxShadow: isOff ? 'none' : '0 1px 3px rgba(0,0,0,0.04)',
+                      opacity: isOff ? 0.8 : 1
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{
+                        padding: '4px 10px',
+                        borderRadius: '8px',
+                        fontSize: '12px',
+                        background: isOff ? 'var(--surface)' : 'var(--primary-tint)',
+                        color: isOff ? 'var(--muted)' : 'var(--primary-dark)',
+                        fontWeight: 700
+                      }}>
+                        {arDayName}
+                      </span>
+                      <div>
+                        <div style={{ fontWeight: 800, fontSize: '13.5px', color: 'var(--text)' }}>{date}</div>
+                        <div style={{ fontSize: '11.5px', color: 'var(--muted)', marginTop: '2px' }}>اليوم {day} من الشهر</div>
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'left' }}>
+                      {isOff ? (
+                        <span className="badge secondary" style={{ fontSize: '11.5px' }}>💤 راحة (OFF)</span>
+                      ) : (
+                        <div>
+                          <span className="badge success" style={{ fontSize: '11px', display: 'inline-block', marginBottom: '3px' }}>⏰ وردية عمل</span>
+                          <div style={{ fontSize: '12.5px', fontWeight: 800, color: 'var(--primary-dark)' }}>
+                            {daySchedule?.start} – {daySchedule?.end}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="table-responsive">
+              <table>
+                <thead>
+                  <tr>
+                    <th>التاريخ</th>
+                    <th>اليوم</th>
+                    <th>نوع اليوم</th>
+                    <th>أوقات الشيفت</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {monthCalendar.map(({ date, day, arDayName, daySchedule }) => {
+                    const isOff = daySchedule?.type === 'off';
+                    return (
+                      <tr
+                        key={date}
+                        style={{
+                          background: isOff ? 'rgba(100,116,139,0.06)' : undefined,
+                          opacity: isOff ? 0.75 : 1
+                        }}
+                      >
+                        <td style={{ fontWeight: 600 }}>{date}</td>
+                        <td>
+                          <span style={{
+                            padding: '2px 8px',
+                            borderRadius: '99px',
+                            fontSize: '12px',
+                            background: isOff ? 'var(--surface)' : 'var(--primary-tint)',
+                            color: isOff ? 'var(--muted)' : 'var(--primary-dark)',
+                            fontWeight: 600
+                          }}>
+                            {arDayName}
+                          </span>
+                        </td>
+                        <td>
+                          {isOff ? (
+                            <span className="badge secondary">💤 راحة (OFF)</span>
+                          ) : (
+                            <span className="badge success">⏰ وردية عمل</span>
+                          )}
+                        </td>
+                        <td style={{ color: isOff ? 'var(--muted)' : 'var(--primary)', fontWeight: isOff ? 400 : 600 }}>
+                          {isOff ? '—' : `${daySchedule?.start} – ${daySchedule?.end}`}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </div>
