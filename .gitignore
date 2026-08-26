@@ -28,4 +28,4 @@ dist-ssr
 build
 dev-dist
 *.zip
-
+*.apk
