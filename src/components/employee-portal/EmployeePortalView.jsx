@@ -3066,33 +3066,6 @@ export default function EmployeePortalView({
 
           <button
             type="button"
-            className={`ep-bottom-nav-btn ${['leaves', 'permissions', 'loans'].includes(activeTab) ? 'active' : ''}`}
-            onClick={() => setActiveTab('leaves')}
-            style={{
-              flex: 1,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '2px',
-              height: '100%',
-              background: 'none',
-              border: 'none',
-              color: ['leaves', 'permissions', 'loans'].includes(activeTab) ? 'var(--primary, #0d9488)' : 'var(--muted)',
-              fontSize: '11px',
-              fontWeight: ['leaves', 'permissions', 'loans'].includes(activeTab) ? 800 : 600,
-              cursor: 'pointer',
-              padding: '4px 0',
-              fontFamily: 'inherit',
-              position: 'relative'
-            }}
-          >
-            <span style={{ fontSize: '18px' }}>📋</span>
-            <span>الطلبات</span>
-          </button>
-
-          <button
-            type="button"
             className="ep-bottom-nav-btn"
             onClick={() => setIsMobileDrawerOpen(true)}
             style={{
@@ -3708,45 +3681,75 @@ export default function EmployeePortalView({
 
               {/* Absence days in shifts view */}
               {absenceDays.length > 0 && (
-                <div style={{ margin: '16px 0', padding: '12px 16px', background: 'rgba(239,68,68,0.07)', border: '1px dashed rgba(239,68,68,0.4)', borderRadius: '10px' }}>
-                  <div style={{ fontWeight: 700, color: 'var(--danger)', fontSize: '13px', marginBottom: '8px' }}>
-                    🚫 أيام الغياب التلقائية المحسوبة ({absenceDays.length} يوم)
+                <div style={{ margin: '16px 0', padding: '12px 14px', background: 'rgba(239,68,68,0.07)', border: '1px dashed rgba(239,68,68,0.4)', borderRadius: '12px' }}>
+                  <div style={{ fontWeight: 800, color: 'var(--danger)', fontSize: '13px', marginBottom: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span>🚫 أيام الغياب التلقائية المحسوبة ({absenceDays.length} يوم)</span>
+                    {canViewSalary && (
+                      <span style={{ color: 'var(--danger)', fontWeight: 800 }}>
+                        إجمالي: -{fmt(absenceDeduction)} ج.م
+                      </span>
+                    )}
                   </div>
-                  <div className="table-responsive">
-                    <table style={{ fontSize: '12.5px' }}>
-                      <thead>
-                        <tr>
-                          <th>التاريخ</th>
-                          <th>اليوم</th>
-                          <th>وقت الشيفت المفروض</th>
-                          <th>الحالة</th>
-                          <th>الخصم</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {absenceDays.map(ab => (
-                          <tr key={ab.date} style={{ background: 'rgba(239,68,68,0.04)' }}>
-                            <td style={{ fontWeight: 600, color: 'var(--danger)' }}>{ab.date}</td>
-                            <td>{ab.arDayName}</td>
-                            <td>{ab.daySchedule?.start} – {ab.daySchedule?.end}</td>
-                            <td><span className="badge danger">🚫 غياب</span></td>
-                            <td style={{ color: 'var(--danger)', fontWeight: 700 }}>
-                              {canViewSalary ? `-${fmt(dailyRate)} ج.م` : '—'}
-                            </td>
+                  {isMobileScreen ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      {absenceDays.map(ab => (
+                        <div key={ab.date} style={{ background: 'var(--surface)', border: '1px solid rgba(239,68,68,0.2)', padding: '8px 12px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px' }}>
+                          <div>
+                            <span style={{ fontWeight: 800, color: 'var(--danger)' }}>{ab.date}</span>
+                            <span style={{ color: 'var(--muted)', marginRight: '6px' }}>({ab.arDayName})</span>
+                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                              الشيفت المفروض: {ab.daySchedule?.start || '—'} – {ab.daySchedule?.end || '—'}
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'left' }}>
+                            <span className="badge danger" style={{ fontSize: '10.5px' }}>🚫 غياب</span>
+                            {canViewSalary && (
+                              <div style={{ color: 'var(--danger)', fontWeight: 800, fontSize: '11.5px', marginTop: '2px' }}>
+                                -{fmt(dailyRate)} ج.م
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="table-responsive">
+                      <table style={{ fontSize: '12.5px' }}>
+                        <thead>
+                          <tr>
+                            <th>التاريخ</th>
+                            <th>اليوم</th>
+                            <th>وقت الشيفت المفروض</th>
+                            <th>الحالة</th>
+                            <th>الخصم</th>
                           </tr>
-                        ))}
-                      </tbody>
-                      <tfoot>
-                        <tr style={{ fontWeight: 700 }}>
-                          <td colSpan={4} style={{ textAlign: 'right', paddingRight: '8px' }}>إجمالي خصم الغياب</td>
-                          <td style={{ color: 'var(--danger)' }}>{canViewSalary ? `-${fmt(absenceDeduction)} ج.م` : '—'}</td>
-                        </tr>
-                      </tfoot>
-                    </table>
-                  </div>
+                        </thead>
+                        <tbody>
+                          {absenceDays.map(ab => (
+                            <tr key={ab.date} style={{ background: 'rgba(239,68,68,0.04)' }}>
+                              <td style={{ fontWeight: 600, color: 'var(--danger)' }}>{ab.date}</td>
+                              <td>{ab.arDayName}</td>
+                              <td>{ab.daySchedule?.start} – {ab.daySchedule?.end}</td>
+                              <td><span className="badge danger">🚫 غياب</span></td>
+                              <td style={{ color: 'var(--danger)', fontWeight: 700 }}>
+                                {canViewSalary ? `-${fmt(dailyRate)} ج.م` : '—'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr style={{ fontWeight: 700 }}>
+                            <td colSpan={4} style={{ textAlign: 'right', paddingRight: '8px' }}>إجمالي خصم الغياب</td>
+                            <td style={{ color: 'var(--danger)' }}>{canViewSalary ? `-${fmt(absenceDeduction)} ج.م` : '—'}</td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  )}
                 </div>
               )}
 
+              {/* Multi-Branch vs Single Branch Shifts */}
               {emp.branchesDetails && emp.branchesDetails.length > 1 && !selectedBranchId ? (
                 <div>
                   {emp.branchesDetails.map((bd) => {
@@ -3761,89 +3764,284 @@ export default function EmployeePortalView({
                         <h4 style={{ margin: '0 0 10px 0', color: 'var(--primary-dark)', fontSize: '15px' }}>
                           📋 بصمات فرع {bName} ({bShifts.length} وردية)
                         </h4>
-                        <div className="table-responsive">
-                          <table>
-                            <thead>
-                              <tr>
-                                <th>#</th>
-                                <th>التاريخ</th>
-                                <th>اليوم</th>
-                                <th>وقت الدخول</th>
-                                <th>وقت الخروج</th>
-                                <th>ساعات البريك</th>
-                                <th>صافي ساعات العمل</th>
-                                <th>المبلغ المستحق</th>
-                                <th>الملاحظات</th>
-                                {canEditShift && <th>الإجراءات</th>}
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {bShifts.length === 0 ? (
-                                <tr className="empty-row">
-                                  <td colSpan={canEditShift ? 10 : 9}>لا توجد ورديات مسجلة لهذا الفرع في هذا الشهر</td>
-                                </tr>
-                              ) : (
-                                bShifts.map((s, idx) => {
-                                  const perm = isApprovedPermissionForDate(emp.id, s.date, state);
-                                  const hasPerm = s.hasApprovedPermission || !!perm;
-                                  const permHours = s.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
+                        {isMobileScreen ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            {bShifts.length === 0 ? (
+                              <div style={{ padding: '20px 14px', textAlign: 'center', color: 'var(--muted)', fontSize: '12.5px', background: 'var(--surface)', borderRadius: '10px' }}>
+                                لا توجد ورديات مسجلة لهذا الفرع في هذا الشهر
+                              </div>
+                            ) : (
+                              bShifts.map((s, idx) => {
+                                const perm = isApprovedPermissionForDate(emp.id, s.date, state);
+                                const hasPerm = s.hasApprovedPermission || !!perm;
+                                const permHours = s.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
+                                const effHours = getEffectiveShiftHours(s, state);
 
-                                  const effHours = getEffectiveShiftHours(s, state);
-
-                                  return (
-                                    <tr key={s.id} style={{ background: hasPerm ? 'rgba(254, 243, 199, 0.25)' : 'transparent' }}>
-                                      <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{idx + 1}</td>
-                                      <td style={{ fontWeight: 600 }}>
-                                        {s.date}
-                                        {hasPerm && (
-                                          <span style={{ display: 'block', marginTop: '2px', background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
-                                            ⏰ معدلة بإذن (+{permHours} س)
+                                return (
+                                  <div key={s.id} style={{ background: hasPerm ? 'rgba(254, 243, 199, 0.3)' : 'var(--surface)', border: hasPerm ? '1.5px solid #fcd34d' : '1px solid var(--border)', borderRadius: '12px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border-light, rgba(0,0,0,0.05))', paddingBottom: '6px' }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                        <span style={{ fontSize: '11px', background: 'var(--surface-muted)', color: 'var(--muted)', padding: '1px 5px', borderRadius: '4px', fontWeight: 700 }}>#{idx + 1}</span>
+                                        <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--text)' }}>{s.date}</span>
+                                        <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>({arabicWeekday(s.date)})</span>
+                                      </div>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                        <span style={{ background: 'var(--primary-light, #ccfbf1)', color: 'var(--primary-dark, #0f766e)', fontWeight: 800, fontSize: '11.5px', padding: '2px 6px', borderRadius: '6px' }}>
+                                          ⏱️ {fmt(effHours)} س
+                                        </span>
+                                        {canViewSalary && (
+                                          <span style={{ background: '#f0fdf4', color: '#15803d', fontWeight: 800, fontSize: '11.5px', padding: '2px 6px', borderRadius: '6px' }}>
+                                            💵 {fmt(effHours * bRate)} ج.م
                                           </span>
                                         )}
-                                      </td>
-                                      <td>{arabicWeekday(s.date)}</td>
-                                      <td><span className="ep-time-badge ep-time-in">{s.timeIn}</span></td>
-                                      <td><span className="ep-time-badge ep-time-out">{s.timeOut || '—'}</span></td>
-                                      <td>{(s.breakHours || 0) > 0 ? <span className="ep-break-badge">{fmt(s.breakHours)} س</span> : <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
-                                      <td className="money" style={{ color: 'var(--primary-dark)', fontWeight: 700 }}>
-                                        {fmt(effHours)} ساعة
-                                        {hasPerm && permHours > 0 && (
-                                          <div style={{ fontSize: '10px', color: '#b45309', fontWeight: 700, marginTop: '2px' }}>
-                                            (فعلي: {fmt(Math.max(0, effHours - permHours))} س + إذن: {fmt(permHours)} س)
+                                      </div>
+                                    </div>
+                                    {hasPerm && (
+                                      <span style={{ background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '2px 6px', borderRadius: '6px', fontSize: '10.5px', fontWeight: 800, alignSelf: 'flex-start' }}>
+                                        ⏰ معدلة بإذن (+{permHours} س)
+                                      </span>
+                                    )}
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px', background: 'var(--surface-muted)', padding: '6px 8px', borderRadius: '8px', textAlign: 'center' }}>
+                                      <div><div style={{ fontSize: '10px', color: 'var(--muted)' }}>🟢 دخول</div><div style={{ fontSize: '12px', fontWeight: 800, color: 'var(--success, #16a34a)', fontFamily: 'monospace' }}>{s.timeIn || '—'}</div></div>
+                                      <div style={{ borderRight: '1px solid var(--border)', borderLeft: '1px solid var(--border)' }}><div style={{ fontSize: '10px', color: 'var(--muted)' }}>🔴 خروج</div><div style={{ fontSize: '12px', fontWeight: 800, color: 'var(--danger, #dc2626)', fontFamily: 'monospace' }}>{s.timeOut || '—'}</div></div>
+                                      <div><div style={{ fontSize: '10px', color: 'var(--muted)' }}>☕ بريك</div><div style={{ fontSize: '12px', fontWeight: 800 }}>{(s.breakHours || 0) > 0 ? `${fmt(s.breakHours)} س` : '—'}</div></div>
+                                    </div>
+                                    {(s.note || canEditShift) && (
+                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', fontSize: '11px', color: 'var(--muted)', paddingTop: '2px' }}>
+                                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{s.note ? `📝 ${s.note}` : ''}</span>
+                                        {canEditShift && (
+                                          <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
+                                            <button className="btn btn-ghost" style={{ padding: '2px 6px', fontSize: '11px' }} onClick={() => openEditShift && openEditShift(s)}>✏️</button>
+                                            <button className="btn btn-ghost" style={{ padding: '2px 6px', fontSize: '11px', color: 'var(--danger)' }} onClick={() => deleteShift && deleteShift(s.id)}>🗑️</button>
                                           </div>
                                         )}
-                                      </td>
-                                      <td className="money" style={{ color: 'var(--success)', fontWeight: 600 }}>{canViewSalary ? `${fmt(effHours * bRate)} ج.م` : '🔒 مقيد'}</td>
-                                      <td style={{ color: hasPerm ? '#047857' : 'var(--text-muted)', fontSize: '0.88rem' }}>
-                                        {hasPerm ? (
-                                          <div>
-                                            <span style={{ fontWeight: 700 }}>⏰ معدلة باحتساب ساعات الإذن المعتمد ({perm?.startTime || '—'} إلى {perm?.endTime || '—'})</span>
-                                            {s.note && !s.note.includes('⏰ تم تعديل البصمة') && <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{s.note}</div>}
-                                          </div>
-                                        ) : (
-                                          s.note || '—'
-                                        )}
-                                      </td>
-                                      {canEditShift && (
-                                        <td>
-                                          <div style={{ display: 'flex', gap: '6px' }}>
-                                            <button className="btn btn-ghost" style={{ padding: '3px 8px', fontSize: '12px' }} onClick={() => openEditShift && openEditShift(s)} title="تعديل الوردية">✏️</button>
-                                            <button className="btn btn-ghost" style={{ padding: '3px 8px', fontSize: '12px', color: 'var(--danger)' }} onClick={() => deleteShift && deleteShift(s.id)} title="حذف الوردية">🗑️</button>
-                                          </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })
+                            )}
+                          </div>
+                        ) : (
+                          <div className="table-responsive">
+                            <table>
+                              <thead>
+                                <tr>
+                                  <th>#</th>
+                                  <th>التاريخ</th>
+                                  <th>اليوم</th>
+                                  <th>وقت الدخول</th>
+                                  <th>وقت الخروج</th>
+                                  <th>ساعات البريك</th>
+                                  <th>صافي ساعات العمل</th>
+                                  <th>المبلغ المستحق</th>
+                                  <th>الملاحظات</th>
+                                  {canEditShift && <th>الإجراءات</th>}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {bShifts.length === 0 ? (
+                                  <tr className="empty-row">
+                                    <td colSpan={canEditShift ? 10 : 9}>لا توجد ورديات مسجلة لهذا الفرع في هذا الشهر</td>
+                                  </tr>
+                                ) : (
+                                  bShifts.map((s, idx) => {
+                                    const perm = isApprovedPermissionForDate(emp.id, s.date, state);
+                                    const hasPerm = s.hasApprovedPermission || !!perm;
+                                    const permHours = s.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
+                                    const effHours = getEffectiveShiftHours(s, state);
+
+                                    return (
+                                      <tr key={s.id} style={{ background: hasPerm ? 'rgba(254, 243, 199, 0.25)' : 'transparent' }}>
+                                        <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{idx + 1}</td>
+                                        <td style={{ fontWeight: 600 }}>
+                                          {s.date}
+                                          {hasPerm && (
+                                            <span style={{ display: 'block', marginTop: '2px', background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 800 }}>
+                                              ⏰ معدلة بإذن (+{permHours} س)
+                                            </span>
+                                          )}
                                         </td>
-                                      )}
-                                    </tr>
-                                  );
-                                })
-                              )}
-                            </tbody>
-                          </table>
-                        </div>
+                                        <td>{arabicWeekday(s.date)}</td>
+                                        <td><span className="ep-time-badge ep-time-in">{s.timeIn}</span></td>
+                                        <td><span className="ep-time-badge ep-time-out">{s.timeOut || '—'}</span></td>
+                                        <td>{(s.breakHours || 0) > 0 ? <span className="ep-break-badge">{fmt(s.breakHours)} س</span> : <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
+                                        <td className="money" style={{ color: 'var(--primary-dark)', fontWeight: 700 }}>
+                                          {fmt(effHours)} ساعة
+                                        </td>
+                                        <td className="money" style={{ color: 'var(--success)', fontWeight: 600 }}>{canViewSalary ? `${fmt(effHours * bRate)} ج.م` : '🔒 مقيد'}</td>
+                                        <td style={{ color: hasPerm ? '#047857' : 'var(--text-muted)', fontSize: '0.88rem' }}>
+                                          {hasPerm ? (
+                                            <div>
+                                              <span style={{ fontWeight: 700 }}>⏰ معدلة باحتساب ساعات الإذن المعتمد ({perm?.startTime || '—'} إلى {perm?.endTime || '—'})</span>
+                                              {s.note && !s.note.includes('⏰ تم تعديل البصمة') && <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{s.note}</div>}
+                                            </div>
+                                          ) : (
+                                            s.note || '—'
+                                          )}
+                                        </td>
+                                        {canEditShift && (
+                                          <td>
+                                            <div style={{ display: 'flex', gap: '6px' }}>
+                                              <button className="btn btn-ghost" style={{ padding: '3px 8px', fontSize: '12px' }} onClick={() => openEditShift && openEditShift(s)} title="تعديل الوردية">✏️</button>
+                                              <button className="btn btn-ghost" style={{ padding: '3px 8px', fontSize: '12px', color: 'var(--danger)' }} onClick={() => deleteShift && deleteShift(s.id)} title="حذف الوردية">🗑️</button>
+                                            </div>
+                                          </td>
+                                        )}
+                                      </tr>
+                                    );
+                                  })
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
                 </div>
+              ) : isMobileScreen ? (
+                /* 📱 MOBILE SHIFT CARDS - ZERO HORIZONTAL SCROLLBAR, ZERO NESTED SCROLLBAR */
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '14px' }}>
+                  {empShifts.length === 0 ? (
+                    <div style={{ padding: '30px 16px', textAlign: 'center', color: 'var(--muted)', background: 'var(--surface-muted)', borderRadius: '12px', fontSize: '13px' }}>
+                      🎉 لا توجد ورديات مسجلة لهذا الشهر
+                    </div>
+                  ) : (
+                    empShifts.map((s, idx) => {
+                      const perm = isApprovedPermissionForDate(emp.id, s.date, state);
+                      const hasPerm = s.hasApprovedPermission || !!perm;
+                      const permHours = s.permissionHours || perm?.hours || (perm?.durationMinutes ? Math.round((perm.durationMinutes / 60) * 100) / 100 : 0);
+                      const effHours = getEffectiveShiftHours(s, state);
+                      const branchRate = (summary.perBranch?.[s.branchId]?.rate || summary.rate) || 0;
+
+                      return (
+                        <div
+                          key={s.id}
+                          style={{
+                            background: hasPerm ? 'rgba(254, 243, 199, 0.3)' : 'var(--surface)',
+                            border: hasPerm ? '1.5px solid #fcd34d' : '1px solid var(--border)',
+                            borderRadius: '14px',
+                            padding: '12px 14px',
+                            boxShadow: '0 2px 6px rgba(0,0,0,0.03)',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '8px'
+                          }}
+                        >
+                          {/* Top Row: Date, Day, Effective Hours & Gross Amount */}
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border-light, rgba(0,0,0,0.05))', paddingBottom: '8px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span style={{ fontSize: '11px', background: 'var(--surface-muted)', color: 'var(--muted)', padding: '2px 6px', borderRadius: '6px', fontWeight: 800 }}>
+                                #{idx + 1}
+                              </span>
+                              <span style={{ fontWeight: 800, fontSize: '13.5px', color: 'var(--text)' }}>
+                                {s.date}
+                              </span>
+                              <span style={{ fontSize: '12px', color: 'var(--muted)', fontWeight: 600 }}>
+                                ({arabicWeekday(s.date)})
+                              </span>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                              <span style={{ background: 'var(--primary-light, #ccfbf1)', color: 'var(--primary-dark, #0f766e)', fontWeight: 800, fontSize: '12px', padding: '3px 8px', borderRadius: '8px' }}>
+                                ⏱️ {fmt(effHours)} س
+                              </span>
+                              {canViewSalary && (
+                                <span style={{ background: '#f0fdf4', color: '#15803d', fontWeight: 800, fontSize: '12px', padding: '3px 8px', borderRadius: '8px' }}>
+                                  💵 {fmt(effHours * branchRate)} ج.م
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Badges Row (if any) */}
+                          {(hasPerm || isShiftManualPunch(s) || s.overtimeStatus) && (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                              {hasPerm && (
+                                <span style={{ background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '2px 6px', borderRadius: '6px', fontSize: '10.5px', fontWeight: 800 }}>
+                                  ⏰ معدلة بإذن (+{permHours} س)
+                                </span>
+                              )}
+                              {isShiftManualPunch(s) && (
+                                <span style={{ background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', padding: '2px 6px', borderRadius: '6px', fontSize: '10.5px', fontWeight: 800 }}>
+                                  🖐️ بصمة يدوية معتمدة
+                                </span>
+                              )}
+                              {s.overtimeStatus === 'approved' && (
+                                <span style={{ background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', padding: '2px 6px', borderRadius: '6px', fontSize: '10.5px', fontWeight: 800 }}>
+                                  ⭐ إضافي معتمد (+{s.overtimeHours} س)
+                                </span>
+                              )}
+                              {s.overtimeStatus === 'pending' && (
+                                <span style={{ background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '2px 6px', borderRadius: '6px', fontSize: '10.5px', fontWeight: 800 }}>
+                                  ⏳ إضافي (+{s.overtimeHours} س) قيد المراجعة
+                                </span>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Timing Grid: Entry, Exit, Break */}
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', background: 'var(--surface-muted)', padding: '8px 10px', borderRadius: '10px' }}>
+                            <div style={{ textAlign: 'center' }}>
+                              <div style={{ fontSize: '10.5px', color: 'var(--muted)', fontWeight: 600 }}>🟢 الدخول</div>
+                              <div style={{ fontSize: '13px', fontWeight: 800, color: 'var(--success, #16a34a)', marginTop: '2px', fontFamily: 'monospace' }}>
+                                {s.timeIn || '—'}
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'center', borderRight: '1px solid var(--border)', borderLeft: '1px solid var(--border)' }}>
+                              <div style={{ fontSize: '10.5px', color: 'var(--muted)', fontWeight: 600 }}>🔴 الخروج</div>
+                              <div style={{ fontSize: '13px', fontWeight: 800, color: 'var(--danger, #dc2626)', marginTop: '2px', fontFamily: 'monospace' }}>
+                                {s.timeOut || '—'}
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'center' }}>
+                              <div style={{ fontSize: '10.5px', color: 'var(--muted)', fontWeight: 600 }}>☕ البريك</div>
+                              <div style={{ fontSize: '13px', fontWeight: 800, color: 'var(--text)', marginTop: '2px' }}>
+                                {(s.breakHours || 0) > 0 ? `${fmt(s.breakHours)} س` : '—'}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Notes & Actions */}
+                          {(s.note || canEditShift) && (
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', fontSize: '11.5px', color: 'var(--muted)', paddingTop: '2px' }}>
+                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                                {s.note ? `📝 ${s.note}` : ''}
+                              </span>
+                              {canEditShift && (
+                                <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+                                  <button className="btn btn-ghost" style={{ padding: '3px 8px', fontSize: '12px' }} onClick={() => openEditShift && openEditShift(s)} title="تعديل الوردية">✏️</button>
+                                  <button className="btn btn-ghost" style={{ padding: '3px 8px', fontSize: '12px', color: 'var(--danger)' }} onClick={() => deleteShift && deleteShift(s.id)} title="حذف الوردية">🗑️</button>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+
+                  {/* Summary footer card on mobile */}
+                  {empShifts.length > 0 && (
+                    <div style={{ background: 'linear-gradient(135deg, var(--surface), var(--surface-muted))', border: '1px solid var(--border)', borderRadius: '12px', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '6px' }}>
+                      <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--text)' }}>
+                        📊 الإجمالي ({empShifts.length} وردية)
+                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--primary-dark)' }}>
+                          {fmt(summary.hours)} ساعة
+                        </span>
+                        {canViewSalary && (
+                          <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--success)' }}>
+                            {fmt(summary.baseEarnings)} ج.م
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
               ) : (
+                /* 💻 Desktop Full Table */
                 <div className="table-responsive" style={{ marginTop: '14px' }}>
                   <table>
                     <thead>

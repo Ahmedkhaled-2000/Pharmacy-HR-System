@@ -738,6 +738,23 @@
   .ep-summary-label {
     font-size: 0.75rem !important;
   }
+
+  /* Remove unsightly scrollbars inside cards and sections on mobile */
+  .ep-tab-content,
+  .card,
+  .table-responsive,
+  .ep-table-container {
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+  }
+  .ep-tab-content::-webkit-scrollbar,
+  .card::-webkit-scrollbar,
+  .table-responsive::-webkit-scrollbar,
+  .ep-table-container::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+  }
 }
 
 @media (max-width: 480px) {
