@@ -2907,31 +2907,8 @@ export default function EmployeePortalView({
               })}
             </div>
 
-            {/* Drawer Footer (Privacy toggle + Logout) */}
+            {/* Drawer Footer (Logout) */}
             <div style={{ padding: '14px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <button
-                type="button"
-                onClick={togglePrivacyMode}
-                style={{
-                  width: '100%',
-                  padding: '9px 14px',
-                  borderRadius: '8px',
-                  border: '1px solid var(--border)',
-                  background: isPrivacyMode ? 'rgba(239, 68, 68, 0.1)' : 'var(--surface-muted)',
-                  color: isPrivacyMode ? 'var(--danger)' : 'var(--text)',
-                  fontSize: '13px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '6px'
-                }}
-              >
-                <span>{isPrivacyMode ? '🙈' : '👁️'}</span>
-                <span>{isPrivacyMode ? 'وضع الخصوصية مفعل' : 'تفعيل وضع الخصوصية'}</span>
-              </button>
-
               <button
                 type="button"
                 onClick={() => {
