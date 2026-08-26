@@ -4806,7 +4806,17 @@ export default function App() {
         <DesktopLayout
           currentRole={authRole}
           currentBranch={currentBranch}
-          notifications={state.notifications || []}
+          notifications={
+            authRole === 'branch'
+              ? (state.notifications || []).filter(n => {
+                  if (!n) return false;
+                  const cIdStr = currentBranch?.id ? String(currentBranch.id) : null;
+                  if (n.targetRole === 'employee') return false;
+                  if (n.branchId && cIdStr && String(n.branchId) !== cIdStr) return false;
+                  return true;
+                })
+              : (state.notifications || [])
+          }
           onMarkNotificationRead={handleMarkNotificationRead}
           onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
           onDeleteNotification={handleDeleteNotification}
