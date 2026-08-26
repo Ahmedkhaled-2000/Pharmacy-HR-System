@@ -2,8 +2,5 @@
   "appId": "com.pharmacy.employee",
   "appName": "بوابة الموظف",
   "webDir": "dist",
-  "server": {
-    "url": "https://pharmacy-time-tracker.vercel.app/employee",
-    "cleartext": false
-  }
+  "bundledWebRuntime": false
 }
