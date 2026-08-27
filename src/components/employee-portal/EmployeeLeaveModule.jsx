@@ -117,7 +117,7 @@ export default function EmployeeLeaveModule({
     }
 
     const daysCount = currentDaysCount;
-    const reqBranchId = selectedBranchId || emp.branchId;
+    const reqBranchId = selectedBranchId || emp.branchesDetails?.[0]?.branchId || emp.branchId;
     const isDirectAdmin = shouldRouteDirectToAdmin(emp, reqBranchId, state);
     const targetApproval = (isDirectAdmin || willExceedThreeDays) ? 'admin_only' : 'branch_and_admin';
 

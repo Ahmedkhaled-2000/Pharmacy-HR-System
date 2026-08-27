@@ -95,7 +95,7 @@ export default function EmployeePermissionsModule({
       }
     }
 
-    const reqBranchId = selectedBranchId || emp.branchId;
+    const reqBranchId = selectedBranchId || emp.branchesDetails?.[0]?.branchId || emp.branchId;
     const isDirectAdmin = shouldRouteDirectToAdmin(emp, reqBranchId, state);
     const targetApproval = isDirectAdmin ? 'admin_only' : 'branch_and_admin';
 

@@ -27,7 +27,7 @@ export default function EmployeeShiftSwapModule({
 
   const employees = state.employees || [];
   const branches = state.branches || [];
-  const currentBranchId = selectedBranchId || emp.branchId;
+  const currentBranchId = selectedBranchId || emp.branchesDetails?.[0]?.branchId || emp.branchId;
 
   const getBranchLabel = (bId) => {
     if (!bId) return '';

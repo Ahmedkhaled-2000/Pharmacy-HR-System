@@ -66,12 +66,27 @@ export function isManagementJob(jobTitle, jobsList = DEFAULT_JOBS) {
  * If there is no manager (empty or 'none' or null), returns true.
  */
 export function isBranchWithoutManager(branchId, state) {
-  if (!branchId || !state?.branches) return false;
+  if (!branchId || !state?.branches || !Array.isArray(state.branches)) return false;
+  const targetStr = String(branchId).trim();
+  if (!targetStr) return false;
+
   const branch = state.branches.find(
-    (b) => String(b.id) === String(branchId) || String(b.branchCode) === String(branchId)
+    (b) => String(b.id) === targetStr || String(b.branchCode) === targetStr || b.name === targetStr
   );
   if (!branch) return false;
-  return !branch.managerId || branch.managerId === 'none' || String(branch.managerId).trim() === '';
+  
+  // Check if manager is explicitly empty, 'none', or not set
+  if (!branch.managerId || branch.managerId === 'none' || String(branch.managerId).trim() === '') {
+    return true;
+  }
+  
+  // Verify if assigned manager exists in employees list
+  if (state.employees && Array.isArray(state.employees)) {
+    const mgrEmp = state.employees.find(e => String(e.id) === String(branch.managerId));
+    if (!mgrEmp) return true;
+  }
+
+  return false;
 }
 
 /**
@@ -90,7 +105,7 @@ export function shouldRouteDirectToAdmin(emp, branchId, state) {
   }
   
   // 2. Employee's target branch has no manager
-  const targetBranchId = branchId || emp.branchId || emp.branchesDetails?.[0]?.branchId;
+  const targetBranchId = branchId || emp.branchesDetails?.[0]?.branchId || emp.branchId;
   if (targetBranchId && isBranchWithoutManager(targetBranchId, state)) {
     return true;
   }

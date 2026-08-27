@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { shouldShowRequestToBranch } from '../../utils/formatters';
+import { shouldRouteDirectToAdmin, isBranchWithoutManager } from '../../utils/jobsHelper';
 import { getFormattedRequestBadge } from '../requests/RequestsModule';
 
 export default function ApprovalCenterModule({
@@ -220,12 +221,20 @@ export default function ApprovalCenterModule({
 
                     {/* Dual Approval Status Indicators */}
                     {(() => {
-                      const isBranchNotReq = req.targetApproval === 'admin_only' || req.targetApproval === 'admin' || ['loan', 'advance', 'credit_medicine', 'eval_edit_request', 'complaint'].includes(req.type) || req.branchNotRequired || req.isDirectToAdmin;
+                      const effectiveBranchId = req.branchId || emp?.branchesDetails?.[0]?.branchId || emp?.branchId;
+                      const isBranchNotReq = req.targetApproval === 'admin_only' ||
+                        req.targetApproval === 'admin' ||
+                        ['loan', 'advance', 'credit_medicine', 'eval_edit_request', 'complaint'].includes(req.type) ||
+                        req.branchNotRequired ||
+                        req.isDirectToAdmin ||
+                        shouldRouteDirectToAdmin(emp, effectiveBranchId, state) ||
+                        isBranchWithoutManager(effectiveBranchId, state);
+
                       return (
                         <div style={{ display: 'flex', gap: '12px', marginTop: '8px', flexWrap: 'wrap' }}>
                           <div className={`approval-status-badge ${isBranchNotReq ? 'na' : isBranchApproved ? 'approved' : 'pending'}`}>
                             {isBranchNotReq
-                              ? '🔒 مدير الفرع: غير موجهة إليه'
+                              ? '🔒 مدير الفرع: غير موجهة إليه (فرع بدون مدير / إدارة)'
                               : isBranchApproved
                                 ? '✅ مدير الفرع: معتمد'
                                 : '⏳ مدير الفرع: بانتظار الموافقة'}

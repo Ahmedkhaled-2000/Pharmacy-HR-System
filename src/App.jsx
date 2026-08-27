@@ -816,6 +816,18 @@ export default function App() {
     const currentBranches = state.branches || [];
     const exists = currentBranches.some((b) => b.id === branchData.id);
 
+    // Check branch username uniqueness across all branches
+    if (branchData.username && String(branchData.username).trim()) {
+      const cleanUsername = String(branchData.username).trim().toLowerCase();
+      const duplicateBranch = currentBranches.find(
+        (b) => b.id !== branchData.id && (b.username && String(b.username).trim().toLowerCase() === cleanUsername)
+      );
+      if (duplicateBranch) {
+        showToast(`⚠️ خطأ: اسم المستخدم (${branchData.username}) مستخدم بالفعل لفرع "${duplicateBranch.name}"!`);
+        return;
+      }
+    }
+
     const performSaveBranch = async () => {
       let updatedBranches;
       if (exists) {
@@ -859,10 +871,24 @@ export default function App() {
   const handleSaveEmployeeFile = async (empData) => {
     const currentEmps = state.employees || [];
     const empIdStr = String(empData.id);
-    const empCodeStr = String(empData.code || '');
+    const empCodeStr = String(empData.code || '').trim();
+
+    // Check employee code uniqueness (prevent duplicates across different employees)
+    if (empCodeStr) {
+      const isDuplicateCode = currentEmps.some(
+        (e) => String(e.id) !== empIdStr && (
+          (e.code && String(e.code).trim() === empCodeStr) ||
+          (e.username && String(e.username).trim() === empCodeStr)
+        )
+      );
+      if (isDuplicateCode) {
+        showToast('⚠️ خطأ: كود الموظف مستخدم بالفعل لموظف آخر!');
+        return;
+      }
+    }
 
     const oldEmp = currentEmps.find(
-      (e) => String(e.id) === empIdStr || (e.code && String(e.code) === empCodeStr)
+      (e) => String(e.id) === empIdStr
     );
     const exists = Boolean(oldEmp);
 
@@ -882,7 +908,7 @@ export default function App() {
       let updatedEmps;
       if (exists) {
         updatedEmps = currentEmps.map((e) =>
-          String(e.id) === empIdStr || (e.code && String(e.code) === empCodeStr)
+          String(e.id) === empIdStr
             ? { ...e, ...normalizedEmpData, id: e.id }
             : e
         );
@@ -1199,6 +1225,39 @@ export default function App() {
         // 5. Approved Employee Permissions: Automatically update actual shift hours & lateness
         if (target.type === 'permission') {
           updatedShifts = applyApprovedPermissionsToShifts([target], updatedShifts, state.bylaws, updatedEmps);
+        }
+
+        // 6. Monthly Roster Request Approval (Update active rosters in state immediately)
+        if (target.type === 'roster_update' || target.type === 'roster_edit' || target.type === 'roster_edit_request') {
+          const empObj = (state.employees || []).find(e => String(e.id) === String(target.employeeId) || (target.employeeCode && String(e.code) === String(target.employeeCode)));
+          const targetBranch = target.branchId || empObj?.branchesDetails?.[0]?.branchId || empObj?.branchId || null;
+          const normalizedSch = normalizeSchedule(target.schedule || target.newSchedule);
+
+          const activeRosterObj = {
+            id: target.id || `roster_${Date.now()}`,
+            employeeId: target.employeeId || empObj?.id,
+            employeeCode: target.employeeCode || empObj?.code,
+            branchId: targetBranch,
+            month: target.month || new Date().toISOString().slice(0, 7),
+            fromDate: target.fromDate,
+            toDate: target.toDate,
+            schedule: normalizedSch,
+            status: 'approved',
+            adminApproved: true,
+            approvedAt: new Date().toISOString()
+          };
+
+          const existingIdx = updatedRosters.findIndex(
+            (ros) => (String(ros.employeeId) === String(target.employeeId) || (empObj?.code && String(ros.employeeCode) === String(empObj.code))) &&
+                     (ros.month === target.month || !target.month || !ros.month) &&
+                     (String(ros.branchId || '') === String(targetBranch || '') || (!ros.branchId && !targetBranch))
+          );
+
+          if (existingIdx >= 0) {
+            updatedRosters = updatedRosters.map((ros, idx) => idx === existingIdx ? activeRosterObj : ros);
+          } else {
+            updatedRosters = [activeRosterObj, ...updatedRosters];
+          }
         }
       }
 

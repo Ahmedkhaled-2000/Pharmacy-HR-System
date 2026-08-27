@@ -252,22 +252,27 @@ export default function EmployeePortalView({
     return getCycleDateRange(selectedMonth, orgSettings || state?.orgSettings);
   }, [selectedMonth, orgSettings, state?.orgSettings]);
 
-  const [selectedBranchId, setSelectedBranchId] = useState('');
-  const [isBranchSelected, setIsBranchSelected] = useState(false);
-  const [punchTargetBranchId, setPunchTargetBranchId] = useState('');
+  const primaryEmpBranchId = emp?.branchesDetails?.[0]?.branchId || emp?.branchId || '';
+  const [selectedBranchId, setSelectedBranchId] = useState(primaryEmpBranchId);
+  const [isBranchSelected, setIsBranchSelected] = useState(Boolean(primaryEmpBranchId));
+  const [punchTargetBranchId, setPunchTargetBranchId] = useState(primaryEmpBranchId);
 
   useEffect(() => {
     if (currentEmpUser) {
-      const emp = (state && state.employees && state.employees.find((e) => e.id === currentEmpUser?.id)) || currentEmpUser;
-      if (!emp || !emp.branchesDetails || emp.branchesDetails.length <= 1) {
-        setSelectedBranchId(emp?.branchId || '');
+      const currentEmp = (state && state.employees && state.employees.find((e) => e.id === currentEmpUser?.id)) || currentEmpUser;
+      const primaryBId = currentEmp?.branchesDetails?.[0]?.branchId || currentEmp?.branchId || '';
+      if (!currentEmp || !currentEmp.branchesDetails || currentEmp.branchesDetails.length <= 1) {
+        setSelectedBranchId(primaryBId);
         setIsBranchSelected(true);
-        setPunchTargetBranchId(emp?.branchId || '');
+        setPunchTargetBranchId(primaryBId);
       } else {
-        setPunchTargetBranchId(emp.branchesDetails[0]?.branchId || emp.branchId || '');
+        setPunchTargetBranchId(primaryBId);
+        if (!selectedBranchId && primaryBId) {
+          setSelectedBranchId(primaryBId);
+        }
       }
     }
-  }, [currentEmpUser?.id]);
+  }, [currentEmpUser?.id, emp?.branchesDetails, emp?.branchId]);
 
   // When multi-branch employee is on "All Branches" (selectedBranchId === ''), only allowed tabs are accessible
   useEffect(() => {

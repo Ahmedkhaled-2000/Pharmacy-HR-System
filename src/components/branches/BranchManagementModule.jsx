@@ -17,9 +17,28 @@ export default function BranchManagementModule({ state, onSaveBranch, onDeleteBr
   const [managerId, setManagerId] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [usernameError, setUsernameError] = useState('');
 
   const branches = state.branches || [];
   const employees = state.employees || [];
+
+  const handleUsernameChange = (val) => {
+    setUsername(val);
+    const cleanVal = val.trim().toLowerCase();
+    if (!cleanVal) {
+      setUsernameError('');
+      return;
+    }
+    const currentBranchId = editingBranch ? editingBranch.id : null;
+    const duplicate = branches.find(
+      (b) => b.id !== currentBranchId && b.username && b.username.trim().toLowerCase() === cleanVal
+    );
+    if (duplicate) {
+      setUsernameError(`⚠️ اسم المستخدم مستخدم بالفعل لفرع "${duplicate.name}"`);
+    } else {
+      setUsernameError('');
+    }
+  };
 
   const handleOpenAdd = () => {
     setEditingBranch(null);
@@ -32,6 +51,7 @@ export default function BranchManagementModule({ state, onSaveBranch, onDeleteBr
     setManagerId('');
     setUsername(`branch_${branches.length + 1}`);
     setPassword('123456');
+    setUsernameError('');
     setIsModalOpen(true);
   };
 
@@ -61,6 +81,7 @@ export default function BranchManagementModule({ state, onSaveBranch, onDeleteBr
     setManagerId(branch.managerId || '');
     setUsername(branch.username || '');
     setPassword(branch.password || '');
+    setUsernameError('');
     setIsModalOpen(true);
   };
 
@@ -100,6 +121,21 @@ export default function BranchManagementModule({ state, onSaveBranch, onDeleteBr
       return;
     }
 
+    if (usernameError) {
+      alert('يرجى اختيار اسم مستخدم غير مكرر للفرع');
+      return;
+    }
+
+    const cleanUsername = username.trim().toLowerCase();
+    const currentBranchId = editingBranch ? editingBranch.id : null;
+    const duplicate = branches.find(
+      (b) => b.id !== currentBranchId && b.username && b.username.trim().toLowerCase() === cleanUsername
+    );
+    if (duplicate) {
+      alert(`⚠️ اسم المستخدم مستخدم بالفعل لفرع "${duplicate.name}"`);
+      return;
+    }
+
     // Clean valid phones
     const validPhones = phones.filter(p => p.number && p.number.trim());
     const primaryPhone = validPhones[0]?.number || '';
@@ -112,7 +148,7 @@ export default function BranchManagementModule({ state, onSaveBranch, onDeleteBr
       phone: primaryPhone,
       phones: validPhones,
       managerId,
-      username,
+      username: username.trim(),
       password,
       createdAt: editingBranch ? editingBranch.createdAt : new Date().toISOString(),
       updatedAt: new Date().toISOString()
@@ -380,7 +416,18 @@ export default function BranchManagementModule({ state, onSaveBranch, onDeleteBr
 
               <div className="field">
                 <label>اسم المستخدم (صفحة الفرع)</label>
-                <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} required />
+                <input
+                  type="text"
+                  value={username}
+                  onChange={(e) => handleUsernameChange(e.target.value)}
+                  style={usernameError ? { borderColor: 'var(--danger)' } : {}}
+                  required
+                />
+                {usernameError && (
+                  <span style={{ color: 'var(--danger)', fontSize: '12px', fontWeight: 'bold', marginTop: '4px' }}>
+                    {usernameError}
+                  </span>
+                )}
               </div>
 
               <div className="field">

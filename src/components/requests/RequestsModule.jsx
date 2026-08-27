@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { applyShiftSwapToRosters, arabicWeekday, shouldShowRequestToBranch, getEmpDisplayName, isEmployeeActive, normalizeState } from '../../utils/formatters';
 import { notifyEmployeeEarlyExitWarning } from '../../utils/gmailService';
 import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
+import { shouldRouteDirectToAdmin, isBranchWithoutManager } from '../../utils/jobsHelper';
 import { normalizeSchedule } from '../roster/RosterModule';
 import { syncNow, fetchRemoteState } from '../../utils/offlineSync';
 import { createRequestDecisionNotification } from '../../utils/notificationEngine';
@@ -1504,19 +1505,36 @@ export default function RequestsModule({
                     </td>
                     <td>{getFormattedRequestBadge(req.type, req.leaveType)}</td>
                     <td>
-                      {(req.type === 'disciplinary_penalty' || req.createdRole === 'branch' || req.createdRole === 'branch_manager' || req.submittedByBranchManager || req.branchApprovalStatus === 'approved') ? (
-                        <span style={{ color: '#15803d', fontWeight: '800', background: '#f0fdf4', padding: '4px 8px', borderRadius: '6px', border: '1px solid #bbf7d0', fontSize: '12px' }}>
-                          ✓ مرسل من مدير الفرع
-                        </span>
-                      ) : (req.targetApproval === 'admin_only' || req.targetApproval === 'admin' || ['loan', 'advance', 'credit_medicine', 'eval_edit_request', 'complaint'].includes(req.type) || req.branchNotRequired || req.isDirectToAdmin) ? (
-                        <span style={{ color: 'var(--muted)', fontSize: '12px', background: 'rgba(148, 163, 184, 0.14)', padding: '4px 8px', borderRadius: '6px', fontWeight: '700', border: '1px solid var(--border)' }}>
-                          🔒 غير موجهة لمدير الفرع
-                        </span>
-                      ) : req.branchApproved ? (
-                        <span style={{ color: '#16a34a', fontWeight: '700' }}>🟢 معتمد من الفرع</span>
-                      ) : (
-                        <span style={{ color: '#d97706', fontWeight: '700' }}>⏳ بانتظار الفرع</span>
-                      )}
+                      {(() => {
+                        const emp = employees.find(e => e.id === req.employeeId || e.code === req.employeeCode);
+                        const effectiveBranchId = req.branchId || emp?.branchesDetails?.[0]?.branchId || emp?.branchId;
+                        const isDirectAdmin = req.targetApproval === 'admin_only' ||
+                          req.targetApproval === 'admin' ||
+                          ['loan', 'advance', 'credit_medicine', 'eval_edit_request', 'complaint'].includes(req.type) ||
+                          req.branchNotRequired ||
+                          req.isDirectToAdmin ||
+                          shouldRouteDirectToAdmin(emp, effectiveBranchId, state) ||
+                          isBranchWithoutManager(effectiveBranchId, state);
+
+                        if (req.type === 'disciplinary_penalty' || req.createdRole === 'branch' || req.createdRole === 'branch_manager' || req.submittedByBranchManager || req.branchApprovalStatus === 'approved') {
+                          return (
+                            <span style={{ color: '#15803d', fontWeight: '800', background: '#f0fdf4', padding: '4px 8px', borderRadius: '6px', border: '1px solid #bbf7d0', fontSize: '12px' }}>
+                              ✓ مرسل من مدير الفرع
+                            </span>
+                          );
+                        }
+                        if (isDirectAdmin) {
+                          return (
+                            <span style={{ color: 'var(--muted)', fontSize: '12px', background: 'rgba(148, 163, 184, 0.14)', padding: '4px 8px', borderRadius: '6px', fontWeight: '700', border: '1px solid var(--border)' }}>
+                              🔒 غير موجهة لمدير الفرع
+                            </span>
+                          );
+                        }
+                        if (req.branchApproved) {
+                          return <span style={{ color: '#16a34a', fontWeight: '700' }}>🟢 معتمد من الفرع</span>;
+                        }
+                        return <span style={{ color: '#d97706', fontWeight: '700' }}>⏳ بانتظار الفرع</span>;
+                      })()}
                     </td>
                     <td>
                       {req.status === 'approved' && <span className="approval-status-badge approved">🟢 معتمد نهائياً</span>}
@@ -1573,9 +1591,10 @@ export default function RequestsModule({
       </div>
 
       {previewModalReq && (() => {
-        const empObj = employees.find(e => String(e.id) === String(previewModalReq.employeeId));
+        const empObj = employees.find(e => String(e.id) === String(previewModalReq.employeeId) || (previewModalReq.employeeCode && String(e.code) === String(previewModalReq.employeeCode)));
         const branches = state.branches || [];
-        const branchObj = branches.find(b => b.id === (previewModalReq.branchId || empObj?.branchId));
+        const effectiveReqBranchId = previewModalReq.branchId || empObj?.branchesDetails?.[0]?.branchId || empObj?.branchId;
+        const branchObj = branches.find(b => String(b.id) === String(effectiveReqBranchId) || String(b.branchCode) === String(effectiveReqBranchId) || b.name === effectiveReqBranchId);
         const targetEmpObj = employees.find(e => String(e.id) === String(previewModalReq.targetEmpId || previewModalReq.targetEmployeeId || previewModalReq.peerEmployeeId));
 
         // Calculate leave days count accurately
@@ -1607,7 +1626,14 @@ export default function RequestsModule({
         const isInstallment = previewModalReq.loanType === 'installments' || previewModalReq.isInstallment || (monthlyDed > 0 && monthlyDed < totalAmount) || (parseInt(previewModalReq.installmentsCount, 10) > 1);
         const installmentsCount = previewModalReq.installmentsCount || previewModalReq.monthsCount || (monthlyDed > 0 ? Math.ceil(totalAmount / monthlyDed) : 1);
 
-        const isBranchNotReq = previewModalReq.targetApproval === 'admin_only' || previewModalReq.targetApproval === 'admin' || isLoan || isComplaint || previewModalReq.branchNotRequired || previewModalReq.isDirectToAdmin;
+        const isBranchNotReq = previewModalReq.targetApproval === 'admin_only' ||
+          previewModalReq.targetApproval === 'admin' ||
+          isLoan ||
+          isComplaint ||
+          previewModalReq.branchNotRequired ||
+          previewModalReq.isDirectToAdmin ||
+          shouldRouteDirectToAdmin(empObj, effectiveReqBranchId, state) ||
+          isBranchWithoutManager(effectiveReqBranchId, state);
 
         return (
           <div className="modal-overlay" onClick={() => setPreviewModalReq(null)} style={{ zIndex: 1100 }}>
@@ -1655,7 +1681,7 @@ export default function RequestsModule({
                     <div>
                       <span style={{ color: 'var(--muted)', fontSize: '12px' }}>الفرع:</span>
                       <div style={{ fontWeight: 'bold', color: 'var(--text)' }}>
-                        🏢 {branchObj?.name ? `فرع ${branchObj.name}` : 'الفرع الرئيسي'}
+                        🏢 {branchObj?.name ? (branchObj.name.startsWith('فرع') ? branchObj.name : `فرع ${branchObj.name}`) : (previewModalReq.branchName || empObj?.branchName || 'الفرع الرئيسي')}
                       </div>
                     </div>
                     <div>

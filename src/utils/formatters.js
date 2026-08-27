@@ -448,7 +448,7 @@ export function shouldShowRequestToBranch(req, state) {
   }
 
   // 5. Check if the branch has no assigned manager (direct to Admin)
-  const targetBranchId = req.branchId || emp?.branchId || emp?.branchesDetails?.[0]?.branchId;
+  const targetBranchId = req.branchId || emp?.branchesDetails?.[0]?.branchId || emp?.branchId;
   if (targetBranchId && isBranchWithoutManager(targetBranchId, state)) {
     return false;
   }

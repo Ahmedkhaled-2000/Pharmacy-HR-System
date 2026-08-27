@@ -67,7 +67,7 @@ export default function EmployeeFileModal({
   
   // 3. Financial & Branches & Schedule (Multi-Branch Support)
   const [branchesDetails, setBranchesDetails] = useState([
-    { id: Date.now().toString(), branchId: '', salary: '4000', workHours: '8', workDays: '26' }
+    { id: Date.now().toString(), branchId: '', salary: '', workHours: '', workDays: '', breakHours: '' }
   ]);
   // Preserved/Archived financial data for branches the employee was unassigned from
   const [archivedBranchesDetails, setArchivedBranchesDetails] = useState([]);
@@ -107,10 +107,10 @@ export default function EmployeeFileModal({
       newBd[idx] = {
         ...newBd[idx],
         branchId: selectedBranchId,
-        salary: String(foundArchived.salary || '4000'),
-        workHours: String(foundArchived.workHours || foundArchived.workHoursPerDay || '8'),
-        workDays: String(foundArchived.workDays || foundArchived.workDaysPerMonth || '26'),
-        breakHours: String(foundArchived.breakHours || foundArchived.defaultBreakHours || '0')
+        salary: String(foundArchived.salary !== undefined ? foundArchived.salary : ''),
+        workHours: String(foundArchived.workHours || foundArchived.workHoursPerDay || ''),
+        workDays: String(foundArchived.workDays || foundArchived.workDaysPerMonth || ''),
+        breakHours: String(foundArchived.breakHours || foundArchived.defaultBreakHours || '')
       };
       // Remove from archived list since it is now active
       setArchivedBranchesDetails(prev => prev.filter(ab => String(ab.branchId) !== String(selectedBranchId)));
@@ -140,10 +140,10 @@ export default function EmployeeFileModal({
             branchId: bId,
             branchName: branchObj ? branchObj.name : (targetBranch.branchName || 'فرع غير معروف'),
             branchCode: branchObj ? branchObj.branchCode : '',
-            salary: String(targetBranch.salary || '4000'),
-            workHours: String(targetBranch.workHours || targetBranch.workHoursPerDay || '8'),
-            workDays: String(targetBranch.workDays || targetBranch.workDaysPerMonth || '26'),
-            breakHours: String(targetBranch.breakHours || targetBranch.defaultBreakHours || '0'),
+            salary: String(targetBranch.salary !== undefined ? targetBranch.salary : ''),
+            workHours: String(targetBranch.workHours || targetBranch.workHoursPerDay || ''),
+            workDays: String(targetBranch.workDays || targetBranch.workDaysPerMonth || ''),
+            breakHours: String(targetBranch.breakHours || targetBranch.defaultBreakHours || ''),
             archivedAt: new Date().toISOString()
           }
         ];
@@ -151,7 +151,7 @@ export default function EmployeeFileModal({
     }
 
     if (branchesDetails.length <= 1) {
-      setBranchesDetails([{ id: Math.random().toString(), branchId: '', salary: '4000', workHours: '8', workDays: '26', breakHours: '0' }]);
+      setBranchesDetails([{ id: Math.random().toString(), branchId: '', salary: '', workHours: '', workDays: '', breakHours: '' }]);
     } else {
       setBranchesDetails(branchesDetails.filter((_, i) => i !== idx));
     }
@@ -242,20 +242,20 @@ export default function EmployeeFileModal({
         loadedActiveBranches = editingEmp.branchesDetails.map(bd => ({
           id: Math.random().toString(),
           branchId: bd.branchId || '',
-          salary: String(bd.salary || '4000'),
-          workHours: String(bd.workHoursPerDay || bd.workHours || '8'),
-          workDays: String(bd.workDaysPerMonth || bd.workDays || '26'),
-          breakHours: String(bd.breakHours || bd.defaultBreakHours || editingEmp.breakHours || editingEmp.defaultBreakHours || '0')
+          salary: String(bd.salary !== undefined ? bd.salary : ''),
+          workHours: String(bd.workHoursPerDay !== undefined ? bd.workHoursPerDay : (bd.workHours !== undefined ? bd.workHours : '')),
+          workDays: String(bd.workDaysPerMonth !== undefined ? bd.workDaysPerMonth : (bd.workDays !== undefined ? bd.workDays : '')),
+          breakHours: String(bd.breakHours !== undefined ? bd.breakHours : (bd.defaultBreakHours !== undefined ? bd.defaultBreakHours : ''))
         }));
       } else {
         loadedActiveBranches = [
           { 
             id: Math.random().toString(),
             branchId: editingEmp.branchId || (branches[0]?.id || ''),
-            salary: String(editingEmp.salary || '4000'),
-            workHours: String(editingEmp.workHoursPerDay || editingEmp.workHours || '8'),
-            workDays: String(editingEmp.workDaysPerMonth || editingEmp.workDays || '26'),
-            breakHours: String(editingEmp.breakHours || editingEmp.defaultBreakHours || '0')
+            salary: String(editingEmp.salary !== undefined ? editingEmp.salary : ''),
+            workHours: String(editingEmp.workHoursPerDay !== undefined ? editingEmp.workHoursPerDay : (editingEmp.workHours !== undefined ? editingEmp.workHours : '')),
+            workDays: String(editingEmp.workDaysPerMonth !== undefined ? editingEmp.workDaysPerMonth : (editingEmp.workDays !== undefined ? editingEmp.workDays : '')),
+            breakHours: String(editingEmp.breakHours !== undefined ? editingEmp.breakHours : (editingEmp.defaultBreakHours !== undefined ? editingEmp.defaultBreakHours : ''))
           }
         ];
       }
@@ -273,10 +273,10 @@ export default function EmployeeFileModal({
             branchId: ab.branchId,
             branchName: ab.branchName || (bObj ? bObj.name : 'فرع غير معروف'),
             branchCode: ab.branchCode || (bObj ? bObj.branchCode : ''),
-            salary: String(ab.salary || '4000'),
-            workHours: String(ab.workHoursPerDay || ab.workHours || '8'),
-            workDays: String(ab.workDaysPerMonth || ab.workDays || '26'),
-            breakHours: String(ab.breakHours || ab.defaultBreakHours || '0'),
+            salary: String(ab.salary !== undefined ? ab.salary : ''),
+            workHours: String(ab.workHoursPerDay !== undefined ? ab.workHoursPerDay : (ab.workHours !== undefined ? ab.workHours : '')),
+            workDays: String(ab.workDaysPerMonth !== undefined ? ab.workDaysPerMonth : (ab.workDays !== undefined ? ab.workDays : '')),
+            breakHours: String(ab.breakHours !== undefined ? ab.breakHours : (ab.defaultBreakHours !== undefined ? ab.defaultBreakHours : '')),
             archivedAt: ab.archivedAt || new Date().toISOString()
           };
         });
@@ -324,7 +324,7 @@ export default function EmployeeFileModal({
       setExtraAllowances([]);
 
       setBranchesDetails([
-        { id: Math.random().toString(), branchId: branches[0]?.id || '', salary: '4000', workHours: '8', workDays: '26' }
+        { id: Math.random().toString(), branchId: branches[0]?.id || '', salary: '', workHours: '', workDays: '', breakHours: '' }
       ]);
       setArchivedBranchesDetails([]);
       
@@ -966,11 +966,27 @@ export default function EmployeeFileModal({
                 {branchesDetails.map((bd, idx) => {
                   const branchName = branches.find(b => b.id === bd.branchId)?.name || `فرع غير محدد (${idx + 1})`;
                   const rateVal = parseFloat(bd.salary) || 0;
-                  const daysVal = parseFloat(bd.workDays) || 26;
-                  const hoursVal = parseFloat(bd.workHours) || 8;
-                  const calcDailyRate = daysVal > 0 ? (rateVal * hoursVal) / daysVal : 0;
-                  const calcDailyHourlyRate = hoursVal > 0 ? calcDailyRate / hoursVal : (daysVal > 0 ? rateVal / daysVal : rateVal);
-                  const calcMonthlySalary = calcDailyRate * daysVal;
+                  const hoursVal = parseFloat(bd.workHours) || 0;
+                  const daysVal = parseFloat(bd.workDays) || 0;
+                  const breakVal = parseFloat(bd.breakHours) || 0;
+                  const netHoursVal = Math.max(0, hoursVal - breakVal);
+
+                  let calcDailyRate = 0;
+                  let calcDailyHourlyRate = 0;
+                  let calcMonthlySalary = 0;
+
+                  if (rateVal > 0 && daysVal > 0) {
+                    if (rateVal >= 200) {
+                      calcDailyRate = Math.round((rateVal / daysVal) * 100) / 100;
+                      calcDailyHourlyRate = (netHoursVal > 0 ? calcDailyRate / netHoursVal : (hoursVal > 0 ? calcDailyRate / hoursVal : 0));
+                      calcDailyHourlyRate = Math.round(calcDailyHourlyRate * 100) / 100;
+                      calcMonthlySalary = rateVal;
+                    } else {
+                      calcDailyHourlyRate = rateVal;
+                      calcDailyRate = Math.round(calcDailyHourlyRate * (netHoursVal > 0 ? netHoursVal : hoursVal) * 100) / 100;
+                      calcMonthlySalary = Math.round(calcDailyRate * daysVal * 100) / 100;
+                    }
+                  }
 
                   return (
                     <div key={bd.id} style={{ background: 'var(--primary-tint)', padding: '16px', borderRadius: '12px', border: '1.5px solid var(--primary-light, #bfdbfe)' }}>
@@ -984,29 +1000,47 @@ export default function EmployeeFileModal({
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px' }}>
                         <div className="field">
                           <label>سعر الساعة الشهري (الراتب الأساسي)</label>
-                          <input type="number" value={bd.salary} onChange={(e) => {
-                            const newBd = [...branchesDetails];
-                            newBd[idx].salary = e.target.value;
-                            setBranchesDetails(newBd);
-                          }} placeholder="650" required />
+                          <input
+                            type="number"
+                            value={bd.salary !== undefined ? bd.salary : ''}
+                            onChange={(e) => {
+                              const newBd = [...branchesDetails];
+                              newBd[idx].salary = e.target.value;
+                              setBranchesDetails(newBd);
+                            }}
+                            placeholder="الراتب الأساسي / سعر الساعة"
+                            required
+                          />
                         </div>
 
                         <div className="field">
                           <label>ساعات العمل اليومية المدخلة</label>
-                          <input type="number" value={bd.workHours} onChange={(e) => {
-                            const newBd = [...branchesDetails];
-                            newBd[idx].workHours = e.target.value;
-                            setBranchesDetails(newBd);
-                          }} placeholder="10" required />
+                          <input
+                            type="number"
+                            value={bd.workHours !== undefined ? bd.workHours : ''}
+                            onChange={(e) => {
+                              const newBd = [...branchesDetails];
+                              newBd[idx].workHours = e.target.value;
+                              setBranchesDetails(newBd);
+                            }}
+                            placeholder="ساعات العمل"
+                            required
+                          />
                         </div>
 
                         <div className="field">
                           <label>أيام العمل الشهرية المدخلة</label>
-                          <input type="number" value={bd.workDays} onChange={(e) => {
-                            const newBd = [...branchesDetails];
-                            newBd[idx].workDays = e.target.value;
-                            setBranchesDetails(newBd);
-                          }} placeholder="26" required />
+                          <input
+                            type="number"
+                            value={bd.workDays !== undefined ? bd.workDays : ''}
+                            onChange={(e) => {
+                              const newBd = [...branchesDetails];
+                              newBd[idx].workDays = e.target.value;
+                              setBranchesDetails(newBd);
+                            }}
+                            placeholder="أيام العمل"
+                            required
+                          />
                         </div>
 
                         <div className="field">
@@ -1016,7 +1050,7 @@ export default function EmployeeFileModal({
                             step="0.25"
                             min="0"
                             max="12"
-                            value={bd.breakHours || '0'}
+                            value={bd.breakHours !== undefined ? bd.breakHours : ''}
                             onChange={(e) => {
                               const newBd = [...branchesDetails];
                               newBd[idx].breakHours = e.target.value;
@@ -1028,10 +1062,10 @@ export default function EmployeeFileModal({
                       </div>
 
                       <div style={{ marginTop: '10px', padding: '8px 12px', background: '#fff', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '12.5px', color: '#166534', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
-                        <span>📅 سعر اليوم: <strong>{calcDailyRate.toLocaleString()} ج.م / يوم</strong> (({rateVal} × {hoursVal}) ÷ {daysVal})</span>
-                        <span>💵 سعر الساعة اليومي: <strong>{calcDailyHourlyRate.toLocaleString()} ج.م / ساعة</strong></span>
-                        <span>☕ ساعات البريك: <strong>{bd.breakHours || '0'} س</strong></span>
-                        <span>💰 الراتب الأساسي الشهري: <strong>{calcMonthlySalary.toLocaleString()} ج.م</strong></span>
+                        <span>📅 سعر اليوم: <strong>{calcDailyRate > 0 ? `${calcDailyRate.toLocaleString()} ج.م / يوم` : '0 ج.م'}</strong></span>
+                        <span>💵 سعر الساعة اليومي: <strong>{calcDailyHourlyRate > 0 ? `${calcDailyHourlyRate.toLocaleString()} ج.م / ساعة` : '0 ج.م'}</strong></span>
+                        <span>☕ ساعات البريك: <strong>{breakVal > 0 ? `${breakVal} س` : '0 س'}</strong></span>
+                        <span>💰 الراتب الأساسي الشهري: <strong>{calcMonthlySalary > 0 ? `${calcMonthlySalary.toLocaleString()} ج.م` : '0 ج.م'}</strong></span>
                       </div>
                     </div>
                   );
@@ -1053,11 +1087,27 @@ export default function EmployeeFileModal({
                   {archivedBranchesDetails.map((ab) => {
                     const branchName = ab.branchName || branches.find(b => String(b.id) === String(ab.branchId))?.name || 'فرع غير معروف';
                     const rateVal = parseFloat(ab.salary) || 0;
-                    const daysVal = parseFloat(ab.workDays || ab.workDaysPerMonth) || 26;
-                    const hoursVal = parseFloat(ab.workHours || ab.workHoursPerDay) || 8;
-                    const calcDailyRate = daysVal > 0 ? (rateVal * hoursVal) / daysVal : 0;
-                    const calcDailyHourlyRate = hoursVal > 0 ? calcDailyRate / hoursVal : (daysVal > 0 ? rateVal / daysVal : rateVal);
-                    const calcMonthlySalary = calcDailyRate * daysVal;
+                    const hoursVal = parseFloat(ab.workHours || ab.workHoursPerDay) || 0;
+                    const daysVal = parseFloat(ab.workDays || ab.workDaysPerMonth) || 0;
+                    const breakVal = parseFloat(ab.breakHours || ab.defaultBreakHours) || 0;
+                    const netHoursVal = Math.max(0, hoursVal - breakVal);
+
+                    let calcDailyRate = 0;
+                    let calcDailyHourlyRate = 0;
+                    let calcMonthlySalary = 0;
+
+                    if (rateVal > 0 && daysVal > 0) {
+                      if (rateVal >= 200) {
+                        calcDailyRate = Math.round((rateVal / daysVal) * 100) / 100;
+                        calcDailyHourlyRate = (netHoursVal > 0 ? calcDailyRate / netHoursVal : (hoursVal > 0 ? calcDailyRate / hoursVal : 0));
+                        calcDailyHourlyRate = Math.round(calcDailyHourlyRate * 100) / 100;
+                        calcMonthlySalary = rateVal;
+                      } else {
+                        calcDailyHourlyRate = rateVal;
+                        calcDailyRate = Math.round(calcDailyHourlyRate * (netHoursVal > 0 ? netHoursVal : hoursVal) * 100) / 100;
+                        calcMonthlySalary = Math.round(calcDailyRate * daysVal * 100) / 100;
+                      }
+                    }
 
                     return (
                       <div
@@ -1109,7 +1159,7 @@ export default function EmployeeFileModal({
                             <label style={{ color: '#64748b', fontSize: '12px' }}>سعر الساعة الشهري (محفوظ)</label>
                             <input
                               type="number"
-                              value={ab.salary}
+                              value={ab.salary !== undefined ? ab.salary : ''}
                               disabled
                               readOnly
                               style={{
@@ -1126,7 +1176,7 @@ export default function EmployeeFileModal({
                             <label style={{ color: '#64748b', fontSize: '12px' }}>ساعات العمل اليومية (محفوظة)</label>
                             <input
                               type="number"
-                              value={ab.workHours || ab.workHoursPerDay || '8'}
+                              value={ab.workHours || ab.workHoursPerDay || ''}
                               disabled
                               readOnly
                               style={{
@@ -1143,7 +1193,7 @@ export default function EmployeeFileModal({
                             <label style={{ color: '#64748b', fontSize: '12px' }}>أيام العمل الشهرية (محفوظة)</label>
                             <input
                               type="number"
-                              value={ab.workDays || ab.workDaysPerMonth || '26'}
+                              value={ab.workDays || ab.workDaysPerMonth || ''}
                               disabled
                               readOnly
                               style={{
@@ -1160,7 +1210,7 @@ export default function EmployeeFileModal({
                             <label style={{ color: '#64748b', fontSize: '12px' }}>ساعات البريك (محفوظة)</label>
                             <input
                               type="number"
-                              value={ab.breakHours || ab.defaultBreakHours || '0'}
+                              value={ab.breakHours !== undefined ? ab.breakHours : ''}
                               disabled
                               readOnly
                               style={{
@@ -1175,9 +1225,9 @@ export default function EmployeeFileModal({
                         </div>
 
                         <div style={{ marginTop: '10px', padding: '8px 12px', background: '#f1f5f9', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '12px', color: '#475569', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
-                          <span>📅 سعر اليوم المحفوظ: <strong>{calcDailyRate.toLocaleString()} ج.م</strong></span>
-                          <span>💵 سعر الساعة: <strong>{calcDailyHourlyRate.toLocaleString()} ج.م</strong></span>
-                          <span>💰 الراتب الأساسي: <strong>{calcMonthlySalary.toLocaleString()} ج.م</strong></span>
+                          <span>📅 سعر اليوم المحفوظ: <strong>{calcDailyRate > 0 ? `${calcDailyRate.toLocaleString()} ج.م` : '0 ج.م'}</strong></span>
+                          <span>💵 سعر الساعة: <strong>{calcDailyHourlyRate > 0 ? `${calcDailyHourlyRate.toLocaleString()} ج.م` : '0 ج.م'}</strong></span>
+                          <span>💰 الراتب الأساسي: <strong>{calcMonthlySalary > 0 ? `${calcMonthlySalary.toLocaleString()} ج.م` : '0 ج.م'}</strong></span>
                           <span style={{ color: '#0284c7', fontWeight: 'bold' }}>ℹ️ لإعادة التفعيل: أضف الفرع للموظف</span>
                         </div>
                       </div>

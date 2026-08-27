@@ -93,7 +93,7 @@ export default function EmployeeResignationModule({
       return;
     }
 
-    const reqBranchId = selectedBranchId || emp.branchId;
+    const reqBranchId = selectedBranchId || emp.branchesDetails?.[0]?.branchId || emp.branchId;
     const isDirectAdmin = shouldRouteDirectToAdmin(emp, reqBranchId, state);
 
     const newReq = {

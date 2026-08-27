@@ -129,24 +129,39 @@ export function normalizeSchedule(rawSchedule) {
 
 export function getResolvedEmployeeRoster(emp, targetBranchId, selectedMonth, state) {
   if (!emp || !state) return null;
-  const empIdStr = String(emp.id);
-  const targetBIdStr = targetBranchId ? String(targetBranchId) : null;
+  const empIdStr = String(emp.id || '');
+  const empCodeStr = String(emp.code || '');
+  const targetBIdStr = targetBranchId ? String(targetBranchId).trim() : null;
   const rosters = state.rosters || [];
   const requests = state.requests || [];
-  const isMultiBranch = emp.branchesDetails && emp.branchesDetails.length > 1;
+  const isMultiBranch = Array.isArray(emp.branchesDetails) && emp.branchesDetails.length > 1;
+
+  const matchesEmployee = (item) => {
+    if (!item) return false;
+    const itemEmpId = String(item.employeeId || '');
+    const itemEmpCode = String(item.employeeCode || '');
+    return (
+      (empIdStr && itemEmpId === empIdStr) ||
+      (empCodeStr && itemEmpCode === empCodeStr) ||
+      (empCodeStr && itemEmpId === empCodeStr) ||
+      (empIdStr && itemEmpCode === empIdStr)
+    );
+  };
 
   const branchMatches = (itemBranchId) => {
     if (!targetBIdStr) return true;
-    const itemBStr = itemBranchId ? String(itemBranchId) : '';
+    const itemBStr = itemBranchId ? String(itemBranchId).trim() : '';
+    if (!itemBStr) return true; // If unassigned, consider matching
     if (itemBStr === targetBIdStr) return true;
     
-    // Check match against branch object ID and Name
-    const targetBObj = (state.branches || []).find(b => String(b.id) === targetBIdStr || b.name === targetBIdStr);
-    if (targetBObj && (itemBStr === String(targetBObj.id) || itemBStr === targetBObj.name)) return true;
+    // Check match against branch object ID, branchCode and Name
+    const targetBObj = (state.branches || []).find(b => String(b.id) === targetBIdStr || String(b.branchCode) === targetBIdStr || b.name === targetBIdStr);
+    if (targetBObj && (itemBStr === String(targetBObj.id) || itemBStr === String(targetBObj.branchCode) || itemBStr === targetBObj.name)) return true;
 
     // Fallback if employee is single-branch or item branch was empty
-    if (!itemBStr && !isMultiBranch) {
-      return String(emp.branchId || '') === targetBIdStr || String(emp.branchesDetails?.[0]?.branchId || '') === targetBIdStr;
+    if (!isMultiBranch) {
+      const singleB = String(emp.branchesDetails?.[0]?.branchId || emp.branchId || '');
+      return singleB === targetBIdStr || singleB === itemBStr;
     }
     return false;
   };
@@ -155,8 +170,8 @@ export function getResolvedEmployeeRoster(emp, targetBranchId, selectedMonth, st
 
   // 1. Gather all matching approved records from state.rosters
   rosters.forEach((r) => {
-    if (String(r.employeeId) !== empIdStr) return;
-    if (r.status !== 'approved') return;
+    if (!matchesEmployee(r)) return;
+    if (r.status !== 'approved' && !r.adminApproved) return;
     if (selectedMonth && r.month && r.month !== selectedMonth) return;
     if (branchMatches(r.branchId)) {
       candidates.push({
@@ -169,7 +184,7 @@ export function getResolvedEmployeeRoster(emp, targetBranchId, selectedMonth, st
 
   // 2. Gather all matching approved records from state.requests
   requests.forEach((req) => {
-    if (String(req.employeeId) !== empIdStr) return;
+    if (!matchesEmployee(req)) return;
     if (req.type !== 'roster_update' && req.type !== 'roster_edit' && req.type !== 'roster_edit_request') return;
     if (req.status !== 'approved' && !req.adminApproved) return;
     if (selectedMonth && req.month && req.month !== selectedMonth) return;
@@ -181,7 +196,7 @@ export function getResolvedEmployeeRoster(emp, targetBranchId, selectedMonth, st
         month: req.month,
         fromDate: req.fromDate,
         toDate: req.toDate,
-        schedule: req.schedule,
+        schedule: req.schedule || req.newSchedule,
         status: 'approved',
         approvedAt: req.approvedAt || req.updatedAt || req.createdAt || '2000-01-01',
         source: 'requests'
@@ -215,6 +230,7 @@ export default function EmployeeRosterModule({
   selectedBranchId
 }) {
   const isMultiBranch = emp.branchesDetails && emp.branchesDetails.length > 1;
+  const primaryBranch = emp.branchesDetails?.[0]?.branchId || emp.branchId || '';
 
   const [isMobileScreen, setIsMobileScreen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth <= 768 : false));
   useEffect(() => {
@@ -225,10 +241,10 @@ export default function EmployeeRosterModule({
 
   const [showRosterModal, setShowRosterModal] = useState(false);
   const [viewMode, setViewMode] = useState('calendar'); // 'calendar' | 'week'
-  const [activeFormBranchId, setActiveFormBranchId] = useState(selectedBranchId || '');
+  const [activeFormBranchId, setActiveFormBranchId] = useState(selectedBranchId || primaryBranch || '');
 
   // Determine current active branch ID for roster lookups
-  const curBranch = selectedBranchId || activeFormBranchId || (isMultiBranch ? emp.branchesDetails?.[0]?.branchId : emp.branchId);
+  const curBranch = selectedBranchId || activeFormBranchId || primaryBranch;
 
   // Form states
   const [scheduleInputs, setScheduleInputs] = useState(DEFAULT_SCHEDULE);
@@ -247,7 +263,7 @@ export default function EmployeeRosterModule({
 
   // Sync state when selectedBranchId, activeFormBranchId, selectedMonth, or state changes
   useEffect(() => {
-    const targetBranch = selectedBranchId || activeFormBranchId || (isMultiBranch ? emp.branchesDetails?.[0]?.branchId : emp.branchId);
+    const targetBranch = selectedBranchId || activeFormBranchId || primaryBranch;
     const approved = getResolvedEmployeeRoster(emp, targetBranch, selectedMonth, state);
 
     if (approved?.schedule) {
@@ -265,16 +281,16 @@ export default function EmployeeRosterModule({
       const daysInMonth = new Date(y, m, 0).getDate();
       setToDate(`${selectedMonth}-${String(daysInMonth).padStart(2, '0')}`);
     }
-  }, [selectedBranchId, activeFormBranchId, selectedMonth, state.rosters, state.requests, emp.id, emp.branchId]);
+  }, [selectedBranchId, activeFormBranchId, selectedMonth, state.rosters, state.requests, emp.id, emp.code, emp.branchId, primaryBranch]);
 
   // Pending Roster Requests for Employee
   const pendingRosterReq = (state.requests || []).find(
     (r) =>
-      String(r.employeeId) === String(emp.id) &&
+      (String(r.employeeId) === String(emp.id) || (emp.code && String(r.employeeCode) === String(emp.code))) &&
       (r.type === 'roster_update' || r.type === 'roster_edit' || r.type === 'roster_edit_request') &&
       (r.month === selectedMonth || !r.month) &&
       (r.status === 'pending' || r.status === 'pending_admin') &&
-      (String(r.branchId || '') === String(curBranch || '') || (!r.branchId && String(emp.branchId || '') === String(curBranch || '')))
+      (String(r.branchId || '') === String(curBranch || '') || (!r.branchId && String(primaryBranch || '') === String(curBranch || '')))
   );
 
   // The active schedule to display (approved or form defaults)
@@ -304,7 +320,7 @@ export default function EmployeeRosterModule({
   const handleSubmitRoster = async (e) => {
     e.preventDefault();
 
-    const targetBranch = activeFormBranchId || selectedBranchId || emp.branchId;
+    const targetBranch = activeFormBranchId || selectedBranchId || primaryBranch;
 
     const isDirectAdmin = shouldRouteDirectToAdmin(emp, targetBranch, state);
     const targetApproval = isDirectAdmin ? 'admin_only' : 'branch_and_admin';
@@ -330,12 +346,18 @@ export default function EmployeeRosterModule({
     const updatedRequests = [newRosterReq, ...(state.requests || [])];
     const updatedState = { ...state, requests: updatedRequests };
 
+    // Instant Optimistic UI Update (No lagging or waiting)
     setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    notifyAdminOnNewRequest({ state: updatedState, newRequest: newRosterReq, empName: emp.name });
-
     setShowRosterModal(false);
     showToast(isDirectAdmin ? 'تم إرسال جدول الشيفتات الشهري للاعتماد من الإدارة العليا مباشرة 📅' : 'تم إرسال جدول الشيفتات الشهري للاعتماد من مدير الفرع والإدارة العليا 📅');
+
+    // Asynchronous background persistence and notifications
+    try {
+      if (saveState) await saveState(updatedState);
+      notifyAdminOnNewRequest({ state: updatedState, newRequest: newRosterReq, empName: emp.name });
+    } catch (err) {
+      console.warn('Background sync on submit roster:', err);
+    }
   };
 
   // Render Roster Builder Modal Component
