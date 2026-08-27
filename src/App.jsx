@@ -5053,7 +5053,7 @@ export default function App() {
                   (state.employees || []).find((e) => e.id === currentBranch?.managerId)?.id,
                   state
                 )
-              : filterAdminNotifications(state.notifications || [])
+              : filterAdminNotifications(state.notifications || [], state)
           }
           onMarkNotificationRead={handleMarkNotificationRead}
           onMarkAllNotificationsRead={handleMarkAllNotificationsRead}

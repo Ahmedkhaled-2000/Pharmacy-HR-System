@@ -381,7 +381,7 @@ export default function NotificationCenterModule({
         (state.employees || []).find((e) => e.id === currentBranch?.managerId)?.id,
         state
       )
-    : filterAdminNotifications(state.notifications || []);
+    : filterAdminNotifications(state.notifications || [], state);
 
   const notifications = baseNotifications.filter((n) => {
     if (!n) return false;

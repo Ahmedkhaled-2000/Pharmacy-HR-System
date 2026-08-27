@@ -155,20 +155,28 @@ export function filterEmployeeNotifications(notifications = [], employeeId = nul
   });
 }
 
+import { shouldShowRequestToBranch } from './formatters';
+
 /**
  * Filter notifications meant for Senior Management / Admins
  * Strictly prevents self-notifications when Admin executes any action, punch, or adjustment
+ * Integrates live incoming requests from employees and branches that await Higher Management approval
  */
-export function filterAdminNotifications(notifications = []) {
-  return (notifications || []).filter((n) => {
+export function filterAdminNotifications(notifications = [], state = null) {
+  const deletedIdsSet = new Set((state?._deletedIds || []).map(String));
+
+  // 1. Filter explicit notifications from state.notifications
+  const explicitNotifs = (notifications || []).filter((n) => {
     if (!n) return false;
+    const notifIdStr = String(n.id || '');
+    if (deletedIdsSet.has(notifIdStr)) return false;
 
     // 1. Never show notifications marked as hidden from Admin or created by Admin for employees
     if (n.hiddenFromAdmin === true || n.creatorRole === 'admin' || n.createdBy === 'admin' || n.isAdminCreated === true || n.submittedByAdmin === true) {
       return false;
     }
 
-    // 2. Never show employee-targeted notifications or decision confirmations (e.g. approvals, rejections, direct adjustments, manual punches)
+    // 2. Never show employee-targeted notifications or self decision confirmations (approvals/rejections of employee items)
     if (n.targetRole === 'employee' || n.targetRole === 'all_employees') {
       return false;
     }
@@ -183,8 +191,7 @@ export function filterAdminNotifications(notifications = []) {
       n.title.includes('تم تسجيل بصمة') ||
       n.title.includes('تم تطبيق خصم') ||
       n.title.includes('تمت إضافة مكافأة') ||
-      n.title.includes('تم اعتماد السلفة') ||
-      n.title.includes('تم اعتماد طلب')
+      n.title.includes('تم اعتماد السلفة')
     )) {
       return false;
     }
@@ -195,7 +202,7 @@ export function filterAdminNotifications(notifications = []) {
     }
 
     // 4. Explicitly targeted to Admin / Owner / Management
-    if (n.targetRole === 'admin' || n.targetRole === 'owner' || n.targetRole === 'branch_and_admin') {
+    if (n.targetRole === 'admin' || n.targetRole === 'owner' || n.targetRole === 'branch_and_admin' || !n.targetRole) {
       return true;
     }
 
@@ -205,7 +212,101 @@ export function filterAdminNotifications(notifications = []) {
     }
 
     return false;
-  }).sort((a, b) => {
+  });
+
+  // 2. Dynamically integrate active pending requests waiting for Admin approval if not already in explicit notifications
+  const synthesizedPendingNotifs = [];
+  if (state) {
+    const existingReqIds = new Set(
+      explicitNotifs.map((n) => String(n.requestId || n.id || '')).filter(Boolean)
+    );
+    const seenReqs = new Set();
+
+    const addIfAdminPending = (r, defaultType) => {
+      if (!r || !r.id) return;
+      const rId = String(r.id);
+      if (seenReqs.has(rId) || deletedIdsSet.has(rId)) return;
+      seenReqs.add(rId);
+
+      if (r.hiddenFromAdmin) return;
+      if (r.adminApproved === true || r.status === 'approved' || r.status === 'rejected' || r.status === 'cancelled') return;
+
+      const isPending = r.status === 'pending' || r.status === 'pending_admin' || !r.status;
+      if (isPending) {
+        const emp = (state.employees || []).find(
+          (e) => String(e.id) === String(r.employeeId) || (r.employeeCode && String(e.code) === String(r.employeeCode))
+        );
+        const empName = emp?.name || r.employeeName || 'موظف';
+        const finalType = r.type || defaultType;
+        const typeLabel = getRequestTypeArabicLabel(finalType);
+        const iconMap = {
+          leave: '🏖️',
+          leave_request: '🏖️',
+          permission: '⏰',
+          loan: '💳',
+          advance: '💳',
+          meds: '💊',
+          credit_medicine: '💊',
+          swap: '🔄',
+          shift_swap: '🔄',
+          resignation: '🚪',
+          penalty_objection: '✋'
+        };
+
+        if (!existingReqIds.has(rId) && !existingReqIds.has(`notif_pending_${rId}`)) {
+          synthesizedPendingNotifs.push({
+            id: `notif_pending_${rId}`,
+            requestId: r.id,
+            type: finalType,
+            typeLabel,
+            icon: iconMap[finalType] || '📋',
+            title: `📋 طلب وارد ينتظر قرار الإدارة: ${empName}`,
+            message: `${typeLabel} للموظف (${empName}) ينتظر الاعتماد والمراجعة. ${r.reason || r.details || ''}`,
+            employeeId: r.employeeId || emp?.id,
+            employeeName: empName,
+            employeeCode: r.employeeCode || emp?.code,
+            branchId: r.branchId || emp?.branchId,
+            date: r.date || (r.createdAt ? r.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10)),
+            timestamp: r.createdAt || new Date().toISOString(),
+            read: false,
+            targetRole: 'admin'
+          });
+          existingReqIds.add(rId);
+        }
+      }
+    };
+
+    (state.requests || []).forEach((r) => addIfAdminPending(r, 'request'));
+    (state.leaveRequests || []).forEach((r) => addIfAdminPending(r, 'leave'));
+    (state.shiftSwaps || []).forEach((r) => addIfAdminPending(r, 'swap'));
+    (state.loans || []).forEach((r) => addIfAdminPending(r, 'loan'));
+    (state.resignationRequests || []).forEach((r) => addIfAdminPending(r, 'resignation'));
+
+    // Handle late incident objections
+    (state.lateIncidents || []).forEach((inc) => {
+      if (inc && inc.objection && (inc.objection.status === 'pending' || inc.status === 'objection_pending')) {
+        const objId = `obj_inc_${inc.id}`;
+        if (!seenReqs.has(objId) && !deletedIdsSet.has(objId)) {
+          seenReqs.add(objId);
+          addIfAdminPending({
+            id: objId,
+            type: 'penalty_objection',
+            employeeId: inc.employeeId,
+            employeeName: inc.employeeName,
+            employeeCode: inc.employeeCode,
+            branchId: inc.branchId,
+            date: inc.date,
+            reason: inc.objection.reason || 'تظلم على واقعة تأخير / جزاء لائحى',
+            status: 'pending',
+            createdAt: inc.objection.submittedAt || inc.date
+          }, 'penalty_objection');
+        }
+      }
+    });
+  }
+
+  const combined = [...explicitNotifs, ...synthesizedPendingNotifs];
+  return combined.sort((a, b) => {
     const tA = new Date(a.timestamp || a.date || 0).getTime();
     const tB = new Date(b.timestamp || b.date || 0).getTime();
     return tB - tA;
@@ -215,25 +316,43 @@ export function filterAdminNotifications(notifications = []) {
 /**
  * Filter notifications strictly meant for Branch Managers
  * Isolates branch manager notifications completely from Admin / Super Admin and other branches
+ * Integrates live incoming branch requests waiting for manager review
  */
 export function filterBranchManagerNotifications(notifications = [], currentBranch = null, managerEmpId = null, state = null) {
   const branchIdStr = currentBranch?.id ? String(currentBranch.id).trim() : null;
-  const branchName = currentBranch?.name ? currentBranch.name.trim() : null;
+  const branchCodeStr = currentBranch?.branchCode ? String(currentBranch.branchCode).trim() : (currentBranch?.code ? String(currentBranch.code).trim() : null);
+  const branchName = currentBranch?.name ? String(currentBranch.name).trim() : null;
+  const branchUsername = currentBranch?.username ? String(currentBranch.username).trim() : null;
   const mgrIdStr = managerEmpId ? String(managerEmpId).trim() : null;
 
-  // Set of employee IDs belonging to this branch
+  // Set of employee IDs and codes belonging to this branch
   const branchEmpIds = new Set();
-  if (state?.employees && branchIdStr) {
+  if (state?.employees && (branchIdStr || branchCodeStr || branchName || branchUsername)) {
     state.employees.forEach((emp) => {
-      if (String(emp.branchId) === branchIdStr || (emp.branchesDetails && emp.branchesDetails.some(bd => String(bd.branchId) === branchIdStr))) {
-        branchEmpIds.add(String(emp.id));
-        if (emp.code) branchEmpIds.add(String(emp.code));
+      const eBranch = String(emp.branchId || '').trim();
+      const isDirectMatch = (branchIdStr && eBranch === branchIdStr) ||
+        (branchCodeStr && eBranch === branchCodeStr) ||
+        (branchName && eBranch === branchName) ||
+        (branchUsername && eBranch === branchUsername);
+      const isMultiBranchMatch = emp.branchesDetails && emp.branchesDetails.some((bd) => {
+        const b = String(bd.branchId || '').trim();
+        return (branchIdStr && b === branchIdStr) || (branchCodeStr && b === branchCodeStr);
+      });
+      if (isDirectMatch || isMultiBranchMatch) {
+        branchEmpIds.add(String(emp.id).trim());
+        if (emp.code) branchEmpIds.add(String(emp.code).trim());
+        if (emp.username) branchEmpIds.add(String(emp.username).trim());
       }
     });
   }
 
-  return (notifications || []).filter((n) => {
+  const deletedIdsSet = new Set((state?._deletedIds || []).map(String));
+
+  // 1. Filter explicit notifications from state.notifications
+  const explicitNotifs = (notifications || []).filter((n) => {
     if (!n) return false;
+    const notifIdStr = String(n.id || '');
+    if (deletedIdsSet.has(notifIdStr)) return false;
 
     // 1. Strictly block notifications aimed exclusively at senior management / super admin / owner
     if (n.targetRole === 'admin' || n.targetRole === 'owner' || n.targetApproval === 'admin_only') {
@@ -248,18 +367,20 @@ export function filterBranchManagerNotifications(notifications = [], currentBran
       return false;
     }
 
-    // 3. Notifications explicitly targeted to branch manager
-    if (n.targetRole === 'branch' || n.targetRole === 'branch_manager' || n.targetRole === 'manager') {
-      if (!branchIdStr) return true;
-      if (n.branchId && String(n.branchId).trim() === branchIdStr) return true;
+    // 3. Notifications targeted to branch manager or branch
+    if (n.targetRole === 'branch' || n.targetRole === 'branch_manager' || n.targetRole === 'manager' || n.targetRole === 'branch_and_admin' || !n.targetRole) {
+      if (!branchIdStr && !branchCodeStr && !branchName) return true;
+      if (n.branchId && (String(n.branchId).trim() === branchIdStr || (branchCodeStr && String(n.branchId).trim() === branchCodeStr) || (branchName && String(n.branchId).trim() === branchName))) return true;
+      if (n.branchCode && (String(n.branchCode).trim() === branchCodeStr || (branchIdStr && String(n.branchCode).trim() === branchIdStr))) return true;
       if (n.branchName && branchName && n.branchName === branchName) return true;
       if (n.employeeId && branchEmpIds.has(String(n.employeeId).trim())) return true;
-      if (!n.branchId && !n.branchName) return true; // General branch update
+      if (n.employeeCode && branchEmpIds.has(String(n.employeeCode).trim())) return true;
+      if (!n.branchId && !n.branchName && !n.employeeId) return true; // General branch update
       return false;
     }
 
     // 4. Branch-specific operational notifications or requests from employees of this branch
-    if (n.branchId && branchIdStr && String(n.branchId).trim() === branchIdStr) {
+    if (n.branchId && (String(n.branchId).trim() === branchIdStr || (branchCodeStr && String(n.branchId).trim() === branchCodeStr))) {
       return true;
     }
     if (n.employeeId && branchEmpIds.has(String(n.employeeId).trim())) {
@@ -267,7 +388,87 @@ export function filterBranchManagerNotifications(notifications = [], currentBran
     }
 
     return false;
-  }).sort((a, b) => {
+  });
+
+  // 2. Dynamically integrate active pending branch requests if not already in explicit notifications
+  const synthesizedPendingNotifs = [];
+  if (state) {
+    const existingReqIds = new Set(
+      explicitNotifs.map((n) => String(n.requestId || n.id || '')).filter(Boolean)
+    );
+    const seenBranchReqs = new Set();
+
+    const matchesBranch = (r) => {
+      if (!r || !r.id) return false;
+      const rIdStr = String(r.id);
+      if (deletedIdsSet.has(rIdStr) || seenBranchReqs.has(rIdStr)) return false;
+
+      // Loans, advances, and credit medicines are strictly for Senior Management
+      if (['loan', 'advance', 'credit_medicine', 'meds'].includes(r.type)) return false;
+
+      if (!shouldShowRequestToBranch(r, state)) return false;
+
+      // Status check: must be pending branch review/approval
+      if (r.submittedByBranchManager || r.createdRole === 'branch' || r.createdRole === 'branch_manager') return false;
+      if (r.branchApproved === true || r.branchApprovalStatus === 'approved' || r.branchApprovalStatus === 'rejected') return false;
+      if (r.status === 'pending_admin' || r.status === 'approved' || r.status === 'rejected' || r.status === 'cancelled') return false;
+      if (r.status !== 'pending' && r.status) return false;
+
+      // Branch match
+      if (!branchIdStr && !branchCodeStr && !branchName) return true;
+      if (r.branchId && (String(r.branchId).trim() === branchIdStr || (branchCodeStr && String(r.branchId).trim() === branchCodeStr) || (branchName && String(r.branchId).trim() === branchName))) return true;
+      if (r.employeeId && branchEmpIds.has(String(r.employeeId).trim())) return true;
+      if (r.employeeCode && branchEmpIds.has(String(r.employeeCode).trim())) return true;
+
+      const emp = (state.employees || []).find((e) => String(e.id) === String(r.employeeId) || (r.employeeCode && String(e.code) === String(r.employeeCode)));
+      if (emp) {
+        const eBranch = String(emp.branchId || '').trim();
+        if ((branchIdStr && eBranch === branchIdStr) || (branchCodeStr && eBranch === branchCodeStr) || (branchName && eBranch === branchName)) return true;
+        if (emp.branchesDetails && emp.branchesDetails.some((bd) => (branchIdStr && String(bd.branchId) === branchIdStr) || (branchCodeStr && String(bd.branchId) === branchCodeStr))) return true;
+      }
+
+      return false;
+    };
+
+    const allBranchRequests = [];
+    (state.requests || []).forEach((r) => { if (matchesBranch(r)) { seenBranchReqs.add(String(r.id)); allBranchRequests.push(r); } });
+    (state.leaveRequests || []).forEach((r) => { if (matchesBranch(r)) { seenBranchReqs.add(String(r.id)); allBranchRequests.push({ ...r, type: r.type || 'leave' }); } });
+    (state.shiftSwaps || []).forEach((r) => { if (matchesBranch(r)) { seenBranchReqs.add(String(r.id)); allBranchRequests.push({ ...r, type: 'swap' }); } });
+    (state.resignationRequests || []).forEach((r) => { if (matchesBranch(r)) { seenBranchReqs.add(String(r.id)); allBranchRequests.push({ ...r, type: 'resignation' }); } });
+
+    allBranchRequests.forEach((r) => {
+      const rId = String(r.id);
+      if (!existingReqIds.has(rId) && !existingReqIds.has(`notif_pending_${rId}`)) {
+        const emp = (state.employees || []).find((e) => String(e.id) === String(r.employeeId) || (r.employeeCode && String(e.code) === String(r.employeeCode)));
+        const empName = emp?.name || r.employeeName || 'موظف';
+        const finalType = r.type || 'request';
+        const typeLabel = getRequestTypeArabicLabel(finalType);
+        const iconMap = { leave: '🏖️', permission: '⏰', swap: '🔄', resignation: '🚪' };
+
+        synthesizedPendingNotifs.push({
+          id: `notif_pending_${rId}`,
+          requestId: r.id,
+          type: finalType,
+          typeLabel,
+          icon: iconMap[finalType] || '📋',
+          title: `📋 طلب جديد ينتظر موافقة الفرع: ${empName}`,
+          message: `${typeLabel} للموظف (${empName}) ينتظر مراجعتك واعتمادك في مركز الطلبات. ${r.reason || r.details || ''}`,
+          employeeId: r.employeeId || emp?.id,
+          employeeName: empName,
+          employeeCode: r.employeeCode || emp?.code,
+          branchId: r.branchId || branchIdStr,
+          date: r.date || (r.createdAt ? r.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10)),
+          timestamp: r.createdAt || new Date().toISOString(),
+          read: false,
+          targetRole: 'branch'
+        });
+        existingReqIds.add(rId);
+      }
+    });
+  }
+
+  const combined = [...explicitNotifs, ...synthesizedPendingNotifs];
+  return combined.sort((a, b) => {
     const tA = new Date(a.timestamp || a.date || 0).getTime();
     const tB = new Date(b.timestamp || b.date || 0).getTime();
     return tB - tA;
