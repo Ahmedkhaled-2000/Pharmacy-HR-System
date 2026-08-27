@@ -15,6 +15,7 @@ import PayslipPrintModal from '../payroll/PayslipPrintModal';
 import BylawsModule from '../bylaws/BylawsModule';
 import EmployeeResignationModule from './EmployeeResignationModule';
 import { computeLatenessFinancialAmount, isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
+import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
 import { printEmployeePayslipDirect } from '../../utils/printHelper';
 import { useLiveRealTime } from '../../hooks/useLiveRealTime';
 import '../../portal.css';
@@ -1203,9 +1204,9 @@ export default function EmployeePortalView({
     return getResolvedEmployeeRoster(emp, targetBId, selectedMonth, state);
   }, [emp, selectedBranchId, selectedMonth, state.rosters, state.requests]);
 
-  // Build list of absence days (work day in roster, no punch recorded, not a leave day)
+  // Build list of absence days (work day in roster/swaps, no punch recorded, not a leave day)
   const absenceDays = useMemo(() => {
-    if (!emp || !approvedRoster?.schedule) return [];
+    if (!emp) return [];
     const today = getRealTodayStr();
     const results = [];
     const dates = [];
@@ -1238,14 +1239,12 @@ export default function EmployeePortalView({
     for (const dateStr of dates) {
       if (dateStr >= today) continue; // future/today days
 
-      const jsDay = new Date(dateStr).getDay();
-      const arDayName = Object.keys(WEEKDAY_AR_MAP).find(k => WEEKDAY_AR_MAP[k] === jsDay) || '';
-      const daySchedule = approvedRoster.schedule[dateStr] || approvedRoster.schedule[arDayName] || Object.entries(approvedRoster.schedule).find(([k]) => k.replace(/[\u0625\u0623\u0622]/g, 'ا') === arDayName.replace(/[\u0625\u0623\u0622]/g, 'ا'))?.[1];
-
-      if (!daySchedule || daySchedule.type === 'off' || daySchedule.isOff) continue; // rest day
+      // Dynamic day schedule taking into account shift swaps and off swaps
+      const daySchedule = getEmployeeDaySchedule(emp.id, dateStr, state);
+      if (!daySchedule || daySchedule.type === 'off' || daySchedule.isOff) continue; // rest day / swapped off
 
       // Check if there's a punch for this day
-      const hasPunch = (state.shifts || []).some(s => s.employeeId === emp.id && s.date === dateStr);
+      const hasPunch = (state.shifts || []).some(s => String(s.employeeId) === String(emp.id) && s.date === dateStr);
       if (hasPunch) continue;
 
       // Check if there's an approved leave for this day (Strictly deduplicated)
@@ -1255,10 +1254,11 @@ export default function EmployeePortalView({
       );
       if (hasLeave) continue;
 
+      const arDayName = arabicWeekday(dateStr);
       results.push({ date: dateStr, arDayName, daySchedule });
     }
     return results;
-  }, [emp, approvedRoster, state.shifts, state.leaveRequests, state.requests, selectedMonth]);
+  }, [emp, state.shifts, state.leaveRequests, state.requests, state.shiftSwaps, state.rosters, selectedMonth, filterMode, rangeStart, rangeEnd]);
 
   // Absence deduction from computeEmpSummary
   const dailyRate = summary.dailyRate || 0;
@@ -3771,6 +3771,11 @@ export default function EmployeePortalView({
                             <span style={{ color: 'var(--muted)', marginRight: '6px' }}>({ab.arDayName})</span>
                             <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
                               الشيفت المفروض: {ab.daySchedule?.start || '—'} – {ab.daySchedule?.end || '—'}
+                              {ab.daySchedule?.isSwapped && (
+                                <span style={{ color: '#b45309', fontWeight: 600, marginRight: '4px' }}>
+                                  ({ab.daySchedule?.swapNote || `متبدلة مع ${ab.daySchedule?.swappedWithName || 'الزميل'}`})
+                                </span>
+                              )}
                             </div>
                           </div>
                           <div style={{ textAlign: 'left' }}>
@@ -3801,7 +3806,14 @@ export default function EmployeePortalView({
                             <tr key={ab.date} style={{ background: 'rgba(239,68,68,0.04)' }}>
                               <td style={{ fontWeight: 600, color: 'var(--danger)' }}>{ab.date}</td>
                               <td>{ab.arDayName}</td>
-                              <td>{ab.daySchedule?.start} – {ab.daySchedule?.end}</td>
+                              <td>
+                                {ab.daySchedule?.start} – {ab.daySchedule?.end}
+                                {ab.daySchedule?.isSwapped && (
+                                  <div style={{ fontSize: '11px', color: '#b45309', fontWeight: 600, marginTop: '2px' }}>
+                                    {ab.daySchedule?.swapNote || `🔄 وردية متبدلة مع ${ab.daySchedule?.swappedWithName || 'الزميل'}`}
+                                  </div>
+                                )}
+                              </td>
                               <td><span className="badge danger">🚫 غياب</span></td>
                               <td style={{ color: 'var(--danger)', fontWeight: 700 }}>
                                 {canViewSalary ? `-${fmt(dailyRate)} ج.م` : '—'}

@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { fmt, getRealTodayStr, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 import { isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
+import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
 import {
   filterAdminNotifications,
   filterBranchManagerNotifications,
@@ -157,10 +158,9 @@ export default function NotificationCenterModule({
       const empId = String(emp.id);
       const branchObj = branches.find((b) => empBelongsToBranch(emp, b.id));
 
-      // Check Roster if scheduled to work today
-      const empRoster = rosters.find((r) => String(r.employeeId) === empId && r.month === currentMonth && r.status === 'approved');
-      const todaySchedule = empRoster?.schedule?.[todayDayName] || empRoster?.schedule?.[todayDate];
-      const isScheduledToday = todaySchedule ? todaySchedule.type !== 'off' : true;
+      // Check Roster and approved swaps if scheduled to work today
+      const todaySchedule = getEmployeeDaySchedule(emp.id, todayDate, state);
+      const isScheduledToday = todaySchedule ? (todaySchedule.type !== 'off' && !todaySchedule.isOff) : true;
 
       // Check if on approved leave
       const approvedLeave = allLeaves.find(
