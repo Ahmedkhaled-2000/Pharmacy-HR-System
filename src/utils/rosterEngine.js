@@ -239,96 +239,102 @@ export function getEmployeeDaySchedule(empId, dateStr, state) {
     if (reqDate === tgtDate) {
       // الموظف الحالي يأخذ جدول الزميل في هذا اليوم
       const otherBaseSched = getEmployeeBaseDaySchedule(otherEmpId, dateStr, state);
+      const isOtherOff = otherBaseSched?.type === 'off' || otherBaseSched?.isOff === true;
       return {
         ...otherBaseSched,
+        type: isOtherOff ? 'off' : (otherBaseSched?.type || 'shift'),
+        isOff: isOtherOff,
+        start: isOtherOff ? '' : (otherBaseSched?.start || '08:00'),
+        end: isOtherOff ? '' : (otherBaseSched?.end || '16:00'),
+        hours: isOtherOff ? 0 : (otherBaseSched?.hours !== undefined ? otherBaseSched.hours : 8),
         isSwapped: true,
         swapRequestId: approvedSwap.id,
         swappedWithId: otherEmpId,
         swappedWithName: otherEmpName,
         swapDate: dateStr,
-        swapNote: `🔄 شيفت متبدل مع: ${otherEmpName}`
+        swapNote: isOtherOff ? `🛋️ راحة متبدلة مع ${otherEmpName}` : `🔄 شيفت متبدل مع: ${otherEmpName}`
       };
     }
 
     // الحالة الثانية: التبديل في تواريخ مختلفة (Cross-Date Swap)
-    // أ) إذا كان هذا تاريخ طلب الموظف الأصلي (reqDate للمقدم أو tgtDate للهدف)
-    if (isRequester && dateStr === reqDate) {
-      // مقدم الطلب في يومه الأصلي reqDate: يتنازل عنه للزميل، ويصبح راحة
-      return {
-        type: 'off',
-        isOff: true,
-        start: '',
-        end: '',
-        hours: 0,
-        isSwapped: true,
-        swapRequestId: approvedSwap.id,
-        swappedWithId: otherEmpId,
-        swappedWithName: otherEmpName,
-        swapDate: reqDate,
-        targetCoverDate: tgtDate,
-        swapNote: `🛋️ راحة متبدلة مع ${otherEmpName} (مقابل تغطية يوم ${tgtDate})`
-      };
+    // 1. في تاريخ طلب الموظف الأصلي (reqDate):
+    if (dateStr === reqDate) {
+      if (isRequester) {
+        // مقدم الطلب في يومه الأصلي reqDate: يتنازل عنه ويصبح راحة
+        return {
+          type: 'off',
+          isOff: true,
+          start: '',
+          end: '',
+          hours: 0,
+          isSwapped: true,
+          swapRequestId: approvedSwap.id,
+          swappedWithId: otherEmpId,
+          swappedWithName: otherEmpName,
+          swapDate: reqDate,
+          targetCoverDate: tgtDate,
+          swapNote: `🛋️ راحة متبدلة مع ${otherEmpName} (مقابل تغطية يوم ${tgtDate})`
+        };
+      } else {
+        // الزميل المستهدف في يوم reqDate: يغطي جدول مقدم الطلب
+        const reqBaseSched = getEmployeeBaseDaySchedule(reqEmpId, reqDate, state);
+        const isReqOff = reqBaseSched?.type === 'off' || reqBaseSched?.isOff === true;
+        return {
+          ...reqBaseSched,
+          type: isReqOff ? 'off' : (reqBaseSched?.type || 'shift'),
+          isOff: isReqOff,
+          start: isReqOff ? '' : (reqBaseSched?.start || '08:00'),
+          end: isReqOff ? '' : (reqBaseSched?.end || '16:00'),
+          hours: isReqOff ? 0 : (reqBaseSched?.hours !== undefined ? reqBaseSched.hours : 8),
+          isSwapped: true,
+          swapRequestId: approvedSwap.id,
+          swappedWithId: otherEmpId,
+          swappedWithName: otherEmpName,
+          swapDate: reqDate,
+          originalShiftDate: tgtDate,
+          swapNote: isReqOff ? `🛋️ راحة متبدلة مع ${otherEmpName}` : `🔄 وردية عمل بديلة لتغطية ${otherEmpName}`
+        };
+      }
     }
 
-    if (!isRequester && dateStr === tgtDate) {
-      // الزميل المستهدف في يومه الأصلي tgtDate: يتنازل عنه لمقدم الطلب، ويصبح راحة
-      return {
-        type: 'off',
-        isOff: true,
-        start: '',
-        end: '',
-        hours: 0,
-        isSwapped: true,
-        swapRequestId: approvedSwap.id,
-        swappedWithId: otherEmpId,
-        swappedWithName: otherEmpName,
-        swapDate: tgtDate,
-        targetCoverDate: reqDate,
-        swapNote: `🛋️ راحة متبدلة مع ${otherEmpName} (مقابل تغطية يوم ${reqDate})`
-      };
-    }
-
-    // ب) إذا كان هذا تاريخ التغطية البديل (tgtDate للمقدم أو reqDate للمستهدف)
-    if (isRequester && dateStr === tgtDate) {
-      // مقدم الطلب يغطي يوم الزميل tgtDate: يأخذ شيفت عمل الزميل
-      const otherBaseSched = getEmployeeBaseDaySchedule(otherEmpId, tgtDate, state);
-      const effectiveShift = (!otherBaseSched || otherBaseSched.isOff || otherBaseSched.type === 'off')
-        ? getEmployeeBaseDaySchedule(empId, reqDate, state)
-        : otherBaseSched;
-
-      return {
-        ...effectiveShift,
-        type: 'shift',
-        isOff: false,
-        isSwapped: true,
-        swapRequestId: approvedSwap.id,
-        swappedWithId: otherEmpId,
-        swappedWithName: otherEmpName,
-        swapDate: tgtDate,
-        originalShiftDate: reqDate,
-        swapNote: `🔄 وردية عمل بديلة لتغطية ${otherEmpName}`
-      };
-    }
-
-    if (!isRequester && dateStr === reqDate) {
-      // الزميل المستهدف يغطي يوم مقدم الطلب reqDate: يأخذ شيفت عمل مقدم الطلب
-      const reqBaseSched = getEmployeeBaseDaySchedule(reqEmpId, reqDate, state);
-      const effectiveShift = (!reqBaseSched || reqBaseSched.isOff || reqBaseSched.type === 'off')
-        ? getEmployeeBaseDaySchedule(empId, tgtDate, state)
-        : reqBaseSched;
-
-      return {
-        ...effectiveShift,
-        type: 'shift',
-        isOff: false,
-        isSwapped: true,
-        swapRequestId: approvedSwap.id,
-        swappedWithId: otherEmpId,
-        swappedWithName: otherEmpName,
-        swapDate: reqDate,
-        originalShiftDate: tgtDate,
-        swapNote: `🔄 وردية عمل بديلة لتغطية ${otherEmpName}`
-      };
+    // 2. في تاريخ الزميل المستهدف (tgtDate):
+    if (dateStr === tgtDate) {
+      if (!isRequester) {
+        // الزميل المستهدف في يومه الأصلي tgtDate: يتنازل عنه ويصبح راحة
+        return {
+          type: 'off',
+          isOff: true,
+          start: '',
+          end: '',
+          hours: 0,
+          isSwapped: true,
+          swapRequestId: approvedSwap.id,
+          swappedWithId: otherEmpId,
+          swappedWithName: otherEmpName,
+          swapDate: tgtDate,
+          targetCoverDate: reqDate,
+          swapNote: `🛋️ راحة متبدلة مع ${otherEmpName} (مقابل تغطية يوم ${reqDate})`
+        };
+      } else {
+        // مقدم الطلب في يوم tgtDate: يغطي جدول الزميل المستهدف
+        const tgtBaseSched = getEmployeeBaseDaySchedule(tgtEmpId, tgtDate, state);
+        const isTgtOff = tgtBaseSched?.type === 'off' || tgtBaseSched?.isOff === true;
+        return {
+          ...tgtBaseSched,
+          type: isTgtOff ? 'off' : (tgtBaseSched?.type || 'shift'),
+          isOff: isTgtOff,
+          start: isTgtOff ? '' : (tgtBaseSched?.start || '08:00'),
+          end: isTgtOff ? '' : (tgtBaseSched?.end || '16:00'),
+          hours: isTgtOff ? 0 : (tgtBaseSched?.hours !== undefined ? tgtBaseSched.hours : 8),
+          isSwapped: true,
+          swapRequestId: approvedSwap.id,
+          swappedWithId: otherEmpId,
+          swappedWithName: otherEmpName,
+          swapDate: tgtDate,
+          originalShiftDate: reqDate,
+          swapNote: isTgtOff ? `🛋️ راحة متبدلة مع ${otherEmpName}` : `🔄 وردية عمل بديلة لتغطية ${otherEmpName}`
+        };
+      }
     }
   }
 
@@ -355,8 +361,11 @@ export function applyShiftSwapToRosters(targetReq, currentRosters = [], employee
 
   let updatedRosters = [...currentRosters];
 
-  const ensureRoster = (empId, monthKey) => {
-    let ros = updatedRosters.find((r) => String(r.employeeId) === String(empId) && (r.month === monthKey || !r.month) && r.status === 'approved');
+  const ensureRoster = (empId, monthKey, targetDate = null) => {
+    let ros = findEmployeeRoster(empId, targetDate || monthKey, { rosters: updatedRosters, employees });
+    if (!ros) {
+      ros = updatedRosters.find((r) => String(r.employeeId) === String(empId) && (r.month === monthKey || !r.month) && r.status === 'approved');
+    }
     if (!ros) {
       ros = updatedRosters.find((r) => String(r.employeeId) === String(empId) && (r.month === monthKey || !r.month));
     }
@@ -377,7 +386,7 @@ export function applyShiftSwapToRosters(targetReq, currentRosters = [], employee
   };
 
   if (targetReq.type === 'shift_edit') {
-    const ros = ensureRoster(empAId, monthKeyA);
+    const ros = ensureRoster(empAId, monthKeyA, dateA);
     const newSchedule = { ...(ros.schedule || {}) };
     const updatedDayItem = {
       type: targetReq.newDayType || (targetReq.isOff ? 'off' : 'shift'),
@@ -393,8 +402,8 @@ export function applyShiftSwapToRosters(targetReq, currentRosters = [], employee
   }
 
   if (empAId && empBId) {
-    const rosA = ensureRoster(empAId, monthKeyA);
-    const rosB = ensureRoster(empBId, monthKeyB);
+    const rosA = ensureRoster(empAId, monthKeyA, dateA);
+    const rosB = ensureRoster(empBId, monthKeyB, dateB);
 
     const schedA = { ...(rosA.schedule || {}) };
     const schedB = { ...(rosB.schedule || {}) };
@@ -413,10 +422,10 @@ export function applyShiftSwapToRosters(targetReq, currentRosters = [], employee
       // تواريخ مختلفة:
       // في يوم dateA: الموظف A راحة، والموظف B يغطي شيفت A
       schedA[dateA] = { type: 'off', isOff: true, start: '', end: '', hours: 0, isSwapped: true, swappedWith: empBId };
-      schedB[dateA] = { ...(itemA_on_dateA.isOff ? itemB_on_dateB : itemA_on_dateA), type: 'shift', isOff: false, isSwapped: true, swappedWith: empAId };
+      schedB[dateA] = { ...itemA_on_dateA, isSwapped: true, swappedWith: empAId };
 
       // في يوم dateB: الموظف A يغطي شيفت B، والموظف B راحة
-      schedA[dateB] = { ...(itemB_on_dateB.isOff ? itemA_on_dateA : itemB_on_dateB), type: 'shift', isOff: false, isSwapped: true, swappedWith: empBId };
+      schedA[dateB] = { ...itemB_on_dateB, isSwapped: true, swappedWith: empBId };
       schedB[dateB] = { type: 'off', isOff: true, start: '', end: '', hours: 0, isSwapped: true, swappedWith: empAId };
     }
 

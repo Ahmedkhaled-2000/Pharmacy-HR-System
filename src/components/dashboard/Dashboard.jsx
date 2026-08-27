@@ -11,6 +11,7 @@ import {
   getScheduledShiftForDate,
   calculateLatenessMinutes
 } from '../../utils/latePenaltyEngine';
+import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
 
 export default function Dashboard({
   state,
@@ -213,6 +214,10 @@ export default function Dashboard({
                       (r) => String(r.employeeId) === String(emp.id) && (r.status === 'approved' || r.adminApproved) && (r.type === 'leave' || r.type === 'leave_request') && r.startDate <= todayDate && r.endDate >= todayDate
                     );
 
+                    const daySched = getEmployeeDaySchedule(emp.id, todayDate, state);
+                    const isOffToday = daySched?.type === 'off' || daySched?.isOff === true;
+                    const isSwapped = Boolean(daySched?.isSwapped);
+
                     let statusText = '🔴 لم يبصم بهذا الفرع';
                     let statusColor = '#dc2626';
 
@@ -234,6 +239,14 @@ export default function Dashboard({
                     } else if (onLeaveToday) {
                       statusText = '🏖️ إجازة معتمدة';
                       statusColor = '#16a34a';
+                    } else if (isOffToday) {
+                      statusText = isSwapped
+                        ? `🔄 💤 راحة متبدلة (${daySched?.swappedWithName ? 'مع ' + daySched.swappedWithName : 'معتمد'})`
+                        : '💤 راحة أسبوعية (OFF)';
+                      statusColor = '#64748b';
+                    } else if (isSwapped && daySched?.start && daySched?.end) {
+                      statusText = `🔄 وردية متبدلة (${daySched.start} - ${daySched.end}) • لم يبصم بعد`;
+                      statusColor = '#d97706';
                     }
 
                     return (
@@ -262,6 +275,8 @@ export default function Dashboard({
             (r) => String(r.employeeId) === String(emp.id) && (r.status === 'approved' || r.adminApproved) && (r.type === 'leave' || r.type === 'leave_request') && r.startDate <= todayDate && r.endDate >= todayDate
           );
           if (onLeaveToday) return false;
+          const daySched = getEmployeeDaySchedule(emp.id, todayDate, state);
+          if (daySched?.type === 'off' || daySched?.isOff === true) return false; // Employee is on rest day / OFF today!
           return true;
         });
 
