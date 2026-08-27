@@ -4774,11 +4774,19 @@ export default function BranchManagerView({
                   style={{ width: '100%', padding: '9px 14px', borderRadius: '10px', border: '1.5px solid #0d9488', fontWeight: 'bold', fontSize: '13.5px', background: '#fff' }}
                 >
                   <option value="">-- اختر موظف من طاقم الفرع --</option>
-                  {branchEmployees.map((e) => (
-                    <option key={e.id} value={e.id}>
-                      {e.name} (كود: {e.code} — الوظيفة: {e.jobTitle || 'موظف'})
-                    </option>
-                  ))}
+                  {branchEmployees
+                    .filter(e => {
+                      if (currentBranch?.managerId && String(e.id) === String(currentBranch.managerId)) return false;
+                      if (currentBranch?.managerCode && String(e.code) === String(currentBranch.managerCode)) return false;
+                      if (state.currentUserId && String(e.id) === String(state.currentUserId)) return false;
+                      if (e.jobTitle && (e.jobTitle.includes('مدير فرع') || e.jobTitle.includes('مدير الفرع'))) return false;
+                      return true;
+                    })
+                    .map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {e.name} (كود: {e.code} — الوظيفة: {e.jobTitle || 'موظف'})
+                      </option>
+                    ))}
                 </select>
               </div>
 

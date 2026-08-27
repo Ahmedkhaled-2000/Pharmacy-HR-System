@@ -112,6 +112,7 @@ export default function EvaluationsModule({
   const [evalNotes, setEvalNotes] = useState('');
   const [evalItems, setEvalItems] = useState([]);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [evalTargetJobFilter, setEvalTargetJobFilter] = useState('all'); // Requirement 32: Admin filter by Job Title
 
   // Criteria Template Settings State (Requirement 3)
   const [selectedCriteriaJob, setSelectedCriteriaJob] = useState('صيدلي');
@@ -411,29 +412,36 @@ export default function EvaluationsModule({
       return e;
     });
 
-    // Notification for Employee
+    // Notification for Employee (Targeted specifically to the evaluated employee)
     const empNotif = {
-      id: `notif_eval_final_emp_${Date.now()}`,
-      employeeId: ev.employeeId,
+      id: `notif_eval_final_emp_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+      employeeId: String(ev.employeeId),
+      targetEmployeeId: String(ev.employeeId),
+      targetRole: 'employee',
       type: 'eval_finalized',
+      icon: '⭐',
       title: `⭐ تم اعتماد تقييم أداء شهر (${ev.month || selectedMonth}) من الإدارة العليا`,
       message: `اعتمدت الإدارة العليا تقييمك لشهر (${ev.month || selectedMonth}) بنسبة نهائية ${ev.percentage}%. ${finalComment.trim() ? `تعليق الإدارة: "${finalComment.trim()}"` : ''}`,
       timestamp: new Date().toISOString(),
+      date: new Date().toISOString().slice(0, 10),
       read: false,
       linkTab: 'evaluations',
       evalId: ev.id
     };
 
-    // Notification for Branch Manager
+    // Notification for Branch Manager (Targeted to the branch manager)
     const mgrNotif = {
-      id: `notif_eval_final_mgr_${Date.now()}`,
-      type: 'eval_finalized_manager',
-      title: `⭐ تم اعتماد تقييم الموظف (${ev.employeeName})`,
-      message: `راجعت واعتمدت الإدارة العليا تقييم الموظف ${ev.employeeName} لشهر (${ev.month || selectedMonth}). ${finalComment.trim() ? `تعليق الإدارة: "${finalComment.trim()}"` : ''}`,
-      timestamp: new Date().toISOString(),
-      read: false,
+      id: `notif_eval_final_mgr_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+      employeeId: String(ev.employeeId),
       targetRole: 'branch',
-      branchId: ev.branchId,
+      branchId: String(ev.branchId),
+      type: 'eval_finalized_manager',
+      icon: '⭐',
+      title: `⭐ تم اعتماد تقييم الموظف (${ev.employeeName})`,
+      message: `راجعت واعتمدت الإدارة العليا تقييم الموظف ${ev.employeeName} لشهر (${ev.month || selectedMonth}) بنسبة ${ev.percentage}%. ${finalComment.trim() ? `تعليق الإدارة: "${finalComment.trim()}"` : ''}`,
+      timestamp: new Date().toISOString(),
+      date: new Date().toISOString().slice(0, 10),
+      read: false,
       linkTab: 'evaluations',
       evalId: ev.id
     };
@@ -546,7 +554,41 @@ export default function EvaluationsModule({
       return ev;
     });
 
-    const updatedState = { ...state, evaluations: updatedEvals };
+    // Notifications on direct admin update
+    const empNotif = {
+      id: `notif_eval_direct_emp_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+      employeeId: String(editingEval.employeeId),
+      targetEmployeeId: String(editingEval.employeeId),
+      targetRole: 'employee',
+      type: 'eval_finalized',
+      icon: '⭐',
+      title: `⭐ تم اعتماد وتحديث تقييمك لشهر (${editingEval.month || selectedMonth})`,
+      message: `اعتمدت الإدارة العليا تقييمك لشهر (${editingEval.month || selectedMonth}) بنسبة ${percentage}%.`,
+      timestamp: new Date().toISOString(),
+      date: new Date().toISOString().slice(0, 10),
+      read: false,
+      linkTab: 'evaluations',
+      evalId: editingEval.id
+    };
+
+    const mgrNotif = {
+      id: `notif_eval_direct_mgr_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+      employeeId: String(editingEval.employeeId),
+      targetRole: 'branch',
+      branchId: String(editingEval.branchId),
+      type: 'eval_finalized_manager',
+      icon: '⭐',
+      title: `⭐ اعتماد وتحديث تقييم (${editingEval.employeeName})`,
+      message: `تم اعتماد وتحديث تقييم الموظف ${editingEval.employeeName} لشهر (${editingEval.month || selectedMonth}) بنسبة ${percentage}%.`,
+      timestamp: new Date().toISOString(),
+      date: new Date().toISOString().slice(0, 10),
+      read: false,
+      linkTab: 'evaluations',
+      evalId: editingEval.id
+    };
+
+    const updatedNotifications = [empNotif, mgrNotif, ...(state.notifications || [])];
+    const updatedState = { ...state, evaluations: updatedEvals, notifications: updatedNotifications };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
 
@@ -750,94 +792,84 @@ export default function EvaluationsModule({
           </div>
 
           {/* ──────────────────────────────────────────────────────────────── */}
-          {/* Requirement 5: Top Performers Wall of Fame (لوحة شرف التميز)   */}
+          {/* Requirement 29 & 30: Top Performers Wall of Fame (لوحة شرف التميز)   */}
+          {/* Compact side-by-side cards, hidden for branch manager             */}
           {/* ──────────────────────────────────────────────────────────────── */}
-          <div style={{
-            background: 'linear-gradient(135deg, #fffbeb, #fef3c7)',
-            border: '2px solid #fcd34d',
-            borderRadius: '18px',
-            padding: '20px 24px',
-            boxShadow: '0 4px 16px rgba(245, 158, 11, 0.12)'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <span style={{ fontSize: '30px' }}>🏆</span>
-                <div>
-                  <h3 style={{ margin: 0, fontFamily: 'Cairo', color: '#92400e', fontSize: '17px' }}>
-                    لوحة الشرف والتميز الوظيفي — أعلى الموظفين تقييماً لشهر ({monthLabelText})
-                  </h3>
-                  <p style={{ margin: '2px 0 0', fontSize: '12.5px', color: '#b45309' }}>
-                    تكريم فرسان الأداء والمركز الأول في كل مسمى وظيفي بالشركة
-                  </p>
-                </div>
-              </div>
-              <span style={{ background: '#fef08a', border: '1px solid #fde047', color: '#854d0e', padding: '4px 12px', borderRadius: '99px', fontSize: '12px', fontWeight: 'bold' }}>
-                🌟 {topPerformersByJob.length} فئات وظيفية متميزة
-              </span>
-            </div>
-
-            {topPerformersByJob.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '20px', color: '#b45309', background: '#fffbeb', borderRadius: '12px', fontSize: '13.5px' }}>
-                لا توجد تقييمات مرصودة لشهر ({monthLabelText}) حتى الآن لاستخراج لوحة الشرف.
-              </div>
-            ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '14px' }}>
-                {topPerformersByJob.map((winner, idx) => (
-                  <div
-                    key={winner.id || idx}
-                    style={{
-                      background: '#ffffff',
-                      border: '1.5px solid #fde68a',
-                      borderRadius: '14px',
-                      padding: '16px',
-                      boxShadow: '0 4px 10px rgba(217, 119, 6, 0.08)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '10px',
-                      position: 'relative',
-                      overflow: 'hidden'
-                    }}
-                  >
-                    <div style={{ position: 'absolute', top: '-10px', left: '-10px', background: 'linear-gradient(135deg, #f59e0b, #d97706)', color: '#fff', padding: '14px 14px 6px 6px', borderRadius: '0 0 20px 0', fontSize: '14px', fontWeight: 'bold' }}>
-                      🥇
-                    </div>
-
-                    <div style={{ paddingRight: '18px' }}>
-                      <span style={{ fontSize: '11.5px', fontWeight: '800', color: '#d97706', background: '#fef3c7', padding: '3px 8px', borderRadius: '6px' }}>
-                        ⭐ أفضل {winner.jobTitle}
-                      </span>
-                      <h4 style={{ margin: '6px 0 2px', fontSize: '15.5px', fontWeight: '900', color: '#1e293b' }}>
-                        {winner.employeeName}
-                        <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 'normal', marginRight: '6px' }}>
-                          (كود: {winner.employeeCode})
-                        </span>
-                      </h4>
-                    </div>
-
-                    <div style={{ fontSize: '12.5px', display: 'flex', flexDirection: 'column', gap: '4px', background: '#f8fafc', padding: '8px 12px', borderRadius: '8px', border: '1px solid #f1f5f9' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: '#64748b' }}>📍 الفرع:</span>
-                        <strong style={{ color: '#0f766e' }}>{winner.branchName || 'الفرع الرئيسي'}</strong>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: '#64748b' }}>👤 مدير الفرع:</span>
-                        <span style={{ color: '#334155', fontWeight: '600' }}>{winner.evaluatorName || 'مدير الفرع'}</span>
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
-                      <span style={{ fontSize: '12px', color: '#92400e', fontWeight: 'bold' }}>
-                        التقدير: {winner.rating || 'ممتاز'}
-                      </span>
-                      <span style={{ fontSize: '17px', fontWeight: '900', color: '#15803d', background: '#dcfce7', padding: '2px 10px', borderRadius: '8px', border: '1px solid #86efac' }}>
-                        {winner.percentage || winner.score}%
-                      </span>
-                    </div>
+          {currentRole !== 'branch' && (
+            <div style={{
+              background: 'linear-gradient(135deg, #fffdf5, #fefce8)',
+              border: '1.5px solid #fde047',
+              borderRadius: '14px',
+              padding: '14px 18px',
+              boxShadow: '0 2px 10px rgba(245, 158, 11, 0.08)',
+              marginBottom: '16px'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '20px' }}>🏆</span>
+                  <div>
+                    <h4 style={{ margin: 0, fontFamily: 'Cairo', color: '#92400e', fontSize: '14.5px', fontWeight: '800' }}>
+                      لوحة الشرف والتميز الوظيفي — فرسان المركز الأول لشهر ({monthLabelText})
+                    </h4>
+                    <span style={{ fontSize: '11.5px', color: '#b45309' }}>
+                      تكريم أعلى الموظفين تقييماً في كل مسمى وظيفي
+                    </span>
                   </div>
-                ))}
+                </div>
+                <span style={{ background: '#fef08a', color: '#854d0e', padding: '2px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: 'bold', border: '1px solid #fde047' }}>
+                  🌟 {topPerformersByJob.length} فئات وظيفية متميزة
+                </span>
               </div>
-            )}
-          </div>
+
+              {topPerformersByJob.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '14px', color: '#b45309', background: '#fffbeb', borderRadius: '10px', fontSize: '12.5px' }}>
+                  لا توجد تقييمات مرصودة لشهر ({monthLabelText}) حتى الآن لاستخراج لوحة الشرف.
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '10px' }}>
+                  {topPerformersByJob.map((winner, idx) => (
+                    <div
+                      key={winner.id || idx}
+                      style={{
+                        background: '#ffffff',
+                        border: '1.5px solid #fde68a',
+                        borderRadius: '10px',
+                        padding: '10px 12px',
+                        boxShadow: '0 2px 6px rgba(217, 119, 6, 0.06)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '6px',
+                        transition: 'transform 0.15s ease'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '11px', fontWeight: '800', color: '#b45309', background: '#fef3c7', padding: '2px 7px', borderRadius: '5px' }}>
+                          🥇 أفضل {winner.jobTitle}
+                        </span>
+                        <span style={{ fontSize: '13.5px', fontWeight: '900', color: '#15803d', background: '#dcfce7', padding: '1px 8px', borderRadius: '6px', border: '1px solid #86efac' }}>
+                          {winner.percentage || winner.score}%
+                        </span>
+                      </div>
+
+                      <div>
+                        <strong style={{ fontSize: '13.5px', color: '#0f172a', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {winner.employeeName}
+                        </strong>
+                        <span style={{ fontSize: '11px', color: '#64748b' }}>
+                          كود: {winner.employeeCode}
+                        </span>
+                      </div>
+
+                      <div style={{ fontSize: '11px', display: 'flex', justifyContent: 'space-between', color: '#475569', borderTop: '1px solid #f1f5f9', paddingTop: '4px' }}>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100px' }}>📍 {winner.branchName || 'الفرع'}</span>
+                        <span style={{ color: '#92400e', fontWeight: 'bold' }}>{winner.rating || 'ممتاز'}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* ──────────────────────────────────────────────────────────────── */}
           {/* New Evaluation Form (Interactive by Job Criteria)                */}
@@ -855,23 +887,64 @@ export default function EvaluationsModule({
               </div>
 
               <form onSubmit={handleEvaluationSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '14px' }}>
-                  <div className="field">
-                    <label style={{ fontWeight: 'bold', fontSize: '13px' }}>اختر الموظف المراد تقييمه *</label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px' }}>
+                  
+                  {/* Requirement 32: Job Filter Selector for Higher Management */}
+                  {currentRole === 'admin' && (
+                    <div className="field">
+                      <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#1e293b' }}>
+                        🎯 تحديد الوظيفة المستهدفة للتقييم:
+                      </label>
+                      <select
+                        value={evalTargetJobFilter}
+                        onChange={(e) => {
+                          setEvalTargetJobFilter(e.target.value);
+                          setEvalEmpId('');
+                        }}
+                        style={{ width: '100%', padding: '9px 14px', borderRadius: '10px', border: '1.5px solid #0d9488', fontWeight: 'bold', fontSize: '13px', background: '#fff' }}
+                      >
+                        <option value="all">-- جميع الوظائف (عرض الكل) --</option>
+                        {['صيدلي', 'كاشير', 'مساعد صيدلي', 'مسؤول توصيل', 'مدير فرع', 'خدمات / نظافة', 'محاسب', 'سائق', 'أخرى'].map(job => (
+                          <option key={job} value={job}>{job}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Requirement 31 & 32: Employee Selector */}
+                  <div className="field" style={{ flex: '1 1 240px' }}>
+                    <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#1e293b' }}>
+                      اختر الموظف المراد تقييمه * {evalTargetJobFilter !== 'all' ? `(وظيفة: ${evalTargetJobFilter})` : ''}
+                    </label>
                     <select
                       value={evalEmpId}
                       onChange={(e) => setEvalEmpId(e.target.value)}
                       required
-                      style={{ padding: '9px 14px', borderRadius: '10px', border: '1.5px solid #0d9488', fontWeight: 'bold', fontSize: '13.5px', background: '#fff' }}
+                      style={{ width: '100%', padding: '9px 14px', borderRadius: '10px', border: '1.5px solid #0d9488', fontWeight: 'bold', fontSize: '13.5px', background: '#fff' }}
                     >
                       <option value="">-- اختر الموظف من القائمة --</option>
                       {employees
                         .filter(isEmployeeActive)
                         .filter(e => {
+                          // Branch filtering and Requirement 31: Exclude branch manager from evaluating himself
                           if (currentRole === 'branch' && currentBranchId) {
                             const bId = e.branchesDetails?.[0]?.branchId || e.branchId;
-                            return String(bId) === String(currentBranchId);
+                            if (String(bId) !== String(currentBranchId)) return false;
+
+                            const curBranch = branches.find(b => String(b.id) === String(currentBranchId));
+                            if (curBranch?.managerId && String(e.id) === String(curBranch.managerId)) return false;
+                            if (curBranch?.managerCode && String(e.code) === String(curBranch.managerCode)) return false;
+                            if (state.currentUserId && String(e.id) === String(state.currentUserId)) return false;
+                            if (e.jobTitle && (e.jobTitle.includes('مدير فرع') || e.jobTitle.includes('مدير الفرع'))) return false;
                           }
+
+                          // Requirement 32: Filter by selected job
+                          if (evalTargetJobFilter && evalTargetJobFilter !== 'all') {
+                            const empJob = (e.jobTitle || '').toLowerCase();
+                            const filterJob = evalTargetJobFilter.toLowerCase();
+                            if (!empJob.includes(filterJob) && !filterJob.includes(empJob)) return false;
+                          }
+
                           return true;
                         })
                         .map((e) => (
