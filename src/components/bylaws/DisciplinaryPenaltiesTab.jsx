@@ -771,12 +771,17 @@ export default function DisciplinaryPenaltiesTab({
       adjustments: updatedAdjustments,
       notifications: updatedNotifications
     };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
 
+    // 0ms instant optimistic UI response
+    if (setState) setState(updatedState);
     setObjectionTargetPen(null);
     setObjectionReason('');
-    showToast?.('✅ تم إرسال تظلمك واعتراضك إلى الإدارة العليا بنجاح وجاري مراجعته');
+    showToast?.('✅ تم إرسال تظلمك واعتراضك إلى الإدارة العليا فوراً وجاري مراجعته');
+
+    // Non-blocking background sync
+    if (saveState) {
+      saveState(updatedState).catch(err => console.error('Background save error on objection submit:', err));
+    }
   };
 
   // ── Admin Objection Handlers ──

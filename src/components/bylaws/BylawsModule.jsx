@@ -234,7 +234,7 @@ export default function BylawsModule({
     }
   };
 
-  const handleSubmitObjection = async (e) => {
+  const handleSubmitObjection = (e) => {
     e.preventDefault();
     if (!objectionTargetReq || !objectionReason.trim()) {
       showToast?.('يرجى كتابة أسباب ومبررات الاعتراض');
@@ -242,9 +242,10 @@ export default function BylawsModule({
     }
 
     const penId = objectionTargetReq.id;
+    const reasonText = objectionReason.trim();
     const objData = {
       status: 'pending',
-      reason: objectionReason.trim(),
+      reason: reasonText,
       submittedAt: new Date().toISOString()
     };
 
@@ -285,18 +286,65 @@ export default function BylawsModule({
       });
     }
 
+    // Create a formal request entry for Higher Management
+    const objReq = {
+      id: `obj_req_${penId}_${Date.now()}`,
+      penaltyId: penId,
+      sourceType: objectionTargetReq.sourceType || 'late_incident',
+      type: 'penalty_objection',
+      typeLabel: 'تظلم على جزاء لائحى',
+      employeeId: objectionTargetReq.employeeId,
+      employeeCode: objectionTargetReq.employeeCode,
+      employeeName: objectionTargetReq.employeeName,
+      branchId: objectionTargetReq.branchId,
+      branchName: objectionTargetReq.branchName,
+      date: objectionTargetReq.date || new Date().toISOString().slice(0, 10),
+      reason: reasonText,
+      details: `تظلم على: ${objectionTargetReq.ruleTitle || objectionTargetReq.reason || 'جزاء تأديبي'} (${objectionTargetReq.penaltyAmount || objectionTargetReq.amount || 0} ج.م / ${objectionTargetReq.deductionMinutes || 0} دقيقة) — مبررات الموظف: ${reasonText}`,
+      penaltyAmount: objectionTargetReq.penaltyAmount || objectionTargetReq.amount || 0,
+      deductionMinutes: objectionTargetReq.deductionMinutes || 0,
+      violationTitle: objectionTargetReq.ruleTitle || objectionTargetReq.reason || 'جزاء تأديبي',
+      status: 'pending',
+      adminApproved: false,
+      createdAt: new Date().toISOString()
+    };
+
+    updatedRequests = [objReq, ...updatedRequests.filter(r => r.penaltyId !== penId || r.type !== 'penalty_objection')];
+
+    // Create admin notification
+    const objNotif = {
+      id: `notif_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      type: 'bylaws',
+      targetRole: 'admin',
+      requestId: objReq.id,
+      employeeId: objectionTargetReq.employeeId,
+      title: `✋ تظلم جديد على جزاء (${objectionTargetReq.employeeName || 'موظف'})`,
+      message: `تظلم على: ${objectionTargetReq.ruleTitle || objectionTargetReq.reason || 'جزاء تأديبي'} — السبب: ${reasonText}`,
+      date: new Date().toISOString().slice(0, 10),
+      timestamp: new Date().toISOString(),
+      read: false
+    };
+
+    const updatedNotifications = [objNotif, ...(state.notifications || [])];
+
     const updatedState = {
       ...state,
       requests: updatedRequests,
       lateIncidents: updatedLateIncidents,
-      adjustments: updatedAdjustments
+      adjustments: updatedAdjustments,
+      notifications: updatedNotifications
     };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
 
+    // 0ms instant optimistic UI response
+    if (setState) setState(updatedState);
     setObjectionTargetReq(null);
     setObjectionReason('');
-    showToast?.('✅ تم إرسال اعتراضك إلى الإدارة العليا بنجاح وجاري مراجعته');
+    showToast?.('✅ تم إرسال اعتراضك إلى الإدارة العليا فوراً وجاري مراجعته');
+
+    // Non-blocking background sync
+    if (saveState) {
+      saveState(updatedState).catch(err => console.error('Background save error on objection submit:', err));
+    }
   };
 
   const handleAdminApproveObjection = async (reqId) => {
