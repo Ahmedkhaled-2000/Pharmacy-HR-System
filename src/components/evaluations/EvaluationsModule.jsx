@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { getEmpDisplayName, isEmployeeActive, fmt, arabicWeekday } from '../../utils/formatters';
 import { getActivePayrollMonth } from '../../utils/periodEngine';
 import { getRealTodayStr } from '../../utils/timeEngine';
+import { getJobsList } from '../../utils/jobsHelper';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Default Standard Criteria Templates per Job Title (المعايير القياسية للوظائف)
@@ -142,6 +143,23 @@ export default function EvaluationsModule({
   const notes = state?.employeeNotes || [];
   const branches = state?.branches || [];
   const orgSettings = state?.orgSettings || {};
+
+  // Requirement 34: Dynamically retrieve job titles from system's jobs directory
+  const systemJobs = useMemo(() => getJobsList(state), [state]);
+  const availableJobTitles = useMemo(() => {
+    const titles = new Set();
+    systemJobs.forEach((j) => {
+      const t = (j.title || j.name || '').trim();
+      if (t) titles.add(t);
+    });
+    (state?.employees || []).forEach((e) => {
+      if (e.jobTitle?.trim()) titles.add(e.jobTitle.trim());
+    });
+    if (titles.size === 0) {
+      ['صيدلي أول', 'مدير فرع', 'مدير إداري', 'صيدلي', 'مساعد صيدلي', 'كاشير', 'مدخل بيانات', 'مسؤول مخزن', 'خدمة توصيل (دليفري)'].forEach(j => titles.add(j));
+    }
+    return Array.from(titles);
+  }, [systemJobs, state?.employees]);
 
   // Synchronize SubTab
   useEffect(() => {
@@ -775,7 +793,7 @@ export default function EvaluationsModule({
                 style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px', background: '#fff' }}
               >
                 <option value="all">👔 جميع الوظائف</option>
-                {Object.keys(DEFAULT_JOB_EVALUATION_CRITERIA).filter(k => k !== 'general').map(j => (
+                {availableJobTitles.map(j => (
                   <option key={j} value={j}>{j}</option>
                 ))}
               </select>
@@ -889,7 +907,7 @@ export default function EvaluationsModule({
               <form onSubmit={handleEvaluationSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px' }}>
                   
-                  {/* Requirement 32: Job Filter Selector for Higher Management */}
+                  {/* Requirement 32 & 34: Job Filter Selector for Higher Management from System Jobs */}
                   {currentRole === 'admin' && (
                     <div className="field">
                       <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#1e293b' }}>
@@ -904,7 +922,7 @@ export default function EvaluationsModule({
                         style={{ width: '100%', padding: '9px 14px', borderRadius: '10px', border: '1.5px solid #0d9488', fontWeight: 'bold', fontSize: '13px', background: '#fff' }}
                       >
                         <option value="all">-- جميع الوظائف (عرض الكل) --</option>
-                        {['صيدلي', 'كاشير', 'مساعد صيدلي', 'مسؤول توصيل', 'مدير فرع', 'خدمات / نظافة', 'محاسب', 'سائق', 'أخرى'].map(job => (
+                        {availableJobTitles.map((job) => (
                           <option key={job} value={job}>{job}</option>
                         ))}
                       </select>
@@ -1392,11 +1410,12 @@ export default function EvaluationsModule({
                   onChange={(e) => setSelectedCriteriaJob(e.target.value)}
                   style={{ padding: '8px 16px', borderRadius: '10px', border: '1.5px solid #0d9488', fontWeight: 'bold', fontSize: '13.5px', background: '#f0fdfa', color: '#0f766e' }}
                 >
-                  {Object.keys(DEFAULT_JOB_EVALUATION_CRITERIA).map(job => (
+                  {availableJobTitles.map(job => (
                     <option key={job} value={job}>
-                      👔 {job === 'general' ? 'معايير عامة افتراضية' : job}
+                      👔 {job}
                     </option>
                   ))}
+                  <option value="general">👔 معايير عامة افتراضية (عام)</option>
                 </select>
               </div>
             </div>
