@@ -1128,8 +1128,7 @@ export default function EmployeePortalView({
         (r) =>
           String(r.employeeId) === String(emp.id) &&
           (r.status === 'approved' || r.adminApproved || r.status === 'partial') &&
-          (r.type === 'loan' || r.type === 'advance' || r.type === 'meds' || r.type === 'credit_medicine') &&
-          filterFn(r.date || (r.createdAt ? r.createdAt.slice(0, 10) : ''))
+          (r.type === 'loan' || r.type === 'advance' || r.type === 'meds' || r.type === 'credit_medicine')
       )
       .forEach((r) => loanMap.set(String(r.id), r));
 
@@ -1141,8 +1140,7 @@ export default function EmployeePortalView({
           l.status !== 'pending_admin' &&
           l.status !== 'rejected' &&
           l.status !== 'cancelled' &&
-          (l.type === 'loan' || l.type === 'advance' || l.type === 'meds' || l.type === 'credit_medicine') &&
-          filterFn(l.date || (l.createdAt ? l.createdAt.slice(0, 10) : ''))
+          (l.type === 'loan' || l.type === 'advance' || l.type === 'meds' || l.type === 'credit_medicine')
       )
       .forEach((l) => {
         const existing = loanMap.get(String(l.id));
@@ -1154,13 +1152,20 @@ export default function EmployeePortalView({
       const paid = parseFloat(l.paidAmount) || 0;
       const rem = Math.max(0, total - paid);
       if (rem <= 0) return;
-      const monthlyDeduction = parseFloat(l.monthlyDeduction || l.installmentAmount) || Math.min(rem, total);
-      const deductionAmt = Math.min(rem, monthlyDeduction);
+
+      const isInstallment = l.loanType === 'installment' || parseInt(l.installmentsCount || l.monthsCount, 10) > 1 || (parseFloat(l.monthlyDeduction || l.installmentAmount) > 0 && parseFloat(l.monthlyDeduction || l.installmentAmount) < total);
+      const monthlyDeduction = parseFloat(l.monthlyDeduction || l.installmentAmount) || (isInstallment ? Math.ceil(total / (parseInt(l.installmentsCount || l.monthsCount, 10) || 1)) : rem);
+      const itemDate = l.date || (l.createdAt ? l.createdAt.slice(0, 10) : '');
+
+      if (!isInstallment && !filterFn(itemDate) && rem <= 0) {
+        return;
+      }
+
+      const deductionAmt = Math.min(rem, isInstallment ? monthlyDeduction : rem);
       if (deductionAmt > 0) {
         const lId = `loan_ded_${l.id}`;
         if (!map.has(lId)) {
           const isMeds = l.type === 'meds' || l.type === 'credit_medicine';
-          const isInstallment = parseFloat(l.installmentsCount || l.monthsCount) > 1;
           const typeLabel = isMeds
             ? '💊 مشتريات أدوية بالآجل'
             : isInstallment
@@ -1172,9 +1177,9 @@ export default function EmployeePortalView({
             employeeId: emp.id,
             type: 'deduction',
             amount: deductionAmt,
-            date: l.date || (l.createdAt ? l.createdAt.slice(0, 10) : ''),
+            date: itemDate || getRealTodayStr(),
             reason: `${typeLabel}${l.reason ? ` - ${l.reason}` : ''}`,
-            details: `خصم قسط من إجمالي (${fmt(total)} ج.م) - المتبقي (${fmt(Math.max(0, rem - deductionAmt))} ج.م)`,
+            details: `خصم من إجمالي (${fmt(total)} ج.م) - المتبقي بعد الخصم (${fmt(Math.max(0, rem - deductionAmt))} ج.م)`,
             createdAt: l.createdAt
           });
         }

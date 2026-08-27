@@ -227,14 +227,15 @@ export default function PayslipPrintModal({
   });
 
   // 4. Loans & Credit Medicine (السلف ومشتريات الأدوية)
+  const cyclePredicate = (d) => d && d >= cycleRange.startDate && d <= cycleRange.endDate;
+
   const loanBreakdownMap = new Map();
   (state?.requests || [])
     .filter(
       (r) =>
         String(r.employeeId) === String(emp.id) &&
         (r.status === 'approved' || r.adminApproved || r.status === 'partial') &&
-        (r.type === 'loan' || r.type === 'advance' || r.type === 'meds' || r.type === 'credit_medicine') &&
-        (r.date || (r.createdAt ? r.createdAt.slice(0, 10) : '')).startsWith(month)
+        (r.type === 'loan' || r.type === 'advance' || r.type === 'meds' || r.type === 'credit_medicine')
     )
     .forEach((r) => loanBreakdownMap.set(String(r.id), r));
 
@@ -246,8 +247,7 @@ export default function PayslipPrintModal({
         l.status !== 'pending_admin' &&
         l.status !== 'rejected' &&
         l.status !== 'cancelled' &&
-        (l.type === 'loan' || l.type === 'advance' || l.type === 'meds' || l.type === 'credit_medicine') &&
-        (l.date || (l.createdAt ? l.createdAt.slice(0, 10) : '')).startsWith(month)
+        (l.type === 'loan' || l.type === 'advance' || l.type === 'meds' || l.type === 'credit_medicine')
     )
     .forEach((l) => {
       const existing = loanBreakdownMap.get(String(l.id));
@@ -258,12 +258,22 @@ export default function PayslipPrintModal({
     const total = parseFloat(l.amount || l.totalAmount) || 0;
     const paid = parseFloat(l.paidAmount) || 0;
     const rem = Math.max(0, total - paid);
-    const monthlyDeduction = parseFloat(l.monthlyDeduction || l.installmentAmount) || Math.min(rem, total);
-    const isInstallment = l.loanType === 'installment' || parseInt(l.installmentsCount || l.monthsCount, 10) > 1;
+    if (rem <= 0) return null;
+
+    const isInstallment = l.loanType === 'installment' || parseInt(l.installmentsCount || l.monthsCount, 10) > 1 || (parseFloat(l.monthlyDeduction || l.installmentAmount) > 0 && parseFloat(l.monthlyDeduction || l.installmentAmount) < total);
+    const monthlyDeduction = parseFloat(l.monthlyDeduction || l.installmentAmount) || (isInstallment ? Math.ceil(total / (parseInt(l.installmentsCount || l.monthsCount, 10) || 1)) : rem);
+    const itemDate = l.date || (l.createdAt ? l.createdAt.slice(0, 10) : '');
+
+    if (!isInstallment && !cyclePredicate(itemDate) && rem <= 0) {
+      return null;
+    }
+
+    const deductedThisMonth = Math.min(rem, isInstallment ? monthlyDeduction : rem);
+    if (deductedThisMonth <= 0) return null;
 
     return {
       id: l.id,
-      date: l.date || (l.createdAt ? l.createdAt.slice(0, 10) : month + '-01'),
+      date: itemDate || cycleRange.startDate,
       typeLabel: (l.type === 'meds' || l.type === 'credit_medicine')
         ? '💊 مشتريات أدوية بالآجل'
         : isInstallment
@@ -271,11 +281,11 @@ export default function PayslipPrintModal({
         : '💳 سلفة نقدية شهرية',
       totalAmount: total,
       paidAmount: paid,
-      deductedThisMonth: monthlyDeduction,
-      remainingBalance: Math.max(0, rem - monthlyDeduction),
+      deductedThisMonth,
+      remainingBalance: Math.max(0, rem - deductedThisMonth),
       notes: l.reason || l.details || l.notes || '—'
     };
-  });
+  }).filter(Boolean);
 
   // 5. Absence deductions (الغياب)
   const absenceDaysCount = summary.absenceDaysCount || 0;

@@ -2600,8 +2600,7 @@ export default function App() {
         (r) =>
           String(r.employeeId) === String(empId) &&
           (r.status === 'approved' || r.adminApproved || r.status === 'partial') &&
-          (r.type === 'loan' || r.type === 'advance' || r.type === 'meds' || r.type === 'credit_medicine') &&
-          effectiveFilterFn(r.date || (r.createdAt ? r.createdAt.slice(0, 10) : ''))
+          (r.type === 'loan' || r.type === 'advance' || r.type === 'meds' || r.type === 'credit_medicine')
       )
       .forEach((r) => loanDeductionMap.set(String(r.id), r));
 
@@ -2613,8 +2612,7 @@ export default function App() {
           l.status !== 'pending_admin' &&
           l.status !== 'rejected' &&
           l.status !== 'cancelled' &&
-          (l.type === 'loan' || l.type === 'advance' || l.type === 'meds' || l.type === 'credit_medicine') &&
-          effectiveFilterFn(l.date || (l.createdAt ? l.createdAt.slice(0, 10) : ''))
+          (l.type === 'loan' || l.type === 'advance' || l.type === 'meds' || l.type === 'credit_medicine')
       )
       .forEach((l) => {
         const existing = loanDeductionMap.get(String(l.id));
@@ -2627,8 +2625,21 @@ export default function App() {
       const paid = parseFloat(l.paidAmount) || 0;
       const rem = Math.max(0, total - paid);
       if (rem <= 0) return acc;
-      const monthlyDeduction = parseFloat(l.monthlyDeduction || l.installmentAmount) || Math.min(rem, total);
-      return acc + Math.min(rem, monthlyDeduction);
+
+      const isInstallment = l.loanType === 'installment' || parseInt(l.installmentsCount || l.monthsCount, 10) > 1 || (parseFloat(l.monthlyDeduction || l.installmentAmount) > 0 && parseFloat(l.monthlyDeduction || l.installmentAmount) < total);
+      const monthlyDeduction = parseFloat(l.monthlyDeduction || l.installmentAmount) || (isInstallment ? Math.ceil(total / (parseInt(l.installmentsCount || l.monthsCount, 10) || 1)) : rem);
+
+      if (isInstallment) {
+        // السلفة المقسطة: يتم خصم القسط الشهري تلقائياً في كل دورة راتب طالما هناك رصيد متبقي
+        return acc + Math.min(rem, monthlyDeduction);
+      } else {
+        // السلفة الشهرية النقدية: تخصم تلقائياً من راتب الموظف في دورة الرواتب المعتمدة
+        const itemDate = l.date || (l.createdAt ? l.createdAt.slice(0, 10) : '');
+        if (!effectiveFilterFn || effectiveFilterFn(itemDate) || rem > 0) {
+          return acc + rem;
+        }
+        return acc;
+      }
     }, 0);
 
     // Calculate Approved Unpaid Leaves & Annual Leaves in period (Strictly deduplicated)

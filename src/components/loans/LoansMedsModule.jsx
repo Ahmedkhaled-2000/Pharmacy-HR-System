@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { fmt, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
+import { getActivePayrollMonth, getCycleDateRange } from '../../utils/periodEngine';
 
 export default function LoansMedsModule({
   state,
@@ -341,12 +342,10 @@ export default function LoansMedsModule({
   };
 
   const handleAutoCloseMonthlyInstallments = async () => {
-    const currentMonth = new Date().toISOString().slice(0, 7);
-    const sDay = state.orgSettings?.payrollPayoutStartDay || 26;
-    const eDay = state.orgSettings?.payrollPayoutEndDay || 25;
-    const [y, m] = currentMonth.split('-').map(Number);
-    const endDate = `${y}-${String(m).padStart(2, '0')}-${String(eDay).padStart(2, '0')}`;
-    const startDate = `${m === 1 ? y - 1 : y}-${String(m === 1 ? 12 : m - 1).padStart(2, '0')}-${String(sDay).padStart(2, '0')}`;
+    const activeMonth = getActivePayrollMonth(state.orgSettings);
+    const cycleRange = getCycleDateRange(activeMonth, state.orgSettings);
+    const { startDate, endDate } = cycleRange;
+    const currentMonth = activeMonth;
 
     if (!window.confirm(`هل ترغب في تطبيق الخصم التلقائي لأقساط السلف في نهاية فترة الرواتب المحددة (${startDate} إلى ${endDate})؟`)) {
       return;
@@ -401,7 +400,7 @@ export default function LoansMedsModule({
       if (saveState) await saveState(updatedState);
 
       if (processedCount > 0) {
-        showToast?.(`✅ تم خصم وتأكيد سداد الأقساط التلقائية لعدد ${processedCount} سلفة عن دورة ${currentMonth} (${endDate})!`);
+        showToast?.(`✅ تم خصم وتأكيد سداد الأقساط التلقائية لعدد ${processedCount} سلفة عن دورة ${currentMonth} (${startDate} إلى ${endDate})!`);
       } else {
         showToast?.(`ℹ️ جميع الأقساط لسلف هذه الدورة (${currentMonth}) مخصومة ومسددة بالكامل مسبقاً.`);
       }
@@ -411,7 +410,7 @@ export default function LoansMedsModule({
       executeWithOwnerGuard({
         lockKey: 'lockApproveLoans',
         actionTitle: 'الخصم التلقائي لأقساط السلف',
-        actionDetails: `دورة الرواتب: ${currentMonth}`,
+        actionDetails: `دورة الرواتب: ${cycleRange.label || currentMonth}`,
         onExecute: performAutoClose
       });
     } else {
