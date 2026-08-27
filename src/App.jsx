@@ -1142,6 +1142,7 @@ export default function App() {
       });
 
       let updatedAdjs = state.adjustments || [];
+      let updatedLoans = [...(state.loans || [])];
       let updatedRosters = state.rosters || [];
       let updatedSwaps = state.shiftSwaps || [];
       let updatedEmps = state.employees || [];
@@ -1214,7 +1215,7 @@ export default function App() {
           });
         }
 
-        // 3. Loans & Credit Medicines Auto-Enrollment into Direct Adjustments for Current Cycle
+        // 3. Loans & Credit Medicines Auto-Enrollment into state.loans
         if (target.type === 'loan' || target.type === 'advance' || target.type === 'meds' || target.type === 'credit_medicine') {
           const totalAmount = parseFloat(target.amount || target.totalAmount) || 0;
           const monthsCount = parseInt(target.monthsCount || target.installmentsCount || target.installments, 10) || 1;
@@ -1223,21 +1224,35 @@ export default function App() {
           const isMeds = target.type === 'meds' || target.type === 'credit_medicine';
           const isInstallment = target.loanType === 'installment' || target.loanType === 'installments' || monthsCount > 1;
 
-          let loanTypeTitle = isMeds ? 'مشتريات أدوية آجل' : isInstallment ? `سلفة مقسطة (${monthsCount} أقساط)` : 'سلفة شهرية';
-          const deductionDesc = isInstallment 
-            ? `خصم قسط ${loanTypeTitle} (قسط شهري) — مبلغ ${monthlyInstallment} ج.م من إجمالي ${totalAmount} ج.م`
-            : `خصم ${loanTypeTitle} — مبلغ ${monthlyInstallment} ج.م`;
-
-          updatedAdjs.push({
-            id: `adj_loan_${Date.now()}`,
+          const approvedLoanObj = {
+            id: target.id,
             employeeId: target.employeeId,
-            type: 'deduction',
-            amount: monthlyInstallment,
-            description: deductionDesc,
-            notes: deductionDesc,
-            reason: deductionDesc,
-            date: getRealTodayStr()
-          });
+            employeeCode: target.employeeCode,
+            employeeName: target.employeeName,
+            type: isMeds ? 'meds' : 'loan',
+            loanType: isInstallment ? 'installment' : 'monthly',
+            amount: totalAmount,
+            totalAmount: totalAmount,
+            paidAmount: parseFloat(target.paidAmount) || 0,
+            monthlyDeduction: monthlyInstallment,
+            installmentAmount: monthlyInstallment,
+            installmentsCount: monthsCount,
+            monthsCount: monthsCount,
+            medicines: target.medicines || target.medsItems || target.items || [],
+            medsItems: target.medicines || target.medsItems || target.items || [],
+            notes: target.reason || target.details || target.adminNotes || (isMeds ? 'مشتريات أدوية آجل معتمدة' : 'سلفة مالية معتمدة'),
+            date: target.date || (target.createdAt ? target.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10)),
+            status: 'approved',
+            adminApproved: true,
+            approvedAt: new Date().toISOString()
+          };
+
+          const lIdx = updatedLoans.findIndex((l) => String(l.id) === String(target.id));
+          if (lIdx >= 0) {
+            updatedLoans[lIdx] = { ...updatedLoans[lIdx], ...approvedLoanObj };
+          } else {
+            updatedLoans.unshift(approvedLoanObj);
+          }
         }
 
         // 4. Shift Swaps Schedule Swapping in Rosters
@@ -1303,6 +1318,7 @@ export default function App() {
         ...state,
         requests: updatedRequests,
         adjustments: updatedAdjs,
+        loans: updatedLoans,
         rosters: updatedRosters,
         shiftSwaps: updatedSwaps,
         employees: updatedEmps,

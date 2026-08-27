@@ -29,6 +29,16 @@ export default function LoansMedsModule({
   const [ruleMaxInstallmentMultiplier, setRuleMaxInstallmentMultiplier] = useState(
     orgSettings.maxInstallmentLoanSalaryMultiplier !== undefined ? orgSettings.maxInstallmentLoanSalaryMultiplier : 2
   );
+  // Credit Medicine Installments Settings
+  const [ruleAllowCreditMedicineInstallments, setRuleAllowCreditMedicineInstallments] = useState(
+    orgSettings.allowCreditMedicineInstallments !== false
+  );
+  const [ruleCreditMedicineInstallmentMinAmount, setRuleCreditMedicineInstallmentMinAmount] = useState(
+    orgSettings.creditMedicineInstallmentMinAmount !== undefined ? orgSettings.creditMedicineInstallmentMinAmount : 500
+  );
+  const [ruleCreditMedicineMaxInstallments, setRuleCreditMedicineMaxInstallments] = useState(
+    orgSettings.creditMedicineMaxInstallments !== undefined ? orgSettings.creditMedicineMaxInstallments : 6
+  );
 
   useEffect(() => {
     if (state.orgSettings) {
@@ -36,6 +46,9 @@ export default function LoansMedsModule({
       if (state.orgSettings.loanRequestEndDay !== undefined) setRuleEndDay(state.orgSettings.loanRequestEndDay);
       if (state.orgSettings.maxMonthlyLoanSalaryPercent !== undefined) setRuleMaxMonthlyPercent(state.orgSettings.maxMonthlyLoanSalaryPercent);
       if (state.orgSettings.maxInstallmentLoanSalaryMultiplier !== undefined) setRuleMaxInstallmentMultiplier(state.orgSettings.maxInstallmentLoanSalaryMultiplier);
+      if (state.orgSettings.allowCreditMedicineInstallments !== undefined) setRuleAllowCreditMedicineInstallments(state.orgSettings.allowCreditMedicineInstallments);
+      if (state.orgSettings.creditMedicineInstallmentMinAmount !== undefined) setRuleCreditMedicineInstallmentMinAmount(state.orgSettings.creditMedicineInstallmentMinAmount);
+      if (state.orgSettings.creditMedicineMaxInstallments !== undefined) setRuleCreditMedicineMaxInstallments(state.orgSettings.creditMedicineMaxInstallments);
     }
   }, [state.orgSettings]);
 
@@ -46,19 +59,22 @@ export default function LoansMedsModule({
         loanRequestStartDay: parseInt(ruleStartDay) || 1,
         loanRequestEndDay: parseInt(ruleEndDay) || 10,
         maxMonthlyLoanSalaryPercent: parseFloat(ruleMaxMonthlyPercent) || 50,
-        maxInstallmentLoanSalaryMultiplier: parseFloat(ruleMaxInstallmentMultiplier) || 2
+        maxInstallmentLoanSalaryMultiplier: parseFloat(ruleMaxInstallmentMultiplier) || 2,
+        allowCreditMedicineInstallments: Boolean(ruleAllowCreditMedicineInstallments),
+        creditMedicineInstallmentMinAmount: parseFloat(ruleCreditMedicineInstallmentMinAmount) || 500,
+        creditMedicineMaxInstallments: parseInt(ruleCreditMedicineMaxInstallments, 10) || 6
       };
       const updatedState = { ...state, orgSettings: updatedSettings };
       if (setState) setState(updatedState);
       if (saveState) await saveState(updatedState);
-      showToast?.('✅ تم حفظ ضوابط وشروط السلف للموظفين وتطبيقها فوراً!');
+      showToast?.('✅ تم حفظ ضوابط وشروط السلف وتقسيط الأدوية للموظفين وتطبيقها فوراً!');
     };
 
     if (executeWithOwnerGuard) {
       executeWithOwnerGuard({
         lockKey: 'lockEditCutoffRules',
-        actionTitle: 'تعديل ضوابط ومواعيد السلف',
-        actionDetails: `النافذة: من يوم ${ruleStartDay} إلى ${ruleEndDay}`,
+        actionTitle: 'تعديل ضوابط ومواعيد السلف وتقسيط الأدوية',
+        actionDetails: `النافذة: من يوم ${ruleStartDay} إلى ${ruleEndDay} - تقسيط الأدوية: ${ruleAllowCreditMedicineInstallments ? 'مفعل' : 'معطل'}`,
         onExecute: performSaveLoanSettings
       });
     } else {
@@ -96,12 +112,14 @@ export default function LoansMedsModule({
           type: isMeds ? 'meds' : 'loan',
           loanType: r.loanType || 'monthly',
           typeLabel: isMeds
-            ? (r.status === 'approved' ? 'أدوية ومشتريات آجل معتمدة' : 'طلب أدوية آجل')
+            ? (r.status === 'approved' ? (r.loanType === 'installment' ? 'أدوية آجل مقسطة معتمدة' : 'أدوية ومشتريات آجل معتمدة') : 'طلب أدوية آجل')
             : (r.status === 'approved' ? (r.loanType === 'installment' ? 'سلفة مقسطة معتمدة' : 'سلفة مالية معتمدة') : 'طلب سلفة مالية'),
           amount: parseFloat(r.amount || r.totalAmount) || 0,
           paidAmount: parseFloat(paidAmount) || 0,
           paymentsHistory: history,
-          medsItems: r.medsItems || r.items || r.medsDetails || [],
+          medsItems: r.medicines || r.medsItems || r.items || r.medsDetails || [],
+          medicines: r.medicines || r.medsItems || r.items || r.medsDetails || [],
+          monthsCount: parseInt(r.monthsCount || r.installmentsCount, 10) || 1,
           monthlyDeduction: r.monthlyDeduction || r.installmentAmount || null,
           status: r.status || 'approved',
           notes: r.reason || r.details || r.notes || (isMeds ? 'طلب أدوية آجل' : 'طلب سلفة مالية'),
@@ -504,7 +522,7 @@ export default function LoansMedsModule({
           </div>
 
           <div className="field">
-            <label style={{ fontSize: '12.5px', fontWeight: 'bold' }}>📊 نسبة السلفة الشهرية (% من الراتب الكامل)</label>
+            <label style={{ fontSize: '12.5px', fontWeight: 'bold' }}>📊 نسبة السلفة الشهرية (% من الراتب)</label>
             <input
               type="number"
               min="1"
@@ -513,11 +531,11 @@ export default function LoansMedsModule({
               onChange={(e) => setRuleMaxMonthlyPercent(e.target.value)}
               placeholder="50"
             />
-            <small style={{ color: 'var(--muted)', fontSize: '11px' }}>نسبة من الراتب الشهري (سعر الساعة × ساعات العمل)</small>
+            <small style={{ color: 'var(--muted)', fontSize: '11px' }}>نسبة من الراتب الشهري</small>
           </div>
 
           <div className="field">
-            <label style={{ fontSize: '12.5px', fontWeight: 'bold' }}>💰 الحد الأقصى للسلفة المقسطة (أضعاف الراتب)</label>
+            <label style={{ fontSize: '12.5px', fontWeight: 'bold' }}>💰 أقصى سلفة مقسطة (أضعاف الراتب)</label>
             <input
               type="number"
               min="1"
@@ -527,7 +545,50 @@ export default function LoansMedsModule({
               onChange={(e) => setRuleMaxInstallmentMultiplier(e.target.value)}
               placeholder="2"
             />
-            <small style={{ color: 'var(--muted)', fontSize: '11px' }}>عدد أضعاف الراتب الشهري الكامل (مثال: 2 أو 3 أضعاف)</small>
+            <small style={{ color: 'var(--muted)', fontSize: '11px' }}>أضعاف الراتب الكامل (مثال: 2)</small>
+          </div>
+
+          <div className="field">
+            <label style={{ fontSize: '12.5px', fontWeight: 'bold' }}>💊 تفعيل تقسيط الأدوية الآجل</label>
+            <select
+              value={ruleAllowCreditMedicineInstallments ? 'true' : 'false'}
+              onChange={(e) => setRuleAllowCreditMedicineInstallments(e.target.value === 'true')}
+            >
+              <option value="true">🟢 مفعل (السماح للموظف بالتقسيط عند حد معين)</option>
+              <option value="false">🔴 معطل (الخصم دفعة واحدة فقط)</option>
+            </select>
+            <small style={{ color: 'var(--muted)', fontSize: '11px' }}>إمكانية تقسيط مشتريات الأدوية</small>
+          </div>
+
+          <div className="field">
+            <label style={{ fontSize: '12.5px', fontWeight: 'bold' }}>🏷️ الحد الأدنى لمبلغ تقسيط الدواء (ج.م)</label>
+            <input
+              type="number"
+              min="1"
+              value={ruleCreditMedicineInstallmentMinAmount}
+              onChange={(e) => setRuleCreditMedicineInstallmentMinAmount(e.target.value)}
+              placeholder="500"
+              disabled={!ruleAllowCreditMedicineInstallments}
+            />
+            <small style={{ color: 'var(--muted)', fontSize: '11px' }}>تفعيل التقسيط إذا بلغ الطلب هذا المبلغ فأكثر</small>
+          </div>
+
+          <div className="field">
+            <label style={{ fontSize: '12.5px', fontWeight: 'bold' }}>📅 أقصى عدد شهور لتقسيط الدواء</label>
+            <select
+              value={ruleCreditMedicineMaxInstallments}
+              onChange={(e) => setRuleCreditMedicineMaxInstallments(e.target.value)}
+              disabled={!ruleAllowCreditMedicineInstallments}
+            >
+              <option value="2">شهرين (2 قسط)</option>
+              <option value="3">3 شهور (3 أقساط)</option>
+              <option value="4">4 شهور (4 أقساط)</option>
+              <option value="5">5 شهور (5 أقساط)</option>
+              <option value="6">6 شهور (6 أقساط)</option>
+              <option value="10">10 شهور</option>
+              <option value="12">سنة كاملة (12 شهر)</option>
+            </select>
+            <small style={{ color: 'var(--muted)', fontSize: '11px' }}>الحد الأقصى للأقساط الشهرية للأدوية</small>
           </div>
         </div>
       </div>
@@ -556,31 +617,27 @@ export default function LoansMedsModule({
             </select>
           </div>
 
-          {entryType === 'loan' && (
-            <>
-              <div className="field">
-                <label>نظام الخصم والسداد</label>
-                <select value={loanRepayPlan} onChange={(e) => setLoanRepayPlan(e.target.value)}>
-                  <option value="single">💵 سلفة شهرية (دفعة واحدة مع أقرب راتب)</option>
-                  <option value="installment">📅 سلفة مقسطة على عدة شهور</option>
-                </select>
-              </div>
+          <div className="field">
+            <label>نظام الخصم والسداد</label>
+            <select value={loanRepayPlan} onChange={(e) => setLoanRepayPlan(e.target.value)}>
+              <option value="single">💵 دفعة واحدة (مع أقرب مرتب)</option>
+              <option value="installment">📅 مقسطة على عدة شهور</option>
+            </select>
+          </div>
 
-              {loanRepayPlan === 'installment' && (
-                <div className="field">
-                  <label>عدد شهور التقسيط</label>
-                  <select value={loanMonthsCount} onChange={(e) => setLoanMonthsCount(e.target.value)}>
-                    <option value="2">شهرين (2 شهور)</option>
-                    <option value="3">3 شهور</option>
-                    <option value="4">4 شهور</option>
-                    <option value="5">5 شهور</option>
-                    <option value="6">6 شهور</option>
-                    <option value="10">10 شهور</option>
-                    <option value="12">سنة كاملة (12 شهر)</option>
-                  </select>
-                </div>
-              )}
-            </>
+          {loanRepayPlan === 'installment' && (
+            <div className="field">
+              <label>عدد شهور التقسيط</label>
+              <select value={loanMonthsCount} onChange={(e) => setLoanMonthsCount(e.target.value)}>
+                <option value="2">شهرين (2 شهور)</option>
+                <option value="3">3 شهور</option>
+                <option value="4">4 شهور</option>
+                <option value="5">5 شهور</option>
+                <option value="6">6 شهور</option>
+                <option value="10">10 شهور</option>
+                <option value="12">سنة كاملة (12 شهر)</option>
+              </select>
+            </div>
           )}
 
           <div className="field">

@@ -644,6 +644,9 @@ export default function RequestsModule({
           monthlyDeduction: monthlyInstallment,
           installmentAmount: monthlyInstallment,
           installmentsCount: monthsCount,
+          monthsCount: monthsCount,
+          medicines: approvedTargetReq.medicines || approvedTargetReq.medsItems || approvedTargetReq.items || [],
+          medsItems: approvedTargetReq.medicines || approvedTargetReq.medsItems || approvedTargetReq.items || [],
           notes: approvedTargetReq.reason || approvedTargetReq.details || approvedTargetReq.adminNotes || (isMeds ? 'مشتريات أدوية آجل معتمدة' : 'سلفة مالية معتمدة'),
           date: approvedTargetReq.date || (approvedTargetReq.createdAt ? approvedTargetReq.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10)),
           status: 'approved',
@@ -2075,6 +2078,69 @@ export default function RequestsModule({
                         </div>
                       </div>
                     </div>
+
+                    {/* Medicines Detail Table if Credit Medicine */}
+                    {(() => {
+                      const medItemsList = previewModalReq.medicines || previewModalReq.medsItems || previewModalReq.items || previewModalReq.medsDetails || [];
+                      if (medItemsList.length === 0) return null;
+
+                      return (
+                        <div style={{ marginTop: '14px', background: '#fff', padding: '12px 14px', borderRadius: '10px', border: '1.5px solid #0d9488', boxShadow: '0 2px 5px rgba(13,148,136,0.06)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+                            <h5 style={{ margin: 0, color: '#0f766e', fontSize: '13.5px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span>💊</span>
+                              <span>بيان وقائمة الأصناف والأدوية المطلوبة بالآجل ({medItemsList.length} صنف):</span>
+                            </h5>
+                            <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#0f766e', background: '#ccfbf1', padding: '3px 10px', borderRadius: '6px' }}>
+                              إجمالي تكلفة الأصناف: {fmt(previewModalReq.totalAmount || previewModalReq.amount || totalAmount)} ج.م
+                            </span>
+                          </div>
+                          <div className="table-responsive">
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'center' }}>
+                              <thead>
+                                <tr style={{ background: '#f0fdfa', color: '#134e4a', fontWeight: 'bold' }}>
+                                  <th style={{ padding: '6px', border: '1px solid #99f6e4', width: '6%' }}>#</th>
+                                  <th style={{ padding: '6px 12px', border: '1px solid #99f6e4', width: '42%', textAlign: 'right' }}>اسم الدواء / الصنف</th>
+                                  <th style={{ padding: '6px', border: '1px solid #99f6e4', width: '18%' }}>سعر الوحدة</th>
+                                  <th style={{ padding: '6px', border: '1px solid #99f6e4', width: '14%' }}>الكمية</th>
+                                  <th style={{ padding: '6px', border: '1px solid #99f6e4', width: '20%' }}>الإجمالي الصافي</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {medItemsList.map((item, idx) => {
+                                  const itemPrice = parseFloat(item.price) || 0;
+                                  const itemQty = parseFloat(item.qty || item.quantity) || 1;
+                                  const itemTotal = itemPrice * itemQty;
+                                  return (
+                                    <tr key={item.id || idx} style={{ background: idx % 2 === 0 ? '#fff' : '#f0fdfa' }}>
+                                      <td style={{ padding: '6px', border: '1px solid #99f6e4' }}>{idx + 1}</td>
+                                      <td style={{ padding: '6px 12px', border: '1px solid #99f6e4', textAlign: 'right', fontWeight: 'bold', color: '#0f766e' }}>
+                                        {item.name || item.title || 'دواء / صنف'}
+                                      </td>
+                                      <td style={{ padding: '6px', border: '1px solid #99f6e4' }}>{fmt(itemPrice)} ج.م</td>
+                                      <td style={{ padding: '6px', border: '1px solid #99f6e4', fontWeight: 'bold' }}>{itemQty}</td>
+                                      <td style={{ padding: '6px', border: '1px solid #99f6e4', fontWeight: 'bold', color: '#0d9488' }}>
+                                        {fmt(itemTotal)} ج.م
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                              <tfoot>
+                                <tr style={{ background: '#ccfbf1', fontWeight: 'bold', color: '#0f766e', fontSize: '12.5px' }}>
+                                  <td colSpan="4" style={{ padding: '6px 12px', border: '1px solid #99f6e4', textAlign: 'right' }}>
+                                    المجموع الكلي المطلوب للأدوية:
+                                  </td>
+                                  <td style={{ padding: '6px', border: '1px solid #99f6e4', fontWeight: '900', color: '#0f766e' }}>
+                                    {fmt(previewModalReq.totalAmount || previewModalReq.amount || totalAmount)} ج.م
+                                  </td>
+                                </tr>
+                              </tfoot>
+                            </table>
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     {/* Badge if Modified by Admin */}
                     {previewModalReq.adminModified && (

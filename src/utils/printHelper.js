@@ -935,6 +935,49 @@ export function generateOfficialPayslipHTML({
   // Sort unified table chronologically
   unifiedTableRows.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
+  // 3. Absence days (أيام الغياب غير المبرر عن الورديات المجدولة - للأيام المنقضية فقط)
+  const absenceDayItems = [];
+  const today = getRealTodayStr();
+  cycleDates.forEach(dateStr => {
+    if (dateStr >= today) return; // لا تحتسب الأيام الحالية أو المستقبلية كغياب
+    if (shiftDatesSet.has(dateStr) || leaveDatesSet.has(dateStr)) return;
+    const daySched = getEmployeeDaySchedule(emp.id, dateStr, state);
+    if (daySched && daySched.type !== 'off' && !daySched.isOff) {
+      const shiftBranch = daySched.branchId ? getBranchName(daySched.branchId) : '';
+      const shiftTime = (daySched.start && daySched.end) ? `${daySched.start} - ${daySched.end}` : 'وردية كاملة';
+      absenceDayItems.push({
+        id: `abs_${dateStr}`,
+        date: dateStr,
+        dateRangeLabel: `${arabicWeekday(dateStr)} ${dateStr}`,
+        dayName: arabicWeekday(dateStr),
+        scheduledShift: `${shiftTime}${daySched.isSwapped ? ` (بديل عن ${daySched.swappedWithName || 'الزميل'})` : ''}${shiftBranch ? ` (${shiftBranch})` : ''}`,
+        deductionAmt: dailyRate,
+        effectLabel: `🔴 مخصوم (-${fmt(dailyRate)} ج.م)`,
+        effectColor: '#dc2626',
+        reason: daySched.isSwapped ? `غياب عن وردية متبدلة معتمدة لتغطية ${daySched.swappedWithName || 'الزميل'}` : 'غياب بدون إذن رسمي / عدم تسجيل بصمة حضور أو تقديم طلب إجازة'
+      });
+    }
+  });
+
+  const totalAbsenceDaysCount = summary.absenceDaysCount !== undefined ? summary.absenceDaysCount : absenceDayItems.length;
+  const totalAbsenceDeductionAmt = summary.absenceDeduction !== undefined ? summary.absenceDeduction : Math.round(totalAbsenceDaysCount * dailyRate * 100) / 100;
+
+  if (absenceDayItems.length === 0 && totalAbsenceDaysCount > 0) {
+    for (let i = 0; i < totalAbsenceDaysCount; i++) {
+      absenceDayItems.push({
+        id: `abs_sum_${i + 1}`,
+        date: `${month}`,
+        dateRangeLabel: `يوم غياب مسجل بالشهر (#${i + 1})`,
+        dayName: 'غياب',
+        scheduledShift: 'وردية عمل مجدولة',
+        deductionAmt: dailyRate,
+        effectLabel: `🔴 مخصوم (-${fmt(dailyRate)} ج.م)`,
+        effectColor: '#dc2626',
+        reason: 'غياب بدون إذن رسمي مسجل في نظام المرتبات'
+      });
+    }
+  }
+
   // Request 24: Remove loans and unpaid leaves from generalFinancialItems
   const generalFinancialItems = [...allowanceItems, ...manualItems, ...absenceItem];
   const isCompact = printFitMode === 'single_page';

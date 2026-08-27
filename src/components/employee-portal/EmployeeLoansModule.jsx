@@ -33,6 +33,8 @@ export default function EmployeeLoansModule({
     { id: 'med_1', name: '', price: '', qty: '1' }
   ]);
   const [medNotes, setMedNotes] = useState('');
+  const [medRepayPlan, setMedRepayPlan] = useState('monthly'); // 'monthly' | 'installment'
+  const [medMonthsCount, setMedMonthsCount] = useState('2');
 
   const [viewingPaymentsReq, setViewingPaymentsReq] = useState(null);
 
@@ -234,6 +236,12 @@ export default function EmployeeLoansModule({
     }
 
     const totalCost = calcMedTotal();
+    const allowCreditMedicineInstallments = state.orgSettings?.allowCreditMedicineInstallments !== false;
+    const creditMedicineInstallmentMinAmount = state.orgSettings?.creditMedicineInstallmentMinAmount !== undefined ? parseFloat(state.orgSettings.creditMedicineInstallmentMinAmount) : 500;
+    const isInstallment = allowCreditMedicineInstallments && medRepayPlan === 'installment' && totalCost >= creditMedicineInstallmentMinAmount;
+    const months = isInstallment ? Math.max(2, parseInt(medMonthsCount, 10) || 2) : 1;
+    const monthlyDeduction = isInstallment ? Math.round((totalCost / months) * 100) / 100 : totalCost;
+
     const newMedReq = {
       id: 'medreq_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
       employeeId: emp.id,
@@ -241,10 +249,18 @@ export default function EmployeeLoansModule({
       employeeCode: emp.code,
       branchId: selectedBranchId || emp.branchId,
       type: 'credit_medicine',
+      loanType: isInstallment ? 'installment' : 'monthly',
+      monthsCount: months,
+      installmentsCount: months,
+      monthlyDeduction,
+      installmentAmount: monthlyDeduction,
       medicines: validItems,
+      medsItems: validItems,
       totalAmount: totalCost,
       amount: totalCost,
       notes: medNotes.trim(),
+      reason: medNotes.trim() || `طلب أدوية بالآجل (${validItems.length} صنف)`,
+      details: medNotes.trim() || `طلب أدوية بالآجل (${validItems.length} صنف)`,
       targetApproval: 'admin_only', // للإدارة العليا فقط
       status: 'pending',
       createdAt: new Date().toISOString()
@@ -256,7 +272,7 @@ export default function EmployeeLoansModule({
       type: 'credit_medicine',
       targetRole: 'admin',
       title: `💊 طلب أدوية آجل جديد: ${emp.name}`,
-      message: `طلب أدوية بالآجل بإجمالي مبلغ ${totalCost.toLocaleString()} ج.م (${validItems.length} صنف)`,
+      message: `طلب أدوية بالآجل بإجمالي مبلغ ${totalCost.toLocaleString()} ج.م (${validItems.length} صنف)${isInstallment ? ` - مقسطة على ${months} شهور` : ''}`,
       employeeId: emp.id,
       employeeName: emp.name,
       employeeCode: emp.code,
@@ -523,13 +539,74 @@ export default function EmployeeLoansModule({
                 + إضافة دواء آخر للطلب
               </button>
 
-              <div style={{ marginTop: '14px', padding: '10px 14px', borderRadius: '8px', background: 'var(--surface)', border: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontWeight: '700' }}>الإجمالي الكلي للأدوية:</span>
-                <span style={{ fontSize: '18px', fontWeight: '800', color: 'var(--primary)' }}>{fmt(calcMedTotal())} ج.م</span>
-              </div>
+              {(() => {
+                const totalCost = calcMedTotal();
+                const allowCreditMedicineInstallments = state.orgSettings?.allowCreditMedicineInstallments !== false;
+                const creditMedicineInstallmentMinAmount = state.orgSettings?.creditMedicineInstallmentMinAmount !== undefined ? parseFloat(state.orgSettings.creditMedicineInstallmentMinAmount) : 500;
+                const creditMedicineMaxInstallments = state.orgSettings?.creditMedicineMaxInstallments !== undefined ? parseInt(state.orgSettings.creditMedicineMaxInstallments, 10) : 6;
+                const canInstallment = allowCreditMedicineInstallments && totalCost >= creditMedicineInstallmentMinAmount;
 
-              <div className="field" style={{ marginTop: '10px' }}>
-                <label style={{ fontWeight: '700' }}>ملاحظات أضافية</label>
+                return (
+                  <>
+                    <div style={{ marginTop: '14px', padding: '12px 16px', borderRadius: '10px', background: '#f0fdfa', border: '1.5px solid #0d9488', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <span style={{ fontWeight: '800', color: '#0f766e', fontSize: '14px' }}>الإجمالي الكلي للأدوية:</span>
+                        <div style={{ fontSize: '11px', color: '#134e4a' }}>عدد الأصناف: {medItems.filter(i => i.name.trim()).length} صنف</div>
+                      </div>
+                      <span style={{ fontSize: '20px', fontWeight: '900', color: '#0d9488' }}>{fmt(totalCost)} ج.م</span>
+                    </div>
+
+                    {/* Credit Medicine Installment Selector */}
+                    {canInstallment ? (
+                      <div style={{ marginTop: '14px', background: '#fff', border: '1.5px solid #3b82f6', borderRadius: '10px', padding: '14px', boxShadow: '0 2px 6px rgba(59,130,246,0.06)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px', fontWeight: 'bold', color: '#1d4ed8', fontSize: '13.5px' }}>
+                          <span>🎉</span>
+                          <span>متاح لك خيار تقسيط ثمن الأدوية على دفعات شهرية!</span>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px', alignItems: 'end' }}>
+                          <div className="field">
+                            <label style={{ fontSize: '12.5px', fontWeight: 'bold' }}>طريقة سداد وخصم الأدوية</label>
+                            <select value={medRepayPlan} onChange={(e) => setMedRepayPlan(e.target.value)}>
+                              <option value="monthly">💵 خصم دفعة واحدة (مع أقرب راتب)</option>
+                              <option value="installment">📅 تقسيط على عدة شهور</option>
+                            </select>
+                          </div>
+
+                          {medRepayPlan === 'installment' && (
+                            <div className="field">
+                              <label style={{ fontSize: '12.5px', fontWeight: 'bold' }}>عدد شهور التقسيط</label>
+                              <select value={medMonthsCount} onChange={(e) => setMedMonthsCount(e.target.value)}>
+                                {Array.from({ length: Math.max(1, creditMedicineMaxInstallments - 1) }, (_, i) => i + 2).map((m) => (
+                                  <option key={m} value={m}>{m} شهور ({fmt(Math.round((totalCost / m) * 100) / 100)} ج.م / شهر)</option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+                        </div>
+
+                        {medRepayPlan === 'installment' && (
+                          <div style={{ marginTop: '10px', padding: '8px 12px', background: '#dbeafe', borderRadius: '6px', fontSize: '12.5px', color: '#1e40af', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between' }}>
+                            <span>القسط الشهري المستحق:</span>
+                            <span>{fmt(Math.round((totalCost / (parseInt(medMonthsCount, 10) || 2)) * 100) / 100)} ج.م / شهر</span>
+                          </div>
+                        )}
+                      </div>
+                    ) : allowCreditMedicineInstallments ? (
+                      <div style={{ marginTop: '10px', fontSize: '11.5px', color: '#64748b', background: '#f8fafc', padding: '8px 12px', borderRadius: '6px', border: '1px dashed #cbd5e1' }}>
+                        💡 ملاحظة: خيار التقسيط متاح تلقائياً لمشتريات الأدوية من <strong>{creditMedicineInstallmentMinAmount} ج.م</strong> فأكثر وفق ضوابط الإدارة العليا (سيتم خصم طلبك دفعة واحدة مع أقرب مرتب).
+                      </div>
+                    ) : (
+                      <div style={{ marginTop: '10px', fontSize: '11.5px', color: '#64748b', background: '#f8fafc', padding: '8px 12px', borderRadius: '6px', border: '1px dashed #cbd5e1' }}>
+                        🔒 تقسيط الأدوية غير مفعل حالياً من الإدارة العليا (سيتم خصم كامل المبلغ دفعة واحدة مع أقرب مرتب).
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+
+              <div className="field" style={{ marginTop: '12px' }}>
+                <label style={{ fontWeight: '700' }}>ملاحظات إضافية على الطلب</label>
                 <input
                   type="text"
                   placeholder="ملاحظات للطلب..."
@@ -566,6 +643,8 @@ export default function EmployeeLoansModule({
               const rem = Math.max(0, total - paid);
               const history = r.paymentsHistory || [];
               const isLoan = r.type === 'loan' || r.type === 'advance';
+              const isMeds = r.type === 'meds' || r.type === 'credit_medicine';
+              const medsList = r.medicines || r.medsItems || r.items || [];
 
               return (
                 <div
@@ -585,9 +664,9 @@ export default function EmployeeLoansModule({
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--muted)' }}>#{idx + 1}</span>
                       {isLoan ? (
-                        <span className="badge info" style={{ fontSize: '11.5px' }}>💳 سلفة ({r.loanType === 'installment' ? 'مقسمة' : 'شهرية'})</span>
+                        <span className="badge info" style={{ fontSize: '11.5px' }}>💳 سلفة ({r.loanType === 'installment' ? `${r.monthsCount || 2} أقساط` : 'شهرية'})</span>
                       ) : (
-                        <span className="badge success" style={{ fontSize: '11.5px' }}>💊 أدوية بالآجل</span>
+                        <span className="badge success" style={{ fontSize: '11.5px' }}>💊 أدوية آجل ({r.loanType === 'installment' ? `${r.monthsCount || 2} أقساط` : 'شهرية'})</span>
                       )}
                     </div>
                     <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>
@@ -611,6 +690,19 @@ export default function EmployeeLoansModule({
                     </div>
                   </div>
 
+                  {/* Medicines Preview Items for credit meds */}
+                  {isMeds && medsList.length > 0 && (
+                    <div style={{ background: '#f0fdfa', border: '1px solid #99f6e4', padding: '8px 10px', borderRadius: '8px', fontSize: '11.5px' }}>
+                      <div style={{ fontWeight: 'bold', color: '#0f766e', marginBottom: '3px' }}>💊 الأصناف المطلوبة ({medsList.length} صنف):</div>
+                      {medsList.map((m, mIdx) => (
+                        <div key={m.id || mIdx} style={{ display: 'flex', justifyContent: 'space-between', color: '#134e4a', padding: '1px 0' }}>
+                          <span>• {m.name} (كمية: {m.qty || 1})</span>
+                          <strong>{fmt((parseFloat(m.price) || 0) * (parseFloat(m.qty) || 1))} ج.م</strong>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   {/* Status and Action */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', paddingTop: '4px' }}>
                     <div>
@@ -629,7 +721,7 @@ export default function EmployeeLoansModule({
                       style={{ padding: '4px 10px', fontSize: '12px', color: '#0f766e', fontWeight: 'bold', background: 'var(--primary-tint)' }}
                       onClick={() => setViewingPaymentsReq(r)}
                     >
-                      📜 كشف الدفعات ({history.length})
+                      📜 تفاصيل الدفعات والأصناف ({history.length})
                     </button>
                   </div>
                 </div>
@@ -643,12 +735,12 @@ export default function EmployeeLoansModule({
             <thead>
               <tr style={{ background: 'var(--surface-muted)' }}>
                 <th>#</th>
-                <th>نوع الطلب</th>
+                <th>نوع الطلب والأصناف</th>
                 <th>المبلغ الكلي</th>
                 <th>المدفوع</th>
                 <th>المتبقي للسداد</th>
                 <th>حالة الاعتماد والسداد</th>
-                <th>تفاصيل الدفعات المسددة</th>
+                <th>تفاصيل الدفعات والأصناف</th>
                 <th>التاريخ</th>
               </tr>
             </thead>
@@ -663,15 +755,24 @@ export default function EmployeeLoansModule({
                   const paid = parseFloat(r.paidAmount) || 0;
                   const rem = Math.max(0, total - paid);
                   const history = r.paymentsHistory || [];
+                  const isMeds = r.type === 'meds' || r.type === 'credit_medicine';
+                  const medsList = r.medicines || r.medsItems || r.items || [];
 
                   return (
                     <tr key={r.id}>
                       <td>{idx + 1}</td>
-                      <td>
+                      <td style={{ textAlign: 'right' }}>
                         {r.type === 'loan' || r.type === 'advance' ? (
-                          <span className="badge info">💳 سلفة مالية ({r.loanType === 'installment' ? 'مقسمة' : 'شهرية'})</span>
+                          <span className="badge info">💳 سلفة مالية ({r.loanType === 'installment' ? `${r.monthsCount || 2} أقساط` : 'شهرية'})</span>
                         ) : (
-                          <span className="badge success">💊 أدوية بالآجل</span>
+                          <div>
+                            <span className="badge success">💊 أدوية بالآجل ({r.loanType === 'installment' ? `${r.monthsCount || 2} أقساط` : 'شهرية'})</span>
+                            {medsList.length > 0 && (
+                              <div style={{ fontSize: '11px', color: '#0f766e', marginTop: '2px' }}>
+                                {medsList.map(m => m.name).join('، ')}
+                              </div>
+                            )}
+                          </div>
                         )}
                       </td>
                       <td style={{ fontWeight: '800' }}>{fmt(total)} ج.م</td>
@@ -693,7 +794,7 @@ export default function EmployeeLoansModule({
                           style={{ padding: '3px 8px', fontSize: '11.5px', color: '#0f766e', fontWeight: 'bold' }}
                           onClick={() => setViewingPaymentsReq(r)}
                         >
-                          📜 كشف الدفعات ({history.length})
+                          📜 عرض الأصناف والدفعات ({history.length})
                         </button>
                       </td>
                       <td style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>
@@ -708,19 +809,69 @@ export default function EmployeeLoansModule({
         </div>
       )}
 
-      {/* Employee Payments Detail Modal */}
+      {/* Employee Payments & Medicine Details Modal */}
       {viewingPaymentsReq && (
         <div className="modal-backdrop">
           <div className="modal-content card" style={{ maxWidth: '950px', width: '96%', padding: '28px', maxHeight: '90vh', overflowY: 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h3 style={{ margin: 0, color: '#0d9488', fontSize: '16px' }}>
-                📜 كشف وتفاصيل الدفعات المسددة للسلفة (المتبقي: {fmt(Math.max(0, (parseFloat(viewingPaymentsReq.amount || viewingPaymentsReq.totalAmount) || 0) - (parseFloat(viewingPaymentsReq.paidAmount) || 0)))} ج.م)
-              </h3>
+              <div>
+                <h3 style={{ margin: 0, color: '#0d9488', fontSize: '16px' }}>
+                  📜 تفاصيل {viewingPaymentsReq.type === 'credit_medicine' || viewingPaymentsReq.type === 'meds' ? 'طلب الأدوية الآجل' : 'السلفة المالية'}
+                </h3>
+                <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                  إجمالي المبلغ: {fmt(parseFloat(viewingPaymentsReq.amount || viewingPaymentsReq.totalAmount) || 0)} ج.م · المتبقي للسداد: {fmt(Math.max(0, (parseFloat(viewingPaymentsReq.amount || viewingPaymentsReq.totalAmount) || 0) - (parseFloat(viewingPaymentsReq.paidAmount) || 0)))} ج.م
+                </span>
+              </div>
               <button className="btn btn-ghost" onClick={() => setViewingPaymentsReq(null)}>✕ إغلاق</button>
             </div>
 
+            {/* If Credit Medicine, Render Table of Medicines */}
+            {(viewingPaymentsReq.medicines || viewingPaymentsReq.medsItems || []).length > 0 && (
+              <div style={{ marginBottom: '20px', background: '#f0fdfa', border: '1.5px solid #99f6e4', borderRadius: '10px', padding: '12px' }}>
+                <h4 style={{ margin: '0 0 10px 0', color: '#0f766e', fontSize: '13.5px', fontWeight: 'bold' }}>
+                  💊 قائمة الأصناف والأدوية المطلوبة:
+                </h4>
+                <div className="table-responsive">
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'center', background: '#fff' }}>
+                    <thead>
+                      <tr style={{ background: '#ccfbf1', color: '#134e4a', fontWeight: 'bold' }}>
+                        <th style={{ padding: '6px', border: '1px solid #99f6e4', width: '6%' }}>#</th>
+                        <th style={{ padding: '6px 12px', border: '1px solid #99f6e4', width: '44%', textAlign: 'right' }}>اسم الدواء / الصنف</th>
+                        <th style={{ padding: '6px', border: '1px solid #99f6e4', width: '16%' }}>سعر الوحدة</th>
+                        <th style={{ padding: '6px', border: '1px solid #99f6e4', width: '14%' }}>الكمية</th>
+                        <th style={{ padding: '6px', border: '1px solid #99f6e4', width: '20%' }}>الإجمالي</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(viewingPaymentsReq.medicines || viewingPaymentsReq.medsItems).map((m, mIdx) => {
+                        const pr = parseFloat(m.price) || 0;
+                        const qt = parseFloat(m.qty) || 1;
+                        return (
+                          <tr key={m.id || mIdx}>
+                            <td style={{ padding: '6px', border: '1px solid #99f6e4' }}>{mIdx + 1}</td>
+                            <td style={{ padding: '6px 12px', border: '1px solid #99f6e4', textAlign: 'right', fontWeight: 'bold', color: '#0f766e' }}>
+                              {m.name || 'صنف دواء'}
+                            </td>
+                            <td style={{ padding: '6px', border: '1px solid #99f6e4' }}>{fmt(pr)} ج.م</td>
+                            <td style={{ padding: '6px', border: '1px solid #99f6e4', fontWeight: 'bold' }}>{qt}</td>
+                            <td style={{ padding: '6px', border: '1px solid #99f6e4', fontWeight: 'bold', color: '#0d9488' }}>
+                              {fmt(pr * qt)} ج.م
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Payments History Table */}
+            <h4 style={{ margin: '0 0 8px', color: '#334155', fontSize: '13px', fontWeight: 'bold' }}>
+              💳 سجل الدفعات والخصومات المسددة:
+            </h4>
             {(!viewingPaymentsReq.paymentsHistory || viewingPaymentsReq.paymentsHistory.length === 0) ? (
-              <div style={{ textAlign: 'center', padding: '24px', background: 'var(--surface-muted)', borderRadius: '10px', color: 'var(--muted)', fontSize: '13.5px' }}>
+              <div style={{ textAlign: 'center', padding: '20px', background: 'var(--surface-muted)', borderRadius: '10px', color: 'var(--muted)', fontSize: '13px' }}>
                 لم يتم خصم أو تسديد أي دفعات مالية لهذه السلفة بعد.
               </div>
             ) : (
