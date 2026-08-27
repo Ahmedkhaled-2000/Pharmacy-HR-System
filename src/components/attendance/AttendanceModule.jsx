@@ -72,7 +72,7 @@ export default function AttendanceModule({
     const bH = Math.max(0, parseFloat(manualBreakHours) || 0);
     const workHours = Math.max(0, Math.round((elapsedHours - bH) * 100) / 100);
 
-    const performAdd = async () => {
+    const performAdd = () => {
       const newPunch = {
         id: `punch_manual_${Date.now()}`,
         employeeId: manualEmpId,
@@ -87,6 +87,10 @@ export default function AttendanceModule({
         actualWorkedHours: workHours,
         isManual: true,
         manualPunch: true,
+        createdBy: 'admin',
+        creatorRole: 'admin',
+        isAdminCreated: true,
+        acknowledgedByAdmin: true,
         note: manualNotes.trim() || (bH > 0 ? `تسجيل بصمة يدوية من الأدمن (بريك: ${bH} س)` : 'تسجيل بصمة يدوية من الأدمن'),
         statusLabel: 'تسجيل يدوي',
         createdAt: new Date().toISOString()
@@ -101,32 +105,55 @@ export default function AttendanceModule({
         state: updatedState,
         payrollCycleId: manualDate.slice(0, 7)
       });
+
+      const markedIncidents = (recRes.incidents || []).map((inc) => {
+        if (inc.shiftId === newPunch.id || inc.date === manualDate) {
+          return {
+            ...inc,
+            read: true,
+            acknowledgedByAdmin: true,
+            isAdminCreated: true,
+            creatorRole: 'admin'
+          };
+        }
+        return inc;
+      });
+
+      const markedRequests = (recRes.updatedRequests || []).map((r) => {
+        if (r.date === manualDate || r.shiftId === newPunch.id) {
+          return {
+            ...r,
+            read: true,
+            hiddenFromAdmin: true,
+            isAdminCreated: true,
+            creatorRole: 'admin'
+          };
+        }
+        return r;
+      });
+
       updatedState = {
         ...updatedState,
-        lateIncidents: recRes.incidents,
-        requests: recRes.updatedRequests
+        lateIncidents: markedIncidents,
+        requests: markedRequests
       };
 
+      // 0ms instant optimistic UI response
       if (setState) setState(updatedState);
-      if (saveState) await saveState(updatedState);
       setManualInTime('');
       setManualOutTime('');
       setManualBreakHours('0');
       setManualNotes('');
       setManualBranchId('');
-      showToast?.('✅ تم إضافة البصمة اليدوية للموظف بنجاح!');
+      showToast?.('✅ تم إضافة البصمة اليدوية للموظف فوراً وحساب الساعات بنجاح');
+
+      // Non-blocking background sync
+      if (saveState) {
+        saveState(updatedState).catch(err => console.error('Background save error on manual punch:', err));
+      }
     };
 
-    if (executeWithOwnerGuard) {
-      executeWithOwnerGuard({
-        lockKey: 'lockManualShiftEntry',
-        actionTitle: `تسجيل بصمة يدوية للموظف (${empObj?.name || manualEmpId})`,
-        actionDetails: `تاريخ: ${manualDate} · من ${manualInTime} إلى ${manualOutTime}`,
-        onExecute: performAdd
-      });
-    } else {
-      await performAdd();
-    }
+    performAdd();
   };
 
   return (

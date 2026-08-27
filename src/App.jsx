@@ -5063,10 +5063,22 @@ export default function App() {
             return count;
           })()}
           bylawsCount={(() => {
+            if (authRole !== 'branch') {
+              // Senior Management / Owner:
+              // Automatic late penalties are handled automatically by the bylaws engine.
+              // Only count disciplinary penalties submitted by branch managers awaiting admin review.
+              const branchSubmittedPenalties = (state.requests || []).filter((r) => {
+                if (r.type !== 'penalty' && r.type !== 'disciplinary_penalty' && r.type !== 'early_exit') return false;
+                if (r.isAdminCreated || r.creatorRole === 'admin' || r.createdBy === 'admin' || r.isManualAdmin || r.hiddenFromAdmin) return false;
+                if (r.status === 'approved' || r.status === 'rejected') return false;
+                return !r.read && currentFilterFn(r.date || r.createdAt?.slice(0, 10));
+              }).length;
+              return branchSubmittedPenalties;
+            }
+
             const cIdStr = String(currentBranch?.id || '');
             const unreadLate = (state.lateIncidents || []).filter((inc) => {
-              if (authRole === 'branch' && cIdStr && String(inc.branchId) !== cIdStr) return false;
-              if (authRole !== 'branch' && (inc.isAdminCreated || inc.creatorRole === 'admin' || inc.createdBy === 'admin' || inc.acknowledgedByAdmin)) return false;
+              if (cIdStr && String(inc.branchId) !== cIdStr) return false;
               return (
                 !inc.read &&
                 inc.status !== 'cancelled' &&
@@ -5080,8 +5092,7 @@ export default function App() {
 
             const unreadManual = (state.requests || []).filter((r) => {
               if (r.type !== 'penalty' && r.type !== 'early_exit') return false;
-              if (authRole !== 'branch' && (r.isAdminCreated || r.creatorRole === 'admin' || r.createdBy === 'admin' || r.isManualAdmin)) return false;
-              if (authRole === 'branch' && cIdStr && String(r.branchId) !== cIdStr) return false;
+              if (cIdStr && String(r.branchId) !== cIdStr) return false;
               return !r.read && currentFilterFn(r.date || r.createdAt?.slice(0, 10));
             }).length;
 
