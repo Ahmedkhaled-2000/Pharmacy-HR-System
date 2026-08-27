@@ -796,11 +796,11 @@ export function generateOfficialPayslipHTML({
   const totalUnpaidLeaveDays = leaveDayItems.filter(l => l.category === 'unpaid').reduce((acc, l) => acc + l.daysCount, 0);
   const totalSickLeaveDays = leaveDayItems.filter(l => l.category === 'sick').reduce((acc, l) => acc + l.daysCount, 0);
 
-  // 3. Absence days (أيام الغياب غير المبرر عن الورديات المجدولة)
+  // 3. Absence days (أيام الغياب غير المبرر عن الورديات المجدولة - للأيام المنقضية فقط)
   const absenceDayItems = [];
   const today = getRealTodayStr();
   cycleDates.forEach(dateStr => {
-    if (month === today.slice(0, 7) && dateStr >= today) return; // Only count past days in current cycle
+    if (dateStr >= today) return; // لا تحتسب الأيام الحالية أو المستقبلية كغياب
     if (shiftDatesSet.has(dateStr) || leaveDatesSet.has(dateStr)) return;
     const daySched = getEmployeeDaySchedule(emp.id, dateStr, state);
     if (daySched && daySched.type !== 'off' && !daySched.isOff) {
@@ -820,7 +820,7 @@ export function generateOfficialPayslipHTML({
     }
   });
 
-  const totalAbsenceDaysCount = Math.max(summary.absenceDaysCount || 0, absenceDayItems.length);
+  const totalAbsenceDaysCount = summary.absenceDaysCount !== undefined ? summary.absenceDaysCount : absenceDayItems.length;
   const totalAbsenceDeductionAmt = summary.absenceDeduction !== undefined ? summary.absenceDeduction : Math.round(totalAbsenceDaysCount * dailyRate * 100) / 100;
 
   if (absenceDayItems.length === 0 && totalAbsenceDaysCount > 0) {
