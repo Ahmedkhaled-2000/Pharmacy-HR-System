@@ -8,6 +8,7 @@ import { printEmployeePayslipDirect } from '../../utils/printHelper';
 import BylawsModule from '../bylaws/BylawsModule';
 import IncomeExpensesModule from '../finance/IncomeExpensesModule';
 import { getFormattedRequestBadge } from '../requests/RequestsModule';
+import { getJobEvaluationCriteria } from '../evaluations/EvaluationsModule';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import BranchResignationModule from '../resignation/BranchResignationModule';
 import { normalizeSchedule } from '../roster/RosterModule';
@@ -217,6 +218,13 @@ export default function BranchManagerView({
   const [showRosterEditModal, setShowRosterEditModal] = useState(false);
   const [rosterEditEmpId, setRosterEditEmpId] = useState('');
   const [rosterEditDetails, setRosterEditDetails] = useState('');
+
+  // 4. Branch Manager Evaluation Modal State (Requirement 28)
+  const [showEvalModal, setShowEvalModal] = useState(false);
+  const [bmEvalEmpId, setBmEvalEmpId] = useState('');
+  const [bmEvalMonth, setBmEvalMonth] = useState('');
+  const [bmEvalNotes, setBmEvalNotes] = useState('');
+  const [bmEvalItems, setBmEvalItems] = useState([]);
 
   // ── State for "طلبات الفرع المرسلة للإدارة" Tab ──
   const [sentCategoryFilter, setSentCategoryFilter] = useState('all');
@@ -1324,6 +1332,110 @@ export default function BranchManagerView({
   const handleAddEvalItem = () => {
     const newId = String(Date.now());
     setEvalItems([...evalItems, { id: newId, title: '', score: 10, maxScore: 10 }]);
+  };
+
+  // Load Job Criteria automatically when employee is selected in Branch Evaluation Modal
+  useEffect(() => {
+    if (!bmEvalEmpId) {
+      setBmEvalItems([]);
+      return;
+    }
+    const emp = branchEmployees.find((e) => String(e.id) === String(bmEvalEmpId)) || (state.employees || []).find((e) => String(e.id) === String(bmEvalEmpId));
+    const job = emp?.jobTitle || 'general';
+    const criteria = getJobEvaluationCriteria(job, state?.orgSettings || {});
+    setBmEvalItems(criteria.map((c) => ({
+      id: c.id || String(Date.now() + Math.random()),
+      title: c.title,
+      description: c.description || '',
+      maxScore: c.maxScore || 20,
+      score: c.maxScore || 20
+    })));
+  }, [bmEvalEmpId, state?.orgSettings, branchEmployees, state?.employees]);
+
+  // Submit Monthly Evaluation by Branch Manager (Requirement 28)
+  const handleSubmitBranchEvaluation = async (e) => {
+    e.preventDefault();
+    if (!bmEvalEmpId) {
+      showToast?.('يرجى اختيار الموظف المراد تقييمه');
+      return;
+    }
+
+    const empObj = branchEmployees.find((e) => String(e.id) === String(bmEvalEmpId)) || (state.employees || []).find((e) => String(e.id) === String(bmEvalEmpId));
+    if (!empObj) {
+      showToast?.('بيانات الموظف غير متوفرة');
+      return;
+    }
+
+    const totalScore = bmEvalItems.reduce((acc, item) => acc + (parseFloat(item.score) || 0), 0);
+    const maxTotalScore = bmEvalItems.reduce((acc, item) => acc + (parseFloat(item.maxScore) || 20), 0);
+    const percentage = maxTotalScore > 0 ? Math.round((totalScore / maxTotalScore) * 100) : 0;
+
+    let rating = 'ممتاز';
+    if (percentage < 60) rating = 'ضعيف';
+    else if (percentage < 75) rating = 'مقبول';
+    else if (percentage < 85) rating = 'جيد';
+    else if (percentage < 95) rating = 'جيد جداً';
+
+    const evaluatorName = currentBranch?.managerName || state.currentUserName || 'مدير الفرع';
+    const targetMonth = bmEvalMonth || selectedMonth || activeCycleMonth || getRealTodayStr().slice(0, 7);
+
+    const evalData = {
+      id: `eval_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      employeeId: String(empObj.id),
+      employeeName: empObj.name,
+      employeeCode: empObj.code,
+      jobTitle: empObj.jobTitle || 'موظف',
+      branchId: currentBranch?.id || empObj.branchId,
+      branchName: currentBranch?.name || 'الفرع',
+      evaluatorId: currentBranch?.managerId || state.currentUserId || '',
+      evaluatorName: evaluatorName,
+      evaluatorCode: currentBranch?.managerCode || '',
+      evaluatorRole: 'مدير الفرع',
+      month: targetMonth,
+      date: getRealTodayStr(),
+      createdAt: new Date().toISOString(),
+      items: bmEvalItems,
+      score: percentage,
+      percentage,
+      totalScore,
+      maxTotalScore,
+      rating,
+      managerNotes: bmEvalNotes.trim(),
+      notes: bmEvalNotes.trim(),
+      stage: 'pending_employee',
+      status: 'pending_employee',
+      employeeStatus: 'pending',
+      employeeComment: '',
+      respondedAt: null,
+      adminStatus: 'pending',
+      adminComment: '',
+      adminApproved: false,
+      approvedAt: null
+    };
+
+    const empNotif = {
+      id: `notif_eval_emp_${Date.now()}`,
+      employeeId: empObj.id,
+      type: 'eval_pending_employee',
+      title: `⭐ تقييم شهري جديد لشهر (${targetMonth})`,
+      message: `قام مدير الفرع (${evaluatorName}) برصد تقييم أدائك لشهر (${targetMonth}) بنسبة ${percentage}% (${rating}). يرجى مراجعة تفاصيل التقييم والرد بالموافقة أو إبداء الملاحظات.`,
+      timestamp: new Date().toISOString(),
+      read: false,
+      linkTab: 'evaluations',
+      evalId: evalData.id
+    };
+
+    const updatedEvals = [evalData, ...(state.evaluations || [])];
+    const updatedNotifications = [empNotif, ...(state.notifications || [])];
+    const updatedState = { ...state, evaluations: updatedEvals, notifications: updatedNotifications };
+
+    setState(updatedState);
+    if (saveState) await saveState(updatedState);
+
+    showToast?.(`✅ تم حفظ تقييم الموظف (${empObj.name}) وإرساله لبوابته للمراجعة والرد الأول`);
+    setShowEvalModal(false);
+    setBmEvalEmpId('');
+    setBmEvalNotes('');
   };
 
   const handleRemoveEvalItem = (id) => {
@@ -4345,6 +4457,17 @@ export default function BranchManagerView({
               >
                 📅 طلب تعديل جدول
               </button>
+              <button
+                type="button"
+                className="btn btn-start"
+                style={{ padding: '7px 14px', fontSize: '12.5px', background: 'linear-gradient(135deg, #f59e0b, #d97706)', color: '#fff', display: 'flex', alignItems: 'center', gap: '5px', boxShadow: '0 2px 8px rgba(245,158,11,0.25)', fontWeight: 'bold' }}
+                onClick={() => {
+                  setBmEvalMonth(selectedMonth || activeCycleMonth || getRealTodayStr().slice(0, 7));
+                  setShowEvalModal(true);
+                }}
+              >
+                ⭐ رصد تقييم أداء موظف
+              </button>
             </div>
           </div>
 
@@ -4963,6 +5086,267 @@ export default function BranchManagerView({
                 <button type="button" className="btn btn-ghost" onClick={() => setShowLeaveModal(false)}>إلغاء</button>
                 <button type="submit" className="btn btn-start" style={{ background: '#0284c7' }}>
                   📤 إرسال طلب الإجازة للإدارة العليا للاعتماد
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* ── MODAL 5: BRANCH MANAGER EMPLOYEE EVALUATION MODAL ── */}
+      {/* ───────────────────────────────────────────────────────────── */}
+      {showEvalModal && (
+        <div className="modal-backdrop" onClick={() => setShowEvalModal(false)}>
+          <div className="modal-content card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '680px', width: '94%', maxHeight: '90vh', overflowY: 'auto', padding: '24px', borderRadius: '18px', boxShadow: '0 10px 30px rgba(0,0,0,0.25)' }}>
+            
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1.5px solid #ccfbf1', paddingBottom: '12px' }}>
+              <h3 style={{ margin: 0, fontSize: '17.5px', color: '#0f766e', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>⭐</span>
+                <span>رصد تقييم أداء موظف بالفرع</span>
+              </h3>
+              <button type="button" className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '14px' }} onClick={() => setShowEvalModal(false)}>✕</button>
+            </div>
+
+            <form onSubmit={handleSubmitBranchEvaluation} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              
+              {/* Month Switcher System (Requirement 28) */}
+              <div style={{
+                background: 'linear-gradient(135deg, #f0fdfa, #f8fafc)',
+                border: '1.5px solid #99f6e4',
+                borderRadius: '12px',
+                padding: '12px 16px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '10px'
+              }}>
+                <span style={{ fontSize: '13px', fontWeight: '800', color: '#0f766e', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span>🗓️</span>
+                  <span>شهر التقييم المستهدف:</span>
+                </span>
+                
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => {
+                      const cur = bmEvalMonth || selectedMonth || getRealTodayStr().slice(0, 7);
+                      const [y, m] = cur.split('-').map(Number);
+                      const d = new Date(y, m - 2, 1);
+                      setBmEvalMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+                    }}
+                    style={{ padding: '3px 8px', fontSize: '12px', background: '#fff', border: '1px solid #99f6e4', borderRadius: '6px' }}
+                    title="الشهر السابق"
+                  >
+                    ◀
+                  </button>
+
+                  <input
+                    type="month"
+                    value={bmEvalMonth || selectedMonth || getRealTodayStr().slice(0, 7)}
+                    onChange={(e) => setBmEvalMonth(e.target.value)}
+                    style={{
+                      padding: '5px 10px',
+                      borderRadius: '8px',
+                      border: '1.5px solid #0d9488',
+                      fontWeight: 'bold',
+                      fontSize: '13px',
+                      color: '#0f766e',
+                      background: '#fff',
+                      cursor: 'pointer'
+                    }}
+                    required
+                  />
+
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => {
+                      const cur = bmEvalMonth || selectedMonth || getRealTodayStr().slice(0, 7);
+                      const [y, m] = cur.split('-').map(Number);
+                      const d = new Date(y, m, 1);
+                      setBmEvalMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+                    }}
+                    style={{ padding: '3px 8px', fontSize: '12px', background: '#fff', border: '1px solid #99f6e4', borderRadius: '6px' }}
+                    title="الشهر التالي"
+                  >
+                    ▶
+                  </button>
+                </div>
+              </div>
+
+              {/* Employee Selector (Requirement 28) */}
+              <div className="field">
+                <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#1e293b' }}>اختر الموظف المراد تقييمه *</label>
+                <select
+                  value={bmEvalEmpId}
+                  onChange={(e) => setBmEvalEmpId(e.target.value)}
+                  required
+                  style={{ width: '100%', padding: '9px 14px', borderRadius: '10px', border: '1.5px solid #0d9488', fontWeight: 'bold', fontSize: '13.5px', background: '#fff' }}
+                >
+                  <option value="">-- اختر موظف من طاقم الفرع --</option>
+                  {branchEmployees.map((e) => (
+                    <option key={e.id} value={e.id}>
+                      {e.name} (كود: {e.code} — الوظيفة: {e.jobTitle || 'موظف'})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Immediate Job Title & Employee Info Card (Requirement 28) */}
+              {bmEvalEmpId && (() => {
+                const selEmp = branchEmployees.find((e) => String(e.id) === String(bmEvalEmpId)) || (state.employees || []).find((e) => String(e.id) === String(bmEvalEmpId));
+                const totalSc = bmEvalItems.reduce((acc, i) => acc + (parseFloat(i.score) || 0), 0);
+                const maxSc = bmEvalItems.reduce((acc, i) => acc + (parseFloat(i.maxScore) || 20), 0);
+                const pct = maxSc > 0 ? Math.round((totalSc / maxSc) * 100) : 0;
+
+                return (
+                  <div style={{
+                    background: 'linear-gradient(135deg, #f0fdfa, #e6fffa)',
+                    border: '2px solid #0d9488',
+                    padding: '14px 18px',
+                    borderRadius: '14px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '10px',
+                    boxShadow: '0 3px 10px rgba(13,148,136,0.08)'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '18px' }}>👤</span>
+                        <strong style={{ fontSize: '15.5px', color: '#0f172a' }}>{selEmp?.name}</strong>
+                        <span style={{ fontSize: '12px', background: '#ccfbf1', color: '#0f766e', padding: '2px 8px', borderRadius: '6px', fontWeight: 'bold' }}>
+                          كود: {selEmp?.code}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ fontSize: '12px', color: '#475569' }}>📍 الفرع:</span>
+                        <strong style={{ color: '#0f766e', fontSize: '13px' }}>{currentBranch?.name || 'الفرع'}</strong>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', borderTop: '1px solid #99f6e4', paddingTop: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '13px', color: '#0f766e', fontWeight: 'bold' }}>الوظيفة المعتمدة:</span>
+                        <span style={{
+                          background: '#0d9488',
+                          color: '#ffffff',
+                          padding: '4px 14px',
+                          borderRadius: '8px',
+                          fontWeight: '900',
+                          fontSize: '14px',
+                          boxShadow: '0 2px 6px rgba(13,148,136,0.2)'
+                        }}>
+                          👔 {selEmp?.jobTitle || 'موظف'}
+                        </span>
+                        <span style={{ fontSize: '12px', color: '#64748b' }}>
+                          ({bmEvalItems.length} معايير محملة)
+                        </span>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '12.5px', color: '#0f766e', fontWeight: 'bold' }}>الدرجة والنسبة:</span>
+                        <span style={{
+                          background: pct >= 85 ? '#dcfce7' : pct >= 70 ? '#fef3c7' : '#fee2e2',
+                          color: pct >= 85 ? '#15803d' : pct >= 70 ? '#b45309' : '#b91c1c',
+                          border: `1px solid ${pct >= 85 ? '#86efac' : pct >= 70 ? '#fde68a' : '#fca5a5'}`,
+                          padding: '3px 12px',
+                          borderRadius: '8px',
+                          fontWeight: '900',
+                          fontSize: '15px'
+                        }}>
+                          {totalSc} / {maxSc} ({pct}%)
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Dynamic Job Criteria Rows */}
+              {bmEvalItems.length > 0 && (
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                    <label style={{ fontWeight: '800', fontSize: '13.5px', color: '#1e293b' }}>
+                      📋 بنود التقييم المعتمدة لوظيفة الموظف ({bmEvalItems.length} معايير):
+                    </label>
+                    <span style={{ fontSize: '12px', color: '#64748b' }}>
+                      الدرجة من 0 إلى الدرجة القصوى
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {bmEvalItems.map((item, idx) => (
+                      <div
+                        key={item.id || idx}
+                        style={{
+                          display: 'flex',
+                          gap: '12px',
+                          alignItems: 'center',
+                          flexWrap: 'wrap',
+                          background: '#ffffff',
+                          padding: '10px 14px',
+                          borderRadius: '8px',
+                          border: '1px solid #cbd5e1'
+                        }}
+                      >
+                        <div style={{ flex: '3 1 250px' }}>
+                          <div style={{ fontWeight: 'bold', fontSize: '13px', color: '#0f172a' }}>
+                            #{idx + 1} — {item.title}
+                          </div>
+                          {item.description && (
+                            <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '2px' }}>
+                              {item.description}
+                            </div>
+                          )}
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <label style={{ fontSize: '12px', color: '#475569', fontWeight: 'bold' }}>الدرجة:</label>
+                          <input
+                            type="number"
+                            min="0"
+                            max={item.maxScore}
+                            value={item.score}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 0;
+                              setBmEvalItems(bmEvalItems.map((i) => i.id === item.id ? { ...i, score: Math.min(val, item.maxScore) } : i));
+                            }}
+                            style={{ width: '75px', padding: '6px 8px', borderRadius: '6px', border: '1.5px solid #0d9488', textAlign: 'center', fontWeight: 'bold', fontSize: '14px', color: '#0f766e' }}
+                            required
+                          />
+                          <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#64748b' }}>
+                            / {item.maxScore}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Manager Notes */}
+              <div className="field">
+                <label style={{ fontWeight: 'bold', fontSize: '13px' }}>📝 ملاحظات وتوصيات مدير الفرع على أداء الموظف</label>
+                <textarea
+                  rows="2"
+                  placeholder="اكتب ملاحظاتك التوجيهية وتوصياتك الإدارية..."
+                  value={bmEvalNotes}
+                  onChange={(e) => setBmEvalNotes(e.target.value)}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}
+                />
+              </div>
+
+              {/* Action Buttons */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '8px' }}>
+                <button type="button" className="btn btn-ghost" onClick={() => setShowEvalModal(false)}>
+                  إلغاء
+                </button>
+                <button type="submit" className="btn btn-start" style={{ background: 'linear-gradient(135deg, #0d9488, #0f766e)', padding: '10px 22px', fontSize: '13.5px' }}>
+                  🚀 إرسال التقييم للموظف للمراجعة والرد الأول
                 </button>
               </div>
             </form>

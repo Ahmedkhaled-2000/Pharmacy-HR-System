@@ -862,9 +862,9 @@ export default function EvaluationsModule({
                       value={evalEmpId}
                       onChange={(e) => setEvalEmpId(e.target.value)}
                       required
-                      style={{ padding: '8px 12px', borderRadius: '8px', border: '1.5px solid #0d9488', fontWeight: 'bold' }}
+                      style={{ padding: '9px 14px', borderRadius: '10px', border: '1.5px solid #0d9488', fontWeight: 'bold', fontSize: '13.5px', background: '#fff' }}
                     >
-                      <option value="">-- اختر الموظف --</option>
+                      <option value="">-- اختر الموظف من القائمة --</option>
                       {employees
                         .filter(isEmployeeActive)
                         .filter(e => {
@@ -876,7 +876,7 @@ export default function EvaluationsModule({
                         })
                         .map((e) => (
                           <option key={e.id} value={e.id}>
-                            {getEmpDisplayName(e)} (كود: {e.code} — {e.jobTitle || 'موظف'})
+                            {getEmpDisplayName(e)} (كود: {e.code} — الوظيفة: {e.jobTitle || 'موظف'})
                           </option>
                         ))}
                     </select>
@@ -887,16 +887,64 @@ export default function EvaluationsModule({
                     const totalSc = evalItems.reduce((acc, i) => acc + (parseFloat(i.score) || 0), 0);
                     const maxSc = evalItems.reduce((acc, i) => acc + (parseFloat(i.maxScore) || 20), 0);
                     const pct = maxSc > 0 ? Math.round((totalSc / maxSc) * 100) : 0;
+                    const bObj = branches.find(b => String(b.id) === String(selEmp?.branchId || selEmp?.branchesDetails?.[0]?.branchId));
                     return (
-                      <div style={{ background: '#f0fdfa', border: '1px solid #99f6e4', padding: '10px 14px', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <div>
-                          <div style={{ fontSize: '12px', color: '#0f766e', fontWeight: 'bold' }}>الوظيفة والمعايير المحملة:</div>
-                          <div style={{ fontWeight: '900', color: '#134e4a', fontSize: '14px' }}>👔 {selEmp?.jobTitle || 'عام'}</div>
+                      <div style={{
+                        background: 'linear-gradient(135deg, #f0fdfa, #e6fffa)',
+                        border: '2px solid #0d9488',
+                        padding: '14px 18px',
+                        borderRadius: '12px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '10px',
+                        boxShadow: '0 3px 10px rgba(13,148,136,0.08)'
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontSize: '18px' }}>👤</span>
+                            <strong style={{ fontSize: '15px', color: '#0f172a' }}>{selEmp?.name}</strong>
+                            <span style={{ fontSize: '12px', background: '#ccfbf1', color: '#0f766e', padding: '2px 8px', borderRadius: '6px', fontWeight: 'bold' }}>
+                              كود: {selEmp?.code}
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ fontSize: '12px', color: '#475569' }}>📍 الفرع:</span>
+                            <strong style={{ color: '#0f766e', fontSize: '13px' }}>{bObj?.name || 'الفرع الرئيسي'}</strong>
+                          </div>
                         </div>
-                        <div style={{ textAlign: 'left' }}>
-                          <div style={{ fontSize: '12px', color: '#0f766e' }}>الدرجة والنسبة المحتسبة:</div>
-                          <div style={{ fontWeight: '900', fontSize: '16px', color: pct >= 85 ? '#15803d' : pct >= 70 ? '#d97706' : '#dc2626' }}>
-                            {totalSc} / {maxSc} ({pct}%)
+
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', borderTop: '1px solid #99f6e4', paddingTop: '8px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontSize: '13px', color: '#0f766e', fontWeight: 'bold' }}>الوظيفة المعتمدة:</span>
+                            <span style={{
+                              background: '#0d9488',
+                              color: '#ffffff',
+                              padding: '4px 14px',
+                              borderRadius: '8px',
+                              fontWeight: '900',
+                              fontSize: '14px',
+                              boxShadow: '0 2px 6px rgba(13,148,136,0.2)'
+                            }}>
+                              👔 {selEmp?.jobTitle || 'موظف'}
+                            </span>
+                            <span style={{ fontSize: '12px', color: '#64748b' }}>
+                              ({evalItems.length} بنود قياسية محملة)
+                            </span>
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontSize: '12.5px', color: '#0f766e', fontWeight: 'bold' }}>الدرجة والنسبة:</span>
+                            <span style={{
+                              background: pct >= 85 ? '#dcfce7' : pct >= 70 ? '#fef3c7' : '#fee2e2',
+                              color: pct >= 85 ? '#15803d' : pct >= 70 ? '#b45309' : '#b91c1c',
+                              border: `1px solid ${pct >= 85 ? '#86efac' : pct >= 70 ? '#fde68a' : '#fca5a5'}`,
+                              padding: '3px 12px',
+                              borderRadius: '8px',
+                              fontWeight: '900',
+                              fontSize: '15px'
+                            }}>
+                              {totalSc} / {maxSc} ({pct}%)
+                            </span>
                           </div>
                         </div>
                       </div>
