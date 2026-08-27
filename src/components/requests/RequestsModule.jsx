@@ -98,8 +98,10 @@ export default function RequestsModule({
   customTo = '',
   currentBranch = null,
   authRole = 'admin',
+  currentRole = 'admin',
   executeWithOwnerGuard
 }) {
+  const effectiveRole = currentRole || authRole || 'admin';
   const [filterType, setFilterType] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterEmp, setFilterEmp] = useState('all');
@@ -834,7 +836,7 @@ export default function RequestsModule({
       }
     };
 
-    if (currentRole === 'admin') {
+    if (effectiveRole === 'admin') {
       if (targetReq.type === 'loan' || targetReq.type === 'advance' || targetReq.type === 'meds' || targetReq.type === 'credit_medicine') {
         executeWithOwnerGuard?.({
           lockKey: 'lockApproveLoans',
