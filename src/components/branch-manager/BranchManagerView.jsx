@@ -218,6 +218,13 @@ export default function BranchManagerView({
   const [rosterEditEmpId, setRosterEditEmpId] = useState('');
   const [rosterEditDetails, setRosterEditDetails] = useState('');
 
+  // ── State for "طلبات الفرع المرسلة للإدارة" Tab ──
+  const [sentCategoryFilter, setSentCategoryFilter] = useState('all');
+  const [sentStatusFilter, setSentStatusFilter] = useState('all');
+  const [sentEmpFilter, setSentEmpFilter] = useState('all');
+  const [sentDateFilter, setSentDateFilter] = useState('');
+  const [sentSearchQuery, setSentSearchQuery] = useState('');
+
   // Branch Manager Date Range & Month Filter State (Persistent & Synchronized with App header)
   const activeCycleMonth = useMemo(() => {
     return getActivePayrollMonth(state?.orgSettings, getRealDate());
@@ -443,6 +450,154 @@ export default function BranchManagerView({
 
     return list.sort((a, b) => getRequestSortTime(b) - getRequestSortTime(a));
   }, [branchRequests, branchReqEmpFilter, branchReqDateFilter]);
+
+  // ── All Requests Sent from this Branch to Higher Management (Punches, Leaves, Permissions, Penalties, Bonuses, Evaluations, Roster Edits, Resignations) ──
+  const branchSentRequests = useMemo(() => {
+    const cIdStr = currentBranch?.id ? String(currentBranch.id) : null;
+    const branchEmpIdSet = new Set(
+      branchEmployees.flatMap((e) => [String(e.id), String(e.code || '')]).filter(Boolean)
+    );
+
+    const rawList = [];
+    const seenIds = new Set();
+
+    // 1. From state.requests
+    (state.requests || []).forEach((r) => {
+      if (!r || !r.id || seenIds.has(String(r.id))) return;
+      const idStr = String(r.id);
+      const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
+      if (deletedIdsSet.has(idStr) || (rawId && (deletedIdsSet.has(rawId) || deletedIdsSet.has(`req_${rawId}`)))) return;
+
+      const isMatchBranch = (r.branchId && String(r.branchId) === cIdStr) ||
+                            (r.employeeId && branchEmpIdSet.has(String(r.employeeId))) ||
+                            (r.employeeCode && branchEmpIdSet.has(String(r.employeeCode))) ||
+                            branchEmployees.some(e => String(e.id) === String(r.employeeId));
+
+      if (isMatchBranch) {
+        rawList.push(r);
+        seenIds.add(String(r.id));
+      }
+    });
+
+    // 2. From state.leaveRequests
+    (state.leaveRequests || []).forEach((lr) => {
+      if (!lr || !lr.id || seenIds.has(String(lr.id))) return;
+      const isMatchBranch = (lr.branchId && String(lr.branchId) === cIdStr) ||
+                            (lr.employeeId && branchEmpIdSet.has(String(lr.employeeId))) ||
+                            branchEmployees.some(e => String(e.id) === String(lr.employeeId));
+      if (isMatchBranch) {
+        rawList.push({ ...lr, type: lr.type || 'leave' });
+        seenIds.add(String(lr.id));
+      }
+    });
+
+    // 3. From state.evaluations
+    (state.evaluations || []).forEach((ev) => {
+      if (!ev || !ev.id || seenIds.has(String(ev.id))) return;
+      const isMatchBranch = (ev.branchId && String(ev.branchId) === cIdStr) ||
+                            (ev.employeeId && branchEmpIdSet.has(String(ev.employeeId))) ||
+                            branchEmployees.some(e => String(e.id) === String(ev.employeeId));
+      if (isMatchBranch) {
+        rawList.push({
+          ...ev,
+          type: ev.type || 'evaluation',
+          typeLabel: 'تقييم أداء موظف',
+          status: ev.status || (ev.adminApproved ? 'approved' : 'pending_admin'),
+          details: ev.notes || (ev.items ? `تقييم بمجموع ${ev.totalScore || 0}/${ev.maxTotalScore || 100}` : 'تقييم أداء شهري')
+        });
+        seenIds.add(String(ev.id));
+      }
+    });
+
+    return rawList.sort((a, b) => getRequestSortTime(b) - getRequestSortTime(a));
+  }, [state.requests, state.leaveRequests, state.evaluations, branchEmployees, currentBranch, deletedIdsSet]);
+
+  const getSentReqMeta = (r) => {
+    if (!r) return { cat: 'other', label: 'طلب إداري', icon: '📋', bg: '#f8fafc', border: '#e2e8f0', text: '#334155' };
+    const type = String(r.type || '').toLowerCase();
+    const title = String(r.title || r.typeLabel || '').toLowerCase();
+
+    if (type.includes('punch') || title.includes('بصم') || r.punchType) {
+      return { cat: 'punch', label: '🖐️ طلب بصمة يدوي', icon: '🖐️', bg: '#fdf2f8', border: '#fbcfe8', text: '#9d174d' };
+    }
+    if (type.includes('perm') || title.includes('إذن') || title.includes('اذن') || title.includes('استئذان')) {
+      return { cat: 'permission', label: '⏰ طلب إذن موظف', icon: '⏰', bg: '#fffbeb', border: '#fde68a', text: '#b45309' };
+    }
+    if (type.includes('leave') || title.includes('إجاز') || title.includes('اجاز') || r.leaveType) {
+      return { cat: 'leave', label: '🏖️ طلب إجازة موظف', icon: '🏖️', bg: '#f0fdf4', border: '#bbf7d0', text: '#15803d' };
+    }
+    if (type === 'bonus' || title.includes('مكافأ') || title.includes('مكافأة') || title.includes('حافز')) {
+      return { cat: 'adjustment', label: '🎁 طلب مكافأة / حافز', icon: '🎁', bg: '#ecfdf5', border: '#a7f3d0', text: '#047857' };
+    }
+    if (type === 'penalty' || type.includes('pen') || title.includes('خصم') || title.includes('جزاء')) {
+      return { cat: 'adjustment', label: '⚠️ طلب تطبيق جزاء', icon: '⚠️', bg: '#fef2f2', border: '#fecaca', text: '#b91c1c' };
+    }
+    if (type.includes('eval') || title.includes('تقييم') || title.includes('شكو') || r.evalItems || r.items) {
+      return { cat: 'evaluation', label: '⭐️ تقييم أداء موظف', icon: '⭐️', bg: '#faf5ff', border: '#e9d5ff', text: '#7e22ce' };
+    }
+    if (type.includes('roster') || title.includes('جدول')) {
+      return { cat: 'roster', label: '📅 طلب تعديل جدول', icon: '📅', bg: '#f0f9ff', border: '#bae6fd', text: '#0369a1' };
+    }
+    if (type.includes('resign') || title.includes('استقال')) {
+      return { cat: 'resignation', label: '🚪 طلب استقالة', icon: '🚪', bg: '#fff1f2', border: '#fecdd3', text: '#be123c' };
+    }
+    return { cat: 'other', label: r.typeLabel || '📋 طلب إداري', icon: '📋', bg: '#f8fafc', border: '#e2e8f0', text: '#334155' };
+  };
+
+  const filteredSentRequests = useMemo(() => {
+    return branchSentRequests.filter((r) => {
+      const meta = getSentReqMeta(r);
+      // Category filter
+      if (sentCategoryFilter !== 'all' && meta.cat !== sentCategoryFilter) return false;
+
+      // Status filter
+      const isApproved = r.status === 'approved' || r.adminApproved;
+      const isRejected = r.status === 'rejected' || r.adminDecision === 'rejected';
+      const isPending = !isApproved && !isRejected;
+
+      if (sentStatusFilter === 'pending' && !isPending) return false;
+      if (sentStatusFilter === 'approved' && !isApproved) return false;
+      if (sentStatusFilter === 'rejected' && !isRejected) return false;
+
+      // Employee filter
+      if (sentEmpFilter !== 'all' && String(r.employeeId) !== String(sentEmpFilter)) return false;
+
+      // Date filter
+      if (sentDateFilter) {
+        const rDate = (r.createdAt ? r.createdAt.slice(0, 10) : (r.startDate || r.date || ''));
+        if (!rDate.startsWith(sentDateFilter)) return false;
+      }
+
+      // Search query
+      if (sentSearchQuery.trim()) {
+        const q = sentSearchQuery.trim().toLowerCase();
+        const empName = (r.employeeName || '').toLowerCase();
+        const empCode = (r.employeeCode || '').toLowerCase();
+        const reason = (r.reason || r.details || r.notes || '').toLowerCase();
+        const typeLabel = (meta.label || '').toLowerCase();
+        if (!empName.includes(q) && !empCode.includes(q) && !reason.includes(q) && !typeLabel.includes(q)) return false;
+      }
+
+      return true;
+    });
+  }, [branchSentRequests, sentCategoryFilter, sentStatusFilter, sentEmpFilter, sentDateFilter, sentSearchQuery]);
+
+  const sentStats = useMemo(() => {
+    let pending = 0;
+    let approved = 0;
+    let rejected = 0;
+    branchSentRequests.forEach(r => {
+      if (r.status === 'approved' || r.adminApproved) approved++;
+      else if (r.status === 'rejected' || r.adminDecision === 'rejected') rejected++;
+      else pending++;
+    });
+    return {
+      total: branchSentRequests.length,
+      pending,
+      approved,
+      rejected
+    };
+  }, [branchSentRequests]);
 
   // ── Calculate Manager Salary Metrics ──
   const managerSalaryMetrics = useMemo(() => {
@@ -1732,10 +1887,12 @@ export default function BranchManagerView({
 
         const isLeave = ['leave', 'leave_request', 'annual_leave', 'sick_leave', 'emergency_leave', 'unpaid_leave'].includes(previewModalReq.type);
         const isLoan = ['loan', 'advance', 'meds', 'credit_medicine'].includes(previewModalReq.type);
-        const isPermission = previewModalReq.type === 'permission';
+        const isPermission = previewModalReq.type === 'permission' || previewModalReq.type === 'permission_request';
         const isSwap = ['swap', 'shift_swap', 'shift_edit'].includes(previewModalReq.type);
-        const isPunch = ['punch_correction', 'تأكيد بصمة الوجه', 'تأكيد بصمة اليد'].includes(previewModalReq.type);
+        const isPunch = ['punch_correction', 'تأكيد بصمة الوجه', 'تأكيد بصمة اليد', 'manual_punch', 'attendance_punch'].includes(previewModalReq.type) || Boolean(previewModalReq.punchType);
         const isPenalty = previewModalReq.type === 'penalty';
+        const isBonus = previewModalReq.type === 'bonus';
+        const isEvaluation = ['evaluation', 'emp_evaluation', 'manager_eval'].includes(previewModalReq.type) || Boolean(previewModalReq.evalItems || previewModalReq.items);
         const isRoster = ['roster_update', 'roster_edit', 'roster_edit_request'].includes(previewModalReq.type);
 
         const totalAmount = parseFloat(previewModalReq.amount) || 0;
@@ -2057,6 +2214,112 @@ export default function BranchManagerView({
                         </div>
                       </div>
                     </div>
+                  </div>
+                )}
+
+                {/* ── BONUS DETAILS ── */}
+                {isBonus && (
+                  <div style={{ background: '#ecfdf5', padding: '16px', borderRadius: '12px', border: '1px solid #a7f3d0' }}>
+                    <h4 style={{ margin: '0 0 10px', color: '#047857', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      🎁 تفاصيل طلب المكافأة / الحافز:
+                    </h4>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#047857' }}>نوع الإجراء:</span>
+                        <div style={{ fontWeight: 'bold', color: '#065f46' }}>
+                          ➕ إضافة مكافأة / حافز للموظف
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#047857' }}>قيمة المكافأة المقترحة:</span>
+                        <div style={{ fontWeight: '900', color: '#047857', fontSize: '18px' }}>
+                          💰 +{previewModalReq.amount || '0'} ج.م
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── MANUAL PUNCH DETAILS ── */}
+                {Boolean(previewModalReq.punchType || previewModalReq.type === 'manual_punch') && (
+                  <div style={{ background: '#fdf2f8', padding: '16px', borderRadius: '12px', border: '1px solid #fbcfe8' }}>
+                    <h4 style={{ margin: '0 0 10px', color: '#9d174d', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      🖐️ تفاصيل طلب البصمة اليدوية:
+                    </h4>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#9d174d' }}>تاريخ البصمة:</span>
+                        <div style={{ fontWeight: 'bold', color: '#831843' }}>
+                          📅 {previewModalReq.date || '—'} {previewModalReq.date && `(${getArabicWeekday(previewModalReq.date)})`}
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#9d174d' }}>نوع التسجيل:</span>
+                        <div style={{ fontWeight: 'bold', color: '#831843' }}>
+                          {previewModalReq.punchType === 'full' ? 'وردية كاملة (حضور وانصراف)' : previewModalReq.punchType === 'in' ? 'حضور فقط' : previewModalReq.punchType === 'out' ? 'انصراف فقط' : 'تصحيح بصمة'}
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#9d174d' }}>وقت الحضور:</span>
+                        <div style={{ fontWeight: 'bold', color: '#15803d' }}>
+                          🟢 {previewModalReq.timeIn || previewModalReq.time || '—'}
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#9d174d' }}>وقت الانصراف:</span>
+                        <div style={{ fontWeight: 'bold', color: '#dc2626' }}>
+                          🔴 {previewModalReq.timeOut || '—'}
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#9d174d' }}>ساعات البريك:</span>
+                        <div style={{ fontWeight: 'bold', color: '#831843' }}>
+                          ☕ {previewModalReq.breakHours || '0'} ساعة
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── EVALUATION DETAILS ── */}
+                {isEvaluation && (
+                  <div style={{ background: '#faf5ff', padding: '16px', borderRadius: '12px', border: '1px solid #e9d5ff' }}>
+                    <h4 style={{ margin: '0 0 12px', color: '#6b21a8', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      ⭐️ تفاصيل تقييم الأداء والدرجات:
+                    </h4>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f3e8ff', padding: '10px 14px', borderRadius: '10px', marginBottom: '12px' }}>
+                      <span style={{ fontWeight: 'bold', color: '#581c87', fontSize: '13px' }}>
+                        📅 شهر التقييم: {previewModalReq.month || previewModalReq.evalMonth || 'الشهر الحالي'}
+                      </span>
+                      <span style={{ background: '#7e22ce', color: '#fff', padding: '4px 12px', borderRadius: '12px', fontWeight: '900', fontSize: '14px' }}>
+                        الدرجة الإجمالية: {previewModalReq.totalScore || previewModalReq.score || '—'} / {previewModalReq.maxTotalScore || previewModalReq.maxScore || '100'}
+                      </span>
+                    </div>
+
+                    {Array.isArray(previewModalReq.items || previewModalReq.evalItems) && (previewModalReq.items || previewModalReq.evalItems).length > 0 && (
+                      <div className="table-responsive" style={{ maxHeight: '250px', overflowY: 'auto', background: '#fff', borderRadius: '8px', border: '1px solid #e9d5ff' }}>
+                        <table className="table" style={{ fontSize: '12.5px', width: '100%', borderCollapse: 'collapse' }}>
+                          <thead>
+                            <tr style={{ background: '#f5f3ff', color: '#6b21a8' }}>
+                              <th style={{ padding: '6px 10px', textAlign: 'right' }}>#</th>
+                              <th style={{ padding: '6px 10px', textAlign: 'right' }}>بند التقييم</th>
+                              <th style={{ padding: '6px 10px', textAlign: 'center' }}>الدرجة المستحقة</th>
+                              <th style={{ padding: '6px 10px', textAlign: 'center' }}>الدرجة العظمى</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(previewModalReq.items || previewModalReq.evalItems).map((it, i) => (
+                              <tr key={it.id || i} style={{ borderBottom: '1px solid #f3e8ff' }}>
+                                <td style={{ padding: '6px 10px', color: 'var(--muted)' }}>{i + 1}</td>
+                                <td style={{ padding: '6px 10px', fontWeight: 'bold', color: '#334155' }}>{it.title || it.name}</td>
+                                <td style={{ padding: '6px 10px', textAlign: 'center', fontWeight: 'bold', color: '#7e22ce' }}>{it.score}</td>
+                                <td style={{ padding: '6px 10px', textAlign: 'center', color: 'var(--muted)' }}>{it.maxScore || 10}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -3880,6 +4143,345 @@ export default function BranchManagerView({
               </div>
             );
           })()}
+        </div>
+      )}
+
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* ── 13. BRANCH SENT REQUESTS TO ADMIN TAB (سجل الطلبات المرسلة للإدارة) ── */}
+      {/* ───────────────────────────────────────────────────────────── */}
+      {activeTab === 'branch-sent-requests' && (
+        <div className="card settings-card fade-in" style={{ padding: isMobileScreen ? '14px' : '22px' }}>
+          
+          {/* Header */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: isMobileScreen ? '16px' : '18.5px', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                📤 سجل ومتابعة كافة الطلبات المرسلة إلى الإدارة العليا
+              </h3>
+              <p style={{ margin: '5px 0 0', color: 'var(--muted)', fontSize: '13px' }}>
+                متابعة فورية وحالة كافة الطلبات والالتماسات المرفوعة للإدارة العليا (بصمات يدوية، أذونات، إجازات، مكافآت وجزاءات، تقييمات، وتعديل الجداول)
+              </p>
+            </div>
+
+            {/* Quick Action Buttons */}
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn btn-start"
+                style={{ padding: '7px 12px', fontSize: '12.5px', background: '#0d9488', display: 'flex', alignItems: 'center', gap: '5px' }}
+                onClick={() => setShowManualPunchModal(true)}
+              >
+                🖐️ طلب بصمة يدوي
+              </button>
+              <button
+                type="button"
+                className="btn btn-start"
+                style={{ padding: '7px 12px', fontSize: '12.5px', background: '#0284c7', display: 'flex', alignItems: 'center', gap: '5px' }}
+                onClick={() => setShowLeaveModal(true)}
+              >
+                🏖️ طلب إجازة لموظف
+              </button>
+              <button
+                type="button"
+                className="btn btn-start"
+                style={{ padding: '7px 12px', fontSize: '12.5px', background: '#7c3aed', display: 'flex', alignItems: 'center', gap: '5px' }}
+                onClick={() => {
+                  if (setActiveTab) setActiveTab('emp-violations');
+                }}
+              >
+                ⚖️ طلب مكافأة / جزاء
+              </button>
+              <button
+                type="button"
+                className="btn btn-start"
+                style={{ padding: '7px 12px', fontSize: '12.5px', background: '#d97706', display: 'flex', alignItems: 'center', gap: '5px' }}
+                onClick={() => setShowRosterEditModal(true)}
+              >
+                📅 طلب تعديل جدول
+              </button>
+            </div>
+          </div>
+
+          {/* Stats Bar */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+            gap: '12px',
+            marginBottom: '20px'
+          }}>
+            <div style={{ background: '#f8fafc', border: '1px solid var(--border)', padding: '14px', borderRadius: '12px', textAlign: 'center' }}>
+              <span style={{ fontSize: '12px', color: 'var(--muted)', display: 'block', marginBottom: '4px' }}>إجمالي الطلبات المرسلة</span>
+              <strong style={{ fontSize: '20px', color: 'var(--primary-dark)' }}>{sentStats.total}</strong>
+            </div>
+            <div style={{ background: '#fefce8', border: '1px solid #fef08a', padding: '14px', borderRadius: '12px', textAlign: 'center' }}>
+              <span style={{ fontSize: '12px', color: '#854d0e', display: 'block', marginBottom: '4px' }}>⏳ قيد انتظار الإدارة العليا</span>
+              <strong style={{ fontSize: '20px', color: '#ca8a04' }}>{sentStats.pending}</strong>
+            </div>
+            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '14px', borderRadius: '12px', textAlign: 'center' }}>
+              <span style={{ fontSize: '12px', color: '#166534', display: 'block', marginBottom: '4px' }}>🟢 معتمدة ومطبقة</span>
+              <strong style={{ fontSize: '20px', color: '#16a34a' }}>{sentStats.approved}</strong>
+            </div>
+            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', padding: '14px', borderRadius: '12px', textAlign: 'center' }}>
+              <span style={{ fontSize: '12px', color: '#991b1b', display: 'block', marginBottom: '4px' }}>🔴 مرفوضة من الإدارة</span>
+              <strong style={{ fontSize: '20px', color: '#dc2626' }}>{sentStats.rejected}</strong>
+            </div>
+          </div>
+
+          {/* Category Tabs Pills */}
+          <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '10px', marginBottom: '16px', borderBottom: '1px solid var(--border)' }}>
+            {[
+              { id: 'all', label: '🌐 جميع الطلبات', count: branchSentRequests.length },
+              { id: 'punch', label: '🖐️ بصمات يدوية', count: branchSentRequests.filter(r => getSentReqMeta(r).cat === 'punch').length },
+              { id: 'permission', label: '⏰ أذونات الموظفين', count: branchSentRequests.filter(r => getSentReqMeta(r).cat === 'permission').length },
+              { id: 'leave', label: '🏖️ طلبات الإجازات', count: branchSentRequests.filter(r => getSentReqMeta(r).cat === 'leave').length },
+              { id: 'adjustment', label: '⚖️ مكافآت وجزاءات', count: branchSentRequests.filter(r => getSentReqMeta(r).cat === 'adjustment').length },
+              { id: 'evaluation', label: '⭐️ تقييمات الأداء', count: branchSentRequests.filter(r => getSentReqMeta(r).cat === 'evaluation').length },
+              { id: 'roster', label: '📅 تعديل الجداول', count: branchSentRequests.filter(r => getSentReqMeta(r).cat === 'roster').length },
+              { id: 'resignation', label: '🚪 طلبات الاستقالة', count: branchSentRequests.filter(r => getSentReqMeta(r).cat === 'resignation').length }
+            ].map(cat => (
+              <button
+                key={cat.id}
+                type="button"
+                onClick={() => setSentCategoryFilter(cat.id)}
+                style={{
+                  padding: '7px 14px',
+                  borderRadius: '20px',
+                  border: sentCategoryFilter === cat.id ? '2px solid var(--primary)' : '1px solid var(--border)',
+                  background: sentCategoryFilter === cat.id ? 'var(--primary)' : 'var(--surface)',
+                  color: sentCategoryFilter === cat.id ? '#fff' : 'var(--text)',
+                  fontWeight: sentCategoryFilter === cat.id ? '800' : '600',
+                  fontSize: '12.5px',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <span>{cat.label}</span>
+                <span style={{
+                  background: sentCategoryFilter === cat.id ? 'rgba(255,255,255,0.25)' : 'var(--surface-muted)',
+                  padding: '1px 7px',
+                  borderRadius: '10px',
+                  fontSize: '11px'
+                }}>
+                  {cat.count}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {/* Filters Row */}
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '16px', background: 'var(--surface-muted)', padding: '12px', borderRadius: '12px', border: '1px solid var(--border)' }}>
+            <div style={{ flex: '1 1 200px' }}>
+              <input
+                type="text"
+                placeholder="🔍 بحث باسم الموظف أو الكود أو تفاصيل الطلب..."
+                value={sentSearchQuery}
+                onChange={(e) => setSentSearchQuery(e.target.value)}
+                style={{ width: '100%', padding: '7px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+              <select
+                value={sentStatusFilter}
+                onChange={(e) => setSentStatusFilter(e.target.value)}
+                style={{ padding: '7px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '12.5px' }}
+              >
+                <option value="all">-- جميع الحالات --</option>
+                <option value="pending">⏳ قيد انتظار الإدارة العليا</option>
+                <option value="approved">🟢 معتمد من الإدارة العليا</option>
+                <option value="rejected">🔴 مرفوض من الإدارة</option>
+              </select>
+
+              <select
+                value={sentEmpFilter}
+                onChange={(e) => setSentEmpFilter(e.target.value)}
+                style={{ padding: '7px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '12.5px' }}
+              >
+                <option value="all">-- جميع الموظفين --</option>
+                {branchEmployees.map(e => (
+                  <option key={e.id} value={e.id}>{e.name} ({e.code})</option>
+                ))}
+              </select>
+
+              <input
+                type="date"
+                value={sentDateFilter}
+                onChange={(e) => setSentDateFilter(e.target.value)}
+                style={{ padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '12px' }}
+              />
+              {sentDateFilter && (
+                <button type="button" className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '11px', color: 'var(--danger)' }} onClick={() => setSentDateFilter('')}>✕ مسح التاريخ</button>
+              )}
+            </div>
+          </div>
+
+          {/* Data List View */}
+          {filteredSentRequests.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '36px 20px', color: 'var(--muted)', background: 'var(--surface-muted)', borderRadius: '12px', border: '1px solid var(--border)' }}>
+              <span style={{ fontSize: '32px', display: 'block', marginBottom: '8px' }}>📭</span>
+              <h4 style={{ margin: '0 0 6px', fontSize: '15px' }}>لا توجد طلبات تطابق خيارات البحث</h4>
+              <p style={{ margin: 0, fontSize: '12.5px' }}>جرب تغيير تصنيف الطلبات أو الفلاتر أعلاه.</p>
+            </div>
+          ) : isMobileScreen ? (
+            /* Mobile Cards View */
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {filteredSentRequests.map((r, idx) => {
+                const meta = getSentReqMeta(r);
+                const empObj = branchEmployees.find(e => String(e.id) === String(r.employeeId)) || (state.employees || []).find(e => String(e.id) === String(r.employeeId));
+                const dateStr = r.createdAt ? r.createdAt.slice(0, 10) : (r.date || r.startDate || '—');
+
+                return (
+                  <div
+                    key={r.id || idx}
+                    style={{
+                      background: 'var(--surface)',
+                      border: '1px solid var(--border)',
+                      borderRadius: '14px',
+                      padding: '14px 16px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '10px',
+                      boxShadow: '0 2px 6px rgba(0,0,0,0.03)'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{
+                          background: meta.bg,
+                          border: `1px solid ${meta.border}`,
+                          color: meta.text,
+                          padding: '3px 8px',
+                          borderRadius: '8px',
+                          fontSize: '12px',
+                          fontWeight: '800'
+                        }}>
+                          {meta.label}
+                        </span>
+                      </div>
+                      <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
+                        📅 {dateStr}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <strong style={{ fontSize: '14px', color: 'var(--primary-dark)' }}>
+                          {empObj ? `${empObj.name}` : (r.employeeName || 'موظف')}
+                        </strong>
+                        <span style={{ fontSize: '11.5px', color: 'var(--muted)', display: 'block' }}>
+                          كود: {empObj?.code || r.employeeCode || '—'}
+                        </span>
+                      </div>
+
+                      <div>
+                        {(r.status === 'approved' || r.adminApproved) ? (
+                          <span className="approval-status-badge approved" style={{ fontSize: '11.5px' }}>🟢 معتمد نهائياً</span>
+                        ) : (r.status === 'rejected' || r.adminDecision === 'rejected') ? (
+                          <span className="approval-status-badge rejected" style={{ fontSize: '11.5px' }}>🔴 مرفوض</span>
+                        ) : (
+                          <span className="approval-status-badge pending" style={{ fontSize: '11.5px' }}>🟡 بانتظار الإدارة</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {(r.reason || r.details || r.notes) && (
+                      <div style={{ background: 'var(--surface-muted)', padding: '8px 10px', borderRadius: '8px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                        💬 {r.reason || r.details || r.notes}
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: '4px' }}>
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        style={{ padding: '6px 14px', fontSize: '12.5px', border: '1px solid var(--border)', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                        onClick={() => setPreviewModalReq(r)}
+                      >
+                        👁️ معاينة تفاصيل الطلب
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            /* Desktop Table View */
+            <div className="table-responsive">
+              <table className="bylaws-table" style={{ fontSize: '13px' }}>
+                <thead>
+                  <tr style={{ background: '#f8fafc', color: '#1e293b' }}>
+                    <th>#</th>
+                    <th>نوع الطلب</th>
+                    <th>اسم الموظف</th>
+                    <th>تاريخ الإرسال / الموعد</th>
+                    <th>بيان وتفاصيل الطلب</th>
+                    <th>موقف الإدارة العليا</th>
+                    <th style={{ textAlign: 'center' }}>معاينة الطلب</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredSentRequests.map((r, idx) => {
+                    const meta = getSentReqMeta(r);
+                    const empObj = branchEmployees.find(e => String(e.id) === String(r.employeeId)) || (state.employees || []).find(e => String(e.id) === String(r.employeeId));
+                    const dateStr = r.createdAt ? r.createdAt.slice(0, 10) : (r.date || r.startDate || '—');
+
+                    return (
+                      <tr key={r.id || idx}>
+                        <td style={{ color: 'var(--muted)', fontWeight: 'bold' }}>{idx + 1}</td>
+                        <td>
+                          <span style={{
+                            background: meta.bg,
+                            border: `1px solid ${meta.border}`,
+                            color: meta.text,
+                            padding: '3px 9px',
+                            borderRadius: '8px',
+                            fontSize: '12px',
+                            fontWeight: '800',
+                            whiteSpace: 'nowrap'
+                          }}>
+                            {meta.label}
+                          </span>
+                        </td>
+                        <td style={{ fontWeight: '800', color: 'var(--primary-dark)' }}>
+                          {empObj ? `${empObj.name} (${empObj.code})` : (r.employeeName || 'موظف')}
+                        </td>
+                        <td style={{ fontWeight: '700', fontSize: '12px' }}>
+                          📅 {dateStr} {dateStr !== '—' && `(${getArabicWeekday(dateStr)})`}
+                        </td>
+                        <td style={{ fontSize: '12.5px', maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {r.reason || r.details || r.notes || '—'}
+                        </td>
+                        <td>
+                          {(r.status === 'approved' || r.adminApproved) ? (
+                            <span className="approval-status-badge approved">🟢 معتمد من الإدارة العليا</span>
+                          ) : (r.status === 'rejected' || r.adminDecision === 'rejected') ? (
+                            <span className="approval-status-badge rejected">🔴 مرفوض من الإدارة</span>
+                          ) : (
+                            <span className="approval-status-badge pending">🟡 بانتظار اعتماد الإدارة العليا</span>
+                          )}
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            style={{ padding: '5px 12px', fontSize: '12px', border: '1px solid var(--border)', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                            onClick={() => setPreviewModalReq(r)}
+                          >
+                            👁️ معاينة
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
         </div>
       )}
 

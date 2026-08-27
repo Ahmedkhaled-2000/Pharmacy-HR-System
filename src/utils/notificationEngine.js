@@ -640,12 +640,23 @@ export function getNotificationTargetTab(notification, role = 'admin') {
     return notification.linkTab;
   }
 
-  // طلبات الموظفين (إجازات، أذونات، سلف، تبديل، استقالة) -> توجيه لمركز الطلبات أو الموافقات
+  // طلبات المكافآت والحوافز والجزاءات والخصومات والتسويات -> مركز موافقات الطلبات
+  if (type.includes('bonus') || type.includes('penalty') || type.includes('adj') || type.includes('reward') || title.includes('مكافأ') || title.includes('مكافأة') || title.includes('حافز') || title.includes('خصم') || title.includes('جزاء') || reqId.startsWith('adj_') || reqId.startsWith('pen_') || reqId.startsWith('bonus_')) {
+    return 'requests';
+  }
+
+  // طلبات البصمات وتصحيح البصمة اليدوية
+  if (type.includes('manual_punch') || type.includes('punch_correction') || title.includes('طلب بصمة') || title.includes('بصمة يدوي')) {
+    return 'requests';
+  }
+
+  // طلبات الموظفين العامة (إجازات، أذونات، سلف، تبديل، استقالة) -> توجيه لمركز موافقات الطلبات
   if (type.includes('leave') || reqId.startsWith('leave_') || title.includes('إجاز') || title.includes('اجاز')) return 'requests';
   if (type.includes('perm') || reqId.startsWith('perm_') || title.includes('إذن') || title.includes('اذن') || title.includes('استئذان')) return 'requests';
-  if (type.includes('loan') || type.includes('med') || type.includes('advance') || reqId.startsWith('loan_') || reqId.startsWith('medreq_') || title.includes('سلف') || title.includes('أدوي') || title.includes('ادوي') || title.includes('آجل')) return role === 'branch' ? 'requests' : 'requests';
+  if (type.includes('loan') || type.includes('med') || type.includes('advance') || reqId.startsWith('loan_') || reqId.startsWith('medreq_') || title.includes('سلف') || title.includes('أدوي') || title.includes('ادوي') || title.includes('آجل')) return 'requests';
   if (type.includes('swap') || reqId.startsWith('swap_') || title.includes('تبديل')) return 'requests';
-  if (type.includes('resign') || reqId.startsWith('res_') || title.includes('استقال')) return role === 'branch' ? 'requests' : 'requests';
+  if (type.includes('resign') || reqId.startsWith('res_') || title.includes('استقال')) return 'requests';
+  if (type.includes('request') || reqId.startsWith('req_') || title.includes('طلب ')) return 'requests';
 
   // التقييمات والشكاوى
   if (type.includes('eval') || type.includes('complaint') || title.includes('تقييم') || title.includes('شكو')) return 'evaluations';
@@ -657,7 +668,7 @@ export function getNotificationTargetTab(notification, role = 'admin') {
   if (type.includes('punch') || type.includes('shift') || type.includes('biometric') || title.includes('بصم') || title.includes('حضور')) return 'attendance';
 
   // لائحة العمل والجزاءات والتأخير
-  if (type.includes('late') || type.includes('early_exit') || type.includes('penalty') || type.includes('bylaw') || title.includes('تأخير') || title.includes('خروج') || title.includes('جزاء') || title.includes('لائح')) return 'bylaws';
+  if (type.includes('late') || type.includes('early_exit') || type.includes('bylaw') || title.includes('تأخير') || title.includes('خروج') || title.includes('لائح')) return 'bylaws';
 
   // الرواتب
   if (type.includes('payroll') || type.includes('salary') || title.includes('مرتب') || title.includes('راتب')) return 'payroll';
@@ -665,8 +676,8 @@ export function getNotificationTargetTab(notification, role = 'admin') {
   // الفروع
   if (type.includes('branch') || title.includes('فرع')) return 'branches';
 
-  // الموظفين
-  if (type.includes('emp') || title.includes('موظف')) return 'employees';
+  // شؤون الموظفين
+  if (type.includes('employee_profile') || title.includes('إضافة موظف') || title.includes('ملف الموظف')) return 'employees';
 
   // الأرشيف
   if (type.includes('archive') || title.includes('أرشيف') || title.includes('فاتورة')) return 'pharmacy-archive';
@@ -697,6 +708,7 @@ export function getNotificationTabLabel(targetTab, role = 'admin') {
     'electronic-attendance': 'البصمة الحيوية 📸',
     roster: 'الجداول الشهرية 🗓️',
     bylaws: 'لائحة العمل والجزاءات 📜',
+    'branch-sent-requests': 'سجل الطلبات المرسلة للإدارة 📤',
     requests: 'مركز موافقات الطلبات 📋',
     branches: 'إدارة الفروع 🏢',
     employees: 'شؤون الموظفين 👥',

@@ -471,6 +471,13 @@ export default function DesktopLayout({
           icon: '📝',
           badge: resignationCount,
           desc: 'مراجعة طلبات استقالة موظفي الفرع'
+        },
+        {
+          id: 'branch-sent-requests',
+          targetTab: 'branch-sent-requests',
+          label: 'سجل الطلبات المرسلة للإدارة',
+          icon: '📤',
+          desc: 'متابعة ومعاينة كافة الطلبات المرسلة للإدارة (بصمات، أذونات، إجازات، جزاءات، تقييمات)'
         }
       ]
     },
