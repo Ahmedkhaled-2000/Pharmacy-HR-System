@@ -32,6 +32,7 @@ import { smartMergeStates } from './utils/stateMerger';
 import { compressImage } from './utils/imageCompressor';
 import { getPendingCount } from './utils/offlineStorage';
 import { saveAutoBackupOnModification } from './utils/backupHelper';
+import { playFingerprintChime, playNotificationChime } from './hooks/useAudio';
 import ErrorBoundary from './components/common/ErrorBoundary';
 import { normalizeSchedule } from './components/roster/RosterModule';
 import {
