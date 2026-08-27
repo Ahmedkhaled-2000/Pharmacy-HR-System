@@ -229,7 +229,12 @@ export function filterEmployeeNotifications(notifications = [], employeeId = nul
       return true;
     }
 
-    // 5. Broadcasts to all employees
+    // 5. Evaluation notification for this employee (even if created before targetRole was saved)
+    if ((n.type === 'eval_pending_employee' || n.type === 'eval_finalized' || n.evalId || (n.linkTab === 'evaluations' && n.title?.includes('تقييم'))) && (String(n.employeeId).trim() === empIdStr || String(n.targetEmployeeId).trim() === empIdStr)) {
+      return true;
+    }
+
+    // 6. Broadcasts to all employees
     if (n.targetRole === 'all_employees' || n.type === 'broadcast' || n.type === 'announcement') {
       return true;
     }
@@ -274,6 +279,10 @@ export function filterAdminNotifications(notifications = [], state = null) {
 
     // C. Never show employee-targeted notifications or self decision confirmations
     if (n.targetRole === 'employee' || n.targetRole === 'all_employees') {
+      return false;
+    }
+    // Never show evaluation notifications sent to employee for employee review
+    if (n.type === 'eval_pending_employee' || n.type === 'eval_finalized' || (n.title && n.title.includes('برصد تقييم أدائك')) || (n.message && n.message.includes('برصد تقييم أدائك')) || (n.title && n.title.includes('تقييم شهري جديد') && !n.title.includes('رد الموظف'))) {
       return false;
     }
     if (n.targetEmployeeId && (n.action === 'approved' || n.action === 'rejected' || n.action === 'decision' || n.action === 'penalty' || n.action === 'bonus' || n.action === 'punch' || n.action === 'manual_punch')) {
@@ -328,7 +337,16 @@ export function filterAdminNotifications(notifications = [], state = null) {
       seenReqs.add(rId);
 
       if (r.hiddenFromAdmin || r.clearedByAdmin) return;
-      if (r.adminApproved === true || r.status === 'approved' || r.status === 'rejected' || r.status === 'cancelled') return;
+      if (r.adminApproved === true || r.status === 'approved' || r.status === 'rejected' || r.status === 'cancelled' || r.status === 'paid' || r.status === 'partial') return;
+
+      const isLoan = r.type === 'loan' || r.type === 'meds' || r.type === 'credit_medicine' || r.type === 'advance';
+      if (isLoan && state.loans) {
+        const rAmt = parseFloat(r.amount || r.totalAmount) || 0;
+        const matchingLoan = (state.loans || []).find((l) => String(l.id) === rId || String(l.requestId) === rId || (String(l.employeeId) === String(r.employeeId) && Math.abs((parseFloat(l.amount || l.totalAmount) || 0) - rAmt) < 0.01));
+        if (matchingLoan && (matchingLoan.status === 'approved' || matchingLoan.status === 'paid' || matchingLoan.status === 'partial' || matchingLoan.adminApproved || parseFloat(matchingLoan.paidAmount) > 0 || (Array.isArray(matchingLoan.paymentsHistory) && matchingLoan.paymentsHistory.length > 0))) {
+          return;
+        }
+      }
 
       const isPending = r.status === 'pending' || r.status === 'pending_admin' || !r.status;
       if (isPending) {

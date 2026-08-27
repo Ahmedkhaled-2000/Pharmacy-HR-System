@@ -69,7 +69,44 @@ export default function ApprovalCenterModule({
     (state.loans || []).forEach((r) => { if (r && !seen.has(String(r.id))) { list.push({ ...r, type: r.type || 'loan' }); seen.add(String(r.id)); } });
     (state.resignationRequests || []).forEach((r) => { if (r && !seen.has(String(r.id))) { list.push({ ...r, type: 'resignation' }); seen.add(String(r.id)); } });
     
-    return list.filter((r) => {
+    const loansList = state.loans || [];
+
+    return list.map((r) => {
+      if (!r) return r;
+      const isLoanType = r.type === 'loan' || r.type === 'meds' || r.type === 'credit_medicine' || r.type === 'advance';
+      if (isLoanType) {
+        const rIdStr = String(r.id || '');
+        const rAmt = parseFloat(r.amount || r.totalAmount) || 0;
+        const matchingLoan = loansList.find((l) => {
+          if (!l) return false;
+          if (String(l.id) === rIdStr || String(l.requestId) === rIdStr || String(r.requestId) === String(l.id)) return true;
+          if (String(l.employeeId) === String(r.employeeId)) {
+            const lAmt = parseFloat(l.amount || l.totalAmount) || 0;
+            if (rAmt > 0 && lAmt > 0 && Math.abs(rAmt - lAmt) < 0.01) return true;
+          }
+          return false;
+        });
+
+        if (matchingLoan) {
+          const isApprovedOrPaid = matchingLoan.status === 'approved' ||
+                                   matchingLoan.status === 'paid' ||
+                                   matchingLoan.status === 'partial' ||
+                                   matchingLoan.adminApproved === true ||
+                                   (parseFloat(matchingLoan.paidAmount) > 0) ||
+                                   (Array.isArray(matchingLoan.paymentsHistory) && matchingLoan.paymentsHistory.length > 0);
+
+          if (isApprovedOrPaid) {
+            return {
+              ...r,
+              ...matchingLoan,
+              status: matchingLoan.status || 'approved',
+              adminApproved: true
+            };
+          }
+        }
+      }
+      return r;
+    }).filter((r) => {
       if (!r || !r.id) return false;
       const idStr = String(r.id);
       const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
@@ -148,13 +185,13 @@ export default function ApprovalCenterModule({
 
   return (
     <div className="bylaws-card">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '10px' }}>
         <div>
-          <h2 style={{ fontFamily: 'Cairo', margin: 0, color: 'var(--text)' }}>
-            🔐 مركز الاعتمادات وقواعد الموافقة على الطلبات
+          <h2 style={{ fontSize: '20px', fontWeight: 'bold', color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span>📑</span> مركز الاعتمادات والموافقات المزدوجة
           </h2>
-          <p style={{ margin: '4px 0 0 0', color: 'var(--muted)', fontSize: '14px' }}>
-            إدارة تسلسل الموافقات المزدوجة بين مدير الفرع والإدارة العليا والاعتماد المباشر في نظام الرواتب
+          <p style={{ color: 'var(--muted)', fontSize: '13px', marginTop: '4px' }}>
+            إدارة تدفق الموافقات (مدير الفرع + الإدارة العليا) وتنفيذ الإجراءات الإدارية المباشرة
           </p>
         </div>
 
@@ -164,7 +201,7 @@ export default function ApprovalCenterModule({
             className={`btn ${activeSubTab === 'requests' ? 'btn-start' : 'btn-ghost'}`}
             onClick={() => setActiveSubTab('requests')}
           >
-            📋 الطلبات بانتظار الاعتماد ({filteredRequests.filter(r => r.status === 'pending').length})
+            📋 الطلبات بانتظار الاعتماد ({pendingRequestsList.length})
           </button>
           <button
             type="button"
@@ -186,12 +223,12 @@ export default function ApprovalCenterModule({
       {/* SUBTAB 1: Pending Requests Queue */}
       {activeSubTab === 'requests' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          {filteredRequests.length === 0 ? (
+          {pendingRequestsList.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '36px', color: 'var(--muted)', background: 'var(--surface)', borderRadius: '14px', border: '1px solid var(--border)' }}>
               🎉 لا توجد طلبات معلقة بانتظار الاعتماد حالياً.
             </div>
           ) : (
-            filteredRequests.map((req) => {
+            pendingRequestsList.map((req) => {
               const emp = employees.find((e) => e.id === req.employeeId);
               const branch = branches.find((b) => b.id === emp?.branchId);
 

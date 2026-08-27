@@ -266,7 +266,61 @@ export default function RequestsModule({
       }
     });
 
-    return list.filter((r) => {
+    const loansList = state.loans || [];
+
+    return list.map((r) => {
+      if (!r) return r;
+      const isLoanType = r.type === 'loan' || r.type === 'meds' || r.type === 'credit_medicine' || r.type === 'advance';
+      if (isLoanType) {
+        const rIdStr = String(r.id || '');
+        const rAmt = parseFloat(r.amount || r.totalAmount) || 0;
+        const matchingLoan = loansList.find((l) => {
+          if (!l) return false;
+          if (String(l.id) === rIdStr || String(l.requestId) === rIdStr || String(r.requestId) === String(l.id)) return true;
+          if (String(l.employeeId) === String(r.employeeId)) {
+            const lAmt = parseFloat(l.amount || l.totalAmount) || 0;
+            if (rAmt > 0 && lAmt > 0 && Math.abs(rAmt - lAmt) < 0.01) return true;
+          }
+          return false;
+        });
+
+        if (matchingLoan) {
+          const isApprovedOrPaid = matchingLoan.status === 'approved' ||
+                                   matchingLoan.status === 'paid' ||
+                                   matchingLoan.status === 'partial' ||
+                                   matchingLoan.adminApproved === true ||
+                                   (parseFloat(matchingLoan.paidAmount) > 0) ||
+                                   (Array.isArray(matchingLoan.paymentsHistory) && matchingLoan.paymentsHistory.length > 0);
+
+          if (isApprovedOrPaid) {
+            const mPaid = Math.max(parseFloat(matchingLoan.paidAmount) || 0, parseFloat(r.paidAmount) || 0);
+            const totalAmt = parseFloat(matchingLoan.amount || r.amount || rAmt) || 0;
+            const status = mPaid >= totalAmt && totalAmt > 0 ? 'paid' : (mPaid > 0 ? 'partial' : (matchingLoan.status || 'approved'));
+            const history = (Array.isArray(matchingLoan.paymentsHistory) && matchingLoan.paymentsHistory.length > 0)
+              ? matchingLoan.paymentsHistory
+              : (Array.isArray(r.paymentsHistory) ? r.paymentsHistory : []);
+
+            return {
+              ...r,
+              ...matchingLoan,
+              status,
+              adminApproved: true,
+              paidAmount: mPaid,
+              paymentsHistory: history
+            };
+          }
+        } else if (parseFloat(r.paidAmount) > 0 || (Array.isArray(r.paymentsHistory) && r.paymentsHistory.length > 0)) {
+          const mPaid = parseFloat(r.paidAmount) || 0;
+          const totalAmt = parseFloat(r.amount || r.totalAmount) || 0;
+          return {
+            ...r,
+            status: mPaid >= totalAmt && totalAmt > 0 ? 'paid' : 'partial',
+            adminApproved: true
+          };
+        }
+      }
+      return r;
+    }).filter((r) => {
       if (!r || !r.id) return false;
       const idStr = String(r.id);
       const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
@@ -394,7 +448,17 @@ export default function RequestsModule({
         return false;
       }
     }
-    if (filterStatus !== 'all' && r.status !== filterStatus) return false;
+    if (filterStatus !== 'all') {
+      if (filterStatus === 'pending') {
+        if (r.status === 'approved' || r.status === 'paid' || r.status === 'partial' || r.adminApproved === true || r.status === 'rejected' || r.status === 'cancelled') return false;
+      } else if (filterStatus === 'approved') {
+        if (r.status !== 'approved' && r.status !== 'paid' && r.status !== 'partial' && r.adminApproved !== true) return false;
+      } else if (filterStatus === 'pending_admin') {
+        if (r.status !== 'pending_admin' || r.adminApproved === true) return false;
+      } else if (r.status !== filterStatus) {
+        return false;
+      }
+    }
     if (filterEmp !== 'all') {
       if (String(r.employeeId) !== String(filterEmp)) return false;
     }
@@ -1790,10 +1854,21 @@ export default function RequestsModule({
                       })()}
                     </td>
                     <td>
-                      {req.status === 'approved' && <span className="approval-status-badge approved">🟢 معتمد نهائياً</span>}
-                      {req.status === 'pending_admin' && <span className="approval-status-badge pending">🟡 قيد اعتماد الإدارة العليا</span>}
-                      {req.status === 'pending' && <span className="approval-status-badge pending">⏳ قيد المراجعة</span>}
-                      {req.status === 'rejected' && <span className="approval-status-badge rejected">🔴 مرفوض</span>}
+                      {(req.status === 'approved' || req.adminApproved === true || req.status === 'paid' || req.status === 'partial') ? (
+                        <span className="approval-status-badge approved">
+                          {parseFloat(req.paidAmount) >= (parseFloat(req.amount || req.totalAmount) || 0) && (parseFloat(req.amount || req.totalAmount) || 0) > 0
+                            ? '🟢 مسدد بالكامل'
+                            : (parseFloat(req.paidAmount) > 0 ? '🟢 سلفة معتمدة (سداد جزئي)' : '🟢 معتمد نهائياً')}
+                        </span>
+                      ) : req.status === 'pending_admin' ? (
+                        <span className="approval-status-badge pending">🟡 قيد اعتماد الإدارة العليا</span>
+                      ) : req.status === 'rejected' ? (
+                        <span className="approval-status-badge rejected">🔴 مرفوض</span>
+                      ) : req.status === 'cancelled' ? (
+                        <span className="approval-status-badge cancelled">⚪ ملغي</span>
+                      ) : (
+                        <span className="approval-status-badge pending">⏳ قيد المراجعة</span>
+                      )}
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
@@ -1805,7 +1880,7 @@ export default function RequestsModule({
                           👁️ معاينة الطلب
                         </button>
 
-                        {req.status !== 'approved' && (
+                        {req.status !== 'approved' && req.status !== 'paid' && req.status !== 'partial' && !req.adminApproved && req.status !== 'cancelled' && (
                           <button
                             className="btn btn-start"
                             style={{ padding: '4px 10px', fontSize: '12px' }}
@@ -1815,7 +1890,7 @@ export default function RequestsModule({
                           </button>
                         )}
 
-                        {req.status !== 'rejected' && (
+                        {req.status !== 'rejected' && req.status !== 'cancelled' && !req.adminApproved && req.status !== 'approved' && req.status !== 'paid' && req.status !== 'partial' && (
                           <button
                             className="btn btn-ghost"
                             style={{ padding: '4px 10px', fontSize: '12px', color: 'var(--danger)' }}

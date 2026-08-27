@@ -5348,16 +5348,16 @@ export default function App() {
             }
 
             // Super Admin / Owner formula
-            const reqList = [...(state.requests || [])];
-            const seen = new Set(reqList.map(r => String(r.id)));
-            (state.leaveRequests || []).forEach(r => { if (r && !seen.has(String(r.id))) { reqList.push(r); seen.add(String(r.id)); } });
-            (state.shiftSwaps || []).forEach(r => { if (r && !seen.has(String(r.id))) { reqList.push(r); seen.add(String(r.id)); } });
-            (state.loans || []).forEach(r => { if (r && !seen.has(String(r.id))) { reqList.push(r); seen.add(String(r.id)); } });
+            const rawReqList = [...(state.requests || [])];
+            const seen = new Set(rawReqList.map(r => String(r.id)));
+            (state.leaveRequests || []).forEach(r => { if (r && !seen.has(String(r.id))) { rawReqList.push(r); seen.add(String(r.id)); } });
+            (state.shiftSwaps || []).forEach(r => { if (r && !seen.has(String(r.id))) { rawReqList.push(r); seen.add(String(r.id)); } });
+            (state.loans || []).forEach(r => { if (r && !seen.has(String(r.id))) { rawReqList.push(r); seen.add(String(r.id)); } });
             (state.lateIncidents || []).forEach(inc => {
               if (inc && inc.objection && (inc.objection.status === 'pending' || inc.status === 'objection_pending')) {
                 const objId = `obj_inc_${inc.id}`;
                 if (!seen.has(objId)) {
-                  reqList.push({ id: objId, status: 'pending', type: 'penalty_objection' });
+                  rawReqList.push({ id: objId, status: 'pending', type: 'penalty_objection' });
                   seen.add(objId);
                 }
               }
@@ -5366,12 +5366,26 @@ export default function App() {
               if (adj && adj.objection && adj.objection.status === 'pending') {
                 const objId = `obj_adj_${adj.id}`;
                 if (!seen.has(objId)) {
-                  reqList.push({ id: objId, status: 'pending', type: 'penalty_objection' });
+                  rawReqList.push({ id: objId, status: 'pending', type: 'penalty_objection' });
                   seen.add(objId);
                 }
               }
             });
-            return reqList.filter(r => !r.hiddenFromAdmin && (r.status === 'pending' || r.status === 'pending_admin' || (r.adminApproved !== true && r.status !== 'rejected' && r.status !== 'cancelled'))).length;
+            const loansList = state.loans || [];
+            return rawReqList.filter(r => {
+              if (!r || r.hiddenFromAdmin) return false;
+              if (r.status === 'approved' || r.status === 'paid' || r.status === 'partial' || r.adminApproved === true || r.status === 'rejected' || r.status === 'cancelled') return false;
+              const isLoan = r.type === 'loan' || r.type === 'meds' || r.type === 'credit_medicine' || r.type === 'advance';
+              if (isLoan) {
+                const rId = String(r.id || '');
+                const rAmt = parseFloat(r.amount || r.totalAmount) || 0;
+                const matchingLoan = loansList.find(l => String(l.id) === rId || String(l.requestId) === rId || (String(l.employeeId) === String(r.employeeId) && Math.abs((parseFloat(l.amount || l.totalAmount) || 0) - rAmt) < 0.01));
+                if (matchingLoan && (matchingLoan.status === 'approved' || matchingLoan.status === 'paid' || matchingLoan.status === 'partial' || matchingLoan.adminApproved || parseFloat(matchingLoan.paidAmount) > 0 || (matchingLoan.paymentsHistory && matchingLoan.paymentsHistory.length > 0))) {
+                  return false;
+                }
+              }
+              return r.status === 'pending' || r.status === 'pending_admin' || !r.status;
+            }).length;
           })()}
           resignationCount={(() => {
             const seen = new Set();

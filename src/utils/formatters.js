@@ -240,7 +240,7 @@ export function normalizeState(parsed) {
   const resignationRequests = toSafeArray(parsed.resignationRequests);
   const leaveRequests = toSafeArray(parsed.leaveRequests);
   const shiftSwaps = toSafeArray(parsed.shiftSwaps);
-  const loans = toSafeArray(parsed.loans);
+  let loans = toSafeArray(parsed.loans);
   const evaluations = toSafeArray(parsed.evaluations);
   const notifications = toSafeArray(parsed.notifications);
   const employeeNotes = toSafeArray(parsed.employeeNotes);
@@ -250,6 +250,61 @@ export function normalizeState(parsed) {
   const rosters = toSafeArray(parsed.rosters);
   let lateIncidents = toSafeArray(parsed.lateIncidents);
   let cleanAdjustments = adjustments;
+
+  // ── Auto-synchronize loans and credit medicine requests ──
+  // If a loan exists in loans and is approved, paid, partial, or has payment deductions:
+  // ensure the corresponding request in requests is also marked approved / paid and not pending!
+  if (loans.length > 0) {
+    requests = requests.map((r) => {
+      if (!r) return r;
+      const isLoanType = r.type === 'loan' || r.type === 'meds' || r.type === 'credit_medicine' || r.type === 'advance';
+      if (!isLoanType) return r;
+
+      const rIdStr = String(r.id || '');
+      const rAmt = parseFloat(r.amount || r.totalAmount) || 0;
+      const matchingLoan = loans.find((l) => {
+        if (!l) return false;
+        if (String(l.id) === rIdStr || String(l.requestId) === rIdStr || String(r.requestId) === String(l.id)) return true;
+        if (String(l.employeeId) === String(r.employeeId)) {
+          const lAmt = parseFloat(l.amount || l.totalAmount) || 0;
+          if (rAmt > 0 && lAmt > 0 && Math.abs(rAmt - lAmt) < 0.01) {
+            const rDate = String(r.date || r.createdAt || '').slice(0, 7);
+            const lDate = String(l.date || l.createdAt || '').slice(0, 7);
+            if (!rDate || !lDate || rDate === lDate) return true;
+          }
+        }
+        return false;
+      });
+
+      if (matchingLoan) {
+        const isApprovedOrPaid = matchingLoan.status === 'approved' ||
+                                 matchingLoan.status === 'paid' ||
+                                 matchingLoan.status === 'partial' ||
+                                 matchingLoan.adminApproved === true ||
+                                 (parseFloat(matchingLoan.paidAmount) > 0) ||
+                                 (Array.isArray(matchingLoan.paymentsHistory) && matchingLoan.paymentsHistory.length > 0);
+
+        if (isApprovedOrPaid) {
+          const mPaid = Math.max(parseFloat(matchingLoan.paidAmount) || 0, parseFloat(r.paidAmount) || 0);
+          const totalAmt = parseFloat(matchingLoan.amount || r.amount || rAmt) || 0;
+          const status = mPaid >= totalAmt && totalAmt > 0 ? 'paid' : (mPaid > 0 ? 'partial' : (matchingLoan.status || 'approved'));
+          const history = (Array.isArray(matchingLoan.paymentsHistory) && matchingLoan.paymentsHistory.length > 0)
+            ? matchingLoan.paymentsHistory
+            : (Array.isArray(r.paymentsHistory) ? r.paymentsHistory : []);
+
+          return {
+            ...r,
+            status,
+            adminApproved: true,
+            paidAmount: mPaid,
+            paymentsHistory: history,
+            approvedAt: r.approvedAt || matchingLoan.approvedAt || matchingLoan.createdAt || r.createdAt || new Date().toISOString()
+          };
+        }
+      }
+      return r;
+    });
+  }
 
   // ── Auto-sanitize approved penalty objections ──
   const approvedObjections = requests.filter(

@@ -380,12 +380,16 @@ export default function EvaluationsModule({
 
     // Notification for the employee (Requirement 1)
     const empNotif = {
-      id: `notif_eval_emp_${Date.now()}`,
-      employeeId: empObj.id,
+      id: `notif_eval_emp_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+      employeeId: String(empObj.id),
+      targetEmployeeId: String(empObj.id),
+      targetRole: 'employee',
       type: 'eval_pending_employee',
+      icon: '⭐',
       title: `⭐ تقييم شهري جديد لشهر (${selectedMonth})`,
       message: `قام ${evaluatorRole} (${evaluatorName}) برصد تقييم أدائك لشهر (${selectedMonth}) بنسبة ${percentage}% (${rating}). يرجى مراجعة تفاصيل التقييم والرد بالموافقة أو إبداء الملاحظات.`,
       timestamp: new Date().toISOString(),
+      date: new Date().toISOString().slice(0, 10),
       read: false,
       linkTab: 'evaluations',
       evalId: evalData.id

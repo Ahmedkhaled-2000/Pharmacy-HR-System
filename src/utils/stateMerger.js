@@ -193,6 +193,28 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
   if (mergedBiometrics !== undefined) mergedBase.biometrics = mergedBiometrics;
   if (mergedDevices !== undefined) mergedBase.devices = mergedDevices;
 
+  // 5. حماية حالة الاعتماد والسداد للسلف والطلبات من الارتداد لحالة معلقة
+  if (options.prefix === 'loan' || options.prefix === 'req') {
+    const isApprovedOrPaid = localItem.adminApproved === true || remoteItem.adminApproved === true ||
+                             localItem.status === 'approved' || remoteItem.status === 'approved' ||
+                             localItem.status === 'paid' || remoteItem.status === 'paid' ||
+                             localItem.status === 'partial' || remoteItem.status === 'partial' ||
+                             (mergedPaidAmount !== undefined && mergedPaidAmount > 0);
+
+    if (isApprovedOrPaid) {
+      mergedBase.adminApproved = true;
+      const totalAmt = parseFloat(mergedBase.amount || mergedBase.totalAmount) || 0;
+      const paid = mergedPaidAmount !== undefined ? mergedPaidAmount : (parseFloat(mergedBase.paidAmount) || 0);
+      if (paid >= totalAmt && totalAmt > 0) {
+        mergedBase.status = 'paid';
+      } else if (paid > 0) {
+        mergedBase.status = 'partial';
+      } else if (localItem.status === 'approved' || remoteItem.status === 'approved' || mergedBase.status === 'pending') {
+        mergedBase.status = 'approved';
+      }
+    }
+  }
+
   return mergedBase;
 }
 
