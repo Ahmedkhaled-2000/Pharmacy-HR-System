@@ -91,10 +91,17 @@ export default function SettingsModule({
     lockManageBranches: false,
     lockManageJobs: false,
     lockEditSystemPermissions: false,
+    // الطلبات والموافقات والتقييمات
+    lockApproveRequests: false,
+    lockRejectRequests: false,
+    lockDeleteRequests: false,
+    lockEditEvaluations: false,
+    lockDeletePenalties: false,
     // النظام والنسخ الاحتياطي
     lockFactoryReset: true,
     lockRestoreBackup: true,
-    lockChangeAdminCredentials: true
+    lockChangeAdminCredentials: true,
+    lockEditOrgSettings: false
   };
 
   const [ownerLocks, setOwnerLocks] = useState({
@@ -929,8 +936,24 @@ export default function SettingsModule({
     }
   };
 
+  const handleLogoUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      showToast?.('⚠️ يرجى اختيار ملف صورة صالح (PNG, JPG, SVG, WebP)');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (uploadEvent) => {
+      const dataUrl = uploadEvent.target.result;
+      setLogoUrl(dataUrl);
+      showToast?.('✅ تم رفع ومعاينة شعار المؤسسة بنجاح');
+    };
+    reader.readAsDataURL(file);
+  };
+
   return (
-    <div className="bylaws-card" style={{ fontFamily: "'Tajawal', sans-serif" }}>
+    <div className="settings-module fade-in" style={{ fontFamily: "'Tajawal', sans-serif" }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
         <div>
           <h2 style={{ fontFamily: 'Cairo', margin: 0, color: 'var(--text)' }}>
@@ -1021,9 +1044,63 @@ export default function SettingsModule({
               </p>
             </div>
 
-            <div className="field">
-              <label>رابط الشعار (Logo URL)</label>
-              <input type="text" value={logoUrl} onChange={(e) => setLogoUrl(e.target.value)} placeholder="https://example.com/logo.png" />
+            <div className="field" style={{ gridColumn: '1 / -1' }}>
+              <label style={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span>🏢</span> شعار المؤسسة / الصيدلية (Logo)
+              </label>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <input
+                  type="text"
+                  value={logoUrl}
+                  onChange={(e) => setLogoUrl(e.target.value)}
+                  placeholder="رابط الشعار أو قم باختيار صورة مباشرة من جهازك..."
+                  style={{ flex: '1 1 280px' }}
+                />
+                <label
+                  className="btn btn-ghost"
+                  style={{
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '9px 16px',
+                    background: 'var(--primary-light)',
+                    color: 'var(--primary-dark)',
+                    fontWeight: 'bold',
+                    border: '1px solid var(--primary)',
+                    borderRadius: '8px'
+                  }}
+                >
+                  📁 رفع شعار من الجهاز
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleLogoUpload}
+                    style={{ display: 'none' }}
+                  />
+                </label>
+              </div>
+              {logoUrl && (
+                <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '14px', background: 'var(--surface-muted)', padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--border)' }}>
+                  <img
+                    src={logoUrl}
+                    alt="Logo Preview"
+                    style={{ maxHeight: '60px', maxWidth: '140px', objectFit: 'contain', borderRadius: '8px', background: '#fff', padding: '4px', border: '1px solid var(--border)' }}
+                  />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <span style={{ fontSize: '12.5px', color: 'var(--text)', fontWeight: 'bold' }}>✅ معاينة الشعار الحالي للمؤسسة</span>
+                    <button
+                      type="button"
+                      className="del-btn"
+                      style={{ width: 'fit-content', padding: '3px 10px', fontSize: '12px' }}
+                      onClick={() => setLogoUrl('')}
+                    >
+                      🗑️ حذف الشعار
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -2258,7 +2335,62 @@ export default function SettingsModule({
                     </div>
                   </div>
 
-                  {/* Category 6: Database & Danger Zone */}
+                  {/* Category 6: Requests, Approvals & Evaluations */}
+                  <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '16px' }}>
+                    <div style={{ fontWeight: 800, fontSize: '14px', color: '#0f172a', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>
+                      <span>📑</span>
+                      <span>الطلبات والموافقات والتقييمات والجزاءات</span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#334155' }}>
+                        <span>قفل قبول واعتماد جميع أنواع الطلبات</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(ownerLocks.lockApproveRequests)}
+                          onChange={() => handleToggleOwnerLock('lockApproveRequests')}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#d97706' }}
+                        />
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#334155' }}>
+                        <span>قفل رفض الطلبات واستبعادها</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(ownerLocks.lockRejectRequests)}
+                          onChange={() => handleToggleOwnerLock('lockRejectRequests')}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#d97706' }}
+                        />
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#334155' }}>
+                        <span>قفل حذف الطلبات وسجلات الأرشيف</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(ownerLocks.lockDeleteRequests)}
+                          onChange={() => handleToggleOwnerLock('lockDeleteRequests')}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#d97706' }}
+                        />
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#334155' }}>
+                        <span>قفل تعديل واعتماد تقييمات الموظفين والمعايير</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(ownerLocks.lockEditEvaluations)}
+                          onChange={() => handleToggleOwnerLock('lockEditEvaluations')}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#d97706' }}
+                        />
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#334155' }}>
+                        <span>قفل إلغاء أو حذف الجزاءات والمخالفات التأديبية</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(ownerLocks.lockDeletePenalties)}
+                          onChange={() => handleToggleOwnerLock('lockDeletePenalties')}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#d97706' }}
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Category 7: Database & Danger Zone */}
                   <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '16px' }}>
                     <div style={{ fontWeight: 800, fontSize: '14px', color: '#0f172a', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>
                       <span>💾</span>
@@ -2289,6 +2421,15 @@ export default function SettingsModule({
                           type="checkbox"
                           checked={Boolean(ownerLocks.lockChangeAdminCredentials)}
                           onChange={() => handleToggleOwnerLock('lockChangeAdminCredentials')}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#d97706' }}
+                        />
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#334155' }}>
+                        <span>قفل تعديل إعدادات المؤسسة العامة والشعار</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(ownerLocks.lockEditOrgSettings)}
+                          onChange={() => handleToggleOwnerLock('lockEditOrgSettings')}
                           style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#d97706' }}
                         />
                       </label>

@@ -266,9 +266,15 @@ export default function App() {
         lockManageBranches: false,
         lockManageJobs: false,
         lockEditSystemPermissions: false,
+        lockApproveRequests: false,
+        lockRejectRequests: false,
+        lockDeleteRequests: false,
+        lockEditEvaluations: false,
+        lockDeletePenalties: false,
         lockFactoryReset: true,
         lockRestoreBackup: true,
-        lockChangeAdminCredentials: true
+        lockChangeAdminCredentials: true,
+        lockEditOrgSettings: false
       },
       payrollPayoutStartDay: (() => {
         try {
@@ -1334,6 +1340,15 @@ export default function App() {
     };
 
     if (role === 'admin') {
+      if (state.orgSettings?.ownerModificationLocks?.lockApproveRequests) {
+        executeWithOwnerGuard({
+          lockKey: 'lockApproveRequests',
+          actionTitle: `اعتماد طلب (${target.employeeName || target.employeeId})`,
+          actionDetails: `نوع الطلب: ${target.typeLabel || target.type || 'طلب عام'}`,
+          onExecute: performApprove
+        });
+        return;
+      }
       if (target.type === 'loan' || target.type === 'advance' || target.type === 'meds' || target.type === 'credit_medicine') {
         executeWithOwnerGuard({
           lockKey: 'lockApproveLoans',
@@ -1358,80 +1373,95 @@ export default function App() {
   };
 
   const handleRejectRequest = async (requestId, role = 'admin') => {
-    let targetReq = null;
-    const updatedRequests = (state.requests || []).map((r) => {
-      if (r.id === requestId) {
-        targetReq = {
-          ...r,
-          status: 'rejected',
-          adminApproved: false,
-          rejectedAt: new Date().toISOString()
-        };
-        return targetReq;
-      }
-      return r;
-    });
-
-    let updatedShifts = [...(state.shifts || [])];
-    if (targetReq && targetReq.type === 'overtime') {
-      updatedShifts = updatedShifts.map((s) => {
-        if (s.id === targetReq.shiftId || (String(s.employeeId) === String(targetReq.employeeId) && s.date === targetReq.date)) {
-          const regHours = s.regularHours !== undefined ? s.regularHours : (s.scheduledHours || 8);
-          return {
-            ...s,
-            overtimeStatus: 'rejected',
+    const performReject = async () => {
+      let targetReq = null;
+      const updatedRequests = (state.requests || []).map((r) => {
+        if (r.id === requestId) {
+          targetReq = {
+            ...r,
+            status: 'rejected',
             adminApproved: false,
-            note: `ساعات الوردية الأساسية (${regHours} س) — تم استبعاد الإضافي (${targetReq.hours} س) بواسطة الإدارة`
+            rejectedAt: new Date().toISOString()
           };
+          return targetReq;
         }
-        return s;
+        return r;
       });
-    }
 
-    const updatedSwaps = (state.shiftSwaps || []).map((s) =>
-      s.id === requestId ? { ...s, status: 'rejected', adminApproved: false } : s
-    );
+      let updatedShifts = [...(state.shifts || [])];
+      if (targetReq && targetReq.type === 'overtime') {
+        updatedShifts = updatedShifts.map((s) => {
+          if (s.id === targetReq.shiftId || (String(s.employeeId) === String(targetReq.employeeId) && s.date === targetReq.date)) {
+            const regHours = s.regularHours !== undefined ? s.regularHours : (s.scheduledHours || 8);
+            return {
+              ...s,
+              overtimeStatus: 'rejected',
+              adminApproved: false,
+              note: `ساعات الوردية الأساسية (${regHours} س) — تم استبعاد الإضافي (${targetReq.hours} س) بواسطة الإدارة`
+            };
+          }
+          return s;
+        });
+      }
 
-    const updatedLeaveRequests = (state.leaveRequests || []).map((lr) =>
-      lr.id === requestId || (targetReq && String(lr.employeeId) === String(targetReq.employeeId) && lr.startDate === targetReq.startDate)
-        ? { ...lr, status: 'rejected', adminApproved: false }
-        : lr
-    );
+      const updatedSwaps = (state.shiftSwaps || []).map((s) =>
+        s.id === requestId ? { ...s, status: 'rejected', adminApproved: false } : s
+      );
 
-    const updatedLoans = (state.loans || []).map((l) =>
-      l.id === requestId || l.requestId === requestId ? { ...l, status: 'rejected', adminApproved: false } : l
-    );
+      const updatedLeaveRequests = (state.leaveRequests || []).map((lr) =>
+        lr.id === requestId || (targetReq && String(lr.employeeId) === String(targetReq.employeeId) && lr.startDate === targetReq.startDate)
+          ? { ...lr, status: 'rejected', adminApproved: false }
+          : lr
+      );
 
-    const decisionNotif = createRequestDecisionNotification({
-      requestId: targetReq?.id || requestId,
-      employeeId: targetReq?.employeeId,
-      type: targetReq?.type,
-      action: 'rejected',
-      approverRole: role,
-      details: targetReq?.reason || targetReq?.details || ''
-    });
+      const updatedLoans = (state.loans || []).map((l) =>
+        l.id === requestId || l.requestId === requestId ? { ...l, status: 'rejected', adminApproved: false } : l
+      );
 
-    const updatedNotifications = [
-      decisionNotif,
-      ...(state.notifications || []).map((n) =>
-        String(n.requestId) === String(requestId) ? { ...n, read: true } : n
-      )
-    ];
+      const decisionNotif = createRequestDecisionNotification({
+        requestId: targetReq?.id || requestId,
+        employeeId: targetReq?.employeeId,
+        type: targetReq?.type,
+        action: 'rejected',
+        approverRole: role,
+        details: targetReq?.reason || targetReq?.details || ''
+      });
 
-    const updatedState = {
-      ...state,
-      requests: updatedRequests,
-      shifts: updatedShifts,
-      leaveRequests: updatedLeaveRequests,
-      loans: updatedLoans,
-      shiftSwaps: updatedSwaps,
-      notifications: updatedNotifications
+      const updatedNotifications = [
+        decisionNotif,
+        ...(state.notifications || []).map((n) =>
+          String(n.requestId) === String(requestId) ? { ...n, read: true } : n
+        )
+      ];
+
+      const updatedState = {
+        ...state,
+        requests: updatedRequests,
+        shifts: updatedShifts,
+        leaveRequests: updatedLeaveRequests,
+        loans: updatedLoans,
+        shiftSwaps: updatedSwaps,
+        notifications: updatedNotifications
+      };
+      setState(updatedState);
+      showToast('❌ تم رفض الطلب وتحديث السجلات بنجاح');
+      if (saveState) {
+        saveState(updatedState).catch(err => console.error('Background save error:', err));
+      }
     };
-    setState(updatedState);
-    showToast('❌ تم رفض الطلب وتحديث السجلات بنجاح');
-    if (saveState) {
-      saveState(updatedState).catch(err => console.error('Background save error:', err));
+
+    if (role === 'admin' && state.orgSettings?.ownerModificationLocks?.lockRejectRequests) {
+      const targetReq = (state.requests || []).find((r) => r.id === requestId);
+      executeWithOwnerGuard({
+        lockKey: 'lockRejectRequests',
+        actionTitle: `رفض الطلب (${targetReq?.employeeName || targetReq?.employeeId || ''})`,
+        actionDetails: `نوع الطلب: ${targetReq?.typeLabel || targetReq?.type || 'طلب عام'}`,
+        onExecute: performReject
+      });
+      return;
     }
+
+    performReject();
   };
 
   const handleSendEarlyExitEmail = async (reqId) => {

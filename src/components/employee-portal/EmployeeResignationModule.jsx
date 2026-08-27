@@ -46,6 +46,12 @@ export default function EmployeeResignationModule({
   });
 
 
+  const orgSettings = state?.orgSettings || {};
+  const requiredNoticeDays = parseInt(orgSettings.resignationNoticeDays || orgSettings.resignationNoticePeriodDays, 10) || 30;
+  const allowAnytime = orgSettings.resignationAllowAnytime !== false;
+  const windowStartDay = parseInt(orgSettings.resignationAllowedWindowStartDay, 10) || 1;
+  const windowEndDay = parseInt(orgSettings.resignationAllowedWindowEndDay, 10) || 31;
+
   // Default suggested last working date is today + requiredNoticeDays
   const defaultLastDate = (() => {
     const d = new Date();

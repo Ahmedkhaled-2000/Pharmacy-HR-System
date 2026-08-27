@@ -2474,9 +2474,58 @@ export default function DisciplinaryPenaltiesTab({
               </div>
             )}
 
-            {inspectedPenalty.attachmentName && (
-              <div style={{ fontSize: '13px', marginBottom: '12px' }}>
-                <strong>📎 المرفقات: </strong>{inspectedPenalty.attachmentName}
+            {(inspectedPenalty.attachmentName || inspectedPenalty.attachmentData) && (
+              <div style={{ background: '#f8fafc', padding: '12px 14px', borderRadius: '10px', marginBottom: '14px', border: '1px solid #e2e8f0' }}>
+                <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#1e293b', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span>📎</span>
+                  <span>المستندات والأدلة المرفقة:</span>
+                  <span style={{ color: '#2563eb' }}>{inspectedPenalty.attachmentName || 'ملف مرفق'}</span>
+                  {inspectedPenalty.attachmentSize && <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 'normal' }}>({inspectedPenalty.attachmentSize})</span>}
+                </div>
+
+                {inspectedPenalty.attachmentData && (
+                  <div>
+                    {inspectedPenalty.attachmentType === 'image' && (
+                      <div style={{ textAlign: 'center', marginTop: '6px' }}>
+                        <img
+                          src={inspectedPenalty.attachmentData}
+                          alt={inspectedPenalty.attachmentName}
+                          style={{ maxHeight: '220px', maxWidth: '100%', borderRadius: '8px', border: '1px solid #cbd5e1', objectFit: 'contain' }}
+                        />
+                      </div>
+                    )}
+
+                    {inspectedPenalty.attachmentType === 'pdf' && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#fef2f2', padding: '10px 14px', borderRadius: '8px', border: '1px solid #fecaca' }}>
+                        <span style={{ fontSize: '24px' }}>📄</span>
+                        <div style={{ flex: 1 }}>
+                          <strong style={{ color: '#991b1b', fontSize: '13px', display: 'block' }}>{inspectedPenalty.attachmentName}</strong>
+                          <span style={{ fontSize: '11.5px', color: '#7f1d1d' }}>مستند PDF رسمي</span>
+                        </div>
+                        <a
+                          href={inspectedPenalty.attachmentData}
+                          download={inspectedPenalty.attachmentName || 'document.pdf'}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="btn btn-ghost"
+                          style={{ fontSize: '12px', padding: '5px 12px', background: '#fee2e2', color: '#991b1b', fontWeight: 'bold' }}
+                        >
+                          👁️ فتح / تحميل PDF
+                        </a>
+                      </div>
+                    )}
+
+                    {inspectedPenalty.attachmentType === 'video' && (
+                      <div style={{ marginTop: '6px', textAlign: 'center' }}>
+                        <video
+                          controls
+                          src={inspectedPenalty.attachmentData}
+                          style={{ maxHeight: '220px', maxWidth: '100%', borderRadius: '8px', background: '#000' }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 

@@ -2594,12 +2594,59 @@ export default function BranchManagerView({
                     {previewModalReq.reason || previewModalReq.details || previewModalReq.notes || previewModalReq.subject || 'لا يوجد شرح أو سبب إضافي مذكور'}
                   </div>
 
-                  {previewModalReq.photoUrl && (
-                    <div style={{ marginTop: '14px' }}>
-                      <h5 style={{ margin: '0 0 8px', fontSize: '13px', color: 'var(--primary)' }}>📷 المرفقات والصور المسجلة:</h5>
-                      <div style={{ textAlign: 'center', background: '#000', padding: '8px', borderRadius: '8px' }}>
-                        <img src={previewModalReq.photoUrl} alt="صورة المرفق" style={{ maxWidth: '100%', maxHeight: '280px', objectFit: 'contain', borderRadius: '6px' }} />
-                      </div>
+                  {(previewModalReq.photoUrl || previewModalReq.attachmentData || previewModalReq.attachmentName) && (
+                    <div style={{ marginTop: '14px', background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                      <h5 style={{ margin: '0 0 8px', fontSize: '13px', color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span>📎</span>
+                        <span>المرفقات والمستندات المسجلة:</span>
+                        {previewModalReq.attachmentName && <span style={{ color: '#2563eb', fontSize: '12px' }}>({previewModalReq.attachmentName})</span>}
+                      </h5>
+
+                      {previewModalReq.photoUrl && !previewModalReq.attachmentData && (
+                        <div style={{ textAlign: 'center', background: '#000', padding: '8px', borderRadius: '8px' }}>
+                          <img src={previewModalReq.photoUrl} alt="صورة المرفق" style={{ maxWidth: '100%', maxHeight: '280px', objectFit: 'contain', borderRadius: '6px' }} />
+                        </div>
+                      )}
+
+                      {previewModalReq.attachmentData && (
+                        <div>
+                          {previewModalReq.attachmentType === 'image' && (
+                            <div style={{ textAlign: 'center', background: '#000', padding: '8px', borderRadius: '8px' }}>
+                              <img src={previewModalReq.attachmentData} alt={previewModalReq.attachmentName} style={{ maxWidth: '100%', maxHeight: '280px', objectFit: 'contain', borderRadius: '6px' }} />
+                            </div>
+                          )}
+
+                          {previewModalReq.attachmentType === 'pdf' && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#fef2f2', padding: '10px 14px', borderRadius: '8px', border: '1px solid #fecaca' }}>
+                              <span style={{ fontSize: '24px' }}>📄</span>
+                              <div style={{ flex: 1 }}>
+                                <strong style={{ color: '#991b1b', fontSize: '13px', display: 'block' }}>{previewModalReq.attachmentName || 'ملف PDF'}</strong>
+                                <span style={{ fontSize: '11.5px', color: '#7f1d1d' }}>مستند PDF رسمي للتحقيق</span>
+                              </div>
+                              <a
+                                href={previewModalReq.attachmentData}
+                                download={previewModalReq.attachmentName || 'investigation_doc.pdf'}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="btn btn-ghost"
+                                style={{ fontSize: '12px', padding: '5px 12px', background: '#fee2e2', color: '#991b1b', fontWeight: 'bold' }}
+                              >
+                                👁️ فتح / تحميل PDF
+                              </a>
+                            </div>
+                          )}
+
+                          {previewModalReq.attachmentType === 'video' && (
+                            <div style={{ textAlign: 'center', background: '#000', padding: '8px', borderRadius: '8px' }}>
+                              <video
+                                controls
+                                src={previewModalReq.attachmentData}
+                                style={{ maxHeight: '240px', maxWidth: '100%', borderRadius: '6px' }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

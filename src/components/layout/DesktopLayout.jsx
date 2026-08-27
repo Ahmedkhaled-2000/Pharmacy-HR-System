@@ -703,23 +703,32 @@ return (
           ☰
         </button>
 
-        <div style={{
-          width: '28px',
-          height: '28px',
-          borderRadius: '7px',
-          background: 'linear-gradient(135deg, #0d9488, #0f766e)',
-          color: '#fff',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: '14px',
-          fontWeight: 900
-        }}>
-          🏥
-        </div>
+        {orgSettings?.logoUrl ? (
+          <img
+            src={orgSettings.logoUrl}
+            alt="شعار المؤسسة"
+            style={{ width: '28px', height: '28px', borderRadius: '7px', objectFit: 'contain', background: '#fff', padding: '2px', border: '1px solid var(--border)', flexShrink: 0 }}
+          />
+        ) : (
+          <div style={{
+            width: '28px',
+            height: '28px',
+            borderRadius: '7px',
+            background: 'linear-gradient(135deg, #0d9488, #0f766e)',
+            color: '#fff',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '14px',
+            fontWeight: 900,
+            flexShrink: 0
+          }}>
+            🏥
+          </div>
+        )}
 
         <span style={{ fontWeight: 800, fontSize: '13.5px', color: 'var(--text)', whiteSpace: 'nowrap' }}>
-          {currentRole === 'branch' ? `إدارة ${currentBranch?.name || 'الفرع'}` : 'منظومة الموارد البشرية'}
+          {currentRole === 'branch' ? `إدارة ${currentBranch?.name || 'الفرع'}` : (orgSettings?.orgName || 'منظومة الموارد البشرية')}
         </span>
       </div>
 
@@ -901,25 +910,34 @@ return (
       boxShadow: '0 1px 4px rgba(0,0,0,0.03)'
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-        <div style={{
-          width: '32px',
-          height: '32px',
-          borderRadius: '8px',
-          background: 'linear-gradient(135deg, #0d9488, #0f766e)',
-          color: '#fff',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: '16px',
-          fontWeight: 900,
-          boxShadow: '0 2px 6px rgba(13,148,136,0.3)'
-        }}>
-          🏥
-        </div>
+        {orgSettings?.logoUrl ? (
+          <img
+            src={orgSettings.logoUrl}
+            alt="شعار المؤسسة"
+            style={{ width: '32px', height: '32px', borderRadius: '8px', objectFit: 'contain', background: '#fff', padding: '2px', border: '1px solid var(--border)', flexShrink: 0 }}
+          />
+        ) : (
+          <div style={{
+            width: '32px',
+            height: '32px',
+            borderRadius: '8px',
+            background: 'linear-gradient(135deg, #0d9488, #0f766e)',
+            color: '#fff',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '16px',
+            fontWeight: 900,
+            boxShadow: '0 2px 6px rgba(13,148,136,0.3)',
+            flexShrink: 0
+          }}>
+            🏥
+          </div>
+        )}
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{ fontWeight: 800, fontSize: '14px', color: 'var(--text)' }}>
-            {currentRole === 'branch' ? `إدارة ${currentBranch?.name || 'الفرع'}` : 'منظومة الموارد البشرية'}
+            {currentRole === 'branch' ? `إدارة ${currentBranch?.name || 'الفرع'}` : (orgSettings?.orgName || 'منظومة الموارد البشرية')}
           </span>
 
           <span style={{ color: 'var(--border)', fontSize: '16px' }}>/</span>

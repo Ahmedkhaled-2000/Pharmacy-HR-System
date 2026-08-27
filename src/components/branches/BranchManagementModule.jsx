@@ -10,6 +10,7 @@ export default function BranchManagementModule({ state, onSaveBranch, onDeleteBr
   const [branchCode, setBranchCode] = useState('');
   const [branchName, setBranchName] = useState('');
   const [branchAddress, setBranchAddress] = useState('');
+  const [branchLogo, setBranchLogo] = useState('');
   // Multiple phone numbers state: array of { id, number, type: 'mobile' | 'landline' | 'whatsapp' }
   const [phones, setPhones] = useState([
     { id: '1', number: '', type: 'landline' }
@@ -18,6 +19,20 @@ export default function BranchManagementModule({ state, onSaveBranch, onDeleteBr
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [usernameError, setUsernameError] = useState('');
+
+  const handleBranchLogoUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      alert('⚠️ يرجى اختيار ملف صورة صالح (PNG, JPG, SVG, WebP)');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (uploadEvent) => {
+      setBranchLogo(uploadEvent.target.result);
+    };
+    reader.readAsDataURL(file);
+  };
 
   const branches = state.branches || [];
   const employees = state.employees || [];
@@ -52,6 +67,7 @@ export default function BranchManagementModule({ state, onSaveBranch, onDeleteBr
     setBranchCode(`BR-${branches.length + 101}`);
     setBranchName('');
     setBranchAddress('');
+    setBranchLogo('');
     setPhones([
       { id: Date.now().toString(), number: '', type: 'landline' }
     ]);
@@ -85,6 +101,7 @@ export default function BranchManagementModule({ state, onSaveBranch, onDeleteBr
     setBranchCode(branch.branchCode || '');
     setBranchName(branch.name || '');
     setBranchAddress(branch.address || '');
+    setBranchLogo(branch.logoUrl || branch.photoUrl || branch.image || '');
     
     // Load phones array or fallback to legacy single phone string
     if (Array.isArray(branch.phones) && branch.phones.length > 0) {
@@ -179,6 +196,9 @@ export default function BranchManagementModule({ state, onSaveBranch, onDeleteBr
       branchCode,
       name: branchName,
       address: branchAddress,
+      logoUrl: branchLogo,
+      photoUrl: branchLogo,
+      image: branchLogo,
       phone: primaryPhone,
       phones: validPhones,
       managerId,
@@ -292,7 +312,20 @@ export default function BranchManagementModule({ state, onSaveBranch, onDeleteBr
                     <td>
                       <span className="badge badge-primary">{b.branchCode || b.id}</span>
                     </td>
-                    <td style={{ fontWeight: 'bold' }}>{b.name}</td>
+                    <td style={{ fontWeight: 'bold' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        {b.logoUrl || b.photoUrl || b.image ? (
+                          <img
+                            src={b.logoUrl || b.photoUrl || b.image}
+                            alt={b.name}
+                            style={{ width: '34px', height: '34px', borderRadius: '8px', objectFit: 'cover', border: '1px solid var(--border)', flexShrink: 0 }}
+                          />
+                        ) : (
+                          <span style={{ width: '34px', height: '34px', borderRadius: '8px', background: 'var(--primary-light)', color: 'var(--primary-dark)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', flexShrink: 0 }}>🏢</span>
+                        )}
+                        <span>{b.name}</span>
+                      </div>
+                    </td>
                     <td>{b.address || '—'}</td>
                     <td>
                       {branchPhones.length === 0 ? (
@@ -359,6 +392,67 @@ export default function BranchManagementModule({ state, onSaveBranch, onDeleteBr
               <div className="field">
                 <label>عنوان الفرع</label>
                 <input type="text" placeholder="العنوان بالتفصيل" value={branchAddress} onChange={(e) => setBranchAddress(e.target.value)} />
+              </div>
+
+              {/* Branch Photo / Logo Upload Section */}
+              <div className="field">
+                <label style={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span>🏢</span> صورة أو شعار الفرع (Branch Photo / Logo)
+                </label>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <input
+                    type="text"
+                    placeholder="رابط الصورة أو اختر صورة مباشرة من جهازك..."
+                    value={branchLogo}
+                    onChange={(e) => setBranchLogo(e.target.value)}
+                    style={{ flex: '1 1 240px' }}
+                  />
+                  <label
+                    className="btn btn-ghost"
+                    style={{
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '8px 14px',
+                      background: 'var(--primary-light)',
+                      color: 'var(--primary-dark)',
+                      fontWeight: 'bold',
+                      borderRadius: '8px',
+                      border: '1px solid var(--primary)',
+                      fontSize: '12.5px'
+                    }}
+                  >
+                    📁 رفع صورة الفرع
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleBranchLogoUpload}
+                      style={{ display: 'none' }}
+                    />
+                  </label>
+                </div>
+                {branchLogo && (
+                  <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '12px', background: 'var(--surface-muted)', padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--border)' }}>
+                    <img
+                      src={branchLogo}
+                      alt="Branch Preview"
+                      style={{ width: '55px', height: '55px', objectFit: 'cover', borderRadius: '8px', border: '1px solid var(--border)', background: '#fff' }}
+                    />
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <span style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--text)' }}>✅ معاينة صورة الفرع</span>
+                      <button
+                        type="button"
+                        className="del-btn"
+                        style={{ width: 'fit-content', padding: '2px 8px', fontSize: '11.5px' }}
+                        onClick={() => setBranchLogo('')}
+                      >
+                        🗑️ حذف الصورة
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Dynamic Multiple Phone Numbers Section */}

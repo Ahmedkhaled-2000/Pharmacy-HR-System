@@ -39,6 +39,7 @@ export default function EmployeeCardsGrid({
   const [rehireBranchId, setRehireBranchId] = useState('');
   const [rehireNotes, setRehireNotes] = useState('');
   const [isRehiring, setIsRehiring] = useState(false);
+  const [previewPhotoEmp, setPreviewPhotoEmp] = useState(null);
 
   const branches = state.branches || [];
   const employees = state.employees || [];
@@ -572,9 +573,25 @@ export default function EmployeeCardsGrid({
                     >
                       {/* Left Block: Avatar, Name, Title & Code */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: '16px', minWidth: '260px', flex: 1 }}>
-                        <div className="emp-avatar-circle" style={{ width: '52px', height: '52px', flexShrink: 0, opacity: isEmpTerminated ? 0.75 : 1 }}>
-                          {emp.photoUrl ? (
-                            <img src={emp.photoUrl} alt={getEmpDisplayName(emp)} className="emp-img" />
+                        <div
+                          className="emp-avatar-circle"
+                          style={{
+                            width: '52px',
+                            height: '52px',
+                            flexShrink: 0,
+                            opacity: isEmpTerminated ? 0.75 : 1,
+                            cursor: (emp.photoUrl || emp.photo) ? 'pointer' : 'default',
+                            transition: 'transform 0.15s ease'
+                          }}
+                          onClick={() => {
+                            if (emp.photoUrl || emp.photo) {
+                              setPreviewPhotoEmp(emp);
+                            }
+                          }}
+                          title={emp.photoUrl || emp.photo ? '🔍 انقر لمعاينة وتكبير صورة الموظف' : ''}
+                        >
+                          {emp.photoUrl || emp.photo ? (
+                            <img src={emp.photoUrl || emp.photo} alt={getEmpDisplayName(emp)} className="emp-img" />
                           ) : (
                             <span style={{ fontSize: '20px' }}>{getEmpDisplayName(emp).charAt(0)}</span>
                           )}
@@ -922,6 +939,91 @@ export default function EmployeeCardsGrid({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Employee Photo Preview Lightbox Modal ── */}
+      {previewPhotoEmp && (
+        <div
+          className="modal-backdrop"
+          style={{
+            zIndex: 1500,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'rgba(0, 0, 0, 0.75)',
+            backdropFilter: 'blur(4px)',
+            padding: '20px'
+          }}
+          onClick={() => setPreviewPhotoEmp(null)}
+        >
+          <div
+            className="modal-content"
+            style={{
+              maxWidth: '480px',
+              width: '100%',
+              background: 'var(--surface)',
+              borderRadius: '20px',
+              overflow: 'hidden',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+              border: '1px solid var(--border)',
+              animation: 'scaleUp 0.2s ease-out'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '14px 18px',
+              borderBottom: '1px solid var(--border)',
+              background: 'var(--surface-muted)'
+            }}>
+              <div>
+                <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 800, color: 'var(--text)' }}>
+                  👤 {getEmpDisplayName(previewPhotoEmp)}
+                </h4>
+                <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                  كود: {previewPhotoEmp.code} · {previewPhotoEmp.jobTitle || 'موظف'}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setPreviewPhotoEmp(null)}
+                style={{ fontSize: '16px', padding: '4px 10px', borderRadius: '8px' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ padding: '16px', textAlign: 'center', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '260px' }}>
+              <img
+                src={previewPhotoEmp.photoUrl || previewPhotoEmp.photo}
+                alt={getEmpDisplayName(previewPhotoEmp)}
+                style={{
+                  maxWidth: '100%',
+                  maxHeight: '420px',
+                  objectFit: 'contain',
+                  borderRadius: '12px'
+                }}
+              />
+            </div>
+
+            <div style={{ padding: '12px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface)' }}>
+              <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                📍 {getBranchName(previewPhotoEmp.branchId)}
+              </span>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setPreviewPhotoEmp(null)}
+                style={{ fontSize: '12.5px', fontWeight: 'bold' }}
+              >
+                إغلاق
+              </button>
+            </div>
           </div>
         </div>
       )}

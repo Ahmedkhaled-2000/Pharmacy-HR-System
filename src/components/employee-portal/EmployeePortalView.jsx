@@ -175,6 +175,7 @@ export default function EmployeePortalView({
   const [rangeEnd, setRangeEnd] = useState(() => {
     try { return localStorage.getItem('emp_range_end') || ''; } catch { return ''; }
   });
+  const [showPhotoPreview, setShowPhotoPreview] = useState(false);
 
   // Modern Navigation & UI States
   const [openDropdown, setOpenDropdown] = useState(null);
@@ -2822,21 +2823,28 @@ export default function EmployeePortalView({
               </button>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <div style={{
-                  width: '46px',
-                  height: '46px',
-                  borderRadius: '50%',
-                  background: '#ffffff',
-                  color: '#0d9488',
-                  border: '2px solid rgba(255,255,255,0.8)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontWeight: 900,
-                  fontSize: '18px',
-                  overflow: 'hidden',
-                  flexShrink: 0
-                }}>
+                <div
+                  style={{
+                    width: '46px',
+                    height: '46px',
+                    borderRadius: '50%',
+                    background: '#ffffff',
+                    color: '#0d9488',
+                    border: '2px solid rgba(255,255,255,0.8)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontWeight: 900,
+                    fontSize: '18px',
+                    overflow: 'hidden',
+                    flexShrink: 0,
+                    cursor: (emp?.photoUrl || emp?.photo) ? 'pointer' : 'default'
+                  }}
+                  onClick={() => {
+                    if (emp?.photoUrl || emp?.photo) setShowPhotoPreview(true);
+                  }}
+                  title={emp?.photoUrl || emp?.photo ? '🔍 انقر لمعاينة وتكبير صورتك الشخصية' : ''}
+                >
                   {emp.photoUrl ? (
                     <img src={emp.photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                   ) : (
@@ -3364,20 +3372,28 @@ export default function EmployeePortalView({
                 flexWrap: 'wrap'
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                  <div style={{
-                    width: '64px',
-                    height: '64px',
-                    borderRadius: '50%',
-                    background: '#ffffff',
-                    color: '#0d9488',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '28px',
-                    fontWeight: '800',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-                    flexShrink: 0
-                  }}>
+                  <div
+                    style={{
+                      width: '64px',
+                      height: '64px',
+                      borderRadius: '50%',
+                      background: '#ffffff',
+                      color: '#0d9488',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '28px',
+                      fontWeight: '800',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                      flexShrink: 0,
+                      cursor: (emp?.photoUrl || emp?.photo) ? 'pointer' : 'default',
+                      transition: 'transform 0.15s ease'
+                    }}
+                    onClick={() => {
+                      if (emp?.photoUrl || emp?.photo) setShowPhotoPreview(true);
+                    }}
+                    title={emp?.photoUrl || emp?.photo ? '🔍 انقر لمعاينة وتكبير صورتك الشخصية' : ''}
+                  >
                     {emp.photoUrl ? (
                       <img src={emp.photoUrl} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
                     ) : (
@@ -4810,6 +4826,91 @@ export default function EmployeePortalView({
                 <button className="btn btn-ghost" onClick={() => setShowExportModal(false)}>إلغاء</button>
                 <button className="btn btn-start" onClick={handleExportSubmit} disabled={exporting}>
                   {exporting ? '⏳ جاري التصدير...' : '📥 تصدير الملف'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Employee Profile Photo Preview Lightbox Modal ── */}
+        {showPhotoPreview && (emp?.photoUrl || emp?.photo) && (
+          <div
+            className="modal-backdrop"
+            style={{
+              zIndex: 1500,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'rgba(0, 0, 0, 0.75)',
+              backdropFilter: 'blur(4px)',
+              padding: '20px'
+            }}
+            onClick={() => setShowPhotoPreview(false)}
+          >
+            <div
+              className="modal-content"
+              style={{
+                maxWidth: '460px',
+                width: '100%',
+                background: 'var(--surface)',
+                borderRadius: '20px',
+                overflow: 'hidden',
+                boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+                border: '1px solid var(--border)',
+                animation: 'scaleUp 0.2s ease-out'
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '14px 18px',
+                borderBottom: '1px solid var(--border)',
+                background: 'var(--surface-muted)'
+              }}>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 800, color: 'var(--text)' }}>
+                    👤 {getEmpDisplayName(emp)}
+                  </h4>
+                  <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                    كود: {emp.code} · {emp.jobTitle}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => setShowPhotoPreview(false)}
+                  style={{ fontSize: '16px', padding: '4px 10px', borderRadius: '8px' }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div style={{ padding: '16px', textAlign: 'center', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '260px' }}>
+                <img
+                  src={emp.photoUrl || emp.photo}
+                  alt={getEmpDisplayName(emp)}
+                  style={{
+                    maxWidth: '100%',
+                    maxHeight: '420px',
+                    objectFit: 'contain',
+                    borderRadius: '12px'
+                  }}
+                />
+              </div>
+
+              <div style={{ padding: '12px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface)' }}>
+                <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                  📍 {state.branches?.find(b => b.id === emp.branchId)?.name || 'الفرع الرئيسي'}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => setShowPhotoPreview(false)}
+                  style={{ fontSize: '12.5px', fontWeight: 'bold' }}
+                >
+                  إغلاق
                 </button>
               </div>
             </div>

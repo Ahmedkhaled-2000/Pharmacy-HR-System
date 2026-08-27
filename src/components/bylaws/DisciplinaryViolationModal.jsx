@@ -48,6 +48,51 @@ export default function DisciplinaryViolationModal({
   const [incidentDetails, setIncidentDetails] = useState('');
   const [investigationNotes, setInvestigationNotes] = useState('');
   const [attachmentName, setAttachmentName] = useState('');
+  const [attachmentData, setAttachmentData] = useState('');
+  const [attachmentType, setAttachmentType] = useState('');
+  const [attachmentSize, setAttachmentSize] = useState('');
+  const [isUploading, setIsUploading] = useState(false);
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    if (file.size > 30 * 1024 * 1024) {
+      alert('⚠️ حجم الملف كبير جداً. يرجى اختيار ملف بحجم أقل من 30 ميجابايت.');
+      return;
+    }
+
+    let detectedType = 'file';
+    if (file.type.startsWith('image/')) detectedType = 'image';
+    else if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) detectedType = 'pdf';
+    else if (file.type.startsWith('video/')) detectedType = 'video';
+
+    setIsUploading(true);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setAttachmentData(ev.target.result);
+      setAttachmentName(file.name);
+      setAttachmentType(detectedType);
+      
+      const sizeStr = file.size > 1024 * 1024 
+        ? `${(file.size / (1024 * 1024)).toFixed(1)} ميجابايت` 
+        : `${Math.round(file.size / 1024)} كيلوبايت`;
+      setAttachmentSize(sizeStr);
+      setIsUploading(false);
+    };
+    reader.onerror = () => {
+      alert('❌ تعذر قراءة الملف. يرجى المحاولة مرة أخرى.');
+      setIsUploading(false);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleClearAttachment = () => {
+    setAttachmentData('');
+    setAttachmentName('');
+    setAttachmentType('');
+    setAttachmentSize('');
+  };
 
   // Override / Gross Violation State
   const [isOverrideActive, setIsOverrideActive] = useState(false);
@@ -227,6 +272,9 @@ export default function DisciplinaryViolationModal({
         details: incidentDetails,
         investigationNotes: investigationNotes,
         attachmentName: attachmentName,
+        attachmentData: attachmentData,
+        attachmentType: attachmentType,
+        attachmentSize: attachmentSize,
         isOverride: isOverrideActive,
         overrideReason: isOverrideActive ? overrideReason : null,
         createdRole: isAdmin ? 'admin' : 'branch',
@@ -781,18 +829,112 @@ export default function DisciplinaryViolationModal({
             </div>
           </div>
 
-          {/* 7. Attachment / Document Reference */}
-          <div style={{ marginBottom: '20px' }}>
-            <label style={{ display: 'block', fontWeight: 'bold', fontSize: '13px', marginBottom: '4px' }}>
-              📎 المرفقات / مستندات التحقيق والأدلة (اسم الملف أو الرابط):
+          {/* 7. Attachment / Document Reference (Photo, PDF, Video) */}
+          <div style={{ marginBottom: '20px', background: 'var(--surface-muted)', padding: '14px', borderRadius: '12px', border: '1px solid var(--border)' }}>
+            <label style={{ display: 'block', fontWeight: 'bold', fontSize: '13.5px', marginBottom: '8px', color: 'var(--primary-dark)' }}>
+              📎 المرفقات / مستندات التحقيق والأدلة (صورة / PDF / فيديو):
             </label>
+            
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '10px' }}>
+              <label
+                className="btn btn-ghost"
+                style={{
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '9px 16px',
+                  background: '#3b82f6',
+                  color: '#ffffff',
+                  fontWeight: 'bold',
+                  borderRadius: '8px',
+                  fontSize: '13px'
+                }}
+              >
+                <span>📁</span>
+                <span>{isUploading ? 'جاري قراءة الملف...' : 'رفع ملف تحقيق (صورة / PDF / فيديو)'}</span>
+                <input
+                  type="file"
+                  accept="image/*,application/pdf,video/*"
+                  onChange={handleFileUpload}
+                  style={{ display: 'none' }}
+                  disabled={isUploading}
+                />
+              </label>
+
+              <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                أو اكتب اسم المستند / الرابط:
+              </span>
+            </div>
+
             <input
               type="text"
-              placeholder="مثال: محضر_تحقيق_12.pdf أو صورة_الكاميرا_1.jpg أو رابط المستند..."
+              placeholder="مثال: محضر_تحقيق_12.pdf أو صورة_الكاميرا_1.jpg أو رابط فيديو المراقبة..."
               value={attachmentName}
               onChange={(e) => setAttachmentName(e.target.value)}
-              style={{ width: '100%', padding: '9px 12px', borderRadius: '10px', border: '1px solid var(--border)' }}
+              style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px' }}
             />
+
+            {/* Live Attachment Previewer */}
+            {attachmentData && (
+              <div style={{ marginTop: '12px', background: '#fff', border: '1.5px solid #3b82f6', borderRadius: '10px', padding: '12px', boxShadow: '0 2px 6px rgba(59,130,246,0.1)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 'bold', color: '#1e40af' }}>
+                    <span>{attachmentType === 'image' ? '🖼️ صورة مرفقة:' : attachmentType === 'pdf' ? '📄 مستند PDF مرفق:' : attachmentType === 'video' ? '🎥 مقطع فيديو مرفق:' : '📎 ملف مرفق:'}</span>
+                    <span>{attachmentName}</span>
+                    {attachmentSize && <span style={{ fontSize: '11.5px', color: '#64748b', fontWeight: 'normal' }}>({attachmentSize})</span>}
+                  </div>
+                  <button
+                    type="button"
+                    className="del-btn"
+                    onClick={handleClearAttachment}
+                    style={{ padding: '4px 10px', fontSize: '12px' }}
+                  >
+                    ✕ حذف المرفق
+                  </button>
+                </div>
+
+                {attachmentType === 'image' && (
+                  <div style={{ textAlign: 'center', marginTop: '6px' }}>
+                    <img
+                      src={attachmentData}
+                      alt={attachmentName}
+                      style={{ maxHeight: '220px', maxWidth: '100%', borderRadius: '8px', border: '1px solid #e2e8f0', objectFit: 'contain' }}
+                    />
+                  </div>
+                )}
+
+                {attachmentType === 'pdf' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#fef2f2', padding: '10px 14px', borderRadius: '8px', border: '1px solid #fecaca' }}>
+                    <span style={{ fontSize: '24px' }}>📄</span>
+                    <div style={{ flex: 1 }}>
+                      <strong style={{ color: '#991b1b', fontSize: '13px', display: 'block' }}>{attachmentName}</strong>
+                      <span style={{ fontSize: '11.5px', color: '#7f1d1d' }}>مستند PDF جاهز للعرض والمراجعة من قبل الإدارة العليا</span>
+                    </div>
+                    <a
+                      href={attachmentData}
+                      download={attachmentName || 'document.pdf'}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="btn btn-ghost"
+                      style={{ fontSize: '12px', padding: '5px 12px', background: '#fee2e2', color: '#991b1b', fontWeight: 'bold' }}
+                    >
+                      👁️ فتح / تحميل PDF
+                    </a>
+                  </div>
+                )}
+
+                {attachmentType === 'video' && (
+                  <div style={{ marginTop: '6px', textAlign: 'center' }}>
+                    <video
+                      controls
+                      src={attachmentData}
+                      style={{ maxHeight: '220px', maxWidth: '100%', borderRadius: '8px', background: '#000' }}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Financial Summary Line before Submission */}
