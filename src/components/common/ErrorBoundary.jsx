@@ -24,6 +24,26 @@ class ErrorBoundary extends React.Component {
     }
   };
 
+  handleHardReload = async () => {
+    try {
+      if ('serviceWorker' in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        for (const reg of registrations) {
+          await reg.unregister();
+        }
+      }
+      if ('caches' in window) {
+        const cacheKeys = await caches.keys();
+        for (const key of cacheKeys) {
+          await caches.delete(key);
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    window.location.href = window.location.href.split('?')[0] + '?v=' + Date.now();
+  };
+
   render() {
     if (this.state.hasError) {
       return (
@@ -43,7 +63,7 @@ class ErrorBoundary extends React.Component {
             {this.props.fallbackTitle || 'تعذر عرض هذا القسم بشكل مؤقت'}
           </h3>
           <p style={{ color: '#64748b', fontSize: '13.5px', lineHeight: 1.6, margin: '0 0 20px' }}>
-            تم استدراك الخطأ بنجاح لحماية النظام من التوقف. يمكنك محاولة إعادة تحميل الصفحة أو الرجوع للشاشة السابقة.
+            تم استدراك الخطأ بنجاح لحماية النظام من التوقف. يمكنك محاولة إعادة تحميل الصفحة أو تحديث الذاكرة المؤقتة.
           </p>
 
           <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', flexWrap: 'wrap' }}>
@@ -64,6 +84,24 @@ class ErrorBoundary extends React.Component {
               }}
             >
               🔄 إعادة محاولة العرض
+            </button>
+            <button
+              onClick={this.handleHardReload}
+              style={{
+                background: '#4338ca',
+                color: '#fff',
+                border: 'none',
+                padding: '9px 20px',
+                borderRadius: '8px',
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                fontSize: '13.5px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              ⚡ تحديث شامل ومسح الذاكرة المؤقتة
             </button>
             <button
               onClick={() => window.location.href = '/'}

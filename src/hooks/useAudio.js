@@ -52,3 +52,10 @@ export function playNotificationChime() {
     // ignore
   }
 }
+
+// Ensure global attachment to window
+if (typeof window !== 'undefined') {
+  window.playNotificationChime = playNotificationChime;
+  window.playFingerprintChime = playFingerprintChime;
+}
+
