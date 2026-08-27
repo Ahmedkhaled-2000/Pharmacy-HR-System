@@ -2832,12 +2832,45 @@ export default function App() {
   useEffect(() => {
     let isMounted = true;
 
+    // Helper to keep session synchronized with fresh database objects
+    const syncSessionWithFreshData = (freshState) => {
+      try {
+        const savedEmpStr = localStorage.getItem('app_current_emp_user');
+        if (savedEmpStr) {
+          const savedEmp = JSON.parse(savedEmpStr);
+          const freshEmp = (freshState.employees || []).find((e) =>
+            String(e.id) === String(savedEmp?.id) ||
+            (savedEmp?.code && String(e.code || '').trim().toLowerCase() === String(savedEmp.code).trim().toLowerCase()) ||
+            (savedEmp?.username && String(e.username || '').trim().toLowerCase() === String(savedEmp.username).trim().toLowerCase())
+          );
+          if (freshEmp) {
+            setCurrentEmpUser(freshEmp);
+            localStorage.setItem('app_current_emp_user', JSON.stringify(freshEmp));
+          }
+        }
+        const savedBranchStr = localStorage.getItem('app_current_branch');
+        if (savedBranchStr) {
+          const savedBranch = JSON.parse(savedBranchStr);
+          const freshBranch = (freshState.branches || []).find((b) =>
+            String(b.id) === String(savedBranch?.id) ||
+            (savedBranch?.branchCode && String(b.branchCode || b.code || '').trim().toLowerCase() === String(savedBranch.branchCode || savedBranch.code).trim().toLowerCase()) ||
+            (savedBranch?.username && String(b.username || '').trim().toLowerCase() === String(savedBranch.username).trim().toLowerCase())
+          );
+          if (freshBranch) {
+            setCurrentBranch(freshBranch);
+            localStorage.setItem('app_current_branch', JSON.stringify(freshBranch));
+          }
+        }
+      } catch {}
+    };
+
     // 1. إقلاع فوري فائق السرعة من الذاكرة المحلية (في غضون 5 إلى 20 مللي ثانية!)
     loadLocalStateFast().then((cachedData) => {
       if (cachedData && isMounted) {
         const normalizedCached = normalizeState(cachedData);
         const syncedCached = syncAllEmployeesPermissionsAndLateness(normalizedCached);
         setState(syncedCached);
+        syncSessionWithFreshData(syncedCached);
         setIsLoading(false); // إخفاء شاشة التحميل فوراً ودخول المستخدم للنظام بدون أي انتظار
       }
     }).catch(() => {});
@@ -2885,36 +2918,7 @@ export default function App() {
       setLastSyncTime(nowTimeStr());
 
       // Sync active session user/branch with fresh database objects
-      try {
-        const savedEmpStr = localStorage.getItem('app_current_emp_user');
-        if (savedEmpStr) {
-          const savedEmp = JSON.parse(savedEmpStr);
-          const freshEmp = (normalized.employees || []).find((e) => e.id === savedEmp?.id || (savedEmp?.code && e.code === savedEmp.code));
-          if (freshEmp) {
-            setCurrentEmpUser(freshEmp);
-            localStorage.setItem('app_current_emp_user', JSON.stringify(freshEmp));
-          } else if ((normalized.employees || []).length === 0) {
-            localStorage.removeItem('app_current_emp_user');
-            localStorage.removeItem('app_auth_role');
-            setAuthRole('none');
-            setCurrentEmpUser(null);
-          }
-        }
-        const savedBranchStr = localStorage.getItem('app_current_branch');
-        if (savedBranchStr) {
-          const savedBranch = JSON.parse(savedBranchStr);
-          const freshBranch = (normalized.branches || []).find((b) => b.id === savedBranch?.id);
-          if (freshBranch) {
-            setCurrentBranch(freshBranch);
-            localStorage.setItem('app_current_branch', JSON.stringify(freshBranch));
-          } else if ((normalized.branches || []).length === 0) {
-            localStorage.removeItem('app_current_branch');
-            localStorage.removeItem('app_auth_role');
-            setAuthRole('none');
-            setCurrentBranch(null);
-          }
-        }
-      } catch {}
+      syncSessionWithFreshData(synced);
 
       if (normalized.employees.length > 0) {
         setMEmpId(normalized.employees[0].id);
@@ -3006,28 +3010,40 @@ export default function App() {
 
   // ── مراقب صحة وسلامة الجلسات (تسجيل خروج فوري بعد تصفير البيانات أو مسح الحسابات) ──
   useEffect(() => {
+    if (isLoading) return; // لا تفحص صحة الجلسة أثناء التحميل الأولي للبيانات
+
     if (authRole === 'employee' && currentEmpUser) {
-      const exists = (state.employees || []).some(
-        (e) => String(e.id) === String(currentEmpUser.id) || (currentEmpUser.code && e.code === currentEmpUser.code)
-      );
-      if (!exists && (state.employees || []).length === 0) {
-        localStorage.removeItem('app_current_emp_user');
-        localStorage.removeItem('app_auth_role');
-        setAuthRole('none');
-        setCurrentEmpUser(null);
-        showToast('🚨 تم تسجيل الخروج لعدم وجود حساب الموظف في قاعدة البيانات.');
+      if ((state.employees || []).length > 0) {
+        const exists = (state.employees || []).some(
+          (e) => String(e.id) === String(currentEmpUser.id) ||
+            (currentEmpUser.code && String(e.code || '').trim().toLowerCase() === String(currentEmpUser.code).trim().toLowerCase()) ||
+            (currentEmpUser.username && String(e.username || '').trim().toLowerCase() === String(currentEmpUser.username).trim().toLowerCase())
+        );
+        if (!exists) {
+          localStorage.removeItem('app_current_emp_user');
+          localStorage.removeItem('app_auth_role');
+          setAuthRole('none');
+          setCurrentEmpUser(null);
+          showToast('🚨 تم تسجيل الخروج لعدم وجود حساب الموظف في قاعدة البيانات.');
+        }
       }
     } else if (authRole === 'branch' && currentBranch) {
-      const exists = (state.branches || []).some((b) => String(b.id) === String(currentBranch.id));
-      if (!exists && (state.branches || []).length === 0) {
-        localStorage.removeItem('app_current_branch');
-        localStorage.removeItem('app_auth_role');
-        setAuthRole('none');
-        setCurrentBranch(null);
-        showToast('🚨 تم تسجيل الخروج لعدم وجود الفرع في قاعدة البيانات.');
+      if ((state.branches || []).length > 0) {
+        const exists = (state.branches || []).some(
+          (b) => String(b.id) === String(currentBranch.id) ||
+            (currentBranch.branchCode && String(b.branchCode || b.code || '').trim().toLowerCase() === String(currentBranch.branchCode || currentBranch.code).trim().toLowerCase()) ||
+            (currentBranch.username && String(b.username || '').trim().toLowerCase() === String(currentBranch.username).trim().toLowerCase())
+        );
+        if (!exists) {
+          localStorage.removeItem('app_current_branch');
+          localStorage.removeItem('app_auth_role');
+          setAuthRole('none');
+          setCurrentBranch(null);
+          showToast('🚨 تم تسجيل الخروج لعدم وجود الفرع في قاعدة البيانات.');
+        }
       }
     }
-  }, [state.employees, state.branches, authRole, currentEmpUser, currentBranch]);
+  }, [state.employees, state.branches, authRole, currentEmpUser, currentBranch, isLoading]);
 
   // ── مستمع تغيرات الاتصال بالإنترنت ───────────────
   useEffect(() => {
