@@ -20,7 +20,8 @@ import {
   fmt,
   parseArabicFloat,
   normalizeState,
-  shouldShowRequestToBranch
+  shouldShowRequestToBranch,
+  getEmployeeApprovedLeaves
 } from './utils/formatters';
 import { getRealDate, getRealTodayStr, getRealNowTimeStr } from './utils/timeEngine';
 import { getEmployeeDaySchedule, getDayScheduleFromMap, applyShiftSwapToRosters } from './utils/rosterEngine';
@@ -33,8 +34,15 @@ import { getPendingCount } from './utils/offlineStorage';
 import { saveAutoBackupOnModification } from './utils/backupHelper';
 import ErrorBoundary from './components/common/ErrorBoundary';
 import { normalizeSchedule } from './components/roster/RosterModule';
-import { playNotificationChime } from './hooks/useAudio';
-import { createRequestDecisionNotification, filterAdminNotifications, filterEmployeeNotifications } from './utils/notificationEngine';
+import {
+  createRequestDecisionNotification,
+  filterAdminNotifications,
+  filterBranchManagerNotifications,
+  filterEmployeeNotifications,
+  isNotificationReadForAdmin,
+  isNotificationReadForBranch,
+  isNotificationReadForEmployee
+} from './utils/notificationEngine';
 
 // Modular Components
 import GlobalNavbar from './components/navbar/GlobalNavbar';
@@ -102,7 +110,6 @@ import {
   notifyAdminOnOvertime
 } from './utils/gmailService';
 import EmployeePermissionsManagementModule from './components/permissions/EmployeePermissionsManagementModule';
-import { filterBranchManagerNotifications } from './utils/notificationEngine';
 import {
   DEFAULT_LATE_PENALTY_POLICY,
   DEFAULT_PERMISSION_POLICY,
@@ -2615,14 +2622,8 @@ export default function App() {
       return acc + Math.min(rem, monthlyDeduction);
     }, 0);
 
-    // Calculate Approved Unpaid Leaves & Annual Leaves in period
-    const allLeaveRequests = [...(state.leaveRequests || []), ...(state.requests || [])];
-    const empApprovedLeaves = allLeaveRequests.filter(
-      (r) =>
-        String(r.employeeId) === String(empId) &&
-        (r.status === 'approved' || r.adminApproved) &&
-        (r.type === 'leave' || r.type === 'leave_request' || r.type === 'annual_leave' || r.type === 'sick_leave' || r.type === 'emergency_leave' || r.type === 'unpaid_leave')
-    );
+    // Calculate Approved Unpaid Leaves & Annual Leaves in period (Strictly deduplicated)
+    const empApprovedLeaves = getEmployeeApprovedLeaves(emp, state, effectiveFilterFn);
 
     let unpaidLeaveDaysCount = 0;
     let annualLeaveDaysCount = 0;
@@ -4884,33 +4885,192 @@ export default function App() {
   }, [financialRangeMode, financialStartDate, financialEndDate, monthPicker, state.orgSettings]);
 
   const handleMarkNotificationRead = async (notifId) => {
-    const updatedNotifs = (state.notifications || []).map((n) => (n.id === notifId ? { ...n, read: true } : n));
+    if (!notifId) return;
+    const notifIdStr = String(notifId);
+
+    const updatedNotifs = [...(state.notifications || [])];
+    let foundIndex = updatedNotifs.findIndex(
+      (n) => String(n.id) === notifIdStr || String(n.requestId) === notifIdStr || `notif_pending_${n.id}` === notifIdStr || `notif_pending_${n.requestId}` === notifIdStr
+    );
+
+    if (foundIndex === -1) {
+      const newNotifRecord = {
+        id: notifIdStr,
+        requestId: notifIdStr.replace('notif_pending_', ''),
+        read: true,
+        readByAdmin: authRole === 'admin' || authRole === 'owner',
+        readByBranches: authRole === 'branch' && currentBranch ? [String(currentBranch.id), String(currentBranch.branchCode || currentBranch.code || '')].filter(Boolean) : [],
+        readByEmployees: authRole === 'employee' && currentEmpUser ? [String(currentEmpUser.id)] : [],
+        readBy: [
+          (authRole === 'admin' || authRole === 'owner') ? 'admin' : null,
+          (authRole === 'branch' && currentBranch) ? `branch_${currentBranch.id}` : null,
+          (authRole === 'employee' && currentEmpUser) ? `emp_${currentEmpUser.id}` : null
+        ].filter(Boolean),
+        timestamp: new Date().toISOString()
+      };
+      updatedNotifs.unshift(newNotifRecord);
+    } else {
+      const existing = updatedNotifs[foundIndex];
+      const existingReadBy = Array.isArray(existing.readBy) ? [...existing.readBy] : [];
+      const existingReadByBranches = Array.isArray(existing.readByBranches) ? [...existing.readByBranches] : [];
+      const existingReadByEmployees = Array.isArray(existing.readByEmployees) ? [...existing.readByEmployees] : [];
+
+      if (authRole === 'admin' || authRole === 'owner') {
+        if (!existingReadBy.includes('admin')) existingReadBy.push('admin');
+        updatedNotifs[foundIndex] = {
+          ...existing,
+          readByAdmin: true,
+          readBy: existingReadBy
+        };
+      } else if (authRole === 'branch' && currentBranch) {
+        const bId = String(currentBranch.id);
+        const bCode = String(currentBranch.branchCode || currentBranch.code || '');
+        if (bId && !existingReadByBranches.includes(bId)) existingReadByBranches.push(bId);
+        if (bCode && !existingReadByBranches.includes(bCode)) existingReadByBranches.push(bCode);
+        if (bId && !existingReadBy.includes(`branch_${bId}`)) existingReadBy.push(`branch_${bId}`);
+        updatedNotifs[foundIndex] = {
+          ...existing,
+          readByBranches: existingReadByBranches,
+          readBy: existingReadBy
+        };
+      } else if (authRole === 'employee' && currentEmpUser) {
+        const eId = String(currentEmpUser.id);
+        if (!existingReadByEmployees.includes(eId)) existingReadByEmployees.push(eId);
+        if (!existingReadBy.includes(`emp_${eId}`)) existingReadBy.push(`emp_${eId}`);
+        updatedNotifs[foundIndex] = {
+          ...existing,
+          read: true,
+          readByEmployees: existingReadByEmployees,
+          readBy: existingReadBy
+        };
+      } else {
+        updatedNotifs[foundIndex] = { ...existing, read: true };
+      }
+    }
+
     const updatedState = { ...state, notifications: updatedNotifs };
     setState(updatedState);
     if (saveState) saveState(updatedState).catch(() => {});
   };
 
   const handleMarkAllNotificationsRead = async () => {
-    const updatedNotifs = (state.notifications || []).map((n) => ({ ...n, read: true }));
+    const updatedNotifs = (state.notifications || []).map((n) => {
+      const existingReadBy = Array.isArray(n.readBy) ? [...n.readBy] : [];
+      const existingReadByBranches = Array.isArray(n.readByBranches) ? [...n.readByBranches] : [];
+      const existingReadByEmployees = Array.isArray(n.readByEmployees) ? [...n.readByEmployees] : [];
+
+      if (authRole === 'admin' || authRole === 'owner') {
+        if (!existingReadBy.includes('admin')) existingReadBy.push('admin');
+        return {
+          ...n,
+          readByAdmin: true,
+          readBy: existingReadBy
+        };
+      } else if (authRole === 'branch' && currentBranch) {
+        const bId = String(currentBranch.id);
+        const bCode = String(currentBranch.branchCode || currentBranch.code || '');
+        if (bId && !existingReadByBranches.includes(bId)) existingReadByBranches.push(bId);
+        if (bCode && !existingReadByBranches.includes(bCode)) existingReadByBranches.push(bCode);
+        if (bId && !existingReadBy.includes(`branch_${bId}`)) existingReadBy.push(`branch_${bId}`);
+        return {
+          ...n,
+          readByBranches: existingReadByBranches,
+          readBy: existingReadBy
+        };
+      } else if (authRole === 'employee' && currentEmpUser) {
+        const eId = String(currentEmpUser.id);
+        if (!existingReadByEmployees.includes(eId)) existingReadByEmployees.push(eId);
+        if (!existingReadBy.includes(`emp_${eId}`)) existingReadBy.push(`emp_${eId}`);
+        return {
+          ...n,
+          read: true,
+          readByEmployees: existingReadByEmployees,
+          readBy: existingReadBy
+        };
+      }
+      return { ...n, read: true };
+    });
+
     const updatedLate = (state.lateIncidents || []).map((inc) => ({ ...inc, read: true }));
     const updatedRequests = (state.requests || []).map((r) => ({ ...r, read: true }));
     const updatedState = { ...state, notifications: updatedNotifs, lateIncidents: updatedLate, requests: updatedRequests };
     setState(updatedState);
     if (saveState) saveState(updatedState).catch(() => {});
+    showToast('✅ تم تحديد كافة الإشعارات كمقروءة');
   };
 
   const handleDeleteNotification = async (notifId) => {
-    const updatedNotifs = (state.notifications || []).filter((n) => n.id !== notifId);
+    if (!notifId) return;
+    const notifIdStr = String(notifId);
+
+    let updatedNotifs = [];
+    if (authRole === 'admin' || authRole === 'owner') {
+      updatedNotifs = (state.notifications || []).map((n) => {
+        if (String(n.id) === notifIdStr || String(n.requestId) === notifIdStr) {
+          return { ...n, deletedByAdmin: true, hiddenFromAdmin: true };
+        }
+        return n;
+      }).filter((n) => {
+        if ((String(n.id) === notifIdStr || String(n.requestId) === notifIdStr) && (n.targetRole === 'admin' || n.targetRole === 'owner')) return false;
+        return true;
+      });
+    } else if (authRole === 'branch' && currentBranch) {
+      const bId = String(currentBranch.id);
+      const bCode = String(currentBranch.branchCode || currentBranch.code || '');
+      updatedNotifs = (state.notifications || []).map((n) => {
+        if (String(n.id) === notifIdStr || String(n.requestId) === notifIdStr) {
+          const deletedBranches = Array.isArray(n.deletedForBranches) ? [...n.deletedForBranches] : [];
+          if (bId && !deletedBranches.includes(bId)) deletedBranches.push(bId);
+          if (bCode && !deletedBranches.includes(bCode)) deletedBranches.push(bCode);
+          return { ...n, deletedForBranches: deletedBranches };
+        }
+        return n;
+      });
+    } else {
+      updatedNotifs = (state.notifications || []).filter((n) => String(n.id) !== notifIdStr && String(n.requestId) !== notifIdStr);
+    }
+
     const updatedState = { ...state, notifications: updatedNotifs };
     setState(updatedState);
     if (saveState) saveState(updatedState).catch(() => {});
+    showToast('🗑️ تم حذف الإشعار');
   };
 
   const handleClearReadNotifications = async () => {
-    const updatedNotifs = (state.notifications || []).filter((n) => !n.read);
+    let updatedNotifs = [];
+
+    if (authRole === 'admin' || authRole === 'owner') {
+      updatedNotifs = (state.notifications || []).map((n) => {
+        const isAdminRead = isNotificationReadForAdmin(n);
+        if (isAdminRead) {
+          return { ...n, clearedByAdmin: true, hiddenFromAdmin: true };
+        }
+        return n;
+      }).filter((n) => {
+        if ((n.targetRole === 'admin' || n.targetRole === 'owner') && n.clearedByAdmin) return false;
+        return true;
+      });
+    } else if (authRole === 'branch' && currentBranch) {
+      const bId = String(currentBranch.id);
+      const bCode = String(currentBranch.branchCode || currentBranch.code || '');
+      updatedNotifs = (state.notifications || []).map((n) => {
+        const isBranchRead = isNotificationReadForBranch(n, currentBranch);
+        if (isBranchRead) {
+          const clearedBranches = Array.isArray(n.clearedForBranches) ? [...n.clearedForBranches] : [];
+          if (bId && !clearedBranches.includes(bId)) clearedBranches.push(bId);
+          if (bCode && !clearedBranches.includes(bCode)) clearedBranches.push(bCode);
+          return { ...n, clearedForBranches: clearedBranches };
+        }
+        return n;
+      });
+    } else {
+      updatedNotifs = (state.notifications || []).filter((n) => !n.read);
+    }
+
     const updatedState = { ...state, notifications: updatedNotifs };
     setState(updatedState);
     if (saveState) saveState(updatedState).catch(() => {});
+    showToast('🗑️ تم مسح الإشعارات المقروءة بنجاح');
   };
 
   return (

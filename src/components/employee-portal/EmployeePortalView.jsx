@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { AR_MONTHS, arabicWeekday, fmt, arabicMonthLabel, getActivePayrollCycleMonth, getEmpDisplayName, getEmployeeManualPunchesCount, isShiftManualPunch } from '../../utils/formatters';
+import { AR_MONTHS, arabicWeekday, fmt, arabicMonthLabel, getActivePayrollCycleMonth, getEmpDisplayName, getEmployeeManualPunchesCount, isShiftManualPunch, getEmployeeApprovedLeaves } from '../../utils/formatters';
 import { loadExcelJS, mergedTitle, tableHeaderRow, dataRow } from '../../utils/excelExport';
 import { getCycleDateRange, createDatePredicate, getActivePayrollMonth } from '../../utils/periodEngine';
 import { getRealDate, getRealTodayStr, getRealNowTimeStr } from '../../utils/timeEngine';
@@ -1030,13 +1030,9 @@ export default function EmployeePortalView({
       if (!map.has(String(p.id))) map.set(String(p.id), p);
     });
 
-    // Include approved unpaid leaves for the period as explicit deduction items
-    const allLeaveRequests = [...(state.leaveRequests || []), ...(state.requests || [])];
-    const approvedUnpaidLeaves = allLeaveRequests.filter(
-      (r) =>
-        String(r.employeeId) === String(emp.id) &&
-        (r.status === 'approved' || r.adminApproved) &&
-        (r.leaveType === 'unpaid' || r.type === 'unpaid_leave' || r.isUnpaid === true)
+    // Include approved unpaid leaves for the period as explicit deduction items (Strictly deduplicated)
+    const approvedUnpaidLeaves = getEmployeeApprovedLeaves(emp, state, filterFn).filter(
+      (r) => r.leaveType === 'unpaid'
     );
 
     const bDetail = selectedBranchId
@@ -1196,13 +1192,10 @@ export default function EmployeePortalView({
       const hasPunch = (state.shifts || []).some(s => s.employeeId === emp.id && s.date === dateStr);
       if (hasPunch) continue;
 
-      // Check if there's an approved leave for this day
-      const allLeaveRequests = [...(state.leaveRequests || []), ...(state.requests || [])];
-      const hasLeave = allLeaveRequests.some(
-        r => String(r.employeeId) === String(emp.id)
-          && (r.status === 'approved' || r.adminApproved)
-          && (r.type === 'leave' || r.type === 'leave_request' || r.type === 'annual_leave' || r.type === 'sick_leave' || r.type === 'emergency_leave')
-          && r.startDate <= dateStr && r.endDate >= dateStr
+      // Check if there's an approved leave for this day (Strictly deduplicated)
+      const empLeaves = getEmployeeApprovedLeaves(emp, state);
+      const hasLeave = empLeaves.some(
+        r => r.startDate <= dateStr && r.endDate >= dateStr
       );
       if (hasLeave) continue;
 

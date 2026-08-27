@@ -1,7 +1,14 @@
 import React, { useState, useMemo } from 'react';
 import { fmt, getRealTodayStr, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 import { isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
-import { filterAdminNotifications, filterBranchManagerNotifications, getNotificationTargetTab, getNotificationTabLabel } from '../../utils/notificationEngine';
+import {
+  filterAdminNotifications,
+  filterBranchManagerNotifications,
+  getNotificationTargetTab,
+  getNotificationTabLabel,
+  isNotificationReadForAdmin,
+  isNotificationReadForBranch
+} from '../../utils/notificationEngine';
 
 export default function NotificationCenterModule({
   state,
@@ -394,7 +401,53 @@ export default function NotificationCenterModule({
   });
 
   const handleMarkAsRead = async (id) => {
-    const updated = (state.notifications || []).map((n) => (n.id === id ? { ...n, read: true } : n));
+    if (!id) return;
+    const notifIdStr = String(id);
+    const updated = [...(state.notifications || [])];
+    let foundIndex = updated.findIndex((n) => String(n.id) === notifIdStr || String(n.requestId) === notifIdStr || `notif_pending_${n.id}` === notifIdStr || `notif_pending_${n.requestId}` === notifIdStr);
+
+    if (foundIndex === -1) {
+      const newNotif = {
+        id: notifIdStr,
+        requestId: notifIdStr.replace('notif_pending_', ''),
+        read: true,
+        readByAdmin: authRole === 'admin' || authRole === 'owner',
+        readByBranches: authRole === 'branch' && currentBranch ? [String(currentBranch.id), String(currentBranch.branchCode || currentBranch.code || '')].filter(Boolean) : [],
+        readBy: [
+          (authRole === 'admin' || authRole === 'owner') ? 'admin' : null,
+          (authRole === 'branch' && currentBranch) ? `branch_${currentBranch.id}` : null
+        ].filter(Boolean),
+        timestamp: new Date().toISOString()
+      };
+      updated.unshift(newNotif);
+    } else {
+      const existing = updated[foundIndex];
+      const existingReadBy = Array.isArray(existing.readBy) ? [...existing.readBy] : [];
+      const existingReadByBranches = Array.isArray(existing.readByBranches) ? [...existing.readByBranches] : [];
+
+      if (authRole === 'admin' || authRole === 'owner') {
+        if (!existingReadBy.includes('admin')) existingReadBy.push('admin');
+        updated[foundIndex] = {
+          ...existing,
+          readByAdmin: true,
+          readBy: existingReadBy
+        };
+      } else if (authRole === 'branch' && currentBranch) {
+        const bId = String(currentBranch.id);
+        const bCode = String(currentBranch.branchCode || currentBranch.code || '');
+        if (bId && !existingReadByBranches.includes(bId)) existingReadByBranches.push(bId);
+        if (bCode && !existingReadByBranches.includes(bCode)) existingReadByBranches.push(bCode);
+        if (bId && !existingReadBy.includes(`branch_${bId}`)) existingReadBy.push(`branch_${bId}`);
+        updated[foundIndex] = {
+          ...existing,
+          readByBranches: existingReadByBranches,
+          readBy: existingReadBy
+        };
+      } else {
+        updated[foundIndex] = { ...existing, read: true };
+      }
+    }
+
     const updatedState = { ...state, notifications: updated };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
@@ -408,7 +461,7 @@ export default function NotificationCenterModule({
       r.id === incidentId ? { ...r, read: true } : r
     );
     const updatedNotifications = (state.notifications || []).map((n) =>
-      (n.id === incidentId || n.id === `notif_late_${incidentId}`) ? { ...n, read: true } : n
+      (n.id === incidentId || n.id === `notif_late_${incidentId}`) ? { ...n, read: true, readByAdmin: true } : n
     );
     const updatedState = {
       ...state,
@@ -422,7 +475,32 @@ export default function NotificationCenterModule({
   };
 
   const handleMarkAllRead = async () => {
-    const updatedNotifs = (state.notifications || []).map((n) => ({ ...n, read: true }));
+    const updatedNotifs = (state.notifications || []).map((n) => {
+      const existingReadBy = Array.isArray(n.readBy) ? [...n.readBy] : [];
+      const existingReadByBranches = Array.isArray(n.readByBranches) ? [...n.readByBranches] : [];
+
+      if (authRole === 'admin' || authRole === 'owner') {
+        if (!existingReadBy.includes('admin')) existingReadBy.push('admin');
+        return {
+          ...n,
+          readByAdmin: true,
+          readBy: existingReadBy
+        };
+      } else if (authRole === 'branch' && currentBranch) {
+        const bId = String(currentBranch.id);
+        const bCode = String(currentBranch.branchCode || currentBranch.code || '');
+        if (bId && !existingReadByBranches.includes(bId)) existingReadByBranches.push(bId);
+        if (bCode && !existingReadByBranches.includes(bCode)) existingReadByBranches.push(bCode);
+        if (bId && !existingReadBy.includes(`branch_${bId}`)) existingReadBy.push(`branch_${bId}`);
+        return {
+          ...n,
+          readByBranches: existingReadByBranches,
+          readBy: existingReadBy
+        };
+      }
+      return { ...n, read: true };
+    });
+
     const updatedLateIncidents = (state.lateIncidents || []).map((inc) => ({ ...inc, read: true, readAt: new Date().toISOString() }));
     const updatedRequests = (state.requests || []).map((r) => ({ ...r, read: true }));
     const updatedState = {
@@ -437,29 +515,45 @@ export default function NotificationCenterModule({
   };
 
   const handleClearNotifications = async () => {
-    if (!window.confirm('هل أنت متأكد من مسح وتفريغ جميع سجلات الإشعارات والأرشيف نهائياً؟')) return;
+    if (!window.confirm('هل أنت متأكد من مسح الإشعارات المقروءة؟')) return;
 
-    const clearedNow = new Date().toISOString();
-    const currentDeleted = new Set(state._deletedIds || []);
-    (state.notifications || []).forEach((n) => {
-      if (n && n.id) currentDeleted.add(n.id);
-    });
+    let updatedNotifs = [];
+    if (authRole === 'admin' || authRole === 'owner') {
+      updatedNotifs = (state.notifications || []).map((n) => {
+        const isAdminRead = isNotificationReadForAdmin(n);
+        if (isAdminRead) {
+          return { ...n, clearedByAdmin: true, hiddenFromAdmin: true };
+        }
+        return n;
+      }).filter((n) => {
+        if ((n.targetRole === 'admin' || n.targetRole === 'owner') && n.clearedByAdmin) return false;
+        return true;
+      });
+    } else if (authRole === 'branch' && currentBranch) {
+      const bId = String(currentBranch.id);
+      const bCode = String(currentBranch.branchCode || currentBranch.code || '');
+      updatedNotifs = (state.notifications || []).map((n) => {
+        const isBranchRead = isNotificationReadForBranch(n, currentBranch);
+        if (isBranchRead) {
+          const clearedBranches = Array.isArray(n.clearedForBranches) ? [...n.clearedForBranches] : [];
+          if (bId && !clearedBranches.includes(bId)) clearedBranches.push(bId);
+          if (bCode && !clearedBranches.includes(bCode)) clearedBranches.push(bCode);
+          return { ...n, clearedForBranches: clearedBranches };
+        }
+        return n;
+      });
+    } else {
+      updatedNotifs = (state.notifications || []).filter((n) => !n.read);
+    }
 
     const updatedState = {
       ...state,
-      notifications: [],
-      _notificationsClearedAt: clearedNow,
-      _deletedIds: Array.from(currentDeleted).slice(-3000)
+      notifications: updatedNotifs
     };
-
-    try {
-      localStorage.removeItem('app_notifications');
-      sessionStorage.removeItem('app_notifications');
-    } catch {}
 
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.('🗑️ تم مسح وتفريغ الأرشيف نهائياً ولن يعود للظهور مرة أخرى');
+    showToast?.('🗑️ تم مسح الإشعارات بنجاح');
   };
 
   // KPI Counts

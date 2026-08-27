@@ -1,5 +1,5 @@
 import { getRealTodayStr } from '../utils/timeEngine';
-import { fmt, arabicWeekday, AR_MONTHS } from './formatters';
+import { fmt, arabicWeekday, AR_MONTHS, getEmployeeApprovedLeaves } from './formatters';
 import { getEmployeeDaySchedule } from './rosterEngine';
 import { getEffectiveShiftHours, isApprovedPermissionForDate } from './latePenaltyEngine';
 import { getCycleDateRange } from './periodEngine';
@@ -636,15 +636,13 @@ export function generateOfficialPayslipHTML({
     color: '#b91c1c'
   }] : [];
 
-  // 6. Leaves and Rest Days (سجل أيام الإجازات والراحات المأخوذة بالشهر)
-  const allLeaveRequests = [...(state?.leaveRequests || []), ...(state?.requests || [])];
-  const empApprovedLeaves = allLeaveRequests.filter(
-    (r) =>
-      (String(r.employeeId) === String(emp?.id) || (emp.code && String(r.employeeId) === String(emp.code))) &&
-      (r.status === 'approved' || r.adminApproved) &&
-      (r.type === 'leave' || r.type === 'leave_request' || r.type === 'annual_leave' || r.type === 'sick_leave' || r.type === 'emergency_leave' || r.type === 'unpaid_leave') &&
-      ((r.startDate && r.startDate <= endCutoff && r.endDate >= startCutoff) || (r.date && r.date >= startCutoff && r.date <= endCutoff) || (r.createdAt && r.createdAt.slice(0, 7) === month))
-  );
+  // 6. Leaves and Rest Days (سجل أيام الإجازات والراحات المأخوذة بالشهر) - تجريد دقيق يمنع التكرار
+  const empApprovedLeaves = getEmployeeApprovedLeaves(emp, state, (d) => {
+    if (startCutoff && endCutoff) {
+      return d >= startCutoff && d <= endCutoff;
+    }
+    return d.startsWith(month);
+  });
 
   // Generate date list for cycle
   const cycleDates = [];

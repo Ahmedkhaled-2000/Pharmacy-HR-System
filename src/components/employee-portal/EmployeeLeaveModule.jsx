@@ -42,14 +42,23 @@ export default function EmployeeLeaveModule({
     );
 
     const map = new Map();
+    const seenSigSet = new Set();
+
     [...fromLeaves, ...fromHistory, ...fromRequests].forEach((r) => {
-      const existing = map.get(r.id);
-      if (!existing || r.status === 'approved' || r.adminApproved) {
-        map.set(r.id, {
-          ...r,
-          status: (r.status === 'approved' || r.adminApproved) ? 'approved' : r.status
-        });
-      }
+      if (!r) return;
+      const sDate = r.startDate || r.date || '';
+      const eDate = r.endDate || r.date || sDate;
+      const lType = r.leaveType || r.type || 'annual';
+      const sigKey = `${sDate}_${eDate}_${lType}`;
+
+      if (sDate && seenSigSet.has(sigKey)) return;
+      if (sDate) seenSigSet.add(sigKey);
+
+      const rId = String(r.id || sigKey);
+      map.set(rId, {
+        ...r,
+        status: (r.status === 'approved' || r.adminApproved) ? 'approved' : (r.status || 'pending')
+      });
     });
     return Array.from(map.values()).sort((a, b) => {
       const getT = (r) => {
@@ -63,7 +72,7 @@ export default function EmployeeLeaveModule({
       };
       return getT(b) - getT(a);
     });
-  }, [state.requests, state.leaveRequests, emp.id]);
+  }, [state.requests, state.leaveRequests, state.leaveHistory, emp.id]);
 
   const takenAnnualDays = employeeLeaveRequests
     .filter((r) => r.leaveType === 'annual' && r.status === 'approved' && r.startDate.startsWith(currentYear))

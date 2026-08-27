@@ -370,17 +370,17 @@ export function shouldShowRequestToBranch(req, state) {
 
 /**
  * Returns all approved leaves for an employee from all historical and active sources
- * (state.leaveHistory, emp.leaveHistory, emp.approvedLeaves, state.leaveRequests, and state.requests)
+ * Strictly deduplicates duplicate entries created across state.leaveRequests, state.requests, and state.leaveHistory
  */
-export function getEmployeeApprovedLeaves(emp, state) {
+export function getEmployeeApprovedLeaves(emp, state, periodFilterFn = null) {
   if (!emp) return [];
-  const empIdStr = String(emp.id || '');
-  const empCodeStr = String(emp.code || '');
+  const empIdStr = String(emp.id || '').trim();
+  const empCodeStr = String(emp.code || '').trim();
 
   const fromRequests = (state?.requests || []).filter(
     (r) =>
       (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode) === empCodeStr)) &&
-      (r.type === 'leave' || r.type === 'leave_request' || r.type === 'annual_leave' || r.leaveType)
+      (r.type === 'leave' || r.type === 'leave_request' || r.type === 'annual_leave' || r.type === 'unpaid_leave' || r.type === 'sick_leave' || r.leaveType)
   );
 
   const fromLeaveRequests = (state?.leaveRequests || []).filter(
@@ -396,21 +396,46 @@ export function getEmployeeApprovedLeaves(emp, state) {
   const fromEmpHistory = Array.isArray(emp?.leaveHistory) ? emp.leaveHistory : [];
   const fromEmpLeaves = Array.isArray(emp?.approvedLeaves) ? emp.approvedLeaves : [];
 
-  const map = new Map();
-  [...fromLeaveHistory, ...fromEmpHistory, ...fromEmpLeaves, ...fromLeaveRequests, ...fromRequests].forEach((r) => {
+  const candidateList = [...fromLeaveHistory, ...fromEmpHistory, ...fromEmpLeaves, ...fromLeaveRequests, ...fromRequests];
+  const uniqueMap = new Map();
+  const seenDateKeySet = new Set();
+
+  candidateList.forEach((r) => {
     if (!r) return;
-    const isApproved = r.status === 'approved' || r.adminApproved || !r.status;
-    const key = r.id || `${r.employeeId}_${r.startDate}_${r.endDate}_${r.daysCount || 1}`;
-    const existing = map.get(key);
-    if (!existing || isApproved) {
-      map.set(key, {
-        ...r,
-        status: isApproved ? 'approved' : (r.status || 'pending')
-      });
+    const isApproved = r.status === 'approved' || r.adminApproved === true || (!r.status && !r.isCancelled);
+    if (!isApproved) return;
+
+    const sDate = r.startDate || r.date || (r.createdAt ? r.createdAt.slice(0, 10) : '');
+    const eDate = r.endDate || r.date || sDate;
+    if (periodFilterFn && sDate) {
+      if (!periodFilterFn(sDate) && (!eDate || !periodFilterFn(eDate))) {
+        return;
+      }
     }
+
+    const cleanLeaveType = (r.leaveType === 'unpaid' || r.type === 'unpaid_leave' || r.isUnpaid)
+      ? 'unpaid'
+      : (r.leaveType === 'sick' || r.type === 'sick_leave')
+      ? 'sick'
+      : 'annual';
+
+    // Deduplication signature key by employee + start date + end date + leave type
+    const sigKey = `${empIdStr || empCodeStr}_${sDate}_${eDate}_${cleanLeaveType}`;
+    if (sDate && seenDateKeySet.has(sigKey)) return;
+    if (sDate) seenDateKeySet.add(sigKey);
+
+    const rId = String(r.id || sigKey);
+    uniqueMap.set(rId, {
+      ...r,
+      leaveType: cleanLeaveType,
+      startDate: sDate,
+      endDate: eDate,
+      daysCount: parseFloat(r.daysCount || r.days || 1) || 1,
+      status: 'approved'
+    });
   });
 
-  return Array.from(map.values()).sort((a, b) => {
+  return Array.from(uniqueMap.values()).sort((a, b) => {
     const getT = (r) => {
       if (!r) return 0;
       if (r.createdAt) { const t = new Date(r.createdAt).getTime(); if (!isNaN(t) && t > 0) return t; }
@@ -420,6 +445,8 @@ export function getEmployeeApprovedLeaves(emp, state) {
     return getT(b) - getT(a);
   });
 }
+
+export const getUniqueApprovedLeavesForEmployee = getEmployeeApprovedLeaves;
 
 /**
  * Calculates annual leave total, taken days, and remaining balance for an employee

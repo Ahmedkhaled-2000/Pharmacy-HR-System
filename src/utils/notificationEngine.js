@@ -109,6 +109,93 @@ export function createRequestDecisionNotification({
 }
 
 /**
+ * Helper to determine if a notification has been read by Senior Management / Admin
+ */
+export function isNotificationReadForAdmin(notification) {
+  if (!notification) return true;
+  if (notification.readByAdmin === true) return true;
+  if (notification.readByAdmin === false) return false;
+  if (notification.clearedByAdmin === true || notification.deletedByAdmin === true || notification.hiddenFromAdmin === true) return true;
+
+  if (Array.isArray(notification.readBy)) {
+    if (notification.readBy.includes('admin') || notification.readBy.includes('owner') || notification.readBy.includes('super_admin')) {
+      return true;
+    }
+  }
+  if (Array.isArray(notification.readByRoles)) {
+    if (notification.readByRoles.includes('admin') || notification.readByRoles.includes('owner')) {
+      return true;
+    }
+  }
+
+  // Fallback for admin-only notifications that have legacy boolean read
+  if (notification.targetRole === 'admin' || notification.targetRole === 'owner') {
+    return Boolean(notification.read);
+  }
+
+  return false;
+}
+
+/**
+ * Helper to determine if a notification has been read by a specific Branch Manager
+ */
+export function isNotificationReadForBranch(notification, currentBranch = null) {
+  if (!notification) return true;
+  const bId = currentBranch?.id ? String(currentBranch.id).trim() : '';
+  const bCode = currentBranch?.branchCode ? String(currentBranch.branchCode).trim() : (currentBranch?.code ? String(currentBranch.code).trim() : '');
+  const bUser = currentBranch?.username ? String(currentBranch.username).trim().toLowerCase() : '';
+
+  if (Array.isArray(notification.readByBranches)) {
+    if (bId && notification.readByBranches.includes(bId)) return true;
+    if (bCode && notification.readByBranches.includes(bCode)) return true;
+  }
+
+  if (notification.readByBranch && typeof notification.readByBranch === 'object') {
+    if (bId && notification.readByBranch[bId]) return true;
+    if (bCode && notification.readByBranch[bCode]) return true;
+  }
+
+  if (Array.isArray(notification.readBy)) {
+    if (bId && (notification.readBy.includes('branch_' + bId) || notification.readBy.includes(bId))) return true;
+    if (bCode && (notification.readBy.includes('branch_' + bCode) || notification.readBy.includes(bCode))) return true;
+    if (bUser && notification.readBy.includes('branch_' + bUser)) return true;
+  }
+
+  // If notification was created solely for this branch and has legacy boolean read
+  if ((notification.targetRole === 'branch' || notification.targetRole === 'branch_manager') && (!notification.targetRole || notification.targetRole !== 'branch_and_admin')) {
+    if (!notification.targetRole || notification.targetRole === 'branch') {
+      return Boolean(notification.read);
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Helper to determine if a notification has been read by an Employee
+ */
+export function isNotificationReadForEmployee(notification, employeeId = null) {
+  if (!notification) return true;
+  const empIdStr = employeeId ? String(employeeId).trim() : '';
+
+  if (empIdStr && Array.isArray(notification.readByEmployees) && notification.readByEmployees.includes(empIdStr)) {
+    return true;
+  }
+  if (empIdStr && Array.isArray(notification.readBy)) {
+    if (notification.readBy.includes('emp_' + empIdStr) || notification.readBy.includes(empIdStr)) {
+      return true;
+    }
+  }
+
+  // If targeted directly to employee, fallback to boolean read
+  if (notification.targetRole === 'employee' || notification.targetEmployeeId) {
+    return Boolean(notification.read);
+  }
+
+  return false;
+}
+
+/**
  * Filter notifications strictly meant for a specific employee
  */
 export function filterEmployeeNotifications(notifications = [], employeeId = null) {
@@ -148,7 +235,10 @@ export function filterEmployeeNotifications(notifications = [], employeeId = nul
     }
 
     return false;
-  }).sort((a, b) => {
+  }).map((n) => ({
+    ...n,
+    read: isNotificationReadForEmployee(n, employeeId)
+  })).sort((a, b) => {
     const tA = new Date(a.timestamp || a.date || 0).getTime();
     const tB = new Date(b.timestamp || b.date || 0).getTime();
     return tB - tA;
@@ -161,6 +251,7 @@ import { shouldShowRequestToBranch } from './formatters';
  * Filter notifications meant for Senior Management / Admins
  * Strictly prevents self-notifications when Admin executes any action, punch, or adjustment
  * Integrates live incoming requests from employees and branches that await Higher Management approval
+ * Isolates read / unread status completely from branch managers
  */
 export function filterAdminNotifications(notifications = [], state = null) {
   const deletedIdsSet = new Set((state?._deletedIds || []).map(String));
@@ -171,12 +262,17 @@ export function filterAdminNotifications(notifications = [], state = null) {
     const notifIdStr = String(n.id || '');
     if (deletedIdsSet.has(notifIdStr)) return false;
 
-    // 1. Never show notifications marked as hidden from Admin or created by Admin for employees
-    if (n.hiddenFromAdmin === true || n.creatorRole === 'admin' || n.createdBy === 'admin' || n.isAdminCreated === true || n.submittedByAdmin === true) {
+    // A. Filter out notifications cleared or deleted specifically by Admin
+    if (n.clearedByAdmin === true || n.deletedByAdmin === true || n.hiddenFromAdmin === true) {
       return false;
     }
 
-    // 2. Never show employee-targeted notifications or self decision confirmations (approvals/rejections of employee items)
+    // B. Never show notifications created by Admin for employees (e.g. self confirmations)
+    if (n.creatorRole === 'admin' || n.createdBy === 'admin' || n.isAdminCreated === true || n.submittedByAdmin === true) {
+      return false;
+    }
+
+    // C. Never show employee-targeted notifications or self decision confirmations
     if (n.targetRole === 'employee' || n.targetRole === 'all_employees') {
       return false;
     }
@@ -196,23 +292,26 @@ export function filterAdminNotifications(notifications = [], state = null) {
       return false;
     }
 
-    // 3. Never show branch-only alerts to Senior Admin
+    // D. Never show branch-only alerts to Senior Admin
     if (n.targetRole === 'branch_manager' || n.targetRole === 'branch') {
       return false;
     }
 
-    // 4. Explicitly targeted to Admin / Owner / Management
+    // E. Explicitly targeted to Admin / Owner / Management
     if (n.targetRole === 'admin' || n.targetRole === 'owner' || n.targetRole === 'branch_and_admin' || !n.targetRole) {
       return true;
     }
 
-    // 5. Default incoming request notifications from employees or branch managers (waiting for admin action)
+    // F. Default incoming request notifications from employees or branch managers (waiting for admin action)
     if (!n.action || n.action === 'pending' || n.action === 'submitted') {
       return true;
     }
 
     return false;
-  });
+  }).map((n) => ({
+    ...n,
+    read: isNotificationReadForAdmin(n)
+  }));
 
   // 2. Dynamically integrate active pending requests waiting for Admin approval if not already in explicit notifications
   const synthesizedPendingNotifs = [];
@@ -228,7 +327,7 @@ export function filterAdminNotifications(notifications = [], state = null) {
       if (seenReqs.has(rId) || deletedIdsSet.has(rId)) return;
       seenReqs.add(rId);
 
-      if (r.hiddenFromAdmin) return;
+      if (r.hiddenFromAdmin || r.clearedByAdmin) return;
       if (r.adminApproved === true || r.status === 'approved' || r.status === 'rejected' || r.status === 'cancelled') return;
 
       const isPending = r.status === 'pending' || r.status === 'pending_admin' || !r.status;
@@ -317,6 +416,7 @@ export function filterAdminNotifications(notifications = [], state = null) {
  * Filter notifications strictly meant for Branch Managers
  * Isolates branch manager notifications completely from Admin / Super Admin and other branches
  * Integrates live incoming branch requests waiting for manager review
+ * Isolates read / unread status completely from Senior Management / Admin
  */
 export function filterBranchManagerNotifications(notifications = [], currentBranch = null, managerEmpId = null, state = null) {
   const branchIdStr = currentBranch?.id ? String(currentBranch.id).trim() : null;
@@ -354,6 +454,14 @@ export function filterBranchManagerNotifications(notifications = [], currentBran
     const notifIdStr = String(n.id || '');
     if (deletedIdsSet.has(notifIdStr)) return false;
 
+    // Filter out notifications cleared or deleted by this branch
+    if (branchIdStr && (n.clearedForBranches?.includes(branchIdStr) || n.deletedForBranches?.includes(branchIdStr))) {
+      return false;
+    }
+    if (branchCodeStr && (n.clearedForBranches?.includes(branchCodeStr) || n.deletedForBranches?.includes(branchCodeStr))) {
+      return false;
+    }
+
     // 1. Strictly block notifications aimed exclusively at senior management / super admin / owner
     if (n.targetRole === 'admin' || n.targetRole === 'owner' || n.targetApproval === 'admin_only') {
       return false;
@@ -388,7 +496,10 @@ export function filterBranchManagerNotifications(notifications = [], currentBran
     }
 
     return false;
-  });
+  }).map((n) => ({
+    ...n,
+    read: isNotificationReadForBranch(n, currentBranch)
+  }));
 
   // 2. Dynamically integrate active pending branch requests if not already in explicit notifications
   const synthesizedPendingNotifs = [];
