@@ -144,7 +144,14 @@ export default function AttendancePunchesModal({
       if (saveState) await saveState(updatedState);
 
       setEditingPunch(null);
-      showToast?.('✅ تم حفظ وتعديل بيانات البصمة بنجاح!');
+      const lateInc = (recRes.incidents || []).find((inc) => (inc.shiftId === editingPunch.id || inc.date === editDate) && inc.lateMinutes > 0);
+      if (lateInc && lateInc.deductionMinutes > 0) {
+        showToast?.(`✅ تم حفظ التعديل وتطبيق لائحة الجزاءات تلقائياً: تأخير (${lateInc.lateMinutes} دقيقة) - ${lateInc.tierName} (${lateInc.actionLabel} - خصم ${lateInc.penaltyAmount} ج.م)`);
+      } else if (lateInc && lateInc.lateMinutes > 0) {
+        showToast?.(`✅ تم حفظ التعديل: تأخير (${lateInc.lateMinutes} دقيقة) - ${lateInc.actionLabel || 'فترة سماح'}`);
+      } else {
+        showToast?.('✅ تم حفظ وتعديل بيانات البصمة وإعادة احتساب الجزاءات بنجاح!');
+      }
     };
 
     if (executeWithOwnerGuard) {

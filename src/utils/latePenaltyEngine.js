@@ -11,6 +11,7 @@
  */
 
 import { arabicWeekday } from './formatters';
+import { getEmployeeDaySchedule } from './rosterEngine';
 
 // ── السياسة الافتراضية المعتمدة للائحة جزاءات التأخير ──
 export const DEFAULT_LATE_PENALTY_POLICY = {
@@ -270,38 +271,44 @@ export function isApprovedPermissionForDate(employeeId, dateStr, state) {
 }
 
 /**
- * استخراج بداية الشيفت المجدول للموظف لتاريخ معين من الجداول الشهرية المعتمدة
+ * استخراج بداية الشيفت المجدول للموظف لتاريخ معين من الجداول الشهرية المعتمدة والتبديلات
  */
 export function getScheduledShiftForDate(employeeId, dateStr, state) {
   if (!employeeId || !dateStr || !state) return null;
 
   const empIdStr = String(employeeId);
   const monthKey = String(dateStr).slice(0, 7);
+  const emp = (state.employees || []).find((e) => String(e.id) === empIdStr || (e.code && String(e.code) === empIdStr));
+  const empCodeStr = emp?.code ? String(emp.code) : '';
 
   // 1. فحص طلبات تبديل الورديات المعتمدة أولاً
   const approvedSwaps = (state.shiftSwaps || state.requests || []).filter(
     (s) => (s.type === 'shift_swap' || s.subType === 'shift_swap') &&
       (s.status === 'approved' || s.adminApproved) &&
-      s.date === dateStr &&
-      (String(s.requesterId || s.employeeId) === empIdStr || String(s.targetEmployeeId) === empIdStr)
+      (s.date === dateStr || s.requesterDate === dateStr || s.targetDate === dateStr) &&
+      (String(s.requesterId || s.employeeId || s.requesterEmpId) === empIdStr || String(s.targetEmployeeId || s.targetEmpId) === empIdStr || (empCodeStr && (String(s.employeeCode) === empCodeStr || String(s.targetEmpCode) === empCodeStr)))
   );
 
   if (approvedSwaps.length > 0) {
     const swap = approvedSwaps[0];
-    if (String(swap.requesterId || swap.employeeId) === empIdStr && swap.targetSchedule) {
+    const isRequester = String(swap.requesterId || swap.employeeId || swap.requesterEmpId) === empIdStr;
+    const schedObj = isRequester ? (swap.targetSchedule || swap.schedule) : (swap.requesterSchedule || swap.schedule);
+    if (schedObj && schedObj.start) {
       return {
-        start: swap.targetSchedule.start,
-        end: swap.targetSchedule.end,
-        type: swap.targetSchedule.type || 'shift',
-        branchId: swap.targetBranchId || swap.branchId,
+        start: schedObj.start,
+        end: schedObj.end || '',
+        type: schedObj.type || 'shift',
+        branchId: swap.targetBranchId || swap.branchId || emp?.branchId || '',
         source: 'swap'
       };
     }
   }
 
-  // 2. البحث في الجداول الشهرية المعتمدة
+  // 2. البحث في الجداول الشهرية المعتمدة (state.rosters)
   const approvedRosters = (state.rosters || []).filter(
-    (r) => String(r.employeeId) === empIdStr && (r.month === monthKey || !r.month) && (r.status === 'approved' || !r.status)
+    (r) => (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeId) === empCodeStr)) &&
+      (r.month === monthKey || !r.month) &&
+      (r.status === 'approved' || !r.status)
   );
 
   const arDay = arabicWeekday(dateStr);
@@ -309,19 +316,19 @@ export function getScheduledShiftForDate(employeeId, dateStr, state) {
 
   for (const ros of approvedRosters) {
     if (ros.schedule) {
-      let sched = ros.schedule[arDay];
+      let sched = ros.schedule[dateStr] || ros.schedule[arDay];
       if (!sched) {
         sched = Object.entries(ros.schedule).find(
-          ([k]) => k.replace(/[\u0625\u0623\u0622]/g, 'ا') === normalizedArDay
+          ([k]) => k === dateStr || k.replace(/[\u0625\u0623\u0622]/g, 'ا') === normalizedArDay
         )?.[1];
       }
 
-      if (sched && sched.type !== 'off' && sched.start) {
+      if (sched && sched.type !== 'off' && !sched.isOff && sched.start) {
         return {
           start: sched.start,
           end: sched.end || '',
           type: sched.type || 'work',
-          branchId: ros.branchId || sched.branchId || '',
+          branchId: ros.branchId || sched.branchId || emp?.branchId || '',
           rosterId: ros.id,
           source: 'roster'
         };
@@ -331,7 +338,7 @@ export function getScheduledShiftForDate(employeeId, dateStr, state) {
 
   // 3. فحص طلبات تعديل الروستر المعتمدة في requests
   const approvedRosterReqs = (state.requests || []).filter(
-    (r) => String(r.employeeId) === empIdStr &&
+    (r) => (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeId) === empCodeStr)) &&
       (r.type === 'roster_edit' || r.type === 'roster_update' || r.type === 'roster_edit_request') &&
       (r.month === monthKey || !r.month) &&
       (r.status === 'approved' || r.adminApproved) &&
@@ -339,48 +346,72 @@ export function getScheduledShiftForDate(employeeId, dateStr, state) {
   );
 
   for (const req of approvedRosterReqs) {
-    let sched = req.schedule[arDay];
+    let sched = req.schedule[dateStr] || req.schedule[arDay];
     if (!sched) {
       sched = Object.entries(req.schedule).find(
-        ([k]) => k.replace(/[\u0625\u0623\u0622]/g, 'ا') === normalizedArDay
+        ([k]) => k === dateStr || k.replace(/[\u0625\u0623\u0622]/g, 'ا') === normalizedArDay
       )?.[1];
     }
-    if (sched && sched.type !== 'off' && sched.start) {
+    if (sched && sched.type !== 'off' && !sched.isOff && sched.start) {
       return {
         start: sched.start,
         end: sched.end || '',
         type: sched.type || 'work',
-        branchId: req.branchId || sched.branchId || '',
+        branchId: req.branchId || sched.branchId || emp?.branchId || '',
         rosterId: req.id,
         source: 'roster_request'
       };
     }
   }
 
-  // 4. فحص الجداول العامة للموظف كـ Fallback في حال اختلاف اسم الشهر
+  // 4. جدول الموظف العام أو الافتراضي من rosterEngine
+  try {
+    const daySchedule = getEmployeeDaySchedule(empIdStr, dateStr, state);
+    if (daySchedule && daySchedule.type !== 'off' && !daySchedule.isOff && daySchedule.start) {
+      return {
+        start: daySchedule.start,
+        end: daySchedule.end || '',
+        type: daySchedule.type || 'work',
+        branchId: emp?.branchId || '',
+        source: 'roster_engine'
+      };
+    }
+  } catch (e) {
+    console.error('Error fetching employee day schedule in getScheduledShiftForDate:', e);
+  }
+
+  // 5. فحص الجداول العامة للموظف كـ Fallback في حال اختلاف اسم الشهر
   const anyEmpRoster = (state.rosters || []).find(
-    (r) => String(r.employeeId) === empIdStr && (r.status === 'approved' || !r.status) && r.schedule
+    (r) => (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeId) === empCodeStr)) &&
+      (r.status === 'approved' || !r.status) &&
+      r.schedule
   );
   if (anyEmpRoster && anyEmpRoster.schedule) {
-    let sched = anyEmpRoster.schedule[arDay];
+    let sched = anyEmpRoster.schedule[dateStr] || anyEmpRoster.schedule[arDay];
     if (!sched) {
       sched = Object.entries(anyEmpRoster.schedule).find(
-        ([k]) => k.replace(/[\u0625\u0623\u0622]/g, 'ا') === normalizedArDay
+        ([k]) => k === dateStr || k.replace(/[\u0625\u0623\u0622]/g, 'ا') === normalizedArDay
       )?.[1];
     }
-    if (sched && sched.type !== 'off' && sched.start) {
+    if (sched && sched.type !== 'off' && !sched.isOff && sched.start) {
       return {
         start: sched.start,
         end: sched.end || '',
         type: sched.type || 'work',
-        branchId: anyEmpRoster.branchId || sched.branchId || '',
+        branchId: anyEmpRoster.branchId || sched.branchId || emp?.branchId || '',
         rosterId: anyEmpRoster.id,
         source: 'roster_fallback'
       };
     }
   }
 
-  return null;
+  return {
+    start: '08:00',
+    end: '16:00',
+    type: 'work',
+    branchId: emp?.branchId || '',
+    source: 'default_fallback'
+  };
 }
 
 /**

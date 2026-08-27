@@ -145,7 +145,15 @@ export default function AttendanceModule({
       setManualBreakHours('0');
       setManualNotes('');
       setManualBranchId('');
-      showToast?.('✅ تم إضافة البصمة اليدوية للموظف فوراً وحساب الساعات بنجاح');
+
+      const lateInc = markedIncidents.find((inc) => (inc.shiftId === newPunch.id || inc.date === manualDate) && inc.lateMinutes > 0);
+      if (lateInc && lateInc.deductionMinutes > 0) {
+        showToast?.(`✅ تم تسجيل البصمة وتطبيق لائحة الجزاءات تلقائياً: تأخير (${lateInc.lateMinutes} دقيقة) - ${lateInc.tierName} (${lateInc.actionLabel} - خصم ${lateInc.penaltyAmount} ج.م)`);
+      } else if (lateInc && lateInc.lateMinutes > 0) {
+        showToast?.(`✅ تم تسجيل البصمة وتطبيق اللائحة: تأخير (${lateInc.lateMinutes} دقيقة) - ${lateInc.actionLabel || 'فترة سماح'}`);
+      } else {
+        showToast?.('✅ تم إضافة البصمة اليدوية للموظف فوراً وحساب الساعات بنجاح (حضور في الموعد)');
+      }
 
       // Non-blocking background sync
       if (saveState) {
