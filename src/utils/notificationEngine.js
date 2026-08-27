@@ -90,6 +90,9 @@ export function createRequestDecisionNotification({
     employeeId: employeeId ? String(employeeId) : null,
     targetEmployeeId: employeeId ? String(employeeId) : null,
     targetRole: 'employee',
+    creatorRole: approverRole,
+    isAdminCreated: approverRole === 'admin',
+    hiddenFromAdmin: true,
     type: type || 'request',
     typeLabel: typeName,
     icon,
@@ -154,33 +157,49 @@ export function filterEmployeeNotifications(notifications = [], employeeId = nul
 
 /**
  * Filter notifications meant for Senior Management / Admins
+ * Strictly prevents self-notifications when Admin executes any action, punch, or adjustment
  */
 export function filterAdminNotifications(notifications = []) {
   return (notifications || []).filter((n) => {
     if (!n) return false;
 
-    // 1. Never show employee-targeted decision confirmations (e.g. "موافقة الإدارة العليا... الخاص بك") to Admin
-    if (n.targetRole === 'employee' || n.targetRole === 'all_employees') {
-      return false;
-    }
-    if (n.targetEmployeeId && (n.action === 'approved' || n.action === 'rejected' || n.action === 'decision')) {
-      return false;
-    }
-    if (n.title && (n.title.includes('الخاص بك') || n.message?.includes('الخاص بك') || n.title.includes('موافقة الإدارة العليا') || n.title.includes('رفض الطلب من الإدارة العليا'))) {
+    // 1. Never show notifications marked as hidden from Admin or created by Admin for employees
+    if (n.hiddenFromAdmin === true || n.creatorRole === 'admin' || n.createdBy === 'admin' || n.isAdminCreated === true || n.submittedByAdmin === true) {
       return false;
     }
 
-    // 2. Never show branch-only alerts to Senior Admin
+    // 2. Never show employee-targeted notifications or decision confirmations (e.g. approvals, rejections, direct adjustments, manual punches)
+    if (n.targetRole === 'employee' || n.targetRole === 'all_employees') {
+      return false;
+    }
+    if (n.targetEmployeeId && (n.action === 'approved' || n.action === 'rejected' || n.action === 'decision' || n.action === 'penalty' || n.action === 'bonus' || n.action === 'punch' || n.action === 'manual_punch')) {
+      return false;
+    }
+    if (n.title && (
+      n.title.includes('الخاص بك') ||
+      n.message?.includes('الخاص بك') ||
+      n.title.includes('موافقة الإدارة العليا') ||
+      n.title.includes('رفض الطلب من الإدارة العليا') ||
+      n.title.includes('تم تسجيل بصمة') ||
+      n.title.includes('تم تطبيق خصم') ||
+      n.title.includes('تمت إضافة مكافأة') ||
+      n.title.includes('تم اعتماد السلفة') ||
+      n.title.includes('تم اعتماد طلب')
+    )) {
+      return false;
+    }
+
+    // 3. Never show branch-only alerts to Senior Admin
     if (n.targetRole === 'branch_manager' || n.targetRole === 'branch') {
       return false;
     }
 
-    // 3. Explicitly targeted to Admin / Owner / Management
+    // 4. Explicitly targeted to Admin / Owner / Management
     if (n.targetRole === 'admin' || n.targetRole === 'owner' || n.targetRole === 'branch_and_admin') {
       return true;
     }
 
-    // 4. Default incoming request notifications (without decision action)
+    // 5. Default incoming request notifications from employees or branch managers (waiting for admin action)
     if (!n.action || n.action === 'pending' || n.action === 'submitted') {
       return true;
     }

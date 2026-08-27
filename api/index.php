@@ -217,7 +217,7 @@ try {
                     @flush();
                 }
 
-                usleep(250000); // 250ms ultra-fast check interval
+                usleep(150000); // 150ms ultra-fast split-second check interval
             }
             exit();
             break;

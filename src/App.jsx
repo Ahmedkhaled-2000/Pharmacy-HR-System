@@ -1287,8 +1287,10 @@ export default function App() {
       };
 
       setState(updatedState);
-      await saveState(updatedState);
       showToast('✅ تمت الموافقة على الطلب بنجاح');
+      if (saveState) {
+        saveState(updatedState).catch(err => console.error('Background save error:', err));
+      }
     };
 
     if (role === 'admin') {
@@ -1312,7 +1314,7 @@ export default function App() {
       }
     }
 
-    await performApprove();
+    performApprove();
   };
 
   const handleRejectRequest = async (requestId, role = 'admin') => {
@@ -1386,8 +1388,10 @@ export default function App() {
       notifications: updatedNotifications
     };
     setState(updatedState);
-    await saveState(updatedState);
     showToast('❌ تم رفض الطلب وتحديث السجلات بنجاح');
+    if (saveState) {
+      saveState(updatedState).catch(err => console.error('Background save error:', err));
+    }
   };
 
   const handleSendEarlyExitEmail = async (reqId) => {
@@ -1620,6 +1624,10 @@ export default function App() {
         id: `notif_${Date.now()}`,
         targetEmployeeId: String(loan.employeeId),
         employeeId: String(loan.employeeId),
+        targetRole: 'employee',
+        creatorRole: 'admin',
+        isAdminCreated: true,
+        hiddenFromAdmin: true,
         type: 'loan',
         title: `💳 تم اعتماد ${loanTypeTitle}`,
         message: `تم اعتماد طلب ${loanTypeTitle} الخاص بك بمبلغ ${monthlyInstallment} ج.م وتطبيقه في الرواتب`,
@@ -1637,8 +1645,10 @@ export default function App() {
       };
 
       setState(updatedState);
-      await saveState(updatedState);
       showToast('✅ تم اعتماد السلفة وتطبيق الخصم فوراً في نظام أجر الموظف');
+      if (saveState) {
+        saveState(updatedState).catch(err => console.error('Background save error:', err));
+      }
     };
 
     executeWithOwnerGuard({
@@ -1655,8 +1665,10 @@ export default function App() {
     );
     const updatedState = { ...state, loans: updatedLoans };
     setState(updatedState);
-    await saveState(updatedState);
     showToast('❌ تم رفض طلب السلفة');
+    if (saveState) {
+      saveState(updatedState).catch(err => console.error('Background save error:', err));
+    }
   };
 
   const handleAddBranchRequest = async (reqData) => {
@@ -5036,6 +5048,7 @@ export default function App() {
             const cIdStr = String(currentBranch?.id || '');
             const unreadLate = (state.lateIncidents || []).filter((inc) => {
               if (authRole === 'branch' && cIdStr && String(inc.branchId) !== cIdStr) return false;
+              if (authRole !== 'branch' && (inc.isAdminCreated || inc.creatorRole === 'admin' || inc.createdBy === 'admin' || inc.acknowledgedByAdmin)) return false;
               return (
                 !inc.read &&
                 inc.status !== 'cancelled' &&
@@ -5049,6 +5062,7 @@ export default function App() {
 
             const unreadManual = (state.requests || []).filter((r) => {
               if (r.type !== 'penalty' && r.type !== 'early_exit') return false;
+              if (authRole !== 'branch' && (r.isAdminCreated || r.creatorRole === 'admin' || r.createdBy === 'admin' || r.isManualAdmin)) return false;
               if (authRole === 'branch' && cIdStr && String(r.branchId) !== cIdStr) return false;
               return !r.read && currentFilterFn(r.date || r.createdAt?.slice(0, 10));
             }).length;

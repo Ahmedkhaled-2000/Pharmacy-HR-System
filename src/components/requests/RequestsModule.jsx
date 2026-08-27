@@ -724,8 +724,10 @@ export default function RequestsModule({
         notifications: updatedNotifications
       };
       if (setState) setState(updatedState);
-      if (saveState) await saveState(updatedState);
       showToast?.('✅ تم اعتماد موافقة الطلب وتطبيق التأثير فوراً على الأجور والجداول');
+      if (saveState) {
+        saveState(updatedState).catch(err => console.error('Background save error:', err));
+      }
 
       if (approvedTargetReq.type === 'تأكيد بصمة الوجه' || approvedTargetReq.type === 'تأكيد بصمة اليد') {
         const empId = approvedTargetReq.employeeId;
@@ -738,97 +740,73 @@ export default function RequestsModule({
       }
     };
 
-    let lockKey = null;
-    let actionTitle = 'اعتماد وموافقة على طلب';
-    const reqType = targetReq.type;
-
-    if (reqType === 'loan' || reqType === 'advance' || reqType === 'meds' || reqType === 'credit_medicine') {
-      lockKey = 'lockApproveLoans';
-      actionTitle = 'اعتماد وصرف سلفة مالية / أدوية آجل';
-    } else if (reqType === 'bonus' || reqType === 'penalty' || reqType === 'early_exit' || reqType === 'overtime') {
-      lockKey = 'lockDirectBonusDeduction';
-      actionTitle = 'اعتماد مكافأة / خصم / إضافي';
+    if (currentRole === 'admin') {
+      if (approvedTargetReq.type === 'loan' || approvedTargetReq.type === 'advance' || approvedTargetReq.type === 'meds' || approvedTargetReq.type === 'credit_medicine') {
+        executeWithOwnerGuard?.({
+          lockKey: 'lockApproveLoans',
+          actionTitle: `اعتماد طلب سلفة / أدوية آجل (${approvedTargetReq.employeeName || approvedTargetReq.employeeId})`,
+          actionDetails: `المبلغ: ${approvedTargetReq.amount || approvedTargetReq.totalAmount} ج.م`,
+          onExecute: performApprove
+        });
+        return;
+      }
+      if (approvedTargetReq.type === 'bonus' || approvedTargetReq.type === 'penalty' || approvedTargetReq.type === 'early_exit') {
+        executeWithOwnerGuard?.({
+          lockKey: 'lockDirectBonusDeduction',
+          actionTitle: `اعتماد تسوية مالية (${approvedTargetReq.type === 'bonus' ? 'مكافأة' : 'خصم/جزاء'})`,
+          actionDetails: `الموظف: ${approvedTargetReq.employeeName || approvedTargetReq.employeeId}`,
+          onExecute: performApprove
+        });
+        return;
+      }
     }
 
-    if (lockKey && executeWithOwnerGuard) {
-      executeWithOwnerGuard({
-        lockKey,
-        actionTitle,
-        actionDetails: `الموظف: ${targetReq.employeeName || targetReq.employeeId} - نوع الطلب: ${targetReq.typeLabel || reqType}`,
-        onExecute: performApprove
-      });
-    } else {
-      await performApprove();
-    }
+    performApprove();
   };
 
   const handleReject = async (reqId) => {
-    let targetReq = (state.requests || []).find((r) => r.id === reqId) ||
-                    (state.leaveRequests || []).find((r) => r.id === reqId) ||
-                    (state.shiftSwaps || []).find((r) => r.id === reqId) ||
-                    (state.loans || []).find((r) => r.id === reqId) ||
-                    allRequests.find((r) => r.id === reqId);
-
-    if (!targetReq) {
-      showToast?.('لم يتم العثور على الطلب');
-      return;
-    }
-
-    targetReq = {
-      ...targetReq,
-      status: 'rejected',
-      adminApproved: false,
-      isRejected: true,
-      adminRejected: true,
-      rejectedAt: new Date().toISOString()
-    };
-    if (targetReq.photoUrl) delete targetReq.photoUrl;
-
-    let updatedRequests = [...(state.requests || [])];
-    const rIdx = updatedRequests.findIndex((r) => r.id === reqId);
-    if (rIdx >= 0) {
-      updatedRequests[rIdx] = targetReq;
-    } else {
-      updatedRequests.unshift(targetReq);
-    }
+    let rejectedTargetReq = null;
+    const updatedRequests = (state.requests || []).map((r) => {
+      if (r.id === reqId) {
+        rejectedTargetReq = { ...r, status: 'rejected', adminApproved: false, rejectedAt: new Date().toISOString() };
+        return rejectedTargetReq;
+      }
+      return r;
+    });
 
     let updatedShifts = [...(state.shifts || [])];
-    if (targetReq && targetReq.type === 'overtime') {
+    if (rejectedTargetReq && rejectedTargetReq.type === 'overtime') {
       updatedShifts = updatedShifts.map((s) => {
-        if (s.id === targetReq.shiftId || (String(s.employeeId) === String(targetReq.employeeId) && s.date === targetReq.date)) {
+        if (s.id === rejectedTargetReq.shiftId || (String(s.employeeId) === String(rejectedTargetReq.employeeId) && s.date === rejectedTargetReq.date)) {
           const regHours = s.regularHours !== undefined ? s.regularHours : (s.scheduledHours || 8);
           return {
             ...s,
             overtimeStatus: 'rejected',
             adminApproved: false,
-            note: `ساعات الوردية الأساسية (${regHours} س) — تم استبعاد الإضافي (${targetReq.hours} س) بواسطة الإدارة`
+            note: `ساعات الوردية الأساسية (${regHours} س) — تم استبعاد الإضافي (${rejectedTargetReq.hours} س) بواسطة الإدارة`
           };
         }
         return s;
       });
     }
 
-    let updatedLeaveRequests = [...(state.leaveRequests || [])];
-    if (targetReq && (targetReq.type === 'leave' || targetReq.type === 'leave_request')) {
-      updatedLeaveRequests = updatedLeaveRequests.map((lr) => {
-        if (lr.id === targetReq.id || (String(lr.employeeId) === String(targetReq.employeeId) && lr.startDate === targetReq.startDate)) {
-          return { ...lr, status: 'rejected', adminApproved: false };
-        }
-        return lr;
-      });
-    }
+    const updatedLeaveRequests = (state.leaveRequests || []).map((lr) =>
+      lr.id === reqId || (rejectedTargetReq && String(lr.employeeId) === String(rejectedTargetReq.employeeId) && lr.startDate === rejectedTargetReq.startDate)
+        ? { ...lr, status: 'rejected', adminApproved: false }
+        : lr
+    );
 
     const updatedShiftSwaps = (state.shiftSwaps || []).map((s) =>
       s.id === reqId ? { ...s, status: 'rejected', adminApproved: false } : s
     );
 
     const decisionNotif = createRequestDecisionNotification({
-      requestId: targetReq?.id || reqId,
-      employeeId: targetReq?.employeeId,
-      type: targetReq?.type,
+      requestId: rejectedTargetReq?.id || reqId,
+      employeeId: rejectedTargetReq?.employeeId,
+      type: rejectedTargetReq?.type,
       action: 'rejected',
       approverRole: 'admin',
-      details: targetReq?.reason || targetReq?.details || ''
+      details: rejectedTargetReq?.reason || rejectedTargetReq?.details || ''
     });
 
     const updatedNotifications = [
@@ -860,8 +838,10 @@ export default function RequestsModule({
     });
     const updatedState = { ...state, requests: updatedRequests };
     if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
     showToast?.('🛡️ تم إعفاء الموظف من الخصم المالي بنجاح');
+    if (saveState) {
+      saveState(updatedState).catch(err => console.error('Background save error:', err));
+    }
   };
 
   const handleSendWarningEmail = async (reqId) => {
