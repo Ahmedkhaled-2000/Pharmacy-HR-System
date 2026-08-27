@@ -170,9 +170,6 @@ export default function EmployeeLeaveModule({
     };
 
     setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    notifyAdminOnNewRequest({ state: updatedState, newRequest, empName: emp.name });
-
     setShowForm(false);
     setReason('');
     showToast(
@@ -180,6 +177,14 @@ export default function EmployeeLeaveModule({
         ? 'تم إرسال طلب الإجازة للإدارة العليا فقط (لتجاوزه 3 أيام في الشهر) 🏖️'
         : 'تم إرسال طلب الإجازة لمدير الفرع والإدارة العليا للاعتماد 🏖️'
     );
+
+    // مزامنة خلفية فورية دون تأخير استجابة الزر
+    if (saveState) {
+      saveState(updatedState).catch((err) => {
+        console.warn('[Leave] Background sync warning:', err);
+      });
+    }
+    notifyAdminOnNewRequest({ state: updatedState, newRequest, empName: emp.name });
   };
 
   return (

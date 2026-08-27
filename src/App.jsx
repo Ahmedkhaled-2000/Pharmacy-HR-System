@@ -3014,11 +3014,11 @@ export default function App() {
       }
     };
 
-    // 1. High-frequency adaptive polling: 2.5s when active tab, 15s when in background
+    // 1. High-frequency adaptive polling: 1.5s when active tab, 12s when in background
     let timerId = null;
     const scheduleNextPoll = () => {
       const isVisible = typeof document !== 'undefined' ? document.visibilityState === 'visible' : true;
-      const delay = isVisible ? 2500 : 15000;
+      const delay = isVisible ? 1500 : 12000;
       timerId = setTimeout(async () => {
         await poll();
         scheduleNextPoll();
@@ -3027,7 +3027,7 @@ export default function App() {
 
     scheduleNextPoll();
 
-    // 2. Real-Time Push Stream via Server-Sent Events (SSE) (Instant < 500ms push on any changes)
+    // 2. Real-Time Push Stream via Server-Sent Events (SSE) (Instant < 250ms push on any changes)
     const eventSource = apiCreateEventSource(STORAGE_KEY, (versionData) => {
       poll();
     });
@@ -3062,7 +3062,7 @@ export default function App() {
     };
   }, []);
 
-  // Save State function with Optimistic Non-Blocking Sync & Auto-Backup
+  // Save State function with Optimistic Non-Blocking Sync & Asynchronous Auto-Backup
   const saveState = async (updatedState) => {
     setIsSyncing(true);
     const result = await smartSaveState(updatedState, {
@@ -3090,12 +3090,10 @@ export default function App() {
       setState((prev) => smartMergeStates(prev, normalizeState(result.mergedState)));
     }
 
-    // Auto-backup snapshot upon every modification
-    try {
-      await saveAutoBackupOnModification(finalState, 'تعديل وحفظ بالمنظومة');
-    } catch (e) {
+    // Auto-backup snapshot in background without blocking UI flow
+    saveAutoBackupOnModification(finalState, 'تعديل وحفظ بالمنظومة').catch((e) => {
       console.warn('[AutoBackup] Snapshot trigger skipped:', e);
-    }
+    });
 
     return result;
   };
@@ -4713,7 +4711,7 @@ export default function App() {
     const updatedNotifs = (state.notifications || []).map((n) => (n.id === notifId ? { ...n, read: true } : n));
     const updatedState = { ...state, notifications: updatedNotifs };
     setState(updatedState);
-    if (saveState) await saveState(updatedState);
+    if (saveState) saveState(updatedState).catch(() => {});
   };
 
   const handleMarkAllNotificationsRead = async () => {
@@ -4722,21 +4720,21 @@ export default function App() {
     const updatedRequests = (state.requests || []).map((r) => ({ ...r, read: true }));
     const updatedState = { ...state, notifications: updatedNotifs, lateIncidents: updatedLate, requests: updatedRequests };
     setState(updatedState);
-    if (saveState) await saveState(updatedState);
+    if (saveState) saveState(updatedState).catch(() => {});
   };
 
   const handleDeleteNotification = async (notifId) => {
     const updatedNotifs = (state.notifications || []).filter((n) => n.id !== notifId);
     const updatedState = { ...state, notifications: updatedNotifs };
     setState(updatedState);
-    if (saveState) await saveState(updatedState);
+    if (saveState) saveState(updatedState).catch(() => {});
   };
 
   const handleClearReadNotifications = async () => {
     const updatedNotifs = (state.notifications || []).filter((n) => !n.read);
     const updatedState = { ...state, notifications: updatedNotifs };
     setState(updatedState);
-    if (saveState) await saveState(updatedState);
+    if (saveState) saveState(updatedState).catch(() => {});
   };
 
   return (

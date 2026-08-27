@@ -150,11 +150,16 @@ export default function EmployeeResignationModule({
       notifications: [newNotif, ...(state.notifications || [])]
     };
     setState(updatedState);
-    if (saveState) await saveState(updatedState);
-
-    showToast(isDirectAdmin ? 'تم إرسال الطلب للإدارة العليا مباشرة ✅' : 'تم إرسال الطلب لمدير الفرع للمراجعة أولاً ✅');
     setShowForm(false);
     setReason('');
+    showToast(isDirectAdmin ? 'تم إرسال الطلب للإدارة العليا مباشرة ✅' : 'تم إرسال الطلب لمدير الفرع للمراجعة أولاً ✅');
+
+    // مزامنة خلفية فورية دون تأخير استجابة الزر
+    if (saveState) {
+      saveState(updatedState).catch((err) => {
+        console.warn('[Resignation] Background sync warning:', err);
+      });
+    }
   };
 
   const handleConditionAction = async (reqId, action) => {
@@ -190,7 +195,6 @@ export default function EmployeeResignationModule({
         resignationRequests: updatedReqs 
       };
       setState(updatedState);
-      if (saveState) await saveState(updatedState);
       
       try {
         localStorage.removeItem('app_auth_role');
@@ -201,6 +205,11 @@ export default function EmployeeResignationModule({
       } catch {}
 
       showToast('تم رفض الشروط وتم إيقاف الحساب وتسجيل الخروج');
+
+      if (saveState) {
+        saveState(updatedState).catch(() => {});
+      }
+
       setTimeout(() => {
         window.location.reload();
       }, 1000);
@@ -225,8 +234,13 @@ export default function EmployeeResignationModule({
       
       const updatedState = { ...state, employees: updatedEmployees, resignationRequests: updatedReqs };
       setState(updatedState);
-      if (saveState) await saveState(updatedState);
       showToast('تم قبول شروط الاستقالة وإيقاف البصمة الإلكترونية');
+
+      if (saveState) {
+        saveState(updatedState).catch((err) => {
+          console.warn('[Resignation] Background sync warning:', err);
+        });
+      }
     }
   };
 

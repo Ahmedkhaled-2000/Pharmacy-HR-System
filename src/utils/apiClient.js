@@ -36,7 +36,10 @@ export const API_BASE_URL = getApiBaseUrl();
 const activeETags = new Map();
 
 async function request(endpoint, options = {}) {
-  const url = `${API_BASE_URL}/${endpoint.replace(/^\/+/, '')}`;
+  // إضافة معامل زمني اختياري لتخطي أي كاش للمتصفح أو البروكسي
+  const separator = endpoint.includes('?') ? '&' : '?';
+  const antiCacheQuery = options.noCache !== false ? `${separator}_t=${Date.now()}` : '';
+  const url = `${API_BASE_URL}/${endpoint.replace(/^\/+/, '')}${antiCacheQuery}`;
   const timeoutMs = options.timeout || 12000;
   
   const controller = new AbortController();
@@ -45,6 +48,9 @@ async function request(endpoint, options = {}) {
   const headers = {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0',
     ...options.headers,
   };
 
@@ -56,6 +62,7 @@ async function request(endpoint, options = {}) {
   const config = {
     ...options,
     headers,
+    cache: 'no-store',
     signal: controller.signal,
   };
 
@@ -97,8 +104,9 @@ async function request(endpoint, options = {}) {
 export async function apiFetchSettings(key = STORAGE_KEY, options = {}) {
   const res = await request(`settings?key=${encodeURIComponent(key)}`, {
     method: 'GET',
-    timeout: options.timeout || 10000,
-    useETag: options.useETag || false
+    timeout: options.timeout || 8000,
+    useETag: options.useETag || false,
+    noCache: true
   });
   if (res?.notModified) return { notModified: true };
   return res?.value || null;
@@ -108,7 +116,8 @@ export async function apiSaveSettings(key = STORAGE_KEY, value, options = {}) {
   return await request('settings', {
     method: 'POST',
     body: JSON.stringify({ key, value }),
-    timeout: options.timeout || 25000
+    timeout: options.timeout || 20000,
+    noCache: true
   });
 }
 
@@ -116,13 +125,14 @@ export async function apiSaveSettings(key = STORAGE_KEY, value, options = {}) {
 export async function apiFetchVersion(key = STORAGE_KEY, options = {}) {
   return await request(`sync/version?key=${encodeURIComponent(key)}`, {
     method: 'GET',
-    timeout: options.timeout || 5000
+    timeout: options.timeout || 3500,
+    noCache: true
   });
 }
 
 export function apiCreateEventSource(key = STORAGE_KEY, onVersionChange) {
   if (typeof window === 'undefined' || !('EventSource' in window)) return null;
-  const url = `${API_BASE_URL}/stream?key=${encodeURIComponent(key)}`;
+  const url = `${API_BASE_URL}/stream?key=${encodeURIComponent(key)}&_t=${Date.now()}`;
   try {
     const es = new EventSource(url);
     es.addEventListener('version_change', (e) => {
@@ -131,6 +141,9 @@ export function apiCreateEventSource(key = STORAGE_KEY, onVersionChange) {
         onVersionChange?.(data);
       } catch {}
     });
+    es.onerror = () => {
+      // إغلاق صامت عند انقطاع الاتصال مع ترك آلية المتصفح تعيد الاتصال
+    };
     return es;
   } catch {
     return null;

@@ -147,12 +147,17 @@ export default function EmployeePermissionsModule({
     };
 
     setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    notifyAdminOnNewRequest({ state: updatedState, newRequest: newPermReq, empName: emp.name });
-
     setShowForm(false);
     setReason('');
     showToast('تم إرسال طلب الإذن للاعتماد (لا يؤثر على الراتب وتحتسب وردية كاملة عند الموافقة) ⏰');
+
+    // مزامنة خلفية فورية دون تأخير استجابة الزر
+    if (saveState) {
+      saveState(updatedState).catch((err) => {
+        console.warn('[Permission] Background sync warning:', err);
+      });
+    }
+    notifyAdminOnNewRequest({ state: updatedState, newRequest: newPermReq, empName: emp.name });
   };
 
   return (

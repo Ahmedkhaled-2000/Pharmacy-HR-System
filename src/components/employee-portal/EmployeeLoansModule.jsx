@@ -210,13 +210,18 @@ export default function EmployeeLoansModule({
     };
 
     setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    notifyAdminOnNewRequest({ state: updatedState, newRequest: newLoanReq, empName: emp.name });
-
     setShowLoanForm(false);
     setLoanAmount('');
     setLoanReason('');
     showToast('تم إرسال طلب السلفة إلى الإدارة العليا فقط 💳');
+
+    // مزامنة خلفية فورية دون تأخير استجابة الزر
+    if (saveState) {
+      saveState(updatedState).catch((err) => {
+        console.warn('[Loan] Background sync warning:', err);
+      });
+    }
+    notifyAdminOnNewRequest({ state: updatedState, newRequest: newLoanReq, empName: emp.name });
   };
 
   // Submit Credit Medicine Request
@@ -269,13 +274,18 @@ export default function EmployeeLoansModule({
     };
 
     setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    notifyAdminOnNewRequest({ state: updatedState, newRequest: newMedReq, empName: emp.name });
-
     setShowMedForm(false);
     setMedItems([{ id: 'med_1', name: '', price: '', qty: '1' }]);
     setMedNotes('');
     showToast('تم إرسال طلب الأدوية بالآجل إلى الإدارة العليا فقط 💊');
+
+    // مزامنة خلفية فورية دون تأخير استجابة الزر
+    if (saveState) {
+      saveState(updatedState).catch((err) => {
+        console.warn('[MedRequest] Background sync warning:', err);
+      });
+    }
+    notifyAdminOnNewRequest({ state: updatedState, newRequest: newMedReq, empName: emp.name });
   };
 
   return (

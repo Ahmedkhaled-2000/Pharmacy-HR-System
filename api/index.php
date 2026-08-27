@@ -159,9 +159,11 @@ try {
             while (@ob_end_clean());
 
             header('Content-Type: text/event-stream; charset=utf-8');
-            header('Cache-Control: no-cache, no-transform');
+            header('Cache-Control: no-cache, no-transform, no-store, must-revalidate');
             header('Connection: keep-alive');
             header('X-Accel-Buffering: no');
+            header('Pragma: no-cache');
+            header('Expires: 0');
 
             $key = $_GET['key'] ?? DEFAULT_STORAGE_KEY;
             $lastKnownVersion = (int)($_GET['last_version'] ?? 0);
@@ -169,6 +171,24 @@ try {
             // Allow stream script to run up to 25 seconds per connection, browser auto-reconnects seamlessly
             set_time_limit(30);
             $startTime = time();
+
+            // فحص فوري عند بداية الاتصال
+            $initRow = Database::queryOne(
+                "SELECT version, updated_at FROM app_settings WHERE key_name = ? LIMIT 1",
+                [$key]
+            );
+            $initVer = (int)($initRow['version'] ?? 0);
+            if ($initVer > 0 && $initVer !== $lastKnownVersion) {
+                $lastKnownVersion = $initVer;
+                echo "event: version_change\n";
+                echo "data: " . json_encode([
+                    'version' => $initVer,
+                    'updated_at' => $initRow['updated_at'] ?? null,
+                    'key' => $key
+                ]) . "\n\n";
+                @ob_flush();
+                @flush();
+            }
 
             while (time() - $startTime < 25) {
                 if (connection_aborted()) {
@@ -197,7 +217,7 @@ try {
                     @flush();
                 }
 
-                usleep(500000); // 500ms check interval
+                usleep(250000); // 250ms ultra-fast check interval
             }
             exit();
             break;

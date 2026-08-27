@@ -140,13 +140,18 @@ export default function EmployeeShiftSwapModule({
     };
 
     setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    notifyAdminOnNewRequest({ state: updatedState, newRequest: newSwapReq, empName: emp.name });
-
     setShowSwapModal(false);
     setSwapNotes('');
     setTargetEmpId('');
     showToast(`تم إرسال طلب التبديل إلى الزميل ${targetEmpObj ? targetEmpObj.name : ''} للموافقة المبدئية 🔄`);
+
+    // مزامنة خلفية فورية دون تأخير استجابة الزر
+    if (saveState) {
+      saveState(updatedState).catch((err) => {
+        console.warn('[ShiftSwap] Background sync warning:', err);
+      });
+    }
+    notifyAdminOnNewRequest({ state: updatedState, newRequest: newSwapReq, empName: emp.name });
   };
 
   // Handle Employee B Action (Accept/Reject incoming swap request)
@@ -205,17 +210,22 @@ export default function EmployeeShiftSwapModule({
       notifications: updatedNotifs
     };
     setState(updatedState);
-    if (saveState) await saveState(updatedState);
-
-    if (action === 'accept' && targetSwapReq) {
-      notifyAdminOnNewRequest({ state: updatedState, newRequest: targetSwapReq, empName: emp.name });
-    }
-
     showToast(
       action === 'accept'
         ? 'تمت الموافقة على طلب التبديل وإحالته للإدارة العليا ومدير الفرع للاعتماد النهائي ✅'
         : 'تم رفض طلب تبديل الشيفت ❌'
     );
+
+    // مزامنة خلفية فورية دون تأخير استجابة الزر
+    if (saveState) {
+      saveState(updatedState).catch((err) => {
+        console.warn('[ShiftSwap] Background sync warning:', err);
+      });
+    }
+
+    if (action === 'accept' && targetSwapReq) {
+      notifyAdminOnNewRequest({ state: updatedState, newRequest: targetSwapReq, empName: emp.name });
+    }
   };
 
   const statusBadge = (status) => {

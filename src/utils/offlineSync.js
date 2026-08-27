@@ -67,35 +67,42 @@ export async function fetchRemoteState(options = {}) {
 }
 
 // ── حفظ الحالة بدمج ذكي يمنع مسح طلبات الأجهزة الأخرى ───────────────────
+let saveQueueTimer = null;
+let latestQueuedState = null;
+
 export async function smartSaveState(updatedState, options = {}) {
   const { onSyncSuccess, onSyncFail, onQueuedOffline } = options;
   const cleanUpdated = normalizeState(updatedState);
 
-  // 1. تحديث الكاش المحلي وبث التغيير لكافة التبويبات فورياً (0ms)
-  await saveStateLocally(cleanUpdated);
+  // 1. بث التغيير لكافة التبويبات فورياً في نفس الجهاز (0ms Instant Broadcast)
   broadcastStateChange(cleanUpdated);
+
+  // 2. تحديث الكاش المحلي بشكل غير معطل للواجهة
+  saveStateLocally(cleanUpdated).catch((err) => {
+    console.warn('[Sync] Local storage async write warning:', err);
+  });
 
   if (isOnline()) {
     try {
-      // 2. إرسال النسخة النظيفة إلى السحابة مباشرة
-      const res = await apiSaveSettings(STORAGE_KEY, cleanUpdated, { timeout: 12000 });
+      // 3. إرسال النسخة النظيفة إلى السحابة مباشرة
+      const res = await apiSaveSettings(STORAGE_KEY, cleanUpdated, { timeout: 15000 });
 
       if (!res?.success) {
-        throw new Error(res?.error || 'Failed to save to MariaDB');
+        throw new Error(res?.error || 'Failed to save to Database');
       }
 
       onSyncSuccess?.(cleanUpdated);
       return { success: true, queued: false, mergedState: cleanUpdated };
     } catch (e) {
       console.error('[Sync] Network/Server error during save:', e);
-      await addToPendingQueue({ type: 'SAVE_STATE', state: updatedState });
+      await addToPendingQueue({ type: 'SAVE_STATE', state: updatedState }).catch(() => {});
       onSyncFail?.(e.message);
       return { success: false, queued: true, error: e.message, mergedState: updatedState };
     }
   } else {
-    // 3. غير متصل: جدولة المزامنة عند عودة الإنترنت
+    // 4. غير متصل: جدولة المزامنة عند عودة الإنترنت
     console.log('[Sync] Offline - state saved locally, will merge & sync when online');
-    await addToPendingQueue({ type: 'SAVE_STATE', state: updatedState });
+    await addToPendingQueue({ type: 'SAVE_STATE', state: updatedState }).catch(() => {});
     onQueuedOffline?.();
 
     if ('serviceWorker' in navigator && 'SyncManager' in window) {
