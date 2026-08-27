@@ -549,8 +549,16 @@ export function generateOfficialPayslipHTML({
     (inc) =>
       String(inc.employeeId) === String(emp?.id) &&
       inc.status !== 'cancelled' &&
+      !inc.isCancelled &&
+      inc.objection?.status !== 'approved' &&
       inc.status !== 'approved_permission_exempt' &&
       inc.actionType !== 'grace' &&
+      !(state?.requests || []).some(
+        (r) =>
+          (r.type === 'penalty_objection' || r.type === 'objection') &&
+          (r.status === 'approved' || r.adminApproved) &&
+          (r.penaltyId === inc.id || r.id === `obj_inc_${inc.id}` || (String(r.employeeId) === String(emp?.id) && r.date === inc.date))
+      ) &&
       (inc.deductionMinutes > 0 || inc.penaltyAmount > 0) &&
       (!selectedBranchId || String(inc.branchId) === String(selectedBranchId)) &&
       (inc.date >= startCutoff && inc.date <= endCutoff)

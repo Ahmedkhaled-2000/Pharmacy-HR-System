@@ -546,6 +546,36 @@ export function recalculateEmployeeCycleLateness({
     const branchObj = (state.branches || []).find((b) => b.id === effectiveShiftBranchId);
     const branchName = branchObj ? branchObj.name : 'الفرع الرئيسي';
 
+    // فحص ما إذا كان هناك تظلم معتمد أو إلغاء رسمي للواقعة
+    const approvedObjReq = (state.requests || []).find(
+      (r) =>
+        String(r.employeeId) === empIdStr &&
+        (r.type === 'penalty_objection' || r.type === 'objection' || r.type === 'penalty') &&
+        (r.status === 'approved' || r.adminApproved || r.objection?.status === 'approved') &&
+        (r.penaltyId === incId || r.id === `obj_inc_${incId}` || r.id === `req_${incId}` || (r.date === shift.date && (r.subType === 'lateness' || r.type === 'penalty')))
+    );
+
+    const isObjectionApproved = Boolean(
+      prevInc?.objection?.status === 'approved' ||
+      prevInc?.isCancelled ||
+      prevInc?.status === 'cancelled' ||
+      prevInc?.status === 'waived' ||
+      (approvedObjReq && (approvedObjReq.type === 'penalty_objection' || approvedObjReq.isCancelled || approvedObjReq.status === 'cancelled' || approvedObjReq.objection?.status === 'approved'))
+    );
+
+    const isObjectionPending = Boolean(
+      !isObjectionApproved &&
+      (prevInc?.objection?.status === 'pending' ||
+       prevInc?.status === 'objection_pending' ||
+       (state.requests || []).some(
+         (r) =>
+           String(r.employeeId) === empIdStr &&
+           (r.type === 'penalty_objection' || r.type === 'objection') &&
+           r.status === 'pending' &&
+           (r.penaltyId === incId || r.id === `obj_inc_${incId}` || (r.date === shift.date && r.subType === 'lateness'))
+       ))
+    );
+
     let occurrenceNumber = 0;
     let actionType = 'grace';
     let actionLabel = 'سماح';
@@ -553,6 +583,9 @@ export function recalculateEmployeeCycleLateness({
     let penaltyAmount = 0;
     let status = 'approved';
     let overrideReason = '';
+    let isCancelled = false;
+    let cancellationReason = '';
+    let objectionData = prevInc?.objection || null;
 
     if (approvedPerm) {
       // ✅ تم إلغاء الخصم والجزاء لوجود إذن معتمد رسمي
@@ -562,7 +595,22 @@ export function recalculateEmployeeCycleLateness({
       penaltyAmount = 0;
       status = 'approved_permission_exempt';
       overrideReason = `تم إلغاء الجزاء والخصم تلقائياً لوجود إذن معتمد (${approvedPerm.permType === 'early' ? 'إذن خروج مبكر' : 'إذن تأخير'} من ${approvedPerm.startTime || '—'} إلى ${approvedPerm.endTime || '—'})${approvedPerm.reason ? ' - سبب الإذن: ' + approvedPerm.reason : ''}`;
-      occurrenceNumber = 0; // لا يتم احتسابها كواقعة جزائية غير مبررة
+      occurrenceNumber = 0;
+    } else if (isObjectionApproved) {
+      // ✅ تم قبول التظلم والاعتراض رسمياً من الإدارة العليا وإلغاء الخصم المالي
+      actionType = 'grace';
+      actionLabel = 'سماح (تم قبول التظلم وإلغاء الخصم)';
+      deductionMins = 0;
+      penaltyAmount = 0;
+      status = 'cancelled';
+      isCancelled = true;
+      cancellationReason = prevInc?.cancellationReason || approvedObjReq?.reason || 'تم قبول تظلم الموظف وإلغاء الجزاء والخصم التأديبي';
+      objectionData = {
+        ...(prevInc?.objection || approvedObjReq?.objection || {}),
+        status: 'approved',
+        resolvedAt: prevInc?.objection?.resolvedAt || new Date().toISOString()
+      };
+      occurrenceNumber = 0;
     } else {
       // زيادة عداد الفئة وتحديد رقم التكرار للوقائع غير المأذونة
       tierCounters[tierKey] = (tierCounters[tierKey] || 0) + 1;
@@ -576,8 +624,11 @@ export function recalculateEmployeeCycleLateness({
       actionLabel = isOverridden ? prevInc.actionLabel : rule.label;
       deductionMins = isOverridden ? (parseFloat(prevInc.deductionMinutes) || 0) : (rule.deductionMinutes || 0);
       penaltyAmount = computeLatenessFinancialAmount(deductionMins, emp, effectiveShiftBranchId);
-      status = prevInc?.status && prevInc.status !== 'pending' ? prevInc.status : 'approved';
+      status = isObjectionPending ? 'objection_pending' : (prevInc?.status && prevInc.status !== 'pending' ? prevInc.status : 'approved');
       overrideReason = prevInc?.overrideReason || '';
+      if (isObjectionPending) {
+        objectionData = prevInc?.objection || { status: 'pending', submittedAt: new Date().toISOString() };
+      }
     }
 
     const incident = {
@@ -605,6 +656,9 @@ export function recalculateEmployeeCycleLateness({
       penaltyAmount: penaltyAmount,
       payrollCycleId: payrollCycleId || shift.date.slice(0, 7),
       status: status,
+      isCancelled: isCancelled,
+      cancellationReason: cancellationReason,
+      objection: objectionData,
       overrideReason: overrideReason,
       permissionRequestId: approvedPerm ? approvedPerm.id : null,
       acknowledgedByAdmin: Boolean(prevInc?.acknowledgedByAdmin || shift.isManual || shift.manualPunch || shift.createdBy === 'admin' || shift.creatorRole === 'admin'),
@@ -628,7 +682,7 @@ export function recalculateEmployeeCycleLateness({
   );
 
   const newLateRequests = newIncidents
-    .filter((inc) => inc.status !== 'approved_permission_exempt' && inc.actionType !== 'grace' && (inc.deductionMinutes > 0 || inc.penaltyAmount > 0))
+    .filter((inc) => inc.status !== 'approved_permission_exempt' && inc.status !== 'cancelled' && !inc.isCancelled && inc.objection?.status !== 'approved' && inc.actionType !== 'grace' && (inc.deductionMinutes > 0 || inc.penaltyAmount > 0))
     .map((inc) => ({
       id: `req_${inc.id}`,
       employeeId: inc.employeeId,

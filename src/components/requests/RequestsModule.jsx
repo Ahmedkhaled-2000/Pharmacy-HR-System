@@ -745,13 +745,25 @@ export default function RequestsModule({
       // Penalty Objection Approval: Cancel violation penalty and remove financial deduction
       if (approvedTargetReq.type === 'penalty_objection' || approvedTargetReq.penaltyId || approvedTargetReq.sourceType === 'late_incident') {
         const targetPenId = approvedTargetReq.penaltyId || String(approvedTargetReq.id).replace(/^obj_(inc|adj|req)_/, '');
+        const cleanPenId = String(targetPenId).replace(/^req_/, '');
+
+        // 1. Cancel the penalty in lateIncidents
         updatedLateIncidents = updatedLateIncidents.map((inc) => {
-          if (String(inc.id) === String(targetPenId) || String(inc.id) === String(approvedTargetReq.penaltyId)) {
+          const incIdStr = String(inc.id);
+          const isTarget =
+            incIdStr === String(targetPenId) ||
+            incIdStr === cleanPenId ||
+            incIdStr === `late_inc_${cleanPenId}` ||
+            (String(inc.employeeId) === String(approvedTargetReq.employeeId) && inc.date === approvedTargetReq.date);
+
+          if (isTarget) {
             return {
               ...inc,
               status: 'cancelled',
               actionType: 'grace',
+              actionLabel: 'سماح (تم قبول التظلم وإلغاء الخصم)',
               deductionMinutes: 0,
+              deductionHours: 0,
               penaltyAmount: 0,
               isCancelled: true,
               cancellationReason: 'تم قبول تظلم الموظف وإلغاء الجزاء التأديبي',
@@ -765,15 +777,62 @@ export default function RequestsModule({
           return inc;
         });
 
+        // 2. Cancel the penalty in requests
+        updatedRequests = updatedRequests.map((r) => {
+          const rIdStr = String(r.id);
+          const isTarget =
+            rIdStr === String(targetPenId) ||
+            rIdStr === `req_${cleanPenId}` ||
+            rIdStr === cleanPenId ||
+            r.penaltyId === targetPenId ||
+            r.penaltyId === cleanPenId ||
+            (String(r.employeeId) === String(approvedTargetReq.employeeId) && r.date === approvedTargetReq.date && (r.subType === 'lateness' || r.type === 'penalty'));
+
+          if (isTarget && r.id !== approvedTargetReq.id) {
+            return {
+              ...r,
+              status: 'cancelled',
+              isCancelled: true,
+              cancelledAt: new Date().toISOString(),
+              cancelledBy: 'الإدارة العليا',
+              cancellationReason: 'تم قبول تظلم الموظف وإلغاء الجزاء التأديبي',
+              amount: 0,
+              deductionMinutes: 0,
+              objection: {
+                ...(r.objection || {}),
+                status: 'approved',
+                resolvedAt: new Date().toISOString()
+              }
+            };
+          }
+          return r;
+        });
+
+        // 3. Remove any financial adjustment
         updatedAdjustments = updatedAdjustments.filter((a) => {
-          return String(a.id) !== String(targetPenId) && a.requestId !== targetPenId && a.id !== `adj_disc_${targetPenId}`;
+          const aIdStr = String(a.id);
+          if (
+            aIdStr === String(targetPenId) ||
+            aIdStr === cleanPenId ||
+            aIdStr === `adj_${targetPenId}` ||
+            aIdStr === `adj_disc_${targetPenId}` ||
+            aIdStr === `adj_disc_${cleanPenId}` ||
+            a.requestId === targetPenId ||
+            a.requestId === cleanPenId
+          ) return false;
+          if (
+            String(a.employeeId) === String(approvedTargetReq.employeeId) &&
+            a.date === approvedTargetReq.date &&
+            (a.type === 'penalty' || a.type === 'deduction')
+          ) return false;
+          return true;
         });
       } else if (approvedTargetReq && approvedTargetReq.employeeId && approvedTargetReq.type !== 'loan' && approvedTargetReq.type !== 'advance') {
         try {
           const { incidents } = recalculateEmployeeCycleLateness({
             employeeId: approvedTargetReq.employeeId,
             cycleFilterFn: null,
-            state: { ...state, requests: updatedRequests, shifts: updatedShifts },
+            state: { ...state, requests: updatedRequests, shifts: updatedShifts, lateIncidents: updatedLateIncidents },
             payrollCycleId: (approvedTargetReq.date || new Date().toISOString()).slice(0, 7)
           });
           const incidentIds = new Set(incidents.map((i) => i.id));
@@ -882,10 +941,20 @@ export default function RequestsModule({
 
     if (rejectedTargetReq && (rejectedTargetReq.type === 'penalty_objection' || rejectedTargetReq.penaltyId || rejectedTargetReq.sourceType === 'late_incident')) {
       const targetPenId = rejectedTargetReq.penaltyId || String(rejectedTargetReq.id).replace(/^obj_(inc|adj|req)_/, '');
+      const cleanPenId = String(targetPenId).replace(/^req_/, '');
+
       updatedLateIncidents = updatedLateIncidents.map((inc) => {
-        if (String(inc.id) === String(targetPenId) || String(inc.id) === String(rejectedTargetReq.penaltyId)) {
+        const incIdStr = String(inc.id);
+        const isTarget =
+          incIdStr === String(targetPenId) ||
+          incIdStr === cleanPenId ||
+          incIdStr === `late_inc_${cleanPenId}` ||
+          (String(inc.employeeId) === String(rejectedTargetReq.employeeId) && inc.date === rejectedTargetReq.date);
+
+        if (isTarget) {
           return {
             ...inc,
+            status: 'approved',
             objection: {
               ...(inc.objection || {}),
               status: 'rejected',
@@ -894,6 +963,29 @@ export default function RequestsModule({
           };
         }
         return inc;
+      });
+
+      updatedRequests = updatedRequests.map((r) => {
+        const rIdStr = String(r.id);
+        const isTarget =
+          rIdStr === String(targetPenId) ||
+          rIdStr === `req_${cleanPenId}` ||
+          rIdStr === cleanPenId ||
+          r.penaltyId === targetPenId ||
+          r.penaltyId === cleanPenId ||
+          (String(r.employeeId) === String(rejectedTargetReq.employeeId) && r.date === rejectedTargetReq.date && (r.subType === 'lateness' || r.type === 'penalty'));
+
+        if (isTarget && r.id !== rejectedTargetReq.id) {
+          return {
+            ...r,
+            objection: {
+              ...(r.objection || {}),
+              status: 'rejected',
+              resolvedAt: new Date().toISOString()
+            }
+          };
+        }
+        return r;
       });
 
       updatedAdjustments = updatedAdjustments.map((a) => {
@@ -958,6 +1050,8 @@ export default function RequestsModule({
     const updatedState = {
       ...state,
       requests: updatedRequests,
+      lateIncidents: updatedLateIncidents,
+      adjustments: updatedAdjustments,
       shifts: updatedShifts,
       leaveRequests: updatedLeaveRequests,
       shiftSwaps: updatedShiftSwaps,

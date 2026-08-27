@@ -236,7 +236,7 @@ export function normalizeState(parsed) {
   }));
 
   const branches = toSafeArray(parsed.branches);
-  const requests = toSafeArray(parsed.requests);
+  let requests = toSafeArray(parsed.requests);
   const resignationRequests = toSafeArray(parsed.resignationRequests);
   const leaveRequests = toSafeArray(parsed.leaveRequests);
   const shiftSwaps = toSafeArray(parsed.shiftSwaps);
@@ -248,6 +248,98 @@ export function normalizeState(parsed) {
   const logs = toSafeArray(parsed.logs);
   const approvalRules = toSafeArray(parsed.approvalRules);
   const rosters = toSafeArray(parsed.rosters);
+  let lateIncidents = toSafeArray(parsed.lateIncidents);
+  let cleanAdjustments = adjustments;
+
+  // ── Auto-sanitize approved penalty objections ──
+  const approvedObjections = requests.filter(
+    (r) =>
+      (r.type === 'penalty_objection' || r.type === 'objection') &&
+      (r.status === 'approved' || r.adminApproved === true || r.objection?.status === 'approved')
+  );
+
+  if (approvedObjections.length > 0) {
+    approvedObjections.forEach((objReq) => {
+      const penId = objReq.penaltyId || String(objReq.id).replace(/^obj_(inc|adj|req)_/, '');
+      const cleanPenId = String(penId).replace(/^req_/, '');
+
+      requests = requests.map((r) => {
+        const rIdStr = String(r.id);
+        const isTarget =
+          rIdStr === String(penId) ||
+          rIdStr === `req_${cleanPenId}` ||
+          rIdStr === cleanPenId ||
+          r.penaltyId === penId ||
+          r.penaltyId === cleanPenId ||
+          (String(r.employeeId) === String(objReq.employeeId) && r.date === objReq.date && (r.subType === 'lateness' || r.type === 'penalty'));
+
+        if (isTarget && r.id !== objReq.id) {
+          return {
+            ...r,
+            status: 'cancelled',
+            isCancelled: true,
+            amount: 0,
+            deductionMinutes: 0,
+            cancellationReason: r.cancellationReason || 'تم قبول تظلم الموظف وإلغاء الجزاء التأديبي',
+            objection: {
+              ...(r.objection || {}),
+              status: 'approved',
+              resolvedAt: r.objection?.resolvedAt || objReq.approvedAt || new Date().toISOString()
+            }
+          };
+        }
+        return r;
+      });
+
+      lateIncidents = lateIncidents.map((inc) => {
+        const incIdStr = String(inc.id);
+        const isTarget =
+          incIdStr === String(penId) ||
+          incIdStr === cleanPenId ||
+          incIdStr === `late_inc_${cleanPenId}` ||
+          (String(inc.employeeId) === String(objReq.employeeId) && inc.date === objReq.date);
+
+        if (isTarget) {
+          return {
+            ...inc,
+            status: 'cancelled',
+            isCancelled: true,
+            actionType: 'grace',
+            actionLabel: 'سماح (تم قبول التظلم وإلغاء الخصم)',
+            deductionMinutes: 0,
+            deductionHours: 0,
+            penaltyAmount: 0,
+            cancellationReason: inc.cancellationReason || 'تم قبول تظلم الموظف وإلغاء الجزاء التأديبي',
+            objection: {
+              ...(inc.objection || {}),
+              status: 'approved',
+              resolvedAt: inc.objection?.resolvedAt || objReq.approvedAt || new Date().toISOString()
+            }
+          };
+        }
+        return inc;
+      });
+
+      cleanAdjustments = cleanAdjustments.filter((a) => {
+        const aIdStr = String(a.id);
+        if (
+          aIdStr === String(penId) ||
+          aIdStr === cleanPenId ||
+          aIdStr === `adj_${penId}` ||
+          aIdStr === `adj_disc_${penId}` ||
+          aIdStr === `adj_disc_${cleanPenId}` ||
+          a.requestId === penId ||
+          a.requestId === cleanPenId
+        ) return false;
+        if (
+          String(a.employeeId) === String(objReq.employeeId) &&
+          a.date === objReq.date &&
+          (a.type === 'penalty' || a.type === 'deduction')
+        ) return false;
+        return true;
+      });
+    });
+  }
 
   const activeShifts = (parsed.activeShifts && typeof parsed.activeShifts === 'object' && !Array.isArray(parsed.activeShifts))
     ? parsed.activeShifts
@@ -268,8 +360,9 @@ export function normalizeState(parsed) {
     branches,
     shifts,
     activeShifts,
-    adjustments,
+    adjustments: cleanAdjustments,
     requests,
+    lateIncidents,
     resignationRequests,
     leaveRequests,
     leaveHistory: toSafeArray(parsed.leaveHistory),

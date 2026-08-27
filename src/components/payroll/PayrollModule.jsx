@@ -646,9 +646,17 @@ export default function PayrollModule({
                   (inc) =>
                     String(inc.employeeId) === String(selectedEmpModal.id) &&
                     inc.status !== 'cancelled' &&
+                    !inc.isCancelled &&
+                    inc.objection?.status !== 'approved' &&
                     inc.status !== 'approved_permission_exempt' &&
                     inc.actionType !== 'grace' &&
                     !isApprovedPermissionForDate(selectedEmpModal.id, inc.date, state) &&
+                    !(state?.requests || []).some(
+                      (r) =>
+                        (r.type === 'penalty_objection' || r.type === 'objection') &&
+                        (r.status === 'approved' || r.adminApproved) &&
+                        (r.penaltyId === inc.id || r.id === `obj_inc_${inc.id}` || (String(r.employeeId) === String(selectedEmpModal.id) && r.date === inc.date))
+                    ) &&
                     (inc.deductionMinutes > 0 || inc.penaltyAmount > 0) &&
                     (!filterBranch || String(inc.branchId) === String(filterBranch)) &&
                     payrollFilterFn(inc.date)

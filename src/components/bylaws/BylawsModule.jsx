@@ -351,15 +351,28 @@ export default function BylawsModule({
     const performApproveObj = async () => {
       let empId = null;
       let ruleTitle = '';
+      const cleanId = String(reqId).replace(/^(req_|obj_req_|obj_inc_|obj_adj_)/, '');
       const updatedRequests = (state.requests || []).map((r) => {
-        if (String(r.id) === String(reqId)) {
+        const rIdStr = String(r.id);
+        const isTarget =
+          rIdStr === String(reqId) ||
+          rIdStr === cleanId ||
+          rIdStr === `req_${cleanId}` ||
+          r.penaltyId === reqId ||
+          r.penaltyId === cleanId;
+
+        if (isTarget) {
           empId = r.employeeId;
-          ruleTitle = r.ruleTitle;
+          ruleTitle = r.ruleTitle || r.reason;
           return {
             ...r,
             status: 'cancelled',
             isCancelled: true,
+            amount: 0,
+            deductionMinutes: 0,
             cancelledAt: new Date().toISOString(),
+            cancelledBy: 'الإدارة العليا',
+            cancellationReason: 'تم قبول تظلم الموظف وإلغاء الجزاء التأديبي',
             objection: {
               ...(r.objection || {}),
               status: 'approved',
@@ -371,13 +384,24 @@ export default function BylawsModule({
       });
 
       const updatedLateIncidents = (state.lateIncidents || []).map((inc) => {
-        if (String(inc.id) === String(reqId)) {
+        const incIdStr = String(inc.id);
+        const isTarget =
+          incIdStr === String(reqId) ||
+          incIdStr === cleanId ||
+          incIdStr === `late_inc_${cleanId}`;
+
+        if (isTarget) {
+          if (!empId) empId = inc.employeeId;
           return {
             ...inc,
             status: 'cancelled',
             actionType: 'grace',
+            actionLabel: 'سماح (تم قبول التظلم وإلغاء الخصم)',
             deductionMinutes: 0,
+            deductionHours: 0,
             penaltyAmount: 0,
+            isCancelled: true,
+            cancellationReason: 'تم قبول تظلم الموظف وإلغاء الجزاء التأديبي',
             objection: {
               ...(inc.objection || {}),
               status: 'approved',
@@ -390,7 +414,18 @@ export default function BylawsModule({
 
       // Automatically remove any corresponding deduction from adjustments
       const updatedAdjustments = (state.adjustments || []).filter((a) => {
-        if (String(a.id) === String(reqId) || a.id === `adj_${reqId}` || a.id === `adj_penalty_${reqId}` || a.requestId === reqId || a.id === `adj_disc_${reqId}`) return false;
+        const aIdStr = String(a.id);
+        if (
+          aIdStr === String(reqId) ||
+          aIdStr === cleanId ||
+          aIdStr === `adj_${reqId}` ||
+          aIdStr === `adj_${cleanId}` ||
+          aIdStr === `adj_penalty_${reqId}` ||
+          aIdStr === `adj_disc_${reqId}` ||
+          aIdStr === `adj_disc_${cleanId}` ||
+          a.requestId === reqId ||
+          a.requestId === cleanId
+        ) return false;
         if (empId && String(a.employeeId) === String(empId) && (a.type === 'penalty' || a.type === 'deduction') && (a.reason === ruleTitle || a.details === ruleTitle)) return false;
         return true;
       });
@@ -420,8 +455,10 @@ export default function BylawsModule({
   };
 
   const handleAdminRejectObjection = async (reqId, reply = '') => {
+    const cleanId = String(reqId).replace(/^(req_|obj_req_|obj_inc_|obj_adj_)/, '');
     const updatedRequests = (state.requests || []).map((r) => {
-      if (String(r.id) === String(reqId)) {
+      const rIdStr = String(r.id);
+      if (rIdStr === String(reqId) || rIdStr === cleanId || rIdStr === `req_${cleanId}` || r.penaltyId === reqId || r.penaltyId === cleanId) {
         return {
           ...r,
           objection: {
@@ -436,7 +473,8 @@ export default function BylawsModule({
     });
 
     const updatedLateIncidents = (state.lateIncidents || []).map((inc) => {
-      if (String(inc.id) === String(reqId)) {
+      const incIdStr = String(inc.id);
+      if (incIdStr === String(reqId) || incIdStr === cleanId || incIdStr === `late_inc_${cleanId}`) {
         return {
           ...inc,
           status: 'approved',
@@ -501,6 +539,40 @@ export default function BylawsModule({
           }
         }
 
+        // Check for approved objection in requests
+        const isApprovedObjection =
+          r.objection?.status === 'approved' ||
+          r.isCancelled ||
+          r.status === 'cancelled' ||
+          (state.requests || []).some(
+            (req) =>
+              (req.type === 'penalty_objection' || req.type === 'objection') &&
+              (req.status === 'approved' || req.adminApproved) &&
+              (req.penaltyId === r.id || req.id === `obj_inc_${r.id}` || req.id === `obj_req_${r.id}` || (String(req.employeeId) === String(r.employeeId) && req.date === r.date))
+          );
+
+        const isPendingObjection =
+          !isApprovedObjection &&
+          (r.objection?.status === 'pending' ||
+           r.status === 'objection_pending' ||
+           (state.requests || []).some(
+             (req) =>
+               (req.type === 'penalty_objection' || req.type === 'objection') &&
+               req.status === 'pending' &&
+               (req.penaltyId === r.id || req.id === `obj_inc_${r.id}` || req.id === `obj_req_${r.id}` || (String(req.employeeId) === String(r.employeeId) && req.date === r.date))
+           ));
+
+        let effectiveStatus = r.status || (r.adminApproved ? 'approved' : 'pending');
+        let effectiveObjection = r.objection ? { ...r.objection } : null;
+
+        if (isApprovedObjection) {
+          effectiveStatus = 'cancelled';
+          amount = 0;
+          effectiveObjection = { ...(effectiveObjection || {}), status: 'approved' };
+        } else if (isPendingObjection) {
+          effectiveObjection = { ...(effectiveObjection || {}), status: 'pending' };
+        }
+
         list.push({
           id: r.id,
           employeeId: r.employeeId,
@@ -517,16 +589,17 @@ export default function BylawsModule({
           createdAt: r.createdAt || new Date().toISOString(),
           reason: r.reason || r.ruleTitle || r.details || 'مخالفة لائحية',
           details: r.details || r.reason || 'مخالفة لائحية',
-          status: r.status || (r.adminApproved ? 'approved' : 'pending'),
+          status: effectiveStatus,
           adminApproved: r.adminApproved,
-          objection: r.objection || null,
+          objection: effectiveObjection,
+          isCancelled: isApprovedObjection,
           sourceType: 'request'
         });
       }
     });
 
     (state.lateIncidents || []).forEach((inc) => {
-      if (inc.status === 'cancelled' || inc.status === 'approved_permission_exempt' || inc.actionType === 'grace') return;
+      if (inc.status === 'cancelled' || inc.isCancelled || inc.objection?.status === 'approved' || inc.status === 'approved_permission_exempt' || inc.actionType === 'grace') return;
       const incIdStr = String(inc.id);
       if (seenReqIds.has(incIdStr)) return;
       seenReqIds.add(incIdStr);
@@ -535,6 +608,19 @@ export default function BylawsModule({
       const bObj = branches.find((b) => String(b.id) === String(inc.branchId || emp?.branchId));
       const dayAmt = computeLatenessFinancialAmount(inc.deductionMinutes || 0, emp, inc.branchId);
       const incAmount = dayAmt > 0 ? dayAmt : (parseFloat(inc.penaltyAmount) || 0);
+
+      const isApprovedObjection =
+        inc.objection?.status === 'approved' ||
+        inc.isCancelled ||
+        inc.status === 'cancelled' ||
+        (state.requests || []).some(
+          (req) =>
+            (req.type === 'penalty_objection' || req.type === 'objection') &&
+            (req.status === 'approved' || req.adminApproved) &&
+            (req.penaltyId === inc.id || req.id === `obj_inc_${inc.id}` || (String(req.employeeId) === String(inc.employeeId) && req.date === inc.date))
+        );
+
+      if (isApprovedObjection) return;
 
       list.push({
         id: inc.id,

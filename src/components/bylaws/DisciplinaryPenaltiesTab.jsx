@@ -787,12 +787,28 @@ export default function DisciplinaryPenaltiesTab({
   // ── Admin Objection Handlers ──
   const handleAdminApproveObjection = async (penId) => {
     const performApproveObj = async () => {
+      const cleanId = String(penId).replace(/^(req_|obj_req_|obj_inc_|obj_adj_)/, '');
+      let empId = null;
+      let ruleTitle = '';
+
       let updatedRequests = (state.requests || []).map((r) => {
-        if (String(r.id) === String(penId)) {
+        const rIdStr = String(r.id);
+        const isTarget =
+          rIdStr === String(penId) ||
+          rIdStr === cleanId ||
+          rIdStr === `req_${cleanId}` ||
+          r.penaltyId === penId ||
+          r.penaltyId === cleanId;
+
+        if (isTarget) {
+          empId = r.employeeId;
+          ruleTitle = r.ruleTitle || r.reason;
           return {
             ...r,
             status: 'cancelled',
             isCancelled: true,
+            amount: 0,
+            deductionMinutes: 0,
             cancelledAt: new Date().toISOString(),
             cancelledBy: 'الإدارة العليا',
             cancellationReason: 'تم قبول تظلم الموظف وإلغاء الجزاء التأديبي',
@@ -817,13 +833,24 @@ export default function DisciplinaryPenaltiesTab({
       });
 
       let updatedLateIncidents = (state.lateIncidents || []).map((inc) => {
-        if (String(inc.id) === String(penId)) {
+        const incIdStr = String(inc.id);
+        const isTarget =
+          incIdStr === String(penId) ||
+          incIdStr === cleanId ||
+          incIdStr === `late_inc_${cleanId}`;
+
+        if (isTarget) {
+          if (!empId) empId = inc.employeeId;
           return {
             ...inc,
             status: 'cancelled',
             actionType: 'grace',
+            actionLabel: 'سماح (تم قبول التظلم وإلغاء الخصم)',
             deductionMinutes: 0,
+            deductionHours: 0,
             penaltyAmount: 0,
+            isCancelled: true,
+            cancellationReason: 'تم قبول تظلم الموظف وإلغاء الجزاء التأديبي',
             objection: {
               ...(inc.objection || {}),
               status: 'approved',
@@ -835,7 +862,19 @@ export default function DisciplinaryPenaltiesTab({
       });
 
       const updatedAdjustments = (state.adjustments || []).filter((a) => {
-        if (String(a.id) === String(penId) || a.requestId === penId || a.id === `adj_disc_${penId}`) return false;
+        const aIdStr = String(a.id);
+        if (
+          aIdStr === String(penId) ||
+          aIdStr === cleanId ||
+          aIdStr === `adj_${penId}` ||
+          aIdStr === `adj_${cleanId}` ||
+          aIdStr === `adj_penalty_${penId}` ||
+          aIdStr === `adj_disc_${penId}` ||
+          aIdStr === `adj_disc_${cleanId}` ||
+          a.requestId === penId ||
+          a.requestId === cleanId
+        ) return false;
+        if (empId && String(a.employeeId) === String(empId) && (a.type === 'penalty' || a.type === 'deduction') && (a.reason === ruleTitle || a.details === ruleTitle)) return false;
         return true;
       });
 

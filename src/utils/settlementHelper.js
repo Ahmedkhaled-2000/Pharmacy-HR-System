@@ -217,9 +217,17 @@ export function computeEmployeeFinalSettlement(empId, state, terminationDate = n
     (inc) =>
       String(inc.employeeId) === String(empId) &&
       inc.status !== 'cancelled' &&
+      !inc.isCancelled &&
+      inc.objection?.status !== 'approved' &&
       inc.status !== 'approved_permission_exempt' &&
       inc.actionType !== 'grace' &&
       !isApprovedPermissionForDate(empId, inc.date, state) &&
+      !(state?.requests || []).some(
+        (r) =>
+          (r.type === 'penalty_objection' || r.type === 'objection') &&
+          (r.status === 'approved' || r.adminApproved) &&
+          (r.penaltyId === inc.id || r.id === `obj_inc_${inc.id}` || (String(r.employeeId) === String(empId) && r.date === inc.date))
+      ) &&
       (inc.deductionMinutes > 0 || inc.penaltyAmount > 0) &&
       (inc.date ? (inc.date >= payrollCycle.startDate && inc.date <= termDate) : true)
   );
