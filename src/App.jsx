@@ -5757,6 +5757,7 @@ export default function App() {
                   setState={setState}
                   saveState={saveState}
                   currentRole={authRole === 'branch' ? 'branch' : 'admin'}
+                  currentBranchId={currentBranch?.id}
                   onSaveEvaluation={handleSaveEvaluation}
                   onSaveEmployeeNote={handleSaveEmployeeNote}
                   onReplyToNote={handleReplyToNote}
