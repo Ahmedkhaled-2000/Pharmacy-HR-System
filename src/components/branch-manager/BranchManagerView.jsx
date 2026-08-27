@@ -451,7 +451,7 @@ export default function BranchManagerView({
     return list.sort((a, b) => getRequestSortTime(b) - getRequestSortTime(a));
   }, [branchRequests, branchReqEmpFilter, branchReqDateFilter]);
 
-  // ── All Requests Sent from this Branch to Higher Management (Punches, Leaves, Permissions, Penalties, Bonuses, Evaluations, Roster Edits, Resignations) ──
+  // ── All Requests Sent from this Branch Manager to Higher Management (Punches, Leaves, Permissions, Penalties, Bonuses, Evaluations, Roster Edits, Resignations) ──
   const branchSentRequests = useMemo(() => {
     const cIdStr = currentBranch?.id ? String(currentBranch.id) : null;
     const branchEmpIdSet = new Set(
@@ -461,43 +461,94 @@ export default function BranchManagerView({
     const rawList = [];
     const seenIds = new Set();
 
-    // 1. From state.requests
+    // 1. From state.requests (Only requests sent by the branch manager to Higher Management)
     (state.requests || []).forEach((r) => {
       if (!r || !r.id || seenIds.has(String(r.id))) return;
       const idStr = String(r.id);
       const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
       if (deletedIdsSet.has(idStr) || (rawId && (deletedIdsSet.has(rawId) || deletedIdsSet.has(`req_${rawId}`)))) return;
 
+      // Strictly exclude system automated lateness incidents & employee penalty objections
+      if (
+        r.subType === 'lateness' ||
+        r.type === 'late_penalty' ||
+        r.type === 'penalty_objection' ||
+        r.type === 'objection' ||
+        idStr.startsWith('req_late_inc_') ||
+        idStr.startsWith('late_inc_') ||
+        idStr.startsWith('obj_')
+      ) {
+        return;
+      }
+
       const isMatchBranch = (r.branchId && String(r.branchId) === cIdStr) ||
                             (r.employeeId && branchEmpIdSet.has(String(r.employeeId))) ||
                             (r.employeeCode && branchEmpIdSet.has(String(r.employeeCode))) ||
                             branchEmployees.some(e => String(e.id) === String(r.employeeId));
 
-      if (isMatchBranch) {
+      if (!isMatchBranch) return;
+
+      // Check if sent by branch manager:
+      const isSentByBranch = Boolean(
+        r.submittedByBranchManager ||
+        r.createdBy === 'branch' ||
+        r.creatorRole === 'branch' ||
+        r.requestedBy === 'branch' ||
+        r.senderRole === 'branch' ||
+        r.subType === 'manual_punch_request' ||
+        r.type === 'punch_correction' ||
+        r.type === 'roster_edit_request' ||
+        r.type === 'roster_edit' ||
+        r.type === 'eval_edit_request' ||
+        r.type === 'bonus' ||
+        (r.type === 'penalty' && r.subType !== 'lateness' && !idStr.startsWith('req_late_inc_')) ||
+        (r.branchApproved && r.targetApproval !== 'branch_only')
+      );
+
+      if (isSentByBranch) {
         rawList.push(r);
         seenIds.add(String(r.id));
       }
     });
 
-    // 2. From state.leaveRequests
+    // 2. From state.leaveRequests (Leaves submitted/forwarded by branch manager)
     (state.leaveRequests || []).forEach((lr) => {
       if (!lr || !lr.id || seenIds.has(String(lr.id))) return;
       const isMatchBranch = (lr.branchId && String(lr.branchId) === cIdStr) ||
                             (lr.employeeId && branchEmpIdSet.has(String(lr.employeeId))) ||
                             branchEmployees.some(e => String(e.id) === String(lr.employeeId));
-      if (isMatchBranch) {
+      if (!isMatchBranch) return;
+
+      const isSentByBranch = Boolean(
+        lr.submittedByBranchManager ||
+        lr.createdBy === 'branch' ||
+        lr.creatorRole === 'branch' ||
+        lr.requestedBy === 'branch' ||
+        (lr.branchApproved && lr.targetApproval !== 'branch_only')
+      );
+
+      if (isSentByBranch) {
         rawList.push({ ...lr, type: lr.type || 'leave' });
         seenIds.add(String(lr.id));
       }
     });
 
-    // 3. From state.evaluations
+    // 3. From state.evaluations (Evaluations submitted by branch manager)
     (state.evaluations || []).forEach((ev) => {
       if (!ev || !ev.id || seenIds.has(String(ev.id))) return;
       const isMatchBranch = (ev.branchId && String(ev.branchId) === cIdStr) ||
                             (ev.employeeId && branchEmpIdSet.has(String(ev.employeeId))) ||
                             branchEmployees.some(e => String(e.id) === String(ev.employeeId));
-      if (isMatchBranch) {
+      if (!isMatchBranch) return;
+
+      const isSentByBranch = Boolean(
+        ev.evaluatorRole === 'مدير الفرع' ||
+        ev.managerId === managerEmp?.id ||
+        ev.createdBy === 'branch' ||
+        ev.branchId
+      );
+
+      if (isSentByBranch) {
         rawList.push({
           ...ev,
           type: ev.type || 'evaluation',
@@ -510,7 +561,7 @@ export default function BranchManagerView({
     });
 
     return rawList.sort((a, b) => getRequestSortTime(b) - getRequestSortTime(a));
-  }, [state.requests, state.leaveRequests, state.evaluations, branchEmployees, currentBranch, deletedIdsSet]);
+  }, [state.requests, state.leaveRequests, state.evaluations, branchEmployees, currentBranch, managerEmp, deletedIdsSet]);
 
   const getSentReqMeta = (r) => {
     if (!r) return { cat: 'other', label: 'طلب إداري', icon: '📋', bg: '#f8fafc', border: '#e2e8f0', text: '#334155' };
@@ -914,6 +965,9 @@ export default function BranchManagerView({
       branchApproved: true,
       adminApproved: false,
       targetApproval: 'admin_only',
+      submittedByBranchManager: true,
+      createdBy: 'branch',
+      creatorRole: 'branch',
       createdAt: new Date().toISOString()
     };
 
@@ -972,6 +1026,9 @@ export default function BranchManagerView({
       branchApproved: true,
       adminApproved: false,
       targetApproval: 'admin_only',
+      submittedByBranchManager: true,
+      createdBy: 'branch',
+      creatorRole: 'branch',
       createdAt: new Date().toISOString()
     };
 
