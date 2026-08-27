@@ -1013,7 +1013,7 @@ export default function EmployeePortalView({
 
     // 2. Penalty & Adjustment Requests (state.requests)
     const penaltyReqs = (state.requests || [])
-      .filter((r) => String(r.employeeId) === String(emp.id) && (r.type === 'penalty' || r.type === 'adjustment') && r.status !== 'cancelled' && r.status !== 'rejected' && r.objection?.status !== 'approved' && !r.isCancelled && filterFn(r.date || r.createdAt?.slice(0, 10)))
+      .filter((r) => String(r.employeeId) === String(emp.id) && (r.type === 'penalty' || r.type === 'adjustment') && r.status !== 'cancelled' && r.status !== 'rejected' && r.objection?.status !== 'approved' && !r.isCancelled && !String(r.id).startsWith('req_late_inc_') && !String(r.id).startsWith('req_late_') && r.subType !== 'lateness' && r.type !== 'late_penalty' && filterFn(r.date || r.createdAt?.slice(0, 10)))
       .map((r) => {
         let amt = parseFloat(r.amount) || 0;
         if (!amt && (r.impactType || r.impactVal)) {

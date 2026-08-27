@@ -47,7 +47,7 @@ export default function AdjustmentsModule({
   const adjustments = React.useMemo(() => {
     const list = [...(state.adjustments || [])];
     const penaltyReqs = (state.requests || [])
-      .filter((r) => (r.type === 'penalty' || r.type === 'adjustment' || r.type === 'disciplinary_penalty' || r.subType === 'disciplinary_penalty') && (r.status === 'approved' || r.adminApproved) && r.status !== 'cancelled' && r.status !== 'rejected' && r.objection?.status !== 'approved' && !r.isCancelled)
+      .filter((r) => (r.type === 'penalty' || r.type === 'adjustment' || r.type === 'disciplinary_penalty' || r.subType === 'disciplinary_penalty') && !String(r.id).startsWith('req_late_inc_') && !String(r.id).startsWith('req_late_') && r.subType !== 'lateness' && (r.status === 'approved' || r.adminApproved) && r.status !== 'cancelled' && r.status !== 'rejected' && r.objection?.status !== 'approved' && !r.isCancelled)
       .map((r) => {
         const emp = employees.find((e) => String(e.id) === String(r.employeeId));
         let amount = parseFloat(r.amount) || 0;

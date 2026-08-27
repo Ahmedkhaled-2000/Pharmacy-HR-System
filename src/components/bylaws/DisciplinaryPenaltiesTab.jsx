@@ -93,6 +93,7 @@ export default function DisciplinaryPenaltiesTab({
   const allDisciplinaryPenalties = useMemo(() => {
     const list = [];
     const seenIds = new Set();
+    const seenLateKeys = new Set();
 
     // 1. Requests (Disciplinary Penalties, Direct Penalties, Violations, Deductions)
     (state.requests || []).forEach((r) => {
@@ -109,7 +110,19 @@ export default function DisciplinaryPenaltiesTab({
         if (isEmployee && currentEmpId && String(r.employeeId) !== String(currentEmpId)) return;
         if (isBranch && currentBranchId && String(r.branchId) !== String(currentBranchId) && !scopedEmpIds.has(String(r.employeeId))) return;
 
-        seenIds.add(String(r.id));
+        const idStr = String(r.id);
+        const cleanId = idStr.replace(/^req_/, '');
+        seenIds.add(idStr);
+        seenIds.add(cleanId);
+        seenIds.add(`req_${cleanId}`);
+        seenIds.add(`late_inc_${cleanId.replace(/^late_inc_/, '')}`);
+        seenIds.add(`req_late_inc_${cleanId.replace(/^late_inc_/, '')}`);
+
+        const isLateReq = r.subType === 'lateness' || r.type === 'late_penalty' || idStr.startsWith('req_late_inc_');
+        if (isLateReq && r.employeeId && r.date) {
+          seenLateKeys.add(`${r.employeeId}_${r.date}`);
+        }
+
         const emp = allEmployeesList.find((e) => String(e.id) === String(r.employeeId));
         const bObj = (state.branches || []).find((b) => String(b.id) === String(r.branchId || emp?.branchId));
 
@@ -184,8 +197,19 @@ export default function DisciplinaryPenaltiesTab({
       if (isBranch && currentBranchId && String(inc.branchId) !== String(currentBranchId) && !scopedEmpIds.has(String(inc.employeeId))) return;
 
       const incIdStr = String(inc.id);
-      if (seenIds.has(incIdStr)) return;
+      const cleanIncId = incIdStr.replace(/^late_inc_/, '');
+      if (
+        seenIds.has(incIdStr) ||
+        seenIds.has(cleanIncId) ||
+        seenIds.has(`req_${incIdStr}`) ||
+        seenIds.has(`req_late_inc_${cleanIncId}`) ||
+        (inc.employeeId && inc.date && seenLateKeys.has(`${inc.employeeId}_${inc.date}`))
+      ) {
+        return;
+      }
       seenIds.add(incIdStr);
+      seenIds.add(`req_${incIdStr}`);
+      if (inc.employeeId && inc.date) seenLateKeys.add(`${inc.employeeId}_${inc.date}`);
 
       const emp = allEmployeesList.find((e) => String(e.id) === String(inc.employeeId));
       const bObj = (state.branches || []).find((b) => String(b.id) === String(inc.branchId || emp?.branchId));
