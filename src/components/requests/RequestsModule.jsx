@@ -663,11 +663,44 @@ export default function RequestsModule({
         updatedRosters = applyShiftSwapToRosters(approvedTargetReq, updatedRosters, state.employees || []);
       }
 
-      if (approvedTargetReq.type === 'permission' || approvedTargetReq.type === 'إذن' || approvedTargetReq.type === 'late_permission' || approvedTargetReq.type === 'early_leave') {
+      if (approvedTargetReq.type === 'permission' || approvedTargetReq.type === 'إذن' || approvedTargetReq.type === 'late_permission' || approvedTargetReq.type === 'early_leave' || approvedTargetReq.permType === 'late' || approvedTargetReq.permType === 'early') {
+        const permDate = approvedTargetReq.date || approvedTargetReq.startDate;
         updatedShifts = applyApprovedPermissionsToShifts({
           ...state,
           requests: updatedRequests,
           shifts: updatedShifts
+        });
+
+        // Cancel any late penalties on this date and employee
+        updatedRequests = updatedRequests.map((r) => {
+          if (
+            String(r.employeeId) === String(approvedTargetReq.employeeId) &&
+            r.date === permDate &&
+            (r.subType === 'lateness' || r.type === 'late_penalty' || String(r.id).startsWith('req_late_inc_'))
+          ) {
+            return {
+              ...r,
+              status: 'approved_permission_exempt',
+              isCancelled: true,
+              amount: 0,
+              deductionMinutes: 0,
+              actionType: 'grace',
+              cancellationReason: `تم إلغاء الجزاء تلقائياً لوجود إذن معتمد بتاريخ ${permDate}`
+            };
+          }
+          return r;
+        });
+
+        // Remove adjustments linked to late penalties on this date
+        updatedAdjustments = updatedAdjustments.filter((a) => {
+          if (
+            String(a.employeeId) === String(approvedTargetReq.employeeId) &&
+            a.date === permDate &&
+            (a.type === 'penalty' || a.type === 'deduction' || String(a.id).startsWith('adj_pen_') || String(a.id).startsWith('adj_disc_'))
+          ) {
+            return false;
+          }
+          return true;
         });
       }
 
@@ -829,12 +862,15 @@ export default function RequestsModule({
         });
       } else if (approvedTargetReq && approvedTargetReq.employeeId && approvedTargetReq.type !== 'loan' && approvedTargetReq.type !== 'advance') {
         try {
-          const { incidents } = recalculateEmployeeCycleLateness({
+          const { incidents, updatedRequests: recalcedRequests } = recalculateEmployeeCycleLateness({
             employeeId: approvedTargetReq.employeeId,
             cycleFilterFn: null,
             state: { ...state, requests: updatedRequests, shifts: updatedShifts, lateIncidents: updatedLateIncidents },
             payrollCycleId: (approvedTargetReq.date || new Date().toISOString()).slice(0, 7)
           });
+          if (recalcedRequests) {
+            updatedRequests = recalcedRequests;
+          }
           const incidentIds = new Set(incidents.map((i) => i.id));
           updatedLateIncidents = [
             ...updatedLateIncidents.filter((i) => !incidentIds.has(i.id) && String(i.employeeId) !== String(approvedTargetReq.employeeId)),

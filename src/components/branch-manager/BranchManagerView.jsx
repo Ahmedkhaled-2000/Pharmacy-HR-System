@@ -806,6 +806,29 @@ export default function BranchManagerView({
       }
     }
 
+    // 5. If permission request approved
+    if (updatedTargetReq.type === 'permission' || updatedTargetReq.type === 'إذن' || updatedTargetReq.type === 'late_permission' || updatedTargetReq.type === 'early_leave' || updatedTargetReq.permType === 'late' || updatedTargetReq.permType === 'early') {
+      const permDate = updatedTargetReq.date || updatedTargetReq.startDate;
+      updatedRequests = updatedRequests.map((r) => {
+        if (
+          String(r.employeeId) === String(updatedTargetReq.employeeId) &&
+          r.date === permDate &&
+          (r.subType === 'lateness' || r.type === 'late_penalty' || String(r.id).startsWith('req_late_inc_'))
+        ) {
+          return {
+            ...r,
+            status: 'approved_permission_exempt',
+            isCancelled: true,
+            amount: 0,
+            deductionMinutes: 0,
+            actionType: 'grace',
+            cancellationReason: `تم إلغاء الجزاء تلقائياً لوجود إذن معتمد بتاريخ ${permDate}`
+          };
+        }
+        return r;
+      });
+    }
+
     // Dismiss or update notification
     const updatedNotifications = (state.notifications || []).map((n) => {
       if (n.requestId === reqId) return { ...n, isRead: true, status: isFullyApproved ? 'approved' : 'pending_admin' };
@@ -815,12 +838,15 @@ export default function BranchManagerView({
     let updatedLateIncidents = [...(state.lateIncidents || [])];
     if (updatedTargetReq && updatedTargetReq.employeeId) {
       try {
-        const { incidents } = recalculateEmployeeCycleLateness({
+        const { incidents, updatedRequests: recalcedRequests } = recalculateEmployeeCycleLateness({
           employeeId: updatedTargetReq.employeeId,
           cycleFilterFn: null,
           state: { ...state, requests: updatedRequests, shifts: updatedShifts },
           payrollCycleId: (updatedTargetReq.date || new Date().toISOString()).slice(0, 7)
         });
+        if (recalcedRequests) {
+          updatedRequests = recalcedRequests;
+        }
         const incidentIds = new Set(incidents.map((i) => i.id));
         updatedLateIncidents = [
           ...updatedLateIncidents.filter((i) => !incidentIds.has(i.id) && String(i.employeeId) !== String(updatedTargetReq.employeeId)),

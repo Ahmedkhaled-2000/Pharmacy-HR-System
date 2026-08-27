@@ -341,6 +341,70 @@ export function normalizeState(parsed) {
     });
   }
 
+  // ── Auto-sanitize approved permissions against late penalties ──
+  const approvedPermissions = requests.filter(
+    (r) =>
+      (r.type === 'permission' || r.type === 'إذن' || r.type === 'late_permission' || r.type === 'early_leave' || r.permType === 'late' || r.permType === 'early') &&
+      (r.status === 'approved' || r.adminApproved === true || (r.branchApproved && r.status !== 'rejected')) &&
+      r.status !== 'rejected' &&
+      r.status !== 'cancelled'
+  );
+
+  if (approvedPermissions.length > 0) {
+    approvedPermissions.forEach((permReq) => {
+      const pEmpId = String(permReq.employeeId || '');
+      const pDate = String(permReq.date || permReq.startDate || (permReq.createdAt ? permReq.createdAt.slice(0, 10) : '')).slice(0, 10);
+      if (!pEmpId || !pDate) return;
+
+      requests = requests.map((r) => {
+        if (
+          String(r.employeeId) === pEmpId &&
+          (r.date === pDate || (r.createdAt && r.createdAt.slice(0, 10) === pDate)) &&
+          (r.subType === 'lateness' || r.type === 'late_penalty' || String(r.id).startsWith('req_late_inc_'))
+        ) {
+          return {
+            ...r,
+            status: 'approved_permission_exempt',
+            isCancelled: true,
+            amount: 0,
+            deductionMinutes: 0,
+            actionType: 'grace',
+            cancellationReason: `تم إلغاء الجزاء تلقائياً لوجود إذن معتمد بتاريخ ${pDate}`
+          };
+        }
+        return r;
+      });
+
+      lateIncidents = lateIncidents.map((inc) => {
+        if (String(inc.employeeId) === pEmpId && inc.date === pDate) {
+          return {
+            ...inc,
+            status: 'approved_permission_exempt',
+            isCancelled: true,
+            actionType: 'grace',
+            actionLabel: `سماح (${permReq.permType === 'early' ? 'إذن خروج مبكر معتمد' : 'إذن تأخير معتمد'})`,
+            deductionMinutes: 0,
+            deductionHours: 0,
+            penaltyAmount: 0,
+            cancellationReason: `تم إلغاء الجزاء تلقائياً لوجود إذن معتمد بتاريخ ${pDate}`
+          };
+        }
+        return inc;
+      });
+
+      cleanAdjustments = cleanAdjustments.filter((a) => {
+        if (
+          String(a.employeeId) === pEmpId &&
+          a.date === pDate &&
+          (a.type === 'penalty' || a.type === 'deduction' || String(a.id).startsWith('adj_pen_') || String(a.id).startsWith('adj_disc_'))
+        ) {
+          return false;
+        }
+        return true;
+      });
+    });
+  }
+
   const activeShifts = (parsed.activeShifts && typeof parsed.activeShifts === 'object' && !Array.isArray(parsed.activeShifts))
     ? parsed.activeShifts
     : {};

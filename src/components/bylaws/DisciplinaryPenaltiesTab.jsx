@@ -6,7 +6,7 @@ import {
   getEmployeeDisciplinarySummary,
   resolveDisciplinaryCategory
 } from '../../utils/disciplinaryPenaltyEngine';
-import { computeLatenessFinancialAmount } from '../../utils/latePenaltyEngine';
+import { computeLatenessFinancialAmount, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
 import { getEmpDisplayName } from '../../utils/formatters';
 import DisciplinaryViolationModal from './DisciplinaryViolationModal';
 
@@ -119,6 +119,9 @@ export default function DisciplinaryPenaltiesTab({
         seenIds.add(`req_late_inc_${cleanId.replace(/^late_inc_/, '')}`);
 
         const isLateReq = r.subType === 'lateness' || r.type === 'late_penalty' || idStr.startsWith('req_late_inc_');
+        if (isLateReq && (isApprovedPermissionForDate(r.employeeId, r.date, state) || r.status === 'approved_permission_exempt')) {
+          return;
+        }
         if (isLateReq && r.employeeId && r.date) {
           seenLateKeys.add(`${r.employeeId}_${r.date}`);
         }
@@ -192,7 +195,13 @@ export default function DisciplinaryPenaltiesTab({
 
     // 2. Late Incidents (وقائع التأخير اللائحي التلقائية)
     (state.lateIncidents || []).forEach((inc) => {
-      if (inc.status === 'cancelled' || inc.status === 'approved_permission_exempt' || inc.actionType === 'grace') return;
+      if (
+        inc.status === 'cancelled' ||
+        inc.isCancelled ||
+        inc.status === 'approved_permission_exempt' ||
+        inc.actionType === 'grace' ||
+        isApprovedPermissionForDate(inc.employeeId, inc.date, state)
+      ) return;
       if (isEmployee && currentEmpId && String(inc.employeeId) !== String(currentEmpId)) return;
       if (isBranch && currentBranchId && String(inc.branchId) !== String(currentBranchId) && !scopedEmpIds.has(String(inc.employeeId))) return;
 

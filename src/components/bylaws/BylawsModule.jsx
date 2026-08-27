@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import LatePenaltyPolicyModule from './LatePenaltyPolicyModule';
 import DisciplinaryPenaltiesTab from './DisciplinaryPenaltiesTab';
-import { computeLatenessFinancialAmount } from '../../utils/latePenaltyEngine';
+import { computeLatenessFinancialAmount, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
 import {
   DEFAULT_PHARMACY_BYLAWS_SECTIONS,
   parseBylawsIntoSections,
@@ -532,6 +532,9 @@ export default function BylawsModule({
         seenReqIds.add(`req_late_inc_${cleanId.replace(/^late_inc_/, '')}`);
 
         const isLateReq = r.subType === 'lateness' || r.type === 'late_penalty' || idStr.startsWith('req_late_inc_');
+        if (isLateReq && (isApprovedPermissionForDate(r.employeeId, r.date, state) || r.status === 'approved_permission_exempt')) {
+          return;
+        }
         if (isLateReq && r.employeeId && r.date) {
           seenLateKeys.add(`${r.employeeId}_${r.date}`);
         }
@@ -612,7 +615,14 @@ export default function BylawsModule({
     });
 
     (state.lateIncidents || []).forEach((inc) => {
-      if (inc.status === 'cancelled' || inc.isCancelled || inc.objection?.status === 'approved' || inc.status === 'approved_permission_exempt' || inc.actionType === 'grace') return;
+      if (
+        inc.status === 'cancelled' ||
+        inc.isCancelled ||
+        inc.objection?.status === 'approved' ||
+        inc.status === 'approved_permission_exempt' ||
+        inc.actionType === 'grace' ||
+        isApprovedPermissionForDate(inc.employeeId, inc.date, state)
+      ) return;
       const incIdStr = String(inc.id);
       const cleanIncId = incIdStr.replace(/^late_inc_/, '');
       if (
