@@ -22,6 +22,9 @@ export function getFormattedRequestBadge(type, leaveType) {
     return <span className="badge badge-success">🏖️ طلب إجازة</span>;
   }
 
+  if (cleanType === 'penalty_objection' || cleanType === 'objection' || cleanType === 'تظلم' || cleanType === 'اعتراض') {
+    return <span className="badge badge-danger" style={{ background: '#7c3aed', color: '#fff', border: '1px solid #6d28d9' }}>✋ تظلم على جزاء لائحى</span>;
+  }
   if (cleanType === 'disciplinary_penalty' || cleanType === 'violation' || cleanType === 'disciplinary') {
     return <span className="badge badge-danger">⚠️ جزاء تأديبي لائحي</span>;
   }
@@ -201,6 +204,66 @@ export default function RequestsModule({
       }
     });
 
+    // Aggregate any pending/resolved employee penalty objections from late incidents
+    (state.lateIncidents || []).forEach((inc) => {
+      if (inc && inc.objection && (inc.objection.status || inc.status === 'objection_pending')) {
+        const objReqId = `obj_inc_${inc.id}`;
+        if (!existingIds.has(objReqId) && !existingIds.has(String(inc.id))) {
+          const emp = (state.employees || []).find((e) => String(e.id) === String(inc.employeeId) || (inc.employeeCode && String(e.code) === String(inc.employeeCode)));
+          list.push({
+            id: objReqId,
+            penaltyId: inc.id,
+            sourceType: 'late_incident',
+            type: 'penalty_objection',
+            typeLabel: 'تظلم على جزاء لائحى',
+            employeeId: inc.employeeId || emp?.id,
+            employeeCode: inc.employeeCode || emp?.code,
+            employeeName: inc.employeeName || emp?.name,
+            branchId: inc.branchId || emp?.branchId,
+            date: inc.date,
+            reason: inc.objection.reason || 'تظلم على واقعة تأخير / جزاء لائحى',
+            details: `تظلم على جزاء (${inc.penaltyAmount || 0} ج.م / ${inc.deductionMinutes || 0} دقيقة تأخير) — مبررات الموظف: ${inc.objection.reason || '—'}`,
+            penaltyAmount: inc.penaltyAmount || 0,
+            deductionMinutes: inc.deductionMinutes || 0,
+            violationTitle: inc.violationTitle || `تأخير (${inc.lateMinutes || 0} دقيقة)`,
+            status: inc.objection.status || (inc.status === 'objection_pending' ? 'pending' : 'pending'),
+            adminApproved: inc.objection.status === 'approved',
+            createdAt: inc.objection.submittedAt || inc.date || new Date().toISOString()
+          });
+          existingIds.add(objReqId);
+        }
+      }
+    });
+
+    // Aggregate any employee objections from financial adjustments
+    (state.adjustments || []).forEach((adj) => {
+      if (adj && adj.objection && adj.objection.status) {
+        const objReqId = `obj_adj_${adj.id}`;
+        if (!existingIds.has(objReqId) && !existingIds.has(String(adj.id))) {
+          const emp = (state.employees || []).find((e) => String(e.id) === String(adj.employeeId) || (adj.employeeCode && String(e.code) === String(adj.employeeCode)));
+          list.push({
+            id: objReqId,
+            penaltyId: adj.id,
+            sourceType: 'adjustment',
+            type: 'penalty_objection',
+            typeLabel: 'تظلم على خصم مالي',
+            employeeId: adj.employeeId || emp?.id,
+            employeeCode: adj.employeeCode || emp?.code,
+            employeeName: adj.employeeName || emp?.name,
+            branchId: adj.branchId || emp?.branchId,
+            date: adj.date,
+            reason: adj.objection.reason || 'تظلم على خصم مالي',
+            details: `تظلم على خصم (${adj.amount || 0} ج.م) — مبررات الموظف: ${adj.objection.reason || '—'}`,
+            penaltyAmount: adj.amount || 0,
+            status: adj.objection.status || 'pending',
+            adminApproved: adj.objection.status === 'approved',
+            createdAt: adj.objection.submittedAt || adj.date || new Date().toISOString()
+          });
+          existingIds.add(objReqId);
+        }
+      }
+    });
+
     return list.filter((r) => {
       if (!r || !r.id) return false;
       const idStr = String(r.id);
@@ -216,7 +279,7 @@ export default function RequestsModule({
       }
       return true;
     });
-  }, [state.requests, state.leaveRequests, state.shiftSwaps, state.loans, state.resignationRequests, state.employees, state.approvalRules, isBranch, cIdStr, branchEmpIdSet, deletedIdsSet]);
+  }, [state.requests, state.leaveRequests, state.shiftSwaps, state.loans, state.resignationRequests, state.lateIncidents, state.adjustments, state.employees, state.approvalRules, isBranch, cIdStr, branchEmpIdSet, deletedIdsSet]);
 
   const hiddenAdminCount = isBranch ? 0 : allRequests.filter(r => r && r.hiddenFromAdmin).length;
   
@@ -323,6 +386,8 @@ export default function RequestsModule({
         if (r.type !== 'roster_update' && r.type !== 'roster_edit' && r.type !== 'roster_edit_request') return false;
       } else if (filterType === 'complaint') {
         if (r.type !== 'complaint' && r.type !== 'eval_edit_request') return false;
+      } else if (filterType === 'penalty_objection') {
+        if (r.type !== 'penalty_objection' && r.type !== 'objection' && !r.penaltyId && !r.objection) return false;
       } else if (r.type !== filterType) {
         return false;
       }
@@ -673,12 +738,35 @@ export default function RequestsModule({
         }
       }
 
-      const updatedShiftSwaps = (state.shiftSwaps || []).map((s) =>
-        s.id === reqId ? { ...s, status: 'approved', adminApproved: true, branchApproved: true, approvedAt: new Date().toISOString() } : s
-      );
-
       let updatedLateIncidents = [...(state.lateIncidents || [])];
-      if (approvedTargetReq && approvedTargetReq.employeeId) {
+
+      // Penalty Objection Approval: Cancel violation penalty and remove financial deduction
+      if (approvedTargetReq.type === 'penalty_objection' || approvedTargetReq.penaltyId || approvedTargetReq.sourceType === 'late_incident') {
+        const targetPenId = approvedTargetReq.penaltyId || String(approvedTargetReq.id).replace(/^obj_(inc|adj|req)_/, '');
+        updatedLateIncidents = updatedLateIncidents.map((inc) => {
+          if (String(inc.id) === String(targetPenId) || String(inc.id) === String(approvedTargetReq.penaltyId)) {
+            return {
+              ...inc,
+              status: 'cancelled',
+              actionType: 'grace',
+              deductionMinutes: 0,
+              penaltyAmount: 0,
+              isCancelled: true,
+              cancellationReason: 'تم قبول تظلم الموظف وإلغاء الجزاء التأديبي',
+              objection: {
+                ...(inc.objection || {}),
+                status: 'approved',
+                resolvedAt: new Date().toISOString()
+              }
+            };
+          }
+          return inc;
+        });
+
+        updatedAdjustments = updatedAdjustments.filter((a) => {
+          return String(a.id) !== String(targetPenId) && a.requestId !== targetPenId && a.id !== `adj_disc_${targetPenId}`;
+        });
+      } else if (approvedTargetReq && approvedTargetReq.employeeId && approvedTargetReq.type !== 'loan' && approvedTargetReq.type !== 'advance') {
         try {
           const { incidents } = recalculateEmployeeCycleLateness({
             employeeId: approvedTargetReq.employeeId,
@@ -696,12 +784,18 @@ export default function RequestsModule({
         }
       }
 
+      const shiftSwaps = (state.shiftSwaps || []).map((s) =>
+        s.id === reqId ? { ...s, status: 'approved', adminApproved: true, branchApproved: true, approvedAt: new Date().toISOString() } : s
+      );
+
       const decisionNotif = createRequestDecisionNotification({
         requestId: approvedTargetReq.id,
         employeeId: approvedTargetReq.employeeId,
         type: approvedTargetReq.type,
         action: 'approved',
         approverRole: 'admin',
+        title: approvedTargetReq.type === 'penalty_objection' ? '✅ تم قبول تظلمك وإلغاء الجزاء' : undefined,
+        message: approvedTargetReq.type === 'penalty_objection' ? 'تم قبول تظلمك من قِبل الإدارة العليا وإلغاء الجزاء والخصم المالي' : undefined,
         details: approvedTargetReq.details || approvedTargetReq.reason || (approvedTargetReq.amount ? `${approvedTargetReq.amount} ج.م` : '')
       });
 
@@ -719,7 +813,7 @@ export default function RequestsModule({
         shifts: updatedShifts,
         leaveRequests: updatedLeaveRequests,
         leaveHistory: updatedLeaveHistory,
-        shiftSwaps: updatedShiftSwaps,
+        shiftSwaps,
         lateIncidents: updatedLateIncidents,
         notifications: updatedNotifications
       };
@@ -774,6 +868,40 @@ export default function RequestsModule({
       return r;
     });
 
+    let updatedLateIncidents = [...(state.lateIncidents || [])];
+    let updatedAdjustments = [...(state.adjustments || [])];
+
+    if (rejectedTargetReq && (rejectedTargetReq.type === 'penalty_objection' || rejectedTargetReq.penaltyId || rejectedTargetReq.sourceType === 'late_incident')) {
+      const targetPenId = rejectedTargetReq.penaltyId || String(rejectedTargetReq.id).replace(/^obj_(inc|adj|req)_/, '');
+      updatedLateIncidents = updatedLateIncidents.map((inc) => {
+        if (String(inc.id) === String(targetPenId) || String(inc.id) === String(rejectedTargetReq.penaltyId)) {
+          return {
+            ...inc,
+            objection: {
+              ...(inc.objection || {}),
+              status: 'rejected',
+              resolvedAt: new Date().toISOString()
+            }
+          };
+        }
+        return inc;
+      });
+
+      updatedAdjustments = updatedAdjustments.map((a) => {
+        if (String(a.id) === String(targetPenId) || String(a.id) === String(rejectedTargetReq.penaltyId)) {
+          return {
+            ...a,
+            objection: {
+              ...(a.objection || {}),
+              status: 'rejected',
+              resolvedAt: new Date().toISOString()
+            }
+          };
+        }
+        return a;
+      });
+    }
+
     let updatedShifts = [...(state.shifts || [])];
     if (rejectedTargetReq && rejectedTargetReq.type === 'overtime') {
       updatedShifts = updatedShifts.map((s) => {
@@ -806,6 +934,8 @@ export default function RequestsModule({
       type: rejectedTargetReq?.type,
       action: 'rejected',
       approverRole: 'admin',
+      title: rejectedTargetReq?.type === 'penalty_objection' ? '❌ تم رفض التظلم وتثبيت الجزاء' : undefined,
+      message: rejectedTargetReq?.type === 'penalty_objection' ? 'تمت دراسة التظلم ورؤي عدم كفاية المبررات وتثبيت القرار التأديبي' : undefined,
       details: rejectedTargetReq?.reason || rejectedTargetReq?.details || ''
     });
 
@@ -1422,6 +1552,7 @@ export default function RequestsModule({
           <label style={{ fontSize: '13px', fontWeight: 'bold' }}>نوع الطلب:</label>
           <select value={filterType} onChange={(e) => setFilterType(e.target.value)} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)' }}>
             <option value="all">-- جميع أنواع الطلبات --</option>
+            <option value="penalty_objection">✋ تظلمات الجزاءات واللائحة</option>
             <option value="leave">🏖️ إجازات (&lt;= 3 أيام)</option>
             <option value="long_leave">🏖️ إجازات أكثر من 3 أيام</option>
             <option value="permission">⏰ أذون خروج/دخول</option>
@@ -1490,7 +1621,7 @@ export default function RequestsModule({
                         const effectiveBranchId = req.branchId || emp?.branchesDetails?.[0]?.branchId || emp?.branchId;
                         const isDirectAdmin = req.targetApproval === 'admin_only' ||
                           req.targetApproval === 'admin' ||
-                          ['loan', 'advance', 'credit_medicine', 'eval_edit_request', 'complaint'].includes(req.type) ||
+                          ['loan', 'advance', 'credit_medicine', 'eval_edit_request', 'complaint', 'penalty_objection', 'objection'].includes(req.type) ||
                           req.branchNotRequired ||
                           req.isDirectToAdmin ||
                           shouldRouteDirectToAdmin(emp, effectiveBranchId, state) ||
@@ -1598,6 +1729,7 @@ export default function RequestsModule({
         const isSwap = ['swap', 'shift_swap', 'shift_edit'].includes(previewModalReq.type);
         const isPunch = ['punch_correction', 'تأكيد بصمة الوجه', 'تأكيد بصمة اليد'].includes(previewModalReq.type);
         const isPenalty = previewModalReq.type === 'penalty';
+        const isPenaltyObjection = previewModalReq.type === 'penalty_objection' || previewModalReq.type === 'objection' || Boolean(previewModalReq.penaltyId) || Boolean(previewModalReq.objection);
         const isRoster = ['roster_update', 'roster_edit', 'roster_edit_request'].includes(previewModalReq.type);
         const isComplaint = ['complaint', 'eval_edit_request'].includes(previewModalReq.type);
 
@@ -1610,6 +1742,7 @@ export default function RequestsModule({
           previewModalReq.targetApproval === 'admin' ||
           isLoan ||
           isComplaint ||
+          isPenaltyObjection ||
           previewModalReq.branchNotRequired ||
           previewModalReq.isDirectToAdmin ||
           shouldRouteDirectToAdmin(empObj, effectiveReqBranchId, state) ||
@@ -2095,69 +2228,81 @@ export default function RequestsModule({
                   </div>
                 )}
 
-                {/* ── PENALTY DETAILS ── */}
-                {isPenalty && (
-                  <div style={{ background: '#fef2f2', padding: '16px', borderRadius: '12px', border: '1px solid #fecaca' }}>
-                    <h4 style={{ margin: '0 0 10px', color: '#991b1b', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      ⚠️ تفاصيل الخصم / الجزاء الإداري:
+                {/* ── PENALTY & OBJECTION DETAILS ── */}
+                {(isPenalty || isPenaltyObjection) && (
+                  <div style={{ background: '#fdf4ff', padding: '16px', borderRadius: '12px', border: '1px solid #f0abfc' }}>
+                    <h4 style={{ margin: '0 0 10px', color: '#86198f', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      ✋ تفاصيل التظلم / الجزاء التأديبي:
                     </h4>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: previewModalReq.objection ? '14px' : '0' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '12px' }}>
                       <div>
-                        <span style={{ fontSize: '12px', color: '#991b1b' }}>نوع البند:</span>
-                        <div style={{ fontWeight: 'bold', color: '#7f1d1d' }}>
-                          {previewModalReq.subType === 'lateness' ? '🏃‍♂️ تأخير عن موعد العمل المجدول' : 'مخالفة لائحة'}
+                        <span style={{ fontSize: '12px', color: '#701a75' }}>مسمى المخالفة / الجزاء:</span>
+                        <div style={{ fontWeight: 'bold', color: '#581c87', fontSize: '14px' }}>
+                          ⚖️ {previewModalReq.violationTitle || previewModalReq.title || (previewModalReq.subType === 'lateness' ? 'تأخير عن العمل' : 'جزاء تأديبي لائحي')}
                         </div>
                       </div>
-                      {previewModalReq.latenessMinutes && (
+                      {(previewModalReq.latenessMinutes || previewModalReq.deductionMinutes) && (
                         <div>
-                          <span style={{ fontSize: '12px', color: '#991b1b' }}>مدة التأخير:</span>
-                          <div style={{ fontWeight: 'bold', color: '#7f1d1d' }}>
-                            ⏱️ {previewModalReq.latenessMinutes} دقيقة
+                          <span style={{ fontSize: '12px', color: '#701a75' }}>مدة / دقائق التأخير:</span>
+                          <div style={{ fontWeight: 'bold', color: '#581c87' }}>
+                            ⏱️ {previewModalReq.latenessMinutes || previewModalReq.deductionMinutes} دقيقة
                           </div>
                         </div>
                       )}
                       <div>
-                        <span style={{ fontSize: '12px', color: '#991b1b' }}>مبلغ الخصم:</span>
+                        <span style={{ fontSize: '12px', color: '#701a75' }}>قيمة الخصم المالي:</span>
                         <div style={{ fontWeight: '900', color: '#b91c1c', fontSize: '16px' }}>
-                          💸 {previewModalReq.amount || '0'} ج.م
+                          💸 {previewModalReq.penaltyAmount || previewModalReq.amount || '0'} ج.م
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#701a75' }}>تاريخ الواقعة:</span>
+                        <div style={{ fontWeight: 'bold', color: '#581c87' }}>
+                          📅 {previewModalReq.date || previewModalReq.createdAt?.slice(0, 10) || '—'}
                         </div>
                       </div>
                     </div>
 
-                    {previewModalReq.objection && (
-                      <div style={{ background: '#fff', border: '1px solid #f59e0b', borderRadius: '10px', padding: '12px', marginTop: '10px' }}>
-                        <div style={{ fontWeight: 'bold', color: '#b45309', marginBottom: '6px', fontSize: '13.5px' }}>
-                          ✋ اعتراض مقدم من الموظف:
-                        </div>
-                        <div style={{ fontSize: '13px', color: '#1e293b', background: '#fef3c7', padding: '8px 12px', borderRadius: '6px', marginBottom: '10px' }}>
-                          "{previewModalReq.objection.reason}"
-                        </div>
-                        {previewModalReq.objection.status === 'pending' ? (
-                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                            <button
-                              type="button"
-                              className="btn btn-start"
-                              style={{ background: '#16a34a', fontSize: '12px', padding: '5px 12px' }}
-                              onClick={() => handleApprovePenaltyObjection(previewModalReq.id)}
-                            >
-                              ✅ قبول الاعتراض وإلغاء الجزاء والخصم
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-start"
-                              style={{ background: '#dc2626', fontSize: '12px', padding: '5px 12px' }}
-                              onClick={() => handleRejectPenaltyObjection(previewModalReq.id)}
-                            >
-                              ❌ رفض الاعتراض وتثبيت الجزاء
-                            </button>
-                          </div>
-                        ) : previewModalReq.objection.status === 'approved' ? (
-                          <span className="badge badge-success">✅ تم قبول الاعتراض وإلغاء الخصم</span>
-                        ) : (
-                          <span className="badge badge-danger">❌ تم رفض الاعتراض ({previewModalReq.objection.adminReply || 'مثبت'})</span>
-                        )}
+                    {/* Objection reasons box */}
+                    <div style={{ background: '#fff', border: '1px solid #e879f9', borderRadius: '10px', padding: '14px', marginTop: '10px' }}>
+                      <div style={{ fontWeight: 'bold', color: '#86198f', marginBottom: '6px', fontSize: '13.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span>✋</span>
+                        <span>أسباب ومبررات التظلم المقدمة من الموظف:</span>
                       </div>
-                    )}
+                      <div style={{ fontSize: '13.5px', color: '#1e293b', background: '#fae8ff', padding: '10px 14px', borderRadius: '8px', marginBottom: '12px', lineHeight: '1.6' }}>
+                        "{previewModalReq.reason || (typeof previewModalReq.objection === 'object' ? previewModalReq.objection.reason : previewModalReq.objection) || previewModalReq.details || '—'}"
+                      </div>
+                      {previewModalReq.status === 'pending' || previewModalReq.objection?.status === 'pending' ? (
+                        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                          <button
+                            type="button"
+                            className="btn btn-start"
+                            style={{ background: '#16a34a', color: '#fff', fontSize: '13px', padding: '8px 16px', fontWeight: 'bold', borderRadius: '8px' }}
+                            onClick={() => {
+                              handleApprove(previewModalReq.id);
+                              setPreviewModalReq(null);
+                            }}
+                          >
+                            ✅ قبول التظلم وإلغاء الجزاء وسحب الخصم
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-start"
+                            style={{ background: '#dc2626', color: '#fff', fontSize: '13px', padding: '8px 16px', fontWeight: 'bold', borderRadius: '8px' }}
+                            onClick={() => {
+                              handleReject(previewModalReq.id);
+                              setPreviewModalReq(null);
+                            }}
+                          >
+                            ❌ رفض التظلم وتثبيت الجزاء
+                          </button>
+                        </div>
+                      ) : previewModalReq.status === 'approved' || previewModalReq.objection?.status === 'approved' ? (
+                        <span className="badge badge-success" style={{ padding: '6px 12px', fontSize: '13px' }}>✅ تم قبول التظلم وإلغاء الخصم بنجاح</span>
+                      ) : (
+                        <span className="badge badge-danger" style={{ padding: '6px 12px', fontSize: '13px' }}>❌ تم رفض التظلم وتثبيت الجزاء</span>
+                      )}
+                    </div>
                   </div>
                 )}
 

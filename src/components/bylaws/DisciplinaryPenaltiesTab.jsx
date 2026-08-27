@@ -615,11 +615,53 @@ export default function DisciplinaryPenaltiesTab({
       });
     }
 
+    // Create a formal request entry for Higher Management
+    const objReq = {
+      id: `obj_req_${penId}_${Date.now()}`,
+      penaltyId: penId,
+      sourceType: objectionTargetPen.sourceType || 'late_incident',
+      type: 'penalty_objection',
+      typeLabel: 'تظلم على جزاء لائحى',
+      employeeId: objectionTargetPen.employeeId,
+      employeeCode: objectionTargetPen.employeeCode,
+      employeeName: objectionTargetPen.employeeName,
+      branchId: objectionTargetPen.branchId,
+      branchName: objectionTargetPen.branchName,
+      date: objectionTargetPen.date || new Date().toISOString().slice(0, 10),
+      reason: objectionReason.trim(),
+      details: `تظلم على: ${objectionTargetPen.violationTitle || objectionTargetPen.title || 'جزاء تأديبي'} (${objectionTargetPen.penaltyAmount || objectionTargetPen.amount || 0} ج.م / ${objectionTargetPen.deductionMinutes || 0} دقيقة تأخير) — مبررات الموظف: ${objectionReason.trim()}`,
+      penaltyAmount: objectionTargetPen.penaltyAmount || objectionTargetPen.amount || 0,
+      deductionMinutes: objectionTargetPen.deductionMinutes || 0,
+      violationTitle: objectionTargetPen.violationTitle || objectionTargetPen.title || 'جزاء تأديبي',
+      status: 'pending',
+      adminApproved: false,
+      createdAt: new Date().toISOString()
+    };
+
+    updatedRequests = [objReq, ...updatedRequests.filter(r => r.penaltyId !== penId || r.type !== 'penalty_objection')];
+
+    // Create admin notification
+    const objNotif = {
+      id: `notif_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      type: 'bylaws',
+      targetRole: 'admin',
+      requestId: objReq.id,
+      employeeId: objectionTargetPen.employeeId,
+      title: `✋ تظلم جديد على جزاء (${objectionTargetPen.employeeName || 'موظف'})`,
+      message: `تظلم على: ${objectionTargetPen.violationTitle || objectionTargetPen.title || 'جزاء تأديبي'} — السبب: ${objectionReason.trim()}`,
+      date: new Date().toISOString().slice(0, 10),
+      timestamp: new Date().toISOString(),
+      read: false
+    };
+
+    const updatedNotifications = [objNotif, ...(state.notifications || [])];
+
     const updatedState = {
       ...state,
       requests: updatedRequests,
       lateIncidents: updatedLateIncidents,
-      adjustments: updatedAdjustments
+      adjustments: updatedAdjustments,
+      notifications: updatedNotifications
     };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);

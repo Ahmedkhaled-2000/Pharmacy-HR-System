@@ -16,6 +16,7 @@ import BylawsModule from '../bylaws/BylawsModule';
 import EmployeeResignationModule from './EmployeeResignationModule';
 import { computeLatenessFinancialAmount, isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
 import { printEmployeePayslipDirect } from '../../utils/printHelper';
+import { useLiveRealTime } from '../../hooks/useLiveRealTime';
 import '../../portal.css';
 
 // ─────────────────────────────────────────

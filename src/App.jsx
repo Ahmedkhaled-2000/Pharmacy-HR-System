@@ -4976,6 +4976,24 @@ export default function App() {
             (state.leaveRequests || []).forEach(r => { if (r && !seen.has(String(r.id))) { reqList.push(r); seen.add(String(r.id)); } });
             (state.shiftSwaps || []).forEach(r => { if (r && !seen.has(String(r.id))) { reqList.push(r); seen.add(String(r.id)); } });
             (state.loans || []).forEach(r => { if (r && !seen.has(String(r.id))) { reqList.push(r); seen.add(String(r.id)); } });
+            (state.lateIncidents || []).forEach(inc => {
+              if (inc && inc.objection && (inc.objection.status === 'pending' || inc.status === 'objection_pending')) {
+                const objId = `obj_inc_${inc.id}`;
+                if (!seen.has(objId)) {
+                  reqList.push({ id: objId, status: 'pending', type: 'penalty_objection' });
+                  seen.add(objId);
+                }
+              }
+            });
+            (state.adjustments || []).forEach(adj => {
+              if (adj && adj.objection && adj.objection.status === 'pending') {
+                const objId = `obj_adj_${adj.id}`;
+                if (!seen.has(objId)) {
+                  reqList.push({ id: objId, status: 'pending', type: 'penalty_objection' });
+                  seen.add(objId);
+                }
+              }
+            });
             return reqList.filter(r => !r.hiddenFromAdmin && (r.status === 'pending' || r.status === 'pending_admin' || (r.adminApproved !== true && r.status !== 'rejected' && r.status !== 'cancelled'))).length;
           })()}
           resignationCount={(() => {
