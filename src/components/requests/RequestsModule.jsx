@@ -835,20 +835,20 @@ export default function RequestsModule({
     };
 
     if (currentRole === 'admin') {
-      if (approvedTargetReq.type === 'loan' || approvedTargetReq.type === 'advance' || approvedTargetReq.type === 'meds' || approvedTargetReq.type === 'credit_medicine') {
+      if (targetReq.type === 'loan' || targetReq.type === 'advance' || targetReq.type === 'meds' || targetReq.type === 'credit_medicine') {
         executeWithOwnerGuard?.({
           lockKey: 'lockApproveLoans',
-          actionTitle: `اعتماد طلب سلفة / أدوية آجل (${approvedTargetReq.employeeName || approvedTargetReq.employeeId})`,
-          actionDetails: `المبلغ: ${approvedTargetReq.amount || approvedTargetReq.totalAmount} ج.م`,
+          actionTitle: `اعتماد طلب سلفة / أدوية آجل (${targetReq.employeeName || targetReq.employeeId})`,
+          actionDetails: `المبلغ: ${targetReq.amount || targetReq.totalAmount} ج.م`,
           onExecute: performApprove
         });
         return;
       }
-      if (approvedTargetReq.type === 'bonus' || approvedTargetReq.type === 'penalty' || approvedTargetReq.type === 'early_exit') {
+      if (targetReq.type === 'bonus' || targetReq.type === 'penalty' || targetReq.type === 'early_exit') {
         executeWithOwnerGuard?.({
           lockKey: 'lockDirectBonusDeduction',
-          actionTitle: `اعتماد تسوية مالية (${approvedTargetReq.type === 'bonus' ? 'مكافأة' : 'خصم/جزاء'})`,
-          actionDetails: `الموظف: ${approvedTargetReq.employeeName || approvedTargetReq.employeeId}`,
+          actionTitle: `اعتماد تسوية مالية (${targetReq.type === 'bonus' ? 'مكافأة' : 'خصم/جزاء'})`,
+          actionDetails: `الموظف: ${targetReq.employeeName || targetReq.employeeId}`,
           onExecute: performApprove
         });
         return;
@@ -859,14 +859,21 @@ export default function RequestsModule({
   };
 
   const handleReject = async (reqId) => {
-    let rejectedTargetReq = null;
-    const updatedRequests = (state.requests || []).map((r) => {
-      if (r.id === reqId) {
-        rejectedTargetReq = { ...r, status: 'rejected', adminApproved: false, rejectedAt: new Date().toISOString() };
-        return rejectedTargetReq;
-      }
-      return r;
-    });
+    let targetReq = (state.requests || []).find((r) => r.id === reqId) ||
+                    (state.leaveRequests || []).find((r) => r.id === reqId) ||
+                    (state.shiftSwaps || []).find((r) => r.id === reqId) ||
+                    (state.loans || []).find((r) => r.id === reqId) ||
+                    allRequests.find((r) => r.id === reqId);
+
+    let rejectedTargetReq = targetReq ? { ...targetReq, status: 'rejected', adminApproved: false, rejectedAt: new Date().toISOString() } : null;
+
+    let updatedRequests = [...(state.requests || [])];
+    const rIdx = updatedRequests.findIndex((r) => r.id === reqId);
+    if (rIdx >= 0) {
+      updatedRequests[rIdx] = rejectedTargetReq;
+    } else if (rejectedTargetReq) {
+      updatedRequests.unshift(rejectedTargetReq);
+    }
 
     let updatedLateIncidents = [...(state.lateIncidents || [])];
     let updatedAdjustments = [...(state.adjustments || [])];
