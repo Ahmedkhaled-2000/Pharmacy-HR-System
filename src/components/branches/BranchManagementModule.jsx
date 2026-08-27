@@ -30,11 +30,18 @@ export default function BranchManagementModule({ state, onSaveBranch, onDeleteBr
       return;
     }
     const currentBranchId = editingBranch ? editingBranch.id : null;
-    const duplicate = branches.find(
+    const duplicateBranch = branches.find(
       (b) => b.id !== currentBranchId && b.username && b.username.trim().toLowerCase() === cleanVal
     );
-    if (duplicate) {
-      setUsernameError(`⚠️ اسم المستخدم مستخدم بالفعل لفرع "${duplicate.name}"`);
+    const duplicateEmp = employees.find(
+      (e) => (e.code && String(e.code).trim().toLowerCase() === cleanVal) ||
+             (e.username && String(e.username).trim().toLowerCase() === cleanVal)
+    );
+
+    if (duplicateBranch) {
+      setUsernameError(`⚠️ اسم المستخدم مستخدم بالفعل لفرع "${duplicateBranch.name}"`);
+    } else if (duplicateEmp) {
+      setUsernameError(`⚠️ اسم المستخدم مستخدم بالفعل ككود للموظف "${duplicateEmp.name}" (كود: ${duplicateEmp.code})`);
     } else {
       setUsernameError('');
     }
@@ -49,7 +56,25 @@ export default function BranchManagementModule({ state, onSaveBranch, onDeleteBr
       { id: Date.now().toString(), number: '', type: 'landline' }
     ]);
     setManagerId('');
-    setUsername(`branch_${branches.length + 1}`);
+    
+    // Auto-generate safe username that doesn't conflict with existing branches or employee codes
+    let bIndex = branches.length + 1;
+    let candidateUser = `branch_${bIndex}`;
+    const isUserTaken = (cand) => {
+      const u = cand.toLowerCase();
+      const bTaken = branches.some(b => b.username && b.username.trim().toLowerCase() === u);
+      const eTaken = employees.some(e => 
+        (e.code && String(e.code).trim().toLowerCase() === u) ||
+        (e.username && String(e.username).trim().toLowerCase() === u)
+      );
+      return bTaken || eTaken;
+    };
+    while (isUserTaken(candidateUser)) {
+      bIndex++;
+      candidateUser = `branch_${bIndex}`;
+    }
+
+    setUsername(candidateUser);
     setPassword('123456');
     setUsernameError('');
     setIsModalOpen(true);
@@ -133,6 +158,15 @@ export default function BranchManagementModule({ state, onSaveBranch, onDeleteBr
     );
     if (duplicate) {
       alert(`⚠️ اسم المستخدم مستخدم بالفعل لفرع "${duplicate.name}"`);
+      return;
+    }
+
+    const duplicateEmp = employees.find(
+      (e) => (e.code && String(e.code).trim().toLowerCase() === cleanUsername) ||
+             (e.username && String(e.username).trim().toLowerCase() === cleanUsername)
+    );
+    if (duplicateEmp) {
+      alert(`⚠️ لا يمكن استخدام اسم المستخدم هذا لأنه مستخدم بالفعل ككود للموظف "${duplicateEmp.name}" (كود: ${duplicateEmp.code})`);
       return;
     }
 

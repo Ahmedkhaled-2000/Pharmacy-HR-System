@@ -311,7 +311,23 @@ export default function EmployeeFileModal({
       setPhotoUrl('');
       setMaritalStatus('أعزب');
 
-      const nextCode = String(100 + (allEmployees.length + 1));
+      // Auto-generate safe nextCode that doesn't conflict with any existing employee code or branch username
+      let candidateNum = 100 + (allEmployees.length + 1);
+      const isTaken = (cand) => {
+        const strCand = String(cand).toLowerCase();
+        const empTaken = allEmployees.some(e => 
+          (e.code && String(e.code).trim().toLowerCase() === strCand) ||
+          (e.username && String(e.username).trim().toLowerCase() === strCand)
+        );
+        const branchTaken = branches.some(b => 
+          b.username && String(b.username).trim().toLowerCase() === strCand
+        );
+        return empTaken || branchTaken;
+      };
+      while (isTaken(candidateNum)) {
+        candidateNum++;
+      }
+      const nextCode = String(candidateNum);
       setCode(nextCode);
       const defaultJob = jobs[0]?.title || 'صيدلي';
       setJobTitle(defaultJob);
@@ -351,12 +367,22 @@ export default function EmployeeFileModal({
   // Handle unique code verification
   const handleCodeChange = (val) => {
     setCode(val);
+    const cleanVal = val.trim().toLowerCase();
+    if (!cleanVal) {
+      setCodeError('');
+      return;
+    }
     const exists = allEmployees.some(
-      (e) => (e.code.trim() === val.trim() || (e.username && e.username.trim() === val.trim())) && 
+      (e) => ((e.code && e.code.trim().toLowerCase() === cleanVal) || (e.username && e.username.trim().toLowerCase() === cleanVal)) && 
              e.id !== (editingEmp ? editingEmp.id : null)
     );
-    if (exists && val.trim() !== '') {
+    const branchConflict = branches.find(
+      (b) => b.username && b.username.trim().toLowerCase() === cleanVal
+    );
+    if (exists) {
       setCodeError('⚠️ هذا الكود مستخدم بالفعل لموظف آخر');
+    } else if (branchConflict) {
+      setCodeError(`⚠️ هذا الكود مستخدم بالفعل كاسم مستخدم لفرع "${branchConflict.name}"`);
     } else {
       setCodeError('');
     }
@@ -414,6 +440,31 @@ export default function EmployeeFileModal({
 
     if (!name.trim()) {
       alert('يرجى إدخال اسم الموظف');
+      return;
+    }
+
+    const cleanCode = String(code || '').trim().toLowerCase();
+    if (!cleanCode) {
+      alert('يرجى إدخال كود الموظف');
+      return;
+    }
+
+    // Double check duplicate employee code
+    const isEmpDuplicate = allEmployees.some(
+      (e) => ((e.code && String(e.code).trim().toLowerCase() === cleanCode) || (e.username && String(e.username).trim().toLowerCase() === cleanCode)) &&
+             e.id !== (editingEmp ? editingEmp.id : null)
+    );
+    if (isEmpDuplicate) {
+      alert('⚠️ كود الموظف مستخدم بالفعل لموظف آخر');
+      return;
+    }
+
+    // Double check duplicate with any branch username
+    const branchConflict = branches.find(
+      (b) => b.username && String(b.username).trim().toLowerCase() === cleanCode
+    );
+    if (branchConflict) {
+      alert(`⚠️ لا يمكن استخدام هذا الكود لأنه مستخدم كاسم مستخدم لفرع "${branchConflict.name}"`);
       return;
     }
 

@@ -815,7 +815,7 @@ export default function App() {
     const currentBranches = state.branches || [];
     const exists = currentBranches.some((b) => b.id === branchData.id);
 
-    // Check branch username uniqueness across all branches
+    // Check branch username uniqueness across all branches AND all employees
     if (branchData.username && String(branchData.username).trim()) {
       const cleanUsername = String(branchData.username).trim().toLowerCase();
       const duplicateBranch = currentBranches.find(
@@ -823,6 +823,14 @@ export default function App() {
       );
       if (duplicateBranch) {
         showToast(`⚠️ خطأ: اسم المستخدم (${branchData.username}) مستخدم بالفعل لفرع "${duplicateBranch.name}"!`);
+        return;
+      }
+      const duplicateEmp = (state.employees || []).find(
+        (e) => (e.code && String(e.code).trim().toLowerCase() === cleanUsername) ||
+               (e.username && String(e.username).trim().toLowerCase() === cleanUsername)
+      );
+      if (duplicateEmp) {
+        showToast(`⚠️ خطأ: اسم المستخدم (${branchData.username}) مستخدم بالفعل ككود للموظف "${duplicateEmp.name}" (كود: ${duplicateEmp.code})!`);
         return;
       }
     }
@@ -872,16 +880,24 @@ export default function App() {
     const empIdStr = String(empData.id);
     const empCodeStr = String(empData.code || '').trim();
 
-    // Check employee code uniqueness (prevent duplicates across different employees)
+    // Check employee code uniqueness (prevent duplicates across different employees AND branch usernames)
     if (empCodeStr) {
+      const cleanCode = empCodeStr.toLowerCase();
       const isDuplicateCode = currentEmps.some(
         (e) => String(e.id) !== empIdStr && (
-          (e.code && String(e.code).trim() === empCodeStr) ||
-          (e.username && String(e.username).trim() === empCodeStr)
+          (e.code && String(e.code).trim().toLowerCase() === cleanCode) ||
+          (e.username && String(e.username).trim().toLowerCase() === cleanCode)
         )
       );
       if (isDuplicateCode) {
         showToast('⚠️ خطأ: كود الموظف مستخدم بالفعل لموظف آخر!');
+        return;
+      }
+      const duplicateBranch = (state.branches || []).find(
+        (b) => b.username && String(b.username).trim().toLowerCase() === cleanCode
+      );
+      if (duplicateBranch) {
+        showToast(`⚠️ خطأ: كود الموظف (${empCodeStr}) مستخدم كاسم مستخدم لفرع "${duplicateBranch.name}"!`);
         return;
       }
     }
@@ -1856,13 +1872,21 @@ export default function App() {
       return;
     }
 
-    // Check for duplicate employee code
+    // Check for duplicate employee code across employees and branch usernames
+    const cleanEmpCode = empCode.trim().toLowerCase();
     const isDuplicate = state.employees.some(e => 
-      (e.code.trim() === empCode.trim() || (e.username && e.username.trim() === empCode.trim())) && 
+      ((e.code && e.code.trim().toLowerCase() === cleanEmpCode) || (e.username && e.username.trim().toLowerCase() === cleanEmpCode)) && 
       e.id !== (editingEmp ? editingEmp.id : null)
     );
     if (isDuplicate) {
-      showToast('خطأ: كود الموظف مستخدم بالفعل لموظف آخر!');
+      showToast('⚠️ خطأ: كود الموظف مستخدم بالفعل لموظف آخر!');
+      return;
+    }
+    const branchConflict = (state.branches || []).find(
+      (b) => b.username && b.username.trim().toLowerCase() === cleanEmpCode
+    );
+    if (branchConflict) {
+      showToast(`⚠️ خطأ: كود الموظف (${empCode.trim()}) مستخدم كاسم مستخدم لفرع "${branchConflict.name}"!`);
       return;
     }
 
@@ -4179,6 +4203,10 @@ export default function App() {
       }
 
       const imported = [];
+      const skippedDuplicates = [];
+      const currentEmps = state.employees || [];
+      const currentBranches = state.branches || [];
+
       ws.eachRow((row, rowNum) => {
         if (rowNum <= 3) return; // skip headers
         const code = String(row.getCell(1).value || '').trim();
@@ -4191,6 +4219,21 @@ export default function App() {
         const password = String(row.getCell(8).value || '123').trim();
 
         if (code && name) {
+          const cleanCode = code.toLowerCase();
+          const isTakenByEmp = currentEmps.some(e => 
+            (e.code && String(e.code).trim().toLowerCase() === cleanCode) || 
+            (e.username && String(e.username).trim().toLowerCase() === cleanCode)
+          ) || imported.some(i => i.code.toLowerCase() === cleanCode);
+          
+          const isTakenByBranch = currentBranches.some(b => 
+            b.username && String(b.username).trim().toLowerCase() === cleanCode
+          );
+
+          if (isTakenByEmp || isTakenByBranch) {
+            skippedDuplicates.push({ code, name, reason: isTakenByBranch ? 'مطابق لاسم مستخدم فرع' : 'كود موظف مكرر' });
+            return;
+          }
+
           imported.push({
             id: 'emp_' + uid(),
             code,
@@ -4209,7 +4252,11 @@ export default function App() {
       });
 
       if (imported.length === 0) {
-        showToast('لم يتم العثور على بيانات موظفين صحيحة في الملف');
+        if (skippedDuplicates.length > 0) {
+          showToast(`⚠️ تم تخطي جميع السجلات (${skippedDuplicates.length}) لتطابق أكوادها مع موظفين أو فروع مسجلة مسبقاً`);
+        } else {
+          showToast('لم يتم العثور على بيانات موظفين صحيحة في الملف');
+        }
         return;
       }
 
@@ -4217,7 +4264,11 @@ export default function App() {
       const updatedState = { ...state, employees: updatedEmps };
       setState(updatedState);
       await saveState(updatedState);
-      showToast(`تم استيراد ${imported.length} موظف جديد بنجاح من إكسل`);
+      let successMsg = `تم استيراد ${imported.length} موظف جديد بنجاح من إكسل`;
+      if (skippedDuplicates.length > 0) {
+        successMsg += ` (تم تخطي ${skippedDuplicates.length} مكرر)`;
+      }
+      showToast(successMsg);
     } catch (err) {
       console.error('Import excel error:', err);
       showToast('حدث خطأ أثناء قراءة ملف الإكسل');
