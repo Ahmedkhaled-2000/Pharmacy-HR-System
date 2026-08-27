@@ -68,7 +68,14 @@ function buildMonthCalendar(selectedMonth, schedule, fromDate, toDate, empId = n
         
         let daySchedule;
         if (empId && state) {
-          daySchedule = getEmployeeDaySchedule(empId, dateStr, state);
+          const dynamicSchedule = getEmployeeDaySchedule(empId, dateStr, state);
+          if (dynamicSchedule?.isSwapped) {
+            daySchedule = dynamicSchedule;
+          } else if (schedule) {
+            daySchedule = getDayScheduleFromSchedule(schedule, dateStr, arDayName);
+          } else {
+            daySchedule = dynamicSchedule;
+          }
         } else {
           daySchedule = getDayScheduleFromSchedule(schedule, dateStr, arDayName);
         }
@@ -90,7 +97,14 @@ function buildMonthCalendar(selectedMonth, schedule, fromDate, toDate, empId = n
     
     let daySchedule;
     if (empId && state) {
-      daySchedule = getEmployeeDaySchedule(empId, dateStr, state);
+      const dynamicSchedule = getEmployeeDaySchedule(empId, dateStr, state);
+      if (dynamicSchedule?.isSwapped) {
+        daySchedule = dynamicSchedule;
+      } else if (schedule) {
+        daySchedule = getDayScheduleFromSchedule(schedule, dateStr, arDayName);
+      } else {
+        daySchedule = dynamicSchedule;
+      }
     } else {
       daySchedule = getDayScheduleFromSchedule(schedule, dateStr, arDayName);
     }

@@ -1,5 +1,6 @@
 import { arabicWeekday } from './formatters';
 import { getRealTodayStr } from './timeEngine';
+import { getActivePayrollMonth } from './periodEngine';
 
 export const AR_WEEKDAYS_MAP = {
   0: ['sunday', ' الأحد', 'الأحد', 'الاحد'],
@@ -85,39 +86,90 @@ function normalizeScheduleItem(item, jsDayIndex) {
 /**
  * البحث عن جدول الموظف المعتمد لشهر أو فترة محددة
  */
-export function findEmployeeRoster(empId, monthOrDate, state) {
+export function findEmployeeRoster(empId, monthOrDate, state, targetBranchId = null) {
   if (!empId || !state) return null;
   const empIdStr = String(empId);
   const emp = (state.employees || []).find(e => String(e.id) === empIdStr || (e.code && String(e.code) === empIdStr));
   const empCodeStr = emp?.code ? String(emp.code) : '';
+  const dateStr = monthOrDate && monthOrDate.length >= 10 ? String(monthOrDate).slice(0, 10) : null;
   const monthStr = monthOrDate ? (monthOrDate.length === 7 ? monthOrDate : monthOrDate.slice(0, 7)) : null;
 
-  // 1. البحث في state.rosters
-  let roster = (state.rosters || []).find(r => 
-    (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeId) === empCodeStr)) &&
-    (r.month === monthStr || !r.month || !monthStr) &&
-    (r.status === 'approved' || !r.status)
-  );
-
-  // 2. البحث في طلبات تعديل الجداول المعتمدة
-  if (!roster) {
-    const approvedReq = (state.requests || []).find(req => 
-      (String(req.employeeId) === empIdStr || (empCodeStr && String(req.employeeId) === empCodeStr)) &&
-      (req.type === 'roster_update' || req.type === 'roster_edit' || req.type === 'roster_edit_request') &&
-      (req.month === monthStr || !req.month || !monthStr) &&
-      (req.status === 'approved' || req.adminApproved)
-    );
-    if (approvedReq && approvedReq.schedule) {
-      roster = approvedReq;
+  let cycleMonth = monthStr;
+  if (dateStr) {
+    try {
+      cycleMonth = getActivePayrollMonth(state.orgSettings || {}, new Date(dateStr + 'T00:00:00'));
+    } catch {
+      cycleMonth = monthStr;
     }
   }
 
-  // 3. الجدول الافتراضي المرفق ببيانات الموظف إن وجد
-  if (!roster && emp?.roster && emp.roster.schedule) {
-    roster = emp.roster;
+  const matchesEmployee = (item) => {
+    if (!item) return false;
+    const itemEmpId = String(item.employeeId || '');
+    const itemEmpCode = String(item.employeeCode || '');
+    return (
+      (empIdStr && itemEmpId === empIdStr) ||
+      (empCodeStr && itemEmpCode === empCodeStr) ||
+      (empCodeStr && itemEmpId === empCodeStr) ||
+      (empIdStr && itemEmpCode === empIdStr)
+    );
+  };
+
+  const matchesBranch = (item) => {
+    if (!targetBranchId) return true;
+    const bStr = String(item.branchId || '').trim();
+    if (!bStr) return true;
+    return bStr === String(targetBranchId).trim();
+  };
+
+  const matchesDateOrMonth = (item) => {
+    if (dateStr && item.fromDate && item.toDate) {
+      if (dateStr >= item.fromDate && dateStr <= item.toDate) return true;
+    }
+    if (item.month) {
+      if (cycleMonth && item.month === cycleMonth) return true;
+      if (monthStr && item.month === monthStr) return true;
+    }
+    if (!item.month && !item.fromDate) return true;
+    return false;
+  };
+
+  // 1. البحث في state.rosters
+  const approvedRosters = (state.rosters || []).filter(r =>
+    matchesEmployee(r) &&
+    matchesBranch(r) &&
+    (r.status === 'approved' || r.adminApproved || !r.status) &&
+    matchesDateOrMonth(r)
+  );
+
+  if (approvedRosters.length > 0) {
+    const exactDateMatch = dateStr ? approvedRosters.find(r => r.fromDate && r.toDate && dateStr >= r.fromDate && dateStr <= r.toDate) : null;
+    if (exactDateMatch) return exactDateMatch;
+    return approvedRosters[0];
   }
 
-  return roster;
+  // 2. البحث في طلبات تعديل الجداول المعتمدة
+  const approvedReqs = (state.requests || []).filter(req =>
+    matchesEmployee(req) &&
+    matchesBranch(req) &&
+    (req.type === 'roster_update' || req.type === 'roster_edit' || req.type === 'roster_edit_request') &&
+    (req.status === 'approved' || req.adminApproved) &&
+    (req.schedule || req.newSchedule) &&
+    matchesDateOrMonth(req)
+  );
+
+  if (approvedReqs.length > 0) {
+    const exactDateMatch = dateStr ? approvedReqs.find(r => r.fromDate && r.toDate && dateStr >= r.fromDate && dateStr <= r.toDate) : null;
+    if (exactDateMatch) return { ...exactDateMatch, schedule: exactDateMatch.schedule || exactDateMatch.newSchedule };
+    return { ...approvedReqs[0], schedule: approvedReqs[0].schedule || approvedReqs[0].newSchedule };
+  }
+
+  // 3. الجدول الافتراضي المرفق ببيانات الموظف إن وجد
+  if (emp?.roster && emp.roster.schedule) {
+    return emp.roster;
+  }
+
+  return null;
 }
 
 /**
