@@ -5258,6 +5258,7 @@ export default function App() {
                   customTo={adminCustomTo}
                   currentBranch={currentBranch}
                   authRole={authRole}
+                  currentRole={authRole === 'branch' ? 'branch' : 'admin'}
                   executeWithOwnerGuard={executeWithOwnerGuard}
                 />
               )}
