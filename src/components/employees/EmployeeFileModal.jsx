@@ -719,15 +719,24 @@ export default function EmployeeFileModal({
           {activeTab === 'job' && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
               <div className="field" style={{ gridColumn: 'span 2' }}>
-                <label>كود الموظف (موحد وغير قابل للتكرار)</label>
+                <label style={{ fontWeight: 'bold' }}>كود الموظف / اسم المستخدم للدخول (موحد وغير قابل للتكرار) *</label>
                 <input
                   type="text"
                   value={code}
                   onChange={(e) => handleCodeChange(e.target.value)}
-                  placeholder="101"
+                  style={codeError ? { borderColor: 'var(--danger)', borderWidth: '2px' } : {}}
+                  placeholder="مثال: 101 أو emp_ahmed"
                   required
                 />
-                {codeError && <span style={{ color: 'var(--danger)', fontSize: '12px', fontWeight: 'bold' }}>{codeError}</span>}
+                {codeError ? (
+                  <span style={{ color: 'var(--danger)', fontSize: '12px', fontWeight: 'bold', marginTop: '4px', display: 'block' }}>
+                    {codeError}
+                  </span>
+                ) : code.trim() ? (
+                  <span style={{ color: '#16a34a', fontSize: '11.5px', fontWeight: 'bold', marginTop: '4px', display: 'block' }}>
+                    ✓ كود الموظف متاح وجاهز لتسجيل الدخول
+                  </span>
+                ) : null}
               </div>
 
               <div className="field">

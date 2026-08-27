@@ -45,7 +45,7 @@ function nextMonth(m) {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
 }
 
-const CURRENT_MONTH = todayStr().slice(0, 7);
+const CURRENT_MONTH = new Date().toISOString().slice(0, 7);
 
 // Arabic weekday name => JS getDay() index mapping
 const WEEKDAY_AR_MAP = {
@@ -287,7 +287,7 @@ export default function EmployeePortalView({
 
   // ── Form States for Employee Actions ───────────
   const [showManualForm, setShowManualForm] = useState(false);
-  const [empManualDate, setEmpManualDate] = useState(todayStr());
+  const [empManualDate, setEmpManualDate] = useState(() => getRealTodayStr());
   const [empManualIn, setEmpManualIn] = useState('');
   const [empManualOut, setEmpManualOut] = useState('');
   const [empManualBreak, setEmpManualBreak] = useState('0');
@@ -296,7 +296,7 @@ export default function EmployeePortalView({
   const [showAdjForm, setShowAdjForm] = useState(false);
   const [empAdjType, setEmpAdjType] = useState('bonus');
   const [empAdjAmount, setEmpAdjAmount] = useState('');
-  const [empAdjDate, setEmpAdjDate] = useState(todayStr());
+  const [empAdjDate, setEmpAdjDate] = useState(() => getRealTodayStr());
   const [empAdjDesc, setEmpAdjDesc] = useState('');
 
   // ── Export Excel ──────────────────────────────
@@ -873,7 +873,7 @@ export default function EmployeePortalView({
       id: 'adj_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
       type: empAdjType,
       employeeId: emp.id,
-      date: empAdjDate || todayStr(),
+      date: empAdjDate || getRealTodayStr(),
       amount,
       description: empAdjDesc.trim()
     };
@@ -1112,7 +1112,7 @@ export default function EmployeePortalView({
   const currentMonthlySalary = summary.monthlySalary || (currentHourlyRate * monthlyRequiredHours);
 
   // ── Active Month Roster Status Check ──
-  const activeMonthStr = todayStr().slice(0, 7);
+  const activeMonthStr = getRealTodayStr().slice(0, 7);
   const activeMonthLabel = monthLabel(activeMonthStr).arabic;
 
   const hasApprovedRosterForActiveMonth = useMemo(() => {
@@ -1154,7 +1154,7 @@ export default function EmployeePortalView({
   // Build list of absence days (work day in roster, no punch recorded, not a leave day)
   const absenceDays = useMemo(() => {
     if (!emp || !approvedRoster?.schedule) return [];
-    const today = todayStr();
+    const today = getRealTodayStr();
     const results = [];
     const dates = [];
 
@@ -1263,13 +1263,13 @@ export default function EmployeePortalView({
     const noticeDays = parseInt(activeReq.conditionsDaysRemaining, 10) || 0;
     if (noticeDays <= 0) return null;
 
-    const startDateStr = activeReq.conditionsStartDate || activeReq.requestDate || todayStr();
+    const startDateStr = activeReq.conditionsStartDate || activeReq.requestDate || getRealTodayStr();
     const sDate = parseDateStr(startDateStr);
     const eDate = new Date(sDate);
     eDate.setDate(eDate.getDate() + noticeDays);
     const endDateStr = `${eDate.getFullYear()}-${String(eDate.getMonth() + 1).padStart(2, '0')}-${String(eDate.getDate()).padStart(2, '0')}`;
 
-    const today = parseDateStr(todayStr());
+    const today = parseDateStr(getRealTodayStr());
     const diffMs = eDate.getTime() - today.getTime();
     const remainingDays = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
 

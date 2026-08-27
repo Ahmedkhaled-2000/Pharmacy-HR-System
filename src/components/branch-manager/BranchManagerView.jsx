@@ -1219,7 +1219,7 @@ export default function BranchManagerView({
   return (
     <div style={{ fontFamily: "'Tajawal', sans-serif" }} className="fade-in-page">
 
-      {/* ── Top Header Profile Card for Branch Manager ── */}
+      {/* ── Top Header Profile Card for Branch (Branch Manager View) ── */}
       <div style={{
         background: 'linear-gradient(135deg, #0d9488, #0f766e)',
         borderRadius: isMobileScreen ? '12px' : '16px',
@@ -1243,23 +1243,33 @@ export default function BranchManagerView({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: isMobileScreen ? '20px' : '28px',
+            fontSize: isMobileScreen ? '22px' : '32px',
             fontWeight: '800',
             boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
             flexShrink: 0
           }}>
-            {managerEmp.photoUrl ? (
-              <img src={managerEmp.photoUrl} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
-            ) : (
-              managerEmp.name.trim().charAt(0)
-            )}
+            🏢
           </div>
           <div>
-            <h2 style={{ margin: '0 0 2px', fontSize: isMobileScreen ? '16px' : '20px', fontWeight: '800', color: '#ffffff' }}>
-              {managerEmp.name}
+            <h2 style={{ margin: '0 0 4px', fontSize: isMobileScreen ? '17px' : '22px', fontWeight: '800', color: '#ffffff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {currentBranch?.name ? (currentBranch.name.startsWith('فرع') ? currentBranch.name : `فرع ${currentBranch.name}`) : 'الفرع الرئيسي'}
             </h2>
-            <p style={{ margin: 0, opacity: 0.9, fontSize: isMobileScreen ? '12px' : '13.5px', fontWeight: '500' }}>
-              👔 {managerEmp.jobTitle} &nbsp;|&nbsp; 📍 فرع: {currentBranch?.name || 'الفرع الرئيسي'} &nbsp;|&nbsp; 🆔 كود: {managerEmp.code}
+            <p style={{ margin: 0, opacity: 0.95, fontSize: isMobileScreen ? '12px' : '13.5px', fontWeight: '500', display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+              <span>🏷️ كود الفرع: <strong>{currentBranch?.branchCode || currentBranch?.code || currentBranch?.id || '—'}</strong></span>
+              <span>•</span>
+              <span>👤 مدير الفرع: <strong>{managerEmp && managerEmp.id !== 'none' ? (managerEmp.name || getEmpDisplayName(managerEmp)) : 'لا يوجد مدير معين (مباشر للإدارة)'}</strong></span>
+              {currentBranch?.address && (
+                <>
+                  <span>•</span>
+                  <span>📍 {currentBranch.address}</span>
+                </>
+              )}
+              {(currentBranch?.phone || currentBranch?.phones?.[0]?.number) && (
+                <>
+                  <span>•</span>
+                  <span>📞 {currentBranch.phone || currentBranch.phones[0].number}</span>
+                </>
+              )}
             </p>
           </div>
         </div>
