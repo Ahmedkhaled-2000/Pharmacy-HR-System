@@ -2836,6 +2836,26 @@ export default function App() {
       }
 
       const normalized = normalizeState(data);
+
+      // Check if a global Factory Reset / System Wipe occurred!
+      const currentKnownResetToken = localStorage.getItem('last_known_reset_token') || '';
+      if (normalized._systemResetToken && normalized._systemResetToken !== currentKnownResetToken) {
+        localStorage.setItem('last_known_reset_token', normalized._systemResetToken);
+        localStorage.removeItem('app_auth_role');
+        localStorage.removeItem('app_current_emp_user');
+        localStorage.removeItem('app_current_branch');
+        localStorage.removeItem('app_is_admin');
+        localStorage.removeItem('app_active_nav_tab');
+        localStorage.removeItem('app_active_sub_tab');
+        sessionStorage.clear();
+        setAuthRole('none');
+        setIsAdminLoggedIn(false);
+        setCurrentEmpUser(null);
+        setCurrentBranch(null);
+        setState(normalized);
+        return;
+      }
+
       const synced = syncAllEmployeesPermissionsAndLateness(normalized);
       setState(synced);
       setLastSyncTime(nowTimeStr());
@@ -2849,6 +2869,11 @@ export default function App() {
           if (freshEmp) {
             setCurrentEmpUser(freshEmp);
             localStorage.setItem('app_current_emp_user', JSON.stringify(freshEmp));
+          } else if ((normalized.employees || []).length === 0) {
+            localStorage.removeItem('app_current_emp_user');
+            localStorage.removeItem('app_auth_role');
+            setAuthRole('none');
+            setCurrentEmpUser(null);
           }
         }
         const savedBranchStr = localStorage.getItem('app_current_branch');
@@ -2858,6 +2883,11 @@ export default function App() {
           if (freshBranch) {
             setCurrentBranch(freshBranch);
             localStorage.setItem('app_current_branch', JSON.stringify(freshBranch));
+          } else if ((normalized.branches || []).length === 0) {
+            localStorage.removeItem('app_current_branch');
+            localStorage.removeItem('app_auth_role');
+            setAuthRole('none');
+            setCurrentBranch(null);
           }
         }
       } catch {}
@@ -2950,6 +2980,31 @@ export default function App() {
     }
   }, [state.requests, authRole, isLoading, currentBranch, state.employees, state.approvalRules]);
 
+  // ── مراقب صحة وسلامة الجلسات (تسجيل خروج فوري بعد تصفير البيانات أو مسح الحسابات) ──
+  useEffect(() => {
+    if (authRole === 'employee' && currentEmpUser) {
+      const exists = (state.employees || []).some(
+        (e) => String(e.id) === String(currentEmpUser.id) || (currentEmpUser.code && e.code === currentEmpUser.code)
+      );
+      if (!exists && (state.employees || []).length === 0) {
+        localStorage.removeItem('app_current_emp_user');
+        localStorage.removeItem('app_auth_role');
+        setAuthRole('none');
+        setCurrentEmpUser(null);
+        showToast('🚨 تم تسجيل الخروج لعدم وجود حساب الموظف في قاعدة البيانات.');
+      }
+    } else if (authRole === 'branch' && currentBranch) {
+      const exists = (state.branches || []).some((b) => String(b.id) === String(currentBranch.id));
+      if (!exists && (state.branches || []).length === 0) {
+        localStorage.removeItem('app_current_branch');
+        localStorage.removeItem('app_auth_role');
+        setAuthRole('none');
+        setCurrentBranch(null);
+        showToast('🚨 تم تسجيل الخروج لعدم وجود الفرع في قاعدة البيانات.');
+      }
+    }
+  }, [state.employees, state.branches, authRole, currentEmpUser, currentBranch]);
+
   // ── مستمع تغيرات الاتصال بالإنترنت ───────────────
   useEffect(() => {
     const unsubscribe = listenToConnectionChanges(
@@ -2983,13 +3038,55 @@ export default function App() {
       const parsed = typeof remoteData === 'string' ? JSON.parse(remoteData) : remoteData;
       if (!parsed) return;
       const normalized = normalizeState(parsed);
+
+      // Check if a global Factory Reset / System Wipe occurred on any device!
+      const currentKnownResetToken = localStorage.getItem('last_known_reset_token') || '';
+      if (normalized._systemResetToken && normalized._systemResetToken !== currentKnownResetToken) {
+        localStorage.setItem('last_known_reset_token', normalized._systemResetToken);
+        localStorage.removeItem('app_auth_role');
+        localStorage.removeItem('app_current_emp_user');
+        localStorage.removeItem('app_current_branch');
+        localStorage.removeItem('app_is_admin');
+        localStorage.removeItem('app_active_nav_tab');
+        localStorage.removeItem('app_active_sub_tab');
+        sessionStorage.clear();
+
+        setAuthRole('none');
+        setIsAdminLoggedIn(false);
+        setCurrentEmpUser(null);
+        setCurrentBranch(null);
+        setState(normalized);
+        showToast('🚨 تم تصفير ومسح قاعدة البيانات بالكامل. تم تسجيل الخروج بنجاح والبدء من جديد.');
+        setTimeout(() => {
+          window.location.href = '/';
+        }, 800);
+        return;
+      }
+
       setState((prev) => {
         setLastSyncTime(nowTimeStr());
         // Sync current logged-in employee session with fresh database permissions
         setCurrentEmpUser((prevEmp) => {
           if (!prevEmp) return prevEmp;
           const fresh = (normalized.employees || []).find((e) => e.id === prevEmp.id || (prevEmp.code && e.code === prevEmp.code));
+          if (!fresh && (normalized.employees || []).length === 0) {
+            localStorage.removeItem('app_current_emp_user');
+            localStorage.removeItem('app_auth_role');
+            setAuthRole('none');
+            return null;
+          }
           return fresh || prevEmp;
+        });
+        setCurrentBranch((prevBranch) => {
+          if (!prevBranch) return prevBranch;
+          const fresh = (normalized.branches || []).find((b) => b.id === prevBranch.id);
+          if (!fresh && (normalized.branches || []).length === 0) {
+            localStorage.removeItem('app_current_branch');
+            localStorage.removeItem('app_auth_role');
+            setAuthRole('none');
+            return null;
+          }
+          return fresh || prevBranch;
         });
         return normalized;
       });

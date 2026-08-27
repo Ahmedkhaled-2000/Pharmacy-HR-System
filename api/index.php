@@ -389,6 +389,62 @@ try {
             jsonResponse(['success' => true, 'message' => 'Backup restored successfully']);
             break;
 
+        // ==================================================================
+        // 7. تصفير ومسح قاعدة البيانات بالكامل (Full Server Factory Reset)
+        // ==================================================================
+        case 'system/reset':
+        case 'reset':
+            if ($method !== 'POST') {
+                jsonResponse(['success' => false, 'error' => 'Method not allowed'], 405);
+            }
+
+            $payload = getRequestData();
+            $targetKey = (string)($payload['key'] ?? DEFAULT_STORAGE_KEY);
+            $wipedState = $payload['state'] ?? null;
+
+            // 1. مسح جدول البصمات الحيوية بالكامل
+            try {
+                Database::execute("DELETE FROM employee_faces");
+            } catch (Throwable $fe) {
+                error_log('[Reset Faces Error] ' . $fe->getMessage());
+            }
+
+            // 2. تحديث جدول الإعدادات بالحالة النظيفة المصفّرة
+            if ($wipedState !== null) {
+                $jsonString = is_string($wipedState) ? $wipedState : json_encode($wipedState, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                if ($driver === 'pgsql') {
+                    $sql = "INSERT INTO app_settings (key_name, value_data, version, updated_at)
+                            VALUES (?, ?::jsonb, 1, NOW())
+                            ON CONFLICT (key_name) DO UPDATE
+                            SET value_data = EXCLUDED.value_data,
+                                version = app_settings.version + 1,
+                                updated_at = NOW()";
+                } else {
+                    $sql = "INSERT INTO app_settings (key_name, value_data, version, updated_at)
+                            VALUES (?, ?, 1, NOW())
+                            ON DUPLICATE KEY UPDATE
+                                value_data = VALUES(value_data),
+                                version = version + 1,
+                                updated_at = NOW()";
+                }
+                Database::execute($sql, [$targetKey, $jsonString]);
+            }
+
+            // 3. تدوين سجل إعادة ضبط المصنع في sync_logs
+            try {
+                $clientIp = getClientIp();
+                Database::execute(
+                    "INSERT INTO sync_logs (action_type, entity_key, version, client_ip, created_at) VALUES ('FACTORY_RESET', ?, 1, ?, NOW())",
+                    [$targetKey, $clientIp]
+                );
+            } catch (Throwable) {}
+
+            jsonResponse([
+                'success' => true,
+                'message' => 'Server database wiped and factory reset successfully'
+            ]);
+            break;
+
         default:
             jsonResponse([
                 'success' => false,
@@ -397,6 +453,7 @@ try {
                     'GET/POST /api/settings',
                     'GET /api/sync/version',
                     'GET/POST/DELETE /api/faces',
+                    'POST /api/system/reset',
                     'GET /api/health',
                     'GET /api/migrate',
                     'GET /api/backup/export',

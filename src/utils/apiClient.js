@@ -187,7 +187,17 @@ export async function apiImportBackup(payload) {
   });
 }
 
-// ── 5. فحص سلامة الاتصال (Health Check) ───────────────────────────────────────
+// ── 5. تصفير ومسح السيرفر وقاعدة البيانات بالكامل (Full Factory Reset) ───────
+export async function apiSystemReset(wipedState = null, key = STORAGE_KEY) {
+  return await request('system/reset', {
+    method: 'POST',
+    body: JSON.stringify({ key, state: wipedState }),
+    timeout: 25000,
+    noCache: true
+  });
+}
+
+// ── 6. فحص سلامة الاتصال (Health Check) ───────────────────────────────────────
 export async function apiHealthCheck() {
   return await request('health', { method: 'GET' });
 }
