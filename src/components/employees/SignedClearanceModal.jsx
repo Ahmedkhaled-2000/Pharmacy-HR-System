@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { compressImage } from '../../utils/imageCompressor';
-import { todayStr } from '../../utils/formatters';
+import { getRealTodayStr } from '../../utils/formatters';
 
 export default function SignedClearanceModal({
   emp,
@@ -11,7 +11,7 @@ export default function SignedClearanceModal({
   const [fileData, setFileData] = useState(emp?.signedClearanceDoc?.url || null);
   const [fileName, setFileName] = useState(emp?.signedClearanceDoc?.fileName || '');
   const [fileType, setFileType] = useState(emp?.signedClearanceDoc?.fileType || '');
-  const [signedDate, setSignedDate] = useState(emp?.signedClearanceDoc?.signedDate || todayStr());
+  const [signedDate, setSignedDate] = useState(emp?.signedClearanceDoc?.signedDate || getRealTodayStr());
   const [notes, setNotes] = useState(emp?.signedClearanceDoc?.notes || '');
   const [isProcessing, setIsProcessing] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1);

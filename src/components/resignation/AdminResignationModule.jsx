@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { arabicWeekday, todayStr, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
+import { arabicWeekday, getRealTodayStr, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 
 export default function AdminResignationModule({
   state,
@@ -20,7 +20,7 @@ export default function AdminResignationModule({
     type: 'resignation',
     reason: '',
     noticeDays: '0',
-    noticeStart: todayStr()
+    noticeStart: getRealTodayStr()
   });
 
   // 1. Gather all resignation & withdraw requests from both stores without duplicates
@@ -33,7 +33,7 @@ export default function AdminResignationModule({
       rawList.push({
         ...r,
         employeeReason: r.employeeReason || r.reason || r.notes || 'طلب استقالة',
-        requestDate: r.requestDate || r.date || r.createdAt?.slice(0, 10) || todayStr(),
+        requestDate: r.requestDate || r.date || r.createdAt?.slice(0, 10) || getRealTodayStr(),
         managerStatus: r.managerStatus || (r.branchApproved ? 'approved' : (r.branchApprovalStatus || 'pending')),
         adminStatus: r.adminStatus || (r.status === 'approved' ? 'approved' : r.status === 'rejected' ? 'rejected' : 'pending')
       });
@@ -46,7 +46,7 @@ export default function AdminResignationModule({
       rawList.push({
         ...r,
         employeeReason: r.employeeReason || r.reason || r.notes || 'طلب استقالة',
-        requestDate: r.requestDate || r.date || r.createdAt?.slice(0, 10) || todayStr(),
+        requestDate: r.requestDate || r.date || r.createdAt?.slice(0, 10) || getRealTodayStr(),
         managerStatus: r.managerStatus || (r.branchApproved ? 'approved' : (r.branchApprovalStatus || 'pending')),
         adminStatus: r.adminStatus || (r.status === 'approved' ? 'approved' : r.status === 'rejected' ? 'rejected' : 'pending')
       });
@@ -137,7 +137,7 @@ export default function AdminResignationModule({
     const isWithdraw = targetReq.type === 'withdraw';
 
     const nDays = isWithdraw ? 0 : (parseInt(noticeDays[reqId], 10) || 0);
-    const nStart = noticeStart[reqId] || todayStr();
+    const nStart = noticeStart[reqId] || getRealTodayStr();
 
     const performAction = async () => {
       let updatedResignations = (state.resignationRequests || []).map(r => {
@@ -285,7 +285,7 @@ export default function AdminResignationModule({
     }
 
     const nDays = parseInt(manualData.noticeDays, 10) || 0;
-    const nStart = manualData.noticeStart || todayStr();
+    const nStart = manualData.noticeStart || getRealTodayStr();
 
     const emp = (state.employees || []).find(e => String(e.id) === String(manualData.employeeId));
     if (!emp) return;
@@ -299,7 +299,7 @@ export default function AdminResignationModule({
         isAdminCreated: true,
         isManualAdmin: true,
         employeeReason: 'تم الإنشاء يدوياً بواسطة الإدارة العليا: ' + manualData.reason,
-        requestDate: todayStr(),
+        requestDate: getRealTodayStr(),
         managerStatus: 'approved',
         managerComment: 'إجراء إداري مباشر من الإدارة العليا',
         adminStatus: 'approved',
@@ -350,7 +350,7 @@ export default function AdminResignationModule({
       if (saveState) await saveState(updatedState);
       showToast('تم تطبيق الإجراء اليدوي بنجاح');
       setShowManualForm(false);
-      setManualData({ employeeId: '', type: 'resignation', reason: '', noticeDays: '0', noticeStart: todayStr() });
+      setManualData({ employeeId: '', type: 'resignation', reason: '', noticeDays: '0', noticeStart: getRealTodayStr() });
     };
 
     if (executeWithOwnerGuard) {
@@ -863,7 +863,7 @@ export default function AdminResignationModule({
                               type="date" 
                               className="ep-input"
                               style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--border)' }}
-                              value={noticeStart[req.id] || todayStr()}
+                              value={noticeStart[req.id] || getRealTodayStr()}
                               onChange={(e) => handleInputChange(req.id, 'start', e.target.value)}
                             />
                           </div>

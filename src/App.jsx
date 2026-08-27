@@ -14,7 +14,7 @@ import {
 import {
   arabicMonthLabel,
   arabicWeekday,
-  todayStr,
+  getRealTodayStr,
   nowTimeStr,
   getActivePayrollCycleMonth,
   uid,
@@ -472,7 +472,7 @@ export default function App() {
       const h = nowDate.getHours();
       const m = nowDate.getMinutes();
       if (h === 23 && m >= 55) {
-        const todayKey = todayStr();
+        const todayKey = getRealTodayStr();
         const lastSentKey = 'last_digest_sent_' + todayKey;
         if (!sessionStorage.getItem(lastSentKey)) {
           sessionStorage.setItem(lastSentKey, 'true');
@@ -607,17 +607,17 @@ export default function App() {
 
   const [financialStartDate, setFinancialStartDate] = useState(() => {
     try {
-      return localStorage.getItem('financial_start_date') || (todayStr().slice(0, 8) + '01');
+      return localStorage.getItem('financial_start_date') || (getRealTodayStr().slice(0, 8) + '01');
     } catch {
-      return todayStr().slice(0, 8) + '01';
+      return getRealTodayStr().slice(0, 8) + '01';
     }
   });
 
   const [financialEndDate, setFinancialEndDate] = useState(() => {
     try {
-      return localStorage.getItem('financial_end_date') || todayStr();
+      return localStorage.getItem('financial_end_date') || getRealTodayStr();
     } catch {
-      return todayStr();
+      return getRealTodayStr();
     }
   });
 
@@ -664,7 +664,7 @@ export default function App() {
     if (!emp) return;
     const empId = emp.id;
     const active = state.activeShifts[empId];
-    const todayShifts = state.shifts.filter((s) => s.employeeId === empId && s.date === todayStr());
+    const todayShifts = state.shifts.filter((s) => s.employeeId === empId && s.date === getRealTodayStr());
     const todayHours = todayShifts.reduce((acc, s) => acc + s.hours, 0);
 
     let statusText = 'خارج الشيفت';
@@ -936,7 +936,7 @@ export default function App() {
             type: 'resignation',
             isAdminCreated: true,
             employeeReason: terminationReason,
-            requestDate: todayStr(),
+            requestDate: getRealTodayStr(),
             managerStatus: 'approved',
             managerComment: 'إجراء إداري مباشر من ملف الموظف',
             adminStatus: 'approved',
@@ -1213,7 +1213,7 @@ export default function App() {
             description: deductionDesc,
             notes: deductionDesc,
             reason: deductionDesc,
-            date: todayStr()
+            date: getRealTodayStr()
           });
         }
 
@@ -1419,7 +1419,7 @@ export default function App() {
     const performAddPunch = async () => {
       const isCheckIn = type === 'in';
       const emp = (state.employees || []).find((e) => String(e.id) === String(employeeId));
-      const targetDate = date || todayStr();
+      const targetDate = date || getRealTodayStr();
       const existingShift = (state.shifts || []).find(
         (s) => String(s.employeeId) === String(employeeId) && s.date === targetDate
       );
@@ -1492,7 +1492,7 @@ export default function App() {
     executeWithOwnerGuard({
       lockKey: 'lockManualShiftEntry',
       actionTitle: `تسجيل بصمة يدوية (${type === 'in' ? 'حضور' : 'انصراف'})`,
-      actionDetails: `تاريخ: ${date || todayStr()} · الوقت: ${time}`,
+      actionDetails: `تاريخ: ${date || getRealTodayStr()} · الوقت: ${time}`,
       onExecute: performAddPunch
     });
   };
@@ -1510,7 +1510,7 @@ export default function App() {
         description: notes || (type === 'bonus' ? 'مكافأة مباشرة' : 'خصم مباشر'),
         notes: notes || '',
         reason: notes || '',
-        date: todayStr(),
+        date: getRealTodayStr(),
         createdAt: new Date().toISOString()
       };
 
@@ -1599,7 +1599,7 @@ export default function App() {
         description: deductionDesc,
         notes: deductionDesc,
         reason: deductionDesc,
-        date: todayStr()
+        date: getRealTodayStr()
       };
 
       const updatedLoans = (state.loans || []).map((l) =>
@@ -1624,7 +1624,7 @@ export default function App() {
         type: 'loan',
         title: `💳 تم اعتماد ${loanTypeTitle}`,
         message: `تم اعتماد طلب ${loanTypeTitle} الخاص بك بمبلغ ${monthlyInstallment} ج.م وتطبيقه في الرواتب`,
-        date: todayStr(),
+        date: getRealTodayStr(),
         timestamp: new Date().toISOString(),
         read: false
       };
@@ -1897,7 +1897,7 @@ export default function App() {
         password: empPassword.trim() || '123',
         annualLeaveBalance,
         photoUrl: empPhotoUrl.trim(),
-        createdAt: todayStr(),
+        createdAt: getRealTodayStr(),
         devices: []
       };
       updatedEmps = [...state.employees, newEmp];
@@ -1931,7 +1931,7 @@ export default function App() {
           deviceInfo,
           credentialId,
           status: 'pending',
-          requestedAt: todayStr()
+          requestedAt: getRealTodayStr()
         };
         return { ...emp, devices: [...(emp.devices || []), newDevice] };
       }
@@ -2252,7 +2252,7 @@ export default function App() {
         id: uid(),
         type: aType,
         employeeId: aEmpId,
-        date: aDate || todayStr(),
+        date: aDate || getRealTodayStr(),
         amount,
         description: aDesc.trim()
       };
@@ -2369,7 +2369,7 @@ export default function App() {
       }
     }
 
-    const today = todayStr();
+    const today = getRealTodayStr();
     let count = 0;
 
     for (const dateStr of dates) {
@@ -2778,7 +2778,7 @@ export default function App() {
 
   // Manual Shift Entry States
   const [mEmpId, setMEmpId] = useState('');
-  const [mDate, setMDate] = useState(todayStr());
+  const [mDate, setMDate] = useState(getRealTodayStr());
   const [mIn, setMIn] = useState('');
   const [mOut, setMOut] = useState('');
   const [mBreak, setMBreak] = useState('0');
@@ -2788,7 +2788,7 @@ export default function App() {
   // Adjustments States
   const [aType, setAType] = useState('bonus');
   const [aEmpId, setAEmpId] = useState('all');
-  const [aDate, setADate] = useState(todayStr());
+  const [aDate, setADate] = useState(getRealTodayStr());
   const [aAmount, setAAmount] = useState('');
   const [aDesc, setADesc] = useState('');
 
@@ -3403,7 +3403,7 @@ export default function App() {
       employeeId: empId,
       cycleFilterFn: currentFilterFn,
       state: currentState,
-      payrollCycleId: (dateStr || todayStr()).slice(0, 7)
+      payrollCycleId: (dateStr || getRealTodayStr()).slice(0, 7)
     });
 
     const currentIncident = incidents.find((i) => i.date === dateStr) || incidents[incidents.length - 1];
@@ -3465,7 +3465,7 @@ export default function App() {
     const emp = (currentState.employees || []).find((e) => String(e.id) === String(empId));
     if (!emp) return currentState;
 
-    const monthKey = (dateStr || todayStr()).slice(0, 7);
+    const monthKey = (dateStr || getRealTodayStr()).slice(0, 7);
     const approvedRosters = (currentState.rosters || []).filter(
       (r) => String(r.employeeId) === String(empId) && (r.month === monthKey || !r.month) && r.status === 'approved'
     );
@@ -3630,7 +3630,7 @@ export default function App() {
       showToast('⚠️ الموظف لديه وردية عمل نشطة بالفعل');
       return;
     }
-    const punchDate = todayStr();
+    const punchDate = getRealTodayStr();
     const punchTime = nowTimeStr().slice(0, 5);
 
     const effectiveBranchId = branchId || emp?.branchId || (emp?.branchesDetails && emp.branchesDetails[0]?.branchId) || '';
@@ -3708,7 +3708,7 @@ export default function App() {
         jobTitle: emp ? emp.jobTitle : '',
         photoUrl: emp ? emp.photoUrl : '',
         message: 'تم بدء الاستراحة (البريك) بنجاح.',
-        timestamp: `${todayStr()} · ${nowTime}`
+        timestamp: `${getRealTodayStr()} · ${nowTime}`
       });
       setKioskCode('');
       setKioskSelectedEmp(null);
@@ -3748,7 +3748,7 @@ export default function App() {
         jobTitle: emp ? emp.jobTitle : '',
         photoUrl: emp ? emp.photoUrl : '',
         message: 'تم إنهاء البريك واستئناف العمل بنجاح.',
-        timestamp: `${todayStr()} · ${nowTimeStr().slice(0, 5)}`
+        timestamp: `${getRealTodayStr()} · ${nowTimeStr().slice(0, 5)}`
       });
       setKioskCode('');
       setKioskSelectedEmp(null);
@@ -3779,7 +3779,7 @@ export default function App() {
     const bObj = (state.branches || []).find((b) => String(b.id) === String(bId));
 
     // 1. Check schedule from approved roster for overtime and schedule tracking
-    const monthKey = (active.date || todayStr()).slice(0, 7);
+    const monthKey = (active.date || getRealTodayStr()).slice(0, 7);
     const approvedRosters = (state.rosters || []).filter(
       (r) => String(r.employeeId) === String(empId) && (r.month === monthKey || !r.month) && r.status === 'approved'
     );
@@ -3943,7 +3943,7 @@ export default function App() {
         jobTitle: emp ? emp.jobTitle : '',
         photoUrl: emp ? emp.photoUrl : '',
         message: `تم تسجيل الانصراف بنجاح! إجمالي ساعات الشيفت: ${netHours} ساعة.`,
-        timestamp: `${todayStr()} · ${timeOut}`
+        timestamp: `${getRealTodayStr()} · ${timeOut}`
       });
       setKioskCode('');
       showToast(msg);
@@ -4076,7 +4076,7 @@ export default function App() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `بيانات-الموظفين-${todayStr()}.xlsx`;
+      a.download = `بيانات-الموظفين-${getRealTodayStr()}.xlsx`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -4128,7 +4128,7 @@ export default function App() {
             workDaysPerMonth,
             password,
             photoUrl: '',
-            createdAt: todayStr()
+            createdAt: getRealTodayStr()
           });
         }
       });

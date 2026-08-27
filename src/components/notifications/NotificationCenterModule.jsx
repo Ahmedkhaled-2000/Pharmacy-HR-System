@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { fmt, todayStr, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
+import { fmt, getRealTodayStr, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 import { isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
 import { filterAdminNotifications, filterBranchManagerNotifications } from '../../utils/notificationEngine';
 
@@ -28,7 +28,7 @@ export default function NotificationCenterModule({
   const [empFilter, setEmpFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('');
 
-  const todayDate = todayStr();
+  const todayDate = getRealTodayStr();
   const isCustom = (filterMode === 'custom' || filterMode === 'range') && customFrom && customTo;
   const periodDisplayLabel = dateFilter 
     ? `بتاريخ: ${dateFilter}` 

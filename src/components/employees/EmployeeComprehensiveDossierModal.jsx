@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { fmt, todayStr, getEmpDisplayName } from '../../utils/formatters';
+import { fmt, getRealTodayStr, getEmpDisplayName } from '../../utils/formatters';
 import { getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
 import { computeEmployeeFinalSettlement } from '../../utils/settlementHelper';
 import { triggerDirectPrint, generateClearanceSlipHTML } from '../../utils/printHelper';
@@ -123,7 +123,7 @@ export default function EmployeeComprehensiveDossierModal({
 
   const handlePrintOfficialSlip = () => {
     try {
-      const termDate = emp.terminationDate || emp.resignationDate || todayStr();
+      const termDate = emp.terminationDate || emp.resignationDate || getRealTodayStr();
       const stmnt = finalSettlement || computeEmployeeFinalSettlement(emp.id, state, termDate);
       const html = generateClearanceSlipHTML({
         emp,
@@ -152,7 +152,7 @@ export default function EmployeeComprehensiveDossierModal({
   };
 
   // Check if live settlement can be calculated if finalSettlement doesn't exist
-  const effectiveSettlement = finalSettlement || (isTerminated ? computeEmployeeFinalSettlement(emp.id, state, emp.terminationDate || todayStr()) : null);
+  const effectiveSettlement = finalSettlement || (isTerminated ? computeEmployeeFinalSettlement(emp.id, state, emp.terminationDate || getRealTodayStr()) : null);
 
   return (
     <div className="modal-backdrop" style={{ zIndex: 1250, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -362,7 +362,7 @@ export default function EmployeeComprehensiveDossierModal({
                       📜 كشف التصفية والمخالصة المالية النهائية المعتمدة
                     </h3>
                     <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
-                      تاريخ التصفية: <strong>{effectiveSettlement.terminationDate || effectiveSettlement.settlementDate || todayStr()}</strong>
+                      تاريخ التصفية: <strong>{effectiveSettlement.terminationDate || effectiveSettlement.settlementDate || getRealTodayStr()}</strong>
                     </span>
                   </div>
 

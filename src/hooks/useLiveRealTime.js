@@ -1,3 +1,4 @@
+import { getRealTodayStr } from '../utils/timeEngine';
 import { useState, useEffect } from 'react';
 import {
   getRealDate,
@@ -19,7 +20,7 @@ export function useLiveRealTime(updateIntervalMs = 1000) {
     const d = getRealDate();
     return {
       realDate: d,
-      todayStr: getRealTodayStr(),
+      getRealTodayStr: getRealTodayStr(),
       timeStr: getRealNowTimeStr(true),
       formatted12Time: getRealFormatted12HourTime(true),
       formatted12TimeNoSec: getRealFormatted12HourTime(false),
@@ -37,7 +38,7 @@ export function useLiveRealTime(updateIntervalMs = 1000) {
       const d = getRealDate();
       setLiveState({
         realDate: d,
-        todayStr: getRealTodayStr(),
+        getRealTodayStr: getRealTodayStr(),
         timeStr: getRealNowTimeStr(true),
         formatted12Time: getRealFormatted12HourTime(true),
         formatted12TimeNoSec: getRealFormatted12HourTime(false),

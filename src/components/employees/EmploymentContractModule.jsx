@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { fmt, todayStr, getEmpDisplayName } from '../../utils/formatters';
+import { fmt, getRealTodayStr, getEmpDisplayName } from '../../utils/formatters';
 import { triggerDirectPrint } from '../../utils/printHelper';
 import {
   getBylawsSectionsFromState,
@@ -60,7 +60,7 @@ export default function EmploymentContractModule({
       : (calcDailyRate * workDays)
   ) || (rateVal * workHours);
 
-  const hireDate = emp?.hireDate || emp?.hiring_date || todayStr();
+  const hireDate = emp?.hireDate || emp?.hiring_date || getRealTodayStr();
 
   // Official bylaws structured sections from state
   const bylawsSections = getBylawsSectionsFromState(state);

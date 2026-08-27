@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { sendGmailEmail, buildEmailTemplate, generateDailyDigestHTML } from '../../utils/gmailService';
-import { fmt, todayStr } from '../../utils/formatters';
+import { fmt, getRealTodayStr } from '../../utils/formatters';
 
 export default function GmailConfigCard({
   state,
@@ -92,7 +92,7 @@ export default function GmailConfigCard({
 
   const handleTriggerDailyDigestNow = async () => {
     setIsSendingDigest(true);
-    const dateToday = todayStr();
+    const dateToday = getRealTodayStr();
     const employees = state.employees || [];
     const shifts = (state.shifts || []).filter(s => s.date === dateToday);
     const requests = (state.requests || []).filter(r => r.date === dateToday || r.createdAt?.startsWith(dateToday));

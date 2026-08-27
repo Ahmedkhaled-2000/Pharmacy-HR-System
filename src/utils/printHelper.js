@@ -1,3 +1,4 @@
+import { getRealTodayStr } from '../utils/timeEngine';
 import { fmt, arabicWeekday, AR_MONTHS } from './formatters';
 import { getEffectiveShiftHours, isApprovedPermissionForDate } from './latePenaltyEngine';
 import { getCycleDateRange } from './periodEngine';
@@ -794,7 +795,7 @@ export function generateOfficialPayslipHTML({
 
   // 3. Absence days (أيام الغياب غير المبرر عن الورديات المجدولة)
   const absenceDayItems = [];
-  const today = todayStr();
+  const today = getRealTodayStr();
   cycleDates.forEach(dateStr => {
     if (month === today.slice(0, 7) && dateStr >= today) return; // Only count past days in current cycle
     if (shiftDatesSet.has(dateStr) || leaveDatesSet.has(dateStr)) return;

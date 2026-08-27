@@ -1,4 +1,4 @@
-import { fmt, todayStr } from './formatters';
+import { fmt, getRealTodayStr } from './formatters';
 import { getEffectiveShiftHours, computeLatenessFinancialAmount, isApprovedPermissionForDate } from './latePenaltyEngine';
 import { isManagementJob, getJobsList } from './jobsHelper';
 import { getCycleDateRange, getActivePayrollMonth } from './periodEngine';
@@ -6,7 +6,7 @@ import { getCycleDateRange, getActivePayrollMonth } from './periodEngine';
 /**
  * دالة مساعدة لحساب واستخراج فترة وتواريخ دورة الرواتب الدقيقة وفقاً لإعدادات المنظومة
  */
-export function getPayrollCycleForDate(refDate = todayStr(), orgSettings = {}) {
+export function getPayrollCycleForDate(refDate = getRealTodayStr(), orgSettings = {}) {
   const targetDate = refDate ? new Date(refDate + (refDate.length === 10 ? 'T12:00:00' : '')) : new Date();
   const activeMonth = getActivePayrollMonth(orgSettings, targetDate);
   const range = getCycleDateRange(activeMonth, orgSettings);
@@ -35,7 +35,7 @@ export function computeEmployeeFinalSettlement(empId, state, terminationDate = n
   const emp = (state.employees || []).find((e) => String(e.id) === String(empId));
   if (!emp) return null;
 
-  const termDate = terminationDate || todayStr();
+  const termDate = terminationDate || getRealTodayStr();
   const orgSettings = state.orgSettings || {};
   const payrollCycle = getPayrollCycleForDate(termDate, orgSettings);
 

@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { arabicWeekday, todayStr, fmt } from '../../utils/formatters';
+import { arabicWeekday, getRealTodayStr, fmt } from '../../utils/formatters';
 import { createDatePredicate, getCycleDateRange } from '../../utils/periodEngine';
 import {
   DEFAULT_LATE_PENALTY_POLICY,

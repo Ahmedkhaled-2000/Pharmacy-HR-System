@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { fmt, todayStr } from '../../utils/formatters';
+import { fmt, getRealTodayStr } from '../../utils/formatters';
 import { computeEmployeeFinalSettlement } from '../../utils/settlementHelper';
 import { triggerDirectPrint, generateClearanceSlipHTML } from '../../utils/printHelper';
 import { compressImage } from '../../utils/imageCompressor';
@@ -12,7 +12,7 @@ export default function EmployeeTerminationModal({
 }) {
   const [terminationReason, setTerminationReason] = useState('استقالة بناءً على رغبة الموظف');
   const [customReason, setCustomReason] = useState('');
-  const [terminationDate, setTerminationDate] = useState(todayStr());
+  const [terminationDate, setTerminationDate] = useState(getRealTodayStr());
   const [clearanceNotes, setClearanceNotes] = useState('');
   const [signedDoc, setSignedDoc] = useState(emp?.signedClearanceDoc || null);
   const [isUploadingDoc, setIsUploadingDoc] = useState(false);

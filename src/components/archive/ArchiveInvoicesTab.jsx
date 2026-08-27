@@ -1,3 +1,4 @@
+import { getRealTodayStr } from '../../utils/timeEngine';
 import React, { useState, useMemo } from 'react';
 import {
   FileText,
@@ -43,9 +44,9 @@ export default function ArchiveInvoicesTab({
       setDateFrom('');
       setDateTo('');
     } else if (mode === 'today') {
-      const todayStr = now.toISOString().split('T')[0];
-      setDateFrom(todayStr);
-      setDateTo(todayStr);
+      const getRealTodayStr = now.toISOString().split('T')[0];
+      setDateFrom(getRealTodayStr);
+      setDateTo(getRealTodayStr);
     } else if (mode === 'week') {
       const firstDay = new Date(now.setDate(now.getDate() - now.getDay()));
       const lastDay = new Date(now.setDate(now.getDate() - now.getDay() + 6));

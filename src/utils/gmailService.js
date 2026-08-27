@@ -2,7 +2,7 @@
 //  Gmail & HTML Email Notification Service
 // ─────────────────────────────────────────
 
-import { fmt, todayStr } from './formatters';
+import { fmt, getRealTodayStr } from './formatters';
 
 /**
  * Construct responsive HTML layout for emails
@@ -116,7 +116,7 @@ export async function notifyAdminOnResignationRequest({ state, emp, branchName, 
       <table style="width: 100%; border-collapse: collapse; font-size: 13.5px;">
         <tr><td style="padding: 6px 0; font-weight: bold; width: 140px;">👤 الموظف:</td><td>${empName} (كود: ${emp?.code || '—'})</td></tr>
         <tr><td style="padding: 6px 0; font-weight: bold;">🏢 الفرع:</td><td>${resolvedBranch}</td></tr>
-        <tr><td style="padding: 6px 0; font-weight: bold;">📅 تاريخ التقديم:</td><td>${dateStr || todayStr()}</td></tr>
+        <tr><td style="padding: 6px 0; font-weight: bold;">📅 تاريخ التقديم:</td><td>${dateStr || getRealTodayStr()}</td></tr>
         <tr><td style="padding: 6px 0; font-weight: bold;">نوع الطلب:</td><td><strong>${typeLabel}</strong></td></tr>
         ${managerStatus ? `<tr><td style="padding: 6px 0; font-weight: bold;">👔 رأي مدير الفرع:</td><td><strong style="color: ${managerStatus === 'approved' ? '#16a34a' : '#dc2626'}">${managerStatus === 'approved' ? 'موافق' : 'مرفوض'}</strong></td></tr>` : ''}
         ${managerComment ? `<tr><td style="padding: 6px 0; font-weight: bold;">📌 تعليق مدير الفرع:</td><td>${managerComment}</td></tr>` : ''}
@@ -331,7 +331,7 @@ export async function notifyEmployeeOnDecision({ state, request, status, decisio
 
   const content = `
     <p>عزيزي الموظف <strong>${emp.name}</strong>،</p>
-    <p>نود إعلامك بأنه تم اتخاذ قرار بشأن طلبك الوارد بتاريخ <strong>${request.createdAt ? request.createdAt.slice(0, 10) : todayStr()}</strong>:</p>
+    <p>نود إعلامك بأنه تم اتخاذ قرار بشأن طلبك الوارد بتاريخ <strong>${request.createdAt ? request.createdAt.slice(0, 10) : getRealTodayStr()}</strong>:</p>
 
     <div style="background: ${isApproved ? '#f0fdf4' : '#fef2f2'}; border: 1px solid ${isApproved ? '#bbf7d0' : '#fecaca'}; border-radius: 12px; padding: 16px; margin: 16px 0;">
       <h3 style="margin: 0 0 10px; color: ${isApproved ? '#166534' : '#991b1b'}; font-size: 16px;">
@@ -378,7 +378,7 @@ export async function notifyEmployeeOnAdjustment({ state, adjustment, emp }) {
 
   const content = `
     <p>عزيزي الموظف <strong>${empObj.name}</strong>،</p>
-    <p>تم تسجيل معاملة مالية جديدة في سجل أجورك بتاريخ <strong>${adjustment.date || todayStr()}</strong>:</p>
+    <p>تم تسجيل معاملة مالية جديدة في سجل أجورك بتاريخ <strong>${adjustment.date || getRealTodayStr()}</strong>:</p>
 
     <div style="background: ${isBonus ? '#f0fdf4' : '#fef2f2'}; border: 1px solid ${isBonus ? '#bbf7d0' : '#fecaca'}; border-radius: 12px; padding: 16px; margin: 16px 0;">
       <h3 style="margin: 0 0 10px; color: ${isBonus ? '#166534' : '#991b1b'}; font-size: 16px;">
@@ -386,7 +386,7 @@ export async function notifyEmployeeOnAdjustment({ state, adjustment, emp }) {
       </h3>
       <p style="margin: 4px 0;">• <strong>المبلغ:</strong> <strong style="color: ${isBonus ? '#16a34a' : '#dc2626'}; font-size: 16px;">${isBonus ? '+' : '-'}${fmt(adjustment.amount)} ج.م</strong></p>
       <p style="margin: 4px 0;">• <strong>السبب والبيان:</strong> ${adjustment.reason || adjustment.notes || 'معاملة مالية معتمدة'}</p>
-      <p style="margin: 4px 0;">• <strong>تاريخ التطبيق:</strong> ${adjustment.date || todayStr()}</p>
+      <p style="margin: 4px 0;">• <strong>تاريخ التطبيق:</strong> ${adjustment.date || getRealTodayStr()}</p>
     </div>
   `;
 
@@ -424,7 +424,7 @@ export async function notifyAllEmployeesPayrollIssued({ state, monthStr }) {
   for (const emp of employees) {
     const content = `
       <p>مرحباً <strong>${emp.name}</strong>،</p>
-      <p>يسرنا إعلامك بأنه تم رسمياً **إصدار واعتماد رواتب ومستحقات شهر ${monthStr || todayStr().slice(0, 7)}** لجميع موظفي الصيدليات.</p>
+      <p>يسرنا إعلامك بأنه تم رسمياً **إصدار واعتماد رواتب ومستحقات شهر ${monthStr || getRealTodayStr().slice(0, 7)}** لجميع موظفي الصيدليات.</p>
 
       <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 16px; margin: 16px 0;">
         <h3 style="margin: 0 0 8px; color: #166534;">🎉 تم إصدار مسودة الراتب الشهرية</h3>
@@ -439,7 +439,7 @@ export async function notifyAllEmployeesPayrollIssued({ state, monthStr }) {
     `;
 
     const html = buildEmailTemplate({
-      title: `💰 تم إصدار رواتب شهر ${monthStr || todayStr().slice(0, 7)}`,
+      title: `💰 تم إصدار رواتب شهر ${monthStr || getRealTodayStr().slice(0, 7)}`,
       subtitle: `إشعار إداري شامل لجميع الموظفين`,
       badgeText: 'إصدار الرواتب رسمياً',
       badgeColor: '#16a34a',
@@ -449,7 +449,7 @@ export async function notifyAllEmployeesPayrollIssued({ state, monthStr }) {
     const res = await sendGmailEmail({
       gmailConfig,
       recipientEmail: emp.email,
-      subject: `💰 تم إصدار رواتب شهر ${monthStr || todayStr().slice(0, 7)} — مجموعة الصيدليات`,
+      subject: `💰 تم إصدار رواتب شهر ${monthStr || getRealTodayStr().slice(0, 7)} — مجموعة الصيدليات`,
       htmlContent: html
     });
 
@@ -482,7 +482,7 @@ export async function notifyAdminOnLateness({ state, emp, branchName, latenessMi
       <table style="width: 100%; border-collapse: collapse; font-size: 13.5px;">
         <tr><td style="padding: 6px 0; font-weight: bold; width: 140px;">👤 الموظف:</td><td>${empName} ${empCode} - ${empJob}</td></tr>
         <tr><td style="padding: 6px 0; font-weight: bold;">🏢 الفرع:</td><td>${resolvedBranch}</td></tr>
-        <tr><td style="padding: 6px 0; font-weight: bold;">📅 تاريخ اليوم:</td><td>${dateStr || todayStr()}</td></tr>
+        <tr><td style="padding: 6px 0; font-weight: bold;">📅 تاريخ اليوم:</td><td>${dateStr || getRealTodayStr()}</td></tr>
         <tr><td style="padding: 6px 0; font-weight: bold;">⏰ موعد الوردية المجدول:</td><td><strong style="color: #1e293b;">${scheduledStart}</strong></td></tr>
         <tr><td style="padding: 6px 0; font-weight: bold;">📸 وقت تسجيل البصمة:</td><td><strong style="color: #dc2626;">${timeIn}</strong></td></tr>
         <tr><td style="padding: 6px 0; font-weight: bold;">⏱️ مدة التأخير:</td><td><span style="background: #fee2e2; color: #dc2626; padding: 2px 8px; border-radius: 6px; font-weight: bold;">${latenessMinutes} دقيقة تأخير</span></td></tr>
@@ -545,7 +545,7 @@ export async function notifyAdminOnEarlyExit({ state, emp, branchName, earlyMinu
       <table style="width: 100%; border-collapse: collapse; font-size: 13.5px;">
         <tr><td style="padding: 6px 0; font-weight: bold; width: 140px;">👤 الموظف:</td><td>${empName} ${empCode} - ${empJob}</td></tr>
         <tr><td style="padding: 6px 0; font-weight: bold;">🏢 الفرع:</td><td>${resolvedBranch}</td></tr>
-        <tr><td style="padding: 6px 0; font-weight: bold;">📅 تاريخ اليوم:</td><td>${dateStr || todayStr()}</td></tr>
+        <tr><td style="padding: 6px 0; font-weight: bold;">📅 تاريخ اليوم:</td><td>${dateStr || getRealTodayStr()}</td></tr>
         <tr><td style="padding: 6px 0; font-weight: bold;">⏰ موعد نهاية الوردية:</td><td><strong style="color: #1e293b;">${scheduledEnd}</strong></td></tr>
         <tr><td style="padding: 6px 0; font-weight: bold;">📸 وقت تسجيل الانصراف:</td><td><strong style="color: #d97706;">${timeOut}</strong></td></tr>
         <tr><td style="padding: 6px 0; font-weight: bold;">⏱️ مدة الخروج المبكر:</td><td><span style="background: #fef3c7; color: #b45309; padding: 2px 8px; border-radius: 6px; font-weight: bold;">${earlyMinutes} دقيقة مبكراً</span></td></tr>
@@ -595,7 +595,7 @@ export async function notifyEmployeeEarlyExitWarning({ state, emp, branchName, e
 
     <div style="background: #fffbeb; border: 1px solid #fef3c7; border-radius: 12px; padding: 16px; margin: 16px 0;">
       <h3 style="margin: 0 0 10px; color: #b45309; font-size: 15px;">📋 بيانات الانصراف المسجلة:</h3>
-      <p style="margin: 4px 0;">• <strong>تاريخ اليوم:</strong> ${dateStr || todayStr()}</p>
+      <p style="margin: 4px 0;">• <strong>تاريخ اليوم:</strong> ${dateStr || getRealTodayStr()}</p>
       <p style="margin: 4px 0;">• <strong>فرع العمل:</strong> ${resolvedBranch}</p>
       <p style="margin: 4px 0;">• <strong>موعد انتهاء الوردية المجدول:</strong> ${scheduledEnd}</p>
       <p style="margin: 4px 0;">• <strong>وقت تسجيل خروجك الفعلي:</strong> ${timeOut}</p>
@@ -645,7 +645,7 @@ export async function notifyAdminOnOvertime({ state, emp, branchName, overtimeHo
       <table style="width: 100%; border-collapse: collapse; font-size: 13.5px;">
         <tr><td style="padding: 6px 0; font-weight: bold; width: 140px;">👤 الموظف:</td><td>${empName} (كود: ${emp?.code || '—'})</td></tr>
         <tr><td style="padding: 6px 0; font-weight: bold;">🏢 الفرع:</td><td>${resolvedBranch}</td></tr>
-        <tr><td style="padding: 6px 0; font-weight: bold;">📅 التاريخ:</td><td>${dateStr || todayStr()}</td></tr>
+        <tr><td style="padding: 6px 0; font-weight: bold;">📅 التاريخ:</td><td>${dateStr || getRealTodayStr()}</td></tr>
         <tr><td style="padding: 6px 0; font-weight: bold;">🕒 الوردية المجدولة:</td><td>من ${scheduledStart} إلى ${scheduledEnd} (${regularHours} س)</td></tr>
         <tr><td style="padding: 6px 0; font-weight: bold;">📸 البصمة الفعلية:</td><td>من ${actualIn} إلى ${actualOut} (إجمالي: ${totalHours} س)</td></tr>
         <tr><td style="padding: 6px 0; font-weight: bold;">⭐ الساعات الإضافية:</td><td><strong style="color: #15803d; font-size: 15px;">+${overtimeHours} ساعة إضافية</strong></td></tr>

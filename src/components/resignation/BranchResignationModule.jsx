@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { arabicWeekday, todayStr } from '../../utils/formatters';
+import { arabicWeekday, getRealTodayStr } from '../../utils/formatters';
 import { notifyAdminOnResignationRequest } from '../../utils/gmailService';
 
 export default function BranchResignationModule({
@@ -77,7 +77,7 @@ export default function BranchResignationModule({
       type: 'resignation',
       title: `👔 تم رد مدير الفرع على طلب ${targetReq?.type === 'resignation' ? 'الاستقالة' : 'التراجع'}`,
       message: `قام مدير فرع ${branchName} بالرد (${status === 'approved' ? 'موافق' : 'مرفوض'}) على طلب ${emp?.name || 'الموظف'}. تم تحويل الطلب للإدارة العليا للبت النهائي.`,
-      date: todayStr(),
+      date: getRealTodayStr(),
       timestamp: new Date().toISOString(),
       read: false,
       targetRole: 'admin',
@@ -102,7 +102,7 @@ export default function BranchResignationModule({
       reason: targetReq?.employeeReason,
       managerStatus: status,
       managerComment: comment,
-      dateStr: todayStr()
+      dateStr: getRealTodayStr()
     }).catch(err => console.error("Error sending email to admin:", err));
 
     showToast(status === 'approved' ? '✅ تمت الموافقة وإحالة الطلب للإدارة العليا' : '🔴 تم تسجيل الرفض وإحالة الطلب للإدارة العليا');

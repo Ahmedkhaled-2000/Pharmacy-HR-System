@@ -1,3 +1,4 @@
+import { getRealTodayStr } from '../../utils/timeEngine';
 import React, { useState, useEffect, useRef } from 'react';
 import { fmt, arabicWeekday, AR_MONTHS } from '../../utils/formatters';
 import { computeLatenessFinancialAmount, isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
@@ -440,7 +441,7 @@ export default function PayslipPrintModal({
 
   // 3. Absence days (أيام الغياب غير المبرر عن الورديات المجدولة)
   const absenceDayItems = [];
-  const today = todayStr();
+  const today = getRealTodayStr();
   cycleDates.forEach(dateStr => {
     if (month === today.slice(0, 7) && dateStr >= today) return; // Only count past days in current cycle
     if (shiftDatesSet.has(dateStr) || leaveDatesSet.has(dateStr)) return;

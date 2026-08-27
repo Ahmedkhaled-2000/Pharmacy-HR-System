@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { fmt, todayStr, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
+import { fmt, getRealTodayStr, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 import EmployeeTerminationModal from './EmployeeTerminationModal';
 import EmployeeComprehensiveDossierModal from './EmployeeComprehensiveDossierModal';
 
@@ -35,7 +35,7 @@ export default function EmployeeCardsGrid({
   const [dossierModalEmp, setDossierModalEmp] = useState(null);
   const [dossierInitialTab, setDossierInitialTab] = useState('summary');
   const [rehireModalEmp, setRehireModalEmp] = useState(null);
-  const [rehireDate, setRehireDate] = useState(todayStr());
+  const [rehireDate, setRehireDate] = useState(getRealTodayStr());
   const [rehireBranchId, setRehireBranchId] = useState('');
   const [rehireNotes, setRehireNotes] = useState('');
   const [isRehiring, setIsRehiring] = useState(false);
@@ -56,12 +56,12 @@ export default function EmployeeCardsGrid({
   const getResignationNoticeDetails = (start, days) => {
     const nDays = parseInt(days, 10) || 0;
     if (nDays <= 0) return { endDate: '', remainingDays: 0 };
-    const sDate = parseDateStr(start || todayStr());
+    const sDate = parseDateStr(start || getRealTodayStr());
     const eDate = new Date(sDate);
     eDate.setDate(eDate.getDate() + nDays);
     const endDate = `${eDate.getFullYear()}-${String(eDate.getMonth() + 1).padStart(2, '0')}-${String(eDate.getDate()).padStart(2, '0')}`;
     
-    const today = parseDateStr(todayStr());
+    const today = parseDateStr(getRealTodayStr());
     const diffMs = eDate.getTime() - today.getTime();
     const remainingDays = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
     return { endDate, remainingDays };
