@@ -127,6 +127,27 @@ export default function DisciplinaryPenaltiesTab({
         const rawTitle = r.ruleTitle || r.actionTitle || (r.subType === 'lateness' ? `تأخير عن الشيفت (${r.latenessMinutes || ''} د)` : r.reason) || 'مخالفة لائحية';
         const cleanTitle = String(rawTitle).replace(/^CAT_ADMIN_PENALTY\s*/i, '').replace(/^late_[a-z0-9_]+\s*/i, '');
 
+        const isFromAdmin = r.createdRole === 'admin' || r.createdBy === 'admin' || r.isAdminCreated || r.createdRole === 'owner';
+        const isFromBranch = r.createdRole === 'branch' || r.createdRole === 'branch_manager' || r.submittedByBranchManager || r.source === 'branch_manager' || r.sourceType === 'branch_submission';
+        const isFromSystem = r.source === 'late_penalty_engine' || r.source === 'system' || r.subType === 'lateness' || String(r.id).startsWith('req_late_inc_');
+
+        let createdRole = 'system';
+        let createdByName = 'النظام التلقائي (بصمة الحضور)';
+
+        if (isFromAdmin) {
+          createdRole = 'admin';
+          createdByName = 'الإدارة العليا';
+        } else if (isFromBranch) {
+          createdRole = 'branch';
+          createdByName = 'طلب مدير الفرع';
+        } else if (isFromSystem) {
+          createdRole = 'system';
+          createdByName = 'النظام التلقائي (بصمة الحضور)';
+        } else if (r.createdByName) {
+          createdRole = r.createdRole || 'branch';
+          createdByName = r.createdByName;
+        }
+
         list.push({
           id: r.id,
           employeeId: r.employeeId,
@@ -148,7 +169,10 @@ export default function DisciplinaryPenaltiesTab({
           status: r.status || (r.adminApproved ? 'approved' : 'pending_admin'),
           adminApproved: r.adminApproved || r.status === 'approved',
           objection: r.objection || null,
-          sourceType: 'request'
+          createdRole,
+          createdByName,
+          submittedByBranchManager: r.submittedByBranchManager,
+          sourceType: isFromSystem ? 'late_incident' : 'request'
         });
       }
     });
@@ -169,6 +193,9 @@ export default function DisciplinaryPenaltiesTab({
       const incAmount = dayAmt > 0 ? dayAmt : (parseFloat(inc.penaltyAmount) || 0);
 
       const cat = resolveDisciplinaryCategory({ sourceType: 'late_incident', ...inc }, policy);
+      const isFromAdmin = inc.isAdminCreated || inc.createdBy === 'admin' || inc.creatorRole === 'admin';
+      const createdRole = isFromAdmin ? 'admin' : 'system';
+      const createdByName = isFromAdmin ? 'الإدارة العليا (بصمة يدوية)' : 'النظام التلقائي (بصمة الحضور)';
 
       list.push({
         id: inc.id,
@@ -192,6 +219,8 @@ export default function DisciplinaryPenaltiesTab({
         status: inc.status === 'overridden' ? 'overridden' : (inc.status || 'approved'),
         adminApproved: true,
         objection: inc.objection || null,
+        createdRole,
+        createdByName,
         sourceType: 'late_incident',
         rawIncident: inc
       });
@@ -232,6 +261,10 @@ export default function DisciplinaryPenaltiesTab({
       const rawTitle = a.reason || a.description || 'خصم إداري مباشر';
       const cleanTitle = String(rawTitle).replace(/^CAT_ADMIN_PENALTY\s*/i, '').replace(/^late_[a-z0-9_]+\s*/i, '');
 
+      const isFromBranch = a.creatorRole === 'branch' || a.createdBy === 'branch';
+      const createdRole = isFromBranch ? 'branch' : 'admin';
+      const createdByName = isFromBranch ? 'طلب مدير الفرع' : 'الإدارة العليا (تسوية مالية)';
+
       list.push({
         id: a.id,
         employeeId: a.employeeId,
@@ -252,6 +285,8 @@ export default function DisciplinaryPenaltiesTab({
         status: 'approved',
         adminApproved: true,
         objection: a.objection || null,
+        createdRole,
+        createdByName,
         sourceType: 'adjustment'
       });
     });
@@ -324,6 +359,79 @@ export default function DisciplinaryPenaltiesTab({
     });
     return list;
   }, [employees, allDisciplinaryPenalties, policy]);
+
+  const renderPenaltyCreatorBadge = (pen) => {
+    if (!pen) return null;
+    const role = pen.createdRole;
+    const name = pen.createdByName;
+
+    if (role === 'admin' || name?.includes('الإدارة العليا')) {
+      return (
+        <span
+          style={{
+            background: '#f5f3ff',
+            color: '#6d28d9',
+            border: '1px solid #ddd6fe',
+            padding: '3px 8px',
+            borderRadius: '6px',
+            fontSize: '11.5px',
+            fontWeight: '800',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '4px',
+            whiteSpace: 'nowrap'
+          }}
+        >
+          <span>👑</span>
+          <span>{name || 'الإدارة العليا'}</span>
+        </span>
+      );
+    }
+
+    if (role === 'branch' || role === 'branch_manager' || name?.includes('مدير الفرع')) {
+      return (
+        <span
+          style={{
+            background: '#fffbeb',
+            color: '#b45309',
+            border: '1px solid #fde68a',
+            padding: '3px 8px',
+            borderRadius: '6px',
+            fontSize: '11.5px',
+            fontWeight: '800',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '4px',
+            whiteSpace: 'nowrap'
+          }}
+        >
+          <span>👤</span>
+          <span>{name || 'طلب مدير الفرع'}</span>
+        </span>
+      );
+    }
+
+    return (
+      <span
+        style={{
+          background: '#f0f9ff',
+          color: '#0369a1',
+          border: '1px solid #bae6fd',
+          padding: '3px 8px',
+          borderRadius: '6px',
+          fontSize: '11.5px',
+          fontWeight: '800',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '4px',
+          whiteSpace: 'nowrap'
+        }}
+      >
+        <span>⚙️</span>
+        <span>{name || 'النظام التلقائي (بصمة الحضور)'}</span>
+      </span>
+    );
+  };
 
   // ── Actions ──
   const handleApprovePenalty = async (pen) => {
@@ -1948,7 +2056,7 @@ export default function DisciplinaryPenaltiesTab({
                           )}
                         </td>
                         <td>
-                          <span style={{ fontSize: '12px' }}>{pen.createdByName || (pen.createdRole === 'admin' ? 'الإدارة العليا' : 'مدير الفرع')}</span>
+                          {renderPenaltyCreatorBadge(pen)}
                         </td>
                         <td>
                           {isCancelled ? (
@@ -2269,6 +2377,7 @@ export default function DisciplinaryPenaltiesTab({
               <div><strong>رقم القرار: </strong>{inspectedPenalty.id}</div>
               <div><strong>الموظف: </strong>{inspectedPenalty.employeeName} ({inspectedPenalty.employeeCode || '—'})</div>
               <div><strong>التاريخ: </strong>{inspectedPenalty.date}</div>
+              <div><strong>منشئ المخالفة: </strong>{renderPenaltyCreatorBadge(inspectedPenalty)}</div>
               <div><strong>فئة المخالفة: </strong>{inspectedPenalty.categoryName}</div>
               <div><strong>نوع المخالفة: </strong>{inspectedPenalty.ruleTitle}</div>
               <div><strong>العداد: </strong>المرة {inspectedPenalty.occurrenceNumber || 1}</div>
