@@ -3124,7 +3124,7 @@ export default function App() {
       if (isPolling || !navigator.onLine) return;
       isPolling = true;
       try {
-        const versionRes = await apiFetchVersion(STORAGE_KEY, { timeout: 3500 });
+        const versionRes = await apiFetchVersion(STORAGE_KEY, { timeout: 2500 });
         const currentVer = typeof versionRes?.version === 'number' ? versionRes.version : 0;
         const currentUpdated = versionRes?.updated_at || '';
 
@@ -3135,7 +3135,7 @@ export default function App() {
         if (hasChanged) {
           lastKnownVersion = currentVer;
           lastKnownUpdatedAt = currentUpdated;
-          const remoteData = await apiFetchSettings(STORAGE_KEY, { timeout: 6000, useETag: false });
+          const remoteData = await apiFetchSettings(STORAGE_KEY, { timeout: 5000, useETag: false });
           if (remoteData && !remoteData.notModified) {
             applyRemoteData(remoteData);
           }
@@ -3147,11 +3147,11 @@ export default function App() {
       }
     };
 
-    // 1. High-frequency adaptive polling: 1.5s when active tab, 12s when in background
+    // 1. Ultra-Fast 0.5s (500ms) Real-Time Polling for Instant Sync across all devices
     let timerId = null;
     const scheduleNextPoll = () => {
       const isVisible = typeof document !== 'undefined' ? document.visibilityState === 'visible' : true;
-      const delay = isVisible ? 1500 : 12000;
+      const delay = isVisible ? 500 : 2500;
       timerId = setTimeout(async () => {
         await poll();
         scheduleNextPoll();

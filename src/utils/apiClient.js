@@ -125,7 +125,7 @@ export async function apiSaveSettings(key = STORAGE_KEY, value, options = {}) {
 export async function apiFetchVersion(key = STORAGE_KEY, options = {}) {
   return await request(`sync/version?key=${encodeURIComponent(key)}`, {
     method: 'GET',
-    timeout: options.timeout || 3500,
+    timeout: options.timeout || 2500,
     noCache: true
   });
 }
