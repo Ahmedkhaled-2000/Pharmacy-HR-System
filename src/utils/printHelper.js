@@ -613,31 +613,52 @@ export function generateOfficialPayslipHTML({
     const total = parseFloat(l.amount || l.totalAmount) || 0;
     const paid = parseFloat(l.paidAmount) || 0;
     const rem = Math.max(0, total - paid);
-    if (rem <= 0) return null;
+
+    const history = l.paymentsHistory || l.payments || l.paidHistory || [];
+    const paymentsInCycle = history.filter((p) => {
+      const pDate = p.date || '';
+      const pMonth = p.month || '';
+      if (pDate && cyclePredicate(pDate)) return true;
+      if (month && (pMonth === month || (p.note && p.note.includes(month)))) return true;
+      return false;
+    });
+    const paidInCycle = paymentsInCycle.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
 
     const isInstallment = l.loanType === 'installment' || parseInt(l.installmentsCount || l.monthsCount, 10) > 1 || (parseFloat(l.monthlyDeduction || l.installmentAmount) > 0 && parseFloat(l.monthlyDeduction || l.installmentAmount) < total);
     const monthlyDeduction = parseFloat(l.monthlyDeduction || l.installmentAmount) || (isInstallment ? Math.ceil(total / (parseInt(l.installmentsCount || l.monthsCount, 10) || 1)) : rem);
     const itemDate = l.date || (l.createdAt ? l.createdAt.slice(0, 10) : '');
 
-    if (!isInstallment && !cyclePredicate(itemDate) && rem <= 0) {
-      return null;
+    let deductedThisMonth = 0;
+    let previouslyPaid = 0;
+
+    if (paidInCycle > 0) {
+      deductedThisMonth = paidInCycle;
+      previouslyPaid = Math.max(0, paid - paidInCycle);
+    } else if (rem > 0) {
+      if (isInstallment) {
+        deductedThisMonth = Math.min(rem, monthlyDeduction);
+      } else if (cyclePredicate(itemDate) || rem > 0) {
+        deductedThisMonth = rem;
+      }
+      previouslyPaid = paid;
     }
 
-    const deductedThisMonth = Math.min(rem, isInstallment ? monthlyDeduction : rem);
     if (deductedThisMonth <= 0) return null;
+
+    const remainingBalance = Math.max(0, total - (previouslyPaid + deductedThisMonth));
 
     return {
       id: l.id,
-      date: itemDate || cycleRange.startDate,
+      date: paymentsInCycle[0]?.date || itemDate || cycleRange.startDate,
       typeLabel: (l.type === 'meds' || l.type === 'credit_medicine')
         ? '💊 مشتريات أدوية بالآجل'
         : isInstallment
         ? `💳 قسط سلفة مقسطة (${l.currentInstallmentNumber || 1}/${l.installmentsCount || l.monthsCount || 1})`
         : '💳 سلفة نقدية شهرية',
       totalAmount: total,
-      paidAmount: paid,
+      paidAmount: previouslyPaid,
       deductedThisMonth,
-      remainingBalance: Math.max(0, rem - deductedThisMonth),
+      remainingBalance,
       notes: l.reason || l.details || l.notes || '—'
     };
   }).filter(Boolean);
@@ -852,7 +873,17 @@ export function generateOfficialPayslipHTML({
     color: '#dc2626'
   }] : [];
 
-  const generalFinancialItems = [...allowanceItems, ...manualItems, ...absenceItem, ...unpaidLeaveItem];
+  const loanFinancialItems = empLoans.map((l) => ({
+    id: `loan_fin_${l.id}`,
+    date: l.date,
+    typeLabel: l.typeLabel,
+    amount: l.deductedThisMonth,
+    isPositive: false,
+    details: l.notes && l.notes !== '—' ? `${l.notes} (المتبقي بعد الخصم: ${fmt(l.remainingBalance)} ج.م)` : `خصم سلفة نقدية / قسط شهري معتمد (المتبقي بعد الخصم: ${fmt(l.remainingBalance)} ج.م)`,
+    color: '#b91c1c'
+  }));
+
+  const generalFinancialItems = [...allowanceItems, ...manualItems, ...loanFinancialItems, ...absenceItem, ...unpaidLeaveItem];
   const isCompact = printFitMode === 'single_page';
 
   return `

@@ -2624,6 +2624,21 @@ export default function App() {
       const total = parseFloat(l.amount || l.totalAmount) || 0;
       const paid = parseFloat(l.paidAmount) || 0;
       const rem = Math.max(0, total - paid);
+
+      const history = l.paymentsHistory || l.payments || l.paidHistory || [];
+      const paymentsInCycle = history.filter((p) => {
+        const pDate = p.date || '';
+        const pMonth = p.month || '';
+        if (effectiveFilterFn && pDate && effectiveFilterFn(pDate)) return true;
+        if (monthStr && (pMonth === monthStr || (p.note && p.note.includes(monthStr)))) return true;
+        return false;
+      });
+      const paidInCycle = paymentsInCycle.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+
+      if (paidInCycle > 0) {
+        return acc + paidInCycle;
+      }
+
       if (rem <= 0) return acc;
 
       const isInstallment = l.loanType === 'installment' || parseInt(l.installmentsCount || l.monthsCount, 10) > 1 || (parseFloat(l.monthlyDeduction || l.installmentAmount) > 0 && parseFloat(l.monthlyDeduction || l.installmentAmount) < total);
