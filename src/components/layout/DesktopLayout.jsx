@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useLiveRealTime } from '../../hooks/useLiveRealTime';
 import { getCycleDateRange } from '../../utils/periodEngine';
+import { getNotificationTargetTab } from '../../utils/notificationEngine';
 
 export default function DesktopLayout({
   currentRole,
@@ -788,25 +789,48 @@ return (
                     🎉 لا توجد إشعارات حالياً
                   </div>
                 ) : (
-                  (notifications || []).slice(0, 15).map(n => (
-                    <div key={n.id} style={{ padding: '8px 10px', borderBottom: '1px solid var(--border-light, rgba(0,0,0,0.05))', display: 'flex', gap: '8px', alignItems: 'flex-start', background: !n.read ? 'rgba(13,148,136,0.05)' : 'transparent' }}>
-                      <span style={{ fontSize: '16px' }}>{n.icon || '🔔'}</span>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <h5 style={{ margin: 0, fontSize: '12px', fontWeight: !n.read ? 800 : 600 }}>{n.title || n.typeLabel || 'إشعار'}</h5>
-                          <div style={{ display: 'flex', gap: '4px' }}>
-                            {!n.read && onMarkNotificationRead && (
-                              <button type="button" onClick={() => onMarkNotificationRead(n.id)} style={{ background: 'none', border: 'none', color: 'var(--primary)', fontSize: '10.5px', fontWeight: 'bold', cursor: 'pointer' }}>✓</button>
-                            )}
-                            {onDeleteNotification && (
-                              <button type="button" onClick={() => onDeleteNotification(n.id)} style={{ background: 'none', border: 'none', color: 'var(--muted)', fontSize: '11px', cursor: 'pointer' }}>🗑️</button>
-                            )}
+                  (notifications || []).slice(0, 15).map(n => {
+                    const isUnread = !n.read;
+                    const handleItemClick = () => {
+                      if (isUnread && onMarkNotificationRead) onMarkNotificationRead(n.id);
+                      setIsNotifDropdownOpen(false);
+                      const target = getNotificationTargetTab(n, currentRole);
+                      if (setActiveTab) setActiveTab(target);
+                    };
+
+                    return (
+                      <div
+                        key={n.id}
+                        onClick={handleItemClick}
+                        style={{
+                          padding: '8px 10px',
+                          borderBottom: '1px solid var(--border-light, rgba(0,0,0,0.05))',
+                          display: 'flex',
+                          gap: '8px',
+                          alignItems: 'flex-start',
+                          background: isUnread ? 'rgba(13,148,136,0.05)' : 'transparent',
+                          cursor: 'pointer',
+                          transition: 'background 0.15s ease'
+                        }}
+                      >
+                        <span style={{ fontSize: '16px' }}>{n.icon || '🔔'}</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <h5 style={{ margin: 0, fontSize: '12px', fontWeight: isUnread ? 800 : 600 }}>{n.title || n.typeLabel || 'إشعار'}</h5>
+                            <div style={{ display: 'flex', gap: '4px' }} onClick={(e) => e.stopPropagation()}>
+                              {isUnread && onMarkNotificationRead && (
+                                <button type="button" onClick={() => onMarkNotificationRead(n.id)} style={{ background: 'none', border: 'none', color: 'var(--primary)', fontSize: '10.5px', fontWeight: 'bold', cursor: 'pointer' }}>✓</button>
+                              )}
+                              {onDeleteNotification && (
+                                <button type="button" onClick={() => onDeleteNotification(n.id)} style={{ background: 'none', border: 'none', color: 'var(--muted)', fontSize: '11px', cursor: 'pointer' }}>🗑️</button>
+                              )}
+                            </div>
                           </div>
+                          <p style={{ margin: '2px 0', fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.3 }}>{n.message || n.body || ''}</p>
                         </div>
-                        <p style={{ margin: '2px 0', fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.3 }}>{n.message || n.body || ''}</p>
                       </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
               {onClearReadNotifications && (notifications || []).some(n => n.read) && (
@@ -1232,9 +1256,17 @@ return (
                 ) : (
                   (notifications || []).slice(0, 20).map((n) => {
                     const isUnread = !n.read;
+                    const handleDesktopItemClick = () => {
+                      if (isUnread && onMarkNotificationRead) onMarkNotificationRead(n.id);
+                      setIsNotifDropdownOpen(false);
+                      const target = getNotificationTargetTab(n, currentRole);
+                      if (setActiveTab) setActiveTab(target);
+                    };
+
                     return (
                       <div
                         key={n.id}
+                        onClick={handleDesktopItemClick}
                         style={{
                           padding: '10px 14px',
                           borderBottom: '1px solid var(--border, #f1f5f9)',
@@ -1242,8 +1274,10 @@ return (
                           display: 'flex',
                           gap: '10px',
                           alignItems: 'flex-start',
+                          cursor: 'pointer',
                           transition: 'background 0.15s ease'
                         }}
+                        className="notif-dropdown-item-hover"
                       >
                         <span style={{ fontSize: '16px', marginTop: '2px' }}>
                           {n.icon || (n.type === 'loan' ? '💳' : n.type === 'leave' ? '🏖️' : n.type === 'permission' ? '⏰' : n.type === 'swap' ? '🔄' : '🔔')}
@@ -1253,7 +1287,7 @@ return (
                             <h5 style={{ margin: 0, fontSize: '12.5px', fontWeight: isUnread ? 800 : 600, color: 'var(--text)' }}>
                               {n.title || n.typeLabel || 'إشعار إداري'}
                             </h5>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }} onClick={(e) => e.stopPropagation()}>
                               {isUnread && onMarkNotificationRead && (
                                 <button
                                   type="button"

@@ -2585,4 +2585,29 @@ tbody tr:hover {
 /* Sub-tabs horizontal scroll on smaller desktop viewports */
 .employees-hub-container button {
   white-space: nowrap;
+}
+
+/* Notification Interaction & Hover Styles */
+.notif-dropdown-item-hover:hover {
+  background: rgba(13, 148, 136, 0.12) !important;
+  transform: translateX(-2px);
+}
+
+.notif-card-hover {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.notif-card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.07);
+  border-color: var(--primary) !important;
+}
+
+.ep-notif-card {
+  transition: all 0.18s ease;
+}
+
+.ep-notif-card:hover {
+  background: rgba(15, 118, 110, 0.1) !important;
+  transform: translateX(-3px);
 }

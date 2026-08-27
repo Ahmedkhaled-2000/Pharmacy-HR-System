@@ -271,3 +271,108 @@ export function countUnreadBranchManagerNotifications(notifications = [], curren
   return branchNotifs.filter((n) => !n.read).length;
 }
 
+/**
+ * دالة ذكية لتحديد الصفحة / التبويب المستهدف عند الضغط على أي إشعار
+ * تدعم الإدارة العليا، مدير الفرع، وبوابة الموظف
+ */
+export function getNotificationTargetTab(notification, role = 'admin') {
+  if (!notification) {
+    return role === 'employee' ? 'dashboard' : 'requests';
+  }
+
+  const type = String(notification.type || '').toLowerCase();
+  const reqId = String(notification.requestId || '').toLowerCase();
+  const title = String(notification.title || '').toLowerCase();
+  const msg = String(notification.message || notification.body || '').toLowerCase();
+
+  // 1. بوابة الموظف (Employee Portal)
+  if (role === 'employee') {
+    if (notification.linkTab && ['leaves', 'permissions', 'loans', 'swaps', 'resignations', 'evaluations', 'salary', 'adjustments', 'shifts', 'roster', 'bylaws', 'dashboard'].includes(notification.linkTab)) {
+      return notification.linkTab;
+    }
+    if (type.includes('leave') || reqId.startsWith('leave_') || title.includes('إجاز') || title.includes('اجاز')) return 'leaves';
+    if (type.includes('perm') || reqId.startsWith('perm_') || title.includes('إذن') || title.includes('اذن') || title.includes('استئذان')) return 'permissions';
+    if (type.includes('loan') || type.includes('med') || type.includes('advance') || reqId.startsWith('loan_') || reqId.startsWith('medreq_') || title.includes('سلف') || title.includes('أدوي') || title.includes('ادوي') || title.includes('آجل')) return 'loans';
+    if (type.includes('swap') || reqId.startsWith('swap_') || title.includes('تبديل') || title.includes('شفت') || title.includes('ورد')) return 'swaps';
+    if (type.includes('resign') || reqId.startsWith('res_') || title.includes('استقال')) return 'resignations';
+    if (type.includes('eval') || type.includes('complaint') || title.includes('تقييم') || title.includes('شكو')) return 'evaluations';
+    if (type.includes('salary') || type.includes('payroll') || type.includes('payslip') || title.includes('مرتب') || title.includes('راتب') || title.includes('أجر') || title.includes('مفردات')) return 'salary';
+    if (type.includes('adj') || type.includes('penalty') || type.includes('bonus') || type.includes('deduct') || type.includes('late') || type.includes('early_exit') || type.includes('overtime') || title.includes('مكافأ') || title.includes('خصم') || title.includes('جزاء') || title.includes('تأخير') || title.includes('خروج') || title.includes('إضافي')) return 'adjustments';
+    if (type.includes('punch') || type.includes('shift') || title.includes('بصم') || title.includes('حضور')) return 'shifts';
+    if (type.includes('roster') || title.includes('جدول')) return 'roster';
+    if (type.includes('bylaw') || title.includes('لائح')) return 'bylaws';
+    return 'dashboard';
+  }
+
+  // 2. الإدارة العليا ومدير الفرع (Admin & Branch Manager)
+  if (notification.linkTab) {
+    return notification.linkTab;
+  }
+
+  // طلبات الموظفين (إجازات، أذونات، سلف، تبديل، استقالة) -> توجيه لمركز الطلبات أو الموافقات
+  if (type.includes('leave') || reqId.startsWith('leave_') || title.includes('إجاز') || title.includes('اجاز')) return 'requests';
+  if (type.includes('perm') || reqId.startsWith('perm_') || title.includes('إذن') || title.includes('اذن') || title.includes('استئذان')) return 'requests';
+  if (type.includes('loan') || type.includes('med') || type.includes('advance') || reqId.startsWith('loan_') || reqId.startsWith('medreq_') || title.includes('سلف') || title.includes('أدوي') || title.includes('ادوي') || title.includes('آجل')) return role === 'branch' ? 'requests' : 'requests';
+  if (type.includes('swap') || reqId.startsWith('swap_') || title.includes('تبديل')) return 'requests';
+  if (type.includes('resign') || reqId.startsWith('res_') || title.includes('استقال')) return role === 'branch' ? 'requests' : 'requests';
+
+  // التقييمات والشكاوى
+  if (type.includes('eval') || type.includes('complaint') || title.includes('تقييم') || title.includes('شكو')) return 'evaluations';
+
+  // الجداول والورديات
+  if (type.includes('roster') || title.includes('جدول')) return 'roster';
+
+  // الحضور والبصمات
+  if (type.includes('punch') || type.includes('shift') || type.includes('biometric') || title.includes('بصم') || title.includes('حضور')) return 'attendance';
+
+  // لائحة العمل والجزاءات والتأخير
+  if (type.includes('late') || type.includes('early_exit') || type.includes('penalty') || type.includes('bylaw') || title.includes('تأخير') || title.includes('خروج') || title.includes('جزاء') || title.includes('لائح')) return 'bylaws';
+
+  // الرواتب
+  if (type.includes('payroll') || type.includes('salary') || title.includes('مرتب') || title.includes('راتب')) return 'payroll';
+
+  // الفروع
+  if (type.includes('branch') || title.includes('فرع')) return 'branches';
+
+  // الموظفين
+  if (type.includes('emp') || title.includes('موظف')) return 'employees';
+
+  // الأرشيف
+  if (type.includes('archive') || title.includes('أرشيف') || title.includes('فاتورة')) return 'pharmacy-archive';
+
+  return 'requests';
+}
+
+/**
+ * الحصول على اسم التبويب بالعربية لرسائل التوجيه
+ */
+export function getNotificationTabLabel(targetTab, role = 'admin') {
+  const labels = {
+    leaves: 'قسم الإجازات 🏖️',
+    permissions: 'قسم الأذونات ⏰',
+    'permissions-management': 'إدارة الأذونات ⏰',
+    loans: 'قسم السلف والآجل 💳',
+    'loans-meds': 'قسم السلف والأدوية 💳',
+    swaps: 'تبديل الشيفتات 🔄',
+    resignations: 'طلبات الاستقالة 🚪',
+    resignation: 'طلبات الاستقالة 🚪',
+    evaluations: 'التقييمات والشكاوى ⭐',
+    salary: 'تفاصيل ومفردات المرتب 💼',
+    payroll: 'كشف ومسير الرواتب 💰',
+    adjustments: 'المكافآت والخصومات 📝',
+    'adjustments-module': 'المكافآت والخصومات 📝',
+    shifts: 'سجل البصمات والحضور 📋',
+    attendance: 'سجل الحضور والانصراف ⏱️',
+    'electronic-attendance': 'البصمة الحيوية 📸',
+    roster: 'الجداول الشهرية 🗓️',
+    bylaws: 'لائحة العمل والجزاءات 📜',
+    requests: 'مركز موافقات الطلبات 📋',
+    branches: 'إدارة الفروع 🏢',
+    employees: 'شؤون الموظفين 👥',
+    'pharmacy-archive': 'أرشيف الصيدلية 🗄️',
+    dashboard: 'لوحة التحكم 📊'
+  };
+
+  return labels[targetTab] || 'القسم المطلوب 🔗';
+}
+

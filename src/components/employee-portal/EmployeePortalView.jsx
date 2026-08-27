@@ -3,8 +3,7 @@ import { AR_MONTHS, arabicWeekday, fmt, arabicMonthLabel, getActivePayrollCycleM
 import { loadExcelJS, mergedTitle, tableHeaderRow, dataRow } from '../../utils/excelExport';
 import { getCycleDateRange, createDatePredicate, getActivePayrollMonth } from '../../utils/periodEngine';
 import { getRealDate, getRealTodayStr, getRealNowTimeStr } from '../../utils/timeEngine';
-import { useLiveRealTime } from '../../hooks/useLiveRealTime';
-import { filterEmployeeNotifications, countUnreadEmployeeNotifications } from '../../utils/notificationEngine';
+import { filterEmployeeNotifications, countUnreadEmployeeNotifications, getNotificationTargetTab, getNotificationTabLabel } from '../../utils/notificationEngine';
 
 import EmployeeLeaveModule from './EmployeeLeaveModule';
 import EmployeeLoansModule from './EmployeeLoansModule';
@@ -1858,17 +1857,34 @@ export default function EmployeePortalView({
                       ) : (
                         empNotifications.slice(0, 20).map((n) => {
                           const isUnread = !n.read;
+                          const targetTab = getNotificationTargetTab(n, 'employee');
+                          const tabLabel = getNotificationTabLabel(targetTab, 'employee');
+
+                          const handleEmpNotifClick = () => {
+                            if (isUnread) handleMarkNotifRead(n.id);
+                            setIsNotifDropdownOpen(false);
+                            setActiveTab(targetTab);
+                            showToast?.(`الانتقال إلى: ${tabLabel}`);
+                          };
+
                           return (
-                            <div key={n.id} style={{
-                              display: 'flex',
-                              gap: '10px',
-                              padding: '10px',
-                              borderRadius: '8px',
-                              background: isUnread ? 'rgba(15, 118, 110, 0.05)' : 'transparent',
-                              borderRight: isUnread ? '3px solid var(--primary)' : '3px solid transparent',
-                              marginBottom: '4px',
-                              borderBottom: '1px solid var(--border-light, rgba(0,0,0,0.04))'
-                            }}>
+                            <div
+                              key={n.id}
+                              onClick={handleEmpNotifClick}
+                              style={{
+                                display: 'flex',
+                                gap: '10px',
+                                padding: '10px',
+                                borderRadius: '8px',
+                                background: isUnread ? 'rgba(15, 118, 110, 0.05)' : 'transparent',
+                                borderRight: isUnread ? '3px solid var(--primary)' : '3px solid transparent',
+                                marginBottom: '4px',
+                                borderBottom: '1px solid var(--border-light, rgba(0,0,0,0.04))',
+                                cursor: 'pointer',
+                                transition: 'background 0.15s ease'
+                              }}
+                              className="notif-dropdown-item-hover"
+                            >
                               <span style={{ fontSize: '18px', marginTop: '2px' }}>
                                 {n.icon || (n.type === 'loan' ? '💳' : n.type === 'leave' ? '🏖️' : n.type === 'permission' ? '⏰' : n.type === 'swap' ? '🔄' : '🔔')}
                               </span>
@@ -1890,11 +1906,14 @@ export default function EmployeePortalView({
                                       </span>
                                     )}
                                   </h5>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }} onClick={(e) => e.stopPropagation()}>
                                     {isUnread && (
                                       <button
                                         type="button"
-                                        onClick={() => handleMarkNotifRead(n.id)}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleMarkNotifRead(n.id);
+                                        }}
                                         style={{
                                           background: 'none',
                                           border: 'none',
@@ -1911,7 +1930,10 @@ export default function EmployeePortalView({
                                     )}
                                     <button
                                       type="button"
-                                      onClick={() => handleDeleteNotif(n.id)}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDeleteNotif(n.id);
+                                      }}
                                       title="حذف الإشعار"
                                       style={{
                                         background: 'none',
@@ -1931,7 +1953,7 @@ export default function EmployeePortalView({
                                 </p>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px', fontSize: '10px', color: 'var(--muted)' }}>
                                   <span>🕒 {n.date || (n.timestamp ? n.timestamp.slice(0, 10) : '')}</span>
-                                  {n.typeLabel && <span>📂 {n.typeLabel}</span>}
+                                  <span style={{ color: 'var(--primary)', fontWeight: 'bold' }}>• فتح: {tabLabel}</span>
                                 </div>
                               </div>
                             </div>
@@ -2346,17 +2368,34 @@ export default function EmployeePortalView({
                     ) : (
                       empNotifications.slice(0, 20).map((n) => {
                         const isUnread = !n.read;
+                        const targetTab = getNotificationTargetTab(n, 'employee');
+                        const tabLabel = getNotificationTabLabel(targetTab, 'employee');
+
+                        const handleEmpNotifClick = () => {
+                          if (isUnread) handleMarkNotifRead(n.id);
+                          setIsNotifDropdownOpen(false);
+                          setActiveTab(targetTab);
+                          showToast?.(`الانتقال إلى: ${tabLabel}`);
+                        };
+
                         return (
-                          <div key={n.id} className={`ep-notif-card ${isUnread ? 'unread' : ''}`} style={{
-                            display: 'flex',
-                            gap: '10px',
-                            padding: '10px',
-                            borderRadius: '8px',
-                            background: isUnread ? 'rgba(15, 118, 110, 0.05)' : 'transparent',
-                            borderRight: isUnread ? '3px solid var(--primary)' : '3px solid transparent',
-                            marginBottom: '4px',
-                            borderBottom: '1px solid var(--border-light, rgba(0,0,0,0.04))'
-                          }}>
+                          <div
+                            key={n.id}
+                            className={`ep-notif-card ${isUnread ? 'unread' : ''}`}
+                            onClick={handleEmpNotifClick}
+                            style={{
+                              display: 'flex',
+                              gap: '10px',
+                              padding: '10px',
+                              borderRadius: '8px',
+                              background: isUnread ? 'rgba(15, 118, 110, 0.05)' : 'transparent',
+                              borderRight: isUnread ? '3px solid var(--primary)' : '3px solid transparent',
+                              marginBottom: '4px',
+                              borderBottom: '1px solid var(--border-light, rgba(0,0,0,0.04))',
+                              cursor: 'pointer',
+                              transition: 'background 0.15s ease'
+                            }}
+                          >
                             <span style={{ fontSize: '18px', marginTop: '2px' }}>
                               {n.icon || (n.type === 'loan' ? '💳' : n.type === 'leave' ? '🏖️' : n.type === 'permission' ? '⏰' : n.type === 'swap' ? '🔄' : '🔔')}
                             </span>
@@ -2378,11 +2417,14 @@ export default function EmployeePortalView({
                                     </span>
                                   )}
                                 </h5>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }} onClick={(e) => e.stopPropagation()}>
                                   {isUnread && (
                                     <button
                                       type="button"
-                                      onClick={() => handleMarkNotifRead(n.id)}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleMarkNotifRead(n.id);
+                                      }}
                                       title="تحديد كمقروء"
                                       style={{
                                         background: 'none',
@@ -2400,7 +2442,10 @@ export default function EmployeePortalView({
                                   )}
                                   <button
                                     type="button"
-                                    onClick={() => handleDeleteNotif(n.id)}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleDeleteNotif(n.id);
+                                    }}
                                     title="حذف الإشعار"
                                     style={{
                                       background: 'none',
@@ -2423,7 +2468,7 @@ export default function EmployeePortalView({
                               </p>
                               <div className="ep-notif-meta" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px', fontSize: '10px', color: 'var(--muted)' }}>
                                 <span>🕒 {n.date || (n.timestamp ? n.timestamp.slice(0, 10) : '')}</span>
-                                {n.typeLabel && <span>📂 {n.typeLabel}</span>}
+                                <span style={{ color: 'var(--primary)', fontWeight: 'bold' }}>• فتح: {tabLabel}</span>
                               </div>
                             </div>
                           </div>

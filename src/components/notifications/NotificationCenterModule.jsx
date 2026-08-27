@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { fmt, getRealTodayStr, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 import { isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
-import { filterAdminNotifications, filterBranchManagerNotifications } from '../../utils/notificationEngine';
+import { filterAdminNotifications, filterBranchManagerNotifications, getNotificationTargetTab, getNotificationTabLabel } from '../../utils/notificationEngine';
 
 export default function NotificationCenterModule({
   state,
@@ -1097,9 +1097,21 @@ export default function NotificationCenterModule({
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {notifications.map((item) => {
                 const isUnread = !item.read;
+                const targetTab = getNotificationTargetTab(item, authRole);
+                const tabLabel = getNotificationTabLabel(targetTab, authRole);
+
+                const handleNavigateToItem = () => {
+                  if (isUnread) handleMarkAsRead(item.id);
+                  if (onNavigateTab) {
+                    onNavigateTab(targetTab);
+                    showToast?.(`الانتقال إلى: ${tabLabel}`);
+                  }
+                };
+
                 return (
                   <div
                     key={`gen_notif_${item.id}`}
+                    onClick={handleNavigateToItem}
                     style={{
                       padding: '14px 18px',
                       borderRadius: '10px',
@@ -1110,10 +1122,13 @@ export default function NotificationCenterModule({
                       justifyContent: 'space-between',
                       alignItems: 'center',
                       flexWrap: 'wrap',
-                      gap: '10px'
+                      gap: '10px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
                     }}
+                    className="notif-card-hover"
                   >
-                    <div>
+                    <div style={{ flex: 1, minWidth: '240px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
                         <span style={{ fontSize: '18px' }}>{item.icon || '🔔'}</span>
                         <h4 style={{ margin: 0, fontSize: '14.5px', color: 'var(--text)', fontWeight: isUnread ? 800 : 600 }}>
@@ -1134,12 +1149,17 @@ export default function NotificationCenterModule({
                       <p style={{ margin: '0 0 4px', fontSize: '13px', color: 'var(--text-muted)' }}>
                         {item.message || item.body || item.details || ''}
                       </p>
-                      <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
-                        🕒 {item.date || (item.timestamp ? item.timestamp.slice(0, 10) : todayDate)}
-                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
+                          🕒 {item.date || (item.timestamp ? item.timestamp.slice(0, 10) : todayDate)}
+                        </span>
+                        <span style={{ fontSize: '11px', color: 'var(--primary)', fontWeight: 'bold' }}>
+                          • فتح القسم: {tabLabel}
+                        </span>
+                      </div>
                     </div>
 
-                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
                       {isUnread && (
                         <button
                           className="btn btn-start"
@@ -1149,15 +1169,13 @@ export default function NotificationCenterModule({
                           ✓ تحديد كمقروء
                         </button>
                       )}
-                      {item.requestId && (
-                        <button
-                          className="btn btn-ghost"
-                          style={{ fontSize: '12px', padding: '5px 12px', border: '1px solid var(--border)' }}
-                          onClick={() => onNavigateTab?.('requests')}
-                        >
-                          عرض الطلب 🔗
-                        </button>
-                      )}
+                      <button
+                        className="btn btn-ghost"
+                        style={{ fontSize: '12px', padding: '5px 12px', border: '1px solid var(--border)', background: 'var(--surface-muted)', fontWeight: 'bold' }}
+                        onClick={handleNavigateToItem}
+                      >
+                        الانتقال للقسم 🔗
+                      </button>
                     </div>
                   </div>
                 );
@@ -1191,6 +1209,11 @@ export default function NotificationCenterModule({
               {unreadBylawsPenalties.map((item) => (
                 <div
                   key={`unread_bylaw_${item.id}`}
+                  onClick={() => {
+                    handleAcknowledgeLateIncident(item.id);
+                    onNavigateTab?.('bylaws');
+                    showToast?.('الانتقال إلى: لائحة العمل والجزاءات 📜');
+                  }}
                   style={{
                     padding: '16px 20px',
                     borderRadius: '12px',
@@ -1201,7 +1224,8 @@ export default function NotificationCenterModule({
                     justifyContent: 'space-between',
                     alignItems: 'center',
                     flexWrap: 'wrap',
-                    gap: '12px'
+                    gap: '12px',
+                    cursor: 'pointer'
                   }}
                 >
                   <div>
@@ -1223,11 +1247,14 @@ export default function NotificationCenterModule({
                     </span>
                   </div>
 
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
                     <button
                       className="btn btn-ghost"
                       style={{ fontSize: '12px', padding: '6px 12px', background: '#faf5ff', color: '#7c3aed', border: '1px solid #e9d5ff', fontWeight: 'bold' }}
-                      onClick={() => onNavigateTab?.('bylaws')}
+                      onClick={() => {
+                        handleAcknowledgeLateIncident(item.id);
+                        onNavigateTab?.('bylaws');
+                      }}
                     >
                       عرض باللائحة 📜
                     </button>
@@ -1243,32 +1270,55 @@ export default function NotificationCenterModule({
               ))}
 
               {/* 2. Unread General Notifications */}
-              {notifications.filter((n) => !n.read).map((item) => (
-                <div
-                  key={`unread_gen_${item.id}`}
-                  style={{
-                    padding: '14px 18px',
-                    borderRadius: '10px',
-                    background: 'rgba(13, 148, 136, 0.06)',
-                    border: '1px solid rgba(13, 148, 136, 0.3)',
-                    borderRight: '4px solid var(--primary)',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    flexWrap: 'wrap',
-                    gap: '10px'
-                  }}
-                >
-                  <div>
-                    <h4 style={{ margin: '0 0 4px', fontSize: '14.5px', color: 'var(--text)' }}>{item.title}</h4>
-                    <p style={{ margin: '0 0 4px', fontSize: '13px', color: 'var(--text-muted)' }}>{item.message || item.body}</p>
-                    <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>🕒 {item.date || item.timestamp}</span>
+              {notifications.filter((n) => !n.read).map((item) => {
+                const targetTab = getNotificationTargetTab(item, authRole);
+                const tabLabel = getNotificationTabLabel(targetTab, authRole);
+
+                const handleNavigateUnread = () => {
+                  handleMarkAsRead(item.id);
+                  if (onNavigateTab) {
+                    onNavigateTab(targetTab);
+                    showToast?.(`الانتقال إلى: ${tabLabel}`);
+                  }
+                };
+
+                return (
+                  <div
+                    key={`unread_gen_${item.id}`}
+                    onClick={handleNavigateUnread}
+                    style={{
+                      padding: '14px 18px',
+                      borderRadius: '10px',
+                      background: 'rgba(13, 148, 136, 0.06)',
+                      border: '1px solid rgba(13, 148, 136, 0.3)',
+                      borderRight: '4px solid var(--primary)',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      gap: '10px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <div>
+                      <h4 style={{ margin: '0 0 4px', fontSize: '14.5px', color: 'var(--text)' }}>{item.title}</h4>
+                      <p style={{ margin: '0 0 4px', fontSize: '13px', color: 'var(--text-muted)' }}>{item.message || item.body}</p>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>🕒 {item.date || item.timestamp}</span>
+                        <span style={{ fontSize: '11px', color: 'var(--primary)', fontWeight: 'bold' }}>• فتح: {tabLabel}</span>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
+                      <button className="btn btn-ghost" style={{ fontSize: '12px', padding: '5px 12px', border: '1px solid var(--border)' }} onClick={handleNavigateUnread}>
+                        انتقال 🔗
+                      </button>
+                      <button className="btn btn-start" style={{ fontSize: '12px', padding: '5px 14px' }} onClick={() => handleMarkAsRead(item.id)}>
+                        ✓ تم
+                      </button>
+                    </div>
                   </div>
-                  <button className="btn btn-start" style={{ fontSize: '12px', padding: '5px 14px' }} onClick={() => handleMarkAsRead(item.id)}>
-                    ✓ تم
-                  </button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

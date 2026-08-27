@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useLiveRealTime } from '../../hooks/useLiveRealTime';
+import { getNotificationTargetTab } from '../../utils/notificationEngine';
 
 export default function GlobalNavbar({
   orgSettings,
@@ -11,7 +12,8 @@ export default function GlobalNavbar({
   isOffline,
   pendingSyncCount,
   notifications = [],
-  onNavigateTab
+  onNavigateTab,
+  onMarkNotificationRead
 }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -160,23 +162,31 @@ export default function GlobalNavbar({
                   {notifications.length === 0 ? (
                     <p style={{ fontSize: '13px', color: 'var(--muted)', textAlign: 'center', margin: '14px 0' }}>لا توجد إشعارات حالياً</p>
                   ) : (
-                    notifications.slice(0, 5).map((n) => (
+                    notifications.slice(0, 8).map((n) => (
                       <div
                         key={n.id}
                         onClick={() => {
                           setShowNotifMenu(false);
-                          if (onNavigateTab && n.linkTab) onNavigateTab(n.linkTab);
+                          if (onMarkNotificationRead) onMarkNotificationRead(n.id);
+                          const targetTab = getNotificationTargetTab(n, 'admin');
+                          if (onNavigateTab) onNavigateTab(targetTab);
                         }}
                         style={{
-                          padding: '8px 10px',
+                          padding: '9px 12px',
                           borderRadius: '8px',
                           background: n.read ? 'transparent' : 'rgba(13, 148, 136, 0.08)',
+                          borderRight: n.read ? '3px solid transparent' : '3px solid var(--primary)',
                           cursor: 'pointer',
-                          fontSize: '12.5px'
+                          fontSize: '12.5px',
+                          transition: 'all 0.15s ease'
                         }}
+                        className="notif-dropdown-item-hover"
                       >
-                        <div style={{ fontWeight: 'bold', color: 'var(--text)' }}>{n.title}</div>
-                        <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{n.message}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 'bold', color: 'var(--text)' }}>
+                          <span>{n.icon || '🔔'}</span>
+                          <span>{n.title || n.typeLabel || 'إشعار'}</span>
+                        </div>
+                        <div style={{ color: 'var(--text-muted)', fontSize: '12px', marginTop: '2px' }}>{n.message || n.body || ''}</div>
                       </div>
                     ))
                   )}
