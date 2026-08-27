@@ -181,6 +181,9 @@ export default function EmployeeFileModal({
   const [codeError, setCodeError] = useState('');
 
   useEffect(() => {
+    if (isOpen) {
+      setActiveTab('personal');
+    }
     if (editingEmp) {
       if (Array.isArray(editingEmp.phones) && editingEmp.phones.length > 0) {
         setPhones(editingEmp.phones.map(p => ({
