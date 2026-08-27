@@ -994,9 +994,24 @@ export default function EmployeePortalView({
 
   const empAdjs = useMemo(() => {
     if (!emp) return [];
+
+    const map = new Map();
+
+    const bDetail = selectedBranchId
+      ? emp.branchesDetails?.find((b) => String(b.branchId) === String(selectedBranchId))
+      : (emp?.branchesDetails && emp.branchesDetails.length === 1 ? emp.branchesDetails[0] : null);
+    const hrRate = bDetail ? (parseFloat(bDetail.salary) || 0) : (parseFloat(emp?.salary) || 0);
+    const wHours = bDetail ? (parseFloat(bDetail.workHoursPerDay) || 8) : (parseFloat(emp?.workHoursPerDay) || 8);
+    const wDays = bDetail ? (parseFloat(bDetail.workDaysPerMonth) || 26) : (parseFloat(emp?.workDaysPerMonth) || 26);
+    const calcDailyRate = wDays > 0 ? (hrRate * wHours) / wDays : (hrRate * wHours);
+
+    // 1. Direct Adjustments (state.adjustments)
     const directAdjs = (state.adjustments || []).filter(
       (a) => (String(a.employeeId) === String(emp.id) || a.employeeId === 'all') && filterFn(a.date)
     );
+    directAdjs.forEach((a) => map.set(String(a.id), a));
+
+    // 2. Penalty & Adjustment Requests (state.requests)
     const penaltyReqs = (state.requests || [])
       .filter((r) => String(r.employeeId) === String(emp.id) && (r.type === 'penalty' || r.type === 'adjustment') && r.status !== 'cancelled' && r.status !== 'rejected' && r.objection?.status !== 'approved' && !r.isCancelled && filterFn(r.date || r.createdAt?.slice(0, 10)))
       .map((r) => {
@@ -1005,11 +1020,7 @@ export default function EmployeePortalView({
           if (r.impactType === 'fixed_amount') {
             amt = parseFloat(r.impactVal) || 0;
           } else if (r.impactType === 'deduction_days') {
-            const salary = parseFloat(emp.salary) || 0;
-            const workHours = parseFloat(emp.workHoursPerDay) || 8;
-            const workDays = parseFloat(emp.workDaysPerMonth) || 26;
-            const dailyRate = workDays > 0 ? (salary * workHours) / workDays : (salary * workHours);
-            amt = Math.round(dailyRate * (parseFloat(r.impactVal) || 1) * 100) / 100;
+            amt = Math.round(calcDailyRate * (parseFloat(r.impactVal) || 1) * 100) / 100;
           }
         }
         return {
@@ -1023,26 +1034,14 @@ export default function EmployeePortalView({
           createdAt: r.createdAt
         };
       });
-
-    const map = new Map();
-    directAdjs.forEach((a) => map.set(String(a.id), a));
     penaltyReqs.forEach((p) => {
       if (!map.has(String(p.id))) map.set(String(p.id), p);
     });
 
-    // Include approved unpaid leaves for the period as explicit deduction items (Strictly deduplicated)
+    // 3. Approved Unpaid Leaves (Strictly deduplicated)
     const approvedUnpaidLeaves = getEmployeeApprovedLeaves(emp, state, filterFn).filter(
       (r) => r.leaveType === 'unpaid'
     );
-
-    const bDetail = selectedBranchId
-      ? emp.branchesDetails?.find((b) => String(b.branchId) === String(selectedBranchId))
-      : (emp?.branchesDetails && emp.branchesDetails.length === 1 ? emp.branchesDetails[0] : null);
-    const hrRate = bDetail ? (parseFloat(bDetail.salary) || 0) : (parseFloat(emp?.salary) || 0);
-    const wHours = bDetail ? (parseFloat(bDetail.workHoursPerDay) || 8) : (parseFloat(emp?.workHoursPerDay) || 8);
-    const wDays = bDetail ? (parseFloat(bDetail.workDaysPerMonth) || 26) : (parseFloat(emp?.workDaysPerMonth) || 26);
-    const calcDailyRate = wDays > 0 ? (hrRate * wHours) / wDays : (hrRate * wHours);
-
     approvedUnpaidLeaves.forEach((l) => {
       let daysInPeriod = 0;
       if (l.startDate && l.endDate) {
@@ -1082,8 +1081,117 @@ export default function EmployeePortalView({
       }
     });
 
-    return Array.from(map.values());
-  }, [emp, state.adjustments, state.requests, state.leaveRequests, filterFn, selectedBranchId]);
+    // 4. Late Incidents & Bylaws Penalties (وقائع وتأخيرات البصمة والجزاءات اللائحية)
+    const empLateIncidents = (state.lateIncidents || []).filter(
+      (inc) =>
+        String(inc.employeeId) === String(emp.id) &&
+        inc.status !== 'cancelled' &&
+        inc.status !== 'approved_permission_exempt' &&
+        inc.actionType !== 'grace' &&
+        !isApprovedPermissionForDate(emp.id, inc.date, state) &&
+        (inc.deductionMinutes > 0 || inc.penaltyAmount > 0) &&
+        (!selectedBranchId || String(inc.branchId) === String(selectedBranchId)) &&
+        filterFn(inc.date)
+    );
+    empLateIncidents.forEach((inc) => {
+      const dynamicAmt = computeLatenessFinancialAmount(inc.deductionMinutes || 0, emp, inc.branchId || selectedBranchId);
+      const amt = dynamicAmt > 0 ? dynamicAmt : (parseFloat(inc.penaltyAmount) || 0);
+      if (amt > 0) {
+        const lateId = `late_inc_${inc.id}`;
+        if (!map.has(lateId)) {
+          map.set(lateId, {
+            id: lateId,
+            employeeId: emp.id,
+            type: 'deduction',
+            amount: amt,
+            date: inc.date,
+            reason: `⏱️ تأخير بصمة (${inc.deductionMinutes || inc.delayMinutes || 0} دقيقة) - ${inc.tierName || inc.penaltyDescription || 'لائحة الجزاءات'}`,
+            details: `خصم تأخير طبقاً للائحة الجزاءات المعتمدة`,
+            createdAt: inc.date
+          });
+        }
+      }
+    });
+
+    // 5. Approved Loans, Cash Advances, and Credit Medicine Deductions (السلف وأدوية الآجل)
+    const loanMap = new Map();
+    (state.requests || [])
+      .filter(
+        (r) =>
+          String(r.employeeId) === String(emp.id) &&
+          (r.status === 'approved' || r.adminApproved || r.status === 'partial') &&
+          (r.type === 'loan' || r.type === 'advance' || r.type === 'meds' || r.type === 'credit_medicine') &&
+          filterFn(r.date || (r.createdAt ? r.createdAt.slice(0, 10) : ''))
+      )
+      .forEach((r) => loanMap.set(String(r.id), r));
+
+    (state.loans || [])
+      .filter(
+        (l) =>
+          String(l.employeeId) === String(emp.id) &&
+          l.status !== 'pending' &&
+          l.status !== 'pending_admin' &&
+          l.status !== 'rejected' &&
+          l.status !== 'cancelled' &&
+          (l.type === 'loan' || l.type === 'advance' || l.type === 'meds' || l.type === 'credit_medicine') &&
+          filterFn(l.date || (l.createdAt ? l.createdAt.slice(0, 10) : ''))
+      )
+      .forEach((l) => {
+        const existing = loanMap.get(String(l.id));
+        loanMap.set(String(l.id), { ...(existing || {}), ...l });
+      });
+
+    Array.from(loanMap.values()).forEach((l) => {
+      const total = parseFloat(l.amount || l.totalAmount) || 0;
+      const paid = parseFloat(l.paidAmount) || 0;
+      const rem = Math.max(0, total - paid);
+      if (rem <= 0) return;
+      const monthlyDeduction = parseFloat(l.monthlyDeduction || l.installmentAmount) || Math.min(rem, total);
+      const deductionAmt = Math.min(rem, monthlyDeduction);
+      if (deductionAmt > 0) {
+        const lId = `loan_ded_${l.id}`;
+        if (!map.has(lId)) {
+          const isMeds = l.type === 'meds' || l.type === 'credit_medicine';
+          const isInstallment = parseFloat(l.installmentsCount || l.monthsCount) > 1;
+          const typeLabel = isMeds
+            ? '💊 مشتريات أدوية بالآجل'
+            : isInstallment
+            ? `💳 قسط سلفة مقسطة (${l.currentInstallmentNumber || 1}/${l.installmentsCount || l.monthsCount || 1})`
+            : '💳 سلفة نقدية شهرية';
+
+          map.set(lId, {
+            id: lId,
+            employeeId: emp.id,
+            type: 'deduction',
+            amount: deductionAmt,
+            date: l.date || (l.createdAt ? l.createdAt.slice(0, 10) : ''),
+            reason: `${typeLabel}${l.reason ? ` - ${l.reason}` : ''}`,
+            details: `خصم قسط من إجمالي (${fmt(total)} ج.م) - المتبقي (${fmt(Math.max(0, rem - deductionAmt))} ج.م)`,
+            createdAt: l.createdAt
+          });
+        }
+      }
+    });
+
+    // 6. Absence Deductions (غياب بدون إذن)
+    if (summary.absenceDaysCount > 0 && summary.absenceDeduction > 0) {
+      const absId = `abs_summary_${selectedMonth}`;
+      if (!map.has(absId)) {
+        map.set(absId, {
+          id: absId,
+          employeeId: emp.id,
+          type: 'deduction',
+          amount: summary.absenceDeduction,
+          date: `${selectedMonth}-28`,
+          reason: `🚫 غياب بدون إذن (${summary.absenceDaysCount} يوم)`,
+          details: `خصم عدد (${summary.absenceDaysCount}) يوم غياب بدون إذن عن الورديات المجدولة بسعر اليوم (${fmt(calcDailyRate)} ج.م)`,
+          createdAt: `${selectedMonth}-01`
+        });
+      }
+    }
+
+    return Array.from(map.values()).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  }, [emp, state.adjustments, state.requests, state.leaveRequests, state.lateIncidents, state.loans, summary.absenceDaysCount, summary.absenceDeduction, filterFn, selectedBranchId, selectedMonth]);
 
   const bonuses = empAdjs.filter((a) => a.type === 'bonus');
   const deductions = empAdjs.filter((a) => a.type === 'deduction' || a.type === 'penalty');
