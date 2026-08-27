@@ -460,79 +460,136 @@ export default function PayslipPrintModal({
     });
   });
 
-  const allTakenDays = [...restDayItems, ...leaveDayItems].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-  const totalRestDaysCount = restDayItems.length;
-  const totalAnnualLeaveDays = leaveDayItems.filter(l => l.category === 'annual').reduce((acc, l) => acc + l.daysCount, 0);
-  const totalUnpaidLeaveDays = leaveDayItems.filter(l => l.category === 'unpaid').reduce((acc, l) => acc + l.daysCount, 0);
-  const totalSickLeaveDays = leaveDayItems.filter(l => l.category === 'sick').reduce((acc, l) => acc + l.daysCount, 0);
+  // 1. Build unified chronological rows for Table 1 (shifts, rest days, leaves, swaps)
+  const unifiedTableRows = [];
 
-  // 3. Absence days (أيام الغياب غير المبرر عن الورديات المجدولة - للأيام المنقضية فقط)
-  const absenceDayItems = [];
-  const today = getRealTodayStr();
-  cycleDates.forEach(dateStr => {
-    if (dateStr >= today) return; // لا تحتسب الأيام الحالية أو المستقبلية كغياب
-    if (shiftDatesSet.has(dateStr) || leaveDatesSet.has(dateStr)) return;
-    const daySched = getEmployeeDaySchedule(emp.id, dateStr, state);
-    if (daySched && daySched.type !== 'off' && !daySched.isOff) {
-      const shiftBranch = daySched.branchId ? (state?.branches || []).find(b => String(b.id) === String(daySched.branchId))?.name : '';
-      const shiftTime = (daySched.start && daySched.end) ? `${daySched.start} - ${daySched.end}` : 'وردية كاملة';
-      absenceDayItems.push({
-        id: `abs_${dateStr}`,
+  // Shifts
+  (empShifts || []).forEach((s) => {
+    const shiftRate = (summary.perBranch?.[s.branchId]?.rate) || hourlyRate;
+    const effHours = getEffectiveShiftHours(s, state);
+    const hasPerm = isApprovedPermissionForDate(emp.id, s.date, state);
+    const daySched = getEmployeeDaySchedule(emp.id, s.date, state);
+    const isSwapped = daySched && daySched.isSwapped;
+
+    unifiedTableRows.push({
+      id: `shift_${s.id || s.date}`,
+      date: s.date,
+      type: 'shift',
+      dayName: arabicWeekday(s.date),
+      hasPerm,
+      timeIn: s.timeIn || '—',
+      timeOut: s.timeOut || '—',
+      breakHours: s.breakHours || 0,
+      effHours: effHours,
+      earnings: effHours * shiftRate,
+      isSwapped,
+      badge: isSwapped ? (
+        <span style={{ background: '#fef3c7', color: '#b45309', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold', fontSize: '9px' }}>
+          🔄 وردية متبدلة {daySched.swappedWithName ? `(بديل عن ${daySched.swappedWithName})` : ''}
+        </span>
+      ) : null
+    });
+  });
+
+  // Rest days (weekly rest & swapped rest)
+  restDayItems.forEach((r) => {
+    unifiedTableRows.push({
+      id: r.id,
+      date: r.date,
+      type: 'rest',
+      dayName: r.dayName || arabicWeekday(r.date),
+      timeIn: '—',
+      timeOut: '—',
+      breakHours: 0,
+      effHours: 0,
+      earnings: 0,
+      badge: r.categoryBadge,
+      statusLabel: r.typeLabel,
+      effectLabel: r.financialStatus || 'مدفوعة (ضمن الراتب)',
+      effectColor: r.effectColor || '#0284c7',
+      reason: r.reason
+    });
+  });
+
+  // Approved leaves (annual, unpaid, sick)
+  empApprovedLeaves.forEach((l) => {
+    const isUnpaid = l.leaveType === 'unpaid' || l.type === 'unpaid_leave' || l.isUnpaid === true;
+    const isSick = l.leaveType === 'sick' || l.type === 'sick_leave';
+    const isAnnual = !isUnpaid && !isSick;
+
+    const lStart = l.startDate || l.date;
+    const lEnd = l.endDate || l.date || lStart;
+    let cur = new Date(lStart);
+    const endD = new Date(lEnd);
+
+    let categoryBadge = <span style={{ background: '#dcfce7', color: '#15803d', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold', fontSize: '9px' }}>🌴 إجازة سنوية</span>;
+    let typeLabel = 'إجازة سنوية / اعتيادية';
+    let effectColor = '#15803d';
+
+    if (isUnpaid) {
+      categoryBadge = <span style={{ background: '#fee2e2', color: '#991b1b', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold', fontSize: '9px' }}>💸 إجازة بدون أجر</span>;
+      typeLabel = 'إجازة بدون أجر';
+      effectColor = '#dc2626';
+    } else if (isSick) {
+      categoryBadge = <span style={{ background: '#fef3c7', color: '#92400e', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold', fontSize: '9px' }}>🤒 إجازة مرضية</span>;
+      typeLabel = 'إجازة مرضية معتمدة';
+      effectColor = '#b45309';
+    }
+
+    if (!lStart || !lEnd || isNaN(cur) || isNaN(endD)) {
+      const dateStr = lStart || l.date || cycleRange.startDate;
+      const singleDayDeduction = isUnpaid ? Math.round(dailyRate * 100) / 100 : 0;
+      unifiedTableRows.push({
+        id: `leave_${l.id}_${dateStr}`,
         date: dateStr,
-        dateRangeLabel: `${arabicWeekday(dateStr)} ${dateStr}`,
+        type: 'leave',
         dayName: arabicWeekday(dateStr),
-        scheduledShift: `${shiftTime}${daySched.isSwapped ? ` (بديل عن ${daySched.swappedWithName || 'الزميل'})` : ''}${shiftBranch ? ` (${shiftBranch})` : ''}`,
-        deductionAmt: dailyRate,
-        effectLabel: `🔴 مخصوم (-${fmt(dailyRate)} ج.م)`,
-        effectColor: '#dc2626',
-        reason: daySched.isSwapped ? `غياب عن وردية متبدلة معتمدة لتغطية ${daySched.swappedWithName || 'الزميل'}` : 'غياب بدون إذن رسمي / لم يتم تسجيل بصمة حضور أو تقديم طلب إجازة'
+        timeIn: '—',
+        timeOut: '—',
+        breakHours: 0,
+        effHours: 0,
+        earnings: isUnpaid ? -singleDayDeduction : 0,
+        badge: categoryBadge,
+        statusLabel: typeLabel,
+        effectLabel: isUnpaid ? `مخصوم (-${fmt(singleDayDeduction)} ج.م)` : 'مدفوعة الأجر',
+        effectColor,
+        reason: l.reason || l.details || l.notes || (isAnnual ? 'إجازة سنوية اعتيادية معتمدة' : (isUnpaid ? 'إجازة بدون أجر معتمدة' : 'إجازة مرضية معتمدة'))
       });
+    } else {
+      while (cur <= endD) {
+        const cy = cur.getFullYear();
+        const cm = cur.getMonth() + 1;
+        const cd = cur.getDate();
+        const curDateStr = `${cy}-${String(cm).padStart(2, '0')}-${String(cd).padStart(2, '0')}`;
+        if (cyclePredicate(curDateStr)) {
+          const singleDayDeduction = isUnpaid ? Math.round(dailyRate * 100) / 100 : 0;
+          unifiedTableRows.push({
+            id: `leave_${l.id}_${curDateStr}`,
+            date: curDateStr,
+            type: 'leave',
+            dayName: arabicWeekday(curDateStr),
+            timeIn: '—',
+            timeOut: '—',
+            breakHours: 0,
+            effHours: 0,
+            earnings: isUnpaid ? -singleDayDeduction : 0,
+            badge: categoryBadge,
+            statusLabel: typeLabel,
+            effectLabel: isUnpaid ? `مخصوم (-${fmt(singleDayDeduction)} ج.م)` : 'مدفوعة الأجر',
+            effectColor,
+            reason: l.reason || l.details || l.notes || (isAnnual ? 'إجازة سنوية اعتيادية معتمدة' : (isUnpaid ? 'إجازة بدون أجر معتمدة' : 'إجازة مرضية معتمدة'))
+          });
+        }
+        cur.setDate(cur.getDate() + 1);
+      }
     }
   });
 
-  const totalAbsenceDaysCount = summary.absenceDaysCount !== undefined ? summary.absenceDaysCount : absenceDayItems.length;
-  const totalAbsenceDeductionAmt = summary.absenceDeduction !== undefined ? summary.absenceDeduction : Math.round(totalAbsenceDaysCount * dailyRate * 100) / 100;
+  // Sort unified table chronologically
+  unifiedTableRows.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
-  if (absenceDayItems.length === 0 && totalAbsenceDaysCount > 0) {
-    for (let i = 0; i < totalAbsenceDaysCount; i++) {
-      absenceDayItems.push({
-        id: `abs_sum_${i + 1}`,
-        date: `${month}`,
-        dateRangeLabel: `يوم غياب مسجل بالشهر (#${i + 1})`,
-        dayName: 'غياب',
-        scheduledShift: 'وردية عمل مجدولة',
-        deductionAmt: dailyRate,
-        effectLabel: `🔴 مخصوم (-${fmt(dailyRate)} ج.م)`,
-        effectColor: '#dc2626',
-        reason: 'غياب بدون إذن رسمي مسجل في نظام المرتبات'
-      });
-    }
-  }
-
-  const unpaidLeavesCount = summary.unpaidLeaveDaysCount || totalUnpaidLeaveDays;
-  const unpaidLeaveDeductionTotal = summary.unpaidLeaveDeduction !== undefined ? summary.unpaidLeaveDeduction : Math.round(unpaidLeavesCount * dailyRate * 100) / 100;
-
-  const unpaidLeaveItem = (unpaidLeavesCount > 0 || unpaidLeaveDeductionTotal > 0) ? [{
-    id: 'unpaid_leave_summary',
-    date: `${month} (إجازة غير مدفوعة)`,
-    typeLabel: '💸 إجازة غير مدفوعة الأجر',
-    amount: unpaidLeaveDeductionTotal,
-    isPositive: false,
-    details: `خصم عدد (${unpaidLeavesCount}) يوم إجازة غير مدفوعة الأجر بسعر اليوم (${fmt(dailyRate)} ج.م)`,
-    color: '#dc2626'
-  }] : [];
-
-  const loanFinancialItems = empLoans.map((l) => ({
-    id: `loan_fin_${l.id}`,
-    date: l.date,
-    typeLabel: l.typeLabel,
-    amount: l.deductedThisMonth,
-    isPositive: false,
-    details: l.notes && l.notes !== '—' ? `${l.notes} (المتبقي بعد الخصم: ${fmt(l.remainingBalance)} ج.م)` : `خصم سلفة نقدية / قسط شهري معتمد (المتبقي بعد الخصم: ${fmt(l.remainingBalance)} ج.م)`,
-    color: '#b91c1c'
-  }));
-
-  const generalFinancialItems = [...allowanceItems, ...manualItems, ...loanFinancialItems, ...absenceItem, ...unpaidLeaveItem];
+  // Request 24: Remove loans and unpaid leaves from generalFinancialItems
+  const generalFinancialItems = [...allowanceItems, ...manualItems, ...absenceItem];
 
   const handlePrint = () => {
     try {
@@ -1031,10 +1088,10 @@ export default function PayslipPrintModal({
               <div style={{ marginBottom: '12px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
                   <h4 style={{ margin: 0, fontFamily: 'Cairo', color: '#0f766e', borderRight: '3px solid #0f766e', paddingRight: '6px', fontSize: '12.5px', fontWeight: 800 }}>
-                    📋 أولاً: تفاصيل سجل الحضور والبصمات ({empShifts.length} وردية)
+                    📋 أولاً: تفاصيل سجل الحضور والورديات والإجازات والراحات ({unifiedTableRows.length} يوم/وردية)
                   </h4>
                   <span style={{ fontSize: '10.5px', color: '#64748b' }}>
-                    إجمالي الساعات: <strong>{fmt(totalHours)} س</strong> · البريك: <strong>{fmt(totalBreakHours)} س</strong>
+                    إجمالي الساعات الفعلية: <strong>{fmt(totalHours)} س</strong> · البريك: <strong>{fmt(totalBreakHours)} س</strong>
                   </span>
                 </div>
 
@@ -1042,44 +1099,77 @@ export default function PayslipPrintModal({
                   <thead>
                     <tr style={{ background: '#f1f5f9', color: '#334155' }}>
                       <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '5%' }}>#</th>
-                      <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '25%' }}>اليوم والتاريخ</th>
-                      <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '15%' }}>وقت الدخول</th>
-                      <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '15%' }}>وقت الخروج</th>
-                      <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '12%' }}>البريك</th>
-                      <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '13%' }}>ساعات العمل</th>
-                      <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '15%' }}>الأجر المستحق</th>
+                      <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '22%' }}>اليوم والتاريخ</th>
+                      <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '12%' }}>وقت الدخول</th>
+                      <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '12%' }}>وقت الخروج</th>
+                      <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '10%' }}>البريك</th>
+                      <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '18%' }}>ساعات العمل / نوع اليوم</th>
+                      <th style={{ padding: '4px', border: '1px solid #cbd5e1', width: '21%' }}>الأجر المستحق / الأثر المالي</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {empShifts.length === 0 ? (
+                    {unifiedTableRows.length === 0 ? (
                       <tr>
                         <td colSpan={7} style={{ padding: '10px', border: '1px solid #cbd5e1', color: '#94a3b8' }}>
-                          لا توجد بصمات مسجلة للموظف عن هذا الشهر
+                          لا توجد سجلات حضور أو ورديات مسجلة للموظف عن هذا الشهر
                         </td>
                       </tr>
                     ) : (
-                      empShifts.map((s, idx) => {
-                        const shiftRate = (summary.perBranch?.[s.branchId]?.rate) || hourlyRate;
-                        const effHours = getEffectiveShiftHours(s, state);
-                        const hasPerm = isApprovedPermissionForDate(emp.id, s.date, state);
-                        return (
-                          <tr key={s.id || idx} style={{ background: hasPerm ? '#fefce8' : (idx % 2 === 0 ? '#fff' : '#f8fafc') }}>
-                            <td style={{ padding: '3px', border: '1px solid #cbd5e1' }}>{idx + 1}</td>
-                            <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>
-                              {arabicWeekday(s.date)} {s.date}
-                              {hasPerm && <span style={{ display: 'block', color: '#b45309', fontSize: '9px' }}>⏰ إذن معتمد</span>}
-                            </td>
-                            <td style={{ padding: '3px', border: '1px solid #cbd5e1', color: '#16a34a' }}>{s.timeIn || '—'}</td>
-                            <td style={{ padding: '3px', border: '1px solid #cbd5e1', color: '#dc2626' }}>{s.timeOut || '—'}</td>
-                            <td style={{ padding: '3px', border: '1px solid #cbd5e1' }}>{fmt(s.breakHours)} س</td>
-                            <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>{fmt(effHours)} س</td>
-                            <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold', color: '#0f766e' }}>{fmt(effHours * shiftRate)} ج.م</td>
-                          </tr>
-                        );
+                      unifiedTableRows.map((item, idx) => {
+                        if (item.type === 'shift') {
+                          return (
+                            <tr key={item.id || idx} style={{ background: item.hasPerm ? '#fefce8' : (idx % 2 === 0 ? '#fff' : '#f8fafc') }}>
+                              <td style={{ padding: '3px', border: '1px solid #cbd5e1' }}>{idx + 1}</td>
+                              <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>
+                                {item.dayName} {item.date}
+                                {item.hasPerm && <span style={{ display: 'block', color: '#b45309', fontSize: '9px' }}>⏰ إذن معتمد</span>}
+                                {item.badge && <span style={{ display: 'block', marginTop: '2px' }}>{item.badge}</span>}
+                              </td>
+                              <td style={{ padding: '3px', border: '1px solid #cbd5e1', color: '#16a34a' }}>{item.timeIn}</td>
+                              <td style={{ padding: '3px', border: '1px solid #cbd5e1', color: '#dc2626' }}>{item.timeOut}</td>
+                              <td style={{ padding: '3px', border: '1px solid #cbd5e1' }}>{fmt(item.breakHours)} س</td>
+                              <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>{fmt(item.effHours)} س</td>
+                              <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold', color: '#0f766e' }}>{fmt(item.earnings)} ج.م</td>
+                            </tr>
+                          );
+                        } else if (item.type === 'rest') {
+                          return (
+                            <tr key={item.id || idx} style={{ background: '#f0f9ff' }}>
+                              <td style={{ padding: '3px', border: '1px solid #bae6fd' }}>{idx + 1}</td>
+                              <td style={{ padding: '3px', border: '1px solid #bae6fd', fontWeight: 'bold', color: '#0369a1' }}>
+                                {item.dayName} {item.date}
+                              </td>
+                              <td style={{ padding: '3px', border: '1px solid #bae6fd', color: '#64748b' }}>—</td>
+                              <td style={{ padding: '3px', border: '1px solid #bae6fd', color: '#64748b' }}>—</td>
+                              <td style={{ padding: '3px', border: '1px solid #bae6fd', color: '#64748b' }}>—</td>
+                              <td style={{ padding: '3px', border: '1px solid #bae6fd' }}>{item.badge || item.statusLabel}</td>
+                              <td style={{ padding: '3px', border: '1px solid #bae6fd', fontWeight: 'bold', color: item.effectColor }}>
+                                {item.effectLabel}
+                              </td>
+                            </tr>
+                          );
+                        } else {
+                          // leave
+                          return (
+                            <tr key={item.id || idx} style={{ background: item.earnings < 0 ? '#fef2f2' : '#f0fdf4' }}>
+                              <td style={{ padding: '3px', border: '1px solid #cbd5e1' }}>{idx + 1}</td>
+                              <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>
+                                {item.dayName} {item.date}
+                              </td>
+                              <td style={{ padding: '3px', border: '1px solid #cbd5e1', color: '#64748b' }}>—</td>
+                              <td style={{ padding: '3px', border: '1px solid #cbd5e1', color: '#64748b' }}>—</td>
+                              <td style={{ padding: '3px', border: '1px solid #cbd5e1', color: '#64748b' }}>—</td>
+                              <td style={{ padding: '3px', border: '1px solid #cbd5e1' }}>{item.badge || item.statusLabel}</td>
+                              <td style={{ padding: '3px', border: '1px solid #cbd5e1', fontWeight: 'bold', color: item.effectColor }}>
+                                {item.effectLabel}
+                              </td>
+                            </tr>
+                          );
+                        }
                       })
                     )}
                   </tbody>
-                  {empShifts.length > 0 && (
+                  {unifiedTableRows.length > 0 && (
                     <tfoot>
                       <tr style={{ background: '#e2e8f0', fontWeight: 'bold', fontSize: '11px' }}>
                         <td colSpan={4} style={{ padding: '4px 8px', border: '1px solid #cbd5e1', textAlign: 'right' }}>الإجمالي:</td>
@@ -1173,50 +1263,12 @@ export default function PayslipPrintModal({
               </div>
             )}
 
-            {/* Leaves and Rest Days Table */}
-            {allTakenDays.length > 0 && (
-              <div style={{ marginBottom: '12px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
-                  <h4 style={{ margin: 0, fontFamily: 'Cairo', color: '#0284c7', borderRight: '3px solid #0284c7', paddingRight: '6px', fontSize: '12.5px', fontWeight: 800 }}>
-                    🌴 رابعاً: سجل أيام الإجازات والراحات الأسبوعية المأخوذة بالشهر ({allTakenDays.length} يوم/بند)
-                  </h4>
-                  <span style={{ fontSize: '10px', color: '#0369a1', fontWeight: 'bold', background: '#e0f2fe', padding: '2px 8px', borderRadius: '4px' }}>
-                    🛋️ راحة: {totalRestDaysCount} يوم · 🌴 سنوي: {totalAnnualLeaveDays} يوم · 💸 بدون أجر: {totalUnpaidLeaveDays} يوم {totalSickLeaveDays > 0 ? `· 🤒 مرضي: ${totalSickLeaveDays} يوم` : ''}
-                  </span>
-                </div>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10.5px', textAlign: 'center' }}>
-                  <thead>
-                    <tr style={{ background: '#e0f2fe', color: '#0369a1', fontWeight: 800 }}>
-                      <th style={{ padding: '4px', border: '1px solid #bae6fd', width: '5%' }}>#</th>
-                      <th style={{ padding: '4px', border: '1px solid #bae6fd', width: '24%' }}>اليوم والتاريخ / الفترة</th>
-                      <th style={{ padding: '4px', border: '1px solid #bae6fd', width: '18%' }}>نوع الإجازة / الراحة</th>
-                      <th style={{ padding: '4px', border: '1px solid #bae6fd', width: '10%' }}>المدة</th>
-                      <th style={{ padding: '4px', border: '1px solid #bae6fd', width: '18%' }}>الأثر المالي</th>
-                      <th style={{ padding: '4px', border: '1px solid #bae6fd', width: '25%' }}>البيان / ملاحظات</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {allTakenDays.map((item, idx) => (
-                      <tr key={item.id || idx} style={{ background: item.category === 'unpaid' ? '#fef2f2' : (item.category === 'rest' ? '#f0f9ff' : '#f0fdf4') }}>
-                        <td style={{ padding: '3px', border: '1px solid #bae6fd' }}>{idx + 1}</td>
-                        <td style={{ padding: '3px', border: '1px solid #bae6fd', fontWeight: 'bold' }}>{item.dateRangeLabel || `${item.dayName} ${item.date}`}</td>
-                        <td style={{ padding: '3px', border: '1px solid #bae6fd' }}>{item.categoryBadge}</td>
-                        <td style={{ padding: '3px', border: '1px solid #bae6fd', fontWeight: 'bold' }}>{item.daysCount} يوم</td>
-                        <td style={{ padding: '3px', border: '1px solid #bae6fd', fontWeight: 'bold', color: item.effectColor }}>{item.effectLabel}</td>
-                        <td style={{ padding: '3px', border: '1px solid #bae6fd', fontSize: '10px' }}>{item.reason}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {/* Absences Record Table */}
+            {/* Absences Record Table (If exists) */}
             {absenceDayItems.length > 0 && (
               <div style={{ marginBottom: '12px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
                   <h4 style={{ margin: 0, fontFamily: 'Cairo', color: '#b91c1c', borderRight: '3px solid #b91c1c', paddingRight: '6px', fontSize: '12.5px', fontWeight: 800 }}>
-                    🚫 خامساً: سجل أيام الغياب غير المبرر عن العمل ({absenceDayItems.length} يوم)
+                    🚫 رابعاً: سجل أيام الغياب غير المبرر عن العمل ({absenceDayItems.length} يوم)
                   </h4>
                   <span style={{ fontSize: '10.5px', color: '#b91c1c', fontWeight: 'bold', background: '#fee2e2', padding: '2px 8px', borderRadius: '4px' }}>
                     إجمالي خصم الغياب: -{fmt(totalAbsenceDeductionAmt)} ج.م ({totalAbsenceDaysCount} يوم)
@@ -1252,7 +1304,7 @@ export default function PayslipPrintModal({
               <div style={{ marginBottom: '12px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
                   <h4 style={{ margin: 0, fontFamily: 'Cairo', color: '#0f766e', borderRight: '3px solid #0f766e', paddingRight: '6px', fontSize: '12.5px', fontWeight: 800 }}>
-                    📝 {absenceDayItems.length > 0 ? 'سادساً' : 'خامساً'}: بيان البدلات الثابتة والمكافآت والجزاءات والغياب والإجازات ({generalFinancialItems.length} بند)
+                    📝 خامساً: بيان البدلات الثابتة والمكافآت والجزاءات الإدارية والغياب ({generalFinancialItems.length} بند)
                   </h4>
                 </div>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10.5px', textAlign: 'center' }}>

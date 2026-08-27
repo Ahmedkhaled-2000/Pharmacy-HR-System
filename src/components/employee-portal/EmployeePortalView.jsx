@@ -1121,72 +1121,7 @@ export default function EmployeePortalView({
       }
     });
 
-    // 5. Approved Loans, Cash Advances, and Credit Medicine Deductions (السلف وأدوية الآجل)
-    const loanMap = new Map();
-    (state.requests || [])
-      .filter(
-        (r) =>
-          String(r.employeeId) === String(emp.id) &&
-          (r.status === 'approved' || r.adminApproved || r.status === 'partial') &&
-          (r.type === 'loan' || r.type === 'advance' || r.type === 'meds' || r.type === 'credit_medicine')
-      )
-      .forEach((r) => loanMap.set(String(r.id), r));
-
-    (state.loans || [])
-      .filter(
-        (l) =>
-          String(l.employeeId) === String(emp.id) &&
-          l.status !== 'pending' &&
-          l.status !== 'pending_admin' &&
-          l.status !== 'rejected' &&
-          l.status !== 'cancelled' &&
-          (l.type === 'loan' || l.type === 'advance' || l.type === 'meds' || l.type === 'credit_medicine')
-      )
-      .forEach((l) => {
-        const existing = loanMap.get(String(l.id));
-        loanMap.set(String(l.id), { ...(existing || {}), ...l });
-      });
-
-    Array.from(loanMap.values()).forEach((l) => {
-      const total = parseFloat(l.amount || l.totalAmount) || 0;
-      const paid = parseFloat(l.paidAmount) || 0;
-      const rem = Math.max(0, total - paid);
-      if (rem <= 0) return;
-
-      const isInstallment = l.loanType === 'installment' || parseInt(l.installmentsCount || l.monthsCount, 10) > 1 || (parseFloat(l.monthlyDeduction || l.installmentAmount) > 0 && parseFloat(l.monthlyDeduction || l.installmentAmount) < total);
-      const monthlyDeduction = parseFloat(l.monthlyDeduction || l.installmentAmount) || (isInstallment ? Math.ceil(total / (parseInt(l.installmentsCount || l.monthsCount, 10) || 1)) : rem);
-      const itemDate = l.date || (l.createdAt ? l.createdAt.slice(0, 10) : '');
-
-      if (!isInstallment && !filterFn(itemDate) && rem <= 0) {
-        return;
-      }
-
-      const deductionAmt = Math.min(rem, isInstallment ? monthlyDeduction : rem);
-      if (deductionAmt > 0) {
-        const lId = `loan_ded_${l.id}`;
-        if (!map.has(lId)) {
-          const isMeds = l.type === 'meds' || l.type === 'credit_medicine';
-          const typeLabel = isMeds
-            ? '💊 مشتريات أدوية بالآجل'
-            : isInstallment
-            ? `💳 قسط سلفة مقسطة (${l.currentInstallmentNumber || 1}/${l.installmentsCount || l.monthsCount || 1})`
-            : '💳 سلفة نقدية شهرية';
-
-          map.set(lId, {
-            id: lId,
-            employeeId: emp.id,
-            type: 'deduction',
-            amount: deductionAmt,
-            date: itemDate || getRealTodayStr(),
-            reason: `${typeLabel}${l.reason ? ` - ${l.reason}` : ''}`,
-            details: `خصم من إجمالي (${fmt(total)} ج.م) - المتبقي بعد الخصم (${fmt(Math.max(0, rem - deductionAmt))} ج.م)`,
-            createdAt: l.createdAt
-          });
-        }
-      }
-    });
-
-    // 6. Absence Deductions (غياب بدون إذن)
+    // 5. Absence Deductions (غياب بدون إذن)
     if (summary.absenceDaysCount > 0 && summary.absenceDeduction > 0) {
       const absId = `abs_summary_${selectedMonth}`;
       if (!map.has(absId)) {
@@ -4409,7 +4344,13 @@ export default function EmployeePortalView({
                         </div>
                       )}
                       <div className="ep-breakdown-row" style={{ color: 'var(--success)' }}><span className="ep-breakdown-label">+ إجمالي المكافآت ({bonuses.length} بند)</span><span className="ep-breakdown-value">+{fmt(summary.totalBonus)} ج.م</span></div>
-                      <div className="ep-breakdown-row" style={{ color: 'var(--danger)' }}><span className="ep-breakdown-label">- إجمالي الخصومات ({deductions.length} بند)</span><span className="ep-breakdown-value">-{fmt(summary.totalDeduction)} ج.م</span></div>
+                      <div className="ep-breakdown-row" style={{ color: 'var(--danger)' }}><span className="ep-breakdown-label">- إجمالي الخصومات والجزاءات ({deductions.length} بند)</span><span className="ep-breakdown-value">-{fmt(summary.totalDeduction)} ج.م</span></div>
+                      {summary.loansDeduction > 0 && (
+                        <div className="ep-breakdown-row" style={{ color: '#b91c1c', fontWeight: 'bold' }}>
+                          <span className="ep-breakdown-label">- إجمالي السلف وأقساط الشهر المعتمدة</span>
+                          <span className="ep-breakdown-value">-{fmt(summary.loansDeduction)} ج.م</span>
+                        </div>
+                      )}
                       {absenceDays.length > 0 && (
                         <div className="ep-breakdown-row" style={{ color: 'var(--danger)' }}><span className="ep-breakdown-label">- خصم الغياب الكلي ({absenceDays.length} يوم)</span><span className="ep-breakdown-value">-{fmt(absenceDeduction)} ج.م</span></div>
                       )}
@@ -4517,7 +4458,13 @@ export default function EmployeePortalView({
                       {absenceDays.length > 0 && (
                         <div className="ep-breakdown-row" style={{ color: 'var(--danger)' }}><span className="ep-breakdown-label">- خصم الغياب ({absenceDays.length} يوم)</span><span className="ep-breakdown-value">-{fmt(absenceDeduction)} ج.م</span></div>
                       )}
-                      <div className="ep-breakdown-row" style={{ color: 'var(--danger)' }}><span className="ep-breakdown-label">- إجمالي الخصومات الشاملة</span><span className="ep-breakdown-value">-{fmt(summary.totalDeduction)} ج.م</span></div>
+                      <div className="ep-breakdown-row" style={{ color: 'var(--danger)' }}><span className="ep-breakdown-label">- إجمالي الخصومات والجزاءات ({deductions.length} بند)</span><span className="ep-breakdown-value">-{fmt(summary.totalDeduction)} ج.م</span></div>
+                      {summary.loansDeduction > 0 && (
+                        <div className="ep-breakdown-row" style={{ color: '#b91c1c', fontWeight: 'bold' }}>
+                          <span className="ep-breakdown-label">- إجمالي السلف وأقساط الشهر المعتمدة</span>
+                          <span className="ep-breakdown-value">-{fmt(summary.loansDeduction)} ج.م</span>
+                        </div>
+                      )}
                       <div className="ep-net-salary-box">
                         <div className="ep-net-label">صافي المرتب المستحق</div>
                         <div className="ep-net-month">{lbl.arabic}</div>
@@ -4614,7 +4561,7 @@ export default function EmployeePortalView({
                         ))}
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: 'var(--surface-muted)', borderRadius: '10px', fontWeight: 800 }}>
                           <span>إجمالي المكافآت:</span>
-                          <span style={{ color: 'var(--success)', fontSize: '15px' }}>+{fmt(summary.totalBonus)} ج.م</span>
+                          <span style={{ color: 'var(--success)', fontSize: '15px' }}>+{fmt(bonuses.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0))} ج.م</span>
                         </div>
                       </div>
                     ) : (
@@ -4633,7 +4580,7 @@ export default function EmployeePortalView({
                           <tfoot>
                             <tr style={{ fontWeight: 700 }}>
                               <td>الإجمالي</td>
-                              <td style={{ color: 'var(--success)' }}>+{fmt(summary.totalBonus)} ج.م</td>
+                              <td style={{ color: 'var(--success)' }}>+{fmt(bonuses.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0))} ج.م</td>
                               <td></td>
                             </tr>
                           </tfoot>
@@ -4674,7 +4621,7 @@ export default function EmployeePortalView({
                         ))}
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: 'var(--surface-muted)', borderRadius: '10px', fontWeight: 800 }}>
                           <span>إجمالي الخصومات:</span>
-                          <span style={{ color: 'var(--danger)', fontSize: '15px' }}>-{fmt(summary.totalDeduction)} ج.م</span>
+                          <span style={{ color: 'var(--danger)', fontSize: '15px' }}>-{fmt(deductions.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0))} ج.م</span>
                         </div>
                       </div>
                     ) : (
@@ -4693,7 +4640,7 @@ export default function EmployeePortalView({
                           <tfoot>
                             <tr style={{ fontWeight: 700 }}>
                               <td>الإجمالي</td>
-                              <td style={{ color: 'var(--danger)' }}>-{fmt(summary.totalDeduction)} ج.م</td>
+                              <td style={{ color: 'var(--danger)' }}>-{fmt(deductions.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0))} ج.م</td>
                               <td></td>
                             </tr>
                           </tfoot>
