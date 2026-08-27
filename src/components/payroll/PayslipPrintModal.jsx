@@ -1,6 +1,7 @@
 import { getRealTodayStr } from '../../utils/timeEngine';
 import React, { useState, useEffect, useRef } from 'react';
 import { fmt, arabicWeekday, AR_MONTHS } from '../../utils/formatters';
+import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
 import { computeLatenessFinancialAmount, isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
 import { triggerDirectPrint, generateOfficialPayslipHTML } from '../../utils/printHelper';
 import { getCycleDateRange } from '../../utils/periodEngine';
@@ -321,22 +322,7 @@ export default function PayslipPrintModal({
          (r.month === month || !r.month) && (r.status === 'approved' || r.adminApproved)
   );
 
-  const getDayScheduleFromRoster = (scheduleMap, jsDay, dateStr) => {
-    if (!scheduleMap) {
-      return jsDay === 5 ? { type: 'off', isOff: true } : { type: 'shift', start: '08:00', end: '16:00' };
-    }
-    if (scheduleMap[dateStr]) return scheduleMap[dateStr];
-    const dayNames = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
-    const dName = dayNames[jsDay];
-    const dNameAlt = jsDay === 1 ? 'الإثنين' : dName;
-    const keys = [dateStr, String(jsDay), dName, dNameAlt];
-    for (const k of keys) {
-      if (scheduleMap[k]) return scheduleMap[k];
-    }
-    return jsDay === 5 ? { type: 'off', isOff: true } : { type: 'shift', start: '08:00', end: '16:00' };
-  };
-
-  // 1. Rest days (الراحات الأسبوعية والمجدولة المأخوذة)
+  // 1. Rest days (الراحات الأسبوعية والمجدولة المأخوذة بما فيها التبديلات المعتمدة)
   const restDayItems = [];
   const shiftDatesSet = new Set((empShifts || []).map(s => s.date));
   const leaveDatesSet = new Set();
@@ -359,22 +345,26 @@ export default function PayslipPrintModal({
 
   cycleDates.forEach(dateStr => {
     if (shiftDatesSet.has(dateStr) || leaveDatesSet.has(dateStr)) return;
-    const jsDay = new Date(dateStr).getDay();
-    const daySched = getDayScheduleFromRoster(empRoster?.schedule, jsDay, dateStr);
+    const daySched = getEmployeeDaySchedule(emp.id, dateStr, state);
     if (daySched && (daySched.type === 'off' || daySched.isOff)) {
+      const isSwapRest = !!daySched.isSwapped;
       restDayItems.push({
         id: `rest_${dateStr}`,
         date: dateStr,
         dateRangeLabel: `${arabicWeekday(dateStr)} ${dateStr}`,
         dayName: arabicWeekday(dateStr),
         category: 'rest',
-        categoryBadge: <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold', fontSize: '9px' }}>🛋️ راحة أسبوعية</span>,
-        typeLabel: 'راحة أسبوعية / مجدولة',
+        categoryBadge: isSwapRest ? (
+          <span style={{ background: '#fef3c7', color: '#b45309', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold', fontSize: '9px' }}>🔄 راحة متبدلة مع {daySched.swappedWithName || 'الزميل'}</span>
+        ) : (
+          <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold', fontSize: '9px' }}>🛋️ راحة أسبوعية</span>
+        ),
+        typeLabel: isSwapRest ? `راحة متبدلة مع ${daySched.swappedWithName || 'الزميل'}` : 'راحة أسبوعية / مجدولة',
         daysCount: 1,
-        effectLabel: '🟢 راحة مجدولة معتمدة',
-        effectColor: '#0284c7',
+        effectLabel: isSwapRest ? '🟢 راحة متبدلة معتمدة' : '🟢 راحة مجدولة معتمدة',
+        effectColor: isSwapRest ? '#d97706' : '#0284c7',
         financialStatus: 'مدفوعة (ضمن الراتب)',
-        reason: 'يوم راحة أسبوعية مجدولة بالجدول الشهري'
+        reason: daySched.swapNote || 'يوم راحة أسبوعية مجدولة بالجدول الشهري'
       });
     }
   });
@@ -445,8 +435,7 @@ export default function PayslipPrintModal({
   cycleDates.forEach(dateStr => {
     if (month === today.slice(0, 7) && dateStr >= today) return; // Only count past days in current cycle
     if (shiftDatesSet.has(dateStr) || leaveDatesSet.has(dateStr)) return;
-    const jsDay = new Date(dateStr).getDay();
-    const daySched = getDayScheduleFromRoster(empRoster?.schedule, jsDay, dateStr);
+    const daySched = getEmployeeDaySchedule(emp.id, dateStr, state);
     if (daySched && daySched.type !== 'off' && !daySched.isOff) {
       const shiftBranch = daySched.branchId ? (state?.branches || []).find(b => String(b.id) === String(daySched.branchId))?.name : '';
       const shiftTime = (daySched.start && daySched.end) ? `${daySched.start} - ${daySched.end}` : 'وردية كاملة';
@@ -455,11 +444,11 @@ export default function PayslipPrintModal({
         date: dateStr,
         dateRangeLabel: `${arabicWeekday(dateStr)} ${dateStr}`,
         dayName: arabicWeekday(dateStr),
-        scheduledShift: `${shiftTime}${shiftBranch ? ` (${shiftBranch})` : ''}`,
+        scheduledShift: `${shiftTime}${daySched.isSwapped ? ` (بديل عن ${daySched.swappedWithName || 'الزميل'})` : ''}${shiftBranch ? ` (${shiftBranch})` : ''}`,
         deductionAmt: dailyRate,
         effectLabel: `🔴 مخصوم (-${fmt(dailyRate)} ج.م)`,
         effectColor: '#dc2626',
-        reason: 'غياب بدون إذن رسمي / لم يتم تسجيل بصمة حضور أو تقديم طلب إجازة'
+        reason: daySched.isSwapped ? `غياب عن وردية متبدلة معتمدة لتغطية ${daySched.swappedWithName || 'الزميل'}` : 'غياب بدون إذن رسمي / لم يتم تسجيل بصمة حضور أو تقديم طلب إجازة'
       });
     }
   });

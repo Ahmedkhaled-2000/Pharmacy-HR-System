@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { arabicWeekday } from '../../utils/formatters';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import { shouldRouteDirectToAdmin } from '../../utils/jobsHelper';
+import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
 
 // Arabic weekday names mapped to JS getDay() index (0=Sunday)
 const WEEKDAY_AR_MAP = {
@@ -49,9 +50,9 @@ function getDayScheduleFromSchedule(schedule, dateStr, arDayName) {
 
 /**
  * Build a list of all days in the given month with their weekday name and whether it's off
- * based on the weekly schedule template.
+ * based on the weekly schedule template or dynamic swap resolution.
  */
-function buildMonthCalendar(selectedMonth, schedule, fromDate, toDate) {
+function buildMonthCalendar(selectedMonth, schedule, fromDate, toDate, empId = null, state = null) {
   const result = [];
   if (fromDate && toDate) {
     let current = new Date(fromDate);
@@ -64,7 +65,14 @@ function buildMonthCalendar(selectedMonth, schedule, fromDate, toDate) {
         const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
         const jsDay = current.getDay();
         const arDayName = Object.keys(WEEKDAY_AR_MAP).find(k => WEEKDAY_AR_MAP[k] === jsDay) || '';
-        const daySchedule = getDayScheduleFromSchedule(schedule, dateStr, arDayName);
+        
+        let daySchedule;
+        if (empId && state) {
+          daySchedule = getEmployeeDaySchedule(empId, dateStr, state);
+        } else {
+          daySchedule = getDayScheduleFromSchedule(schedule, dateStr, arDayName);
+        }
+
         result.push({ date: dateStr, day: d, arDayName, daySchedule });
         current.setDate(current.getDate() + 1);
       }
@@ -79,7 +87,14 @@ function buildMonthCalendar(selectedMonth, schedule, fromDate, toDate) {
     const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
     const jsDay = new Date(dateStr).getDay(); // 0=Sun..6=Sat
     const arDayName = Object.keys(WEEKDAY_AR_MAP).find(k => WEEKDAY_AR_MAP[k] === jsDay) || '';
-    const daySchedule = getDayScheduleFromSchedule(schedule, dateStr, arDayName);
+    
+    let daySchedule;
+    if (empId && state) {
+      daySchedule = getEmployeeDaySchedule(empId, dateStr, state);
+    } else {
+      daySchedule = getDayScheduleFromSchedule(schedule, dateStr, arDayName);
+    }
+
     result.push({ date: dateStr, day: d, arDayName, daySchedule });
   }
   return result;
@@ -296,12 +311,14 @@ export default function EmployeeRosterModule({
   // The active schedule to display (approved or form defaults)
   const activeSchedule = currentRoster?.schedule || scheduleInputs;
 
-  // Build full month calendar
+  // Build full month calendar with swap integration
   const monthCalendar = buildMonthCalendar(
     selectedMonth,
     activeSchedule,
     currentRoster?.fromDate || fromDate,
-    currentRoster?.toDate || toDate
+    currentRoster?.toDate || toDate,
+    emp?.id,
+    state
   );
 
   // Stats
@@ -505,7 +522,7 @@ export default function EmployeeRosterModule({
           const bRoster = getResolvedEmployeeRoster(emp, bId, selectedMonth, state);
 
           const bSchedule = bRoster?.schedule || DEFAULT_SCHEDULE;
-          const bCalendar = buildMonthCalendar(selectedMonth, bSchedule, bRoster?.fromDate || fromDate, bRoster?.toDate || toDate);
+          const bCalendar = buildMonthCalendar(selectedMonth, bSchedule, bRoster?.fromDate || fromDate, bRoster?.toDate || toDate, emp?.id, state);
           const bWorkDays = bCalendar.filter(d => d.daySchedule?.type !== 'off').length;
           const bOffDays = bCalendar.length - bWorkDays;
 
@@ -539,19 +556,20 @@ export default function EmployeeRosterModule({
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   {bCalendar.map(({ date, day, arDayName, daySchedule }) => {
                     const isOff = daySchedule?.type === 'off';
+                    const isSwapped = daySchedule?.isSwapped;
                     return (
                       <div
                         key={date}
                         style={{
-                          background: isOff ? 'var(--surface-muted)' : 'var(--surface)',
-                          border: isOff ? '1px dashed var(--border)' : '1px solid var(--border)',
+                          background: isSwapped ? 'rgba(245, 158, 11, 0.08)' : (isOff ? 'var(--surface-muted)' : 'var(--surface)'),
+                          border: isSwapped ? '1px solid #f59e0b' : (isOff ? '1px dashed var(--border)' : '1px solid var(--border)'),
                           borderRadius: '12px',
                           padding: '12px 14px',
                           display: 'flex',
                           justifyContent: 'space-between',
                           alignItems: 'center',
                           boxShadow: isOff ? 'none' : '0 1px 3px rgba(0,0,0,0.04)',
-                          opacity: isOff ? 0.8 : 1
+                          opacity: (isOff && !isSwapped) ? 0.8 : 1
                         }}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -559,24 +577,32 @@ export default function EmployeeRosterModule({
                             padding: '4px 10px',
                             borderRadius: '8px',
                             fontSize: '12px',
-                            background: isOff ? 'var(--surface)' : 'var(--primary-tint)',
-                            color: isOff ? 'var(--muted)' : 'var(--primary-dark)',
+                            background: isSwapped ? '#fef3c7' : (isOff ? 'var(--surface)' : 'var(--primary-tint)'),
+                            color: isSwapped ? '#b45309' : (isOff ? 'var(--muted)' : 'var(--primary-dark)'),
                             fontWeight: 700
                           }}>
                             {arDayName}
                           </span>
                           <div>
                             <div style={{ fontWeight: 800, fontSize: '13.5px', color: 'var(--text)' }}>{date}</div>
-                            <div style={{ fontSize: '11.5px', color: 'var(--muted)', marginTop: '2px' }}>اليوم {day} من الشهر</div>
+                            <div style={{ fontSize: '11.5px', color: isSwapped ? '#b45309' : 'var(--muted)', marginTop: '2px' }}>
+                              {isSwapped ? (daySchedule.swapNote || '🔄 شيفت متبدل معتمد') : `اليوم ${day} من الشهر`}
+                            </div>
                           </div>
                         </div>
                         <div style={{ textAlign: 'left' }}>
                           {isOff ? (
-                            <span className="badge secondary" style={{ fontSize: '11.5px' }}>💤 راحة (OFF)</span>
+                            isSwapped ? (
+                              <span className="badge warning" style={{ fontSize: '11.5px' }}>🔄 💤 راحة متبدلة</span>
+                            ) : (
+                              <span className="badge secondary" style={{ fontSize: '11.5px' }}>💤 راحة (OFF)</span>
+                            )
                           ) : (
                             <div>
-                              <span className="badge success" style={{ fontSize: '11px', display: 'inline-block', marginBottom: '3px' }}>⏰ وردية عمل</span>
-                              <div style={{ fontSize: '12.5px', fontWeight: 800, color: 'var(--primary-dark)' }}>
+                              <span className={`badge ${isSwapped ? 'warning' : 'success'}`} style={{ fontSize: '11px', display: 'inline-block', marginBottom: '3px' }}>
+                                {isSwapped ? '🔄 وردية متبدلة' : '⏰ وردية عمل'}
+                              </span>
+                              <div style={{ fontSize: '12.5px', fontWeight: 800, color: isSwapped ? '#b45309' : 'var(--primary-dark)' }}>
                                 {daySchedule?.start} – {daySchedule?.end}
                               </div>
                             </div>
@@ -600,19 +626,24 @@ export default function EmployeeRosterModule({
                     <tbody>
                       {bCalendar.map(({ date, day, arDayName, daySchedule }) => {
                         const isOff = daySchedule?.type === 'off';
+                        const isSwapped = daySchedule?.isSwapped;
                         return (
-                          <tr key={date} style={{ background: isOff ? 'rgba(100,116,139,0.06)' : undefined, opacity: isOff ? 0.75 : 1 }}>
+                          <tr key={date} style={{ background: isSwapped ? 'rgba(245, 158, 11, 0.08)' : (isOff ? 'rgba(100,116,139,0.06)' : undefined), opacity: (isOff && !isSwapped) ? 0.75 : 1 }}>
                             <td style={{ fontWeight: 600 }}>{date}</td>
                             <td>
-                              <span style={{ padding: '2px 8px', borderRadius: '99px', fontSize: '12px', background: isOff ? 'var(--surface)' : 'var(--primary-tint)', color: isOff ? 'var(--muted)' : 'var(--primary-dark)', fontWeight: 600 }}>
+                              <span style={{ padding: '2px 8px', borderRadius: '99px', fontSize: '12px', background: isSwapped ? '#fef3c7' : (isOff ? 'var(--surface)' : 'var(--primary-tint)'), color: isSwapped ? '#b45309' : (isOff ? 'var(--muted)' : 'var(--primary-dark)'), fontWeight: 600 }}>
                                 {arDayName}
                               </span>
                             </td>
                             <td>
-                              {isOff ? <span className="badge secondary">💤 راحة (OFF)</span> : <span className="badge success">⏰ وردية عمل</span>}
+                              {isOff ? (
+                                isSwapped ? <span className="badge warning">🔄 💤 راحة متبدلة</span> : <span className="badge secondary">💤 راحة (OFF)</span>
+                              ) : (
+                                isSwapped ? <span className="badge warning">🔄 وردية متبدلة</span> : <span className="badge success">⏰ وردية عمل</span>
+                              )}
                             </td>
-                            <td style={{ color: isOff ? 'var(--muted)' : 'var(--primary)', fontWeight: isOff ? 400 : 600 }}>
-                              {isOff ? '—' : `${daySchedule?.start} – ${daySchedule?.end}`}
+                            <td style={{ color: isSwapped ? '#b45309' : (isOff ? 'var(--muted)' : 'var(--primary)'), fontWeight: isOff && !isSwapped ? 400 : 600 }}>
+                              {isOff ? (isSwapped ? (daySchedule.swapNote || 'راحة متبدلة') : '—') : `${daySchedule?.start} – ${daySchedule?.end}${isSwapped && daySchedule.swappedWithName ? ` (مع ${daySchedule.swappedWithName})` : ''}`}
                             </td>
                           </tr>
                         );
@@ -739,19 +770,20 @@ export default function EmployeeRosterModule({
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {monthCalendar.map(({ date, day, arDayName, daySchedule }) => {
                 const isOff = daySchedule?.type === 'off';
+                const isSwapped = daySchedule?.isSwapped;
                 return (
                   <div
                     key={date}
                     style={{
-                      background: isOff ? 'var(--surface-muted)' : 'var(--surface)',
-                      border: isOff ? '1px dashed var(--border)' : '1px solid var(--border)',
+                      background: isSwapped ? 'rgba(245, 158, 11, 0.08)' : (isOff ? 'var(--surface-muted)' : 'var(--surface)'),
+                      border: isSwapped ? '1px solid #f59e0b' : (isOff ? '1px dashed var(--border)' : '1px solid var(--border)'),
                       borderRadius: '12px',
                       padding: '12px 14px',
                       display: 'flex',
                       justifyContent: 'space-between',
                       alignItems: 'center',
                       boxShadow: isOff ? 'none' : '0 1px 3px rgba(0,0,0,0.04)',
-                      opacity: isOff ? 0.8 : 1
+                      opacity: (isOff && !isSwapped) ? 0.8 : 1
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -759,24 +791,32 @@ export default function EmployeeRosterModule({
                         padding: '4px 10px',
                         borderRadius: '8px',
                         fontSize: '12px',
-                        background: isOff ? 'var(--surface)' : 'var(--primary-tint)',
-                        color: isOff ? 'var(--muted)' : 'var(--primary-dark)',
+                        background: isSwapped ? '#fef3c7' : (isOff ? 'var(--surface)' : 'var(--primary-tint)'),
+                        color: isSwapped ? '#b45309' : (isOff ? 'var(--muted)' : 'var(--primary-dark)'),
                         fontWeight: 700
                       }}>
                         {arDayName}
                       </span>
                       <div>
                         <div style={{ fontWeight: 800, fontSize: '13.5px', color: 'var(--text)' }}>{date}</div>
-                        <div style={{ fontSize: '11.5px', color: 'var(--muted)', marginTop: '2px' }}>اليوم {day} من الشهر</div>
+                        <div style={{ fontSize: '11.5px', color: isSwapped ? '#b45309' : 'var(--muted)', marginTop: '2px' }}>
+                          {isSwapped ? (daySchedule.swapNote || '🔄 شيفت متبدل معتمد') : `اليوم ${day} من الشهر`}
+                        </div>
                       </div>
                     </div>
                     <div style={{ textAlign: 'left' }}>
                       {isOff ? (
-                        <span className="badge secondary" style={{ fontSize: '11.5px' }}>💤 راحة (OFF)</span>
+                        isSwapped ? (
+                          <span className="badge warning" style={{ fontSize: '11.5px' }}>🔄 💤 راحة متبدلة</span>
+                        ) : (
+                          <span className="badge secondary" style={{ fontSize: '11.5px' }}>💤 راحة (OFF)</span>
+                        )
                       ) : (
                         <div>
-                          <span className="badge success" style={{ fontSize: '11px', display: 'inline-block', marginBottom: '3px' }}>⏰ وردية عمل</span>
-                          <div style={{ fontSize: '12.5px', fontWeight: 800, color: 'var(--primary-dark)' }}>
+                          <span className={`badge ${isSwapped ? 'warning' : 'success'}`} style={{ fontSize: '11px', display: 'inline-block', marginBottom: '3px' }}>
+                            {isSwapped ? '🔄 وردية متبدلة' : '⏰ وردية عمل'}
+                          </span>
+                          <div style={{ fontSize: '12.5px', fontWeight: 800, color: isSwapped ? '#b45309' : 'var(--primary-dark)' }}>
                             {daySchedule?.start} – {daySchedule?.end}
                           </div>
                         </div>
@@ -800,12 +840,13 @@ export default function EmployeeRosterModule({
                 <tbody>
                   {monthCalendar.map(({ date, day, arDayName, daySchedule }) => {
                     const isOff = daySchedule?.type === 'off';
+                    const isSwapped = daySchedule?.isSwapped;
                     return (
                       <tr
                         key={date}
                         style={{
-                          background: isOff ? 'rgba(100,116,139,0.06)' : undefined,
-                          opacity: isOff ? 0.75 : 1
+                          background: isSwapped ? 'rgba(245, 158, 11, 0.08)' : (isOff ? 'rgba(100,116,139,0.06)' : undefined),
+                          opacity: (isOff && !isSwapped) ? 0.75 : 1
                         }}
                       >
                         <td style={{ fontWeight: 600 }}>{date}</td>
@@ -814,8 +855,8 @@ export default function EmployeeRosterModule({
                             padding: '2px 8px',
                             borderRadius: '99px',
                             fontSize: '12px',
-                            background: isOff ? 'var(--surface)' : 'var(--primary-tint)',
-                            color: isOff ? 'var(--muted)' : 'var(--primary-dark)',
+                            background: isSwapped ? '#fef3c7' : (isOff ? 'var(--surface)' : 'var(--primary-tint)'),
+                            color: isSwapped ? '#b45309' : (isOff ? 'var(--muted)' : 'var(--primary-dark)'),
                             fontWeight: 600
                           }}>
                             {arDayName}
@@ -823,13 +864,13 @@ export default function EmployeeRosterModule({
                         </td>
                         <td>
                           {isOff ? (
-                            <span className="badge secondary">💤 راحة (OFF)</span>
+                            isSwapped ? <span className="badge warning">🔄 💤 راحة متبدلة</span> : <span className="badge secondary">💤 راحة (OFF)</span>
                           ) : (
-                            <span className="badge success">⏰ وردية عمل</span>
+                            isSwapped ? <span className="badge warning">🔄 وردية متبدلة</span> : <span className="badge success">⏰ وردية عمل</span>
                           )}
                         </td>
-                        <td style={{ color: isOff ? 'var(--muted)' : 'var(--primary)', fontWeight: isOff ? 400 : 600 }}>
-                          {isOff ? '—' : `${daySchedule?.start} – ${daySchedule?.end}`}
+                        <td style={{ color: isSwapped ? '#b45309' : (isOff ? 'var(--muted)' : 'var(--primary)'), fontWeight: isOff && !isSwapped ? 400 : 600 }}>
+                          {isOff ? (isSwapped ? (daySchedule.swapNote || 'راحة متبدلة') : '—') : `${daySchedule?.start} – ${daySchedule?.end}${isSwapped && daySchedule.swappedWithName ? ` (مع ${daySchedule.swappedWithName})` : ''}`}
                         </td>
                       </tr>
                     );

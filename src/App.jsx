@@ -14,17 +14,16 @@ import {
 import {
   arabicMonthLabel,
   arabicWeekday,
-  getRealTodayStr,
   nowTimeStr,
   getActivePayrollCycleMonth,
   uid,
   fmt,
   parseArabicFloat,
   normalizeState,
-  applyShiftSwapToRosters,
   shouldShowRequestToBranch
 } from './utils/formatters';
 import { getRealDate, getRealTodayStr, getRealNowTimeStr } from './utils/timeEngine';
+import { getEmployeeDaySchedule, getDayScheduleFromMap, applyShiftSwapToRosters } from './utils/rosterEngine';
 import { getActivePayrollMonth, getCycleDateRange, createDatePredicate } from './utils/periodEngine';
 import { loadExcelJS, mergedTitle, tableHeaderRow, dataRow } from './utils/excelExport';
 import { smartSaveState, smartLoadState, loadLocalStateFast, listenToConnectionChanges, syncNow, listenToLiveBroadcasts } from './utils/offlineSync';
@@ -2316,24 +2315,6 @@ export default function App() {
     if (!monthStr || monthStr.length !== 7) return 0;
     const empIdStr = String(empId);
 
-    let roster = (state.rosters || []).find(
-      r => String(r.employeeId) === empIdStr && (r.month === monthStr || !r.month) && r.status === 'approved'
-    );
-
-    if (!roster) {
-      const approvedReq = (state.requests || []).find(
-        req => String(req.employeeId) === empIdStr &&
-        (req.type === 'roster_update' || req.type === 'roster_edit' || req.type === 'roster_edit_request') &&
-        (req.month === monthStr || !req.month) &&
-        (req.status === 'approved' || req.adminApproved)
-      );
-      if (approvedReq && approvedReq.schedule) {
-        roster = approvedReq;
-      }
-    }
-
-    if (!roster || !roster.schedule) return 0;
-
     const range = getPayrollCutoffRange(monthStr);
     let dates = [];
 
@@ -2347,18 +2328,6 @@ export default function App() {
           const cd = cur.getDate();
           dates.push(`${cy}-${String(cm).padStart(2, '0')}-${String(cd).padStart(2, '0')}`);
           cur.setDate(cur.getDate() + 1);
-        }
-      }
-    } else if (roster.fromDate && roster.toDate) {
-      let current = new Date(roster.fromDate);
-      const end = new Date(roster.toDate);
-      if (!isNaN(current) && !isNaN(end) && current <= end) {
-        while (current <= end) {
-          const y = current.getFullYear();
-          const m = current.getMonth() + 1;
-          const d = current.getDate();
-          dates.push(`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
-          current.setDate(current.getDate() + 1);
         }
       }
     } else if (monthStr && monthStr.length === 7) {
@@ -2375,8 +2344,7 @@ export default function App() {
     for (const dateStr of dates) {
       if (dateStr >= today) continue; // Only count past days
 
-      const jsDay = new Date(dateStr).getDay();
-      const daySchedule = getDayScheduleFromMap(roster.schedule, jsDay, dateStr);
+      const daySchedule = getEmployeeDaySchedule(empIdStr, dateStr, state);
       if (!daySchedule || daySchedule.type === 'off' || daySchedule.isOff) continue;
       const hasShift = (state.shifts || []).some(s => String(s.employeeId) === empIdStr && s.date === dateStr);
       if (hasShift) continue;

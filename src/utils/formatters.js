@@ -1,5 +1,6 @@
 import { isManagementJob, isBranchWithoutManager, getJobsList } from './jobsHelper';
 import { getActivePayrollMonth } from './periodEngine';
+export { getRealDate, getRealTodayStr, getRealNowTimeStr } from './timeEngine';
 import { getRealDate } from './timeEngine';
 
 export const AR_MONTHS = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
@@ -287,135 +288,8 @@ export function normalizeState(parsed) {
   };
 }
 
-export function applyShiftSwapToRosters(targetReq, currentRosters = [], employees = []) {
-  if (!targetReq || (targetReq.type !== 'swap' && targetReq.type !== 'shift_swap' && targetReq.type !== 'shift_edit')) {
-    return currentRosters;
-  }
+export { applyShiftSwapToRosters, getDayScheduleFromMap, getEmployeeDaySchedule, findEmployeeRoster, getEmployeeBaseDaySchedule } from './rosterEngine';
 
-  const empAId = String(targetReq.requesterEmpId || targetReq.employeeId || '');
-  const empBId = String(targetReq.targetEmpId || targetReq.targetEmployeeId || targetReq.peerEmployeeId || '');
-  const dateA = targetReq.requesterDate || targetReq.date || targetReq.startDate || todayStr();
-  const dateB = targetReq.targetDate || targetReq.targetSwapDate || dateA;
-
-  const monthKeyA = dateA.slice(0, 7);
-  const monthKeyB = dateB.slice(0, 7);
-
-  const dayNameA = arabicWeekday(dateA);
-  const dayNameB = arabicWeekday(dateB);
-
-  let updatedRosters = [...currentRosters];
-
-  const ensureRoster = (empId, monthKey) => {
-    let ros = updatedRosters.find((r) => String(r.employeeId) === String(empId) && (r.month === monthKey || !r.month) && r.status === 'approved');
-    if (!ros) {
-      ros = updatedRosters.find((r) => String(r.employeeId) === String(empId) && (r.month === monthKey || !r.month));
-    }
-    if (!ros) {
-      const empObj = employees.find((e) => String(e.id) === String(empId));
-      const defaultSchedule = {
-        'السبت': { type: 'shift', start: '08:00', end: '16:00' },
-        'الأحد': { type: 'shift', start: '08:00', end: '16:00' },
-        'الاثنين': { type: 'shift', start: '08:00', end: '16:00' },
-        'الثلاثاء': { type: 'shift', start: '08:00', end: '16:00' },
-        'الأربعاء': { type: 'shift', start: '08:00', end: '16:00' },
-        'الخميس': { type: 'shift', start: '08:00', end: '16:00' },
-        'الجمعة': { type: 'off' }
-      };
-      ros = {
-        id: `ros_${empId}_${monthKey}_${Date.now()}`,
-        employeeId: empId,
-        branchId: empObj?.branchId || null,
-        month: monthKey,
-        schedule: defaultSchedule,
-        status: 'approved',
-        approvedAt: new Date().toISOString()
-      };
-      updatedRosters.push(ros);
-    }
-    return ros;
-  };
-
-  const getSchedItem = (sched, dayName, dateStr) => {
-    if (!sched) return { type: 'shift', start: '08:00', end: '16:00' };
-    if (sched[dateStr]) return sched[dateStr];
-    if (sched[dayName]) return sched[dayName];
-    const alt = dayName.startsWith('ا') ? 'إ' + dayName.slice(1) : (dayName.startsWith('إ') ? 'ا' + dayName.slice(1) : dayName);
-    if (sched[alt]) return sched[alt];
-    const matchedKey = Object.keys(sched).find(k => k.replace(/[\u0625\u0623\u0622]/g, 'ا') === dayName.replace(/[\u0625\u0623\u0622]/g, 'ا'));
-    if (matchedKey) return sched[matchedKey];
-    return { type: 'shift', start: '08:00', end: '16:00' };
-  };
-
-  if (targetReq.type === 'shift_edit') {
-    const ros = ensureRoster(empAId, monthKeyA);
-    const newSchedule = { ...(ros.schedule || {}) };
-    const updatedDayItem = {
-      type: targetReq.newDayType || (targetReq.isOff ? 'off' : 'shift'),
-      start: targetReq.newStart || '08:00',
-      end: targetReq.newEnd || '16:00',
-      hours: targetReq.newHours || 8
-    };
-    newSchedule[dayNameA] = updatedDayItem;
-    newSchedule[dateA] = updatedDayItem;
-    const altA = dayNameA.startsWith('ا') ? 'إ' + dayNameA.slice(1) : (dayNameA.startsWith('إ') ? 'ا' + dayNameA.slice(1) : dayNameA);
-    newSchedule[altA] = updatedDayItem;
-
-    updatedRosters = updatedRosters.map((r) => r.id === ros.id ? { ...r, schedule: newSchedule, status: 'approved' } : r);
-    return updatedRosters;
-  }
-
-  if (empAId && empBId) {
-    const rosA = ensureRoster(empAId, monthKeyA);
-    const rosB = ensureRoster(empBId, monthKeyB);
-
-    const schedA = { ...(rosA.schedule || {}) };
-    const schedB = { ...(rosB.schedule || {}) };
-
-    const itemA_on_dateA = getSchedItem(schedA, dayNameA, dateA);
-    const itemB_on_dateB = getSchedItem(schedB, dayNameB, dateB);
-
-    // Apply Swap
-    if (dateA === dateB) {
-      // Both employees on the same date (e.g. Emp A was off, Emp B was working)
-      schedA[dayNameA] = { ...itemB_on_dateB };
-      schedA[dateA] = { ...itemB_on_dateB };
-      const altA = dayNameA.startsWith('ا') ? 'إ' + dayNameA.slice(1) : (dayNameA.startsWith('إ') ? 'ا' + dayNameA.slice(1) : dayNameA);
-      schedA[altA] = { ...itemB_on_dateB };
-
-      schedB[dayNameB] = { ...itemA_on_dateA };
-      schedB[dateB] = { ...itemA_on_dateA };
-      const altB = dayNameB.startsWith('ا') ? 'إ' + dayNameB.slice(1) : (dayNameB.startsWith('إ') ? 'ا' + dayNameB.slice(1) : dayNameB);
-      schedB[altB] = { ...itemA_on_dateA };
-    } else {
-      // Cross dates
-      schedA[dayNameA] = { type: 'off' };
-      schedA[dateA] = { type: 'off' };
-      const altA = dayNameA.startsWith('ا') ? 'إ' + dayNameA.slice(1) : (dayNameA.startsWith('إ') ? 'ا' + dayNameA.slice(1) : dayNameA);
-      schedA[altA] = { type: 'off' };
-
-      schedA[dayNameB] = { ...itemB_on_dateB };
-      schedA[dateB] = { ...itemB_on_dateB };
-      const altB = dayNameB.startsWith('ا') ? 'إ' + dayNameB.slice(1) : (dayNameB.startsWith('إ') ? 'ا' + dayNameB.slice(1) : dayNameB);
-      schedA[altB] = { ...itemB_on_dateB };
-
-      schedB[dayNameB] = { type: 'off' };
-      schedB[dateB] = { type: 'off' };
-      schedB[altB] = { type: 'off' };
-
-      schedB[dayNameA] = { ...itemA_on_dateA };
-      schedB[dateA] = { ...itemA_on_dateA };
-      schedB[altA] = { ...itemA_on_dateA };
-    }
-
-    updatedRosters = updatedRosters.map((r) => {
-      if (r.id === rosA.id) return { ...r, schedule: schedA, status: 'approved' };
-      if (r.id === rosB.id) return { ...r, schedule: schedB, status: 'approved' };
-      return r;
-    });
-  }
-
-  return updatedRosters;
-}
 
 /**
  * Determines whether a request should be visible to and require approval from the Branch Manager,

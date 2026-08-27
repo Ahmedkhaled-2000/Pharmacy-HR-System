@@ -16,6 +16,7 @@ import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isA
 import EmployeePermissionsManagementModule from '../permissions/EmployeePermissionsManagementModule';
 import { getCycleDateRange, createDatePredicate, getActivePayrollMonth } from '../../utils/periodEngine';
 import { getRealDate, getRealTodayStr } from '../../utils/timeEngine';
+import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
 
 const WEEKDAYS_AR = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
 
@@ -1353,7 +1354,7 @@ export default function BranchManagerView({
                   const activeInThisBranch = activeShift && (String(activeShift.branchId || emp.branchId) === cIdStr);
                   const activeInOtherBranch = activeShift && !activeInThisBranch;
 
-                  const todayStrVal = new Date().toISOString().slice(0, 10);
+                  const todayStrVal = getRealTodayStr();
                   const todayShiftsInThisBranch = (state.shifts || []).filter(
                     (s) => String(s.employeeId) === String(emp.id) && s.date === todayStrVal && (String(s.branchId || emp.branchId) === cIdStr)
                   );
@@ -1361,6 +1362,10 @@ export default function BranchManagerView({
                   const onLeaveToday = allLeaves.some(
                     (r) => String(r.employeeId) === String(emp.id) && (r.status === 'approved' || r.adminApproved) && (r.type === 'leave' || r.type === 'leave_request') && r.startDate <= todayStrVal && r.endDate >= todayStrVal
                   );
+
+                  const daySched = getEmployeeDaySchedule(emp.id, todayStrVal, state);
+                  const isOffToday = daySched && (daySched.type === 'off' || daySched.isOff);
+                  const isSwappedToday = daySched?.isSwapped;
 
                   let statusLabel = '🔴 لم يبصم بهذا الفرع / خارج الوردية';
                   let statusBg = '#fef2f2';
@@ -1392,6 +1397,18 @@ export default function BranchManagerView({
                     statusLabel = '🏖️ في إجازة معتمدة';
                     statusBg = '#f0fdf4';
                     statusColor = '#16a34a';
+                  } else if (isSwappedToday && isOffToday) {
+                    statusLabel = `🔄 🛋️ راحة متبدلة مع ${daySched.swappedWithName || 'الزميل'}`;
+                    statusBg = '#fef3c7';
+                    statusColor = '#b45309';
+                  } else if (isOffToday) {
+                    statusLabel = '🛋️ راحة أسبوعية (OFF)';
+                    statusBg = '#f8fafc';
+                    statusColor = '#64748b';
+                  } else if (isSwappedToday) {
+                    statusLabel = `🔄 وردية متبدلة لتغطية ${daySched.swappedWithName || 'الزميل'} (${daySched.start} - ${daySched.end})`;
+                    statusBg = '#fef3c7';
+                    statusColor = '#b45309';
                   }
 
                   return (
