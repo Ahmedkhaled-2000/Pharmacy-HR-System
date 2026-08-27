@@ -441,10 +441,22 @@ export default function EmployeeTerminationModal({
         <div id="printable-clearance-slip" style={{ display: 'none', fontFamily: "'Tajawal', sans-serif", direction: 'rtl' }}>
           {settlement && (
             <div>
-              <div style={{ textAlign: 'center', borderBottom: '3px double #0f766e', paddingBottom: '12px', marginBottom: '16px' }}>
-                <h2 style={{ margin: 0, color: '#0f766e', fontSize: '20px' }}>🏥 {state.orgSettings?.orgName || 'مجموعة صيدليات الشركة'}</h2>
-                <h3 style={{ margin: '6px 0 0', color: '#1e293b', fontSize: '17px' }}>نموذج إخلاء طرف وتصفية ومخالصة مالية نهائية</h3>
-                <span style={{ fontSize: '12px', color: '#64748b' }}>تاريخ الإصدار: {new Date().toISOString().slice(0, 10)}</span>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '3px double #0f766e', paddingBottom: '12px', marginBottom: '16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', textAlign: 'right' }}>
+                  {state.orgSettings?.logoUrl ? (
+                    <img src={state.orgSettings.logoUrl} alt="Logo" style={{ maxHeight: '55px', maxWidth: '130px', objectFit: 'contain' }} />
+                  ) : (
+                    <span style={{ fontSize: '28px' }}>🏥</span>
+                  )}
+                  <div>
+                    <h2 style={{ margin: 0, color: '#0f766e', fontSize: '18px', fontWeight: 800 }}>{state.orgSettings?.orgName || 'مجموعة صيدليات الشركة'}</h2>
+                    <span style={{ fontSize: '12px', color: '#64748b' }}>إدارة الموارد البشرية والشؤون الإدارية والمالية</span>
+                  </div>
+                </div>
+                <div style={{ textAlign: 'center' }}>
+                  <h3 style={{ margin: 0, color: '#1e293b', fontSize: '16px', fontWeight: 800 }}>نموذج إخلاء طرف وتصفية ومخالصة مالية نهائية</h3>
+                  <span style={{ fontSize: '12px', color: '#64748b' }}>تاريخ الإصدار: {new Date().toISOString().slice(0, 10)}</span>
+                </div>
               </div>
 
               {/* Employee Info Box */}

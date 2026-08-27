@@ -179,9 +179,12 @@ export function generateClearanceSlipHTML({
     <div style="width: 100%; max-width: 800px; margin: 0 auto; background: #fff;">
       <!-- Header -->
       <div style="border-bottom: 3px double #0f766e; padding-bottom: 12px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
-        <div style="text-align: right;">
-          <h2 style="margin: 0; color: #0f766e; font-size: 19px; font-weight: 800;">🏥 ${orgName}</h2>
-          <span style="font-size: 12px; color: #475569; font-weight: 600;">إدارة الموارد البشرية والشؤون الإدارية والمالية</span>
+        <div style="text-align: right; display: flex; align-items: center; gap: 10px;">
+          ${orgSettings.logoUrl ? `<img src="${orgSettings.logoUrl}" alt="Logo" style="max-height: 52px; max-width: 120px; object-fit: contain;" />` : `<span style="font-size: 24px;">🏥</span>`}
+          <div>
+            <h2 style="margin: 0; color: #0f766e; font-size: 18px; font-weight: 800;">${orgName}</h2>
+            <span style="font-size: 12px; color: #475569; font-weight: 600;">إدارة الموارد البشرية والشؤون الإدارية والمالية</span>
+          </div>
         </div>
         <div style="text-align: center;">
           <div style="background: #f0fdf4; border: 2px solid #0f766e; padding: 4px 16px; border-radius: 8px;">
@@ -987,9 +990,12 @@ export function generateOfficialPayslipHTML({
       
       <!-- Header -->
       <div style="border-bottom: 2.5px double #0f766e; padding-bottom: 6px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
-        <div style="text-align: right;">
-          <h2 style="margin: 0; color: #0f766e; font-size: 17px; font-weight: 800;">🏥 ${orgName}</h2>
-          <span style="font-size: 11px; color: #475569; font-weight: 600;">${gmName}</span>
+        <div style="text-align: right; display: flex; align-items: center; gap: 8px;">
+          ${orgSettings.logoUrl ? `<img src="${orgSettings.logoUrl}" alt="Logo" style="max-height: 44px; max-width: 110px; object-fit: contain;" />` : `<span style="font-size: 22px;">🏥</span>`}
+          <div>
+            <h2 style="margin: 0; color: #0f766e; font-size: 16px; font-weight: 800;">${orgName}</h2>
+            <span style="font-size: 11px; color: #475569; font-weight: 600;">${gmName}</span>
+          </div>
         </div>
         <div style="text-align: center;">
           <div style="background: #f0fdf4; border: 2px solid #0f766e; padding: 3px 14px; border-radius: 6px;">

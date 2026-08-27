@@ -174,11 +174,30 @@ export default function LoginPage({ onLogin, state, themeMode, toggleTheme }) {
 
       <div style={S.card}>
         {/* Logo */}
-        <div style={S.logo}>HR</div>
+        {state?.orgSettings?.logoUrl ? (
+          <div style={{ marginBottom: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <img
+              src={state.orgSettings.logoUrl}
+              alt="شعار المؤسسة"
+              style={{
+                maxHeight: '75px',
+                maxWidth: '180px',
+                objectFit: 'contain',
+                borderRadius: '12px',
+                background: isDark ? '#0f172a' : '#ffffff',
+                padding: '6px',
+                border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`,
+                boxShadow: '0 4px 12px rgba(0,0,0,0.08)'
+              }}
+            />
+          </div>
+        ) : (
+          <div style={S.logo}>HR</div>
+        )}
 
         {/* Titles */}
         <h1 style={S.title}>تسجيل الدخول</h1>
-        <p style={S.subtitle}>نظام إدارة الموارد البشرية - صيدليات مداواة</p>
+        <p style={S.subtitle}>{state?.orgSettings?.orgName || 'منظومة إدارة الموارد البشرية والرواتب'}</p>
 
         {/* Error */}
         {errorMsg && <div style={S.error}>⚠️ {errorMsg}</div>}

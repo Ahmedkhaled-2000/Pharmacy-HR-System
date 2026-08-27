@@ -540,6 +540,24 @@ export default function App() {
     return () => clearInterval(timer);
   }, [state]);
 
+  // Unify Document Title and Dynamic Favicon based on uploaded Logo & Org Name
+  useEffect(() => {
+    const orgName = state.orgSettings?.orgName;
+    if (orgName) {
+      document.title = `${orgName} — منظومة إدارة الموارد البشرية`;
+    }
+    const logoUrl = state.orgSettings?.logoUrl;
+    if (logoUrl) {
+      let link = document.querySelector("link[rel~='icon']");
+      if (!link) {
+        link = document.createElement('link');
+        link.rel = 'icon';
+        document.getElementsByTagName('head')[0].appendChild(link);
+      }
+      link.href = logoUrl;
+    }
+  }, [state.orgSettings?.orgName, state.orgSettings?.logoUrl]);
+
   // Employee Management Modal State
   const [isEmpModalOpen, setIsEmpModalOpen] = useState(false);
   const [editingEmp, setEditingEmp] = useState(null);
@@ -5185,25 +5203,44 @@ export default function App() {
             maxWidth: '90%',
             textAlign: 'center'
           }}>
-            <div style={{
-              width: '68px',
-              height: '68px',
-              borderRadius: '16px',
-              background: 'linear-gradient(135deg, #0d9488 0%, #14b8a6 100%)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '34px',
-              marginBottom: '18px',
-              boxShadow: '0 8px 20px rgba(20, 184, 166, 0.35)'
-            }}>
-              🏥
-            </div>
+            {state.orgSettings?.logoUrl ? (
+              <div style={{
+                marginBottom: '18px',
+                background: '#ffffff',
+                padding: '8px 14px',
+                borderRadius: '16px',
+                boxShadow: '0 8px 24px rgba(0, 0, 0, 0.25)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}>
+                <img
+                  src={state.orgSettings.logoUrl}
+                  alt="شعار المؤسسة"
+                  style={{ maxHeight: '64px', maxWidth: '160px', objectFit: 'contain' }}
+                />
+              </div>
+            ) : (
+              <div style={{
+                width: '68px',
+                height: '68px',
+                borderRadius: '16px',
+                background: 'linear-gradient(135deg, #0d9488 0%, #14b8a6 100%)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '34px',
+                marginBottom: '18px',
+                boxShadow: '0 8px 20px rgba(20, 184, 166, 0.35)'
+              }}>
+                🏥
+              </div>
+            )}
             <h2 style={{ margin: '0 0 8px 0', fontSize: '20px', fontWeight: 800, color: '#f0fdf4', letterSpacing: '-0.5px' }}>
-              منظومة الموارد البشرية والرواتب
+              {state.orgSettings?.orgName || 'منظومة الموارد البشرية والرواتب'}
             </h2>
             <div style={{ fontSize: '13px', color: '#99f6e4', marginBottom: '24px', fontWeight: 600 }}>
-              مجموعة الصيدليات الطبية
+              {state.orgSettings?.generalManagerName ? `إدارة: ${state.orgSettings.generalManagerName}` : 'مجموعة الصيدليات الطبية'}
             </div>
             
             <div style={{

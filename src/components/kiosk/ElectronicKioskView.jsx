@@ -255,6 +255,23 @@ export default function ElectronicKioskView({
             boxShadow: '0 20px 40px -15px rgba(0,0,0,0.25)'
           }}
         >
+          {orgSettings?.logoUrl && (
+            <div style={{ marginBottom: '6px' }}>
+              <img
+                src={orgSettings.logoUrl}
+                alt="شعار المؤسسة"
+                style={{
+                  maxHeight: '60px',
+                  maxWidth: '160px',
+                  objectFit: 'contain',
+                  background: '#ffffff',
+                  padding: '4px 10px',
+                  borderRadius: '12px',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.06)'
+                }}
+              />
+            </div>
+          )}
           <div>
             <h1 
               className="kiosk-clock-main"

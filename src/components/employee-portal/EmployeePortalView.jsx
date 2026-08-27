@@ -1763,24 +1763,32 @@ export default function EmployeePortalView({
                 ☰
               </button>
 
-              <div style={{
-                width: '28px',
-                height: '28px',
-                borderRadius: '7px',
-                background: 'linear-gradient(135deg, #0d9488, #0f766e)',
-                color: '#fff',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '14px',
-                fontWeight: 900,
-                flexShrink: 0
-              }}>
-                🏥
-              </div>
+              {(orgSettings?.logoUrl || state?.orgSettings?.logoUrl) ? (
+                <img
+                  src={orgSettings?.logoUrl || state?.orgSettings?.logoUrl}
+                  alt="شعار المؤسسة"
+                  style={{ width: '28px', height: '28px', borderRadius: '7px', objectFit: 'contain', background: '#fff', padding: '2px', border: '1px solid var(--border)', flexShrink: 0 }}
+                />
+              ) : (
+                <div style={{
+                  width: '28px',
+                  height: '28px',
+                  borderRadius: '7px',
+                  background: 'linear-gradient(135deg, #0d9488, #0f766e)',
+                  color: '#fff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '14px',
+                  fontWeight: 900,
+                  flexShrink: 0
+                }}>
+                  🏥
+                </div>
+              )}
 
               <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--text)', whiteSpace: 'nowrap' }}>
-                بوابة الموظف
+                {orgSettings?.orgName || state?.orgSettings?.orgName || 'بوابة الموظف'}
               </span>
             </div>
 
@@ -2169,26 +2177,34 @@ export default function EmployeePortalView({
         }}>
           {/* Right Side: Brand, Profile Badge & Breadcrumb */}
           <div className="ep-titlebar-right" style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-            <div className="ep-logo-badge" style={{
-              width: '32px',
-              height: '32px',
-              borderRadius: '8px',
-              background: 'linear-gradient(135deg, #0d9488, #0f766e)',
-              color: '#fff',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '16px',
-              fontWeight: 900,
-              boxShadow: '0 2px 6px rgba(13,148,136,0.3)',
-              flexShrink: 0
-            }}>
-              🏥
-            </div>
+            {(orgSettings?.logoUrl || state?.orgSettings?.logoUrl) ? (
+              <img
+                src={orgSettings?.logoUrl || state?.orgSettings?.logoUrl}
+                alt="شعار المؤسسة"
+                style={{ width: '32px', height: '32px', borderRadius: '8px', objectFit: 'contain', background: '#fff', padding: '2px', border: '1px solid var(--border)', flexShrink: 0 }}
+              />
+            ) : (
+              <div className="ep-logo-badge" style={{
+                width: '32px',
+                height: '32px',
+                borderRadius: '8px',
+                background: 'linear-gradient(135deg, #0d9488, #0f766e)',
+                color: '#fff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '16px',
+                fontWeight: 900,
+                boxShadow: '0 2px 6px rgba(13,148,136,0.3)',
+                flexShrink: 0
+              }}>
+                🏥
+              </div>
+            )}
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--text)', whiteSpace: 'nowrap' }}>
-                منظومة الموارد البشرية
+                {orgSettings?.orgName || state?.orgSettings?.orgName || 'منظومة الموارد البشرية'}
               </span>
 
 

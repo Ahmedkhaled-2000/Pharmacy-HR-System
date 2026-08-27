@@ -7,7 +7,7 @@ import { fmt, getRealTodayStr } from './formatters';
 /**
  * Construct responsive HTML layout for emails
  */
-export function buildEmailTemplate({ title, subtitle, badgeText, badgeColor = '#0d9488', bodyContent, footerText }) {
+export function buildEmailTemplate({ title, subtitle, badgeText, badgeColor = '#0d9488', bodyContent, footerText, logoUrl, orgName }) {
   return `
 <!DOCTYPE html>
 <html dir="rtl" lang="ar">
@@ -34,7 +34,8 @@ export function buildEmailTemplate({ title, subtitle, badgeText, badgeColor = '#
 <body>
   <div class="container">
     <div class="header">
-      <h1>🏥 مجموعة الصيدليات الطبية</h1>
+      ${logoUrl ? `<img src="${logoUrl}" alt="Logo" style="max-height: 52px; max-width: 160px; background: #ffffff; padding: 4px 10px; border-radius: 10px; margin-bottom: 10px; object-fit: contain; display: inline-block;" /><br/>` : ''}
+      <h1>${orgName ? `🏥 ${orgName}` : '🏥 مجموعة الصيدليات الطبية'}</h1>
       <p>${subtitle || 'نظام إدارة الموارد البشرية والحضور والرواتب'}</p>
       ${badgeText ? `<span class="badge">${badgeText}</span>` : ''}
     </div>

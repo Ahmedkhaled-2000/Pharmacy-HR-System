@@ -206,10 +206,13 @@ export default function EmploymentContractModule({
         
         <!-- Official Header -->
         <div style="border-bottom: 2.5px double #0f766e; padding-bottom: 8px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; page-break-inside: avoid; break-inside: avoid;">
-          <div style="text-align: right;">
-            <h2 style="margin: 0; color: #0f766e; font-size: 18px; font-weight: 800;">🏥 ${orgName}</h2>
-            <span style="font-size: 11px; color: #475569; font-weight: 600;">الإدارة العامة والشؤون القانونية والموارد البشرية</span>
-            <div style="font-size: 10px; color: #64748b; margin-top: 2px;">س.ت: ${commercialReg} | ب.ض: ${taxNumber}</div>
+          <div style="text-align: right; display: flex; align-items: center; gap: 8px;">
+            ${(state.orgSettings?.logoUrl) ? `<img src="${state.orgSettings.logoUrl}" alt="Logo" style="max-height: 48px; max-width: 110px; object-fit: contain;" />` : `<span style="font-size: 20px;">🏥</span>`}
+            <div>
+              <h2 style="margin: 0; color: #0f766e; font-size: 18px; font-weight: 800;">${orgName}</h2>
+              <span style="font-size: 11px; color: #475569; font-weight: 600;">الإدارة العامة والشؤون القانونية والموارد البشرية</span>
+              <div style="font-size: 10px; color: #64748b; margin-top: 2px;">س.ت: ${commercialReg} | ب.ض: ${taxNumber}</div>
+            </div>
           </div>
           <div style="text-align: center;">
             <div style="background: #f0fdf4; border: 2px solid #0f766e; padding: 4px 18px; border-radius: 6px;">
