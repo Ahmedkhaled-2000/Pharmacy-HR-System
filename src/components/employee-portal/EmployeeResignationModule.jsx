@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { todayStr, uid } from '../../utils/formatters';
+import { uid } from '../../utils/formatters';
+import { getRealTodayStr } from '../../utils/timeEngine';
 import { notifyAdminOnResignationRequest } from '../../utils/gmailService';
 import { shouldRouteDirectToAdmin } from '../../utils/jobsHelper';
 
@@ -38,16 +39,12 @@ export default function EmployeeResignationModule({
         }
       }
       if (r.requestDate) { const t = new Date(r.requestDate).getTime(); if (!isNaN(t) && t > 0) return t; }
+      if (r.date) { const t = new Date(r.date).getTime(); if (!isNaN(t) && t > 0) return t; }
       return 0;
     };
     return getT(b) - getT(a);
   });
 
-  const orgSettings = state.orgSettings || {};
-  const requiredNoticeDays = parseInt(orgSettings.resignationNoticeDays || 30, 10);
-  const windowStartDay = parseInt(orgSettings.resignationAllowedWindowStartDay || 1, 10);
-  const windowEndDay = parseInt(orgSettings.resignationAllowedWindowEndDay || 31, 10);
-  const allowAnytime = orgSettings.resignationAllowAnytime !== false;
 
   // Default suggested last working date is today + requiredNoticeDays
   const defaultLastDate = (() => {
@@ -61,7 +58,7 @@ export default function EmployeeResignationModule({
   // Compute notice days provided
   const noticeDaysProvided = (() => {
     if (!requestedLastWorkingDate) return 0;
-    const tToday = new Date(todayStr() + 'T00:00:00').getTime();
+    const tToday = new Date(getRealTodayStr() + 'T00:00:00').getTime();
     const tTarget = new Date(requestedLastWorkingDate + 'T00:00:00').getTime();
     const diff = Math.round((tTarget - tToday) / (1000 * 60 * 60 * 24));
     return diff > 0 ? diff : 0;
@@ -103,11 +100,11 @@ export default function EmployeeResignationModule({
       employeeCode: emp.code,
       branchId: reqBranchId,
       type: requestType,
-      date: todayStr(),
+      date: getRealTodayStr(),
       reason: reason.trim(),
       details: reason.trim(),
       employeeReason: reason.trim(),
-      requestDate: todayStr(),
+      requestDate: getRealTodayStr(),
       requestedLastWorkingDate: requestType === 'resignation' ? requestedLastWorkingDate : '',
       noticeDaysProvided: requestType === 'resignation' ? noticeDaysProvided : 0,
       requiredNoticeDays,
@@ -138,7 +135,7 @@ export default function EmployeeResignationModule({
       employeeId: emp.id,
       employeeName: emp.name,
       employeeCode: emp.code,
-      date: todayStr(),
+      date: getRealTodayStr(),
       timestamp: new Date().toISOString(),
       read: false,
       targetRole: isDirectAdmin ? 'admin' : 'branch_and_admin',
@@ -327,7 +324,7 @@ export default function EmployeeResignationModule({
               <label style={{ fontWeight: '700', display: 'block', marginBottom: '6px' }}>تاريخ تقديم الطلب</label>
               <input
                 type="date"
-                value={todayStr()}
+                value={getRealTodayStr()}
                 disabled
                 style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface-muted)', cursor: 'not-allowed', color: 'var(--muted)', fontFamily: 'Cairo, sans-serif' }}
               />
@@ -350,7 +347,7 @@ export default function EmployeeResignationModule({
                 </div>
                 <input
                   type="date"
-                  min={todayStr()}
+                  min={getRealTodayStr()}
                   value={requestedLastWorkingDate}
                   onChange={(e) => setRequestedLastWorkingDate(e.target.value)}
                   required

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { todayStr, fmt } from '../../utils/formatters';
+import { fmt } from '../../utils/formatters';
+import { getRealTodayStr } from '../../utils/timeEngine';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 
 export default function EmployeeLoansModule({
@@ -181,7 +182,7 @@ export default function EmployeeLoansModule({
       adminApproved: false,
       paidAmount: 0,
       paymentsHistory: [],
-      date: todayStr(),
+      date: getRealTodayStr(),
       createdAt: new Date().toISOString()
     };
 

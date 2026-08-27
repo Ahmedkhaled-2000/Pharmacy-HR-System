@@ -187,3 +187,17 @@ export function formatArabicFullDateTime(refDate = getRealDate()) {
   const year = d.getFullYear();
   return `${dayName}، ${dayNum} ${monthName} ${year}`;
 }
+
+/**
+ * دالة مساعدة معيارية لإرجاع تاريخ اليوم بصيغة YYYY-MM-DD
+ */
+export function todayStr() {
+  return getRealTodayStr();
+}
+
+/**
+ * دالة مساعدة معيارية لإرجاع الوقت الحالي بصيغة HH:mm:ss
+ */
+export function nowTimeStr() {
+  return getRealNowTimeStr();
+}

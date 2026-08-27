@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { AR_MONTHS, arabicWeekday, todayStr, fmt, arabicMonthLabel, getActivePayrollCycleMonth, getEmpDisplayName, getEmployeeManualPunchesCount, isShiftManualPunch } from '../../utils/formatters';
+import { AR_MONTHS, arabicWeekday, fmt, arabicMonthLabel, getActivePayrollCycleMonth, getEmpDisplayName, getEmployeeManualPunchesCount, isShiftManualPunch } from '../../utils/formatters';
 import { loadExcelJS, mergedTitle, tableHeaderRow, dataRow } from '../../utils/excelExport';
 import { getCycleDateRange, createDatePredicate, getActivePayrollMonth } from '../../utils/periodEngine';
 import { getRealDate, getRealTodayStr, getRealNowTimeStr } from '../../utils/timeEngine';

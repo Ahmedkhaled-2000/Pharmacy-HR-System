@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { todayStr } from '../../utils/formatters';
 
 export default function EmployeeEvaluationsModule({
   emp,

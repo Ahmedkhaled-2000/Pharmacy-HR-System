@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { todayStr, fmt } from '../../utils/formatters';
+import { fmt } from '../../utils/formatters';
+import { getRealTodayStr } from '../../utils/timeEngine';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import { shouldRouteDirectToAdmin } from '../../utils/jobsHelper';
 
@@ -19,7 +20,7 @@ export default function EmployeePermissionsModule({
   }, []);
 
   const [permType, setPermType] = useState('late'); // 'late' | 'early'
-  const [date, setDate] = useState(todayStr());
+  const [date, setDate] = useState(() => getRealTodayStr());
   const [startTime, setStartTime] = useState('08:00');
   const [endTime, setEndTime] = useState('09:00');
   const [reason, setReason] = useState('');

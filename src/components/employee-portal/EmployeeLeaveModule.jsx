@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { todayStr, fmt } from '../../utils/formatters';
+import { fmt } from '../../utils/formatters';
+import { getRealTodayStr } from '../../utils/timeEngine';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import { shouldRouteDirectToAdmin } from '../../utils/jobsHelper';
 
@@ -21,13 +22,13 @@ export default function EmployeeLeaveModule({
 
   const annualQuota = emp.annualLeaveBalance !== undefined ? Number(emp.annualLeaveBalance) : 21;
   const [leaveType, setLeaveType] = useState(annualQuota > 0 ? 'annual' : 'unpaid'); // 'annual' | 'unpaid'
-  const [startDate, setStartDate] = useState(todayStr());
-  const [endDate, setEndDate] = useState(todayStr());
+  const [startDate, setStartDate] = useState(() => getRealTodayStr());
+  const [endDate, setEndDate] = useState(() => getRealTodayStr());
   const [reason, setReason] = useState('');
   const [showForm, setShowForm] = useState(false);
 
   // Calculate taken annual leaves for the current year
-  const currentYear = (selectedMonth || todayStr()).slice(0, 4);
+  const currentYear = (selectedMonth || getRealTodayStr()).slice(0, 4);
   const employeeLeaveRequests = React.useMemo(() => {
     const empIdStr = String(emp.id);
     const fromRequests = (state.requests || []).filter(
@@ -83,7 +84,7 @@ export default function EmployeeLeaveModule({
   const currentDaysCount = calcDaysCount(startDate, endDate);
 
   // Calculate existing leave days requested/approved in the target month (strictly within that month/cycle)
-  const targetMonth = (startDate || selectedMonth || todayStr()).slice(0, 7);
+  const targetMonth = (startDate || selectedMonth || getRealTodayStr()).slice(0, 7);
   const monthLeaveDaysSoFar = employeeLeaveRequests
     .filter((r) => {
       if (r.status === 'rejected' || r.status === 'cancelled' || r.isCancelled) return false;
