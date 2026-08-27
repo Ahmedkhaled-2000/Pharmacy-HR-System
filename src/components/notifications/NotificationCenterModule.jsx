@@ -35,8 +35,10 @@ export default function NotificationCenterModule({
   const [branchFilter, setBranchFilter] = useState(() => (authRole === 'branch' && currentBranch?.id ? currentBranch.id : 'all'));
   const [empFilter, setEmpFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('');
+  const [attendanceDate, setAttendanceDate] = useState(() => getRealTodayStr()); // Requirement 33: Dedicated day for attendance table
 
   const todayDate = getRealTodayStr();
+  const targetDayDate = attendanceDate || todayDate;
   const isCustom = (filterMode === 'custom' || filterMode === 'range') && customFrom && customTo;
   const periodDisplayLabel = dateFilter 
     ? `بتاريخ: ${dateFilter}` 
@@ -90,12 +92,16 @@ export default function NotificationCenterModule({
     return days[d.getDay()] || '';
   };
   const todayDayName = getArabicDayName(todayDate);
+  const targetDayName = getArabicDayName(targetDayDate);
 
-  // 1. Live Attendance & Punches
+  // 1. Live Attendance & Punches (Requirement 33: Strictly for the selected day only)
   const todayPunches = useMemo(() => {
     return shifts
       .filter((s) => {
-        if (!activePeriodFn(s.date)) return false;
+        // Strictly match the target specific date
+        const shiftDateStr = String(s.date || '').slice(0, 10);
+        if (shiftDateStr !== targetDayDate) return false;
+
         if (empFilter !== 'all' && String(s.employeeId) !== String(empFilter)) return false;
         const targetB = branchFilter !== 'all' ? branchFilter : (authRole === 'branch' && currentBranch?.id ? currentBranch.id : null);
         if (targetB && String(s.branchId) !== String(targetB)) return false;
@@ -104,7 +110,7 @@ export default function NotificationCenterModule({
       .map((s) => {
         const emp = employees.find((e) => String(e.id) === String(s.employeeId));
         const branchObj = branches.find((b) => String(b.id) === String(s.branchId || emp?.branchId));
-        const activeObj = activeShifts[s.employeeId];
+        const activeObj = targetDayDate === getRealTodayStr() ? activeShifts[s.employeeId] : null;
         
         let statusText = 'انصرف (تم إغلاق الوردية)';
         let statusColor = '#64748b';
@@ -144,22 +150,26 @@ export default function NotificationCenterModule({
           note: s.note || ''
         };
       });
-  }, [shifts, employees, branches, activeShifts, empFilter, branchFilter, authRole, currentBranch, activePeriodFn]);
+  }, [shifts, employees, branches, activeShifts, empFilter, branchFilter, authRole, currentBranch, targetDayDate]);
 
-  // 2. Absences & Delays Today
+  // 2. Absences & Delays Today (Strictly for targetDayDate)
   const todayAbsencesAndDelays = useMemo(() => {
     const allLeaves = [...(state.leaveRequests || []), ...(state.requests || [])];
     const punchEmpIds = new Set(todayPunches.map((p) => String(p.employeeId)));
-    Object.keys(activeShifts).forEach((id) => punchEmpIds.add(String(id)));
+    if (targetDayDate === getRealTodayStr()) {
+      Object.keys(activeShifts).forEach((id) => punchEmpIds.add(String(id)));
+    }
 
     const result = [];
 
     employees.forEach((emp) => {
       const empId = String(emp.id);
       const branchObj = branches.find((b) => empBelongsToBranch(emp, b.id));
+      if (branchFilter !== 'all' && !empBelongsToBranch(emp, branchFilter)) return;
+      if (empFilter !== 'all' && String(emp.id) !== String(empFilter)) return;
 
       // Check Roster and approved swaps if scheduled to work today
-      const todaySchedule = getEmployeeDaySchedule(emp.id, todayDate, state);
+      const todaySchedule = getEmployeeDaySchedule(emp.id, targetDayDate, state);
       const isScheduledToday = todaySchedule ? (todaySchedule.type !== 'off' && !todaySchedule.isOff) : true;
 
       // Check if on approved leave
@@ -168,8 +178,8 @@ export default function NotificationCenterModule({
           String(r.employeeId) === empId &&
           (r.status === 'approved' || r.adminApproved) &&
           (r.type === 'leave' || r.type === 'leave_request' || r.type === 'annual_leave' || r.type === 'sick_leave' || r.type === 'emergency_leave') &&
-          r.startDate <= todayDate &&
-          r.endDate >= todayDate
+          r.startDate <= targetDayDate &&
+          r.endDate >= targetDayDate
       );
 
       // Check if has approved permission today
@@ -178,7 +188,7 @@ export default function NotificationCenterModule({
           String(r.employeeId) === empId &&
           (r.status === 'approved' || r.adminApproved) &&
           r.type === 'permission' &&
-          (r.date === todayDate || r.startDate === todayDate)
+          (r.date === targetDayDate || r.startDate === targetDayDate)
       );
 
       const hasPunched = punchEmpIds.has(empId);
@@ -761,19 +771,71 @@ export default function NotificationCenterModule({
         </button>
       </div>
 
-      {/* ── 1. Tab: Today Punches (حضور وبصمات اليوم) ── */}
+      {/* ── 1. Tab: Today Punches (حضور وبصمات اليوم المحدد) ── */}
       {(filterType === 'all' || filterType === 'today_punches') && (
         <div style={{ marginBottom: '24px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <h4 style={{ margin: 0, color: '#166534', fontSize: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              ⏱️ سجل الحضور والبصمات المسجلة اليوم ({todayDate} - {todayDayName})
-            </h4>
-            <span style={{ fontSize: '13px', color: 'var(--muted)' }}>إجمالي الحاضرين: {todayPunches.length} موظف</span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <h4 style={{ margin: 0, color: '#166534', fontSize: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                ⏱️ سجل الحضور والبصمات المسجلة ليوم ({targetDayDate} - {targetDayName})
+              </h4>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ padding: '3px 8px', fontSize: '11px', background: '#fff', border: '1px solid #bbf7d0', borderRadius: '6px' }}
+                  onClick={() => {
+                    const d = new Date(targetDayDate);
+                    d.setDate(d.getDate() - 1);
+                    const yr = d.getFullYear();
+                    const mo = String(d.getMonth() + 1).padStart(2, '0');
+                    const da = String(d.getDate()).padStart(2, '0');
+                    setAttendanceDate(`${yr}-${mo}-${da}`);
+                  }}
+                  title="اليوم السابق"
+                >
+                  ◀
+                </button>
+                <input
+                  type="date"
+                  value={targetDayDate}
+                  onChange={(e) => e.target.value && setAttendanceDate(e.target.value)}
+                  style={{ padding: '3px 8px', borderRadius: '6px', border: '1.5px solid #16a34a', fontSize: '12.5px', fontWeight: 'bold', color: '#166534', background: '#fff', cursor: 'pointer' }}
+                />
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ padding: '3px 8px', fontSize: '11px', background: '#fff', border: '1px solid #bbf7d0', borderRadius: '6px' }}
+                  onClick={() => {
+                    const d = new Date(targetDayDate);
+                    d.setDate(d.getDate() + 1);
+                    const yr = d.getFullYear();
+                    const mo = String(d.getMonth() + 1).padStart(2, '0');
+                    const da = String(d.getDate()).padStart(2, '0');
+                    setAttendanceDate(`${yr}-${mo}-${da}`);
+                  }}
+                  title="اليوم التالي"
+                >
+                  ▶
+                </button>
+                {targetDayDate !== getRealTodayStr() && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    style={{ padding: '3px 8px', fontSize: '11px', color: '#16a34a', border: '1px solid #16a34a', borderRadius: '6px', background: '#f0fdf4' }}
+                    onClick={() => setAttendanceDate(getRealTodayStr())}
+                  >
+                    🔄 اليوم الحالي
+                  </button>
+                )}
+              </div>
+            </div>
+            <span style={{ fontSize: '13px', color: 'var(--muted)', fontWeight: 'bold' }}>إجمالي الحاضرين: {todayPunches.length} موظف</span>
           </div>
 
           {todayPunches.length === 0 ? (
             <div style={{ padding: '20px', textAlign: 'center', color: 'var(--muted)', background: 'var(--surface)', borderRadius: '10px', border: '1px solid var(--border)' }}>
-              لم يتم تسجيل أي بصمة دخول حتى الآن اليوم.
+              لم يتم تسجيل أي بصمة دخول ليوم ({targetDayDate}).
             </div>
           ) : (
             <div className="table-responsive">
@@ -835,9 +897,9 @@ export default function NotificationCenterModule({
         <div style={{ marginBottom: '24px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
             <h4 style={{ margin: 0, color: '#991b1b', fontSize: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              🚨 سجل الغياب وتصنيف الحالات اليوم ({todayDate} - {todayDayName})
+              🚨 سجل الغياب وتصنيف الحالات ليوم ({targetDayDate} - {targetDayName})
             </h4>
-            <span style={{ fontSize: '13px', color: 'var(--muted)' }}>إجمالي الحالات: {todayAbsencesAndDelays.length}</span>
+            <span style={{ fontSize: '13px', color: 'var(--muted)', fontWeight: 'bold' }}>إجمالي الحالات: {todayAbsencesAndDelays.length}</span>
           </div>
 
           {todayAbsencesAndDelays.length === 0 ? (
