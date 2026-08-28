@@ -1191,35 +1191,77 @@ export default function App() {
           });
         }
 
-        // 1. Penalty / Early Exit Direct Financial Deduction Integration
-        if (target.type === 'penalty' || target.type === 'early_exit') {
+        // 1. Penalty / Early Exit / Disciplinary Violation Direct Financial Deduction Integration
+        if (target.type === 'penalty' || target.type === 'early_exit' || target.type === 'disciplinary_penalty' || target.type === 'violation' || String(target.id || '').startsWith('disc_')) {
           const emp = (state.employees || []).find((e) => String(e.id) === String(target.employeeId));
           let amount = 0;
-          if (target.impactType === 'deduction_days') {
+          if (target.impactType === 'deduction_days' || target.deductionDays) {
+            const days = parseFloat(target.impactVal || target.deductionDays || target.penaltyDays) || 1;
             const salary = emp ? parseFloat(emp.salary) || 0 : 0;
             const workHours = emp ? parseFloat(emp.workHoursPerDay) || 8 : 8;
             const workDays = emp ? parseFloat(emp.workDaysPerMonth) || 26 : 26;
-            const dailyRate = workDays > 0 ? (salary * workHours) / workDays : (salary * workHours);
-            amount = Math.round(dailyRate * (parseFloat(target.impactVal) || 1) * 100) / 100;
-          } else if (target.impactType === 'fixed_amount') {
-            amount = parseFloat(target.impactVal) || 0;
-          } else if (target.amount) {
-            amount = parseFloat(target.amount) || 0;
+            const dailyRate = target.dailyRate ? parseFloat(target.dailyRate) : (workDays > 0 ? (salary * workHours) / workDays : salary);
+            amount = Math.round(dailyRate * days * 100) / 100;
+          } else if (target.impactType === 'fixed_amount' || target.deductionFixedAmount) {
+            amount = parseFloat(target.impactVal || target.deductionFixedAmount) || 0;
+          } else if (target.amount || target.penaltyAmount) {
+            amount = parseFloat(target.amount || target.penaltyAmount) || 0;
           }
 
           if (amount > 0) {
-            const ruleTitle = target.ruleTitle || target.reason || target.details || 'مخالفة لائحية';
-            const penaltyDesc = `خصم جزاء لائحى: ${ruleTitle} (${target.impactType === 'deduction_days' ? `خصم ${target.impactVal} يوم` : `${amount} ج.م`})`;
-            updatedAdjs.push({
-              id: `adj_pen_${Date.now()}`,
-              employeeId: target.employeeId,
-              type: 'deduction',
-              amount,
-              description: penaltyDesc,
-              notes: penaltyDesc,
-              reason: penaltyDesc,
-              date: target.date || target.startDate || new Date().toISOString().slice(0, 10),
-              createdAt: new Date().toISOString()
+            const ruleTitle = target.ruleTitle || target.violationTitle || target.reason || target.details || 'مخالفة لائحية';
+            const actionName = target.actionTitle || target.penaltyAction || 'خصم من الراتب';
+            const penaltyDesc = `خصم جزاء تأديبي لائحى: ${ruleTitle} (${actionName} - ${amount} ج.م)`;
+            
+            // Check if already in updatedAdjs
+            const existingAdj = updatedAdjs.some(a => a.requestId === target.id || (a.id && a.id === `adj_disc_${target.id}`));
+            if (!existingAdj) {
+              updatedAdjs.push({
+                id: `adj_pen_${target.id || Date.now()}`,
+                requestId: target.id,
+                employeeId: target.employeeId,
+                employeeName: target.employeeName,
+                type: 'deduction',
+                subType: 'disciplinary_penalty',
+                amount,
+                description: penaltyDesc,
+                notes: penaltyDesc,
+                reason: penaltyDesc,
+                date: target.date || target.startDate || new Date().toISOString().slice(0, 10),
+                createdAt: new Date().toISOString()
+              });
+            }
+          }
+
+          // Handle special penalties
+          if (target.actionTitle === 'إنهاء خدمة / فصل تأديبي' || target.penaltyAction === 'إنهاء خدمة / فصل تأديبي') {
+            updatedEmps = updatedEmps.map(e => {
+              if (String(e.id) === String(target.employeeId)) {
+                return {
+                  ...e,
+                  status: 'تم الاستقالة',
+                  is_active: false,
+                  isTerminated: true,
+                  terminationReason: target.reason || target.details || 'فصل تأديبي',
+                  terminatedAt: new Date().toISOString(),
+                  biometricSuspended: true,
+                  suspensionReason: 'فصل تأديبي معتمد من الإدارة العليا'
+                };
+              }
+              return e;
+            });
+          } else if (target.actionTitle === 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق' || target.penaltyAction === 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق') {
+            updatedEmps = updatedEmps.map(e => {
+              if (String(e.id) === String(target.employeeId)) {
+                return {
+                  ...e,
+                  biometricSuspended: true,
+                  suspensionReason: target.reason || target.details || 'إيقاف مؤقت معتمد',
+                  suspendedAt: new Date().toISOString(),
+                  suspendedBy: 'الإدارة العليا'
+                };
+              }
+              return e;
             });
           }
         }

@@ -1961,7 +1961,11 @@ export default function BranchManagerView({
         const isPermission = previewModalReq.type === 'permission' || previewModalReq.type === 'permission_request';
         const isSwap = ['swap', 'shift_swap', 'shift_edit'].includes(previewModalReq.type);
         const isPunch = ['punch_correction', 'تأكيد بصمة الوجه', 'تأكيد بصمة اليد', 'manual_punch', 'attendance_punch'].includes(previewModalReq.type) || Boolean(previewModalReq.punchType);
-        const isPenalty = previewModalReq.type === 'penalty';
+        const isDisciplinaryViolation = previewModalReq.type === 'disciplinary_penalty' ||
+          previewModalReq.type === 'violation' ||
+          previewModalReq.subType === 'disciplinary_penalty' ||
+          String(previewModalReq.id || '').startsWith('disc_');
+        const isPenalty = previewModalReq.type === 'penalty' || isDisciplinaryViolation;
         const isBonus = previewModalReq.type === 'bonus';
         const isEvaluation = ['evaluation', 'emp_evaluation', 'manager_eval'].includes(previewModalReq.type) || Boolean(previewModalReq.evalItems || previewModalReq.items);
         const isRoster = ['roster_update', 'roster_edit', 'roster_edit_request'].includes(previewModalReq.type);
@@ -2457,6 +2461,114 @@ export default function BranchManagerView({
                   </div>
                 )}
 
+                {/* ── DISCIPLINARY VIOLATION & BRANCH MANAGER DECISION DETAILS ── */}
+                {isDisciplinaryViolation && (
+                  <div style={{ background: '#fff1f2', padding: '18px', borderRadius: '14px', border: '1.5px solid #fecdd3', boxShadow: '0 2px 10px rgba(225,29,72,0.05)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                      <h4 style={{ margin: 0, color: '#9f1239', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 800 }}>
+                        <span>⚠️</span>
+                        <span>تفاصيل المخالفة التأديبية وقرار مدير الفرع الموثق:</span>
+                      </h4>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {previewModalReq.occurrenceNumber && (
+                          <span style={{ background: '#ffe4e6', color: '#be123c', border: '1px solid #fda4af', padding: '3px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: 800 }}>
+                            🔁 التكرار: المرة {previewModalReq.occurrenceNumber === 1 ? 'الأولى' : previewModalReq.occurrenceNumber === 2 ? 'الثانية' : previewModalReq.occurrenceNumber === 3 ? 'الثالثة' : previewModalReq.occurrenceNumber === 4 ? 'الرابعة' : `${previewModalReq.occurrenceNumber}`}
+                          </span>
+                        )}
+                        {previewModalReq.categoryCode && (
+                          <span style={{ background: '#f1f5f9', color: '#334155', border: '1px solid #cbd5e1', padding: '3px 8px', borderRadius: '8px', fontSize: '11.5px', fontWeight: 700 }}>
+                            كود اللائحة: {previewModalReq.categoryCode}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Violation Details Grid */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '14px' }}>
+                      <div style={{ background: '#fff', padding: '10px 14px', borderRadius: '10px', border: '1px solid #fecdd3' }}>
+                        <span style={{ fontSize: '12px', color: '#9f1239', fontWeight: 600 }}>بند / مسمى المخالفة:</span>
+                        <div style={{ fontWeight: 800, color: '#881337', fontSize: '14px', marginTop: '2px' }}>
+                          ⚖️ {previewModalReq.ruleTitle || previewModalReq.violationTitle || previewModalReq.categoryName || previewModalReq.reason || 'مخالفة لائحية'}
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#fff', padding: '10px 14px', borderRadius: '10px', border: '1px solid #fecdd3' }}>
+                        <span style={{ fontSize: '12px', color: '#9f1239', fontWeight: 600 }}>تصنيف لائحة العمل:</span>
+                        <div style={{ fontWeight: 700, color: '#881337', fontSize: '13.5px', marginTop: '2px' }}>
+                          📜 {previewModalReq.categoryName || 'لائحة الجزاءات والانضباط'}
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#ffe4e6', padding: '10px 14px', borderRadius: '10px', border: '1px solid #fda4af' }}>
+                        <span style={{ fontSize: '12px', color: '#be123c', fontWeight: 700 }}>قرار وعقوبة مدير الفرع:</span>
+                        <div style={{ fontWeight: 900, color: '#9f1239', fontSize: '15px', marginTop: '2px' }}>
+                          🚨 {previewModalReq.actionTitle || previewModalReq.penaltyAction || 'لفت نظر / خصم تأديبي'}
+                        </div>
+                      </div>
+
+                      {(parseFloat(previewModalReq.amount || previewModalReq.penaltyAmount) > 0 || parseFloat(previewModalReq.deductionDays || previewModalReq.penaltyDays) > 0) && (
+                        <div style={{ background: '#fef2f2', padding: '10px 14px', borderRadius: '10px', border: '1.5px solid #fca5a5' }}>
+                          <span style={{ fontSize: '12px', color: '#b91c1c', fontWeight: 700 }}>الأثر المالي للخصم:</span>
+                          <div style={{ fontWeight: 900, color: '#dc2626', fontSize: '16px', marginTop: '2px' }}>
+                            💸 {previewModalReq.deductionDays ? `خصم ${previewModalReq.deductionDays} يوم ` : ''}
+                            {previewModalReq.amount ? `(${previewModalReq.amount} ج.م)` : ''}
+                          </div>
+                        </div>
+                      )}
+
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#9f1239' }}>تاريخ حدوث الواقعة:</span>
+                        <div style={{ fontWeight: 700, color: '#881337', fontSize: '13.5px', marginTop: '2px' }}>
+                          📅 {previewModalReq.date || previewModalReq.createdAt?.slice(0, 10) || '—'}
+                        </div>
+                      </div>
+
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#9f1239' }}>موثق المخالفة:</span>
+                        <div style={{ fontWeight: 700, color: '#881337', fontSize: '13.5px', marginTop: '2px' }}>
+                          👔 {previewModalReq.createdByName || 'مدير الفرع'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Detailed Incident Notes */}
+                    {previewModalReq.details && (
+                      <div style={{ background: '#fff', padding: '12px 14px', borderRadius: '10px', border: '1px solid #fecdd3', marginBottom: '10px' }}>
+                        <span style={{ fontSize: '12px', color: '#9f1239', fontWeight: 700, display: 'block', marginBottom: '4px' }}>
+                          📝 تفاصيل ووقائع المخالفة المسجلة:
+                        </span>
+                        <div style={{ color: '#1e293b', lineHeight: 1.6, fontSize: '13px', whiteSpace: 'pre-wrap' }}>
+                          {previewModalReq.details}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Investigation Notes if present */}
+                    {previewModalReq.investigationNotes && (
+                      <div style={{ background: '#f8fafc', padding: '12px 14px', borderRadius: '10px', border: '1px solid #cbd5e1', marginBottom: '10px' }}>
+                        <span style={{ fontSize: '12px', color: '#475569', fontWeight: 700, display: 'block', marginBottom: '4px' }}>
+                          🔍 ملخص التحقيق وأقوال الموظف:
+                        </span>
+                        <div style={{ color: '#334155', lineHeight: 1.6, fontSize: '13px', whiteSpace: 'pre-wrap' }}>
+                          {previewModalReq.investigationNotes}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Override reason if present */}
+                    {previewModalReq.overrideReason && (
+                      <div style={{ background: '#fffbeb', padding: '10px 14px', borderRadius: '8px', border: '1px solid #fde68a', marginBottom: '10px' }}>
+                        <span style={{ fontSize: '12px', color: '#92400e', fontWeight: 700, display: 'block' }}>
+                          ⚠️ مبررات الاستثناء وتجاوز التدرج اللائحي:
+                        </span>
+                        <div style={{ color: '#78350f', fontSize: '12.5px', marginTop: '3px' }}>
+                          {previewModalReq.overrideReason}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* ── ROSTER EDIT DETAILS & COMPARISON (الجدول السابق مقابل الجديد) ── */}
                 {isRoster && (() => {
                   const existingRoster = (state.rosters || []).find(r => 
@@ -2594,61 +2706,74 @@ export default function BranchManagerView({
                     {previewModalReq.reason || previewModalReq.details || previewModalReq.notes || previewModalReq.subject || 'لا يوجد شرح أو سبب إضافي مذكور'}
                   </div>
 
-                  {(previewModalReq.photoUrl || previewModalReq.attachmentData || previewModalReq.attachmentName) && (
-                    <div style={{ marginTop: '14px', background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                      <h5 style={{ margin: '0 0 8px', fontSize: '13px', color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span>📎</span>
-                        <span>المرفقات والمستندات المسجلة:</span>
-                        {previewModalReq.attachmentName && <span style={{ color: '#2563eb', fontSize: '12px' }}>({previewModalReq.attachmentName})</span>}
-                      </h5>
+                  {(() => {
+                    const attData = previewModalReq.attachmentData || previewModalReq.photoUrl || previewModalReq.videoUrl || previewModalReq.attachment || previewModalReq.fileData || previewModalReq.fileUrl || previewModalReq.mediaUrl;
+                    const attName = previewModalReq.attachmentName || previewModalReq.fileName || (typeof attData === 'string' && attData.startsWith('data:video/') ? 'فيديو توثيق المخالفة.mp4' : typeof attData === 'string' && attData.startsWith('data:application/pdf') ? 'مستند_التحقيق.pdf' : 'مستند / مرفق رسمي');
+                    const attType = previewModalReq.attachmentType || (
+                      (typeof attData === 'string' && (attData.startsWith('data:image/') || /\.(jpg|jpeg|png|webp|gif)$/i.test(attData) || previewModalReq.photoUrl)) ? 'image' :
+                      (typeof attData === 'string' && (attData.startsWith('data:application/pdf') || /\.pdf$/i.test(attData) || /\.pdf$/i.test(attName))) ? 'pdf' :
+                      (typeof attData === 'string' && (attData.startsWith('data:video/') || /\.(mp4|webm|mov|ogg)$/i.test(attData) || previewModalReq.videoUrl)) ? 'video' :
+                      'image'
+                    );
 
-                      {previewModalReq.photoUrl && !previewModalReq.attachmentData && (
-                        <div style={{ textAlign: 'center', background: '#000', padding: '8px', borderRadius: '8px' }}>
-                          <img src={previewModalReq.photoUrl} alt="صورة المرفق" style={{ maxWidth: '100%', maxHeight: '280px', objectFit: 'contain', borderRadius: '6px' }} />
-                        </div>
-                      )}
+                    if (!attData) return null;
 
-                      {previewModalReq.attachmentData && (
-                        <div>
-                          {previewModalReq.attachmentType === 'image' && (
-                            <div style={{ textAlign: 'center', background: '#000', padding: '8px', borderRadius: '8px' }}>
-                              <img src={previewModalReq.attachmentData} alt={previewModalReq.attachmentName} style={{ maxWidth: '100%', maxHeight: '280px', objectFit: 'contain', borderRadius: '6px' }} />
-                            </div>
-                          )}
+                    return (
+                      <div style={{ marginTop: '14px', background: '#f8fafc', padding: '14px', borderRadius: '10px', border: '1.5px solid #e2e8f0' }}>
+                        <h5 style={{ margin: '0 0 10px', fontSize: '13.5px', color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 800 }}>
+                          <span>📎</span>
+                          <span>المرفق التوثيقي المرفوع (صورة / فيديو / مستند):</span>
+                          {attName && <span style={{ color: '#2563eb', fontSize: '12px', fontWeight: 600 }}>({attName})</span>}
+                        </h5>
 
-                          {previewModalReq.attachmentType === 'pdf' && (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#fef2f2', padding: '10px 14px', borderRadius: '8px', border: '1px solid #fecaca' }}>
-                              <span style={{ fontSize: '24px' }}>📄</span>
-                              <div style={{ flex: 1 }}>
-                                <strong style={{ color: '#991b1b', fontSize: '13px', display: 'block' }}>{previewModalReq.attachmentName || 'ملف PDF'}</strong>
-                                <span style={{ fontSize: '11.5px', color: '#7f1d1d' }}>مستند PDF رسمي للتحقيق</span>
+                        {attType === 'image' && (
+                          <div style={{ textAlign: 'center', background: '#0f172a', padding: '10px', borderRadius: '8px', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.2)' }}>
+                            <img
+                              src={attData}
+                              alt={attName}
+                              style={{ maxWidth: '100%', maxHeight: '350px', objectFit: 'contain', borderRadius: '6px', cursor: 'pointer' }}
+                              onClick={() => window.open(attData, '_blank')}
+                              title="انقر لفتح الصورة بالحجم الكامل"
+                            />
+                            <div style={{ color: '#94a3b8', fontSize: '11px', marginTop: '6px' }}>🔍 انقر على الصورة لفتحها بالحجم الكامل</div>
+                          </div>
+                        )}
+
+                        {attType === 'pdf' && (
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#fef2f2', padding: '12px 16px', borderRadius: '10px', border: '1.5px solid #fecaca', flexWrap: 'wrap', gap: '10px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                              <span style={{ fontSize: '28px' }}>📄</span>
+                              <div>
+                                <strong style={{ color: '#991b1b', fontSize: '13.5px', display: 'block' }}>{attName || 'مستند PDF رسمي'}</strong>
+                                <span style={{ fontSize: '11.5px', color: '#7f1d1d' }}>مستند PDF رسمي مرفق من مدير الفرع</span>
                               </div>
-                              <a
-                                href={previewModalReq.attachmentData}
-                                download={previewModalReq.attachmentName || 'investigation_doc.pdf'}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="btn btn-ghost"
-                                style={{ fontSize: '12px', padding: '5px 12px', background: '#fee2e2', color: '#991b1b', fontWeight: 'bold' }}
-                              >
-                                👁️ فتح / تحميل PDF
-                              </a>
                             </div>
-                          )}
+                            <a
+                              href={attData}
+                              download={attName || 'investigation_doc.pdf'}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="btn"
+                              style={{ fontSize: '12.5px', padding: '6px 14px', background: '#dc2626', color: '#ffffff', fontWeight: 'bold', borderRadius: '8px', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                            >
+                              👁️ فتح / تحميل ملف PDF
+                            </a>
+                          </div>
+                        )}
 
-                          {previewModalReq.attachmentType === 'video' && (
-                            <div style={{ textAlign: 'center', background: '#000', padding: '8px', borderRadius: '8px' }}>
-                              <video
-                                controls
-                                src={previewModalReq.attachmentData}
-                                style={{ maxHeight: '240px', maxWidth: '100%', borderRadius: '6px' }}
-                              />
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
+                        {attType === 'video' && (
+                          <div style={{ textAlign: 'center', background: '#0f172a', padding: '10px', borderRadius: '8px', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.2)' }}>
+                            <video
+                              controls
+                              src={attData}
+                              style={{ maxHeight: '280px', maxWidth: '100%', borderRadius: '6px' }}
+                            />
+                            <div style={{ color: '#94a3b8', fontSize: '11px', marginTop: '6px' }}>🎥 مشغل فيديو توثيق المخالفة</div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
 
