@@ -363,6 +363,13 @@ export function smartMergeStates(localState, remoteState) {
           mergedSettings.empPermissions = localSettings.empPermissions;
         }
       }
+
+      // دمج عميق لأقفال المالك لضمان عدم فقدان أي قفل عند التزامن
+      mergedSettings.ownerModificationLocks = {
+        ...(localSettings.ownerModificationLocks || {}),
+        ...(remoteSettings.ownerModificationLocks || {})
+      };
+
       return mergedSettings;
     })(),
     bylaws: {

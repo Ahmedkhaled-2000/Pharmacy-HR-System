@@ -114,10 +114,31 @@ export default function SettingsModule({
     lockEditOrgSettings: false
   };
 
-  const [ownerLocks, setOwnerLocks] = useState({
-    ...DEFAULT_OWNER_LOCKS,
-    ...(orgSettings.ownerModificationLocks || {})
+  const [ownerLocks, setOwnerLocks] = useState(() => {
+    let saved = null;
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const raw = localStorage.getItem('pharmacy-owner-locks');
+        if (raw) saved = JSON.parse(raw);
+      }
+    } catch {}
+    return {
+      ...DEFAULT_OWNER_LOCKS,
+      ...(saved || {}),
+      ...(orgSettings.ownerModificationLocks || {})
+    };
   });
+
+  // مزامنة حالة الأقفال فور ورودها من السحابة أو الكاش
+  useEffect(() => {
+    if (state?.orgSettings?.ownerModificationLocks) {
+      setOwnerLocks((prev) => ({
+        ...DEFAULT_OWNER_LOCKS,
+        ...prev,
+        ...state.orgSettings.ownerModificationLocks
+      }));
+    }
+  }, [state?.orgSettings?.ownerModificationLocks]);
 
   const handleUnlockOwnerTab = (e) => {
     e.preventDefault();
@@ -158,7 +179,8 @@ export default function SettingsModule({
     const updatedOrgSettings = {
       ...(state.orgSettings || {}),
       ownerUsername: ownerUsernameInput.trim().toLowerCase(),
-      ownerPassword: ownerPasswordInput.trim()
+      ownerPassword: ownerPasswordInput.trim(),
+      updatedAt: Date.now()
     };
     const updatedState = { ...state, orgSettings: updatedOrgSettings };
     setState(updatedState);
@@ -171,9 +193,16 @@ export default function SettingsModule({
     const updatedLocks = { ...ownerLocks, [lockKey]: newVal };
     setOwnerLocks(updatedLocks);
 
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('pharmacy-owner-locks', JSON.stringify(updatedLocks));
+      }
+    } catch {}
+
     const updatedOrgSettings = {
       ...(state.orgSettings || {}),
-      ownerModificationLocks: updatedLocks
+      ownerModificationLocks: updatedLocks,
+      updatedAt: Date.now()
     };
     const updatedState = { ...state, orgSettings: updatedOrgSettings };
     setState(updatedState);
@@ -188,9 +217,16 @@ export default function SettingsModule({
     });
     setOwnerLocks(updatedLocks);
 
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('pharmacy-owner-locks', JSON.stringify(updatedLocks));
+      }
+    } catch {}
+
     const updatedOrgSettings = {
       ...(state.orgSettings || {}),
-      ownerModificationLocks: updatedLocks
+      ownerModificationLocks: updatedLocks,
+      updatedAt: Date.now()
     };
     const updatedState = { ...state, orgSettings: updatedOrgSettings };
     setState(updatedState);
@@ -200,9 +236,17 @@ export default function SettingsModule({
 
   const handleSetRecommendedLocks = async () => {
     setOwnerLocks(DEFAULT_OWNER_LOCKS);
+
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('pharmacy-owner-locks', JSON.stringify(DEFAULT_OWNER_LOCKS));
+      }
+    } catch {}
+
     const updatedOrgSettings = {
       ...(state.orgSettings || {}),
-      ownerModificationLocks: DEFAULT_OWNER_LOCKS
+      ownerModificationLocks: DEFAULT_OWNER_LOCKS,
+      updatedAt: Date.now()
     };
     const updatedState = { ...state, orgSettings: updatedOrgSettings };
     setState(updatedState);
@@ -441,7 +485,13 @@ export default function SettingsModule({
 
     const performSaveGeneral = async () => {
       const updatedSettings = {
+        ...(state.orgSettings || {}),
         ...orgSettings,
+        ownerModificationLocks: {
+          ...DEFAULT_OWNER_LOCKS,
+          ...(state.orgSettings?.ownerModificationLocks || {}),
+          ...(ownerLocks || {})
+        },
         orgName: orgName.trim(),
         generalManagerName: gmName.trim(),
         logoUrl,

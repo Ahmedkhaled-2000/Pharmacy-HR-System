@@ -194,6 +194,20 @@ function mergeServerState(array $existing, array $incoming): array
         $merged[$k] = $mergeArrayEntities($eList, $iList, $p);
     }
 
+    // Deep merge orgSettings and ownerModificationLocks
+    if (isset($existing['orgSettings']) || isset($incoming['orgSettings'])) {
+        $eOrg = is_array($existing['orgSettings'] ?? null) ? $existing['orgSettings'] : [];
+        $iOrg = is_array($incoming['orgSettings'] ?? null) ? $incoming['orgSettings'] : [];
+        $mergedOrg = array_merge($eOrg, $iOrg);
+
+        $eLocks = is_array($eOrg['ownerModificationLocks'] ?? null) ? $eOrg['ownerModificationLocks'] : [];
+        $iLocks = is_array($iOrg['ownerModificationLocks'] ?? null) ? $iOrg['ownerModificationLocks'] : [];
+        if (!empty($eLocks) || !empty($iLocks)) {
+            $mergedOrg['ownerModificationLocks'] = array_merge($eLocks, $iLocks);
+        }
+        $merged['orgSettings'] = $mergedOrg;
+    }
+
     $merged['_deletedIds'] = array_slice($deletedIds, -3000);
     return $merged;
 }

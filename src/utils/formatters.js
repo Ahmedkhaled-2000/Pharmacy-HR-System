@@ -181,6 +181,19 @@ export function normalizeState(parsed) {
     return null;
   })();
 
+  const savedOwnerLocks = (() => {
+    try {
+      const v = localStorage.getItem('pharmacy-owner-locks');
+      if (v) return JSON.parse(v);
+    } catch {}
+    return null;
+  })();
+
+  const effectiveOwnerLocks = {
+    ...(savedOwnerLocks || {}),
+    ...(parsed.orgSettings?.ownerModificationLocks || {})
+  };
+
   const effectiveStartDay = (parsed.orgSettings?.payrollPayoutStartDay !== undefined)
     ? parseInt(parsed.orgSettings.payrollPayoutStartDay, 10)
     : (savedStartDay !== null && savedStartDay !== undefined ? savedStartDay : 26);
@@ -209,6 +222,7 @@ export function normalizeState(parsed) {
     permissions: {},
     empPermissions: {},
     ...(parsed.orgSettings || {}),
+    ownerModificationLocks: effectiveOwnerLocks,
     payrollPeriodType: effectivePeriodType,
     payrollPayoutStartDay: effectiveStartDay,
     payrollPayoutEndDay: effectiveEndDay,
@@ -218,6 +232,9 @@ export function normalizeState(parsed) {
   };
 
   try {
+    if (Object.keys(effectiveOwnerLocks).length > 0) {
+      localStorage.setItem('pharmacy-owner-locks', JSON.stringify(effectiveOwnerLocks));
+    }
     localStorage.setItem('payroll_payout_start_day', String(orgSettings.payrollPayoutStartDay));
     localStorage.setItem('payroll_payout_end_day', String(orgSettings.payrollPayoutEndDay));
     localStorage.setItem('payroll_period_type', orgSettings.payrollPeriodType);

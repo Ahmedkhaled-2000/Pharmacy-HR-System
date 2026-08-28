@@ -263,41 +263,50 @@ export default function App() {
       ownerPassword: 'owner123',
       adminUsername: 'admin',
       adminPassword: '123',
-      ownerModificationLocks: {
-        lockEditSalary: false,
-        lockEditAllowances: false,
-        lockApproveLoans: false,
-        lockDirectBonusDeduction: false,
-        lockEditCutoffRules: false,
-        lockDeleteEmployee: true,
-        lockTerminateEmployee: false,
-        lockSuspendBiometric: false,
-        lockDeleteShifts: true,
-        lockEditPastShifts: false,
-        lockManualShiftEntry: false,
-        lockManageBranches: false,
-        lockManageJobs: false,
-        lockEditSystemPermissions: false,
-        lockApproveRequests: false,
-        lockApproveLeaves: false,
-        lockApproveLoans: false,
-        lockApprovePermissions: false,
-        lockApproveDisciplinaryPenalties: false,
-        lockApproveShiftSwaps: false,
-        lockApproveRosters: false,
-        lockApproveManualPunches: false,
-        lockApproveResignations: false,
-        lockApproveBonuses: false,
-        lockApproveComplaints: false,
-        lockRejectRequests: false,
-        lockDeleteRequests: false,
-        lockEditEvaluations: false,
-        lockDeletePenalties: false,
-        lockFactoryReset: true,
-        lockRestoreBackup: true,
-        lockChangeAdminCredentials: true,
-        lockEditOrgSettings: false
-      },
+      ownerModificationLocks: (() => {
+        const defaultLocks = {
+          lockEditSalary: false,
+          lockEditAllowances: false,
+          lockApproveLoans: false,
+          lockDirectBonusDeduction: false,
+          lockEditCutoffRules: false,
+          lockDeleteEmployee: true,
+          lockTerminateEmployee: false,
+          lockSuspendBiometric: false,
+          lockDeleteShifts: true,
+          lockEditPastShifts: false,
+          lockManualShiftEntry: false,
+          lockManageBranches: false,
+          lockManageJobs: false,
+          lockEditSystemPermissions: false,
+          lockApproveRequests: false,
+          lockApproveLeaves: false,
+          lockApproveLoans: false,
+          lockApprovePermissions: false,
+          lockApproveDisciplinaryPenalties: false,
+          lockApproveShiftSwaps: false,
+          lockApproveRosters: false,
+          lockApproveManualPunches: false,
+          lockApproveResignations: false,
+          lockApproveBonuses: false,
+          lockApproveComplaints: false,
+          lockRejectRequests: false,
+          lockDeleteRequests: false,
+          lockEditEvaluations: false,
+          lockDeletePenalties: false,
+          lockFactoryReset: true,
+          lockRestoreBackup: true,
+          lockChangeAdminCredentials: true,
+          lockEditOrgSettings: false
+        };
+        try {
+          if (typeof localStorage !== 'undefined') {
+            const saved = localStorage.getItem('pharmacy-owner-locks');
+            if (saved) return { ...defaultLocks, ...JSON.parse(saved) };
+          }
+        } catch {}
+        return defaultLocks;
+      })(),
       payrollPayoutStartDay: (() => {
         try {
           const v = localStorage.getItem('payroll_payout_start_day');
