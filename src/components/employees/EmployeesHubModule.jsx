@@ -5,6 +5,7 @@ import ElectronicAttendanceAdmin from '../attendance/ElectronicAttendanceAdmin';
 import RosterModule from '../roster/RosterModule';
 import JobsDepartmentsModule from './JobsDepartmentsModule';
 import EmploymentContractModule from './EmploymentContractModule';
+import RecruitmentHubModule from '../recruitment/RecruitmentHubModule';
 
 export default function EmployeesHubModule({
   subTab = 'cards',
@@ -154,6 +155,22 @@ export default function EmployeesHubModule({
           saveState={saveState}
           showToast={showToast}
           executeWithOwnerGuard={executeWithOwnerGuard}
+        />
+      )}
+
+      {/* ── Sub-tab 7: Recruitment & Hiring Module (التعيينات والتوظيف) ── */}
+      {currentSubTab === 'recruitment' && (
+        <RecruitmentHubModule
+          state={state}
+          setState={setState}
+          saveState={saveState}
+          showToast={showToast}
+          openAddEmpModalWithDraft={(draftEmp) => {
+            if (setEditingEmpFile && setIsEmpFileModalOpen) {
+              setEditingEmpFile(draftEmp);
+              setIsEmpFileModalOpen(true);
+            }
+          }}
         />
       )}
     </div>

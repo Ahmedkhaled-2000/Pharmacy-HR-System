@@ -125,6 +125,14 @@ export default function DesktopLayout({
           label: 'عقد العمل وبنود اللائحة',
           icon: '📝',
           desc: 'صياغة وتعديل وطباعة عقود العمل الرسمية وفق قانون العمل'
+        },
+        {
+          id: 'employees:recruitment',
+          targetTab: 'employees',
+          targetSubTab: 'recruitment',
+          label: 'التعيينات والتوظيف',
+          icon: '🎯',
+          desc: 'إدارة طلبات التعيين، الشواغر، المقابلات، وقوائم الانتظار'
         }
       ]
     },

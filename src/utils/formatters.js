@@ -496,6 +496,8 @@ export function normalizeState(parsed) {
     rosters,
     ipRestrictions,
     bylaws,
+    recruitmentApplications: toSafeArray(parsed.recruitmentApplications),
+    jobVacancies: toSafeArray(parsed.jobVacancies),
     _deletedIds: toSafeArray(parsed._deletedIds || [])
   };
 }

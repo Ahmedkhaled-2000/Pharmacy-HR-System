@@ -436,7 +436,8 @@ export function smartMergeStates(localState, remoteState) {
     finances: mergeArrays(localState.finances, remoteState.finances, { prefix: 'fin', deletedIds }),
     transactions: mergeArrays(localState.transactions, remoteState.transactions, { prefix: 'tx', deletedIds }),
 
-    // 4. الجداول والشفتات وقائمة المحذوفات
+    recruitmentApplications: mergeArrays(localState.recruitmentApplications, remoteState.recruitmentApplications, { prefix: 'app', deletedIds }),
+    jobVacancies: mergeArrays(localState.jobVacancies, remoteState.jobVacancies, { prefix: 'vac', deletedIds }),
     rosters: mergeRosters(localState.rosters, remoteState.rosters, { deletedIds }),
     activeShifts: mergeActiveShifts(localState.activeShifts, remoteState.activeShifts, mergedShifts, { deletedIds }),
     _notificationsClearedAt: localState._notificationsClearedAt || remoteState._notificationsClearedAt || null,

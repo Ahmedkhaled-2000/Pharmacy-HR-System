@@ -212,7 +212,26 @@ export default function EmployeeFileModal({
       setPhotoUrl(editingEmp.photoUrl || '');
       setMaritalStatus(editingEmp.maritalStatus || 'أعزب');
 
-      setCode(editingEmp.code || '');
+      let initialEmpCode = editingEmp.code || '';
+      if (!initialEmpCode) {
+        let candidateNum = 100 + ((allEmployees || []).length + 1);
+        const isTaken = (cand) => {
+          const strCand = String(cand).toLowerCase();
+          const empTaken = (allEmployees || []).some(e => 
+            (e.code && String(e.code).trim().toLowerCase() === strCand) ||
+            (e.username && String(e.username).trim().toLowerCase() === strCand)
+          );
+          const branchTaken = (branches || []).some(b => 
+            b.username && String(b.username).trim().toLowerCase() === strCand
+          );
+          return empTaken || branchTaken;
+        };
+        while (isTaken(candidateNum)) {
+          candidateNum++;
+        }
+        initialEmpCode = String(candidateNum);
+      }
+      setCode(initialEmpCode);
       setJobTitle(editingEmp.jobTitle || 'صيدلي');
       setDepartment(editingEmp.department || jobs.find(j => j.title === editingEmp.jobTitle)?.department || departments[0] || 'الصيدلية');
       
@@ -532,7 +551,9 @@ export default function EmployeeFileModal({
     const combinedExtraTitle = validExtraAllowances.map(a => a.title).join(' + ');
 
     const employeeData = {
-      id: editingEmp ? editingEmp.id : `emp_${Date.now()}`,
+      id: editingEmp && editingEmp.id && !editingEmp.isFromRecruitment ? editingEmp.id : `emp_${Date.now()}`,
+      recruitmentApplicationId: editingEmp?.recruitmentApplicationId || editingEmp?.applicationId || undefined,
+      isFromRecruitment: editingEmp?.isFromRecruitment || undefined,
       name: name.trim(),
       nickname: nickname.trim(),
       phone: primaryPhone,
@@ -588,8 +609,31 @@ export default function EmployeeFileModal({
     <div className="modal-overlay">
       <div className="modal-card" style={{ maxWidth: '780px', width: '95%' }}>
         <h3 style={{ fontFamily: 'Cairo', textAlign: 'center', margin: '0 0 16px 0' }}>
-          {editingEmp ? `📄 ملف الموظف: ${editingEmp.name}` : '👤 إضافة ملف موظف جديد'}
+          {editingEmp && editingEmp.isFromRecruitment
+            ? `🎯 إضافة وتعيين موظف جديد معتمد: ${editingEmp.name}`
+            : editingEmp && editingEmp.id
+            ? `📄 ملف الموظف: ${editingEmp.name}`
+            : '👤 إضافة ملف موظف جديد'}
         </h3>
+
+        {editingEmp && editingEmp.isFromRecruitment && (
+          <div style={{
+            background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(5, 150, 105, 0.08))',
+            border: '1px solid #10b981',
+            borderRadius: '10px',
+            padding: '10px 16px',
+            marginBottom: '16px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            color: '#065f46',
+            fontSize: '13px',
+            fontWeight: 700
+          }}>
+            <span style={{ fontSize: '18px' }}>✨</span>
+            <span>تم استيراد البيانات الشخصية والمؤهلات والوثائق تلقائياً من بوابة التوظيف وطلب التعيين. يرجى استكمال بيانات الوظيفة والفرع والراتب لاعتماد تعيين الموظف.</span>
+          </div>
+        )}
 
         {/* Tab Header Navigation */}
         <div style={{ display: 'flex', gap: '8px', borderBottom: '2px solid var(--border)', marginBottom: '20px' }}>

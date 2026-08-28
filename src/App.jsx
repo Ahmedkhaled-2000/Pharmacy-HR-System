@@ -100,6 +100,8 @@ import ElectronicAttendanceAdmin from './components/attendance/ElectronicAttenda
 import NotificationCenterModule from './components/notifications/NotificationCenterModule';
 import AdminResignationModule from './components/resignation/AdminResignationModule';
 import ArchiveSystemView from './components/archive/ArchiveSystemView';
+import PublicCandidateApplyPortal from './components/recruitment/PublicCandidateApplyPortal';
+import InterviewerEvaluationPortal from './components/recruitment/InterviewerEvaluationPortal';
 import OwnerOverrideModal from './components/common/OwnerOverrideModal';
 import {
   sendGmailEmail,
@@ -144,10 +146,20 @@ export default function App() {
     setThemeMode((prev) => (prev === 'light' ? 'dark' : 'light'));
   };
 
-  // Navigation via URL: /admin | /kiosk | /employee | /archive
+  // Navigation via URL: /admin | /kiosk | /employee | /archive | /careers | /interview
   const location = useLocation();
   const navigate = useNavigate();
-  const viewMode = location.pathname.startsWith('/archive') ? 'archive' : location.pathname.startsWith('/kiosk') ? 'kiosk' : location.pathname === '/employee' ? 'employee' : 'admin';
+  const viewMode = location.pathname.startsWith('/careers')
+    ? 'careers'
+    : location.pathname.startsWith('/interview')
+    ? 'interview'
+    : location.pathname.startsWith('/archive')
+    ? 'archive'
+    : location.pathname.startsWith('/kiosk')
+    ? 'kiosk'
+    : location.pathname === '/employee'
+    ? 'employee'
+    : 'admin';
   const kioskBranchId = location.pathname.startsWith('/kiosk/') ? location.pathname.split('/')[2] : null;
   const [adminSubTab, setAdminSubTab] = useState('dashboard'); // 'dashboard' | 'settings' | 'whatsapp'
   const [empActiveTab, setEmpActiveTab] = useState('portal'); // 'portal' | 'kiosk'
@@ -1026,15 +1038,33 @@ export default function App() {
         });
       }
 
+      // If candidate was converted from a recruitment application, update application status to hired
+      let updatedApplications = state.recruitmentApplications || [];
+      const recruitmentAppId = editingEmpFile?.recruitmentApplicationId || empData?.recruitmentApplicationId;
+      if (recruitmentAppId) {
+        updatedApplications = updatedApplications.map((app) =>
+          app.id === recruitmentAppId
+            ? {
+                ...app,
+                status: 'hired',
+                convertedEmployeeId: empData.id,
+                hiredAt: new Date().toISOString()
+              }
+            : app
+        );
+      }
+
       const updatedState = {
         ...state,
         employees: updatedEmps,
         activeShifts: updatedActiveShifts,
-        resignationRequests: updatedResignations
+        resignationRequests: updatedResignations,
+        recruitmentApplications: updatedApplications
       };
 
       setState(updatedState);
       if (saveState) await saveState(updatedState);
+      setIsEmpFileModalOpen(false);
       setEditingEmpFile(null);
       showToast(isTerminated ? '🔒 تم حفظ الحالة وإيقاف الحساب والبصمة بنجاح' : '💾 تم حفظ وتحديث ملف الموظف بنجاح');
     };
@@ -5429,8 +5459,36 @@ export default function App() {
         <Route path="/kiosk/*" element={null} />
         <Route path="/employee" element={null} />
         <Route path="/employee/*" element={null} />
+        <Route path="/careers" element={null} />
+        <Route path="/careers/*" element={null} />
+        <Route path="/interview" element={null} />
+        <Route path="/interview/*" element={null} />
         <Route path="*" element={<Navigate to="/admin" replace />} />
       </Routes>
+
+      {/* ── Public Candidate Job Application Portal (/careers) ── */}
+      {viewMode === 'careers' && (
+        <ErrorBoundary fallbackTitle="حدث خطأ في بوابة التوظيف وتقديم الطلبات">
+          <PublicCandidateApplyPortal
+            state={state}
+            setState={setState}
+            saveState={saveState}
+            showToast={showToast}
+          />
+        </ErrorBoundary>
+      )}
+
+      {/* ── Interviewer Candidate Evaluation Portal (/interview) ── */}
+      {viewMode === 'interview' && (
+        <ErrorBoundary fallbackTitle="حدث خطأ في بوابة تقييم المقابلات الشخصية">
+          <InterviewerEvaluationPortal
+            state={state}
+            setState={setState}
+            saveState={saveState}
+            showToast={showToast}
+          />
+        </ErrorBoundary>
+      )}
 
       {/* ── 0. Standalone Pharmacy Archive System View ── */}
       {viewMode === 'archive' && (
@@ -5440,7 +5498,7 @@ export default function App() {
       )}
 
       {/* ── 1. Unauthenticated Login Screen (Modern Unified LoginPage) ── */}
-      {viewMode !== 'kiosk' && viewMode !== 'archive' && (
+      {viewMode !== 'kiosk' && viewMode !== 'archive' && viewMode !== 'careers' && viewMode !== 'interview' && (
         (!isAdminLoggedIn && !currentEmpUser && !currentBranch) || authRole === 'none' ? (
           <ErrorBoundary fallbackTitle="حدث خطأ في شاشة تسجيل الدخول">
             <LoginPage 

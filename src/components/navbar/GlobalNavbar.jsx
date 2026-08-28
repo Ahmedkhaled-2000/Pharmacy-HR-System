@@ -23,8 +23,15 @@ export default function GlobalNavbar({
   const currentPath = location.pathname;
   const unreadCount = (notifications || []).filter((n) => !n.read).length;
 
-  // إخفاء الـ Navbar تماماً في صفحة البصمة وبوابة الموظف
-  if (currentPath === '/kiosk' || currentPath === '/employee') {
+  // إخفاء الـ Navbar تماماً في صفحة البصمة وبوابة الموظف وصفحات التوظيف والمقابلات
+  if (
+    currentPath === '/kiosk' ||
+    currentPath === '/employee' ||
+    currentPath === '/careers' ||
+    currentPath.startsWith('/careers') ||
+    currentPath === '/interview' ||
+    currentPath.startsWith('/interview')
+  ) {
     return null;
   }
 
