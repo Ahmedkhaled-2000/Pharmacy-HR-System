@@ -242,13 +242,18 @@ export default function PublicCandidateApplyPortal({
       // Create realtime notification for Admin
       const newNotif = {
         id: `notif_app_${Date.now()}`,
-        title: '📥 طلب تعيين جديد',
-        message: `تم استلام طلب تعيين جديد من المرشح (${newApp.name}) لوظيفة (${newApp.targetJobTitle}) برقم ${newApp.code}`,
+        title: `📥 طلب توظيف جديد: ${newApp.name}`,
+        message: `تم استلام طلب توظيف جديد من المرشح (${newApp.name}) لوظيفة (${newApp.targetJobTitle} - ${newApp.department}) - كود الطلب: ${newApp.code}`,
         type: 'recruitment',
+        icon: '📥',
+        typeLabel: 'طلب توظيف جديد',
+        employeeName: newApp.name,
         targetTab: 'employees',
         targetSubTab: 'recruitment',
         applicationId: newApp.id,
+        date: new Date().toISOString().slice(0, 10),
         createdAt: new Date().toISOString(),
+        timestamp: new Date().toISOString(),
         read: false
       };
 
@@ -264,14 +269,21 @@ export default function PublicCandidateApplyPortal({
       };
 
       if (setState) setState(updatedState);
-      if (saveState) await saveState(updatedState);
 
+      // Instant optimistic UI update
       setSubmittedReceipt(newApp);
+      setIsSubmitting(false);
       showToast?.(`✅ تم تقديم طلب التعيين بنجاح! كود الطلب: ${newApp.code}`);
+
+      // Background asynchronous non-blocking persistence
+      if (saveState) {
+        saveState(updatedState).catch(err => {
+          console.warn('[CareersPortal] Background sync warning:', err);
+        });
+      }
     } catch (err) {
       console.error('Error submitting application:', err);
       showToast?.('حدث خطأ أثناء إرسال الطلب، يرجى المحاولة مرة أخرى');
-    } finally {
       setIsSubmitting(false);
     }
   };

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { APPLICATION_STATUSES, calculateEvaluationScore } from '../../utils/recruitmentHelper';
+import { openDocumentSafely, downloadDocument } from '../../utils/documentViewer';
 
 export default function ApplicantDetailsModal({
   isOpen,
@@ -19,6 +20,7 @@ export default function ApplicantDetailsModal({
   const [activeTab, setActiveTab] = useState('profile'); // 'profile' | 'education' | 'documents' | 'evaluation'
   const [internalNotes, setInternalNotes] = useState(applicant.notes || '');
   const [isEditingNotes, setIsEditingNotes] = useState(false);
+  const [previewDoc, setPreviewDoc] = useState(null); // { url, title, fileName }
 
   const statusConfig = APPLICATION_STATUSES[applicant.status] || APPLICATION_STATUSES.new;
   const evaluation = applicant.interviewEvaluation;
@@ -378,25 +380,95 @@ export default function ApplicantDetailsModal({
           {activeTab === 'documents' && (
             <div className="fade-in" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
               {/* CV File */}
-              <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
-                <h5 style={{ margin: '0 0 8px', color: '#0284c7', fontSize: '14px', fontWeight: 800 }}>📄 السيرة الذاتية (CV)</h5>
-                {applicant.cvUrl ? (
-                  <div>
-                    <span style={{ fontSize: '12px', color: '#64748b', display: 'block', marginBottom: '10px' }}>
-                      {applicant.cvFileName || 'ملف السيرة الذاتية'}
-                    </span>
-                    <a
-                      href={applicant.cvUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{ padding: '8px 16px', fontSize: '12.5px', display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'linear-gradient(135deg, #0d9488, #0f766e)', color: '#fff', textDecoration: 'none', borderRadius: '8px', fontWeight: 800 }}
+              <div style={{ background: '#f8fafc', padding: '18px', borderRadius: '16px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <h5 style={{ margin: 0, color: '#0f766e', fontSize: '14.5px', fontWeight: 800 }}>📄 السيرة الذاتية (CV)</h5>
+                    {applicant.cvUrl && (
+                      <span style={{ fontSize: '11px', background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '2px 8px', borderRadius: '6px', fontWeight: 700 }}>
+                        ✓ مرفق
+                      </span>
+                    )}
+                  </div>
+                  {applicant.cvUrl ? (
+                    <div style={{ fontSize: '12.5px', color: '#64748b', marginBottom: '14px', wordBreak: 'break-all' }}>
+                      📎 {applicant.cvFileName || `CV_${applicant.name}`}
+                    </div>
+                  ) : (
+                    <span style={{ color: '#94a3b8', fontSize: '12.5px', display: 'block', marginBottom: '14px' }}>لم يتم إرفاق سيرة ذاتية</span>
+                  )}
+                </div>
+
+                {applicant.cvUrl && (
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      onClick={() => setPreviewDoc({
+                        url: applicant.cvUrl,
+                        title: `معاينة السيرة الذاتية - ${applicant.name}`,
+                        fileName: applicant.cvFileName || `CV_${applicant.name}`
+                      })}
+                      style={{
+                        flex: 1,
+                        minWidth: '110px',
+                        padding: '8px 14px',
+                        fontSize: '12.5px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px',
+                        background: 'linear-gradient(135deg, #0d9488, #0f766e)',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '8px',
+                        fontWeight: 800,
+                        cursor: 'pointer'
+                      }}
                     >
                       <span>👁️</span>
-                      <span>معاينة وتحميل الـ CV</span>
-                    </a>
+                      <span>معاينة فورية</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => downloadDocument(applicant.cvUrl, applicant.cvFileName || `CV_${applicant.name}`)}
+                      style={{
+                        padding: '8px 12px',
+                        fontSize: '12.5px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        background: '#ffffff',
+                        color: '#334155',
+                        border: '1px solid #cbd5e1',
+                        borderRadius: '8px',
+                        fontWeight: 700,
+                        cursor: 'pointer'
+                      }}
+                      title="تحميل الملف إلى جهازك"
+                    >
+                      <span>⬇️</span>
+                      <span>تحميل</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => openDocumentSafely(applicant.cvUrl, applicant.cvFileName || `CV_${applicant.name}`)}
+                      style={{
+                        padding: '8px 10px',
+                        fontSize: '12px',
+                        background: '#f0fdfa',
+                        color: '#0f766e',
+                        border: '1px solid #ccfbf1',
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                        fontWeight: 700
+                      }}
+                      title="فتح في نافذة مستقلة"
+                    >
+                      ↗️
+                    </button>
                   </div>
-                ) : (
-                  <span style={{ color: '#94a3b8', fontSize: '12.5px' }}>لم يتم رفع ملف سيرة ذاتية</span>
                 )}
               </div>
 
@@ -405,10 +477,28 @@ export default function ApplicantDetailsModal({
                 <h5 style={{ margin: '0 0 8px', color: '#0284c7', fontSize: '14px', fontWeight: 800 }}>🪪 بطاقة الرقم القومي</h5>
                 {applicant.nationalIdPhotoUrl ? (
                   <div>
-                    <img src={applicant.nationalIdPhotoUrl} alt="National ID" style={{ width: '100%', height: '120px', objectFit: 'cover', borderRadius: '8px', marginBottom: '8px', border: '1px solid #cbd5e1' }} />
-                    <a href={applicant.nationalIdPhotoUrl} target="_blank" rel="noreferrer" style={{ padding: '4px 10px', fontSize: '12px', background: '#f1f5f9', color: '#334155', borderRadius: '6px', textDecoration: 'none', display: 'inline-block', fontWeight: 700 }}>
-                      عرض بحجم كامل
-                    </a>
+                    <img
+                      src={applicant.nationalIdPhotoUrl}
+                      alt="National ID"
+                      onClick={() => setPreviewDoc({ url: applicant.nationalIdPhotoUrl, title: `بطاقة الرقم القومي - ${applicant.name}`, fileName: `NationalID_${applicant.name}.jpg` })}
+                      style={{ width: '100%', height: '120px', objectFit: 'cover', borderRadius: '8px', marginBottom: '8px', border: '1px solid #cbd5e1', cursor: 'pointer' }}
+                    />
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button
+                        type="button"
+                        onClick={() => setPreviewDoc({ url: applicant.nationalIdPhotoUrl, title: `بطاقة الرقم القومي - ${applicant.name}`, fileName: `NationalID_${applicant.name}.jpg` })}
+                        style={{ flex: 1, padding: '5px 10px', fontSize: '12px', background: '#f0fdfa', color: '#0f766e', border: '1px solid #ccfbf1', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
+                      >
+                        👁️ معاينة
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => downloadDocument(applicant.nationalIdPhotoUrl, `NationalID_${applicant.name}.jpg`)}
+                        style={{ padding: '5px 10px', fontSize: '12px', background: '#f1f5f9', color: '#334155', border: '1px solid #cbd5e1', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
+                      >
+                        ⬇️
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <span style={{ color: '#94a3b8', fontSize: '12.5px' }}>لم يتم رفع صورة البطاقة</span>
@@ -420,10 +510,28 @@ export default function ApplicantDetailsModal({
                 <h5 style={{ margin: '0 0 8px', color: '#0284c7', fontSize: '14px', fontWeight: 800 }}>📜 شهادة التخرج / الكارنيه</h5>
                 {applicant.graduationCertUrl ? (
                   <div>
-                    <img src={applicant.graduationCertUrl} alt="Certificate" style={{ width: '100%', height: '120px', objectFit: 'cover', borderRadius: '8px', marginBottom: '8px', border: '1px solid #cbd5e1' }} />
-                    <a href={applicant.graduationCertUrl} target="_blank" rel="noreferrer" style={{ padding: '4px 10px', fontSize: '12px', background: '#f1f5f9', color: '#334155', borderRadius: '6px', textDecoration: 'none', display: 'inline-block', fontWeight: 700 }}>
-                      عرض بحجم كامل
-                    </a>
+                    <img
+                      src={applicant.graduationCertUrl}
+                      alt="Certificate"
+                      onClick={() => setPreviewDoc({ url: applicant.graduationCertUrl, title: `شهادة التخرج - ${applicant.name}`, fileName: `GradCert_${applicant.name}.jpg` })}
+                      style={{ width: '100%', height: '120px', objectFit: 'cover', borderRadius: '8px', marginBottom: '8px', border: '1px solid #cbd5e1', cursor: 'pointer' }}
+                    />
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button
+                        type="button"
+                        onClick={() => setPreviewDoc({ url: applicant.graduationCertUrl, title: `شهادة التخرج - ${applicant.name}`, fileName: `GradCert_${applicant.name}.jpg` })}
+                        style={{ flex: 1, padding: '5px 10px', fontSize: '12px', background: '#f0fdfa', color: '#0f766e', border: '1px solid #ccfbf1', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
+                      >
+                        👁️ معاينة
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => downloadDocument(applicant.graduationCertUrl, `GradCert_${applicant.name}.jpg`)}
+                        style={{ padding: '5px 10px', fontSize: '12px', background: '#f1f5f9', color: '#334155', border: '1px solid #cbd5e1', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
+                      >
+                        ⬇️
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <span style={{ color: '#94a3b8', fontSize: '12.5px' }}>لم يتم رفع صورة الشهادة</span>
@@ -435,10 +543,28 @@ export default function ApplicantDetailsModal({
                 <h5 style={{ margin: '0 0 8px', color: '#0284c7', fontSize: '14px', fontWeight: 800 }}>🚗 ترخيص مزاولة المهنة / رخصة القيادة</h5>
                 {applicant.licensePhotoUrl ? (
                   <div>
-                    <img src={applicant.licensePhotoUrl} alt="License" style={{ width: '100%', height: '120px', objectFit: 'cover', borderRadius: '8px', marginBottom: '8px', border: '1px solid #cbd5e1' }} />
-                    <a href={applicant.licensePhotoUrl} target="_blank" rel="noreferrer" style={{ padding: '4px 10px', fontSize: '12px', background: '#f1f5f9', color: '#334155', borderRadius: '6px', textDecoration: 'none', display: 'inline-block', fontWeight: 700 }}>
-                      عرض بحجم كامل
-                    </a>
+                    <img
+                      src={applicant.licensePhotoUrl}
+                      alt="License"
+                      onClick={() => setPreviewDoc({ url: applicant.licensePhotoUrl, title: `ترخيص مزاولة المهنة - ${applicant.name}`, fileName: `License_${applicant.name}.jpg` })}
+                      style={{ width: '100%', height: '120px', objectFit: 'cover', borderRadius: '8px', marginBottom: '8px', border: '1px solid #cbd5e1', cursor: 'pointer' }}
+                    />
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button
+                        type="button"
+                        onClick={() => setPreviewDoc({ url: applicant.licensePhotoUrl, title: `ترخيص مزاولة المهنة - ${applicant.name}`, fileName: `License_${applicant.name}.jpg` })}
+                        style={{ flex: 1, padding: '5px 10px', fontSize: '12px', background: '#f0fdfa', color: '#0f766e', border: '1px solid #ccfbf1', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
+                      >
+                        👁️ معاينة
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => downloadDocument(applicant.licensePhotoUrl, `License_${applicant.name}.jpg`)}
+                        style={{ padding: '5px 10px', fontSize: '12px', background: '#f1f5f9', color: '#334155', border: '1px solid #cbd5e1', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
+                      >
+                        ⬇️
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <span style={{ color: '#94a3b8', fontSize: '12.5px' }}>لم يتم رفع الترخيص</span>
@@ -667,6 +793,87 @@ export default function ApplicantDetailsModal({
           </div>
         </div>
       </div>
+
+      {/* ── Safe Document Preview Lightbox Modal ── */}
+      {previewDoc && (
+        <div
+          className="modal-overlay"
+          onClick={() => setPreviewDoc(null)}
+          style={{ zIndex: 1300, background: 'rgba(15, 23, 42, 0.75)', backdropFilter: 'blur(5px)' }}
+        >
+          <div
+            className="fade-in"
+            onClick={e => e.stopPropagation()}
+            style={{
+              maxWidth: '920px',
+              width: '95%',
+              maxHeight: '92vh',
+              background: '#ffffff',
+              borderRadius: '22px',
+              padding: '20px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '14px',
+              boxShadow: '0 25px 60px rgba(0, 0, 0, 0.3)',
+              overflow: 'hidden',
+              border: '1px solid #cbd5e1'
+            }}
+          >
+            {/* Preview Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px' }}>
+              <h4 style={{ margin: 0, fontSize: '17px', fontWeight: 900, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>📄</span>
+                <span>{previewDoc.title}</span>
+              </h4>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={() => downloadDocument(previewDoc.url, previewDoc.fileName)}
+                  style={{ padding: '7px 14px', background: '#f0fdfa', color: '#0f766e', border: '1px solid #ccfbf1', borderRadius: '8px', fontSize: '12.5px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                >
+                  <span>⬇️</span>
+                  <span>تحميل</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => openDocumentSafely(previewDoc.url, previewDoc.fileName)}
+                  style={{ padding: '7px 14px', background: '#f8fafc', color: '#334155', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '12.5px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                >
+                  <span>↗️</span>
+                  <span>نافذة مستقلة</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setPreviewDoc(null)}
+                  style={{ background: '#f1f5f9', border: 'none', width: '32px', height: '32px', borderRadius: '50%', fontSize: '16px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#475569' }}
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Preview Body */}
+            <div style={{ flex: 1, minHeight: '380px', maxHeight: '72vh', overflow: 'auto', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '10px' }}>
+              {previewDoc.url.startsWith('data:application/pdf') || (previewDoc.fileName && previewDoc.fileName.toLowerCase().endsWith('.pdf')) ? (
+                <iframe
+                  src={previewDoc.url}
+                  title="PDF Preview"
+                  style={{ width: '100%', height: '70vh', border: 'none', borderRadius: '8px' }}
+                />
+              ) : (
+                <img
+                  src={previewDoc.url}
+                  alt={previewDoc.title}
+                  style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain', borderRadius: '8px', boxShadow: '0 4px 14px rgba(0,0,0,0.08)' }}
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

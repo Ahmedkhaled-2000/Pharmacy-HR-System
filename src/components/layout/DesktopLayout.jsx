@@ -1313,12 +1313,12 @@ return (
                         className="notif-dropdown-item-hover"
                       >
                         <span style={{ fontSize: '16px', marginTop: '2px' }}>
-                          {n.icon || (n.type === 'loan' ? '💳' : n.type === 'leave' ? '🏖️' : n.type === 'permission' ? '⏰' : n.type === 'swap' ? '🔄' : '🔔')}
+                          {n.icon || (n.type === 'recruitment' ? '📥' : n.type === 'loan' ? '💳' : n.type === 'leave' ? '🏖️' : n.type === 'permission' ? '⏰' : n.type === 'swap' ? '🔄' : '🔔')}
                         </span>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '4px' }}>
                             <h5 style={{ margin: 0, fontSize: '12.5px', fontWeight: isUnread ? 800 : 600, color: 'var(--text)' }}>
-                              {n.title || n.typeLabel || 'إشعار إداري'}
+                              {n.title || n.typeLabel || (n.type === 'recruitment' ? 'طلب توظيف جديد' : 'إشعار إداري')}
                             </h5>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }} onClick={(e) => e.stopPropagation()}>
                               {isUnread && onMarkNotificationRead && (

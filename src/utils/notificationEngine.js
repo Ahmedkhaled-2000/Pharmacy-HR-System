@@ -41,7 +41,10 @@ export const REQUEST_TYPE_LABELS = {
   emp_evaluation: 'تقييم أداء وظيفي',
   manager_eval: 'تقييم أداء الموظف',
   complaint: 'شكوى / مقترح إداري',
-  eval_edit_request: 'طلب مراجعة تقييم الأداء'
+  eval_edit_request: 'طلب مراجعة تقييم الأداء',
+  recruitment: 'طلب توظيف جديد',
+  recruitment_application: 'طلب توظيف جديد',
+  job_application: 'طلب توظيف جديد'
 };
 
 export function getRequestTypeArabicLabel(type) {
@@ -51,6 +54,7 @@ export function getRequestTypeArabicLabel(type) {
   
   // Normalized fallback lookup
   const lower = cleanType.toLowerCase();
+  if (lower.includes('recruit') || lower.includes('job_app') || lower.includes('applicant')) return 'طلب توظيف جديد';
   if (lower.includes('disc') || lower.includes('penalty') || lower.includes('violation')) return 'جزاء تأديبي لائحى';
   if (lower.includes('leave')) return 'طلب إجازة';
   if (lower.includes('loan') || lower.includes('advance')) return 'طلب سلفة مالية';
@@ -732,8 +736,10 @@ export function getNotificationTargetTab(notification, role = 'admin') {
   // الفروع
   if (type.includes('branch') || title.includes('فرع')) return 'branches';
 
-  // شؤون الموظفين
-  if (type.includes('employee_profile') || title.includes('إضافة موظف') || title.includes('ملف الموظف')) return 'employees';
+  // شؤون الموظفين والتوظيف
+  if (type.includes('recruit') || type.includes('applicant') || title.includes('توظيف') || title.includes('تعيين') || reqId.startsWith('notif_app_') || reqId.startsWith('app_') || type.includes('employee_profile') || title.includes('إضافة موظف') || title.includes('ملف الموظف')) {
+    return 'employees';
+  }
 
   // الأرشيف
   if (type.includes('archive') || title.includes('أرشيف') || title.includes('فاتورة')) return 'pharmacy-archive';

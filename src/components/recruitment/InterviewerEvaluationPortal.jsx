@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { calculateEvaluationScore, APPLICATION_STATUSES } from '../../utils/recruitmentHelper';
+import { openDocumentSafely, downloadDocument } from '../../utils/documentViewer';
 
 export default function InterviewerEvaluationPortal({
   state,
@@ -20,6 +21,7 @@ export default function InterviewerEvaluationPortal({
   const [selectedApp, setSelectedApp] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submissionSuccess, setSubmissionSuccess] = useState(false);
+  const [previewDoc, setPreviewDoc] = useState(null); // { url, title, fileName }
 
   // Evaluation Form States
   const [interviewerName, setInterviewerName] = useState('');
@@ -183,15 +185,22 @@ export default function InterviewerEvaluationPortal({
       };
 
       if (setState) setState(updatedState);
-      if (saveState) await saveState(updatedState);
 
+      // Instant optimistic UI feedback
       setSelectedApp(updatedApp);
       setSubmissionSuccess(true);
+      setIsSubmitting(false);
       showToast?.('✅ تم حفظ وإرسال تقييم المقابلة للإدارة العليا بنجاح');
+
+      // Background asynchronous non-blocking persistence
+      if (saveState) {
+        saveState(updatedState).catch(err => {
+          console.warn('[InterviewerPortal] Background sync warning:', err);
+        });
+      }
     } catch (err) {
       console.error('Error submitting evaluation:', err);
       showToast?.('حدث خطأ أثناء حفظ التقييم، يرجى المحاولة مرة أخرى');
-    } finally {
       setIsSubmitting(false);
     }
   };
@@ -460,14 +469,50 @@ export default function InterviewerEvaluationPortal({
                     📞 اتصال ({selectedApp.phone})
                   </a>
                   {selectedApp.cvUrl && (
-                    <a
-                      href={selectedApp.cvUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{ background: '#f0fdfa', color: '#0f766e', border: '1px solid #ccfbf1', padding: '7px 14px', borderRadius: '8px', fontSize: '12.5px', fontWeight: 800, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px' }}
-                    >
-                      📄 عرض الـ CV
-                    </a>
+                    <div style={{ display: 'flex', gap: '4px' }}>
+                      <button
+                        type="button"
+                        onClick={() => setPreviewDoc({
+                          url: selectedApp.cvUrl,
+                          title: `السيرة الذاتية - ${selectedApp.name}`,
+                          fileName: selectedApp.cvFileName || `CV_${selectedApp.name}`
+                        })}
+                        style={{
+                          background: '#f0fdfa',
+                          color: '#0f766e',
+                          border: '1px solid #ccfbf1',
+                          padding: '7px 14px',
+                          borderRadius: '8px',
+                          fontSize: '12.5px',
+                          fontWeight: 800,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px'
+                        }}
+                      >
+                        <span>📄</span>
+                        <span>معاينة الـ CV</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => downloadDocument(selectedApp.cvUrl, selectedApp.cvFileName || `CV_${selectedApp.name}`)}
+                        style={{
+                          background: '#f8fafc',
+                          color: '#334155',
+                          border: '1px solid #cbd5e1',
+                          padding: '7px 10px',
+                          borderRadius: '8px',
+                          fontSize: '12px',
+                          fontWeight: 800,
+                          cursor: 'pointer'
+                        }}
+                        title="تحميل السيرة الذاتية"
+                      >
+                        ⬇️
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
@@ -799,6 +844,87 @@ export default function InterviewerEvaluationPortal({
           </div>
         )}
       </main>
+
+      {/* ── Safe Document Preview Lightbox Modal ── */}
+      {previewDoc && (
+        <div
+          className="modal-overlay"
+          onClick={() => setPreviewDoc(null)}
+          style={{ zIndex: 1300, background: 'rgba(15, 23, 42, 0.75)', backdropFilter: 'blur(5px)' }}
+        >
+          <div
+            className="fade-in"
+            onClick={e => e.stopPropagation()}
+            style={{
+              maxWidth: '920px',
+              width: '95%',
+              maxHeight: '92vh',
+              background: '#ffffff',
+              borderRadius: '22px',
+              padding: '20px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '14px',
+              boxShadow: '0 25px 60px rgba(0, 0, 0, 0.3)',
+              overflow: 'hidden',
+              border: '1px solid #cbd5e1'
+            }}
+          >
+            {/* Preview Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px' }}>
+              <h4 style={{ margin: 0, fontSize: '17px', fontWeight: 900, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>📄</span>
+                <span>{previewDoc.title}</span>
+              </h4>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={() => downloadDocument(previewDoc.url, previewDoc.fileName)}
+                  style={{ padding: '7px 14px', background: '#f0fdfa', color: '#0f766e', border: '1px solid #ccfbf1', borderRadius: '8px', fontSize: '12.5px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                >
+                  <span>⬇️</span>
+                  <span>تحميل</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => openDocumentSafely(previewDoc.url, previewDoc.fileName)}
+                  style={{ padding: '7px 14px', background: '#f8fafc', color: '#334155', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '12.5px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                >
+                  <span>↗️</span>
+                  <span>نافذة مستقلة</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setPreviewDoc(null)}
+                  style={{ background: '#f1f5f9', border: 'none', width: '32px', height: '32px', borderRadius: '50%', fontSize: '16px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#475569' }}
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Preview Body */}
+            <div style={{ flex: 1, minHeight: '380px', maxHeight: '72vh', overflow: 'auto', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '10px' }}>
+              {previewDoc.url.startsWith('data:application/pdf') || (previewDoc.fileName && previewDoc.fileName.toLowerCase().endsWith('.pdf')) ? (
+                <iframe
+                  src={previewDoc.url}
+                  title="PDF Preview"
+                  style={{ width: '100%', height: '70vh', border: 'none', borderRadius: '8px' }}
+                />
+              ) : (
+                <img
+                  src={previewDoc.url}
+                  alt={previewDoc.title}
+                  style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain', borderRadius: '8px', boxShadow: '0 4px 14px rgba(0,0,0,0.08)' }}
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
