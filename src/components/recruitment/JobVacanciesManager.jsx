@@ -163,119 +163,178 @@ export default function JobVacanciesManager({
     showToast?.('🗑️ تم حذف الوظيفة الشاغرة');
   };
 
+  const allowGeneralApplication = state?.recruitmentSettings?.allowGeneralApplication !== false;
+
+  const handleToggleGeneralApplication = async () => {
+    const newVal = !allowGeneralApplication;
+    const updatedSettings = {
+      ...(state?.recruitmentSettings || {}),
+      allowGeneralApplication: newVal
+    };
+    const updatedState = {
+      ...state,
+      recruitmentSettings: updatedSettings
+    };
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+    showToast?.(newVal ? '🟢 تم تفعيل التقديم العام في صفحة الوظائف (/careers)' : '🔴 تم إيقاف التقديم العام (التقديم مقتصر على الشواغر المعلنة فقط)');
+  };
+
   return (
     <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '20px', fontFamily: "'Cairo', 'Tajawal', sans-serif" }}>
       
-      {/* ── Top Shareable Links Banner ── */}
+      {/* ── Top Shareable Links & Settings Banner ── */}
       <div style={{
         background: '#ffffff',
         borderRadius: '20px',
         border: '1px solid #e2e8f0',
         padding: '22px 24px',
         display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        flexWrap: 'wrap',
-        gap: '16px',
+        flexDirection: 'column',
+        gap: '18px',
         boxShadow: '0 4px 16px rgba(0, 0, 0, 0.03)'
       }}>
-        <div>
-          <h4 style={{ margin: '0 0 6px', fontSize: '18px', fontWeight: 900, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span>🔗</span>
-            <span>روابط التوظيف والمقابلات السريعة</span>
-          </h4>
-          <p style={{ margin: 0, color: '#64748b', fontSize: '13.5px', fontWeight: 600 }}>
-            شارك رابط التقديم العام مع المرشحين، أو رابط المقابلات مع مديري الفروع ورؤساء الأقسام.
-          </p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+          <div>
+            <h4 style={{ margin: '0 0 6px', fontSize: '18px', fontWeight: 900, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span>🔗</span>
+              <span>روابط التوظيف والمقابلات السريعة</span>
+            </h4>
+            <p style={{ margin: 0, color: '#64748b', fontSize: '13.5px', fontWeight: 600 }}>
+              شارك رابط التقديم العام مع المرشحين، أو رابط المقابلات مع مديري الفروع ورؤساء الأقسام.
+            </p>
+          </div>
+
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            {/* Public Candidate Apply Link */}
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard?.writeText(publicApplyUrl);
+                  showToast?.('📋 تم نسخ رابط تقديم المرشحين العام (/careers)');
+                }}
+                style={{
+                  background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)',
+                  color: '#ffffff',
+                  border: 'none',
+                  padding: '9px 18px',
+                  borderRadius: '10px',
+                  fontWeight: 800,
+                  fontSize: '13px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(13, 148, 136, 0.25)'
+                }}
+              >
+                <span>📋 نسخ رابط التقديم (/careers)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleOpenQrModal(publicApplyUrl, 'رابط تقديم المرشحين للوظائف')}
+                title="عرض رمز الاستجابة السريعة QR"
+                style={{
+                  background: '#f0fdfa',
+                  color: '#0f766e',
+                  border: '1px solid #ccfbf1',
+                  padding: '9px 14px',
+                  borderRadius: '10px',
+                  fontSize: '13.5px',
+                  fontWeight: 800,
+                  cursor: 'pointer'
+                }}
+              >
+                📱 QR
+              </button>
+            </div>
+
+            {/* Interviewer Portal Link */}
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard?.writeText(interviewerPortalUrl);
+                  showToast?.('📋 تم نسخ رابط القائم بالمقابلة (/interview)');
+                }}
+                style={{
+                  background: '#f8fafc',
+                  color: '#334155',
+                  border: '1.5px solid #cbd5e1',
+                  padding: '9px 18px',
+                  borderRadius: '10px',
+                  fontWeight: 800,
+                  fontSize: '13px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  cursor: 'pointer'
+                }}
+              >
+                <span>⭐️ نسخ رابط المقابلات (/interview)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleOpenQrModal(interviewerPortalUrl, 'رابط بوابة القائم بالمقابلة')}
+                title="عرض رمز الاستجابة السريعة QR"
+                style={{
+                  background: '#f8fafc',
+                  color: '#475569',
+                  border: '1px solid #cbd5e1',
+                  padding: '9px 14px',
+                  borderRadius: '10px',
+                  fontSize: '13.5px',
+                  fontWeight: 800,
+                  cursor: 'pointer'
+                }}
+              >
+                📱 QR
+              </button>
+            </div>
+          </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-          {/* Public Candidate Apply Link */}
-          <div style={{ display: 'flex', gap: '6px' }}>
-            <button
-              type="button"
-              onClick={() => {
-                navigator.clipboard?.writeText(publicApplyUrl);
-                showToast?.('📋 تم نسخ رابط تقديم المرشحين العام (/careers)');
-              }}
-              style={{
-                background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)',
-                color: '#ffffff',
-                border: 'none',
-                padding: '9px 18px',
-                borderRadius: '10px',
-                fontWeight: 800,
-                fontSize: '13px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                cursor: 'pointer',
-                boxShadow: '0 4px 12px rgba(13, 148, 136, 0.25)'
-              }}
-            >
-              <span>📋 نسخ رابط التقديم (/careers)</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleOpenQrModal(publicApplyUrl, 'رابط تقديم المرشحين للوظائف')}
-              title="عرض رمز الاستجابة السريعة QR"
-              style={{
-                background: '#f0fdfa',
-                color: '#0f766e',
-                border: '1px solid #ccfbf1',
-                padding: '9px 14px',
-                borderRadius: '10px',
-                fontSize: '13.5px',
-                fontWeight: 800,
-                cursor: 'pointer'
-              }}
-            >
-              📱 QR
-            </button>
+        {/* General Application Status Bar */}
+        <div style={{
+          background: allowGeneralApplication ? '#f0fdfa' : '#fff1f2',
+          border: `1px solid ${allowGeneralApplication ? '#ccfbf1' : '#fecdd3'}`,
+          borderRadius: '14px',
+          padding: '12px 18px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '12px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span style={{ fontSize: '20px' }}>{allowGeneralApplication ? '🟢' : '🔴'}</span>
+            <div>
+              <div style={{ fontSize: '13.5px', fontWeight: 800, color: allowGeneralApplication ? '#0f766e' : '#9f1239' }}>
+                {allowGeneralApplication
+                  ? 'التقديم العام مفعل: يمكن للمرشحين التقديم على كافة التخصصات عبر زر التقديم العام في صفحة الوظائف.'
+                  : 'التقديم العام موقوف: تم إخفاء زر التقديم العام، والتقديم متاح حصرياً على الشواغر المحددة والمعلنة بالأسفل.'}
+              </div>
+            </div>
           </div>
 
-          {/* Interviewer Portal Link */}
-          <div style={{ display: 'flex', gap: '6px' }}>
-            <button
-              type="button"
-              onClick={() => {
-                navigator.clipboard?.writeText(interviewerPortalUrl);
-                showToast?.('📋 تم نسخ رابط القائم بالمقابلة (/interview)');
-              }}
-              style={{
-                background: '#f8fafc',
-                color: '#334155',
-                border: '1.5px solid #cbd5e1',
-                padding: '9px 18px',
-                borderRadius: '10px',
-                fontWeight: 800,
-                fontSize: '13px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                cursor: 'pointer'
-              }}
-            >
-              <span>⭐️ نسخ رابط المقابلات (/interview)</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleOpenQrModal(interviewerPortalUrl, 'رابط بوابة القائم بالمقابلة')}
-              title="عرض رمز الاستجابة السريعة QR"
-              style={{
-                background: '#f8fafc',
-                color: '#475569',
-                border: '1px solid #cbd5e1',
-                padding: '9px 14px',
-                borderRadius: '10px',
-                fontSize: '13.5px',
-                fontWeight: 800,
-                cursor: 'pointer'
-              }}
-            >
-              📱 QR
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={handleToggleGeneralApplication}
+            style={{
+              padding: '7px 16px',
+              borderRadius: '8px',
+              fontSize: '12.5px',
+              fontWeight: 800,
+              cursor: 'pointer',
+              background: allowGeneralApplication ? '#ffffff' : '#e11d48',
+              color: allowGeneralApplication ? '#0f766e' : '#ffffff',
+              border: allowGeneralApplication ? '1.5px solid #0d9488' : 'none',
+              boxShadow: '0 2px 6px rgba(0,0,0,0.06)'
+            }}
+          >
+            {allowGeneralApplication ? '⏸️ إيقاف التقديم العام' : '▶️ تفعيل التقديم العام'}
+          </button>
         </div>
       </div>
 

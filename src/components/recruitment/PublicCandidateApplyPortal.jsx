@@ -75,23 +75,28 @@ export default function PublicCandidateApplyPortal({
 
   // Choose a vacancy
   const handleSelectVacancy = (vac) => {
+    const matchedJob = jobsList.find(j => j.title === vac.jobTitle);
+    const resolvedDept = vac.department || matchedJob?.department || departmentsList[0] || 'الصيدلية';
     setSelectedVacancy(vac);
     setTargetJobTitle(vac.jobTitle);
-    setDepartment(vac.department || departmentsList[0] || 'الصيدلية');
+    setDepartment(resolvedDept);
     setCurrentStep(1);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   // General application without specific vacancy
   const handleOpenGeneralApplication = () => {
+    const defaultJob = jobsList[0]?.title || 'صيدلي';
+    const matchedJob = jobsList.find(j => j.title === defaultJob);
+    const resolvedDept = matchedJob?.department || departmentsList[0] || 'الصيدلية';
     setSelectedVacancy({
       id: 'general_apply',
-      jobTitle: jobsList[0]?.title || 'صيدلي',
-      department: departmentsList[0] || 'الصيدلية',
+      jobTitle: defaultJob,
+      department: resolvedDept,
       description: 'تقديم طلب توظيف عام لكافة التخصصات'
     });
-    setTargetJobTitle(jobsList[0]?.title || 'صيدلي');
-    setDepartment(departmentsList[0] || 'الصيدلية');
+    setTargetJobTitle(defaultJob);
+    setDepartment(resolvedDept);
     setCurrentStep(1);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -299,6 +304,8 @@ export default function PublicCandidateApplyPortal({
     setLicensePhotoUrl('');
   };
 
+  const allowGeneralApplication = state?.recruitmentSettings?.allowGeneralApplication !== false;
+
   return (
     <div style={{
       minHeight: '100dvh',
@@ -388,26 +395,43 @@ export default function PublicCandidateApplyPortal({
             <p style={{ maxWidth: '650px', margin: '0 auto 24px', color: '#e6fffa', fontSize: '15px', lineHeight: '1.7', fontWeight: 500 }}>
               نبحث دائماً عن الكفاءات الطبية والإدارية المتميزة لمشاركتنا رحلة النجاح والتطور. اختر الوظيفة المناسبة وسجّل بياناتك للتواصل معك وتحديد موعد المقابلة.
             </p>
-            <button
-              type="button"
-              onClick={handleOpenGeneralApplication}
-              style={{
-                fontSize: '15px',
-                padding: '12px 28px',
-                borderRadius: '12px',
-                fontWeight: 900,
-                background: '#ffffff',
-                color: '#0f766e',
-                border: 'none',
-                cursor: 'pointer',
-                boxShadow: '0 6px 20px rgba(0, 0, 0, 0.15)',
-                transition: 'transform 0.15s ease'
-              }}
-              onMouseOver={e => e.currentTarget.style.transform = 'translateY(-2px)'}
-              onMouseOut={e => e.currentTarget.style.transform = 'none'}
-            >
-              📝 تقديم طلب توظيف عام الآن
-            </button>
+            {allowGeneralApplication ? (
+              <button
+                type="button"
+                onClick={handleOpenGeneralApplication}
+                style={{
+                  fontSize: '15px',
+                  padding: '12px 28px',
+                  borderRadius: '12px',
+                  fontWeight: 900,
+                  background: '#ffffff',
+                  color: '#0f766e',
+                  border: 'none',
+                  cursor: 'pointer',
+                  boxShadow: '0 6px 20px rgba(0, 0, 0, 0.15)',
+                  transition: 'transform 0.15s ease'
+                }}
+                onMouseOver={e => e.currentTarget.style.transform = 'translateY(-2px)'}
+                onMouseOut={e => e.currentTarget.style.transform = 'none'}
+              >
+                📝 تقديم طلب توظيف عام الآن
+              </button>
+            ) : (
+              <div style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                background: 'rgba(255, 255, 255, 0.2)',
+                padding: '10px 22px',
+                borderRadius: '14px',
+                fontSize: '14px',
+                fontWeight: 800,
+                color: '#ffffff'
+              }}>
+                <span>🔒</span>
+                <span>التقديم متاح حالياً حصرياً على الشواغر والوظائف المعلنة بالأسفل</span>
+              </div>
+            )}
           </div>
         )}
 
@@ -448,84 +472,75 @@ export default function PublicCandidateApplyPortal({
             <div style={{
               background: '#f8fafc',
               borderRadius: '16px',
-              padding: '18px 20px',
-              textAlign: 'right',
               border: '1px solid #e2e8f0',
-              marginBottom: '24px'
+              padding: '18px',
+              marginBottom: '24px',
+              textAlign: 'right'
             }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>
-                <span style={{ color: '#64748b', fontSize: '13px', fontWeight: 700 }}>كود الطلب المرجعي:</span>
-                <strong style={{ color: '#0d9488', fontSize: '16px', fontFamily: 'monospace', letterSpacing: '1px' }}>{submittedReceipt.code}</strong>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <span style={{ color: '#64748b', fontSize: '13px' }}>كود طلب التعيين:</span>
+                <strong style={{ fontFamily: 'monospace', fontSize: '16px', color: '#0f766e' }}>{submittedReceipt.code}</strong>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <span style={{ color: '#64748b', fontSize: '13px', fontWeight: 700 }}>اسم المرشح:</span>
-                <strong style={{ color: '#0f172a', fontSize: '14px' }}>{submittedReceipt.name}</strong>
+                <span style={{ color: '#64748b', fontSize: '13px' }}>اسم المرشح:</span>
+                <strong style={{ color: '#0f172a' }}>{submittedReceipt.name}</strong>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <span style={{ color: '#64748b', fontSize: '13px', fontWeight: 700 }}>الوظيفة المتقدم لها:</span>
-                <span style={{ color: '#0284c7', fontWeight: 800 }}>{submittedReceipt.targetJobTitle} ({submittedReceipt.department})</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <span style={{ color: '#64748b', fontSize: '13px', fontWeight: 700 }}>رقم الهاتف المسجل:</span>
-                <span style={{ color: '#0f172a', fontWeight: 700, direction: 'ltr' }}>{submittedReceipt.phone}</span>
+                <span style={{ color: '#64748b', fontSize: '13px' }}>الوظيفة المستهدفة:</span>
+                <strong style={{ color: '#0284c7' }}>{submittedReceipt.targetJobTitle} ({submittedReceipt.department})</strong>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#64748b', fontSize: '13px', fontWeight: 700 }}>تاريخ التقديم:</span>
-                <span style={{ color: '#64748b', fontSize: '12px' }}>{new Date(submittedReceipt.createdAt).toLocaleString('ar-EG')}</span>
+                <span style={{ color: '#64748b', fontSize: '13px' }}>حالة الطلب:</span>
+                <span style={{
+                  padding: '2px 10px',
+                  borderRadius: '6px',
+                  fontSize: '11.5px',
+                  fontWeight: 800,
+                  background: '#eff6ff',
+                  color: '#1d4ed8'
+                }}>
+                  طلب جديد
+                </span>
               </div>
             </div>
 
-            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                onClick={() => {
-                  navigator.clipboard?.writeText(submittedReceipt.code);
-                  showToast?.('📋 تم نسخ كود الطلب بنجاح');
-                }}
-                style={{
-                  padding: '10px 20px',
-                  borderRadius: '10px',
-                  fontWeight: 700,
-                  background: '#f1f5f9',
-                  color: '#334155',
-                  border: '1px solid #cbd5e1',
-                  cursor: 'pointer'
-                }}
-              >
-                📋 نسخ كود الطلب
-              </button>
-              <button
-                type="button"
-                onClick={handleResetForm}
-                style={{
-                  padding: '10px 24px',
-                  borderRadius: '10px',
-                  fontWeight: 800,
-                  background: '#0d9488',
-                  color: '#ffffff',
-                  border: 'none',
-                  cursor: 'pointer'
-                }}
-              >
-                🏠 العودة للشواغر المتاحة
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={handleResetForm}
+              style={{
+                padding: '12px 28px',
+                borderRadius: '12px',
+                fontWeight: 900,
+                fontSize: '14.5px',
+                background: '#0d9488',
+                color: '#ffffff',
+                border: 'none',
+                cursor: 'pointer'
+              }}
+            >
+              🔄 تقديم طلب تعيين آخر
+            </button>
           </div>
         )}
 
-        {/* ── 2. Open Vacancies Cards (When no vacancy selected yet) ── */}
+        {/* ── 2. Open Vacancies List ── */}
         {!selectedVacancy && !submittedReceipt && (
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 900, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span>🎯</span>
-                <span>الوظائف الشاغرة حالياً ({activeVacancies.length})</span>
-              </h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '10px' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '21px', fontWeight: 900, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>🎯</span>
+                  <span>الوظائف الشاغرة حالياً ({activeVacancies.length})</span>
+                </h3>
+                <span style={{ fontSize: '13.5px', color: '#64748b', fontWeight: 600 }}>
+                  تصفح الشواغر المتاحة وقدّم على الوظيفة التي تناسب مؤهلك وخبراتك
+                </span>
+              </div>
             </div>
 
             <div style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(310px, 1fr))',
               gap: '20px'
             }}>
               {activeVacancies.map(vac => (
@@ -534,8 +549,8 @@ export default function PublicCandidateApplyPortal({
                   style={{
                     background: '#ffffff',
                     borderRadius: '20px',
-                    border: '1px solid #e2e8f0',
-                    padding: '22px',
+                    border: '1.5px solid #e2e8f0',
+                    padding: '24px',
                     display: 'flex',
                     flexDirection: 'column',
                     justifyContent: 'space-between',
@@ -691,113 +706,169 @@ export default function PublicCandidateApplyPortal({
             </div>
 
             {/* Step 1: Job Preferences */}
-            {currentStep === 1 && (
-              <div className="fade-in">
-                <h4 style={{ margin: '0 0 16px', fontSize: '16.5px', fontWeight: 800, color: '#0f766e', borderBottom: '1.5px solid #f0fdfa', paddingBottom: '8px' }}>
-                  1. تحديد الوظيفة وتفضيلات العمل
-                </h4>
+            {currentStep === 1 && (() => {
+              const isSpecificVacancy = Boolean(selectedVacancy && selectedVacancy.id !== 'general_apply');
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '20px' }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
-                      المسمى الوظيفي المستهدف *
-                    </label>
-                    <select
-                      className="form-control"
-                      value={targetJobTitle}
-                      onChange={e => {
-                        const val = e.target.value;
-                        setTargetJobTitle(val);
-                        const match = jobsList.find(j => j.title === val);
-                        if (match && match.department) setDepartment(match.department);
-                      }}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a', fontWeight: 600 }}
-                    >
-                      {jobsList.map(j => (
-                        <option key={j.id || j.title} value={j.title}>{j.title}</option>
-                      ))}
-                    </select>
-                  </div>
+              return (
+                <div className="fade-in">
+                  <h4 style={{ margin: '0 0 16px', fontSize: '16.5px', fontWeight: 800, color: '#0f766e', borderBottom: '1.5px solid #f0fdfa', paddingBottom: '8px' }}>
+                    1. تحديد الوظيفة وتفضيلات العمل
+                  </h4>
 
-                  <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
-                      القسم التابع له
-                    </label>
-                    <select
-                      className="form-control"
-                      value={department}
-                      onChange={e => setDepartment(e.target.value)}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a', fontWeight: 600 }}
-                    >
-                      {departmentsList.map(d => (
-                        <option key={d} value={d}>{d}</option>
-                      ))}
-                    </select>
-                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '20px' }}>
+                    {/* Target Job Title */}
+                    <div>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
+                        <span>المسمى الوظيفي المستهدف *</span>
+                        {isSpecificVacancy && (
+                          <span style={{ fontSize: '11px', color: '#0d9488', background: '#f0fdfa', padding: '2px 8px', borderRadius: '6px', border: '1px solid #ccfbf1', fontWeight: 800 }}>
+                            🔒 محدد وفق الشاغر المختار
+                          </span>
+                        )}
+                      </label>
+                      {isSpecificVacancy ? (
+                        <input
+                          type="text"
+                          className="form-control"
+                          value={targetJobTitle}
+                          disabled
+                          readOnly
+                          style={{
+                            width: '100%',
+                            padding: '10px 12px',
+                            borderRadius: '10px',
+                            background: '#f1f5f9',
+                            border: '1.5px solid #cbd5e1',
+                            color: '#0f172a',
+                            fontWeight: 800,
+                            cursor: 'not-allowed'
+                          }}
+                        />
+                      ) : (
+                        <select
+                          className="form-control"
+                          value={targetJobTitle}
+                          onChange={e => {
+                            const val = e.target.value;
+                            setTargetJobTitle(val);
+                            const match = jobsList.find(j => j.title === val);
+                            if (match && match.department) {
+                              setDepartment(match.department);
+                            }
+                          }}
+                          style={{
+                            width: '100%',
+                            padding: '10px 12px',
+                            borderRadius: '10px',
+                            background: '#f8fafc',
+                            border: '1.5px solid #cbd5e1',
+                            color: '#0f172a',
+                            fontWeight: 700
+                          }}
+                          required
+                        >
+                          {jobsList.map(j => (
+                            <option key={j.id || j.title} value={j.title}>{j.title}</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
 
-                  <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
-                      الفرع المفضل للعمل
-                    </label>
-                    <select
-                      className="form-control"
-                      value={preferredBranchId}
-                      onChange={e => setPreferredBranchId(e.target.value)}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a', fontWeight: 600 }}
-                    >
-                      <option value="">أي فرع متاح (مرونة تامة)</option>
-                      {branches.map(b => (
-                        <option key={b.id} value={b.id}>{b.name} ({b.branchCode || ''})</option>
-                      ))}
-                    </select>
-                  </div>
+                    {/* Department - ALWAYS Automatically Selected & Locked */}
+                    <div>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
+                        <span>القسم التابع له</span>
+                        <span style={{ fontSize: '11px', color: '#0284c7', background: '#f0f9ff', padding: '2px 8px', borderRadius: '6px', border: '1px solid #bae6fd', fontWeight: 800 }}>
+                          🔒 محدد تلقائياً حسب الوظيفة
+                        </span>
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        value={department}
+                        disabled
+                        readOnly
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px',
+                          borderRadius: '10px',
+                          background: '#f1f5f9',
+                          border: '1.5px solid #cbd5e1',
+                          color: '#0f172a',
+                          fontWeight: 800,
+                          cursor: 'not-allowed'
+                        }}
+                      />
+                    </div>
 
-                  <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
-                      نوع الدوام المفضل
-                    </label>
-                    <select
-                      className="form-control"
-                      value={contractTypePreference}
-                      onChange={e => setContractTypePreference(e.target.value)}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a', fontWeight: 600 }}
-                    >
-                      <option value="دوام كامل">دوام كامل (Full Time)</option>
-                      <option value="دوام جزئي">دوام جزئي (Part Time)</option>
-                      <option value="شفت مسائي">شفت مسائي / ليلي</option>
-                      <option value="تدريب صيدلي">تدريب صيدلي (Internship)</option>
-                    </select>
-                  </div>
+                    {/* Preferred Branch */}
+                    <div>
+                      <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
+                        الفرع المفضل للعمل
+                      </label>
+                      <select
+                        className="form-control"
+                        value={preferredBranchId}
+                        onChange={e => setPreferredBranchId(e.target.value)}
+                        style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a', fontWeight: 600 }}
+                      >
+                        <option value="">أي فرع متاح (مرونة تامة)</option>
+                        {branches.map(b => (
+                          <option key={b.id} value={b.id}>{b.name} ({b.branchCode || ''})</option>
+                        ))}
+                      </select>
+                    </div>
 
-                  <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
-                      الراتب المتوقع (شهرياً - اختياري)
-                    </label>
-                    <input
-                      type="number"
-                      className="form-control"
-                      placeholder="مثال: 6000"
-                      value={expectedSalary}
-                      onChange={e => setExpectedSalary(e.target.value)}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
-                    />
-                  </div>
+                    {/* Work Type Preference */}
+                    <div>
+                      <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
+                        نوع الدوام المفضل
+                      </label>
+                      <select
+                        className="form-control"
+                        value={contractTypePreference}
+                        onChange={e => setContractTypePreference(e.target.value)}
+                        style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a', fontWeight: 600 }}
+                      >
+                        <option value="دوام كامل">دوام كامل (Full Time)</option>
+                        <option value="دوام جزئي">دوام جزئي (Part Time)</option>
+                        <option value="شفت مسائي">شفت مسائي / ليلي</option>
+                        <option value="تدريب صيدلي">تدريب صيدلي (Internship)</option>
+                      </select>
+                    </div>
 
-                  <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
-                      تاريخ الاستعداد للبدء بالعمل
-                    </label>
-                    <input
-                      type="date"
-                      className="form-control"
-                      value={availableStartDate}
-                      onChange={e => setAvailableStartDate(e.target.value)}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
-                    />
+                    {/* Expected Salary */}
+                    <div>
+                      <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
+                        الراتب المتوقع (شهرياً - اختياري)
+                      </label>
+                      <input
+                        type="number"
+                        className="form-control"
+                        placeholder="مثال: 6000"
+                        value={expectedSalary}
+                        onChange={e => setExpectedSalary(e.target.value)}
+                        style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
+                      />
+                    </div>
+
+                    {/* Available Start Date */}
+                    <div>
+                      <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
+                        تاريخ الاستعداد للبدء بالعمل
+                      </label>
+                      <input
+                        type="date"
+                        className="form-control"
+                        value={availableStartDate}
+                        onChange={e => setAvailableStartDate(e.target.value)}
+                        style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
+                      />
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Step 2: Personal Information */}
             {currentStep === 2 && (
