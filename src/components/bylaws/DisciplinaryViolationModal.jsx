@@ -52,6 +52,7 @@ export default function DisciplinaryViolationModal({
   const [attachmentType, setAttachmentType] = useState('');
   const [attachmentSize, setAttachmentSize] = useState('');
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
 
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
@@ -68,22 +69,39 @@ export default function DisciplinaryViolationModal({
     else if (file.type.startsWith('video/')) detectedType = 'video';
 
     setIsUploading(true);
+    setUploadProgress(10);
+
     const reader = new FileReader();
-    reader.onload = (ev) => {
-      setAttachmentData(ev.target.result);
-      setAttachmentName(file.name);
-      setAttachmentType(detectedType);
-      
-      const sizeStr = file.size > 1024 * 1024 
-        ? `${(file.size / (1024 * 1024)).toFixed(1)} ميجابايت` 
-        : `${Math.round(file.size / 1024)} كيلوبايت`;
-      setAttachmentSize(sizeStr);
-      setIsUploading(false);
+
+    reader.onprogress = (ev) => {
+      if (ev.lengthComputable) {
+        const percent = Math.min(95, Math.round((ev.loaded / ev.total) * 100));
+        setUploadProgress(percent);
+      }
     };
+
+    reader.onload = (ev) => {
+      setUploadProgress(100);
+      setTimeout(() => {
+        setAttachmentData(ev.target.result);
+        setAttachmentName(file.name);
+        setAttachmentType(detectedType);
+        
+        const sizeStr = file.size > 1024 * 1024 
+          ? `${(file.size / (1024 * 1024)).toFixed(1)} ميجابايت` 
+          : `${Math.round(file.size / 1024)} كيلوبايت`;
+        setAttachmentSize(sizeStr);
+        setIsUploading(false);
+        setUploadProgress(0);
+      }, 350);
+    };
+
     reader.onerror = () => {
       alert('❌ تعذر قراءة الملف. يرجى المحاولة مرة أخرى.');
       setIsUploading(false);
+      setUploadProgress(0);
     };
+
     reader.readAsDataURL(file);
   };
 
@@ -127,33 +145,36 @@ export default function DisciplinaryViolationModal({
     }
   }, [selectedCategory]);
 
-  // التجميع الشامل لكافة السجلات والمخالفات السابقة للموظف لحساب العداد بدقة
+  // التجميع الدقيق لكافة المخالفات التأديبية السابقة الفعلية للموظف لحساب العداد دون تكرار
   const allViolationHistory = useMemo(() => {
-    const list = [...(state.requests || [])];
-    (state.lateIncidents || []).forEach((inc) => {
-      if (inc.status !== 'cancelled' && inc.status !== 'approved_permission_exempt') {
-        list.push({ ...inc, sourceType: 'late_incident' });
+    const list = [];
+    const seenIds = new Set();
+
+    // 1. طلبات وسجلات الجزاءات التأديبية الصريحة فقط
+    (state.requests || []).forEach((req) => {
+      const isDisc = req.type === 'disciplinary_penalty' ||
+        req.type === 'penalty' ||
+        req.type === 'violation' ||
+        req.subType === 'disciplinary_penalty' ||
+        String(req.id || '').startsWith('disc_');
+
+      if (isDisc && req.status !== 'rejected' && req.status !== 'cancelled' && !req.isCancelled) {
+        list.push(req);
+        seenIds.add(String(req.id));
       }
     });
+
+    // 2. التسويات والخصومات التأديبية مع منع التكرار مع الطلبات
     (state.adjustments || []).forEach((a) => {
-      if (a.type === 'penalty' || a.type === 'deduction') {
-        const reasonLower = (a.reason || a.description || a.details || '').toLowerCase();
-        if (
-          !a.isLoan &&
-          !a.loanId &&
-          !a.type?.includes('loan') &&
-          !reasonLower.includes('سلفة') &&
-          !reasonLower.includes('سلفه') &&
-          !reasonLower.includes('قسط') &&
-          !reasonLower.includes('أدوية') &&
-          !reasonLower.includes('ادوية')
-        ) {
+      if (a.subType === 'disciplinary_penalty' || (a.type === 'penalty' || (a.type === 'deduction' && (a.description || a.reason || '').includes('جزاء تأديبي')))) {
+        if (!seenIds.has(String(a.requestId)) && !seenIds.has(String(a.id))) {
           list.push({ ...a, sourceType: 'adjustment' });
         }
       }
     });
+
     return list;
-  }, [state.requests, state.lateIncidents, state.adjustments]);
+  }, [state.requests, state.adjustments]);
 
   // Calculation of Occurrence Counter & Suggested Action
   const counterResult = useMemo(() => {
@@ -881,6 +902,38 @@ export default function DisciplinaryViolationModal({
               onChange={(e) => setAttachmentName(e.target.value)}
               style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px' }}
             />
+
+            {/* 📊 Animated Upload Progress Bar (شريط تقدم تحميل الملف) */}
+            {isUploading && (
+              <div style={{ marginTop: '12px', background: '#f0fdf4', border: '1.5px solid #86efac', borderRadius: '10px', padding: '14px', boxShadow: '0 2px 8px rgba(34,197,94,0.1)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 800, color: '#166534', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span className="spinner-border spinner-border-sm" style={{ width: '14px', height: '14px', borderWidth: '2px', borderColor: '#16a34a', borderTopColor: 'transparent' }}></span>
+                    <span>جاري تحميل ومعالجة وتشفير المرفق...</span>
+                  </span>
+                  <span style={{ fontSize: '14px', fontWeight: 900, color: '#15803d' }}>
+                    {uploadProgress}%
+                  </span>
+                </div>
+                
+                {/* Progress Track */}
+                <div style={{ width: '100%', height: '10px', background: '#dcfce7', borderRadius: '999px', overflow: 'hidden', border: '1px solid #bbf7d0' }}>
+                  <div
+                    style={{
+                      width: `${uploadProgress}%`,
+                      height: '100%',
+                      background: 'linear-gradient(90deg, #22c55e, #16a34a)',
+                      borderRadius: '999px',
+                      transition: 'width 0.25s ease-out'
+                    }}
+                  />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '6px', fontSize: '11px', color: '#15803d' }}>
+                  <span>⚡ معالجة مستند التحقيق بأعلى دقة</span>
+                  <span>{uploadProgress === 100 ? '✅ اكتمل التحميل بنجاح' : 'يرجى الانتظار لحين اكتمال الرفع'}</span>
+                </div>
+              </div>
+            )}
 
             {/* Live Attachment Previewer */}
             {attachmentData && (

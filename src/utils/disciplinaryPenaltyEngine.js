@@ -231,82 +231,95 @@ export const DEFAULT_DISCIPLINARY_CATEGORIES = [
  */
 export function resolveDisciplinaryCategory(pen, disciplinaryPolicy = DEFAULT_DISCIPLINARY_CATEGORIES) {
   const policy = disciplinaryPolicy || DEFAULT_DISCIPLINARY_CATEGORIES;
-  if (!pen) return policy[0] || DEFAULT_DISCIPLINARY_CATEGORIES[0];
+  if (!pen) return null;
+
+  // Verify that pen is an actual disciplinary record / violation
+  const isDisc = pen.type === 'disciplinary_penalty' ||
+    pen.type === 'penalty' ||
+    pen.type === 'violation' ||
+    pen.subType === 'disciplinary_penalty' ||
+    pen.sourceType === 'adjustment' ||
+    String(pen.id || '').startsWith('disc_') ||
+    Boolean(pen.categoryId || pen.categoryCode || pen.ruleTitle || pen.actionTitle || pen.penaltyAction);
+
+  if (!isDisc) return null;
 
   // 1. فحص الكود أو المعرف المباشر
   const rawCatId = String(pen.categoryId || pen.categoryCode || pen.tierId || pen.tierKey || '').trim();
-  const directMatch = policy.find(
-    (c) =>
-      c.id === rawCatId ||
-      c.code === rawCatId ||
-      c.code === rawCatId.replace('CAT_', '') ||
-      c.id === `cat_${rawCatId}` ||
-      c.id === `cat_${rawCatId.toLowerCase()}`
-  );
-  if (directMatch) return directMatch;
+  if (rawCatId) {
+    const directMatch = policy.find(
+      (c) =>
+        c.id === rawCatId ||
+        c.code === rawCatId ||
+        c.code === rawCatId.replace('CAT_', '') ||
+        c.id === `cat_${rawCatId}` ||
+        c.id === `cat_${rawCatId.toLowerCase()}`
+    );
+    if (directMatch) return directMatch;
+  }
 
   // 2. تحليل الكلمات الدلالية من نص المخالفة والسبب
-  const text = `${pen.ruleTitle || ''} ${pen.reason || ''} ${pen.details || ''} ${pen.actionTitle || ''} ${pen.categoryName || ''} ${pen.category || ''}`.toLowerCase();
+  const text = `${pen.ruleTitle || ''} ${pen.violationTitle || ''} ${pen.reason || ''} ${pen.details || ''} ${pen.actionTitle || ''} ${pen.penaltyAction || ''} ${pen.categoryName || ''} ${pen.category || ''}`.toLowerCase();
 
-  // أ. الحضور والانصراف والتأخيرات ومواعيد الوردية -> الفئة A
-  if (
-    pen.sourceType === 'late_incident' ||
-    pen.subType === 'lateness' ||
-    pen.type === 'early_exit' ||
-    rawCatId.startsWith('late_') ||
-    text.includes('تأخير') ||
-    text.includes('انصراف') ||
-    text.includes('حضور') ||
-    text.includes('شيفت') ||
-    text.includes('بصمة') ||
-    text.includes('مواعيد') ||
-    text.includes('وردية')
-  ) {
-    return policy.find((c) => c.code === 'A' || c.id === 'cat_admin_simple') || policy[0];
+  // ط. الأمانة والمخالفات الجسيمة -> الفئة J
+  if (text.includes('أمانة') || text.includes('امانة') || text.includes('سرقة') || text.includes('سرقه') || text.includes('تزوير') || text.includes('مشاجرة') || text.includes('مشاجره') || text.includes('جسيمة') || text.includes('اختلاس')) {
+    return policy.find((c) => c.code === 'J' || c.id === 'cat_grave_misconduct') || policy[9] || policy[0];
+  }
+
+  // ز. التسعير والصرف الدوائي والروشتات -> الفئة I
+  if (text.includes('تسعير') || text.includes('صرف') || text.includes('دواء') || text.includes('أدوية') || text.includes('ادوية') || text.includes('روشتة') || text.includes('روشته') || text.includes('صلاحية') || text.includes('اكسباير')) {
+    return policy.find((c) => c.code === 'I' || c.id === 'cat_pricing_dispensing') || policy[8] || policy[0];
+  }
+
+  // و. التعامل مع العملاء والمرضى -> الفئة H
+  if (text.includes('عملاء') || text.includes('جمهور') || text.includes('مرضى') || text.includes('زبائن') || text.includes('شكوى') || text.includes('معاملة الجمهور')) {
+    return policy.find((c) => c.code === 'H' || c.id === 'cat_customers_treatment') || policy[7] || policy[0];
   }
 
   // ب. نظافة الفرع وترتيب مكان العمل -> الفئة F
-  if (text.includes('نظافة') || text.includes('نظافه') || text.includes('ترتيب') || text.includes('مكان العمل')) {
+  if (text.includes('نظافة') || text.includes('نظافه') || text.includes('ترتيب') || text.includes('تنظيم') || text.includes('مكان العمل') || text.includes('ملفات')) {
     return policy.find((c) => c.code === 'F' || c.id === 'cat_workplace_cleanliness') || policy[5] || policy[0];
   }
 
   // ج. المظهر العام والزي الرسمي -> الفئة E
-  if (text.includes('مظهر') || text.includes('زي') || text.includes('يونيفورم') || text.includes('لائق') || text.includes('هندام')) {
+  if (text.includes('مظهر') || text.includes('زي') || text.includes('يونيفورم') || text.includes('لائق') || text.includes('هندام') || text.includes('كارت التعريف')) {
     return policy.find((c) => c.code === 'E' || c.id === 'cat_appearance') || policy[4] || policy[0];
   }
 
-  // د. التعليمات والأوامر الإدارية -> الفئة B
-  if (text.includes('تعليمات') || text.includes('أوامر') || text.includes('مسؤول') || text.includes('إجراءات')) {
-    return policy.find((c) => c.code === 'B' || c.id === 'cat_instructions') || policy[1] || policy[0];
-  }
-
   // هـ. العهدة والخزينة والكاشير والجرد والإهمال -> الفئة D
-  if (text.includes('خزينة') || text.includes('كاشير') || text.includes('جرد') || text.includes('عهدة') || text.includes('إهمال') || text.includes('تقصير')) {
+  if (text.includes('خزينة') || text.includes('خزينه') || text.includes('كاشير') || text.includes('جرد') || text.includes('عهدة') || text.includes('عهده') || text.includes('إهمال') || text.includes('تقصير') || text.includes('عجز')) {
     return policy.find((c) => c.code === 'D' || c.id === 'cat_negligence') || policy[3] || policy[0];
   }
 
-  // و. التعامل مع العملاء والمرضى -> الفئة H
-  if (text.includes('عملاء') || text.includes('جمهور') || text.includes('مرضى') || text.includes('زبائن') || text.includes('شكوى')) {
-    return policy.find((c) => c.code === 'H' || c.id === 'cat_customers_treatment') || policy[7] || policy[0];
-  }
-
-  // ز. التسعير والصرف الدوائي والروشتات -> الفئة I
-  if (text.includes('تسعير') || text.includes('صرف') || text.includes('دواء') || text.includes('أدوية') || text.includes('روشتة')) {
-    return policy.find((c) => c.code === 'I' || c.id === 'cat_pricing_dispensing') || policy[8] || policy[0];
-  }
-
   // ح. الهاتف والأجهزة الشخصية -> الفئة C
-  if (text.includes('هاتف') || text.includes('موبايل') || text.includes('أجهزة') || text.includes('جوال') || text.includes('سوشيال')) {
+  if (text.includes('هاتف') || text.includes('موبايل') || text.includes('أجهزة') || text.includes('جوال') || text.includes('سوشيال') || text.includes('انشغال بالهاتف')) {
     return policy.find((c) => c.code === 'C' || c.id === 'cat_phone_devices') || policy[2] || policy[0];
   }
 
-  // ط. الأمانة والمخالفات الجسيمة -> الفئة J
-  if (text.includes('أمانة') || text.includes('سرقة') || text.includes('تزوير') || text.includes('مشاجرة') || text.includes('جسيمة') || text.includes('اختلاس')) {
-    return policy.find((c) => c.code === 'J' || c.id === 'cat_grave_misconduct') || policy[9] || policy[0];
+  // د. التعليمات والأوامر الإدارية -> الفئة B
+  if (text.includes('تعليمات') || text.includes('أوامر') || text.includes('اوامر') || text.includes('مسؤول') || text.includes('إجراءات') || text.includes('إخطار')) {
+    return policy.find((c) => c.code === 'B' || c.id === 'cat_instructions') || policy[1] || policy[0];
   }
 
-  // الافتراضي: الفئة A
-  return policy[0] || DEFAULT_DISCIPLINARY_CATEGORIES[0];
+  // أ. المخالفات الإدارية البسيطة ومواعيد العمل -> الفئة A
+  if (
+    rawCatId.startsWith('late_') ||
+    text.includes('مخالفة إدارية') ||
+    text.includes('مخالفات إدارية') ||
+    text.includes('تأخير عن العمل') ||
+    text.includes('ترك مكان العمل') ||
+    text.includes('انصراف مبكر بدون إذن') ||
+    text.includes('تأخير')
+  ) {
+    return policy.find((c) => c.code === 'A' || c.id === 'cat_admin_simple') || policy[0];
+  }
+
+  // إذا كانت مخالفة تأديبية صريحة بدون فئة محددة، نعتبرها الفئة A
+  if (pen.type === 'disciplinary_penalty' || pen.type === 'violation' || String(pen.id || '').startsWith('disc_')) {
+    return policy[0] || DEFAULT_DISCIPLINARY_CATEGORIES[0];
+  }
+
+  return null;
 }
 
 /**

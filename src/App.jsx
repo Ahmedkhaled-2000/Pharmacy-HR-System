@@ -267,6 +267,16 @@ export default function App() {
         lockManageJobs: false,
         lockEditSystemPermissions: false,
         lockApproveRequests: false,
+        lockApproveLeaves: false,
+        lockApproveLoans: false,
+        lockApprovePermissions: false,
+        lockApproveDisciplinaryPenalties: false,
+        lockApproveShiftSwaps: false,
+        lockApproveRosters: false,
+        lockApproveManualPunches: false,
+        lockApproveResignations: false,
+        lockApproveBonuses: false,
+        lockApproveComplaints: false,
         lockRejectRequests: false,
         lockDeleteRequests: false,
         lockEditEvaluations: false,
@@ -1400,16 +1410,42 @@ export default function App() {
     };
 
     if (role === 'admin') {
-      if (state.orgSettings?.ownerModificationLocks?.lockApproveRequests) {
+      const locks = state.orgSettings?.ownerModificationLocks || {};
+
+      // 1. Global Request Approval Lock
+      if (locks.lockApproveRequests) {
         executeWithOwnerGuard({
           lockKey: 'lockApproveRequests',
           actionTitle: `اعتماد طلب (${target.employeeName || target.employeeId})`,
-          actionDetails: `نوع الطلب: ${target.typeLabel || target.type || 'طلب عام'}`,
+          actionDetails: `نوع الطلب: ${getRequestTypeArabicLabel(target.type) || target.typeLabel || 'طلب عام'}`,
           onExecute: performApprove
         });
         return;
       }
-      if (target.type === 'loan' || target.type === 'advance' || target.type === 'meds' || target.type === 'credit_medicine') {
+
+      // 2. Granular Specific Request Type Locks
+      const isLeave = ['leave', 'leave_request', 'annual_leave', 'sick_leave', 'emergency_leave', 'unpaid_leave'].includes(target.type);
+      const isLoan = ['loan', 'advance', 'meds', 'credit_medicine'].includes(target.type);
+      const isPermission = ['permission', 'permission_request'].includes(target.type);
+      const isDisc = target.type === 'disciplinary_penalty' || target.type === 'violation' || target.type === 'penalty' || String(target.id || '').startsWith('disc_');
+      const isSwap = ['swap', 'shift_swap', 'shift_edit'].includes(target.type);
+      const isRoster = ['roster_update', 'roster_edit', 'roster_edit_request'].includes(target.type);
+      const isPunch = ['punch_correction', 'manual_punch', 'attendance_punch', 'تأكيد بصمة الوجه', 'تأكيد بصمة اليد'].includes(target.type);
+      const isResignation = target.type === 'resignation';
+      const isBonus = target.type === 'bonus';
+      const isComplaint = ['complaint', 'eval_edit_request', 'penalty_objection', 'objection'].includes(target.type);
+
+      if (isLeave && locks.lockApproveLeaves) {
+        executeWithOwnerGuard({
+          lockKey: 'lockApproveLeaves',
+          actionTitle: `اعتماد طلب إجازة (${target.employeeName || target.employeeId})`,
+          actionDetails: `المدة: ${target.daysCount || target.days || 1} يوم`,
+          onExecute: performApprove
+        });
+        return;
+      }
+
+      if (isLoan && locks.lockApproveLoans) {
         executeWithOwnerGuard({
           lockKey: 'lockApproveLoans',
           actionTitle: `اعتماد طلب سلفة / أدوية آجل (${target.employeeName || target.employeeId})`,
@@ -1418,11 +1454,82 @@ export default function App() {
         });
         return;
       }
-      if (target.type === 'bonus' || target.type === 'penalty' || target.type === 'early_exit') {
+
+      if (isPermission && locks.lockApprovePermissions) {
         executeWithOwnerGuard({
-          lockKey: 'lockDirectBonusDeduction',
-          actionTitle: `اعتماد تسوية مالية (${target.type === 'bonus' ? 'مكافأة' : 'خصم/جزاء'})`,
-          actionDetails: `الموظف: ${target.employeeName || target.employeeId}`,
+          lockKey: 'lockApprovePermissions',
+          actionTitle: `اعتماد إذن استئذان (${target.employeeName || target.employeeId})`,
+          actionDetails: `تاريخ الإذن: ${target.date || ''} - الساعات: ${target.hours || ''}`,
+          onExecute: performApprove
+        });
+        return;
+      }
+
+      if (isDisc && locks.lockApproveDisciplinaryPenalties) {
+        executeWithOwnerGuard({
+          lockKey: 'lockApproveDisciplinaryPenalties',
+          actionTitle: `اعتماد جزاء تأديبي لائحى (${target.employeeName || target.employeeId})`,
+          actionDetails: `المخالفة: ${target.ruleTitle || target.violationTitle || 'مخالفة لائحية'} - القرار: ${target.actionTitle || target.penaltyAction || 'خصم'}`,
+          onExecute: performApprove
+        });
+        return;
+      }
+
+      if (isSwap && locks.lockApproveShiftSwaps) {
+        executeWithOwnerGuard({
+          lockKey: 'lockApproveShiftSwaps',
+          actionTitle: `اعتماد تبديل وردية (${target.employeeName || target.employeeId})`,
+          actionDetails: `التاريخ: ${target.date || ''}`,
+          onExecute: performApprove
+        });
+        return;
+      }
+
+      if (isRoster && locks.lockApproveRosters) {
+        executeWithOwnerGuard({
+          lockKey: 'lockApproveRosters',
+          actionTitle: `اعتماد تعديل جدول شهري (${target.employeeName || target.employeeId})`,
+          actionDetails: `الشهر: ${target.month || ''}`,
+          onExecute: performApprove
+        });
+        return;
+      }
+
+      if (isPunch && locks.lockApproveManualPunches) {
+        executeWithOwnerGuard({
+          lockKey: 'lockApproveManualPunches',
+          actionTitle: `اعتماد تسجيل/تصحيح بصمة (${target.employeeName || target.employeeId})`,
+          actionDetails: `التاريخ: ${target.date || ''} - الوقت: ${target.time || ''}`,
+          onExecute: performApprove
+        });
+        return;
+      }
+
+      if (isResignation && locks.lockApproveResignations) {
+        executeWithOwnerGuard({
+          lockKey: 'lockApproveResignations',
+          actionTitle: `اعتماد طلب استقالة (${target.employeeName || target.employeeId})`,
+          actionDetails: `تاريخ السريان: ${target.date || target.lastWorkingDate || ''}`,
+          onExecute: performApprove
+        });
+        return;
+      }
+
+      if (isBonus && (locks.lockApproveBonuses || locks.lockDirectBonusDeduction)) {
+        executeWithOwnerGuard({
+          lockKey: 'lockApproveBonuses',
+          actionTitle: `اعتماد مكافأة مالية (${target.employeeName || target.employeeId})`,
+          actionDetails: `المبلغ: ${target.amount || 0} ج.م`,
+          onExecute: performApprove
+        });
+        return;
+      }
+
+      if (isComplaint && locks.lockApproveComplaints) {
+        executeWithOwnerGuard({
+          lockKey: 'lockApproveComplaints',
+          actionTitle: `اعتماد شكوى / تظلم (${target.employeeName || target.employeeId})`,
+          actionDetails: `الموضوع: ${target.subject || target.title || 'تظلم'}`,
           onExecute: performApprove
         });
         return;

@@ -93,6 +93,16 @@ export default function SettingsModule({
     lockEditSystemPermissions: false,
     // الطلبات والموافقات والتقييمات
     lockApproveRequests: false,
+    lockApproveLeaves: false,
+    lockApproveLoans: false,
+    lockApprovePermissions: false,
+    lockApproveDisciplinaryPenalties: false,
+    lockApproveShiftSwaps: false,
+    lockApproveRosters: false,
+    lockApproveManualPunches: false,
+    lockApproveResignations: false,
+    lockApproveBonuses: false,
+    lockApproveComplaints: false,
     lockRejectRequests: false,
     lockDeleteRequests: false,
     lockEditEvaluations: false,
@@ -2342,8 +2352,8 @@ export default function SettingsModule({
                       <span>الطلبات والموافقات والتقييمات والجزاءات</span>
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#334155' }}>
-                        <span>قفل قبول واعتماد جميع أنواع الطلبات</span>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '13px', fontWeight: 800, color: '#0f172a', background: '#fef3c7', padding: '8px 12px', borderRadius: '8px', border: '1px solid #fde68a' }}>
+                        <span>🔒 قفل قبول واعتماد جميع أنواع الطلبات (شامل)</span>
                         <input
                           type="checkbox"
                           checked={Boolean(ownerLocks.lockApproveRequests)}
@@ -2351,6 +2361,114 @@ export default function SettingsModule({
                           style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#d97706' }}
                         />
                       </label>
+
+                      {/* Granular Request Type Locks */}
+                      <div style={{ margin: '4px 0', padding: '12px', background: '#fff', borderRadius: '10px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <span style={{ fontSize: '12px', fontWeight: 800, color: '#64748b', marginBottom: '2px' }}>
+                          🎯 قفل قبول أنواع محددة من الطلبات بشكل مستقل:
+                        </span>
+
+                        <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '12.5px', fontWeight: 600, color: '#334155' }}>
+                          <span>🏖️ قفل قبول طلبات الإجازات (سنوية / مرضية / عارضة)</span>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(ownerLocks.lockApproveLeaves)}
+                            onChange={() => handleToggleOwnerLock('lockApproveLeaves')}
+                            style={{ width: '17px', height: '17px', cursor: 'pointer', accentColor: '#d97706' }}
+                          />
+                        </label>
+
+                        <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '12.5px', fontWeight: 600, color: '#334155' }}>
+                          <span>💳 قفل قبول طلبات السلف النقدية ومشتريات الأدوية الآجل</span>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(ownerLocks.lockApproveLoans)}
+                            onChange={() => handleToggleOwnerLock('lockApproveLoans')}
+                            style={{ width: '17px', height: '17px', cursor: 'pointer', accentColor: '#d97706' }}
+                          />
+                        </label>
+
+                        <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '12.5px', fontWeight: 600, color: '#334155' }}>
+                          <span>⏰ قفل قبول أذونات الاستئذان والتأخير والخروج</span>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(ownerLocks.lockApprovePermissions)}
+                            onChange={() => handleToggleOwnerLock('lockApprovePermissions')}
+                            style={{ width: '17px', height: '17px', cursor: 'pointer', accentColor: '#d97706' }}
+                          />
+                        </label>
+
+                        <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '12.5px', fontWeight: 600, color: '#334155' }}>
+                          <span>⚖️ قفل قبول واعتماد الجزاءات والمخالفات التأديبية</span>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(ownerLocks.lockApproveDisciplinaryPenalties)}
+                            onChange={() => handleToggleOwnerLock('lockApproveDisciplinaryPenalties')}
+                            style={{ width: '17px', height: '17px', cursor: 'pointer', accentColor: '#d97706' }}
+                          />
+                        </label>
+
+                        <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '12.5px', fontWeight: 600, color: '#334155' }}>
+                          <span>🔄 قفل قبول طلبات تبديل وتعديل الورديات</span>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(ownerLocks.lockApproveShiftSwaps)}
+                            onChange={() => handleToggleOwnerLock('lockApproveShiftSwaps')}
+                            style={{ width: '17px', height: '17px', cursor: 'pointer', accentColor: '#d97706' }}
+                          />
+                        </label>
+
+                        <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '12.5px', fontWeight: 600, color: '#334155' }}>
+                          <span>📅 قفل قبول وتعديل الجداول الشهرية (Rosters)</span>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(ownerLocks.lockApproveRosters)}
+                            onChange={() => handleToggleOwnerLock('lockApproveRosters')}
+                            style={{ width: '17px', height: '17px', cursor: 'pointer', accentColor: '#d97706' }}
+                          />
+                        </label>
+
+                        <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '12.5px', fontWeight: 600, color: '#334155' }}>
+                          <span>⏱️ قفل قبول وتأكيد البصمات اليدوية وتصحيح الحضور</span>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(ownerLocks.lockApproveManualPunches)}
+                            onChange={() => handleToggleOwnerLock('lockApproveManualPunches')}
+                            style={{ width: '17px', height: '17px', cursor: 'pointer', accentColor: '#d97706' }}
+                          />
+                        </label>
+
+                        <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '12.5px', fontWeight: 600, color: '#334155' }}>
+                          <span>🚪 قفل قبول طلبات الاستقالة وإنهاء الخدمة</span>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(ownerLocks.lockApproveResignations)}
+                            onChange={() => handleToggleOwnerLock('lockApproveResignations')}
+                            style={{ width: '17px', height: '17px', cursor: 'pointer', accentColor: '#d97706' }}
+                          />
+                        </label>
+
+                        <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '12.5px', fontWeight: 600, color: '#334155' }}>
+                          <span>🎁 قفل قبول واعتماد المكافآت والحوافز المالية</span>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(ownerLocks.lockApproveBonuses)}
+                            onChange={() => handleToggleOwnerLock('lockApproveBonuses')}
+                            style={{ width: '17px', height: '17px', cursor: 'pointer', accentColor: '#d97706' }}
+                          />
+                        </label>
+
+                        <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '12.5px', fontWeight: 600, color: '#334155' }}>
+                          <span>📝 قفل قبول الشكاوى والتظلمات من تقييم الأداء والجزاءات</span>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(ownerLocks.lockApproveComplaints)}
+                            onChange={() => handleToggleOwnerLock('lockApproveComplaints')}
+                            style={{ width: '17px', height: '17px', cursor: 'pointer', accentColor: '#d97706' }}
+                          />
+                        </label>
+                      </div>
+
                       <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#334155' }}>
                         <span>قفل رفض الطلبات واستبعادها</span>
                         <input

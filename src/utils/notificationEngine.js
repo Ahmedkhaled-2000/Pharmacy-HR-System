@@ -6,27 +6,65 @@
 export const REQUEST_TYPE_LABELS = {
   leave: 'طلب إجازة',
   leave_request: 'طلب إجازة',
+  annual_leave: 'طلب إجازة اعتيادية سنوية',
+  sick_leave: 'طلب إجازة مرضية',
+  emergency_leave: 'طلب إجازة عارضة',
+  unpaid_leave: 'طلب إجازة بدون راتب',
   permission: 'طلب إذن استئذان',
-  loan: 'طلب سلفة نقدية',
-  advance: 'طلب سلفة نقدية',
+  permission_request: 'طلب إذن استئذان',
+  loan: 'طلب سلفة مالية نقدية',
+  advance: 'طلب سلفة مالية نقدية',
   meds: 'طلب مشتريات أدوية آجل',
   credit_medicine: 'طلب مشتريات أدوية آجل',
   swap: 'طلب تبديل وردية',
   shift_swap: 'طلب تبديل وردية',
+  shift_edit: 'طلب تعديل وردية',
   roster: 'الجدول الشهري',
   roster_update: 'تحديث الجدول الشهري',
   roster_edit: 'تعديل الجدول الشهري',
+  roster_edit_request: 'طلب تعديل الجدول الشهري',
   resignation: 'طلب استقالة',
   overtime: 'طلب ساعات إضافي',
   bonus: 'مكافأة مالية',
   penalty: 'خصم جزاء لائحى',
+  disciplinary_penalty: 'جزاء تأديبي لائحى',
+  violation: 'مخالفة تأديبية',
+  penalty_objection: 'تظلم من جزاء تأديبي',
+  objection: 'تظلم من جزاء',
   early_exit: 'إذن خروج مبكر',
-  manual_punch: 'طلب تسجيل بصمة يدوية'
+  manual_punch: 'طلب تسجيل بصمة يدوية',
+  punch_correction: 'طلب تصحيح بصمة الحضور',
+  attendance_punch: 'تأكيد بصمة الحضور',
+  'تأكيد بصمة الوجه': 'تأكيد بصمة الوجه',
+  'تأكيد بصمة اليد': 'تأكيد بصمة اليد',
+  evaluation: 'تقييم أداء وظيفي',
+  emp_evaluation: 'تقييم أداء وظيفي',
+  manager_eval: 'تقييم أداء الموظف',
+  complaint: 'شكوى / مقترح إداري',
+  eval_edit_request: 'طلب مراجعة تقييم الأداء'
 };
 
 export function getRequestTypeArabicLabel(type) {
   if (!type) return 'طلب إداري';
-  return REQUEST_TYPE_LABELS[type] || type;
+  const cleanType = String(type).trim();
+  if (REQUEST_TYPE_LABELS[cleanType]) return REQUEST_TYPE_LABELS[cleanType];
+  
+  // Normalized fallback lookup
+  const lower = cleanType.toLowerCase();
+  if (lower.includes('disc') || lower.includes('penalty') || lower.includes('violation')) return 'جزاء تأديبي لائحى';
+  if (lower.includes('leave')) return 'طلب إجازة';
+  if (lower.includes('loan') || lower.includes('advance')) return 'طلب سلفة مالية';
+  if (lower.includes('meds')) return 'طلب أدوية آجل';
+  if (lower.includes('swap')) return 'طلب تبديل وردية';
+  if (lower.includes('roster')) return 'طلب تعديل جدول';
+  if (lower.includes('punch')) return 'طلب تصحيح بصمة';
+  if (lower.includes('permis')) return 'طلب إذن استئذان';
+  if (lower.includes('eval')) return 'تقييم أداء';
+  if (lower.includes('complaint')) return 'شكوى / مقترح';
+  if (lower.includes('bonus')) return 'مكافأة مالية';
+  if (lower.includes('resign')) return 'طلب استقالة';
+
+  return cleanType;
 }
 
 /**
