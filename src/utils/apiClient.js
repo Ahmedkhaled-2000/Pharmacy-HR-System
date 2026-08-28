@@ -30,73 +30,92 @@ const getApiBaseUrl = () => {
 export const API_BASE_URL = getApiBaseUrl();
 
 /**
- * دالة مساعدة متقدمة لتنفيذ طلبات الـ HTTP مع مهلة زمنية ذكية ومعالجة الأخطاء والتنسيق
+ * دالة مساعدة متقدمة لتنفيذ طلبات الـ HTTP مع مهلة زمنية ذكية ومعالجة الأخطاء والتنسيق وإعادة المحاولة التلقائية
  */
 const activeETags = new Map();
 
 async function request(endpoint, options = {}) {
-  // إضافة معامل زمني اختياري لتخطي أي كاش للمتصفح أو البروكسي
-  const separator = endpoint.includes('?') ? '&' : '?';
-  const antiCacheQuery = options.noCache !== false ? `${separator}_t=${Date.now()}` : '';
-  const url = `${API_BASE_URL}/${endpoint.replace(/^\/+/, '')}${antiCacheQuery}`;
-  const timeoutMs = options.timeout || 12000;
+  const maxRetries = options.retries !== undefined ? options.retries : (options.method === 'POST' ? 1 : 2);
+  const baseTimeoutMs = options.timeout || 15000;
   
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  let lastError = null;
 
-  const headers = {
-    'Content-Type': 'application/json',
-    'Accept': 'application/json',
-    'Cache-Control': 'no-cache, no-store, must-revalidate',
-    'Pragma': 'no-cache',
-    'Expires': '0',
-    ...options.headers,
-  };
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    // إضافة معامل زمني عشوائي صارم لمنع أي كاش للمتصفح أو البروكسي
+    const separator = endpoint.includes('?') ? '&' : '?';
+    const antiCacheQuery = options.noCache !== false ? `${separator}_t=${Date.now()}_${Math.random().toString(36).slice(2, 7)}` : '';
+    const url = `${API_BASE_URL}/${endpoint.replace(/^\/+/, '')}${antiCacheQuery}`;
+    const timeoutMs = baseTimeoutMs + (attempt * 3000);
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-  // دعم ETag التلقائي للطلبات المشروطة إذا كان مفعلاً
-  if (options.useETag && activeETags.has(url)) {
-    headers['If-None-Match'] = activeETags.get(url);
+    const headers = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+      ...options.headers,
+    };
+
+    // دعم ETag التلقائي للطلبات المشروطة إذا كان مفعلاً
+    if (options.useETag && activeETags.has(url)) {
+      headers['If-None-Match'] = activeETags.get(url);
+    }
+
+    const config = {
+      ...options,
+      headers,
+      cache: 'no-store',
+      signal: controller.signal,
+    };
+
+    try {
+      const response = await fetch(url, config);
+      clearTimeout(timeoutId);
+
+      // معالجة حالة عدم التغيير HTTP 304 Not Modified
+      if (response.status === 304) {
+        return { notModified: true, status: 304 };
+      }
+
+      // تخزين الـ ETag المستلم للطلبات اللاحقة
+      const etag = response.headers.get('ETag') || response.headers.get('etag');
+      if (etag) {
+        activeETags.set(url, etag);
+      }
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorJson;
+        try { errorJson = JSON.parse(errorText); } catch { /* ignore */ }
+        throw new Error(errorJson?.error || `HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      return await response.json();
+    } catch (error) {
+      clearTimeout(timeoutId);
+      lastError = error;
+
+      if (error.name === 'AbortError') {
+        console.warn(`[ApiClient] Request to ${endpoint} timed out after ${timeoutMs}ms (Attempt ${attempt + 1}/${maxRetries + 1})`);
+      } else {
+        console.warn(`[ApiClient] Request to ${endpoint} failed:`, error.message, `(Attempt ${attempt + 1}/${maxRetries + 1})`);
+      }
+
+      // إذا كانت هذه ليست المحاولة الأخيرة، انتظر قليلاً قبل إعادة المحاولة
+      if (attempt < maxRetries) {
+        const delay = (attempt + 1) * 800;
+        await new Promise((res) => setTimeout(res, delay));
+      }
+    }
   }
 
-  const config = {
-    ...options,
-    headers,
-    cache: 'no-store',
-    signal: controller.signal,
-  };
-
-  try {
-    const response = await fetch(url, config);
-    clearTimeout(timeoutId);
-
-    // معالجة حالة عدم التغيير HTTP 304 Not Modified
-    if (response.status === 304) {
-      return { notModified: true, status: 304 };
-    }
-
-    // تخزين الـ ETag المستلم للطلبات اللاحقة
-    const etag = response.headers.get('ETag') || response.headers.get('etag');
-    if (etag) {
-      activeETags.set(url, etag);
-    }
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      let errorJson;
-      try { errorJson = JSON.parse(errorText); } catch { /* ignore */ }
-      throw new Error(errorJson?.error || `HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    return await response.json();
-  } catch (error) {
-    clearTimeout(timeoutId);
-    if (error.name === 'AbortError') {
-      console.warn(`[ApiClient] Request to ${endpoint} timed out after ${timeoutMs}ms`);
-      throw new Error(`انتهت مهلة الاتصال بالخادم (${timeoutMs / 1000} ثواني)`);
-    }
-    console.warn(`[ApiClient] Request to ${endpoint} failed:`, error.message);
-    throw error;
+  if (lastError?.name === 'AbortError') {
+    throw new Error(`انتهت مهلة الاتصال بالخادم. يرجى التحقق من اتصال الإنترنت وإعادة المحاولة.`);
   }
+  throw lastError || new Error(`تعذر الاتصال بالخادم بعد عدة محاولات.`);
 }
 
 // ── 1. دوال إعدادات وبيانات التطبيق الرئيسية (Settings / State) ────────────────

@@ -2190,12 +2190,12 @@ tbody tr:hover {
 /* ───────────────────────────────────────────────────────────── */
 /* ── PRINTING & PDF EXPORT STYLES (Single A4 Page Fit) ─────── */
 /* ───────────────────────────────────────────────────────────── */
-@media print {
-  @page {
-    size: A4 portrait;
-    margin: 6mm 8mm;
-  }
+@page {
+  size: A4 portrait;
+  margin: 6mm 8mm;
+}
 
+@media print {
   html, body, #root, .app-layout, main {
     margin: 0 !important;
     padding: 0 !important;

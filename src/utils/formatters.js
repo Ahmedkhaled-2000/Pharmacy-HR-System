@@ -214,9 +214,9 @@ export function normalizeState(parsed) {
   const effectiveCustomTo = (savedCustomTo !== null && savedCustomTo !== undefined) ? savedCustomTo : (parsed.orgSettings?.payrollCustomTo || '');
 
   const orgSettings = {
-    orgName: 'نظام إدارة الموارد البشرية - صيدليات مداواة',
+    orgName: 'منظومة إدارة الموارد البشرية والرواتب',
     logoUrl: '',
-    waServerUrl: 'https://funny-sloth-89.loca.lt',
+    waServerUrl: '',
     adminUsername: 'admin',
     adminPassword: '123',
     permissions: {},

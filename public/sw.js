@@ -2,87 +2,69 @@
 // Service Worker - PWA Employee Portal
 // ──────────────────────────────────────────────────────────────────────────────
 
-const CACHE_NAME = 'pharmacy-employee-v1';
+const CACHE_NAME = 'pharmacy-portal-v2-' + Date.now();
 const OFFLINE_URL = '/offline.html';
-
-// ملفات يتم تخزينها مؤقتًا عند أول تحميل
-const PRECACHE_ASSETS = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/offline.html'
-];
 
 // ── Install ──────────────────────────────────────────────────────────────────
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      console.log('[SW] Pre-caching offline assets');
-      return cache.addAll(PRECACHE_ASSETS);
-    }).then(() => self.skipWaiting())
-  );
+  self.skipWaiting();
 });
 
-// ── Activate ─────────────────────────────────────────────────────────────────
+// ── Activate: Purge ALL old caches immediately ──────────────────────────────
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => {
       return Promise.all(
-        keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
+        keys.map((key) => {
+          console.log('[SW] Deleting obsolete cache:', key);
+          return caches.delete(key);
+        })
       );
     }).then(() => self.clients.claim())
   );
 });
 
-// ── Fetch ────────────────────────────────────────────────────────────────────
+// ── Fetch: Strict Network-First Strategy ─────────────────────────────────────
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Skip non-GET, chrome-extension, API endpoints, and external services
+  // Skip non-GET, chrome-extension, API endpoints, SSE streams, and external metrics
   if (
     request.method !== 'GET' ||
     url.protocol === 'chrome-extension:' ||
     url.pathname.startsWith('/api') ||
+    url.pathname.includes('/api/') ||
+    url.pathname.includes('/stream') ||
     url.hostname.includes('googleapis.com') ||
     url.hostname.includes('fonts.gstatic.com')
   ) {
     return;
   }
 
-  // Network-first strategy for HTML navigation
-  if (request.mode === 'navigate') {
-    event.respondWith(
-      fetch(request).catch(() => {
-        return caches.open(CACHE_NAME).then((cache) => {
-          return cache.match(OFFLINE_URL);
-        });
-      })
-    );
-    return;
-  }
-
-  // Cache-first strategy for static assets
+  // Network-First: Always fetch fresh from network, fallback to cache/offline only when completely offline
   event.respondWith(
-    caches.match(request).then((cachedResponse) => {
-      if (cachedResponse) return cachedResponse;
-
-      return fetch(request).then((networkResponse) => {
-        // Cache successful responses for static assets
-        if (networkResponse && networkResponse.status === 200) {
-          const responseToCache = networkResponse.clone();
+    fetch(request, { cache: 'no-cache' })
+      .then((networkResponse) => {
+        if (networkResponse && networkResponse.status === 200 && request.method === 'GET') {
+          const responseClone = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => {
-            cache.put(request, responseToCache);
+            cache.put(request, responseClone);
           });
         }
         return networkResponse;
-      });
-    }).catch(() => {
-      // Return offline page for navigation
-      if (request.destination === 'document') {
-        return caches.match(OFFLINE_URL);
-      }
-    })
+      })
+      .catch(async () => {
+        const cachedResponse = await caches.match(request);
+        if (cachedResponse) {
+          return cachedResponse;
+        }
+        if (request.mode === 'navigate' || request.destination === 'document') {
+          const offlinePage = await caches.match(OFFLINE_URL);
+          if (offlinePage) return offlinePage;
+        }
+        return new Response('Offline - No connection', { status: 503, statusText: 'Offline' });
+      })
   );
 });
 

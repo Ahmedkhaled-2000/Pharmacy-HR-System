@@ -200,48 +200,46 @@ export async function loadLocalStateFast() {
 }
 
 // ── تحميل الحالة السحابية فائق السرعة مع مهلة ذكية وإعادة محاولة تلقائية ─────
-export async function smartLoadState() {
-  // 1. فحص وجود بيانات سريعة محلياً
+export async function smartLoadState(options = {}) {
+  const onProgress = options.onProgress;
+  const isCurrentlyOnline = isOnline();
+
+  // 1. فحص وجود بيانات سريعة محلياً لاستخدامها مؤقتاً كواجهة أولية
   const localCache = await loadLocalStateFast();
   const pendingCount = await getPendingCount().catch(() => 0);
 
-  if (isOnline()) {
+  if (isCurrentlyOnline) {
+    onProgress?.('جاري الاتصال بالسحابة ومزامنة البيانات...');
     try {
-      // محاولة أولى سريعة لجلب أحدث نسخة حية من السحابة
-      const remoteData = await fetchRemoteState({ timeout: 5000, useETag: Boolean(localCache) });
+      // محاولة مباشرة لجلب أحدث وأدق نسخة حية من السحابة بدون كاش
+      const remoteData = await fetchRemoteState({ timeout: 15000, useETag: false });
       
       if (remoteData && !remoteData.notModified) {
         const normalized = normalizeState(remoteData);
-        // إذا كان هناك تعديلات أوف لاين معلقة فقط، ندمجها؛ وإلا فإن السحابة هي المصدر الموثوق
+        // إذا كان هناك تعديلات أوف لاين معلقة فقط، ندمجها؛ وإلا فإن السحابة هي المصدر الموثوق النهائي
         const merged = (localCache && pendingCount > 0) ? smartMergeStates(localCache, normalized) : normalized;
         await saveStateLocally(merged);
         return { data: merged, source: 'cloud' };
-      } else if (remoteData && remoteData.notModified) {
-        // لم تتغير البيانات في السحابة
-        if (localCache) {
-          return { data: localCache, source: 'cloud_cached_304' };
-        }
       }
     } catch (e) {
-      console.warn('[Sync] Cloud fast load warning, attempting robust fetch:', e.message);
+      console.warn('[Sync] First cloud fetch attempt failed, retrying:', e.message);
     }
 
-    // 2. إذا لم تكن هناك بيانات محلية، نقوم بإجراء محاولة ثانية قوية فوراً لتجنب بقاء النظام فارغاً
-    if (!localCache) {
-      try {
-        const retryData = await fetchRemoteState({ timeout: 12000, useETag: false });
-        if (retryData && !retryData.notModified) {
-          const normalized = normalizeState(retryData);
-          await saveStateLocally(normalized);
-          return { data: normalized, source: 'cloud_retry' };
-        }
-      } catch (retryErr) {
-        console.error('[Sync] Robust cloud load attempt failed:', retryErr);
+    // محاولة ثانية سريعة لضمان عدم ظهور النظام فارغاً
+    try {
+      const retryData = await fetchRemoteState({ timeout: 20000, useETag: false });
+      if (retryData && !retryData.notModified) {
+        const normalized = normalizeState(retryData);
+        const merged = (localCache && pendingCount > 0) ? smartMergeStates(localCache, normalized) : normalized;
+        await saveStateLocally(merged);
+        return { data: merged, source: 'cloud_retry' };
       }
+    } catch (retryErr) {
+      console.error('[Sync] Robust cloud load attempt failed:', retryErr);
     }
   }
 
-  // 3. إذا كنا أوف لاين أو حدث بطء، استخدام الكاش المحلي مباشرة
+  // 2. إذا كنا أوف لاين أو تعذر الوصول للسيرفر، استخدام الكاش المحلي كبديل طوارئ
   if (localCache) {
     return { data: localCache, source: 'local_offline' };
   }
@@ -250,7 +248,7 @@ export async function smartLoadState() {
 }
 
 // ── استطلاع ذكي متكيف في الخلفية (Adaptive Background Smart Polling) ────────
-export function startSmartPolling({ onRemoteUpdate, intervalActive = 15000, intervalIdle = 60000 }) {
+export function startSmartPolling({ onRemoteUpdate, intervalActive = 2000, intervalIdle = 15000 }) {
   let lastKnownVersion = null;
   let timerId = null;
   let isFetching = false;
@@ -260,13 +258,12 @@ export function startSmartPolling({ onRemoteUpdate, intervalActive = 15000, inte
     
     try {
       isFetching = true;
-      const vRes = await apiFetchVersion(STORAGE_KEY, { timeout: 4000 });
-      const currentVer = vRes?.version || vRes?.updated_at || vRes?.timestamp;
+      const vRes = await apiFetchVersion(STORAGE_KEY, { timeout: 3500 });
+      const currentVer = typeof vRes?.version === 'number' ? vRes.version : (vRes?.updated_at || vRes?.timestamp);
 
       if (currentVer) {
-        if (lastKnownVersion && currentVer !== lastKnownVersion) {
-          console.log('[Sync Polling] New cloud version detected:', currentVer, 'Old:', lastKnownVersion);
-          const freshData = await fetchRemoteState({ timeout: 7000 });
+        if (lastKnownVersion !== null && currentVer !== lastKnownVersion) {
+          const freshData = await fetchRemoteState({ timeout: 8000, useETag: false });
           if (freshData && !freshData.notModified) {
             onRemoteUpdate?.(freshData);
             await saveStateLocally(freshData);
@@ -275,7 +272,7 @@ export function startSmartPolling({ onRemoteUpdate, intervalActive = 15000, inte
         lastKnownVersion = currentVer;
       }
     } catch (err) {
-      // خطأ صامت في استطلاع الخلفية لتجنب إزعاج المستخدم
+      // خطأ صامت في استطلاع الخلفية لتجنب إجهاد الشبكة
     } finally {
       isFetching = false;
     }

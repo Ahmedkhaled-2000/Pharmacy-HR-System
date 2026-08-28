@@ -97,6 +97,24 @@ export default defineConfig({
     })
   ],
   build: {
-    cssMinify: false
+    cssMinify: false,
+    chunkSizeWarningLimit: 3000,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('exceljs') || id.includes('xlsx') || id.includes('papaparse')) {
+              return 'vendor-excel';
+            }
+            if (id.includes('lucide-react')) {
+              return 'vendor-icons';
+            }
+            if (id.includes('react') || id.includes('react-dom') || id.includes('react-router-dom')) {
+              return 'vendor-react';
+            }
+          }
+        }
+      }
+    }
   }
 });

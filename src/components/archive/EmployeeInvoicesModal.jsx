@@ -8,11 +8,10 @@ export default function EmployeeInvoicesModal({
   invoices = [],
   onSelectInvoice
 }) {
-  if (!isOpen || !employee) return null;
-
-  const empId = employee.id;
+  const empId = employee?.id;
 
   const receivedInvoices = useMemo(() => {
+    if (!empId) return [];
     return invoices.filter((inv) => {
       const recId = inv.receiverId || inv.receiver_id;
       return String(recId) === String(empId);
@@ -20,11 +19,14 @@ export default function EmployeeInvoicesModal({
   }, [invoices, empId]);
 
   const enteredInvoices = useMemo(() => {
+    if (!empId) return [];
     return invoices.filter((inv) => {
       const clkId = inv.entryClerkId || inv.entry_clerk_id;
       return String(clkId) === String(empId);
     });
   }, [invoices, empId]);
+
+  if (!isOpen || !employee) return null;
 
   const totalReceivedNet = receivedInvoices.reduce((sum, inv) => sum + parseFloat(inv.netAmount || inv.net_amount || inv.totalAmount || 0), 0);
   const totalEnteredNet = enteredInvoices.reduce((sum, inv) => sum + parseFloat(inv.netAmount || inv.net_amount || inv.totalAmount || 0), 0);

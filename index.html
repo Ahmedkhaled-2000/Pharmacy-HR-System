@@ -100,27 +100,39 @@
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
 
-    <!-- Register Service Worker with Auto-Update Reload -->
+    <!-- Register Service Worker with Auto-Update & Automatic Old Cache Purge -->
     <script>
-      if ('serviceWorker' in navigator) {
-        let refreshing = false;
-        // When a new service worker takes control, reload the page automatically
-        navigator.serviceWorker.addEventListener('controllerchange', () => {
-          if (refreshing) return;
-          refreshing = true;
-          window.location.reload();
-        });
+      (function() {
+        // تنظيف ومسح أي كاش قديم متبقي في المتصفح تلقائياً عند الإقلاع
+        if ('caches' in window) {
+          caches.keys().then(function(keys) {
+            keys.forEach(function(key) {
+              if (key.indexOf('v1') !== -1 || key.indexOf('workbox') !== -1 || key.indexOf('employee-v1') !== -1) {
+                console.log('[CachePurger] Purging obsolete cache:', key);
+                caches.delete(key);
+              }
+            });
+          }).catch(function() {});
+        }
 
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js', { scope: '/' })
-            .then(reg => {
-              console.log('[PWA] SW registered:', reg.scope);
-              // Force check for updates on every page load
-              reg.update();
-            })
-            .catch(err => console.error('[PWA] SW registration failed:', err));
-        });
-      }
+        if ('serviceWorker' in navigator) {
+          let refreshing = false;
+          navigator.serviceWorker.addEventListener('controllerchange', () => {
+            if (refreshing) return;
+            refreshing = true;
+            window.location.reload();
+          });
+
+          window.addEventListener('load', () => {
+            navigator.serviceWorker.register('/sw.js', { scope: '/' })
+              .then(reg => {
+                console.log('[PWA] SW registered:', reg.scope);
+                reg.update();
+              })
+              .catch(err => console.warn('[PWA] SW registration note:', err));
+          });
+        }
+      })();
     </script>
   </body>
 </html>

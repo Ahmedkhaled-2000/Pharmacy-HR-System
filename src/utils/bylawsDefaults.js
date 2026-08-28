@@ -184,13 +184,13 @@ export function isBylawsHeaderLine(line) {
   let t = String(line)
     .replace(/[\u200E\u200F\u200B\uFEFF\u00A0]/g, ' ')
     .trim()
-    .replace(/^[\*\#\-\_\=\.\:\—\–\•\▪\▫\🔹\🔸\📌\✨\⭐\📜\📋\⚖️]+\s*/, '')
+    .replace(/^[*#\-_=.:—–•▪▫🔹🔸📌✨⭐📜📋⚖️]+\s*/u, '')
     .trim();
 
   if (!t) return false;
 
   // إذا كان السطر مجرد خط فاصل
-  if (/^[\-\_\=\*\.]{3,}$/.test(t)) return false;
+  if (/^[-_=*.\s]{3,}$/.test(t)) return false;
 
   // صيغة الترتيب والأعداد العربية الشاملة (من 1 إلى 50+ مفرد ومركب)
   const singleOrdinals = '(مقدمة|تمهيد|اللائحة\\s+التنظيمية|الائحة\\s+التنظيمية|أولاً|اولاً|أولا|اولا|أول|الاول|الأول|ثانياً|ثانيا|ثاني|الثاني|ثالثاً|ثالثا|ثالث|الثالث|رابعاً|رابعا|رابع|الرابع|خامساً|خامسا|خامس|الخامس|سادساً|سادسا|سادس|السادس|سابعاً|سابعا|سابع|السابع|ثامناً|ثامنا|ثامن|الثامن|تاسعاً|تاسعا|تاسع|التاسع|عاشراً|عاشرا|عاشر|العاشر)';
@@ -244,7 +244,7 @@ export function sanitizeBylawsSections(sections = []) {
       let pStr = String(points[j] || '').replace(/[\u200E\u200F\u200B\uFEFF\u00A0]/g, ' ').trim();
       
       // إهمال الأسطر الفاصلة والفارغة
-      if (!pStr || /^[\-\_\=\*\.]{3,}$/.test(pStr) || pStr.startsWith('====') || pStr.startsWith('----') || pStr.startsWith('____')) {
+      if (!pStr || /^[-_=*.\s]{3,}$/.test(pStr) || pStr.startsWith('====') || pStr.startsWith('----') || pStr.startsWith('____')) {
         continue;
       }
 
@@ -257,7 +257,7 @@ export function sanitizeBylawsSections(sections = []) {
         const isNextPreamble = pStr.includes('مقدمة') || pStr.includes('تمهيد') || pStr.includes('اللائحة التنظيمية');
         currentSec = {
           id: isNextPreamble ? 'bylaw_preamble' : `bylaw_${counter++}`,
-          title: pStr.replace(/^[\-\*▪•▫]+\s*/, '').trim(),
+          title: pStr.replace(/^[-*▪•▫]+\s*/, '').trim(),
           category: isNextPreamble ? 'preamble' : 'general',
           points: []
         };
@@ -300,7 +300,7 @@ export function parseBylawsIntoSections(text) {
     const trimmed = rawLine.trim();
 
     // تجاهل الفواصل والأسطر الفارغة
-    if (!trimmed || /^[\-\_\=\*\.]{3,}$/.test(trimmed) || trimmed.startsWith('===') || trimmed.startsWith('---') || trimmed.startsWith('___')) {
+    if (!trimmed || /^[-_=*.\s]{3,}$/.test(trimmed) || trimmed.startsWith('===') || trimmed.startsWith('---') || trimmed.startsWith('___')) {
       continue;
     }
 

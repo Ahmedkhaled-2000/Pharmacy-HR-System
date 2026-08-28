@@ -131,6 +131,8 @@ import {
 } from './utils/latePenaltyEngine';
 
 
+import OfflineStateOverlay from './components/common/OfflineStateOverlay';
+
 export default function App() {
   // Theme Mode State ('light' | 'dark')
   const [themeMode, setThemeMode] = useState(() => {
@@ -257,7 +259,7 @@ export default function App() {
   // Core Data State
   const [state, setState] = useState({
     orgSettings: {
-      orgName: 'نظام إدارة الموارد البشرية - صيدليات مداواة',
+      orgName: 'منظومة إدارة الموارد البشرية والرواتب',
       logoUrl: '',
       ownerUsername: 'owner',
       ownerPassword: 'owner123',
@@ -3152,33 +3154,29 @@ export default function App() {
       } catch {}
     };
 
-    // 1. إقلاع فوري فائق السرعة من الذاكرة المحلية (في غضون 5 إلى 20 مللي ثانية!)
+    // 1. إقلاع فوري من الذاكرة المحلية كواجهة انتقالية مؤقتة
     loadLocalStateFast().then((cachedData) => {
       if (cachedData && isMounted) {
         const normalizedCached = normalizeState(cachedData);
         const syncedCached = syncAllEmployeesPermissionsAndLateness(normalizedCached);
         setState(syncedCached);
         syncSessionWithFreshData(syncedCached);
-        setIsLoading(false); // إخفاء شاشة التحميل فوراً ودخول المستخدم للنظام بدون أي انتظار
+        setIsLoading(false); // إخفاء شاشة التحميل إذا توفرت بيانات محلية صالحة
       }
     }).catch(() => {});
 
-    // 2. مهلة أمان قصوى صارمة تضمن إخفاء شاشة التحميل مهما حدث (1.2 ثانية كحد أقصى)
+    // 2. مهلة أمان قصوى لحالات انقطاع الشبكة الشديد (10 ثوانٍ)
     const safetyTimer = setTimeout(() => {
       if (isMounted) {
         setIsLoading(false);
       }
-    }, 1200);
+    }, 10000);
 
-    // 3. جلب ومزامنة أحدث البيانات السحابية في الخلفية
+    // 3. جلب ومزامنة أحدث البيانات السحابية الحية دائماً ومباشرة من السيرفر
     smartLoadState().then(({ data, source }) => {
       if (!isMounted) return;
       setIsLoading(false);
       if (!data) return;
-
-      if (source === 'local_offline') {
-        // تم الاعتماد على الكاش المحلي
-      }
 
       const normalized = normalizeState(data);
 
@@ -6464,6 +6462,22 @@ export default function App() {
         actionTitle={ownerOverrideModal.actionTitle}
         actionDetails={ownerOverrideModal.actionDetails}
         state={state}
+        showToast={showToast}
+      />
+
+      {/* Offline State & Network Quality Overlay */}
+      <OfflineStateOverlay
+        isOffline={isOffline}
+        pendingCount={pendingSyncCount}
+        onRetrySync={async () => {
+          const res = await syncNow();
+          if (res.success && res.mergedState) {
+            setState((prev) => normalizeState(smartMergeStates(prev, normalizeState(res.mergedState))));
+            setPendingSyncCount(0);
+            setIsOffline(false);
+            showToast('✅ تمت استعادة الاتصال وتحديث البيانات بنجاح');
+          }
+        }}
         showToast={showToast}
       />
 

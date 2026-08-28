@@ -18,8 +18,15 @@ date_default_timezone_set('Africa/Cairo');
 // إعدادات ترويسات CORS المفتوحة للاتصال من الويب والهاتف
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-App-Version');
+header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-App-Version, If-None-Match');
 header('Access-Control-Max-Age: 86400'); // 24 hours cache for preflight
+
+// ترويسات صارمة لمنع التخزين المؤقت (Anti-Cache / Zero-Cache)
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0, post-check=0, pre-check=0');
+header('Pragma: no-cache');
+header('Expires: Mon, 26 Jul 1997 05:00:00 GMT');
+header('X-LiteSpeed-Cache-Control: no-cache, no-store');
+header('X-Accel-Buffering: no');
 
 // التعامل مع طلبات Preflight (OPTIONS)
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
@@ -42,7 +49,7 @@ define('DB_CHARSET', 'utf8');
 define('DEFAULT_STORAGE_KEY', 'pharmacy-tracker-data');
 
 /**
- * إرسال استجابة JSON موحدة
+ * إرسال استجابة JSON موحدة خالية من أي كاش وسيط
  *
  * @param array<string, mixed>|object|null $data
  * @param int $statusCode
@@ -52,9 +59,11 @@ function jsonResponse(mixed $data, int $statusCode = 200): void
 {
     http_response_code($statusCode);
     header('Content-Type: application/json; charset=utf-8');
-    header('Cache-Control: no-cache, no-store, must-revalidate, max-age=0');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0, post-check=0, pre-check=0');
     header('Pragma: no-cache');
-    header('Expires: 0');
+    header('Expires: Mon, 26 Jul 1997 05:00:00 GMT');
+    header('X-LiteSpeed-Cache-Control: no-cache, no-store');
+    header('X-Accel-Buffering: no');
     echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
     exit();
 }
