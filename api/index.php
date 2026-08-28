@@ -102,11 +102,32 @@ try {
                 $targetKey = (string)($payload['key'] ?? $key);
                 $value = $payload['value'] ?? null;
 
-                if ($value === null) {
-                    jsonResponse(['success' => false, 'error' => 'Missing "value" in request body'], 400);
+                $decodedIncoming = is_string($value) ? json_decode($value, true) : $value;
+
+                // Server-side Smart Merge: جلب الحالة الحالية من السيرفر ودمجها لحماية الطلبات من المسح
+                $finalValueData = $value;
+                if (is_array($decodedIncoming)) {
+                    $existingRow = Database::queryOne(
+                        "SELECT value_data FROM app_settings WHERE key_name = ? LIMIT 1",
+                        [$targetKey]
+                    );
+
+                    if ($existingRow && !empty($existingRow['value_data'])) {
+                        $existingDecoded = is_string($existingRow['value_data'])
+                            ? json_decode($existingRow['value_data'], true)
+                            : $existingRow['value_data'];
+
+                        if (is_array($existingDecoded)) {
+                            // دمج ذكي يحافظ على جميع الطلبات والكيانات المستلمة من كافة الأجهزة
+                            $mergedState = mergeServerState($existingDecoded, $decodedIncoming);
+                            $finalValueData = $mergedState;
+                        }
+                    }
                 }
 
-                $jsonString = is_string($value) ? $value : json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                $jsonString = is_string($finalValueData)
+                    ? $finalValueData
+                    : json_encode($finalValueData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
 
                 // Upsert with version increment (PostgreSQL vs MySQL)
                 if ($driver === 'pgsql') {
@@ -140,10 +161,11 @@ try {
 
                 jsonResponse([
                     'success' => true,
-                    'message' => 'State saved successfully',
+                    'message' => 'State saved and merged successfully',
                     'key' => $targetKey,
                     'version' => $currentVersion,
-                    'updated_at' => $updatedAt
+                    'updated_at' => $updatedAt,
+                    'value' => is_array($finalValueData) ? $finalValueData : null
                 ]);
             }
             break;

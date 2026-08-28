@@ -84,15 +84,20 @@ export async function smartSaveState(updatedState, options = {}) {
 
   if (isOnline()) {
     try {
-      // 3. إرسال النسخة النظيفة إلى السحابة مباشرة
+      // 3. إرسال النسخة النظيفة إلى السحابة مباشرة مع الدمج الخادمي
       const res = await apiSaveSettings(STORAGE_KEY, cleanUpdated, { timeout: 15000 });
 
       if (!res?.success) {
         throw new Error(res?.error || 'Failed to save to Database');
       }
 
-      onSyncSuccess?.(cleanUpdated);
-      return { success: true, queued: false, mergedState: cleanUpdated };
+      // إذا أعاد الخادم حالة مدمجة، نعتمدها ونحدث التخزين المحلي
+      const finalState = res?.value && typeof res.value === 'object' ? normalizeState(res.value) : cleanUpdated;
+      saveStateLocally(finalState).catch(() => {});
+      broadcastStateChange(finalState);
+
+      onSyncSuccess?.(finalState);
+      return { success: true, queued: false, mergedState: finalState };
     } catch (e) {
       console.error('[Sync] Network/Server error during save:', e);
       await addToPendingQueue({ type: 'SAVE_STATE', state: updatedState }).catch(() => {});
@@ -129,7 +134,7 @@ export async function syncNow(onProgress) {
     const localState = await loadStateLocally();
 
     if (!localState) {
-      const remote = await fetchRemoteState();
+      const remote = await fetchRemoteState({ timeout: 10000, useETag: false });
       if (remote && !remote.notModified) {
         await saveStateLocally(remote);
         return { success: true, mergedState: remote };
@@ -138,7 +143,7 @@ export async function syncNow(onProgress) {
     }
 
     // جلب النسخة السحابية ودمجها مع المحلية
-    const remoteState = await fetchRemoteState();
+    const remoteState = await fetchRemoteState({ timeout: 10000, useETag: false });
     const validRemote = remoteState && !remoteState.notModified ? remoteState : null;
     const mergedState = validRemote ? smartMergeStates(localState, validRemote) : localState;
 
@@ -147,11 +152,12 @@ export async function syncNow(onProgress) {
       throw new Error(res?.error || 'Manual sync save failed');
     }
 
-    await saveStateLocally(mergedState);
+    const finalState = res?.value && typeof res.value === 'object' ? normalizeState(res.value) : mergedState;
+    await saveStateLocally(finalState);
     await clearPendingQueue();
-    broadcastStateChange(mergedState);
+    broadcastStateChange(finalState);
     onProgress?.('تمت المزامنة والدمج بنجاح ✅');
-    return { success: true, mergedState };
+    return { success: true, mergedState: finalState };
   } catch (e) {
     console.error('[Sync] Manual sync failed:', e);
     return { success: false, reason: e.message };
@@ -184,7 +190,7 @@ export function listenToConnectionChanges(onOnline, onOffline) {
 export async function loadLocalStateFast() {
   try {
     const localData = await loadStateLocally();
-    if (localData) {
+    if (localData && typeof localData === 'object') {
       return normalizeState(localData);
     }
   } catch (e) {
@@ -193,7 +199,7 @@ export async function loadLocalStateFast() {
   return null;
 }
 
-// ── تحميل الحالة السحابية فائق السرعة مع مهلة ذكية (Smart Fast Load) ─────
+// ── تحميل الحالة السحابية فائق السرعة مع مهلة ذكية وإعادة محاولة تلقائية ─────
 export async function smartLoadState() {
   // 1. فحص وجود بيانات سريعة محلياً
   const localCache = await loadLocalStateFast();
@@ -201,8 +207,8 @@ export async function smartLoadState() {
 
   if (isOnline()) {
     try {
-      // محاولة جلب أحدث نسخة حية من السحابة بمهلة قصيرة ذكية
-      const remoteData = await fetchRemoteState({ timeout: 4500, useETag: true });
+      // محاولة أولى سريعة لجلب أحدث نسخة حية من السحابة
+      const remoteData = await fetchRemoteState({ timeout: 5000, useETag: Boolean(localCache) });
       
       if (remoteData && !remoteData.notModified) {
         const normalized = normalizeState(remoteData);
@@ -211,17 +217,31 @@ export async function smartLoadState() {
         await saveStateLocally(merged);
         return { data: merged, source: 'cloud' };
       } else if (remoteData && remoteData.notModified) {
-        // لم تتغير البيانات في السحابة -> استخدام الكاش المحلي الفوري
+        // لم تتغير البيانات في السحابة
         if (localCache) {
           return { data: localCache, source: 'cloud_cached_304' };
         }
       }
     } catch (e) {
-      console.warn('[Sync] Cloud load timed out or failed, using local storage cache:', e);
+      console.warn('[Sync] Cloud fast load warning, attempting robust fetch:', e.message);
+    }
+
+    // 2. إذا لم تكن هناك بيانات محلية، نقوم بإجراء محاولة ثانية قوية فوراً لتجنب بقاء النظام فارغاً
+    if (!localCache) {
+      try {
+        const retryData = await fetchRemoteState({ timeout: 12000, useETag: false });
+        if (retryData && !retryData.notModified) {
+          const normalized = normalizeState(retryData);
+          await saveStateLocally(normalized);
+          return { data: normalized, source: 'cloud_retry' };
+        }
+      } catch (retryErr) {
+        console.error('[Sync] Robust cloud load attempt failed:', retryErr);
+      }
     }
   }
 
-  // إذا كنا أوف لاين أو حدث بطء في الشبكة، استخدام الكاش المحلي مباشرة
+  // 3. إذا كنا أوف لاين أو حدث بطء، استخدام الكاش المحلي مباشرة
   if (localCache) {
     return { data: localCache, source: 'local_offline' };
   }

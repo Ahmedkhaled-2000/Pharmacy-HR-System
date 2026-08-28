@@ -437,9 +437,30 @@ export function filterAdminNotifications(notifications = [], state = null) {
 
     (state.requests || []).forEach((r) => addIfAdminPending(r, 'request'));
     (state.leaveRequests || []).forEach((r) => addIfAdminPending(r, 'leave'));
+    (state.permissions || []).forEach((r) => addIfAdminPending(r, 'permission'));
     (state.shiftSwaps || []).forEach((r) => addIfAdminPending(r, 'swap'));
     (state.loans || []).forEach((r) => addIfAdminPending(r, 'loan'));
     (state.resignationRequests || []).forEach((r) => addIfAdminPending(r, 'resignation'));
+
+    // Handle adjustment penalty objections
+    (state.adjustments || []).forEach((adj) => {
+      if (adj && adj.objection && (adj.objection.status === 'pending' || adj.status === 'objection_pending')) {
+        const objId = `obj_adj_${adj.id}`;
+        if (!seenReqs.has(objId) && !deletedIdsSet.has(objId)) {
+          seenReqs.add(objId);
+          addIfAdminPending({
+            id: objId,
+            type: 'penalty_objection',
+            employeeId: adj.employeeId,
+            employeeName: adj.employeeName,
+            date: adj.date,
+            reason: adj.objection.reason || adj.reason || 'تظلم على خصم مالي',
+            status: 'pending',
+            createdAt: adj.objection.submittedAt || adj.date
+          }, 'penalty_objection');
+        }
+      }
+    });
 
     // Handle late incident objections
     (state.lateIncidents || []).forEach((inc) => {

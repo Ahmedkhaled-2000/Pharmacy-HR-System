@@ -95,3 +95,105 @@ function getClientIp(): string
     }
     return (string)($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0');
 }
+
+/**
+ * دمج ذكي لبيانات النظام على الخادم لمنع مسح أو تداخل طلبات الموظفين بين الأجهزة
+ *
+ * @param array<string, mixed> $existing
+ * @param array<string, mixed> $incoming
+ * @return array<string, mixed>
+ */
+function mergeServerState(array $existing, array $incoming): array
+{
+    $deletedIds = array_unique(array_merge(
+        (array)($existing['_deletedIds'] ?? []),
+        (array)($incoming['_deletedIds'] ?? [])
+    ));
+    $deletedSet = array_flip(array_map('strval', $deletedIds));
+
+    $mergeArrayEntities = function(array $arr1, array $arr2, string $prefix = 'item') use ($deletedSet) {
+        $map = [];
+        $addOrMerge = function(array $list) use (&$map, $deletedSet, $prefix) {
+            foreach ($list as $item) {
+                if (!is_array($item)) continue;
+                $key = isset($item['id']) && $item['id'] !== '' ? (string)$item['id'] : null;
+                if (!$key && isset($item['employeeId'], $item['date'])) {
+                    $key = $item['employeeId'] . '_' . $item['date'] . '_' . ($item['type'] ?? '') . '_' . ($item['time'] ?? $item['timeIn'] ?? '');
+                }
+                if (!$key) {
+                    $key = $prefix . '_' . md5(json_encode($item));
+                }
+
+                // فحص ما إذا كان العنصر محذوفاً
+                if (isset($deletedSet[$key]) || (isset($item['id']) && isset($deletedSet[(string)$item['id']]))) {
+                    continue;
+                }
+
+                if (!isset($map[$key])) {
+                    $map[$key] = $item;
+                } else {
+                    $old = $map[$key];
+                    $tOld = strtotime((string)($old['updatedAt'] ?? $old['approvedAt'] ?? $old['createdAt'] ?? $old['timestamp'] ?? $old['date'] ?? '1970-01-01'));
+                    $tNew = strtotime((string)($item['updatedAt'] ?? $item['approvedAt'] ?? $item['createdAt'] ?? $item['timestamp'] ?? $item['date'] ?? '1970-01-01'));
+
+                    $isOldApproved = in_array($old['status'] ?? '', ['approved', 'paid', 'partial'], true) || ($old['adminApproved'] ?? false);
+                    $isNewApproved = in_array($item['status'] ?? '', ['approved', 'paid', 'partial'], true) || ($item['adminApproved'] ?? false);
+
+                    if ($isOldApproved && !$isNewApproved) {
+                        $merged = array_merge($item, $old);
+                    } elseif ($tNew >= $tOld) {
+                        $merged = array_merge($old, $item);
+                    } else {
+                        $merged = array_merge($item, $old);
+                    }
+
+                    if (isset($old['paymentsHistory']) || isset($item['paymentsHistory'])) {
+                        $pOld = (array)($old['paymentsHistory'] ?? []);
+                        $pNew = (array)($item['paymentsHistory'] ?? []);
+                        $pMap = [];
+                        foreach (array_merge($pOld, $pNew) as $p) {
+                            if (is_array($p)) {
+                                $pKey = isset($p['id']) ? (string)$p['id'] : md5(json_encode($p));
+                                $pMap[$pKey] = $p;
+                            }
+                        }
+                        $merged['paymentsHistory'] = array_values($pMap);
+                    }
+
+                    $map[$key] = $merged;
+                }
+            }
+        };
+
+        $addOrMerge($arr1);
+        $addOrMerge($arr2);
+        return array_values($map);
+    };
+
+    $merged = array_merge($existing, $incoming);
+    $arrayKeys = [
+        'employees' => 'emp',
+        'branches' => 'branch',
+        'shifts' => 'shift',
+        'requests' => 'req',
+        'leaveRequests' => 'leave',
+        'shiftSwaps' => 'swap',
+        'loans' => 'loan',
+        'resignationRequests' => 'res',
+        'notifications' => 'notif',
+        'adjustments' => 'adj',
+        'lateIncidents' => 'late_inc',
+        'evaluations' => 'eval',
+        'rosters' => 'roster',
+        'authorizedDevices' => 'dev'
+    ];
+
+    foreach ($arrayKeys as $k => $p) {
+        $eList = is_array($existing[$k] ?? null) ? $existing[$k] : [];
+        $iList = is_array($incoming[$k] ?? null) ? $incoming[$k] : [];
+        $merged[$k] = $mergeArrayEntities($eList, $iList, $p);
+    }
+
+    $merged['_deletedIds'] = array_slice($deletedIds, -3000);
+    return $merged;
+}

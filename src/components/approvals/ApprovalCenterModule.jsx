@@ -135,6 +135,19 @@ export default function ApprovalCenterModule({
     return true;
   });
 
+  const pendingRequestsList = filteredRequests.filter(req => {
+    if (!req) return false;
+    if (req.status === 'rejected' || req.status === 'cancelled') return false;
+    if (req.status === 'approved' && req.adminApproved) return false;
+    if (currentRole === 'branch') {
+      return !req.branchApproved && (req.status === 'pending' || !req.status);
+    }
+    if (currentRole === 'admin' || currentRole === 'owner') {
+      return !req.adminApproved;
+    }
+    return req.status === 'pending' || req.status === 'pending_admin' || !req.adminApproved;
+  });
+
   const handleAddRule = () => {
     if (!newRuleName.trim()) return;
     const newRule = {
@@ -285,10 +298,10 @@ export default function ApprovalCenterModule({
                   </div>
 
                   {/* Actions based on role */}
-                  {req.status === 'pending' && (
+                  {req.status !== 'rejected' && req.status !== 'cancelled' && (
                     <div style={{ display: 'flex', gap: '8px' }}>
                       {((currentRole === 'branch' && !isBranchApproved) ||
-                        (currentRole === 'admin' && !isAdminApproved)) && (
+                        ((currentRole === 'admin' || currentRole === 'owner') && !isAdminApproved)) && (
                         <>
                           <button
                             type="button"

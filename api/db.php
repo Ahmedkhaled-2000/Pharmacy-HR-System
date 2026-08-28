@@ -43,12 +43,15 @@ class Database
                     );
                 }
 
-                $pdo = new PDO($dsn, DB_USER, DB_PASS, [
+                $pdoOptions = [
                     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
                     PDO::ATTR_EMULATE_PREPARES => false,
                     PDO::ATTR_STRINGIFY_FETCHES => false,
-                ]);
+                    PDO::ATTR_TIMEOUT => 7,
+                ];
+
+                $pdo = new PDO($dsn, DB_USER, DB_PASS, $pdoOptions);
 
                 self::$instance = $pdo;
             } catch (PDOException $e) {
@@ -62,6 +65,14 @@ class Database
         }
 
         return self::$instance;
+    }
+
+    /**
+     * إعادة تعيين الاتصال عند حدوث انقطاع مؤقت
+     */
+    public static function resetConnection(): void
+    {
+        self::$instance = null;
     }
 
     /**
@@ -105,7 +116,7 @@ class Database
     }
 
     /**
-     * تنفيذ استعلام محمي وإرجاع جميع السجلات
+     * تنفيذ استعلام محمي وإرجاع جميع السجلات مع إعادة المحاولة التلقائية عند انقطاع الاتصال
      *
      * @param string $sql
      * @param mixed $typesOrParams
@@ -114,15 +125,25 @@ class Database
      */
     public static function query(string $sql, mixed $typesOrParams = '', array $params = []): array
     {
-        $db = self::getConnection();
         $actualParams = self::resolveParams($typesOrParams, $params);
         $normalizedSql = self::normalizeQuery($sql);
 
-        $stmt = $db->prepare($normalizedSql);
-        $stmt->execute($actualParams);
-
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        return is_array($rows) ? $rows : [];
+        for ($attempt = 1; $attempt <= 2; $attempt++) {
+            try {
+                $db = self::getConnection();
+                $stmt = $db->prepare($normalizedSql);
+                $stmt->execute($actualParams);
+                $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                return is_array($rows) ? $rows : [];
+            } catch (PDOException $e) {
+                if ($attempt === 1 && (str_contains($e->getMessage(), 'server closed the connection') || str_contains($e->getMessage(), 'gone away') || str_contains($e->getMessage(), 'Connection lost') || str_contains($e->getMessage(), 'Broken pipe'))) {
+                    self::resetConnection();
+                    continue;
+                }
+                throw $e;
+            }
+        }
+        return [];
     }
 
     /**
@@ -135,26 +156,38 @@ class Database
      */
     public static function execute(string $sql, mixed $typesOrParams = '', array $params = []): array
     {
-        $db = self::getConnection();
         $actualParams = self::resolveParams($typesOrParams, $params);
         $normalizedSql = self::normalizeQuery($sql);
 
-        $stmt = $db->prepare($normalizedSql);
-        $stmt->execute($actualParams);
+        for ($attempt = 1; $attempt <= 2; $attempt++) {
+            try {
+                $db = self::getConnection();
+                $stmt = $db->prepare($normalizedSql);
+                $stmt->execute($actualParams);
 
-        $affectedRows = $stmt->rowCount();
-        $insertId = 0;
+                $affectedRows = $stmt->rowCount();
+                $insertId = 0;
 
-        try {
-            $insertId = $db->lastInsertId();
-        } catch (Throwable) {
-            $insertId = 0;
+                try {
+                    $insertId = $db->lastInsertId();
+                } catch (Throwable) {
+                    $insertId = 0;
+                }
+
+                return [
+                    'affected_rows' => $affectedRows,
+                    'insert_id' => $insertId
+                ];
+            } catch (PDOException $e) {
+                if ($attempt === 1 && (str_contains($e->getMessage(), 'server closed the connection') || str_contains($e->getMessage(), 'gone away') || str_contains($e->getMessage(), 'Connection lost') || str_contains($e->getMessage(), 'Broken pipe'))) {
+                    self::resetConnection();
+                    continue;
+                }
+                throw $e;
+            }
         }
 
-        return [
-            'affected_rows' => $affectedRows,
-            'insert_id' => $insertId
-        ];
+        return ['affected_rows' => 0, 'insert_id' => 0];
     }
 
     /**

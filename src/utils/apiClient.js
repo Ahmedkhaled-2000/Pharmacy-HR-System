@@ -15,11 +15,10 @@ const getApiBaseUrl = () => {
     return import.meta.env.VITE_API_URL.replace(/\/+$/, '');
   }
 
-  // في بيئة المتصفح الحية (على الاستضافة Apex Thunder)
+  // في بيئة المتصفح الحية
   if (typeof window !== 'undefined' && window.location) {
-    const origin = window.location.origin;
-    // إذا كان يعمل على الدومين المرفوع
-    if (!origin.includes('localhost') && !origin.includes('127.0.0.1')) {
+    const { origin, protocol, hostname } = window.location;
+    if (origin && !hostname.includes('localhost') && !hostname.includes('127.0.0.1') && protocol.startsWith('http')) {
       return `${origin}/api`;
     }
   }
