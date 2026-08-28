@@ -269,7 +269,7 @@ export default function RecruitmentHubModule({
   };
 
   return (
-    <div className="fade-in" style={{ width: '100%', fontFamily: "'Tajawal', sans-serif" }}>
+    <div className="fade-in" style={{ width: '100%', fontFamily: "'Cairo', 'Tajawal', sans-serif" }}>
       
       {/* ── KPI Summary Cards ── */}
       <div style={{
@@ -280,84 +280,84 @@ export default function RecruitmentHubModule({
       }}>
         {/* Total Applications */}
         <div style={{
-          background: 'var(--surface, #1e293b)',
+          background: '#ffffff',
           borderRadius: '16px',
-          border: '1px solid var(--border)',
+          border: '1px solid #e2e8f0',
           padding: '16px 18px',
-          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)'
+          boxShadow: '0 2px 10px rgba(0, 0, 0, 0.02)'
         }}>
-          <div style={{ color: '#94a3b8', fontSize: '12.5px', fontWeight: 700 }}>📥 إجمالي الطلبات</div>
-          <div style={{ fontSize: '26px', fontWeight: 900, color: 'var(--text, #fff)', marginTop: '4px' }}>
+          <div style={{ color: '#64748b', fontSize: '12.5px', fontWeight: 800 }}>📥 إجمالي الطلبات</div>
+          <div style={{ fontSize: '26px', fontWeight: 900, color: '#0f172a', marginTop: '4px' }}>
             {stats.total}
           </div>
         </div>
 
         {/* New Applications */}
         <div style={{
-          background: 'var(--surface, #1e293b)',
+          background: '#ffffff',
           borderRadius: '16px',
-          border: '1px solid rgba(59, 130, 246, 0.4)',
+          border: '1.5px solid #bfdbfe',
           padding: '16px 18px',
-          boxShadow: '0 4px 12px rgba(59, 130, 246, 0.1)'
+          boxShadow: '0 2px 10px rgba(37, 99, 235, 0.04)'
         }}>
-          <div style={{ color: '#60a5fa', fontSize: '12.5px', fontWeight: 700 }}>🆕 طلبات جديدة</div>
-          <div style={{ fontSize: '26px', fontWeight: 900, color: '#3b82f6', marginTop: '4px' }}>
+          <div style={{ color: '#1d4ed8', fontSize: '12.5px', fontWeight: 800 }}>🆕 طلبات جديدة</div>
+          <div style={{ fontSize: '26px', fontWeight: 900, color: '#2563eb', marginTop: '4px' }}>
             {stats.newCount}
           </div>
         </div>
 
         {/* Scheduled Interviews */}
         <div style={{
-          background: 'var(--surface, #1e293b)',
+          background: '#ffffff',
           borderRadius: '16px',
-          border: '1px solid rgba(139, 92, 246, 0.4)',
+          border: '1.5px solid #ddd6fe',
           padding: '16px 18px',
-          boxShadow: '0 4px 12px rgba(139, 92, 246, 0.1)'
+          boxShadow: '0 2px 10px rgba(124, 58, 237, 0.04)'
         }}>
-          <div style={{ color: '#a78bfa', fontSize: '12.5px', fontWeight: 700 }}>📅 مقابلات مجدولة</div>
-          <div style={{ fontSize: '26px', fontWeight: 900, color: '#8b5cf6', marginTop: '4px' }}>
+          <div style={{ color: '#6d28d9', fontSize: '12.5px', fontWeight: 800 }}>📅 مقابلات مجدولة</div>
+          <div style={{ fontSize: '26px', fontWeight: 900, color: '#7c3aed', marginTop: '4px' }}>
             {stats.scheduledCount}
           </div>
         </div>
 
         {/* Interviewed */}
         <div style={{
-          background: 'var(--surface, #1e293b)',
+          background: '#ffffff',
           borderRadius: '16px',
-          border: '1px solid rgba(245, 158, 11, 0.4)',
+          border: '1.5px solid #fde68a',
           padding: '16px 18px',
-          boxShadow: '0 4px 12px rgba(245, 158, 11, 0.1)'
+          boxShadow: '0 2px 10px rgba(217, 119, 6, 0.04)'
         }}>
-          <div style={{ color: '#fbbf24', fontSize: '12.5px', fontWeight: 700 }}>📋 تمت المقابلة وبانتظار القرار</div>
-          <div style={{ fontSize: '26px', fontWeight: 900, color: '#f59e0b', marginTop: '4px' }}>
+          <div style={{ color: '#b45309', fontSize: '12.5px', fontWeight: 800 }}>📋 تمت المقابلة وبانتظار القرار</div>
+          <div style={{ fontSize: '26px', fontWeight: 900, color: '#d97706', marginTop: '4px' }}>
             {stats.interviewedCount}
           </div>
         </div>
 
         {/* Hired */}
         <div style={{
-          background: 'var(--surface, #1e293b)',
+          background: '#ffffff',
           borderRadius: '16px',
-          border: '1px solid rgba(16, 185, 129, 0.4)',
+          border: '1.5px solid #a7f3d0',
           padding: '16px 18px',
-          boxShadow: '0 4px 12px rgba(16, 185, 129, 0.1)'
+          boxShadow: '0 2px 10px rgba(5, 150, 105, 0.04)'
         }}>
-          <div style={{ color: '#34d399', fontSize: '12.5px', fontWeight: 700 }}>✅ تم القبول والتعيين</div>
-          <div style={{ fontSize: '26px', fontWeight: 900, color: '#10b981', marginTop: '4px' }}>
+          <div style={{ color: '#047857', fontSize: '12.5px', fontWeight: 800 }}>✅ تم القبول والتعيين</div>
+          <div style={{ fontSize: '26px', fontWeight: 900, color: '#059669', marginTop: '4px' }}>
             {stats.hiredCount}
           </div>
         </div>
 
         {/* Waiting List */}
         <div style={{
-          background: 'var(--surface, #1e293b)',
+          background: '#ffffff',
           borderRadius: '16px',
-          border: '1px solid rgba(234, 179, 8, 0.4)',
+          border: '1.5px solid #fed7aa',
           padding: '16px 18px',
-          boxShadow: '0 4px 12px rgba(234, 179, 8, 0.1)'
+          boxShadow: '0 2px 10px rgba(234, 88, 12, 0.04)'
         }}>
-          <div style={{ color: '#facc15', fontSize: '12.5px', fontWeight: 700 }}>⏳ قائمة الانتظار</div>
-          <div style={{ fontSize: '26px', fontWeight: 900, color: '#eab308', marginTop: '4px' }}>
+          <div style={{ color: '#c2410c', fontSize: '12.5px', fontWeight: 800 }}>⏳ قائمة الانتظار</div>
+          <div style={{ fontSize: '26px', fontWeight: 900, color: '#ea580c', marginTop: '4px' }}>
             {stats.waitingCount}
           </div>
         </div>
@@ -368,20 +368,32 @@ export default function RecruitmentHubModule({
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        background: 'var(--surface, #1e293b)',
+        background: '#ffffff',
         padding: '10px 16px',
-        borderRadius: '14px',
-        border: '1px solid var(--border)',
+        borderRadius: '16px',
+        border: '1px solid #e2e8f0',
         marginBottom: '20px',
         flexWrap: 'wrap',
-        gap: '12px'
+        gap: '12px',
+        boxShadow: '0 2px 10px rgba(0, 0, 0, 0.02)'
       }}>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           <button
             type="button"
-            className={`btn ${activeTab === 'pipeline' ? 'btn-start' : 'btn-ghost'}`}
             onClick={() => setActiveTab('pipeline')}
-            style={{ fontWeight: 800, fontSize: '13.5px', display: 'flex', alignItems: 'center', gap: '6px' }}
+            style={{
+              fontWeight: 800,
+              fontSize: '13.5px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '8px 18px',
+              borderRadius: '10px',
+              border: activeTab === 'pipeline' ? 'none' : '1px solid #cbd5e1',
+              background: activeTab === 'pipeline' ? 'linear-gradient(135deg, #0d9488, #0f766e)' : '#f8fafc',
+              color: activeTab === 'pipeline' ? '#ffffff' : '#334155',
+              cursor: 'pointer'
+            }}
           >
             <span>📑</span>
             <span>سجل طلبات التعيين ({applications.length})</span>
@@ -389,9 +401,20 @@ export default function RecruitmentHubModule({
 
           <button
             type="button"
-            className={`btn ${activeTab === 'vacancies' ? 'btn-start' : 'btn-ghost'}`}
             onClick={() => setActiveTab('vacancies')}
-            style={{ fontWeight: 800, fontSize: '13.5px', display: 'flex', alignItems: 'center', gap: '6px' }}
+            style={{
+              fontWeight: 800,
+              fontSize: '13.5px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '8px 18px',
+              borderRadius: '10px',
+              border: activeTab === 'vacancies' ? 'none' : '1px solid #cbd5e1',
+              background: activeTab === 'vacancies' ? 'linear-gradient(135deg, #0d9488, #0f766e)' : '#f8fafc',
+              color: activeTab === 'vacancies' ? '#ffffff' : '#334155',
+              cursor: 'pointer'
+            }}
           >
             <span>💼</span>
             <span>الوظائف المتاحة وشروط التعيين</span>
@@ -399,9 +422,20 @@ export default function RecruitmentHubModule({
 
           <button
             type="button"
-            className={`btn ${activeTab === 'waiting_list' ? 'btn-start' : 'btn-ghost'}`}
             onClick={() => setActiveTab('waiting_list')}
-            style={{ fontWeight: 800, fontSize: '13.5px', display: 'flex', alignItems: 'center', gap: '6px' }}
+            style={{
+              fontWeight: 800,
+              fontSize: '13.5px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '8px 18px',
+              borderRadius: '10px',
+              border: activeTab === 'waiting_list' ? 'none' : '1px solid #cbd5e1',
+              background: activeTab === 'waiting_list' ? 'linear-gradient(135deg, #0d9488, #0f766e)' : '#f8fafc',
+              color: activeTab === 'waiting_list' ? '#ffffff' : '#334155',
+              cursor: 'pointer'
+            }}
           >
             <span>⏳</span>
             <span>قائمة الانتظار وبنك الكفاءات ({stats.waitingCount})</span>
@@ -411,10 +445,10 @@ export default function RecruitmentHubModule({
         <button
           type="button"
           onClick={handleExportExcel}
-          className="btn btn-ghost"
-          style={{ background: 'rgba(34, 197, 94, 0.1)', color: '#22c55e', border: '1px solid rgba(34, 197, 94, 0.3)', padding: '6px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: 700 }}
+          style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '8px 16px', borderRadius: '10px', fontSize: '13px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
         >
-          📊 تصدير Excel
+          <span>📊</span>
+          <span>تصدير Excel</span>
         </button>
       </div>
 
@@ -435,15 +469,16 @@ export default function RecruitmentHubModule({
           
           {/* Filters & Search Toolbar */}
           <div style={{
-            background: 'var(--surface, #1e293b)',
+            background: '#ffffff',
             padding: '16px',
             borderRadius: '16px',
-            border: '1px solid var(--border)',
+            border: '1px solid #e2e8f0',
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
             flexWrap: 'wrap',
-            gap: '12px'
+            gap: '12px',
+            boxShadow: '0 2px 10px rgba(0, 0, 0, 0.02)'
           }}>
             {/* Search Input */}
             <div style={{ flex: '1 1 280px' }}>
@@ -453,7 +488,7 @@ export default function RecruitmentHubModule({
                 placeholder="🔍 بحث بالاسم، رقم الهاتف، الرقم القومي، كود الطلب..."
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', fontSize: '13.5px' }}
+                style={{ width: '100%', padding: '10px 14px', borderRadius: '10px', fontSize: '13.5px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
               />
             </div>
 
@@ -464,7 +499,7 @@ export default function RecruitmentHubModule({
                   className="form-control"
                   value={jobFilter}
                   onChange={e => setJobFilter(e.target.value)}
-                  style={{ padding: '9px 12px', borderRadius: '10px', fontSize: '13px' }}
+                  style={{ padding: '10px 12px', borderRadius: '10px', fontSize: '13px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a', fontWeight: 600 }}
                 >
                   <option value="all">كافة المسميات الوظيفية</option>
                   {availableJobTitles.map(t => (
@@ -481,14 +516,14 @@ export default function RecruitmentHubModule({
                   type="button"
                   onClick={() => setStatusFilter('all')}
                   style={{
-                    padding: '6px 12px',
+                    padding: '7px 14px',
                     borderRadius: '8px',
-                    fontSize: '12px',
-                    fontWeight: 700,
+                    fontSize: '12.5px',
+                    fontWeight: 800,
                     cursor: 'pointer',
-                    background: statusFilter === 'all' ? 'var(--primary, #2563eb)' : 'rgba(255, 255, 255, 0.06)',
-                    color: '#fff',
-                    border: 'none'
+                    background: statusFilter === 'all' ? '#0d9488' : '#f1f5f9',
+                    color: statusFilter === 'all' ? '#ffffff' : '#334155',
+                    border: statusFilter === 'all' ? 'none' : '1px solid #cbd5e1'
                   }}
                 >
                   الكل ({applications.length})
@@ -496,20 +531,21 @@ export default function RecruitmentHubModule({
 
                 {Object.values(APPLICATION_STATUSES).map(st => {
                   const count = applications.filter(a => a.status === st.id).length;
+                  const isSelected = statusFilter === st.id;
                   return (
                     <button
                       key={st.id}
                       type="button"
                       onClick={() => setStatusFilter(st.id)}
                       style={{
-                        padding: '6px 12px',
+                        padding: '7px 12px',
                         borderRadius: '8px',
                         fontSize: '12px',
-                        fontWeight: 700,
+                        fontWeight: 800,
                         cursor: 'pointer',
-                        background: statusFilter === st.id ? st.color : 'rgba(255, 255, 255, 0.06)',
-                        color: statusFilter === st.id ? '#fff' : st.color,
-                        border: 'none'
+                        background: isSelected ? st.color : st.bgColor,
+                        color: isSelected ? '#ffffff' : st.color,
+                        border: `1px solid ${isSelected ? st.color : st.borderColor}`
                       }}
                     >
                       {st.icon} {st.label} ({count})
@@ -520,12 +556,12 @@ export default function RecruitmentHubModule({
             )}
           </div>
 
-          {/* Applications List / Table */}
+          {/* Applications List / Cards */}
           {filteredApplications.length > 0 ? (
             <div style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))',
-              gap: '16px'
+              gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))',
+              gap: '18px'
             }}>
               {filteredApplications.map(app => {
                 const statusCfg = APPLICATION_STATUSES[app.status] || APPLICATION_STATUSES.new;
@@ -536,15 +572,15 @@ export default function RecruitmentHubModule({
                   <div
                     key={app.id}
                     style={{
-                      background: 'var(--surface, #1e293b)',
+                      background: '#ffffff',
                       borderRadius: '18px',
-                      border: `1px solid ${statusCfg.borderColor}`,
-                      padding: '20px',
+                      border: `1.5px solid ${statusCfg.borderColor}`,
+                      padding: '22px',
                       display: 'flex',
                       flexDirection: 'column',
                       justifyContent: 'space-between',
                       gap: '14px',
-                      boxShadow: '0 4px 16px rgba(0, 0, 0, 0.15)',
+                      boxShadow: '0 4px 16px rgba(0, 0, 0, 0.04)',
                       transition: 'transform 0.15s ease'
                     }}
                   >
@@ -553,7 +589,7 @@ export default function RecruitmentHubModule({
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                           {app.photoUrl ? (
-                            <img src={app.photoUrl} alt="Photo" style={{ width: '48px', height: '48px', borderRadius: '12px', objectFit: 'cover', border: '2px solid rgba(255, 255, 255, 0.1)' }} />
+                            <img src={app.photoUrl} alt="Photo" style={{ width: '48px', height: '48px', borderRadius: '12px', objectFit: 'cover', border: '1.5px solid #cbd5e1' }} />
                           ) : (
                             <div style={{
                               width: '48px',
@@ -562,21 +598,22 @@ export default function RecruitmentHubModule({
                               background: statusCfg.bgColor,
                               color: statusCfg.color,
                               fontSize: '18px',
-                              fontWeight: 800,
+                              fontWeight: 900,
                               display: 'flex',
                               alignItems: 'center',
-                              justifyContent: 'center'
+                              justifyContent: 'center',
+                              border: `1px solid ${statusCfg.borderColor}`
                             }}>
                               {app.name.charAt(0)}
                             </div>
                           )}
 
                           <div>
-                            <h4 style={{ margin: 0, fontSize: '17px', fontWeight: 800, color: 'var(--text, #fff)' }}>
+                            <h4 style={{ margin: 0, fontSize: '17px', fontWeight: 900, color: '#0f172a' }}>
                               {app.name}
                             </h4>
-                            <div style={{ fontSize: '12px', color: '#94a3b8' }}>
-                              كود: <span style={{ fontFamily: 'monospace', color: '#fbbf24' }}>{app.code}</span>
+                            <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>
+                              كود: <span style={{ fontFamily: 'monospace', color: '#d97706', fontWeight: 800 }}>{app.code}</span>
                             </div>
                           </div>
                         </div>
@@ -594,27 +631,27 @@ export default function RecruitmentHubModule({
                         </span>
                       </div>
 
-                      {/* Job & Qualifications Info */}
-                      <div style={{ background: 'rgba(15, 23, 42, 0.4)', padding: '12px 14px', borderRadius: '12px', fontSize: '13px', display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '10px' }}>
+                      {/* Job & Qualifications Info Box */}
+                      <div style={{ background: '#f8fafc', padding: '12px 14px', borderRadius: '12px', fontSize: '13px', display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '10px', border: '1px solid #e2e8f0' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <span style={{ color: '#94a3b8' }}>الوظيفة المطلوبة:</span>
-                          <strong style={{ color: '#38bdf8' }}>{app.targetJobTitle} ({app.department})</strong>
+                          <span style={{ color: '#64748b', fontWeight: 700 }}>الوظيفة المطلوبة:</span>
+                          <strong style={{ color: '#0284c7' }}>{app.targetJobTitle} ({app.department})</strong>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <span style={{ color: '#94a3b8' }}>الهاتف:</span>
-                          <span style={{ color: '#fff', direction: 'ltr' }}>{app.phone}</span>
+                          <span style={{ color: '#64748b', fontWeight: 700 }}>الهاتف:</span>
+                          <span style={{ color: '#0f172a', fontWeight: 800, direction: 'ltr' }}>{app.phone}</span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <span style={{ color: '#94a3b8' }}>المؤهل والخبرة:</span>
-                          <span style={{ color: '#cbd5e1' }}>{app.qualification || '—'} ({app.experienceYears || '0'} سنين)</span>
+                          <span style={{ color: '#64748b', fontWeight: 700 }}>المؤهل والخبرة:</span>
+                          <span style={{ color: '#334155', fontWeight: 600 }}>{app.qualification || '—'} ({app.experienceYears || '0'} سنين)</span>
                         </div>
                       </div>
 
                       {/* Evaluation Score Badge if available */}
                       {evalData && (
                         <div style={{
-                          background: 'rgba(16, 185, 129, 0.1)',
-                          border: '1px solid rgba(16, 185, 129, 0.3)',
+                          background: '#ecfdf5',
+                          border: '1px solid #a7f3d0',
                           padding: '8px 12px',
                           borderRadius: '10px',
                           fontSize: '12.5px',
@@ -623,10 +660,10 @@ export default function RecruitmentHubModule({
                           alignItems: 'center',
                           marginBottom: '8px'
                         }}>
-                          <div>
-                            ⭐️ <strong>تقييم المقابلة:</strong> <span style={{ color: '#10b981', fontWeight: 800 }}>{scoreResult?.percentage}%</span> ({evalData.interviewerName})
+                          <div style={{ color: '#065f46' }}>
+                            ⭐️ <strong>تقييم المقابلة:</strong> <span style={{ color: '#047857', fontWeight: 900 }}>{scoreResult?.percentage}%</span> ({evalData.interviewerName})
                           </div>
-                          <span style={{ fontSize: '11px', color: evalData.recommendation === 'recommended' ? '#10b981' : (evalData.recommendation === 'waiting_list' ? '#fbbf24' : '#ef4444'), fontWeight: 700 }}>
+                          <span style={{ fontSize: '11px', color: evalData.recommendation === 'recommended' ? '#047857' : (evalData.recommendation === 'waiting_list' ? '#b45309' : '#b91c1c'), fontWeight: 800 }}>
                             {evalData.recommendation === 'recommended' ? '🟢 موصى به' : (evalData.recommendation === 'waiting_list' ? '⏳ انتظار' : '❌ مرفوض')}
                           </span>
                         </div>
@@ -635,13 +672,14 @@ export default function RecruitmentHubModule({
                       {/* Interview Schedule Details if scheduled */}
                       {app.interviewSchedule && (
                         <div style={{
-                          background: 'rgba(139, 92, 246, 0.1)',
-                          border: '1px solid rgba(139, 92, 246, 0.3)',
+                          background: '#f5f3ff',
+                          border: '1px solid #ddd6fe',
                           padding: '8px 12px',
                           borderRadius: '10px',
                           fontSize: '12px',
-                          color: '#c4b5fd',
-                          marginBottom: '8px'
+                          color: '#5b21b6',
+                          marginBottom: '8px',
+                          fontWeight: 700
                         }}>
                           📅 المقابلة: <strong>{app.interviewSchedule.date}</strong> في <strong>{app.interviewSchedule.time}</strong> ({app.interviewSchedule.locationLabel})
                         </div>
@@ -649,12 +687,11 @@ export default function RecruitmentHubModule({
                     </div>
 
                     {/* Card Actions Footer */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #f1f5f9', paddingTop: '12px', flexWrap: 'wrap', gap: '8px' }}>
                       <button
                         type="button"
-                        className="btn btn-ghost"
                         onClick={() => handleOpenDetails(app)}
-                        style={{ padding: '6px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: 700 }}
+                        style={{ padding: '7px 16px', borderRadius: '8px', fontSize: '13px', fontWeight: 800, background: '#f1f5f9', color: '#334155', border: '1px solid #cbd5e1', cursor: 'pointer' }}
                       >
                         👁️ استعراض الملف
                       </button>
@@ -663,9 +700,8 @@ export default function RecruitmentHubModule({
                         {app.status !== 'hired' && (
                           <button
                             type="button"
-                            className="btn btn-start"
                             onClick={() => handleApproveAndHire(app)}
-                            style={{ padding: '6px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: 800, background: 'linear-gradient(135deg, #10b981, #059669)' }}
+                            style={{ padding: '7px 14px', borderRadius: '8px', fontSize: '12.5px', fontWeight: 900, background: 'linear-gradient(135deg, #10b981, #059669)', color: '#ffffff', border: 'none', cursor: 'pointer', boxShadow: '0 2px 8px rgba(16, 185, 129, 0.3)' }}
                             title="الموافقة والتعيين الفوري بملف الموظف"
                           >
                             ✅ تعيين
@@ -674,9 +710,8 @@ export default function RecruitmentHubModule({
 
                         <button
                           type="button"
-                          className="btn btn-ghost"
                           onClick={() => handleOpenSchedule(app)}
-                          style={{ padding: '6px 10px', borderRadius: '8px', fontSize: '12px' }}
+                          style={{ padding: '7px 11px', borderRadius: '8px', fontSize: '12px', background: '#f5f3ff', border: '1px solid #ddd6fe', color: '#6d28d9', cursor: 'pointer' }}
                           title="جدولة موعد مقابلة"
                         >
                           📅
@@ -686,8 +721,7 @@ export default function RecruitmentHubModule({
                           href={`https://wa.me/2${app.whatsappPhone || app.phone}`}
                           target="_blank"
                           rel="noreferrer"
-                          className="btn btn-ghost"
-                          style={{ background: 'rgba(34, 197, 94, 0.1)', color: '#22c55e', padding: '6px 10px', borderRadius: '8px', fontSize: '12px' }}
+                          style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '7px 11px', borderRadius: '8px', fontSize: '12px', textDecoration: 'none', display: 'flex', alignItems: 'center' }}
                           title="مراسلة واتساب"
                         >
                           💬
@@ -700,17 +734,18 @@ export default function RecruitmentHubModule({
             </div>
           ) : (
             <div style={{
-              background: 'var(--surface, #1e293b)',
+              background: '#ffffff',
               borderRadius: '16px',
-              border: '1px solid var(--border)',
+              border: '1px solid #e2e8f0',
               padding: '48px 20px',
-              textAlign: 'center'
+              textAlign: 'center',
+              boxShadow: '0 2px 10px rgba(0, 0, 0, 0.02)'
             }}>
               <div style={{ fontSize: '48px', marginBottom: '12px' }}>📂</div>
-              <h4 style={{ margin: '0 0 6px', color: 'var(--text, #fff)', fontSize: '18px' }}>
+              <h4 style={{ margin: '0 0 6px', color: '#0f172a', fontSize: '18px', fontWeight: 900 }}>
                 لا توجد طلبات تعيين تطابق شروط البحث الحالية
               </h4>
-              <p style={{ color: '#94a3b8', fontSize: '13.5px', margin: '0 0 16px' }}>
+              <p style={{ color: '#64748b', fontSize: '13.5px', margin: '0 0 16px', fontWeight: 600 }}>
                 {activeTab === 'waiting_list'
                   ? 'لم يتم نقل أي مرشح إلى قائمة الانتظار بعد.'
                   : 'يمكنك مشاركة رابط التقديم (/careers) لاستقبال طلبات المتقدمين الجدد.'}

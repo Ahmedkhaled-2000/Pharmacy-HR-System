@@ -301,129 +301,110 @@ export default function PublicCandidateApplyPortal({
 
   return (
     <div style={{
-      minHeight: '100vh',
-      background: 'var(--background, #0f172a)',
-      color: 'var(--text, #f8fafc)',
-      fontFamily: "'Tajawal', 'Cairo', sans-serif",
+      minHeight: '100dvh',
+      background: 'linear-gradient(145deg, #f0fdfa 0%, #f8fafc 40%, #e0f2fe 100%)',
+      color: '#0f172a',
+      fontFamily: "'Cairo', 'Tajawal', sans-serif",
       direction: 'rtl',
-      padding: '0 0 60px 0'
+      padding: '0 0 60px 0',
+      position: 'relative'
     }}>
       {/* ── Top Portal Header ── */}
       <header style={{
-        background: 'rgba(30, 41, 59, 0.75)',
-        backdropFilter: 'blur(16px)',
-        borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
-        padding: '16px 24px',
+        background: '#ffffff',
+        borderBottom: '1px solid #e2e8f0',
+        padding: '14px 20px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
         position: 'sticky',
         top: 0,
-        zIndex: 100
+        zIndex: 100,
+        boxShadow: '0 2px 10px rgba(0, 0, 0, 0.03)'
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           {logoUrl ? (
-            <img src={logoUrl} alt="Logo" style={{ width: '42px', height: '42px', borderRadius: '10px', objectFit: 'cover' }} />
+            <img src={logoUrl} alt="Logo" style={{ width: '42px', height: '42px', borderRadius: '10px', objectFit: 'contain', background: '#f8fafc', padding: '4px', border: '1px solid #e2e8f0' }} />
           ) : (
             <div style={{
               width: '42px',
               height: '42px',
-              borderRadius: '10px',
-              background: 'linear-gradient(135deg, #2563eb, #3b82f6)',
+              borderRadius: '12px',
+              background: 'linear-gradient(135deg, #0d9488, #0f766e)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               fontWeight: 900,
               fontSize: '20px',
               color: '#fff',
-              boxShadow: '0 4px 12px rgba(37, 99, 235, 0.35)'
+              boxShadow: '0 4px 12px rgba(13, 148, 136, 0.25)'
             }}>
-              HR
+              🏥
             </div>
           )}
           <div>
-            <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: 'var(--text, #fff)' }}>
+            <h1 style={{ margin: 0, fontSize: '17px', fontWeight: 900, color: '#0f172a' }}>
               {orgName}
             </h1>
-            <span style={{ fontSize: '12px', color: '#94a3b8' }}>
+            <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>
               بوابة التوظيف والانضمام لفريق العمل
             </span>
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {toggleTheme && (
-            <button
-              type="button"
-              onClick={toggleTheme}
-              className="btn btn-ghost"
-              style={{
-                borderRadius: '50%',
-                width: '38px',
-                height: '38px',
-                padding: 0,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                border: '1px solid var(--border)'
-              }}
-              title="تبديل المظهر"
-            >
-              {themeMode === 'light' ? '🌙' : '☀️'}
-            </button>
-          )}
-          <a
-            href="/login"
-            style={{
-              fontSize: '13px',
-              color: 'var(--primary, #38bdf8)',
-              textDecoration: 'none',
-              fontWeight: 'bold',
-              padding: '6px 14px',
-              borderRadius: '8px',
-              border: '1px solid rgba(56, 189, 248, 0.3)',
-              background: 'rgba(56, 189, 248, 0.08)'
-            }}
-          >
-            🔐 دخول الموظفين / الإدارة
-          </a>
-        </div>
+        {/* Note: The login button [🔐 دخول الموظفين / الإدارة] is removed as requested */}
       </header>
 
       {/* ── Main Container ── */}
-      <main style={{ maxWidth: '1000px', margin: '30px auto', padding: '0 16px' }}>
+      <main style={{ maxWidth: '1000px', margin: '24px auto', padding: '0 16px' }}>
 
         {/* Hero Section */}
         {!selectedVacancy && !submittedReceipt && (
           <div style={{
-            background: 'linear-gradient(135deg, rgba(30, 58, 138, 0.4), rgba(15, 23, 42, 0.8))',
+            background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)',
             borderRadius: '24px',
-            border: '1px solid rgba(59, 130, 246, 0.25)',
-            padding: '36px 28px',
+            padding: '36px 24px',
             textAlign: 'center',
-            marginBottom: '36px',
-            boxShadow: '0 20px 40px rgba(0, 0, 0, 0.3)'
+            marginBottom: '32px',
+            boxShadow: '0 14px 34px rgba(13, 148, 136, 0.22)',
+            color: '#ffffff'
           }}>
-            <div style={{ display: 'inline-block', padding: '6px 16px', background: 'rgba(59, 130, 246, 0.15)', borderRadius: '20px', color: '#60a5fa', fontSize: '13px', fontWeight: 700, marginBottom: '12px' }}>
+            <div style={{
+              display: 'inline-block',
+              padding: '6px 16px',
+              background: 'rgba(255, 255, 255, 0.2)',
+              backdropFilter: 'blur(8px)',
+              borderRadius: '20px',
+              color: '#ffffff',
+              fontSize: '13px',
+              fontWeight: 800,
+              marginBottom: '14px'
+            }}>
               💼 فرص وظيفية واعدة وبيئة عمل احترافية
             </div>
-            <h2 style={{ fontSize: '32px', fontWeight: 900, margin: '0 0 12px 0', color: '#fff' }}>
+            <h2 style={{ fontSize: 'clamp(22px, 5vw, 30px)', fontWeight: 900, margin: '0 0 12px 0', color: '#ffffff' }}>
               انضم إلى فريق {orgName}
             </h2>
-            <p style={{ maxWidth: '650px', margin: '0 auto 24px', color: '#cbd5e1', fontSize: '15px', lineHeight: '1.7' }}>
-              نبحث دائماً عن الكفاءات الطبية والإدارية المتميزة لمشاركتنا رحلة النجاح والتطور. اختر الوظيفة المناسبة وقدّم بياناتك وسنتواصل معك لتحديد موعد المقابلة.
+            <p style={{ maxWidth: '650px', margin: '0 auto 24px', color: '#e6fffa', fontSize: '15px', lineHeight: '1.7', fontWeight: 500 }}>
+              نبحث دائماً عن الكفاءات الطبية والإدارية المتميزة لمشاركتنا رحلة النجاح والتطور. اختر الوظيفة المناسبة وسجّل بياناتك للتواصل معك وتحديد موعد المقابلة.
             </p>
             <button
               type="button"
               onClick={handleOpenGeneralApplication}
-              className="btn btn-start"
               style={{
                 fontSize: '15px',
                 padding: '12px 28px',
                 borderRadius: '12px',
-                fontWeight: 800,
-                boxShadow: '0 6px 20px rgba(37, 99, 235, 0.4)'
+                fontWeight: 900,
+                background: '#ffffff',
+                color: '#0f766e',
+                border: 'none',
+                cursor: 'pointer',
+                boxShadow: '0 6px 20px rgba(0, 0, 0, 0.15)',
+                transition: 'transform 0.15s ease'
               }}
+              onMouseOver={e => e.currentTarget.style.transform = 'translateY(-2px)'}
+              onMouseOut={e => e.currentTarget.style.transform = 'none'}
             >
               📝 تقديم طلب توظيف عام الآن
             </button>
@@ -433,83 +414,98 @@ export default function PublicCandidateApplyPortal({
         {/* ── 1. Submission Success Receipt ── */}
         {submittedReceipt && (
           <div className="fade-in" style={{
-            background: 'var(--surface, #1e293b)',
+            background: '#ffffff',
             borderRadius: '24px',
-            border: '1px solid #10b981',
-            padding: '36px 28px',
+            border: '1.5px solid #10b981',
+            padding: '36px 24px',
             textAlign: 'center',
-            maxWidth: '650px',
+            maxWidth: '620px',
             margin: '0 auto',
-            boxShadow: '0 20px 50px rgba(16, 185, 129, 0.15)'
+            boxShadow: '0 16px 40px rgba(16, 185, 129, 0.12)'
           }}>
             <div style={{
-              width: '80px',
-              height: '80px',
+              width: '76px',
+              height: '76px',
               borderRadius: '50%',
-              background: 'rgba(16, 185, 129, 0.15)',
-              color: '#10b981',
-              fontSize: '40px',
+              background: '#ecfdf5',
+              color: '#059669',
+              fontSize: '38px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              margin: '0 auto 20px'
+              margin: '0 auto 18px',
+              border: '2px solid #a7f3d0'
             }}>
               ✓
             </div>
-            <h2 style={{ margin: '0 0 10px', fontSize: '26px', fontWeight: 900, color: '#10b981' }}>
+            <h2 style={{ margin: '0 0 10px', fontSize: '24px', fontWeight: 900, color: '#065f46' }}>
               تم استلام طلب التعيين بنجاح!
             </h2>
-            <p style={{ color: '#cbd5e1', fontSize: '14.5px', marginBottom: '24px' }}>
-              شكراً لاهتمامك بالانضمام إلينا. تم تسجيل بياناتك بنجاح في قاعدة بيانات التوظيف وسيتم مراجعتها والتواصل معك عبر الهاتف أو الواتساب.
+            <p style={{ color: '#475569', fontSize: '14.5px', marginBottom: '22px', lineHeight: '1.6' }}>
+              شكراً لاهتمامك بالانضمام إلينا. تم تسجيل بياناتك بنجاح وسيتم مراجعتها من قبل إدارة الموارد البشرية للتواصل معك عبر الهاتف أو الواتساب.
             </p>
 
             <div style={{
-              background: 'rgba(15, 23, 42, 0.6)',
+              background: '#f8fafc',
               borderRadius: '16px',
-              padding: '20px',
+              padding: '18px 20px',
               textAlign: 'right',
-              border: '1px dashed rgba(255, 255, 255, 0.2)',
+              border: '1px solid #e2e8f0',
               marginBottom: '24px'
             }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '10px' }}>
-                <span style={{ color: '#94a3b8', fontSize: '13px' }}>كود الطلب المرجعي:</span>
-                <strong style={{ color: '#38bdf8', fontSize: '16px', fontFamily: 'monospace', letterSpacing: '1px' }}>{submittedReceipt.code}</strong>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>
+                <span style={{ color: '#64748b', fontSize: '13px', fontWeight: 700 }}>كود الطلب المرجعي:</span>
+                <strong style={{ color: '#0d9488', fontSize: '16px', fontFamily: 'monospace', letterSpacing: '1px' }}>{submittedReceipt.code}</strong>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <span style={{ color: '#94a3b8', fontSize: '13px' }}>اسم المرشح:</span>
-                <strong style={{ color: '#fff', fontSize: '14px' }}>{submittedReceipt.name}</strong>
+                <span style={{ color: '#64748b', fontSize: '13px', fontWeight: 700 }}>اسم المرشح:</span>
+                <strong style={{ color: '#0f172a', fontSize: '14px' }}>{submittedReceipt.name}</strong>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <span style={{ color: '#94a3b8', fontSize: '13px' }}>الوظيفة المتقدم لها:</span>
-                <span style={{ color: '#fbbf24', fontWeight: 700 }}>{submittedReceipt.targetJobTitle} ({submittedReceipt.department})</span>
+                <span style={{ color: '#64748b', fontSize: '13px', fontWeight: 700 }}>الوظيفة المتقدم لها:</span>
+                <span style={{ color: '#0284c7', fontWeight: 800 }}>{submittedReceipt.targetJobTitle} ({submittedReceipt.department})</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <span style={{ color: '#94a3b8', fontSize: '13px' }}>رقم الهاتف المسجل:</span>
-                <span style={{ color: '#fff', direction: 'ltr' }}>{submittedReceipt.phone}</span>
+                <span style={{ color: '#64748b', fontSize: '13px', fontWeight: 700 }}>رقم الهاتف المسجل:</span>
+                <span style={{ color: '#0f172a', fontWeight: 700, direction: 'ltr' }}>{submittedReceipt.phone}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#94a3b8', fontSize: '13px' }}>تاريخ التقديم:</span>
-                <span style={{ color: '#94a3b8', fontSize: '12px' }}>{new Date(submittedReceipt.createdAt).toLocaleString('ar-EG')}</span>
+                <span style={{ color: '#64748b', fontSize: '13px', fontWeight: 700 }}>تاريخ التقديم:</span>
+                <span style={{ color: '#64748b', fontSize: '12px' }}>{new Date(submittedReceipt.createdAt).toLocaleString('ar-EG')}</span>
               </div>
             </div>
 
             <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap' }}>
               <button
                 type="button"
-                className="btn btn-ghost"
                 onClick={() => {
                   navigator.clipboard?.writeText(submittedReceipt.code);
                   showToast?.('📋 تم نسخ كود الطلب بنجاح');
                 }}
-                style={{ padding: '10px 20px', borderRadius: '10px', fontWeight: 700 }}
+                style={{
+                  padding: '10px 20px',
+                  borderRadius: '10px',
+                  fontWeight: 700,
+                  background: '#f1f5f9',
+                  color: '#334155',
+                  border: '1px solid #cbd5e1',
+                  cursor: 'pointer'
+                }}
               >
                 📋 نسخ كود الطلب
               </button>
               <button
                 type="button"
-                className="btn btn-start"
                 onClick={handleResetForm}
-                style={{ padding: '10px 24px', borderRadius: '10px', fontWeight: 800 }}
+                style={{
+                  padding: '10px 24px',
+                  borderRadius: '10px',
+                  fontWeight: 800,
+                  background: '#0d9488',
+                  color: '#ffffff',
+                  border: 'none',
+                  cursor: 'pointer'
+                }}
               >
                 🏠 العودة للشواغر المتاحة
               </button>
@@ -521,7 +517,7 @@ export default function PublicCandidateApplyPortal({
         {!selectedVacancy && !submittedReceipt && (
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 900, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span>🎯</span>
                 <span>الوظائف الشاغرة حالياً ({activeVacancies.length})</span>
               </h3>
@@ -529,62 +525,65 @@ export default function PublicCandidateApplyPortal({
 
             <div style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))',
               gap: '20px'
             }}>
               {activeVacancies.map(vac => (
                 <div
                   key={vac.id}
                   style={{
-                    background: 'var(--surface, #1e293b)',
-                    borderRadius: '18px',
-                    border: '1px solid var(--border, rgba(255, 255, 255, 0.1))',
+                    background: '#ffffff',
+                    borderRadius: '20px',
+                    border: '1px solid #e2e8f0',
                     padding: '22px',
                     display: 'flex',
                     flexDirection: 'column',
                     justifyContent: 'space-between',
                     gap: '16px',
-                    transition: 'transform 0.2s ease, border-color 0.2s ease',
-                    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.15)'
+                    transition: 'all 0.2s ease',
+                    boxShadow: '0 6px 20px rgba(0, 0, 0, 0.04)'
                   }}
                   onMouseEnter={e => {
-                    e.currentTarget.style.borderColor = 'rgba(59, 130, 246, 0.6)';
+                    e.currentTarget.style.borderColor = '#0d9488';
                     e.currentTarget.style.transform = 'translateY(-3px)';
+                    e.currentTarget.style.boxShadow = '0 12px 28px rgba(13, 148, 136, 0.12)';
                   }}
                   onMouseLeave={e => {
-                    e.currentTarget.style.borderColor = 'var(--border, rgba(255, 255, 255, 0.1))';
-                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.borderColor = '#e2e8f0';
+                    e.currentTarget.style.transform = 'none';
+                    e.currentTarget.style.boxShadow = '0 6px 20px rgba(0, 0, 0, 0.04)';
                   }}
                 >
                   <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
                       <span style={{
                         padding: '4px 10px',
-                        background: 'rgba(59, 130, 246, 0.15)',
-                        color: '#60a5fa',
+                        background: '#f0fdfa',
+                        color: '#0f766e',
+                        border: '1px solid #ccfbf1',
                         borderRadius: '8px',
                         fontSize: '12px',
-                        fontWeight: 700
+                        fontWeight: 800
                       }}>
                         {vac.department || 'الصيدلية'}
                       </span>
                       {vac.openingsCount > 1 && (
-                        <span style={{ fontSize: '11.5px', color: '#10b981', background: 'rgba(16, 185, 129, 0.1)', padding: '2px 8px', borderRadius: '6px', fontWeight: 600 }}>
+                        <span style={{ fontSize: '11.5px', color: '#047857', background: '#ecfdf5', border: '1px solid #a7f3d0', padding: '2px 8px', borderRadius: '6px', fontWeight: 700 }}>
                           مطلوب {vac.openingsCount} كوادر
                         </span>
                       )}
                     </div>
 
-                    <h4 style={{ margin: '0 0 8px', fontSize: '19px', fontWeight: 800, color: 'var(--text, #fff)' }}>
+                    <h4 style={{ margin: '0 0 8px', fontSize: '19px', fontWeight: 900, color: '#0f172a' }}>
                       {vac.jobTitle}
                     </h4>
 
-                    <p style={{ margin: '0 0 14px', color: '#94a3b8', fontSize: '13.5px', lineHeight: '1.6' }}>
+                    <p style={{ margin: '0 0 14px', color: '#475569', fontSize: '13.5px', lineHeight: '1.6' }}>
                       {vac.description}
                     </p>
 
-                    <div style={{ background: 'rgba(15, 23, 42, 0.4)', padding: '10px 12px', borderRadius: '10px', fontSize: '12.5px', color: '#cbd5e1', marginBottom: '12px' }}>
-                      <div style={{ marginBottom: '4px' }}>
+                    <div style={{ background: '#f8fafc', padding: '12px 14px', borderRadius: '12px', fontSize: '12.5px', color: '#1e293b', border: '1px solid #e2e8f0', marginBottom: '12px' }}>
+                      <div style={{ marginBottom: '6px' }}>
                         🎓 <strong>المؤهل:</strong> {vac.qualificationRequired || 'مؤهل مناسب'}
                       </div>
                       <div>
@@ -593,7 +592,7 @@ export default function PublicCandidateApplyPortal({
                     </div>
 
                     {Array.isArray(vac.requirements) && vac.requirements.length > 0 && (
-                      <ul style={{ margin: 0, paddingRight: '18px', fontSize: '12.5px', color: '#94a3b8', lineHeight: '1.6' }}>
+                      <ul style={{ margin: 0, paddingRight: '18px', fontSize: '12.5px', color: '#334155', lineHeight: '1.6' }}>
                         {vac.requirements.slice(0, 3).map((req, idx) => (
                           <li key={idx}>{req}</li>
                         ))}
@@ -604,17 +603,21 @@ export default function PublicCandidateApplyPortal({
                   <button
                     type="button"
                     onClick={() => handleSelectVacancy(vac)}
-                    className="btn btn-start"
                     style={{
                       width: '100%',
-                      padding: '10px',
-                      borderRadius: '10px',
+                      padding: '11px',
+                      borderRadius: '12px',
                       fontWeight: 800,
                       fontSize: '14px',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      gap: '6px'
+                      gap: '6px',
+                      background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)',
+                      color: '#ffffff',
+                      border: 'none',
+                      cursor: 'pointer',
+                      boxShadow: '0 4px 12px rgba(13, 148, 136, 0.25)'
                     }}
                   >
                     <span>📝</span>
@@ -629,11 +632,11 @@ export default function PublicCandidateApplyPortal({
         {/* ── 3. Multi-Step Application Form Wizard ── */}
         {selectedVacancy && !submittedReceipt && (
           <div className="fade-in" style={{
-            background: 'var(--surface, #1e293b)',
+            background: '#ffffff',
             borderRadius: '24px',
-            border: '1px solid var(--border, rgba(255, 255, 255, 0.1))',
+            border: '1px solid #e2e8f0',
             padding: '30px 24px',
-            boxShadow: '0 16px 40px rgba(0, 0, 0, 0.25)'
+            boxShadow: '0 16px 40px -10px rgba(15, 23, 42, 0.08)'
           }}>
             {/* Header / Back */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '10px' }}>
@@ -644,10 +647,10 @@ export default function PublicCandidateApplyPortal({
                   style={{
                     background: 'none',
                     border: 'none',
-                    color: '#38bdf8',
+                    color: '#0d9488',
                     cursor: 'pointer',
                     fontSize: '13px',
-                    fontWeight: 700,
+                    fontWeight: 800,
                     padding: 0,
                     marginBottom: '6px',
                     display: 'flex',
@@ -657,8 +660,8 @@ export default function PublicCandidateApplyPortal({
                 >
                   ← العودة لقائمة الوظائف المتاحة
                 </button>
-                <h3 style={{ margin: 0, fontSize: '22px', fontWeight: 800, color: 'var(--text, #fff)' }}>
-                  استمارة التقديم لوظيفة: <span style={{ color: '#38bdf8' }}>{targetJobTitle}</span>
+                <h3 style={{ margin: 0, fontSize: '22px', fontWeight: 900, color: '#0f172a' }}>
+                  استمارة التقديم لوظيفة: <span style={{ color: '#0d9488' }}>{targetJobTitle}</span>
                 </h3>
               </div>
 
@@ -668,15 +671,16 @@ export default function PublicCandidateApplyPortal({
                   <div
                     key={stepNum}
                     style={{
-                      width: '32px',
-                      height: '32px',
+                      width: '34px',
+                      height: '34px',
                       borderRadius: '50%',
-                      background: currentStep === stepNum ? '#2563eb' : (currentStep > stepNum ? '#10b981' : 'rgba(255, 255, 255, 0.1)'),
-                      color: '#fff',
+                      background: currentStep === stepNum ? '#0d9488' : (currentStep > stepNum ? '#10b981' : '#f1f5f9'),
+                      color: currentStep >= stepNum ? '#fff' : '#64748b',
+                      border: currentStep < stepNum ? '1px solid #cbd5e1' : 'none',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      fontWeight: 800,
+                      fontWeight: 900,
                       fontSize: '13px'
                     }}
                   >
@@ -689,13 +693,13 @@ export default function PublicCandidateApplyPortal({
             {/* Step 1: Job Preferences */}
             {currentStep === 1 && (
               <div className="fade-in">
-                <h4 style={{ margin: '0 0 16px', fontSize: '17px', color: '#60a5fa', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '8px' }}>
+                <h4 style={{ margin: '0 0 16px', fontSize: '16.5px', fontWeight: 800, color: '#0f766e', borderBottom: '1.5px solid #f0fdfa', paddingBottom: '8px' }}>
                   1. تحديد الوظيفة وتفضيلات العمل
                 </h4>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '20px' }}>
                   <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                       المسمى الوظيفي المستهدف *
                     </label>
                     <select
@@ -707,7 +711,7 @@ export default function PublicCandidateApplyPortal({
                         const match = jobsList.find(j => j.title === val);
                         if (match && match.department) setDepartment(match.department);
                       }}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px' }}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a', fontWeight: 600 }}
                     >
                       {jobsList.map(j => (
                         <option key={j.id || j.title} value={j.title}>{j.title}</option>
@@ -716,14 +720,14 @@ export default function PublicCandidateApplyPortal({
                   </div>
 
                   <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                       القسم التابع له
                     </label>
                     <select
                       className="form-control"
                       value={department}
                       onChange={e => setDepartment(e.target.value)}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px' }}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a', fontWeight: 600 }}
                     >
                       {departmentsList.map(d => (
                         <option key={d} value={d}>{d}</option>
@@ -732,14 +736,14 @@ export default function PublicCandidateApplyPortal({
                   </div>
 
                   <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                       الفرع المفضل للعمل
                     </label>
                     <select
                       className="form-control"
                       value={preferredBranchId}
                       onChange={e => setPreferredBranchId(e.target.value)}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px' }}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a', fontWeight: 600 }}
                     >
                       <option value="">أي فرع متاح (مرونة تامة)</option>
                       {branches.map(b => (
@@ -749,14 +753,14 @@ export default function PublicCandidateApplyPortal({
                   </div>
 
                   <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                       نوع الدوام المفضل
                     </label>
                     <select
                       className="form-control"
                       value={contractTypePreference}
                       onChange={e => setContractTypePreference(e.target.value)}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px' }}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a', fontWeight: 600 }}
                     >
                       <option value="دوام كامل">دوام كامل (Full Time)</option>
                       <option value="دوام جزئي">دوام جزئي (Part Time)</option>
@@ -766,7 +770,7 @@ export default function PublicCandidateApplyPortal({
                   </div>
 
                   <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                       الراتب المتوقع (شهرياً - اختياري)
                     </label>
                     <input
@@ -775,12 +779,12 @@ export default function PublicCandidateApplyPortal({
                       placeholder="مثال: 6000"
                       value={expectedSalary}
                       onChange={e => setExpectedSalary(e.target.value)}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px' }}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                     />
                   </div>
 
                   <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                       تاريخ الاستعداد للبدء بالعمل
                     </label>
                     <input
@@ -788,7 +792,7 @@ export default function PublicCandidateApplyPortal({
                       className="form-control"
                       value={availableStartDate}
                       onChange={e => setAvailableStartDate(e.target.value)}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px' }}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                     />
                   </div>
                 </div>
@@ -798,13 +802,13 @@ export default function PublicCandidateApplyPortal({
             {/* Step 2: Personal Information */}
             {currentStep === 2 && (
               <div className="fade-in">
-                <h4 style={{ margin: '0 0 16px', fontSize: '17px', color: '#60a5fa', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '8px' }}>
+                <h4 style={{ margin: '0 0 16px', fontSize: '16.5px', fontWeight: 800, color: '#0f766e', borderBottom: '1.5px solid #f0fdfa', paddingBottom: '8px' }}>
                   2. البيانات الشخصية ومحل الإقامة
                 </h4>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '20px' }}>
                   <div style={{ gridColumn: 'span 2' }}>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                       الاسم الكامل رباعياً (كما هو في البطاقة الشخصية) *
                     </label>
                     <input
@@ -813,13 +817,13 @@ export default function PublicCandidateApplyPortal({
                       placeholder="أحمد محمد علي حسن"
                       value={name}
                       onChange={e => setName(e.target.value)}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px' }}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                       required
                     />
                   </div>
 
                   <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                       الاسم الشائع / اللقب (اختياري)
                     </label>
                     <input
@@ -828,12 +832,12 @@ export default function PublicCandidateApplyPortal({
                       placeholder="د. أحمد"
                       value={nickname}
                       onChange={e => setNickname(e.target.value)}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px' }}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                     />
                   </div>
 
                   <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                       الرقم القومي (14 رقم) *
                     </label>
                     <input
@@ -843,13 +847,13 @@ export default function PublicCandidateApplyPortal({
                       placeholder="2980101XXXXXXXX"
                       value={nationalId}
                       onChange={e => setNationalId(e.target.value.replace(/\D/g, ''))}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', direction: 'ltr', textAlign: 'right' }}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', direction: 'ltr', textAlign: 'right', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                       required
                     />
                   </div>
 
                   <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                       تاريخ الميلاد
                     </label>
                     <input
@@ -857,19 +861,19 @@ export default function PublicCandidateApplyPortal({
                       className="form-control"
                       value={dob}
                       onChange={e => setDob(e.target.value)}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px' }}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                     />
                   </div>
 
                   <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                       النوع
                     </label>
                     <select
                       className="form-control"
                       value={gender}
                       onChange={e => setGender(e.target.value)}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px' }}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                     >
                       <option value="ذكر">ذكر</option>
                       <option value="أنثى">أنثى</option>
@@ -877,14 +881,14 @@ export default function PublicCandidateApplyPortal({
                   </div>
 
                   <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                       الحالة الاجتماعية
                     </label>
                     <select
                       className="form-control"
                       value={maritalStatus}
                       onChange={e => setMaritalStatus(e.target.value)}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px' }}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                     >
                       <option value="أعزب">أعزب</option>
                       <option value="متزوج">متزوج</option>
@@ -893,7 +897,7 @@ export default function PublicCandidateApplyPortal({
                   </div>
 
                   <div style={{ gridColumn: 'span 2' }}>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                       العنوان ومحل الإقامة الحالي بالتفصيل *
                     </label>
                     <input
@@ -902,7 +906,7 @@ export default function PublicCandidateApplyPortal({
                       placeholder="المحافظة، المدينة، اسم الشارع، رقم العقار"
                       value={address}
                       onChange={e => setAddress(e.target.value)}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px' }}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                       required
                     />
                   </div>
@@ -913,13 +917,13 @@ export default function PublicCandidateApplyPortal({
             {/* Step 3: Contact Info */}
             {currentStep === 3 && (
               <div className="fade-in">
-                <h4 style={{ margin: '0 0 16px', fontSize: '17px', color: '#60a5fa', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '8px' }}>
+                <h4 style={{ margin: '0 0 16px', fontSize: '16.5px', fontWeight: 800, color: '#0f766e', borderBottom: '1.5px solid #f0fdfa', paddingBottom: '8px' }}>
                   3. بيانات الاتصال والتواصل
                 </h4>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '20px' }}>
                   <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                       رقم الهاتف الأساسي *
                     </label>
                     <input
@@ -928,13 +932,13 @@ export default function PublicCandidateApplyPortal({
                       placeholder="010XXXXXXXX"
                       value={phone}
                       onChange={e => setPhone(e.target.value.replace(/\D/g, ''))}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', direction: 'ltr', textAlign: 'right' }}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', direction: 'ltr', textAlign: 'right', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                       required
                     />
                   </div>
 
                   <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                       رقم الواتساب (للتواصل وتأكيد المقابلة)
                     </label>
                     <input
@@ -943,12 +947,12 @@ export default function PublicCandidateApplyPortal({
                       placeholder="010XXXXXXXX"
                       value={whatsappPhone}
                       onChange={e => setWhatsappPhone(e.target.value.replace(/\D/g, ''))}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', direction: 'ltr', textAlign: 'right' }}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', direction: 'ltr', textAlign: 'right', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                     />
                   </div>
 
                   <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                       رقم هاتف قريب / الطوارئ
                     </label>
                     <input
@@ -957,12 +961,12 @@ export default function PublicCandidateApplyPortal({
                       placeholder="011XXXXXXXX"
                       value={relativePhone}
                       onChange={e => setRelativePhone(e.target.value.replace(/\D/g, ''))}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', direction: 'ltr', textAlign: 'right' }}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', direction: 'ltr', textAlign: 'right', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                     />
                   </div>
 
                   <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                       البريد الإلكتروني (Email)
                     </label>
                     <input
@@ -971,7 +975,7 @@ export default function PublicCandidateApplyPortal({
                       placeholder="example@gmail.com"
                       value={email}
                       onChange={e => setEmail(e.target.value)}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', direction: 'ltr', textAlign: 'right' }}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', direction: 'ltr', textAlign: 'right', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                     />
                   </div>
                 </div>
@@ -981,13 +985,13 @@ export default function PublicCandidateApplyPortal({
             {/* Step 4: Education & Experience */}
             {currentStep === 4 && (
               <div className="fade-in">
-                <h4 style={{ margin: '0 0 16px', fontSize: '17px', color: '#60a5fa', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '8px' }}>
+                <h4 style={{ margin: '0 0 16px', fontSize: '16.5px', fontWeight: 800, color: '#0f766e', borderBottom: '1.5px solid #f0fdfa', paddingBottom: '8px' }}>
                   4. المؤهل الأكاديمي والخبرات السابقة
                 </h4>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '20px' }}>
                   <div style={{ gridColumn: 'span 2' }}>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                       المؤهل الدراسي والتخصص *
                     </label>
                     <input
@@ -996,13 +1000,13 @@ export default function PublicCandidateApplyPortal({
                       placeholder="مثال: بكالوريوس العلوم الصيدلية"
                       value={qualification}
                       onChange={e => setQualification(e.target.value)}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px' }}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                       required
                     />
                   </div>
 
                   <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                       الجامعة / المعهد
                     </label>
                     <input
@@ -1011,12 +1015,12 @@ export default function PublicCandidateApplyPortal({
                       placeholder="مثال: جامعة القاهرة"
                       value={university}
                       onChange={e => setUniversity(e.target.value)}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px' }}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                     />
                   </div>
 
                   <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                       سنة التخرج
                     </label>
                     <input
@@ -1025,19 +1029,19 @@ export default function PublicCandidateApplyPortal({
                       placeholder="مثال: 2023"
                       value={graduationYear}
                       onChange={e => setGraduationYear(e.target.value)}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px' }}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                     />
                   </div>
 
                   <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                       التقدير العام
                     </label>
                     <select
                       className="form-control"
                       value={grade}
                       onChange={e => setGrade(e.target.value)}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px' }}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                     >
                       <option value="امتياز مع مرتبة الشرف">امتياز مع مرتبة الشرف</option>
                       <option value="امتياز">امتياز</option>
@@ -1048,14 +1052,14 @@ export default function PublicCandidateApplyPortal({
                   </div>
 
                   <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                       سنوات الخبرة العملية
                     </label>
                     <select
                       className="form-control"
                       value={experienceYears}
                       onChange={e => setExperienceYears(e.target.value)}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px' }}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                     >
                       <option value="0">حديث تخرج (بدون خبرة)</option>
                       <option value="1">سنة واحدة</option>
@@ -1067,7 +1071,7 @@ export default function PublicCandidateApplyPortal({
                   </div>
 
                   <div style={{ gridColumn: 'span 2' }}>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                       الخبرات وأماكن العمل السابقة
                     </label>
                     <textarea
@@ -1076,12 +1080,12 @@ export default function PublicCandidateApplyPortal({
                       placeholder="اذكر الصيدليات أو الشركات السابقة، المسمى الوظيفي، والمدة"
                       value={previousExperience}
                       onChange={e => setPreviousExperience(e.target.value)}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px' }}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                     />
                   </div>
 
                   <div style={{ gridColumn: 'span 2' }}>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                       المهارات الإضافية واللغات والبرامج الصيدلية
                     </label>
                     <textarea
@@ -1090,7 +1094,7 @@ export default function PublicCandidateApplyPortal({
                       placeholder="مثال: إجادة برنامج صيدليات معتمد، لغة إنجليزية جيدة، مهارات بيع وإقناع"
                       value={skills}
                       onChange={e => setSkills(e.target.value)}
-                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px' }}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                     />
                   </div>
                 </div>
@@ -1100,93 +1104,100 @@ export default function PublicCandidateApplyPortal({
             {/* Step 5: Documents & Final Submit */}
             {currentStep === 5 && (
               <div className="fade-in">
-                <h4 style={{ margin: '0 0 16px', fontSize: '17px', color: '#60a5fa', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '8px' }}>
+                <h4 style={{ margin: '0 0 16px', fontSize: '16.5px', fontWeight: 800, color: '#0f766e', borderBottom: '1.5px solid #f0fdfa', paddingBottom: '8px' }}>
                   5. المرفقات والمستندات وتأكيد الإرسال
                 </h4>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '24px' }}>
                   {/* CV Upload */}
-                  <div style={{ background: 'rgba(15, 23, 42, 0.5)', padding: '16px', borderRadius: '14px', border: '1px dashed rgba(255, 255, 255, 0.2)' }}>
-                    <label style={{ display: 'block', fontSize: '13.5px', fontWeight: 700, color: '#fff', marginBottom: '8px' }}>
+                  <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '14px', border: '1.5px dashed #cbd5e1' }}>
+                    <label style={{ display: 'block', fontSize: '13.5px', fontWeight: 800, color: '#1e293b', marginBottom: '8px' }}>
                       📄 السيرة الذاتية (CV / PDF أو صورة)
                     </label>
                     <input
                       type="file"
                       accept=".pdf,image/*"
                       onChange={e => handleFileChange(e, 'cv')}
-                      style={{ fontSize: '12px', color: '#94a3b8' }}
+                      style={{ fontSize: '12px', color: '#475569' }}
                     />
                     {cvFileName && (
-                      <div style={{ marginTop: '8px', color: '#10b981', fontSize: '12px' }}>
+                      <div style={{ marginTop: '8px', color: '#059669', fontSize: '12px', fontWeight: 700 }}>
                         ✓ تم اختيار: {cvFileName}
                       </div>
                     )}
                   </div>
 
                   {/* Personal Photo */}
-                  <div style={{ background: 'rgba(15, 23, 42, 0.5)', padding: '16px', borderRadius: '14px', border: '1px dashed rgba(255, 255, 255, 0.2)' }}>
-                    <label style={{ display: 'block', fontSize: '13.5px', fontWeight: 700, color: '#fff', marginBottom: '8px' }}>
+                  <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '14px', border: '1.5px dashed #cbd5e1' }}>
+                    <label style={{ display: 'block', fontSize: '13.5px', fontWeight: 800, color: '#1e293b', marginBottom: '8px' }}>
                       👤 الصورة الشخصية (اختياري)
                     </label>
                     <input
                       type="file"
                       accept="image/*"
                       onChange={e => handleFileChange(e, 'photo')}
-                      style={{ fontSize: '12px', color: '#94a3b8' }}
+                      style={{ fontSize: '12px', color: '#475569' }}
                     />
                     {photoUrl && (
-                      <img src={photoUrl} alt="Preview" style={{ width: '50px', height: '50px', borderRadius: '8px', objectFit: 'cover', marginTop: '8px' }} />
+                      <img src={photoUrl} alt="Preview" style={{ width: '50px', height: '50px', borderRadius: '8px', objectFit: 'cover', marginTop: '8px', border: '1px solid #cbd5e1' }} />
                     )}
                   </div>
 
                   {/* National ID Photo */}
-                  <div style={{ background: 'rgba(15, 23, 42, 0.5)', padding: '16px', borderRadius: '14px', border: '1px dashed rgba(255, 255, 255, 0.2)' }}>
-                    <label style={{ display: 'block', fontSize: '13.5px', fontWeight: 700, color: '#fff', marginBottom: '8px' }}>
+                  <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '14px', border: '1.5px dashed #cbd5e1' }}>
+                    <label style={{ display: 'block', fontSize: '13.5px', fontWeight: 800, color: '#1e293b', marginBottom: '8px' }}>
                       🪪 صورة بطاقة الرقم القومي
                     </label>
                     <input
                       type="file"
                       accept="image/*"
                       onChange={e => handleFileChange(e, 'nationalId')}
-                      style={{ fontSize: '12px', color: '#94a3b8' }}
+                      style={{ fontSize: '12px', color: '#475569' }}
                     />
                     {nationalIdPhotoUrl && (
-                      <div style={{ marginTop: '8px', color: '#10b981', fontSize: '12px' }}>✓ تم رفع صورة البطاقة</div>
+                      <div style={{ marginTop: '8px', color: '#059669', fontSize: '12px', fontWeight: 700 }}>✓ تم رفع صورة البطاقة</div>
                     )}
                   </div>
 
                   {/* Graduation Certificate Photo */}
-                  <div style={{ background: 'rgba(15, 23, 42, 0.5)', padding: '16px', borderRadius: '14px', border: '1px dashed rgba(255, 255, 255, 0.2)' }}>
-                    <label style={{ display: 'block', fontSize: '13.5px', fontWeight: 700, color: '#fff', marginBottom: '8px' }}>
+                  <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '14px', border: '1.5px dashed #cbd5e1' }}>
+                    <label style={{ display: 'block', fontSize: '13.5px', fontWeight: 800, color: '#1e293b', marginBottom: '8px' }}>
                       📜 شهادة التخرج / كارنيه النقابة
                     </label>
                     <input
                       type="file"
                       accept="image/*"
                       onChange={e => handleFileChange(e, 'gradCert')}
-                      style={{ fontSize: '12px', color: '#94a3b8' }}
+                      style={{ fontSize: '12px', color: '#475569' }}
                     />
                     {graduationCertUrl && (
-                      <div style={{ marginTop: '8px', color: '#10b981', fontSize: '12px' }}>✓ تم رفع الشهادة</div>
+                      <div style={{ marginTop: '8px', color: '#059669', fontSize: '12px', fontWeight: 700 }}>✓ تم رفع الشهادة</div>
                     )}
                   </div>
                 </div>
 
                 {/* Terms and Confirmation */}
-                <div style={{ background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.3)', padding: '14px 18px', borderRadius: '12px', fontSize: '13px', color: '#93c5fd', marginBottom: '20px' }}>
+                <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '14px 18px', borderRadius: '12px', fontSize: '13px', color: '#166534', fontWeight: 600, marginBottom: '20px' }}>
                   ℹ️ بالإرسال، أنت تؤكد صحة البيانات المدخلة وتوافق على مراجعتها من قبل إدارة الموارد البشرية لتحديد موعد المقابلة الشخصية.
                 </div>
               </div>
             )}
 
             {/* Navigation & Submit Buttons */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '24px', borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '24px', borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
               {currentStep > 1 ? (
                 <button
                   type="button"
                   onClick={handlePrevStep}
-                  className="btn btn-ghost"
-                  style={{ padding: '10px 20px', borderRadius: '10px', fontWeight: 700 }}
+                  style={{
+                    padding: '10px 20px',
+                    borderRadius: '10px',
+                    fontWeight: 700,
+                    background: '#f1f5f9',
+                    color: '#334155',
+                    border: '1px solid #cbd5e1',
+                    cursor: 'pointer'
+                  }}
                 >
                   ← الخطوة السابقة
                 </button>
@@ -1196,8 +1207,16 @@ export default function PublicCandidateApplyPortal({
                 <button
                   type="button"
                   onClick={handleNextStep}
-                  className="btn btn-start"
-                  style={{ padding: '10px 24px', borderRadius: '10px', fontWeight: 800 }}
+                  style={{
+                    padding: '11px 26px',
+                    borderRadius: '11px',
+                    fontWeight: 800,
+                    background: '#0d9488',
+                    color: '#ffffff',
+                    border: 'none',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 14px rgba(13, 148, 136, 0.3)'
+                  }}
                 >
                   التالي ({currentStep + 1} من 5) →
                 </button>
@@ -1206,14 +1225,16 @@ export default function PublicCandidateApplyPortal({
                   type="button"
                   onClick={handleSubmitApplication}
                   disabled={isSubmitting}
-                  className="btn btn-start"
                   style={{
                     padding: '12px 32px',
                     borderRadius: '12px',
                     fontWeight: 900,
                     fontSize: '15px',
                     background: 'linear-gradient(135deg, #10b981, #059669)',
-                    boxShadow: '0 4px 16px rgba(16, 185, 129, 0.4)'
+                    color: '#ffffff',
+                    border: 'none',
+                    cursor: isSubmitting ? 'wait' : 'pointer',
+                    boxShadow: '0 6px 20px rgba(16, 185, 129, 0.35)'
                   }}
                 >
                   {isSubmitting ? 'جاري إرسال الطلب...' : '🚀 تأكيد وإرسال طلب التعيين'}
@@ -1222,6 +1243,7 @@ export default function PublicCandidateApplyPortal({
             </div>
           </div>
         )}
+
       </main>
     </div>
   );

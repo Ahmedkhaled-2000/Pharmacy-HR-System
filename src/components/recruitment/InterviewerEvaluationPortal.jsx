@@ -198,118 +198,85 @@ export default function InterviewerEvaluationPortal({
 
   return (
     <div style={{
-      minHeight: '100vh',
-      background: 'var(--background, #0f172a)',
-      color: 'var(--text, #f8fafc)',
-      fontFamily: "'Tajawal', 'Cairo', sans-serif",
+      minHeight: '100dvh',
+      background: 'linear-gradient(145deg, #f0fdfa 0%, #f8fafc 40%, #e0f2fe 100%)',
+      color: '#0f172a',
+      fontFamily: "'Cairo', 'Tajawal', sans-serif",
       direction: 'rtl',
-      padding: '0 0 60px 0'
+      padding: '0 0 60px 0',
+      position: 'relative'
     }}>
       {/* ── Top Header ── */}
       <header style={{
-        background: 'rgba(30, 41, 59, 0.85)',
-        backdropFilter: 'blur(16px)',
-        borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
-        padding: '16px 24px',
+        background: '#ffffff',
+        borderBottom: '1px solid #e2e8f0',
+        padding: '14px 20px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
         position: 'sticky',
         top: 0,
-        zIndex: 100
+        zIndex: 100,
+        boxShadow: '0 2px 10px rgba(0, 0, 0, 0.03)'
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           {logoUrl ? (
-            <img src={logoUrl} alt="Logo" style={{ width: '42px', height: '42px', borderRadius: '10px', objectFit: 'cover' }} />
+            <img src={logoUrl} alt="Logo" style={{ width: '42px', height: '42px', borderRadius: '10px', objectFit: 'contain', background: '#f8fafc', padding: '4px', border: '1px solid #e2e8f0' }} />
           ) : (
             <div style={{
               width: '42px',
               height: '42px',
-              borderRadius: '10px',
-              background: 'linear-gradient(135deg, #8b5cf6, #6d28d9)',
+              borderRadius: '12px',
+              background: 'linear-gradient(135deg, #0d9488, #0f766e)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               fontWeight: 900,
               fontSize: '20px',
-              color: '#fff'
+              color: '#fff',
+              boxShadow: '0 4px 12px rgba(13, 148, 136, 0.25)'
             }}>
-              HR
+              📋
             </div>
           )}
           <div>
-            <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: 'var(--text, #fff)' }}>
+            <h1 style={{ margin: 0, fontSize: '17px', fontWeight: 900, color: '#0f172a' }}>
               {orgName}
             </h1>
-            <span style={{ fontSize: '12px', color: '#c4b5fd' }}>
-              بوابة القائم بالمقابلة الشخصية واستمارة تقييم المرشحين
+            <span style={{ fontSize: '12px', color: '#0d9488', fontWeight: 700 }}>
+              بوابة القائم بالمقابلة الشخصية وتقييم المرشحين
             </span>
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {toggleTheme && (
-            <button
-              type="button"
-              onClick={toggleTheme}
-              className="btn btn-ghost"
-              style={{
-                borderRadius: '50%',
-                width: '38px',
-                height: '38px',
-                padding: 0,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                border: '1px solid var(--border)'
-              }}
-              title="تبديل المظهر"
-            >
-              {themeMode === 'light' ? '🌙' : '☀️'}
-            </button>
-          )}
-          <a
-            href="/admin"
-            style={{
-              fontSize: '13px',
-              color: '#c4b5fd',
-              textDecoration: 'none',
-              fontWeight: 'bold',
-              padding: '6px 14px',
-              borderRadius: '8px',
-              border: '1px solid rgba(196, 181, 253, 0.3)',
-              background: 'rgba(196, 181, 253, 0.08)'
-            }}
-          >
-            🏢 لوحة شؤون الموظفين
-          </a>
-        </div>
+        {/* Note: The button [🏢 لوحة شؤون الموظفين] is removed as requested */}
       </header>
 
       {/* ── Main Content ── */}
-      <main style={{ maxWidth: '960px', margin: '30px auto', padding: '0 16px' }}>
+      <main style={{ maxWidth: '960px', margin: '24px auto', padding: '0 16px' }}>
 
         {/* ── Search Bar Section ── */}
         <div style={{
-          background: 'linear-gradient(135deg, rgba(46, 16, 101, 0.4), rgba(15, 23, 42, 0.8))',
-          borderRadius: '20px',
-          border: '1px solid rgba(139, 92, 246, 0.3)',
+          background: '#ffffff',
+          borderRadius: '24px',
+          border: '1px solid #e2e8f0',
           padding: '28px 24px',
-          marginBottom: '28px',
-          boxShadow: '0 12px 32px rgba(0, 0, 0, 0.25)'
+          marginBottom: '24px',
+          boxShadow: '0 12px 30px rgba(0, 0, 0, 0.04)'
         }}>
-          <h2 style={{ margin: '0 0 10px', fontSize: '22px', fontWeight: 800, color: '#fff' }}>
-            🔍 استدعاء بيانات المرشح للمقابلة
+          <h2 style={{ margin: '0 0 10px', fontSize: '20px', fontWeight: 900, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span>🔍</span>
+            <span>استدعاء بيانات المرشح للمقابلة</span>
           </h2>
-          <p style={{ color: '#cbd5e1', fontSize: '14px', margin: '0 0 18px', lineHeight: '1.6' }}>
-            أدخل <strong>رقم هاتف المرشح</strong> أو <strong>كود طلب التعيين</strong> لجلب كافة البيانات التي ملأها المرشح فوراً وبدء تقييم المقابلة.
+          <p style={{ color: '#475569', fontSize: '14px', margin: '0 0 18px', lineHeight: '1.6' }}>
+            أدخل <strong>رقم هاتف المرشح</strong> أو <strong>كود طلب التعيين</strong> لجلب كافة البيانات المسجلة فوراً وبدء التقييم.
           </p>
 
           <form onSubmit={handleSearch} style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
             <input
               type="text"
               className="form-control"
-              placeholder="اكتب رقم الهاتف (مثال: 01012345678) أو كود الطلب..."
+              placeholder="اكتب رقم الهاتف (مثال: 01012345678) أو كود الطلب (APP-XXXX)..."
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               style={{
@@ -317,21 +284,24 @@ export default function InterviewerEvaluationPortal({
                 padding: '12px 16px',
                 borderRadius: '12px',
                 fontSize: '15px',
-                background: 'rgba(15, 23, 42, 0.8)',
-                border: '1px solid rgba(139, 92, 246, 0.4)',
-                color: '#fff'
+                background: '#f8fafc',
+                border: '1.8px solid #cbd5e1',
+                color: '#0f172a',
+                fontFamily: "'Cairo', 'Tajawal', sans-serif"
               }}
             />
             <button
               type="submit"
-              className="btn btn-start"
               style={{
                 padding: '12px 28px',
                 borderRadius: '12px',
-                fontWeight: 800,
+                fontWeight: 900,
                 fontSize: '15px',
-                background: 'linear-gradient(135deg, #8b5cf6, #6d28d9)',
-                boxShadow: '0 4px 14px rgba(139, 92, 246, 0.4)'
+                background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)',
+                color: '#ffffff',
+                border: 'none',
+                cursor: 'pointer',
+                boxShadow: '0 4px 14px rgba(13, 148, 136, 0.3)'
               }}
             >
               بحث وجلب البيانات ⚡
@@ -340,31 +310,32 @@ export default function InterviewerEvaluationPortal({
 
           {/* Quick Shortcuts for pending candidates */}
           {pendingCandidates.length > 0 && !selectedApp && (
-            <div style={{ marginTop: '20px', borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '14px' }}>
-              <span style={{ fontSize: '12.5px', color: '#a78bfa', fontWeight: 700, display: 'block', marginBottom: '8px' }}>
+            <div style={{ marginTop: '20px', borderTop: '1px solid #f1f5f9', paddingTop: '14px' }}>
+              <span style={{ fontSize: '12.5px', color: '#0f766e', fontWeight: 800, display: 'block', marginBottom: '8px' }}>
                 📋 مرشحون بانتظار المقابلة ({pendingCandidates.length}):
               </span>
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                {pendingCandidates.slice(0, 5).map(cand => (
+                {pendingCandidates.slice(0, 6).map(cand => (
                   <button
                     key={cand.id}
                     type="button"
                     onClick={() => loadCandidateData(cand)}
                     style={{
-                      background: 'rgba(139, 92, 246, 0.15)',
-                      border: '1px solid rgba(139, 92, 246, 0.3)',
-                      color: '#ddd6fe',
+                      background: '#f0fdfa',
+                      border: '1px solid #ccfbf1',
+                      color: '#0f766e',
                       padding: '6px 12px',
                       borderRadius: '8px',
-                      fontSize: '12px',
+                      fontSize: '12.5px',
                       cursor: 'pointer',
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '6px'
+                      gap: '6px',
+                      fontWeight: 700
                     }}
                   >
                     <span>👤 {cand.name}</span>
-                    <span style={{ color: '#fbbf24', fontSize: '11px' }}>({cand.targetJobTitle})</span>
+                    <span style={{ color: '#0284c7', fontSize: '11.5px' }}>({cand.targetJobTitle})</span>
                   </button>
                 ))}
               </div>
@@ -375,31 +346,38 @@ export default function InterviewerEvaluationPortal({
         {/* ── Submission Success Receipt ── */}
         {submissionSuccess && selectedApp && (
           <div className="fade-in" style={{
-            background: 'var(--surface, #1e293b)',
+            background: '#ffffff',
             borderRadius: '20px',
-            border: '1px solid #10b981',
+            border: '1.5px solid #10b981',
             padding: '28px',
             textAlign: 'center',
             marginBottom: '28px',
-            boxShadow: '0 10px 30px rgba(16, 185, 129, 0.15)'
+            boxShadow: '0 12px 30px rgba(16, 185, 129, 0.12)'
           }}>
             <div style={{ fontSize: '40px', marginBottom: '10px' }}>✅</div>
-            <h3 style={{ margin: '0 0 8px', fontSize: '22px', fontWeight: 800, color: '#10b981' }}>
-              تم حفظ وإرسال تقرير المقابلة للإدارة العليا!
+            <h3 style={{ margin: '0 0 8px', fontSize: '22px', fontWeight: 900, color: '#065f46' }}>
+              تم حفظ وإرسال تقرير المقابلة للإدارة بنجاح!
             </h3>
-            <p style={{ color: '#cbd5e1', fontSize: '14px', marginBottom: '16px' }}>
+            <p style={{ color: '#475569', fontSize: '14px', marginBottom: '16px' }}>
               تم توثيق تقييم المرشح ({selectedApp.name}) بنجاح وإرسال الإشعار والتوصيات للإدارة لاتخاذ القرار النهائي.
             </p>
             <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
               <button
                 type="button"
-                className="btn btn-ghost"
                 onClick={() => {
                   setSelectedApp(null);
                   setSubmissionSuccess(false);
                   setSearchQuery('');
                 }}
-                style={{ padding: '8px 20px', borderRadius: '10px' }}
+                style={{
+                  padding: '9px 24px',
+                  borderRadius: '10px',
+                  fontWeight: 800,
+                  background: '#0d9488',
+                  color: '#fff',
+                  border: 'none',
+                  cursor: 'pointer'
+                }}
               >
                 🔍 تقييم مرشح آخر
               </button>
@@ -412,30 +390,30 @@ export default function InterviewerEvaluationPortal({
           <div className="fade-in">
             {/* Candidate Summary Card */}
             <div style={{
-              background: 'var(--surface, #1e293b)',
+              background: '#ffffff',
               borderRadius: '20px',
-              border: '1px solid var(--border, rgba(255, 255, 255, 0.1))',
+              border: '1px solid #e2e8f0',
               padding: '24px',
               marginBottom: '24px',
-              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.2)'
+              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.04)'
             }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '14px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                   {selectedApp.photoUrl ? (
-                    <img src={selectedApp.photoUrl} alt="Photo" style={{ width: '64px', height: '64px', borderRadius: '14px', objectFit: 'cover', border: '2px solid #8b5cf6' }} />
+                    <img src={selectedApp.photoUrl} alt="Photo" style={{ width: '64px', height: '64px', borderRadius: '14px', objectFit: 'cover', border: '2px solid #0d9488' }} />
                   ) : (
                     <div style={{
                       width: '64px',
                       height: '64px',
                       borderRadius: '14px',
-                      background: 'rgba(139, 92, 246, 0.2)',
-                      color: '#a78bfa',
+                      background: '#f0fdfa',
+                      color: '#0d9488',
                       fontSize: '24px',
-                      fontWeight: 800,
+                      fontWeight: 900,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      border: '2px solid rgba(139, 92, 246, 0.4)'
+                      border: '2px solid #ccfbf1'
                     }}>
                       {selectedApp.name.charAt(0)}
                     </div>
@@ -443,23 +421,24 @@ export default function InterviewerEvaluationPortal({
 
                   <div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                      <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 800, color: '#fff' }}>
+                      <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 900, color: '#0f172a' }}>
                         {selectedApp.name}
                       </h3>
                       <span style={{
-                        padding: '2px 8px',
+                        padding: '3px 10px',
                         borderRadius: '6px',
                         fontSize: '11.5px',
-                        fontWeight: 700,
-                        background: APPLICATION_STATUSES[selectedApp.status]?.bgColor || 'rgba(255,255,255,0.1)',
-                        color: APPLICATION_STATUSES[selectedApp.status]?.color || '#fff'
+                        fontWeight: 800,
+                        background: APPLICATION_STATUSES[selectedApp.status]?.bgColor || '#f1f5f9',
+                        color: APPLICATION_STATUSES[selectedApp.status]?.color || '#334155',
+                        border: `1px solid ${APPLICATION_STATUSES[selectedApp.status]?.borderColor || '#cbd5e1'}`
                       }}>
                         {APPLICATION_STATUSES[selectedApp.status]?.label || selectedApp.status}
                       </span>
                     </div>
 
-                    <div style={{ fontSize: '13px', color: '#94a3b8', marginTop: '4px' }}>
-                      الوظيفة المتقدم لها: <strong style={{ color: '#38bdf8' }}>{selectedApp.targetJobTitle}</strong> ({selectedApp.department}) · كود الطلب: <span style={{ fontFamily: 'monospace', color: '#fbbf24' }}>{selectedApp.code}</span>
+                    <div style={{ fontSize: '13px', color: '#64748b', marginTop: '4px', fontWeight: 600 }}>
+                      الوظيفة المتقدم لها: <strong style={{ color: '#0284c7' }}>{selectedApp.targetJobTitle}</strong> ({selectedApp.department}) · كود الطلب: <span style={{ fontFamily: 'monospace', color: '#d97706' }}>{selectedApp.code}</span>
                     </div>
                   </div>
                 </div>
@@ -470,15 +449,13 @@ export default function InterviewerEvaluationPortal({
                     href={`https://wa.me/2${selectedApp.phone}`}
                     target="_blank"
                     rel="noreferrer"
-                    className="btn btn-ghost"
-                    style={{ background: 'rgba(34, 197, 94, 0.1)', color: '#22c55e', border: '1px solid rgba(34, 197, 94, 0.3)', padding: '6px 12px', borderRadius: '8px', fontSize: '12.5px', fontWeight: 700 }}
+                    style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '7px 14px', borderRadius: '8px', fontSize: '12.5px', fontWeight: 800, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px' }}
                   >
                     💬 واتساب
                   </a>
                   <a
                     href={`tel:${selectedApp.phone}`}
-                    className="btn btn-ghost"
-                    style={{ padding: '6px 12px', borderRadius: '8px', fontSize: '12.5px', fontWeight: 700 }}
+                    style={{ background: '#f8fafc', color: '#334155', border: '1px solid #cbd5e1', padding: '7px 14px', borderRadius: '8px', fontSize: '12.5px', fontWeight: 800, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px' }}
                   >
                     📞 اتصال ({selectedApp.phone})
                   </a>
@@ -487,8 +464,7 @@ export default function InterviewerEvaluationPortal({
                       href={selectedApp.cvUrl}
                       target="_blank"
                       rel="noreferrer"
-                      className="btn btn-ghost"
-                      style={{ background: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)', padding: '6px 12px', borderRadius: '8px', fontSize: '12.5px', fontWeight: 700 }}
+                      style={{ background: '#f0fdfa', color: '#0f766e', border: '1px solid #ccfbf1', padding: '7px 14px', borderRadius: '8px', fontSize: '12.5px', fontWeight: 800, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px' }}
                     >
                       📄 عرض الـ CV
                     </a>
@@ -502,10 +478,12 @@ export default function InterviewerEvaluationPortal({
                 gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
                 gap: '12px',
                 marginTop: '18px',
-                background: 'rgba(15, 23, 42, 0.5)',
+                background: '#f8fafc',
                 padding: '14px 16px',
                 borderRadius: '12px',
-                fontSize: '13px'
+                fontSize: '13px',
+                border: '1px solid #e2e8f0',
+                color: '#1e293b'
               }}>
                 <div>🎓 <strong>المؤهل:</strong> {selectedApp.qualification || 'غير محدد'} ({selectedApp.graduationYear || ''})</div>
                 <div>🏛️ <strong>الجامعة:</strong> {selectedApp.university || 'غير محدد'} ({selectedApp.grade || ''})</div>
@@ -516,7 +494,7 @@ export default function InterviewerEvaluationPortal({
               </div>
 
               {selectedApp.previousExperience && (
-                <div style={{ marginTop: '12px', fontSize: '13px', color: '#cbd5e1', background: 'rgba(15, 23, 42, 0.3)', padding: '10px 14px', borderRadius: '10px' }}>
+                <div style={{ marginTop: '12px', fontSize: '13px', color: '#334155', background: '#f1f5f9', padding: '10px 14px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
                   💼 <strong>الخبرات السابقة:</strong> {selectedApp.previousExperience}
                 </div>
               )}
@@ -524,13 +502,13 @@ export default function InterviewerEvaluationPortal({
 
             {/* Evaluation Form */}
             <form onSubmit={handleSubmitEvaluation} style={{
-              background: 'var(--surface, #1e293b)',
+              background: '#ffffff',
               borderRadius: '20px',
-              border: '1px solid var(--border, rgba(255, 255, 255, 0.1))',
+              border: '1px solid #e2e8f0',
               padding: '28px 24px',
-              boxShadow: '0 12px 32px rgba(0, 0, 0, 0.25)'
+              boxShadow: '0 12px 32px rgba(0, 0, 0, 0.05)'
             }}>
-              <h3 style={{ margin: '0 0 18px', fontSize: '20px', fontWeight: 800, color: '#a78bfa', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <h3 style={{ margin: '0 0 18px', fontSize: '19px', fontWeight: 900, color: '#0f766e', borderBottom: '1.5px solid #f0fdfa', paddingBottom: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span>⭐️</span>
                 <span>استمارة تقييم المقابلة الشخصية والمهنية</span>
               </h3>
@@ -538,7 +516,7 @@ export default function InterviewerEvaluationPortal({
               {/* Interviewer Info */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '24px' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                     اسم القائم بالمقابلة *
                   </label>
                   <input
@@ -547,13 +525,13 @@ export default function InterviewerEvaluationPortal({
                     placeholder="د. مصطفى أحمد"
                     value={interviewerName}
                     onChange={e => setInterviewerName(e.target.value)}
-                    style={{ width: '100%', padding: '10px 12px', borderRadius: '10px' }}
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                     required
                   />
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                     الصفة الوظيفية للمقابل
                   </label>
                   <input
@@ -562,12 +540,12 @@ export default function InterviewerEvaluationPortal({
                     placeholder="مدير فرع / مسؤول الموارد البشرية"
                     value={interviewerJobTitle}
                     onChange={e => setInterviewerJobTitle(e.target.value)}
-                    style={{ width: '100%', padding: '10px 12px', borderRadius: '10px' }}
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                   />
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                     تاريخ المقابلة
                   </label>
                   <input
@@ -575,20 +553,20 @@ export default function InterviewerEvaluationPortal({
                     className="form-control"
                     value={interviewDate}
                     onChange={e => setInterviewDate(e.target.value)}
-                    style={{ width: '100%', padding: '10px 12px', borderRadius: '10px' }}
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                   />
                 </div>
               </div>
 
               {/* Evaluation Rubrics */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginBottom: '24px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '18px', marginBottom: '24px' }}>
                 
                 {/* 1. Technical & Pharmacy Competence */}
-                <div style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '18px', borderRadius: '14px', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                <div style={{ background: '#f8fafc', padding: '18px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
                     <div>
-                      <strong style={{ fontSize: '15px', color: '#fff' }}>1. الكفاءة الفنية والتخصصية</strong>
-                      <div style={{ fontSize: '12px', color: '#94a3b8' }}>المعرفة الصيدلية/الفنية، الخبرة العملية، الدقة والتعامل مع المنظومة</div>
+                      <strong style={{ fontSize: '15px', color: '#0f172a' }}>1. الكفاءة الفنية والتخصصية</strong>
+                      <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>المعرفة الصيدلية/الفنية، الخبرة العملية، الدقة والتعامل مع المنظومة</div>
                     </div>
 
                     {/* Star / Number Rating */}
@@ -601,12 +579,13 @@ export default function InterviewerEvaluationPortal({
                           style={{
                             padding: '6px 12px',
                             borderRadius: '8px',
-                            background: technicalSkills >= star ? '#f59e0b' : 'rgba(255, 255, 255, 0.08)',
-                            color: technicalSkills >= star ? '#000' : '#94a3b8',
-                            border: 'none',
+                            background: technicalSkills >= star ? '#f59e0b' : '#ffffff',
+                            color: technicalSkills >= star ? '#ffffff' : '#64748b',
+                            border: '1px solid #cbd5e1',
                             cursor: 'pointer',
-                            fontWeight: 800,
-                            fontSize: '13px'
+                            fontWeight: 900,
+                            fontSize: '13px',
+                            boxShadow: technicalSkills >= star ? '0 2px 6px rgba(245, 158, 11, 0.4)' : 'none'
                           }}
                         >
                           ★ {star}
@@ -621,16 +600,16 @@ export default function InterviewerEvaluationPortal({
                     placeholder="ملاحظات فنية حول مستوى المرشح الصيدلي/الفني..."
                     value={technicalNotes}
                     onChange={e => setTechnicalNotes(e.target.value)}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', fontSize: '13px' }}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', fontSize: '13px', background: '#ffffff', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                   />
                 </div>
 
                 {/* 2. Soft Skills & Communication */}
-                <div style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '18px', borderRadius: '14px', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                <div style={{ background: '#f8fafc', padding: '18px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
                     <div>
-                      <strong style={{ fontSize: '15px', color: '#fff' }}>2. المهارات الشخصية والسلوكية والتواصل</strong>
-                      <div style={{ fontSize: '12px', color: '#94a3b8' }}>اللباقة، المظهر العام، التعامل مع العملاء، العمل تحت الضغط</div>
+                      <strong style={{ fontSize: '15px', color: '#0f172a' }}>2. المهارات الشخصية والسلوكية والتواصل</strong>
+                      <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>اللباقة، المظهر العام، التعامل مع العملاء، العمل تحت الضغط</div>
                     </div>
 
                     <div style={{ display: 'flex', gap: '6px' }}>
@@ -642,12 +621,13 @@ export default function InterviewerEvaluationPortal({
                           style={{
                             padding: '6px 12px',
                             borderRadius: '8px',
-                            background: softSkills >= star ? '#f59e0b' : 'rgba(255, 255, 255, 0.08)',
-                            color: softSkills >= star ? '#000' : '#94a3b8',
-                            border: 'none',
+                            background: softSkills >= star ? '#f59e0b' : '#ffffff',
+                            color: softSkills >= star ? '#ffffff' : '#64748b',
+                            border: '1px solid #cbd5e1',
                             cursor: 'pointer',
-                            fontWeight: 800,
-                            fontSize: '13px'
+                            fontWeight: 900,
+                            fontSize: '13px',
+                            boxShadow: softSkills >= star ? '0 2px 6px rgba(245, 158, 11, 0.4)' : 'none'
                           }}
                         >
                           ★ {star}
@@ -662,15 +642,15 @@ export default function InterviewerEvaluationPortal({
                     placeholder="ملاحظات سلوكية وتواصل..."
                     value={softSkillsNotes}
                     onChange={e => setSoftSkillsNotes(e.target.value)}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', fontSize: '13px' }}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', fontSize: '13px', background: '#ffffff', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                   />
                 </div>
 
                 {/* 3. Language & Computer Skills & Culture Fit */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '16px' }}>
-                  <div style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '16px', borderRadius: '14px' }}>
+                  <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                      <strong style={{ fontSize: '14px', color: '#fff' }}>3. برامج الحاسب واللغات</strong>
+                      <strong style={{ fontSize: '14px', color: '#0f172a' }}>3. برامج الحاسب واللغات</strong>
                       <div style={{ display: 'flex', gap: '4px' }}>
                         {[1, 2, 3, 4, 5].map(star => (
                           <button
@@ -680,12 +660,12 @@ export default function InterviewerEvaluationPortal({
                             style={{
                               padding: '4px 8px',
                               borderRadius: '6px',
-                              background: languageTech >= star ? '#3b82f6' : 'rgba(255, 255, 255, 0.08)',
-                              color: '#fff',
-                              border: 'none',
+                              background: languageTech >= star ? '#0d9488' : '#ffffff',
+                              color: languageTech >= star ? '#fff' : '#64748b',
+                              border: '1px solid #cbd5e1',
                               cursor: 'pointer',
                               fontSize: '11.5px',
-                              fontWeight: 700
+                              fontWeight: 800
                             }}
                           >
                             {star}
@@ -695,9 +675,9 @@ export default function InterviewerEvaluationPortal({
                     </div>
                   </div>
 
-                  <div style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '16px', borderRadius: '14px' }}>
+                  <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                      <strong style={{ fontSize: '14px', color: '#fff' }}>4. الانضباط والالتزام والملاءمة</strong>
+                      <strong style={{ fontSize: '14px', color: '#0f172a' }}>4. الانضباط والالتزام والملاءمة</strong>
                       <div style={{ display: 'flex', gap: '4px' }}>
                         {[1, 2, 3, 4, 5].map(star => (
                           <button
@@ -707,12 +687,12 @@ export default function InterviewerEvaluationPortal({
                             style={{
                               padding: '4px 8px',
                               borderRadius: '6px',
-                              background: cultureFit >= star ? '#3b82f6' : 'rgba(255, 255, 255, 0.08)',
-                              color: '#fff',
-                              border: 'none',
+                              background: cultureFit >= star ? '#0d9488' : '#ffffff',
+                              color: cultureFit >= star ? '#fff' : '#64748b',
+                              border: '1px solid #cbd5e1',
                               cursor: 'pointer',
                               fontSize: '11.5px',
-                              fontWeight: 700
+                              fontWeight: 800
                             }}
                           >
                             {star}
@@ -727,7 +707,7 @@ export default function InterviewerEvaluationPortal({
               {/* Proposed Salary & Final Recommendation */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '20px' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                     الراتب المقترح / المتفق عليه أثناء المقابلة
                   </label>
                   <input
@@ -736,12 +716,12 @@ export default function InterviewerEvaluationPortal({
                     placeholder="مثال: 6500"
                     value={proposedSalary}
                     onChange={e => setProposedSalary(e.target.value)}
-                    style={{ width: '100%', padding: '10px 12px', borderRadius: '10px' }}
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                   />
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                     التوصية النهائية للمقابل *
                   </label>
                   <select
@@ -753,7 +733,9 @@ export default function InterviewerEvaluationPortal({
                       padding: '10px 12px',
                       borderRadius: '10px',
                       fontWeight: 800,
-                      color: recommendation === 'recommended' ? '#10b981' : (recommendation === 'waiting_list' ? '#f59e0b' : '#ef4444')
+                      background: '#f8fafc',
+                      border: '1.5px solid #cbd5e1',
+                      color: recommendation === 'recommended' ? '#047857' : (recommendation === 'waiting_list' ? '#b45309' : '#b91c1c')
                     }}
                   >
                     <option value="recommended">🟢 يوصى بالتعيين الفوري (Recommended)</option>
@@ -765,7 +747,7 @@ export default function InterviewerEvaluationPortal({
 
               {/* General Notes */}
               <div style={{ marginBottom: '24px' }}>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                   ملاحظات وتوصيات المقابل للإدارة العليا
                 </label>
                 <textarea
@@ -774,31 +756,40 @@ export default function InterviewerEvaluationPortal({
                   placeholder="اكتب أي ملاحظات إضافية حول جاهزية المرشح، نقاط القوة والضعف..."
                   value={generalNotes}
                   onChange={e => setGeneralNotes(e.target.value)}
-                  style={{ width: '100%', padding: '10px 12px', borderRadius: '10px' }}
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                 />
               </div>
 
               {/* Submit Buttons */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
                 <button
                   type="button"
                   onClick={() => setSelectedApp(null)}
-                  className="btn btn-ghost"
-                  style={{ padding: '10px 20px', borderRadius: '10px' }}
+                  style={{
+                    padding: '10px 20px',
+                    borderRadius: '10px',
+                    fontWeight: 700,
+                    background: '#f1f5f9',
+                    color: '#334155',
+                    border: '1px solid #cbd5e1',
+                    cursor: 'pointer'
+                  }}
                 >
                   إلغاء
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="btn btn-start"
                   style={{
                     padding: '12px 32px',
                     borderRadius: '12px',
                     fontWeight: 900,
                     fontSize: '15px',
-                    background: 'linear-gradient(135deg, #8b5cf6, #6d28d9)',
-                    boxShadow: '0 4px 16px rgba(139, 92, 246, 0.4)'
+                    background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)',
+                    color: '#ffffff',
+                    border: 'none',
+                    cursor: isSubmitting ? 'wait' : 'pointer',
+                    boxShadow: '0 4px 16px rgba(13, 148, 136, 0.35)'
                   }}
                 >
                   {isSubmitting ? 'جاري الإرسال...' : '🚀 اعتماد وإرسال تقييم المقابلة للإدارة'}

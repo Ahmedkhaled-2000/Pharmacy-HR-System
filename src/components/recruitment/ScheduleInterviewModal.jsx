@@ -92,19 +92,21 @@ ${notes ? `📝 ملاحظات: ${notes}` : ''}
         style={{
           maxWidth: '550px',
           width: '95%',
-          background: 'var(--surface, #1e293b)',
+          background: '#ffffff',
           borderRadius: '20px',
           padding: '24px',
-          fontFamily: "'Tajawal', 'Cairo', sans-serif"
+          border: '1px solid #e2e8f0',
+          boxShadow: '0 20px 45px rgba(0, 0, 0, 0.15)',
+          fontFamily: "'Cairo', 'Tajawal', sans-serif"
         }}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '12px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px' }}>
           <div>
-            <h3 style={{ margin: 0, fontSize: '19px', fontWeight: 800, color: 'var(--text)' }}>
+            <h3 style={{ margin: 0, fontSize: '19px', fontWeight: 900, color: '#0f172a' }}>
               📅 جدولة موعد مقابلة شخصية
             </h3>
-            <span style={{ fontSize: '13px', color: '#94a3b8' }}>
-              المرشح: <strong style={{ color: '#38bdf8' }}>{applicant.name}</strong> ({applicant.targetJobTitle})
+            <span style={{ fontSize: '13px', color: '#64748b', fontWeight: 600 }}>
+              المرشح: <strong style={{ color: '#0284c7' }}>{applicant.name}</strong> ({applicant.targetJobTitle})
             </span>
           </div>
           <button type="button" className="close-btn" onClick={onClose} style={{ fontSize: '18px' }}>✕</button>
@@ -113,7 +115,7 @@ ${notes ? `📝 ملاحظات: ${notes}` : ''}
         <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
             <div>
-              <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                 تاريخ المقابلة *
               </label>
               <input
@@ -121,13 +123,13 @@ ${notes ? `📝 ملاحظات: ${notes}` : ''}
                 className="form-control"
                 value={date}
                 onChange={e => setDate(e.target.value)}
-                style={{ width: '100%', padding: '8px 12px', borderRadius: '8px' }}
+                style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                 required
               />
             </div>
 
             <div>
-              <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                 الوقت والتوقيت *
               </label>
               <input
@@ -135,7 +137,7 @@ ${notes ? `📝 ملاحظات: ${notes}` : ''}
                 className="form-control"
                 value={time}
                 onChange={e => setTime(e.target.value)}
-                style={{ width: '100%', padding: '8px 12px', borderRadius: '8px' }}
+                style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                 required
               />
             </div>
@@ -143,14 +145,14 @@ ${notes ? `📝 ملاحظات: ${notes}` : ''}
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
             <div>
-              <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                 نوع ومقر المقابلة
               </label>
               <select
                 className="form-control"
                 value={locationType}
                 onChange={e => setLocationType(e.target.value)}
-                style={{ width: '100%', padding: '8px 12px', borderRadius: '8px' }}
+                style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
               >
                 <option value="branch">مقر أحد الفروع</option>
                 <option value="headquarters">مقر الإدارة العامة</option>
@@ -161,14 +163,14 @@ ${notes ? `📝 ملاحظات: ${notes}` : ''}
 
             {locationType === 'branch' && (
               <div>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                   اختيار الفرع
                 </label>
                 <select
                   className="form-control"
                   value={branchId}
                   onChange={e => setBranchId(e.target.value)}
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px' }}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                 >
                   {branches.map(b => (
                     <option key={b.id} value={b.id}>{b.name}</option>
@@ -179,7 +181,7 @@ ${notes ? `📝 ملاحظات: ${notes}` : ''}
 
             {locationType === 'custom' && (
               <div>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                   العنوان المخصص
                 </label>
                 <input
@@ -188,14 +190,14 @@ ${notes ? `📝 ملاحظات: ${notes}` : ''}
                   placeholder="اكتب العنوان بالتفصيل"
                   value={customLocation}
                   onChange={e => setCustomLocation(e.target.value)}
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px' }}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                 />
               </div>
             )}
           </div>
 
           <div>
-            <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
               اسم القائم بالمقابلة / المحاور (اختياري)
             </label>
             <input
@@ -204,12 +206,12 @@ ${notes ? `📝 ملاحظات: ${notes}` : ''}
               placeholder="مثال: د. مصطفى - مدير فرع ..."
               value={interviewerName}
               onChange={e => setInterviewerName(e.target.value)}
-              style={{ width: '100%', padding: '8px 12px', borderRadius: '8px' }}
+              style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
             />
           </div>
 
           <div>
-            <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
               ملاحظات وتعليمات للمرشح
             </label>
             <textarea
@@ -218,16 +220,15 @@ ${notes ? `📝 ملاحظات: ${notes}` : ''}
               placeholder="مثال: إحضار أصل شهادة التخرج والمستندات الرسمية..."
               value={notes}
               onChange={e => setNotes(e.target.value)}
-              style={{ width: '100%', padding: '8px 12px', borderRadius: '8px' }}
+              style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
             />
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '14px', borderTop: '1px solid var(--border)', paddingTop: '14px', flexWrap: 'wrap', gap: '10px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '14px', borderTop: '1px solid #e2e8f0', paddingTop: '14px', flexWrap: 'wrap', gap: '10px' }}>
             <button
               type="button"
               onClick={handleSendWhatsApp}
-              className="btn btn-ghost"
-              style={{ background: 'rgba(34, 197, 94, 0.15)', color: '#22c55e', border: '1px solid rgba(34, 197, 94, 0.3)', padding: '8px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}
+              style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '8px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
             >
               <span>💬</span>
               <span>إرسال التفاصيل بالواتساب</span>
@@ -237,7 +238,7 @@ ${notes ? `📝 ملاحظات: ${notes}` : ''}
               <button type="button" className="btn btn-ghost" onClick={onClose} style={{ padding: '8px 16px', borderRadius: '8px' }}>
                 إلغاء
               </button>
-              <button type="submit" className="btn btn-start" style={{ padding: '8px 20px', borderRadius: '8px', fontWeight: 800 }}>
+              <button type="submit" style={{ padding: '8px 20px', borderRadius: '8px', fontWeight: 900, background: 'linear-gradient(135deg, #0d9488, #0f766e)', color: '#fff', border: 'none', cursor: 'pointer' }}>
                 💾 حفظ الموعد وتأكيده
               </button>
             </div>

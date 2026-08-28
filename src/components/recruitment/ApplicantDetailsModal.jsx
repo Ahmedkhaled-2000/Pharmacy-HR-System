@@ -55,11 +55,13 @@ export default function ApplicantDetailsModal({
           maxHeight: '90vh',
           display: 'flex',
           flexDirection: 'column',
-          background: 'var(--surface, #1e293b)',
+          background: '#ffffff',
           borderRadius: '24px',
           padding: '24px',
-          fontFamily: "'Tajawal', 'Cairo', sans-serif",
-          overflow: 'hidden'
+          fontFamily: "'Cairo', 'Tajawal', sans-serif",
+          overflow: 'hidden',
+          border: '1px solid #e2e8f0',
+          boxShadow: '0 20px 45px rgba(0, 0, 0, 0.15)'
         }}
       >
         {/* Modal Header */}
@@ -67,26 +69,26 @@ export default function ApplicantDetailsModal({
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          borderBottom: '1px solid var(--border)',
+          borderBottom: '1px solid #e2e8f0',
           paddingBottom: '16px',
           flexShrink: 0
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
             {applicant.photoUrl ? (
-              <img src={applicant.photoUrl} alt="Photo" style={{ width: '56px', height: '56px', borderRadius: '12px', objectFit: 'cover', border: '2px solid #38bdf8' }} />
+              <img src={applicant.photoUrl} alt="Photo" style={{ width: '56px', height: '56px', borderRadius: '12px', objectFit: 'cover', border: '2px solid #0d9488' }} />
             ) : (
               <div style={{
                 width: '56px',
                 height: '56px',
                 borderRadius: '12px',
-                background: 'rgba(56, 189, 248, 0.15)',
-                color: '#38bdf8',
+                background: '#f0fdfa',
+                color: '#0d9488',
                 fontSize: '22px',
-                fontWeight: 800,
+                fontWeight: 900,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                border: '2px solid rgba(56, 189, 248, 0.3)'
+                border: '2px solid #ccfbf1'
               }}>
                 {applicant.name.charAt(0)}
               </div>
@@ -94,7 +96,7 @@ export default function ApplicantDetailsModal({
 
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 800, color: 'var(--text, #fff)' }}>
+                <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 900, color: '#0f172a' }}>
                   {applicant.name}
                 </h3>
                 <span style={{
@@ -110,8 +112,8 @@ export default function ApplicantDetailsModal({
                 </span>
               </div>
 
-              <div style={{ fontSize: '13px', color: '#94a3b8', marginTop: '3px' }}>
-                الوظيفة: <strong style={{ color: '#38bdf8' }}>{applicant.targetJobTitle}</strong> ({applicant.department}) · كود الطلب: <span style={{ fontFamily: 'monospace', color: '#fbbf24' }}>{applicant.code}</span> · تاريخ التقديم: {new Date(applicant.createdAt).toLocaleDateString('ar-EG')}
+              <div style={{ fontSize: '13px', color: '#64748b', marginTop: '3px', fontWeight: 600 }}>
+                الوظيفة: <strong style={{ color: '#0284c7' }}>{applicant.targetJobTitle}</strong> ({applicant.department}) · كود الطلب: <span style={{ fontFamily: 'monospace', color: '#d97706', fontWeight: 800 }}>{applicant.code}</span> · تاريخ التقديم: {new Date(applicant.createdAt).toLocaleDateString('ar-EG')}
               </div>
             </div>
           </div>
@@ -124,44 +126,70 @@ export default function ApplicantDetailsModal({
           display: 'flex',
           gap: '8px',
           padding: '12px 0',
-          borderBottom: '1px solid var(--border)',
+          borderBottom: '1px solid #e2e8f0',
           overflowX: 'auto',
           flexShrink: 0
         }}>
           <button
             type="button"
-            className={`btn ${activeTab === 'profile' ? 'btn-start' : 'btn-ghost'}`}
             onClick={() => setActiveTab('profile')}
-            style={{ padding: '6px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: 700 }}
+            style={{
+              padding: '7px 14px',
+              borderRadius: '8px',
+              fontSize: '13px',
+              fontWeight: 800,
+              cursor: 'pointer',
+              border: activeTab === 'profile' ? 'none' : '1px solid #cbd5e1',
+              background: activeTab === 'profile' ? 'linear-gradient(135deg, #0d9488, #0f766e)' : '#f8fafc',
+              color: activeTab === 'profile' ? '#ffffff' : '#334155'
+            }}
           >
             👤 البيانات الشخصية والاتصال
           </button>
           <button
             type="button"
-            className={`btn ${activeTab === 'education' ? 'btn-start' : 'btn-ghost'}`}
             onClick={() => setActiveTab('education')}
-            style={{ padding: '6px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: 700 }}
+            style={{
+              padding: '7px 14px',
+              borderRadius: '8px',
+              fontSize: '13px',
+              fontWeight: 800,
+              cursor: 'pointer',
+              border: activeTab === 'education' ? 'none' : '1px solid #cbd5e1',
+              background: activeTab === 'education' ? 'linear-gradient(135deg, #0d9488, #0f766e)' : '#f8fafc',
+              color: activeTab === 'education' ? '#ffffff' : '#334155'
+            }}
           >
             🎓 المؤهلات والخبرات
           </button>
           <button
             type="button"
-            className={`btn ${activeTab === 'documents' ? 'btn-start' : 'btn-ghost'}`}
             onClick={() => setActiveTab('documents')}
-            style={{ padding: '6px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: 700 }}
+            style={{
+              padding: '7px 14px',
+              borderRadius: '8px',
+              fontSize: '13px',
+              fontWeight: 800,
+              cursor: 'pointer',
+              border: activeTab === 'documents' ? 'none' : '1px solid #cbd5e1',
+              background: activeTab === 'documents' ? 'linear-gradient(135deg, #0d9488, #0f766e)' : '#f8fafc',
+              color: activeTab === 'documents' ? '#ffffff' : '#334155'
+            }}
           >
             📁 المستندات والمرفقات ({[applicant.cvUrl, applicant.nationalIdPhotoUrl, applicant.graduationCertUrl, applicant.licensePhotoUrl].filter(Boolean).length})
           </button>
           <button
             type="button"
-            className={`btn ${activeTab === 'evaluation' ? 'btn-start' : 'btn-ghost'}`}
             onClick={() => setActiveTab('evaluation')}
             style={{
-              padding: '6px 14px',
+              padding: '7px 14px',
               borderRadius: '8px',
               fontSize: '13px',
-              fontWeight: 700,
-              color: evaluation ? '#10b981' : undefined
+              fontWeight: 800,
+              cursor: 'pointer',
+              border: activeTab === 'evaluation' ? 'none' : '1px solid #cbd5e1',
+              background: activeTab === 'evaluation' ? 'linear-gradient(135deg, #0d9488, #0f766e)' : '#f8fafc',
+              color: activeTab === 'evaluation' ? '#ffffff' : '#334155'
             }}
           >
             ⭐️ تقرير المقابلة {evaluation && `(${evalScore?.percentage}%)`}
@@ -178,99 +206,99 @@ export default function ApplicantDetailsModal({
                 display: 'grid',
                 gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
                 gap: '14px',
-                background: 'rgba(15, 23, 42, 0.4)',
+                background: '#f8fafc',
                 padding: '16px',
                 borderRadius: '14px',
-                border: '1px solid rgba(255, 255, 255, 0.06)'
+                border: '1px solid #e2e8f0'
               }}>
                 <div>
-                  <span style={{ color: '#94a3b8', fontSize: '12px', display: 'block' }}>الاسم الرباعي:</span>
-                  <strong style={{ color: '#fff', fontSize: '14px' }}>{applicant.name}</strong>
+                  <span style={{ color: '#64748b', fontSize: '12px', display: 'block', fontWeight: 700 }}>الاسم الرباعي:</span>
+                  <strong style={{ color: '#0f172a', fontSize: '14px' }}>{applicant.name}</strong>
                 </div>
 
                 {applicant.nickname && (
                   <div>
-                    <span style={{ color: '#94a3b8', fontSize: '12px', display: 'block' }}>الاسم الشائع / اللقب:</span>
-                    <strong style={{ color: '#fff', fontSize: '14px' }}>{applicant.nickname}</strong>
+                    <span style={{ color: '#64748b', fontSize: '12px', display: 'block', fontWeight: 700 }}>الاسم الشائع / اللقب:</span>
+                    <strong style={{ color: '#0f172a', fontSize: '14px' }}>{applicant.nickname}</strong>
                   </div>
                 )}
 
                 <div>
-                  <span style={{ color: '#94a3b8', fontSize: '12px', display: 'block' }}>الرقم القومي:</span>
-                  <strong style={{ color: '#fbbf24', fontSize: '14px', fontFamily: 'monospace' }}>{applicant.nationalId || '—'}</strong>
+                  <span style={{ color: '#64748b', fontSize: '12px', display: 'block', fontWeight: 700 }}>الرقم القومي:</span>
+                  <strong style={{ color: '#d97706', fontSize: '14px', fontFamily: 'monospace' }}>{applicant.nationalId || '—'}</strong>
                 </div>
 
                 <div>
-                  <span style={{ color: '#94a3b8', fontSize: '12px', display: 'block' }}>تاريخ الميلاد والنوع:</span>
-                  <span style={{ color: '#fff', fontSize: '13.5px' }}>{applicant.dob || '—'} ({applicant.gender || 'ذكر'})</span>
+                  <span style={{ color: '#64748b', fontSize: '12px', display: 'block', fontWeight: 700 }}>تاريخ الميلاد والنوع:</span>
+                  <span style={{ color: '#0f172a', fontSize: '13.5px', fontWeight: 600 }}>{applicant.dob || '—'} ({applicant.gender || 'ذكر'})</span>
                 </div>
 
                 <div>
-                  <span style={{ color: '#94a3b8', fontSize: '12px', display: 'block' }}>الحالة الاجتماعية:</span>
-                  <span style={{ color: '#fff', fontSize: '13.5px' }}>{applicant.maritalStatus || 'أعزب'}</span>
+                  <span style={{ color: '#64748b', fontSize: '12px', display: 'block', fontWeight: 700 }}>الحالة الاجتماعية:</span>
+                  <span style={{ color: '#0f172a', fontSize: '13.5px', fontWeight: 600 }}>{applicant.maritalStatus || 'أعزب'}</span>
                 </div>
 
                 <div>
-                  <span style={{ color: '#94a3b8', fontSize: '12px', display: 'block' }}>الفرع المفضل:</span>
-                  <span style={{ color: '#38bdf8', fontSize: '13.5px', fontWeight: 700 }}>
+                  <span style={{ color: '#64748b', fontSize: '12px', display: 'block', fontWeight: 700 }}>الفرع المفضل:</span>
+                  <span style={{ color: '#0284c7', fontSize: '13.5px', fontWeight: 800 }}>
                     {preferredBranch ? preferredBranch.name : (applicant.preferredBranchId || 'أي فرع متاح')}
                   </span>
                 </div>
 
                 <div>
-                  <span style={{ color: '#94a3b8', fontSize: '12px', display: 'block' }}>نوع الدوام والراتب المتوقع:</span>
-                  <span style={{ color: '#fff', fontSize: '13.5px' }}>
+                  <span style={{ color: '#64748b', fontSize: '12px', display: 'block', fontWeight: 700 }}>نوع الدوام والراتب المتوقع:</span>
+                  <span style={{ color: '#0f172a', fontSize: '13.5px', fontWeight: 600 }}>
                     {applicant.contractTypePreference || 'دوام كامل'} {applicant.expectedSalary ? `· ${applicant.expectedSalary} ج.م` : ''}
                   </span>
                 </div>
 
                 <div>
-                  <span style={{ color: '#94a3b8', fontSize: '12px', display: 'block' }}>تاريخ الاستعداد للبدء:</span>
-                  <span style={{ color: '#fff', fontSize: '13.5px' }}>{applicant.availableStartDate || 'فوري'}</span>
+                  <span style={{ color: '#64748b', fontSize: '12px', display: 'block', fontWeight: 700 }}>تاريخ الاستعداد للبدء:</span>
+                  <span style={{ color: '#0f172a', fontSize: '13.5px', fontWeight: 600 }}>{applicant.availableStartDate || 'فوري'}</span>
                 </div>
 
                 <div style={{ gridColumn: 'span 2' }}>
-                  <span style={{ color: '#94a3b8', fontSize: '12px', display: 'block' }}>العنوان ومحل الإقامة:</span>
-                  <span style={{ color: '#fff', fontSize: '13.5px' }}>{applicant.address || '—'}</span>
+                  <span style={{ color: '#64748b', fontSize: '12px', display: 'block', fontWeight: 700 }}>العنوان ومحل الإقامة:</span>
+                  <span style={{ color: '#0f172a', fontSize: '13.5px', fontWeight: 600 }}>{applicant.address || '—'}</span>
                 </div>
               </div>
 
               {/* Contact Card */}
               <div style={{
-                background: 'rgba(15, 23, 42, 0.4)',
+                background: '#f8fafc',
                 padding: '16px',
                 borderRadius: '14px',
-                border: '1px solid rgba(255, 255, 255, 0.06)'
+                border: '1px solid #e2e8f0'
               }}>
-                <h4 style={{ margin: '0 0 12px', fontSize: '15px', color: '#60a5fa' }}>📞 أرقام وبيانات الاتصال</h4>
+                <h4 style={{ margin: '0 0 12px', fontSize: '15px', color: '#0284c7', fontWeight: 800 }}>📞 أرقام وبيانات الاتصال</h4>
                 <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                  <div style={{ background: 'rgba(255, 255, 255, 0.05)', padding: '10px 14px', borderRadius: '10px', flex: '1 1 200px' }}>
-                    <span style={{ color: '#94a3b8', fontSize: '11.5px', display: 'block' }}>رقم الهاتف الأساسي:</span>
-                    <a href={`tel:${applicant.phone}`} style={{ color: '#38bdf8', fontSize: '15px', fontWeight: 800, textDecoration: 'none', direction: 'ltr', display: 'inline-block' }}>
+                  <div style={{ background: '#ffffff', border: '1px solid #cbd5e1', padding: '10px 14px', borderRadius: '10px', flex: '1 1 200px' }}>
+                    <span style={{ color: '#64748b', fontSize: '11.5px', display: 'block', fontWeight: 700 }}>رقم الهاتف الأساسي:</span>
+                    <a href={`tel:${applicant.phone}`} style={{ color: '#0284c7', fontSize: '15px', fontWeight: 900, textDecoration: 'none', direction: 'ltr', display: 'inline-block' }}>
                       {applicant.phone}
                     </a>
                   </div>
 
                   {applicant.whatsappPhone && (
-                    <div style={{ background: 'rgba(34, 197, 94, 0.08)', border: '1px solid rgba(34, 197, 94, 0.2)', padding: '10px 14px', borderRadius: '10px', flex: '1 1 200px' }}>
-                      <span style={{ color: '#86efac', fontSize: '11.5px', display: 'block' }}>رقم الواتساب:</span>
-                      <a href={`https://wa.me/2${applicant.whatsappPhone}`} target="_blank" rel="noreferrer" style={{ color: '#22c55e', fontSize: '15px', fontWeight: 800, textDecoration: 'none', direction: 'ltr', display: 'inline-block' }}>
+                    <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', padding: '10px 14px', borderRadius: '10px', flex: '1 1 200px' }}>
+                      <span style={{ color: '#047857', fontSize: '11.5px', display: 'block', fontWeight: 700 }}>رقم الواتساب:</span>
+                      <a href={`https://wa.me/2${applicant.whatsappPhone}`} target="_blank" rel="noreferrer" style={{ color: '#047857', fontSize: '15px', fontWeight: 900, textDecoration: 'none', direction: 'ltr', display: 'inline-block' }}>
                         {applicant.whatsappPhone} 💬
                       </a>
                     </div>
                   )}
 
                   {applicant.relativePhone && (
-                    <div style={{ background: 'rgba(255, 255, 255, 0.05)', padding: '10px 14px', borderRadius: '10px', flex: '1 1 200px' }}>
-                      <span style={{ color: '#94a3b8', fontSize: '11.5px', display: 'block' }}>هاتف الطوارئ / قريب:</span>
-                      <span style={{ color: '#fff', fontSize: '14px', fontFamily: 'monospace' }}>{applicant.relativePhone}</span>
+                    <div style={{ background: '#ffffff', border: '1px solid #cbd5e1', padding: '10px 14px', borderRadius: '10px', flex: '1 1 200px' }}>
+                      <span style={{ color: '#64748b', fontSize: '11.5px', display: 'block', fontWeight: 700 }}>هاتف الطوارئ / قريب:</span>
+                      <span style={{ color: '#0f172a', fontSize: '14px', fontFamily: 'monospace', fontWeight: 800 }}>{applicant.relativePhone}</span>
                     </div>
                   )}
 
                   {applicant.email && (
-                    <div style={{ background: 'rgba(255, 255, 255, 0.05)', padding: '10px 14px', borderRadius: '10px', flex: '1 1 200px' }}>
-                      <span style={{ color: '#94a3b8', fontSize: '11.5px', display: 'block' }}>البريد الإلكتروني:</span>
-                      <span style={{ color: '#fff', fontSize: '13px' }}>{applicant.email}</span>
+                    <div style={{ background: '#ffffff', border: '1px solid #cbd5e1', padding: '10px 14px', borderRadius: '10px', flex: '1 1 200px' }}>
+                      <span style={{ color: '#64748b', fontSize: '11.5px', display: 'block', fontWeight: 700 }}>البريد الإلكتروني:</span>
+                      <span style={{ color: '#0f172a', fontSize: '13px', fontWeight: 600 }}>{applicant.email}</span>
                     </div>
                   )}
                 </div>
@@ -279,23 +307,22 @@ export default function ApplicantDetailsModal({
               {/* Scheduled Interview Section */}
               {applicant.interviewSchedule && (
                 <div style={{
-                  background: 'rgba(139, 92, 246, 0.1)',
-                  border: '1px solid rgba(139, 92, 246, 0.3)',
+                  background: '#f5f3ff',
+                  border: '1px solid #ddd6fe',
                   padding: '16px',
                   borderRadius: '14px'
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                    <h4 style={{ margin: 0, fontSize: '15px', color: '#c4b5fd' }}>📅 تفاصيل موعد المقابلة المجدولة</h4>
+                    <h4 style={{ margin: 0, fontSize: '15px', color: '#6d28d9', fontWeight: 800 }}>📅 تفاصيل موعد المقابلة المجدولة</h4>
                     <button
                       type="button"
-                      className="btn btn-ghost"
                       onClick={() => onOpenScheduleModal?.(applicant)}
-                      style={{ padding: '4px 10px', fontSize: '12px', borderRadius: '6px' }}
+                      style={{ padding: '4px 10px', fontSize: '12px', borderRadius: '6px', background: '#ffffff', border: '1px solid #ddd6fe', color: '#6d28d9', cursor: 'pointer', fontWeight: 700 }}
                     >
                       تعديل الموعد
                     </button>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px', fontSize: '13px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px', fontSize: '13px', color: '#334155' }}>
                     <div><strong>التاريخ:</strong> {applicant.interviewSchedule.date}</div>
                     <div><strong>الوقت:</strong> {applicant.interviewSchedule.time}</div>
                     <div><strong>المكان:</strong> {applicant.interviewSchedule.locationLabel}</div>
@@ -304,7 +331,7 @@ export default function ApplicantDetailsModal({
                     )}
                   </div>
                   {applicant.interviewSchedule.notes && (
-                    <div style={{ marginTop: '8px', fontSize: '12.5px', color: '#cbd5e1' }}>
+                    <div style={{ marginTop: '8px', fontSize: '12.5px', color: '#475569' }}>
                       <strong>ملاحظات:</strong> {applicant.interviewSchedule.notes}
                     </div>
                   )}
@@ -316,9 +343,9 @@ export default function ApplicantDetailsModal({
           {/* Tab 2: Education & Experience */}
           {activeTab === 'education' && (
             <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div style={{ background: 'rgba(15, 23, 42, 0.4)', padding: '16px', borderRadius: '14px', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
-                <h4 style={{ margin: '0 0 12px', fontSize: '15px', color: '#60a5fa' }}>🎓 المؤهل الأكاديمي</h4>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', fontSize: '13.5px' }}>
+              <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
+                <h4 style={{ margin: '0 0 12px', fontSize: '15px', color: '#0284c7', fontWeight: 800 }}>🎓 المؤهل الأكاديمي</h4>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', fontSize: '13.5px', color: '#1e293b' }}>
                   <div><strong>المؤهل:</strong> {applicant.qualification || 'غير محدد'}</div>
                   <div><strong>الجامعة / المعهد:</strong> {applicant.university || 'غير محدد'}</div>
                   <div><strong>سنة التخرج:</strong> {applicant.graduationYear || '—'}</div>
@@ -328,18 +355,18 @@ export default function ApplicantDetailsModal({
               </div>
 
               {applicant.previousExperience && (
-                <div style={{ background: 'rgba(15, 23, 42, 0.4)', padding: '16px', borderRadius: '14px', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
-                  <h4 style={{ margin: '0 0 8px', fontSize: '15px', color: '#60a5fa' }}>💼 أماكن العمل والخبرات السابقة</h4>
-                  <p style={{ margin: 0, fontSize: '13.5px', color: '#cbd5e1', lineHeight: '1.7', whiteSpace: 'pre-wrap' }}>
+                <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
+                  <h4 style={{ margin: '0 0 8px', fontSize: '15px', color: '#0284c7', fontWeight: 800 }}>💼 أماكن العمل والخبرات السابقة</h4>
+                  <p style={{ margin: 0, fontSize: '13.5px', color: '#334155', lineHeight: '1.7', whiteSpace: 'pre-wrap' }}>
                     {applicant.previousExperience}
                   </p>
                 </div>
               )}
 
               {applicant.skills && (
-                <div style={{ background: 'rgba(15, 23, 42, 0.4)', padding: '16px', borderRadius: '14px', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
-                  <h4 style={{ margin: '0 0 8px', fontSize: '15px', color: '#60a5fa' }}>⚡ المهارات واللغات وبرامج الحاسب</h4>
-                  <p style={{ margin: 0, fontSize: '13.5px', color: '#cbd5e1', lineHeight: '1.7', whiteSpace: 'pre-wrap' }}>
+                <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
+                  <h4 style={{ margin: '0 0 8px', fontSize: '15px', color: '#0284c7', fontWeight: 800 }}>⚡ المهارات واللغات وبرامج الحاسب</h4>
+                  <p style={{ margin: 0, fontSize: '13.5px', color: '#334155', lineHeight: '1.7', whiteSpace: 'pre-wrap' }}>
                     {applicant.skills}
                   </p>
                 </div>
@@ -351,71 +378,70 @@ export default function ApplicantDetailsModal({
           {activeTab === 'documents' && (
             <div className="fade-in" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
               {/* CV File */}
-              <div style={{ background: 'rgba(15, 23, 42, 0.5)', padding: '16px', borderRadius: '14px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
-                <h5 style={{ margin: '0 0 8px', color: '#38bdf8', fontSize: '14px' }}>📄 السيرة الذاتية (CV)</h5>
+              <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
+                <h5 style={{ margin: '0 0 8px', color: '#0284c7', fontSize: '14px', fontWeight: 800 }}>📄 السيرة الذاتية (CV)</h5>
                 {applicant.cvUrl ? (
                   <div>
-                    <span style={{ fontSize: '12px', color: '#94a3b8', display: 'block', marginBottom: '10px' }}>
+                    <span style={{ fontSize: '12px', color: '#64748b', display: 'block', marginBottom: '10px' }}>
                       {applicant.cvFileName || 'ملف السيرة الذاتية'}
                     </span>
                     <a
                       href={applicant.cvUrl}
                       target="_blank"
                       rel="noreferrer"
-                      className="btn btn-start"
-                      style={{ padding: '6px 14px', fontSize: '12.5px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                      style={{ padding: '8px 16px', fontSize: '12.5px', display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'linear-gradient(135deg, #0d9488, #0f766e)', color: '#fff', textDecoration: 'none', borderRadius: '8px', fontWeight: 800 }}
                     >
                       <span>👁️</span>
                       <span>معاينة وتحميل الـ CV</span>
                     </a>
                   </div>
                 ) : (
-                  <span style={{ color: '#64748b', fontSize: '12.5px' }}>لم يتم رفع ملف سيرة ذاتية</span>
+                  <span style={{ color: '#94a3b8', fontSize: '12.5px' }}>لم يتم رفع ملف سيرة ذاتية</span>
                 )}
               </div>
 
               {/* National ID Photo */}
-              <div style={{ background: 'rgba(15, 23, 42, 0.5)', padding: '16px', borderRadius: '14px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
-                <h5 style={{ margin: '0 0 8px', color: '#38bdf8', fontSize: '14px' }}>🪪 بطاقة الرقم القومي</h5>
+              <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
+                <h5 style={{ margin: '0 0 8px', color: '#0284c7', fontSize: '14px', fontWeight: 800 }}>🪪 بطاقة الرقم القومي</h5>
                 {applicant.nationalIdPhotoUrl ? (
                   <div>
-                    <img src={applicant.nationalIdPhotoUrl} alt="National ID" style={{ width: '100%', height: '120px', objectFit: 'cover', borderRadius: '8px', marginBottom: '8px' }} />
-                    <a href={applicant.nationalIdPhotoUrl} target="_blank" rel="noreferrer" className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: '12px' }}>
+                    <img src={applicant.nationalIdPhotoUrl} alt="National ID" style={{ width: '100%', height: '120px', objectFit: 'cover', borderRadius: '8px', marginBottom: '8px', border: '1px solid #cbd5e1' }} />
+                    <a href={applicant.nationalIdPhotoUrl} target="_blank" rel="noreferrer" style={{ padding: '4px 10px', fontSize: '12px', background: '#f1f5f9', color: '#334155', borderRadius: '6px', textDecoration: 'none', display: 'inline-block', fontWeight: 700 }}>
                       عرض بحجم كامل
                     </a>
                   </div>
                 ) : (
-                  <span style={{ color: '#64748b', fontSize: '12.5px' }}>لم يتم رفع صورة البطاقة</span>
+                  <span style={{ color: '#94a3b8', fontSize: '12.5px' }}>لم يتم رفع صورة البطاقة</span>
                 )}
               </div>
 
               {/* Graduation Certificate */}
-              <div style={{ background: 'rgba(15, 23, 42, 0.5)', padding: '16px', borderRadius: '14px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
-                <h5 style={{ margin: '0 0 8px', color: '#38bdf8', fontSize: '14px' }}>📜 شهادة التخرج / الكارنيه</h5>
+              <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
+                <h5 style={{ margin: '0 0 8px', color: '#0284c7', fontSize: '14px', fontWeight: 800 }}>📜 شهادة التخرج / الكارنيه</h5>
                 {applicant.graduationCertUrl ? (
                   <div>
-                    <img src={applicant.graduationCertUrl} alt="Certificate" style={{ width: '100%', height: '120px', objectFit: 'cover', borderRadius: '8px', marginBottom: '8px' }} />
-                    <a href={applicant.graduationCertUrl} target="_blank" rel="noreferrer" className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: '12px' }}>
+                    <img src={applicant.graduationCertUrl} alt="Certificate" style={{ width: '100%', height: '120px', objectFit: 'cover', borderRadius: '8px', marginBottom: '8px', border: '1px solid #cbd5e1' }} />
+                    <a href={applicant.graduationCertUrl} target="_blank" rel="noreferrer" style={{ padding: '4px 10px', fontSize: '12px', background: '#f1f5f9', color: '#334155', borderRadius: '6px', textDecoration: 'none', display: 'inline-block', fontWeight: 700 }}>
                       عرض بحجم كامل
                     </a>
                   </div>
                 ) : (
-                  <span style={{ color: '#64748b', fontSize: '12.5px' }}>لم يتم رفع صورة الشهادة</span>
+                  <span style={{ color: '#94a3b8', fontSize: '12.5px' }}>لم يتم رفع صورة الشهادة</span>
                 )}
               </div>
 
               {/* License Photo */}
-              <div style={{ background: 'rgba(15, 23, 42, 0.5)', padding: '16px', borderRadius: '14px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
-                <h5 style={{ margin: '0 0 8px', color: '#38bdf8', fontSize: '14px' }}>🚗 ترخيص مزاولة المهنة / رخصة القيادة</h5>
+              <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
+                <h5 style={{ margin: '0 0 8px', color: '#0284c7', fontSize: '14px', fontWeight: 800 }}>🚗 ترخيص مزاولة المهنة / رخصة القيادة</h5>
                 {applicant.licensePhotoUrl ? (
                   <div>
-                    <img src={applicant.licensePhotoUrl} alt="License" style={{ width: '100%', height: '120px', objectFit: 'cover', borderRadius: '8px', marginBottom: '8px' }} />
-                    <a href={applicant.licensePhotoUrl} target="_blank" rel="noreferrer" className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: '12px' }}>
+                    <img src={applicant.licensePhotoUrl} alt="License" style={{ width: '100%', height: '120px', objectFit: 'cover', borderRadius: '8px', marginBottom: '8px', border: '1px solid #cbd5e1' }} />
+                    <a href={applicant.licensePhotoUrl} target="_blank" rel="noreferrer" style={{ padding: '4px 10px', fontSize: '12px', background: '#f1f5f9', color: '#334155', borderRadius: '6px', textDecoration: 'none', display: 'inline-block', fontWeight: 700 }}>
                       عرض بحجم كامل
                     </a>
                   </div>
                 ) : (
-                  <span style={{ color: '#64748b', fontSize: '12.5px' }}>لم يتم رفع الترخيص</span>
+                  <span style={{ color: '#94a3b8', fontSize: '12.5px' }}>لم يتم رفع الترخيص</span>
                 )}
               </div>
             </div>
@@ -428,8 +454,8 @@ export default function ApplicantDetailsModal({
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                   {/* Score Highlight Banner */}
                   <div style={{
-                    background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(15, 23, 42, 0.6))',
-                    border: '1px solid rgba(16, 185, 129, 0.3)',
+                    background: '#ecfdf5',
+                    border: '1.5px solid #a7f3d0',
                     padding: '18px 24px',
                     borderRadius: '16px',
                     display: 'flex',
@@ -439,11 +465,11 @@ export default function ApplicantDetailsModal({
                     gap: '14px'
                   }}>
                     <div>
-                      <div style={{ color: '#94a3b8', fontSize: '12.5px' }}>نتيجة تقييم المقابلة:</div>
-                      <div style={{ fontSize: '28px', fontWeight: 900, color: evalScore?.badgeColor || '#10b981' }}>
-                        {evalScore?.percentage}% <span style={{ fontSize: '16px', fontWeight: 700 }}>({evalScore?.ratingLabel})</span>
+                      <div style={{ color: '#047857', fontSize: '12.5px', fontWeight: 700 }}>نتيجة تقييم المقابلة:</div>
+                      <div style={{ fontSize: '28px', fontWeight: 900, color: '#047857' }}>
+                        {evalScore?.percentage}% <span style={{ fontSize: '16px', fontWeight: 800 }}>({evalScore?.ratingLabel})</span>
                       </div>
-                      <div style={{ fontSize: '12px', color: '#cbd5e1', marginTop: '2px' }}>
+                      <div style={{ fontSize: '12.5px', color: '#334155', marginTop: '2px', fontWeight: 600 }}>
                         👤 المقابل: <strong>{evaluation.interviewerName}</strong> ({evaluation.interviewerJobTitle}) · تاريخ: {evaluation.interviewDate}
                       </div>
                     </div>
@@ -454,9 +480,9 @@ export default function ApplicantDetailsModal({
                         borderRadius: '10px',
                         fontSize: '13px',
                         fontWeight: 800,
-                        background: evaluation.recommendation === 'recommended' ? 'rgba(16, 185, 129, 0.2)' : (evaluation.recommendation === 'waiting_list' ? 'rgba(234, 179, 8, 0.2)' : 'rgba(239, 68, 68, 0.2)'),
-                        color: evaluation.recommendation === 'recommended' ? '#10b981' : (evaluation.recommendation === 'waiting_list' ? '#fbbf24' : '#ef4444'),
-                        border: '1px solid currentColor'
+                        background: evaluation.recommendation === 'recommended' ? '#dcfce7' : (evaluation.recommendation === 'waiting_list' ? '#fef3c7' : '#fee2e2'),
+                        color: evaluation.recommendation === 'recommended' ? '#047857' : (evaluation.recommendation === 'waiting_list' ? '#b45309' : '#b91c1c'),
+                        border: `1px solid ${evaluation.recommendation === 'recommended' ? '#86efac' : (evaluation.recommendation === 'waiting_list' ? '#fde68a' : '#fecaca')}`
                       }}>
                         {evaluation.recommendation === 'recommended' ? '🟢 يوصى بالتعيين الفوري' : (evaluation.recommendation === 'waiting_list' ? '⏳ يوصى بقائمة الانتظار' : '❌ غير مناسب / مرفوض')}
                       </span>
@@ -465,54 +491,54 @@ export default function ApplicantDetailsModal({
 
                   {/* Rubrics Grid */}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
-                    <div style={{ background: 'rgba(15, 23, 42, 0.4)', padding: '14px', borderRadius: '12px', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                    <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                        <span style={{ fontSize: '13px', color: '#94a3b8' }}>الكفاءة الفنية والتخصص:</span>
-                        <strong style={{ color: '#fbbf24' }}>★ {evaluation.technicalSkills} / 5</strong>
+                        <span style={{ fontSize: '13px', color: '#64748b', fontWeight: 700 }}>الكفاءة الفنية والتخصص:</span>
+                        <strong style={{ color: '#d97706' }}>★ {evaluation.technicalSkills} / 5</strong>
                       </div>
-                      {evaluation.technicalNotes && <div style={{ fontSize: '12px', color: '#cbd5e1' }}>{evaluation.technicalNotes}</div>}
+                      {evaluation.technicalNotes && <div style={{ fontSize: '12px', color: '#334155' }}>{evaluation.technicalNotes}</div>}
                     </div>
 
-                    <div style={{ background: 'rgba(15, 23, 42, 0.4)', padding: '14px', borderRadius: '12px', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                    <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                        <span style={{ fontSize: '13px', color: '#94a3b8' }}>المهارات السلوكية والتواصل:</span>
-                        <strong style={{ color: '#fbbf24' }}>★ {evaluation.softSkills} / 5</strong>
+                        <span style={{ fontSize: '13px', color: '#64748b', fontWeight: 700 }}>المهارات السلوكية والتواصل:</span>
+                        <strong style={{ color: '#d97706' }}>★ {evaluation.softSkills} / 5</strong>
                       </div>
-                      {evaluation.softSkillsNotes && <div style={{ fontSize: '12px', color: '#cbd5e1' }}>{evaluation.softSkillsNotes}</div>}
+                      {evaluation.softSkillsNotes && <div style={{ fontSize: '12px', color: '#334155' }}>{evaluation.softSkillsNotes}</div>}
                     </div>
 
-                    <div style={{ background: 'rgba(15, 23, 42, 0.4)', padding: '14px', borderRadius: '12px', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                    <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ fontSize: '13px', color: '#94a3b8' }}>البرامج واللغات:</span>
-                        <strong style={{ color: '#38bdf8' }}>{evaluation.languageTech} / 5</strong>
+                        <span style={{ fontSize: '13px', color: '#64748b', fontWeight: 700 }}>البرامج واللغات:</span>
+                        <strong style={{ color: '#0d9488' }}>{evaluation.languageTech} / 5</strong>
                       </div>
                     </div>
 
-                    <div style={{ background: 'rgba(15, 23, 42, 0.4)', padding: '14px', borderRadius: '12px', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                    <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ fontSize: '13px', color: '#94a3b8' }}>الانضباط والملاءمة:</span>
-                        <strong style={{ color: '#38bdf8' }}>{evaluation.cultureFit} / 5</strong>
+                        <span style={{ fontSize: '13px', color: '#64748b', fontWeight: 700 }}>الانضباط والملاءمة:</span>
+                        <strong style={{ color: '#0d9488' }}>{evaluation.cultureFit} / 5</strong>
                       </div>
                     </div>
                   </div>
 
                   {evaluation.proposedSalary && (
-                    <div style={{ fontSize: '13.5px', background: 'rgba(56, 189, 248, 0.08)', padding: '10px 14px', borderRadius: '10px', color: '#38bdf8' }}>
+                    <div style={{ fontSize: '13.5px', background: '#f0fdfa', border: '1px solid #ccfbf1', padding: '10px 14px', borderRadius: '10px', color: '#0f766e', fontWeight: 700 }}>
                       💰 <strong>الراتب المقترح أثناء المقابلة:</strong> {evaluation.proposedSalary} ج.م شهرياً
                     </div>
                   )}
 
                   {evaluation.notes && (
-                    <div style={{ background: 'rgba(15, 23, 42, 0.4)', padding: '14px', borderRadius: '12px' }}>
-                      <strong style={{ fontSize: '13px', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>ملاحظات وتوصيات المقابل:</strong>
-                      <p style={{ margin: 0, fontSize: '13.5px', color: '#fff', lineHeight: '1.6' }}>{evaluation.notes}</p>
+                    <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                      <strong style={{ fontSize: '13px', color: '#64748b', display: 'block', marginBottom: '4px' }}>ملاحظات وتوصيات المقابل:</strong>
+                      <p style={{ margin: 0, fontSize: '13.5px', color: '#0f172a', lineHeight: '1.6' }}>{evaluation.notes}</p>
                     </div>
                   )}
                 </div>
               ) : (
-                <div style={{ textAlign: 'center', padding: '36px 16px', color: '#94a3b8' }}>
+                <div style={{ textAlign: 'center', padding: '36px 16px', color: '#64748b' }}>
                   <div style={{ fontSize: '36px', marginBottom: '10px' }}>⏳</div>
-                  <h4 style={{ margin: '0 0 6px', color: '#fff' }}>لم يتم تسجيل تقييم المقابلة بعد</h4>
+                  <h4 style={{ margin: '0 0 6px', color: '#0f172a', fontWeight: 800 }}>لم يتم تسجيل تقييم المقابلة بعد</h4>
                   <p style={{ fontSize: '13px', margin: '0 0 16px' }}>يمكن للقائم بالمقابلة تقييم المرشح عبر رابط المقابلات أو تسجيله من هنا مباشرة.</p>
                 </div>
               )}
@@ -520,14 +546,14 @@ export default function ApplicantDetailsModal({
           )}
 
           {/* Internal HR Notes Box */}
-          <div style={{ marginTop: '16px', background: 'rgba(15, 23, 42, 0.4)', padding: '14px', borderRadius: '12px', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+          <div style={{ marginTop: '16px', background: '#f8fafc', padding: '14px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-              <span style={{ fontSize: '12.5px', fontWeight: 700, color: '#cbd5e1' }}>📝 ملاحظات داخلية لإدارة الموارد البشرية:</span>
+              <span style={{ fontSize: '12.5px', fontWeight: 800, color: '#334155' }}>📝 ملاحظات داخلية لإدارة الموارد البشرية:</span>
               {!isEditingNotes ? (
                 <button
                   type="button"
                   onClick={() => setIsEditingNotes(true)}
-                  style={{ background: 'none', border: 'none', color: '#38bdf8', cursor: 'pointer', fontSize: '12px', fontWeight: 700 }}
+                  style={{ background: 'none', border: 'none', color: '#0284c7', cursor: 'pointer', fontSize: '12px', fontWeight: 800 }}
                 >
                   تعديل الملاحظات
                 </button>
@@ -535,8 +561,7 @@ export default function ApplicantDetailsModal({
                 <button
                   type="button"
                   onClick={handleSaveNotes}
-                  className="btn btn-start"
-                  style={{ padding: '2px 10px', fontSize: '11.5px', borderRadius: '6px' }}
+                  style={{ padding: '3px 12px', fontSize: '12px', borderRadius: '6px', background: '#0d9488', color: '#fff', border: 'none', fontWeight: 800, cursor: 'pointer' }}
                 >
                   حفظ
                 </button>
@@ -549,10 +574,10 @@ export default function ApplicantDetailsModal({
                 value={internalNotes}
                 onChange={e => setInternalNotes(e.target.value)}
                 placeholder="اكتب أي ملاحظات إدارية خاصة بهذا الطلب..."
-                style={{ width: '100%', padding: '6px 10px', borderRadius: '8px', fontSize: '12.5px' }}
+                style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', fontSize: '13px', background: '#ffffff', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
               />
             ) : (
-              <div style={{ fontSize: '13px', color: internalNotes ? '#fff' : '#64748b' }}>
+              <div style={{ fontSize: '13px', color: internalNotes ? '#0f172a' : '#94a3b8', fontWeight: 600 }}>
                 {internalNotes || 'لا توجد ملاحظات داخلية مدونة.'}
               </div>
             )}
@@ -564,7 +589,7 @@ export default function ApplicantDetailsModal({
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          borderTop: '1px solid var(--border)',
+          borderTop: '1px solid #e2e8f0',
           paddingTop: '16px',
           marginTop: '10px',
           flexWrap: 'wrap',
@@ -575,17 +600,15 @@ export default function ApplicantDetailsModal({
           <div style={{ display: 'flex', gap: '8px' }}>
             <button
               type="button"
-              className="btn btn-ghost"
               onClick={() => handleSendWhatsApp()}
-              style={{ background: 'rgba(34, 197, 94, 0.1)', color: '#22c55e', border: '1px solid rgba(34, 197, 94, 0.3)', padding: '8px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: 700 }}
+              style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '8px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}
             >
               💬 واتساب
             </button>
             <button
               type="button"
-              className="btn btn-ghost"
               onClick={() => onOpenScheduleModal?.(applicant)}
-              style={{ padding: '8px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: 700 }}
+              style={{ background: '#f5f3ff', color: '#6d28d9', border: '1px solid #ddd6fe', padding: '8px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}
             >
               📅 جدولة مقابلة
             </button>
@@ -596,7 +619,6 @@ export default function ApplicantDetailsModal({
             {applicant.status !== 'hired' && (
               <button
                 type="button"
-                className="btn btn-start"
                 onClick={() => onApproveAndHire?.(applicant)}
                 style={{
                   padding: '8px 18px',
@@ -604,6 +626,9 @@ export default function ApplicantDetailsModal({
                   fontWeight: 900,
                   fontSize: '13.5px',
                   background: 'linear-gradient(135deg, #10b981, #059669)',
+                  color: '#ffffff',
+                  border: 'none',
+                  cursor: 'pointer',
                   boxShadow: '0 4px 14px rgba(16, 185, 129, 0.3)'
                 }}
               >
@@ -614,9 +639,8 @@ export default function ApplicantDetailsModal({
             {applicant.status !== 'waiting_list' && applicant.status !== 'hired' && (
               <button
                 type="button"
-                className="btn btn-ghost"
                 onClick={() => onMoveToWaitingList?.(applicant)}
-                style={{ background: 'rgba(234, 179, 8, 0.1)', color: '#fbbf24', border: '1px solid rgba(234, 179, 8, 0.3)', padding: '8px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: 700 }}
+                style={{ background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a', padding: '8px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}
               >
                 ⏳ قائمة الانتظار
               </button>
@@ -625,9 +649,8 @@ export default function ApplicantDetailsModal({
             {applicant.status !== 'rejected' && applicant.status !== 'hired' && (
               <button
                 type="button"
-                className="btn btn-ghost"
                 onClick={() => onReject?.(applicant)}
-                style={{ background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '8px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: 700 }}
+                style={{ background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca', padding: '8px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}
               >
                 ❌ رفض الطلب
               </button>
@@ -635,9 +658,8 @@ export default function ApplicantDetailsModal({
 
             <button
               type="button"
-              className="btn btn-ghost"
               onClick={() => onDelete?.(applicant.id)}
-              style={{ color: '#94a3b8', padding: '8px 10px', borderRadius: '8px', fontSize: '12px' }}
+              style={{ color: '#ef4444', background: '#fef2f2', border: '1px solid #fecaca', padding: '8px 12px', borderRadius: '8px', fontSize: '12px', cursor: 'pointer' }}
               title="حذف الطلب نهائياً"
             >
               🗑️

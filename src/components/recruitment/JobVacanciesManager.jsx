@@ -164,26 +164,27 @@ export default function JobVacanciesManager({
   };
 
   return (
-    <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+    <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '20px', fontFamily: "'Cairo', 'Tajawal', sans-serif" }}>
       
       {/* ── Top Shareable Links Banner ── */}
       <div style={{
-        background: 'linear-gradient(135deg, rgba(30, 58, 138, 0.4), rgba(15, 23, 42, 0.8))',
+        background: '#ffffff',
         borderRadius: '20px',
-        border: '1px solid rgba(59, 130, 246, 0.3)',
+        border: '1px solid #e2e8f0',
         padding: '22px 24px',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
         flexWrap: 'wrap',
-        gap: '16px'
+        gap: '16px',
+        boxShadow: '0 4px 16px rgba(0, 0, 0, 0.03)'
       }}>
         <div>
-          <h4 style={{ margin: '0 0 6px', fontSize: '18px', fontWeight: 800, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <h4 style={{ margin: '0 0 6px', fontSize: '18px', fontWeight: 900, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span>🔗</span>
             <span>روابط التوظيف والمقابلات السريعة</span>
           </h4>
-          <p style={{ margin: 0, color: '#cbd5e1', fontSize: '13.5px' }}>
+          <p style={{ margin: 0, color: '#64748b', fontSize: '13.5px', fontWeight: 600 }}>
             شارك رابط التقديم العام مع المرشحين، أو رابط المقابلات مع مديري الفروع ورؤساء الأقسام.
           </p>
         </div>
@@ -193,21 +194,41 @@ export default function JobVacanciesManager({
           <div style={{ display: 'flex', gap: '6px' }}>
             <button
               type="button"
-              className="btn btn-start"
               onClick={() => {
                 navigator.clipboard?.writeText(publicApplyUrl);
                 showToast?.('📋 تم نسخ رابط تقديم المرشحين العام (/careers)');
               }}
-              style={{ padding: '8px 16px', borderRadius: '10px', fontWeight: 800, fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}
+              style={{
+                background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)',
+                color: '#ffffff',
+                border: 'none',
+                padding: '9px 18px',
+                borderRadius: '10px',
+                fontWeight: 800,
+                fontSize: '13px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                cursor: 'pointer',
+                boxShadow: '0 4px 12px rgba(13, 148, 136, 0.25)'
+              }}
             >
               <span>📋 نسخ رابط التقديم (/careers)</span>
             </button>
             <button
               type="button"
-              className="btn btn-ghost"
               onClick={() => handleOpenQrModal(publicApplyUrl, 'رابط تقديم المرشحين للوظائف')}
               title="عرض رمز الاستجابة السريعة QR"
-              style={{ padding: '8px 12px', borderRadius: '10px', fontSize: '14px' }}
+              style={{
+                background: '#f0fdfa',
+                color: '#0f766e',
+                border: '1px solid #ccfbf1',
+                padding: '9px 14px',
+                borderRadius: '10px',
+                fontSize: '13.5px',
+                fontWeight: 800,
+                cursor: 'pointer'
+              }}
             >
               📱 QR
             </button>
@@ -217,21 +238,40 @@ export default function JobVacanciesManager({
           <div style={{ display: 'flex', gap: '6px' }}>
             <button
               type="button"
-              className="btn btn-ghost"
               onClick={() => {
                 navigator.clipboard?.writeText(interviewerPortalUrl);
                 showToast?.('📋 تم نسخ رابط القائم بالمقابلة (/interview)');
               }}
-              style={{ background: 'rgba(139, 92, 246, 0.15)', color: '#c4b5fd', border: '1px solid rgba(139, 92, 246, 0.3)', padding: '8px 16px', borderRadius: '10px', fontWeight: 800, fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}
+              style={{
+                background: '#f8fafc',
+                color: '#334155',
+                border: '1.5px solid #cbd5e1',
+                padding: '9px 18px',
+                borderRadius: '10px',
+                fontWeight: 800,
+                fontSize: '13px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                cursor: 'pointer'
+              }}
             >
               <span>⭐️ نسخ رابط المقابلات (/interview)</span>
             </button>
             <button
               type="button"
-              className="btn btn-ghost"
               onClick={() => handleOpenQrModal(interviewerPortalUrl, 'رابط بوابة القائم بالمقابلة')}
               title="عرض رمز الاستجابة السريعة QR"
-              style={{ padding: '8px 12px', borderRadius: '10px', fontSize: '14px' }}
+              style={{
+                background: '#f8fafc',
+                color: '#475569',
+                border: '1px solid #cbd5e1',
+                padding: '9px 14px',
+                borderRadius: '10px',
+                fontSize: '13.5px',
+                fontWeight: 800,
+                cursor: 'pointer'
+              }}
             >
               📱 QR
             </button>
@@ -242,10 +282,10 @@ export default function JobVacanciesManager({
       {/* ── Vacancies Grid Header ── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
         <div>
-          <h3 style={{ margin: 0, fontSize: '19px', fontWeight: 800, color: 'var(--text, #fff)' }}>
+          <h3 style={{ margin: 0, fontSize: '19px', fontWeight: 900, color: '#0f172a' }}>
             💼 إدارة الوظائف الشاغرة وشروط التعيين ({vacancies.length})
           </h3>
-          <span style={{ fontSize: '13px', color: '#94a3b8' }}>
+          <span style={{ fontSize: '13px', color: '#64748b', fontWeight: 600 }}>
             تحديد المتطلبات والمؤهلات المطلوبة لكل مسمى وظيفي لجلبها في بوابة التقديم
           </span>
         </div>
@@ -253,8 +293,20 @@ export default function JobVacanciesManager({
         <button
           type="button"
           onClick={handleOpenAddModal}
-          className="btn btn-start"
-          style={{ padding: '10px 20px', borderRadius: '10px', fontWeight: 800, fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}
+          style={{
+            background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)',
+            color: '#ffffff',
+            border: 'none',
+            padding: '10px 20px',
+            borderRadius: '11px',
+            fontWeight: 900,
+            fontSize: '14px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            cursor: 'pointer',
+            boxShadow: '0 4px 14px rgba(13, 148, 136, 0.3)'
+          }}
         >
           <span>➕</span>
           <span>إضافة وظيفة شاغرة جديدة</span>
@@ -264,34 +316,36 @@ export default function JobVacanciesManager({
       {/* ── Vacancies Cards Grid ── */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(310px, 1fr))',
         gap: '18px'
       }}>
         {vacancies.map(vac => (
           <div
             key={vac.id}
             style={{
-              background: 'var(--surface, #1e293b)',
-              borderRadius: '16px',
-              border: `1px solid ${vac.isActive !== false ? 'rgba(59, 130, 246, 0.3)' : 'rgba(255, 255, 255, 0.08)'}`,
-              padding: '20px',
+              background: '#ffffff',
+              borderRadius: '18px',
+              border: `1.5px solid ${vac.isActive !== false ? '#ccfbf1' : '#e2e8f0'}`,
+              padding: '22px',
               display: 'flex',
               flexDirection: 'column',
               justifyContent: 'space-between',
               gap: '14px',
-              opacity: vac.isActive !== false ? 1 : 0.65,
-              boxShadow: '0 4px 16px rgba(0, 0, 0, 0.15)'
+              opacity: vac.isActive !== false ? 1 : 0.7,
+              boxShadow: '0 4px 16px rgba(0, 0, 0, 0.04)',
+              transition: 'transform 0.15s ease'
             }}
           >
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                 <span style={{
                   padding: '3px 10px',
-                  background: 'rgba(59, 130, 246, 0.15)',
-                  color: '#60a5fa',
-                  borderRadius: '6px',
+                  background: '#f0fdfa',
+                  color: '#0f766e',
+                  borderRadius: '8px',
                   fontSize: '12px',
-                  fontWeight: 700
+                  fontWeight: 800,
+                  border: '1px solid #ccfbf1'
                 }}>
                   {vac.department || 'الصيدلية'}
                 </span>
@@ -300,14 +354,14 @@ export default function JobVacanciesManager({
                   type="button"
                   onClick={() => handleToggleActive(vac.id)}
                   style={{
-                    padding: '2px 8px',
-                    borderRadius: '6px',
-                    fontSize: '11px',
+                    padding: '3px 10px',
+                    borderRadius: '8px',
+                    fontSize: '11.5px',
                     fontWeight: 800,
                     cursor: 'pointer',
-                    background: vac.isActive !== false ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                    color: vac.isActive !== false ? '#10b981' : '#ef4444',
-                    border: 'none'
+                    background: vac.isActive !== false ? '#ecfdf5' : '#fef2f2',
+                    color: vac.isActive !== false ? '#047857' : '#b91c1c',
+                    border: `1px solid ${vac.isActive !== false ? '#a7f3d0' : '#fecaca'}`
                   }}
                   title="تغيير حالة التقديم"
                 >
@@ -315,21 +369,34 @@ export default function JobVacanciesManager({
                 </button>
               </div>
 
-              <h4 style={{ margin: '0 0 6px', fontSize: '18px', fontWeight: 800, color: 'var(--text, #fff)' }}>
+              <h4 style={{ margin: '0 0 6px', fontSize: '18px', fontWeight: 900, color: '#0f172a' }}>
                 {vac.jobTitle}
               </h4>
 
-              <p style={{ margin: '0 0 12px', color: '#94a3b8', fontSize: '13px', lineHeight: '1.6' }}>
+              <p style={{ margin: '0 0 12px', color: '#475569', fontSize: '13px', lineHeight: '1.6' }}>
                 {vac.description || 'لا يوجد وصف مدون.'}
               </p>
 
-              <div style={{ background: 'rgba(15, 23, 42, 0.4)', padding: '10px 12px', borderRadius: '10px', fontSize: '12px', color: '#cbd5e1', marginBottom: '10px' }}>
-                <div style={{ marginBottom: '4px' }}>🎓 <strong>المؤهل:</strong> {vac.qualificationRequired || 'مؤهل مناسب'}</div>
-                <div>⏳ <strong>الخبرة:</strong> {vac.minExperienceYears ? `${vac.minExperienceYears} سنوات فأكثر` : 'مبتدئ أو ذو خبرة'} · 👥 <strong>المطلوب:</strong> {vac.openingsCount || 1}</div>
+              {/* High-contrast Info Box */}
+              <div style={{
+                background: '#f8fafc',
+                padding: '12px 14px',
+                borderRadius: '12px',
+                fontSize: '12.5px',
+                color: '#1e293b',
+                border: '1px solid #e2e8f0',
+                marginBottom: '12px'
+              }}>
+                <div style={{ marginBottom: '6px' }}>
+                  🎓 <strong>المؤهل:</strong> {vac.qualificationRequired || 'مؤهل مناسب'}
+                </div>
+                <div>
+                  ⏳ <strong>الخبرة:</strong> {vac.minExperienceYears ? `${vac.minExperienceYears} سنوات فأكثر` : 'مبتدئ أو ذو خبرة'} · 👥 <strong>المطلوب:</strong> {vac.openingsCount || 1}
+                </div>
               </div>
 
               {Array.isArray(vac.requirements) && vac.requirements.length > 0 && (
-                <ul style={{ margin: 0, paddingRight: '16px', fontSize: '12px', color: '#94a3b8', lineHeight: '1.6' }}>
+                <ul style={{ margin: 0, paddingRight: '16px', fontSize: '12px', color: '#334155', lineHeight: '1.6' }}>
                   {vac.requirements.slice(0, 3).map((req, idx) => (
                     <li key={idx}>{req}</li>
                   ))}
@@ -338,20 +405,35 @@ export default function JobVacanciesManager({
             </div>
 
             {/* Actions */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', borderTop: '1px solid #f1f5f9', paddingTop: '12px' }}>
               <button
                 type="button"
-                className="btn btn-ghost"
                 onClick={() => handleOpenEditModal(vac)}
-                style={{ padding: '6px 12px', fontSize: '12.5px', borderRadius: '8px' }}
+                style={{
+                  padding: '6px 14px',
+                  fontSize: '12.5px',
+                  borderRadius: '8px',
+                  background: '#f1f5f9',
+                  color: '#334155',
+                  border: '1px solid #cbd5e1',
+                  fontWeight: 800,
+                  cursor: 'pointer'
+                }}
               >
                 ✏️ تعديل الشروط
               </button>
               <button
                 type="button"
-                className="btn btn-ghost"
                 onClick={() => handleDeleteVacancy(vac.id, vac.jobTitle)}
-                style={{ padding: '6px 10px', fontSize: '12px', borderRadius: '8px', color: '#ef4444' }}
+                style={{
+                  padding: '6px 10px',
+                  fontSize: '12px',
+                  borderRadius: '8px',
+                  color: '#ef4444',
+                  background: '#fef2f2',
+                  border: '1px solid #fecaca',
+                  cursor: 'pointer'
+                }}
                 title="حذف الشاغر"
               >
                 🗑️
@@ -370,23 +452,25 @@ export default function JobVacanciesManager({
             style={{
               maxWidth: '600px',
               width: '95%',
-              background: 'var(--surface, #1e293b)',
+              background: '#ffffff',
               borderRadius: '20px',
               padding: '24px',
-              fontFamily: "'Tajawal', 'Cairo', sans-serif"
+              border: '1px solid #e2e8f0',
+              boxShadow: '0 20px 45px rgba(0, 0, 0, 0.15)',
+              fontFamily: "'Cairo', 'Tajawal', sans-serif"
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '12px' }}>
-              <h3 style={{ margin: 0, fontSize: '19px', fontWeight: 800, color: 'var(--text)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px' }}>
+              <h3 style={{ margin: 0, fontSize: '19px', fontWeight: 900, color: '#0f172a' }}>
                 {editingVac ? '✏️ تعديل شروط الوظيفة الشاغرة' : '➕ إضافة وظيفة شاغرة جديدة'}
               </h3>
-              <button type="button" className="close-btn" onClick={() => setShowModal(false)}>✕</button>
+              <button type="button" className="close-btn" onClick={() => setShowModal(false)} style={{ fontSize: '18px' }}>✕</button>
             </div>
 
             <form onSubmit={handleSaveVacancy} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                     المسمى الوظيفي (من وظائف المؤسسة) *
                   </label>
                   <select
@@ -398,7 +482,7 @@ export default function JobVacanciesManager({
                       const matched = jobsList.find(j => j.title === val);
                       if (matched && matched.department) setDepartment(matched.department);
                     }}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px' }}
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                     required
                   >
                     {jobsList.map(j => (
@@ -408,14 +492,14 @@ export default function JobVacanciesManager({
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                     القسم التابع له *
                   </label>
                   <select
                     className="form-control"
                     value={department}
                     onChange={e => setDepartment(e.target.value)}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px' }}
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                     required
                   >
                     {departmentsList.map(d => (
@@ -427,7 +511,7 @@ export default function JobVacanciesManager({
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                     عدد الشواغر المطلوبة
                   </label>
                   <input
@@ -436,19 +520,19 @@ export default function JobVacanciesManager({
                     className="form-control"
                     value={openingsCount}
                     onChange={e => setOpeningsCount(e.target.value)}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px' }}
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                   />
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                     الحد الأدنى لسنوات الخبرة
                   </label>
                   <select
                     className="form-control"
                     value={minExperienceYears}
                     onChange={e => setMinExperienceYears(e.target.value)}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px' }}
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                   >
                     <option value="0">حديث تخرج (بدون خبرة)</option>
                     <option value="1">سنة واحدة</option>
@@ -460,7 +544,7 @@ export default function JobVacanciesManager({
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                   المؤهل الدراسي المطلوب *
                 </label>
                 <input
@@ -469,13 +553,13 @@ export default function JobVacanciesManager({
                   placeholder="مثال: بكالوريوس صيدلة مع ترخيص مزاولة المهنة"
                   value={qualificationRequired}
                   onChange={e => setQualificationRequired(e.target.value)}
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px' }}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                   required
                 />
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                   الوصف الوظيفي والمهام
                 </label>
                 <textarea
@@ -484,12 +568,12 @@ export default function JobVacanciesManager({
                   placeholder="اكتب نبذة عن المسؤوليات اليومية للوظيفة..."
                   value={description}
                   onChange={e => setDescription(e.target.value)}
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px' }}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                 />
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '6px' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
                   شروط ومتطلبات التعيين (اكتب كل شرط في سطر مستقل)
                 </label>
                 <textarea
@@ -498,7 +582,7 @@ export default function JobVacanciesManager({
                   placeholder="شرط 1&#10;شرط 2&#10;شرط 3"
                   value={requirementsInput}
                   onChange={e => setRequirementsInput(e.target.value)}
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px' }}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a' }}
                 />
               </div>
 
@@ -510,16 +594,16 @@ export default function JobVacanciesManager({
                   onChange={e => setIsActive(e.target.checked)}
                   style={{ width: '18px', height: '18px', cursor: 'pointer' }}
                 />
-                <label htmlFor="vac_active_check" style={{ fontSize: '13.5px', fontWeight: 700, color: '#cbd5e1', cursor: 'pointer' }}>
+                <label htmlFor="vac_active_check" style={{ fontSize: '13.5px', fontWeight: 800, color: '#334155', cursor: 'pointer' }}>
                   إتاحة هذه الوظيفة للتقديم المباشر في بوابة الوظائف (/careers)
                 </label>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px', borderTop: '1px solid var(--border)', paddingTop: '14px' }}>
-                <button type="button" className="btn btn-ghost" onClick={() => setShowModal(false)}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px', borderTop: '1px solid #e2e8f0', paddingTop: '14px' }}>
+                <button type="button" className="btn btn-ghost" onClick={() => setShowModal(false)} style={{ padding: '8px 18px', borderRadius: '8px' }}>
                   إلغاء
                 </button>
-                <button type="submit" className="btn btn-start" style={{ padding: '8px 24px', fontWeight: 800 }}>
+                <button type="submit" style={{ padding: '8px 24px', fontWeight: 900, background: 'linear-gradient(135deg, #0d9488, #0f766e)', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer' }}>
                   💾 حفظ الشاغر الوظيفي
                 </button>
               </div>
@@ -537,37 +621,38 @@ export default function JobVacanciesManager({
             style={{
               maxWidth: '380px',
               width: '90%',
-              background: 'var(--surface, #1e293b)',
+              background: '#ffffff',
               borderRadius: '20px',
               padding: '24px',
               textAlign: 'center',
-              fontFamily: "'Tajawal', 'Cairo', sans-serif"
+              border: '1px solid #e2e8f0',
+              boxShadow: '0 20px 45px rgba(0, 0, 0, 0.15)',
+              fontFamily: "'Cairo', 'Tajawal', sans-serif"
             }}
           >
-            <h4 style={{ margin: '0 0 6px', fontSize: '17px', color: '#fff' }}>{qrModal.title}</h4>
-            <span style={{ fontSize: '12px', color: '#94a3b8', display: 'block', marginBottom: '16px' }}>امسح الرمز بالجوال لفتح الرابط مباشرة</span>
+            <h4 style={{ margin: '0 0 6px', fontSize: '17px', fontWeight: 900, color: '#0f172a' }}>{qrModal.title}</h4>
+            <span style={{ fontSize: '12px', color: '#64748b', display: 'block', marginBottom: '16px' }}>امسح الرمز بالجوال لفتح الرابط مباشرة</span>
 
             {qrDataUrl && (
               <img
                 src={qrDataUrl}
                 alt="QR Code"
-                style={{ width: '220px', height: '220px', borderRadius: '12px', margin: '0 auto 16px', background: '#fff', padding: '8px' }}
+                style={{ width: '220px', height: '220px', borderRadius: '12px', margin: '0 auto 16px', background: '#fff', padding: '8px', border: '1px solid #e2e8f0' }}
               />
             )}
 
-            <div style={{ fontSize: '12px', color: '#38bdf8', wordBreak: 'break-all', marginBottom: '16px', fontFamily: 'monospace' }}>
+            <div style={{ fontSize: '12px', color: '#0284c7', wordBreak: 'break-all', marginBottom: '16px', fontFamily: 'monospace', fontWeight: 700 }}>
               {qrModal.url}
             </div>
 
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
               <button
                 type="button"
-                className="btn btn-start"
                 onClick={() => {
                   navigator.clipboard?.writeText(qrModal.url);
                   showToast?.('📋 تم نسخ الرابط بنجاح');
                 }}
-                style={{ padding: '8px 16px', borderRadius: '8px', fontSize: '13px' }}
+                style={{ padding: '8px 16px', borderRadius: '8px', fontSize: '13px', background: '#0d9488', color: '#fff', border: 'none', fontWeight: 800, cursor: 'pointer' }}
               >
                 📋 نسخ الرابط
               </button>
