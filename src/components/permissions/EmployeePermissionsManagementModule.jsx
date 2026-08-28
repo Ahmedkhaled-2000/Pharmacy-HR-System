@@ -305,7 +305,7 @@ export default function EmployeePermissionsManagementModule({
     try {
       const emp = (state.employees || []).find((empObj) => String(empObj.id) === String(excEmpId));
       const durObj = computeDurationObj(excStartTime, excEndTime);
-      const isAdmin = authRole === 'admin';
+      const isAdmin = authRole === 'admin' || authRole === 'owner';
 
       const newExcPerm = {
         id: 'perm_exc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
@@ -928,7 +928,7 @@ export default function EmployeePermissionsManagementModule({
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ fontSize: '24px' }}>✨</span>
                 <h3 style={{ margin: 0, fontSize: '18px', color: 'var(--primary-dark)', fontWeight: 800 }}>
-                  {authRole === 'admin' ? 'إصدار إذن استثنائي معتمد لموظف' : 'طلب إذن استثنائي لموظف (يُرسل للإدارة العليا)'}
+                  {(authRole === 'admin' || authRole === 'owner') ? 'إصدار إذن استثنائي معتمد لموظف' : 'طلب إذن استثنائي لموظف (يُرسل للإدارة العليا)'}
                 </h3>
               </div>
               <button
@@ -1074,7 +1074,7 @@ export default function EmployeePermissionsManagementModule({
                   className="btn btn-start"
                   style={{ background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)', color: '#fff', border: 'none', padding: '10px 22px', borderRadius: '8px', fontWeight: 800 }}
                 >
-                  {excSubmitting ? 'جاري الإرسال...' : (authRole === 'admin' ? '✨ إصدار واعتماد فوري' : '📤 إرسال الطلب للإدارة العليا للاعتماد')}
+                  {excSubmitting ? 'جاري الإرسال...' : ((authRole === 'admin' || authRole === 'owner') ? '✨ إصدار واعتماد فوري' : '📤 إرسال الطلب للإدارة العليا للاعتماد')}
                 </button>
               </div>
 

@@ -25,8 +25,8 @@ export default function DisciplinaryPenaltiesTab({
   executeWithOwnerGuard
 }) {
   const isEmployee = userRole === 'employee' || Boolean(currentEmpId);
-  const isBranch = userRole === 'branch' || (Boolean(currentBranchId) && !isEmployee && userRole !== 'admin');
-  const isAdmin = userRole === 'admin' && !isEmployee && !isBranch;
+  const isBranch = userRole === 'branch' || (Boolean(currentBranchId) && !isEmployee && userRole !== 'admin' && userRole !== 'owner');
+  const isAdmin = (userRole === 'admin' || userRole === 'owner') && !isEmployee && !isBranch;
 
   const allEmployeesList = state.employees || [];
   const branches = state.branches || [];
@@ -226,7 +226,7 @@ export default function DisciplinaryPenaltiesTab({
       const incAmount = dayAmt > 0 ? dayAmt : (parseFloat(inc.penaltyAmount) || 0);
 
       const cat = resolveDisciplinaryCategory({ sourceType: 'late_incident', ...inc }, policy);
-      const isFromAdmin = inc.isAdminCreated || inc.createdBy === 'admin' || inc.creatorRole === 'admin';
+      const isFromAdmin = inc.isAdminCreated || inc.createdBy === 'admin' || inc.creatorRole === 'admin' || inc.creatorRole === 'owner';
       const createdRole = isFromAdmin ? 'admin' : 'system';
       const createdByName = isFromAdmin ? 'الإدارة العليا (بصمة يدوية)' : 'النظام التلقائي (بصمة الحضور)';
 

@@ -19,7 +19,7 @@ export default function DisciplinaryViolationModal({
   onViolationSaved = null,
   executeWithOwnerGuard
 }) {
-  const isAdmin = userRole === 'admin';
+  const isAdmin = userRole === 'admin' || userRole === 'owner';
   const isBranch = userRole === 'branch';
 
   const employees = state.employees || [];

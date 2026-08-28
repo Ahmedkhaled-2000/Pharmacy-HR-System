@@ -24,7 +24,7 @@ export default function LatePenaltyPolicyModule({
   customTo = '',
   executeWithOwnerGuard
 }) {
-  const isAdmin = userRole === 'admin';
+  const isAdmin = userRole === 'admin' || userRole === 'owner';
   const isBranchManager = userRole === 'branch';
   const isEmployee = userRole === 'employee';
   const isManagerOrAdmin = isAdmin || isBranchManager;

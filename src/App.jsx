@@ -3269,8 +3269,8 @@ export default function App() {
 
     if (pendingNewRequests.length === 0) return;
 
-    // 1. الإدارة العليا (Super Admin): تنبيه بالصوت والرسالة للطلبات الجديدة
-    if (authRole === 'admin') {
+    // 1. الإدارة العليا والمالك (Super Admin & Owner): تنبيه بالصوت والرسالة للطلبات الجديدة
+    if (authRole === 'admin' || authRole === 'owner') {
       playNotificationChime();
       showToast('🔔 يوجد طلب جديد يحتاج للمراجعة من الإدارة العليا');
     }
@@ -3649,8 +3649,8 @@ export default function App() {
 
   // Check Permissions Helper
   const getEmpPermission = (empOrId, permKey) => {
-    // Admin management screens only bypass permissions when actively in Admin role and not evaluating an employee profile
-    if (authRole === 'admin' && !empOrId) return true;
+    // Admin management screens only bypass permissions when actively in Admin/Owner role and not evaluating an employee profile
+    if ((authRole === 'admin' || authRole === 'owner') && !empOrId) return true;
     
     // إذا كان الموظف مسجل الدخول من صفحة البصمة (Kiosk) وتم تأكيد الـ IP، يتم تخطي صلاحيات تسجيل الحضور
     if (viewMode === 'kiosk') {

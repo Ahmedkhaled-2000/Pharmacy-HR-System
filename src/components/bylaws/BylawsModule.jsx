@@ -40,8 +40,8 @@ export default function BylawsModule({
       setActiveTab(activeSubTab);
     }
   }, [activeSubTab]);
-  const isManagerOrAdmin = userRole === 'admin' || userRole === 'branch';
-  const isAdmin = userRole === 'admin';
+  const isManagerOrAdmin = userRole === 'admin' || userRole === 'owner' || userRole === 'branch';
+  const isAdmin = userRole === 'admin' || userRole === 'owner';
 
   // State for official bylaws structured sections & raw text
   const [bylawsSections, setBylawsSections] = useState(() => getBylawsSectionsFromState(state));

@@ -663,8 +663,8 @@ return { group: 'النظام', item: 'لوحة التحكم', icon: '📊' };
 };
 
 const breadcrumb = getActiveBreadcrumb();
-const profileName = userProfile?.name || (currentRole === 'admin' ? 'الإدارة العليا' : (currentBranch?.name ? `مدير فرع - ${currentBranch.name}` : 'مدير الفرع'));
-const profileTitle = userProfile?.jobTitle || (currentRole === 'admin' ? 'المدير العام' : 'مدير الفرع');
+const profileName = userProfile?.name || ((currentRole === 'owner' || userProfile?.isOwner) ? '👑 المالك' : (currentRole === 'admin' ? 'الإدارة العليا' : (currentBranch?.name ? `مدير فرع - ${currentBranch.name}` : 'مدير الفرع')));
+const profileTitle = userProfile?.jobTitle || ((currentRole === 'owner' || userProfile?.isOwner) ? 'Super Root / Owner' : (currentRole === 'admin' ? 'المدير العام' : 'مدير الفرع'));
 const firstLetter = profileName.trim().charAt(0) || 'م';
 
 return (

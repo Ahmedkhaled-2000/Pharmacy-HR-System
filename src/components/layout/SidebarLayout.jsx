@@ -62,8 +62,8 @@ export default function SidebarLayout({
   const currentLabel = menuItems.find(m => m.id === activeTab)?.label || 'لوحة التحكم';
 
   // Profile data fallback
-  const profileName = userProfile?.name || (currentRole === 'admin' ? 'الإدارة العليا' : (currentBranch?.name ? `مدير فرع - ${currentBranch.name}` : 'مدير الفرع'));
-  const profileTitle = userProfile?.jobTitle || (currentRole === 'admin' ? 'المدير العام' : 'مدير الفرع');
+  const profileName = userProfile?.name || ((currentRole === 'owner' || userProfile?.isOwner) ? '👑 المالك' : (currentRole === 'admin' ? 'الإدارة العليا' : (currentBranch?.name ? `مدير فرع - ${currentBranch.name}` : 'مدير الفرع')));
+  const profileTitle = userProfile?.jobTitle || ((currentRole === 'owner' || userProfile?.isOwner) ? 'Super Root / Owner' : (currentRole === 'admin' ? 'المدير العام' : 'مدير الفرع'));
   const profileCode = userProfile?.code ? `· ${userProfile.code}` : '';
   const firstLetter = profileName.trim().charAt(0) || 'م';
 

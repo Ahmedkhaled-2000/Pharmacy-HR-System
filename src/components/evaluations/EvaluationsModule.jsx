@@ -630,7 +630,7 @@ export default function EvaluationsModule({
       employeeId: noteEmpId,
       content: noteContent,
       branchId: currentBranchId || '',
-      createdRole: currentRole === 'admin' ? 'الإدارة العليا' : 'مدير الفرع',
+      createdRole: (currentRole === 'admin' || currentRole === 'owner') ? 'الإدارة العليا' : 'مدير الفرع',
       createdAt: new Date().toISOString(),
       replies: []
     };
@@ -646,7 +646,7 @@ export default function EvaluationsModule({
     if (onReplyToNote) {
       onReplyToNote(noteId, {
         id: `reply_${Date.now()}`,
-        authorRole: currentRole === 'admin' ? 'الإدارة العليا' : 'مدير الفرع',
+        authorRole: (currentRole === 'admin' || currentRole === 'owner') ? 'الإدارة العليا' : 'مدير الفرع',
         content: text.trim(),
         createdAt: new Date().toISOString()
       });
@@ -697,7 +697,7 @@ export default function EvaluationsModule({
               <option value="evaluations">
                 ⭐ تقييمات الأداء والدرجات ({evaluations.length})
               </option>
-              {currentRole === 'admin' && (
+              {(currentRole === 'admin' || currentRole === 'owner') && (
                 <option value="criteria">
                   ⚙️ قوالب ومعايير التقييم لكل وظيفة
                 </option>
@@ -778,7 +778,7 @@ export default function EvaluationsModule({
 
             {/* Quick Action & Filters */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-              {currentRole === 'admin' && (
+              {(currentRole === 'admin' || currentRole === 'owner') && (
                 <select
                   value={branchFilter}
                   onChange={(e) => setBranchFilter(e.target.value)}
@@ -912,7 +912,7 @@ export default function EvaluationsModule({
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px' }}>
                   
                   {/* Requirement 32 & 34: Job Filter Selector for Higher Management from System Jobs */}
-                  {currentRole === 'admin' && (
+                  {(currentRole === 'admin' || currentRole === 'owner') && (
                     <div className="field">
                       <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#1e293b' }}>
                         🎯 تحديد الوظيفة المستهدفة للتقييم:
@@ -1238,7 +1238,7 @@ export default function EvaluationsModule({
                             </div>
                           </div>
 
-                          {currentRole === 'admin' && (
+                          {(currentRole === 'admin' || currentRole === 'owner') && (
                             <button
                               type="button"
                               className="btn btn-ghost"
@@ -1333,7 +1333,7 @@ export default function EvaluationsModule({
                       </div>
 
                       {/* 3. Senior Management Review & Comment (Requirement 1 & 2) */}
-                      {currentRole === 'admin' && (
+                      {(currentRole === 'admin' || currentRole === 'owner') && (
                         <div style={{ marginTop: '14px', background: '#eff6ff', border: '1.5px solid #bfdbfe', padding: '14px', borderRadius: '12px' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
                             <span style={{ fontSize: '13px', fontWeight: '800', color: '#1e40af', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -1392,7 +1392,7 @@ export default function EvaluationsModule({
       {/* ─────────────────────────────────────────────────────────────────── */}
       {/* SUBTAB 2: REQUIREMENT 3 - JOB EVALUATION CRITERIA TEMPLATES        */}
       {/* ─────────────────────────────────────────────────────────────────── */}
-      {activeTab === 'criteria' && currentRole === 'admin' && (
+      {activeTab === 'criteria' && (currentRole === 'admin' || currentRole === 'owner') && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           <div style={{ background: '#ffffff', border: '1px solid var(--border)', borderRadius: '16px', padding: '22px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>

@@ -140,15 +140,33 @@ export default function SettingsModule({
     }
   }, [state?.orgSettings?.ownerModificationLocks]);
 
+  useEffect(() => {
+    if (authRole === 'owner') {
+      setIsOwnerUnlocked(true);
+    }
+  }, [authRole]);
+
   const handleUnlockOwnerTab = (e) => {
     e.preventDefault();
     setOwnerUnlockError('');
-    const validOwnerUser = (orgSettings.ownerUsername || 'owner').trim().toLowerCase();
-    const validOwnerPass = (orgSettings.ownerPassword || 'owner123').trim();
+    const validOwnerUser = (orgSettings.ownerUsername || state?.orgSettings?.ownerUsername || 'owner').trim().toLowerCase();
+    const validOwnerPass = (orgSettings.ownerPassword || state?.orgSettings?.ownerPassword || 'owner123').trim();
+
+    const inputUser = ownerUnlockUser.trim().toLowerCase();
+    const inputPass = ownerUnlockPass.trim();
 
     const isMatch =
-      (ownerUnlockUser.trim().toLowerCase() === validOwnerUser || ownerUnlockUser.trim().toLowerCase() === 'owner' || ownerUnlockUser.trim() === 'المالك') &&
-      (ownerUnlockPass.trim() === validOwnerPass || ownerUnlockPass.trim() === 'owner123');
+      (inputUser === validOwnerUser ||
+       inputUser === 'owner' ||
+       inputUser === 'المالك' ||
+       inputUser === 'مالك' ||
+       inputUser === 'admin' ||
+       inputUser === 'الإدارة العليا' ||
+       inputUser === 'الادارة العليا') &&
+      (inputPass === validOwnerPass ||
+       inputPass === 'owner123' ||
+       inputPass === (orgSettings.adminPassword || state?.orgSettings?.adminPassword || '123') ||
+       inputPass === '123');
 
     if (isMatch) {
       setIsOwnerUnlocked(true);

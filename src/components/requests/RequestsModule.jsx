@@ -998,7 +998,7 @@ export default function RequestsModule({
       }
     };
 
-    if (effectiveRole === 'admin') {
+    if (effectiveRole === 'admin' || effectiveRole === 'owner') {
       if (targetReq.type === 'loan' || targetReq.type === 'advance' || targetReq.type === 'meds' || targetReq.type === 'credit_medicine') {
         executeWithOwnerGuard?.({
           lockKey: 'lockApproveLoans',

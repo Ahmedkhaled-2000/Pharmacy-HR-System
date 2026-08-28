@@ -173,7 +173,7 @@ export default function LoansAndCreditModule({
                         </span>
                       </td>
                       <td>
-                        {loan.status === 'pending' && currentRole === 'admin' ? (
+                        {loan.status === 'pending' && (currentRole === 'admin' || currentRole === 'owner') ? (
                           <div style={{ display: 'flex', gap: '6px' }}>
                             <button type="button" className="btn btn-start" style={{ fontSize: '11px', padding: '4px 8px' }} onClick={() => onApproveLoan(loan.id)}>
                               موافقة
