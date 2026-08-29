@@ -277,6 +277,62 @@ export default function AppRoutes() {
     return `السلام عليكم ورحمة الله وبركاته،\n\nعزيزي الموظف: ${emp.name} (كود: ${emp.code})\nإليك تفاصيل مرتب شهر ${monthLabel}:\n\n• ساعات العمل المسجلة: ${fmt(summary.hours)} ساعة\n• المستحقات الأساسية: ${fmt(summary.baseEarnings)} ج.م\n• إجمالي المكافآت (+): ${fmt(summary.totalBonus)} ج.م\n• إجمالي الخصومات (-): ${fmt(summary.totalDeduction)} ج.م\n-----------------------------------------\n★ صافي المرتب المستحق: ${fmt(summary.netSalary)} ج.م\n\nمع تحيات إدارة ${orgName}.`;
   };
 
+  const handleLogin = (username, password) => {
+    const cleanUser = String(username || '').trim().toLowerCase();
+    const cleanPass = String(password || '').trim();
+
+    if (!cleanUser || !cleanPass) {
+      return { success: false, error: 'يرجى إدخال اسم المستخدم وكلمة المرور' };
+    }
+
+    const orgSettings = state?.orgSettings || {};
+    const ownerUser = String(orgSettings.ownerUsername || 'owner').trim().toLowerCase();
+    const ownerPass = String(orgSettings.ownerPassword || 'owner123').trim();
+    const adminUser = String(orgSettings.adminUsername || orgSettings.adminUser || 'admin').trim().toLowerCase();
+    const adminPass = String(orgSettings.adminPassword || orgSettings.adminPass || '123').trim();
+
+    // 1. Check Owner
+    if ((cleanUser === ownerUser || cleanUser === 'owner') && (cleanPass === ownerPass || cleanPass === 'owner123')) {
+      handleUnifiedLogin({ role: 'owner', redirectTab: 'dashboard' });
+      return { success: true };
+    }
+
+    // 2. Check Admin
+    if ((cleanUser === adminUser || cleanUser === 'admin') && (cleanPass === adminPass || cleanPass === '123')) {
+      handleUnifiedLogin({ role: 'admin', redirectTab: 'dashboard' });
+      return { success: true };
+    }
+
+    // 3. Check Branch Manager
+    const branches = state?.branches || [];
+    const matchedBranch = branches.find((b) => {
+      const bUser = String(b.username || b.code || b.branchCode || '').trim().toLowerCase();
+      const bPass = String(b.password || '123').trim();
+      return bUser === cleanUser && bPass === cleanPass;
+    });
+    if (matchedBranch) {
+      handleUnifiedLogin({ role: 'branch', branch: matchedBranch, redirectTab: 'branch' });
+      return { success: true };
+    }
+
+    // 4. Check Employee
+    const employees = state?.employees || [];
+    const matchedEmp = employees.find((e) => {
+      const eCode = String(e.code || '').trim().toLowerCase();
+      const eUser = String(e.username || '').trim().toLowerCase();
+      const ePhone = String(e.phone || '').trim();
+      const ePass = String(e.password || '123').trim();
+      const isUserMatch = eCode === cleanUser || (eUser && eUser === cleanUser) || (ePhone && ePhone === cleanUser);
+      return isUserMatch && ePass === cleanPass;
+    });
+    if (matchedEmp) {
+      handleUnifiedLogin({ role: 'employee', user: matchedEmp, redirectTab: 'portal' });
+      return { success: true };
+    }
+
+    return { success: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة' };
+  };
+
   return (
     <div className={`mode-${viewMode}`}>
       {/* 0. Initial Loading Spinner with Organization Logo */}
@@ -427,7 +483,7 @@ export default function AppRoutes() {
         (!isAdminLoggedIn && !currentEmpUser && !currentBranch) || authRole === 'none' ? (
           <ErrorBoundary fallbackTitle="حدث خطأ في شاشة تسجيل الدخول">
             <LoginPage
-              onLogin={handleUnifiedLogin}
+              onLogin={handleLogin}
               state={state}
               themeMode={themeMode}
               toggleTheme={toggleTheme}

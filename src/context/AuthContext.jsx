@@ -85,13 +85,14 @@ export function AuthProvider({ children }) {
   }, [authRole, currentBranch, currentEmpUser, activeNavTab, activeSubTab, isAdminLoggedIn]);
 
   // Unified Login Handler
-  const handleUnifiedLogin = ({ role, user, branch, redirectTab = 'dashboard' }) => {
+  const handleUnifiedLogin = (options = {}) => {
+    const role = typeof options === 'string' ? options : (options.role || 'none');
+    const user = options.user || null;
+    const branch = options.branch || null;
+    const redirectTab = options.redirectTab || (role === 'employee' ? 'portal' : role === 'branch' ? 'branch' : 'dashboard');
+
     setAuthRole(role);
-    if (role === 'owner') {
-      setIsAdminLoggedIn(true);
-      setCurrentBranch(null);
-      setCurrentEmpUser(null);
-    } else if (role === 'admin') {
+    if (role === 'owner' || role === 'admin') {
       setIsAdminLoggedIn(true);
       setCurrentBranch(null);
       setCurrentEmpUser(null);
