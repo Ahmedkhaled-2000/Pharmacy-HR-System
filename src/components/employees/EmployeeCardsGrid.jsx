@@ -313,35 +313,36 @@ export default function EmployeeCardsGrid({
       </div>
 
       {/* ── MODERN MAIN TABS (ACTIVE vs RESIGNED) ── */}
-      <div style={{ display: 'flex', gap: '10px', marginBottom: '18px', borderBottom: '2px solid var(--border)', paddingBottom: '12px' }}>
+      <div style={{ display: 'flex', gap: '12px', marginBottom: '20px', borderBottom: '2px solid var(--border)', paddingBottom: '14px' }}>
         <button
           type="button"
           onClick={() => setActiveMainTab('active')}
           style={{
-            padding: '10px 22px',
-            borderRadius: '12px',
-            border: 'none',
-            background: activeMainTab === 'active' ? 'linear-gradient(135deg, #0f766e 0%, #115e59 100%)' : '#fff',
-            color: activeMainTab === 'active' ? '#fff' : '#475569',
-            fontWeight: 'bold',
+            padding: '11px 24px',
+            borderRadius: '14px',
+            border: activeMainTab === 'active' ? '1px solid rgba(13, 148, 136, 0.4)' : '1px solid var(--border)',
+            background: activeMainTab === 'active' ? 'linear-gradient(135deg, var(--primary-dark) 0%, var(--primary) 100%)' : 'var(--surface)',
+            color: activeMainTab === 'active' ? '#fff' : 'var(--text-secondary)',
+            fontWeight: '800',
             fontSize: '14px',
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
             gap: '8px',
-            boxShadow: activeMainTab === 'active' ? '0 4px 12px rgba(15,118,110,0.25)' : '0 1px 3px rgba(0,0,0,0.05)',
+            boxShadow: activeMainTab === 'active' ? '0 4px 14px rgba(13,148,136,0.3)' : 'var(--shadow-sm)',
             transition: 'all 0.2s ease'
           }}
         >
           <span>🟢 الموظفون الحاليون (على رأس العمل)</span>
           <span
             style={{
-              background: activeMainTab === 'active' ? 'rgba(255,255,255,0.25)' : '#e2e8f0',
-              color: activeMainTab === 'active' ? '#fff' : '#0f766e',
+              background: activeMainTab === 'active' ? 'rgba(255,255,255,0.25)' : 'var(--surface-muted)',
+              color: activeMainTab === 'active' ? '#fff' : 'var(--primary)',
               padding: '2px 8px',
               borderRadius: '20px',
               fontSize: '12px',
-              fontWeight: '900'
+              fontWeight: '900',
+              border: activeMainTab === 'active' ? 'none' : '1px solid var(--border)'
             }}
           >
             {activeEmployeesList.length}
@@ -352,26 +353,26 @@ export default function EmployeeCardsGrid({
           type="button"
           onClick={() => setActiveMainTab('resigned')}
           style={{
-            padding: '10px 22px',
-            borderRadius: '12px',
-            border: 'none',
-            background: activeMainTab === 'resigned' ? 'linear-gradient(135deg, #991b1b 0%, #7f1d1d 100%)' : '#fff',
-            color: activeMainTab === 'resigned' ? '#fff' : '#475569',
-            fontWeight: 'bold',
+            padding: '11px 24px',
+            borderRadius: '14px',
+            border: activeMainTab === 'resigned' ? '1px solid rgba(220, 38, 38, 0.4)' : '1px solid var(--border)',
+            background: activeMainTab === 'resigned' ? 'linear-gradient(135deg, var(--danger-dark) 0%, var(--danger) 100%)' : 'var(--surface)',
+            color: activeMainTab === 'resigned' ? '#fff' : 'var(--text-secondary)',
+            fontWeight: '800',
             fontSize: '14px',
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
             gap: '8px',
-            boxShadow: activeMainTab === 'resigned' ? '0 4px 12px rgba(153,27,27,0.25)' : '0 1px 3px rgba(0,0,0,0.05)',
+            boxShadow: activeMainTab === 'resigned' ? '0 4px 14px rgba(220,38,38,0.3)' : 'var(--shadow-sm)',
             transition: 'all 0.2s ease'
           }}
         >
           <span>📁 المستقيلون ومنتهية خدمتهم</span>
           <span
             style={{
-              background: activeMainTab === 'resigned' ? 'rgba(255,255,255,0.25)' : '#fee2e2',
-              color: activeMainTab === 'resigned' ? '#fff' : '#991b1b',
+              background: activeMainTab === 'resigned' ? 'rgba(255,255,255,0.25)' : 'var(--danger-tint)',
+              color: activeMainTab === 'resigned' ? '#fff' : 'var(--danger)',
               padding: '2px 8px',
               borderRadius: '20px',
               fontSize: '12px',
@@ -393,10 +394,11 @@ export default function EmployeeCardsGrid({
             onChange={(e) => setSearchTerm(e.target.value)}
             style={{
               width: '100%',
-              padding: '10px 14px',
-              borderRadius: '10px',
+              padding: '11px 16px',
+              borderRadius: '12px',
               border: '1px solid var(--border)',
-              background: '#fff',
+              background: 'var(--surface)',
+              color: 'var(--text)',
               fontSize: '13.5px',
               boxSizing: 'border-box'
             }}
@@ -405,7 +407,7 @@ export default function EmployeeCardsGrid({
             <button
               type="button"
               onClick={() => setSearchTerm('')}
-              style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'none', cursor: 'pointer', color: '#94a3b8' }}
+              style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'none', cursor: 'pointer', color: 'var(--muted)' }}
             >
               ✕
             </button>
@@ -418,10 +420,11 @@ export default function EmployeeCardsGrid({
             onChange={(e) => setSelectedBranchFilter(e.target.value)}
             style={{
               width: '100%',
-              padding: '10px 14px',
-              borderRadius: '10px',
+              padding: '11px 16px',
+              borderRadius: '12px',
               border: '1px solid var(--border)',
-              background: '#fff',
+              background: 'var(--surface)',
+              color: 'var(--text)',
               fontSize: '13.5px',
               boxSizing: 'border-box'
             }}
@@ -436,7 +439,7 @@ export default function EmployeeCardsGrid({
 
       {/* ── NO RESULTS ALERT ── */}
       {displayedEmployees.length === 0 && (
-        <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: '16px', padding: '40px 20px', textAlign: 'center', color: 'var(--muted)' }}>
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '16px', padding: '40px 20px', textAlign: 'center', color: 'var(--muted)', boxShadow: 'var(--shadow-sm)' }}>
           <span style={{ fontSize: '40px', display: 'block', marginBottom: '10px' }}>
             {activeMainTab === 'active' ? '👥' : '📁'}
           </span>
@@ -556,10 +559,10 @@ export default function EmployeeCardsGrid({
                     <div
                       key={emp.id}
                       style={{
-                        background: '#fff',
-                        border: isEmpTerminated ? '1px solid #fca5a5' : '1px solid var(--border)',
-                        borderRadius: '14px',
-                        padding: '16px 20px',
+                        background: 'var(--surface)',
+                        border: isEmpTerminated ? '1px solid var(--danger-border, #fca5a5)' : '1px solid var(--border)',
+                        borderRadius: '16px',
+                        padding: '18px 22px',
                         display: 'flex',
                         flexDirection: 'row',
                         justifyContent: 'space-between',
@@ -568,7 +571,8 @@ export default function EmployeeCardsGrid({
                         gap: '16px',
                         width: '100%',
                         boxSizing: 'border-box',
-                        boxShadow: '0 2px 8px rgba(0,0,0,0.03)'
+                        boxShadow: 'var(--shadow-sm)',
+                        transition: 'all 0.2s ease'
                       }}
                     >
                       {/* Left Block: Avatar, Name, Title & Code */}
@@ -598,7 +602,7 @@ export default function EmployeeCardsGrid({
                         </div>
                         <div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                            <h3 style={{ margin: 0, fontFamily: 'Cairo', fontSize: '17px', color: isEmpTerminated ? '#7f1d1d' : 'var(--text)' }}>
+                            <h3 style={{ margin: 0, fontFamily: 'Cairo', fontSize: '17px', color: isEmpTerminated ? 'var(--danger-dark, #dc2626)' : 'var(--text)' }}>
                               {getEmpDisplayName(emp)}
                             </h3>
                             {emp.nickname && emp.nickname.trim() !== emp.name?.trim() && (

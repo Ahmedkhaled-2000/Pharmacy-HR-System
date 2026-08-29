@@ -469,18 +469,19 @@ export default function Dashboard({
             style={{
               padding: '22px 24px',
               marginBottom: '28px',
-              border: '1px solid #fecdd3',
-              background: 'linear-gradient(180deg, #fff5f5 0%, #ffffff 100%)',
+              border: '1px solid rgba(239, 68, 68, 0.25)',
+              borderTop: '3.5px solid var(--danger)',
+              background: 'var(--surface)',
               borderRadius: '18px',
-              boxShadow: '0 10px 30px -5px rgba(244, 63, 94, 0.08), 0 2px 6px rgba(0, 0, 0, 0.02)'
+              boxShadow: 'var(--shadow)'
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
-              <h4 style={{ margin: 0, fontSize: '17px', color: '#991b1b', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '800' }}>
+              <h4 style={{ margin: 0, fontSize: '17px', color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '800' }}>
                 🚨 الموظفون الغائبون / لم يبصموا اليوم ({todayDate})
               </h4>
               <span style={{
-                background: '#ef4444',
+                background: 'var(--danger)',
                 color: '#ffffff',
                 padding: '5px 14px',
                 borderRadius: '99px',
@@ -494,9 +495,9 @@ export default function Dashboard({
 
             {absentEmpsToday.length === 0 ? (
               <div style={{
-                background: '#dcfce7',
-                color: '#166534',
-                border: '1px solid #bbf7d0',
+                background: 'var(--primary-tint)',
+                color: 'var(--primary-dark)',
+                border: '1px solid rgba(13, 148, 136, 0.2)',
                 padding: '14px 18px',
                 borderRadius: '12px',
                 fontSize: '14px',
@@ -513,23 +514,23 @@ export default function Dashboard({
                     <div
                       key={emp.id}
                       style={{
-                        background: '#ffffff',
-                        border: '1px solid #fecdd3',
-                        borderRight: '4px solid #ef4444',
+                        background: 'var(--surface-muted)',
+                        border: '1px solid var(--border)',
+                        borderRight: '4px solid var(--danger)',
                         padding: '12px 16px',
                         borderRadius: '12px',
                         display: 'flex',
                         alignItems: 'center',
                         gap: '12px',
-                        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.03)'
+                        boxShadow: 'var(--shadow-sm)'
                       }}
                     >
                       <div style={{
                         width: '38px',
                         height: '38px',
                         borderRadius: '10px',
-                        background: 'linear-gradient(135deg, #fee2e2 0%, #fecaca 100%)',
-                        color: '#b91c1c',
+                        background: 'var(--danger-tint)',
+                        color: 'var(--danger)',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
@@ -539,10 +540,10 @@ export default function Dashboard({
                         {emp.name.charAt(0)}
                       </div>
                       <div style={{ overflow: 'hidden' }}>
-                        <div style={{ fontWeight: '800', fontSize: '14px', color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {emp.name} <span style={{ fontSize: '11.5px', color: '#64748b' }}>({emp.code})</span>
+                        <div style={{ fontWeight: '800', fontSize: '14px', color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {emp.name} <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>({emp.code})</span>
                         </div>
-                        <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+                        <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '2px' }}>
                           {emp.jobTitle} • {branchObj ? `فرع ${branchObj.name}` : 'الإدارة العامة'}
                         </div>
                       </div>
@@ -1511,39 +1512,39 @@ export default function Dashboard({
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px', marginBottom: '24px' }}>
             {/* Early Exit Card */}
             {earlyExitRequests.length > 0 && (
-              <div className="card settings-card" style={{ padding: '18px', border: '2px solid #fecdd3', background: '#fff1f2' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                  <h4 style={{ margin: 0, fontSize: '15px', color: '#be123c', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div className="card settings-card" style={{ padding: '20px', border: '1px solid rgba(220, 38, 38, 0.25)', borderTop: '3.5px solid var(--danger)', background: 'var(--surface)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                  <h4 style={{ margin: 0, fontSize: '15px', color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '800' }}>
                     🏃‍♂️ رصد الانصراف المبكر عن موعد الوردية ({earlyExitRequests.length})
                   </h4>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   {earlyExitRequests.map((req) => {
                     const isApproved = req.status === 'approved' || req.adminApproved;
                     const isWaived = req.status === 'waived';
                     const isPending = req.status === 'pending';
 
                     return (
-                      <div key={req.id} style={{ background: '#ffffff', border: '1px solid #fecdd3', borderRadius: '10px', padding: '12px 14px' }}>
+                      <div key={req.id} style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)', borderRadius: '12px', padding: '14px 16px', boxShadow: 'var(--shadow-sm)' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
                           <div>
-                            <strong style={{ color: '#9f1239', fontSize: '14px' }}>👤 {req.employeeName}</strong>
+                            <strong style={{ color: 'var(--danger)', fontSize: '14px', fontWeight: '800' }}>👤 {req.employeeName}</strong>
                             <span style={{ fontSize: '12px', color: 'var(--muted)', marginRight: '6px' }}>• فرع {req.branchName}</span>
-                            <div style={{ fontSize: '12.5px', color: '#475569', marginTop: '4px' }}>
+                            <div style={{ fontSize: '12.5px', color: 'var(--text-secondary)', marginTop: '4px' }}>
                               {req.details || req.reason}
                             </div>
                           </div>
-                          <span style={{ fontSize: '11.5px', color: '#be123c', fontWeight: 'bold' }}>
+                          <span style={{ fontSize: '12px', color: 'var(--danger)', fontWeight: '800', background: 'var(--danger-tint)', padding: '2px 8px', borderRadius: '6px' }}>
                             {req.earlyMinutes} دقيقة مبكراً
                           </span>
                         </div>
 
-                        <div style={{ marginTop: '10px', display: 'flex', gap: '6px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                        <div style={{ marginTop: '12px', display: 'flex', gap: '6px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                           {isPending ? (
                             <>
                               <button
                                 className="btn btn-start"
-                                style={{ padding: '4px 10px', fontSize: '12px', background: '#dc2626' }}
+                                style={{ padding: '5px 12px', fontSize: '12px', background: 'var(--danger)' }}
                                 onClick={() => onApproveRequest?.(req.id)}
                                 title="تطبيق الجزاء والخصم المالي في حساب الراتب"
                               >
@@ -1551,7 +1552,7 @@ export default function Dashboard({
                               </button>
                               <button
                                 className="btn btn-ghost"
-                                style={{ padding: '4px 10px', fontSize: '12px', border: '1px solid #cbd5e1' }}
+                                style={{ padding: '5px 12px', fontSize: '12px', border: '1px solid var(--border)' }}
                                 onClick={() => onWaiveEarlyExit ? onWaiveEarlyExit(req.id) : onRejectRequest?.(req.id)}
                                 title="إعفاء الموظف بدون خصم مالي"
                               >
@@ -1560,7 +1561,7 @@ export default function Dashboard({
                               {onSendEarlyExitEmail && (
                                 <button
                                   className="btn btn-outline"
-                                  style={{ padding: '4px 10px', fontSize: '12px', color: '#d97706', borderColor: '#fde68a' }}
+                                  style={{ padding: '5px 12px', fontSize: '12px', color: 'var(--accent)', borderColor: 'var(--accent)' }}
                                   onClick={() => onSendEarlyExitEmail(req.id)}
                                   title="إرسال تنبيه رسمي لبريد الموظف"
                                 >
@@ -1569,11 +1570,11 @@ export default function Dashboard({
                               )}
                             </>
                           ) : isApproved ? (
-                            <span style={{ color: '#16a34a', fontSize: '12px', fontWeight: 'bold' }}>✅ تم تطبيق الخصم اللائحي</span>
+                            <span style={{ color: 'var(--success)', fontSize: '12px', fontWeight: '800' }}>✅ تم تطبيق الخصم اللائحي</span>
                           ) : isWaived ? (
-                            <span style={{ color: '#0284c7', fontSize: '12px', fontWeight: 'bold' }}>🛡️ معفى من الخصم المالي</span>
+                            <span style={{ color: '#0284c7', fontSize: '12px', fontWeight: '800' }}>🛡️ معفى من الخصم المالي</span>
                           ) : (
-                            <span style={{ color: '#64748b', fontSize: '12px', fontWeight: 'bold' }}>❌ مرفوض</span>
+                            <span style={{ color: 'var(--muted)', fontSize: '12px', fontWeight: '800' }}>❌ مرفوض</span>
                           )}
                         </div>
                       </div>
@@ -1585,39 +1586,39 @@ export default function Dashboard({
 
             {/* Overtime Card */}
             {overtimeRequests.length > 0 && (
-              <div className="card settings-card" style={{ padding: '18px', border: '2px solid #bbf7d0', background: '#f0fdf4' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                  <h4 style={{ margin: 0, fontSize: '15px', color: '#166534', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div className="card settings-card" style={{ padding: '20px', border: '1px solid rgba(5, 150, 105, 0.25)', borderTop: '3.5px solid var(--success)', background: 'var(--surface)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                  <h4 style={{ margin: 0, fontSize: '15px', color: 'var(--success-dark)', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '800' }}>
                     ⏱️ طلبات اعتماد الساعات الإضافية ({overtimeRequests.length})
                   </h4>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   {overtimeRequests.map((req) => {
                     const isApproved = req.status === 'approved' || req.adminApproved;
                     const isRejected = req.status === 'rejected';
                     const isPending = req.status === 'pending';
 
                     return (
-                      <div key={req.id} style={{ background: '#ffffff', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '12px 14px' }}>
+                      <div key={req.id} style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)', borderRadius: '12px', padding: '14px 16px', boxShadow: 'var(--shadow-sm)' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
                           <div>
-                            <strong style={{ color: '#14532d', fontSize: '14px' }}>👤 {req.employeeName}</strong>
+                            <strong style={{ color: 'var(--success-dark)', fontSize: '14px', fontWeight: '800' }}>👤 {req.employeeName}</strong>
                             <span style={{ fontSize: '12px', color: 'var(--muted)', marginRight: '6px' }}>• فرع {req.branchName}</span>
-                            <div style={{ fontSize: '12.5px', color: '#334155', marginTop: '4px' }}>
+                            <div style={{ fontSize: '12.5px', color: 'var(--text-secondary)', marginTop: '4px' }}>
                               {req.details || req.reason}
                             </div>
                           </div>
-                          <span style={{ background: '#dcfce7', color: '#15803d', padding: '2px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold' }}>
+                          <span style={{ background: 'var(--success-tint)', color: 'var(--success-dark)', padding: '2px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: '800' }}>
                             +{req.hours} س إضافي
                           </span>
                         </div>
 
-                        <div style={{ marginTop: '10px', display: 'flex', gap: '6px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                        <div style={{ marginTop: '12px', display: 'flex', gap: '6px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                           {isPending ? (
                             <>
                               <button
                                 className="btn btn-start"
-                                style={{ padding: '4px 12px', fontSize: '12px', background: '#16a34a' }}
+                                style={{ padding: '5px 14px', fontSize: '12px', background: 'var(--success)' }}
                                 onClick={() => onApproveRequest?.(req.id)}
                                 title="اعتماد الساعات الإضافية واحتسابها ضمن أجر الراتب"
                               >
@@ -1625,7 +1626,7 @@ export default function Dashboard({
                               </button>
                               <button
                                 className="btn btn-outline"
-                                style={{ padding: '4px 10px', fontSize: '12px', color: '#dc2626', borderColor: '#fca5a5' }}
+                                style={{ padding: '5px 12px', fontSize: '12px', color: 'var(--danger)', borderColor: 'var(--danger)' }}
                                 onClick={() => onRejectRequest?.(req.id)}
                                 title="استبعاد الإضافي وعدم احتسابه بالأجر"
                               >
@@ -1633,9 +1634,9 @@ export default function Dashboard({
                               </button>
                             </>
                           ) : isApproved ? (
-                            <span style={{ color: '#16a34a', fontSize: '12px', fontWeight: 'bold' }}>✅ تم اعتماد الساعات واحتسابها بالراتب</span>
+                            <span style={{ color: 'var(--success)', fontSize: '12px', fontWeight: '800' }}>✅ تم اعتماد الساعات واحتسابها بالراتب</span>
                           ) : (
-                            <span style={{ color: '#64748b', fontSize: '12px', fontWeight: 'bold' }}>❌ تم استبعاد الساعات الإضافية من الأجر</span>
+                            <span style={{ color: 'var(--muted)', fontSize: '12px', fontWeight: '800' }}>❌ تم استبعاد الساعات الإضافية من الأجر</span>
                           )}
                         </div>
                       </div>
@@ -1691,60 +1692,72 @@ export default function Dashboard({
         </div>
       </div>
 
-      {/* Financial Cards Grid (Matching Image 1 EXACT layout) */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px', marginBottom: '14px' }}>
+      {/* Financial Cards Grid (Modern High-End Bespoke Styling) */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '16px' }}>
         {/* Card 1: Total Work Hours */}
-        <div style={{ background: '#fff', border: '1px solid var(--border)', padding: '16px', borderRadius: '12px', boxShadow: '0 2px 6px rgba(0,0,0,0.03)' }}>
-          <span style={{ fontSize: '12.5px', color: '#64748b', fontWeight: '600', display: 'block', textAlign: 'left' }}>إجمالي ساعات العمل</span>
-          <h3 style={{ margin: '8px 0 0 0', fontSize: '24px', fontWeight: '900', color: '#0d9488', textAlign: 'left' }}>
-            {totalWorkHours} ساعة
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderTop: '3.5px solid var(--primary)', padding: '18px 20px', borderRadius: '16px', boxShadow: 'var(--shadow)', transition: 'all 0.2s ease' }}>
+          <span style={{ fontSize: '13px', color: 'var(--muted)', fontWeight: '700', display: 'block', textAlign: 'right' }}>⏱️ إجمالي ساعات العمل</span>
+          <h3 style={{ margin: '8px 0 0 0', fontSize: '26px', fontWeight: '900', color: 'var(--primary)', textAlign: 'right', fontFamily: "'Plus Jakarta Sans', 'Cairo', sans-serif" }}>
+            {totalWorkHours} <span style={{ fontSize: '15px', fontWeight: '700', color: 'var(--muted)' }}>ساعة</span>
           </h3>
         </div>
 
         {/* Card 2: Total Base Earnings */}
-        <div style={{ background: '#fff', border: '1px solid var(--border)', padding: '16px', borderRadius: '12px', boxShadow: '0 2px 6px rgba(0,0,0,0.03)' }}>
-          <span style={{ fontSize: '12.5px', color: '#64748b', fontWeight: '600', display: 'block', textAlign: 'left' }}>إجمالي المستحقات الأساسية</span>
-          <h3 style={{ margin: '8px 0 0 0', fontSize: '24px', fontWeight: '900', color: '#0d9488', textAlign: 'left' }}>
-            {totalBaseEarnings.toFixed(2)} ج.م
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderTop: '3.5px solid #0284c7', padding: '18px 20px', borderRadius: '16px', boxShadow: 'var(--shadow)', transition: 'all 0.2s ease' }}>
+          <span style={{ fontSize: '13px', color: 'var(--muted)', fontWeight: '700', display: 'block', textAlign: 'right' }}>💼 إجمالي المستحقات الأساسية</span>
+          <h3 style={{ margin: '8px 0 0 0', fontSize: '26px', fontWeight: '900', color: '#0284c7', textAlign: 'right', fontFamily: "'Plus Jakarta Sans', 'Cairo', sans-serif" }}>
+            {totalBaseEarnings.toFixed(2)} <span style={{ fontSize: '15px', fontWeight: '700', color: 'var(--muted)' }}>ج.م</span>
           </h3>
         </div>
 
         {/* Card 3: Total Bonuses */}
-        <div style={{ background: '#fff', border: '1px solid var(--border)', padding: '16px', borderRadius: '12px', boxShadow: '0 2px 6px rgba(0,0,0,0.03)' }}>
-          <span style={{ fontSize: '12.5px', color: '#64748b', fontWeight: '600', display: 'block', textAlign: 'left' }}>إجمالي المكافآت</span>
-          <h3 style={{ margin: '8px 0 0 0', fontSize: '24px', fontWeight: '900', color: '#10b981', textAlign: 'left' }}>
-            +{totalBonuses.toFixed(2)} ج.م
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderTop: '3.5px solid var(--success)', padding: '18px 20px', borderRadius: '16px', boxShadow: 'var(--shadow)', transition: 'all 0.2s ease' }}>
+          <span style={{ fontSize: '13px', color: 'var(--muted)', fontWeight: '700', display: 'block', textAlign: 'right' }}>🎁 إجمالي المكافآت</span>
+          <h3 style={{ margin: '8px 0 0 0', fontSize: '26px', fontWeight: '900', color: 'var(--success)', textAlign: 'right', fontFamily: "'Plus Jakarta Sans', 'Cairo', sans-serif" }}>
+            +{totalBonuses.toFixed(2)} <span style={{ fontSize: '15px', fontWeight: '700', color: 'var(--muted)' }}>ج.م</span>
           </h3>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.8fr 1fr', gap: '14px', marginBottom: '24px' }}>
-        {/* Card 4: Solid Teal Banner - Total Paid Net Salaries */}
-        <div style={{ background: '#0d9488', color: '#fff', padding: '18px 24px', borderRadius: '12px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-          <span style={{ fontSize: '13px', opacity: 0.9, fontWeight: '700', textAlign: 'left' }}>إجمالي رواتب الشركة المدفوعة (صافي المرتبات)</span>
-          <h2 style={{ margin: '8px 0 0 0', fontSize: '32px', fontWeight: '900', textAlign: 'left' }}>
-            {totalNetSalaries.toFixed(2)} ج.م
+      <div style={{ display: 'grid', gridTemplateColumns: '1.8fr 1fr', gap: '16px', marginBottom: '24px' }}>
+        {/* Card 4: Solid Teal Hero Banner - Total Paid Net Salaries */}
+        <div style={{
+          background: 'linear-gradient(135deg, var(--primary-dark) 0%, var(--primary) 100%)',
+          color: '#ffffff',
+          padding: '22px 26px',
+          borderRadius: '16px',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          boxShadow: '0 8px 24px -4px rgba(13, 148, 136, 0.35)',
+          border: '1px solid rgba(255, 255, 255, 0.15)'
+        }}>
+          <span style={{ fontSize: '13.5px', color: 'rgba(255, 255, 255, 0.95)', fontWeight: '700', textAlign: 'right' }}>
+            💳 إجمالي رواتب الشركة المدفوعة (صافي المرتبات)
+          </span>
+          <h2 style={{ margin: '8px 0 0 0', fontSize: '32px', fontWeight: '900', textAlign: 'right', color: '#ffffff', fontFamily: "'Plus Jakarta Sans', 'Cairo', sans-serif" }}>
+            {totalNetSalaries.toFixed(2)} <span style={{ fontSize: '18px', fontWeight: '700', color: 'rgba(255, 255, 255, 0.85)' }}>ج.م</span>
           </h2>
         </div>
 
         {/* Card 5: Total Deductions */}
-        <div style={{ background: '#fff', border: '1px solid var(--border)', padding: '16px', borderRadius: '12px', boxShadow: '0 2px 6px rgba(0,0,0,0.03)' }}>
-          <span style={{ fontSize: '12.5px', color: '#64748b', fontWeight: '600', display: 'block', textAlign: 'left' }}>إجمالي الخصومات</span>
-          <h3 style={{ margin: '8px 0 0 0', fontSize: '24px', fontWeight: '900', color: '#ef4444', textAlign: 'left' }}>
-            -{totalDeductions.toFixed(2)} ج.م
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderTop: '3.5px solid var(--danger)', padding: '18px 20px', borderRadius: '16px', boxShadow: 'var(--shadow)', transition: 'all 0.2s ease' }}>
+          <span style={{ fontSize: '13px', color: 'var(--muted)', fontWeight: '700', display: 'block', textAlign: 'right' }}>📉 إجمالي الخصومات والجزاءات</span>
+          <h3 style={{ margin: '8px 0 0 0', fontSize: '26px', fontWeight: '900', color: 'var(--danger)', textAlign: 'right', fontFamily: "'Plus Jakarta Sans', 'Cairo', sans-serif" }}>
+            -{totalDeductions.toFixed(2)} <span style={{ fontSize: '15px', fontWeight: '700', color: 'var(--muted)' }}>ج.م</span>
           </h3>
         </div>
       </div>
 
       {/* Income & Expenses Summary Bar */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px' }}>
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', padding: '14px', borderRadius: '10px' }}>
-          <span style={{ fontSize: '12px', color: 'var(--muted)' }}>🟢 إجمالي الإيرادات المسجلة</span>
-          <h4 style={{ margin: '4px 0 0 0', color: '#16a34a', fontWeight: '800' }}>{totalIncome.toLocaleString()} ج.م</h4>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRight: '4px solid var(--success)', padding: '16px 18px', borderRadius: '14px', boxShadow: 'var(--shadow-sm)' }}>
+          <span style={{ fontSize: '12.5px', color: 'var(--muted)', fontWeight: '700' }}>🟢 إجمالي الإيرادات المسجلة</span>
+          <h4 style={{ margin: '6px 0 0 0', color: 'var(--success)', fontWeight: '900', fontSize: '18px', fontFamily: "'Plus Jakarta Sans', 'Cairo', sans-serif" }}>{totalIncome.toLocaleString()} ج.م</h4>
         </div>
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', padding: '14px', borderRadius: '10px' }}>
-          <span style={{ fontSize: '12px', color: 'var(--muted)' }}>🔴 إجمالي المصروفات المسجلة</span>
-          <h4 style={{ margin: '4px 0 0 0', color: '#dc2626', fontWeight: '800' }}>{totalExpenses.toLocaleString()} ج.م</h4>
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRight: '4px solid var(--danger)', padding: '16px 18px', borderRadius: '14px', boxShadow: 'var(--shadow-sm)' }}>
+          <span style={{ fontSize: '12.5px', color: 'var(--muted)', fontWeight: '700' }}>🔴 إجمالي المصروفات المسجلة</span>
+          <h4 style={{ margin: '6px 0 0 0', color: 'var(--danger)', fontWeight: '900', fontSize: '18px', fontFamily: "'Plus Jakarta Sans', 'Cairo', sans-serif" }}>{totalExpenses.toLocaleString()} ج.م</h4>
         </div>
       </div>
     </div>
