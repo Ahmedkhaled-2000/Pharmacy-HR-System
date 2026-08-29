@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useUI } from '../../context/UIContext';
 
 export default function IncomeExpensesModule({
   state,
@@ -13,6 +14,7 @@ export default function IncomeExpensesModule({
   customFrom,
   customTo
 }) {
+  const { showConfirm } = useUI();
   const [isMobileScreen, setIsMobileScreen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth <= 768 : false));
   React.useEffect(() => {
     const handleResize = () => setIsMobileScreen(window.innerWidth <= 768);
@@ -109,7 +111,15 @@ export default function IncomeExpensesModule({
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('هل أنت متأكد من حذف هذا البند المالي؟')) return;
+    const isConfirmed = await showConfirm({
+      title: 'حذف بند مالي',
+      message: 'هل أنت متأكد من حذف هذا البند المالي نهائياً؟',
+      confirmText: 'تأكيد الحذف',
+      cancelText: 'إلغاء وتراجع',
+      type: 'danger',
+      icon: '🗑️'
+    });
+    if (!isConfirmed) return;
     const updated = transactions.filter((t) => t.id !== id);
     const updatedDeleted = [...(state._deletedIds || []), String(id)];
     const updatedState = { ...state, finances: updated, transactions: updated, _deletedIds: updatedDeleted };

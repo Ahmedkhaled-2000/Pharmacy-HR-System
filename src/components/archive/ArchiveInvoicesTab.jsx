@@ -15,6 +15,7 @@ import {
   Download
 } from 'lucide-react';
 import { apiArchiveDeleteInvoice } from '../../utils/archiveApiClient';
+import { useUI } from '../../context/UIContext';
 
 export default function ArchiveInvoicesTab({
   invoices = [],
@@ -27,6 +28,7 @@ export default function ArchiveInvoicesTab({
   onSelectSupplier,
   onInvoiceDeleted = () => {}
 }) {
+  const { showConfirm } = useUI();
   const [selectedSupplierId, setSelectedSupplierId] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [quickDateFilter, setQuickDateFilter] = useState('all'); // 'all' | 'today' | 'week' | 'month'
@@ -155,9 +157,15 @@ export default function ArchiveInvoicesTab({
   // Delete Invoice
   const handleDeleteInvoice = async (inv, e) => {
     e.stopPropagation();
-    if (!window.confirm(`هل أنت متأكد من حذف الفاتورة رقم "${inv.invoiceNumber || inv.invoice_number || '—'}" نهائياً من الأرشيف؟`)) {
-      return;
-    }
+    const isConfirmed = await showConfirm({
+      title: 'حذف الفاتورة من الأرشيف',
+      message: `هل أنت متأكد من حذف الفاتورة رقم "${inv.invoiceNumber || inv.invoice_number || '—'}" نهائياً من الأرشيف؟`,
+      confirmText: 'تأكيد الحذف',
+      cancelText: 'إلغاء وتراجع',
+      type: 'danger',
+      icon: '🧾'
+    });
+    if (!isConfirmed) return;
     setDeletingId(inv.id);
     try {
       const res = await apiArchiveDeleteInvoice(inv.id);

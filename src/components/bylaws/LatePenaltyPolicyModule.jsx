@@ -9,6 +9,7 @@ import {
   countEmployeeTierOccurrences
 } from '../../utils/latePenaltyEngine';
 import { fmt, isEmployeeActive } from '../../utils/formatters';
+import { useUI } from '../../context/UIContext';
 
 export default function LatePenaltyPolicyModule({
   state,
@@ -24,6 +25,7 @@ export default function LatePenaltyPolicyModule({
   customTo = '',
   executeWithOwnerGuard
 }) {
+  const { showConfirm } = useUI();
   const isAdmin = userRole === 'admin' || userRole === 'owner';
   const isBranchManager = userRole === 'branch';
   const isEmployee = userRole === 'employee';
@@ -370,7 +372,15 @@ export default function LatePenaltyPolicyModule({
 
   // Handler: Restore Policy to Standard Defaults
   const handleRestoreDefaultPolicy = async () => {
-    if (!window.confirm('هل ترغب بالتأكيد في استعادة اللائحة القياسية الافتراضية لجزاءات التأخير؟')) return;
+    const isConfirmed = await showConfirm({
+      title: 'استعادة لائحة جزاءات التأخير القياسية',
+      message: 'هل ترغب بالتأكيد في استعادة اللائحة القياسية الافتراضية لجزاءات التأخير؟\nسيتم إعادة تعيين الشرائح وسلالم الخصم للوضع الافتراضي.',
+      confirmText: 'استعادة اللائحة الافتراضية',
+      cancelText: 'إلغاء وتراجع',
+      type: 'warning',
+      icon: '⏱️'
+    });
+    if (!isConfirmed) return;
 
     const performRestorePolicy = async () => {
       try {

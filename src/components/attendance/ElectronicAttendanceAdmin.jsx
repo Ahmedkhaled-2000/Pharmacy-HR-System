@@ -3,9 +3,11 @@ import FaceRegistrationModal from './FaceRegistrationModal';
 import FaceTestModal from './FaceTestModal';
 import { saveFaceDescriptor, deleteFaceDescriptor, saveHandDescriptor, deleteHandDescriptor } from '../../utils/faceStorage';
 import { getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
+import { useUI } from '../../context/UIContext';
 
 export default function ElectronicAttendanceAdmin({ state, setState, saveState, showToast, executeWithOwnerGuard }) {
-  const [selectedEmp, setSelectedEmp] = useState(null);
+  const { showConfirm } = useUI();
+  const [selectedEmp = null, setSelectedEmp] = useState(null);
   const [modalMode, setModalMode] = useState(null); // 'register' | 'test' | null
 
   // Suspension & Reactivation Modal States
@@ -33,7 +35,15 @@ export default function ElectronicAttendanceAdmin({ state, setState, saveState, 
   const deletePrint = async (empId, type) => {
     const isHand = type === 'hand';
     const emp = employees.find(e => e.id === empId);
-    if (!window.confirm(`هل أنت متأكد من حذف بصمة ${isHand ? 'اليد' : 'الوجه'} لهذا الموظف؟`)) return;
+    const isConfirmed = await showConfirm({
+      title: 'حذف البصمة الإلكترونية',
+      message: `هل أنت متأكد من حذف بصمة ${isHand ? 'اليد' : 'الوجه'} للموظف (${emp?.name || ''})؟`,
+      confirmText: 'تأكيد الحذف',
+      cancelText: 'إلغاء وتراجع',
+      type: 'danger',
+      icon: isHand ? '✋' : '👤'
+    });
+    if (!isConfirmed) return;
     
     const performDelete = async () => {
       // Delete from Storage / DB

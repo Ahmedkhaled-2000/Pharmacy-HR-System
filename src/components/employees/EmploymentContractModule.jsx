@@ -5,6 +5,7 @@ import {
   getBylawsSectionsFromState,
   parseBylawsIntoSections
 } from '../../utils/bylawsDefaults';
+import { useUI } from '../../context/UIContext';
 
 export default function EmploymentContractModule({
   state,
@@ -13,6 +14,7 @@ export default function EmploymentContractModule({
   showToast,
   executeWithOwnerGuard
 }) {
+  const { showConfirm } = useUI();
   const employees = (state.employees || []).filter(e => e.status !== 'تم الاستقالة' && e.is_active !== false);
   const [selectedEmpId, setSelectedEmpId] = useState(employees[0]?.id || '');
   const [searchTerm, setSearchTerm] = useState('');
@@ -145,14 +147,30 @@ export default function EmploymentContractModule({
     ]);
   };
 
-  const handleRemoveClause = (id) => {
-    if (window.confirm('هل أنت متأكد من حذف هذا البند من العقد؟')) {
+  const handleRemoveClause = async (id) => {
+    const isConfirmed = await showConfirm({
+      title: 'حذف بند من العقد',
+      message: 'هل أنت متأكد من حذف هذا البند من العقد؟',
+      confirmText: 'تأكيد الحذف',
+      cancelText: 'إلغاء وتراجع',
+      type: 'danger',
+      icon: '📜'
+    });
+    if (isConfirmed) {
       setClauses(clauses.filter(c => c.id !== id));
     }
   };
 
-  const handleResetClauses = () => {
-    if (window.confirm('هل ترغب في استعادة نموذج العقد القانوني الافتراضي؟')) {
+  const handleResetClauses = async () => {
+    const isConfirmed = await showConfirm({
+      title: 'استعادة نموذج العقد الافتراضي',
+      message: 'هل ترغب في استعادة نموذج العقد القانوني الافتراضي؟',
+      confirmText: 'استعادة النموذج',
+      cancelText: 'إلغاء وتراجع',
+      type: 'warning',
+      icon: '🔄'
+    });
+    if (isConfirmed) {
       setClauses(getDefaultClauses(emp));
       setIsEditing(false);
       showToast?.('تمت استعادة نموذج العقد الافتراضي');

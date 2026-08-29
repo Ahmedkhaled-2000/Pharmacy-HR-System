@@ -4,6 +4,7 @@ import JobVacanciesManager from './JobVacanciesManager';
 import ApplicantDetailsModal from './ApplicantDetailsModal';
 import ScheduleInterviewModal from './ScheduleInterviewModal';
 import { loadExcelJS, mergedTitle, tableHeaderRow, dataRow } from '../../utils/excelExport';
+import { useUI } from '../../context/UIContext';
 
 export default function RecruitmentHubModule({
   state,
@@ -13,6 +14,7 @@ export default function RecruitmentHubModule({
   executeWithOwnerGuard,
   openAddEmpModalWithDraft
 }) {
+  const { showConfirm } = useUI();
   const applications = state?.recruitmentApplications || [];
   const branches = state?.branches || [];
 
@@ -169,7 +171,15 @@ export default function RecruitmentHubModule({
 
   // Delete Application
   const handleDelete = async (appId) => {
-    if (!window.confirm('هل أنت متأكد من حذف طلب التعيين هذا نهائياً؟')) return;
+    const isConfirmed = await showConfirm({
+      title: 'حذف طلب التوظيف',
+      message: 'هل أنت متأكد من حذف طلب التعيين هذا نهائياً من سجلات التوظيف؟',
+      confirmText: 'تأكيد الحذف',
+      cancelText: 'إلغاء وتراجع',
+      type: 'danger',
+      icon: '🗑️'
+    });
+    if (!isConfirmed) return;
 
     const updatedApps = applications.filter(a => a.id !== appId);
     const updatedState = { ...state, recruitmentApplications: updatedApps };

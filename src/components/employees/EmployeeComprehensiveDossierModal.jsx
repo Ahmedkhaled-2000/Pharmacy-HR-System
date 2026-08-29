@@ -4,6 +4,7 @@ import { getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
 import { computeEmployeeFinalSettlement } from '../../utils/settlementHelper';
 import { triggerDirectPrint, generateClearanceSlipHTML } from '../../utils/printHelper';
 import { compressImage } from '../../utils/imageCompressor';
+import { useUI } from '../../context/UIContext';
 
 export default function EmployeeComprehensiveDossierModal({
   emp,
@@ -15,6 +16,7 @@ export default function EmployeeComprehensiveDossierModal({
   onOpenIDCardModal,
   onSaveSignedClearance
 }) {
+  const { showConfirm } = useUI();
   const [activeTab, setActiveTab] = useState(initialTab || 'summary'); // 'summary' | 'shifts' | 'settlement' | 'permissions' | 'leaves' | 'lateness' | 'loans' | 'evaluations' | 'requests'
   const [isUploadingDoc, setIsUploadingDoc] = useState(false);
   const [previewDocModal, setPreviewDocModal] = useState(null); // { url, type, name }
@@ -115,7 +117,15 @@ export default function EmployeeComprehensiveDossierModal({
   };
 
   const handleDeleteSignedDoc = async () => {
-    if (!window.confirm('هل أنت متأكد من حذف مستند إخلاء الطرف الموقع والمؤرشف؟')) return;
+    const isConfirmed = await showConfirm({
+      title: 'حذف مستند إخلاء الطرف المؤرشف',
+      message: 'هل أنت متأكد من حذف مستند إخلاء الطرف الموقع والمؤرشف؟',
+      confirmText: 'تأكيد الحذف',
+      cancelText: 'إلغاء وتراجع',
+      type: 'danger',
+      icon: '🗑️'
+    });
+    if (!isConfirmed) return;
     if (onSaveSignedClearance) {
       await onSaveSignedClearance(emp.id, null);
     }

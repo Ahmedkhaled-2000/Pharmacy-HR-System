@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { compressImage } from '../../utils/imageCompressor';
 import { getRealTodayStr } from '../../utils/formatters';
+import { useUI } from '../../context/UIContext';
 
 export default function SignedClearanceModal({
   emp,
@@ -8,6 +9,7 @@ export default function SignedClearanceModal({
   onSaveSignedDoc,
   executeWithOwnerGuard
 }) {
+  const { showConfirm } = useUI();
   const [fileData, setFileData] = useState(emp?.signedClearanceDoc?.url || null);
   const [fileName, setFileName] = useState(emp?.signedClearanceDoc?.fileName || '');
   const [fileType, setFileType] = useState(emp?.signedClearanceDoc?.fileType || '');
@@ -74,8 +76,16 @@ export default function SignedClearanceModal({
     onClose();
   };
 
-  const handleDelete = () => {
-    if (window.confirm('هل أنت متأكد من رغبتك في حذف مستند إخلاء الطرف الموقع لهذا الموظف؟')) {
+  const handleDelete = async () => {
+    const isConfirmed = await showConfirm({
+      title: 'حذف مستند إخلاء الطرف',
+      message: 'هل أنت متأكد من رغبتك في حذف مستند إخلاء الطرف الموقع لهذا الموظف نهائياً؟',
+      confirmText: 'تأكيد الحذف',
+      cancelText: 'إلغاء وتراجع',
+      type: 'danger',
+      icon: '🗑️'
+    });
+    if (isConfirmed) {
       if (onSaveSignedDoc) {
         onSaveSignedDoc(emp.id, null);
       }

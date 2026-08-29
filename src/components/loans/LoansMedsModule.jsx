@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { fmt, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 import { getActivePayrollMonth, getCycleDateRange } from '../../utils/periodEngine';
+import { useUI } from '../../context/UIContext';
 
 export default function LoansMedsModule({
   state,
@@ -9,6 +10,7 @@ export default function LoansMedsModule({
   showToast,
   executeWithOwnerGuard
 }) {
+  const { showConfirm } = useUI();
   const [selectedEmpModal, setSelectedEmpModal] = useState(null);
   const [filterBranch, setFilterBranch] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -365,9 +367,15 @@ export default function LoansMedsModule({
     const { startDate, endDate } = cycleRange;
     const currentMonth = activeMonth;
 
-    if (!window.confirm(`هل ترغب في تطبيق الخصم التلقائي لأقساط السلف في نهاية فترة الرواتب المحددة (${startDate} إلى ${endDate})؟`)) {
-      return;
-    }
+    const isConfirmed = await showConfirm({
+      title: 'تطبيق الخصم التلقائي لأقساط السلف',
+      message: `هل ترغب في تطبيق الخصم التلقائي لأقساط السلف في نهاية فترة الرواتب المحددة (${startDate} إلى ${endDate})؟`,
+      confirmText: 'تطبيق الخصم التلقائي',
+      cancelText: 'إلغاء وتراجع',
+      type: 'info',
+      icon: '💳'
+    });
+    if (!isConfirmed) return;
 
     const performAutoClose = async () => {
       let processedCount = 0;

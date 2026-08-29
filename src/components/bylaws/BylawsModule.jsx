@@ -8,6 +8,7 @@ import {
   sectionsToBylawsText,
   getBylawsSectionsFromState
 } from '../../utils/bylawsDefaults';
+import { useUI } from '../../context/UIContext';
 
 export default function BylawsModule({
   state,
@@ -26,6 +27,7 @@ export default function BylawsModule({
   customTo = '',
   executeWithOwnerGuard
 }) {
+  const { showConfirm } = useUI();
   const [isMobileScreen, setIsMobileScreen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth <= 768 : false));
   useEffect(() => {
     const handleResize = () => setIsMobileScreen(window.innerWidth <= 768);
@@ -103,8 +105,16 @@ export default function BylawsModule({
     setBylawsRawText(sectionsToBylawsText(updated));
   };
 
-  const handleDeleteBylawSection = (secId) => {
-    if (window.confirm('هل أنت متأكد من حذف هذا البند من لائحة العمل؟')) {
+  const handleDeleteBylawSection = async (secId) => {
+    const isConfirmed = await showConfirm({
+      title: 'حذف بند من لائحة العمل',
+      message: 'هل أنت متأكد من حذف هذا البند من لائحة العمل؟',
+      confirmText: 'تأكيد الحذف',
+      cancelText: 'إلغاء وتراجع',
+      type: 'danger',
+      icon: '📜'
+    });
+    if (isConfirmed) {
       const updated = bylawsSections.filter((s) => s.id !== secId);
       setBylawsSections(updated);
       setBylawsRawText(sectionsToBylawsText(updated));
@@ -204,7 +214,15 @@ export default function BylawsModule({
   };
 
   const handleResetDefaultBylawsText = async () => {
-    if (!window.confirm('هل ترغب في استعادة بنود اللائحة النموذجية المعتمدة للصيدلية (14 بنداً شاملاً لكافة السياسات)؟')) return;
+    const isConfirmed = await showConfirm({
+      title: 'استعادة اللائحة النموذجية المعتمدة',
+      message: 'هل ترغب في استعادة بنود اللائحة النموذجية المعتمدة للصيدلية (14 بنداً شاملاً لكافة السياسات)؟\nسيتم استبدال النصوص الحالية بالنصوص النموذجية.',
+      confirmText: 'استعادة النموذج القياسي',
+      cancelText: 'إلغاء وتراجع',
+      type: 'warning',
+      icon: '📋'
+    });
+    if (!isConfirmed) return;
 
     const performResetText = async () => {
       const defaultSections = DEFAULT_PHARMACY_BYLAWS_SECTIONS;

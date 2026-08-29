@@ -16,6 +16,7 @@ import ExportPayrollModal from '../payroll/ExportPayrollModal';
 import KioskConfirmModal from '../kiosk/KioskConfirmModal';
 import OwnerOverrideModal from '../common/OwnerOverrideModal';
 import OfflineStateOverlay from '../common/OfflineStateOverlay';
+import ConfirmDialogModal from '../common/ConfirmDialogModal';
 
 import { useData } from '../../context/DataContext';
 import { useUI } from '../../context/UIContext';
@@ -71,7 +72,9 @@ export default function GlobalModalsContainer() {
     setKioskInquiryModal,
     inspectedEmp,
     setInspectedEmp,
-    openEditShift
+    openEditShift,
+    confirmModal,
+    handleConfirmAction
   } = useUI();
 
   const {
@@ -484,6 +487,19 @@ export default function GlobalModalsContainer() {
 
       {/* 12. Global Toast Notification */}
       <div className={`toast ${toast.show ? 'show' : ''}`}>{toast.message}</div>
+
+      {/* 13. Universal Custom In-App Confirmation Modal */}
+      <ConfirmDialogModal
+        isOpen={Boolean(confirmModal?.isOpen)}
+        title={confirmModal?.title}
+        message={confirmModal?.message}
+        confirmText={confirmModal?.confirmText}
+        cancelText={confirmModal?.cancelText}
+        type={confirmModal?.type}
+        icon={confirmModal?.icon}
+        onConfirm={() => handleConfirmAction(true)}
+        onCancel={() => handleConfirmAction(false)}
+      />
     </>
   );
 }

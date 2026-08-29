@@ -3,6 +3,7 @@ import { fmt } from '../../utils/formatters';
 import { getRealTodayStr } from '../../utils/timeEngine';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import { shouldRouteDirectToAdmin } from '../../utils/jobsHelper';
+import { useUI } from '../../context/UIContext';
 
 export default function EmployeePermissionsModule({
   emp,
@@ -12,6 +13,7 @@ export default function EmployeePermissionsModule({
   showToast,
   selectedBranchId
 }) {
+  const { showConfirm } = useUI();
   const [isMobileScreen, setIsMobileScreen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth <= 768 : false));
   React.useEffect(() => {
     const handleResize = () => setIsMobileScreen(window.innerWidth <= 768);
@@ -91,9 +93,15 @@ export default function EmployeePermissionsModule({
     }
 
     if (remainingPermCount <= 0) {
-      if (!window.confirm(`⚠️ تنبيه: لقد استنفذت الحد الشهري للأذونات المتاحة (${maxMonthlyCount} أذونات لشهر ${currentMonthKey}). هل ترغب في إرسال الطلب كطلب استثنائي يحتاج موافقة الإدارة العليا؟`)) {
-        return;
-      }
+      const isConfirmed = await showConfirm({
+        title: 'إرسال طلب إذن استثنائي',
+        message: `⚠️ تنبيه: لقد استنفذت الحد الشهري للأذونات المتاحة (${maxMonthlyCount} أذونات لشهر ${currentMonthKey}).\nهل ترغب في إرسال الطلب كطلب استثنائي يحتاج موافقة الإدارة العليا؟`,
+        confirmText: 'إرسال كطلب استثنائي',
+        cancelText: 'إلغاء وتراجع',
+        type: 'warning',
+        icon: '⏰'
+      });
+      if (!isConfirmed) return;
     }
 
     const reqBranchId = selectedBranchId || emp.branchesDetails?.[0]?.branchId || emp.branchId;

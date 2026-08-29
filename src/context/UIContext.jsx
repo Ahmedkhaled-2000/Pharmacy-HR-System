@@ -20,6 +20,53 @@ export function UIProvider({ children }) {
     }, 3200);
   }, []);
 
+  // Universal In-App Confirmation Modal System
+  const [confirmModal, setConfirmModal] = useState({
+    isOpen: false,
+    title: 'تأكيد الإجراء',
+    message: '',
+    confirmText: 'تأكيد',
+    cancelText: 'إلغاء وتراجع',
+    type: 'danger',
+    icon: null,
+    resolve: null
+  });
+
+  const showConfirm = useCallback((options) => {
+    const config = typeof options === 'string'
+      ? { message: options }
+      : (options || {});
+
+    const {
+      title = 'تأكيد الإجراء',
+      message = 'هل أنت متأكد من تنفيذ هذا الإجراء؟',
+      confirmText = 'تأكيد',
+      cancelText = 'إلغاء وتراجع',
+      type = 'danger',
+      icon = null
+    } = config;
+
+    return new Promise((resolve) => {
+      setConfirmModal({
+        isOpen: true,
+        title,
+        message,
+        confirmText,
+        cancelText,
+        type,
+        icon,
+        resolve
+      });
+    });
+  }, []);
+
+  const handleConfirmAction = useCallback((isConfirmed) => {
+    if (confirmModal.resolve) {
+      confirmModal.resolve(isConfirmed);
+    }
+    setConfirmModal((prev) => ({ ...prev, isOpen: false, resolve: null }));
+  }, [confirmModal]);
+
   // Filter State (Month & Custom Date Range)
   const [adminFilterMode, setAdminFilterMode] = useState(() => {
     try { return localStorage.getItem('admin_filter_mode') || 'month'; } catch { return 'month'; }
@@ -201,7 +248,10 @@ export function UIProvider({ children }) {
     kioskInquiryModal,
     setKioskInquiryModal,
     inspectedEmp,
-    setInspectedEmp
+    setInspectedEmp,
+    confirmModal,
+    showConfirm,
+    handleConfirmAction
   };
 
   return <UIContext.Provider value={value}>{children}</UIContext.Provider>;

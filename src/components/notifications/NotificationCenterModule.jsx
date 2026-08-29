@@ -10,6 +10,7 @@ import {
   isNotificationReadForAdmin,
   isNotificationReadForBranch
 } from '../../utils/notificationEngine';
+import { useUI } from '../../context/UIContext';
 
 export default function NotificationCenterModule({
   state,
@@ -29,8 +30,12 @@ export default function NotificationCenterModule({
   customFrom = '',
   customTo = '',
   currentBranch = null,
-  authRole = 'admin'
+  authRole = 'admin',
+  currentRole = 'admin',
+  userProfile = null,
+  executeWithOwnerGuard
 }) {
+  const { showConfirm } = useUI();
   const [filterType, setFilterType] = useState('all'); // 'all' | 'today_punches' | 'today_absences' | 'requests' | 'penalties' | 'unread'
   const [branchFilter, setBranchFilter] = useState(() => (authRole === 'branch' && currentBranch?.id ? currentBranch.id : 'all'));
   const [empFilter, setEmpFilter] = useState('all');
@@ -525,7 +530,15 @@ export default function NotificationCenterModule({
   };
 
   const handleClearNotifications = async () => {
-    if (!window.confirm('هل أنت متأكد من مسح الإشعارات المقروءة؟')) return;
+    const isConfirmed = await showConfirm({
+      title: 'مسح الإشعارات المقروءة',
+      message: 'هل أنت متأكد من مسح وإخفاء جميع الإشعارات المقروءة؟',
+      confirmText: 'مسح الإشعارات',
+      cancelText: 'إلغاء وتراجع',
+      type: 'warning',
+      icon: '🧹'
+    });
+    if (!isConfirmed) return;
 
     let updatedNotifs = [];
     if (authRole === 'admin' || authRole === 'owner') {

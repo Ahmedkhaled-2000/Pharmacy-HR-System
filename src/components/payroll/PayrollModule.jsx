@@ -4,6 +4,7 @@ import { fmt, getEmpDisplayName } from '../../utils/formatters';
 import { computeLatenessFinancialAmount, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
 import { printEmployeePayslipDirect } from '../../utils/printHelper';
 import { getCycleDateRange } from '../../utils/periodEngine';
+import { useUI } from '../../context/UIContext';
 
 export default function PayrollModule({
   state,
@@ -15,6 +16,7 @@ export default function PayrollModule({
   exportEmpExcel,
   showToast
 }) {
+  const { showConfirm } = useUI();
   const [selectedEmpModal, setSelectedEmpModal] = useState(null);
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -153,10 +155,18 @@ export default function PayrollModule({
   const handleToggleFreezePeriod = async () => {
     const nextStatus = !isPeriodFrozen;
     const confirmMsg = nextStatus
-      ? `هل أنت متأكد من إغلاق وتجميد دورة رواتب شهر (${monthPicker})؟ سيتم قفل تعديل البصمات والخصومات لضمان عدم تغيير المستحقات المصروفة.`
+      ? `هل أنت متأكد من إغلاق وتجميد دورة رواتب شهر (${monthPicker})؟\nسيتم قفل تعديل البصمات والخصومات لضمان عدم تغيير المستحقات المصروفة.`
       : `هل ترغب في فك تجميد دورة رواتب شهر (${monthPicker}) للسماح بالتعديلات من الإدارة؟`;
 
-    if (!window.confirm(confirmMsg)) return;
+    const isConfirmed = await showConfirm({
+      title: nextStatus ? 'إغلاق وتجميد الرواتب' : 'فك تجميد الرواتب',
+      message: confirmMsg,
+      confirmText: nextStatus ? 'تأكيد التجميد' : 'تأكيد فك التجميد',
+      cancelText: 'إلغاء وتراجع',
+      type: nextStatus ? 'danger' : 'info',
+      icon: nextStatus ? '🔒' : '🔓'
+    });
+    if (!isConfirmed) return;
 
     const frozenMap = { ...(state.orgSettings?.payrollPeriodFrozen || {}) };
     frozenMap[monthPicker] = {

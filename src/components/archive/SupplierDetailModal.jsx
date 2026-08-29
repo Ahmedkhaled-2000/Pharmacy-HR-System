@@ -23,6 +23,7 @@ import {
   apiArchiveSaveSupplier,
   apiArchiveDeleteSupplier
 } from '../../utils/archiveApiClient';
+import { useUI } from '../../context/UIContext';
 
 const STANDARD_FIELDS = [
   { value: 'productName', label: 'اسم الصنف / الدواء' },
@@ -44,6 +45,7 @@ export default function SupplierDetailModal({
   onSupplierUpdated = () => {},
   onSupplierDeleted = () => {}
 }) {
+  const { showConfirm } = useUI();
   const [activeTab, setActiveTab] = useState('invoices'); // 'invoices' | 'info' | 'mappings'
 
   // Info State
@@ -164,7 +166,15 @@ export default function SupplierDetailModal({
   };
 
   const handleDeleteSupplier = async () => {
-    if (!window.confirm(`هل أنت متأكد من حذف المورد "${supplier.name}"؟`)) return;
+    const isConfirmed = await showConfirm({
+      title: 'حذف المورد',
+      message: `هل أنت متأكد من حذف المورد "${supplier.name}" نهائياً من الأرشيف؟`,
+      confirmText: 'تأكيد الحذف',
+      cancelText: 'إلغاء وتراجع',
+      type: 'danger',
+      icon: '🏢'
+    });
+    if (!isConfirmed) return;
 
     setIsDeleting(true);
     try {

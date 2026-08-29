@@ -12,17 +12,15 @@ import {
   Briefcase
 } from 'lucide-react';
 import { apiArchiveSaveEmployee, apiArchiveDeleteEmployee, apiArchiveGetEmployees } from '../../utils/archiveApiClient';
+import { useUI } from '../../context/UIContext';
 
 const ROLES = [
   'صيدلي مسؤول',
   'أمين مخزن',
   'مدخل بيانات',
   'كاشير',
-  'صيدلي مساعد',
-  'أمين عهدة واستلام',
-  'محاسب ومدخل بيانات',
-  'مراجع فواتير',
-  'مسؤول مشتريات'
+  'عامل خدمات',
+  'مدير فرع'
 ];
 
 export default function EmployeeManagerModal({
@@ -33,6 +31,7 @@ export default function EmployeeManagerModal({
   onEmployeeSaved = () => {},
   onEmployeeDeleted = () => {}
 }) {
+  const { showConfirm } = useUI();
   const [name, setName] = useState('');
   const [role, setRole] = useState('صيدلي مسؤول');
   const [phone, setPhone] = useState('');
@@ -137,7 +136,15 @@ export default function EmployeeManagerModal({
   };
 
   const handleDelete = async (empId, empName) => {
-    if (!window.confirm(`هل أنت متأكد من حذف الموظف (${empName}) من سجل الأرشيف؟`)) return;
+    const isConfirmed = await showConfirm({
+      title: 'حذف موظف الأرشيف',
+      message: `هل أنت متأكد من حذف الموظف (${empName}) نهائياً من سجل الأرشيف؟`,
+      confirmText: 'تأكيد الحذف',
+      cancelText: 'إلغاء وتراجع',
+      type: 'danger',
+      icon: '👤'
+    });
+    if (!isConfirmed) return;
     try {
       const res = await apiArchiveDeleteEmployee(empId);
       if (res.success) {

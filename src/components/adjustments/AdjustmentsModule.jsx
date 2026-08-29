@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { fmt, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
+import { useUI } from '../../context/UIContext';
 
 export default function AdjustmentsModule({
   state,
@@ -13,6 +14,7 @@ export default function AdjustmentsModule({
   customTo,
   executeWithOwnerGuard
 }) {
+  const { showConfirm } = useUI();
   const [selectedBranchId, setSelectedBranchId] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedMonth, setSelectedMonth] = useState(monthPicker || new Date().toISOString().slice(0, 7));
@@ -155,7 +157,15 @@ export default function AdjustmentsModule({
   };
 
   const handleDeleteAdjustment = async (adjId) => {
-    if (!window.confirm('هل أنت متأكد من رغبتك في حذف وإلغاء هذا الجزاء / البند الإداري نهائياً؟')) return;
+    const isConfirmed = await showConfirm({
+      title: 'حذف البند الإداري / الجزاء',
+      message: 'هل أنت متأكد من رغبتك في حذف وإلغاء هذا الجزاء / البند الإداري نهائياً من سجلات النظام؟',
+      confirmText: 'حذف نهائي',
+      cancelText: 'إلغاء وتراجع',
+      type: 'danger',
+      icon: '🗑️'
+    });
+    if (!isConfirmed) return;
 
     const performDelete = async () => {
       const updatedAdjs = (state.adjustments || []).filter((a) => String(a.id) !== String(adjId));

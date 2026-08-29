@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { compressImage } from '../../utils/imageCompressor';
 import { DEFAULT_JOBS, isManagementJob, DEFAULT_DEPARTMENTS } from '../../utils/jobsHelper';
 import { syncEmployeeEntireDrive } from '../../utils/googleDriveService';
+import { useUI } from '../../context/UIContext';
 
 export default function EmployeeFileModal({
   isOpen,
@@ -19,6 +20,7 @@ export default function EmployeeFileModal({
   saveState,
   showToast
 }) {
+  const { showConfirm } = useUI();
   const currentEmp = editingEmp || emp;
   const [activeTab, setActiveTab] = useState('personal'); // 'personal' | 'job' | 'financial' | 'documents'
 
@@ -173,10 +175,18 @@ export default function EmployeeFileModal({
   };
 
   // Permanently delete an archived branch salary record
-  const handleDeleteArchivedBranch = (branchIdToDelete) => {
+  const handleDeleteArchivedBranch = async (branchIdToDelete) => {
     const target = archivedBranchesDetails.find(ab => String(ab.branchId) === String(branchIdToDelete));
     const branchName = target?.branchName || branches.find(b => String(b.id) === String(branchIdToDelete))?.name || 'هذا الفرع';
-    if (window.confirm(`هل أنت متأكد من حذف بيانات وراتب "${branchName}" نهائياً من سجل الموظف؟`)) {
+    const isConfirmed = await showConfirm({
+      title: 'حذف سجل راتب الفرع المؤرشف',
+      message: `هل أنت متأكد من حذف بيانات وراتب "${branchName}" نهائياً من سجل الموظف؟`,
+      confirmText: 'تأكيد الحذف',
+      cancelText: 'إلغاء وتراجع',
+      type: 'danger',
+      icon: '🏢'
+    });
+    if (isConfirmed) {
       setArchivedBranchesDetails(prev => prev.filter(ab => String(ab.branchId) !== String(branchIdToDelete)));
     }
   };

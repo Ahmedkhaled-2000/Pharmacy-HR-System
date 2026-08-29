@@ -26,8 +26,11 @@ import {
   apiArchiveGetEmployees,
   apiArchiveGetSettings
 } from '../../utils/archiveApiClient';
+import { useUI } from '../../context/UIContext';
 
 export default function ArchiveSystemView({ isStandalone = false }) {
+  const { showConfirm } = useUI();
+
   // Authentication State
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
     return Boolean(getArchiveToken());
@@ -117,8 +120,16 @@ export default function ArchiveSystemView({ isStandalone = false }) {
     }
   }, [isAuthenticated, loadAllData]);
 
-  const handleLogout = () => {
-    if (window.confirm('هل ترغب في تسجيل الخروج من نظام أرشيف الصيدلية؟')) {
+  const handleLogout = async () => {
+    const isConfirmed = await showConfirm({
+      title: 'تسجيل الخروج',
+      message: 'هل ترغب في تسجيل الخروج من نظام أرشيف الصيدلية؟',
+      confirmText: 'تسجيل الخروج',
+      cancelText: 'إلغاء وتراجع',
+      type: 'warning',
+      icon: '🚪'
+    });
+    if (isConfirmed) {
       clearArchiveSession();
       setIsAuthenticated(false);
     }

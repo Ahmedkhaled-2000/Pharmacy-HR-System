@@ -3,6 +3,7 @@ import { fmt, getRealTodayStr } from '../../utils/formatters';
 import { computeEmployeeFinalSettlement } from '../../utils/settlementHelper';
 import { triggerDirectPrint, generateClearanceSlipHTML } from '../../utils/printHelper';
 import { compressImage } from '../../utils/imageCompressor';
+import { useUI } from '../../context/UIContext';
 
 export default function EmployeeTerminationModal({
   emp,
@@ -10,6 +11,7 @@ export default function EmployeeTerminationModal({
   onClose,
   onConfirmTermination
 }) {
+  const { showConfirm } = useUI();
   const [terminationReason, setTerminationReason] = useState('استقالة بناءً على رغبة الموظف');
   const [customReason, setCustomReason] = useState('');
   const [terminationDate, setTerminationDate] = useState(getRealTodayStr());
@@ -65,15 +67,21 @@ export default function EmployeeTerminationModal({
     }
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!terminationDate) {
       alert('يرجى تحديد تاريخ سريان إنهاء الخدمة');
       return;
     }
-    if (!window.confirm(`هل أنت متأكد من اعتماد إنهاء خدمة الموظف (${emp.name}) وتصفية حسابه المالي بصافي (${fmt(settlement?.netSettlement || 0)} ج.م)؟`)) {
-      return;
-    }
+    const isConfirmed = await showConfirm({
+      title: 'اعتماد إنهاء الخدمة وتصفية المستحقات',
+      message: `هل أنت متأكد من اعتماد إنهاء خدمة الموظف (${emp.name}) وتصفية حسابه المالي بصافي (${fmt(settlement?.netSettlement || 0)} ج.م)؟`,
+      confirmText: 'اعتماد إنهاء الخدمة',
+      cancelText: 'إلغاء وتراجع',
+      type: 'danger',
+      icon: '🚪'
+    });
+    if (!isConfirmed) return;
 
     setIsSubmitting(true);
     try {

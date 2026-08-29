@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { isApprovedPermissionForDate, getEffectiveShiftHours, recalculateEmployeeCycleLateness } from '../../utils/latePenaltyEngine';
 import { getEmployeeManualPunchesCount, isShiftManualPunch, arabicWeekday } from '../../utils/formatters';
+import { useUI } from '../../context/UIContext';
 
 export default function AttendancePunchesModal({
   employee,
@@ -16,6 +17,7 @@ export default function AttendancePunchesModal({
   customTo = '',
   onClose
 }) {
+  const { showConfirm } = useUI();
   if (!employee) return null;
 
   const [editingPunch, setEditingPunch] = useState(null);
@@ -197,7 +199,15 @@ export default function AttendancePunchesModal({
         onExecute: performDelete
       });
     } else {
-      if (window.confirm(`هل أنت متأكد من حذف بصمة يوم ${punch.date} للموظف ${employee.name}؟`)) {
+      const isConfirmed = await showConfirm({
+        title: 'حذف بصمة الحضور',
+        message: `هل أنت متأكد من حذف بصمة يوم ${punch.date} للموظف (${employee.name})؟`,
+        confirmText: 'تأكيد الحذف',
+        cancelText: 'إلغاء وتراجع',
+        type: 'danger',
+        icon: '🗑️'
+      });
+      if (isConfirmed) {
         await performDelete();
       }
     }

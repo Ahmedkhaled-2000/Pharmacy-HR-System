@@ -9,6 +9,7 @@ import {
 import { computeLatenessFinancialAmount, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
 import { getEmpDisplayName } from '../../utils/formatters';
 import DisciplinaryViolationModal from './DisciplinaryViolationModal';
+import { useUI } from '../../context/UIContext';
 
 export default function DisciplinaryPenaltiesTab({
   state,
@@ -24,6 +25,7 @@ export default function DisciplinaryPenaltiesTab({
   customTo = '',
   executeWithOwnerGuard
 }) {
+  const { showConfirm } = useUI();
   const isEmployee = userRole === 'employee' || Boolean(currentEmpId);
   const isBranch = userRole === 'branch' || (Boolean(currentBranchId) && !isEmployee && userRole !== 'admin' && userRole !== 'owner');
   const isAdmin = (userRole === 'admin' || userRole === 'owner') && !isEmployee && !isBranch;
@@ -1058,7 +1060,15 @@ export default function DisciplinaryPenaltiesTab({
     const defaultCat = DEFAULT_DISCIPLINARY_CATEGORIES.find((c) => c.id === catId);
     if (!defaultCat) return;
 
-    if (!window.confirm(`هل ترغب في استعادة الإعدادات وسلم الجزاءات الافتراضي لـ "${defaultCat.name}"؟`)) return;
+    const isConfirmed = await showConfirm({
+      title: 'استعادة الإعدادات الافتراضية للفئة',
+      message: `هل ترغب في استعادة الإعدادات وسلم الجزاءات الافتراضي لـ "${defaultCat.name}"؟`,
+      confirmText: 'استعادة الافتراضي',
+      cancelText: 'إلغاء وتراجع',
+      type: 'warning',
+      icon: '🔄'
+    });
+    if (!isConfirmed) return;
 
     const performResetCat = async () => {
       const updatedPolicy = policy.map((c) => (c.id === catId ? JSON.parse(JSON.stringify(defaultCat)) : c));
@@ -1082,7 +1092,15 @@ export default function DisciplinaryPenaltiesTab({
   };
 
   const handleResetAllCategoriesToDefault = async () => {
-    if (!window.confirm('هل أنت متأكد من استعادة كافة فئات لائحة الجزاءات التأديبية وسلالم التصعيد إلى الإعدادات القياسية الافتراضية؟')) return;
+    const isConfirmed = await showConfirm({
+      title: 'استعادة لائحة الجزاءات التأديبية كاملة',
+      message: 'هل أنت متأكد من استعادة كافة فئات لائحة الجزاءات التأديبية وسلالم التصعيد إلى الإعدادات القياسية الافتراضية؟',
+      confirmText: 'استعادة كافة الفئات',
+      cancelText: 'إلغاء وتراجع',
+      type: 'warning',
+      icon: '⚠️'
+    });
+    if (!isConfirmed) return;
 
     const performResetAll = async () => {
       const updatedState = { ...state, disciplinaryPolicy: DEFAULT_DISCIPLINARY_CATEGORIES };
@@ -1105,7 +1123,15 @@ export default function DisciplinaryPenaltiesTab({
   };
 
   const handleDeleteCategory = async (catId, catName) => {
-    if (!window.confirm(`هل أنت متأكد من حذف الفئة "${catName}" نهائياً من اللائحة؟`)) return;
+    const isConfirmed = await showConfirm({
+      title: 'حذف فئة من لائحة الجزاءات',
+      message: `هل أنت متأكد من حذف الفئة "${catName}" نهائياً من اللائحة؟`,
+      confirmText: 'تأكيد الحذف',
+      cancelText: 'إلغاء وتراجع',
+      type: 'danger',
+      icon: '🗑️'
+    });
+    if (!isConfirmed) return;
 
     const performDeleteCat = async () => {
       const updatedPolicy = policy.filter((c) => c.id !== catId);

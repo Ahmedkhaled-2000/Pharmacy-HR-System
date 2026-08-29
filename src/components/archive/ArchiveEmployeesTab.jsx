@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Users, Search, Plus, Phone, FileText, ChevronLeft, Edit2, Trash2, Loader2, Shield } from 'lucide-react';
 import { apiArchiveDeleteEmployee } from '../../utils/archiveApiClient';
 import EmployeeInvoicesModal from './EmployeeInvoicesModal';
+import { useUI } from '../../context/UIContext';
 
 export default function ArchiveEmployeesTab({
   employees = [],
@@ -12,6 +13,7 @@ export default function ArchiveEmployeesTab({
   onEmployeeSaved = () => {},
   onEmployeeDeleted = () => {}
 }) {
+  const { showConfirm } = useUI();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedEmpForInvoices, setSelectedEmpForInvoices] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
@@ -28,7 +30,15 @@ export default function ArchiveEmployeesTab({
 
   const handleDelete = async (emp, e) => {
     if (e) e.stopPropagation();
-    if (!window.confirm(`هل أنت متأكد من حذف الموظف "${emp.name}"؟`)) return;
+    const isConfirmed = await showConfirm({
+      title: 'حذف موظف الأرشيف',
+      message: `هل أنت متأكد من حذف الموظف "${emp.name}" من دليل الأرشيف؟`,
+      confirmText: 'تأكيد الحذف',
+      cancelText: 'إلغاء وتراجع',
+      type: 'danger',
+      icon: '👤'
+    });
+    if (!isConfirmed) return;
 
     setDeletingId(emp.id);
     try {

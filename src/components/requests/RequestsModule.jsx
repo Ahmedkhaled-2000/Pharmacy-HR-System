@@ -6,6 +6,7 @@ import { shouldRouteDirectToAdmin, isBranchWithoutManager } from '../../utils/jo
 import { normalizeSchedule } from '../roster/RosterModule';
 import { syncNow, fetchRemoteState } from '../../utils/offlineSync';
 import { createRequestDecisionNotification } from '../../utils/notificationEngine';
+import { useUI } from '../../context/UIContext';
 
 export function getFormattedRequestBadge(type, leaveType) {
   const cleanType = String(type || '').trim().toLowerCase();
@@ -102,6 +103,7 @@ export default function RequestsModule({
   executeWithOwnerGuard
 }) {
   const effectiveRole = currentRole || authRole || 'admin';
+  const { showConfirm } = useUI();
   const [filterType, setFilterType] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterEmp, setFilterEmp] = useState('all');
@@ -1250,7 +1252,15 @@ export default function RequestsModule({
   };
 
   const handleDeleteSingleRequest = async (reqId) => {
-    if (!window.confirm('هل أنت متأكد من حذف هذا الطلب نهائياً من سجلات النظام بالكامل؟')) return;
+    const isConfirmed = await showConfirm({
+      title: 'حذف الطلب نهائياً',
+      message: 'هل أنت متأكد من حذف هذا الطلب نهائياً من سجلات النظام بالكامل؟\nلا يمكن التراجع عن هذا الإجراء.',
+      confirmText: 'حذف نهائي',
+      cancelText: 'إلغاء وتراجع',
+      type: 'danger',
+      icon: '🗑️'
+    });
+    if (!isConfirmed) return;
     const idStr = String(reqId);
     const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
     const updatedDeleted = Array.from(new Set([
@@ -1402,12 +1412,17 @@ export default function RequestsModule({
   // 1. Clear / Hide requests from Higher Management screen ONLY (Does NOT affect Employee or Branch Manager screens)
   const handleClearAdminViewOnly = async () => {
     if (visibleAdminRequests.length === 0) {
-      alert('لا توجد أي طلبات ظاهرة حالياً لمسحها من شاشة الإدارة');
+      showToast?.('لا توجد أي طلبات ظاهرة حالياً لمسحها من شاشة الإدارة');
       return;
     }
-    const isConfirmed = window.confirm(
-      `🧹 تأكيد تفريغ شاشة الإدارة العليا (${visibleAdminRequests.length} طلب):\n\nهل تريد مسح وإخفاء هذه الطلبات من شاشة الإدارة العليا فقط لترتيب وتنظيف الشاشة؟\n\n✅ ملاحظة هامة:\n1. لن يتم حذف الطلبات نهائياً من النظام، وتظل محفوظة في سجلات الموظف والفرع.\n2. يمكنك في أي وقت الضغط على زر "عرض المؤرشف" لاستعادتها أو معاينتها.`
-    );
+    const isConfirmed = await showConfirm({
+      title: 'تفريغ شاشة الإدارة العليا',
+      message: `تأكيد تفريغ شاشة الإدارة العليا (${visibleAdminRequests.length} طلب):\n\nهل تريد مسح وإخفاء هذه الطلبات من شاشة الإدارة العليا فقط لترتيب وتنظيف الشاشة؟\n\n✅ ملاحظة هامة:\n1. لن يتم حذف الطلبات نهائياً من النظام، وتظل محفوظة في سجلات الموظف والفرع.\n2. يمكنك في أي وقت الضغط على زر "عرض المؤرشف" لاستعادتها أو معاينتها.`,
+      confirmText: 'تفريغ الشاشة',
+      cancelText: 'إلغاء وتراجع',
+      type: 'info',
+      icon: '🧹'
+    });
     if (!isConfirmed) return;
 
     const visibleIds = new Set(visibleAdminRequests.map((r) => String(r.id)));
@@ -1456,12 +1471,17 @@ export default function RequestsModule({
   const handleClearAllRequests = async () => {
     const currentReqs = allRequests || [];
     if (currentReqs.length === 0) {
-      alert('لا توجد أي طلبات حالياً في النظام لمسحها');
+      showToast?.('لا توجد أي طلبات حالياً في النظام لمسحها');
       return;
     }
-    const isConfirmed = window.confirm(
-      `⚠️ تحذير: مسح السجل العام لكافة الطلبات:\n\nهل تريد حذف كافة الطلبات (${currentReqs.length} طلب) نهائياً من النظام بالكامل لجميع الشاشات؟\n\n(ملاحظة: إذا كنت ترغب في تفريغ شاشة الإدارة العليا فقط دون التأثير على الموظف والفرع، اضغط Cancel واستخدم زر "مسح شاشة الإدارة فقط").`
-    );
+    const isConfirmed = await showConfirm({
+      title: 'مسح السجل العام لكافة الطلبات',
+      message: `⚠️ تحذير: مسح السجل العام لكافة الطلبات:\n\nهل تريد حذف كافة الطلبات (${currentReqs.length} طلب) نهائياً من النظام بالكامل لجميع الشاشات؟\n\n(ملاحظة: إذا كنت ترغب في تفريغ شاشة الإدارة العليا فقط دون التأثير على الموظف والفرع، اضغط "إلغاء" واستخدم زر "مسح شاشة الإدارة فقط").`,
+      confirmText: 'مسح السجل بالكامل',
+      cancelText: 'إلغاء وتراجع',
+      type: 'danger',
+      icon: '🚨'
+    });
     if (!isConfirmed) return;
 
     const performClearAllRequests = async () => {

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import QRCode from 'qrcode';
 import { DEFAULT_JOBS, getJobsList, DEFAULT_DEPARTMENTS, getDepartmentsList } from '../../utils/jobsHelper';
 import { DEFAULT_VACANCIES } from '../../utils/recruitmentHelper';
+import { useUI } from '../../context/UIContext';
 
 export default function JobVacanciesManager({
   state,
@@ -10,6 +11,7 @@ export default function JobVacanciesManager({
   showToast,
   executeWithOwnerGuard
 }) {
+  const { showConfirm } = useUI();
   const jobsList = getJobsList(state);
   const departmentsList = getDepartmentsList(state);
   const branches = state?.branches || [];
@@ -153,7 +155,15 @@ export default function JobVacanciesManager({
 
   // Delete Vacancy
   const handleDeleteVacancy = async (vacId, title) => {
-    if (!window.confirm(`هل أنت متأكد من حذف الوظيفة الشاغرة (${title}) نهائياً؟`)) return;
+    const isConfirmed = await showConfirm({
+      title: 'حذف الوظيفة الشاغرة',
+      message: `هل أنت متأكد من حذف الوظيفة الشاغرة (${title}) نهائياً؟`,
+      confirmText: 'تأكيد الحذف',
+      cancelText: 'إلغاء وتراجع',
+      type: 'danger',
+      icon: '🗑️'
+    });
+    if (!isConfirmed) return;
 
     const updatedList = vacancies.filter(v => v.id !== vacId);
     setVacancies(updatedList);

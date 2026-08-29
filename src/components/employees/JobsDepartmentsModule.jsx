@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { DEFAULT_JOBS, getJobsList, DEFAULT_DEPARTMENTS, getDepartmentsList } from '../../utils/jobsHelper';
+import { useUI } from '../../context/UIContext';
 
 export default function JobsDepartmentsModule({
   state,
@@ -8,6 +9,7 @@ export default function JobsDepartmentsModule({
   showToast,
   executeWithOwnerGuard
 }) {
+  const { showConfirm } = useUI();
   const jobsList = getJobsList(state);
   const departmentsList = getDepartmentsList(state);
 
@@ -76,7 +78,15 @@ export default function JobsDepartmentsModule({
               type="button"
               className="btn btn-ghost"
               onClick={async () => {
-                if (window.confirm('هل تريد استعادة قائمة الوظائف والأقسام القياسية الافتراضية؟')) {
+                const isConfirmed = await showConfirm({
+                  title: 'استعادة دليل الوظائف والأقسام الافتراضي',
+                  message: 'هل تريد استعادة قائمة الوظائف والأقسام القياسية الافتراضية؟',
+                  confirmText: 'استعادة الافتراضي',
+                  cancelText: 'إلغاء وتراجع',
+                  type: 'warning',
+                  icon: '🔄'
+                });
+                if (isConfirmed) {
                   const performRestore = async () => {
                     const updatedState = { ...state, jobs: DEFAULT_JOBS, departments: DEFAULT_DEPARTMENTS };
                     setState(updatedState);
@@ -306,14 +316,19 @@ export default function JobsDepartmentsModule({
                             className="del-btn"
                             style={{ padding: '2px 6px', fontSize: '11px' }}
                             onClick={async () => {
-                              if (linkedJobs.length > 0 || linkedEmps.length > 0) {
-                                const confirmed = window.confirm(
-                                  `⚠️ تنبيه: يوجد (${linkedJobs.length}) وظيفة و (${linkedEmps.length}) موظف مسجلين بقسم (${dept}). هل أنت متأكد من حذف هذا القسم؟`
-                                );
-                                if (!confirmed) return;
-                              } else {
-                                if (!window.confirm(`هل أنت متأكد من حذف قسم (${dept})؟`)) return;
-                              }
+                              const confirmMsg = (linkedJobs.length > 0 || linkedEmps.length > 0)
+                                ? `⚠️ تنبيه: يوجد (${linkedJobs.length}) وظيفة و (${linkedEmps.length}) موظف مسجلين بقسم (${dept}).\nهل أنت متأكد من حذف هذا القسم؟`
+                                : `هل أنت متأكد من حذف قسم (${dept})؟`;
+
+                              const confirmed = await showConfirm({
+                                title: 'حذف قسم إداري',
+                                message: confirmMsg,
+                                confirmText: 'تأكيد الحذف',
+                                cancelText: 'إلغاء وتراجع',
+                                type: 'danger',
+                                icon: '🏢'
+                              });
+                              if (!confirmed) return;
 
                               const performDeleteDept = async () => {
                                 const updatedDepts = departmentsList.filter(d => d !== dept);
@@ -459,12 +474,19 @@ export default function JobsDepartmentsModule({
                             className="del-btn"
                             style={{ padding: '4px 8px', fontSize: '12px' }}
                             onClick={async () => {
-                              if (assignedEmps.length > 0) {
-                                const confirmed = window.confirm(`⚠️ تنبيه: يوجد عدد (${assignedEmps.length}) موظف مسجلين حالياً على وظيفة (${j.title}). هل أنت متأكد من حذف هذه الوظيفة من قائمة الخيارات؟`);
-                                if (!confirmed) return;
-                              } else {
-                                if (!window.confirm(`هل أنت متأكد من حذف وظيفة (${j.title})؟`)) return;
-                              }
+                              const confirmMsg = assignedEmps.length > 0
+                                ? `⚠️ تنبيه: يوجد عدد (${assignedEmps.length}) موظف مسجلين حالياً على وظيفة (${j.title}).\nهل أنت متأكد من حذف هذه الوظيفة من قائمة الخيارات؟`
+                                : `هل أنت متأكد من حذف وظيفة (${j.title})؟`;
+
+                              const confirmed = await showConfirm({
+                                title: 'حذف مسمى وظيفي',
+                                message: confirmMsg,
+                                confirmText: 'تأكيد الحذف',
+                                cancelText: 'إلغاء وتراجع',
+                                type: 'danger',
+                                icon: '💼'
+                              });
+                              if (!confirmed) return;
 
                               const performDeleteJob = async () => {
                                 const updatedJobs = jobsList.filter(item => item.id !== j.id && item.title !== j.title);

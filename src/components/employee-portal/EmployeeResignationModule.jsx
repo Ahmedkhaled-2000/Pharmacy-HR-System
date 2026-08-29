@@ -3,6 +3,7 @@ import { uid } from '../../utils/formatters';
 import { getRealTodayStr } from '../../utils/timeEngine';
 import { notifyAdminOnResignationRequest } from '../../utils/gmailService';
 import { shouldRouteDirectToAdmin } from '../../utils/jobsHelper';
+import { useUI } from '../../context/UIContext';
 
 export default function EmployeeResignationModule({
   emp,
@@ -12,6 +13,7 @@ export default function EmployeeResignationModule({
   showToast,
   selectedBranchId
 }) {
+  const { showConfirm } = useUI();
   const [showForm, setShowForm] = useState(false);
   const [requestType, setRequestType] = useState('resignation'); // 'resignation' | 'withdraw'
   const [reason, setReason] = useState('');
@@ -226,7 +228,15 @@ export default function EmployeeResignationModule({
   };
 
   const handleCancelRequest = async (reqId) => {
-    if (!window.confirm('هل أنت متأكد من مسح وإلغاء هذا الطلب نهائياً؟')) return;
+    const isConfirmed = await showConfirm({
+      title: 'إلغاء ومسح طلب الاستقالة',
+      message: 'هل أنت متأكد من مسح وإلغاء هذا الطلب نهائياً؟',
+      confirmText: 'تأكيد الإلغاء',
+      cancelText: 'تراجع',
+      type: 'danger',
+      icon: '🗑️'
+    });
+    if (!isConfirmed) return;
 
     const idStr = String(reqId);
     const rawId = idStr.replace(/^(res_|req_)/, '');

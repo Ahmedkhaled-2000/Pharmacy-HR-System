@@ -33,6 +33,7 @@ import {
   apiArchiveRemoveInvoiceFile,
   apiArchiveUploadFile
 } from '../../utils/archiveApiClient';
+import { useUI } from '../../context/UIContext';
 
 export default function InvoiceDetailModal({
   invoice: initialInvoice,
@@ -43,6 +44,7 @@ export default function InvoiceDetailModal({
   onInvoiceUpdated = () => {},
   onInvoiceDeleted = () => {}
 }) {
+  const { showConfirm } = useUI();
   const [currentInvoice, setCurrentInvoice] = useState(initialInvoice || null);
   const [isEditing, setIsEditing] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -250,7 +252,15 @@ export default function InvoiceDetailModal({
   };
 
   const handleDelete = async () => {
-    if (!window.confirm('هل أنت متأكد من رغبتك في حذف هذه الفاتورة نهائياً من الأرشيف؟')) return;
+    const isConfirmed = await showConfirm({
+      title: 'حذف الفاتورة نهائياً',
+      message: 'هل أنت متأكد من رغبتك في حذف هذه الفاتورة نهائياً من الأرشيف؟',
+      confirmText: 'تأكيد الحذف',
+      cancelText: 'إلغاء وتراجع',
+      type: 'danger',
+      icon: '🗑️'
+    });
+    if (!isConfirmed) return;
     try {
       const res = await apiArchiveDeleteInvoice(currentInvoice.id);
       if (res.success) {
@@ -311,7 +321,15 @@ export default function InvoiceDetailModal({
   };
 
   const handleRemoveAttachedFile = async () => {
-    if (!window.confirm('هل تريد حذف الملف المرفق من الفاتورة؟')) return;
+    const isConfirmed = await showConfirm({
+      title: 'حذف الملف المرفق',
+      message: 'هل تريد حذف الملف المرفق من الفاتورة نهائياً؟',
+      confirmText: 'تأكيد الحذف',
+      cancelText: 'إلغاء وتراجع',
+      type: 'danger',
+      icon: '🗑️'
+    });
+    if (!isConfirmed) return;
     try {
       const res = await apiArchiveRemoveInvoiceFile(currentInvoice.id);
       if (res.success) {

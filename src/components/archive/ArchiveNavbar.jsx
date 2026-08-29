@@ -12,6 +12,7 @@ import {
   Plus
 } from 'lucide-react';
 import { getArchiveUsername, clearArchiveSession } from '../../utils/archiveApiClient';
+import { useUI } from '../../context/UIContext';
 
 export default function ArchiveNavbar({
   activeTab,
@@ -23,13 +24,22 @@ export default function ArchiveNavbar({
   onLogout,
   settings = {}
 }) {
+  const { showConfirm } = useUI();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const currentUsername = getArchiveUsername();
   const displayName = settings.PHARMACY_NAME || settings.pharmacyName || pharmacyName || 'صيدلية الفلاي';
   const displayLogo = settings.PHARMACY_LOGO || settings.pharmacyLogo || pharmacyLogo;
 
-  const handleSystemLogout = () => {
-    if (!window.confirm('هل تريد بالتأكيد تسجيل الخروج من نظام الأرشيف؟')) return;
+  const handleSystemLogout = async () => {
+    const isConfirmed = await showConfirm({
+      title: 'تسجيل الخروج',
+      message: 'هل تريد بالتأكيد تسجيل الخروج من نظام الأرشيف؟',
+      confirmText: 'تسجيل الخروج',
+      cancelText: 'إلغاء وتراجع',
+      type: 'warning',
+      icon: '🚪'
+    });
+    if (!isConfirmed) return;
     clearArchiveSession();
     if (onLogout) onLogout();
     else window.location.reload();

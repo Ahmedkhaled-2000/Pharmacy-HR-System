@@ -26,6 +26,7 @@ export function useAttendanceEngine() {
   const {
     currentFilterFn,
     showToast,
+    showConfirm,
     executeWithOwnerGuard,
     setKioskConfirmModal,
     editingShift,
@@ -881,7 +882,15 @@ export function useAttendanceEngine() {
       showToast('لا يمكن حذف الموظف الوحيد المتبقي بالنظام');
       return;
     }
-    if (!window.confirm(`هل أنت متأكد من حذف الموظف "${emp.name}" نهائياً من كافة سجلات النظام؟`)) return;
+    const isConfirmed = await showConfirm({
+      title: 'حذف ملف الموظف نهائياً',
+      message: `هل أنت متأكد من حذف الموظف "${emp.name}" نهائياً من كافة سجلات النظام؟\nسيتم حذف ملفه وبصماته ومعاملاته بالكامل.`,
+      confirmText: 'تأكيد الحذف النهائي',
+      cancelText: 'إلغاء وتراجع',
+      type: 'danger',
+      icon: '👤'
+    });
+    if (!isConfirmed) return;
 
     const performDelete = async () => {
       const empIdStr = String(empId);

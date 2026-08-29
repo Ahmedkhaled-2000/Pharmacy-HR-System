@@ -19,6 +19,7 @@ import GoogleDriveConfigCard from './GoogleDriveConfigCard';
 import DatesPeriodsSettingsCard from './DatesPeriodsSettingsCard';
 import { DEFAULT_JOBS, getJobsList, DEFAULT_DEPARTMENTS, getDepartmentsList } from '../../utils/jobsHelper';
 import { getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
+import { useUI } from '../../context/UIContext';
 
 const ALL_REQUEST_TYPES = [
   { type: 'long_leave', label: 'طلبات الإجازة أكثر من ثلاث أيام في الشهر (سنوية أو بدون أجر)' },
@@ -45,6 +46,7 @@ export default function SettingsModule({
   setActiveSubTab,
   executeWithOwnerGuard
 }) {
+  const { showConfirm } = useUI();
   const [activeTab, setActiveTab] = useState(activeSubTab || 'general'); // 'general' | 'jobs' | 'permissions' | 'rules' | 'gmail' | 'ip' | 'backup' | 'owner'
 
   useEffect(() => {
@@ -800,7 +802,15 @@ export default function SettingsModule({
   };
 
   const handleRevokeAllPermissions = async () => {
-    if (!window.confirm('🚨 هل أنت متأكد من رغبتك في إيقاف وتعطيل جميع الصلاحيات لنطاق الموظفين المحدد؟')) return;
+    const isConfirmed = await showConfirm({
+      title: 'تعطيل جميع الصلاحيات',
+      message: '🚨 هل أنت متأكد من رغبتك في إيقاف وتعطيل جميع الصلاحيات لنطاق الموظفين المحدد؟',
+      confirmText: 'تعطيل الكل',
+      cancelText: 'إلغاء وتراجع',
+      type: 'danger',
+      icon: '🚨'
+    });
+    if (!isConfirmed) return;
 
     const performRevoke = async () => {
       const allFalse = {};
@@ -1760,7 +1770,7 @@ export default function SettingsModule({
                   className="btn btn-ghost" 
                   style={{ width: '100%', border: '1px solid #f59e0b', color: '#b45309', fontWeight: 800 }}
                   disabled={isRestoring}
-                  onClick={() => {
+                  onClick={async () => {
                     const currentOwnerPass = state.orgSettings?.ownerPassword || 'owner123';
                     if (authRole !== 'owner') {
                       const inputPass = window.prompt('👑 استعادة النسخ الاحتياطية مقصورة على المالك فقط.\nيرجى إدخال كلمة مرور المالك (Owner Password) للمتابعة:');
@@ -1769,7 +1779,15 @@ export default function SettingsModule({
                         return;
                       }
                     }
-                    if (window.confirm('هل أنت متأكد من رغبتك في استرجاع البيانات من ملف خارجي؟ سيتم استبدال البيانات الحالية بالبيانات الموجودة في الملف.')) {
+                    const isConfirmed = await showConfirm({
+                      title: 'استرجاع نسخة احتياطية من ملف',
+                      message: 'هل أنت متأكد من رغبتك في استرجاع البيانات من ملف خارجي؟\nسيتم استبدال البيانات الحالية بالبيانات الموجودة في الملف.',
+                      confirmText: 'تأكيد الاسترجاع',
+                      cancelText: 'إلغاء وتراجع',
+                      type: 'warning',
+                      icon: '📤'
+                    });
+                    if (isConfirmed && fileInputRef.current) {
                       fileInputRef.current.click();
                     }
                   }}
@@ -1844,7 +1862,15 @@ export default function SettingsModule({
                                     return;
                                   }
                                 }
-                                if (window.confirm(`هل أنت متأكد من رغبتك في استرجاع هذه اللقطة الاحتياطية المأخوذة في ${snap.isoDate || ''}؟`)) {
+                                const isConfirmed = await showConfirm({
+                                  title: 'استرجاع اللقطة الاحتياطية',
+                                  message: `هل أنت متأكد من رغبتك في استرجاع هذه اللقطة الاحتياطية المأخوذة في ${snap.isoDate || ''}؟`,
+                                  confirmText: 'تأكيد الاسترجاع',
+                                  cancelText: 'إلغاء وتراجع',
+                                  type: 'warning',
+                                  icon: '📸'
+                                });
+                                if (isConfirmed) {
                                   if (snap.appState) {
                                     setState(snap.appState);
                                     await saveState(snap.appState);
