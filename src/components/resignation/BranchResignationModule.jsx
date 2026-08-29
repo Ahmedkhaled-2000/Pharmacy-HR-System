@@ -11,17 +11,38 @@ export default function BranchResignationModule({
 }) {
   const [managerComment, setManagerComment] = useState({});
 
-  const branchRequests = (state.resignationRequests || []).filter(r => {
-    if (!currentBranch?.id) return true;
-    const cIdStr = String(currentBranch.id);
-    if (r.branchId && String(r.branchId) === cIdStr) return true;
-    const reqEmp = (state.employees || []).find(e => String(e.id) === String(r.employeeId));
-    if (reqEmp) {
-      if (reqEmp.branchId && String(reqEmp.branchId) === cIdStr) return true;
-      if (reqEmp.branchesDetails && reqEmp.branchesDetails.some(bd => String(bd.branchId) === cIdStr)) return true;
-    }
-    return false;
-  });
+  const branchRequests = React.useMemo(() => {
+    const map = new Map();
+    const cIdStr = currentBranch?.id ? String(currentBranch.id) : '';
+
+    const isMatch = (r) => {
+      if (!cIdStr) return true;
+      if (r.branchId && String(r.branchId) === cIdStr) return true;
+      const reqEmp = (state.employees || []).find(e => String(e.id) === String(r.employeeId));
+      if (reqEmp) {
+        if (reqEmp.branchId && String(reqEmp.branchId) === cIdStr) return true;
+        if (reqEmp.branchesDetails && reqEmp.branchesDetails.some(bd => String(bd.branchId) === cIdStr)) return true;
+      }
+      return false;
+    };
+
+    (state.resignationRequests || []).forEach(r => {
+      if (r && isMatch(r)) map.set(String(r.id), r);
+    });
+
+    (state.requests || []).forEach(r => {
+      if (r && (r.type === 'resignation' || r.type === 'withdraw' || r.type === 'resignation_request') && isMatch(r)) {
+        if (!map.has(String(r.id))) {
+          map.set(String(r.id), r);
+        } else {
+          map.set(String(r.id), { ...map.get(String(r.id)), ...r });
+        }
+      }
+    });
+
+    return Array.from(map.values());
+  }, [state.resignationRequests, state.requests, state.employees, currentBranch]);
+
   // Helper to extract numeric timestamp for accurate descending sort
   const getReqSortTime = (r) => {
     if (r.createdAt) {
@@ -56,27 +77,47 @@ export default function BranchResignationModule({
       return;
     }
 
-    const targetReq = state.resignationRequests.find(r => r.id === reqId);
+    const idStr = String(reqId);
+    const targetReq = branchRequests.find(r => String(r.id) === idStr) || (state.resignationRequests || []).find(r => String(r.id) === idStr);
     const emp = (state.employees || []).find(e => String(e.id) === String(targetReq?.employeeId));
     const branchName = currentBranch?.name || (state.branches || []).find(b => String(b.id) === String(targetReq?.branchId))?.name || 'الفرع';
 
-    const updatedReqs = (state.resignationRequests || []).map(r => {
-      if (r.id === reqId) {
-        return { 
-          ...r, 
-          managerStatus: status, 
-          managerComment: comment,
-          updatedAt: new Date().toISOString()
-        };
+    const updatedTargetReq = {
+      ...(targetReq || {}),
+      managerStatus: status,
+      branchApproved: status === 'approved',
+      branchRejected: status === 'rejected',
+      branchDecision: status,
+      managerComment: comment,
+      updatedAt: new Date().toISOString()
+    };
+
+    let updatedResignations = (state.resignationRequests || []).map(r => {
+      if (String(r.id) === idStr) {
+        return updatedTargetReq;
       }
       return r;
     });
+    if (!updatedResignations.some(r => String(r.id) === idStr)) {
+      updatedResignations.unshift(updatedTargetReq);
+    }
+
+    let updatedRequests = (state.requests || []).map(r => {
+      if (String(r.id) === idStr) {
+        return updatedTargetReq;
+      }
+      return r;
+    });
+    if (!updatedRequests.some(r => String(r.id) === idStr)) {
+      updatedRequests.unshift(updatedTargetReq);
+    }
 
     const newNotif = {
       id: 'notif_mgr_' + reqId + '_' + Date.now(),
+      requestId: idStr,
       type: 'resignation',
-      title: `👔 تم رد مدير الفرع على طلب ${targetReq?.type === 'resignation' ? 'الاستقالة' : 'التراجع'}`,
-      message: `قام مدير فرع ${branchName} بالرد (${status === 'approved' ? 'موافق' : 'مرفوض'}) على طلب ${emp?.name || 'الموظف'}. تم تحويل الطلب للإدارة العليا للبت النهائي.`,
+      title: `👔 رد مدير الفرع على طلب ${targetReq?.type === 'resignation' ? 'الاستقالة' : 'التراجع'} (${status === 'approved' ? 'موافقة' : 'عدم موافقة'})`,
+      message: `قام مدير فرع ${branchName} بالرد (${status === 'approved' ? 'موافق' : 'غير موافق'}) على طلب ${emp?.name || 'الموظف'}. تم تحويل الطلب للإدارة العليا للبت النهائي. تعليق: ${comment}`,
       date: getRealTodayStr(),
       timestamp: new Date().toISOString(),
       read: false,
@@ -84,10 +125,28 @@ export default function BranchResignationModule({
       branchId: targetReq?.branchId || currentBranch?.id
     };
 
+    const empNotif = {
+      id: 'notif_emp_mgr_' + reqId + '_' + Date.now(),
+      requestId: idStr,
+      employeeId: String(targetReq?.employeeId || ''),
+      targetEmployeeId: String(targetReq?.employeeId || ''),
+      targetRole: 'employee',
+      type: 'resignation',
+      action: status === 'approved' ? 'approved' : 'rejected',
+      approverRole: 'branch',
+      title: status === 'approved' ? '🟢 موافقة مدير الفرع على طلب الاستقالة' : '❌ عدم موافقة مدير الفرع (محال للإدارة العليا)',
+      message: `قام مدير الفرع (${branchName}) بتسجيل (${status === 'approved' ? 'الموافقة' : 'عدم الموافقة'}) على طلبك وإحالته للإدارة العليا للبت النهائي.`,
+      details: comment,
+      date: getRealTodayStr(),
+      timestamp: new Date().toISOString(),
+      read: false
+    };
+
     const updatedState = { 
       ...state, 
-      resignationRequests: updatedReqs,
-      notifications: [newNotif, ...(state.notifications || [])]
+      resignationRequests: updatedResignations,
+      requests: updatedRequests,
+      notifications: [empNotif, newNotif, ...(state.notifications || [])]
     };
 
     setState(updatedState);

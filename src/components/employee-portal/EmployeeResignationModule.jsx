@@ -16,35 +16,57 @@ export default function EmployeeResignationModule({
   const [requestType, setRequestType] = useState('resignation'); // 'resignation' | 'withdraw'
   const [reason, setReason] = useState('');
   
-  const empIdStr = String(emp.id || '').trim();
-  const empCodeStr = String(emp.code || '').trim();
-  const empUserStr = String(emp.username || '').trim();
+  const empIdStr = String(emp?.id || '').trim();
+  const empCodeStr = String(emp?.code || '').trim();
+  const empUserStr = String(emp?.username || '').trim();
 
-  const empRequests = (state.resignationRequests || []).filter(r => {
-    const rId = String(r.employeeId || '').trim();
-    return rId === empIdStr || (empCodeStr && rId === empCodeStr) || (empUserStr && rId === empUserStr);
-  });
+  // Aggregate seamlessly from both resignationRequests and requests
+  const empRequests = React.useMemo(() => {
+    const map = new Map();
+    const isEmpMatch = (r) => {
+      if (!r) return false;
+      const rId = String(r.employeeId || '').trim();
+      return rId === empIdStr || (empCodeStr && rId === empCodeStr) || (empUserStr && rId === empUserStr);
+    };
 
-  // Sort descending by newest request first
-  empRequests.sort((a, b) => {
-    const getT = (r) => {
-      if (!r) return 0;
-      if (r.createdAt) { const t = new Date(r.createdAt).getTime(); if (!isNaN(t) && t > 0) return t; }
-      if (r.updatedAt) { const t = new Date(r.updatedAt).getTime(); if (!isNaN(t) && t > 0) return t; }
-      if (r.id) {
-        const parts = String(r.id).split('_');
-        for (const p of parts) {
-          const num = parseInt(p, 10);
-          if (!isNaN(num) && num > 1000000000000) return num;
+    (state.resignationRequests || []).forEach(r => {
+      if (r && isEmpMatch(r)) map.set(String(r.id), r);
+    });
+
+    (state.requests || []).forEach(r => {
+      if (r && (r.type === 'resignation' || r.type === 'withdraw' || r.type === 'resignation_request') && isEmpMatch(r)) {
+        if (!map.has(String(r.id))) {
+          map.set(String(r.id), r);
+        } else {
+          map.set(String(r.id), { ...map.get(String(r.id)), ...r });
         }
       }
-      if (r.requestDate) { const t = new Date(r.requestDate).getTime(); if (!isNaN(t) && t > 0) return t; }
-      if (r.date) { const t = new Date(r.date).getTime(); if (!isNaN(t) && t > 0) return t; }
-      return 0;
-    };
-    return getT(b) - getT(a);
-  });
+    });
 
+    const list = Array.from(map.values());
+
+    // Sort descending by newest request first
+    list.sort((a, b) => {
+      const getT = (r) => {
+        if (!r) return 0;
+        if (r.createdAt) { const t = new Date(r.createdAt).getTime(); if (!isNaN(t) && t > 0) return t; }
+        if (r.updatedAt) { const t = new Date(r.updatedAt).getTime(); if (!isNaN(t) && t > 0) return t; }
+        if (r.id) {
+          const parts = String(r.id).split('_');
+          for (const p of parts) {
+            const num = parseInt(p, 10);
+            if (!isNaN(num) && num > 1000000000000) return num;
+          }
+        }
+        if (r.requestDate) { const t = new Date(r.requestDate).getTime(); if (!isNaN(t) && t > 0) return t; }
+        if (r.date) { const t = new Date(r.date).getTime(); if (!isNaN(t) && t > 0) return t; }
+        return 0;
+      };
+      return getT(b) - getT(a);
+    });
+
+    return list;
+  }, [state.resignationRequests, state.requests, empIdStr, empCodeStr, empUserStr]);
 
   const orgSettings = state?.orgSettings || {};
   const requiredNoticeDays = parseInt(orgSettings.resignationNoticeDays || orgSettings.resignationNoticePeriodDays, 10) || 30;
@@ -165,6 +187,38 @@ export default function EmployeeResignationModule({
       saveState(updatedState).catch((err) => {
         console.warn('[Resignation] Background sync warning:', err);
       });
+    }
+  };
+
+  const handleCancelRequest = async (reqId) => {
+    if (!window.confirm('هل أنت متأكد من مسح وإلغاء هذا الطلب نهائياً؟')) return;
+
+    const idStr = String(reqId);
+    const rawId = idStr.replace(/^(res_|req_)/, '');
+
+    const matchesId = (r) => {
+      if (!r) return false;
+      const rId = String(r.id || '');
+      const rRaw = rId.replace(/^(res_|req_)/, '');
+      return rId === idStr || rId === rawId || rRaw === idStr || (rawId && rRaw === rawId);
+    };
+
+    const updatedResignations = (state.resignationRequests || []).filter(r => !matchesId(r));
+    const updatedRequests = (state.requests || []).filter(r => !matchesId(r));
+    const updatedNotifications = (state.notifications || []).filter(n => !matchesId(n) && String(n.requestId) !== idStr && String(n.requestId) !== rawId);
+
+    const updatedState = {
+      ...state,
+      resignationRequests: updatedResignations,
+      requests: updatedRequests,
+      notifications: updatedNotifications
+    };
+
+    setState(updatedState);
+    showToast('🗑️ تم مسح وإلغاء طلب الاستقالة بنجاح');
+
+    if (saveState) {
+      await saveState(updatedState).catch(err => console.warn('[Resignation] Delete sync error:', err));
     }
   };
 
@@ -421,7 +475,7 @@ export default function EmployeeResignationModule({
         <div style={{ display: 'grid', gap: '14px', marginTop: '10px' }}>
           {empRequests.map(req => (
             <div key={req.id} style={{ border: '1px solid var(--border)', borderRadius: '12px', padding: '16px', background: 'var(--surface)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', borderBottom: '1px solid var(--border)', paddingBottom: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', borderBottom: '1px solid var(--border)', paddingBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
                 <strong style={{ fontSize: '1.05rem', color: req.type === 'resignation' ? 'var(--danger, #dc2626)' : 'var(--primary)' }}>
                   {req.type === 'resignation' ? '🚪 طلب استقالة' : '↩️ طلب تراجع عن الاستقالة'}
                 </strong>
@@ -432,14 +486,93 @@ export default function EmployeeResignationModule({
                     </span>
                   )}
                   <span style={{ fontSize: '0.85rem', color: 'var(--muted)', background: 'var(--surface-muted)', padding: '3px 8px', borderRadius: '6px', border: '1px solid var(--border)' }}>
-                    📅 تاريخ التقديم: {req.requestDate}
+                    📅 تاريخ التقديم: {req.requestDate || req.date}
                   </span>
+                  {(!req.adminStatus || req.adminStatus === 'pending') && !req.isCancelled && (
+                    <button
+                      type="button"
+                      onClick={() => handleCancelRequest(req.id)}
+                      style={{
+                        background: '#fee2e2',
+                        color: '#dc2626',
+                        border: '1px solid #fca5a5',
+                        padding: '4px 10px',
+                        borderRadius: '6px',
+                        fontSize: '12px',
+                        fontWeight: 'bold',
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        transition: 'all 0.15s ease'
+                      }}
+                      title="مسح وإلغاء هذا الطلب نهائياً"
+                    >
+                      🗑️ مسح / إلغاء الطلب
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* ── Request Lifecycle Sequence (تسلسل مراحل الطلب) ── */}
+              <div style={{ margin: '14px 0 10px', padding: '12px 14px', background: 'var(--surface-muted)', borderRadius: '10px', border: '1px solid var(--border)' }}>
+                <div style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--muted)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span>🔄</span> <strong>تسلسل ومسار اعتماد الطلب:</strong>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '8px', fontSize: '12px' }}>
+                  {/* Step 1: Submission */}
+                  <div style={{ padding: '8px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', color: '#166534' }}>
+                    <div style={{ fontWeight: 'bold' }}>1️⃣ تقديم الطلب</div>
+                    <div style={{ fontSize: '11px', marginTop: '2px', opacity: 0.85 }}>📅 {req.requestDate || req.date}</div>
+                  </div>
+
+                  {/* Step 2: Branch Review */}
+                  <div style={{
+                    padding: '8px',
+                    borderRadius: '8px',
+                    border: req.managerStatus === 'approved' ? '1px solid #bbf7d0' : req.managerStatus === 'rejected' ? '1px solid #fecaca' : req.managerStatus === 'skipped' ? '1px solid var(--border)' : '1px solid #fde68a',
+                    background: req.managerStatus === 'approved' ? '#f0fdf4' : req.managerStatus === 'rejected' ? '#fef2f2' : req.managerStatus === 'skipped' ? 'rgba(148,163,184,0.1)' : '#fffbeb',
+                    color: req.managerStatus === 'approved' ? '#166534' : req.managerStatus === 'rejected' ? '#991b1b' : req.managerStatus === 'skipped' ? 'var(--muted)' : '#92400e'
+                  }}>
+                    <div style={{ fontWeight: 'bold' }}>2️⃣ مراجعة الفرع</div>
+                    <div style={{ fontSize: '11px', marginTop: '2px' }}>
+                      {req.managerStatus === 'approved' ? '✅ موافقة الفرع' : req.managerStatus === 'rejected' ? '❌ رفض الفرع' : req.managerStatus === 'skipped' ? '🔒 للإدارة مباشرة' : '⏳ قيد الانتظار'}
+                    </div>
+                  </div>
+
+                  {/* Step 3: Admin Review */}
+                  <div style={{
+                    padding: '8px',
+                    borderRadius: '8px',
+                    border: req.adminStatus === 'approved' ? '1px solid #bbf7d0' : req.adminStatus === 'rejected' ? '1px solid #fecaca' : req.adminStatus === 'cancelled' ? '1px solid #e2e8f0' : '1px solid #fde68a',
+                    background: req.adminStatus === 'approved' ? '#f0fdf4' : req.adminStatus === 'rejected' ? '#fef2f2' : req.adminStatus === 'cancelled' ? 'rgba(148,163,184,0.1)' : '#fffbeb',
+                    color: req.adminStatus === 'approved' ? '#166534' : req.adminStatus === 'rejected' ? '#991b1b' : req.adminStatus === 'cancelled' ? 'var(--muted)' : '#92400e'
+                  }}>
+                    <div style={{ fontWeight: 'bold' }}>3️⃣ قرار الإدارة العليا</div>
+                    <div style={{ fontSize: '11px', marginTop: '2px' }}>
+                      {req.adminStatus === 'approved' ? '✅ معتمد نهائياً' : req.adminStatus === 'rejected' ? '❌ مرفوض' : req.adminStatus === 'cancelled' ? '🚫 ملغي' : '⏳ قيد النظر'}
+                    </div>
+                  </div>
+
+                  {/* Step 4: Final Outcome */}
+                  <div style={{
+                    padding: '8px',
+                    borderRadius: '8px',
+                    border: (req.adminStatus === 'approved' && req.employeeConditionStatus === 'accepted') ? '1px solid #bbf7d0' : (req.adminStatus === 'approved' && req.conditionsDaysRemaining > 0) ? '1px solid #fde68a' : '1px solid var(--border)',
+                    background: (req.adminStatus === 'approved' && req.employeeConditionStatus === 'accepted') ? '#f0fdf4' : (req.adminStatus === 'approved' && req.conditionsDaysRemaining > 0) ? '#fffbeb' : 'var(--surface)',
+                    color: (req.adminStatus === 'approved' && req.employeeConditionStatus === 'accepted') ? '#166534' : 'var(--text)'
+                  }}>
+                    <div style={{ fontWeight: 'bold' }}>4️⃣ سريان الاستقالة</div>
+                    <div style={{ fontSize: '11px', marginTop: '2px' }}>
+                      {req.adminStatus === 'approved' ? (req.conditionsStartDate ? `🗓️ بدءاً من ${req.conditionsStartDate}` : '✅ سارية فوراً') : req.adminStatus === 'rejected' ? '❌ مستمر بالعمل' : req.isCancelled ? '🚫 ملغاة' : '⏳ بانتظار القرار'}
+                    </div>
+                  </div>
                 </div>
               </div>
               
               <div style={{ marginBottom: '14px', lineHeight: '1.6' }}>
                 <strong style={{ display: 'block', color: 'var(--text)', fontSize: '13px' }}>سبب الطلب:</strong> 
-                <span style={{ color: 'var(--muted)', fontSize: '14px' }}>{req.employeeReason}</span>
+                <span style={{ color: 'var(--muted)', fontSize: '14px' }}>{req.employeeReason || req.reason || req.details}</span>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px', background: 'var(--surface-muted)', padding: '12px', borderRadius: '8px', fontSize: '0.92rem' }}>
@@ -454,7 +587,7 @@ export default function EmployeeResignationModule({
                     background: req.managerStatus === 'approved' ? 'var(--success-light, #d1e7dd)' : req.managerStatus === 'rejected' ? 'var(--danger-light, #f8d7da)' : '#fff3cd',
                     color: req.managerStatus === 'approved' ? 'var(--success-dark, #0f5132)' : req.managerStatus === 'rejected' ? 'var(--danger-dark, #842029)' : '#664d03'
                   }}>
-                    {req.managerStatus === 'approved' ? '✅ موافق' : req.managerStatus === 'rejected' ? '❌ مرفوض' : '⏳ قيد الانتظار'}
+                    {req.managerStatus === 'approved' ? '✅ موافق' : req.managerStatus === 'rejected' ? '❌ مرفوض' : req.managerStatus === 'skipped' ? '🔒 للإدارة مباشرة' : '⏳ قيد الانتظار'}
                   </span>
                   {req.managerComment && <div style={{ marginTop: '6px', color: 'var(--text)', fontSize: '0.88rem', padding: '6px 10px', background: 'var(--surface)', borderRadius: '6px', border: '1px dashed var(--border)' }}><strong>تعليق المدير:</strong> {req.managerComment}</div>}
                 </div>

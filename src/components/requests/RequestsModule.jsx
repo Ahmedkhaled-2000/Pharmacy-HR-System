@@ -952,6 +952,36 @@ export default function RequestsModule({
         s.id === reqId ? { ...s, status: 'approved', adminApproved: true, branchApproved: true, approvedAt: new Date().toISOString() } : s
       );
 
+      let updatedResignations = (state.resignationRequests || []).map((r) => {
+        if (String(r.id) === String(reqId)) {
+          return {
+            ...r,
+            status: 'approved',
+            adminStatus: 'approved',
+            adminApproved: true,
+            adminApprovedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          };
+        }
+        return r;
+      });
+
+      if (approvedTargetReq.type === 'withdraw') {
+        updatedResignations = updatedResignations.map((r) => {
+          if (String(r.employeeId) === String(approvedTargetReq.employeeId) && r.type === 'resignation') {
+            return {
+              ...r,
+              isCancelled: true,
+              adminStatus: 'cancelled',
+              status: 'cancelled',
+              cancelledReason: 'تم إلغاء الاستقالة بسبب قبول طلب التراجع عن الاستقالة',
+              updatedAt: new Date().toISOString()
+            };
+          }
+          return r;
+        });
+      }
+
       const decisionNotif = createRequestDecisionNotification({
         requestId: approvedTargetReq.id,
         employeeId: approvedTargetReq.employeeId,
@@ -978,6 +1008,7 @@ export default function RequestsModule({
         leaveRequests: updatedLeaveRequests,
         leaveHistory: updatedLeaveHistory,
         shiftSwaps,
+        resignationRequests: updatedResignations,
         lateIncidents: updatedLateIncidents,
         notifications: updatedNotifications
       };
@@ -1132,6 +1163,19 @@ export default function RequestsModule({
       s.id === reqId ? { ...s, status: 'rejected', adminApproved: false } : s
     );
 
+    const updatedResignations = (state.resignationRequests || []).map((r) =>
+      String(r.id) === String(reqId)
+        ? {
+            ...r,
+            status: 'rejected',
+            adminStatus: 'rejected',
+            adminApproved: false,
+            rejectedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          }
+        : r
+    );
+
     const decisionNotif = createRequestDecisionNotification({
       requestId: rejectedTargetReq?.id || reqId,
       employeeId: rejectedTargetReq?.employeeId,
@@ -1158,6 +1202,7 @@ export default function RequestsModule({
       shifts: updatedShifts,
       leaveRequests: updatedLeaveRequests,
       shiftSwaps: updatedShiftSwaps,
+      resignationRequests: updatedResignations,
       notifications: updatedNotifications
     };
     if (setState) setState(updatedState);
