@@ -218,6 +218,8 @@ export function isNotificationReadForBranch(notification, currentBranch = null) 
  */
 export function isNotificationReadForEmployee(notification, employeeId = null) {
   if (!notification) return true;
+  if (notification.read === true || notification.isRead === true) return true;
+
   const empIdStr = employeeId ? String(employeeId).trim() : '';
 
   if (empIdStr && Array.isArray(notification.readByEmployees) && notification.readByEmployees.includes(empIdStr)) {
@@ -230,11 +232,11 @@ export function isNotificationReadForEmployee(notification, employeeId = null) {
   }
 
   // If targeted directly to employee, fallback to boolean read
-  if (notification.targetRole === 'employee' || notification.targetEmployeeId) {
-    return Boolean(notification.read);
+  if (notification.targetRole === 'employee' || notification.targetEmployeeId || notification.employeeId) {
+    return Boolean(notification.read || notification.isRead);
   }
 
-  return false;
+  return Boolean(notification.read || notification.isRead);
 }
 
 /**

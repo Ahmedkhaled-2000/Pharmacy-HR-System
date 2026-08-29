@@ -1833,7 +1833,7 @@ export default function RequestsModule({
                           shouldRouteDirectToAdmin(emp, effectiveBranchId, state) ||
                           isBranchWithoutManager(effectiveBranchId, state);
 
-                        if (req.type === 'disciplinary_penalty' || req.createdRole === 'branch' || req.createdRole === 'branch_manager' || req.submittedByBranchManager || req.branchApprovalStatus === 'approved') {
+                        if (req.type === 'disciplinary_penalty' || req.createdRole === 'branch' || req.createdRole === 'branch_manager' || req.submittedByBranchManager) {
                           return (
                             <span style={{ color: '#15803d', fontWeight: '800', background: '#f0fdf4', padding: '4px 8px', borderRadius: '6px', border: '1px solid #bbf7d0', fontSize: '12px' }}>
                               ✓ مرسل من مدير الفرع
@@ -1847,27 +1847,38 @@ export default function RequestsModule({
                             </span>
                           );
                         }
-                        if (req.branchApproved) {
-                          return <span style={{ color: '#16a34a', fontWeight: '700' }}>🟢 معتمد من الفرع</span>;
+                        if (req.branchApproved || req.branchApprovalStatus === 'approved' || req.managerStatus === 'approved' || req.branchDecision === 'approved') {
+                          return <span style={{ color: '#16a34a', fontWeight: '700', background: '#f0fdf4', padding: '3px 8px', borderRadius: '6px', border: '1px solid #bbf7d0', fontSize: '12px' }}>🟢 معتمد من الفرع</span>;
                         }
-                        return <span style={{ color: '#d97706', fontWeight: '700' }}>⏳ بانتظار الفرع</span>;
+                        if (req.branchRejected || req.branchApprovalStatus === 'rejected' || req.managerStatus === 'rejected' || req.branchDecision === 'rejected' || (req.branchApproved === false && (req.branchRejectedAt || req.branchDecision))) {
+                          return <span style={{ color: '#dc2626', fontWeight: '700', background: '#fef2f2', padding: '3px 8px', borderRadius: '6px', border: '1px solid #fecaca', fontSize: '12px' }}>❌ لم يوافق (محال للإدارة)</span>;
+                        }
+                        return <span style={{ color: '#d97706', fontWeight: '700', background: '#fffbeb', padding: '3px 8px', borderRadius: '6px', border: '1px solid #fde68a', fontSize: '12px' }}>⏳ بانتظار الفرع</span>;
                       })()}
                     </td>
                     <td>
                       {(req.status === 'approved' || req.adminApproved === true || req.status === 'paid' || req.status === 'partial') ? (
-                        <span className="approval-status-badge approved">
+                        <span className="approval-status-badge approved" style={{ background: '#dcfce7', color: '#15803d', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px' }}>
                           {parseFloat(req.paidAmount) >= (parseFloat(req.amount || req.totalAmount) || 0) && (parseFloat(req.amount || req.totalAmount) || 0) > 0
                             ? '🟢 مسدد بالكامل'
                             : (parseFloat(req.paidAmount) > 0 ? '🟢 سلفة معتمدة (سداد جزئي)' : '🟢 معتمد نهائياً')}
                         </span>
-                      ) : req.status === 'pending_admin' ? (
-                        <span className="approval-status-badge pending">🟡 قيد اعتماد الإدارة العليا</span>
                       ) : req.status === 'rejected' ? (
-                        <span className="approval-status-badge rejected">🔴 مرفوض</span>
+                        <span className="approval-status-badge rejected" style={{ background: '#fee2e2', color: '#b91c1c', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px' }}>
+                          🔴 مرفوض نهائياً
+                        </span>
                       ) : req.status === 'cancelled' ? (
                         <span className="approval-status-badge cancelled">⚪ ملغي</span>
+                      ) : (req.branchRejected || req.branchApprovalStatus === 'rejected' || req.managerStatus === 'rejected' || req.branchDecision === 'rejected') ? (
+                        <span className="approval-status-badge pending" style={{ background: '#ffedd5', color: '#c2410c', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px' }}>
+                          ⏳ قيد نظر الإدارة (لم يوافق الفرع)
+                        </span>
+                      ) : (req.branchApproved || req.branchApprovalStatus === 'approved') ? (
+                        <span className="approval-status-badge pending" style={{ background: '#fef3c7', color: '#b45309', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px' }}>
+                          🟡 بانتظار الإدارة العليا (وافق الفرع)
+                        </span>
                       ) : (
-                        <span className="approval-status-badge pending">⏳ قيد المراجعة</span>
+                        <span className="approval-status-badge pending" style={{ background: '#fef9c3', color: '#a16207', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px' }}>⏳ قيد المراجعة</span>
                       )}
                     </td>
                     <td>
@@ -2040,8 +2051,10 @@ export default function RequestsModule({
                     <div style={{ marginTop: '4px', fontWeight: 'bold', fontSize: '13.5px' }}>
                       {isBranchNotReq ? (
                         <span style={{ color: '#475569' }}>🔒 موجهة للإدارة العليا فقط (لا تتطلب موافقة الفرع)</span>
-                      ) : previewModalReq.branchApproved ? (
+                      ) : (previewModalReq.branchApproved || previewModalReq.branchApprovalStatus === 'approved' || previewModalReq.managerStatus === 'approved' || previewModalReq.branchDecision === 'approved') ? (
                         <span style={{ color: '#16a34a' }}>🟢 معتمد وموافق عليه من مدير الفرع</span>
+                      ) : (previewModalReq.branchRejected || previewModalReq.branchApprovalStatus === 'rejected' || previewModalReq.managerStatus === 'rejected' || previewModalReq.branchDecision === 'rejected' || (previewModalReq.branchApproved === false && (previewModalReq.branchRejectedAt || previewModalReq.branchDecision))) ? (
+                        <span style={{ color: '#dc2626' }}>❌ لم يوافق مدير الفرع (محال لقرار الإدارة العليا)</span>
                       ) : (
                         <span style={{ color: '#d97706' }}>⏳ بانتظار مراجعة واعتماد مدير الفرع</span>
                       )}
@@ -2051,10 +2064,12 @@ export default function RequestsModule({
                   <div style={{ background: '#fff', padding: '12px 16px', borderRadius: '10px', border: '1px solid var(--border)' }}>
                     <span style={{ fontSize: '12px', color: 'var(--muted)' }}>موقف اعتماد الإدارة العليا:</span>
                     <div style={{ marginTop: '4px', fontWeight: 'bold', fontSize: '13.5px' }}>
-                      {previewModalReq.status === 'approved' ? (
+                      {previewModalReq.status === 'approved' || previewModalReq.adminApproved ? (
                         <span style={{ color: '#16a34a' }}>🟢 معتمد نهائياً ومطبق بالنظام</span>
                       ) : previewModalReq.status === 'rejected' ? (
-                        <span style={{ color: '#dc2626' }}>🔴 مرفوض من الإدارة</span>
+                        <span style={{ color: '#dc2626' }}>🔴 مرفوض من الإدارة العليا</span>
+                      ) : (previewModalReq.branchRejected || previewModalReq.branchApprovalStatus === 'rejected' || previewModalReq.managerStatus === 'rejected' || previewModalReq.branchDecision === 'rejected') ? (
+                        <span style={{ color: '#c2410c' }}>⏳ قيد نظر الإدارة العليا (لم يوافق الفرع)</span>
                       ) : (
                         <span style={{ color: '#d97706' }}>🟡 بانتظار قرار واعتماد الإدارة العليا</span>
                       )}

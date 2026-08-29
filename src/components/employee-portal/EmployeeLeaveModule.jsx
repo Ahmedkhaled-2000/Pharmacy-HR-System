@@ -376,9 +376,17 @@ export default function EmployeeLeaveModule({
                     )}
                   </div>
                   <div>
-                    {r.status === 'approved' && <span className="badge success" style={{ fontSize: '11px' }}>✅ معتمد</span>}
+                    {(r.status === 'approved' || r.adminApproved) && <span className="badge success" style={{ fontSize: '11px' }}>✅ معتمد</span>}
                     {r.status === 'rejected' && <span className="badge danger" style={{ fontSize: '11px' }}>❌ مرفوض</span>}
-                    {r.status === 'pending' && <span className="badge warning" style={{ fontSize: '11px' }}>⏳ قيد الانتظار</span>}
+                    {r.status !== 'approved' && !r.adminApproved && r.status !== 'rejected' && (
+                      (r.branchApproved || r.branchApprovalStatus === 'approved' || r.branchDecision === 'approved') ? (
+                        <span className="badge info" style={{ fontSize: '11px', background: '#dbeafe', color: '#1e40af' }}>🟡 موافقة الفرع (بانتظار الإدارة)</span>
+                      ) : (r.branchRejected || r.branchApprovalStatus === 'rejected' || r.managerStatus === 'rejected' || r.branchDecision === 'rejected' || (r.branchApproved === false && r.branchDecision)) ? (
+                        <span className="badge warning" style={{ fontSize: '11px', background: '#ffedd5', color: '#c2410c' }}>⏳ قيد نظر الإدارة (لم يوافق الفرع)</span>
+                      ) : (
+                        <span className="badge warning" style={{ fontSize: '11px' }}>⏳ قيد الانتظار</span>
+                      )
+                    )}
                   </div>
                 </div>
 
@@ -434,9 +442,17 @@ export default function EmployeeLeaveModule({
                       )}
                     </td>
                     <td>
-                      {r.status === 'approved' && <span className="badge success">✅ معتمد</span>}
+                      {(r.status === 'approved' || r.adminApproved) && <span className="badge success">✅ معتمد</span>}
                       {r.status === 'rejected' && <span className="badge danger">❌ مرفوض</span>}
-                      {r.status === 'pending' && <span className="badge warning">⏳ قيد الانتظار</span>}
+                      {r.status !== 'approved' && !r.adminApproved && r.status !== 'rejected' && (
+                        (r.branchApproved || r.branchApprovalStatus === 'approved' || r.branchDecision === 'approved') ? (
+                          <span className="badge info" style={{ background: '#dbeafe', color: '#1e40af' }}>🟡 موافقة الفرع (بانتظار الإدارة)</span>
+                        ) : (r.branchRejected || r.branchApprovalStatus === 'rejected' || r.managerStatus === 'rejected' || r.branchDecision === 'rejected' || (r.branchApproved === false && r.branchDecision)) ? (
+                          <span className="badge warning" style={{ background: '#ffedd5', color: '#c2410c' }}>⏳ قيد نظر الإدارة (لم يوافق الفرع)</span>
+                        ) : (
+                          <span className="badge warning">⏳ قيد الانتظار</span>
+                        )
+                      )}
                     </td>
                     <td style={{ color: 'var(--muted)', fontSize: '0.88rem' }}>{r.reason || '—'}</td>
                     <td style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>

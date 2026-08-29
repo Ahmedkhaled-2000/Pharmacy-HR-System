@@ -324,16 +324,26 @@ export default function EmployeePermissionsModule({
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
                   <div>
-                    {r.status === 'approved' ? (
+                    {(r.status === 'approved' || r.adminApproved) ? (
                       <span className="badge success" style={{ fontSize: '11px' }}>🟢 محتسبة كاملة (لا خصم)</span>
+                    ) : r.status === 'rejected' ? (
+                      <span className="badge danger" style={{ fontSize: '11px' }}>🔴 غير معتمد (تخصم الساعات)</span>
                     ) : (
                       <span className="badge secondary" style={{ fontSize: '11px' }}>قيد الاعتماد</span>
                     )}
                   </div>
                   <div>
-                    {r.status === 'approved' && <span className="badge success" style={{ fontSize: '11px' }}>✅ معتمد</span>}
+                    {(r.status === 'approved' || r.adminApproved) && <span className="badge success" style={{ fontSize: '11px' }}>✅ معتمد</span>}
                     {r.status === 'rejected' && <span className="badge danger" style={{ fontSize: '11px' }}>❌ مرفوض</span>}
-                    {r.status === 'pending' && <span className="badge warning" style={{ fontSize: '11px' }}>⏳ قيد الانتظار</span>}
+                    {r.status !== 'approved' && !r.adminApproved && r.status !== 'rejected' && (
+                      (r.branchApproved || r.branchApprovalStatus === 'approved' || r.branchDecision === 'approved') ? (
+                        <span className="badge info" style={{ fontSize: '11px', background: '#dbeafe', color: '#1e40af' }}>🟡 موافقة الفرع (بانتظار الإدارة)</span>
+                      ) : (r.branchRejected || r.branchApprovalStatus === 'rejected' || r.managerStatus === 'rejected' || r.branchDecision === 'rejected' || (r.branchApproved === false && r.branchDecision)) ? (
+                        <span className="badge warning" style={{ fontSize: '11px', background: '#ffedd5', color: '#c2410c' }}>⏳ قيد نظر الإدارة (لم يوافق الفرع)</span>
+                      ) : (
+                        <span className="badge warning" style={{ fontSize: '11px' }}>⏳ قيد الانتظار</span>
+                      )
+                    )}
                   </div>
                 </div>
 
@@ -382,16 +392,26 @@ export default function EmployeePermissionsModule({
                     <td style={{ fontWeight: 'bold' }}>{r.startTime} ➔ {r.endTime}</td>
                     <td>{r.durationText || `${r.durationMinutes} دقيقة`}</td>
                     <td>
-                      {r.status === 'approved' ? (
+                      {(r.status === 'approved' || r.adminApproved) ? (
                         <span className="badge success">🟢 محتسبة وردية كاملة (لا خصم)</span>
+                      ) : r.status === 'rejected' ? (
+                        <span className="badge danger">🔴 غير معتمد (تخصم الساعات)</span>
                       ) : (
                         <span className="badge secondary">قيد الاعتماد</span>
                       )}
                     </td>
                     <td>
-                      {r.status === 'approved' && <span className="badge success">✅ معتمد</span>}
+                      {(r.status === 'approved' || r.adminApproved) && <span className="badge success">✅ معتمد</span>}
                       {r.status === 'rejected' && <span className="badge danger">❌ مرفوض</span>}
-                      {r.status === 'pending' && <span className="badge warning">⏳ قيد الانتظار</span>}
+                      {r.status !== 'approved' && !r.adminApproved && r.status !== 'rejected' && (
+                        (r.branchApproved || r.branchApprovalStatus === 'approved' || r.branchDecision === 'approved') ? (
+                          <span className="badge info" style={{ background: '#dbeafe', color: '#1e40af' }}>🟡 موافقة الفرع (بانتظار الإدارة)</span>
+                        ) : (r.branchRejected || r.branchApprovalStatus === 'rejected' || r.managerStatus === 'rejected' || r.branchDecision === 'rejected' || (r.branchApproved === false && r.branchDecision)) ? (
+                          <span className="badge warning" style={{ background: '#ffedd5', color: '#c2410c' }}>⏳ قيد نظر الإدارة (لم يوافق الفرع)</span>
+                        ) : (
+                          <span className="badge warning">⏳ قيد الانتظار</span>
+                        )
+                      )}
                     </td>
                     <td style={{ color: 'var(--muted)', fontSize: '0.88rem' }}>{r.reason || '—'}</td>
                     <td style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>

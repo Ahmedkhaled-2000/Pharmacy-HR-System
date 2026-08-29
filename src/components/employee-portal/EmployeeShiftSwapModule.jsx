@@ -228,12 +228,18 @@ export default function EmployeeShiftSwapModule({
     }
   };
 
-  const statusBadge = (status) => {
-    if (status === 'pending_target') return <span className="badge warning">⏳ بانتظار رد الزميل</span>;
-    if (status === 'pending_admin') return <span className="badge info">⏳ بانتظار اعتماد الإدارة</span>;
-    if (status === 'approved') return <span className="badge success">✅ معتمد</span>;
+  const statusBadge = (status, req = null) => {
+    if (status === 'approved' || req?.adminApproved) return <span className="badge success">✅ معتمد نهائياً</span>;
     if (status === 'rejected') return <span className="badge danger">❌ مرفوض</span>;
-    return <span className="badge secondary">{status}</span>;
+    if (status === 'pending_target') return <span className="badge warning">⏳ بانتظار رد الزميل</span>;
+    if (req?.branchRejected || req?.branchApprovalStatus === 'rejected' || req?.managerStatus === 'rejected' || req?.branchDecision === 'rejected') {
+      return <span className="badge warning" style={{ background: '#ffedd5', color: '#c2410c' }}>⏳ قيد نظر الإدارة (لم يوافق الفرع)</span>;
+    }
+    if (req?.branchApproved || req?.branchApprovalStatus === 'approved' || req?.branchDecision === 'approved') {
+      return <span className="badge info" style={{ background: '#dbeafe', color: '#1e40af' }}>🟡 موافقة الفرع (بانتظار الإدارة)</span>;
+    }
+    if (status === 'pending_admin') return <span className="badge info">⏳ بانتظار الإدارة العليا</span>;
+    return <span className="badge warning">⏳ قيد المراجعة</span>;
   };
 
   return (
@@ -444,7 +450,7 @@ export default function EmployeeShiftSwapModule({
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <span style={{ fontWeight: 800, fontSize: '13px', color: 'var(--muted)' }}>#{idx + 1}</span>
-                      {statusBadge(s.status)}
+                      {statusBadge(s.status, s)}
                     </div>
                     <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>
                       {s.createdAt ? s.createdAt.slice(0, 10) : '—'}
@@ -502,7 +508,7 @@ export default function EmployeeShiftSwapModule({
                       <td>{s.targetEmpName || '—'}</td>
                       <td>{s.requesterDate || '—'}</td>
                       <td>{s.targetDate || '—'}</td>
-                      <td>{statusBadge(s.status)}</td>
+                      <td>{statusBadge(s.status, s)}</td>
                       <td style={{ color: 'var(--text-muted)', fontSize: '0.88rem' }}>{s.notes || '—'}</td>
                       <td style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
                         {s.createdAt ? s.createdAt.slice(0, 10) : '—'}
