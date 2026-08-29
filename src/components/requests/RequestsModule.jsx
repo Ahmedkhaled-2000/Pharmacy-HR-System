@@ -323,8 +323,7 @@ export default function RequestsModule({
     }).filter((r) => {
       if (!r || !r.id) return false;
       const idStr = String(r.id);
-      const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
-      if (deletedIdsSet.has(idStr) || (rawId && (deletedIdsSet.has(rawId) || deletedIdsSet.has(`req_${rawId}`)))) {
+      if (deletedIdsSet.has(idStr) || deletedIdsSet.has(`req_${idStr}`)) {
         return false;
       }
       if (isBranch) {

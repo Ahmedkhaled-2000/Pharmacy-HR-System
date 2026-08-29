@@ -43,10 +43,11 @@ export function isItemDeleted(item, key, deletedIds) {
   if (!deletedIds || !(deletedIds instanceof Set) || deletedIds.size === 0) return false;
 
   if (key && deletedIds.has(key)) return true;
-  if (item.id !== undefined && item.id !== null) {
+  if (item.id !== undefined && item.id !== null && item.id !== '') {
     const idStr = String(item.id);
     if (deletedIds.has(idStr)) return true;
-    if (deletedIds.has(`emp_${idStr}`)) return true;
+
+    // Check specific prefixed deletion if applicable
     if (deletedIds.has(`req_${idStr}`)) return true;
     if (deletedIds.has(`leave_${idStr}`)) return true;
     if (deletedIds.has(`swap_${idStr}`)) return true;
@@ -54,22 +55,21 @@ export function isItemDeleted(item, key, deletedIds) {
     if (deletedIds.has(`loan_${idStr}`)) return true;
     if (deletedIds.has(`shift_${idStr}`)) return true;
     if (deletedIds.has(`adj_${idStr}`)) return true;
+    if (deletedIds.has(`emp_${idStr}`)) return true;
     if (deletedIds.has(`branch_${idStr}`)) return true;
+    if (deletedIds.has(`dev_${idStr}`)) return true;
+    if (deletedIds.has(`notif_${idStr}`)) return true;
 
-    // فحص المعرف المجرد بدون بادئة
-    const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|emp_|shift_|adj_|branch_|dev_|notif_)/, '');
-    if (rawId && (deletedIds.has(rawId) || deletedIds.has(`req_${rawId}`))) return true;
+    // If item.id has a known entity prefix, check if its explicit full id is in deletedIds
+    const prefixMatch = idStr.match(/^(req_|leave_|swap_|res_|loan_|emp_|shift_|adj_|branch_|dev_|notif_)(.+)$/);
+    if (prefixMatch && prefixMatch[2]) {
+      const rawId = prefixMatch[2];
+      if (deletedIds.has(rawId)) return true;
+    }
   }
-  if (item.code && (deletedIds.has(String(item.code)) || deletedIds.has(`emp_${item.code}`))) return true;
+
+  // Device-specific deletion check
   if (item.deviceId && (deletedIds.has(String(item.deviceId)) || deletedIds.has(`dev_${item.deviceId}`))) return true;
-  
-  // فحص ما إذا كان الموظف التابع له هذا السجل قد تم حذفه
-  if (item.employeeId && (deletedIds.has(String(item.employeeId)) || deletedIds.has(`emp_${item.employeeId}`))) return true;
-  if (item.employeeCode && (deletedIds.has(String(item.employeeCode)) || deletedIds.has(`emp_${item.employeeCode}`))) return true;
-  if (item.empId && (deletedIds.has(String(item.empId)) || deletedIds.has(`emp_${item.empId}`))) return true;
-  
-  // فحص ما إذا كان الفرع التابع له هذا السجل قد تم حذفه
-  if (item.branchId && (deletedIds.has(String(item.branchId)) || deletedIds.has(`branch_${item.branchId}`))) return true;
 
   return false;
 }

@@ -3391,11 +3391,12 @@ export default function App() {
 
       setState((prev) => {
         setLastSyncTime(nowTimeStr());
+        const merged = smartMergeStates(prev, normalized);
         // Sync current logged-in employee session with fresh database permissions
         setCurrentEmpUser((prevEmp) => {
           if (!prevEmp) return prevEmp;
-          const fresh = (normalized.employees || []).find((e) => e.id === prevEmp.id || (prevEmp.code && e.code === prevEmp.code));
-          if (!fresh && (normalized.employees || []).length === 0) {
+          const fresh = (merged.employees || []).find((e) => e.id === prevEmp.id || (prevEmp.code && e.code === prevEmp.code));
+          if (!fresh && (merged.employees || []).length === 0) {
             localStorage.removeItem('app_current_emp_user');
             localStorage.removeItem('app_auth_role');
             setAuthRole('none');
@@ -3405,8 +3406,8 @@ export default function App() {
         });
         setCurrentBranch((prevBranch) => {
           if (!prevBranch) return prevBranch;
-          const fresh = (normalized.branches || []).find((b) => b.id === prevBranch.id);
-          if (!fresh && (normalized.branches || []).length === 0) {
+          const fresh = (merged.branches || []).find((b) => b.id === prevBranch.id);
+          if (!fresh && (merged.branches || []).length === 0) {
             localStorage.removeItem('app_current_branch');
             localStorage.removeItem('app_auth_role');
             setAuthRole('none');
@@ -3414,7 +3415,7 @@ export default function App() {
           }
           return fresh || prevBranch;
         });
-        return normalized;
+        return merged;
       });
     };
 
