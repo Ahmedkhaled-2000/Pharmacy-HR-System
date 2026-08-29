@@ -814,6 +814,25 @@ export default function EmployeeCardsGrid({
                           </>
                         )}
 
+                        {emp.driveFolderUrl && (
+                          <a
+                            href={emp.driveFolderUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="icon-btn"
+                            title="فتح مجلد Google Drive للموظف"
+                            style={{
+                              background: '#eff6ff',
+                              borderColor: '#bfdbfe',
+                              textDecoration: 'none',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center'
+                            }}
+                          >
+                            📁
+                          </a>
+                        )}
                         <button className="icon-btn" title="بطاقة الموظف والـ QR" onClick={() => openEmpCard(emp)}>
                           🪪 QR
                         </button>

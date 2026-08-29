@@ -1,19 +1,34 @@
 import React, { useState, useEffect } from 'react';
 import { compressImage } from '../../utils/imageCompressor';
 import { DEFAULT_JOBS, isManagementJob, DEFAULT_DEPARTMENTS } from '../../utils/jobsHelper';
+import { syncEmployeeEntireDrive } from '../../utils/googleDriveService';
 
 export default function EmployeeFileModal({
   isOpen,
   onClose,
   editingEmp,
+  emp,
   branches = [],
   allEmployees = [],
   jobs = DEFAULT_JOBS,
   departments = DEFAULT_DEPARTMENTS,
   onSave,
-  handleFileUpload
+  handleFileUpload,
+  state,
+  setState,
+  saveState,
+  showToast
 }) {
+  const currentEmp = editingEmp || emp;
   const [activeTab, setActiveTab] = useState('personal'); // 'personal' | 'job' | 'financial' | 'documents'
+
+  // Google Drive Cloud State
+  const [driveFolderId, setDriveFolderId] = useState('');
+  const [driveFolderUrl, setDriveFolderUrl] = useState('');
+  const [biometricFolderId, setBiometricFolderId] = useState('');
+  const [driveLastSyncAt, setDriveLastSyncAt] = useState('');
+  const [isDriveSyncing, setIsDriveSyncing] = useState(false);
+  const [driveSyncMsg, setDriveSyncMsg] = useState('');
 
   // 1. Personal Data
   const [name, setName] = useState('');
@@ -320,6 +335,11 @@ export default function EmployeeFileModal({
         { id: 'doc_3', title: 'كارنيه النقابة', fileUrl: '', fileType: 'image' },
         { id: 'doc_4', title: 'العقد', fileUrl: '', fileType: 'image' }
       ]);
+
+      setDriveFolderId(editingEmp.driveFolderId || '');
+      setDriveFolderUrl(editingEmp.driveFolderUrl || '');
+      setBiometricFolderId(editingEmp.biometricFolderId || '');
+      setDriveLastSyncAt(editingEmp.driveLastSyncAt || '');
     } else {
       setName('');
       setPhone('');
@@ -332,6 +352,11 @@ export default function EmployeeFileModal({
       setAddress('');
       setPhotoUrl('');
       setMaritalStatus('أعزب');
+
+      setDriveFolderId('');
+      setDriveFolderUrl('');
+      setBiometricFolderId('');
+      setDriveLastSyncAt('');
 
       // Auto-generate safe nextCode that doesn't conflict with any existing employee code or branch username
       let candidateNum = 100 + (allEmployees.length + 1);
@@ -451,6 +476,71 @@ export default function EmployeeFileModal({
 
   const handleDeleteDocument = (docId) => {
     setDocuments((prevDocs) => prevDocs.filter((d) => d.id !== docId));
+  };
+
+  const handleManualDriveSync = async () => {
+    const driveConfig = state?.orgSettings?.driveConfig;
+    if (!driveConfig || !driveConfig.enabled || !driveConfig.serviceUrl) {
+      alert('⚠️ خدمة Google Drive غير مفعلة. يرجى تفعيلها وإدخال رابط الخدمة من شاشة الإعدادات ➔ أرشفة Google Drive.');
+      return;
+    }
+
+    setIsDriveSyncing(true);
+    setDriveSyncMsg('جاري الاتصال بـ Google Drive...');
+
+    const validPhones = phones.filter(p => p.number && p.number.trim());
+    const primaryPhone = validPhones[0]?.number || '';
+
+    const empDataToSync = {
+      id: currentEmp?.id || `emp_${Date.now()}`,
+      name: name.trim(),
+      code: code.trim(),
+      jobTitle: jobTitle.trim(),
+      department: department || 'الصيدلية',
+      phone: primaryPhone,
+      phones: validPhones,
+      relativePhone: relativePhone.trim(),
+      nationalId: nationalId.trim(),
+      dob,
+      address,
+      photoUrl,
+      maritalStatus,
+      contractType,
+      hireDate,
+      status,
+      annualLeaveBalance: parseFloat(annualLeaveBalance) || 21,
+      branchesDetails,
+      documents,
+      driveFolderId,
+      driveFolderUrl,
+      biometricFolderId
+    };
+
+    const res = await syncEmployeeEntireDrive(empDataToSync, state.orgSettings, (msg) => setDriveSyncMsg(msg));
+    setIsDriveSyncing(false);
+
+    if (res.success && res.updatedEmp) {
+      setDriveFolderId(res.updatedEmp.driveFolderId);
+      setDriveFolderUrl(res.updatedEmp.driveFolderUrl);
+      setBiometricFolderId(res.updatedEmp.biometricFolderId);
+      setDocuments(res.updatedEmp.documents || documents);
+      setDriveLastSyncAt(res.updatedEmp.driveLastSyncAt || new Date().toISOString());
+
+      if (setState && state) {
+        const updatedEmps = (state.employees || []).map(e => 
+          String(e.id) === String(res.updatedEmp.id) ? res.updatedEmp : e
+        );
+        const updatedState = { ...state, employees: updatedEmps };
+        setState(updatedState);
+        if (saveState) saveState(updatedState);
+      }
+      if (showToast) showToast('✅ تمت مزامنة ملف الموظف ومستنداته وصور البصمة مع Google Drive بنجاح');
+      else alert('✅ تمت مزامنة ملف الموظف ومستنداته وصور البصمة مع Google Drive بنجاح');
+    } else {
+      const errText = res.error || res.reason || 'تعذر استكمال المزامنة';
+      if (showToast) showToast(`❌ فشل المزامنة: ${errText}`);
+      else alert(`❌ فشل المزامنة: ${errText}`);
+    }
   };
 
   const handleSubmit = (e) => {
@@ -577,12 +667,12 @@ export default function EmployeeFileModal({
       extraAllowance: totalExtraAllowance,
       extraAllowanceTitle: combinedExtraTitle.trim(),
       // For backwards compatibility and main branch logic, use the first branch's details
-      branchId: validBranchesDetails[0].branchId,
-      salary: validBranchesDetails[0].salary,
-      workHoursPerDay: validBranchesDetails[0].workHoursPerDay,
-      workDaysPerMonth: validBranchesDetails[0].workDaysPerMonth,
-      breakHours: validBranchesDetails[0].breakHours,
-      defaultBreakHours: validBranchesDetails[0].defaultBreakHours,
+      branchId: validBranchesDetails[0]?.branchId || '',
+      salary: validBranchesDetails[0]?.salary || '0',
+      workHoursPerDay: validBranchesDetails[0]?.workHoursPerDay || '8',
+      workDaysPerMonth: validBranchesDetails[0]?.workDaysPerMonth || '26',
+      breakHours: validBranchesDetails[0]?.breakHours || '0',
+      defaultBreakHours: validBranchesDetails[0]?.defaultBreakHours || 0,
       // Store all active branches details here
       branchesDetails: validBranchesDetails,
       // Store preserved/archived branch salaries here
@@ -597,11 +687,47 @@ export default function EmployeeFileModal({
       password,
       annualLeaveBalance: parseFloat(annualLeaveBalance) || 21,
       documents,
+      driveFolderId,
+      driveFolderUrl,
+      biometricFolderId,
+      driveLastSyncAt,
       updatedAt: new Date().toISOString(),
       createdAt: editingEmp ? editingEmp.createdAt : new Date().toISOString()
     };
 
-    onSave(employeeData);
+    if (onSave) {
+      onSave(employeeData);
+    } else if (setState && state) {
+      const isExisting = (state.employees || []).some(e => e.id === employeeData.id);
+      let updatedEmps;
+      if (isExisting) {
+        updatedEmps = (state.employees || []).map(e => e.id === employeeData.id ? { ...e, ...employeeData } : e);
+      } else {
+        updatedEmps = [...(state.employees || []), employeeData];
+      }
+      const updatedState = { ...state, employees: updatedEmps };
+      setState(updatedState);
+      if (saveState) saveState(updatedState);
+    }
+
+    // Trigger auto background sync to Google Drive if configured
+    const driveConfig = state?.orgSettings?.driveConfig;
+    if (driveConfig && driveConfig.enabled && driveConfig.autoSyncOnEmployeeSave && driveConfig.serviceUrl) {
+      syncEmployeeEntireDrive(employeeData, state.orgSettings)
+        .then((res) => {
+          if (res.success && res.updatedEmp && setState && state) {
+            const finalEmps = (state.employees || []).map(e => 
+              String(e.id) === String(res.updatedEmp.id) ? res.updatedEmp : e
+            );
+            const finalState = { ...state, employees: finalEmps };
+            setState(finalState);
+            if (saveState) saveState(finalState);
+            if (showToast) showToast(`☁️ تم إنشاء/تحديث مجلد الموظف (${employeeData.name}) على Google Drive بنجاح`);
+          }
+        })
+        .catch(err => console.warn('Background Google Drive sync error:', err));
+    }
+
     onClose();
   };
 
@@ -667,9 +793,76 @@ export default function EmployeeFileModal({
             style={{ fontSize: '13px', borderRadius: '10px 10px 0 0' }}
             onClick={() => setActiveTab('documents')}
           >
-            4️⃣ المستندات والوثائق
+            4️⃣ المستندات والوثائق {documents.length > 0 && `(${documents.length})`}
           </button>
         </div>
+
+        {/* Google Drive Sync & Quick Access Bar */}
+        {state?.orgSettings?.driveConfig?.enabled && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            background: 'linear-gradient(135deg, rgba(66, 133, 244, 0.08), rgba(52, 168, 83, 0.08))',
+            border: '1px solid rgba(66, 133, 244, 0.25)',
+            borderRadius: '12px',
+            padding: '10px 16px',
+            marginBottom: '16px',
+            fontSize: '13px',
+            flexWrap: 'wrap',
+            gap: '10px'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '18px' }}>📁</span>
+              <div>
+                <strong>Google Drive للموظف: </strong>
+                {driveFolderUrl ? (
+                  <a
+                    href={driveFolderUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: '#0284c7', fontWeight: 'bold', textDecoration: 'underline', marginRight: '6px' }}
+                  >
+                    فتح المجلد السحابي ↗
+                  </a>
+                ) : (
+                  <span style={{ color: 'var(--muted)' }}>سيتم إنشاء المجلد سحابياً عند الحفظ تلقائياً</span>
+                )}
+                {driveLastSyncAt && (
+                  <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block', marginTop: '2px' }}>
+                    آخر مزامنة: {new Date(driveLastSyncAt).toLocaleString('ar-EG')}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {isDriveSyncing ? (
+                <span style={{ color: '#0284c7', fontWeight: 'bold', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span className="spinner" style={{ width: '14px', height: '14px', borderWidth: '2px' }}></span>
+                  {driveSyncMsg || 'جاري المزامنة مع Drive...'}
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={handleManualDriveSync}
+                  style={{
+                    fontSize: '12px',
+                    padding: '5px 12px',
+                    background: '#fff',
+                    border: '1px solid #93c5fd',
+                    color: '#1d4ed8',
+                    fontWeight: 'bold',
+                    borderRadius: '8px'
+                  }}
+                >
+                  🔄 مزامنة درايف الآن
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit}>
           {/* TAB 1: Personal Data */}
@@ -1558,12 +1751,34 @@ export default function EmployeeFileModal({
                       borderRadius: '12px'
                     }}
                   >
-                    <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                       <span style={{ fontWeight: 'bold', color: 'var(--text)' }}>📄 {doc.title}</span>
                       {doc.fileName && (
-                        <span style={{ fontSize: '12px', color: 'var(--muted)', marginRight: '8px' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
                           ({doc.fileName})
                         </span>
+                      )}
+                      {doc.driveViewLink && (
+                        <a
+                          href={doc.driveViewLink}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{
+                            fontSize: '11px',
+                            background: 'rgba(52, 168, 83, 0.12)',
+                            color: '#15803d',
+                            padding: '2px 8px',
+                            borderRadius: '6px',
+                            fontWeight: 'bold',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            textDecoration: 'none'
+                          }}
+                          title="عرض المستند على Google Drive"
+                        >
+                          ☁️ محفوظ بدرايف ↗
+                        </a>
                       )}
                     </div>
 

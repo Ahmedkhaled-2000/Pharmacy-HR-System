@@ -243,12 +243,45 @@ export default function AdminResignationModule({
         });
       }
 
+      const empNotif = {
+        id: 'notif_emp_admin_' + reqId + '_' + Date.now(),
+        requestId: String(reqId),
+        employeeId: String(targetReq?.employeeId || ''),
+        targetEmployeeId: String(targetReq?.employeeId || ''),
+        targetRole: 'employee',
+        type: 'resignation',
+        action: status === 'approved' ? 'approved' : 'rejected',
+        approverRole: 'admin',
+        title: status === 'approved' ? '🟢 اعتماد الإدارة العليا لطلب الاستقالة' : '❌ قرار الإدارة العليا: رفض الاستقالة',
+        message: status === 'approved' 
+          ? `اعتمدت الإدارة العليا طلب الاستقالة رسمياً. تعليق الإدارة: ${comment}` 
+          : `رفضت الإدارة العليا طلب الاستقالة واستمرار الموظف على رأس العمل. تعليق الإدارة: ${comment}`,
+        details: comment,
+        date: getRealTodayStr(),
+        timestamp: new Date().toISOString(),
+        read: false
+      };
+
+      const branchNotif = {
+        id: 'notif_branch_admin_' + reqId + '_' + Date.now(),
+        requestId: String(reqId),
+        type: 'resignation',
+        title: `🏢 القرار النهائي للإدارة العليا: ${status === 'approved' ? 'قبول' : 'رفض'} استقالة ${targetReq?.employeeName || 'الموظف'}`,
+        message: `أصدرت الإدارة العليا قرارها النهائي بخصوص طلب استقالة ${targetReq?.employeeName || 'الموظف'}: (${status === 'approved' ? 'قبول الاستقالة' : 'رفض الاستقالة'}). تعليق الإدارة: ${comment}`,
+        date: getRealTodayStr(),
+        timestamp: new Date().toISOString(),
+        read: false,
+        targetRole: 'branch',
+        branchId: targetReq?.branchId
+      };
+
       const updatedState = { 
         ...state, 
         resignationRequests: updatedResignations,
         requests: updatedGeneralRequests,
         employees: updatedEmployees,
-        activeShifts: updatedActiveShifts
+        activeShifts: updatedActiveShifts,
+        notifications: [empNotif, branchNotif, ...(state.notifications || [])]
       };
       setState(updatedState);
       if (saveState) await saveState(updatedState);

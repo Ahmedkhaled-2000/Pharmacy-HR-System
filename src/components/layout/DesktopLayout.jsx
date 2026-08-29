@@ -377,6 +377,14 @@ export default function DesktopLayout({
               desc: 'إعدادات الربط بالبريد لإرسال الإشعارات'
             },
             {
+              id: 'settings:drive',
+              targetTab: 'settings',
+              targetSubTab: 'drive',
+              label: 'أرشفة Google Drive للموظفين',
+              icon: '📁',
+              desc: 'مزامنة ملفات الموظفين ومستنداتهم وصور البصمة سحابياً'
+            },
+            {
               id: 'settings:ip',
               targetTab: 'settings',
               targetSubTab: 'ip',

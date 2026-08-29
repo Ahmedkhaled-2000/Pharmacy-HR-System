@@ -15,6 +15,7 @@ import { apiFetchFaces, apiDeleteFace, apiSystemReset, STORAGE_KEY } from '../..
 import { clearPendingQueue, saveStateLocally } from '../../utils/offlineStorage';
 import { broadcastStateChange } from '../../utils/offlineSync';
 import GmailConfigCard from './GmailConfigCard';
+import GoogleDriveConfigCard from './GoogleDriveConfigCard';
 import DatesPeriodsSettingsCard from './DatesPeriodsSettingsCard';
 import { DEFAULT_JOBS, getJobsList, DEFAULT_DEPARTMENTS, getDepartmentsList } from '../../utils/jobsHelper';
 import { getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
@@ -372,6 +373,8 @@ export default function SettingsModule({
       const preservedAdminPass = state.orgSettings?.adminPassword || state.orgSettings?.adminPass || '123';
       const preservedOrgName = state.orgSettings?.orgName || 'مجموعة الصيدليات الطبية';
       const preservedGmName = state.orgSettings?.generalManagerName || 'د. أحمد خالد - المدير العام للصيدليات';
+      const preservedGoogleDriveConfig = state.orgSettings?.googleDriveConfig || {};
+      const preservedGmailConfig = state.orgSettings?.gmailConfig || {};
       const preservedLogo = state.orgSettings?.logoUrl || '';
       const systemResetToken = 'rst_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
 
@@ -409,6 +412,8 @@ export default function SettingsModule({
           orgName: preservedOrgName,
           generalManagerName: preservedGmName,
           logoUrl: preservedLogo,
+          googleDriveConfig: preservedGoogleDriveConfig,
+          gmailConfig: preservedGmailConfig,
           biometricType: 'face',
           loanRequestStartDay: 1,
           loanRequestEndDay: 10,
@@ -1060,6 +1065,7 @@ export default function SettingsModule({
             {activeTab === 'permissions' && '🔒 إدارة الصلاحيات'}
             {activeTab === 'rules' && '🔐 قواعد الموافقة المزدوجة'}
             {activeTab === 'gmail' && '✉️ بريد Gmail والتنبيهات'}
+            {activeTab === 'drive' && '📁 أرشفة Google Drive للموظفين'}
             {activeTab === 'ip' && '🌐 راوترات الفروع وبصمة الأجهزة'}
             {activeTab === 'backup' && '💾 النسخ الاحتياطي وقاعدة البيانات'}
             {activeTab === 'owner' && '👑 صلاحيات وتحكم المالك'}
@@ -1086,6 +1092,17 @@ export default function SettingsModule({
           setState={setState}
           saveState={saveState}
           showToast={showToast}
+        />
+      )}
+
+      {/* Tab: Google Drive Config & Employee Files Cloud Archive */}
+      {activeTab === 'drive' && (
+        <GoogleDriveConfigCard
+          state={state}
+          setState={setState}
+          saveState={saveState}
+          showToast={showToast}
+          executeWithOwnerGuard={executeWithOwnerGuard}
         />
       )}
 

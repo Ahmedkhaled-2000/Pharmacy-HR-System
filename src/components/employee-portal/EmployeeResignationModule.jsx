@@ -152,35 +152,70 @@ export default function EmployeeResignationModule({
       updatedAt: new Date().toISOString()
     };
 
-    const newNotif = {
-      id: 'notif_' + newReq.id,
-      requestId: newReq.id,
-      type: 'resignation',
-      title: `📝 طلب ${requestType === 'resignation' ? 'استقالة' : 'تراجع عن استقالة'} جديد`,
-      message: isDirectAdmin
-        ? `قام الموظف ${emp.name} بتقديم طلب ${requestType === 'resignation' ? 'استقالة' : 'تراجع عن استقالة'} (مهلة: ${noticeDaysProvided} يوم) وتم توجيهه للإدارة العليا مباشرة.`
-        : `قام الموظف ${emp.name} بتقديم طلب ${requestType === 'resignation' ? 'استقالة' : 'تراجع عن استقالة'} وبانتظار رد مدير الفرع.`,
-      employeeId: emp.id,
-      employeeName: emp.name,
-      employeeCode: emp.code,
-      date: getRealTodayStr(),
-      timestamp: new Date().toISOString(),
-      read: false,
-      targetRole: isDirectAdmin ? 'admin' : 'branch_and_admin',
-      linkTab: 'notifications',
-      branchId: reqBranchId,
-    };
+    const notificationsList = [];
+
+    if (isDirectAdmin) {
+      notificationsList.push({
+        id: 'notif_admin_' + newReq.id + '_' + Date.now(),
+        requestId: newReq.id,
+        type: 'resignation',
+        title: `📝 طلب ${requestType === 'resignation' ? 'استقالة' : 'تراجع عن استقالة'} جديد (مباشر للإدارة)`,
+        message: `قام الموظف ${emp.name} (${emp.code}) بتقديم طلب ${requestType === 'resignation' ? 'استقالة' : 'تراجع عن استقالة'} وموجّه مباشرة للإدارة العليا للبت والقرار.`,
+        employeeId: emp.id,
+        employeeName: emp.name,
+        employeeCode: emp.code,
+        date: getRealTodayStr(),
+        timestamp: new Date().toISOString(),
+        read: false,
+        targetRole: 'admin',
+        branchId: reqBranchId,
+      });
+    } else {
+      // 1. Actionable notification to Branch Manager
+      notificationsList.push({
+        id: 'notif_branch_' + newReq.id + '_' + Date.now(),
+        requestId: newReq.id,
+        type: 'resignation',
+        title: `📝 طلب ${requestType === 'resignation' ? 'استقالة' : 'تراجع عن استقالة'} جديد (بانتظار مراجعتك)`,
+        message: `قام الموظف ${emp.name} (${emp.code}) بتقديم طلب ${requestType === 'resignation' ? 'استقالة' : 'تراجع عن استقالة'}. يرجى مراجعة الطلب وإبداء الرأي والتعليق لإحالته للإدارة العليا.`,
+        employeeId: emp.id,
+        employeeName: emp.name,
+        employeeCode: emp.code,
+        date: getRealTodayStr(),
+        timestamp: new Date().toISOString(),
+        read: false,
+        targetRole: 'branch',
+        branchId: reqBranchId,
+      });
+
+      // 2. Informative notification to Super Admin
+      notificationsList.push({
+        id: 'notif_admin_info_' + newReq.id + '_' + Date.now(),
+        requestId: newReq.id,
+        type: 'resignation',
+        title: `ℹ️ إشعار: موظف قدم طلب ${requestType === 'resignation' ? 'استقالة' : 'تراجع'} (قيد مراجعة مدير الفرع)`,
+        message: `قام الموظف ${emp.name} (${emp.code}) بتقديم طلب ${requestType === 'resignation' ? 'استقالة' : 'تراجع'}. تم إرسال الطلب لمدير الفرع لإبداء الرأي والتعليق أولاً، وسيتم تحويله للإدارة العليا للبت والقرار النهائي فور انتهاء المراجعة.`,
+        employeeId: emp.id,
+        employeeName: emp.name,
+        employeeCode: emp.code,
+        date: getRealTodayStr(),
+        timestamp: new Date().toISOString(),
+        read: false,
+        targetRole: 'admin',
+        branchId: reqBranchId,
+      });
+    }
 
     const updatedState = { 
       ...state, 
       requests: [newReq, ...(state.requests || [])],
       resignationRequests: [newReq, ...(state.resignationRequests || [])],
-      notifications: [newNotif, ...(state.notifications || [])]
+      notifications: [...notificationsList, ...(state.notifications || [])]
     };
     setState(updatedState);
     setShowForm(false);
     setReason('');
-    showToast(isDirectAdmin ? 'تم إرسال الطلب للإدارة العليا مباشرة ✅' : 'تم إرسال الطلب لمدير الفرع للمراجعة أولاً ✅');
+    showToast(isDirectAdmin ? 'تم إرسال الطلب للإدارة العليا مباشرة ✅' : 'تم إرسال الطلب لمدير الفرع للمراجعة أولاً وإشعار الإدارة العليا ✅');
 
     // مزامنة خلفية فورية دون تأخير استجابة الزر
     if (saveState) {

@@ -50,6 +50,31 @@ export default function EmployeeIDCardModal({
               <span>رمز QR للبصمة الإلكترونية المعتمدة</span>
             </div>
           )}
+
+          {selectedEmpCard.driveFolderUrl && (
+            <div style={{ marginTop: '10px' }}>
+              <a
+                href={selectedEmpCard.driveFolderUrl}
+                target="_blank"
+                rel="noreferrer"
+                style={{
+                  fontSize: '12px',
+                  color: '#0284c7',
+                  fontWeight: 'bold',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  textDecoration: 'none',
+                  background: '#f0f9ff',
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  border: '1px solid #bae6fd'
+                }}
+              >
+                📁 مجلد الوثائق على Google Drive ↗
+              </a>
+            </div>
+          )}
         </div>
 
         <button className="btn btn-start" style={{ width: '100%', marginTop: '16px' }} onClick={() => window.print()}>

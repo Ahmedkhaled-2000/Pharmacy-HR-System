@@ -89,6 +89,10 @@ export default function BranchResignationModule({
       branchRejected: status === 'rejected',
       branchDecision: status,
       managerComment: comment,
+      branchNotes: comment,
+      branchReviewedAt: new Date().toISOString(),
+      status: 'pending_admin',
+      adminStatus: 'pending',
       updatedAt: new Date().toISOString()
     };
 

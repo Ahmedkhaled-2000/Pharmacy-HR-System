@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 
 export default function LoginPage({ onLogin, state, themeMode = 'light', toggleTheme }) {
   const [username, setUsername] = useState('');
@@ -322,16 +323,20 @@ export default function LoginPage({ onLogin, state, themeMode = 'light', toggleT
                   border: 'none',
                   cursor: 'pointer',
                   color: '#64748b',
-                  fontSize: '16px',
                   padding: '6px',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  borderRadius: '8px'
+                  borderRadius: '8px',
+                  transition: 'color 0.2s ease, transform 0.15s ease'
                 }}
                 title={showPassword ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور'}
               >
-                {showPassword ? '👁️' : '🙈'}
+                {showPassword ? (
+                  <EyeOff size={19} style={{ color: '#0d9488' }} />
+                ) : (
+                  <Eye size={19} style={{ color: '#64748b' }} />
+                )}
               </button>
             </div>
           </div>
