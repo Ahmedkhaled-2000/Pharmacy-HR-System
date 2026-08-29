@@ -143,39 +143,148 @@ export default function Dashboard({
     <div style={{ fontFamily: "'Tajawal', 'Cairo', sans-serif" }} className="fade-in-page">
 
       {/* ── 2. Employee Summary Cards Breakdown ── */}
-      <h4 style={{ margin: '0 0 12px 0', fontSize: '16px', color: '#1e293b' }}>
-        📊 إحصائيات الموظفين وتوزيع الفروع والإدارات
-      </h4>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px', marginBottom: '24px' }}>
-        <div style={{ background: 'linear-gradient(135deg, #0d9488, #0f766e)', color: '#fff', padding: '16px', borderRadius: '12px' }}>
-          <span style={{ fontSize: '12.5px', opacity: 0.9 }}>👥 عدد الموظفين الكلي بالشركة</span>
-          <h3 style={{ margin: '6px 0 0 0', fontSize: '24px', fontWeight: '900' }}>{employees.length} موظف</h3>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
+        <span style={{ fontSize: '18px' }}>📊</span>
+        <h4 style={{ margin: 0, fontSize: '17px', fontWeight: '800', color: 'var(--text, #0f172a)' }}>
+          إحصائيات الموظفين وتوزيع الفروع والإدارات
+        </h4>
+      </div>
+      
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '28px' }}>
+        {/* Total Employees Hero Card */}
+        <div style={{
+          background: 'linear-gradient(135deg, #064e3b 0%, #0d9488 60%, #14b8a6 100%)',
+          color: '#ffffff',
+          padding: '20px 22px',
+          borderRadius: '16px',
+          boxShadow: '0 10px 25px -5px rgba(13, 148, 136, 0.35), 0 4px 10px rgba(0, 0, 0, 0.05)',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          border: '1px solid rgba(255, 255, 255, 0.15)',
+          position: 'relative',
+          overflow: 'hidden'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <span style={{ fontSize: '13.5px', fontWeight: '700', color: 'rgba(255, 255, 255, 0.95)' }}>
+              👥 إجمالي موظفي الشركة
+            </span>
+            <span style={{
+              background: 'rgba(255, 255, 255, 0.2)',
+              padding: '3px 8px',
+              borderRadius: '8px',
+              fontSize: '11px',
+              fontWeight: '800',
+              backdropFilter: 'blur(4px)'
+            }}>
+              كافة الفروع
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+            <span style={{ fontSize: '32px', fontWeight: '900', color: '#ffffff', letterSpacing: '-0.5px' }}>
+              {employees.length}
+            </span>
+            <span style={{ fontSize: '15px', fontWeight: '700', color: 'rgba(255, 255, 255, 0.85)' }}>
+              موظف
+            </span>
+          </div>
         </div>
 
+        {/* Individual Branch Cards */}
         {branchCounts.map((b) => (
-          <div key={b.id} style={{ background: 'var(--surface)', border: '1px solid var(--border)', padding: '16px', borderRadius: '12px' }}>
-            <span style={{ fontSize: '12.5px', color: 'var(--muted)' }}>🏢 {b.name}</span>
-            <h3 style={{ margin: '6px 0 0 0', fontSize: '22px', fontWeight: '800', color: 'var(--primary)' }}>
-              {b.count} موظف
-            </h3>
+          <div
+            key={b.id}
+            style={{
+              background: 'var(--surface, #ffffff)',
+              border: '1px solid var(--border, #e2e8f0)',
+              borderTop: '3.5px solid #0d9488',
+              padding: '18px 20px',
+              borderRadius: '16px',
+              boxShadow: '0 4px 16px -2px rgba(15, 23, 42, 0.05), 0 2px 6px rgba(0, 0, 0, 0.02)',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              transition: 'transform 0.2s ease, box-shadow 0.2s ease'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <span style={{ fontSize: '14px', fontWeight: '800', color: 'var(--text, #0f172a)' }}>
+                🏢 {b.name}
+              </span>
+              <span style={{
+                background: 'var(--primary-light, #f0fdfa)',
+                color: 'var(--primary, #0d9488)',
+                border: '1px solid var(--primary-tint, #ccfbf1)',
+                padding: '2px 8px',
+                borderRadius: '8px',
+                fontSize: '11px',
+                fontWeight: '800'
+              }}>
+                فرع
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+              <span style={{ fontSize: '28px', fontWeight: '900', color: 'var(--primary-dark, #0f766e)' }}>
+                {b.count}
+              </span>
+              <span style={{ fontSize: '14px', fontWeight: '700', color: 'var(--muted, #64748b)' }}>
+                موظف
+              </span>
+            </div>
           </div>
         ))}
 
         {unassignedCount > 0 && (
-          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', padding: '16px', borderRadius: '12px' }}>
-            <span style={{ fontSize: '12.5px', color: 'var(--muted)' }}>🏢 الإدارة العامة / المركز الرئيسي</span>
-            <h3 style={{ margin: '6px 0 0 0', fontSize: '22px', fontWeight: '800', color: 'var(--text)' }}>
-              {unassignedCount} موظف
-            </h3>
+          <div
+            style={{
+              background: 'var(--surface, #ffffff)',
+              border: '1px solid var(--border, #e2e8f0)',
+              borderTop: '3.5px solid #64748b',
+              padding: '18px 20px',
+              borderRadius: '16px',
+              boxShadow: '0 4px 16px -2px rgba(15, 23, 42, 0.05)',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <span style={{ fontSize: '13.5px', fontWeight: '800', color: 'var(--text, #0f172a)' }}>
+                🏢 الإدارة العامة / المركز
+              </span>
+              <span style={{
+                background: '#f1f5f9',
+                color: '#475569',
+                border: '1px solid #e2e8f0',
+                padding: '2px 8px',
+                borderRadius: '8px',
+                fontSize: '11px',
+                fontWeight: '800'
+              }}>
+                رئيسي
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+              <span style={{ fontSize: '28px', fontWeight: '900', color: 'var(--text, #0f172a)' }}>
+                {unassignedCount}
+              </span>
+              <span style={{ fontSize: '14px', fontWeight: '700', color: 'var(--muted, #64748b)' }}>
+                موظف
+              </span>
+            </div>
           </div>
         )}
       </div>
 
       {/* ── 3. Separate Live Punch Cards for Every Branch ── */}
-      <h4 style={{ margin: '0 0 12px 0', fontSize: '16px', color: '#1e293b' }}>
-        ⏱️ بطاقات الحضور والبصمات الحية لكل فرع منفصل ({todayDate})
-      </h4>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
+        <span style={{ fontSize: '18px' }}>⏱️</span>
+        <h4 style={{ margin: 0, fontSize: '17px', fontWeight: '800', color: 'var(--text, #0f172a)' }}>
+          بطاقات الحضور والبصمات الحية لكل فرع منفصل ({todayDate})
+        </h4>
+      </div>
+      
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '18px', marginBottom: '28px' }}>
         {branches.map((b) => {
           const branchEmps = employees.filter((e) => empBelongsToBranch(e, b.id));
           const branchTodayPunches = todayPunches.filter((p) => {
@@ -187,17 +296,53 @@ export default function Dashboard({
             return act && String(act.branchId || e.branchId) === String(b.id);
           }).length;
           const allLeaves = [...(state.leaveRequests || []), ...(state.requests || [])];
+          const totalLiveCount = branchTodayPunches.length + branchActiveCount;
 
           return (
-            <div key={b.id} style={{ background: 'var(--surface)', border: '1px solid var(--border)', padding: '16px', borderRadius: '12px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                <h4 style={{ margin: 0, color: 'var(--primary-dark)', fontSize: '15px' }}>🏢 فرع {b.name}</h4>
-                <span className="badge badge-success">{branchTodayPunches.length + branchActiveCount} بصمة حية بالفرع</span>
+            <div
+              key={b.id}
+              style={{
+                background: 'var(--surface, #ffffff)',
+                border: '1px solid var(--border, #e2e8f0)',
+                padding: '20px',
+                borderRadius: '16px',
+                boxShadow: '0 4px 20px -2px rgba(15, 23, 42, 0.05), 0 2px 6px rgba(0, 0, 0, 0.02)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '14px'
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '12px', borderBottom: '1px solid var(--border, #f1f5f9)' }}>
+                <h4 style={{ margin: 0, color: 'var(--primary-dark, #0f766e)', fontSize: '16px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  🏢 فرع {b.name}
+                </h4>
+                <span style={{
+                  background: totalLiveCount > 0 ? '#dcfce7' : '#f1f5f9',
+                  color: totalLiveCount > 0 ? '#15803d' : '#64748b',
+                  border: `1px solid ${totalLiveCount > 0 ? '#bbf7d0' : '#e2e8f0'}`,
+                  padding: '4px 10px',
+                  borderRadius: '99px',
+                  fontSize: '12px',
+                  fontWeight: '800',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px'
+                }}>
+                  <span style={{
+                    width: '6px',
+                    height: '6px',
+                    borderRadius: '50%',
+                    background: totalLiveCount > 0 ? '#22c55e' : '#94a3b8'
+                  }} />
+                  {totalLiveCount} بصمة حية بالفرع
+                </span>
               </div>
 
-              <div style={{ fontSize: '13px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <div style={{ fontSize: '13px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {branchEmps.length === 0 ? (
-                  <span style={{ color: 'var(--muted)' }}>لا يوجد موظفين مسجلين بهذا الفرع.</span>
+                  <span style={{ color: 'var(--muted, #94a3b8)', textAlign: 'center', padding: '12px 0' }}>
+                    لا يوجد موظفين مسجلين بهذا الفرع.
+                  </span>
                 ) : (
                   branchEmps.map((emp) => {
                     const activeShift = state.activeShifts?.[emp.id];
@@ -218,41 +363,80 @@ export default function Dashboard({
                     const isOffToday = daySched?.type === 'off' || daySched?.isOff === true;
                     const isSwapped = Boolean(daySched?.isSwapped);
 
-                    let statusText = '🔴 لم يبصم بهذا الفرع';
-                    let statusColor = '#dc2626';
+                    let statusText = 'لم يبصم بهذا الفرع';
+                    let badgeBg = '#fff1f2';
+                    let badgeColor = '#e11d48';
+                    let badgeBorder = '#fecdd3';
 
                     if (isActiveInThisBranch) {
                       if (activeShift.isOnBreak || activeShift.isPaused) {
                         statusText = '⏸️ في استراحة';
-                        statusColor = '#d97706';
+                        badgeBg = '#fffbeb';
+                        badgeColor = '#b45309';
+                        badgeBorder = '#fde68a';
                       } else {
                         statusText = '🟢 حاضر حالياً';
-                        statusColor = '#16a34a';
+                        badgeBg = '#ecfdf5';
+                        badgeColor = '#047857';
+                        badgeBorder = '#a7f3d0';
                       }
                     } else if (isActiveInOtherBranch) {
                       const otherBranchObj = branches.find((br) => String(br.id) === String(activeShift.branchId));
-                      statusText = `🏢 بوردية بفرع آخر (${otherBranchObj ? otherBranchObj.name : 'آخر'})`;
-                      statusColor = '#64748b';
+                      statusText = `🏢 بوردية بفرع ${otherBranchObj ? otherBranchObj.name : 'آخر'}`;
+                      badgeBg = '#f1f5f9';
+                      badgeColor = '#475569';
+                      badgeBorder = '#e2e8f0';
                     } else if (empTodayPunchesInThisBranch.length > 0) {
-                      statusText = '🟢 تم الحضور اليوم بهذا الفرع';
-                      statusColor = '#0284c7';
+                      statusText = '🟢 تم الحضور اليوم';
+                      badgeBg = '#f0f9ff';
+                      badgeColor = '#0284c7';
+                      badgeBorder = '#bae6fd';
                     } else if (onLeaveToday) {
                       statusText = '🏖️ إجازة معتمدة';
-                      statusColor = '#16a34a';
+                      badgeBg = '#f0fdf4';
+                      badgeColor = '#16a34a';
+                      badgeBorder = '#bbf7d0';
                     } else if (isOffToday) {
                       statusText = isSwapped
-                        ? `🔄 💤 راحة متبدلة (${daySched?.swappedWithName ? 'مع ' + daySched.swappedWithName : 'معتمد'})`
+                        ? `🔄 💤 راحة متبدلة`
                         : '💤 راحة أسبوعية (OFF)';
-                      statusColor = '#64748b';
+                      badgeBg = '#f8fafc';
+                      badgeColor = '#64748b';
+                      badgeBorder = '#e2e8f0';
                     } else if (isSwapped && daySched?.start && daySched?.end) {
-                      statusText = `🔄 وردية متبدلة (${daySched.start} - ${daySched.end}) • لم يبصم بعد`;
-                      statusColor = '#d97706';
+                      statusText = `🔄 وردية متبدلة (${daySched.start})`;
+                      badgeBg = '#fffbeb';
+                      badgeColor = '#d97706';
+                      badgeBorder = '#fde68a';
                     }
 
                     return (
-                      <div key={emp.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span>👤 {emp.name}</span>
-                        <span style={{ color: statusColor, fontWeight: 'bold' }}>{statusText}</span>
+                      <div
+                        key={emp.id}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '8px 12px',
+                          borderRadius: '10px',
+                          background: 'var(--surface-muted, #f8fafc)',
+                          border: '1px solid var(--border, #f1f5f9)'
+                        }}
+                      >
+                        <span style={{ fontWeight: '700', color: 'var(--text, #0f172a)', fontSize: '13.5px' }}>
+                          👤 {emp.name}
+                        </span>
+                        <span style={{
+                          background: badgeBg,
+                          color: badgeColor,
+                          border: `1px solid ${badgeBorder}`,
+                          padding: '3px 8px',
+                          borderRadius: '6px',
+                          fontSize: '11.5px',
+                          fontWeight: '800'
+                        }}>
+                          {statusText}
+                        </span>
                       </div>
                     );
                   })
@@ -281,32 +465,86 @@ export default function Dashboard({
         });
 
         return (
-          <div className="card settings-card" style={{ padding: '20px', marginBottom: '24px', border: '2px solid #fecaca', background: '#fff5f5' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
-              <h4 style={{ margin: 0, fontSize: '16px', color: '#991b1b', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div
+            style={{
+              padding: '22px 24px',
+              marginBottom: '28px',
+              border: '1px solid #fecdd3',
+              background: 'linear-gradient(180deg, #fff5f5 0%, #ffffff 100%)',
+              borderRadius: '18px',
+              boxShadow: '0 10px 30px -5px rgba(244, 63, 94, 0.08), 0 2px 6px rgba(0, 0, 0, 0.02)'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+              <h4 style={{ margin: 0, fontSize: '17px', color: '#991b1b', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '800' }}>
                 🚨 الموظفون الغائبون / لم يبصموا اليوم ({todayDate})
               </h4>
-              <span style={{ background: '#ef4444', color: '#ffffff', padding: '4px 12px', borderRadius: '99px', fontSize: '13px', fontWeight: 'bold' }}>
+              <span style={{
+                background: '#ef4444',
+                color: '#ffffff',
+                padding: '5px 14px',
+                borderRadius: '99px',
+                fontSize: '13px',
+                fontWeight: '800',
+                boxShadow: '0 4px 12px rgba(239, 68, 68, 0.3)'
+              }}>
                 {absentEmpsToday.length} موظف غائب
               </span>
             </div>
 
             {absentEmpsToday.length === 0 ? (
-              <div style={{ background: '#dcfce7', color: '#166534', padding: '12px 16px', borderRadius: '10px', fontSize: '14px', fontWeight: 'bold', textAlign: 'center' }}>
+              <div style={{
+                background: '#dcfce7',
+                color: '#166534',
+                border: '1px solid #bbf7d0',
+                padding: '14px 18px',
+                borderRadius: '12px',
+                fontSize: '14px',
+                fontWeight: 'bold',
+                textAlign: 'center'
+              }}>
                 🟢 لا يوجد موظفين غائبين اليوم - جميع الكوادر مسجلة في وردياتها أو في إجازات معتمدة.
               </div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '12px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '14px' }}>
                 {absentEmpsToday.map((emp) => {
                   const branchObj = branches.find((b) => empBelongsToBranch(emp, b.id));
                   return (
-                    <div key={emp.id} style={{ background: '#ffffff', border: '1px solid #fca5a5', padding: '12px 14px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: '#fee2e2', color: '#b91c1c', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
+                    <div
+                      key={emp.id}
+                      style={{
+                        background: '#ffffff',
+                        border: '1px solid #fecdd3',
+                        borderRight: '4px solid #ef4444',
+                        padding: '12px 16px',
+                        borderRadius: '12px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '12px',
+                        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.03)'
+                      }}
+                    >
+                      <div style={{
+                        width: '38px',
+                        height: '38px',
+                        borderRadius: '10px',
+                        background: 'linear-gradient(135deg, #fee2e2 0%, #fecaca 100%)',
+                        color: '#b91c1c',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontWeight: '900',
+                        fontSize: '15px'
+                      }}>
                         {emp.name.charAt(0)}
                       </div>
                       <div style={{ overflow: 'hidden' }}>
-                        <div style={{ fontWeight: '700', fontSize: '13.5px', color: '#7f1d1d', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{emp.name} ({emp.code})</div>
-                        <div style={{ fontSize: '11.5px', color: '#991b1b' }}>{emp.jobTitle} • {branchObj ? `فرع ${branchObj.name}` : 'الإدارة العامة'}</div>
+                        <div style={{ fontWeight: '800', fontSize: '14px', color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {emp.name} <span style={{ fontSize: '11.5px', color: '#64748b' }}>({emp.code})</span>
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+                          {emp.jobTitle} • {branchObj ? `فرع ${branchObj.name}` : 'الإدارة العامة'}
+                        </div>
                       </div>
                     </div>
                   );
@@ -793,10 +1031,19 @@ export default function Dashboard({
         };
 
         return (
-          <div className="card settings-card" style={{ padding: '22px', marginBottom: '24px', border: '2px solid #fed7aa', background: 'linear-gradient(180deg, #fffaf5 0%, #ffffff 100%)', borderRadius: '16px', boxShadow: '0 4px 20px rgba(234, 88, 12, 0.08)' }}>
+          <div
+            style={{
+              padding: '24px',
+              marginBottom: '28px',
+              border: '1px solid #fed7aa',
+              background: 'linear-gradient(180deg, #fffaf5 0%, #ffffff 100%)',
+              borderRadius: '18px',
+              boxShadow: '0 10px 30px -5px rgba(234, 88, 12, 0.08), 0 2px 6px rgba(0, 0, 0, 0.02)'
+            }}
+          >
             
             {/* Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', flexWrap: 'wrap', gap: '12px' }}>
               <div>
                 <h4 style={{ margin: 0, fontSize: '17px', color: '#c2410c', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '800' }}>
                   🏃‍♂️ موظفو اليوم المتأخرون عن مواعيد العمل المجدولة ({todayDate})

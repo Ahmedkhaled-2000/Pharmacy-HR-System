@@ -1544,19 +1544,20 @@ return (
                 display: 'flex',
                 alignItems: 'center',
                 gap: '7px',
-                padding: '7px 14px',
-                borderRadius: '8px',
+                padding: '8px 15px',
+                borderRadius: '10px',
                 border: 'none',
                 background: isActive
-                  ? 'var(--primary)'
+                  ? 'linear-gradient(135deg, #0f766e 0%, #0d9488 100%)'
                   : isOpen
-                  ? 'var(--hover)'
+                  ? 'var(--hover, rgba(13, 148, 136, 0.08))'
                   : 'transparent',
-                color: isActive ? '#ffffff' : 'var(--text)',
-                fontSize: '13px',
-                fontWeight: isActive ? 800 : 600,
+                color: isActive ? '#ffffff' : 'var(--text-secondary, #334155)',
+                fontSize: '13.5px',
+                fontWeight: isActive ? 800 : 700,
                 cursor: 'pointer',
                 transition: 'all 0.15s cubic-bezier(0.4, 0, 0.2, 1)',
+                boxShadow: isActive ? '0 4px 12px rgba(13, 148, 136, 0.28)' : 'none',
                 position: 'relative'
               }}
               onMouseEnter={(e) => {
