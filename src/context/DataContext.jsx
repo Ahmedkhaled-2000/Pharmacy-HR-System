@@ -460,18 +460,37 @@ export function DataProvider({ children, showToast = () => {} }) {
       if (specificPerms && typeof specificPerms === 'object') {
         if (specificPerms[canKey] !== undefined) return Boolean(specificPerms[canKey]);
         if (specificPerms[allowKey] !== undefined) return Boolean(specificPerms[allowKey]);
+        if (specificPerms[actionName] !== undefined) return Boolean(specificPerms[actionName]);
         if (specificPerms[permKey] !== undefined) return Boolean(specificPerms[permKey]);
       }
     }
 
-    // 2. Global Permissions Default
+    // 2. Employee Object internal permissions
+    const empPerms = freshEmp?.permissions;
+    if (empPerms && typeof empPerms === 'object' && Object.keys(empPerms).length > 0) {
+      if (empPerms[canKey] !== undefined) return Boolean(empPerms[canKey]);
+      if (empPerms[allowKey] !== undefined) return Boolean(empPerms[allowKey]);
+      if (empPerms[actionName] !== undefined) return Boolean(empPerms[actionName]);
+      if (empPerms[permKey] !== undefined) return Boolean(empPerms[permKey]);
+    }
+
+    // 3. Global Permissions Default
     const globalPerms = state.orgSettings?.permissions || {};
     if (globalPerms[canKey] !== undefined) return Boolean(globalPerms[canKey]);
     if (globalPerms[allowKey] !== undefined) return Boolean(globalPerms[allowKey]);
+    if (globalPerms[actionName] !== undefined) return Boolean(globalPerms[actionName]);
     if (globalPerms[permKey] !== undefined) return Boolean(globalPerms[permKey]);
 
-    const defaultTrues = ['allowStartEnd', 'allowManualShift', 'allowEditShift', 'allowExportExcel', 'allowViewSalary', 'allowViewAdjustments', 'canStartEnd', 'canLivePunch', 'canManualShift', 'canEditShift'];
-    return defaultTrues.includes(canKey) || defaultTrues.includes(allowKey) || defaultTrues.includes(permKey);
+    // 4. Default Permission Policies
+    // Actions that are restricted/disabled by default (require explicit admin grant)
+    const defaultFalseActions = ['addadjustment', 'manualshift', 'editshift'];
+    const lowerAction = (actionName || '').toLowerCase();
+    if (defaultFalseActions.includes(lowerAction)) {
+      return false;
+    }
+
+    // All standard employee portal viewing and request actions default to true
+    return true;
   }, [authRole, state.employees, state.orgSettings]);
 
   const getPayrollCutoffRange = useCallback((monthStr) => {

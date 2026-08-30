@@ -1431,9 +1431,6 @@ export default function EmployeePortalView({
 
   // Categorized Menu Items (Matching Senior Management Style)
   const employeeMenuItems = useMemo(() => {
-    const isMultiBranchEmp = emp?.branchesDetails && emp.branchesDetails.length > 1;
-    const isAllBranchesSelected = isMultiBranchEmp && !selectedBranchId;
-
     return [
       {
         id: 'dashboard',
@@ -1462,7 +1459,7 @@ export default function EmployeePortalView({
             icon: '🎁',
             badge: empAdjs.length,
             desc: 'سجل الحوافز والمكافآت والخصومات المعتمدة',
-            visible: !isAllBranchesSelected && canViewAdjustments !== false
+            visible: canViewAdjustments !== false
           },
           {
             id: 'loans',
@@ -1470,7 +1467,7 @@ export default function EmployeePortalView({
             label: 'السلف ومشتريات الأدوية الآجل',
             icon: '💳',
             desc: 'تقديم ومتابعة السلف النقدية والأقساط والأدوية',
-            visible: !isAllBranchesSelected && canApplyLoan !== false
+            visible: canApplyLoan !== false
           },
           {
             id: 'payslip_action',
@@ -1480,7 +1477,7 @@ export default function EmployeePortalView({
             desc: 'استعراض وتحميل قسيمة الراتب الرسمية بتنسيق معتمد',
             visible: canViewSalary !== false
           }
-        ].filter(item => item.visible)
+        ].filter(item => item.visible !== false)
       },
       {
         id: 'attendance-group',
@@ -1494,7 +1491,7 @@ export default function EmployeePortalView({
             icon: '📋',
             badge: empShifts.length,
             desc: 'سجل الحضور والانصراف، البريك، واحتساب ساعات العمل',
-            visible: !isAllBranchesSelected
+            visible: true
           },
           {
             id: 'roster',
@@ -1502,7 +1499,7 @@ export default function EmployeePortalView({
             label: 'الجدول الشهري ومناوبات العمل',
             icon: '🗓️',
             desc: 'استعراض وتصميم جدول الورديات ومناوبات الفرع',
-            visible: !isAllBranchesSelected && canViewRoster !== false
+            visible: canViewRoster !== false
           },
           {
             id: 'swaps',
@@ -1510,7 +1507,7 @@ export default function EmployeePortalView({
             label: 'تبديل ونقل الشيفتات',
             icon: '🔄',
             desc: 'تقديم ومتابعة طلبات تبديل الورديات مع الزملاء',
-            visible: !isAllBranchesSelected && canApplySwap !== false
+            visible: canApplySwap !== false
           }
         ].filter(item => item.visible !== false)
       },
@@ -1526,7 +1523,7 @@ export default function EmployeePortalView({
             label: 'رصيد وسجل الإجازات',
             icon: '🏖️',
             desc: 'تقديم ومتابعة الإجازات السنوية والرصيد المتبقي',
-            visible: !isAllBranchesSelected && canApplyLeave !== false
+            visible: canApplyLeave !== false
           },
           {
             id: 'permissions',
@@ -1534,7 +1531,7 @@ export default function EmployeePortalView({
             label: 'أذونات وساعات الاستئذان',
             icon: '⏰',
             desc: 'طلب إذن استئذان رسمي وتتبع الساعات المعتمدة',
-            visible: !isAllBranchesSelected && canApplyPermission !== false
+            visible: canApplyPermission !== false
           },
           {
             id: 'resignations',
@@ -1543,7 +1540,7 @@ export default function EmployeePortalView({
             icon: '🚪',
             badge: resignationBadgeCount,
             desc: 'تقديم طلب الاستقالة ومتابعة فترة الإشعار',
-            visible: !isAllBranchesSelected
+            visible: true
           }
         ].filter(item => item.visible !== false)
       },
