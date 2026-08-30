@@ -180,23 +180,9 @@ export async function apiFetchVersion(key = STORAGE_KEY, options = {}) {
 }
 
 export function apiCreateEventSource(key = STORAGE_KEY, onVersionChange) {
-  if (typeof window === 'undefined' || !('EventSource' in window)) return null;
-  const url = `${API_BASE_URL}/stream?key=${encodeURIComponent(key)}&_t=${Date.now()}`;
-  try {
-    const es = new EventSource(url);
-    es.addEventListener('version_change', (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        onVersionChange?.(data);
-      } catch {}
-    });
-    es.onerror = () => {
-      // إغلاق صامت عند انقطاع الاتصال مع ترك آلية المتصفح تعيد الاتصال
-    };
-    return es;
-  } catch {
-    return null;
-  }
+  // تعطيل الـ Long-Lived Stream لتجنب استنزاف حد الاتصالات الـ 5 (5 Connections Limit) على الاستضافة المشتركة
+  // يتم الاعتماد على Adaptive Version Polling فائق الخفة والسرعة (< 20ms) وبدون أي اتصالات معلقة
+  return null;
 }
 
 // ── 3. دوال البصمات الحيوية (Biometrics / Faces & Hands) ──────────────────────

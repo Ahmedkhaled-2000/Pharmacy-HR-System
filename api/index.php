@@ -177,70 +177,34 @@ try {
         case 'events':
             @ini_set('zlib.output_compression', '0');
             @ini_set('output_buffering', '0');
-            @ini_set('implicit_flush', '1');
-            while (@ob_end_clean());
 
             header('Content-Type: text/event-stream; charset=utf-8');
             header('Cache-Control: no-cache, no-transform, no-store, must-revalidate');
-            header('Connection: keep-alive');
+            header('Connection: close');
             header('X-Accel-Buffering: no');
             header('Pragma: no-cache');
             header('Expires: 0');
 
             $key = $_GET['key'] ?? DEFAULT_STORAGE_KEY;
-            $lastKnownVersion = (int)($_GET['last_version'] ?? 0);
 
-            // Allow stream script to run up to 25 seconds per connection, browser auto-reconnects seamlessly
-            set_time_limit(30);
-            $startTime = time();
-
-            // فحص فوري عند بداية الاتصال
-            $initRow = Database::queryOne(
-                "SELECT version, updated_at FROM app_settings WHERE key_name = ? LIMIT 1",
-                [$key]
-            );
-            $initVer = (int)($initRow['version'] ?? 0);
-            if ($initVer > 0 && $initVer !== $lastKnownVersion) {
-                $lastKnownVersion = $initVer;
-                echo "event: version_change\n";
-                echo "data: " . json_encode([
-                    'version' => $initVer,
-                    'updated_at' => $initRow['updated_at'] ?? null,
-                    'key' => $key
-                ]) . "\n\n";
-                @ob_flush();
-                @flush();
-            }
-
-            while (time() - $startTime < 25) {
-                if (connection_aborted()) {
-                    break;
-                }
-
+            try {
                 $row = Database::queryOne(
                     "SELECT version, updated_at FROM app_settings WHERE key_name = ? LIMIT 1",
                     [$key]
                 );
                 $curVer = (int)($row['version'] ?? 0);
 
-                if ($curVer !== $lastKnownVersion && $curVer > 0) {
-                    $lastKnownVersion = $curVer;
-                    echo "event: version_change\n";
-                    echo "data: " . json_encode([
-                        'version' => $curVer,
-                        'updated_at' => $row['updated_at'] ?? null,
-                        'key' => $key
-                    ]) . "\n\n";
-                    @ob_flush();
-                    @flush();
-                } else {
-                    echo ": ping\n\n";
-                    @ob_flush();
-                    @flush();
-                }
-
-                usleep(150000); // 150ms ultra-fast split-second check interval
+                echo "event: version_change\n";
+                echo "data: " . json_encode([
+                    'version' => $curVer,
+                    'updated_at' => $row['updated_at'] ?? null,
+                    'key' => $key
+                ]) . "\n\n";
+            } catch (Throwable) {
+                echo ": ping\n\n";
             }
+
+            Database::resetConnection();
             exit();
             break;
 

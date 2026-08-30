@@ -35,15 +35,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 }
 
 // --------------------------------------------------------------------------
-// إعدادات الاتصال بقاعدة بيانات PostgreSQL على استضافة Apex Thunder
+// إعدادات الاتصال بقاعدة بيانات PostgreSQL (الأساسية) و MySQL (الاحتياطية)
 // --------------------------------------------------------------------------
 define('DB_DRIVER', getenv('DB_DRIVER') ?: 'pgsql'); // 'pgsql' لـ PostgreSQL أو 'mysql' لـ MySQL/MariaDB
-define('DB_HOST', getenv('DB_HOST') ?: '127.0.0.1');  // PostgreSQL Host على Apex Thunder (127.0.0.1)
-define('DB_PORT', (int)(getenv('DB_PORT') ?: (DB_DRIVER === 'pgsql' ? 5432 : 3306)));
-define('DB_NAME', getenv('DB_NAME') ?: 'nodej8878_pharmacy_hr'); // اسم قاعدة البيانات من لوحة التحكم
+define('DB_HOST', getenv('DB_HOST') ?: '127.0.0.1');  // PostgreSQL Host على Apex Thunder
+define('DB_PORT', (int)(getenv('DB_PORT') ?: 5432));
+define('DB_NAME', getenv('DB_NAME') ?: 'nodej8878_pharmacy_hr'); // اسم قاعدة البيانات
 define('DB_USER', getenv('DB_USER') ?: 'nodej8878_pg');          // اسم مستخدم قاعدة البيانات
-define('DB_PASS', getenv('DB_PASS') ?: 'C6kMke4Uwj_dYtbCNHJx55r*'); // كلمة المرور الجديدة
+define('DB_PASS', getenv('DB_PASS') ?: 'C6kMke4Uwj_dYtbCNHJx55r*'); // كلمة المرور
 define('DB_CHARSET', 'utf8');
+
+// إعدادات MySQL/MariaDB الاحتياطية التلقائية عند وصول PostgreSQL للحد الأقصى من الاتصالات (5 Connections Limit)
+define('MYSQL_HOST', getenv('MYSQL_HOST') ?: 'localhost');
+define('MYSQL_PORT', (int)(getenv('MYSQL_PORT') ?: 3306));
+define('MYSQL_NAME', getenv('MYSQL_NAME') ?: 'node_PharmacyHR');
+define('MYSQL_USER', getenv('MYSQL_USER') ?: 'node_PharmacyHR');
+define('MYSQL_PASS', getenv('MYSQL_PASS') ?: 'C6kMke4Uwj_dYtbCNHJx55r*');
 
 // المفتاح الافتراضي لحفظ بيانات النظام
 define('DEFAULT_STORAGE_KEY', 'pharmacy-tracker-data');
