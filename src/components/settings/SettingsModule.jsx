@@ -1632,13 +1632,13 @@ export default function SettingsModule({
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           
           {/* Card 1: Auto-Backup & Path Settings */}
-          <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', padding: '22px', borderRadius: '14px' }}>
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', padding: '22px', borderRadius: '14px', boxShadow: 'var(--shadow-sm)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '14px' }}>
               <div>
-                <h4 style={{ margin: 0, fontSize: '16px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <h4 style={{ margin: 0, fontSize: '16px', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   ⚡ الحفظ والنسخ الاحتياطي التلقائي عند أي تعديل
                 </h4>
-                <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#64748b' }}>
+                <p style={{ margin: '4px 0 0', fontSize: '13px', color: 'var(--muted)' }}>
                   يقوم النظام بحفظ لقطة احتياطية كاملة وتحديثها فورياً على جهازك عند إجراء أي عملية تعديل أو إضافة أو اعتماد.
                 </p>
               </div>
@@ -1658,15 +1658,15 @@ export default function SettingsModule({
             </div>
 
             {/* Custom Path Section */}
-            <div style={{ background: '#fff', padding: '16px', borderRadius: '10px', border: '1px solid #e2e8f0', marginTop: '12px' }}>
-              <label style={{ display: 'block', fontSize: '13px', fontWeight: 'bold', color: '#334155', marginBottom: '8px' }}>
+            <div style={{ background: 'var(--surface-muted)', padding: '16px', borderRadius: '10px', border: '1px solid var(--border)', marginTop: '12px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 'bold', color: 'var(--text)', marginBottom: '8px' }}>
                 📁 مسار ومجلد الحفظ التلقائي على الجهاز:
               </label>
               <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
                 <input
                   type="text"
                   className="input"
-                  style={{ flex: 1, minWidth: '240px', background: '#f8fafc', fontSize: '13px' }}
+                  style={{ flex: 1, minWidth: '240px', background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)', fontSize: '13px' }}
                   value={backupPath}
                   onChange={(e) => {
                     setBackupPath(e.target.value);
@@ -1677,7 +1677,7 @@ export default function SettingsModule({
                 <button
                   type="button"
                   className="btn btn-ghost"
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', border: '1px solid #cbd5e1' }}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', border: '1px solid var(--border)' }}
                   disabled={isPickingDir}
                   onClick={async () => {
                     setIsPickingDir(true);
@@ -1694,29 +1694,29 @@ export default function SettingsModule({
                   {isPickingDir ? '⏳ جاري التحديد...' : '📂 اختيار مجلد على الجهاز'}
                 </button>
               </div>
-              <p style={{ margin: '8px 0 0', fontSize: '12px', color: '#64748b' }}>
+              <p style={{ margin: '8px 0 0', fontSize: '12px', color: 'var(--muted)' }}>
                 💡 يتم حفظ اللقطات الاحتياطية في التخزين المحلي الآمن وقاعدة البيانات الداخلية فورياً، بالإضافة إلى التحديث المباشر للمجلد المختار.
               </p>
             </div>
           </div>
 
           {/* Card 2: Manual Export & Restore Actions */}
-          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', padding: '22px', borderRadius: '14px' }}>
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', padding: '22px', borderRadius: '14px', boxShadow: 'var(--shadow-sm)' }}>
             <h4 style={{ margin: '0 0 16px', fontFamily: 'Cairo', color: 'var(--primary-dark)' }}>
               💾 أدوات النسخ اليدوي وتصدير واسترجاع الملفات
             </h4>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '18px' }}>
               {/* Export Section */}
-              <div style={{ padding: '18px', border: '1px solid #10b981', borderRadius: '12px', background: '#ecfdf5', textAlign: 'center' }}>
-                <h4 style={{ color: '#047857', margin: '0 0 8px', fontSize: '15px' }}>أخذ نسخة احتياطية فورية (Export)</h4>
-                <p style={{ fontSize: '12.5px', color: '#065f46', marginBottom: '14px' }}>
+              <div style={{ padding: '18px', border: '1px solid var(--primary)', borderRadius: '12px', background: 'var(--surface-muted)', textAlign: 'center' }}>
+                <h4 style={{ color: 'var(--primary)', margin: '0 0 8px', fontSize: '15px' }}>أخذ نسخة احتياطية فورية (Export)</h4>
+                <p style={{ fontSize: '12.5px', color: 'var(--text-muted)', marginBottom: '14px' }}>
                   تجميع وحفظ كل بيانات المنظومة الحالية في ملف JSON مستقل على جهازك.
                 </p>
                 <button 
                   type="button"
                   className="btn btn-start" 
-                  style={{ width: '100%', background: '#10b981', color: '#fff', border: 'none' }}
+                  style={{ width: '100%', background: 'var(--primary)', color: '#fff', border: 'none' }}
                   disabled={isBackingUp}
                   onClick={async () => {
                     setIsBackingUp(true);
@@ -1735,9 +1735,9 @@ export default function SettingsModule({
               </div>
 
               {/* Import Section */}
-              <div style={{ padding: '18px', border: '1px solid #f59e0b', borderRadius: '12px', background: '#fffbeb', textAlign: 'center' }}>
-                <h4 style={{ color: '#b45309', margin: '0 0 8px', fontSize: '15px' }}>استرجاع بيانات من ملف (Restore)</h4>
-                <p style={{ fontSize: '12.5px', color: '#92400e', marginBottom: '14px' }}>
+              <div style={{ padding: '18px', border: '1px solid var(--accent)', borderRadius: '12px', background: 'var(--surface-muted)', textAlign: 'center' }}>
+                <h4 style={{ color: 'var(--accent)', margin: '0 0 8px', fontSize: '15px' }}>استرجاع بيانات من ملف (Restore)</h4>
+                <p style={{ fontSize: '12.5px', color: 'var(--text-muted)', marginBottom: '14px' }}>
                   استعادة جميع البيانات والورديات والبصمات من ملف نسخة احتياطية سابق.
                 </p>
                 <input 
@@ -1768,7 +1768,7 @@ export default function SettingsModule({
                 <button 
                   type="button"
                   className="btn btn-ghost" 
-                  style={{ width: '100%', border: '1px solid #f59e0b', color: '#b45309', fontWeight: 800 }}
+                  style={{ width: '100%', border: '1px solid var(--accent)', color: 'var(--accent)', fontWeight: 800 }}
                   disabled={isRestoring}
                   onClick={async () => {
                     const currentOwnerPass = state.orgSettings?.ownerPassword || 'owner123';
@@ -1799,7 +1799,7 @@ export default function SettingsModule({
           </div>
 
           {/* Card 3: Live Automatic Snapshots Archive */}
-          <div style={{ background: '#fff', border: '1px solid var(--border)', padding: '20px', borderRadius: '14px' }}>
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', padding: '20px', borderRadius: '14px', boxShadow: 'var(--shadow-sm)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
               <h4 style={{ margin: 0, fontSize: '15px', color: 'var(--primary-dark)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                 ⏱️ سجل اللقطات الاحتياطية التلقائية الحية (آخر {snapshots.length} لقطة محفوظة)
@@ -1838,12 +1838,12 @@ export default function SettingsModule({
                           <strong>{snap.isoDate ? snap.isoDate.replace('T', ' ').slice(0, 19) : new Date(snap.timestamp).toLocaleString('ar-EG')}</strong>
                         </td>
                         <td>
-                          <span style={{ color: '#0369a1', background: '#e0f2fe', padding: '3px 8px', borderRadius: '6px', fontSize: '12px' }}>
+                          <span style={{ color: 'var(--primary)', background: 'var(--primary-tint)', padding: '3px 8px', borderRadius: '6px', fontSize: '12px' }}>
                             {snap.trigger || 'تعديل بيانات'}
                           </span>
                         </td>
                         <td>
-                          <span style={{ fontSize: '12px', color: '#475569' }}>
+                          <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
                             👥 {snap.stats?.employeesCount || 0} موظف • 📑 {snap.stats?.requestsCount || 0} طلب • 🏢 {snap.stats?.branchesCount || 0} فرع
                           </span>
                         </td>
@@ -1920,24 +1920,24 @@ export default function SettingsModule({
 
           {/* Card 4: Danger Zone - Factory Reset & Full Data Wipe */}
           <div style={{
-            background: '#fff5f5',
-            border: '2px solid #f87171',
+            background: 'var(--surface)',
+            border: '2px solid var(--danger)',
             borderRadius: '14px',
             padding: '22px',
-            boxShadow: '0 4px 14px rgba(239,68,68,0.08)'
+            boxShadow: '0 4px 14px rgba(239,68,68,0.1)'
           }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '14px' }}>
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
                   <span style={{ fontSize: '20px' }}>🚨</span>
-                  <h4 style={{ margin: 0, fontFamily: 'Cairo', color: '#991b1b', fontSize: '16px', fontWeight: 800 }}>
+                  <h4 style={{ margin: 0, fontFamily: 'Cairo', color: 'var(--danger)', fontSize: '16px', fontWeight: 800 }}>
                     منطقة العمليات الحساسة: مسح وتصفير قاعدة البيانات بالكامل (Factory Reset)
                   </h4>
-                  <span style={{ background: '#fee2e2', color: '#b91c1c', fontSize: '11px', fontWeight: 900, padding: '2px 8px', borderRadius: '6px', border: '1px solid #fca5a5' }}>
+                  <span style={{ background: 'var(--danger-tint)', color: 'var(--danger)', fontSize: '11px', fontWeight: 900, padding: '2px 8px', borderRadius: '6px', border: '1px solid var(--danger)' }}>
                     إجراء نهائي
                   </span>
                 </div>
-                <p style={{ margin: 0, fontSize: '13px', color: '#7f1d1d', lineHeight: '1.6', maxWidth: '820px' }}>
+                <p style={{ margin: 0, fontSize: '13px', color: 'var(--text)', lineHeight: '1.6', maxWidth: '820px' }}>
                   يتيح هذا الإجراء تفريغ ومسح كافة بيانات المنظومة بالكامل من قاعدة البيانات والسيرفر فوراً (يشمل: جميع الموظفين، الفروع، الورديات، بصمات الوجه، سجلات الحضور والانصراف، الجداول، السلف، والطلبات)، مع <strong>تسجيل الخروج التلقائي الفوري لكافة المستخدمين واليوزرات من جميع الأجهزة</strong> والبدء من جديد مع الاحتفاظ ببيانات دخول الإدارة العليا والمالك.
                 </p>
               </div>
@@ -1982,14 +1982,14 @@ export default function SettingsModule({
             /* Owner Locked Gatekeeper Card */
             <div
               style={{
-                background: '#ffffff',
-                border: '2px solid #f59e0b',
+                background: 'var(--surface)',
+                border: '2px solid var(--accent)',
                 borderRadius: '20px',
                 padding: '36px 24px',
                 textAlign: 'center',
                 maxWidth: '520px',
                 margin: '20px auto',
-                boxShadow: '0 20px 40px rgba(245, 158, 11, 0.12)'
+                boxShadow: 'var(--shadow-lg)'
               }}
             >
               <div
@@ -2009,19 +2009,19 @@ export default function SettingsModule({
               >
                 👑
               </div>
-              <h3 style={{ margin: '0 0 8px 0', fontFamily: 'Cairo', fontSize: '22px', fontWeight: 800, color: '#1e293b' }}>
+              <h3 style={{ margin: '0 0 8px 0', fontFamily: 'Cairo', fontSize: '22px', fontWeight: 800, color: 'var(--text)' }}>
                 بوابة تحكم وصلاحيات المالك (Owner Portal)
               </h3>
-              <p style={{ fontSize: '13.5px', color: '#64748b', margin: '0 0 24px 0', lineHeight: '1.6' }}>
+              <p style={{ fontSize: '13.5px', color: 'var(--muted)', margin: '0 0 24px 0', lineHeight: '1.6' }}>
                 هذه الصفحة مخصصة لمالك المنظومة فقط. يرجى إدخال اسم مستخدم وكلمة مرور المالك للمتابعة وفتح لوحة التحكم.
               </p>
 
               {ownerUnlockError && (
                 <div
                   style={{
-                    background: '#fef2f2',
-                    border: '1px solid #fca5a5',
-                    color: '#991b1b',
+                    background: 'var(--danger-tint)',
+                    border: '1px solid var(--danger)',
+                    color: 'var(--danger)',
                     padding: '10px 14px',
                     borderRadius: '12px',
                     fontSize: '13px',
@@ -2036,7 +2036,7 @@ export default function SettingsModule({
 
               <form onSubmit={handleUnlockOwnerTab} style={{ display: 'flex', flexDirection: 'column', gap: '14px', textAlign: 'right' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: 'var(--text)', marginBottom: '6px' }}>
                     اسم مستخدم المالك (Owner Username)
                   </label>
                   <input
@@ -2048,7 +2048,9 @@ export default function SettingsModule({
                       width: '100%',
                       padding: '11px 14px',
                       borderRadius: '12px',
-                      border: '1.5px solid #cbd5e1',
+                      border: '1.5px solid var(--border)',
+                      background: 'var(--surface-muted)',
+                      color: 'var(--text)',
                       fontSize: '14px',
                       boxSizing: 'border-box'
                     }}
@@ -2056,7 +2058,7 @@ export default function SettingsModule({
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: 'var(--text)', marginBottom: '6px' }}>
                     كلمة مرور المالك (Owner Password)
                   </label>
                   <input
@@ -2068,7 +2070,9 @@ export default function SettingsModule({
                       width: '100%',
                       padding: '11px 14px',
                       borderRadius: '12px',
-                      border: '1.5px solid #cbd5e1',
+                      border: '1.5px solid var(--border)',
+                      background: 'var(--surface-muted)',
+                      color: 'var(--text)',
                       fontSize: '14px',
                       boxSizing: 'border-box'
                     }}
@@ -2160,7 +2164,7 @@ export default function SettingsModule({
               </div>
 
               {/* Card 1: Owner Account Credentials */}
-              <div style={{ background: '#ffffff', border: '1px solid var(--border)', borderRadius: '16px', padding: '22px' }}>
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '16px', padding: '22px', boxShadow: 'var(--shadow-sm)' }}>
                 <h4 style={{ margin: '0 0 6px 0', fontFamily: 'Cairo', color: 'var(--primary-dark)', fontSize: '16px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span>🔐</span>
                   <span>تعديل وتعيين بيانات دخول المالك (Owner Credentials)</span>
@@ -2197,7 +2201,7 @@ export default function SettingsModule({
                         <button
                           type="button"
                           onClick={() => setShowOwnerPasswordText(!showOwnerPasswordText)}
-                          style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'none', cursor: 'pointer', fontSize: '16px', color: '#64748b' }}
+                          style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'none', cursor: 'pointer', fontSize: '16px', color: 'var(--muted)' }}
                         >
                           {showOwnerPasswordText ? '👁️' : '🔒'}
                         </button>
@@ -2237,7 +2241,7 @@ export default function SettingsModule({
               </div>
 
               {/* Card 2: Modification Locks Matrix */}
-              <div style={{ background: '#ffffff', border: '1px solid var(--border)', borderRadius: '16px', padding: '22px' }}>
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '16px', padding: '22px', boxShadow: 'var(--shadow-sm)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '16px' }}>
                   <div>
                     <h4 style={{ margin: '0 0 4px 0', fontFamily: 'Cairo', color: 'var(--primary-dark)', fontSize: '16px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -2254,7 +2258,7 @@ export default function SettingsModule({
                       type="button"
                       className="btn btn-ghost"
                       onClick={() => handleSetAllLocks(true)}
-                      style={{ fontSize: '12px', padding: '6px 12px', color: '#dc2626', border: '1px solid #fca5a5', background: '#fef2f2', fontWeight: 700 }}
+                      style={{ fontSize: '12px', padding: '6px 12px', color: 'var(--danger)', border: '1px solid var(--danger)', background: 'var(--danger-tint)', fontWeight: 700 }}
                     >
                       🔒 قفل كافة التعديلات
                     </button>

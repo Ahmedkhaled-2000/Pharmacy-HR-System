@@ -658,19 +658,20 @@ export default function NotificationCenterModule({
         <div
           onClick={() => setFilterType('today_punches')}
           style={{
-            background: filterType === 'today_punches' ? '#dcfce7' : 'var(--surface)',
-            border: filterType === 'today_punches' ? '2px solid #16a34a' : '1px solid var(--border)',
+            background: filterType === 'today_punches' ? 'var(--primary-light)' : 'var(--surface)',
+            border: filterType === 'today_punches' ? '2px solid var(--success)' : '1px solid var(--border)',
             padding: '14px 18px',
             borderRadius: '12px',
             cursor: 'pointer',
-            transition: 'all 0.2s ease'
+            transition: 'all 0.2s ease',
+            boxShadow: 'var(--shadow-sm)'
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#166534' }}>🟢 بصمات وحضور اليوم</span>
+            <span style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--success)' }}>🟢 بصمات وحضور اليوم</span>
             <span style={{ fontSize: '20px' }}>⏱️</span>
           </div>
-          <h3 style={{ margin: '8px 0 0', fontSize: '24px', fontWeight: '900', color: '#15803d' }}>
+          <h3 style={{ margin: '8px 0 0', fontSize: '24px', fontWeight: '900', color: 'var(--success)' }}>
             {presentCount} موظف
           </h3>
         </div>
@@ -679,19 +680,20 @@ export default function NotificationCenterModule({
         <div
           onClick={() => setFilterType('today_absences')}
           style={{
-            background: filterType === 'today_absences' ? '#fee2e2' : 'var(--surface)',
-            border: filterType === 'today_absences' ? '2px solid #dc2626' : '1px solid var(--border)',
+            background: filterType === 'today_absences' ? 'var(--danger-tint)' : 'var(--surface)',
+            border: filterType === 'today_absences' ? '2px solid var(--danger)' : '1px solid var(--border)',
             padding: '14px 18px',
             borderRadius: '12px',
             cursor: 'pointer',
-            transition: 'all 0.2s ease'
+            transition: 'all 0.2s ease',
+            boxShadow: 'var(--shadow-sm)'
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#991b1b' }}>🚨 غياب اليوم بدون إذن</span>
+            <span style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--danger)' }}>🚨 غياب اليوم بدون إذن</span>
             <span style={{ fontSize: '20px' }}>🔴</span>
           </div>
-          <h3 style={{ margin: '8px 0 0', fontSize: '24px', fontWeight: '900', color: '#b91c1c' }}>
+          <h3 style={{ margin: '8px 0 0', fontSize: '24px', fontWeight: '900', color: 'var(--danger)' }}>
             {absentCount} غائب
           </h3>
         </div>
@@ -704,14 +706,15 @@ export default function NotificationCenterModule({
             border: '1px solid var(--border)',
             padding: '14px 18px',
             borderRadius: '12px',
-            cursor: 'pointer'
+            cursor: 'pointer',
+            boxShadow: 'var(--shadow-sm)'
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#0369a1' }}>🏖️ إجازات معتمدة اليوم</span>
+            <span style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--primary)' }}>🏖️ إجازات معتمدة اليوم</span>
             <span style={{ fontSize: '20px' }}>🏖️</span>
           </div>
-          <h3 style={{ margin: '8px 0 0', fontSize: '24px', fontWeight: '900', color: '#0284c7' }}>
+          <h3 style={{ margin: '8px 0 0', fontSize: '24px', fontWeight: '900', color: 'var(--primary)' }}>
             {leavesCount} موظف
           </h3>
         </div>
@@ -720,19 +723,20 @@ export default function NotificationCenterModule({
         <div
           onClick={() => setFilterType('requests')}
           style={{
-            background: filterType === 'requests' ? '#fef3c7' : 'var(--surface)',
-            border: filterType === 'requests' ? '2px solid #d97706' : '1px solid var(--border)',
+            background: filterType === 'requests' ? 'var(--accent-tint)' : 'var(--surface)',
+            border: filterType === 'requests' ? '2px solid var(--accent)' : '1px solid var(--border)',
             padding: '14px 18px',
             borderRadius: '12px',
             cursor: 'pointer',
-            transition: 'all 0.2s ease'
+            transition: 'all 0.2s ease',
+            boxShadow: 'var(--shadow-sm)'
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#92400e' }}>📋 طلبات بانتظار الاعتماد</span>
+            <span style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--accent)' }}>📋 طلبات بانتظار الاعتماد</span>
             <span style={{ fontSize: '20px' }}>⏳</span>
           </div>
-          <h3 style={{ margin: '8px 0 0', fontSize: '24px', fontWeight: '900', color: '#d97706' }}>
+          <h3 style={{ margin: '8px 0 0', fontSize: '24px', fontWeight: '900', color: 'var(--accent)' }}>
             {pendingCount} طلب
           </h3>
         </div>
@@ -741,19 +745,20 @@ export default function NotificationCenterModule({
         <div
           onClick={() => setFilterType('penalties')}
           style={{
-            background: filterType === 'penalties' ? '#f3e8ff' : 'var(--surface)',
-            border: filterType === 'penalties' ? '2px solid #7c3aed' : '1px solid var(--border)',
+            background: filterType === 'penalties' ? 'rgba(147, 51, 234, 0.16)' : 'var(--surface)',
+            border: filterType === 'penalties' ? '2px solid #a855f7' : '1px solid var(--border)',
             padding: '14px 18px',
             borderRadius: '12px',
             cursor: 'pointer',
-            transition: 'all 0.2s ease'
+            transition: 'all 0.2s ease',
+            boxShadow: 'var(--shadow-sm)'
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#6b21a8' }}>📜 جزاءات وتأخيرات اللائحة</span>
+            <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#a855f7' }}>📜 جزاءات وتأخيرات اللائحة</span>
             <span style={{ fontSize: '20px' }}>📜</span>
           </div>
-          <h3 style={{ margin: '8px 0 0', fontSize: '24px', fontWeight: '900', color: '#7c3aed' }}>
+          <h3 style={{ margin: '8px 0 0', fontSize: '24px', fontWeight: '900', color: '#a855f7' }}>
             {penaltiesCount} واقعة وجزاء
           </h3>
         </div>
@@ -768,35 +773,32 @@ export default function NotificationCenterModule({
           📢 إشعارات وتنبيهات النظام ({notifications.length})
         </button>
         <button className={`btn ${filterType === 'today_punches' ? 'btn-start' : 'btn-ghost'}`} onClick={() => setFilterType('today_punches')}>
-          ⏱️ حضور وبصمات اليوم ({presentCount})
+          ⏱️ البصمات والحضور اليومي ({presentCount})
         </button>
         <button className={`btn ${filterType === 'today_absences' ? 'btn-start' : 'btn-ghost'}`} onClick={() => setFilterType('today_absences')}>
-          🚨 غياب وإجازات اليوم ({absentCount + leavesCount})
+          🚨 الغيابات والإجازات ({absentCount + leavesCount})
         </button>
         <button className={`btn ${filterType === 'requests' ? 'btn-start' : 'btn-ghost'}`} onClick={() => setFilterType('requests')}>
-          📋 طلبات الموظفين ({pendingCount})
+          📋 الطلبات المعلقة ({pendingCount})
         </button>
         <button className={`btn ${filterType === 'penalties' ? 'btn-start' : 'btn-ghost'}`} onClick={() => setFilterType('penalties')}>
-          📜 جزاءات وتأخيرات اللائحة ({penaltiesCount})
-        </button>
-        <button className={`btn ${filterType === 'unread' ? 'btn-start' : 'btn-ghost'}`} onClick={() => setFilterType('unread')}>
-          🔴 إشعارات جديدة ({unreadCount})
+          📜 الجزاءات وتأخيرات اللائحة ({penaltiesCount})
         </button>
       </div>
 
-      {/* ── 1. Tab: Today Punches (حضور وبصمات اليوم المحدد) ── */}
+      {/* ── 1. Tab: Today Attendance Punches (البصمات والحضور اليوم) ── */}
       {(filterType === 'all' || filterType === 'today_punches') && (
         <div style={{ marginBottom: '24px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '10px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-              <h4 style={{ margin: 0, color: '#166534', fontSize: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                ⏱️ سجل الحضور والبصمات المسجلة ليوم ({targetDayDate} - {targetDayName})
+              <h4 style={{ margin: 0, color: 'var(--success)', fontSize: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                ⏱️ كشف بصمات الحضور والانصراف ليوم ({targetDayDate} - {targetDayName})
               </h4>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <button
                   type="button"
                   className="btn btn-ghost"
-                  style={{ padding: '3px 8px', fontSize: '11px', background: '#fff', border: '1px solid #bbf7d0', borderRadius: '6px' }}
+                  style={{ padding: '3px 8px', fontSize: '11px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '6px' }}
                   onClick={() => {
                     const d = new Date(targetDayDate);
                     d.setDate(d.getDate() - 1);
@@ -813,12 +815,12 @@ export default function NotificationCenterModule({
                   type="date"
                   value={targetDayDate}
                   onChange={(e) => e.target.value && setAttendanceDate(e.target.value)}
-                  style={{ padding: '3px 8px', borderRadius: '6px', border: '1.5px solid #16a34a', fontSize: '12.5px', fontWeight: 'bold', color: '#166534', background: '#fff', cursor: 'pointer' }}
+                  style={{ padding: '3px 8px', borderRadius: '6px', border: '1.5px solid var(--primary)', fontSize: '12.5px', fontWeight: 'bold', color: 'var(--text)', background: 'var(--surface)', cursor: 'pointer' }}
                 />
                 <button
                   type="button"
                   className="btn btn-ghost"
-                  style={{ padding: '3px 8px', fontSize: '11px', background: '#fff', border: '1px solid #bbf7d0', borderRadius: '6px' }}
+                  style={{ padding: '3px 8px', fontSize: '11px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '6px' }}
                   onClick={() => {
                     const d = new Date(targetDayDate);
                     d.setDate(d.getDate() + 1);
@@ -835,7 +837,7 @@ export default function NotificationCenterModule({
                   <button
                     type="button"
                     className="btn btn-ghost"
-                    style={{ padding: '3px 8px', fontSize: '11px', color: '#16a34a', border: '1px solid #16a34a', borderRadius: '6px', background: '#f0fdf4' }}
+                    style={{ padding: '3px 8px', fontSize: '11px', color: 'var(--primary)', border: '1px solid var(--primary)', borderRadius: '6px', background: 'var(--primary-tint)' }}
                     onClick={() => setAttendanceDate(getRealTodayStr())}
                   >
                     🔄 اليوم الحالي
@@ -854,7 +856,7 @@ export default function NotificationCenterModule({
             <div className="table-responsive">
               <table className="bylaws-table" style={{ fontSize: '13.5px' }}>
                 <thead>
-                  <tr style={{ background: '#f0fdf4', color: '#166534' }}>
+                  <tr style={{ background: 'var(--surface-muted)', color: 'var(--primary)' }}>
                     <th>#</th>
                     <th>اسم الموظف</th>
                     <th>الفرع</th>
@@ -876,20 +878,20 @@ export default function NotificationCenterModule({
                         </td>
                         <td>🏢 {p.branchName}</td>
                         <td>
-                          <span style={{ background: '#dcfce7', color: '#15803d', padding: '3px 8px', borderRadius: '6px', fontWeight: '700' }}>
+                          <span style={{ background: 'var(--success-tint)', color: 'var(--success)', border: '1px solid var(--success)', padding: '3px 8px', borderRadius: '6px', fontWeight: '700' }}>
                             {p.timeIn}
                           </span>
                         </td>
                         <td>
                           {p.timeOut !== '—' ? (
-                            <span style={{ background: '#fee2e2', color: '#b91c1c', padding: '3px 8px', borderRadius: '6px', fontWeight: '700' }}>
+                            <span style={{ background: 'var(--danger-tint)', color: 'var(--danger)', border: '1px solid var(--danger)', padding: '3px 8px', borderRadius: '6px', fontWeight: '700' }}>
                               {p.timeOut}
                             </span>
                           ) : (
                             <span style={{ color: 'var(--muted)' }}>لم يخرج بعد</span>
                           )}
                         </td>
-                        <td style={{ fontWeight: '700', color: '#0d9488' }}>{fmt(p.hours)} س</td>
+                        <td style={{ fontWeight: '700', color: 'var(--primary)' }}>{fmt(p.hours)} س</td>
                         <td>
                           <span style={{ background: p.statusBg, color: p.statusColor, padding: '3px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px' }}>
                             {p.statusText}
@@ -909,21 +911,21 @@ export default function NotificationCenterModule({
       {(filterType === 'all' || filterType === 'today_absences') && (
         <div style={{ marginBottom: '24px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <h4 style={{ margin: 0, color: '#991b1b', fontSize: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <h4 style={{ margin: 0, color: 'var(--danger)', fontSize: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
               🚨 سجل الغياب وتصنيف الحالات ليوم ({targetDayDate} - {targetDayName})
             </h4>
             <span style={{ fontSize: '13px', color: 'var(--muted)', fontWeight: 'bold' }}>إجمالي الحالات: {todayAbsencesAndDelays.length}</span>
           </div>
 
           {todayAbsencesAndDelays.length === 0 ? (
-            <div style={{ padding: '16px', textAlign: 'center', color: '#15803d', background: '#dcfce7', borderRadius: '10px', fontWeight: 'bold' }}>
+            <div style={{ padding: '16px', textAlign: 'center', color: 'var(--success)', background: 'var(--success-tint)', border: '1px solid var(--success)', borderRadius: '10px', fontWeight: 'bold' }}>
               🟢 ممتاز! جميع الموظفين مسجلون في وردياتهم اليوم.
             </div>
           ) : (
             <div className="table-responsive">
               <table className="bylaws-table" style={{ fontSize: '13.5px' }}>
                 <thead>
-                  <tr style={{ background: '#fef2f2', color: '#991b1b' }}>
+                  <tr style={{ background: 'var(--surface-muted)', color: 'var(--danger)' }}>
                     <th>#</th>
                     <th>اسم الموظف</th>
                     <th>الفرع</th>

@@ -742,7 +742,7 @@ export default function EvaluationsModule({
                 type="button"
                 className="btn btn-ghost"
                 onClick={handlePrevMonth}
-                style={{ padding: '4px 10px', fontSize: '12px', background: '#fff', border: '1px solid #99f6e4', borderRadius: '8px' }}
+                style={{ padding: '4px 10px', fontSize: '12px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--text)' }}
                 title="الشهر السابق"
               >
                 ◀
@@ -754,11 +754,11 @@ export default function EvaluationsModule({
                 style={{
                   padding: '6px 12px',
                   borderRadius: '8px',
-                  border: '1.5px solid #0d9488',
+                  border: '1.5px solid var(--primary)',
                   fontWeight: 'bold',
                   fontSize: '13.5px',
-                  color: '#0f766e',
-                  background: '#fff',
+                  color: 'var(--primary)',
+                  background: 'var(--surface)',
                   cursor: 'pointer'
                 }}
               />
@@ -766,12 +766,12 @@ export default function EvaluationsModule({
                 type="button"
                 className="btn btn-ghost"
                 onClick={handleNextMonth}
-                style={{ padding: '4px 10px', fontSize: '12px', background: '#fff', border: '1px solid #99f6e4', borderRadius: '8px' }}
+                style={{ padding: '4px 10px', fontSize: '12px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--text)' }}
                 title="الشهر التالي"
               >
                 ▶
               </button>
-              <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#0f766e', background: '#ccfbf1', padding: '4px 12px', borderRadius: '99px' }}>
+              <span style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--primary)', background: 'var(--primary-light)', padding: '4px 12px', borderRadius: '99px' }}>
                 {monthLabelText}
               </span>
             </div>
@@ -782,7 +782,7 @@ export default function EvaluationsModule({
                 <select
                   value={branchFilter}
                   onChange={(e) => setBranchFilter(e.target.value)}
-                  style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px', background: '#fff' }}
+                  style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface)', color: 'var(--text)' }}
                 >
                   <option value="all">📍 جميع الفروع</option>
                   {branches.map(b => (
@@ -794,7 +794,7 @@ export default function EvaluationsModule({
               <select
                 value={jobFilter}
                 onChange={(e) => setJobFilter(e.target.value)}
-                style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px', background: '#fff' }}
+                style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface)', color: 'var(--text)' }}
               >
                 <option value="all">👔 جميع الوظائف</option>
                 {availableJobTitles.map(j => (
@@ -914,7 +914,7 @@ export default function EvaluationsModule({
                   {/* Requirement 32 & 34: Job Filter Selector for Higher Management from System Jobs */}
                   {(currentRole === 'admin' || currentRole === 'owner') && (
                     <div className="field">
-                      <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#1e293b' }}>
+                      <label style={{ fontWeight: 'bold', fontSize: '13px', color: 'var(--text)' }}>
                         🎯 تحديد الوظيفة المستهدفة للتقييم:
                       </label>
                       <select
@@ -923,7 +923,7 @@ export default function EvaluationsModule({
                           setEvalTargetJobFilter(e.target.value);
                           setEvalEmpId('');
                         }}
-                        style={{ width: '100%', padding: '9px 14px', borderRadius: '10px', border: '1.5px solid #0d9488', fontWeight: 'bold', fontSize: '13px', background: '#fff' }}
+                        style={{ width: '100%', padding: '9px 14px', borderRadius: '10px', border: '1.5px solid var(--primary)', fontWeight: 'bold', fontSize: '13px', background: 'var(--surface)', color: 'var(--text)' }}
                       >
                         <option value="all">-- جميع الوظائف (عرض الكل) --</option>
                         {availableJobTitles.map((job) => (
@@ -935,14 +935,14 @@ export default function EvaluationsModule({
 
                   {/* Requirement 31 & 32: Employee Selector */}
                   <div className="field" style={{ flex: '1 1 240px' }}>
-                    <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#1e293b' }}>
+                    <label style={{ fontWeight: 'bold', fontSize: '13px', color: 'var(--text)' }}>
                       اختر الموظف المراد تقييمه * {evalTargetJobFilter !== 'all' ? `(وظيفة: ${evalTargetJobFilter})` : ''}
                     </label>
                     <select
                       value={evalEmpId}
                       onChange={(e) => setEvalEmpId(e.target.value)}
                       required
-                      style={{ width: '100%', padding: '9px 14px', borderRadius: '10px', border: '1.5px solid #0d9488', fontWeight: 'bold', fontSize: '13.5px', background: '#fff' }}
+                      style={{ width: '100%', padding: '9px 14px', borderRadius: '10px', border: '1.5px solid var(--primary)', fontWeight: 'bold', fontSize: '13.5px', background: 'var(--surface)', color: 'var(--text)' }}
                     >
                       <option value="">-- اختر الموظف من القائمة --</option>
                       {employees
@@ -1360,7 +1360,7 @@ export default function EvaluationsModule({
                               placeholder="أضف تعليق / توصيات الإدارة العليا هنا..."
                               value={adminCommentMap[ev.id] !== undefined ? adminCommentMap[ev.id] : (ev.adminComment || '')}
                               onChange={(e) => setAdminCommentMap({ ...adminCommentMap, [ev.id]: e.target.value })}
-                              style={{ flex: 1, minWidth: '220px', padding: '8px 12px', borderRadius: '8px', border: '1px solid #93c5fd', fontSize: '13px', background: '#fff' }}
+                              style={{ flex: 1, minWidth: '220px', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface)', color: 'var(--text)' }}
                             />
                             <button
                               type="button"
@@ -1376,7 +1376,7 @@ export default function EvaluationsModule({
 
                       {/* Display Admin Comment to Branch Manager as well */}
                       {currentRole === 'branch' && ev.adminComment && (
-                        <div style={{ marginTop: '12px', background: '#eff6ff', border: '1px solid #bfdbfe', padding: '10px 14px', borderRadius: '10px', fontSize: '13px', color: '#1e40af' }}>
+                        <div style={{ marginTop: '12px', background: 'var(--primary-tint)', border: '1px solid var(--primary)', padding: '10px 14px', borderRadius: '10px', fontSize: '13px', color: 'var(--primary)' }}>
                           <strong>🏛️ تعليق الإدارة العليا: </strong> "{ev.adminComment}"
                         </div>
                       )}
@@ -1394,10 +1394,10 @@ export default function EvaluationsModule({
       {/* ─────────────────────────────────────────────────────────────────── */}
       {activeTab === 'criteria' && (currentRole === 'admin' || currentRole === 'owner') && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          <div style={{ background: '#ffffff', border: '1px solid var(--border)', borderRadius: '16px', padding: '22px' }}>
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '16px', padding: '22px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
               <div>
-                <h3 style={{ margin: 0, fontFamily: 'Cairo', color: '#0f766e', fontSize: '17px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <h3 style={{ margin: 0, fontFamily: 'Cairo', color: 'var(--primary)', fontSize: '17px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span>⚙️</span>
                   <span>إعداد قوالب ومعايير التقييم الثابتة لكل وظيفة</span>
                 </h3>
@@ -1412,7 +1412,7 @@ export default function EvaluationsModule({
                 <select
                   value={selectedCriteriaJob}
                   onChange={(e) => setSelectedCriteriaJob(e.target.value)}
-                  style={{ padding: '8px 16px', borderRadius: '10px', border: '1.5px solid #0d9488', fontWeight: 'bold', fontSize: '13.5px', background: '#f0fdfa', color: '#0f766e' }}
+                  style={{ padding: '8px 16px', borderRadius: '10px', border: '1.5px solid var(--primary)', fontWeight: 'bold', fontSize: '13.5px', background: 'var(--surface-muted)', color: 'var(--primary)' }}
                 >
                   {availableJobTitles.map(job => (
                     <option key={job} value={job}>
@@ -1425,16 +1425,16 @@ export default function EvaluationsModule({
             </div>
 
             {/* Criteria Editor Table */}
-            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '16px', marginBottom: '16px' }}>
+            <div style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)', borderRadius: '14px', padding: '16px', marginBottom: '16px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                <span style={{ fontWeight: '800', fontSize: '14px', color: '#1e293b' }}>
+                <span style={{ fontWeight: '800', fontSize: '14px', color: 'var(--text)' }}>
                   قائمة بنود تقييم وظيفة ({selectedCriteriaJob}):
                 </span>
                 <button
                   type="button"
                   className="btn btn-ghost"
                   onClick={handleAddCriteriaItem}
-                  style={{ fontSize: '12.5px', padding: '4px 10px', background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px' }}
+                  style={{ fontSize: '12.5px', padding: '4px 10px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '6px', color: 'var(--text)' }}
                 >
                   ➕ إضافة بند جديد
                 </button>
@@ -1445,8 +1445,8 @@ export default function EvaluationsModule({
                   <div
                     key={item.id || idx}
                     style={{
-                      background: '#ffffff',
-                      border: '1px solid #cbd5e1',
+                      background: 'var(--surface)',
+                      border: '1px solid var(--border)',
                       borderRadius: '10px',
                       padding: '12px 14px',
                       display: 'flex',
@@ -1455,7 +1455,7 @@ export default function EvaluationsModule({
                       flexWrap: 'wrap'
                     }}
                   >
-                    <span style={{ fontWeight: '900', color: '#0f766e', fontSize: '14px' }}>#{idx + 1}</span>
+                    <span style={{ fontWeight: '900', color: 'var(--primary)', fontSize: '14px' }}>#{idx + 1}</span>
 
                     <div style={{ flex: '3 1 250px' }}>
                       <input
@@ -1463,7 +1463,7 @@ export default function EvaluationsModule({
                         placeholder="عنوان بند التقييم..."
                         value={item.title}
                         onChange={(e) => handleUpdateCriteriaField(item.id, 'title', e.target.value)}
-                        style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontWeight: 'bold', fontSize: '13px', marginBottom: '4px' }}
+                        style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', fontWeight: 'bold', fontSize: '13px', marginBottom: '4px', background: 'var(--surface-muted)', color: 'var(--text)' }}
                         required
                       />
                       <input
@@ -1471,19 +1471,19 @@ export default function EvaluationsModule({
                         placeholder="وصف وتفاصيل المعيار للمدير..."
                         value={item.description}
                         onChange={(e) => handleUpdateCriteriaField(item.id, 'description', e.target.value)}
-                        style={{ width: '100%', padding: '4px 8px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '12px', color: '#64748b' }}
+                        style={{ width: '100%', padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px', color: 'var(--muted)', background: 'var(--surface-muted)' }}
                       />
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <label style={{ fontSize: '12px', color: '#475569', fontWeight: 'bold' }}>الدرجة العظمى:</label>
+                      <label style={{ fontSize: '12px', color: 'var(--muted)', fontWeight: 'bold' }}>الدرجة العظمى:</label>
                       <input
                         type="number"
                         min="1"
                         max="100"
                         value={item.maxScore}
                         onChange={(e) => handleUpdateCriteriaField(item.id, 'maxScore', parseFloat(e.target.value) || 1)}
-                        style={{ width: '70px', padding: '6px 8px', borderRadius: '6px', border: '1.5px solid #0d9488', textAlign: 'center', fontWeight: 'bold', fontSize: '14px', color: '#0f766e' }}
+                        style={{ width: '70px', padding: '6px 8px', borderRadius: '6px', border: '1.5px solid var(--primary)', textAlign: 'center', fontWeight: 'bold', fontSize: '14px', color: 'var(--primary)', background: 'var(--surface)' }}
                         required
                       />
                     </div>
@@ -1673,7 +1673,7 @@ export default function EvaluationsModule({
               <select
                 value={complaintFilterStatus}
                 onChange={(e) => setComplaintFilterStatus(e.target.value)}
-                style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: '#fff' }}
+                style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
               >
                 <option value="all">جميع الحالات</option>
                 <option value="pending">⏳ قيد الانتظار</option>
@@ -1708,7 +1708,7 @@ export default function EvaluationsModule({
                     </p>
 
                     {comp.adminReply && (
-                      <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '8px 12px', borderRadius: '8px', fontSize: '12.5px', color: '#166534', marginTop: '8px' }}>
+                      <div style={{ background: 'var(--success-tint)', border: '1px solid var(--success)', padding: '8px 12px', borderRadius: '8px', fontSize: '12.5px', color: 'var(--success)', marginTop: '8px' }}>
                         <strong>رد الإدارة:</strong> {comp.adminReply}
                       </div>
                     )}
@@ -1725,8 +1725,8 @@ export default function EvaluationsModule({
       {/* ─────────────────────────────────────────────────────────────────── */}
       {editingEval && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '20px' }}>
-          <div style={{ background: '#fff', borderRadius: '16px', maxWidth: '650px', width: '100%', maxHeight: '90vh', overflowY: 'auto', padding: '24px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
-            <h3 style={{ margin: '0 0 14px', fontFamily: 'Cairo', color: '#0f766e', fontSize: '17px' }}>
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '16px', maxWidth: '650px', width: '100%', maxHeight: '90vh', overflowY: 'auto', padding: '24px', boxShadow: 'var(--shadow-lg)' }}>
+            <h3 style={{ margin: '0 0 14px', fontFamily: 'Cairo', color: 'var(--primary)', fontSize: '17px' }}>
               ✏️ تعديل تقييم الموظف: {editingEval.employeeName}
             </h3>
 
@@ -1739,7 +1739,7 @@ export default function EvaluationsModule({
                       type="text"
                       value={item.title}
                       onChange={(e) => setEditItems(editItems.map((it, i) => i === idx ? { ...it, title: e.target.value } : it))}
-                      style={{ flex: 1, padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                      style={{ flex: 1, padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-muted)', color: 'var(--text)' }}
                       required
                     />
                     <input
@@ -1748,10 +1748,10 @@ export default function EvaluationsModule({
                       max={item.maxScore}
                       value={item.score}
                       onChange={(e) => setEditItems(editItems.map((it, i) => i === idx ? { ...it, score: parseFloat(e.target.value) || 0 } : it))}
-                      style={{ width: '70px', padding: '6px 8px', borderRadius: '6px', border: '1px solid #0d9488', textAlign: 'center', fontWeight: 'bold' }}
+                      style={{ width: '70px', padding: '6px 8px', borderRadius: '6px', border: '1.5px solid var(--primary)', textAlign: 'center', fontWeight: 'bold', background: 'var(--surface-muted)', color: 'var(--primary)' }}
                       required
                     />
-                    <span style={{ fontSize: '12px', color: '#64748b' }}>/ {item.maxScore}</span>
+                    <span style={{ fontSize: '12px', color: 'var(--muted)' }}>/ {item.maxScore}</span>
                   </div>
                 ))}
               </div>
@@ -1762,7 +1762,7 @@ export default function EvaluationsModule({
               </div>
 
               <div className="field">
-                <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#1e40af' }}>🏛️ تعليق ورأي الإدارة العليا</label>
+                <label style={{ fontWeight: 'bold', fontSize: '13px', color: 'var(--primary)' }}>🏛️ تعليق ورأي الإدارة العليا</label>
                 <textarea rows="2" value={editAdminComment} onChange={(e) => setEditAdminComment(e.target.value)} placeholder="رأي الإدارة العليا وتوصياتها..." />
               </div>
 

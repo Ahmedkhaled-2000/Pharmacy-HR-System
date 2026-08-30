@@ -125,26 +125,26 @@ export default function DeviceApprovalManager({
             gap: '12px'
           }}>
             <div>
-              <div style={{ fontWeight: 'bold', color: '#1e293b', marginBottom: '4px', fontSize: '0.9rem' }}>
+              <div style={{ fontWeight: 'bold', color: 'var(--text)', marginBottom: '4px', fontSize: '0.9rem' }}>
                 📡 IP الراوتر العام لهذا الجهاز الآن
               </div>
-              <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
+              <div style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>
                 هذا هو IP الراوتر الذي يمكن إضافته للسماح لموظفي نفس الشبكة بتسجيل الحضور
               </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
               {loadingIp ? (
-                <span style={{ color: '#64748b', fontSize: '0.9rem' }}>⏳ جاري الجلب...</span>
+                <span style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>⏳ جاري الجلب...</span>
               ) : (
                 <span style={{
-                  background: '#fff',
-                  border: '2px solid #3b82f6',
+                  background: 'var(--surface)',
+                  border: '2px solid var(--primary)',
                   padding: '8px 16px',
                   borderRadius: '10px',
                   fontWeight: 'bold',
                   fontFamily: 'monospace',
                   fontSize: '1rem',
-                  color: '#1d4ed8',
+                  color: 'var(--primary)',
                   letterSpacing: '0.05em'
                 }}>
                   {currentPublicIp || '—'}
@@ -156,7 +156,8 @@ export default function DeviceApprovalManager({
                 disabled={loadingIp}
                 title="تحديث الـ IP"
                 style={{
-                  background: '#e0f2fe', border: '1px solid #bae6fd',
+                  background: 'var(--primary-tint)', border: '1px solid var(--border)',
+                  color: 'var(--primary)',
                   borderRadius: '8px', padding: '8px 12px',
                   cursor: 'pointer', fontSize: '1rem'
                 }}
@@ -172,23 +173,23 @@ export default function DeviceApprovalManager({
             alignItems: 'center', marginBottom: '20px',
             flexWrap: 'wrap', gap: '10px'
           }}>
-            <h4 style={{ margin: 0, color: '#1e293b', fontSize: '1rem' }}>
+            <h4 style={{ margin: 0, color: 'var(--text)', fontSize: '1rem' }}>
               🔒 تفعيل قفل الحضور على شبكات محددة فقط
             </h4>
             <label style={{
               display: 'flex', alignItems: 'center', gap: '8px',
               cursor: 'pointer', fontWeight: 'bold', fontSize: '0.9rem',
-              color: ipRestrictions.enabled ? '#16a34a' : '#94a3b8',
-              background: ipRestrictions.enabled ? '#dcfce7' : '#f1f5f9',
+              color: ipRestrictions.enabled ? 'var(--success)' : 'var(--muted)',
+              background: ipRestrictions.enabled ? 'var(--success-tint)' : 'var(--surface-muted)',
               padding: '8px 18px', borderRadius: '20px',
-              border: `1px solid ${ipRestrictions.enabled ? '#86efac' : '#e2e8f0'}`,
+              border: `1px solid ${ipRestrictions.enabled ? 'var(--success)' : 'var(--border)'}`,
               transition: 'all 0.2s'
             }}>
               <input
                 type="checkbox"
                 checked={ipRestrictions.enabled || false}
                 onChange={handleToggle}
-                style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#16a34a' }}
+                style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: 'var(--success)' }}
               />
               {ipRestrictions.enabled ? '✅ القفل مُفعَّل' : '⭕ القفل مُعطَّل'}
             </label>
@@ -196,13 +197,13 @@ export default function DeviceApprovalManager({
 
           {/* ── Add Router Form ── */}
           <div style={{
-            background: '#fff',
-            border: '1.5px dashed #93c5fd',
+            background: 'var(--surface-muted)',
+            border: '1.5px dashed var(--border)',
             borderRadius: '12px',
             padding: '18px',
             marginBottom: '20px'
           }}>
-            <p style={{ margin: '0 0 14px', fontWeight: 'bold', color: '#1d4ed8', fontSize: '0.9rem' }}>
+            <p style={{ margin: '0 0 14px', fontWeight: 'bold', color: 'var(--primary)', fontSize: '0.9rem' }}>
               ➕ إضافة راوتر جديد
             </p>
             <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '12px' }}>
@@ -213,7 +214,8 @@ export default function DeviceApprovalManager({
                 onChange={(e) => setNewLabel(e.target.value)}
                 style={{
                   flex: '1', minWidth: '180px', padding: '10px 14px',
-                  borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.9rem'
+                  borderRadius: '8px', border: '1px solid var(--border)',
+                  background: 'var(--surface)', color: 'var(--text)', fontSize: '0.9rem'
                 }}
               />
               <input
@@ -224,7 +226,8 @@ export default function DeviceApprovalManager({
                 onKeyDown={(e) => e.key === 'Enter' && handleAddRouter()}
                 style={{
                   flex: '1', minWidth: '180px', padding: '10px 14px',
-                  borderRadius: '8px', border: '1px solid #cbd5e1',
+                  borderRadius: '8px', border: '1px solid var(--border)',
+                  background: 'var(--surface)', color: 'var(--text)',
                   fontSize: '0.9rem', fontFamily: 'monospace'
                 }}
               />
@@ -234,7 +237,7 @@ export default function DeviceApprovalManager({
                 type="button"
                 onClick={handleAddRouter}
                 style={{
-                  background: '#2563eb', color: '#fff', border: 'none',
+                  background: 'var(--primary)', color: '#fff', border: 'none',
                   padding: '10px 22px', borderRadius: '8px',
                   cursor: 'pointer', fontWeight: 'bold', fontSize: '0.9rem'
                 }}
@@ -246,7 +249,7 @@ export default function DeviceApprovalManager({
                 onClick={handleAddCurrentRouter}
                 disabled={loadingIp}
                 style={{
-                  background: '#059669', color: '#fff', border: 'none',
+                  background: 'var(--success)', color: '#fff', border: 'none',
                   padding: '10px 22px', borderRadius: '8px',
                   cursor: 'pointer', fontWeight: 'bold', fontSize: '0.9rem',
                   opacity: loadingIp ? 0.7 : 1
@@ -259,15 +262,15 @@ export default function DeviceApprovalManager({
 
           {/* ── Router List ── */}
           <div>
-            <p style={{ margin: '0 0 14px', fontWeight: 'bold', color: '#374151', fontSize: '0.9rem' }}>
+            <p style={{ margin: '0 0 14px', fontWeight: 'bold', color: 'var(--text)', fontSize: '0.9rem' }}>
               📋 الراوترات المعتمدة ({routers.length})
             </p>
             {routers.length === 0 ? (
               <div style={{
                 textAlign: 'center', padding: '24px',
-                background: '#fff7ed', borderRadius: '10px',
-                border: '1px solid #fed7aa',
-                color: '#c2410c', fontSize: '0.9rem'
+                background: 'var(--accent-tint)', borderRadius: '10px',
+                border: '1px solid var(--accent)',
+                color: 'var(--accent)', fontSize: '0.9rem'
               }}>
                 ⚠️ لم يتم إضافة أي راوتر بعد.{' '}
                 {ipRestrictions.enabled
@@ -279,15 +282,15 @@ export default function DeviceApprovalManager({
                 {routers.map((router, idx) => (
                   <div key={router.ip} style={{
                     display: 'flex', alignItems: 'center', gap: '12px',
-                    background: '#fff', border: '1px solid #e2e8f0',
+                    background: 'var(--surface)', border: '1px solid var(--border)',
                     borderRadius: '12px', padding: '12px 16px',
                     flexWrap: 'wrap'
                   }}>
                     <div style={{
                       width: '30px', height: '30px', flexShrink: 0,
-                      background: '#dbeafe', borderRadius: '50%',
+                      background: 'var(--primary-tint)', borderRadius: '50%',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontWeight: 'bold', color: '#1d4ed8', fontSize: '0.85rem'
+                      fontWeight: 'bold', color: 'var(--primary)', fontSize: '0.85rem'
                     }}>
                       {idx + 1}
                     </div>
@@ -298,9 +301,9 @@ export default function DeviceApprovalManager({
                       placeholder="اسم الراوتر..."
                       style={{
                         flex: '1', minWidth: '130px', padding: '6px 10px',
-                        border: '1px solid #e2e8f0', borderRadius: '6px',
-                        fontWeight: 'bold', fontSize: '0.9rem', color: '#1e293b',
-                        background: '#f8fafc'
+                        border: '1px solid var(--border)', borderRadius: '6px',
+                        fontWeight: 'bold', fontSize: '0.9rem', color: 'var(--text)',
+                        background: 'var(--surface-muted)'
                       }}
                     />
                     <span style={{

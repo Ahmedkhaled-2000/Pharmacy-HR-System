@@ -752,7 +752,7 @@ export default function LoansMedsModule({
           <div className="modal-content card" style={{ maxWidth: '1150px', width: '96%', padding: '28px', maxHeight: '90vh', overflowY: 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <div>
-                <h3 style={{ margin: 0, color: '#0d9488' }}>
+                <h3 style={{ margin: 0, color: 'var(--primary)' }}>
                   💳 تفاصيل السلف والأدوية الآجل للموظف: {selectedEmpModal.name}
                 </h3>
                 <span style={{ fontSize: '13px', color: 'var(--muted)' }}>الكود: {selectedEmpModal.code}</span>
@@ -790,7 +790,7 @@ export default function LoansMedsModule({
 
                         return (
                           <React.Fragment key={l.id}>
-                            <tr style={{ background: payingLoanId === l.id ? '#f0fdf4' : 'transparent' }}>
+                            <tr style={{ background: payingLoanId === l.id ? 'var(--surface-muted)' : 'transparent' }}>
                               <td>{l.date || '—'}</td>
                               <td>
                                 {l.type === 'meds' ? (
@@ -800,17 +800,17 @@ export default function LoansMedsModule({
                                 )}
                               </td>
                               <td style={{ fontWeight: '800' }}>{fmt(total)} ج.م</td>
-                              <td style={{ color: '#16a34a', fontWeight: 'bold' }}>{fmt(paid)} ج.م</td>
-                              <td style={{ color: rem > 0 ? '#dc2626' : '#16a34a', fontWeight: '900' }}>{fmt(rem)} ج.م</td>
+                              <td style={{ color: 'var(--success)', fontWeight: 'bold' }}>{fmt(paid)} ج.م</td>
+                              <td style={{ color: rem > 0 ? 'var(--danger)' : 'var(--success)', fontWeight: '900' }}>{fmt(rem)} ج.م</td>
                               <td style={{ fontSize: '12px' }}>
                                 <div>{l.notes || l.reason || '—'}</div>
                                 {(l.medsItems || l.medicines || []).length > 0 && (
-                                  <div style={{ marginTop: '6px', background: '#fff', padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
-                                    <div style={{ fontWeight: 'bold', color: '#0d9488', fontSize: '11px', marginBottom: '4px' }}>💊 تفاصيل الأصناف والأدوية:</div>
+                                  <div style={{ marginTop: '6px', background: 'var(--surface)', padding: '6px', borderRadius: '6px', border: '1px solid var(--border)' }}>
+                                    <div style={{ fontWeight: 'bold', color: 'var(--primary)', fontSize: '11px', marginBottom: '4px' }}>💊 تفاصيل الأصناف والأدوية:</div>
                                     {(l.medsItems || l.medicines).map((item, idx) => (
                                       <div key={idx} style={{ fontSize: '11px', display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
                                         <span>• {item.name || item.title} (كمية: {item.qty || 1})</span>
-                                        <strong style={{ color: '#0f766e' }}>{fmt((parseFloat(item.price) || 0) * (parseFloat(item.qty) || 1))} ج.م</strong>
+                                        <strong style={{ color: 'var(--primary)' }}>{fmt((parseFloat(item.price) || 0) * (parseFloat(item.qty) || 1))} ج.م</strong>
                                       </div>
                                     ))}
                                   </div>
@@ -832,7 +832,7 @@ export default function LoansMedsModule({
                                   )}
                                   <button
                                     className="btn btn-ghost"
-                                    style={{ padding: '3px 8px', fontSize: '11.5px', color: '#0f766e', fontWeight: 'bold' }}
+                                    style={{ padding: '3px 8px', fontSize: '11.5px', color: 'var(--primary)', fontWeight: 'bold' }}
                                     onClick={() => setExpandedPaymentsLoanId(expandedPaymentsLoanId === l.id ? null : l.id)}
                                   >
                                     📜 الدفعات ({history.length})
@@ -844,8 +844,8 @@ export default function LoansMedsModule({
                             {/* Inline Payment Form */}
                             {payingLoanId === l.id && (
                               <tr>
-                                <td colSpan="7" style={{ background: '#f0fdf4', padding: '12px 16px', border: '1px solid #86efac', borderRadius: '8px' }}>
-                                  <div style={{ fontWeight: 'bold', color: '#166534', marginBottom: '8px', fontSize: '13px' }}>
+                                <td colSpan="7" style={{ background: 'var(--surface-muted)', padding: '12px 16px', border: '1px solid var(--success)', borderRadius: '8px' }}>
+                                  <div style={{ fontWeight: 'bold', color: 'var(--success)', marginBottom: '8px', fontSize: '13px' }}>
                                     💵 إدخال دفعة جديدة لسداد السلفة (الرصيد المتبقي: {rem} ج.م)
                                   </div>
                                   <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -856,14 +856,14 @@ export default function LoansMedsModule({
                                       placeholder="مبلغ السداد (ج.م)"
                                       value={payInputAmount}
                                       onChange={(e) => setPayInputAmount(e.target.value)}
-                                      style={{ width: '140px', padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                                      style={{ width: '140px', padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
                                     />
                                     <input
                                       type="text"
                                       placeholder="ملاحظات البيان..."
                                       value={payInputNotes}
                                       onChange={(e) => setPayInputNotes(e.target.value)}
-                                      style={{ flex: 1, minWidth: '160px', padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                                      style={{ flex: 1, minWidth: '160px', padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
                                     />
                                     <button
                                       className="btn btn-start"
@@ -887,29 +887,29 @@ export default function LoansMedsModule({
                             {/* Payment History Breakdown Table */}
                             {expandedPaymentsLoanId === l.id && (
                               <tr>
-                                <td colSpan="7" style={{ background: '#f8fafc', padding: '12px 16px', border: '1px solid #cbd5e1' }}>
-                                  <div style={{ fontWeight: 'bold', color: '#0f766e', marginBottom: '6px', fontSize: '12.5px' }}>
+                                <td colSpan="7" style={{ background: 'var(--surface-muted)', padding: '12px 16px', border: '1px solid var(--border)' }}>
+                                  <div style={{ fontWeight: 'bold', color: 'var(--primary)', marginBottom: '6px', fontSize: '12.5px' }}>
                                     📜 سجل الدفعات المسددة لهذه السلفة ({history.length} دفعة):
                                   </div>
                                   {history.length === 0 ? (
-                                    <span style={{ fontSize: '12px', color: '#94a3b8' }}>لم يتم تسجيل أي دفعات مسددة لهذه السلفة بعد.</span>
+                                    <span style={{ fontSize: '12px', color: 'var(--muted)' }}>لم يتم تسجيل أي دفعات مسددة لهذه السلفة بعد.</span>
                                   ) : (
-                                    <table style={{ width: '100%', fontSize: '11.5px', background: '#fff', borderCollapse: 'collapse', textAlign: 'center' }}>
+                                    <table style={{ width: '100%', fontSize: '11.5px', background: 'var(--surface)', borderCollapse: 'collapse', textAlign: 'center', border: '1px solid var(--border)' }}>
                                       <thead>
-                                        <tr style={{ background: '#e2e8f0', color: '#334155' }}>
-                                          <th style={{ padding: '4px', border: '1px solid #cbd5e1' }}>#</th>
-                                          <th style={{ padding: '4px', border: '1px solid #cbd5e1' }}>تاريخ الدفعة</th>
-                                          <th style={{ padding: '4px', border: '1px solid #cbd5e1' }}>المبلغ المسدد</th>
-                                          <th style={{ padding: '4px', border: '1px solid #cbd5e1' }}>نوع الدفعة والبيان</th>
+                                        <tr style={{ background: 'var(--surface-muted)', color: 'var(--text)' }}>
+                                          <th style={{ padding: '4px', border: '1px solid var(--border)' }}>#</th>
+                                          <th style={{ padding: '4px', border: '1px solid var(--border)' }}>تاريخ الدفعة</th>
+                                          <th style={{ padding: '4px', border: '1px solid var(--border)' }}>المبلغ المسدد</th>
+                                          <th style={{ padding: '4px', border: '1px solid var(--border)' }}>نوع الدفعة والبيان</th>
                                         </tr>
                                       </thead>
                                       <tbody>
                                         {history.map((p, pIdx) => (
                                           <tr key={p.id || pIdx}>
-                                            <td style={{ padding: '4px', border: '1px solid #cbd5e1' }}>{pIdx + 1}</td>
-                                            <td style={{ padding: '4px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>{p.date}</td>
-                                            <td style={{ padding: '4px', border: '1px solid #cbd5e1', color: '#16a34a', fontWeight: 'bold' }}>+{p.amount} ج.م</td>
-                                            <td style={{ padding: '4px', border: '1px solid #cbd5e1' }}>{p.note || (p.type === 'auto_payroll' ? 'خصم شهري آلي مع تقفيل الرواتب' : 'سداد مباشر')}</td>
+                                            <td style={{ padding: '4px', border: '1px solid var(--border)' }}>{pIdx + 1}</td>
+                                            <td style={{ padding: '4px', border: '1px solid var(--border)', fontWeight: 'bold' }}>{p.date}</td>
+                                            <td style={{ padding: '4px', border: '1px solid var(--border)', color: 'var(--success)', fontWeight: 'bold' }}>+{p.amount} ج.م</td>
+                                            <td style={{ padding: '4px', border: '1px solid var(--border)' }}>{p.note || (p.type === 'auto_payroll' ? 'خصم شهري آلي مع تقفيل الرواتب' : 'سداد مباشر')}</td>
                                           </tr>
                                         ))}
                                       </tbody>

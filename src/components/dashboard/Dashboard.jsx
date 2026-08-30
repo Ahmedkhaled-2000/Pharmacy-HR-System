@@ -1049,20 +1049,20 @@ export default function Dashboard({
                 <h4 style={{ margin: 0, fontSize: '17px', color: '#c2410c', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '800' }}>
                   🏃‍♂️ موظفو اليوم المتأخرون عن مواعيد العمل المجدولة ({todayDate})
                 </h4>
-                <div style={{ fontSize: '13px', color: '#9a3412', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <div style={{ fontSize: '13px', color: 'var(--accent, #d97706)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                   <span>⏱️ فترة السماح الدائم باللائحة: <strong>حتى {permanentGraceMax} دقائق</strong> (سماح دائم بدون أي خصم).</span>
-                  <span style={{ background: '#ffedd5', color: '#c2410c', padding: '2px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: '700' }}>
+                  <span style={{ background: 'var(--accent-tint, rgba(245, 158, 11, 0.15))', color: 'var(--accent, #d97706)', padding: '2px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: '700', border: '1px solid rgba(245, 158, 11, 0.3)' }}>
                     تكرارات الفئات الأعلى تخضع للسماح المشروط والخصم اللائحي (5 فئات)
                   </span>
                 </div>
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                <span style={{ background: lateEmployeesToday.length > 0 ? '#ea580c' : '#16a34a', color: '#ffffff', padding: '5px 16px', borderRadius: '99px', fontSize: '13.5px', fontWeight: 'bold', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
+                <span style={{ background: lateEmployeesToday.length > 0 ? '#ea580c' : 'var(--success, #16a34a)', color: '#ffffff', padding: '5px 16px', borderRadius: '99px', fontSize: '13.5px', fontWeight: 'bold', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
                   {lateEmployeesToday.length} موظف تأخر اليوم
                 </span>
                 {deductionCount > 0 && (
-                  <span style={{ background: '#dc2626', color: '#ffffff', padding: '5px 14px', borderRadius: '99px', fontSize: '13px', fontWeight: 'bold' }}>
+                  <span style={{ background: 'var(--danger, #dc2626)', color: '#ffffff', padding: '5px 14px', borderRadius: '99px', fontSize: '13px', fontWeight: 'bold' }}>
                     ⚠️ {deductionCount} مستحق خصم
                   </span>
                 )}
@@ -1071,50 +1071,50 @@ export default function Dashboard({
 
             {/* 5-Tier Policy Metrics Mini-Cards Banner */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '10px', marginBottom: '18px' }}>
-              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '10px 12px', borderRight: '4px solid #10b981' }}>
-                <div style={{ fontSize: '11.5px', color: '#15803d', fontWeight: '700' }}>🟢 0 – 10 دقائق</div>
-                <div style={{ fontSize: '18px', fontWeight: '800', color: '#14532d', margin: '2px 0' }}>{permanentGraceCount} <span style={{ fontSize: '11px', fontWeight: '500', color: '#4b5563' }}>حالة</span></div>
-                <div style={{ fontSize: '11px', color: '#16a34a' }}>سماح دائم (بدون خصم)</div>
+              <div style={{ background: 'rgba(16, 185, 129, 0.12)', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '10px', padding: '10px 12px', borderRight: '4px solid #10b981' }}>
+                <div style={{ fontSize: '11.5px', color: '#10b981', fontWeight: '700' }}>🟢 0 – 10 دقائق</div>
+                <div style={{ fontSize: '18px', fontWeight: '800', color: 'var(--text)', margin: '2px 0' }}>{permanentGraceCount} <span style={{ fontSize: '11px', fontWeight: '500', color: 'var(--muted)' }}>حالة</span></div>
+                <div style={{ fontSize: '11px', color: '#10b981' }}>سماح دائم (بدون خصم)</div>
               </div>
 
-              <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '10px', padding: '10px 12px', borderRight: '4px solid #3b82f6' }}>
-                <div style={{ fontSize: '11.5px', color: '#1d4ed8', fontWeight: '700' }}>🔵 11 – 15 دقيقة</div>
-                <div style={{ fontSize: '18px', fontWeight: '800', color: '#1e3a8a', margin: '2px 0' }}>
-                  {lateEmployeesToday.filter((i) => i.tier.id === 'tier_11_15').length} <span style={{ fontSize: '11px', fontWeight: '500', color: '#4b5563' }}>حالة</span>
+              <div style={{ background: 'rgba(59, 130, 246, 0.12)', border: '1px solid rgba(59, 130, 246, 0.3)', borderRadius: '10px', padding: '10px 12px', borderRight: '4px solid #3b82f6' }}>
+                <div style={{ fontSize: '11.5px', color: '#3b82f6', fontWeight: '700' }}>🔵 11 – 15 دقيقة</div>
+                <div style={{ fontSize: '18px', fontWeight: '800', color: 'var(--text)', margin: '2px 0' }}>
+                  {lateEmployeesToday.filter((i) => i.tier.id === 'tier_11_15').length} <span style={{ fontSize: '11px', fontWeight: '500', color: 'var(--muted)' }}>حالة</span>
                 </div>
-                <div style={{ fontSize: '11px', color: '#2563eb' }}>سماح حتى 3 مرات</div>
+                <div style={{ fontSize: '11px', color: '#3b82f6' }}>سماح حتى 3 مرات</div>
               </div>
 
-              <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '10px', padding: '10px 12px', borderRight: '4px solid #f59e0b' }}>
-                <div style={{ fontSize: '11.5px', color: '#b45309', fontWeight: '700' }}>🟠 16 – 30 دقيقة</div>
-                <div style={{ fontSize: '18px', fontWeight: '800', color: '#78350f', margin: '2px 0' }}>
-                  {lateEmployeesToday.filter((i) => i.tier.id === 'tier_16_30').length} <span style={{ fontSize: '11px', fontWeight: '500', color: '#4b5563' }}>حالة</span>
+              <div style={{ background: 'rgba(245, 158, 11, 0.12)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '10px', padding: '10px 12px', borderRight: '4px solid #f59e0b' }}>
+                <div style={{ fontSize: '11.5px', color: '#f59e0b', fontWeight: '700' }}>🟠 16 – 30 دقيقة</div>
+                <div style={{ fontSize: '18px', fontWeight: '800', color: 'var(--text)', margin: '2px 0' }}>
+                  {lateEmployeesToday.filter((i) => i.tier.id === 'tier_16_30').length} <span style={{ fontSize: '11px', fontWeight: '500', color: 'var(--muted)' }}>حالة</span>
                 </div>
-                <div style={{ fontSize: '11px', color: '#d97706' }}>سماح حتى مرتين</div>
+                <div style={{ fontSize: '11px', color: '#f59e0b' }}>سماح حتى مرتين</div>
               </div>
 
-              <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '10px', padding: '10px 12px', borderRight: '4px solid #ea580c' }}>
-                <div style={{ fontSize: '11.5px', color: '#c2410c', fontWeight: '700' }}>🔴 31 – 60 دقيقة</div>
-                <div style={{ fontSize: '18px', fontWeight: '800', color: '#7c2d12', margin: '2px 0' }}>
-                  {lateEmployeesToday.filter((i) => i.tier.id === 'tier_31_60').length} <span style={{ fontSize: '11px', fontWeight: '500', color: '#4b5563' }}>حالة</span>
+              <div style={{ background: 'rgba(234, 88, 12, 0.12)', border: '1px solid rgba(234, 88, 12, 0.3)', borderRadius: '10px', padding: '10px 12px', borderRight: '4px solid #ea580c' }}>
+                <div style={{ fontSize: '11.5px', color: '#ea580c', fontWeight: '700' }}>🔴 31 – 60 دقيقة</div>
+                <div style={{ fontSize: '18px', fontWeight: '800', color: 'var(--text)', margin: '2px 0' }}>
+                  {lateEmployeesToday.filter((i) => i.tier.id === 'tier_31_60').length} <span style={{ fontSize: '11px', fontWeight: '500', color: 'var(--muted)' }}>حالة</span>
                 </div>
                 <div style={{ fontSize: '11px', color: '#ea580c' }}>سماح مرة واحدة</div>
               </div>
 
-              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', padding: '10px 12px', borderRight: '4px solid #dc2626' }}>
-                <div style={{ fontSize: '11.5px', color: '#b91c1c', fontWeight: '700' }}>🟣 أكثر من 60 دقيقة</div>
-                <div style={{ fontSize: '18px', fontWeight: '800', color: '#7f1d1d', margin: '2px 0' }}>
-                  {lateEmployeesToday.filter((i) => i.tier.id === 'tier_over_60').length} <span style={{ fontSize: '11px', fontWeight: '500', color: '#4b5563' }}>حالة</span>
+              <div style={{ background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '10px', padding: '10px 12px', borderRight: '4px solid #dc2626' }}>
+                <div style={{ fontSize: '11.5px', color: '#ef4444', fontWeight: '700' }}>🟣 أكثر من 60 دقيقة</div>
+                <div style={{ fontSize: '18px', fontWeight: '800', color: 'var(--text)', margin: '2px 0' }}>
+                  {lateEmployeesToday.filter((i) => i.tier.id === 'tier_over_60').length} <span style={{ fontSize: '11px', fontWeight: '500', color: 'var(--muted)' }}>حالة</span>
                 </div>
-                <div style={{ fontSize: '11px', color: '#dc2626' }}>خصم فوري مباشر</div>
+                <div style={{ fontSize: '11px', color: '#ef4444' }}>خصم فوري مباشر</div>
               </div>
 
-              <div style={{ background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: '10px', padding: '10px 12px', borderRight: '4px solid #9333ea' }}>
-                <div style={{ fontSize: '11.5px', color: '#7e22ce', fontWeight: '700' }}>💸 إجمالي الخصم المالي لليوم</div>
-                <div style={{ fontSize: '17px', fontWeight: '800', color: '#581c87', margin: '2px 0' }}>
+              <div style={{ background: 'rgba(147, 51, 234, 0.12)', border: '1px solid rgba(147, 51, 234, 0.3)', borderRadius: '10px', padding: '10px 12px', borderRight: '4px solid #9333ea' }}>
+                <div style={{ fontSize: '11.5px', color: '#a855f7', fontWeight: '700' }}>💸 إجمالي الخصم المالي لليوم</div>
+                <div style={{ fontSize: '17px', fontWeight: '800', color: 'var(--text)', margin: '2px 0' }}>
                   {totalDeductionMinutes} دقيقة
                 </div>
-                <div style={{ fontSize: '11.5px', color: '#9333ea', fontWeight: '700' }}>
+                <div style={{ fontSize: '11.5px', color: '#a855f7', fontWeight: '700' }}>
                   ~ {fmt(totalPenaltyAmount)} ج.م
                 </div>
               </div>
@@ -1162,12 +1162,12 @@ export default function Dashboard({
                     placeholder="🔍 بحث باسم الموظف أو الكود..."
                     value={lateSearchQuery}
                     onChange={(e) => setLateSearchQuery(e.target.value)}
-                    style={{ width: '100%', padding: '6px 12px', borderRadius: '8px', border: '1px solid #fed7aa', fontSize: '12.5px' }}
+                    style={{ width: '100%', padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface-muted)', color: 'var(--text)', fontSize: '12.5px' }}
                   />
                   {lateSearchQuery && (
                     <button
                       onClick={() => setLateSearchQuery('')}
-                      style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '13px' }}
+                      style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: '13px' }}
                     >
                       ✕
                     </button>
@@ -1178,29 +1178,29 @@ export default function Dashboard({
 
             {/* Empty State */}
             {lateEmployeesToday.length === 0 ? (
-              <div style={{ background: '#dcfce7', color: '#166534', padding: '16px 20px', borderRadius: '12px', fontSize: '14px', fontWeight: 'bold', textAlign: 'center', border: '1px solid #bbf7d0', boxShadow: '0 2px 6px rgba(22, 101, 52, 0.05)' }}>
+              <div style={{ background: 'var(--primary-light, rgba(13, 148, 136, 0.1))', color: 'var(--primary-dark, #0d9488)', padding: '16px 20px', borderRadius: '12px', fontSize: '14px', fontWeight: 'bold', textAlign: 'center', border: '1px solid var(--border)' }}>
                 🟢 ممتاز! لا توجد أي حالات تأخير مسجلة اليوم — جميع الموظفين الذين حضروا التزموا بالمواعيد وفترة السماح المعتمدة باللائحة (حتى {permanentGraceMax} دقائق).
               </div>
             ) : filteredLateEmployees.length === 0 ? (
-              <div style={{ background: '#f8fafc', color: '#64748b', padding: '16px', borderRadius: '10px', textAlign: 'center', fontSize: '13px', border: '1px dashed #cbd5e1' }}>
+              <div style={{ background: 'var(--surface-muted)', color: 'var(--muted)', padding: '16px', borderRadius: '10px', textAlign: 'center', fontSize: '13px', border: '1px dashed var(--border)' }}>
                 لا توجد حالات تأخير مطابقة لخيارات التصفية الحالية.
               </div>
             ) : (
               /* Late Employees Details Table */
-              <div style={{ overflowX: 'auto', borderRadius: '12px', border: '1px solid #fed7aa', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'center', background: '#ffffff' }}>
+              <div style={{ overflowX: 'auto', borderRadius: '12px', border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'center', background: 'var(--surface)' }}>
                   <thead>
-                    <tr style={{ background: '#ffedd5', color: '#9a3412', fontWeight: 'bold' }}>
-                      <th style={{ padding: '12px 8px', borderBottom: '2px solid #fdba74' }}>#</th>
-                      <th style={{ padding: '12px 8px', borderBottom: '2px solid #fdba74', textAlign: 'right' }}>الموظف</th>
-                      <th style={{ padding: '12px 8px', borderBottom: '2px solid #fdba74' }}>الفرع المجدول</th>
-                      <th style={{ padding: '12px 8px', borderBottom: '2px solid #fdba74' }}>الموعد المجدول</th>
-                      <th style={{ padding: '12px 8px', borderBottom: '2px solid #fdba74' }}>وقت البصمة</th>
-                      <th style={{ padding: '12px 8px', borderBottom: '2px solid #fdba74' }}>مقدار التأخير والتصنيف</th>
-                      <th style={{ padding: '12px 8px', borderBottom: '2px solid #fdba74' }}>سجل التكرار بالفئة</th>
-                      <th style={{ padding: '12px 8px', borderBottom: '2px solid #fdba74' }}>الجزاء والخصم اللائحي</th>
-                      <th style={{ padding: '12px 8px', borderBottom: '2px solid #fdba74' }}>حالة الإجراء</th>
-                      <th style={{ padding: '12px 8px', borderBottom: '2px solid #fdba74' }}>إجراء الإدارة العليا</th>
+                    <tr style={{ background: 'var(--surface-muted)', color: 'var(--text)', fontWeight: 'bold' }}>
+                      <th style={{ padding: '12px 8px', borderBottom: '2px solid var(--border)' }}>#</th>
+                      <th style={{ padding: '12px 8px', borderBottom: '2px solid var(--border)', textAlign: 'right' }}>الموظف</th>
+                      <th style={{ padding: '12px 8px', borderBottom: '2px solid var(--border)' }}>الفرع المجدول</th>
+                      <th style={{ padding: '12px 8px', borderBottom: '2px solid var(--border)' }}>الموعد المجدول</th>
+                      <th style={{ padding: '12px 8px', borderBottom: '2px solid var(--border)' }}>وقت البصمة</th>
+                      <th style={{ padding: '12px 8px', borderBottom: '2px solid var(--border)' }}>مقدار التأخير والتصنيف</th>
+                      <th style={{ padding: '12px 8px', borderBottom: '2px solid var(--border)' }}>سجل التكرار بالفئة</th>
+                      <th style={{ padding: '12px 8px', borderBottom: '2px solid var(--border)' }}>الجزاء والخصم اللائحي</th>
+                      <th style={{ padding: '12px 8px', borderBottom: '2px solid var(--border)' }}>حالة الإجراء</th>
+                      <th style={{ padding: '12px 8px', borderBottom: '2px solid var(--border)' }}>إجراء الإدارة العليا</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1212,7 +1212,7 @@ export default function Dashboard({
                       const isPending = item.status === 'pending';
 
                       return (
-                        <tr key={item.emp.id} style={{ borderBottom: '1px solid #ffedd5', background: isPending && item.deductionMinutes > 0 ? '#fffaf5' : undefined }}>
+                        <tr key={item.emp.id} style={{ borderBottom: '1px solid var(--border)', background: isPending && item.deductionMinutes > 0 ? 'var(--primary-tint)' : undefined }}>
                           <td style={{ padding: '12px 8px', color: 'var(--muted)', fontWeight: 'bold' }}>{idx + 1}</td>
                           
                           {/* Employee info with avatar */}
@@ -1222,8 +1222,8 @@ export default function Dashboard({
                                 width: '32px',
                                 height: '32px',
                                 borderRadius: '50%',
-                                background: item.tier.color ? `${item.tier.color}22` : '#fee2e2',
-                                color: item.tier.color || '#c2410c',
+                                background: item.tier.color ? `${item.tier.color}22` : 'var(--danger-tint)',
+                                color: item.tier.color || 'var(--danger)',
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
@@ -1234,11 +1234,11 @@ export default function Dashboard({
                                 {item.emp.name.charAt(0)}
                               </div>
                               <div>
-                                <div style={{ fontWeight: '800', color: '#1e293b', fontSize: '13.5px' }}>
+                                <div style={{ fontWeight: '800', color: 'var(--text)', fontSize: '13.5px' }}>
                                   {item.emp.name}
                                 </div>
-                                <div style={{ fontSize: '11.5px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                  <span style={{ background: '#f1f5f9', padding: '1px 5px', borderRadius: '4px', fontWeight: 'bold' }}>#{item.emp.code}</span>
+                                <div style={{ fontSize: '11.5px', color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                  <span style={{ background: 'var(--surface-muted)', padding: '1px 5px', borderRadius: '4px', fontWeight: 'bold', border: '1px solid var(--border)' }}>#{item.emp.code}</span>
                                   <span>{item.emp.jobTitle}</span>
                                 </div>
                               </div>
@@ -1247,28 +1247,28 @@ export default function Dashboard({
 
                           {/* Branch */}
                           <td style={{ padding: '12px 8px' }}>
-                            <span style={{ background: '#f8fafc', border: '1px solid #e2e8f0', color: '#334155', padding: '3px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: '600' }}>
+                            <span style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)', color: 'var(--text)', padding: '3px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: '600' }}>
                               📍 {item.branchName}
                             </span>
                           </td>
 
                           {/* Scheduled Start */}
                           <td style={{ padding: '12px 8px' }}>
-                            <span style={{ background: '#f1f5f9', color: '#334155', padding: '3px 8px', borderRadius: '6px', fontWeight: '700', fontSize: '12.5px' }}>
+                            <span style={{ background: 'var(--surface-muted)', color: 'var(--text)', border: '1px solid var(--border)', padding: '3px 8px', borderRadius: '6px', fontWeight: '700', fontSize: '12.5px' }}>
                               {item.scheduledStart}
                             </span>
                           </td>
 
                           {/* Punch Time */}
                           <td style={{ padding: '12px 8px' }}>
-                            <span style={{ background: '#fee2e2', color: '#b91c1c', padding: '3px 8px', borderRadius: '6px', fontWeight: '700', fontSize: '12.5px' }}>
+                            <span style={{ background: 'var(--danger-tint)', color: 'var(--danger)', border: '1px solid var(--danger-border, rgba(239, 68, 68, 0.3))', padding: '3px 8px', borderRadius: '6px', fontWeight: '700', fontSize: '12.5px' }}>
                               {item.timeIn}
                             </span>
                           </td>
 
                           {/* Lateness & Tier Badge */}
                           <td style={{ padding: '12px 8px' }}>
-                            <div style={{ fontWeight: '800', color: item.tier.color || '#c2410c', fontSize: '13.5px' }}>
+                            <div style={{ fontWeight: '800', color: item.tier.color || 'var(--accent)', fontSize: '13.5px' }}>
                               +{item.diffMinutes} دقيقة
                             </div>
                             <span style={{
@@ -1278,8 +1278,9 @@ export default function Dashboard({
                               fontWeight: '700',
                               padding: '2px 8px',
                               borderRadius: '12px',
-                              background: item.tier.badgeBg || '#ffedd5',
-                              color: item.tier.badgeText || item.tier.color || '#c2410c'
+                              background: 'var(--surface-muted)',
+                              border: '1px solid var(--border)',
+                              color: item.tier.color || 'var(--text)'
                             }}>
                               {item.tier.name}
                             </span>
@@ -1288,15 +1289,15 @@ export default function Dashboard({
                           {/* Tier Occurrence History */}
                           <td style={{ padding: '12px 8px' }}>
                             {item.tier.id === 'tier_0_10' ? (
-                              <span style={{ background: '#dcfce7', color: '#15803d', padding: '3px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: '700' }}>
+                              <span style={{ background: 'var(--success-tint)', color: 'var(--success)', border: '1px solid var(--success)', padding: '3px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: '700' }}>
                                 🟢 سماح دائم
                               </span>
                             ) : (
                               <div>
-                                <span style={{ fontWeight: '700', fontSize: '12.5px', color: '#334155' }}>
+                                <span style={{ fontWeight: '700', fontSize: '12.5px', color: 'var(--text)' }}>
                                   المرة #{item.occurrenceNumber} بالدورة
                                 </span>
-                                <span style={{ display: 'block', fontSize: '11px', color: item.actionType === 'grace' ? '#16a34a' : '#dc2626', fontWeight: '600', marginTop: '2px' }}>
+                                <span style={{ display: 'block', fontSize: '11px', color: item.actionType === 'grace' ? 'var(--success)' : 'var(--danger)', fontWeight: '600', marginTop: '2px' }}>
                                   {item.actionType === 'grace'
                                     ? `(سماح متبقي: ${Math.max(0, item.graceCountInTier - item.occurrenceNumber)})`
                                     : `(تجاوز حد السماح ${item.graceCountInTier})`}
@@ -1308,20 +1309,20 @@ export default function Dashboard({
                           {/* Action & Financial Deduction */}
                           <td style={{ padding: '12px 8px' }}>
                             {isPerm ? (
-                              <span style={{ background: '#eff6ff', color: '#1d4ed8', padding: '4px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: '700' }}>
+                              <span style={{ background: 'var(--primary-light)', color: 'var(--primary-dark)', border: '1px solid var(--border)', padding: '4px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: '700' }}>
                                 🛡️ إذن معتمد (معفى)
                               </span>
                             ) : item.deductionMinutes > 0 && !isWaived ? (
                               <div>
-                                <span style={{ color: '#dc2626', fontWeight: '800', fontSize: '13px', display: 'block' }}>
+                                <span style={{ color: 'var(--danger)', fontWeight: '800', fontSize: '13px', display: 'block' }}>
                                   ⚠️ {item.actionTitle}
                                 </span>
-                                <span style={{ color: '#b91c1c', fontSize: '11.5px', fontWeight: '700' }}>
+                                <span style={{ color: 'var(--danger)', fontSize: '11.5px', fontWeight: '700' }}>
                                   خصم {item.deductionMinutes} دقيقة (~ {fmt(item.penaltyAmount)} ج.م)
                                 </span>
                               </div>
                             ) : (
-                              <span style={{ background: '#dcfce7', color: '#15803d', padding: '4px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: '700' }}>
+                              <span style={{ background: 'var(--success-tint)', color: 'var(--success)', border: '1px solid var(--success)', padding: '4px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: '700' }}>
                                 🟢 سماح (0 دقيقة - 0 ج.م)
                               </span>
                             )}
@@ -1330,23 +1331,23 @@ export default function Dashboard({
                           {/* Decision Status Badge */}
                           <td style={{ padding: '12px 8px' }}>
                             {isPerm ? (
-                              <span style={{ background: '#eff6ff', color: '#2563eb', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11.5px', display: 'inline-block' }}>
+                              <span style={{ background: 'var(--primary-tint)', color: 'var(--primary)', border: '1px solid var(--border)', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11.5px', display: 'inline-block' }}>
                                 🛡️ إذن تأخير معتمد
                               </span>
                             ) : isApproved ? (
-                              <span style={{ background: '#dcfce7', color: '#15803d', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11.5px', display: 'inline-block' }}>
+                              <span style={{ background: 'var(--success-tint)', color: 'var(--success)', border: '1px solid var(--success)', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11.5px', display: 'inline-block' }}>
                                 ✅ تم تطبيق الخصم اللائحي
                               </span>
                             ) : isWaived ? (
-                              <span style={{ background: '#f1f5f9', color: '#475569', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11.5px', display: 'inline-block' }}>
+                              <span style={{ background: 'var(--surface-muted)', color: 'var(--muted)', border: '1px solid var(--border)', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11.5px', display: 'inline-block' }}>
                                 🕊️ تم قبول العذر (استثناء)
                               </span>
                             ) : isGraceAllowed ? (
-                              <span style={{ background: '#dcfce7', color: '#166534', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11.5px', display: 'inline-block' }}>
+                              <span style={{ background: 'var(--success-tint)', color: 'var(--success)', border: '1px solid var(--success)', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11.5px', display: 'inline-block' }}>
                                 🟢 سماح لائحي نظامي
                               </span>
                             ) : (
-                              <span style={{ background: '#fef3c7', color: '#b45309', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11.5px', display: 'inline-block' }}>
+                              <span style={{ background: 'var(--accent-tint)', color: 'var(--accent)', border: '1px solid var(--border)', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '11.5px', display: 'inline-block' }}>
                                 ⏳ بانتظار اعتماد الإدارة
                               </span>
                             )}
@@ -1355,18 +1356,18 @@ export default function Dashboard({
                           {/* Admin Action Buttons */}
                           <td style={{ padding: '12px 8px' }}>
                             {isPerm ? (
-                              <span style={{ fontSize: '11.5px', color: '#2563eb', fontWeight: '600' }}>
+                              <span style={{ fontSize: '11.5px', color: 'var(--primary)', fontWeight: '600' }}>
                                 معفى رسمياً
                               </span>
                             ) : isGraceAllowed ? (
-                              <span style={{ fontSize: '11.5px', color: '#16a34a', fontWeight: '600' }}>
+                              <span style={{ fontSize: '11.5px', color: 'var(--success)', fontWeight: '600' }}>
                                 نظامي طبقاً للائحة
                               </span>
                             ) : isPending && item.deductionMinutes > 0 ? (
                               <div style={{ display: 'flex', gap: '4px', justifyContent: 'center', flexWrap: 'wrap' }}>
                                 <button
                                   className="btn btn-start"
-                                  style={{ padding: '4px 8px', fontSize: '11.5px', background: '#dc2626' }}
+                                  style={{ padding: '4px 8px', fontSize: '11.5px', background: 'var(--danger)' }}
                                   onClick={() => handleApplyLatePenalty(item)}
                                   title="تطبيق الخصم اللائحي الفوري على الراتب"
                                 >
@@ -1374,7 +1375,7 @@ export default function Dashboard({
                                 </button>
                                 <button
                                   className="btn btn-ghost"
-                                  style={{ padding: '4px 8px', fontSize: '11.5px', border: '1px solid #cbd5e1' }}
+                                  style={{ padding: '4px 8px', fontSize: '11.5px', border: '1px solid var(--border)' }}
                                   onClick={() => handleWaiveLatePenalty(item)}
                                   title="قبول العذر واستثناء الموظف بدون خصم مالي"
                                 >
@@ -1382,7 +1383,7 @@ export default function Dashboard({
                                 </button>
                                 <button
                                   className="btn btn-ghost"
-                                  style={{ padding: '4px 6px', fontSize: '11px', border: '1px solid #fed7aa', color: '#c2410c' }}
+                                  style={{ padding: '4px 6px', fontSize: '11px', border: '1px solid var(--border)', color: 'var(--accent)' }}
                                   onClick={() => openLateEditModal(item)}
                                   title="تخصيص دقائق أو سبب الخصم"
                                 >
@@ -1391,12 +1392,12 @@ export default function Dashboard({
                               </div>
                             ) : isApproved ? (
                               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
-                                <span style={{ fontSize: '11.5px', color: '#166534', fontWeight: 'bold' }}>
+                                <span style={{ fontSize: '11.5px', color: 'var(--success)', fontWeight: 'bold' }}>
                                   💸 خصم {item.deductionMinutes} د (~{fmt(item.penaltyAmount)} ج.م)
                                 </span>
                                 <button
                                   onClick={() => handleWaiveLatePenalty(item)}
-                                  style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '11px', textDecoration: 'underline' }}
+                                  style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: '11px', textDecoration: 'underline' }}
                                   title="إلغاء الخصم وقبول العذر"
                                 >
                                   إعفاء
@@ -1404,13 +1405,13 @@ export default function Dashboard({
                               </div>
                             ) : isWaived ? (
                               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
-                                <span style={{ fontSize: '11.5px', color: '#64748b', fontWeight: 'bold' }}>
+                                <span style={{ fontSize: '11.5px', color: 'var(--muted)', fontWeight: 'bold' }}>
                                   🕊️ معفى بدون خصم
                                 </span>
                                 {item.deductionMinutes > 0 && (
                                   <button
                                     onClick={() => handleApplyLatePenalty(item)}
-                                    style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '11px', textDecoration: 'underline' }}
+                                    style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: '11px', textDecoration: 'underline' }}
                                     title="إعادة تطبيق الخصم"
                                   >
                                     تطبيق
@@ -1429,22 +1430,22 @@ export default function Dashboard({
 
             {/* Custom Penalty Override Modal */}
             {lateEditModalItem && (
-              <div className="modal-backdrop" onClick={() => setLateEditModalItem(null)} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
-                <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ background: '#fff', padding: '24px', borderRadius: '16px', maxWidth: '480px', width: '92%', boxShadow: '0 20px 40px rgba(0,0,0,0.2)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #f1f5f9', paddingBottom: '12px' }}>
-                    <h3 style={{ margin: 0, fontSize: '16px', color: '#c2410c', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <div className="modal-backdrop" onClick={() => setLateEditModalItem(null)} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+                <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)', padding: '24px', borderRadius: '16px', maxWidth: '480px', width: '92%', boxShadow: 'var(--shadow-lg)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '12px' }}>
+                    <h3 style={{ margin: 0, fontSize: '16px', color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                       ✏️ تخصيص وتعديل جزاء التأخير للموظف
                     </h3>
-                    <button onClick={() => setLateEditModalItem(null)} style={{ background: 'none', border: 'none', fontSize: '16px', cursor: 'pointer', color: '#94a3b8' }}>✕</button>
+                    <button onClick={() => setLateEditModalItem(null)} style={{ background: 'none', border: 'none', fontSize: '16px', cursor: 'pointer', color: 'var(--muted)' }}>✕</button>
                   </div>
 
-                  <div style={{ fontSize: '13px', color: '#334155', marginBottom: '14px' }}>
+                  <div style={{ fontSize: '13px', color: 'var(--text)', marginBottom: '14px' }}>
                     <div>الموظف: <strong>{lateEditModalItem.emp.name} ({lateEditModalItem.emp.code})</strong></div>
                     <div>التأخير المسجل: <strong>+{lateEditModalItem.diffMinutes} دقيقة</strong> ({lateEditModalItem.tier.name})</div>
                   </div>
 
                   <div style={{ marginBottom: '14px' }}>
-                    <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 'bold', marginBottom: '6px', color: '#1e293b' }}>
+                    <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 'bold', marginBottom: '6px', color: 'var(--text)' }}>
                       دقائق الخصم المعتمدة:
                     </label>
                     <input
@@ -1452,7 +1453,7 @@ export default function Dashboard({
                       min="0"
                       value={lateEditDeductionMins}
                       onChange={(e) => setLateEditDeductionMins(e.target.value)}
-                      style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                      style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface-muted)', color: 'var(--text)', fontSize: '13px' }}
                     />
                     <span style={{ fontSize: '11.5px', color: '#64748b', marginTop: '4px', display: 'block' }}>
                       القيمة المالية المقدرة: ~ {fmt(computeLatenessFinancialAmount(lateEditDeductionMins, lateEditModalItem.emp, lateEditModalItem.branchId))} ج.م

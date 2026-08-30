@@ -649,7 +649,6 @@ export default function PayrollModule({
                   </h4>
                 </div>
               </div>
-
               {/* Late Penalties Detailed Incidents Table */}
               {(() => {
                 const empLateIncidents = (state.lateIncidents || []).filter(
@@ -675,20 +674,20 @@ export default function PayrollModule({
                 if (empLateIncidents.length === 0) return null;
 
                 return (
-                  <div style={{ marginBottom: '22px', background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '12px', padding: '16px' }}>
+                  <div style={{ marginBottom: '22px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', padding: '16px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                      <h4 style={{ margin: 0, fontFamily: 'Cairo', color: '#c2410c', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <h4 style={{ margin: 0, fontFamily: 'Cairo', color: 'var(--accent)', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <span>⏱️</span> جدول وقائع وأيام التأخير والخصم اليومي المعتمد ({empLateIncidents.length} واقعة تأخير)
                       </h4>
-                      <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#9a3412' }}>
+                      <span style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--accent)' }}>
                         إجمالي خصم التأخيرات: {fmt(empSum.lateDeduction)} ج.م ({empSum.lateDeductionMinutes} دقيقة)
                       </span>
                     </div>
 
                     <div style={{ overflowX: 'auto' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'center', background: '#fff', borderRadius: '8px', overflow: 'hidden' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'center', background: 'var(--surface)', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border)' }}>
                         <thead>
-                          <tr style={{ background: '#ffedd5', color: '#9a3412', borderBottom: '1px solid #fed7aa' }}>
+                          <tr style={{ background: 'var(--surface-muted)', color: 'var(--accent)', borderBottom: '1px solid var(--border)' }}>
                             <th style={{ padding: '8px 10px' }}>التاريخ</th>
                             <th style={{ padding: '8px 10px' }}>موعد الشيفت</th>
                             <th style={{ padding: '8px 10px' }}>الحضور الفعلي</th>
@@ -705,12 +704,12 @@ export default function PayrollModule({
                             const dayAmt = computeLatenessFinancialAmount(inc.deductionMinutes || 0, selectedEmpModal, inc.branchId || filterBranch);
                             const penaltyVal = dayAmt > 0 ? dayAmt : (parseFloat(inc.penaltyAmount) || 0);
                             return (
-                              <tr key={inc.id} style={{ borderBottom: '1px solid #fed7aa' }}>
+                              <tr key={inc.id} style={{ borderBottom: '1px solid var(--border)' }}>
                                 <td style={{ padding: '7px 10px', fontWeight: 600 }}>{inc.date}</td>
-                                <td style={{ padding: '7px 10px', color: '#2563eb', fontWeight: 600 }}>{inc.scheduledStartTime}</td>
-                                <td style={{ padding: '7px 10px', fontWeight: 600 }}>{inc.actualPunchInTime}</td>
+                                <td style={{ padding: '7px 10px', color: 'var(--primary)', fontWeight: 600 }}>{inc.scheduledStartTime}</td>
+                                <td style={{ padding: '7px 10px', fontWeight: 600, color: 'var(--danger)' }}>{inc.actualPunchInTime}</td>
                                 <td style={{ padding: '7px 10px' }}>
-                                  <span style={{ background: 'rgba(234,88,12,0.1)', color: '#ea580c', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
+                                  <span style={{ background: 'var(--accent-tint)', color: 'var(--accent)', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700 }}>
                                     {inc.lateMinutes} دقيقة
                                   </span>
                                 </td>

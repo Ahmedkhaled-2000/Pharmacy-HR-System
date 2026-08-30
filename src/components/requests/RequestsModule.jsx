@@ -2070,8 +2070,8 @@ export default function RequestsModule({
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', fontSize: '13.5px' }}>
                 
                 {/* 1. Employee & Branch Information Card */}
-                <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-                  <h4 style={{ margin: '0 0 12px', color: '#1e293b', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <div style={{ background: 'var(--surface)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>
+                  <h4 style={{ margin: '0 0 12px', color: 'var(--text)', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                     👤 بيانات الموظف ومقدم الطلب:
                   </h4>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' }}>
@@ -2110,32 +2110,32 @@ export default function RequestsModule({
 
                 {/* 2. Approvals Status Bar */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px' }}>
-                  <div style={{ background: '#fff', padding: '12px 16px', borderRadius: '10px', border: '1px solid var(--border)' }}>
+                  <div style={{ background: 'var(--surface)', padding: '12px 16px', borderRadius: '10px', border: '1px solid var(--border)' }}>
                     <span style={{ fontSize: '12px', color: 'var(--muted)' }}>موقف موافقة مدير الفرع:</span>
                     <div style={{ marginTop: '4px', fontWeight: 'bold', fontSize: '13.5px' }}>
                       {isBranchNotReq ? (
-                        <span style={{ color: '#475569' }}>🔒 موجهة للإدارة العليا فقط (لا تتطلب موافقة الفرع)</span>
+                        <span style={{ color: 'var(--muted)' }}>🔒 موجهة للإدارة العليا فقط (لا تتطلب موافقة الفرع)</span>
                       ) : (previewModalReq.branchApproved || previewModalReq.branchApprovalStatus === 'approved' || previewModalReq.managerStatus === 'approved' || previewModalReq.branchDecision === 'approved') ? (
-                        <span style={{ color: '#16a34a' }}>🟢 معتمد وموافق عليه من مدير الفرع</span>
+                        <span style={{ color: 'var(--success)' }}>🟢 معتمد وموافق عليه من مدير الفرع</span>
                       ) : (previewModalReq.branchRejected || previewModalReq.branchApprovalStatus === 'rejected' || previewModalReq.managerStatus === 'rejected' || previewModalReq.branchDecision === 'rejected' || (previewModalReq.branchApproved === false && (previewModalReq.branchRejectedAt || previewModalReq.branchDecision))) ? (
-                        <span style={{ color: '#dc2626' }}>❌ لم يوافق مدير الفرع (محال لقرار الإدارة العليا)</span>
+                        <span style={{ color: 'var(--danger)' }}>❌ لم يوافق مدير الفرع (محال لقرار الإدارة العليا)</span>
                       ) : (
-                        <span style={{ color: '#d97706' }}>⏳ بانتظار مراجعة واعتماد مدير الفرع</span>
+                        <span style={{ color: 'var(--accent)' }}>⏳ بانتظار مراجعة واعتماد مدير الفرع</span>
                       )}
                     </div>
                   </div>
 
-                  <div style={{ background: '#fff', padding: '12px 16px', borderRadius: '10px', border: '1px solid var(--border)' }}>
+                  <div style={{ background: 'var(--surface)', padding: '12px 16px', borderRadius: '10px', border: '1px solid var(--border)' }}>
                     <span style={{ fontSize: '12px', color: 'var(--muted)' }}>موقف اعتماد الإدارة العليا:</span>
                     <div style={{ marginTop: '4px', fontWeight: 'bold', fontSize: '13.5px' }}>
                       {previewModalReq.status === 'approved' || previewModalReq.adminApproved ? (
-                        <span style={{ color: '#16a34a' }}>🟢 معتمد نهائياً ومطبق بالنظام</span>
+                        <span style={{ color: 'var(--success)' }}>🟢 معتمد نهائياً ومطبق بالنظام</span>
                       ) : previewModalReq.status === 'rejected' ? (
-                        <span style={{ color: '#dc2626' }}>🔴 مرفوض من الإدارة العليا</span>
+                        <span style={{ color: 'var(--danger)' }}>🔴 مرفوض من الإدارة العليا</span>
                       ) : (previewModalReq.branchRejected || previewModalReq.branchApprovalStatus === 'rejected' || previewModalReq.managerStatus === 'rejected' || previewModalReq.branchDecision === 'rejected') ? (
-                        <span style={{ color: '#c2410c' }}>⏳ قيد نظر الإدارة العليا (لم يوافق الفرع)</span>
+                        <span style={{ color: 'var(--accent)' }}>⏳ قيد نظر الإدارة العليا (لم يوافق الفرع)</span>
                       ) : (
-                        <span style={{ color: '#d97706' }}>🟡 بانتظار قرار واعتماد الإدارة العليا</span>
+                        <span style={{ color: 'var(--accent)' }}>🟡 بانتظار قرار واعتماد الإدارة العليا</span>
                       )}
                     </div>
                   </div>
@@ -2145,32 +2145,32 @@ export default function RequestsModule({
                 
                 {/* ── LEAVE DETAILS ── */}
                 {isLeave && (
-                  <div style={{ background: '#f0fdf4', padding: '16px', borderRadius: '12px', border: '1px solid #bbf7d0' }}>
-                    <h4 style={{ margin: '0 0 10px', color: '#166534', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <div style={{ background: 'var(--surface-muted)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>
+                    <h4 style={{ margin: '0 0 10px', color: 'var(--success)', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                       🏖️ تفاصيل الإجازة المطلوبة:
                     </h4>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
                       <div>
-                        <span style={{ fontSize: '12px', color: '#166534' }}>نوع الإجازة:</span>
-                        <div style={{ fontWeight: 'bold', color: '#14532d', fontSize: '14px' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>نوع الإجازة:</span>
+                        <div style={{ fontWeight: 'bold', color: 'var(--text)', fontSize: '14px' }}>
                           {previewModalReq.leaveType === 'annual' ? 'إجازة سنوية اعتيادية' : previewModalReq.leaveType === 'sick' ? 'إجازة مرضية' : previewModalReq.leaveType === 'unpaid' ? 'إجازة بدون أجر' : 'إجازة رسمية'}
                         </div>
                       </div>
                       <div>
-                        <span style={{ fontSize: '12px', color: '#166534' }}>تاريخ البدء:</span>
-                        <div style={{ fontWeight: 'bold', color: '#14532d' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>تاريخ البدء:</span>
+                        <div style={{ fontWeight: 'bold', color: 'var(--text)' }}>
                           📅 {previewModalReq.startDate || '—'} {previewModalReq.startDate && `(${arabicWeekday(previewModalReq.startDate)})`}
                         </div>
                       </div>
                       <div>
-                        <span style={{ fontSize: '12px', color: '#166534' }}>تاريخ الانتهاء:</span>
-                        <div style={{ fontWeight: 'bold', color: '#14532d' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>تاريخ الانتهاء:</span>
+                        <div style={{ fontWeight: 'bold', color: 'var(--text)' }}>
                           📅 {previewModalReq.endDate || '—'} {previewModalReq.endDate && `(${arabicWeekday(previewModalReq.endDate)})`}
                         </div>
                       </div>
-                      <div style={{ background: '#dcfce7', padding: '8px 12px', borderRadius: '8px', border: '1px solid #86efac' }}>
-                        <span style={{ fontSize: '12px', color: '#166534', fontWeight: 'bold' }}>إجمالي عدد أيام الإجازة:</span>
-                        <div style={{ fontWeight: '900', color: '#15803d', fontSize: '16px' }}>
+                      <div style={{ background: 'var(--success-tint)', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--success)' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--success)', fontWeight: 'bold' }}>إجمالي عدد أيام الإجازة:</span>
+                        <div style={{ fontWeight: '900', color: 'var(--success)', fontSize: '16px' }}>
                           ⏱️ {calculateLeaveDays()} أيام
                         </div>
                       </div>
@@ -2180,9 +2180,9 @@ export default function RequestsModule({
 
                 {/* ── LOAN / ADVANCE / MEDS DETAILS (مع إمكانية تعديل الإدارة العليا قبل الاعتماد) ── */}
                 {isLoan && (
-                  <div style={{ background: '#eff6ff', padding: '16px', borderRadius: '12px', border: '1px solid #bfdbfe' }}>
+                  <div style={{ background: 'var(--surface-muted)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
-                      <h4 style={{ margin: 0, color: '#1e40af', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <h4 style={{ margin: 0, color: 'var(--primary)', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                         💳 تفاصيل السلفة / الدواء الآجل المطلوب:
                       </h4>
                       {previewModalReq.status !== 'approved' && previewModalReq.status !== 'rejected' && (
@@ -2192,9 +2192,9 @@ export default function RequestsModule({
                           style={{
                             padding: '5px 12px',
                             fontSize: '12px',
-                            background: isEditingLoan ? '#2563eb' : '#fff',
-                            color: isEditingLoan ? '#fff' : '#1d4ed8',
-                            border: '1px solid #93c5fd',
+                            background: isEditingLoan ? 'var(--primary)' : 'var(--surface)',
+                            color: isEditingLoan ? '#fff' : 'var(--primary)',
+                            border: '1px solid var(--primary)',
                             borderRadius: '6px',
                             cursor: 'pointer',
                             fontWeight: 'bold',
@@ -2211,27 +2211,27 @@ export default function RequestsModule({
 
                     {/* Summary Card */}
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: isEditingLoan ? '14px' : '0' }}>
-                      <div style={{ background: '#dbeafe', padding: '10px 14px', borderRadius: '8px', border: '1px solid #93c5fd' }}>
-                        <span style={{ fontSize: '12px', color: '#1e40af', fontWeight: 'bold' }}>المبلغ المطلوب من الموظف:</span>
-                        <div style={{ fontWeight: '900', color: '#1d4ed8', fontSize: '17px' }}>
+                      <div style={{ background: 'var(--primary-tint)', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--primary)' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--primary)', fontWeight: 'bold' }}>المبلغ المطلوب من الموظف:</span>
+                        <div style={{ fontWeight: '900', color: 'var(--primary)', fontSize: '17px' }}>
                           💰 {previewModalReq.originalAmount || previewModalReq.amount || previewModalReq.totalAmount} ج.م
                         </div>
                       </div>
                       <div>
-                        <span style={{ fontSize: '12px', color: '#1e40af' }}>نظام السداد المطلوب:</span>
-                        <div style={{ fontWeight: 'bold', color: '#1e3a8a', fontSize: '13.5px' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>نظام السداد المطلوب:</span>
+                        <div style={{ fontWeight: 'bold', color: 'var(--text)', fontSize: '13.5px' }}>
                           {isInstallment ? '📆 سلفة مقسطة على عدة شهور' : '💵 سلفة شهرية (خصم دفعة واحدة)'}
                         </div>
                       </div>
                       <div>
-                        <span style={{ fontSize: '12px', color: '#1e40af' }}>عدد الأقساط:</span>
-                        <div style={{ fontWeight: 'bold', color: '#1e3a8a' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>عدد الأقساط:</span>
+                        <div style={{ fontWeight: 'bold', color: 'var(--text)' }}>
                           {installmentsCount} شهر / قسط
                         </div>
                       </div>
                       <div>
-                        <span style={{ fontSize: '12px', color: '#1e40af' }}>قيمة الخصم الشهري (القسط):</span>
-                        <div style={{ fontWeight: 'bold', color: '#1d4ed8', fontSize: '14px' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>قيمة الخصم الشهري (القسط):</span>
+                        <div style={{ fontWeight: 'bold', color: 'var(--primary)', fontSize: '14px' }}>
                           {monthlyDed > 0 ? `${monthlyDed} ج.م / شهر` : `${totalAmount} ج.م`}
                         </div>
                       </div>
@@ -2243,25 +2243,25 @@ export default function RequestsModule({
                       if (medItemsList.length === 0) return null;
 
                       return (
-                        <div style={{ marginTop: '14px', background: '#fff', padding: '12px 14px', borderRadius: '10px', border: '1.5px solid #0d9488', boxShadow: '0 2px 5px rgba(13,148,136,0.06)' }}>
+                        <div style={{ marginTop: '14px', background: 'var(--surface)', padding: '12px 14px', borderRadius: '10px', border: '1.5px solid var(--primary)', boxShadow: 'var(--shadow-sm)' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
-                            <h5 style={{ margin: 0, color: '#0f766e', fontSize: '13.5px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <h5 style={{ margin: 0, color: 'var(--primary)', fontSize: '13.5px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
                               <span>💊</span>
                               <span>بيان وقائمة الأصناف والأدوية المطلوبة بالآجل ({medItemsList.length} صنف):</span>
                             </h5>
-                            <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#0f766e', background: '#ccfbf1', padding: '3px 10px', borderRadius: '6px' }}>
+                            <span style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--primary)', background: 'var(--primary-tint)', padding: '3px 10px', borderRadius: '6px' }}>
                               إجمالي تكلفة الأصناف: {fmt(previewModalReq.totalAmount || previewModalReq.amount || totalAmount)} ج.م
                             </span>
                           </div>
                           <div className="table-responsive">
                             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'center' }}>
                               <thead>
-                                <tr style={{ background: '#f0fdfa', color: '#134e4a', fontWeight: 'bold' }}>
-                                  <th style={{ padding: '6px', border: '1px solid #99f6e4', width: '6%' }}>#</th>
-                                  <th style={{ padding: '6px 12px', border: '1px solid #99f6e4', width: '42%', textAlign: 'right' }}>اسم الدواء / الصنف</th>
-                                  <th style={{ padding: '6px', border: '1px solid #99f6e4', width: '18%' }}>سعر الوحدة</th>
-                                  <th style={{ padding: '6px', border: '1px solid #99f6e4', width: '14%' }}>الكمية</th>
-                                  <th style={{ padding: '6px', border: '1px solid #99f6e4', width: '20%' }}>الإجمالي الصافي</th>
+                                <tr style={{ background: 'var(--surface-muted)', color: 'var(--primary)', fontWeight: 'bold' }}>
+                                  <th style={{ padding: '6px', border: '1px solid var(--border)', width: '6%' }}>#</th>
+                                  <th style={{ padding: '6px 12px', border: '1px solid var(--border)', width: '42%', textAlign: 'right' }}>اسم الدواء / الصنف</th>
+                                  <th style={{ padding: '6px', border: '1px solid var(--border)', width: '18%' }}>سعر الوحدة</th>
+                                  <th style={{ padding: '6px', border: '1px solid var(--border)', width: '14%' }}>الكمية</th>
+                                  <th style={{ padding: '6px', border: '1px solid var(--border)', width: '20%' }}>الإجمالي الصافي</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -2270,14 +2270,14 @@ export default function RequestsModule({
                                   const itemQty = parseFloat(item.qty || item.quantity) || 1;
                                   const itemTotal = itemPrice * itemQty;
                                   return (
-                                    <tr key={item.id || idx} style={{ background: idx % 2 === 0 ? '#fff' : '#f0fdfa' }}>
-                                      <td style={{ padding: '6px', border: '1px solid #99f6e4' }}>{idx + 1}</td>
-                                      <td style={{ padding: '6px 12px', border: '1px solid #99f6e4', textAlign: 'right', fontWeight: 'bold', color: '#0f766e' }}>
+                                    <tr key={item.id || idx} style={{ background: idx % 2 === 0 ? 'var(--surface)' : 'var(--surface-muted)' }}>
+                                      <td style={{ padding: '6px', border: '1px solid var(--border)' }}>{idx + 1}</td>
+                                      <td style={{ padding: '6px 12px', border: '1px solid var(--border)', textAlign: 'right', fontWeight: 'bold', color: 'var(--primary)' }}>
                                         {item.name || item.title || 'دواء / صنف'}
                                       </td>
-                                      <td style={{ padding: '6px', border: '1px solid #99f6e4' }}>{fmt(itemPrice)} ج.م</td>
-                                      <td style={{ padding: '6px', border: '1px solid #99f6e4', fontWeight: 'bold' }}>{itemQty}</td>
-                                      <td style={{ padding: '6px', border: '1px solid #99f6e4', fontWeight: 'bold', color: '#0d9488' }}>
+                                      <td style={{ padding: '6px', border: '1px solid var(--border)' }}>{fmt(itemPrice)} ج.م</td>
+                                      <td style={{ padding: '6px', border: '1px solid var(--border)', fontWeight: 'bold' }}>{itemQty}</td>
+                                      <td style={{ padding: '6px', border: '1px solid var(--border)', fontWeight: 'bold', color: 'var(--primary)' }}>
                                         {fmt(itemTotal)} ج.م
                                       </td>
                                     </tr>
@@ -2285,11 +2285,11 @@ export default function RequestsModule({
                                 })}
                               </tbody>
                               <tfoot>
-                                <tr style={{ background: '#ccfbf1', fontWeight: 'bold', color: '#0f766e', fontSize: '12.5px' }}>
-                                  <td colSpan="4" style={{ padding: '6px 12px', border: '1px solid #99f6e4', textAlign: 'right' }}>
+                                <tr style={{ background: 'var(--surface-muted)', fontWeight: 'bold', color: 'var(--primary)', fontSize: '12.5px' }}>
+                                  <td colSpan="4" style={{ padding: '6px 12px', border: '1px solid var(--border)', textAlign: 'right' }}>
                                     المجموع الكلي المطلوب للأدوية:
                                   </td>
-                                  <td style={{ padding: '6px', border: '1px solid #99f6e4', fontWeight: '900', color: '#0f766e' }}>
+                                  <td style={{ padding: '6px', border: '1px solid var(--border)', fontWeight: '900', color: 'var(--primary)' }}>
                                     {fmt(previewModalReq.totalAmount || previewModalReq.amount || totalAmount)} ج.م
                                   </td>
                                 </tr>
@@ -2302,7 +2302,7 @@ export default function RequestsModule({
 
                     {/* Badge if Modified by Admin */}
                     {previewModalReq.adminModified && (
-                      <div style={{ marginTop: '12px', background: '#fef3c7', border: '1px solid #fde68a', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', color: '#92400e' }}>
+                      <div style={{ marginTop: '12px', background: 'var(--accent-tint)', border: '1px solid var(--accent)', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', color: 'var(--accent)' }}>
                         <strong>⚠️ قرار وتعديل الإدارة العليا: </strong>
                         تم تعديل المبلغ المعتمد إلى <strong>{previewModalReq.amount} ج.م</strong>
                         {previewModalReq.adminNotes && ` — (${previewModalReq.adminNotes})`}
@@ -2311,15 +2311,15 @@ export default function RequestsModule({
 
                     {/* Interactive Admin Edit Form */}
                     {isEditingLoan && (
-                      <div style={{ marginTop: '14px', background: '#fff', border: '2px solid #3b82f6', padding: '14px', borderRadius: '10px', boxShadow: '0 4px 12px rgba(59, 130, 246, 0.08)' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '12px', color: '#1e40af', fontWeight: 'bold', fontSize: '13.5px' }}>
+                      <div style={{ marginTop: '14px', background: 'var(--surface)', border: '2px solid var(--primary)', padding: '14px', borderRadius: '10px', boxShadow: 'var(--shadow-sm)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '12px', color: 'var(--primary)', fontWeight: 'bold', fontSize: '13.5px' }}>
                           <span>✏️</span>
                           <span>لوحة تعديل وتخصيص السلفة المعتمدة من الإدارة العليا:</span>
                         </div>
 
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', alignItems: 'flex-end' }}>
                           <div>
-                            <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#334155', marginBottom: '4px' }}>
+                            <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: 'var(--text)', marginBottom: '4px' }}>
                               المبلغ المعتمد النهائي (ج.م) *
                             </label>
                             <input
@@ -2335,12 +2335,12 @@ export default function RequestsModule({
                                   setLoanCustomMonthlyDed(val);
                                 }
                               }}
-                              style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1.5px solid #3b82f6', fontWeight: 'bold', fontSize: '14px', color: '#1e40af', background: '#f0f7ff' }}
+                              style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1.5px solid var(--primary)', fontWeight: 'bold', fontSize: '14px', color: 'var(--primary)', background: 'var(--surface-muted)' }}
                             />
                           </div>
 
                           <div>
-                            <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#334155', marginBottom: '4px' }}>
+                            <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: 'var(--text)', marginBottom: '4px' }}>
                               نظام السداد والخصم
                             </label>
                             <select
@@ -2368,7 +2368,7 @@ export default function RequestsModule({
 
                           {loanCustomType === 'installment' && (
                             <div>
-                              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#334155', marginBottom: '4px' }}>
+                              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: 'var(--text)', marginBottom: '4px' }}>
                                 عدد الأقساط (شهور)
                               </label>
                               <input
@@ -2390,7 +2390,7 @@ export default function RequestsModule({
 
                           {loanCustomType === 'installment' && (
                             <div>
-                              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#334155', marginBottom: '4px' }}>
+                              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: 'var(--text)', marginBottom: '4px' }}>
                                 القسط الشهري المستقطع (ج.م)
                               </label>
                               <input
@@ -2405,7 +2405,7 @@ export default function RequestsModule({
                         </div>
 
                         <div style={{ marginTop: '10px' }}>
-                          <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#334155', marginBottom: '4px' }}>
+                          <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: 'var(--text)', marginBottom: '4px' }}>
                             📝 ملاحظة / توجيه الإدارة العليا بخصوص التعديل (تظهر للموظف وفي مسير الرواتب):
                           </label>
                           <input
@@ -2491,27 +2491,27 @@ export default function RequestsModule({
 
                 {/* ── SHIFT SWAP DETAILS ── */}
                 {isSwap && (
-                  <div style={{ background: '#f5f3ff', padding: '16px', borderRadius: '12px', border: '1px solid #ddd6fe' }}>
-                    <h4 style={{ margin: '0 0 10px', color: '#5b21b6', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <div style={{ background: 'var(--surface-muted)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>
+                    <h4 style={{ margin: '0 0 10px', color: '#a855f7', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                       🔄 تفاصيل تبديل الشيفت والراحات بين الموظفين:
                     </h4>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px' }}>
-                      <div style={{ background: '#fff', padding: '12px', borderRadius: '10px', border: '1px solid #c4b5fd' }}>
-                        <span style={{ fontSize: '12px', color: '#5b21b6', fontWeight: 'bold' }}>1. الموظف الطالب (الطرف الأول):</span>
-                        <div style={{ fontWeight: 'bold', color: '#4c1d95', marginTop: '2px' }}>
+                      <div style={{ background: 'var(--surface)', padding: '12px', borderRadius: '10px', border: '1px solid var(--border)' }}>
+                        <span style={{ fontSize: '12px', color: '#a855f7', fontWeight: 'bold' }}>1. الموظف الطالب (الطرف الأول):</span>
+                        <div style={{ fontWeight: 'bold', color: 'var(--text)', marginTop: '2px' }}>
                           {previewModalReq.employeeName || empObj?.name || 'مقدم الطلب'} {empObj?.code ? `(كود: ${empObj.code})` : ''}
                         </div>
-                        <div style={{ fontSize: '13px', color: '#6d28d9', marginTop: '4px' }}>
+                        <div style={{ fontSize: '13px', color: 'var(--muted)', marginTop: '4px' }}>
                           📅 تاريخ شيفت الموظف: <strong>{previewModalReq.requesterDate || previewModalReq.startDate || previewModalReq.date || '—'}</strong> { (previewModalReq.requesterDate || previewModalReq.startDate || previewModalReq.date) && `(${arabicWeekday(previewModalReq.requesterDate || previewModalReq.startDate || previewModalReq.date)})` }
                         </div>
                       </div>
 
-                      <div style={{ background: '#fff', padding: '12px', borderRadius: '10px', border: '1px solid #c4b5fd' }}>
-                        <span style={{ fontSize: '12px', color: '#5b21b6', fontWeight: 'bold' }}>2. الزميل البديل (الطرف الثاني):</span>
-                        <div style={{ fontWeight: 'bold', color: '#4c1d95', marginTop: '2px' }}>
+                      <div style={{ background: 'var(--surface)', padding: '12px', borderRadius: '10px', border: '1px solid var(--border)' }}>
+                        <span style={{ fontSize: '12px', color: '#a855f7', fontWeight: 'bold' }}>2. الزميل البديل (الطرف الثاني):</span>
+                        <div style={{ fontWeight: 'bold', color: 'var(--text)', marginTop: '2px' }}>
                           {previewModalReq.targetEmpName || targetEmpObj?.name || 'الزميل البديل'} {targetEmpObj?.code ? `(كود: ${targetEmpObj.code})` : ''}
                         </div>
-                        <div style={{ fontSize: '13px', color: '#6d28d9', marginTop: '4px' }}>
+                        <div style={{ fontSize: '13px', color: 'var(--muted)', marginTop: '4px' }}>
                           📅 تاريخ شيفت الزميل: <strong>{previewModalReq.targetDate || previewModalReq.peerDate || '—'}</strong> { (previewModalReq.targetDate || previewModalReq.peerDate) && `(${arabicWeekday(previewModalReq.targetDate || previewModalReq.peerDate)})` }
                         </div>
                       </div>
@@ -2521,39 +2521,39 @@ export default function RequestsModule({
 
                 {/* ── PUNCH CORRECTION / MANUAL PUNCH DETAILS ── */}
                 {isPunch && (
-                  <div style={{ background: '#f0fdf4', padding: '16px', borderRadius: '12px', border: '1px solid #bbf7d0' }}>
-                    <h4 style={{ margin: '0 0 10px', color: '#166534', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <div style={{ background: 'var(--surface-muted)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>
+                    <h4 style={{ margin: '0 0 10px', color: 'var(--success)', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                       🖐️ تفاصيل تسجيل / تعديل البصمة اليدوية:
                     </h4>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
                       <div>
-                        <span style={{ fontSize: '12px', color: '#166534' }}>نوع البصمة:</span>
-                        <div style={{ fontWeight: 'bold', color: '#14532d' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>نوع البصمة:</span>
+                        <div style={{ fontWeight: 'bold', color: 'var(--text)' }}>
                           {previewModalReq.punchType === 'full' ? 'حضور وانصراف (وردية كاملة)' : previewModalReq.punchType === 'in' ? 'تسجيل حضور فقط' : previewModalReq.punchType === 'out' ? 'تسجيل انصراف فقط' : 'تعديل توقيت بصمة'}
                         </div>
                       </div>
                       <div>
-                        <span style={{ fontSize: '12px', color: '#166534' }}>تاريخ البصمة:</span>
-                        <div style={{ fontWeight: 'bold', color: '#14532d' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>تاريخ البصمة:</span>
+                        <div style={{ fontWeight: 'bold', color: 'var(--text)' }}>
                           📅 {previewModalReq.date || '—'} {previewModalReq.date && `(${arabicWeekday(previewModalReq.date)})`}
                         </div>
                       </div>
                       <div>
-                        <span style={{ fontSize: '12px', color: '#166534' }}>وقت الحضور والانصراف:</span>
-                        <div style={{ fontWeight: 'bold', color: '#14532d' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>وقت الحضور والانصراف:</span>
+                        <div style={{ fontWeight: 'bold', color: 'var(--text)' }}>
                           من <strong>{previewModalReq.timeIn || '—'}</strong> إلى <strong>{previewModalReq.timeOut || '—'}</strong>
                         </div>
                       </div>
                       <div>
-                        <span style={{ fontSize: '12px', color: '#166534' }}>ساعات البريك المخصومة:</span>
-                        <div style={{ fontWeight: 'bold', color: '#14532d' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>ساعات البريك المخصومة:</span>
+                        <div style={{ fontWeight: 'bold', color: 'var(--text)' }}>
                           ☕ {previewModalReq.breakHours !== undefined ? previewModalReq.breakHours : 0} ساعة
                         </div>
                       </div>
                       {previewModalReq.hours && (
-                        <div style={{ background: '#dcfce7', padding: '8px 12px', borderRadius: '8px', border: '1px solid #86efac' }}>
-                          <span style={{ fontSize: '12px', color: '#166534', fontWeight: 'bold' }}>صافي ساعات العمل المحسوبة:</span>
-                          <div style={{ fontWeight: '900', color: '#15803d', fontSize: '16px' }}>
+                        <div style={{ background: 'var(--success-tint)', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--success)' }}>
+                          <span style={{ fontSize: '12px', color: 'var(--success)', fontWeight: 'bold' }}>صافي ساعات العمل المحسوبة:</span>
+                          <div style={{ fontWeight: '900', color: 'var(--success)', fontSize: '16px' }}>
                             ⏱️ {previewModalReq.hours} ساعة
                           </div>
                         </div>
@@ -2564,26 +2564,26 @@ export default function RequestsModule({
 
                 {/* ── BONUS DETAILS ── */}
                 {previewModalReq.type === 'bonus' && (
-                  <div style={{ background: '#f0fdf4', padding: '16px', borderRadius: '12px', border: '1px solid #86efac' }}>
-                    <h4 style={{ margin: '0 0 10px', color: '#15803d', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <div style={{ background: 'var(--surface-muted)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>
+                    <h4 style={{ margin: '0 0 10px', color: 'var(--success)', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                       🎁 تفاصيل طلب المكافأة / الحافز:
                     </h4>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
-                      <div style={{ background: '#dcfce7', padding: '10px 14px', borderRadius: '8px', border: '1px solid #86efac' }}>
-                        <span style={{ fontSize: '12px', color: '#15803d', fontWeight: 'bold' }}>مبلغ المكافأة المقترح:</span>
-                        <div style={{ fontWeight: '900', color: '#166534', fontSize: '18px' }}>
+                      <div style={{ background: 'var(--success-tint)', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--success)' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--success)', fontWeight: 'bold' }}>مبلغ المكافأة المقترح:</span>
+                        <div style={{ fontWeight: '900', color: 'var(--success)', fontSize: '18px' }}>
                           💰 {previewModalReq.amount} ج.م
                         </div>
                       </div>
                       <div>
-                        <span style={{ fontSize: '12px', color: '#15803d' }}>تاريخ الاستحقاق:</span>
-                        <div style={{ fontWeight: 'bold', color: '#14532d' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>تاريخ الاستحقاق:</span>
+                        <div style={{ fontWeight: 'bold', color: 'var(--text)' }}>
                           📅 {previewModalReq.date || previewModalReq.createdAt?.slice(0, 10) || '—'}
                         </div>
                       </div>
                       <div style={{ gridColumn: '1 / -1' }}>
-                        <span style={{ fontSize: '12px', color: '#15803d' }}>مبررات وأسباب المكافأة:</span>
-                        <div style={{ fontWeight: 'bold', color: '#14532d', background: '#fff', padding: '8px 12px', borderRadius: '6px', border: '1px solid #bbf7d0', marginTop: '4px' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>مبررات وأسباب المكافأة:</span>
+                        <div style={{ fontWeight: 'bold', color: 'var(--text)', background: 'var(--surface)', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', marginTop: '4px' }}>
                           {previewModalReq.reason || previewModalReq.details || '—'}
                         </div>
                       </div>
@@ -2593,20 +2593,20 @@ export default function RequestsModule({
 
                 {/* ── DISCIPLINARY VIOLATION & BRANCH MANAGER DECISION DETAILS (جزاء تأديبي ومخالفة موثقة من الفرع) ── */}
                 {isDisciplinaryViolation && (
-                  <div style={{ background: '#fff1f2', padding: '18px', borderRadius: '14px', border: '1.5px solid #fecdd3', boxShadow: '0 2px 10px rgba(225,29,72,0.05)' }}>
+                  <div style={{ background: 'var(--surface-muted)', padding: '18px', borderRadius: '14px', border: '1.5px solid var(--danger)', boxShadow: 'var(--shadow-sm)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
-                      <h4 style={{ margin: 0, color: '#9f1239', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 800 }}>
+                      <h4 style={{ margin: 0, color: 'var(--danger)', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 800 }}>
                         <span>⚠️</span>
                         <span>تفاصيل المخالفة التأديبية وقرار مدير الفرع:</span>
                       </h4>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         {previewModalReq.occurrenceNumber && (
-                          <span style={{ background: '#ffe4e6', color: '#be123c', border: '1px solid #fda4af', padding: '3px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: 800 }}>
+                          <span style={{ background: 'var(--danger-tint)', color: 'var(--danger)', border: '1px solid var(--danger)', padding: '3px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: 800 }}>
                             🔁 التكرار: المرة {previewModalReq.occurrenceNumber === 1 ? 'الأولى' : previewModalReq.occurrenceNumber === 2 ? 'الثانية' : previewModalReq.occurrenceNumber === 3 ? 'الثالثة' : previewModalReq.occurrenceNumber === 4 ? 'الرابعة' : `${previewModalReq.occurrenceNumber}`}
                           </span>
                         )}
                         {previewModalReq.categoryCode && (
-                          <span style={{ background: '#f1f5f9', color: '#334155', border: '1px solid #cbd5e1', padding: '3px 8px', borderRadius: '8px', fontSize: '11.5px', fontWeight: 700 }}>
+                          <span style={{ background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)', padding: '3px 8px', borderRadius: '8px', fontSize: '11.5px', fontWeight: 700 }}>
                             كود اللائحة: {previewModalReq.categoryCode}
                           </span>
                         )}
@@ -2615,31 +2615,31 @@ export default function RequestsModule({
 
                     {/* Violation Details Grid */}
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '14px' }}>
-                      <div style={{ background: '#fff', padding: '10px 14px', borderRadius: '10px', border: '1px solid #fecdd3' }}>
-                        <span style={{ fontSize: '12px', color: '#9f1239', fontWeight: 600 }}>بند / مسمى المخالفة:</span>
-                        <div style={{ fontWeight: 800, color: '#881337', fontSize: '14px', marginTop: '2px' }}>
+                      <div style={{ background: 'var(--surface)', padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--border)' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--danger)', fontWeight: 600 }}>بند / مسمى المخالفة:</span>
+                        <div style={{ fontWeight: 800, color: 'var(--text)', fontSize: '14px', marginTop: '2px' }}>
                           ⚖️ {previewModalReq.ruleTitle || previewModalReq.violationTitle || previewModalReq.categoryName || previewModalReq.reason || 'مخالفة لائحية'}
                         </div>
                       </div>
 
-                      <div style={{ background: '#fff', padding: '10px 14px', borderRadius: '10px', border: '1px solid #fecdd3' }}>
-                        <span style={{ fontSize: '12px', color: '#9f1239', fontWeight: 600 }}>تصنيف لائحة العمل:</span>
-                        <div style={{ fontWeight: 700, color: '#881337', fontSize: '13.5px', marginTop: '2px' }}>
+                      <div style={{ background: 'var(--surface)', padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--border)' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--danger)', fontWeight: 600 }}>تصنيف لائحة العمل:</span>
+                        <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: '13.5px', marginTop: '2px' }}>
                           📜 {previewModalReq.categoryName || 'لائحة الجزاءات والانضباط'}
                         </div>
                       </div>
 
-                      <div style={{ background: '#ffe4e6', padding: '10px 14px', borderRadius: '10px', border: '1.5px solid #fda4af' }}>
-                        <span style={{ fontSize: '12px', color: '#be123c', fontWeight: 700 }}>قرار وعقوبة مدير الفرع:</span>
-                        <div style={{ fontWeight: 900, color: '#9f1239', fontSize: '15px', marginTop: '2px' }}>
+                      <div style={{ background: 'var(--danger-tint)', padding: '10px 14px', borderRadius: '10px', border: '1.5px solid var(--danger)' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--danger)', fontWeight: 700 }}>قرار وعقوبة مدير الفرع:</span>
+                        <div style={{ fontWeight: 900, color: 'var(--danger)', fontSize: '15px', marginTop: '2px' }}>
                           🚨 {previewModalReq.actionTitle || previewModalReq.penaltyAction || 'لفت نظر / خصم تأديبي'}
                         </div>
                       </div>
 
                       {(parseFloat(previewModalReq.amount || previewModalReq.penaltyAmount) > 0 || parseFloat(previewModalReq.deductionDays || previewModalReq.penaltyDays) > 0) && (
-                        <div style={{ background: '#fef2f2', padding: '10px 14px', borderRadius: '10px', border: '1.5px solid #fca5a5' }}>
-                          <span style={{ fontSize: '12px', color: '#b91c1c', fontWeight: 700 }}>الأثر المالي للخصم:</span>
-                          <div style={{ fontWeight: 900, color: '#dc2626', fontSize: '16px', marginTop: '2px' }}>
+                        <div style={{ background: 'var(--danger-tint)', padding: '10px 14px', borderRadius: '10px', border: '1.5px solid var(--danger)' }}>
+                          <span style={{ fontSize: '12px', color: 'var(--danger)', fontWeight: 700 }}>الأثر المالي للخصم:</span>
+                          <div style={{ fontWeight: 900, color: 'var(--danger)', fontSize: '16px', marginTop: '2px' }}>
                             💸 {previewModalReq.deductionDays ? `خصم ${previewModalReq.deductionDays} يوم ` : ''}
                             {previewModalReq.amount ? `(${previewModalReq.amount} ج.م)` : ''}
                           </div>
@@ -2647,15 +2647,15 @@ export default function RequestsModule({
                       )}
 
                       <div>
-                        <span style={{ fontSize: '12px', color: '#9f1239' }}>تاريخ حدوث الواقعة:</span>
-                        <div style={{ fontWeight: 700, color: '#881337', fontSize: '13.5px', marginTop: '2px' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>تاريخ حدوث الواقعة:</span>
+                        <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: '13.5px', marginTop: '2px' }}>
                           📅 {previewModalReq.date || previewModalReq.createdAt?.slice(0, 10) || '—'}
                         </div>
                       </div>
 
                       <div>
-                        <span style={{ fontSize: '12px', color: '#9f1239' }}>موثق المخالفة:</span>
-                        <div style={{ fontWeight: 700, color: '#881337', fontSize: '13.5px', marginTop: '2px' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>موثق المخالفة:</span>
+                        <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: '13.5px', marginTop: '2px' }}>
                           👔 {previewModalReq.createdByName || 'مدير الفرع'}
                         </div>
                       </div>
@@ -2663,11 +2663,11 @@ export default function RequestsModule({
 
                     {/* Detailed Incident Notes */}
                     {previewModalReq.details && (
-                      <div style={{ background: '#fff', padding: '12px 14px', borderRadius: '10px', border: '1px solid #fecdd3', marginBottom: '10px' }}>
-                        <span style={{ fontSize: '12px', color: '#9f1239', fontWeight: 700, display: 'block', marginBottom: '4px' }}>
+                      <div style={{ background: 'var(--surface)', padding: '12px 14px', borderRadius: '10px', border: '1px solid var(--border)', marginBottom: '10px' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--danger)', fontWeight: 700, display: 'block', marginBottom: '4px' }}>
                           📝 تفاصيل ووقائع المخالفة المسجلة:
                         </span>
-                        <div style={{ color: '#1e293b', lineHeight: 1.6, fontSize: '13px', whiteSpace: 'pre-wrap' }}>
+                        <div style={{ color: 'var(--text)', lineHeight: 1.6, fontSize: '13px', whiteSpace: 'pre-wrap' }}>
                           {previewModalReq.details}
                         </div>
                       </div>
@@ -2675,11 +2675,11 @@ export default function RequestsModule({
 
                     {/* Investigation Notes if present */}
                     {previewModalReq.investigationNotes && (
-                      <div style={{ background: '#f8fafc', padding: '12px 14px', borderRadius: '10px', border: '1px solid #cbd5e1', marginBottom: '10px' }}>
-                        <span style={{ fontSize: '12px', color: '#475569', fontWeight: 700, display: 'block', marginBottom: '4px' }}>
+                      <div style={{ background: 'var(--surface)', padding: '12px 14px', borderRadius: '10px', border: '1px solid var(--border)', marginBottom: '10px' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)', fontWeight: 700, display: 'block', marginBottom: '4px' }}>
                           🔍 ملخص التحقيق وأقوال الموظف:
                         </span>
-                        <div style={{ color: '#334155', lineHeight: 1.6, fontSize: '13px', whiteSpace: 'pre-wrap' }}>
+                        <div style={{ color: 'var(--text)', lineHeight: 1.6, fontSize: '13px', whiteSpace: 'pre-wrap' }}>
                           {previewModalReq.investigationNotes}
                         </div>
                       </div>
@@ -2687,11 +2687,11 @@ export default function RequestsModule({
 
                     {/* Override reason if present */}
                     {previewModalReq.overrideReason && (
-                      <div style={{ background: '#fffbeb', padding: '10px 14px', borderRadius: '8px', border: '1px solid #fde68a', marginBottom: '10px' }}>
-                        <span style={{ fontSize: '12px', color: '#92400e', fontWeight: 700, display: 'block' }}>
+                      <div style={{ background: 'var(--accent-tint)', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--accent)', marginBottom: '10px' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--accent)', fontWeight: 700, display: 'block' }}>
                           ⚠️ مبررات الاستثناء وتجاوز التدرج اللائحي:
                         </span>
-                        <div style={{ color: '#78350f', fontSize: '12.5px', marginTop: '3px' }}>
+                        <div style={{ color: 'var(--accent)', fontSize: '12.5px', marginTop: '3px' }}>
                           {previewModalReq.overrideReason}
                         </div>
                       </div>
@@ -2701,46 +2701,46 @@ export default function RequestsModule({
 
                 {/* ── PENALTY OBJECTION DETAILS ── */}
                 {isPenaltyObjection && (
-                  <div style={{ background: '#fdf4ff', padding: '16px', borderRadius: '12px', border: '1px solid #f0abfc' }}>
-                    <h4 style={{ margin: '0 0 10px', color: '#86198f', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <div style={{ background: 'var(--surface-muted)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>
+                    <h4 style={{ margin: '0 0 10px', color: '#a855f7', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                       ✋ تفاصيل تظلم الموظف من الجزاء:
                     </h4>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '12px' }}>
                       <div>
-                        <span style={{ fontSize: '12px', color: '#701a75' }}>مسمى المخالفة / الجزاء:</span>
-                        <div style={{ fontWeight: 'bold', color: '#581c87', fontSize: '14px' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>مسمى المخالفة / الجزاء:</span>
+                        <div style={{ fontWeight: 'bold', color: 'var(--text)', fontSize: '14px' }}>
                           ⚖️ {previewModalReq.violationTitle || previewModalReq.title || (previewModalReq.subType === 'lateness' ? 'تأخير عن العمل' : 'جزاء تأديبي لائحي')}
                         </div>
                       </div>
                       {(previewModalReq.latenessMinutes || previewModalReq.deductionMinutes) && (
                         <div>
-                          <span style={{ fontSize: '12px', color: '#701a75' }}>مدة / دقائق التأخير:</span>
-                          <div style={{ fontWeight: 'bold', color: '#581c87' }}>
+                          <span style={{ fontSize: '12px', color: 'var(--muted)' }}>مدة / دقائق التأخير:</span>
+                          <div style={{ fontWeight: 'bold', color: 'var(--text)' }}>
                             ⏱️ {previewModalReq.latenessMinutes || previewModalReq.deductionMinutes} دقيقة
                           </div>
                         </div>
                       )}
                       <div>
-                        <span style={{ fontSize: '12px', color: '#701a75' }}>قيمة الخصم المالي:</span>
-                        <div style={{ fontWeight: '900', color: '#b91c1c', fontSize: '16px' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>قيمة الخصم المالي:</span>
+                        <div style={{ fontWeight: '900', color: 'var(--danger)', fontSize: '16px' }}>
                           💸 {previewModalReq.penaltyAmount || previewModalReq.amount || '0'} ج.م
                         </div>
                       </div>
                       <div>
-                        <span style={{ fontSize: '12px', color: '#701a75' }}>تاريخ الواقعة:</span>
-                        <div style={{ fontWeight: 'bold', color: '#581c87' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>تاريخ الواقعة:</span>
+                        <div style={{ fontWeight: 'bold', color: 'var(--text)' }}>
                           📅 {previewModalReq.date || previewModalReq.createdAt?.slice(0, 10) || '—'}
                         </div>
                       </div>
                     </div>
 
                     {/* Objection reasons box */}
-                    <div style={{ background: '#fff', border: '1px solid #e879f9', borderRadius: '10px', padding: '14px', marginTop: '10px' }}>
-                      <div style={{ fontWeight: 'bold', color: '#86198f', marginBottom: '6px', fontSize: '13.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '10px', padding: '14px', marginTop: '10px' }}>
+                      <div style={{ fontWeight: 'bold', color: '#a855f7', marginBottom: '6px', fontSize: '13.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <span>✋</span>
                         <span>أسباب ومبررات التظلم المقدمة من الموظف:</span>
                       </div>
-                      <div style={{ fontSize: '13.5px', color: '#1e293b', background: '#fae8ff', padding: '10px 14px', borderRadius: '8px', marginBottom: '12px', lineHeight: '1.6' }}>
+                      <div style={{ fontSize: '13.5px', color: 'var(--text)', background: 'var(--surface-muted)', padding: '10px 14px', borderRadius: '8px', marginBottom: '12px', lineHeight: '1.6' }}>
                         "{previewModalReq.reason || (typeof previewModalReq.objection === 'object' ? previewModalReq.objection.reason : previewModalReq.objection) || previewModalReq.details || '—'}"
                       </div>
                       {previewModalReq.status === 'pending' || previewModalReq.objection?.status === 'pending' ? (
@@ -2748,7 +2748,7 @@ export default function RequestsModule({
                           <button
                             type="button"
                             className="btn btn-start"
-                            style={{ background: '#16a34a', color: '#fff', fontSize: '13px', padding: '8px 16px', fontWeight: 'bold', borderRadius: '8px' }}
+                            style={{ background: 'var(--success)', color: '#fff', fontSize: '13px', padding: '8px 16px', fontWeight: 'bold', borderRadius: '8px' }}
                             onClick={() => {
                               handleApprove(previewModalReq.id);
                               setPreviewModalReq(null);
@@ -2759,7 +2759,7 @@ export default function RequestsModule({
                           <button
                             type="button"
                             className="btn btn-start"
-                            style={{ background: '#dc2626', color: '#fff', fontSize: '13px', padding: '8px 16px', fontWeight: 'bold', borderRadius: '8px' }}
+                            style={{ background: 'var(--danger)', color: '#fff', fontSize: '13px', padding: '8px 16px', fontWeight: 'bold', borderRadius: '8px' }}
                             onClick={() => {
                               handleReject(previewModalReq.id);
                               setPreviewModalReq(null);
@@ -2779,22 +2779,22 @@ export default function RequestsModule({
 
                 {/* ── OVERTIME REQUEST DETAILS ── */}
                 {previewModalReq.type === 'overtime' && (
-                  <div style={{ background: '#f0fdf4', padding: '16px', borderRadius: '12px', border: '1px solid #86efac' }}>
-                    <h4 style={{ margin: '0 0 10px', color: '#166534', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <div style={{ background: 'var(--surface-muted)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>
+                    <h4 style={{ margin: '0 0 10px', color: 'var(--success)', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                       ⏱️ تفاصيل الساعات الإضافية ومقارنة الوردية:
                     </h4>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', fontSize: '13px' }}>
-                      <div style={{ background: '#fff', padding: '8px 12px', borderRadius: '8px', border: '1px solid #bbf7d0' }}>
-                        <span style={{ color: '#64748b', fontSize: '11.5px', display: 'block' }}>الوردية المقررة بالجدول:</span>
-                        <strong style={{ color: '#1e293b' }}>{previewModalReq.regularHours || previewModalReq.scheduledHours || 8} ساعات ({previewModalReq.scheduledStart || '—'} ➔ {previewModalReq.scheduledEnd || '—'})</strong>
+                      <div style={{ background: 'var(--surface)', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                        <span style={{ color: 'var(--muted)', fontSize: '11.5px', display: 'block' }}>الوردية المقررة بالجدول:</span>
+                        <strong style={{ color: 'var(--text)' }}>{previewModalReq.regularHours || previewModalReq.scheduledHours || 8} ساعات ({previewModalReq.scheduledStart || '—'} ➔ {previewModalReq.scheduledEnd || '—'})</strong>
                       </div>
-                      <div style={{ background: '#fff', padding: '8px 12px', borderRadius: '8px', border: '1px solid #bbf7d0' }}>
-                        <span style={{ color: '#64748b', fontSize: '11.5px', display: 'block' }}>البصمة وساعات العمل الفعلية:</span>
-                        <strong style={{ color: '#1e293b' }}>{previewModalReq.totalShiftHours || previewModalReq.actualWorkedHours || '—'} ساعات ({previewModalReq.actualIn || '—'} ➔ {previewModalReq.actualOut || '—'})</strong>
+                      <div style={{ background: 'var(--surface)', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                        <span style={{ color: 'var(--muted)', fontSize: '11.5px', display: 'block' }}>البصمة وساعات العمل الفعلية:</span>
+                        <strong style={{ color: 'var(--text)' }}>{previewModalReq.totalShiftHours || previewModalReq.actualWorkedHours || '—'} ساعات ({previewModalReq.actualIn || '—'} ➔ {previewModalReq.actualOut || '—'})</strong>
                       </div>
-                      <div style={{ background: '#dcfce7', padding: '8px 12px', borderRadius: '8px', border: '1px solid #86efac' }}>
-                        <span style={{ color: '#166534', fontSize: '11.5px', display: 'block' }}>الساعات الإضافية المطلوب اعتمادها:</span>
-                        <strong style={{ color: '#15803d', fontSize: '14px' }}>+{previewModalReq.hours} ساعة إضافية</strong>
+                      <div style={{ background: 'var(--success-tint)', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--success)' }}>
+                        <span style={{ color: 'var(--success)', fontSize: '11.5px', display: 'block' }}>الساعات الإضافية المطلوب اعتمادها:</span>
+                        <strong style={{ color: 'var(--success)', fontSize: '14px' }}>+{previewModalReq.hours} ساعة إضافية</strong>
                       </div>
                     </div>
                   </div>
@@ -2833,18 +2833,18 @@ export default function RequestsModule({
                     : standardDays;
 
                   return (
-                    <div style={{ background: '#f8fafc', padding: '18px', borderRadius: '14px', border: '1px solid #cbd5e1' }}>
+                    <div style={{ background: 'var(--surface-muted)', padding: '18px', borderRadius: '14px', border: '1px solid var(--border)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
-                        <h4 style={{ margin: 0, color: '#0f172a', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <h4 style={{ margin: 0, color: 'var(--text)', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                           📅 مقارنة ومعاينة تعديل الجدول الشهري (الجدول السابق مقابل الجديد):
                         </h4>
-                        <span style={{ fontSize: '12px', background: '#e0f2fe', color: '#0369a1', padding: '4px 10px', borderRadius: '6px', fontWeight: 'bold' }}>
+                        <span style={{ fontSize: '12px', background: 'var(--primary-tint)', color: 'var(--primary)', padding: '4px 10px', borderRadius: '6px', fontWeight: 'bold' }}>
                           الشهر: {previewModalReq.month || 'الشهر الحالي'}
                         </span>
                       </div>
 
                       {previewModalReq.details && (
-                        <div style={{ background: '#fff', border: '1px solid #e2e8f0', padding: '10px 14px', borderRadius: '8px', marginBottom: '14px', fontSize: '13px', color: '#334155' }}>
+                        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', padding: '10px 14px', borderRadius: '8px', marginBottom: '14px', fontSize: '13px', color: 'var(--text)' }}>
                           <strong>📝 تفاصيل التعديل المطلوبة: </strong> {previewModalReq.details}
                         </div>
                       )}
@@ -2852,10 +2852,10 @@ export default function RequestsModule({
                       <div className="table-responsive" style={{ maxHeight: '350px', overflowY: 'auto' }}>
                         <table className="table" style={{ fontSize: '13px', width: '100%', borderCollapse: 'collapse' }}>
                           <thead>
-                            <tr style={{ background: '#e2e8f0', color: '#1e293b' }}>
+                            <tr style={{ background: 'var(--surface-muted)', color: 'var(--text)' }}>
                               <th style={{ padding: '8px 10px' }}>اليوم</th>
-                              <th style={{ padding: '8px 10px', background: '#fee2e2', color: '#991b1b' }}>⏮️ الجدول السابق (قبل التعديل)</th>
-                              <th style={{ padding: '8px 10px', background: '#dcfce7', color: '#166534' }}>⏭️ الجدول الجديد (بعد التعديل)</th>
+                              <th style={{ padding: '8px 10px', background: 'var(--danger-tint)', color: 'var(--danger)' }}>⏮️ الجدول السابق (قبل التعديل)</th>
+                              <th style={{ padding: '8px 10px', background: 'var(--success-tint)', color: 'var(--success)' }}>⏭️ الجدول الجديد (بعد التعديل)</th>
                               <th style={{ padding: '8px 10px' }}>موقف التغيير</th>
                             </tr>
                           </thead>
@@ -2876,17 +2876,17 @@ export default function RequestsModule({
                               const isChanged = (isOldOff !== isNewOff) || (oldStart !== newStart) || (oldEnd !== newEnd);
 
                               return (
-                                <tr key={dayItem.key} style={{ background: isChanged ? '#fffbeb' : '#fff', borderBottom: '1px solid #e2e8f0' }}>
-                                  <td style={{ fontWeight: 'bold', color: '#334155' }}>{dayItem.label}</td>
+                                <tr key={dayItem.key} style={{ background: isChanged ? 'var(--accent-tint)' : 'var(--surface)', borderBottom: '1px solid var(--border)' }}>
+                                  <td style={{ fontWeight: 'bold', color: 'var(--text)' }}>{dayItem.label}</td>
                                   
                                   {/* Previous Schedule */}
-                                  <td style={{ background: isOldOff ? '#fef2f2' : 'transparent' }}>
+                                  <td style={{ background: isOldOff ? 'var(--danger-tint)' : 'transparent' }}>
                                     {isOldOff ? (
                                       <span className="badge badge-danger" style={{ fontSize: '11px' }}>🔴 راحة أسبوعية</span>
                                     ) : (
                                       <div>
                                         <span className="badge badge-success" style={{ fontSize: '11px' }}>🟢 وردية عمل</span>
-                                        <div style={{ fontSize: '12px', marginTop: '3px', color: '#475569' }}>
+                                        <div style={{ fontSize: '12px', marginTop: '3px', color: 'var(--muted)' }}>
                                           من <strong>{oldStart}</strong> إلى <strong>{oldEnd}</strong>
                                         </div>
                                       </div>
@@ -2894,13 +2894,13 @@ export default function RequestsModule({
                                   </td>
 
                                   {/* New Schedule */}
-                                  <td style={{ background: isNewOff ? '#fef2f2' : 'transparent' }}>
+                                  <td style={{ background: isNewOff ? 'var(--danger-tint)' : 'transparent' }}>
                                     {isNewOff ? (
                                       <span className="badge badge-danger" style={{ fontSize: '11px' }}>🔴 راحة أسبوعية</span>
                                     ) : (
                                       <div>
                                         <span className="badge badge-success" style={{ fontSize: '11px' }}>🟢 وردية عمل</span>
-                                        <div style={{ fontSize: '12px', marginTop: '3px', color: '#15803d', fontWeight: 'bold' }}>
+                                        <div style={{ fontSize: '12px', marginTop: '3px', color: 'var(--success)', fontWeight: 'bold' }}>
                                           من <strong>{newStart}</strong> إلى <strong>{newEnd}</strong>
                                         </div>
                                       </div>
@@ -2910,11 +2910,11 @@ export default function RequestsModule({
                                   {/* Change Status */}
                                   <td>
                                     {isChanged ? (
-                                      <span style={{ background: '#fef3c7', color: '#b45309', padding: '3px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 'bold', display: 'inline-block' }}>
+                                      <span style={{ background: 'var(--accent-tint)', color: 'var(--accent)', padding: '3px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 'bold', display: 'inline-block' }}>
                                         ⚡ تم التعديل
                                       </span>
                                     ) : (
-                                      <span style={{ color: '#94a3b8', fontSize: '12px' }}>مطابق</span>
+                                      <span style={{ color: 'var(--muted)', fontSize: '12px' }}>مطابق</span>
                                     )}
                                   </td>
                                 </tr>
@@ -2928,11 +2928,11 @@ export default function RequestsModule({
                 })()}
 
                 {/* 4. Reason, Notes and Description Card */}
-                <div style={{ background: '#fff', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>
+                <div style={{ background: 'var(--surface)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>
                   <h4 style={{ margin: '0 0 8px', color: 'var(--primary-dark)', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                     📝 شرح الطلب والسبب المذكور:
                   </h4>
-                  <div style={{ lineHeight: 1.7, color: '#334155', background: '#f8fafc', padding: '12px 14px', borderRadius: '8px', border: '1px solid #e2e8f0', whiteSpace: 'pre-wrap' }}>
+                  <div style={{ lineHeight: 1.7, color: 'var(--text)', background: 'var(--surface-muted)', padding: '12px 14px', borderRadius: '8px', border: '1px solid var(--border)', whiteSpace: 'pre-wrap' }}>
                     {previewModalReq.reason || previewModalReq.details || previewModalReq.notes || previewModalReq.subject || 'لا يوجد شرح أو سبب إضافي مذكور'}
                   </div>
 
