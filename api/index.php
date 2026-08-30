@@ -140,7 +140,7 @@ try {
                     : json_encode($finalValueData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
 
                 // Upsert with version increment (PostgreSQL vs MySQL)
-                if ($driver === 'pgsql') {
+                if (in_array($driver, ['pgsql', 'sqlite'], true)) {
                     $sql = "INSERT INTO app_settings (key_name, value_data, version, updated_at)
                             VALUES (?, ?::jsonb, 1, NOW())
                             ON CONFLICT (key_name) DO UPDATE
@@ -280,7 +280,7 @@ try {
                 $handDescriptor = isset($payload['hand_descriptor']) ? (is_string($payload['hand_descriptor']) ? $payload['hand_descriptor'] : json_encode($payload['hand_descriptor'])) : null;
                 $biometricType = (string)($payload['biometric_type'] ?? 'face');
 
-                if ($driver === 'pgsql') {
+                if (in_array($driver, ['pgsql', 'sqlite'], true)) {
                     $sql = "INSERT INTO employee_faces (employee_id, descriptor, hand_descriptor, biometric_type, updated_at)
                             VALUES (?, ?::jsonb, ?::jsonb, ?, NOW())
                             ON CONFLICT (employee_id) DO UPDATE
@@ -356,7 +356,7 @@ try {
                     $hand = isset($f['hand_descriptor']) ? (is_string($f['hand_descriptor']) ? $f['hand_descriptor'] : json_encode($f['hand_descriptor'])) : null;
                     $type = (string)($f['biometric_type'] ?? 'face');
 
-                    if ($driver === 'pgsql') {
+                    if (in_array($driver, ['pgsql', 'sqlite'], true)) {
                         Database::execute(
                             "INSERT INTO employee_faces (employee_id, descriptor, hand_descriptor, biometric_type, updated_at)
                              VALUES (?, ?::jsonb, ?::jsonb, ?, NOW())
@@ -408,7 +408,7 @@ try {
             // 2. تحديث جدول الإعدادات بالحالة النظيفة المصفّرة
             if ($wipedState !== null) {
                 $jsonString = is_string($wipedState) ? $wipedState : json_encode($wipedState, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-                if ($driver === 'pgsql') {
+                if (in_array($driver, ['pgsql', 'sqlite'], true)) {
                     $sql = "INSERT INTO app_settings (key_name, value_data, version, updated_at)
                             VALUES (?, ?::jsonb, 1, NOW())
                             ON CONFLICT (key_name) DO UPDATE

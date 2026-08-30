@@ -75,7 +75,7 @@ function ensureArchiveTablesExist(): void
         $driver = Database::getDriver();
         $db = Database::getConnection();
 
-        if ($driver === 'pgsql') {
+        if (in_array($driver, ['pgsql', 'sqlite'], true)) {
             $db->exec("CREATE TABLE IF NOT EXISTS archive_suppliers (
                 id VARCHAR(36) PRIMARY KEY,
                 name VARCHAR(255) NOT NULL UNIQUE,
@@ -285,7 +285,7 @@ function getArchiveSetting(string $key, string $default = ''): string
 function setArchiveSetting(string $key, string $value): void
 {
     $driver = Database::getDriver();
-    if ($driver === 'pgsql') {
+    if (in_array($driver, ['pgsql', 'sqlite'], true)) {
         Database::execute(
             "INSERT INTO archive_system_settings (key_name, value_data, updated_at) VALUES (?, ?, NOW())
              ON CONFLICT (key_name) DO UPDATE SET value_data = EXCLUDED.value_data, updated_at = NOW()",
@@ -985,7 +985,7 @@ function handleArchiveApi(string $subPath, string $method): void
 
                     if (empty($name)) jsonResponse(['success' => false, 'error' => 'اسم المورد مطلوب'], 400);
 
-                    if ($driver === 'pgsql') {
+                    if (in_array($driver, ['pgsql', 'sqlite'], true)) {
                         $sql = "INSERT INTO archive_suppliers (id, name, phone, email, address, tax_number, notes, created_at, updated_at)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
                                 ON CONFLICT (name) DO UPDATE 
@@ -1072,7 +1072,7 @@ function handleArchiveApi(string $subPath, string $method): void
 
                     if (empty($name)) jsonResponse(['success' => false, 'error' => 'اسم الموظف مطلوب'], 400);
 
-                    if ($driver === 'pgsql') {
+                    if (in_array($driver, ['pgsql', 'sqlite'], true)) {
                         $sql = "INSERT INTO archive_employees (id, name, role, phone, active, created_at, updated_at)
                                 VALUES (?, ?, ?, ?, ?, NOW(), NOW())
                                 ON CONFLICT (name) DO UPDATE 

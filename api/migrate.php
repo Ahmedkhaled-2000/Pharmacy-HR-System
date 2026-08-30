@@ -1,7 +1,7 @@
 <?php
 /**
- * Database Migration Script for PostgreSQL 16+/18+ (and MariaDB/MySQL)
- * Auto-creates all necessary tables, JSONB structures, and indexes
+ * Database Migration Script for PostgreSQL 16+/18+, SQLite, and MariaDB/MySQL
+ * Auto-creates all necessary tables, JSON/JSONB structures, and indexes
  */
 
 declare(strict_types=1);
@@ -150,6 +150,120 @@ try {
         );");
         $db->exec("CREATE INDEX IF NOT EXISTS idx_archive_logs_created ON archive_import_logs (created_at DESC);");
 
+    } elseif ($driver === 'sqlite') {
+        // =========================================================================
+        // SQLite DDL Migration
+        // =========================================================================
+        $db->exec("CREATE TABLE IF NOT EXISTS app_settings (
+            key_name TEXT PRIMARY KEY,
+            value_data TEXT NOT NULL,
+            version INTEGER NOT NULL DEFAULT 1,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );");
+
+        $db->exec("CREATE TABLE IF NOT EXISTS employee_faces (
+            employee_id TEXT PRIMARY KEY,
+            descriptor TEXT NULL,
+            hand_descriptor TEXT NULL,
+            biometric_type TEXT NOT NULL DEFAULT 'face',
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );");
+
+        $db->exec("CREATE TABLE IF NOT EXISTS sync_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            action_type TEXT NOT NULL,
+            entity_key TEXT NOT NULL,
+            version INTEGER NOT NULL DEFAULT 1,
+            client_ip TEXT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );");
+
+        $db->exec("CREATE TABLE IF NOT EXISTS archive_suppliers (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            phone TEXT NULL,
+            email TEXT NULL,
+            address TEXT NULL,
+            tax_number TEXT NULL,
+            notes TEXT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );");
+
+        $db->exec("CREATE TABLE IF NOT EXISTS archive_employees (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            role TEXT NULL DEFAULT 'أمين مخزن',
+            phone TEXT NULL,
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );");
+
+        $db->exec("CREATE TABLE IF NOT EXISTS archive_invoices (
+            id TEXT PRIMARY KEY,
+            invoice_number TEXT NOT NULL,
+            supplier_id TEXT NOT NULL,
+            invoice_date DATETIME NOT NULL,
+            total_amount REAL NOT NULL DEFAULT 0.00,
+            discount REAL NOT NULL DEFAULT 0.00,
+            net_amount REAL NOT NULL DEFAULT 0.00,
+            status TEXT NOT NULL DEFAULT 'ARCHIVED',
+            file_url TEXT NULL,
+            drive_file_id TEXT NULL,
+            file_name TEXT NULL,
+            file_type TEXT NULL,
+            upload_mode TEXT NOT NULL DEFAULT 'AUTO_EXTRACT',
+            receiver_id TEXT NULL,
+            entry_clerk_id TEXT NULL,
+            notes TEXT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );");
+
+        $db->exec("CREATE TABLE IF NOT EXISTS archive_invoice_items (
+            id TEXT PRIMARY KEY,
+            invoice_id TEXT NOT NULL,
+            product_name TEXT NOT NULL,
+            quantity INTEGER NOT NULL DEFAULT 1,
+            unit_price REAL NOT NULL DEFAULT 0.00,
+            discount REAL NOT NULL DEFAULT 0.00,
+            total_price REAL NOT NULL DEFAULT 0.00,
+            selling_price REAL NULL,
+            batch_number TEXT NULL,
+            expiry_date TEXT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );");
+
+        $db->exec("CREATE TABLE IF NOT EXISTS archive_column_mappings (
+            id TEXT PRIMARY KEY,
+            supplier_id TEXT NOT NULL,
+            raw_column_name TEXT NOT NULL,
+            standard_field TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (supplier_id, raw_column_name)
+        );");
+
+        $db->exec("CREATE TABLE IF NOT EXISTS archive_system_settings (
+            key_name TEXT PRIMARY KEY,
+            value_data TEXT NOT NULL,
+            description TEXT NULL,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );");
+
+        $db->exec("CREATE TABLE IF NOT EXISTS archive_import_logs (
+            id TEXT PRIMARY KEY,
+            file_name TEXT NOT NULL,
+            file_type TEXT NOT NULL,
+            upload_mode TEXT NOT NULL,
+            status TEXT NOT NULL,
+            items_extracted INTEGER NOT NULL DEFAULT 0,
+            error_message TEXT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );");
+
     } else {
         // =========================================================================
         // MySQL / MariaDB DDL Fallback
@@ -291,7 +405,7 @@ try {
         }
     }
 
-    $dbVerRow = Database::queryOne($driver === 'pgsql' ? "SELECT version() AS ver" : "SELECT VERSION() AS ver");
+    $dbVerRow = Database::queryOne($driver === 'pgsql' ? "SELECT version() AS ver" : ($driver === 'sqlite' ? "SELECT sqlite_version() AS ver" : "SELECT VERSION() AS ver"));
 
     jsonResponse([
         'success' => true,

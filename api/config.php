@@ -38,9 +38,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 }
 
 // --------------------------------------------------------------------------
-// إعدادات الاتصال بقاعدة بيانات PostgreSQL (الأساسية) و MySQL (الاحتياطية)
+// إعدادات الاتصال بقاعدة بيانات PostgreSQL (الأساسية) و MySQL / SQLite (الاحتياطية)
 // --------------------------------------------------------------------------
-define('DB_DRIVER', getenv('DB_DRIVER') ?: 'pgsql'); // 'pgsql' لـ PostgreSQL أو 'mysql' لـ MySQL/MariaDB
+define('DB_DRIVER', getenv('DB_DRIVER') ?: 'pgsql'); // 'pgsql' for PostgreSQL 16+/18+, 'sqlite' for local/fallback, 'mysql' for MySQL/MariaDB
+define('DB_SQLITE_PATH', __DIR__ . '/../database/database.sqlite');
 define('DB_HOST', getenv('DB_HOST') ?: '127.0.0.1');  // PostgreSQL Host على Apex Thunder
 define('DB_PORT', (int)(getenv('DB_PORT') ?: 5432));
 define('DB_NAME', getenv('DB_NAME') ?: 'nodej8878_pharmacy_hr'); // اسم قاعدة البيانات
@@ -48,7 +49,7 @@ define('DB_USER', getenv('DB_USER') ?: 'nodej8878_pg');          // اسم مس�
 define('DB_PASS', getenv('DB_PASS') ?: 'C6kMke4Uwj_dYtbCNHJx55r*'); // كلمة المرور
 define('DB_CHARSET', 'utf8');
 
-// إعدادات MySQL/MariaDB الاحتياطية التلقائية عند وصول PostgreSQL للحد الأقصى من الاتصالات (5 Connections Limit)
+// إعدادات MySQL/MariaDB الاحتياطية
 define('MYSQL_HOST', getenv('MYSQL_HOST') ?: 'localhost');
 define('MYSQL_PORT', (int)(getenv('MYSQL_PORT') ?: 3306));
 define('MYSQL_NAME', getenv('MYSQL_NAME') ?: 'node_PharmacyHR');
