@@ -1,12 +1,12 @@
 /* Modern High-End Bespoke Design System */
 :root {
-  --bg: #F4F6F9;
-  --background: #F4F6F9;
+  --bg: #EEF2F6;
+  --background: #EEF2F6;
   --surface: #FFFFFF;
   --surface-hover: #F8FAFC;
   --surface-card: #FFFFFF;
-  --surface-muted: #F1F5F9;
-  --surface-glass: rgba(255, 255, 255, 0.92);
+  --surface-muted: #F8FAFC;
+  --surface-glass: rgba(255, 255, 255, 0.94);
   --primary: #0D9488;
   --primary-dark: #0F766E;
   --primary-light: #F0FDFA;
@@ -17,8 +17,8 @@
   --text-secondary: #1E293B;
   --muted: #475569;
   --text-muted: #475569;
-  --border: #E2E8F0;
-  --border-subtle: #F1F5F9;
+  --border: #CBD5E1;
+  --border-subtle: #E2E8F0;
   --border-focus: #0D9488;
   --success: #059669;
   --success-dark: #047857;
@@ -32,10 +32,10 @@
   --radius-sm: 10px;
   --radius: 16px;
   --radius-lg: 20px;
-  --shadow-sm: 0 1px 3px 0 rgba(15, 23, 42, 0.05);
-  --shadow: 0 4px 18px -2px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.04);
-  --shadow-lg: 0 14px 36px -4px rgba(15, 23, 42, 0.10), 0 4px 14px -2px rgba(15, 23, 42, 0.05);
-  --shadow-card-hover: 0 10px 28px -4px rgba(13, 148, 136, 0.14), 0 4px 12px rgba(15, 23, 42, 0.06);
+  --shadow-sm: 0 1px 3px 0 rgba(15, 23, 42, 0.08);
+  --shadow: 0 4px 16px -2px rgba(15, 23, 42, 0.08), 0 2px 6px rgba(15, 23, 42, 0.04);
+  --shadow-lg: 0 14px 34px -4px rgba(15, 23, 42, 0.12), 0 4px 14px -2px rgba(15, 23, 42, 0.06);
+  --shadow-card-hover: 0 10px 28px -4px rgba(13, 148, 136, 0.18), 0 4px 12px rgba(15, 23, 42, 0.08);
 }
 
 [data-theme='dark'] {
@@ -44,7 +44,7 @@
   --surface: #0F172A;
   --surface-hover: #1E293B;
   --surface-card: #0F172A;
-  --surface-muted: #0A101D;
+  --surface-muted: #15202E;
   --surface-glass: rgba(15, 23, 42, 0.88);
   --primary: #14B8A6;
   --primary-dark: #0D9488;
