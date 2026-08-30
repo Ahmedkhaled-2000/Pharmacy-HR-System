@@ -206,36 +206,22 @@ export async function smartLoadState(options = {}) {
 
   // 1. فحص وجود بيانات سريعة محلياً لاستخدامها مؤقتاً كواجهة أولية
   const localCache = await loadLocalStateFast();
-  const pendingCount = await getPendingCount().catch(() => 0);
 
   if (isCurrentlyOnline) {
     onProgress?.('جاري الاتصال بالسحابة ومزامنة البيانات...');
     try {
       // محاولة مباشرة لجلب أحدث وأدق نسخة حية من السحابة بدون كاش
-      const remoteData = await fetchRemoteState({ timeout: 15000, useETag: false });
+      const remoteData = await fetchRemoteState({ timeout: 12000, useETag: false, isBackground: true });
       
       if (remoteData && !remoteData.notModified) {
         const normalized = normalizeState(remoteData);
-        // إذا كان هناك تعديلات أوف لاين معلقة فقط، ندمجها؛ وإلا فإن السحابة هي المصدر الموثوق النهائي
-        const merged = (localCache && pendingCount > 0) ? smartMergeStates(localCache, normalized) : normalized;
+        // دمج ذكي دائم للحفاظ على كافة الطلبات والعمليات المحلية التي تمت على الجهاز
+        const merged = localCache ? smartMergeStates(localCache, normalized) : normalized;
         await saveStateLocally(merged);
         return { data: merged, source: 'cloud' };
       }
     } catch (e) {
-      console.warn('[Sync] First cloud fetch attempt failed, retrying:', e.message);
-    }
-
-    // محاولة ثانية سريعة لضمان عدم ظهور النظام فارغاً
-    try {
-      const retryData = await fetchRemoteState({ timeout: 20000, useETag: false });
-      if (retryData && !retryData.notModified) {
-        const normalized = normalizeState(retryData);
-        const merged = (localCache && pendingCount > 0) ? smartMergeStates(localCache, normalized) : normalized;
-        await saveStateLocally(merged);
-        return { data: merged, source: 'cloud_retry' };
-      }
-    } catch (retryErr) {
-      console.error('[Sync] Robust cloud load attempt failed:', retryErr);
+      console.warn('[Sync] First cloud fetch attempt failed:', e.message);
     }
   }
 
@@ -248,31 +234,35 @@ export async function smartLoadState(options = {}) {
 }
 
 // ── استطلاع ذكي متكيف في الخلفية (Adaptive Background Smart Polling) ────────
-export function startSmartPolling({ onRemoteUpdate, intervalActive = 2000, intervalIdle = 15000 }) {
+export function startSmartPolling({ onRemoteUpdate, intervalActive = 3500, intervalIdle = 15000 }) {
   let lastKnownVersion = null;
   let timerId = null;
   let isFetching = false;
+  let pollFailures = 0;
 
   const checkVersion = async () => {
     if (!isOnline() || isFetching) return;
     
     try {
       isFetching = true;
-      const vRes = await apiFetchVersion(STORAGE_KEY, { timeout: 3500 });
+      const vRes = await apiFetchVersion(STORAGE_KEY, { timeout: 3500, isBackground: true });
       const currentVer = typeof vRes?.version === 'number' ? vRes.version : (vRes?.updated_at || vRes?.timestamp);
 
       if (currentVer) {
+        pollFailures = 0;
         if (lastKnownVersion !== null && currentVer !== lastKnownVersion) {
-          const freshData = await fetchRemoteState({ timeout: 8000, useETag: false });
+          const freshData = await fetchRemoteState({ timeout: 8000, useETag: false, isBackground: true });
           if (freshData && !freshData.notModified) {
-            onRemoteUpdate?.(freshData);
-            await saveStateLocally(freshData);
+            const localCurrent = await loadLocalStateFast();
+            const merged = localCurrent ? smartMergeStates(localCurrent, freshData) : freshData;
+            onRemoteUpdate?.(merged);
+            await saveStateLocally(merged);
           }
         }
         lastKnownVersion = currentVer;
       }
     } catch (err) {
-      // خطأ صامت في استطلاع الخلفية لتجنب إجهاد الشبكة
+      pollFailures++;
     } finally {
       isFetching = false;
     }
@@ -280,7 +270,10 @@ export function startSmartPolling({ onRemoteUpdate, intervalActive = 2000, inter
 
   const scheduleNext = () => {
     const isVisible = typeof document !== 'undefined' ? document.visibilityState === 'visible' : true;
-    const delay = isVisible ? intervalActive : intervalIdle;
+    let delay = isVisible ? intervalActive : intervalIdle;
+    if (pollFailures > 0) {
+      delay = Math.min(45000, 3500 * Math.pow(1.8, Math.min(pollFailures, 6)));
+    }
     timerId = setTimeout(async () => {
       await checkVersion();
       scheduleNext();

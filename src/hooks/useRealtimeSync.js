@@ -148,44 +148,57 @@ export function useRealtimeSync(props = {}) {
   // 3. مستمع التدفق السحابي المباشر (SSE) + البث المحلي (0ms Broadcast) + الاستطلاع المتكيف
   useEffect(() => {
     isMountedRef.current = true;
-    let lastKnownVersion = 0;
+    let lastKnownVersion = -1;
     let lastKnownUpdatedAt = '';
     let isPolling = false;
+    let pollFailures = 0;
+    let timerId = null;
 
     const poll = async () => {
       if (isPolling || !navigator.onLine || !isMountedRef.current) return;
       isPolling = true;
       try {
-        const versionRes = await apiFetchVersion(STORAGE_KEY, { timeout: 2500 });
+        const versionRes = await apiFetchVersion(STORAGE_KEY, { timeout: 3500, isBackground: true });
         const currentVer = typeof versionRes?.version === 'number' ? versionRes.version : 0;
         const currentUpdated = versionRes?.updated_at || '';
 
+        const isInitial = (lastKnownVersion === -1);
         const hasChanged =
+          isInitial ||
           (currentVer > 0 && currentVer !== lastKnownVersion) ||
-          (currentUpdated && currentUpdated !== lastKnownUpdatedAt) ||
-          (lastKnownVersion === 0 && lastKnownUpdatedAt === '');
+          (currentUpdated && currentUpdated !== lastKnownUpdatedAt);
+
+        lastKnownVersion = currentVer;
+        lastKnownUpdatedAt = currentUpdated;
+        pollFailures = 0; // نجاح الاتصال -> تصفير الفشل
 
         if (hasChanged) {
-          lastKnownVersion = currentVer;
-          lastKnownUpdatedAt = currentUpdated;
-          const remoteData = await apiFetchSettings(STORAGE_KEY, { timeout: 5000, useETag: false });
+          const remoteData = await apiFetchSettings(STORAGE_KEY, { timeout: 6000, useETag: false, isBackground: true });
           if (remoteData && !remoteData.notModified) {
             applyRemoteData(remoteData);
           }
         }
       } catch (err) {
-        // خطأ صامت في استطلاع الخلفية
+        pollFailures++;
+        // خطأ صامت في استطلاع الخلفية مع تفعيل التراجع الأسي
       } finally {
         isPolling = false;
       }
     };
 
-    // أ) Ultra-Fast 500ms Adaptive Polling
-    let timerId = null;
+    // أ) Adaptive Polling مع تراجع أسي ذكي عند تعثر السيرفر لمنع تسريب الذاكرة
     const scheduleNextPoll = () => {
       if (!isMountedRef.current) return;
+      if (timerId) clearTimeout(timerId);
+
       const isVisible = typeof document !== 'undefined' ? document.visibilityState === 'visible' : true;
-      const delay = isVisible ? 500 : 2500;
+      let delay = isVisible ? 3500 : 15000;
+
+      // في حال تعثر السيرفر (500 أو انقطاع)، التراجع أسي (6ث -> 12ث -> 24ث -> 45ث) لمنع إرهاق المتصفح
+      if (pollFailures > 0) {
+        delay = Math.min(45000, 3000 * Math.pow(1.8, Math.min(pollFailures, 6)));
+      }
+
       timerId = setTimeout(async () => {
         await poll();
         scheduleNextPoll();
@@ -210,7 +223,7 @@ export function useRealtimeSync(props = {}) {
 
     const handleFocusOrVisible = () => {
       if (document.visibilityState === 'visible' || document.hasFocus()) {
-        clearTimeout(timerId);
+        if (timerId) clearTimeout(timerId);
         poll().then(() => scheduleNextPoll());
       }
     };
@@ -221,7 +234,7 @@ export function useRealtimeSync(props = {}) {
 
     return () => {
       isMountedRef.current = false;
-      clearTimeout(timerId);
+      if (timerId) clearTimeout(timerId);
       if (eventSource) eventSource.close();
       unsubBroadcast();
       window.removeEventListener('focus', handleFocusOrVisible);

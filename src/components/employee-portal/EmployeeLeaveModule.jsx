@@ -42,23 +42,22 @@ export default function EmployeeLeaveModule({
     );
 
     const map = new Map();
-    const seenSigSet = new Set();
-
     [...fromLeaves, ...fromHistory, ...fromRequests].forEach((r) => {
       if (!r) return;
-      const sDate = r.startDate || r.date || '';
-      const eDate = r.endDate || r.date || sDate;
-      const lType = r.leaveType || r.type || 'annual';
-      const sigKey = `${sDate}_${eDate}_${lType}`;
-
-      if (sDate && seenSigSet.has(sigKey)) return;
-      if (sDate) seenSigSet.add(sigKey);
-
-      const rId = String(r.id || sigKey);
-      map.set(rId, {
-        ...r,
-        status: (r.status === 'approved' || r.adminApproved) ? 'approved' : (r.status || 'pending')
-      });
+      const rId = String(r.id || `${r.startDate || ''}_${r.createdAt || ''}_${r.leaveType || ''}`);
+      if (!map.has(rId)) {
+        map.set(rId, {
+          ...r,
+          status: (r.status === 'approved' || r.adminApproved) ? 'approved' : (r.status || 'pending')
+        });
+      } else {
+        const existing = map.get(rId);
+        map.set(rId, {
+          ...existing,
+          ...r,
+          status: (r.status === 'approved' || r.adminApproved || existing.status === 'approved' || existing.adminApproved) ? 'approved' : (r.status || existing.status || 'pending')
+        });
+      }
     });
     return Array.from(map.values()).sort((a, b) => {
       const getT = (r) => {

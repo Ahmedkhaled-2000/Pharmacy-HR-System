@@ -40,10 +40,18 @@ export default function EmployeeLoansModule({
 
   // Combine state.requests and state.loans for this employee
   const employeeRequests = React.useMemo(() => {
+    const empIdStr = String(emp.id || '').trim();
+    const empCodeStr = String(emp.code || '').trim();
+    const isEmpMatch = (item) => {
+      if (!item) return false;
+      const itemId = String(item.employeeId || '').trim();
+      return itemId === empIdStr || (empCodeStr && itemId === empCodeStr);
+    };
+
     const reqs = (state.requests || []).filter(
-      (r) => String(r.employeeId) === String(emp.id) && (r.type === 'loan' || r.type === 'credit_medicine' || r.type === 'advance' || r.type === 'meds')
+      (r) => isEmpMatch(r) && (r.type === 'loan' || r.type === 'credit_medicine' || r.type === 'advance' || r.type === 'meds')
     );
-    const directLoans = (state.loans || []).filter((l) => String(l.employeeId) === String(emp.id));
+    const directLoans = (state.loans || []).filter(isEmpMatch);
 
     const map = new Map();
     reqs.forEach((r) => {

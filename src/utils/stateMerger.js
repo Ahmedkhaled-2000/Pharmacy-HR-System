@@ -8,13 +8,22 @@
 export function getItemKey(item, fallbackPrefix = 'item') {
   if (!item || typeof item !== 'object') return null;
   if (item.id !== undefined && item.id !== null && item.id !== '') return String(item.id);
+  if (item._id !== undefined && item._id !== null && item._id !== '') return String(item._id);
+  if (item.requestId !== undefined && item.requestId !== null && item.requestId !== '') return String(item.requestId);
   if (item.deviceId) return String(item.deviceId);
-  if (item.code) return String(item.code);
+  if (fallbackPrefix === 'branch' && item.branchCode) return `branch_${item.branchCode}`;
+  if (fallbackPrefix === 'emp' && item.code) return `emp_${item.code}`;
   if (item.employeeId && item.date) {
-    return `${item.employeeId}_${item.date}_${item.type || item.action || item.subType || ''}_${item.time || ''}`;
+    const sub = item.type || item.action || item.subType || item.time || item.createdAt || item.startTime || item.startDate || '';
+    return `${fallbackPrefix}_${item.employeeId}_${item.date}_${sub}`;
   }
   if (item.timestamp) return `${fallbackPrefix}_${item.timestamp}`;
-  return JSON.stringify(item);
+  if (item.createdAt) return `${fallbackPrefix}_${item.createdAt}`;
+  try {
+    return JSON.stringify(item);
+  } catch {
+    return `${fallbackPrefix}_${Math.random()}`;
+  }
 }
 
 // استخراج أحدث وقت تعديل للعنصر
@@ -36,36 +45,18 @@ export function toSafeArray(val) {
 }
 
 /**
- * فحص ما إذا كان العنصر أو أحد مفاتيحه أو الموظف/الفرع التابع له محذوفاً نهائياً
+ * فحص ما إذا كان العنصر محذوفاً نهائياً بشكل دقيق لمنع الحذف الخاطئ للطلبات الجديدة
  */
 export function isItemDeleted(item, key, deletedIds) {
   if (!item || typeof item !== 'object') return true;
   if (!deletedIds || !(deletedIds instanceof Set) || deletedIds.size === 0) return false;
 
+  // فحص مباشر للمفتاح المحدد
   if (key && deletedIds.has(key)) return true;
+
   if (item.id !== undefined && item.id !== null && item.id !== '') {
     const idStr = String(item.id);
     if (deletedIds.has(idStr)) return true;
-
-    // Check specific prefixed deletion if applicable
-    if (deletedIds.has(`req_${idStr}`)) return true;
-    if (deletedIds.has(`leave_${idStr}`)) return true;
-    if (deletedIds.has(`swap_${idStr}`)) return true;
-    if (deletedIds.has(`res_${idStr}`)) return true;
-    if (deletedIds.has(`loan_${idStr}`)) return true;
-    if (deletedIds.has(`shift_${idStr}`)) return true;
-    if (deletedIds.has(`adj_${idStr}`)) return true;
-    if (deletedIds.has(`emp_${idStr}`)) return true;
-    if (deletedIds.has(`branch_${idStr}`)) return true;
-    if (deletedIds.has(`dev_${idStr}`)) return true;
-    if (deletedIds.has(`notif_${idStr}`)) return true;
-
-    // If item.id has a known entity prefix, check if its explicit full id is in deletedIds
-    const prefixMatch = idStr.match(/^(req_|leave_|swap_|res_|loan_|emp_|shift_|adj_|branch_|dev_|notif_)(.+)$/);
-    if (prefixMatch && prefixMatch[2]) {
-      const rawId = prefixMatch[2];
-      if (deletedIds.has(rawId)) return true;
-    }
   }
 
   // Device-specific deletion check

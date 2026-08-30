@@ -30,25 +30,45 @@ const getApiBaseUrl = () => {
 export const API_BASE_URL = getApiBaseUrl();
 
 /**
- * دالة مساعدة متقدمة لتنفيذ طلبات الـ HTTP مع مهلة زمنية ذكية ومعالجة الأخطاء والتنسيق وإعادة المحاولة التلقائية
+ * دالة مساعدة متقدمة لتنفيذ طلبات الـ HTTP مع مهلة زمنية ذكية وحاجز حماية (Circuit Breaker)
+ * لمنع انهيار المتصفح أو تسريب الذاكرة عند حدوث أخطاء سحابية 500
  */
 const activeETags = new Map();
 
+// حاجز الحماية السحابي لمنع تكرار الاتصال العقيم بالسيرفر (Circuit Breaker)
+let consecutiveServerErrors = 0;
+let circuitBreakerCoolingUntil = 0;
+
+export function isBackendHealthy() {
+  return Date.now() >= circuitBreakerCoolingUntil;
+}
+
+export function resetBackendCircuitBreaker() {
+  consecutiveServerErrors = 0;
+  circuitBreakerCoolingUntil = 0;
+}
+
 async function request(endpoint, options = {}) {
-  const maxRetries = options.retries !== undefined ? options.retries : (options.method === 'POST' ? 1 : 2);
-  const baseTimeoutMs = options.timeout || 15000;
+  // إذا كان السيرفر في وضع التبريد والحماية من الانهيار (Circuit Breaker Active)
+  if (Date.now() < circuitBreakerCoolingUntil && options.isBackground) {
+    throw new Error(`[CircuitBreaker] الخادم قيد إعادة التشغيل والتبريد مؤقتاً.`);
+  }
+
+  const maxRetries = options.retries !== undefined ? options.retries : 0; // عدم تكرار الطلبات الخاطئة في نفس الثانية
+  const baseTimeoutMs = options.timeout || 10000;
   
   let lastError = null;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    // إضافة معامل زمني عشوائي صارم لمنع أي كاش للمتصفح أو البروكسي
     const separator = endpoint.includes('?') ? '&' : '?';
     const antiCacheQuery = options.noCache !== false ? `${separator}_t=${Date.now()}_${Math.random().toString(36).slice(2, 7)}` : '';
     const url = `${API_BASE_URL}/${endpoint.replace(/^\/+/, '')}${antiCacheQuery}`;
-    const timeoutMs = baseTimeoutMs + (attempt * 3000);
+    const timeoutMs = baseTimeoutMs;
     
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    const timeoutId = setTimeout(() => {
+      try { controller.abort(); } catch {}
+    }, timeoutMs);
 
     const headers = {
       'Content-Type': 'application/json',
@@ -59,7 +79,6 @@ async function request(endpoint, options = {}) {
       ...options.headers,
     };
 
-    // دعم ETag التلقائي للطلبات المشروطة إذا كان مفعلاً
     if (options.useETag && activeETags.has(url)) {
       headers['If-None-Match'] = activeETags.get(url);
     }
@@ -75,12 +94,14 @@ async function request(endpoint, options = {}) {
       const response = await fetch(url, config);
       clearTimeout(timeoutId);
 
-      // معالجة حالة عدم التغيير HTTP 304 Not Modified
+      // استجابة صحيحة -> تصفير عداد الأخطاء
+      consecutiveServerErrors = 0;
+      circuitBreakerCoolingUntil = 0;
+
       if (response.status === 304) {
         return { notModified: true, status: 304 };
       }
 
-      // تخزين الـ ETag المستلم للطلبات اللاحقة
       const etag = response.headers.get('ETag') || response.headers.get('etag');
       if (etag) {
         activeETags.set(url, etag);
@@ -90,6 +111,16 @@ async function request(endpoint, options = {}) {
         const errorText = await response.text();
         let errorJson;
         try { errorJson = JSON.parse(errorText); } catch { /* ignore */ }
+        
+        // عند حدوث خطأ 500 من الخادم، نقوم بتفعيل حاجز الحماية لتجنب إجهاد الذاكرة
+        if (response.status >= 500) {
+          consecutiveServerErrors++;
+          if (consecutiveServerErrors >= 3) {
+            circuitBreakerCoolingUntil = Date.now() + 25000; // تبريد لمدة 25 ثانية
+            console.warn(`[ApiClient] خادم السحابة يواجه مشكلة (${response.status}) - تم تفعيل الحفظ المحلي الذكي.`);
+          }
+        }
+
         throw new Error(errorJson?.error || `HTTP ${response.status}: ${response.statusText}`);
       }
 
@@ -98,24 +129,21 @@ async function request(endpoint, options = {}) {
       clearTimeout(timeoutId);
       lastError = error;
 
-      if (error.name === 'AbortError') {
-        console.warn(`[ApiClient] Request to ${endpoint} timed out after ${timeoutMs}ms (Attempt ${attempt + 1}/${maxRetries + 1})`);
-      } else {
-        console.warn(`[ApiClient] Request to ${endpoint} failed:`, error.message, `(Attempt ${attempt + 1}/${maxRetries + 1})`);
+      if (error.name !== 'AbortError' && !error.message?.includes('CircuitBreaker')) {
+        console.warn(`[ApiClient] ${endpoint}: ${error.message}`);
       }
 
-      // إذا كانت هذه ليست المحاولة الأخيرة، انتظر قليلاً قبل إعادة المحاولة
       if (attempt < maxRetries) {
-        const delay = (attempt + 1) * 800;
+        const delay = 1000;
         await new Promise((res) => setTimeout(res, delay));
       }
     }
   }
 
   if (lastError?.name === 'AbortError') {
-    throw new Error(`انتهت مهلة الاتصال بالخادم. يرجى التحقق من اتصال الإنترنت وإعادة المحاولة.`);
+    throw new Error(`انتهت مهلة الاتصال بالخادم. سيتم الاعتماد على الحفظ المحلي.`);
   }
-  throw lastError || new Error(`تعذر الاتصال بالخادم بعد عدة محاولات.`);
+  throw lastError || new Error(`تعذر الاتصال بالخادم.`);
 }
 
 // ── 1. دوال إعدادات وبيانات التطبيق الرئيسية (Settings / State) ────────────────
@@ -124,7 +152,8 @@ export async function apiFetchSettings(key = STORAGE_KEY, options = {}) {
     method: 'GET',
     timeout: options.timeout || 8000,
     useETag: options.useETag || false,
-    noCache: true
+    noCache: true,
+    isBackground: options.isBackground !== undefined ? options.isBackground : true
   });
   if (res?.notModified) return { notModified: true };
   return res?.value || null;
@@ -135,7 +164,8 @@ export async function apiSaveSettings(key = STORAGE_KEY, value, options = {}) {
     method: 'POST',
     body: JSON.stringify({ key, value }),
     timeout: options.timeout || 20000,
-    noCache: true
+    noCache: true,
+    isBackground: false
   });
 }
 
@@ -143,8 +173,9 @@ export async function apiSaveSettings(key = STORAGE_KEY, value, options = {}) {
 export async function apiFetchVersion(key = STORAGE_KEY, options = {}) {
   return await request(`sync/version?key=${encodeURIComponent(key)}`, {
     method: 'GET',
-    timeout: options.timeout || 2500,
-    noCache: true
+    timeout: options.timeout || 3500,
+    noCache: true,
+    isBackground: options.isBackground !== undefined ? options.isBackground : true
   });
 }
 

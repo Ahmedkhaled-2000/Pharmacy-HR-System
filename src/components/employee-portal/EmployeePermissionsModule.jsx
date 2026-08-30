@@ -31,19 +31,30 @@ export default function EmployeePermissionsModule({
   const empIdStr = String(emp.id || '').trim();
   const empCodeStr = String(emp.code || '').trim();
 
-  const employeePermRequests = (state.requests || []).filter(
-    (r) => (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeId) === empCodeStr)) && r.type === 'permission'
-  ).sort((a, b) => {
-    const getT = (r) => {
-      if (!r) return 0;
-      if (r.createdAt) { const t = new Date(r.createdAt).getTime(); if (!isNaN(t) && t > 0) return t; }
-      if (r.timestamp) { const t = new Date(r.timestamp).getTime(); if (!isNaN(t) && t > 0) return t; }
-      if (r.updatedAt) { const t = new Date(r.updatedAt).getTime(); if (!isNaN(t) && t > 0) return t; }
-      if (r.date) { const t = new Date(r.date).getTime(); if (!isNaN(t) && t > 0) return t; }
-      return 0;
-    };
-    return getT(b) - getT(a);
-  });
+  const employeePermRequests = React.useMemo(() => {
+    const map = new Map();
+    [...(state.requests || []), ...(state.permissionRequests || [])].forEach((r) => {
+      if (!r) return;
+      const isPerm = r.type === 'permission' || r.type === 'permission_request';
+      if (!isPerm) return;
+      const rEmpId = String(r.employeeId || '').trim();
+      if (rEmpId === empIdStr || (empCodeStr && rEmpId === empCodeStr)) {
+        map.set(String(r.id), r);
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => {
+      const getT = (r) => {
+        if (!r) return 0;
+        if (r.createdAt) { const t = new Date(r.createdAt).getTime(); if (!isNaN(t) && t > 0) return t; }
+        if (r.timestamp) { const t = new Date(r.timestamp).getTime(); if (!isNaN(t) && t > 0) return t; }
+        if (r.updatedAt) { const t = new Date(r.updatedAt).getTime(); if (!isNaN(t) && t > 0) return t; }
+        if (r.date) { const t = new Date(r.date).getTime(); if (!isNaN(t) && t > 0) return t; }
+        return 0;
+      };
+      return getT(b) - getT(a);
+    });
+  }, [state.requests, state.permissionRequests, empIdStr, empCodeStr]);
 
   // Calculate duration in minutes/hours
   const calcDuration = () => {
