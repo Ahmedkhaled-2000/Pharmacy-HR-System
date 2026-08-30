@@ -1,6 +1,6 @@
 /**
  * supabaseClient.js (Legacy Adapter)
- * يوجه الاستدعاءات إلى apiClient.js للعمل مع MariaDB و PHP Backend
+ * يوجه الاستدعاءات إلى apiClient.js و socketClient.js للعمل مع PostgreSQL و Redis و Socket.io
  */
 
 export {
@@ -26,6 +26,18 @@ import {
   apiSaveFace,
   apiDeleteFace,
 } from './apiClient';
+
+import {
+  getSocket,
+  subscribeToLiveState,
+  subscribeToLiveFaces,
+} from './socketClient';
+
+export {
+  getSocket,
+  subscribeToLiveState,
+  subscribeToLiveFaces,
+};
 
 /**
  * محاكي خفيف لكائن db للتوافق الكامل مع أي كود قديم
@@ -123,6 +135,6 @@ export const db = {
     };
   },
   removeChannel() {
-    // No-op for MariaDB HTTP polling
+    // Handled via Socket.io
   },
 };

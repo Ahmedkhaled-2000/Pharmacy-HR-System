@@ -80,11 +80,21 @@ try {
                 );
 
                 if ($row) {
-                    $decodedValue = is_string($row['value_data']) ? json_decode($row['value_data'], true) : $row['value_data'];
+                    $rawVal = $row['value_data'];
+                    // إذا كانت القيمة مخزنة كنص JSON جاهز، يتم إرسالها فوراً دون استهلاك الذاكرة في json_decode/json_encode
+                    if (is_string($rawVal) && (str_starts_with(trim($rawVal), '{') || str_starts_with(trim($rawVal), '['))) {
+                        header('Content-Type: application/json; charset=utf-8');
+                        header('Cache-Control: no-cache, no-store, must-revalidate');
+                        echo '{"success":true,"key":' . json_encode($row['key_name']) . ',"value":' . trim($rawVal) . ',"version":' . (int)$row['version'] . ',"updated_at":' . json_encode($row['updated_at']) . '}';
+                        Database::resetConnection();
+                        exit();
+                    }
+
+                    $decodedValue = is_string($rawVal) ? json_decode($rawVal, true) : $rawVal;
                     jsonResponse([
                         'success' => true,
                         'key' => $row['key_name'],
-                        'value' => $decodedValue ?? $row['value_data'],
+                        'value' => $decodedValue ?? $rawVal,
                         'version' => (int)$row['version'],
                         'updated_at' => $row['updated_at']
                     ]);
@@ -102,14 +112,35 @@ try {
                 $targetKey = (string)($payload['key'] ?? $key);
                 $value = $payload['value'] ?? null;
 
-                if ($value === null) {
-                    jsonResponse(['success' => false, 'error' => 'Missing "value" in request body'], 400);
+                $decodedIncoming = is_string($value) ? json_decode($value, true) : $value;
+
+                // Server-side Smart Merge: جلب الحالة الحالية من السيرفر ودمجها لحماية الطلبات من المسح
+                $finalValueData = $value;
+                if (is_array($decodedIncoming)) {
+                    $existingRow = Database::queryOne(
+                        "SELECT value_data FROM app_settings WHERE key_name = ? LIMIT 1",
+                        [$targetKey]
+                    );
+
+                    if ($existingRow && !empty($existingRow['value_data'])) {
+                        $existingDecoded = is_string($existingRow['value_data'])
+                            ? json_decode($existingRow['value_data'], true)
+                            : $existingRow['value_data'];
+
+                        if (is_array($existingDecoded)) {
+                            // دمج ذكي يحافظ على جميع الطلبات والكيانات المستلمة من كافة الأجهزة
+                            $mergedState = mergeServerState($existingDecoded, $decodedIncoming);
+                            $finalValueData = $mergedState;
+                        }
+                    }
                 }
 
-                $jsonString = is_string($value) ? $value : json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                $jsonString = is_string($finalValueData)
+                    ? $finalValueData
+                    : json_encode($finalValueData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
 
                 // Upsert with version increment (PostgreSQL vs MySQL)
-                if ($driver === 'pgsql') {
+                if (in_array($driver, ['pgsql', 'sqlite'], true)) {
                     $sql = "INSERT INTO app_settings (key_name, value_data, version, updated_at)
                             VALUES (?, ?::jsonb, 1, NOW())
                             ON CONFLICT (key_name) DO UPDATE
@@ -140,10 +171,11 @@ try {
 
                 jsonResponse([
                     'success' => true,
-                    'message' => 'State saved successfully',
+                    'message' => 'State saved and merged successfully',
                     'key' => $targetKey,
                     'version' => $currentVersion,
-                    'updated_at' => $updatedAt
+                    'updated_at' => $updatedAt,
+                    'value' => is_array($finalValueData) ? $finalValueData : null
                 ]);
             }
             break;
@@ -155,50 +187,34 @@ try {
         case 'events':
             @ini_set('zlib.output_compression', '0');
             @ini_set('output_buffering', '0');
-            @ini_set('implicit_flush', '1');
-            while (@ob_end_clean());
 
             header('Content-Type: text/event-stream; charset=utf-8');
-            header('Cache-Control: no-cache, no-transform');
-            header('Connection: keep-alive');
+            header('Cache-Control: no-cache, no-transform, no-store, must-revalidate');
+            header('Connection: close');
             header('X-Accel-Buffering: no');
+            header('Pragma: no-cache');
+            header('Expires: 0');
 
             $key = $_GET['key'] ?? DEFAULT_STORAGE_KEY;
-            $lastKnownVersion = (int)($_GET['last_version'] ?? 0);
 
-            // Allow stream script to run up to 25 seconds per connection, browser auto-reconnects seamlessly
-            set_time_limit(30);
-            $startTime = time();
-
-            while (time() - $startTime < 25) {
-                if (connection_aborted()) {
-                    break;
-                }
-
+            try {
                 $row = Database::queryOne(
                     "SELECT version, updated_at FROM app_settings WHERE key_name = ? LIMIT 1",
                     [$key]
                 );
                 $curVer = (int)($row['version'] ?? 0);
 
-                if ($curVer !== $lastKnownVersion && $curVer > 0) {
-                    $lastKnownVersion = $curVer;
-                    echo "event: version_change\n";
-                    echo "data: " . json_encode([
-                        'version' => $curVer,
-                        'updated_at' => $row['updated_at'] ?? null,
-                        'key' => $key
-                    ]) . "\n\n";
-                    @ob_flush();
-                    @flush();
-                } else {
-                    echo ": ping\n\n";
-                    @ob_flush();
-                    @flush();
-                }
-
-                usleep(500000); // 500ms check interval
+                echo "event: version_change\n";
+                echo "data: " . json_encode([
+                    'version' => $curVer,
+                    'updated_at' => $row['updated_at'] ?? null,
+                    'key' => $key
+                ]) . "\n\n";
+            } catch (Throwable) {
+                echo ": ping\n\n";
             }
+
+            Database::resetConnection();
             exit();
             break;
 
@@ -264,7 +280,7 @@ try {
                 $handDescriptor = isset($payload['hand_descriptor']) ? (is_string($payload['hand_descriptor']) ? $payload['hand_descriptor'] : json_encode($payload['hand_descriptor'])) : null;
                 $biometricType = (string)($payload['biometric_type'] ?? 'face');
 
-                if ($driver === 'pgsql') {
+                if (in_array($driver, ['pgsql', 'sqlite'], true)) {
                     $sql = "INSERT INTO employee_faces (employee_id, descriptor, hand_descriptor, biometric_type, updated_at)
                             VALUES (?, ?::jsonb, ?::jsonb, ?, NOW())
                             ON CONFLICT (employee_id) DO UPDATE
@@ -340,7 +356,7 @@ try {
                     $hand = isset($f['hand_descriptor']) ? (is_string($f['hand_descriptor']) ? $f['hand_descriptor'] : json_encode($f['hand_descriptor'])) : null;
                     $type = (string)($f['biometric_type'] ?? 'face');
 
-                    if ($driver === 'pgsql') {
+                    if (in_array($driver, ['pgsql', 'sqlite'], true)) {
                         Database::execute(
                             "INSERT INTO employee_faces (employee_id, descriptor, hand_descriptor, biometric_type, updated_at)
                              VALUES (?, ?::jsonb, ?::jsonb, ?, NOW())
@@ -392,7 +408,7 @@ try {
             // 2. تحديث جدول الإعدادات بالحالة النظيفة المصفّرة
             if ($wipedState !== null) {
                 $jsonString = is_string($wipedState) ? $wipedState : json_encode($wipedState, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-                if ($driver === 'pgsql') {
+                if (in_array($driver, ['pgsql', 'sqlite'], true)) {
                     $sql = "INSERT INTO app_settings (key_name, value_data, version, updated_at)
                             VALUES (?, ?::jsonb, 1, NOW())
                             ON CONFLICT (key_name) DO UPDATE

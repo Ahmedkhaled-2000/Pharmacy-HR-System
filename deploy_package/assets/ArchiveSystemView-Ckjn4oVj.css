@@ -1,0 +1,133 @@
+/* =========================================================================
+   Pharmacy Archive System - High Precision Dark Navy Theme
+   Matches Standalone Archive Web App UI & UX 100%
+   ========================================================================= */
+
+.arch-root {
+  min-height: 100vh !important;
+  background-color: #070b14 !important;
+  color: #f8fafc !important;
+  font-family: 'Cairo', 'Segoe UI', system-ui, -apple-system, sans-serif !important;
+  direction: rtl !important;
+  text-align: right !important;
+  display: flex !important;
+  flex-direction: column !important;
+  box-sizing: border-box !important;
+  width: 100% !important;
+}
+
+.arch-root *,
+.arch-root *::before,
+.arch-root *::after {
+  box-sizing: border-box !important;
+}
+
+/* Force dark overrides on common elements within archive to prevent global HR style leakage */
+.arch-root input,
+.arch-root select,
+.arch-root textarea {
+  background-color: #070b14 !important;
+  color: #f8fafc !important;
+  border-color: #334155 !important;
+}
+
+.arch-root select option {
+  background-color: #0b1120 !important;
+  color: #f8fafc !important;
+}
+
+.arch-root table {
+  background-color: transparent !important;
+  color: #f8fafc !important;
+  border-collapse: collapse !important;
+}
+
+.arch-root thead th {
+  background-color: #0f172a !important;
+  color: #94a3b8 !important;
+  border-bottom: 1px solid #1e293b !important;
+}
+
+.arch-root tbody tr {
+  background-color: transparent !important;
+}
+
+.arch-root tbody tr:hover {
+  background-color: rgba(30, 41, 59, 0.5) !important;
+}
+
+/* Custom Scrollbar for Archive */
+.arch-root ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.arch-root ::-webkit-scrollbar-track {
+  background: #070b14;
+}
+
+.arch-root ::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 4px;
+}
+
+.arch-root ::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* Button & Card animations */
+.arch-card-hover {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.arch-card-hover:hover {
+  border-color: rgba(59, 130, 246, 0.4) !important;
+  transform: translateY(-2px);
+}
+
+.arch-blue-glow {
+  box-shadow: 0 4px 20px -2px rgba(37, 99, 235, 0.35);
+}
+
+.arch-green-glow {
+  box-shadow: 0 4px 20px -2px rgba(16, 185, 129, 0.3);
+}
+
+.arch-cyan-glow {
+  box-shadow: 0 4px 20px -2px rgba(56, 189, 248, 0.3);
+}
+
+/* Modal Overlay & Backdrop - Guaranteed High Z-Index */
+.arch-modal-backdrop {
+  position: fixed !important;
+  top: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  left: 0 !important;
+  z-index: 999999 !important;
+  background-color: rgba(3, 7, 18, 0.85) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 16px !important;
+  overflow-y: auto !important;
+  direction: rtl !important;
+}
+
+.arch-modal-container {
+  background-color: #0b1120 !important;
+  border: 1px solid #1e293b !important;
+  border-radius: 20px !important;
+  box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.9), 0 0 35px rgba(37, 99, 235, 0.12) !important;
+  color: #f8fafc !important;
+  overflow: hidden !important;
+  animation: archFadeIn 0.2s ease-out !important;
+}
+
+@keyframes archFadeIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
