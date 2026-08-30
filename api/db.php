@@ -22,7 +22,6 @@ class Database
         if (self::$instance === null) {
             $driver = defined('DB_DRIVER') ? strtolower(DB_DRIVER) : 'pgsql';
             $primaryDriver = in_array($driver, ['pgsql', 'postgres', 'postgresql'], true) ? 'pgsql' : 'mysql';
-            $fallbackDriver = ($primaryDriver === 'pgsql') ? 'mysql' : 'pgsql';
 
             // محاولة الاتصال بالمحرك الأساسي
             $primaryError = null;
@@ -32,23 +31,27 @@ class Database
                 return self::$instance;
             } catch (PDOException $e) {
                 $primaryError = $e->getMessage();
-                error_log("[DB Primary Connection Error: $primaryDriver] " . $primaryError);
-            }
+                error_log("[DB Connection Error: $primaryDriver] " . $primaryError);
 
-            // محاولة الاتصال بالمحرك الاحتياطي التلقائي (Auto-Fallback)
-            try {
-                self::$driver = $fallbackDriver;
-                self::$instance = self::createPDOConnection($fallbackDriver);
-                return self::$instance;
-            } catch (PDOException $e) {
-                $fallbackError = $e->getMessage();
-                error_log("[DB Fallback Connection Error: $fallbackDriver] " . $fallbackError);
+                // إذا كان الاتصال عبر 127.0.0.1 فشل، جرب localhost كبديل مباشر
+                if ($primaryDriver === 'pgsql' && DB_HOST === '127.0.0.1') {
+                    try {
+                        $dsn = sprintf('pgsql:host=localhost;port=%d;dbname=%s;options=\'--client_encoding=utf8\'', DB_PORT, DB_NAME);
+                        self::$instance = new PDO($dsn, DB_USER, DB_PASS, [
+                            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                            PDO::ATTR_TIMEOUT => 5
+                        ]);
+                        return self::$instance;
+                    } catch (PDOException $e2) {
+                        $primaryError .= " | Fallback to localhost: " . $e2->getMessage();
+                    }
+                }
 
                 jsonResponse([
                     'success' => false,
-                    'error' => 'Database connection failed. Please verify PostgreSQL / MySQL credentials in api/config.php.',
-                    'primary_error' => $primaryError,
-                    'fallback_error' => $fallbackError
+                    'error' => 'Database connection failed. Please verify PostgreSQL credentials in api/config.php.',
+                    'details' => $primaryError
                 ], 500);
             }
         }

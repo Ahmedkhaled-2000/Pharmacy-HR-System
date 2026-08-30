@@ -61,7 +61,7 @@ export async function fetchRemoteState(options = {}) {
       return normalizeState(parsed);
     }
   } catch (e) {
-    console.warn('[Sync] Failed to fetch remote state from MariaDB API:', e);
+    console.warn('[Sync] Failed to fetch remote state from Cloud API:', e);
   }
   return null;
 }
