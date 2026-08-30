@@ -21,50 +21,77 @@ class Database
     {
         if (self::$instance === null) {
             $driver = defined('DB_DRIVER') ? strtolower(DB_DRIVER) : 'pgsql';
-            self::$driver = in_array($driver, ['pgsql', 'postgres', 'postgresql'], true) ? 'pgsql' : 'mysql';
+            $primaryDriver = in_array($driver, ['pgsql', 'postgres', 'postgresql'], true) ? 'pgsql' : 'mysql';
+            $fallbackDriver = ($primaryDriver === 'pgsql') ? 'mysql' : 'pgsql';
 
+            // محاولة الاتصال بالمحرك الأساسي
+            $primaryError = null;
             try {
-                if (self::$driver === 'pgsql') {
-                    $dsn = sprintf(
-                        'pgsql:host=%s;port=%d;dbname=%s;options=\'--client_encoding=%s\'',
-                        DB_HOST,
-                        DB_PORT,
-                        DB_NAME,
-                        DB_CHARSET
-                    );
-                } else {
-                    $charset = (DB_CHARSET === 'utf8') ? 'utf8mb4' : DB_CHARSET;
-                    $dsn = sprintf(
-                        'mysql:host=%s;port=%d;dbname=%s;charset=%s',
-                        DB_HOST,
-                        DB_PORT,
-                        DB_NAME,
-                        $charset
-                    );
-                }
-
-                $pdoOptions = [
-                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                    PDO::ATTR_EMULATE_PREPARES => false,
-                    PDO::ATTR_STRINGIFY_FETCHES => false,
-                    PDO::ATTR_TIMEOUT => 7,
-                ];
-
-                $pdo = new PDO($dsn, DB_USER, DB_PASS, $pdoOptions);
-
-                self::$instance = $pdo;
+                self::$driver = $primaryDriver;
+                self::$instance = self::createPDOConnection($primaryDriver);
+                return self::$instance;
             } catch (PDOException $e) {
-                error_log('[DB Connection Error] ' . $e->getMessage());
+                $primaryError = $e->getMessage();
+                error_log("[DB Primary Connection Error: $primaryDriver] " . $primaryError);
+            }
+
+            // محاولة الاتصال بالمحرك الاحتياطي التلقائي (Auto-Fallback)
+            try {
+                self::$driver = $fallbackDriver;
+                self::$instance = self::createPDOConnection($fallbackDriver);
+                return self::$instance;
+            } catch (PDOException $e) {
+                $fallbackError = $e->getMessage();
+                error_log("[DB Fallback Connection Error: $fallbackDriver] " . $fallbackError);
+
                 jsonResponse([
                     'success' => false,
-                    'error' => 'Database connection failed. Please verify PostgreSQL credentials in api/config.php.',
-                    'details' => $e->getMessage()
+                    'error' => 'Database connection failed. Please verify PostgreSQL / MySQL credentials in api/config.php.',
+                    'primary_error' => $primaryError,
+                    'fallback_error' => $fallbackError
                 ], 500);
             }
         }
 
         return self::$instance;
+    }
+
+    private static function createPDOConnection(string $driver): PDO
+    {
+        $host = DB_HOST;
+        $port = ($driver === 'pgsql') ? (defined('DB_PORT') ? DB_PORT : 5432) : 3306;
+        $dbName = DB_NAME;
+        $user = DB_USER;
+        $pass = DB_PASS;
+
+        if ($driver === 'pgsql') {
+            $dsn = sprintf(
+                'pgsql:host=%s;port=%d;dbname=%s;options=\'--client_encoding=%s\'',
+                $host,
+                $port,
+                $dbName,
+                DB_CHARSET
+            );
+        } else {
+            $charset = (DB_CHARSET === 'utf8') ? 'utf8mb4' : DB_CHARSET;
+            $dsn = sprintf(
+                'mysql:host=%s;port=%d;dbname=%s;charset=%s',
+                $host === '127.0.0.1' ? 'localhost' : $host,
+                $port,
+                $dbName,
+                $charset
+            );
+        }
+
+        $pdoOptions = [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            PDO::ATTR_EMULATE_PREPARES => false,
+            PDO::ATTR_STRINGIFY_FETCHES => false,
+            PDO::ATTR_TIMEOUT => 5,
+        ];
+
+        return new PDO($dsn, $user, $pass, $pdoOptions);
     }
 
     /**
