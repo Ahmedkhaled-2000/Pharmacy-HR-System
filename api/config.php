@@ -9,7 +9,10 @@ declare(strict_types=1);
 
 // ضبط تقرير الأخطاء في وضع الإنتاج
 error_reporting(E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED);
-ini_set('display_errors', '0');
+@ini_set('memory_limit', '512M');
+@ini_set('max_execution_time', '60');
+@ini_set('display_errors', '0');
+error_reporting(E_ALL & ~E_NOTICE & ~E_DEPRECATED);
 ini_set('log_errors', '1');
 
 // ضبط التوقيت الافتراضي
