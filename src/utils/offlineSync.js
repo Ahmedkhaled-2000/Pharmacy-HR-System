@@ -85,7 +85,7 @@ export async function smartSaveState(updatedState, options = {}) {
   if (isOnline()) {
     try {
       // 3. إرسال النسخة النظيفة إلى السحابة مباشرة مع الدمج الخادمي
-      const res = await apiSaveSettings(STORAGE_KEY, cleanUpdated, { timeout: 15000 });
+      const res = await apiSaveSettings(STORAGE_KEY, cleanUpdated, { timeout: 25000 });
 
       if (!res?.success) {
         throw new Error(res?.error || 'Failed to save to Database');
@@ -94,6 +94,7 @@ export async function smartSaveState(updatedState, options = {}) {
       // إذا أعاد الخادم حالة مدمجة، نعتمدها ونحدث التخزين المحلي
       const finalState = res?.value && typeof res.value === 'object' ? normalizeState(res.value) : cleanUpdated;
       saveStateLocally(finalState).catch(() => {});
+      clearPendingQueue().catch(() => {});
       broadcastStateChange(finalState);
 
       onSyncSuccess?.(finalState);

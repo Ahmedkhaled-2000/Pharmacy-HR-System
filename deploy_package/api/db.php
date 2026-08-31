@@ -16,7 +16,7 @@ class Database
     private static string $driver = 'pgsql';
 
     /**
-     * الحصول على اتصال قاعدة البيانات مع تبديل ذكي فوري بين PostgreSQL و MariaDB/MySQL و SQLite
+     * الحصول على اتصال قاعدة البيانات مع تبديل ذكي فوري وإعادة محاولة تلقائية لمنع أي انقطاع
      */
     public static function getConnection(): PDO
     {
@@ -26,30 +26,42 @@ class Database
 
         $preferredDriver = defined('DB_DRIVER') ? strtolower((string)DB_DRIVER) : 'pgsql';
 
-        // 1. المحاولة الأولى: PostgreSQL (إذا كان محدداً أو افتراضياً)
+        // 1. المحاولة الأولى: PostgreSQL (مع 3 محاولات اتصال سريعة لمنع أي فشل عابر)
         if (in_array($preferredDriver, ['pgsql', 'postgres', 'postgresql'], true)) {
-            try {
-                self::$driver = 'pgsql';
-                self::$instance = self::createPDOConnection('pgsql', DB_HOST);
+            for ($retry = 0; $retry < 3; $retry++) {
                 try {
-                    self::$instance->exec("SET NAMES 'UTF8'");
-                } catch (Throwable) {}
-                return self::$instance;
-            } catch (Throwable $ePg) {
-                error_log("[DB PostgreSQL Failed - Trying MariaDB Fallback]: " . $ePg->getMessage());
+                    self::$driver = 'pgsql';
+                    self::$instance = self::createPDOConnection('pgsql', DB_HOST);
+                    try {
+                        self::$instance->exec("SET NAMES 'UTF8'");
+                    } catch (Throwable) {}
+                    return self::$instance;
+                } catch (Throwable $ePg) {
+                    if ($retry < 2) {
+                        usleep(60000); // 60ms quick wait before next attempt
+                    } else {
+                        error_log("[DB PostgreSQL Failed after 3 retries - Trying MySQL Fallback]: " . $ePg->getMessage());
+                    }
+                }
             }
         }
 
-        // 2. المحاولة الثانية: MySQL / MariaDB (الخيار فائق السرعة والمتاح دائماً على نفس الاستضافة)
-        try {
-            self::$driver = 'mysql';
-            self::$instance = self::createPDOConnection('mysql', MYSQL_HOST);
+        // 2. المحاولة الثانية: MySQL / MariaDB (مع محاولتين)
+        for ($retry = 0; $retry < 2; $retry++) {
             try {
-                self::$instance->exec("SET NAMES utf8mb4");
-            } catch (Throwable) {}
-            return self::$instance;
-        } catch (Throwable $eMy) {
-            error_log("[DB MySQL Failed - Trying SQLite Fallback]: " . $eMy->getMessage());
+                self::$driver = 'mysql';
+                self::$instance = self::createPDOConnection('mysql', MYSQL_HOST);
+                try {
+                    self::$instance->exec("SET NAMES utf8mb4");
+                } catch (Throwable) {}
+                return self::$instance;
+            } catch (Throwable $eMy) {
+                if ($retry === 0) {
+                    usleep(50000);
+                } else {
+                    error_log("[DB MySQL Failed - Trying SQLite Fallback]: " . $eMy->getMessage());
+                }
+            }
         }
 
         // 3. المحاولة الثالثة: SQLite الطارئة
@@ -204,16 +216,23 @@ class Database
         $actualParams = self::resolveParams($typesOrParams, $params);
         $normalizedSql = self::normalizeQuery($sql);
 
-        try {
-            $db = self::getConnection();
-            $stmt = $db->prepare($normalizedSql);
-            $stmt->execute($actualParams);
-            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            return is_array($rows) ? $rows : [];
-        } catch (PDOException $e) {
-            self::resetConnection();
-            throw $e;
+        for ($attempt = 0; $attempt < 2; $attempt++) {
+            try {
+                $db = self::getConnection();
+                $stmt = $db->prepare($normalizedSql);
+                $stmt->execute($actualParams);
+                $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                return is_array($rows) ? $rows : [];
+            } catch (PDOException $e) {
+                self::resetConnection();
+                if ($attempt === 0) {
+                    usleep(40000); // 40ms wait before reconnect attempt
+                    continue;
+                }
+                throw $e;
+            }
         }
+        return [];
     }
 
     public static function execute(string $sql, mixed $typesOrParams = '', array $params = []): array
@@ -221,27 +240,34 @@ class Database
         $actualParams = self::resolveParams($typesOrParams, $params);
         $normalizedSql = self::normalizeQuery($sql);
 
-        try {
-            $db = self::getConnection();
-            $stmt = $db->prepare($normalizedSql);
-            $stmt->execute($actualParams);
-
-            $affectedRows = $stmt->rowCount();
-            $insertId = 0;
+        for ($attempt = 0; $attempt < 2; $attempt++) {
             try {
-                $insertId = $db->lastInsertId();
-            } catch (Throwable) {
-                $insertId = 0;
-            }
+                $db = self::getConnection();
+                $stmt = $db->prepare($normalizedSql);
+                $stmt->execute($actualParams);
 
-            return [
-                'affected_rows' => $affectedRows,
-                'insert_id' => $insertId
-            ];
-        } catch (PDOException $e) {
-            self::resetConnection();
-            throw $e;
+                $affectedRows = $stmt->rowCount();
+                $insertId = 0;
+                try {
+                    $insertId = $db->lastInsertId();
+                } catch (Throwable) {
+                    $insertId = 0;
+                }
+
+                return [
+                    'affected_rows' => $affectedRows,
+                    'insert_id' => $insertId
+                ];
+            } catch (PDOException $e) {
+                self::resetConnection();
+                if ($attempt === 0) {
+                    usleep(40000);
+                    continue;
+                }
+                throw $e;
+            }
         }
+        return ['affected_rows' => 0, 'insert_id' => 0];
     }
 
     public static function queryOne(string $sql, mixed $typesOrParams = '', array $params = []): ?array

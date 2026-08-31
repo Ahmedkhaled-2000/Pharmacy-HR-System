@@ -49,13 +49,15 @@ export function resetBackendCircuitBreaker() {
 }
 
 async function request(endpoint, options = {}) {
-  // إذا كان السيرفر في وضع التبريد والحماية من الانهيار (Circuit Breaker Active)
-  if (Date.now() < circuitBreakerCoolingUntil && options.isBackground) {
+  const isPostOrSave = options.method === 'POST' || endpoint.includes('settings');
+
+  // إذا كان السيرفر في وضع التبريد والحماية من الانهيار، نسمح دائماً بعمليات الحفظ
+  if (Date.now() < circuitBreakerCoolingUntil && options.isBackground && !isPostOrSave) {
     throw new Error(`[CircuitBreaker] الخادم قيد إعادة التشغيل والتبريد مؤقتاً.`);
   }
 
-  const maxRetries = options.retries !== undefined ? options.retries : 0; // عدم تكرار الطلبات الخاطئة في نفس الثانية
-  const baseTimeoutMs = options.timeout || 10000;
+  const maxRetries = options.retries !== undefined ? options.retries : (isPostOrSave ? 2 : 0);
+  const baseTimeoutMs = options.timeout || (isPostOrSave ? 25000 : 10000);
   
   let lastError = null;
 
@@ -118,11 +120,11 @@ async function request(endpoint, options = {}) {
         let errorJson;
         try { errorJson = JSON.parse(errorText); } catch { /* ignore */ }
         
-        // عند حدوث خطأ 500 من الخادم، نقوم بتفعيل حاجز الحماية لتجنب إجهاد الذاكرة
+        // عند حدوث خطأ 500 متكرر من الخادم
         if (response.status >= 500) {
           consecutiveServerErrors++;
-          if (consecutiveServerErrors >= 3) {
-            circuitBreakerCoolingUntil = Date.now() + 25000; // تبريد لمدة 25 ثانية
+          if (consecutiveServerErrors >= 4) {
+            circuitBreakerCoolingUntil = Date.now() + 15000;
             console.warn(`[ApiClient] خادم السحابة يواجه مشكلة (${response.status}) - تم تفعيل الحفظ المحلي الذكي.`);
           }
         }
@@ -136,12 +138,12 @@ async function request(endpoint, options = {}) {
       lastError = error;
 
       if (error.name !== 'AbortError' && !error.message?.includes('CircuitBreaker')) {
-        console.warn(`[ApiClient] ${endpoint}: ${error.message}`);
+        console.warn(`[ApiClient] ${endpoint} (محاولة ${attempt + 1}/${maxRetries + 1}): ${error.message}`);
       }
 
       if (attempt < maxRetries) {
-        const delay = 1000;
-        await new Promise((res) => setTimeout(res, delay));
+        const backoffDelay = (attempt + 1) * 350;
+        await new Promise((res) => setTimeout(res, backoffDelay));
       }
     }
   }
@@ -156,7 +158,8 @@ async function request(endpoint, options = {}) {
 export async function apiFetchSettings(key = STORAGE_KEY, options = {}) {
   const res = await request(`settings?key=${encodeURIComponent(key)}`, {
     method: 'GET',
-    timeout: options.timeout || 8000,
+    timeout: options.timeout || 15000,
+    retries: options.retries !== undefined ? options.retries : 1,
     useETag: options.useETag || false,
     noCache: true,
     isBackground: options.isBackground !== undefined ? options.isBackground : true
@@ -169,7 +172,8 @@ export async function apiSaveSettings(key = STORAGE_KEY, value, options = {}) {
   return await request('settings', {
     method: 'POST',
     body: JSON.stringify({ key, value }),
-    timeout: options.timeout || 20000,
+    timeout: options.timeout || 25000,
+    retries: options.retries !== undefined ? options.retries : 2,
     noCache: true,
     isBackground: false
   });
