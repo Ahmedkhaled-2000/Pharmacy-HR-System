@@ -27,5 +27,18 @@ dist-ssr
 .gradle
 build
 dev-dist
+deploy_package
 *.zip
 *.apk
+
+# Database & Environment Secrets
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+*.sqlite-wal
+supabase_extracted_data.json
+uploads/
+

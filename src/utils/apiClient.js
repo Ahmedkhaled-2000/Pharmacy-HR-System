@@ -70,12 +70,18 @@ async function request(endpoint, options = {}) {
       try { controller.abort(); } catch {}
     }, timeoutMs);
 
+    let authToken = '';
+    try {
+      authToken = localStorage.getItem('app_auth_token') || localStorage.getItem('archive_token') || '';
+    } catch {}
+
     const headers = {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
       'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
       'Pragma': 'no-cache',
       'Expires': '0',
+      ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
       ...options.headers,
     };
 
@@ -226,13 +232,24 @@ export async function apiImportBackup(payload) {
 export async function apiSystemReset(wipedState = null, key = STORAGE_KEY) {
   return await request('system/reset', {
     method: 'POST',
-    body: JSON.stringify({ key, state: wipedState }),
+    body: JSON.stringify({ key, state: wipedState, confirm: 'CONFIRM_RESET' }),
     timeout: 25000,
     noCache: true
   });
 }
 
-// ── 6. فحص سلامة الاتصال (Health Check) ───────────────────────────────────────
+// ── 6. فحص سلامة الاتصال والمصادقة (Auth & Health Check) ──────────────────────
 export async function apiHealthCheck() {
   return await request('health', { method: 'GET' });
+}
+
+export async function apiLogin(credentials) {
+  return await request('auth/login', {
+    method: 'POST',
+    body: JSON.stringify(credentials),
+  });
+}
+
+export async function apiVerifySession() {
+  return await request('auth/session', { method: 'GET' });
 }

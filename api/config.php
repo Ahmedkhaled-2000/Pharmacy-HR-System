@@ -59,6 +59,71 @@ define('MYSQL_PASS', getenv('MYSQL_PASS') ?: 'C6kMke4Uwj_dYtbCNHJx55r*');
 // المفتاح الافتراضي لحفظ بيانات النظام
 define('DEFAULT_STORAGE_KEY', 'pharmacy-tracker-data');
 
+// مفتاح التوقيع الرقمي للمصادقة وتأمين التوكنات
+define('API_SECRET_KEY', getenv('API_SECRET_KEY') ?: 'pharmacy-system-core-jwt-secret-2026-v1');
+
+/**
+ * توليد رمز مصادقة موقع رقمياً (HMAC-SHA256 Signed Token)
+ *
+ * @param array<string, mixed> $payload
+ * @param int $expirySeconds
+ * @return string
+ */
+function createApiToken(array $payload, int $expirySeconds = 30 * 86400): string
+{
+    $payload['iat'] = time();
+    $payload['exp'] = time() + $expirySeconds;
+    $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $signature = hash_hmac('sha256', $jsonPayload, API_SECRET_KEY);
+    return base64_encode($jsonPayload . '.' . $signature);
+}
+
+/**
+ * التحقق من صحة رمز المصادقة واستخراج البيانات منه
+ *
+ * @param string|null $token
+ * @return array<string, mixed>|null
+ */
+function verifyApiToken(?string $token): ?array
+{
+    if (empty($token)) return null;
+    $token = trim($token);
+    if (preg_match('/^Bearer\s+(.*)$/i', $token, $matches)) {
+        $token = trim($matches[1]);
+    }
+    $decoded = base64_decode($token, true);
+    if (!$decoded) return null;
+
+    $lastDot = strrpos($decoded, '.');
+    if ($lastDot === false) return null;
+
+    $payloadStr = substr($decoded, 0, $lastDot);
+    $signature = substr($decoded, $lastDot + 1);
+
+    $expectedSig = hash_hmac('sha256', $payloadStr, API_SECRET_KEY);
+    if (!hash_equals($expectedSig, $signature)) return null;
+
+    $data = json_decode($payloadStr, true);
+    if (!is_array($data) || (isset($data['exp']) && $data['exp'] < time())) return null;
+
+    return $data;
+}
+
+/**
+ * جلب بيانات المستخدم الموثق من ترويسة الطلب
+ *
+ * @return array<string, mixed>|null
+ */
+function getAuthenticatedUser(): ?array
+{
+    $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '';
+    if (empty($authHeader) && function_exists('apache_request_headers')) {
+        $headers = apache_request_headers();
+        $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? '';
+    }
+    return verifyApiToken($authHeader);
+}
+
 /**
  * إرسال استجابة JSON موحدة خالية من أي كاش وسيط
  *

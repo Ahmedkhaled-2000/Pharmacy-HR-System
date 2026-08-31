@@ -60,7 +60,95 @@ try {
             break;
 
         // ==================================================================
-        // 2. تشغيل الـ Migrations
+        // 2. تسجيل الدخول والتحقق من الجلسة (Auth Endpoints)
+        // ==================================================================
+        case 'auth/login':
+            if ($method !== 'POST') {
+                jsonResponse(['success' => false, 'error' => 'Method not allowed'], 405);
+            }
+
+            $payload = getRequestData();
+            $username = trim((string)($payload['username'] ?? $payload['code'] ?? ''));
+            $password = (string)($payload['password'] ?? '');
+            $role = (string)($payload['role'] ?? 'admin');
+
+            // جلب إعدادات المنشأة للتحقق من كلمات المرور
+            $settingsRow = Database::queryOne("SELECT value_data FROM app_settings WHERE key_name = ? LIMIT 1", [DEFAULT_STORAGE_KEY]);
+            $appState = $settingsRow && !empty($settingsRow['value_data'])
+                ? (is_string($settingsRow['value_data']) ? json_decode($settingsRow['value_data'], true) : $settingsRow['value_data'])
+                : [];
+
+            $orgSettings = is_array($appState['orgSettings'] ?? null) ? $appState['orgSettings'] : [];
+            $adminPass = (string)($orgSettings['adminPassword'] ?? '123456');
+            $ownerPass = (string)($orgSettings['ownerPassword'] ?? $adminPass);
+
+            $authenticated = false;
+            $userRole = 'guest';
+            $userData = ['username' => $username];
+
+            if ($role === 'owner' && $password === $ownerPass) {
+                $authenticated = true;
+                $userRole = 'owner';
+                $userData['name'] = 'المالك / الإدارة العليا';
+            } elseif (($role === 'admin' || $username === 'admin') && ($password === $adminPass || $password === $ownerPass)) {
+                $authenticated = true;
+                $userRole = 'admin';
+                $userData['name'] = 'مدير النظام';
+            } elseif ($role === 'branch') {
+                $branches = is_array($appState['branches'] ?? null) ? $appState['branches'] : [];
+                foreach ($branches as $b) {
+                    if (is_array($b) && ((string)($b['id'] ?? '') === $username || (string)($b['name'] ?? '') === $username)) {
+                        $bPass = (string)($b['managerPin'] ?? $b['password'] ?? '1234');
+                        if ($password === $bPass || $password === $adminPass) {
+                            $authenticated = true;
+                            $userRole = 'branch';
+                            $userData['branchId'] = $b['id'] ?? '';
+                            $userData['name'] = $b['name'] ?? 'مدير فرع';
+                        }
+                        break;
+                    }
+                }
+            }
+
+            if ($authenticated) {
+                $tokenPayload = [
+                    'username' => $username,
+                    'role' => $userRole,
+                    'userData' => $userData
+                ];
+                $token = createApiToken($tokenPayload, 30 * 86400); // 30 days
+                jsonResponse([
+                    'success' => true,
+                    'message' => 'تم تسجيل الدخول بنجاح',
+                    'token' => $token,
+                    'role' => $userRole,
+                    'user' => $userData
+                ]);
+            } else {
+                jsonResponse([
+                    'success' => false,
+                    'error' => 'بيانات الدخول غير صحيحة'
+                ], 401);
+            }
+            break;
+
+        case 'auth/session':
+        case 'auth/verify':
+            $authUser = getAuthenticatedUser();
+            if ($authUser) {
+                jsonResponse([
+                    'success' => true,
+                    'authenticated' => true,
+                    'role' => $authUser['role'] ?? 'user',
+                    'user' => $authUser['userData'] ?? ['username' => $authUser['username'] ?? '']
+                ]);
+            } else {
+                jsonResponse(['success' => false, 'authenticated' => false], 401);
+            }
+            break;
+
+        // ==================================================================
+        // 3. تشغيل الـ Migrations
         // ==================================================================
         case 'migrate':
         case 'migrate.php':
@@ -68,7 +156,7 @@ try {
             break;
 
         // ==================================================================
-        // 3. إدارة إعدادات وبيانات التطبيق الرئيسية (App Settings / State)
+        // 4. إدارة إعدادات وبيانات التطبيق الرئيسية (App Settings / State)
         // ==================================================================
         case 'settings':
             $key = $_GET['key'] ?? DEFAULT_STORAGE_KEY;
@@ -395,6 +483,14 @@ try {
             }
 
             $payload = getRequestData();
+            $confirmation = (string)($payload['confirm'] ?? $payload['confirm_wipe'] ?? '');
+            if ($confirmation !== 'CONFIRM_RESET' && $confirmation !== 'CONFIRM_FACTORY_RESET') {
+                jsonResponse([
+                    'success' => false,
+                    'error' => 'عملية إعادة ضبط المصنع تتطلب تأكيداً صريحاً (confirm: CONFIRM_RESET) لحماية بيانات النظام من المسح العرضي.'
+                ], 400);
+            }
+
             $targetKey = (string)($payload['key'] ?? DEFAULT_STORAGE_KEY);
             $wipedState = $payload['state'] ?? null;
 
@@ -444,24 +540,15 @@ try {
         default:
             jsonResponse([
                 'success' => false,
-                'error' => "Unknown endpoint: {$endpoint}",
-                'available_endpoints' => [
-                    'GET/POST /api/settings',
-                    'GET /api/sync/version',
-                    'GET/POST/DELETE /api/faces',
-                    'POST /api/system/reset',
-                    'GET /api/health',
-                    'GET /api/migrate',
-                    'GET /api/backup/export',
-                    'POST /api/backup/import'
-                ]
+                'error' => "Unknown endpoint: {$endpoint}"
             ], 404);
             break;
     }
 } catch (Throwable $e) {
-    error_log('[API Error] ' . $e->getMessage());
+    error_log('[API Error] ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+    $isDev = (getenv('APP_DEBUG') === 'true' || getenv('APP_ENV') === 'development');
     jsonResponse([
         'success' => false,
-        'error' => $e->getMessage()
+        'error' => $isDev ? $e->getMessage() : 'حدث خطأ غير متوقع أثناء معالجة الطلب في الخادم'
     ], 500);
 }

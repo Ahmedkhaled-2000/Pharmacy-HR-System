@@ -12,7 +12,7 @@
  * - Robust Arabic digit conversion, currency stripping, number & date normalization
  */
 
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import Papa from 'papaparse';
 
 // Common Arabic/English column headers for smart auto-mapping
@@ -129,11 +129,13 @@ export function parseCleanDate(val) {
   // Handle Excel Serial Date (e.g. 45231)
   if (typeof val === 'number' && val > 20000 && val < 60000) {
     try {
-      const dateObj = XLSX.SSF.parse_date_code(val);
-      if (dateObj) {
-        const y = dateObj.y;
-        const m = String(dateObj.m).padStart(2, '0');
-        const d = String(dateObj.d).padStart(2, '0');
+      const utcDays = Math.floor(val - 25569);
+      const utcValue = utcDays * 86400;
+      const dateInfo = new Date(utcValue * 1000);
+      if (!isNaN(dateInfo.getTime())) {
+        const y = dateInfo.getUTCFullYear();
+        const m = String(dateInfo.getUTCMonth() + 1).padStart(2, '0');
+        const d = String(dateInfo.getUTCDate()).padStart(2, '0');
         return `${y}-${m}-${d}`;
       }
     } catch (e) {}
@@ -326,24 +328,49 @@ export async function parseExcelOrCsvMultiInvoices(
     sheetMap['Sheet1'] = parsed.data || [];
   } else {
     // Excel file (.xlsx, .xls)
-    let workbook;
+    const workbook = new ExcelJS.Workbook();
     if (typeof fileData === 'string' && fileData.startsWith('data:')) {
       const base64Data = fileData.replace(/^data:[^;]+;base64,/, '');
-      workbook = XLSX.read(base64Data, { type: 'base64', cellDates: true });
-    } else if (fileData instanceof ArrayBuffer || fileData instanceof Uint8Array) {
-      workbook = XLSX.read(fileData, { type: 'array', cellDates: true });
-    } else {
-      workbook = XLSX.read(fileData, { cellDates: true });
+      const binaryString = atob(base64Data);
+      const len = binaryString.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      await workbook.xlsx.load(bytes.buffer);
+    } else if (fileData instanceof ArrayBuffer) {
+      await workbook.xlsx.load(fileData);
+    } else if (fileData instanceof Uint8Array) {
+      await workbook.xlsx.load(fileData.buffer);
     }
 
-    for (const sheetName of workbook.SheetNames) {
-      if (sheetName.includes('غير محدد') || sheetName.includes('Instructions')) continue;
-      const worksheet = workbook.Sheets[sheetName];
-      const rawRows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
-      if (rawRows && rawRows.length > 0) {
-        sheetMap[sheetName] = rawRows;
+    workbook.eachSheet((worksheet) => {
+      if (worksheet.name.includes('غير محدد') || worksheet.name.includes('Instructions')) return;
+      const rawRows = [];
+      worksheet.eachRow({ includeEmpty: true }, (row) => {
+        const rowValues = [];
+        const rawVals = Array.isArray(row.values) ? row.values.slice(1) : [];
+        rawVals.forEach((val) => {
+          if (val === null || val === undefined) {
+            rowValues.push('');
+          } else if (typeof val === 'object' && val.result !== undefined) {
+            rowValues.push(val.result ?? '');
+          } else if (typeof val === 'object' && val.text !== undefined) {
+            rowValues.push(val.text ?? '');
+          } else if (val instanceof Date) {
+            rowValues.push(val.toISOString().split('T')[0]);
+          } else {
+            rowValues.push(val);
+          }
+        });
+        if (rowValues.length > 0) {
+          rawRows.push(rowValues);
+        }
+      });
+      if (rawRows.length > 0) {
+        sheetMap[worksheet.name] = rawRows;
       }
-    }
+    });
   }
 
   const allInvoicesMap = new Map();

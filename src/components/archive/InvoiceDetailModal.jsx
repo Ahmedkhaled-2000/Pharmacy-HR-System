@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import {
   X,
   FileText,
@@ -120,22 +120,45 @@ export default function InvoiceDetailModal({
     setExcelError('');
 
     try {
-      let workbook;
+      const workbook = new ExcelJS.Workbook();
       if (fileUrl.startsWith('data:')) {
         const base64Data = fileUrl.replace(/^data:[^;]+;base64,/, '');
-        workbook = XLSX.read(base64Data, { type: 'base64' });
+        const binaryString = atob(base64Data);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        await workbook.xlsx.load(bytes.buffer);
       } else {
         const res = await fetch(fileUrl);
         const arrayBuffer = await res.arrayBuffer();
-        workbook = XLSX.read(arrayBuffer, { type: 'array' });
+        await workbook.xlsx.load(arrayBuffer);
       }
 
       const sheets = [];
-      workbook.SheetNames.forEach((name) => {
-        const ws = workbook.Sheets[name];
-        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
-        if (rows && rows.length > 0) {
-          sheets.push({ sheetName: name, rows });
+      workbook.eachSheet((worksheet) => {
+        const rows = [];
+        worksheet.eachRow({ includeEmpty: true }, (row) => {
+          const rowValues = [];
+          const rawVals = Array.isArray(row.values) ? row.values.slice(1) : [];
+          rawVals.forEach((val) => {
+            if (val === null || val === undefined) {
+              rowValues.push('');
+            } else if (typeof val === 'object' && val.result !== undefined) {
+              rowValues.push(val.result ?? '');
+            } else if (typeof val === 'object' && val.text !== undefined) {
+              rowValues.push(val.text ?? '');
+            } else {
+              rowValues.push(String(val));
+            }
+          });
+          if (rowValues.length > 0) {
+            rows.push(rowValues);
+          }
+        });
+        if (rows.length > 0) {
+          sheets.push({ sheetName: worksheet.name, rows });
         }
       });
 

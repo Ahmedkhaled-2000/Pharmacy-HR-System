@@ -159,7 +159,7 @@
     Sub StopServer
       Dim WshShell
       Set WshShell = CreateObject("WScript.Shell")
-      WshShell.Run "cmd /c taskkill /f /im node.exe", 0, True
+      WshShell.Run "powershell -WindowStyle Hidden -Command ""Get-NetTCPConnection -LocalPort 3001 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }""", 0, True
       MsgBox "تم إيقاف خادم الواتساب بنجاح! 🔴", 64, "إدارة الخادم"
       CheckServerStatus
     End Sub
@@ -188,7 +188,7 @@
     Sub StopTunnel
       Dim WshShell
       Set WshShell = CreateObject("WScript.Shell")
-      WshShell.Run "cmd /c taskkill /f /im node.exe", 0, True
+      WshShell.Run "powershell -WindowStyle Hidden -Command ""Get-NetTCPConnection -LocalPort 3001 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }""", 0, True
       document.getElementById("tunnelStatusText").innerText = "رابط الإنترنت: متوقف حالياً 🔴"
       MsgBox "تم إيقاف رابط الإنترنت بنجاح! 🔴", 64, "رابط الإنترنت"
     End Sub

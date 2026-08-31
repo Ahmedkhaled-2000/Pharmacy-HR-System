@@ -1161,8 +1161,17 @@ function handleArchiveApi(string $subPath, string $method): void
 
                 $uploadDir = __DIR__ . '/../uploads/archive/';
                 if (!is_dir($uploadDir)) {
-                    mkdir($uploadDir, 0755, true);
+                    @mkdir($uploadDir, 0755, true);
                 }
+
+                // إنشاء ملف .htaccess لحماية مجلد الرفع من تنفيذ أي نصوص برمجية
+                $htaccessPath = $uploadDir . '.htaccess';
+                if (!file_exists($htaccessPath)) {
+                    @file_put_contents($htaccessPath, "<FilesMatch \"(?i)\\.(php|phtml|php3|php4|php5|php7|php8|phar|inc|pl|py|cgi|sh|bash|exe|bat|cmd|dll|htc|shtml)$\">\n    Order Allow,Deny\n    Deny from all\n</FilesMatch>\n<IfModule mod_php.c>\n    php_flag engine off\n</IfModule>\n<IfModule mod_php7.c>\n    php_flag engine off\n</IfModule>\n<IfModule mod_php8.c>\n    php_flag engine off\n</IfModule>\nOptions -ExecCGI\n");
+                }
+
+                $allowedExtensions = ['jpg', 'jpeg', 'png', 'webp', 'pdf', 'xlsx', 'xls', 'csv', 'txt'];
+                $maxSizeBytes = 25 * 1024 * 1024; // 25 MB
 
                 if (!empty($_FILES['file'])) {
                     $file = $_FILES['file'];
@@ -1170,8 +1179,16 @@ function handleArchiveApi(string $subPath, string $method): void
                         jsonResponse(['success' => false, 'error' => 'فشل رفع الملف'], 400);
                     }
 
-                    $ext = pathinfo($file['name'], PATHINFO_EXTENSION);
-                    $safeName = 'inv_' . date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
+                    if ($file['size'] > $maxSizeBytes) {
+                        jsonResponse(['success' => false, 'error' => 'حجم الملف يتجاوز الحد المسموح (25 ميجابايت)'], 400);
+                    }
+
+                    $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+                    if (!in_array($ext, $allowedExtensions, true)) {
+                        jsonResponse(['success' => false, 'error' => 'نوع الملف غير مدعوم أو غير آمن. يسمح فقط بالصور والمستندات (PDF, Excel, Images)'], 400);
+                    }
+
+                    $safeName = 'inv_' . date('Ymd_His') . '_' . bin2hex(random_bytes(6)) . '.' . $ext;
                     $target = $uploadDir . $safeName;
 
                     if (move_uploaded_file($file['tmp_name'], $target)) {
@@ -1179,7 +1196,7 @@ function handleArchiveApi(string $subPath, string $method): void
                         jsonResponse([
                             'success' => true,
                             'fileUrl' => $fileUrl,
-                            'fileName' => $file['name'],
+                            'fileName' => htmlspecialchars($file['name'], ENT_QUOTES, 'UTF-8'),
                             'fileType' => $file['type']
                         ]);
                     } else {
@@ -1190,19 +1207,32 @@ function handleArchiveApi(string $subPath, string $method): void
                 if (!empty($requestData['base64'])) {
                     $base64 = (string)$requestData['base64'];
                     $fileName = (string)($requestData['fileName'] ?? 'invoice_' . time() . '.png');
-                    $ext = pathinfo($fileName, PATHINFO_EXTENSION) ?: 'png';
-                    $safeName = 'inv_' . date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
+                    $ext = strtolower(pathinfo($fileName, PATHINFO_EXTENSION) ?: 'png');
+
+                    if (!in_array($ext, $allowedExtensions, true)) {
+                        jsonResponse(['success' => false, 'error' => 'نوع الملف المرفوع عبر Base64 غير مسموح'], 400);
+                    }
+
+                    $safeName = 'inv_' . date('Ymd_His') . '_' . bin2hex(random_bytes(6)) . '.' . $ext;
                     $target = $uploadDir . $safeName;
 
                     $data = preg_replace('#^data:[^;]+;base64,#i', '', $base64);
-                    $data = base64_decode($data);
+                    $data = base64_decode($data, true);
+
+                    if ($data === false) {
+                        jsonResponse(['success' => false, 'error' => 'ترميز ملف Base64 غير صالح'], 400);
+                    }
+
+                    if (strlen($data) > $maxSizeBytes) {
+                        jsonResponse(['success' => false, 'error' => 'حجم الملف يتجاوز الحد المسموح (25 ميجابايت)'], 400);
+                    }
 
                     if (file_put_contents($target, $data)) {
                         $fileUrl = '/uploads/archive/' . $safeName;
                         jsonResponse([
                             'success' => true,
                             'fileUrl' => $fileUrl,
-                            'fileName' => $fileName
+                            'fileName' => htmlspecialchars($fileName, ENT_QUOTES, 'UTF-8')
                         ]);
                     }
                 }
@@ -1215,10 +1245,10 @@ function handleArchiveApi(string $subPath, string $method): void
                 break;
         }
     } catch (Throwable $e) {
-        error_log('[Archive API Error] ' . $e->getMessage());
+        error_log('[Archive API Error] ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
         jsonResponse([
             'success' => false,
-            'error' => 'خطأ في معالجة طلب الأرشيف: ' . $e->getMessage()
+            'error' => 'حدث خطأ أثناء معالجة الطلب في خادم الأرشيف'
         ], 500);
     }
 }

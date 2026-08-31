@@ -6,6 +6,20 @@ require_once __DIR__ . '/db.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
+// حماية مسار الفحص من الوصول العام غير المصرح به
+$diagnoseSecret = getenv('DIAGNOSE_SECRET') ?: 'diag_pharmacy_2026';
+$providedSecret = $_GET['secret'] ?? $_SERVER['HTTP_X_DIAGNOSE_SECRET'] ?? '';
+$isDev = (getenv('APP_DEBUG') === 'true' || getenv('APP_ENV') === 'development' || in_array($_SERVER['REMOTE_ADDR'] ?? '', ['127.0.0.1', '::1'], true));
+
+if (!$isDev && $providedSecret !== $diagnoseSecret) {
+    http_response_code(403);
+    echo json_encode([
+        'success' => false,
+        'error' => 'Access denied. Provide valid secret parameter ?secret=...'
+    ], JSON_UNESCAPED_UNICODE);
+    exit();
+}
+
 $results = [
     'php_version' => PHP_VERSION,
     'pdo_drivers' => PDO::getAvailableDrivers(),
