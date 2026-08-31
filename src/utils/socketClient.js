@@ -7,17 +7,25 @@
 import { io } from 'socket.io-client';
 
 const getSocketUrl = () => {
-  // الاتصال بـ WebSockets فقط في حال تم تعيين رابط خادم Socket.io صريح في متغيرات البيئة
+  if (typeof window !== 'undefined' && window.location) {
+    const { hostname } = window.location;
+    const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+
+    // في الإنتاج على الاستضافة، لا نحاول الاتصال بـ localhost إطلاقاً
+    if (!isLocalhost) {
+      const remoteSocketUrl = import.meta.env?.VITE_SOCKET_URL;
+      if (remoteSocketUrl && !remoteSocketUrl.includes('localhost') && !remoteSocketUrl.includes('127.0.0.1')) {
+        return remoteSocketUrl;
+      }
+      // على استضافات PHP/Apache نعتمد على SSE والـ Smart Polling
+      return null;
+    }
+  }
+
+  // في بيئة التطوير المحلي فقط
   if (import.meta.env?.VITE_SOCKET_URL) {
     return import.meta.env.VITE_SOCKET_URL;
   }
-  if (typeof window !== 'undefined' && window.location) {
-    const { hostname, port } = window.location;
-    if ((hostname === 'localhost' || hostname === '127.0.0.1') && port === '5000') {
-      return 'http://localhost:5000';
-    }
-  }
-  // على الاستضافات العادية (PHP/Apache) لا يوجد خادم WebSockets منفصل، فيتم الاعتماد على SSE والـ Smart Polling
   return null;
 };
 

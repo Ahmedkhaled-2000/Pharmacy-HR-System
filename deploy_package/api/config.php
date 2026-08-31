@@ -261,7 +261,9 @@ function mergeServerState(array $existing, array $incoming): array
         'branches' => 'branch',
         'shifts' => 'shift',
         'requests' => 'req',
+        'permissionRequests' => 'perm',
         'leaveRequests' => 'leave',
+        'leaveHistory' => 'lhist',
         'shiftSwaps' => 'swap',
         'loans' => 'loan',
         'resignationRequests' => 'res',
@@ -269,8 +271,12 @@ function mergeServerState(array $existing, array $incoming): array
         'adjustments' => 'adj',
         'lateIncidents' => 'late_inc',
         'evaluations' => 'eval',
+        'employeeNotes' => 'note',
         'rosters' => 'roster',
-        'authorizedDevices' => 'dev'
+        'authorizedDevices' => 'dev',
+        'recruitmentApplications' => 'app',
+        'jobVacancies' => 'vac',
+        'logs' => 'log'
     ];
 
     foreach ($arrayKeys as $k => $p) {

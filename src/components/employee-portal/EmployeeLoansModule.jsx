@@ -39,13 +39,20 @@ export default function EmployeeLoansModule({
   const [viewingPaymentsReq, setViewingPaymentsReq] = useState(null);
 
   // Combine state.requests and state.loans for this employee
+  const empIdStr = String(emp?.id || '').trim();
+  const empCodeStr = String(emp?.code || '').trim();
+  const empUserStr = String(emp?.username || '').trim();
+
   const employeeRequests = React.useMemo(() => {
-    const empIdStr = String(emp.id || '').trim();
-    const empCodeStr = String(emp.code || '').trim();
     const isEmpMatch = (item) => {
       if (!item) return false;
       const itemId = String(item.employeeId || '').trim();
-      return itemId === empIdStr || (empCodeStr && itemId === empCodeStr);
+      const itemCode = String(item.employeeCode || '').trim();
+      return (
+        (empIdStr && (itemId === empIdStr || itemCode === empIdStr)) ||
+        (empCodeStr && (itemId === empCodeStr || itemCode === empCodeStr)) ||
+        (empUserStr && (itemId === empUserStr || itemCode === empUserStr))
+      );
     };
 
     const reqs = (state.requests || []).filter(
@@ -80,7 +87,7 @@ export default function EmployeeLoansModule({
       };
       return getT(b) - getT(a);
     });
-  }, [state.requests, state.loans, emp.id]);
+  }, [state.requests, state.loans, empIdStr, empCodeStr, empUserStr]);
 
   // Handle Medicine Item Row Add/Remove/Update
   const handleAddMedRow = () => {
@@ -213,9 +220,11 @@ export default function EmployeeLoansModule({
     };
 
     const updatedRequests = [newLoanReq, ...(state.requests || [])];
+    const updatedLoans = [newLoanReq, ...(state.loans || [])];
     const updatedState = {
       ...state,
       requests: updatedRequests,
+      loans: updatedLoans,
       notifications: [newLoanNotif, ...(state.notifications || [])]
     };
 
@@ -225,13 +234,15 @@ export default function EmployeeLoansModule({
     setLoanReason('');
     showToast('تم إرسال طلب السلفة إلى الإدارة العليا فقط 💳');
 
-    // مزامنة خلفية فورية دون تأخير استجابة الزر
+    // مزامنة فورية في السحابة
     if (saveState) {
       saveState(updatedState).catch((err) => {
         console.warn('[Loan] Background sync warning:', err);
       });
     }
-    notifyAdminOnNewRequest({ state: updatedState, newRequest: newLoanReq, empName: emp.name });
+    try {
+      notifyAdminOnNewRequest?.({ state: updatedState, newRequest: newLoanReq, empName: emp?.name })?.catch?.(() => {});
+    } catch {}
   };
 
   // Submit Credit Medicine Request
@@ -291,9 +302,11 @@ export default function EmployeeLoansModule({
     };
 
     const updatedRequests = [newMedReq, ...(state.requests || [])];
+    const updatedLoans = [newMedReq, ...(state.loans || [])];
     const updatedState = {
       ...state,
       requests: updatedRequests,
+      loans: updatedLoans,
       notifications: [newMedNotif, ...(state.notifications || [])]
     };
 
@@ -303,13 +316,15 @@ export default function EmployeeLoansModule({
     setMedNotes('');
     showToast('تم إرسال طلب الأدوية بالآجل إلى الإدارة العليا فقط 💊');
 
-    // مزامنة خلفية فورية دون تأخير استجابة الزر
+    // مزامنة فورية في السحابة
     if (saveState) {
       saveState(updatedState).catch((err) => {
         console.warn('[MedRequest] Background sync warning:', err);
       });
     }
-    notifyAdminOnNewRequest({ state: updatedState, newRequest: newMedReq, empName: emp.name });
+    try {
+      notifyAdminOnNewRequest?.({ state: updatedState, newRequest: newMedReq, empName: emp?.name })?.catch?.(() => {});
+    } catch {}
   };
 
   return (

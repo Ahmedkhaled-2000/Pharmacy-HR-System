@@ -28,19 +28,44 @@ export default function EmployeePermissionsModule({
   const [reason, setReason] = useState('');
   const [showForm, setShowForm] = useState(false);
 
-  const empIdStr = String(emp.id || '').trim();
-  const empCodeStr = String(emp.code || '').trim();
+  const empIdStr = String(emp?.id || '').trim();
+  const empCodeStr = String(emp?.code || '').trim();
+  const empUserStr = String(emp?.username || '').trim();
 
   const employeePermRequests = React.useMemo(() => {
     const map = new Map();
-    [...(state.requests || []), ...(state.permissionRequests || [])].forEach((r) => {
-      if (!r) return;
-      const isPerm = r.type === 'permission' || r.type === 'permission_request';
-      if (!isPerm) return;
+    const isEmpMatch = (r) => {
+      if (!r) return false;
       const rEmpId = String(r.employeeId || '').trim();
-      if (rEmpId === empIdStr || (empCodeStr && rEmpId === empCodeStr)) {
-        map.set(String(r.id), r);
-      }
+      const rEmpCode = String(r.employeeCode || '').trim();
+      return (
+        (empIdStr && (rEmpId === empIdStr || rEmpCode === empIdStr)) ||
+        (empCodeStr && (rEmpId === empCodeStr || rEmpCode === empCodeStr)) ||
+        (empUserStr && (rEmpId === empUserStr || rEmpCode === empUserStr))
+      );
+    };
+
+    const isPermType = (r) => {
+      if (!r) return false;
+      const t = String(r.type || '').toLowerCase();
+      const st = String(r.subType || '').toLowerCase();
+      return (
+        t === 'permission' ||
+        t === 'permission_request' ||
+        t === 'late_permission' ||
+        t === 'early_permission' ||
+        t === 'early_leave' ||
+        t === 'إذن' ||
+        t === 'late' ||
+        t === 'early' ||
+        st === 'permission' ||
+        r.permType !== undefined
+      );
+    };
+
+    [...(state.requests || []), ...(state.permissionRequests || [])].forEach((r) => {
+      if (!r || !isPermType(r) || !isEmpMatch(r)) return;
+      map.set(String(r.id), r);
     });
 
     return Array.from(map.values()).sort((a, b) => {
@@ -54,7 +79,7 @@ export default function EmployeePermissionsModule({
       };
       return getT(b) - getT(a);
     });
-  }, [state.requests, state.permissionRequests, empIdStr, empCodeStr]);
+  }, [state.requests, state.permissionRequests, empIdStr, empCodeStr, empUserStr]);
 
   // Calculate duration in minutes/hours
   const calcDuration = () => {
@@ -159,9 +184,11 @@ export default function EmployeePermissionsModule({
     };
 
     const updatedRequests = [newPermReq, ...(state.requests || [])];
+    const updatedPermRequests = [newPermReq, ...(state.permissionRequests || [])];
     const updatedState = {
       ...state,
       requests: updatedRequests,
+      permissionRequests: updatedPermRequests,
       notifications: [newPermNotif, ...(state.notifications || [])]
     };
 
@@ -170,13 +197,15 @@ export default function EmployeePermissionsModule({
     setReason('');
     showToast('تم إرسال طلب الإذن للاعتماد (لا يؤثر على الراتب وتحتسب وردية كاملة عند الموافقة) ⏰');
 
-    // مزامنة خلفية فورية دون تأخير استجابة الزر
+    // مزامنة فورية في السحابة
     if (saveState) {
       saveState(updatedState).catch((err) => {
         console.warn('[Permission] Background sync warning:', err);
       });
     }
-    notifyAdminOnNewRequest({ state: updatedState, newRequest: newPermReq, empName: emp.name });
+    try {
+      notifyAdminOnNewRequest?.({ state: updatedState, newRequest: newPermReq, empName: emp?.name })?.catch?.(() => {});
+    } catch {}
   };
 
   return (

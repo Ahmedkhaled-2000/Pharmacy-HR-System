@@ -29,16 +29,45 @@ export default function EmployeeLeaveModule({
 
   // Calculate taken annual leaves for the current year
   const currentYear = (selectedMonth || getRealTodayStr()).slice(0, 4);
+  const empIdStr = String(emp?.id || '').trim();
+  const empCodeStr = String(emp?.code || '').trim();
+  const empUserStr = String(emp?.username || '').trim();
+
   const employeeLeaveRequests = React.useMemo(() => {
-    const empIdStr = String(emp.id);
+    const isEmpMatch = (r) => {
+      if (!r) return false;
+      const rEmpId = String(r.employeeId || '').trim();
+      const rEmpCode = String(r.employeeCode || '').trim();
+      return (
+        (empIdStr && (rEmpId === empIdStr || rEmpCode === empIdStr)) ||
+        (empCodeStr && (rEmpId === empCodeStr || rEmpCode === empCodeStr)) ||
+        (empUserStr && (rEmpId === empUserStr || rEmpCode === empUserStr))
+      );
+    };
+
+    const isLeaveType = (r) => {
+      if (!r) return false;
+      const t = String(r.type || '').toLowerCase();
+      return (
+        t === 'leave' ||
+        t === 'leave_request' ||
+        t === 'annual_leave' ||
+        t === 'sick_leave' ||
+        t === 'unpaid_leave' ||
+        t === 'casual_leave' ||
+        t === 'إجازة' ||
+        r.leaveType !== undefined
+      );
+    };
+
     const fromRequests = (state.requests || []).filter(
-      (r) => String(r.employeeId) === empIdStr && (r.type === 'leave' || r.type === 'leave_request')
+      (r) => isEmpMatch(r) && isLeaveType(r)
     );
     const fromLeaves = (state.leaveRequests || []).filter(
-      (r) => String(r.employeeId) === empIdStr
+      (r) => isEmpMatch(r)
     );
     const fromHistory = (state.leaveHistory || []).filter(
-      (r) => String(r.employeeId) === empIdStr
+      (r) => isEmpMatch(r)
     );
 
     const map = new Map();
@@ -71,7 +100,7 @@ export default function EmployeeLeaveModule({
       };
       return getT(b) - getT(a);
     });
-  }, [state.requests, state.leaveRequests, state.leaveHistory, emp.id]);
+  }, [state.requests, state.leaveRequests, state.leaveHistory, empIdStr, empCodeStr, empUserStr]);
 
   const takenAnnualDays = employeeLeaveRequests
     .filter((r) => r.leaveType === 'annual' && r.status === 'approved' && r.startDate.startsWith(currentYear))
@@ -186,13 +215,15 @@ export default function EmployeeLeaveModule({
         : 'تم إرسال طلب الإجازة لمدير الفرع والإدارة العليا للاعتماد 🏖️'
     );
 
-    // مزامنة خلفية فورية دون تأخير استجابة الزر
+    // مزامنة فورية في السحابة
     if (saveState) {
       saveState(updatedState).catch((err) => {
         console.warn('[Leave] Background sync warning:', err);
       });
     }
-    notifyAdminOnNewRequest({ state: updatedState, newRequest, empName: emp.name });
+    try {
+      notifyAdminOnNewRequest?.({ state: updatedState, newRequest, empName: emp?.name })?.catch?.(() => {});
+    } catch {}
   };
 
   return (

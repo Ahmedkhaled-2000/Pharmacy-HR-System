@@ -153,13 +153,15 @@ export default function EmployeeShiftSwapModule({
     setTargetEmpId('');
     showToast(`تم إرسال طلب التبديل إلى الزميل ${targetEmpObj ? targetEmpObj.name : ''} للموافقة المبدئية 🔄`);
 
-    // مزامنة خلفية فورية دون تأخير استجابة الزر
+    // مزامنة فورية في السحابة
     if (saveState) {
       saveState(updatedState).catch((err) => {
         console.warn('[ShiftSwap] Background sync warning:', err);
       });
     }
-    notifyAdminOnNewRequest({ state: updatedState, newRequest: newSwapReq, empName: emp.name });
+    try {
+      notifyAdminOnNewRequest?.({ state: updatedState, newRequest: newSwapReq, empName: emp?.name })?.catch?.(() => {});
+    } catch {}
   };
 
   // Handle Employee B Action (Accept/Reject incoming swap request)
@@ -178,15 +180,15 @@ export default function EmployeeShiftSwapModule({
     if (action === 'accept' && targetSwapReq) {
       // 1. Notification to Admin for final approval
       updatedNotifs.unshift({
-        id: `notif_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+        id: `notif_swap_acc_${Date.now()}`,
         requestId: swapId,
-        type: 'swap',
+        type: 'shift_swap',
         targetRole: 'admin',
-        title: `✅ تمت موافقة الزميل على التبديل: بانتظار اعتماد الإدارة`,
-        message: `وافق الموظف ${emp.name} على طلب التبديل المحال إليه من ${targetSwapReq.requesterEmpName || 'الزميل'} وبانتظار اعتماد الإدارة النهائي`,
+        title: `🔄 موافقة زميل على تبديل شيفت: ${emp.name}`,
+        message: `وافق الزميل ${emp.name} على طلب التبديل المقدم من ${targetSwapReq.requesterEmpName || 'الزميل'}. بانتظار الاعتماد النهائي من الإدارة.`,
         employeeId: emp.id,
         employeeName: emp.name,
-        branchId: emp.branchId,
+        branchId: targetSwapReq.branchId || emp.branchId,
         date: new Date().toISOString().slice(0, 10),
         timestamp: new Date().toISOString(),
         read: false
@@ -232,7 +234,9 @@ export default function EmployeeShiftSwapModule({
     }
 
     if (action === 'accept' && targetSwapReq) {
-      notifyAdminOnNewRequest({ state: updatedState, newRequest: targetSwapReq, empName: emp.name });
+      try {
+        notifyAdminOnNewRequest?.({ state: updatedState, newRequest: targetSwapReq, empName: emp?.name })?.catch?.(() => {});
+      } catch {}
     }
   };
 
