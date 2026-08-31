@@ -79,20 +79,26 @@ export default defineConfig({
         clientsClaim: true,
         cleanupOutdatedCaches: true,
         globPatterns: [],
+        maximumFileSizeToCacheInBytes: 15 * 1024 * 1024,
         navigateFallback: null,
+        navigateFallbackDenylist: [/^\/api/],
         runtimeCaching: [
           {
             urlPattern: ({ url }) => url.pathname.includes('/api/'),
-            handler: 'NetworkOnly'
-          },
-          {
-            urlPattern: ({ request }) => request.mode === 'navigate',
-            handler: 'NetworkOnly'
+            handler: 'NetworkOnly',
+            options: {
+              backgroundSync: {
+                name: 'api-sync-queue',
+                options: {
+                  maxRetentionTime: 24 * 60
+                }
+              }
+            }
           }
         ]
       },
       devOptions: {
-        enabled: true
+        enabled: false
       }
     })
   ],
