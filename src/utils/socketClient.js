@@ -7,19 +7,18 @@
 import { io } from 'socket.io-client';
 
 const getSocketUrl = () => {
-  if (typeof window !== 'undefined' && window.location) {
-    const { origin, hostname } = window.location;
-    if (origin && !hostname.includes('localhost') && !hostname.includes('127.0.0.1')) {
-      return origin;
-    }
-  }
+  // الاتصال بـ WebSockets فقط في حال تم تعيين رابط خادم Socket.io صريح في متغيرات البيئة
   if (import.meta.env?.VITE_SOCKET_URL) {
     return import.meta.env.VITE_SOCKET_URL;
   }
-  if (import.meta.env?.VITE_API_URL) {
-    return import.meta.env.VITE_API_URL.replace(/\/api\/?$/, '');
+  if (typeof window !== 'undefined' && window.location) {
+    const { hostname, port } = window.location;
+    if ((hostname === 'localhost' || hostname === '127.0.0.1') && port === '5000') {
+      return 'http://localhost:5000';
+    }
   }
-  return 'https://nodejs-test.apexthunder.com';
+  // على الاستضافات العادية (PHP/Apache) لا يوجد خادم WebSockets منفصل، فيتم الاعتماد على SSE والـ Smart Polling
+  return null;
 };
 
 export const SOCKET_SERVER_URL = getSocketUrl();
@@ -27,14 +26,16 @@ export const SOCKET_SERVER_URL = getSocketUrl();
 let socket = null;
 
 export function getSocket() {
+  if (!SOCKET_SERVER_URL) return null;
+
   if (!socket && typeof window !== 'undefined') {
     socket = io(SOCKET_SERVER_URL, {
       transports: ['websocket', 'polling'],
       reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      timeout: 10000,
+      reconnectionAttempts: 3,
+      reconnectionDelay: 2000,
+      reconnectionDelayMax: 8000,
+      timeout: 5000,
       autoConnect: true,
     });
 
@@ -42,12 +43,13 @@ export function getSocket() {
       console.log(`⚡ [Socket.io] متصل بخادم المزامنة اللحظية: ${SOCKET_SERVER_URL} (ID: ${socket.id})`);
     });
 
-    socket.on('disconnect', (reason) => {
-      console.warn(`⚠️ [Socket.io] انقطع الاتصال بالخادم (${reason}) - جاري إعادة المحاولة...`);
+    socket.on('disconnect', () => {
+      // انقطاع الاتصال
     });
 
-    socket.on('connect_error', (err) => {
-      // صامت في الخلفية مع إعادة المحاولة التلقائية
+    socket.on('connect_error', () => {
+      // إيقاف المحاولات عند عدم توفر خادم WebSockets
+      try { socket.disconnect(); } catch {}
     });
   }
   return socket;
