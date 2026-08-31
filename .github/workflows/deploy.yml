@@ -16,7 +16,7 @@ jobs:
       - name: 🟢 Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
 
       - name: 📦 Install Dependencies
@@ -27,10 +27,13 @@ jobs:
 
       - name: 📁 Prepare Deployment Files
         run: |
+          rm -rf deploy_package
           mkdir -p deploy_package
           cp -r dist/* deploy_package/
           cp -r api deploy_package/api
-          cp public/.htaccess deploy_package/.htaccess
+          if [ -f public/.htaccess ]; then
+            cp public/.htaccess deploy_package/.htaccess
+          fi
 
       - name: 🚀 Sync & Deploy to Hosting via FTP
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
@@ -40,4 +43,12 @@ jobs:
           password: ${{ secrets.FTP_PASSWORD }}
           server-dir: public_html/
           local-dir: deploy_package/
-          dangerous-clean-slate: false
+          dangerous-clean-slate: true
+          timeout: 180000
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/.ftpquota
+            **/node_modules/**
+            **/*.sqlite*
+            **/uploads/**
