@@ -70,10 +70,10 @@ try {
             }
 
             try {
-                $rawInput = file_get_contents('php://input');
-                $jsonData = !empty($rawInput) ? json_decode($rawInput, true) : null;
-                if (!$jsonData && !empty($_POST['data'])) {
-                    $jsonData = is_string($_POST['data']) ? json_decode($_POST['data'], true) : $_POST['data'];
+                $jsonData = getRequestData();
+                if (empty($jsonData)) {
+                    $raw = file_get_contents('php://input');
+                    $jsonData = is_string($raw) ? json_decode($raw, true) : null;
                 }
 
                 if (!$jsonData) {
