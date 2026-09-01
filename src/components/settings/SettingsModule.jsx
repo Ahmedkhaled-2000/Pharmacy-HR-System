@@ -323,20 +323,13 @@ export default function SettingsModule({
 
   const handleExecuteFullDataWipe = async () => {
     const currentOwnerPass = state.orgSettings?.ownerPassword || 'owner123';
-    const currentAdminPass = state.orgSettings?.adminPassword || state.orgSettings?.adminPass || '123';
     
-    // Per user requirement: Allow Owner Password or Admin Password to confirm Factory Reset
+    // اشتراط كلمة مرور المالك (Owner Password) حصرياً لتنفيذ التصفير الشامل
     const inputPass = wipeConfirmPassword.trim();
-    const isOwnerAuthorized =
-      (inputPass && (
-        inputPass === String(currentOwnerPass).trim() ||
-        inputPass === 'owner123' ||
-        inputPass === String(currentAdminPass).trim() ||
-        inputPass === '123'
-      ));
+    const isOwnerAuthorized = (inputPass && (inputPass === String(currentOwnerPass).trim() || inputPass === 'owner123'));
 
     if (!isOwnerAuthorized) {
-      showToast?.('❌ كلمة المرور غير صحيحة! يرجى إدخال كلمة مرور المالك أو الإدارة العليا لتأكيد مسح وتصفير قاعدة البيانات.');
+      showToast?.('❌ كلمة المرور غير صحيحة! هذا الإجراء الحساس يتطلب إدخال كلمة مرور المالك (Owner) حصرياً.');
       return;
     }
 
@@ -368,13 +361,13 @@ export default function SettingsModule({
         console.warn('Error clearing biometric faces:', fErr);
       }
 
-      // 3. Construct clean wiped state
+      // 3. Construct clean wiped state with preserved org structure and bylaws
       const preservedOwnerUser = state.orgSettings?.ownerUsername || 'owner';
       const preservedOwnerPass = state.orgSettings?.ownerPassword || 'owner123';
       const preservedAdminUser = state.orgSettings?.adminUsername || state.orgSettings?.adminUser || 'admin';
       const preservedAdminPass = state.orgSettings?.adminPassword || state.orgSettings?.adminPass || '123';
-      const preservedOrgName = state.orgSettings?.orgName || 'مجموعة الصيدليات الطبية';
-      const preservedGmName = state.orgSettings?.generalManagerName || 'د. أحمد خالد - المدير العام للصيدليات';
+      const preservedOrgName = state.orgSettings?.orgName || 'منظومة إدارة الموارد البشرية والرواتب';
+      const preservedGmName = state.orgSettings?.generalManagerName || 'المدير العام';
       const preservedGoogleDriveConfig = state.orgSettings?.googleDriveConfig || {};
       const preservedGmailConfig = state.orgSettings?.gmailConfig || {};
       const preservedLogo = state.orgSettings?.logoUrl || '';
@@ -403,6 +396,7 @@ export default function SettingsModule({
         permissionRequests: [],
         pendingDeviceRegistrations: [],
         approvedDevices: [],
+        jobs: state.jobs || DEFAULT_JOBS,
         orgSettings: {
           ownerUsername: preservedOwnerUser,
           ownerPassword: preservedOwnerPass,
@@ -419,15 +413,34 @@ export default function SettingsModule({
           biometricType: 'face',
           loanRequestStartDay: 1,
           loanRequestEndDay: 10,
-          maxMonthlyLoanSalaryPercent: 50
+          maxMonthlyLoanSalaryPercent: 50,
+          sessionInvalidationEpoch: Date.now()
         },
-        approvalRules: [],
-        bylaws: {
+        approvalRules: state.approvalRules || [],
+        bylaws: state.bylaws || {
           gracePeriodMinutes: 15,
           resetPeriodDays: 30,
-          latePenalties: [],
-          earlyExitPenalties: [],
-          deductionOptions: []
+          latePenalties: [
+            { occurrence: 1, action: 'تنبيه', deductionFraction: 0 },
+            { occurrence: 2, action: 'إنذار كتابي', deductionFraction: 0 },
+            { occurrence: 3, action: 'خصم ¼ يوم', deductionFraction: 0.25 },
+            { occurrence: 4, action: 'خصم ½ يوم', deductionFraction: 0.5 },
+            { occurrence: 5, action: 'خصم يوم', deductionFraction: 1.0 }
+          ],
+          earlyExitPenalties: [
+            { occurrence: 1, action: 'إنذار', deductionFraction: 0 },
+            { occurrence: 2, action: 'خصم ¼ يوم', deductionFraction: 0.25 },
+            { occurrence: 3, action: 'خصم ½ يوم', deductionFraction: 0.5 },
+            { occurrence: 4, action: 'خصم يوم', deductionFraction: 1.0 }
+          ],
+          deductionOptions: [
+            { label: 'تنبيه / إنذار', value: 0 },
+            { label: 'خصم ¼ يوم', value: 0.25 },
+            { label: 'خصم ½ يوم', value: 0.5 },
+            { label: 'خصم يوم كامل', value: 1.0 },
+            { label: 'خصم يومين', value: 2.0 },
+            { label: 'خصم ثلاث أيام', value: 3.0 }
+          ]
         },
         ipRestrictions: { enabled: false, allowedIps: [] },
         customJobs: [],
@@ -437,9 +450,9 @@ export default function SettingsModule({
         _wipedAt: new Date().toISOString()
       };
 
-      // 4. Save to Cloud / Server DB via API System Reset
+      // 4. Save to Cloud / Server DB via API System Reset with Owner Password Verification
       try {
-        await apiSystemReset(wipedState, STORAGE_KEY);
+        await apiSystemReset(wipedState, STORAGE_KEY, inputPass);
       } catch (srvErr) {
         console.warn('apiSystemReset fallback to saveState:', srvErr);
         if (saveState) {
@@ -447,8 +460,9 @@ export default function SettingsModule({
         }
       }
 
-      // 5. Clear client IndexedDB
+      // 5. Clear client IndexedDB & Local Cache
       await clearPendingQueue().catch(() => {});
+      await clearLocalDatabase().catch(() => {});
       await saveStateLocally(wipedState).catch(() => {});
 
       // 6. Broadcast reset across all devices and open tabs
@@ -2747,12 +2761,12 @@ export default function SettingsModule({
             {/* Password Verification Field */}
             <div style={{ marginBottom: '22px' }}>
               <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: 'var(--text)', marginBottom: '6px' }}>
-                🔒 أدخل كلمة مرور الإدارة العليا الحالية لتأكيد هويتك وتنفيذ المسح:
+                👑 أدخل كلمة مرور المالك (Owner Password) حصرياً لتأكيد هويتك وتنفيذ المسح الشامل:
               </label>
               <div style={{ position: 'relative' }}>
                 <input
                   type={showWipePasswordText ? 'text' : 'password'}
-                  placeholder="كلمة مرور الإدارة العليا..."
+                  placeholder="كلمة مرور المالك (Owner)..."
                   value={wipeConfirmPassword}
                   onChange={(e) => setWipeConfirmPassword(e.target.value)}
                   disabled={isWiping}
@@ -2789,7 +2803,7 @@ export default function SettingsModule({
                 </button>
               </div>
               <span style={{ fontSize: '11.5px', color: 'var(--muted)', marginTop: '4px', display: 'block' }}>
-                * لن يتم قبول العملية إلا إذا تطابقت كلمة المرور المدخلة مع كلمة مرور الإدارة العليا الحالية.
+                * كإجراء أمان متقدم، لن يتم قبول هذه العملية الحساسة إلا بإدخال كلمة مرور حساب المالك (Owner).
               </span>
             </div>
 

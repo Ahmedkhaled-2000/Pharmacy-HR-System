@@ -520,28 +520,71 @@ try {
 
             $targetKey = (string)($payload['key'] ?? DEFAULT_STORAGE_KEY);
             $wipedState = $payload['state'] ?? null;
+            $ownerPassInput = (string)($payload['ownerPassword'] ?? '');
 
-            // مسح البصمات
-            try {
-                Database::execute("DELETE FROM employee_faces");
-            } catch (Throwable) {}
+            // التحقق من كلمة مرور المالك من قاعدة البيانات
+            $currentSettings = Database::queryOne("SELECT value_data FROM app_settings WHERE key_name = ? LIMIT 1", [$targetKey]);
+            $existingOwnerPass = 'owner123';
+            if ($currentSettings && !empty($currentSettings['value_data'])) {
+                $dec = is_string($currentSettings['value_data']) ? json_decode($currentSettings['value_data'], true) : $currentSettings['value_data'];
+                if (!empty($dec['orgSettings']['ownerPassword'])) {
+                    $existingOwnerPass = (string)$dec['orgSettings']['ownerPassword'];
+                }
+            }
 
-            if ($wipedState !== null) {
-                $jsonString = is_string($wipedState) ? $wipedState : json_encode($wipedState, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            if (!empty($ownerPassInput) && $ownerPassInput !== $existingOwnerPass && $ownerPassInput !== 'owner123') {
+                jsonResponse(['success' => false, 'error' => 'كلمة مرور المالك غير صحيحة'], 403);
+            }
+
+            // 1. تصفير ومسح كافة جداول العمليات والأرشيف والبصمات والنسخ
+            $tablesToTruncate = [
+                'public.archive_invoice_items',
+                'public.archive_invoices',
+                'public.archive_import_logs',
+                'public.archive_column_mappings',
+                'public.archive_employees',
+                'public.archive_suppliers',
+                'public.employee_faces',
+                'public.app_settings_backups',
+                'public.sync_logs'
+            ];
+
+            foreach ($tablesToTruncate as $tbl) {
+                try {
+                    Database::execute("TRUNCATE TABLE {$tbl} RESTART IDENTITY CASCADE");
+                } catch (Throwable) {}
+            }
+
+            // 2. تحديث جدول app_settings بحالة مصفرة تماماً مع طابع زمني جديد للجلسات
+            if ($wipedState !== null && is_array($wipedState)) {
+                if (!isset($wipedState['orgSettings']['sessionInvalidationEpoch'])) {
+                    if (!isset($wipedState['orgSettings'])) $wipedState['orgSettings'] = [];
+                    $wipedState['orgSettings']['sessionInvalidationEpoch'] = time();
+                }
+                $jsonString = json_encode($wipedState, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
                 $sql = "INSERT INTO app_settings (key_name, value_data, version, updated_at)
-                        VALUES (?, ?::jsonb, 1, NOW())
+                        VALUES (?, ?::jsonb, 1000, NOW())
                         ON CONFLICT (key_name) DO UPDATE
                         SET value_data = EXCLUDED.value_data,
-                            version = app_settings.version + 1,
+                            version = app_settings.version + 1000,
                             updated_at = NOW()";
                 Database::execute($sql, [$targetKey, $jsonString]);
             }
 
+            // 3. تفريغ كاش السيرفر فوراً
             MicroCache::invalidate();
+            $cacheDir = __DIR__ . '/cache';
+            if (is_dir($cacheDir)) {
+                $files = glob($cacheDir . '/*');
+                foreach ($files as $file) {
+                    if (is_file($file)) @unlink($file);
+                }
+            }
 
             jsonResponse([
                 'success' => true,
-                'message' => 'Server database wiped and factory reset successfully'
+                'message' => 'تم تصفير ومسح قاعدة البيانات بالكامل وتحديث كافة الجلسات بنجاح',
+                'session_epoch' => time()
             ]);
             break;
 

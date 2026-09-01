@@ -234,10 +234,10 @@ export async function apiImportBackup(payload) {
 }
 
 // ── 5. تصفير ومسح السيرفر وقاعدة البيانات بالكامل (Full Factory Reset) ───────
-export async function apiSystemReset(wipedState = null, key = STORAGE_KEY) {
+export async function apiSystemReset(wipedState = null, key = STORAGE_KEY, ownerPassword = '') {
   return await request('system/reset', {
     method: 'POST',
-    body: JSON.stringify({ key, state: wipedState, confirm: 'CONFIRM_RESET' }),
+    body: JSON.stringify({ key, state: wipedState, confirm: 'CONFIRM_RESET', ownerPassword }),
     timeout: 25000,
     noCache: true
   });
