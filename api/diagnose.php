@@ -33,15 +33,17 @@ $results = [
 try {
     $db = Database::getConnection();
     $results['active_driver'] = Database::getDriver();
-    $tables = Database::query("SELECT table_name FROM information_schema.tables WHERE table_schema='public'");
-    $syncLogs = Database::query("SELECT id, action_type, entity_key, version, created_at FROM sync_logs ORDER BY id DESC LIMIT 10");
-    $appSettingsHistory = Database::query("SELECT key_name, version, updated_at FROM app_settings");
+    $appSettings = Database::query("SELECT key_name, version, updated_at, LENGTH(value_data::text) as len FROM app_settings");
+    $backups = [];
+    try {
+        $backups = Database::query("SELECT id, key_name, version, LENGTH(value_data::text) as len, created_at FROM app_settings_backups ORDER BY id DESC LIMIT 20");
+    } catch (Throwable) {}
+
     $results['active_connection_test'] = [
         'status' => 'OK',
         'driver' => Database::getDriver(),
-        'tables' => $tables,
-        'app_settings' => $appSettingsHistory,
-        'sync_logs_sample' => $syncLogs
+        'app_settings_all' => $appSettings,
+        'backups_sample' => $backups
     ];
 } catch (Throwable $e) {
     $results['active_connection_test'] = [
