@@ -43,7 +43,7 @@ jobs:
           password: ${{ secrets.FTP_PASSWORD }}
           server-dir: public_html/
           local-dir: deploy_package/
-          dangerous-clean-slate: true
+          dangerous-clean-slate: false
           timeout: 180000
           exclude: |
             **/.git*
@@ -51,4 +51,9 @@ jobs:
             **/.ftpquota
             **/node_modules/**
             **/*.sqlite*
+            **/database/**
             **/uploads/**
+            **/cgi-bin/**
+            **/.well-known/**
+            **/access-logs/**
+            **/.cpanel/**
