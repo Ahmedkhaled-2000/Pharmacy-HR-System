@@ -127,8 +127,9 @@ class Database
         $pdoOptions = [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES => false,
+            PDO::ATTR_EMULATE_PREPARES => true, // إلزامي مع Supabase Transaction Pooler لمنع خطأ pdo_stmt_does_not_exist
             PDO::ATTR_STRINGIFY_FETCHES => false,
+            PDO::ATTR_PERSISTENT => false,
             PDO::ATTR_TIMEOUT => 6, // 6 seconds connect timeout
         ];
 
