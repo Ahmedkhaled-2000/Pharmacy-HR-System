@@ -182,6 +182,71 @@ try {
                     if ($decodedValue === 'null' || $decodedValue === null || $rawVal === 'null') {
                         $decodedValue = null;
                     }
+
+                    // إذا كانت البيانات فارغة تماماً للمفتاح الرئيسي، نقوم بتهيئة البيانات الأساسية فوراً
+                    if ($key === 'pharmacy-tracker-data' && ($decodedValue === null || empty($decodedValue['employees']))) {
+                        $seedState = [
+                            'orgSettings' => [
+                                'orgName' => 'منظومة إدارة الموارد البشرية والرواتب',
+                                'ownerUsername' => 'owner',
+                                'ownerPassword' => 'owner123',
+                                'adminUsername' => 'admin',
+                                'adminPassword' => '123',
+                            ],
+                            'branches' => [
+                                [
+                                    'id' => 'branch_1',
+                                    'name' => 'الفرع الرئيسي',
+                                    'code' => 'BR01',
+                                    'username' => 'branch1',
+                                    'password' => '123',
+                                    'active' => true
+                                ]
+                            ],
+                            'employees' => [
+                                [
+                                    'id' => 'emp_22',
+                                    'code' => '22',
+                                    'username' => '22',
+                                    'name' => 'د/ أحمد خالد',
+                                    'phone' => '01000000000',
+                                    'password' => '22',
+                                    'branchId' => 'branch_1',
+                                    'jobTitle' => 'صيدلي أول',
+                                    'salary' => 10000,
+                                    'workDaysPerMonth' => 26,
+                                    'workHoursPerDay' => 8,
+                                    'permissions' => [
+                                        'canSubmitLeave' => true,
+                                        'canSubmitPermission' => true,
+                                        'canSubmitLoan' => true,
+                                        'canSubmitSwap' => true
+                                    ]
+                                ]
+                            ],
+                            'requests' => [],
+                            'leaveRequests' => [],
+                            'shifts' => [],
+                            'rosters' => [],
+                            'notifications' => []
+                        ];
+                        
+                        $seedJson = json_encode($seedState, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                        if (in_array($driver, ['pgsql', 'sqlite'], true)) {
+                            Database::execute("INSERT INTO app_settings (key_name, value_data, version, updated_at) VALUES (?, ?::jsonb, 1, NOW()) ON CONFLICT (key_name) DO UPDATE SET value_data = EXCLUDED.value_data, version = app_settings.version + 1, updated_at = NOW()", [$key, $seedJson]);
+                        } else {
+                            Database::execute("INSERT INTO app_settings (key_name, value_data, version, updated_at) VALUES (?, ?, 1, NOW()) ON DUPLICATE KEY UPDATE value_data = VALUES(value_data), version = version + 1, updated_at = NOW()", [$key, $seedJson]);
+                        }
+                        
+                        jsonResponse([
+                            'success' => true,
+                            'key' => $key,
+                            'value' => $seedState,
+                            'version' => 1,
+                            'updated_at' => date('Y-m-d H:i:s')
+                        ]);
+                    }
+
                     jsonResponse([
                         'success' => true,
                         'key' => $row['key_name'],
@@ -190,6 +255,68 @@ try {
                         'updated_at' => $row['updated_at']
                     ]);
                 } else {
+                    // إذا لم يوجد السجل أصلاً للمفتاح الرئيسي، نقوم بتهيئته تلقائياً
+                    if ($key === 'pharmacy-tracker-data') {
+                        $seedState = [
+                            'orgSettings' => [
+                                'orgName' => 'منظومة إدارة الموارد البشرية والرواتب',
+                                'ownerUsername' => 'owner',
+                                'ownerPassword' => 'owner123',
+                                'adminUsername' => 'admin',
+                                'adminPassword' => '123',
+                            ],
+                            'branches' => [
+                                [
+                                    'id' => 'branch_1',
+                                    'name' => 'الفرع الرئيسي',
+                                    'code' => 'BR01',
+                                    'username' => 'branch1',
+                                    'password' => '123',
+                                    'active' => true
+                                ]
+                            ],
+                            'employees' => [
+                                [
+                                    'id' => 'emp_22',
+                                    'code' => '22',
+                                    'username' => '22',
+                                    'name' => 'د/ أحمد خالد',
+                                    'phone' => '01000000000',
+                                    'password' => '22',
+                                    'branchId' => 'branch_1',
+                                    'jobTitle' => 'صيدلي أول',
+                                    'salary' => 10000,
+                                    'workDaysPerMonth' => 26,
+                                    'workHoursPerDay' => 8,
+                                    'permissions' => [
+                                        'canSubmitLeave' => true,
+                                        'canSubmitPermission' => true,
+                                        'canSubmitLoan' => true,
+                                        'canSubmitSwap' => true
+                                    ]
+                                ]
+                            ],
+                            'requests' => [],
+                            'leaveRequests' => [],
+                            'shifts' => [],
+                            'rosters' => [],
+                            'notifications' => []
+                        ];
+                        $seedJson = json_encode($seedState, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                        if (in_array($driver, ['pgsql', 'sqlite'], true)) {
+                            Database::execute("INSERT INTO app_settings (key_name, value_data, version, updated_at) VALUES (?, ?::jsonb, 1, NOW()) ON CONFLICT (key_name) DO UPDATE SET value_data = EXCLUDED.value_data, version = 1, updated_at = NOW()", [$key, $seedJson]);
+                        } else {
+                            Database::execute("INSERT INTO app_settings (key_name, value_data, version, updated_at) VALUES (?, ?, 1, NOW()) ON DUPLICATE KEY UPDATE value_data = VALUES(value_data), version = 1, updated_at = NOW()", [$key, $seedJson]);
+                        }
+                        jsonResponse([
+                            'success' => true,
+                            'key' => $key,
+                            'value' => $seedState,
+                            'version' => 1,
+                            'updated_at' => date('Y-m-d H:i:s')
+                        ]);
+                    }
+
                     jsonResponse([
                         'success' => true,
                         'key' => $key,
