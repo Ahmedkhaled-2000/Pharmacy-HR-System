@@ -349,7 +349,7 @@ export default function GlobalModalsContainer() {
       />
 
       {/* 4. Employee Comprehensive File Modal */}
-      {isEmpFileModalOpen && editingEmpFile && (
+      {isEmpFileModalOpen && (
         <EmployeeFileModal
           isOpen={isEmpFileModalOpen}
           emp={editingEmpFile}
