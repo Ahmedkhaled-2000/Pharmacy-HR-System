@@ -256,7 +256,9 @@ export default function EmployeeRosterModule({
   saveState,
   showToast,
   selectedMonth,
-  selectedBranchId
+  selectedBranchId,
+  autoOpenRosterModal,
+  setAutoOpenRosterModal
 }) {
   const isMultiBranch = emp.branchesDetails && emp.branchesDetails.length > 1;
   const primaryBranch = emp.branchesDetails?.[0]?.branchId || emp.branchId || '';
@@ -269,6 +271,14 @@ export default function EmployeeRosterModule({
   }, []);
 
   const [showRosterModal, setShowRosterModal] = useState(false);
+
+  useEffect(() => {
+    if (autoOpenRosterModal) {
+      setShowRosterModal(true);
+      setAutoOpenRosterModal?.(false);
+    }
+  }, [autoOpenRosterModal, setAutoOpenRosterModal]);
+
   const [viewMode, setViewMode] = useState('calendar'); // 'calendar' | 'week'
   const [activeFormBranchId, setActiveFormBranchId] = useState(selectedBranchId || primaryBranch || '');
 

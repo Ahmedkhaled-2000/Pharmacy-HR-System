@@ -597,9 +597,10 @@ try {
     }
 } catch (Throwable $e) {
     error_log('[API Error] ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
-    $isDev = (getenv('APP_DEBUG') === 'true' || getenv('APP_ENV') === 'development');
     jsonResponse([
         'success' => false,
-        'error' => $isDev ? $e->getMessage() : 'حدث خطأ غير متوقع أثناء معالجة الطلب في الخادم'
+        'error' => $e->getMessage() ?: 'حدث خطأ غير متوقع أثناء معالجة الطلب في الخادم',
+        'file' => basename($e->getFile()),
+        'line' => $e->getLine()
     ], 500);
 }

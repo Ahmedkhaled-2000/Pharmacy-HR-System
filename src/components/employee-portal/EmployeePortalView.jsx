@@ -176,6 +176,7 @@ export default function EmployeePortalView({
     try { return localStorage.getItem('emp_range_end') || ''; } catch { return ''; }
   });
   const [showPhotoPreview, setShowPhotoPreview] = useState(false);
+  const [autoOpenRosterModal, setAutoOpenRosterModal] = useState(false);
 
   // Modern Navigation & UI States
   const [openDropdown, setOpenDropdown] = useState(null);
@@ -3272,7 +3273,10 @@ export default function EmployeePortalView({
                   cursor: 'pointer',
                   boxShadow: '0 2px 8px rgba(234, 88, 12, 0.3)'
                 }}
-                onClick={() => setActiveTab('roster')}
+                onClick={() => {
+                  setActiveTab('roster');
+                  setAutoOpenRosterModal(true);
+                }}
               >
                 📅 إنشاء وحفظ الجدول الشهري الآن 🔗
               </button>
@@ -4741,6 +4745,8 @@ export default function EmployeePortalView({
               showToast={showToast}
               selectedMonth={selectedMonth}
               selectedBranchId={selectedBranchId || null}
+              autoOpenRosterModal={autoOpenRosterModal}
+              setAutoOpenRosterModal={setAutoOpenRosterModal}
             />
           )}
 
