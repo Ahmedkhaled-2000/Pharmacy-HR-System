@@ -333,6 +333,31 @@ function mergeServerState(array $existing, array $incoming): array
     foreach ($arrayKeys as $k => $p) {
         $eList = is_array($existing[$k] ?? null) ? $existing[$k] : [];
         $iList = is_array($incoming[$k] ?? null) ? $incoming[$k] : [];
+
+        // فلترة وحذف الموظفين الوهميين نهائياً (01000000000) لمنع إعادة إحيائهم
+        if ($k === 'employees') {
+            $eList = array_values(array_filter($eList, function($emp) {
+                if (!is_array($emp)) return false;
+                $phone = (string)($emp['phone'] ?? '');
+                $name = (string)($emp['name'] ?? '');
+                $code = (string)($emp['code'] ?? '');
+                if ($phone === '01000000000' && ($name === 'مساعد صيدلي' || in_array($code, ['101','102','103','104','105','106','107','108','109','110']))) {
+                    return false;
+                }
+                return true;
+            }));
+            $iList = array_values(array_filter($iList, function($emp) {
+                if (!is_array($emp)) return false;
+                $phone = (string)($emp['phone'] ?? '');
+                $name = (string)($emp['name'] ?? '');
+                $code = (string)($emp['code'] ?? '');
+                if ($phone === '01000000000' && ($name === 'مساعد صيدلي' || in_array($code, ['101','102','103','104','105','106','107','108','109','110']))) {
+                    return false;
+                }
+                return true;
+            }));
+        }
+
         $merged[$k] = $mergeArrayEntities($eList, $iList, $p);
     }
 
