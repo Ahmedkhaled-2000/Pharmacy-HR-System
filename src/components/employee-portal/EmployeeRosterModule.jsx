@@ -301,6 +301,9 @@ export default function EmployeeRosterModule({
   const [fromDate, setFromDate] = useState(defaultCycleFrom);
   const [toDate, setToDate] = useState(defaultCycleTo);
 
+  // Determine current active branch ID for roster lookups
+  const curBranch = selectedBranchId || activeFormBranchId || primaryBranch;
+
   // Active Approved Roster for current selected branch & month
   const currentRoster = useMemo(() => {
     return getResolvedEmployeeRoster(emp, curBranch, selectedMonth, state);
