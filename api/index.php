@@ -277,15 +277,6 @@ try {
 
                 if ($row) {
                     $rawVal = $row['value_data'];
-                    // إذا كانت القيمة مخزنة كنص JSON جاهز، يتم إرسالها فوراً دون استهلاك الذاكرة في json_decode/json_encode
-                    if (is_string($rawVal) && (str_starts_with(trim($rawVal), '{') || str_starts_with(trim($rawVal), '['))) {
-                        header('Content-Type: application/json; charset=utf-8');
-                        header('Cache-Control: no-cache, no-store, must-revalidate');
-                        echo '{"success":true,"key":' . json_encode($row['key_name']) . ',"value":' . trim($rawVal) . ',"version":' . (int)$row['version'] . ',"updated_at":' . json_encode($row['updated_at']) . '}';
-                        Database::resetConnection();
-                        exit();
-                    }
-
                     $decodedValue = is_string($rawVal) ? json_decode($rawVal, true) : $rawVal;
                     if ($decodedValue === 'null' || $decodedValue === null || $rawVal === 'null') {
                         $decodedValue = null;

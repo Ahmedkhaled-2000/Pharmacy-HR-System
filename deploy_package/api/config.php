@@ -133,6 +133,11 @@ function getAuthenticatedUser(): ?array
  */
 function jsonResponse(mixed $data, int $statusCode = 200): void
 {
+    // Clean all output buffers to prevent partial stream truncation
+    while (ob_get_level() > 0) {
+        @ob_end_clean();
+    }
+
     http_response_code($statusCode);
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0, post-check=0, pre-check=0');
@@ -140,7 +145,21 @@ function jsonResponse(mixed $data, int $statusCode = 200): void
     header('Expires: Mon, 26 Jul 1997 05:00:00 GMT');
     header('X-LiteSpeed-Cache-Control: no-cache, no-store');
     header('X-Accel-Buffering: no');
-    echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+
+    $output = is_string($data) ? $data : json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+    if ($output === false) {
+        $output = json_encode([
+            'success' => false,
+            'error' => 'JSON serialization error: ' . json_last_error_msg()
+        ]);
+    }
+
+    header('Content-Length: ' . strlen($output));
+    echo $output;
+
+    if (function_exists('fastcgi_finish_request')) {
+        fastcgi_finish_request();
+    }
     exit();
 }
 
