@@ -301,3 +301,20 @@ export async function getPendingCount() {
   const queue = await getPendingQueue();
   return queue.length;
 }
+
+// ── تفريغ كامل لقاعدة البيانات المحلية المؤقتة (عند التصفير الشامل) ─────────
+export async function clearLocalDatabase() {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(LOCAL_STORAGE_MIRROR_KEY);
+      localStorage.removeItem(LOCAL_PENDING_QUEUE_KEY);
+    }
+  } catch {}
+  try {
+    memoryStore.clear();
+    const db = await openDB();
+    const tx = db.transaction([STORES.APP_STATE, STORES.PENDING_QUEUE], 'readwrite');
+    tx.objectStore(STORES.APP_STATE).clear();
+    tx.objectStore(STORES.PENDING_QUEUE).clear();
+  } catch {}
+}

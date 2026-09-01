@@ -25,7 +25,8 @@ import {
 import {
   smartSaveState,
   smartLoadState,
-  loadLocalStateFast
+  loadLocalStateFast,
+  clearLocalDatabase
 } from '../utils/offlineSync';
 import {
   smartMergeStates
@@ -327,6 +328,7 @@ export function DataProvider({ children, showToast = () => {} }) {
         localStorage.removeItem('app_active_nav_tab');
         localStorage.removeItem('app_active_sub_tab');
         sessionStorage.clear();
+        clearLocalDatabase().catch(() => {});
         setAuthRole('none');
         setIsAdminLoggedIn(false);
         setCurrentEmpUser(null);

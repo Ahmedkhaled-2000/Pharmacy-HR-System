@@ -16,7 +16,9 @@ import {
   addToPendingQueue,
   clearPendingQueue,
   getPendingCount,
+  clearLocalDatabase,
 } from './offlineStorage';
+export { clearLocalDatabase };
 import { smartMergeStates } from './stateMerger';
 import { normalizeState } from './formatters';
 

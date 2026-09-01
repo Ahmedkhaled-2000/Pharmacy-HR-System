@@ -89,35 +89,12 @@ export function normalizeState(parsed) {
   }
 
   let rawEmployees = toSafeArray(parsed.employees);
-  let employees = [];
-  if (rawEmployees.length > 0) {
-    employees = rawEmployees.map((e) => ({
-      ...e,
-      nickname: e.nickname || '',
-      phone: e.phone || '',
-      username: e.username || e.code || ''
-    }));
-  } else if (parsed.jobs && typeof parsed.jobs === 'object') {
-    Object.entries(parsed.jobs).forEach(([id, job], idx) => {
-      employees.push({
-        id,
-        code: String(101 + idx),
-        username: String(101 + idx),
-        name: job.name || (id === 'dataentry' ? 'مدخل بيانات' : 'مساعد صيدلي'),
-        nickname: '',
-        phone: '01000000000',
-        jobTitle: job.name || 'موظف',
-        salary: typeof job.salary === 'number' ? job.salary : (parseFloat(job.salary) || 0),
-        workHoursPerDay: parseFloat(job.workHoursPerDay) > 0 ? parseFloat(job.workHoursPerDay) : 8,
-        workDaysPerMonth: parseFloat(job.workDaysPerMonth) > 0 ? parseFloat(job.workDaysPerMonth) : 26,
-        password: '123',
-        photoUrl: '',
-        createdAt: todayStr()
-      });
-    });
-  } else {
-    employees = [];
-  }
+  let employees = rawEmployees.map((e) => ({
+    ...e,
+    nickname: e.nickname || '',
+    phone: e.phone || '',
+    username: e.username || e.code || ''
+  }));
 
   // Ensure existing employees have devices array and normalized permissions
   const empPermOverrides = parsed.orgSettings?.empPermissions || {};
