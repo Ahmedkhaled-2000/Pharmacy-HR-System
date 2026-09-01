@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { arabicWeekday } from '../../utils/formatters';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import { shouldRouteDirectToAdmin } from '../../utils/jobsHelper';
 import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
+import { getCycleDateRange } from '../../utils/periodEngine';
 
 // Arabic weekday names mapped to JS getDay() index (0=Sunday)
 const WEEKDAY_AR_MAP = {
@@ -282,45 +283,51 @@ export default function EmployeeRosterModule({
   const [viewMode, setViewMode] = useState('calendar'); // 'calendar' | 'week'
   const [activeFormBranchId, setActiveFormBranchId] = useState(selectedBranchId || primaryBranch || '');
 
-  // Determine current active branch ID for roster lookups
-  const curBranch = selectedBranchId || activeFormBranchId || primaryBranch;
+  // Admin-defined payroll cycle range for current selected month
+  const cycleRange = useMemo(() => {
+    return getCycleDateRange(selectedMonth, state?.orgSettings);
+  }, [selectedMonth, state?.orgSettings]);
 
-  // Form states
-  const [scheduleInputs, setScheduleInputs] = useState(DEFAULT_SCHEDULE);
-  const [fromDate, setFromDate] = useState(`${selectedMonth}-01`);
-  const [toDate, setToDate] = useState(() => {
+  const defaultCycleFrom = cycleRange?.startDate || `${selectedMonth}-01`;
+  const defaultCycleTo = cycleRange?.endDate || (() => {
     if (!selectedMonth) return '';
     const [y, m] = selectedMonth.split('-').map(Number);
     const daysInMonth = new Date(y, m, 0).getDate();
     return `${selectedMonth}-${String(daysInMonth).padStart(2, '0')}`;
-  });
+  })();
+
+  // Form states
+  const [scheduleInputs, setScheduleInputs] = useState(DEFAULT_SCHEDULE);
+  const [fromDate, setFromDate] = useState(defaultCycleFrom);
+  const [toDate, setToDate] = useState(defaultCycleTo);
 
   // Active Approved Roster for current selected branch & month
-  const currentRoster = React.useMemo(() => {
+  const currentRoster = useMemo(() => {
     return getResolvedEmployeeRoster(emp, curBranch, selectedMonth, state);
   }, [emp, curBranch, selectedMonth, state]);
 
-  // Sync state when selectedBranchId, activeFormBranchId, selectedMonth, or state changes
+  // Ref لمنع إعادة تعيين التواريخ التي يقوم الموظف بكتابتها أثناء عمل Polling أو تحديث الحالة
+  const lastSyncKeyRef = useRef('');
+
+  // Sync state ONLY when selectedBranchId, activeFormBranchId, selectedMonth, or approved roster identity actually changes
   useEffect(() => {
     const targetBranch = selectedBranchId || activeFormBranchId || primaryBranch;
     const approved = getResolvedEmployeeRoster(emp, targetBranch, selectedMonth, state);
+    const syncKey = `${selectedMonth}_${targetBranch}_${approved?.id || 'none'}_${approved?.approvedAt || ''}`;
 
-    if (approved?.schedule) {
-      setScheduleInputs(approved.schedule);
-    } else {
-      setScheduleInputs(DEFAULT_SCHEDULE);
+    if (lastSyncKeyRef.current !== syncKey) {
+      lastSyncKeyRef.current = syncKey;
+
+      if (approved?.schedule) {
+        setScheduleInputs(approved.schedule);
+      } else {
+        setScheduleInputs(DEFAULT_SCHEDULE);
+      }
+
+      setFromDate(approved?.fromDate || defaultCycleFrom);
+      setToDate(approved?.toDate || defaultCycleTo);
     }
-
-    if (approved?.fromDate) setFromDate(approved.fromDate);
-    else setFromDate(`${selectedMonth}-01`);
-
-    if (approved?.toDate) setToDate(approved.toDate);
-    else if (selectedMonth) {
-      const [y, m] = selectedMonth.split('-').map(Number);
-      const daysInMonth = new Date(y, m, 0).getDate();
-      setToDate(`${selectedMonth}-${String(daysInMonth).padStart(2, '0')}`);
-    }
-  }, [selectedBranchId, activeFormBranchId, selectedMonth, state.rosters, state.requests, emp.id, emp.code, emp.branchId, primaryBranch]);
+  }, [selectedBranchId, activeFormBranchId, selectedMonth, primaryBranch, defaultCycleFrom, defaultCycleTo, state?.rosters, state?.requests, emp?.id, emp?.code]);
 
   // Pending Roster Requests for Employee
   const pendingRosterReq = (state.requests || []).find(
