@@ -5,6 +5,7 @@ import { UIProvider } from './context/UIContext';
 import { NotificationProvider } from './context/NotificationContext';
 import AppRoutes from './routes/AppRoutes';
 import GlobalModalsContainer from './components/modals/GlobalModalsContainer';
+import AppUpdateWatcher from './components/common/AppUpdateWatcher';
 
 /**
  * Inner Application shell
@@ -14,6 +15,7 @@ function AppContent() {
     <>
       <AppRoutes />
       <GlobalModalsContainer />
+      <AppUpdateWatcher />
     </>
   );
 }

@@ -62,9 +62,10 @@ async function request(endpoint, options = {}) {
   let lastError = null;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const cleanUrl = `${API_BASE_URL}/${endpoint.replace(/^\/+/, '')}`;
     const separator = endpoint.includes('?') ? '&' : '?';
-    const antiCacheQuery = options.noCache !== false ? `${separator}_t=${Date.now()}_${Math.random().toString(36).slice(2, 7)}` : '';
-    const url = `${API_BASE_URL}/${endpoint.replace(/^\/+/, '')}${antiCacheQuery}`;
+    const antiCacheQuery = options.useETag ? '' : (options.noCache !== false ? `${separator}_t=${Date.now()}_${Math.random().toString(36).slice(2, 7)}` : '');
+    const url = options.useETag ? cleanUrl : `${cleanUrl}${antiCacheQuery}`;
     const timeoutMs = baseTimeoutMs;
     
     const controller = new AbortController();
@@ -87,8 +88,8 @@ async function request(endpoint, options = {}) {
       ...options.headers,
     };
 
-    if (options.useETag && activeETags.has(url)) {
-      headers['If-None-Match'] = activeETags.get(url);
+    if (options.useETag && activeETags.has(cleanUrl)) {
+      headers['If-None-Match'] = activeETags.get(cleanUrl);
     }
 
     const config = {
@@ -112,7 +113,7 @@ async function request(endpoint, options = {}) {
 
       const etag = response.headers.get('ETag') || response.headers.get('etag');
       if (etag) {
-        activeETags.set(url, etag);
+        activeETags.set(cleanUrl, etag);
       }
 
       if (!response.ok) {

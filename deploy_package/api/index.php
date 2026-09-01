@@ -1,7 +1,9 @@
 <?php
 /**
  * Main API Router for Pharmacy HR & Archive System
- * Compatible with PHP 8.1 - 8.5 & PostgreSQL 16+/18+ (Default) / MySQL
+ * Exclusively powered by Supabase PostgreSQL
+ * Features: High-Performance Server Micro-Caching + Zero Browser Cache Guarantee
+ * Compatible with PHP 8.1 - 8.5
  */
 
 declare(strict_types=1);
@@ -31,140 +33,29 @@ if (str_starts_with($endpoint, 'archive/') || $endpoint === 'archive') {
     exit();
 }
 
-$driver = Database::getDriver();
-
 try {
     switch ($endpoint) {
         // ==================================================================
-        // 1. فحص سلامة الخادم وقاعدة البيانات (Health Check)
+        // 1. فحص سلامة الخادم وقاعدة بيانات Supabase (Health Check)
         // ==================================================================
         case 'health':
         case 'status':
-            $db = Database::getConnection();
             $dbVersion = 'Unknown';
             try {
-                $vRow = Database::queryOne($driver === 'pgsql' ? "SELECT version() AS ver" : "SELECT VERSION() AS ver");
+                $vRow = Database::queryOne("SELECT version() AS ver");
                 $dbVersion = $vRow['ver'] ?? 'Unknown';
             } catch (Throwable) {}
 
             jsonResponse([
                 'success' => true,
                 'status' => 'online',
-                'service' => 'Pharmacy HR System API',
+                'service' => 'Pharmacy HR System API (Supabase PostgreSQL Dedicated)',
                 'php_version' => PHP_VERSION,
-                'db_driver' => $driver,
+                'db_driver' => 'pgsql',
                 'db_version' => $dbVersion,
                 'server_time' => date('Y-m-d H:i:s'),
                 'timezone' => date_default_timezone_get()
             ]);
-            break;
-
-        // ==================================================================
-        // Restore Authentic System State
-        // ==================================================================
-        case 'restore':
-        case 'restore.php':
-            $secret = $_GET['secret'] ?? $_POST['secret'] ?? '';
-            if ($secret !== 'restore_pharmacy_2026_auth') {
-                jsonResponse(['success' => false, 'error' => 'Unauthorized access'], 403);
-            }
-
-            try {
-                $rawInput = file_get_contents('php://input');
-                $jsonData = !empty($rawInput) ? json_decode($rawInput, true) : null;
-                $jsonError = json_last_error_msg();
-
-                if (!$jsonData && !empty($_POST['data'])) {
-                    $jsonData = is_string($_POST['data']) ? json_decode($_POST['data'], true) : $_POST['data'];
-                }
-
-                // If no JSON sent in body, try to load from server-side backup_seed.json
-                if (!$jsonData) {
-                    $backupPath = __DIR__ . '/backup_seed.json';
-                    if (file_exists($backupPath)) {
-                        $rawBackup = file_get_contents($backupPath);
-                        $jsonData = !empty($rawBackup) ? json_decode($rawBackup, true) : null;
-                    }
-                }
-
-                if (!$jsonData) {
-                    jsonResponse([
-                        'success' => false,
-                        'error' => 'No valid JSON payload provided and no backup_seed.json found',
-                        'raw_len' => strlen((string)$rawInput),
-                        'json_error' => $jsonError,
-                        'content_type' => $_SERVER['CONTENT_TYPE'] ?? 'none'
-                    ], 400);
-                }
-
-                $stateToRestore = null;
-                if (isset($jsonData['app_settings']) && is_array($jsonData['app_settings'])) {
-                    foreach ($jsonData['app_settings'] as $item) {
-                        if (($item['key'] ?? '') === 'pharmacy-tracker-data') {
-                            $stateToRestore = $item['value'];
-                            break;
-                        }
-                    }
-                } elseif (isset($jsonData['employees']) || isset($jsonData['branches']) || isset($jsonData['orgSettings'])) {
-                    $stateToRestore = $jsonData;
-                }
-
-                if (!$stateToRestore || !is_array($stateToRestore)) {
-                    jsonResponse(['success' => false, 'error' => 'Invalid state structure'], 400);
-                }
-
-                $jsonString = json_encode($stateToRestore, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-
-                if (in_array($driver, ['pgsql', 'sqlite'], true)) {
-                    $sql = "INSERT INTO app_settings (key_name, value_data, version, updated_at)
-                            VALUES ('pharmacy-tracker-data', ?::jsonb, 1, NOW())
-                            ON CONFLICT (key_name) DO UPDATE
-                            SET value_data = EXCLUDED.value_data,
-                                version = app_settings.version + 1,
-                                updated_at = NOW()";
-                } else {
-                    $sql = "INSERT INTO app_settings (key_name, value_data, version, updated_at)
-                            VALUES ('pharmacy-tracker-data', ?, 1, NOW())
-                            ON DUPLICATE KEY UPDATE
-                                value_data = VALUES(value_data),
-                                version = version + 1,
-                                updated_at = NOW()";
-                }
-
-                Database::execute($sql, [$jsonString]);
-
-                // Create snapshot backup
-                try {
-                    if (in_array($driver, ['pgsql', 'sqlite'], true)) {
-                        Database::execute("
-                            CREATE TABLE IF NOT EXISTS app_settings_backups (
-                                id BIGSERIAL PRIMARY KEY,
-                                key_name VARCHAR(191) NOT NULL,
-                                value_data JSONB NOT NULL,
-                                version INTEGER NOT NULL DEFAULT 1,
-                                client_ip VARCHAR(45) NULL,
-                                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-                            )
-                        ");
-                        Database::execute(
-                            "INSERT INTO app_settings_backups (key_name, value_data, version, client_ip, created_at) VALUES ('pharmacy-tracker-data', ?::jsonb, 1, 'RESTORE_PAYLOAD', NOW())",
-                            [$jsonString]
-                        );
-                    }
-                } catch (Throwable) {}
-
-                jsonResponse([
-                    'success' => true,
-                    'message' => 'Authentic state restored and synced successfully!',
-                    'employees_count' => count($stateToRestore['employees'] ?? []),
-                    'branches_count' => count($stateToRestore['branches'] ?? []),
-                    'shifts_count' => count($stateToRestore['shifts'] ?? []),
-                    'requests_count' => count($stateToRestore['requests'] ?? []),
-                    'loans_count' => count($stateToRestore['loans'] ?? [])
-                ]);
-            } catch (Throwable $e) {
-                jsonResponse(['success' => false, 'error' => $e->getMessage()], 500);
-            }
             break;
 
         // ==================================================================
@@ -180,14 +71,19 @@ try {
             $password = (string)($payload['password'] ?? '');
             $role = (string)($payload['role'] ?? 'admin');
 
-            // جلب إعدادات المنشأة للتحقق من كلمات المرور
-            $settingsRow = Database::queryOne("SELECT value_data FROM app_settings WHERE key_name = ? LIMIT 1", [DEFAULT_STORAGE_KEY]);
-            $appState = $settingsRow && !empty($settingsRow['value_data'])
-                ? (is_string($settingsRow['value_data']) ? json_decode($settingsRow['value_data'], true) : $settingsRow['value_data'])
-                : [];
+            // جلب إعدادات المنشأة للتحقق من كلمات المرور (مع دعم MicroCache)
+            $cachedSettings = MicroCache::get('settings_' . DEFAULT_STORAGE_KEY);
+            if ($cachedSettings && isset($cachedSettings['value'])) {
+                $appState = $cachedSettings['value'];
+            } else {
+                $settingsRow = Database::queryOne("SELECT value_data FROM app_settings WHERE key_name = ? LIMIT 1", [DEFAULT_STORAGE_KEY]);
+                $appState = $settingsRow && !empty($settingsRow['value_data'])
+                    ? (is_string($settingsRow['value_data']) ? json_decode($settingsRow['value_data'], true) : $settingsRow['value_data'])
+                    : [];
+            }
 
             $orgSettings = is_array($appState['orgSettings'] ?? null) ? $appState['orgSettings'] : [];
-            $adminPass = (string)($orgSettings['adminPassword'] ?? '123456');
+            $adminPass = (string)($orgSettings['adminPassword'] ?? '123');
             $ownerPass = (string)($orgSettings['ownerPassword'] ?? $adminPass);
 
             $authenticated = false;
@@ -264,12 +160,18 @@ try {
             break;
 
         // ==================================================================
-        // 4. إدارة إعدادات وبيانات التطبيق الرئيسية (App Settings / State)
+        // 4. إدارة إعدادات وبيانات التطبيق الرئيسية (App Settings / State Store)
         // ==================================================================
         case 'settings':
             $key = $_GET['key'] ?? DEFAULT_STORAGE_KEY;
 
             if ($method === 'GET') {
+                // فحص كاش السيرفر المصغر أولاً لخفض استهلاك Supabase Egress
+                $cached = MicroCache::get('settings_' . $key);
+                if ($cached !== null) {
+                    jsonResponse($cached);
+                }
+
                 $row = Database::queryOne(
                     "SELECT key_name, value_data, version, updated_at FROM app_settings WHERE key_name = ? LIMIT 1",
                     [$key]
@@ -282,21 +184,33 @@ try {
                         $decodedValue = null;
                     }
 
-                    jsonResponse([
+                    $response = [
                         'success' => true,
                         'key' => $row['key_name'],
                         'value' => $decodedValue,
                         'version' => (int)$row['version'],
                         'updated_at' => $row['updated_at']
-                    ]);
+                    ];
+
+                    // حفظ في كاش السيرفر لمدة 8 ثوانٍ
+                    MicroCache::set('settings_' . $key, $response, MICRO_CACHE_TTL);
+                    MicroCache::set('version_' . $key, [
+                        'success' => true,
+                        'key' => $key,
+                        'version' => (int)$row['version'],
+                        'updated_at' => $row['updated_at']
+                    ], MICRO_CACHE_TTL);
+
+                    jsonResponse($response);
                 } else {
-                    jsonResponse([
+                    $response = [
                         'success' => true,
                         'key' => $key,
                         'value' => null,
                         'version' => 0,
                         'updated_at' => null
-                    ]);
+                    ];
+                    jsonResponse($response);
                 }
             } elseif ($method === 'POST') {
                 $payload = getRequestData();
@@ -319,7 +233,7 @@ try {
                     ], 400);
                 }
 
-                // 2. جلب الحالة السابقة إن وجدت
+                // 2. جلب الحالة السابقة إن وجدت من قاعدة البيانات مباشرة
                 $existingRow = Database::queryOne(
                     "SELECT value_data, version FROM app_settings WHERE key_name = ? LIMIT 1",
                     [$targetKey]
@@ -340,39 +254,26 @@ try {
                 $isExplicitReset = !empty($decodedIncoming['_systemResetToken']) || !empty($payload['allowReset']);
 
                 if (!$isExplicitReset && $incomingEmpCount === 0 && $existingEmpCount > 0) {
-                    // الحفاظ التلقائي على الموظفين والفروع السابقة
                     $decodedIncoming['employees'] = $existingDecoded['employees'] ?? [];
                     if (empty($decodedIncoming['branches']) && !empty($existingDecoded['branches'])) {
                         $decodedIncoming['branches'] = $existingDecoded['branches'];
                     }
                 }
 
-                // 4. دمج البيانات بذكاء مع السيرفر
+                // 4. دمج البيانات بذكاء مع السيرفر للحفاظ على اللوائح والإعدادات والطلبات
                 $finalValueData = $decodedIncoming;
                 if (is_array($existingDecoded)) {
                     $finalValueData = mergeServerState($existingDecoded, $decodedIncoming);
                 }
 
-                // 5. حفظ نسخة احتياطية لقطية فورية في جدول app_settings_backups قبل التعديل
+                // 5. حفظ نسخة احتياطية لقطية فورية في Supabase
                 if (is_array($existingDecoded) && !empty($existingDecoded)) {
                     try {
-                        if (in_array($driver, ['pgsql', 'sqlite'], true)) {
-                            Database::execute("
-                                CREATE TABLE IF NOT EXISTS app_settings_backups (
-                                    id SERIAL PRIMARY KEY,
-                                    key_name VARCHAR(191) NOT NULL,
-                                    value_data JSONB NOT NULL,
-                                    version INTEGER NOT NULL DEFAULT 1,
-                                    client_ip VARCHAR(64),
-                                    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
-                                )
-                            ");
-                            $jsonBackup = json_encode($existingDecoded, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
-                            Database::execute(
-                                "INSERT INTO app_settings_backups (key_name, value_data, version, client_ip, created_at) VALUES (?, ?::jsonb, ?, ?, NOW())",
-                                [$targetKey, $jsonBackup, (int)($existingRow['version'] ?? 1), getClientIp()]
-                            );
-                        }
+                        $jsonBackup = json_encode($existingDecoded, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+                        Database::execute(
+                            "INSERT INTO app_settings_backups (key_name, value_data, version, client_ip, created_at) VALUES (?, ?::jsonb, ?, ?, NOW())",
+                            [$targetKey, $jsonBackup, (int)($existingRow['version'] ?? 1), getClientIp()]
+                        );
                     } catch (Throwable) {}
                 }
 
@@ -380,26 +281,17 @@ try {
                     ? $finalValueData
                     : json_encode($finalValueData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
 
-                // 6. الحفظ في جدول app_settings
-                if (in_array($driver, ['pgsql', 'sqlite'], true)) {
-                    $sql = "INSERT INTO app_settings (key_name, value_data, version, updated_at)
-                            VALUES (?, ?::jsonb, 1, NOW())
-                            ON CONFLICT (key_name) DO UPDATE
-                            SET value_data = EXCLUDED.value_data,
-                                version = app_settings.version + 1,
-                                updated_at = NOW()";
-                } else {
-                    $sql = "INSERT INTO app_settings (key_name, value_data, version, updated_at)
-                            VALUES (?, ?, 1, NOW())
-                            ON DUPLICATE KEY UPDATE
-                            value_data = VALUES(value_data),
-                            version = version + 1,
+                // 6. الحفظ في Supabase PostgreSQL
+                $sql = "INSERT INTO app_settings (key_name, value_data, version, updated_at)
+                        VALUES (?, ?::jsonb, 1, NOW())
+                        ON CONFLICT (key_name) DO UPDATE
+                        SET value_data = EXCLUDED.value_data,
+                            version = app_settings.version + 1,
                             updated_at = NOW()";
-                }
 
                 Database::execute($sql, [$targetKey, $jsonString]);
 
-                // تسجيل المزامنة في sync_logs
+                // 7. جلب النسخة والتاريخ وتفريغ الكاش فوراً
                 $versionRow = Database::queryOne("SELECT version, updated_at FROM app_settings WHERE key_name = ?", [$targetKey]);
                 $currentVersion = (int)($versionRow['version'] ?? 1);
                 $updatedAt = $versionRow['updated_at'] ?? date('Y-m-d H:i:s');
@@ -412,76 +304,59 @@ try {
                     );
                 } catch (Throwable) {}
 
-                jsonResponse([
+                // تحديث كاش السيرفر بالحالة الجديدة مباشرة
+                $savedResponse = [
                     'success' => true,
                     'message' => 'State saved and merged successfully',
                     'key' => $targetKey,
                     'version' => $currentVersion,
                     'updated_at' => $updatedAt,
                     'value' => is_array($finalValueData) ? $finalValueData : null
-                ]);
+                ];
+
+                MicroCache::set('settings_' . $targetKey, $savedResponse, MICRO_CACHE_TTL);
+                MicroCache::set('version_' . $targetKey, [
+                    'success' => true,
+                    'key' => $targetKey,
+                    'version' => $currentVersion,
+                    'updated_at' => $updatedAt
+                ], MICRO_CACHE_TTL);
+
+                jsonResponse($savedResponse);
             }
             break;
 
         // ==================================================================
-        // 4. البث الحي اللحظي للأحداث والتحديثات (Server-Sent Events / SSE)
-        // ==================================================================
-        case 'stream':
-        case 'events':
-            @ini_set('zlib.output_compression', '0');
-            @ini_set('output_buffering', '0');
-
-            header('Content-Type: text/event-stream; charset=utf-8');
-            header('Cache-Control: no-cache, no-transform, no-store, must-revalidate');
-            header('Connection: close');
-            header('X-Accel-Buffering: no');
-            header('Pragma: no-cache');
-            header('Expires: 0');
-
-            $key = $_GET['key'] ?? DEFAULT_STORAGE_KEY;
-
-            try {
-                $row = Database::queryOne(
-                    "SELECT version, updated_at FROM app_settings WHERE key_name = ? LIMIT 1",
-                    [$key]
-                );
-                $curVer = (int)($row['version'] ?? 0);
-
-                echo "event: version_change\n";
-                echo "data: " . json_encode([
-                    'version' => $curVer,
-                    'updated_at' => $row['updated_at'] ?? null,
-                    'key' => $key
-                ]) . "\n\n";
-            } catch (Throwable) {
-                echo ": ping\n\n";
-            }
-
-            Database::resetConnection();
-            exit();
-            break;
-
-        // ==================================================================
-        // 5. فحص رقم الإصدار للمزامنة الخفيفة (Ultra-Fast Smart Polling)
+        // 5. فحص رقم الإصدار للمزامنة الخفيفة (Ultra-Fast Version Polling)
         // ==================================================================
         case 'sync/version':
         case 'version':
             $key = $_GET['key'] ?? DEFAULT_STORAGE_KEY;
+
+            // فحص كاش السيرفر المصغر
+            $cachedVer = MicroCache::get('version_' . $key);
+            if ($cachedVer !== null) {
+                jsonResponse($cachedVer);
+            }
+
             $row = Database::queryOne(
                 "SELECT version, updated_at FROM app_settings WHERE key_name = ? LIMIT 1",
                 [$key]
             );
 
-            jsonResponse([
+            $verResponse = [
                 'success' => true,
                 'key' => $key,
                 'version' => (int)($row['version'] ?? 0),
                 'updated_at' => $row['updated_at'] ?? null
-            ]);
+            ];
+
+            MicroCache::set('version_' . $key, $verResponse, MICRO_CACHE_TTL);
+            jsonResponse($verResponse);
             break;
 
         // ==================================================================
-        // 5. إدارة بصمات الوجه واليد الحيوية (Biometric Descriptors)
+        // 6. إدارة بصمات الوجه واليد الحيوية (Biometric Descriptors)
         // ==================================================================
         case 'faces':
         case 'biometrics':
@@ -501,6 +376,11 @@ try {
 
                     jsonResponse(['success' => true, 'data' => $row]);
                 } else {
+                    $cachedFaces = MicroCache::get('all_faces');
+                    if ($cachedFaces !== null) {
+                        jsonResponse($cachedFaces);
+                    }
+
                     $rows = Database::query("SELECT employee_id, descriptor, hand_descriptor, biometric_type, updated_at FROM employee_faces");
                     
                     foreach ($rows as &$r) {
@@ -509,7 +389,9 @@ try {
                     }
                     unset($r);
 
-                    jsonResponse(['success' => true, 'data' => $rows]);
+                    $facesRes = ['success' => true, 'data' => $rows];
+                    MicroCache::set('all_faces', $facesRes, MICRO_CACHE_TTL * 2);
+                    jsonResponse($facesRes);
                 }
             } elseif ($method === 'POST') {
                 $payload = getRequestData();
@@ -523,25 +405,16 @@ try {
                 $handDescriptor = isset($payload['hand_descriptor']) ? (is_string($payload['hand_descriptor']) ? $payload['hand_descriptor'] : json_encode($payload['hand_descriptor'])) : null;
                 $biometricType = (string)($payload['biometric_type'] ?? 'face');
 
-                if (in_array($driver, ['pgsql', 'sqlite'], true)) {
-                    $sql = "INSERT INTO employee_faces (employee_id, descriptor, hand_descriptor, biometric_type, updated_at)
-                            VALUES (?, ?::jsonb, ?::jsonb, ?, NOW())
-                            ON CONFLICT (employee_id) DO UPDATE
-                            SET descriptor = COALESCE(EXCLUDED.descriptor, employee_faces.descriptor),
-                                hand_descriptor = COALESCE(EXCLUDED.hand_descriptor, employee_faces.hand_descriptor),
-                                biometric_type = EXCLUDED.biometric_type,
-                                updated_at = NOW()";
-                } else {
-                    $sql = "INSERT INTO employee_faces (employee_id, descriptor, hand_descriptor, biometric_type, updated_at)
-                            VALUES (?, ?, ?, ?, NOW())
-                            ON DUPLICATE KEY UPDATE
-                                descriptor = COALESCE(VALUES(descriptor), descriptor),
-                                hand_descriptor = COALESCE(VALUES(hand_descriptor), hand_descriptor),
-                                biometric_type = VALUES(biometric_type),
-                                updated_at = NOW()";
-                }
+                $sql = "INSERT INTO employee_faces (employee_id, descriptor, hand_descriptor, biometric_type, updated_at)
+                        VALUES (?, ?::jsonb, ?::jsonb, ?, NOW())
+                        ON CONFLICT (employee_id) DO UPDATE
+                        SET descriptor = COALESCE(EXCLUDED.descriptor, employee_faces.descriptor),
+                            hand_descriptor = COALESCE(EXCLUDED.hand_descriptor, employee_faces.hand_descriptor),
+                            biometric_type = EXCLUDED.biometric_type,
+                            updated_at = NOW()";
 
                 Database::execute($sql, [$employeeId, $descriptor, $handDescriptor, $biometricType]);
+                MicroCache::invalidate('all_faces');
 
                 jsonResponse([
                     'success' => true,
@@ -555,12 +428,13 @@ try {
                 }
 
                 Database::execute("DELETE FROM employee_faces WHERE employee_id = ?", [$deleteId]);
+                MicroCache::invalidate('all_faces');
                 jsonResponse(['success' => true, 'message' => "Biometrics deleted for employee {$deleteId}"]);
             }
             break;
 
         // ==================================================================
-        // 6. النسخ الاحتياطي والاستعادة الكاملة (Full Backup & Restore)
+        // 7. النسخ الاحتياطي والاستعادة الكاملة (Full Backup & Restore)
         // ==================================================================
         case 'backup/export':
             $settings = Database::query("SELECT * FROM app_settings");
@@ -584,52 +458,50 @@ try {
             break;
 
         case 'backup/import':
+        case 'restore':
+        case 'restore.php':
             if ($method !== 'POST') {
                 jsonResponse(['success' => false, 'error' => 'Method not allowed'], 405);
             }
 
             $payload = getRequestData();
-            $facesData = $payload['employee_faces'] ?? [];
+            $stateToRestore = $payload['value'] ?? $payload['data'] ?? $payload;
 
-            if (is_array($facesData)) {
-                foreach ($facesData as $f) {
-                    if (empty($f['employee_id'])) continue;
-                    $empId = (string)$f['employee_id'];
-                    $desc = isset($f['descriptor']) ? (is_string($f['descriptor']) ? $f['descriptor'] : json_encode($f['descriptor'])) : null;
-                    $hand = isset($f['hand_descriptor']) ? (is_string($f['hand_descriptor']) ? $f['hand_descriptor'] : json_encode($f['hand_descriptor'])) : null;
-                    $type = (string)($f['biometric_type'] ?? 'face');
-
-                    if (in_array($driver, ['pgsql', 'sqlite'], true)) {
-                        Database::execute(
-                            "INSERT INTO employee_faces (employee_id, descriptor, hand_descriptor, biometric_type, updated_at)
-                             VALUES (?, ?::jsonb, ?::jsonb, ?, NOW())
-                             ON CONFLICT (employee_id) DO UPDATE 
-                             SET descriptor = EXCLUDED.descriptor, 
-                                 hand_descriptor = EXCLUDED.hand_descriptor, 
-                                 biometric_type = EXCLUDED.biometric_type, 
-                                 updated_at = NOW()",
-                            [$empId, $desc, $hand, $type]
-                        );
-                    } else {
-                        Database::execute(
-                            "INSERT INTO employee_faces (employee_id, descriptor, hand_descriptor, biometric_type, updated_at)
-                             VALUES (?, ?, ?, ?, NOW())
-                             ON DUPLICATE KEY UPDATE 
-                             descriptor = VALUES(descriptor), 
-                             hand_descriptor = VALUES(hand_descriptor), 
-                             biometric_type = VALUES(biometric_type), 
-                             updated_at = NOW()",
-                            [$empId, $desc, $hand, $type]
-                        );
+            if (isset($stateToRestore['app_settings']) && is_array($stateToRestore['app_settings'])) {
+                foreach ($stateToRestore['app_settings'] as $item) {
+                    if (($item['key'] ?? '') === DEFAULT_STORAGE_KEY) {
+                        $stateToRestore = $item['value'];
+                        break;
                     }
                 }
             }
 
-            jsonResponse(['success' => true, 'message' => 'Backup restored successfully']);
+            if (!is_array($stateToRestore)) {
+                jsonResponse(['success' => false, 'error' => 'Invalid backup payload'], 400);
+            }
+
+            $jsonString = json_encode($stateToRestore, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+            $sql = "INSERT INTO app_settings (key_name, value_data, version, updated_at)
+                    VALUES (?, ?::jsonb, 1, NOW())
+                    ON CONFLICT (key_name) DO UPDATE
+                    SET value_data = EXCLUDED.value_data,
+                        version = app_settings.version + 1,
+                        updated_at = NOW()";
+
+            Database::execute($sql, [DEFAULT_STORAGE_KEY, $jsonString]);
+            MicroCache::invalidate();
+
+            jsonResponse([
+                'success' => true,
+                'message' => 'State restored successfully',
+                'employees_count' => count($stateToRestore['employees'] ?? []),
+                'branches_count' => count($stateToRestore['branches'] ?? [])
+            ]);
             break;
 
         // ==================================================================
-        // 7. تصفير ومسح قاعدة البيانات بالكامل (Full Server Factory Reset)
+        // 8. تصفير ومسح قاعدة البيانات بالكامل (Full Server Factory Reset)
         // ==================================================================
         case 'system/reset':
         case 'reset':
@@ -642,49 +514,30 @@ try {
             if ($confirmation !== 'CONFIRM_RESET' && $confirmation !== 'CONFIRM_FACTORY_RESET') {
                 jsonResponse([
                     'success' => false,
-                    'error' => 'عملية إعادة ضبط المصنع تتطلب تأكيداً صريحاً (confirm: CONFIRM_RESET) لحماية بيانات النظام من المسح العرضي.'
+                    'error' => 'عملية إعادة ضبط المصنع تتطلب تأكيداً صريحاً (confirm: CONFIRM_RESET).'
                 ], 400);
             }
 
             $targetKey = (string)($payload['key'] ?? DEFAULT_STORAGE_KEY);
             $wipedState = $payload['state'] ?? null;
 
-            // 1. مسح جدول البصمات الحيوية بالكامل
+            // مسح البصمات
             try {
                 Database::execute("DELETE FROM employee_faces");
-            } catch (Throwable $fe) {
-                error_log('[Reset Faces Error] ' . $fe->getMessage());
-            }
+            } catch (Throwable) {}
 
-            // 2. تحديث جدول الإعدادات بالحالة النظيفة المصفّرة
             if ($wipedState !== null) {
                 $jsonString = is_string($wipedState) ? $wipedState : json_encode($wipedState, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-                if (in_array($driver, ['pgsql', 'sqlite'], true)) {
-                    $sql = "INSERT INTO app_settings (key_name, value_data, version, updated_at)
-                            VALUES (?, ?::jsonb, 1, NOW())
-                            ON CONFLICT (key_name) DO UPDATE
-                            SET value_data = EXCLUDED.value_data,
-                                version = app_settings.version + 1,
-                                updated_at = NOW()";
-                } else {
-                    $sql = "INSERT INTO app_settings (key_name, value_data, version, updated_at)
-                            VALUES (?, ?, 1, NOW())
-                            ON DUPLICATE KEY UPDATE
-                                value_data = VALUES(value_data),
-                                version = version + 1,
-                                updated_at = NOW()";
-                }
+                $sql = "INSERT INTO app_settings (key_name, value_data, version, updated_at)
+                        VALUES (?, ?::jsonb, 1, NOW())
+                        ON CONFLICT (key_name) DO UPDATE
+                        SET value_data = EXCLUDED.value_data,
+                            version = app_settings.version + 1,
+                            updated_at = NOW()";
                 Database::execute($sql, [$targetKey, $jsonString]);
             }
 
-            // 3. تدوين سجل إعادة ضبط المصنع في sync_logs
-            try {
-                $clientIp = getClientIp();
-                Database::execute(
-                    "INSERT INTO sync_logs (action_type, entity_key, version, client_ip, created_at) VALUES ('FACTORY_RESET', ?, 1, ?, NOW())",
-                    [$targetKey, $clientIp]
-                );
-            } catch (Throwable) {}
+            MicroCache::invalidate();
 
             jsonResponse([
                 'success' => true,

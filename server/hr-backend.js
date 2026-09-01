@@ -46,17 +46,28 @@ const io = new SocketIOServer(server, {
   transports: ['websocket', 'polling'],
 });
 
-// ── 2. إعداد الاتصال بقاعدة بيانات PostgreSQL ──────────────────────────────
+// ── 2. إعداد الاتصال بقاعدة بيانات Supabase PostgreSQL ──────────────────────
 const { Pool } = pg;
-const pgConfig = {
-  host: process.env.POSTGRES_HOST || '127.0.0.1',
-  port: parseInt(process.env.POSTGRES_PORT || '5432', 10),
-  database: process.env.POSTGRES_DB || 'postgres',
-  user: process.env.POSTGRES_USER || 'postgres',
-  password: process.env.POSTGRES_PASSWORD || 'postgres_hr_2026',
-  max: 30, // Connection pool size
+
+const connectionString = process.env.SUPABASE_POOLER_URL ||
+  (process.env.DB_HOST ? `postgresql://${process.env.DB_USER}:${encodeURIComponent(process.env.DB_PASS || '')}@${process.env.DB_HOST}:${process.env.DB_PORT || 6543}/${process.env.DB_NAME || 'postgres'}?sslmode=${process.env.DB_SSLMODE || 'require'}` : null);
+
+const pgConfig = connectionString ? {
+  connectionString,
+  ssl: { rejectUnauthorized: false },
+  max: 20,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000,
+  connectionTimeoutMillis: 8000,
+} : {
+  host: process.env.DB_HOST || process.env.POSTGRES_HOST || 'aws-0-eu-west-1.pooler.supabase.com',
+  port: parseInt(process.env.DB_PORT || process.env.POSTGRES_PORT || '6543', 10),
+  database: process.env.DB_NAME || process.env.POSTGRES_DB || 'postgres',
+  user: process.env.DB_USER || process.env.POSTGRES_USER || 'postgres.jjosopujlxgkhrragumj',
+  password: process.env.DB_PASS || process.env.POSTGRES_PASSWORD || 'cnzrd6YvE0N8tMOa',
+  ssl: { rejectUnauthorized: false },
+  max: 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 8000,
 };
 
 const db = new Pool(pgConfig);
@@ -155,7 +166,7 @@ async function getSettingsFromStorage(key) {
   }
 
   // 2. إذا لم يكن في الكاش، نقرأ من PostgreSQL
-  const res = await db.query('SELECT value, version, updated_at FROM public.app_settings WHERE key = $1', [key]);
+  const res = await db.query('SELECT value_data as value, version, updated_at FROM public.app_settings WHERE key_name = $1', [key]);
   if (res.rows.length > 0) {
     const row = res.rows[0];
     const data = row.value;
@@ -180,10 +191,10 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
 
   // 1. حفظ دائم في PostgreSQL
   const query = `
-    INSERT INTO public.app_settings (key, value, version, updated_at)
+    INSERT INTO public.app_settings (key_name, value_data, version, updated_at)
     VALUES ($1, $2::jsonb, 1, $3)
-    ON CONFLICT (key) DO UPDATE
-    SET value = EXCLUDED.value,
+    ON CONFLICT (key_name) DO UPDATE
+    SET value_data = EXCLUDED.value_data,
         version = public.app_settings.version + 1,
         updated_at = EXCLUDED.updated_at
     RETURNING version, updated_at;

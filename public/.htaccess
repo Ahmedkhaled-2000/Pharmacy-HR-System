@@ -1,24 +1,65 @@
+# ==============================================================================
+# 🚀 PHARMACY HR & ARCHIVE SYSTEM - APACHE / LITESPEED CONFIGURATION
+# ZERO BROWSER CACHE GUARANTEE + INSTANT UPDATES + HIGH PERFORMANCE
+# ==============================================================================
+
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteBase /
 
-  # 1. خدمة الملفات والمجلدات الحقيقية مباشرة (ملفات assets والـ PHP والصور)
+  # 1. توجيه طلبات الـ API إلى api/index.php مباشرة
+  RewriteRule ^api/(.*)$ api/index.php?endpoint=$1 [QSA,L]
+  RewriteRule ^api/?$ api/index.php?endpoint=health [QSA,L]
+
+  # 2. خدمة الملفات والمجلدات الحقيقية مباشرة (ملفات assets والـ PHP والأيقونات)
   RewriteCond %{REQUEST_FILENAME} -f [OR]
   RewriteCond %{REQUEST_FILENAME} -d
   RewriteRule ^ - [L]
-
-  # 2. توجيه طلبات /api/ إلى api/index.php
-  RewriteRule ^api/(.*)$ api/index.php?endpoint=$1 [QSA,L]
-  RewriteRule ^api/?$ api/index.php?endpoint=health [QSA,L]
 
   # 3. توجيه جميع صفحات الواجهة إلى index.html
   RewriteRule ^index\.html$ - [L]
   RewriteRule . /index.html [L]
 </IfModule>
 
-# تفعيل ضغط الملفات
+# ------------------------------------------------------------------------------
+# ترويسات صارمة لمنع التخزين المؤقت في المتصفحات لضمان ظهور التعديلات فوراً
+# ------------------------------------------------------------------------------
+<IfModule mod_headers.c>
+  # 1. منع كاش index.html نهائياً ليتم سحب أحدث كود فور نشره
+  <FilesMatch "\.(html|htm)$">
+    Header set Cache-Control "no-store, no-cache, must-revalidate, max-age=0, post-check=0, pre-check=0"
+    Header set Pragma "no-cache"
+    Header set Expires "Mon, 26 Jul 1997 05:00:00 GMT"
+    Header set X-LiteSpeed-Cache-Control "no-cache, no-store"
+  </FilesMatch>
+
+  # 2. منع كاش الـ Service Worker والـ Manifest
+  <FilesMatch "(sw\.js|service-worker\.js|manifest\.json|manifest\.webmanifest)$">
+    Header set Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+    Header set Pragma "no-cache"
+    Header set Expires "0"
+    Header set X-LiteSpeed-Cache-Control "no-cache, no-store"
+  </FilesMatch>
+
+  # 3. ملفات الـ PHP / API
+  <FilesMatch "\.php$">
+    Header set Cache-Control "no-store, no-cache, must-revalidate, max-age=0, post-check=0, pre-check=0"
+    Header set Pragma "no-cache"
+    Header set Expires "Mon, 26 Jul 1997 05:00:00 GMT"
+    Header set X-LiteSpeed-Cache-Control "no-cache, no-store"
+  </FilesMatch>
+
+  # 4. ملفات الـ JS والـ CSS التي تحتوي على Hash تلقائي
+  <FilesMatch "\.(js|css)$">
+    Header set Cache-Control "no-cache, must-revalidate"
+  </FilesMatch>
+</IfModule>
+
+# ------------------------------------------------------------------------------
+# تفعيل ضغط GZIP لتقليل استهلاك الـ Bandwidth
+# ------------------------------------------------------------------------------
 <IfModule mod_deflate.c>
-  AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css text/javascript application/javascript application/json
+  AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css text/javascript application/javascript application/json application/xml image/svg+xml
 </IfModule>
 
 Options -Indexes

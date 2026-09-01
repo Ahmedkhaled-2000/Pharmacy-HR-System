@@ -1,26 +1,36 @@
 // ──────────────────────────────────────────────────────────────────────────────
-// Service Worker - PWA Employee Portal
+// Service Worker - PWA Pharmacy HR & Employee Portal
+// Zero-Cache Guarantee + Strict Network-First Strategy
 // ──────────────────────────────────────────────────────────────────────────────
 
-const CACHE_NAME = 'pharmacy-portal-v2-' + Date.now();
+const CACHE_NAME = 'pharmacy-portal-v3-' + Date.now();
 const OFFLINE_URL = '/offline.html';
 
-// ── Install ──────────────────────────────────────────────────────────────────
+// ── Install: Force Immediate Activation ──────────────────────────────────────
 self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
 
-// ── Activate: Purge ALL old caches immediately ──────────────────────────────
+// ── Activate: Purge ALL old caches immediately & Claim Clients ───────────────
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => {
       return Promise.all(
         keys.map((key) => {
-          console.log('[SW] Deleting obsolete cache:', key);
+          console.log('[SW] Purging outdated cache:', key);
           return caches.delete(key);
         })
       );
-    }).then(() => self.clients.claim())
+    }).then(() => {
+      return self.clients.claim();
+    }).then(() => {
+      // Notify all open client tabs that a fresh version is active
+      return self.clients.matchAll({ type: 'window' }).then((clients) => {
+        clients.forEach((client) => {
+          client.postMessage({ type: 'SW_UPDATED', version: CACHE_NAME });
+        });
+      });
+    })
   );
 });
 
@@ -29,7 +39,7 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Skip non-GET, chrome-extension, API endpoints, SSE streams, and external metrics
+  // Skip non-GET, chrome extensions, API endpoints, SSE streams, and external domains
   if (
     request.method !== 'GET' ||
     url.protocol === 'chrome-extension:' ||
@@ -42,7 +52,20 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Network-First: Always fetch fresh from network, fallback to cache/offline only when completely offline
+  // For HTML documents: Always fetch fresh from network with no-cache header
+  if (request.mode === 'navigate' || request.destination === 'document') {
+    event.respondWith(
+      fetch(request, { cache: 'no-cache' })
+        .catch(async () => {
+          const offlinePage = await caches.match(OFFLINE_URL);
+          if (offlinePage) return offlinePage;
+          return new Response('Offline - No connection', { status: 503, statusText: 'Offline' });
+        })
+    );
+    return;
+  }
+
+  // Network-First for other static assets
   event.respondWith(
     fetch(request, { cache: 'no-cache' })
       .then((networkResponse) => {
@@ -59,19 +82,14 @@ self.addEventListener('fetch', (event) => {
         if (cachedResponse) {
           return cachedResponse;
         }
-        if (request.mode === 'navigate' || request.destination === 'document') {
-          const offlinePage = await caches.match(OFFLINE_URL);
-          if (offlinePage) return offlinePage;
-        }
-        return new Response('Offline - No connection', { status: 503, statusText: 'Offline' });
+        return new Response('Offline - Asset unavailable', { status: 503, statusText: 'Offline' });
       })
   );
 });
 
-// ── Background Sync (for shift punch when offline) ───────────────────────────
+// ── Background Sync ──────────────────────────────────────────────────────────
 self.addEventListener('sync', (event) => {
   if (event.tag === 'sync-shifts') {
-    console.log('[SW] Syncing offline shifts...');
     event.waitUntil(syncOfflineShifts());
   }
 });
@@ -84,7 +102,6 @@ async function syncOfflineShifts() {
       const response = await cache.match(key);
       const shift = await response.json();
       console.log('[SW] Syncing shift:', shift);
-      // Data is synced when app reopens with network access
     }
   } catch (e) {
     console.error('[SW] Sync failed:', e);

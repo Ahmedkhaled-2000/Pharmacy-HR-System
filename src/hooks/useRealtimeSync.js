@@ -176,7 +176,7 @@ export function useRealtimeSync(props = {}) {
         pollFailures = 0; // نجاح الاتصال -> تصفير الفشل
 
         if (hasChanged) {
-          const remoteData = await apiFetchSettings(STORAGE_KEY, { timeout: 6000, useETag: false, isBackground: true });
+          const remoteData = await apiFetchSettings(STORAGE_KEY, { timeout: 6000, useETag: true, isBackground: true });
           if (remoteData && !remoteData.notModified) {
             applyRemoteData(remoteData);
           }
@@ -195,11 +195,11 @@ export function useRealtimeSync(props = {}) {
       if (timerId) clearTimeout(timerId);
 
       const isVisible = typeof document !== 'undefined' ? document.visibilityState === 'visible' : true;
-      let delay = isVisible ? 3500 : 15000;
+      let delay = isVisible ? 8000 : 30000;
 
-      // في حال تعثر السيرفر (500 أو انقطاع)، التراجع أسي (6ث -> 12ث -> 24ث -> 45ث) لمنع إرهاق المتصفح
+      // في حال تعثر السيرفر (500 أو انقطاع)، التراجع أسي (12ث -> 24ث -> 45ث) لمنع إرهاق المتصفح
       if (pollFailures > 0) {
-        delay = Math.min(45000, 3000 * Math.pow(1.8, Math.min(pollFailures, 6)));
+        delay = Math.min(60000, 5000 * Math.pow(1.8, Math.min(pollFailures, 6)));
       }
 
       timerId = setTimeout(async () => {

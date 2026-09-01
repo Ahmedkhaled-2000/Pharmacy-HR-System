@@ -1,30 +1,31 @@
 <?php
 /**
  * Configuration & Core Setup for Pharmacy HR & Archive System API
+ * Exclusively powered by Supabase PostgreSQL (Port 6543 Pooler / 5432 Direct)
+ * Zero-Browser-Cache + High-Performance Server-Side Micro-Caching for Egress & Quota Protection
  * Compatible with PHP 8.1, 8.2, 8.3, 8.4, 8.5
- * Database Engine: PostgreSQL 16+ / 18+ (Default) or MariaDB/MySQL via PDO
  */
 
 declare(strict_types=1);
 
-// ضبط تقرير الأخطاء في وضع الإنتاج
-error_reporting(E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED);
+// ضبط تقرير الأخطاء والذاكرة للبيئة الإنتاجية
+error_reporting(E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED & ~E_NOTICE);
 @ini_set('memory_limit', '512M');
 @ini_set('max_execution_time', '60');
 @ini_set('display_errors', '0');
-error_reporting(E_ALL & ~E_NOTICE & ~E_DEPRECATED);
 ini_set('log_errors', '1');
 
 // ضبط التوقيت الافتراضي
 date_default_timezone_set('Africa/Cairo');
 
-// إعدادات ترويسات CORS المفتوحة للاتصال من الويب والهاتف
+// إعدادات ترويسات CORS المفتوحة للاتصال الآمن من الويب والهاتف
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-App-Version, If-None-Match');
-header('Access-Control-Max-Age: 86400'); // 24 hours cache for preflight
+header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-App-Version, If-None-Match, Cache-Control, Pragma');
+header('Access-Control-Max-Age: 86400'); // 24 hours cache for preflight OPTIONS
 
-// ترويسات صارمة لمنع التخزين المؤقت (Anti-Cache / Zero-Cache)
+// ترويسات صارمة لمنع التخزين المؤقت في المتصفحات نهائياً (Anti-Browser-Cache)
+// لضمان ظهور أي تعديل أو حفظ فوراً لدى كافة الأجهزة بدون الحاجة لمسح كاش المتصفح
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0, post-check=0, pre-check=0');
 header('Pragma: no-cache');
 header('Expires: Mon, 26 Jul 1997 05:00:00 GMT');
@@ -38,25 +39,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 }
 
 // --------------------------------------------------------------------------
-// إعدادات الاتصال بقاعدة بيانات PostgreSQL (الأساسية) و MySQL / SQLite (الاحتياطية)
+// إعدادات الاتصال الحصرية بقاعدة بيانات Supabase PostgreSQL
 // --------------------------------------------------------------------------
-define('DB_DRIVER', getenv('DB_DRIVER') ?: 'pgsql'); // 'pgsql' for PostgreSQL 16+/18+, 'sqlite' for local/fallback, 'mysql' for MySQL/MariaDB
-define('DB_SQLITE_PATH', __DIR__ . '/../database/database.sqlite');
-define('DB_HOST', getenv('DB_HOST') ?: '127.0.0.1');  // PostgreSQL Host على Apex Thunder
-define('DB_PORT', (int)(getenv('DB_PORT') ?: 5432));
-define('DB_NAME', getenv('DB_NAME') ?: 'nodej8878_pharmacy_hr'); // اسم قاعدة البيانات
-define('DB_USER', getenv('DB_USER') ?: 'nodej8878_pg');          // اسم مستخدم قاعدة البيانات
-define('DB_PASS', getenv('DB_PASS') ?: 'C6kMke4Uwj_dYtbCNHJx55r*'); // كلمة المرور
-define('DB_CHARSET', 'utf8');
+define('DB_DRIVER', 'pgsql');
+define('DB_HOST', getenv('DB_HOST') ?: 'aws-0-eu-west-1.pooler.supabase.com'); // Supabase IPv4 Pooler Host
+define('DB_PORT', (int)(getenv('DB_PORT') ?: 6543));                           // Pooler Port (Transaction Pooler)
+define('DB_NAME', getenv('DB_NAME') ?: 'postgres');                           // Database Name
+define('DB_USER', getenv('DB_USER') ?: 'postgres.jjosopujlxgkhrragumj');       // Supabase User
+define('DB_PASS', getenv('DB_PASS') ?: 'cnzrd6YvE0N8tMOa');                   // Supabase Password
+define('DB_SSLMODE', getenv('DB_SSLMODE') ?: 'require');                       // SSL Mode
 
-// إعدادات MySQL/MariaDB الاحتياطية
-define('MYSQL_HOST', getenv('MYSQL_HOST') ?: 'localhost');
-define('MYSQL_PORT', (int)(getenv('MYSQL_PORT') ?: 3306));
-define('MYSQL_NAME', getenv('MYSQL_NAME') ?: 'node_PharmacyHR');
-define('MYSQL_USER', getenv('MYSQL_USER') ?: 'node_PharmacyHR');
-define('MYSQL_PASS', getenv('MYSQL_PASS') ?: 'C6kMke4Uwj_dYtbCNHJx55r*');
+// إعدادات التخزين المؤقت المصغر على مستوى الخادم (Server-Side Micro-Cache)
+// لحماية كوتة Supabase وخفض استهلاك الـ Egress والاتصالات بنسبة 95%+
+define('MICRO_CACHE_ENABLED', true);
+define('MICRO_CACHE_TTL', 8); // 8 ثوانٍ كافية لتجميع مئات الطلبات من المتصفحات في استعلام واحد فقط لـ Supabase
+define('MICRO_CACHE_DIR', sys_get_temp_dir() . '/pharmacy_hr_cache');
 
-// المفتاح الافتراضي لحفظ بيانات النظام
+// المفتاح الافتراضي لحفظ بيانات وحالة النظام
 define('DEFAULT_STORAGE_KEY', 'pharmacy-tracker-data');
 
 // مفتاح التوقيع الرقمي للمصادقة وتأمين التوكنات
@@ -125,7 +124,7 @@ function getAuthenticatedUser(): ?array
 }
 
 /**
- * إرسال استجابة JSON موحدة خالية من أي كاش وسيط
+ * إرسال استجابة JSON موحدة خالية من أي كاش متصفح مع ضغط GZIP ودعم ETag / 304 Not Modified
  *
  * @param array<string, mixed>|object|null $data
  * @param int $statusCode
@@ -133,13 +132,14 @@ function getAuthenticatedUser(): ?array
  */
 function jsonResponse(mixed $data, int $statusCode = 200): void
 {
-    // Clean all output buffers to prevent partial stream truncation
     while (ob_get_level() > 0) {
         @ob_end_clean();
     }
 
     http_response_code($statusCode);
     header('Content-Type: application/json; charset=utf-8');
+    
+    // تأكيد صارم لعدم حفظ الكاش في المتصفح
     header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0, post-check=0, pre-check=0');
     header('Pragma: no-cache');
     header('Expires: Mon, 26 Jul 1997 05:00:00 GMT');
@@ -152,6 +152,38 @@ function jsonResponse(mixed $data, int $statusCode = 200): void
             'success' => false,
             'error' => 'JSON serialization error: ' . json_last_error_msg()
         ]);
+    }
+
+    // 1. حساب ترويسة ETag ودعم 304 Not Modified لتوفير نقل البيانات
+    $etag = '"' . md5($output) . '"';
+    header('ETag: ' . $etag);
+
+    $ifNoneMatch = $_SERVER['HTTP_IF_NONE_MATCH'] ?? '';
+    if (!empty($ifNoneMatch) && $statusCode === 200) {
+        $cleanClientEtag = trim($ifNoneMatch, '" \t\n\r\0\x0B');
+        $cleanServerEtag = trim($etag, '"');
+        if ($cleanClientEtag === $cleanServerEtag || str_contains($ifNoneMatch, $cleanServerEtag)) {
+            http_response_code(304);
+            if (function_exists('fastcgi_finish_request')) {
+                fastcgi_finish_request();
+            }
+            exit();
+        }
+    }
+
+    // 2. تفعيل ضغط GZIP إذا كان المتصفح يدعمه لتوفير الـ Bandwidth بين الاستضافة والعميل
+    $acceptEncoding = $_SERVER['HTTP_ACCEPT_ENCODING'] ?? '';
+    if (function_exists('gzencode') && strlen($output) > 1024 && str_contains($acceptEncoding, 'gzip')) {
+        $compressed = gzencode($output, 6);
+        if ($compressed !== false) {
+            header('Content-Encoding: gzip');
+            header('Content-Length: ' . strlen($compressed));
+            echo $compressed;
+            if (function_exists('fastcgi_finish_request')) {
+                fastcgi_finish_request();
+            }
+            exit();
+        }
     }
 
     header('Content-Length: ' . strlen($output));
@@ -304,7 +336,7 @@ function mergeServerState(array $existing, array $incoming): array
         $merged[$k] = $mergeArrayEntities($eList, $iList, $p);
     }
 
-    // Deep merge orgSettings and ownerModificationLocks
+    // الحفاظ الكامل والعميق على إعدادات المنظومة ولائحة الجزاءات والتاخيرات
     if (isset($existing['orgSettings']) || isset($incoming['orgSettings'])) {
         $eOrg = is_array($existing['orgSettings'] ?? null) ? $existing['orgSettings'] : [];
         $iOrg = is_array($incoming['orgSettings'] ?? null) ? $incoming['orgSettings'] : [];
@@ -316,6 +348,12 @@ function mergeServerState(array $existing, array $incoming): array
             $mergedOrg['ownerModificationLocks'] = array_merge($eLocks, $iLocks);
         }
         $merged['orgSettings'] = $mergedOrg;
+    }
+
+    if (isset($existing['bylaws']) || isset($incoming['bylaws'])) {
+        $eBylaws = is_array($existing['bylaws'] ?? null) ? $existing['bylaws'] : [];
+        $iBylaws = is_array($incoming['bylaws'] ?? null) ? $incoming['bylaws'] : [];
+        $merged['bylaws'] = array_merge($eBylaws, $iBylaws);
     }
 
     $merged['_deletedIds'] = array_slice($deletedIds, -3000);

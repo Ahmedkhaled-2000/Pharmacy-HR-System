@@ -63,7 +63,7 @@ function verifyArchiveToken(?string $token): ?array
 }
 
 /**
- * التأكد التلقائي والترقية الذاتية لجداول الأرشيف في قاعدة البيانات
+ * التأكد التلقائي والترقية الذاتية لجداول الأرشيف في قاعدة بيانات Supabase PostgreSQL
  */
 function ensureArchiveTablesExist(): void
 {
@@ -72,184 +72,93 @@ function ensureArchiveTablesExist(): void
     $initialized = true;
 
     try {
-        $driver = Database::getDriver();
         $db = Database::getConnection();
 
-        if (in_array($driver, ['pgsql', 'sqlite'], true)) {
-            $db->exec("CREATE TABLE IF NOT EXISTS archive_suppliers (
-                id VARCHAR(36) PRIMARY KEY,
-                name VARCHAR(255) NOT NULL UNIQUE,
-                phone VARCHAR(50) NULL,
-                email VARCHAR(255) NULL,
-                address TEXT NULL,
-                tax_number VARCHAR(100) NULL,
-                notes TEXT NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );");
+        $db->exec("CREATE TABLE IF NOT EXISTS archive_suppliers (
+            id VARCHAR(36) PRIMARY KEY,
+            name VARCHAR(255) NOT NULL UNIQUE,
+            phone VARCHAR(50) NULL,
+            email VARCHAR(255) NULL,
+            address TEXT NULL,
+            tax_number VARCHAR(100) NULL,
+            notes TEXT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );");
 
-            $db->exec("CREATE TABLE IF NOT EXISTS archive_employees (
-                id VARCHAR(36) PRIMARY KEY,
-                name VARCHAR(255) NOT NULL UNIQUE,
-                role VARCHAR(100) NULL DEFAULT 'أمين مخزن',
-                phone VARCHAR(50) NULL,
-                active SMALLINT NOT NULL DEFAULT 1,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );");
+        $db->exec("CREATE TABLE IF NOT EXISTS archive_employees (
+            id VARCHAR(36) PRIMARY KEY,
+            name VARCHAR(255) NOT NULL UNIQUE,
+            role VARCHAR(100) NULL DEFAULT 'أمين مخزن',
+            phone VARCHAR(50) NULL,
+            active SMALLINT NOT NULL DEFAULT 1,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );");
 
-            $db->exec("CREATE TABLE IF NOT EXISTS archive_invoices (
-                id VARCHAR(36) PRIMARY KEY,
-                invoice_number VARCHAR(100) NOT NULL,
-                supplier_id VARCHAR(36) NOT NULL,
-                invoice_date TIMESTAMPTZ NOT NULL,
-                total_amount NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
-                discount NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
-                net_amount NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
-                status VARCHAR(50) NOT NULL DEFAULT 'ARCHIVED',
-                file_url TEXT NULL,
-                drive_file_id VARCHAR(255) NULL,
-                file_name VARCHAR(255) NULL,
-                file_type VARCHAR(50) NULL,
-                upload_mode VARCHAR(50) NOT NULL DEFAULT 'AUTO_EXTRACT',
-                receiver_id VARCHAR(36) NULL,
-                entry_clerk_id VARCHAR(36) NULL,
-                notes TEXT NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );");
+        $db->exec("CREATE TABLE IF NOT EXISTS archive_invoices (
+            id VARCHAR(36) PRIMARY KEY,
+            invoice_number VARCHAR(100) NOT NULL,
+            supplier_id VARCHAR(36) NOT NULL,
+            invoice_date TIMESTAMPTZ NOT NULL,
+            total_amount NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+            discount NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+            net_amount NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+            status VARCHAR(50) NOT NULL DEFAULT 'ARCHIVED',
+            file_url TEXT NULL,
+            drive_file_id VARCHAR(255) NULL,
+            file_name VARCHAR(255) NULL,
+            file_type VARCHAR(50) NULL,
+            upload_mode VARCHAR(50) NOT NULL DEFAULT 'AUTO_EXTRACT',
+            receiver_id VARCHAR(36) NULL,
+            entry_clerk_id VARCHAR(36) NULL,
+            notes TEXT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );");
 
-            $db->exec("CREATE TABLE IF NOT EXISTS archive_invoice_items (
-                id VARCHAR(36) PRIMARY KEY,
-                invoice_id VARCHAR(36) NOT NULL,
-                product_name VARCHAR(255) NOT NULL,
-                quantity INTEGER NOT NULL DEFAULT 1,
-                unit_price NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
-                discount NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
-                total_price NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
-                selling_price NUMERIC(10, 2) NULL,
-                batch_number VARCHAR(100) NULL,
-                expiry_date DATE NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );");
+        $db->exec("CREATE TABLE IF NOT EXISTS archive_invoice_items (
+            id VARCHAR(36) PRIMARY KEY,
+            invoice_id VARCHAR(36) NOT NULL,
+            product_name VARCHAR(255) NOT NULL,
+            quantity INTEGER NOT NULL DEFAULT 1,
+            unit_price NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+            discount NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+            total_price NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+            selling_price NUMERIC(10, 2) NULL,
+            batch_number VARCHAR(100) NULL,
+            expiry_date DATE NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );");
 
-            $db->exec("CREATE TABLE IF NOT EXISTS archive_column_mappings (
-                id VARCHAR(36) PRIMARY KEY,
-                supplier_id VARCHAR(36) NOT NULL,
-                raw_column_name VARCHAR(255) NOT NULL,
-                standard_field VARCHAR(100) NOT NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                CONSTRAINT uq_archive_supp_raw_col UNIQUE (supplier_id, raw_column_name)
-            );");
+        $db->exec("CREATE TABLE IF NOT EXISTS archive_column_mappings (
+            id VARCHAR(36) PRIMARY KEY,
+            supplier_id VARCHAR(36) NOT NULL,
+            raw_column_name VARCHAR(255) NOT NULL,
+            standard_field VARCHAR(100) NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT uq_archive_supp_raw_col UNIQUE (supplier_id, raw_column_name)
+        );");
 
-            $db->exec("CREATE TABLE IF NOT EXISTS archive_system_settings (
-                key_name VARCHAR(100) PRIMARY KEY,
-                value_data TEXT NOT NULL,
-                description TEXT NULL,
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );");
+        $db->exec("CREATE TABLE IF NOT EXISTS archive_system_settings (
+            key_name VARCHAR(100) PRIMARY KEY,
+            value_data TEXT NOT NULL,
+            description TEXT NULL,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );");
 
-            $db->exec("CREATE TABLE IF NOT EXISTS archive_import_logs (
-                id VARCHAR(36) PRIMARY KEY,
-                file_name VARCHAR(255) NOT NULL,
-                file_type VARCHAR(50) NOT NULL,
-                upload_mode VARCHAR(50) NOT NULL,
-                status VARCHAR(50) NOT NULL,
-                items_extracted INTEGER NOT NULL DEFAULT 0,
-                error_message TEXT NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );");
-        } else {
-            $db->exec("CREATE TABLE IF NOT EXISTS archive_suppliers (
-                id VARCHAR(36) NOT NULL PRIMARY KEY,
-                name VARCHAR(255) NOT NULL UNIQUE,
-                phone VARCHAR(50) NULL,
-                email VARCHAR(255) NULL,
-                address TEXT NULL,
-                tax_number VARCHAR(100) NULL,
-                notes TEXT NULL,
-                created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-                updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-                INDEX idx_archive_supplier_name (name)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
-
-            $db->exec("CREATE TABLE IF NOT EXISTS archive_employees (
-                id VARCHAR(36) NOT NULL PRIMARY KEY,
-                name VARCHAR(255) NOT NULL UNIQUE,
-                role VARCHAR(100) NULL DEFAULT 'أمين مخزن',
-                phone VARCHAR(50) NULL,
-                active TINYINT(1) NOT NULL DEFAULT 1,
-                created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-                updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-                INDEX idx_archive_emp_active (active)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
-
-            $db->exec("CREATE TABLE IF NOT EXISTS archive_invoices (
-                id VARCHAR(36) NOT NULL PRIMARY KEY,
-                invoice_number VARCHAR(100) NOT NULL,
-                supplier_id VARCHAR(36) NOT NULL,
-                invoice_date DATETIME NOT NULL,
-                total_amount DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
-                discount DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
-                net_amount DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
-                status VARCHAR(50) NOT NULL DEFAULT 'ARCHIVED',
-                file_url TEXT NULL,
-                drive_file_id VARCHAR(255) NULL,
-                file_name VARCHAR(255) NULL,
-                file_type VARCHAR(50) NULL,
-                upload_mode VARCHAR(50) NOT NULL DEFAULT 'AUTO_EXTRACT',
-                receiver_id VARCHAR(36) NULL,
-                entry_clerk_id VARCHAR(36) NULL,
-                notes TEXT NULL,
-                created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-                updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
-
-            $db->exec("CREATE TABLE IF NOT EXISTS archive_invoice_items (
-                id VARCHAR(36) NOT NULL PRIMARY KEY,
-                invoice_id VARCHAR(36) NOT NULL,
-                product_name VARCHAR(255) NOT NULL,
-                quantity INT NOT NULL DEFAULT 1,
-                unit_price DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
-                discount DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
-                total_price DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
-                selling_price DECIMAL(10, 2) NULL,
-                batch_number VARCHAR(100) NULL,
-                expiry_date DATE NULL,
-                created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-                updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
-
-            $db->exec("CREATE TABLE IF NOT EXISTS archive_column_mappings (
-                id VARCHAR(36) NOT NULL PRIMARY KEY,
-                supplier_id VARCHAR(36) NOT NULL,
-                raw_column_name VARCHAR(255) NOT NULL,
-                standard_field VARCHAR(100) NOT NULL,
-                created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-                updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-                UNIQUE KEY uq_archive_supp_raw_col (supplier_id, raw_column_name)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
-
-            $db->exec("CREATE TABLE IF NOT EXISTS archive_system_settings (
-                key_name VARCHAR(100) NOT NULL PRIMARY KEY,
-                value_data LONGTEXT NOT NULL,
-                description TEXT NULL,
-                updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
-
-            $db->exec("CREATE TABLE IF NOT EXISTS archive_import_logs (
-                id VARCHAR(36) NOT NULL PRIMARY KEY,
-                file_name VARCHAR(255) NOT NULL,
-                file_type VARCHAR(50) NOT NULL,
-                upload_mode VARCHAR(50) NOT NULL,
-                status VARCHAR(50) NOT NULL,
-                items_extracted INT NOT NULL DEFAULT 0,
-                error_message TEXT NULL,
-                created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
-        }
+        $db->exec("CREATE TABLE IF NOT EXISTS archive_import_logs (
+            id VARCHAR(36) PRIMARY KEY,
+            file_name VARCHAR(255) NOT NULL,
+            file_type VARCHAR(50) NOT NULL,
+            upload_mode VARCHAR(50) NOT NULL,
+            status VARCHAR(50) NOT NULL,
+            items_extracted INTEGER NOT NULL DEFAULT 0,
+            error_message TEXT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );");
 
         // Default seeds for settings
         $defaults = [
@@ -270,7 +179,6 @@ function ensureArchiveTablesExist(): void
                 Database::execute("INSERT INTO archive_system_settings (key_name, value_data) VALUES (?, ?)", [$k, $v]);
             }
         }
-
     } catch (Throwable $e) {
         error_log('[Archive DB Init Error] ' . $e->getMessage());
     }
@@ -284,20 +192,11 @@ function getArchiveSetting(string $key, string $default = ''): string
 
 function setArchiveSetting(string $key, string $value): void
 {
-    $driver = Database::getDriver();
-    if (in_array($driver, ['pgsql', 'sqlite'], true)) {
-        Database::execute(
-            "INSERT INTO archive_system_settings (key_name, value_data, updated_at) VALUES (?, ?, NOW())
-             ON CONFLICT (key_name) DO UPDATE SET value_data = EXCLUDED.value_data, updated_at = NOW()",
-            [$key, $value]
-        );
-    } else {
-        Database::execute(
-            "INSERT INTO archive_system_settings (key_name, value_data, updated_at) VALUES (?, ?, NOW())
-             ON DUPLICATE KEY UPDATE value_data = VALUES(value_data), updated_at = NOW()",
-            [$key, $value]
-        );
-    }
+    Database::execute(
+        "INSERT INTO archive_system_settings (key_name, value_data, updated_at) VALUES (?, ?, NOW())
+         ON CONFLICT (key_name) DO UPDATE SET value_data = EXCLUDED.value_data, updated_at = NOW()",
+        [$key, $value]
+    );
 }
 
 /**
