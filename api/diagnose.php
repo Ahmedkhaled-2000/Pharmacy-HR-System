@@ -34,10 +34,12 @@ try {
     $db = Database::getConnection();
     $results['active_driver'] = Database::getDriver();
     $count = Database::queryOne("SELECT COUNT(*) AS c FROM app_settings");
+    $allKeys = Database::query("SELECT key_name, version, LENGTH(value_data::text) as len, updated_at FROM app_settings");
     $results['active_connection_test'] = [
         'status' => 'OK',
         'driver' => Database::getDriver(),
-        'app_settings_count' => (int)($count['c'] ?? 0)
+        'app_settings_count' => (int)($count['c'] ?? 0),
+        'keys' => $allKeys
     ];
 } catch (Throwable $e) {
     $results['active_connection_test'] = [
