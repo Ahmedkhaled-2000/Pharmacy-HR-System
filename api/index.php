@@ -70,14 +70,31 @@ try {
             }
 
             try {
-                $jsonData = getRequestData();
-                if (empty($jsonData)) {
-                    $raw = file_get_contents('php://input');
-                    $jsonData = is_string($raw) ? json_decode($raw, true) : null;
+                $rawInput = file_get_contents('php://input');
+                $jsonData = !empty($rawInput) ? json_decode($rawInput, true) : null;
+                $jsonError = json_last_error_msg();
+
+                if (!$jsonData && !empty($_POST['data'])) {
+                    $jsonData = is_string($_POST['data']) ? json_decode($_POST['data'], true) : $_POST['data'];
+                }
+
+                // If no JSON sent in body, try to load from server-side backup_seed.json
+                if (!$jsonData) {
+                    $backupPath = __DIR__ . '/backup_seed.json';
+                    if (file_exists($backupPath)) {
+                        $rawBackup = file_get_contents($backupPath);
+                        $jsonData = !empty($rawBackup) ? json_decode($rawBackup, true) : null;
+                    }
                 }
 
                 if (!$jsonData) {
-                    jsonResponse(['success' => false, 'error' => 'No valid JSON payload provided'], 400);
+                    jsonResponse([
+                        'success' => false,
+                        'error' => 'No valid JSON payload provided and no backup_seed.json found',
+                        'raw_len' => strlen((string)$rawInput),
+                        'json_error' => $jsonError,
+                        'content_type' => $_SERVER['CONTENT_TYPE'] ?? 'none'
+                    ], 400);
                 }
 
                 $stateToRestore = null;
