@@ -84,6 +84,29 @@ export function AuthProvider({ children }) {
     } catch {}
   }, [authRole, currentBranch, currentEmpUser, activeNavTab, activeSubTab, isAdminLoggedIn]);
 
+  // التحقق من صحة الجلسة ومطابقتها لحالة البيانات الفعلية
+  const validateSessionAgainstData = (latestState) => {
+    if (!latestState) return;
+
+    // 1. إذا كان الموظف المسجل غير موجود في قائمة الموظفين بعد التصفير
+    if (currentEmpUser && latestState.employees) {
+      const exists = (latestState.employees || []).some(e => String(e.id) === String(currentEmpUser.id) || String(e.code) === String(currentEmpUser.code));
+      if (!exists) {
+        handleLogout();
+        return;
+      }
+    }
+
+    // 2. إذا كان الفرع المسجل غير موجود في قائمة الفروع بعد التصفير
+    if (currentBranch && latestState.branches) {
+      const exists = (latestState.branches || []).some(b => String(b.id) === String(currentBranch.id) || String(b.branchCode) === String(currentBranch.branchCode));
+      if (!exists) {
+        handleLogout();
+        return;
+      }
+    }
+  };
+
   // Unified Login Handler
   const handleUnifiedLogin = (options = {}) => {
     const role = typeof options === 'string' ? options : (options.role || 'none');
@@ -155,7 +178,8 @@ export function AuthProvider({ children }) {
     setIsAdminLoggedIn,
     handleUnifiedLogin,
     handleEmpLogin,
-    handleLogout
+    handleLogout,
+    validateSessionAgainstData
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

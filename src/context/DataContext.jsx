@@ -309,10 +309,17 @@ export function DataProvider({ children, showToast = () => {} }) {
 
       const normalized = normalizeState(data);
 
-      // Check Factory Reset
+      // Check Factory Reset or Session Invalidation Epoch
       const currentKnownResetToken = localStorage.getItem('last_known_reset_token') || '';
-      if (normalized._systemResetToken && normalized._systemResetToken !== currentKnownResetToken) {
-        localStorage.setItem('last_known_reset_token', normalized._systemResetToken);
+      const currentKnownEpoch = localStorage.getItem('last_known_session_epoch') || '0';
+      const serverEpoch = String(normalized?.orgSettings?.sessionInvalidationEpoch || '0');
+
+      const isResetTriggered = (normalized._systemResetToken && normalized._systemResetToken !== currentKnownResetToken) ||
+                               (serverEpoch !== '0' && serverEpoch !== currentKnownEpoch);
+
+      if (isResetTriggered) {
+        if (normalized._systemResetToken) localStorage.setItem('last_known_reset_token', normalized._systemResetToken);
+        if (serverEpoch !== '0') localStorage.setItem('last_known_session_epoch', serverEpoch);
         localStorage.removeItem('app_auth_role');
         localStorage.removeItem('app_current_emp_user');
         localStorage.removeItem('app_current_branch');
@@ -326,6 +333,25 @@ export function DataProvider({ children, showToast = () => {} }) {
         setCurrentBranch(null);
         setState(normalized);
         return;
+      }
+
+      // التحقق من صلاحية جلسة الموظف أو الفرع
+      if (authRole === 'employee' && currentEmpUser) {
+        const empExists = (normalized.employees || []).some(e => String(e.id) === String(currentEmpUser.id));
+        if (!empExists) {
+          localStorage.removeItem('app_auth_role');
+          localStorage.removeItem('app_current_emp_user');
+          setAuthRole('none');
+          setCurrentEmpUser(null);
+        }
+      } else if (authRole === 'branch' && currentBranch) {
+        const branchExists = (normalized.branches || []).some(b => String(b.id) === String(currentBranch.id));
+        if (!branchExists) {
+          localStorage.removeItem('app_auth_role');
+          localStorage.removeItem('app_current_branch');
+          setAuthRole('none');
+          setCurrentBranch(null);
+        }
       }
 
       const synced = syncAllEmployeesPermissionsAndLateness(normalized);
