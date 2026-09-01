@@ -179,10 +179,13 @@ try {
                     }
 
                     $decodedValue = is_string($rawVal) ? json_decode($rawVal, true) : $rawVal;
+                    if ($decodedValue === 'null' || $decodedValue === null || $rawVal === 'null') {
+                        $decodedValue = null;
+                    }
                     jsonResponse([
                         'success' => true,
                         'key' => $row['key_name'],
-                        'value' => $decodedValue ?? $rawVal,
+                        'value' => $decodedValue,
                         'version' => (int)$row['version'],
                         'updated_at' => $row['updated_at']
                     ]);
@@ -200,34 +203,84 @@ try {
                 $targetKey = (string)($payload['key'] ?? $key);
                 $value = $payload['value'] ?? null;
 
+                // 1. حماية قصوى: منع مسح قاعدة البيانات بقيم فارغة أو Null
+                if ($value === null || $value === 'null' || $value === '') {
+                    jsonResponse([
+                        'success' => false,
+                        'error' => 'حماية البيانات: لا يمكن حفظ حالة فارغة (null payload rejected)'
+                    ], 400);
+                }
+
                 $decodedIncoming = is_string($value) ? json_decode($value, true) : $value;
+                if (!is_array($decodedIncoming)) {
+                    jsonResponse([
+                        'success' => false,
+                        'error' => 'حماية البيانات: صيغة البيانات المرسلة غير صالحة'
+                    ], 400);
+                }
 
-                // Server-side Smart Merge: جلب الحالة الحالية من السيرفر ودمجها لحماية الطلبات من المسح
-                $finalValueData = $value;
-                if (is_array($decodedIncoming)) {
-                    $existingRow = Database::queryOne(
-                        "SELECT value_data FROM app_settings WHERE key_name = ? LIMIT 1",
-                        [$targetKey]
-                    );
+                // 2. جلب الحالة السابقة إن وجدت
+                $existingRow = Database::queryOne(
+                    "SELECT value_data, version FROM app_settings WHERE key_name = ? LIMIT 1",
+                    [$targetKey]
+                );
 
-                    if ($existingRow && !empty($existingRow['value_data'])) {
-                        $existingDecoded = is_string($existingRow['value_data'])
-                            ? json_decode($existingRow['value_data'], true)
-                            : $existingRow['value_data'];
-
-                        if (is_array($existingDecoded)) {
-                            // دمج ذكي يحافظ على جميع الطلبات والكيانات المستلمة من كافة الأجهزة
-                            $mergedState = mergeServerState($existingDecoded, $decodedIncoming);
-                            $finalValueData = $mergedState;
-                        }
+                $existingDecoded = null;
+                if ($existingRow && !empty($existingRow['value_data'])) {
+                    $rawEx = $existingRow['value_data'];
+                    $existingDecoded = is_string($rawEx) ? json_decode($rawEx, true) : $rawEx;
+                    if ($existingDecoded === 'null' || $existingDecoded === null || $rawEx === 'null') {
+                        $existingDecoded = null;
                     }
+                }
+
+                // 3. حماية ضد المسح العرضي للكوادر والموظفين (Accidental Wipe Prevention)
+                $incomingEmpCount = is_array($decodedIncoming['employees'] ?? null) ? count($decodedIncoming['employees']) : 0;
+                $existingEmpCount = is_array($existingDecoded['employees'] ?? null) ? count($existingDecoded['employees']) : 0;
+                $isExplicitReset = !empty($decodedIncoming['_systemResetToken']) || !empty($payload['allowReset']);
+
+                if (!$isExplicitReset && $incomingEmpCount === 0 && $existingEmpCount > 0) {
+                    // الحفاظ التلقائي على الموظفين والفروع السابقة
+                    $decodedIncoming['employees'] = $existingDecoded['employees'] ?? [];
+                    if (empty($decodedIncoming['branches']) && !empty($existingDecoded['branches'])) {
+                        $decodedIncoming['branches'] = $existingDecoded['branches'];
+                    }
+                }
+
+                // 4. دمج البيانات بذكاء مع السيرفر
+                $finalValueData = $decodedIncoming;
+                if (is_array($existingDecoded)) {
+                    $finalValueData = mergeServerState($existingDecoded, $decodedIncoming);
+                }
+
+                // 5. حفظ نسخة احتياطية لقطية فورية في جدول app_settings_backups قبل التعديل
+                if (is_array($existingDecoded) && !empty($existingDecoded)) {
+                    try {
+                        if (in_array($driver, ['pgsql', 'sqlite'], true)) {
+                            Database::execute("
+                                CREATE TABLE IF NOT EXISTS app_settings_backups (
+                                    id SERIAL PRIMARY KEY,
+                                    key_name VARCHAR(191) NOT NULL,
+                                    value_data JSONB NOT NULL,
+                                    version INTEGER NOT NULL DEFAULT 1,
+                                    client_ip VARCHAR(64),
+                                    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+                                )
+                            ");
+                            $jsonBackup = json_encode($existingDecoded, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+                            Database::execute(
+                                "INSERT INTO app_settings_backups (key_name, value_data, version, client_ip, created_at) VALUES (?, ?::jsonb, ?, ?, NOW())",
+                                [$targetKey, $jsonBackup, (int)($existingRow['version'] ?? 1), getClientIp()]
+                            );
+                        }
+                    } catch (Throwable) {}
                 }
 
                 $jsonString = is_string($finalValueData)
                     ? $finalValueData
                     : json_encode($finalValueData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
 
-                // Upsert with version increment (PostgreSQL vs MySQL)
+                // 6. الحفظ في جدول app_settings
                 if (in_array($driver, ['pgsql', 'sqlite'], true)) {
                     $sql = "INSERT INTO app_settings (key_name, value_data, version, updated_at)
                             VALUES (?, ?::jsonb, 1, NOW())
@@ -239,9 +292,9 @@ try {
                     $sql = "INSERT INTO app_settings (key_name, value_data, version, updated_at)
                             VALUES (?, ?, 1, NOW())
                             ON DUPLICATE KEY UPDATE
-                                value_data = VALUES(value_data),
-                                version = version + 1,
-                                updated_at = NOW()";
+                            value_data = VALUES(value_data),
+                            version = version + 1,
+                            updated_at = NOW()";
                 }
 
                 Database::execute($sql, [$targetKey, $jsonString]);
@@ -252,10 +305,12 @@ try {
                 $updatedAt = $versionRow['updated_at'] ?? date('Y-m-d H:i:s');
                 $clientIp = getClientIp();
 
-                Database::execute(
-                    "INSERT INTO sync_logs (action_type, entity_key, version, client_ip, created_at) VALUES ('SAVE_STATE', ?, ?, ?, NOW())",
-                    [$targetKey, $currentVersion, $clientIp]
-                );
+                try {
+                    Database::execute(
+                        "INSERT INTO sync_logs (action_type, entity_key, version, client_ip, created_at) VALUES ('SAVE_STATE', ?, ?, ?, NOW())",
+                        [$targetKey, $currentVersion, $clientIp]
+                    );
+                } catch (Throwable) {}
 
                 jsonResponse([
                     'success' => true,

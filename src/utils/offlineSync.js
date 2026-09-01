@@ -57,7 +57,13 @@ export async function fetchRemoteState(options = {}) {
       return { notModified: true };
     }
     if (rawData) {
-      const parsed = typeof rawData === 'string' ? JSON.parse(rawData) : rawData;
+      let parsed = rawData;
+      if (typeof rawData === 'string') {
+        try { parsed = JSON.parse(rawData); } catch { parsed = null; }
+      }
+      if (parsed === 'null' || parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return null;
+      }
       return normalizeState(parsed);
     }
   } catch (e) {
@@ -205,8 +211,9 @@ export async function smartLoadState(options = {}) {
   const onProgress = options.onProgress;
   const isCurrentlyOnline = isOnline();
 
-  // 1. فحص وجود بيانات سريعة محلياً لاستخدامها مؤقتاً كواجهة أولية
+  // 1. فحص وجود بيانات سريعة محلياً لاستخدامها كواجهة فورية
   const localCache = await loadLocalStateFast();
+  const localEmpCount = Array.isArray(localCache?.employees) ? localCache.employees.length : 0;
 
   if (isCurrentlyOnline) {
     onProgress?.('جاري الاتصال بالسحابة ومزامنة البيانات...');
@@ -216,8 +223,17 @@ export async function smartLoadState(options = {}) {
       
       if (remoteData && !remoteData.notModified) {
         const normalized = normalizeState(remoteData);
-        // دمج ذكي دائم للحفاظ على كافة الطلبات والعمليات المحلية التي تمت على الجهاز
-        const merged = localCache ? smartMergeStates(localCache, normalized) : normalized;
+        const remoteEmpCount = Array.isArray(normalized?.employees) ? normalized.employees.length : 0;
+
+        let merged = normalized;
+        if (localCache) {
+          merged = smartMergeStates(localCache, normalized);
+          // إذا كان الكاش المحلي يحتوي على كوادر بينما السحابة كانت فارغة، نقوم برفع الكاش للسحابة تلقائياً للإصلاح الذاتي
+          if (localEmpCount > 0 && remoteEmpCount === 0) {
+            console.log('[Sync] Self-healing cloud state from local cache...');
+            apiSaveSettings(STORAGE_KEY, merged).catch(() => {});
+          }
+        }
         await saveStateLocally(merged);
         return { data: merged, source: 'cloud' };
       }
@@ -226,8 +242,12 @@ export async function smartLoadState(options = {}) {
     }
   }
 
-  // 2. إذا كنا أوف لاين أو تعذر الوصول للسيرفر، استخدام الكاش المحلي كبديل طوارئ
+  // 2. إذا لم نحصل على بيانات سحابية ولكن الكاش المحلي متوفر
   if (localCache) {
+    if (localEmpCount > 0 && isCurrentlyOnline) {
+      console.log('[Sync] Seeding cloud database from healthy local cache...');
+      apiSaveSettings(STORAGE_KEY, localCache).catch(() => {});
+    }
     return { data: localCache, source: 'local_offline' };
   }
 

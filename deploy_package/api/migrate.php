@@ -18,7 +18,7 @@ try {
         // PostgreSQL DDL Migration
         // =========================================================================
 
-        // 1. app_settings
+        // 1. app_settings & app_settings_backups
         $db->exec("CREATE TABLE IF NOT EXISTS app_settings (
             key_name VARCHAR(191) PRIMARY KEY,
             value_data JSONB NOT NULL,
@@ -26,6 +26,16 @@ try {
             updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
         );");
         $db->exec("CREATE INDEX IF NOT EXISTS idx_app_settings_updated ON app_settings (updated_at);");
+
+        $db->exec("CREATE TABLE IF NOT EXISTS app_settings_backups (
+            id BIGSERIAL PRIMARY KEY,
+            key_name VARCHAR(191) NOT NULL,
+            value_data JSONB NOT NULL,
+            version INTEGER NOT NULL DEFAULT 1,
+            client_ip VARCHAR(45) NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );");
+        $db->exec("CREATE INDEX IF NOT EXISTS idx_app_settings_backups_key ON app_settings_backups (key_name, created_at DESC);");
 
         // 2. employee_faces
         $db->exec("CREATE TABLE IF NOT EXISTS employee_faces (
