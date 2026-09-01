@@ -33,13 +33,15 @@ $results = [
 try {
     $db = Database::getConnection();
     $results['active_driver'] = Database::getDriver();
-    $count = Database::queryOne("SELECT COUNT(*) AS c FROM app_settings");
-    $allKeys = Database::query("SELECT key_name, version, updated_at FROM app_settings");
+    $tables = Database::query("SELECT table_name FROM information_schema.tables WHERE table_schema='public'");
+    $syncLogs = Database::query("SELECT id, action_type, entity_key, version, created_at FROM sync_logs ORDER BY id DESC LIMIT 10");
+    $appSettingsHistory = Database::query("SELECT key_name, version, updated_at FROM app_settings");
     $results['active_connection_test'] = [
         'status' => 'OK',
         'driver' => Database::getDriver(),
-        'app_settings_count' => (int)($count['c'] ?? 0),
-        'keys' => $allKeys
+        'tables' => $tables,
+        'app_settings' => $appSettingsHistory,
+        'sync_logs_sample' => $syncLogs
     ];
 } catch (Throwable $e) {
     $results['active_connection_test'] = [
