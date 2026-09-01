@@ -79,15 +79,32 @@ try {
     $sqPdo = new PDO("sqlite:" . $sqlitePath);
     $sqPdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $sqVer = $sqPdo->query("SELECT sqlite_version()")->fetchColumn();
+    $sqKeys = $sqPdo->query("SELECT key_name, version, LENGTH(value_data) as len, updated_at FROM app_settings")->fetchAll(PDO::FETCH_ASSOC);
     $results['sqlite_test'] = [
         'status' => 'OK',
         'path' => $sqlitePath,
-        'version' => $sqVer
+        'version' => $sqVer,
+        'keys' => $sqKeys
     ];
 } catch (Throwable $e) {
     $results['sqlite_test'] = [
         'status' => 'ERROR',
         'message' => $e->getMessage()
+    ];
+}
+
+// 4. Test Employee Faces and Sync Logs in PostgreSQL
+try {
+    $faces = Database::query("SELECT employee_id, biometric_type, updated_at FROM employee_faces LIMIT 20");
+    $recentSyncs = Database::query("SELECT id, action_type, entity_key, version, client_ip, created_at FROM sync_logs ORDER BY id DESC LIMIT 20");
+    $results['biometrics_and_sync_audit'] = [
+        'faces_count' => count($faces),
+        'faces_sample' => $faces,
+        'recent_syncs' => $recentSyncs
+    ];
+} catch (Throwable $e) {
+    $results['biometrics_and_sync_audit'] = [
+        'error' => $e->getMessage()
     ];
 }
 
