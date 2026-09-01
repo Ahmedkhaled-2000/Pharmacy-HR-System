@@ -33,10 +33,10 @@ $results = [
 try {
     $db = Database::getConnection();
     $results['active_driver'] = Database::getDriver();
-    $appSettings = Database::query("SELECT key_name, version, updated_at, LENGTH(value_data::text) as len FROM app_settings");
+    $appSettings = Database::query("SELECT key_name, version, updated_at, LENGTH(value_data::text) as len, value_data FROM app_settings");
     $backups = [];
     try {
-        $backups = Database::query("SELECT id, key_name, version, LENGTH(value_data::text) as len, created_at FROM app_settings_backups ORDER BY id DESC LIMIT 20");
+        $backups = Database::query("SELECT id, key_name, version, LENGTH(value_data::text) as len, created_at, value_data FROM app_settings_backups ORDER BY id DESC LIMIT 20");
     } catch (Throwable) {}
 
     $results['active_connection_test'] = [
