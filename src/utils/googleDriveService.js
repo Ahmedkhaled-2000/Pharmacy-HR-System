@@ -77,6 +77,45 @@ export async function createOrGetEmployeeFolder(emp, driveConfig) {
 }
 
 /**
+ * Optimize image base64 if oversized before sending to Google Drive
+ */
+async function ensureOptimizedImageBase64(content) {
+  if (!content || typeof content !== 'string') return content;
+  if (!content.startsWith('data:image/') || content.length < 350000) {
+    return content;
+  }
+  try {
+    return await new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        let w = img.width;
+        let h = img.height;
+        const maxDim = 1400;
+        if (w > maxDim || h > maxDim) {
+          if (w > h) {
+            h = Math.round((h * maxDim) / w);
+            w = maxDim;
+          } else {
+            w = Math.round((w * maxDim) / h);
+            h = maxDim;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', 0.82));
+      };
+      img.onerror = () => resolve(content);
+      img.src = content;
+    });
+  } catch {
+    return content;
+  }
+}
+
+/**
  * Upload a single file (base64) to Google Drive
  */
 export async function uploadFileToDrive({ folderId, fileName, mimeType, base64Content, driveConfig }) {
@@ -84,17 +123,34 @@ export async function uploadFileToDrive({ folderId, fileName, mimeType, base64Co
     throw new Error('Google Drive service is not configured');
   }
 
-  // Clean base64 header if present (e.g. data:image/png;base64,...)
   let cleanBase64 = base64Content || '';
-  if (cleanBase64.includes(';base64,')) {
+
+  // Auto-compress large images if passed as raw base64 dataURL
+  if (cleanBase64.startsWith('data:image/')) {
+    cleanBase64 = await ensureOptimizedImageBase64(cleanBase64);
+  }
+
+  // Clean base64 header if present (e.g. data:image/png;base64,...)
+  if (cleanBase64.indexOf(';base64,') !== -1) {
     cleanBase64 = cleanBase64.split(';base64,')[1];
+  }
+  cleanBase64 = cleanBase64.trim();
+
+  // Validate and resolve accurate MIME type
+  let resolvedMime = mimeType || 'application/octet-stream';
+  if (resolvedMime === 'image' || resolvedMime === 'pdf' || resolvedMime.indexOf('/') === -1) {
+    const lower = (fileName || '').toLowerCase();
+    if (lower.endsWith('.pdf')) resolvedMime = 'application/pdf';
+    else if (lower.endsWith('.png')) resolvedMime = 'image/png';
+    else if (lower.endsWith('.doc')) resolvedMime = 'application/msword';
+    else resolvedMime = 'image/jpeg';
   }
 
   const payload = {
     action: 'upload_file',
     folderId,
     fileName,
-    mimeType: mimeType || 'application/octet-stream',
+    mimeType: resolvedMime,
     base64Data: cleanBase64
   };
 
@@ -109,7 +165,7 @@ export async function uploadFileToDrive({ folderId, fileName, mimeType, base64Co
     return {
       fileId: data.fileId,
       fileUrl: data.fileUrl || data.webViewLink || `https://drive.google.com/file/d/${data.fileId}/view`,
-      downloadUrl: data.webContentLink || '',
+      downloadUrl: data.downloadUrl || data.webContentLink || '',
       fileName: data.fileName || fileName
     };
   }

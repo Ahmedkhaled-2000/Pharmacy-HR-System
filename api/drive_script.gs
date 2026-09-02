@@ -141,65 +141,76 @@ function handleCreateOrGetEmployeeFolder(data) {
  * 3. رفع ملف إلى مجلد محدد
  */
 function handleUploadFile(data) {
-  var folderId = data.folderId;
-  var fileName = data.fileName || ('File_' + Date.now());
-  var mimeType = data.mimeType || 'application/octet-stream';
-  var base64Data = data.base64Data;
+  try {
+    var folderId = data.folderId;
+    var fileName = data.fileName || ('File_' + Date.now());
+    var mimeType = data.mimeType || 'application/octet-stream';
+    var base64Data = data.base64Data;
 
-  if (!folderId || !base64Data) {
-    return createJsonResponse({ success: false, error: 'معرف المجلد أو محتوى الملف مفقود' });
-  }
+    if (!folderId || !base64Data) {
+      return createJsonResponse({ success: false, error: 'معرف المجلد أو محتوى الملف مفقود' });
+    }
 
-  // تنظيف base64 في حال وجود data:header
-  if (base64Data.indexOf(';base64,') !== -1) {
-    base64Data = base64Data.split(';base64,')[1];
-  }
-  base64Data = base64Data.trim();
+    // تنظيف base64 في حال وجود data:header
+    if (base64Data.indexOf(';base64,') !== -1) {
+      base64Data = base64Data.split(';base64,')[1];
+    }
+    base64Data = base64Data.trim();
 
-  // معالجة الـ MIME type إذا كان عاماً أو غير دقيق لمنع استثناءات Google Apps Script
-  if (!mimeType || mimeType === 'image' || mimeType === 'pdf') {
-    var lowerName = fileName.toLowerCase();
-    if (lowerName.indexOf('.pdf') !== -1) mimeType = 'application/pdf';
-    else if (lowerName.indexOf('.png') !== -1) mimeType = 'image/png';
-    else if (lowerName.indexOf('.doc') !== -1) mimeType = 'application/msword';
-    else mimeType = 'image/jpeg';
-  }
+    // معالجة الـ MIME type إذا كان عاماً أو غير دقيق لمنع استثناءات Google Apps Script
+    if (!mimeType || mimeType === 'image' || mimeType === 'pdf' || mimeType.indexOf('/') === -1) {
+      var lowerName = fileName.toLowerCase();
+      if (lowerName.indexOf('.pdf') !== -1) mimeType = 'application/pdf';
+      else if (lowerName.indexOf('.png') !== -1) mimeType = 'image/png';
+      else if (lowerName.indexOf('.doc') !== -1) mimeType = 'application/msword';
+      else mimeType = 'image/jpeg';
+    }
 
-  var targetFolder = DriveApp.getFolderById(folderId);
-  var decodedBytes = Utilities.base64Decode(base64Data);
-  var blob = Utilities.newBlob(decodedBytes, mimeType, fileName);
+    var targetFolder = DriveApp.getFolderById(folderId);
+    var decodedBytes;
+    try {
+      decodedBytes = Utilities.base64Decode(base64Data);
+    } catch (decodeErr) {
+      var sanitized = base64Data.replace(/[^A-Za-z0-9+/=]/g, '');
+      decodedBytes = Utilities.base64Decode(sanitized);
+    }
 
-  // تنظيف النسخ القديمة لضمان تحديث الملف آلياً وبقاء أحدث نسخة فقط
-  if (fileName.indexOf('ملخص_بيانات_الموظف') !== -1) {
-    // إذا كان الملف ملخص بيانات الموظف، نحذف أي ملخص سابق له (سواء .html أو .doc أو .docx) لضمان عدم التكرار
-    var allFolderFiles = targetFolder.getFiles();
-    while (allFolderFiles.hasNext()) {
-      var f = allFolderFiles.next();
-      var fName = f.getName();
-      if (fName.indexOf('ملخص_بيانات_الموظف') !== -1 || fName === fileName) {
-        f.setTrashed(true);
+    var blob = Utilities.newBlob(decodedBytes, mimeType, fileName);
+
+    // تنظيف النسخ القديمة لضمان تحديث الملف آلياً وبقاء أحدث نسخة فقط
+    if (fileName.indexOf('ملخص_بيانات_الموظف') !== -1) {
+      // إذا كان الملف ملخص بيانات الموظف، نحذف أي ملخص سابق له (سواء .html أو .doc أو .docx) لضمان عدم التكرار
+      var allFolderFiles = targetFolder.getFiles();
+      while (allFolderFiles.hasNext()) {
+        var f = allFolderFiles.next();
+        var fName = f.getName();
+        if (fName.indexOf('ملخص_بيانات_الموظف') !== -1 || fName === fileName) {
+          f.setTrashed(true);
+        }
+      }
+    } else {
+      // إذا كان ملفاً عادياً، نستبدل الملف الذي يحمل نفس الاسم
+      var existingFiles = targetFolder.getFilesByName(fileName);
+      while (existingFiles.hasNext()) {
+        var oldFile = existingFiles.next();
+        oldFile.setTrashed(true);
       }
     }
-  } else {
-    // إذا كان ملفاً عادياً، نستبدل الملف الذي يحمل نفس الاسم
-    var existingFiles = targetFolder.getFilesByName(fileName);
-    while (existingFiles.hasNext()) {
-      var oldFile = existingFiles.next();
-      oldFile.setTrashed(true);
-    }
+
+    var newFile = targetFolder.createFile(blob);
+    newFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+    return createJsonResponse({
+      success: true,
+      fileId: newFile.getId(),
+      fileName: newFile.getName(),
+      fileUrl: newFile.getUrl(),
+      webViewLink: newFile.getUrl(),
+      downloadUrl: newFile.getDownloadUrl()
+    });
+  } catch (err) {
+    return createJsonResponse({ success: false, error: 'فشل معالجة الملف في جوجل درايف: ' + err.toString() });
   }
-
-  var newFile = targetFolder.createFile(blob);
-  newFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-
-  return createJsonResponse({
-    success: true,
-    fileId: newFile.getId(),
-    fileName: newFile.getName(),
-    fileUrl: newFile.getUrl(),
-    webViewLink: newFile.getUrl(),
-    downloadUrl: newFile.getDownloadUrl()
-  });
 }
 
 function createJsonResponse(obj) {

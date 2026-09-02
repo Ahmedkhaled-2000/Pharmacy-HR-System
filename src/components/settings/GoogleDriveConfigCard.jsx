@@ -154,35 +154,44 @@ function handleEmployeeFolder(data) {
 }
 
 function handleUploadFile(data) {
-  var folder = DriveApp.getFolderById(data.folderId);
-  var base64Data = data.base64Data || '';
-  if (base64Data.indexOf(';base64,') !== -1) base64Data = base64Data.split(';base64,')[1];
-  base64Data = base64Data.trim();
-  var mimeType = data.mimeType || 'application/octet-stream';
-  var fName = data.fileName || ('File_' + Date.now());
-  if (!mimeType || mimeType === 'image' || mimeType === 'pdf') {
-    var lower = fName.toLowerCase();
-    if (lower.indexOf('.pdf') !== -1) mimeType = 'application/pdf';
-    else if (lower.indexOf('.png') !== -1) mimeType = 'image/png';
-    else if (lower.indexOf('.doc') !== -1) mimeType = 'application/msword';
-    else mimeType = 'image/jpeg';
-  }
-  var bytes = Utilities.base64Decode(base64Data);
-  var blob = Utilities.newBlob(bytes, mimeType, fName);
-  if (fName.indexOf('ملخص_بيانات_الموظف') !== -1) {
-    var allFiles = folder.getFiles();
-    while (allFiles.hasNext()) {
-      var cf = allFiles.next();
-      var cfName = cf.getName();
-      if (cfName.indexOf('ملخص_بيانات_الموظف') !== -1 || cfName === fName) cf.setTrashed(true);
+  try {
+    var folder = DriveApp.getFolderById(data.folderId);
+    var base64Data = data.base64Data || '';
+    if (base64Data.indexOf(';base64,') !== -1) base64Data = base64Data.split(';base64,')[1];
+    base64Data = base64Data.trim();
+    var mimeType = data.mimeType || 'application/octet-stream';
+    var fName = data.fileName || ('File_' + Date.now());
+    if (!mimeType || mimeType === 'image' || mimeType === 'pdf' || mimeType.indexOf('/') === -1) {
+      var lower = fName.toLowerCase();
+      if (lower.indexOf('.pdf') !== -1) mimeType = 'application/pdf';
+      else if (lower.indexOf('.png') !== -1) mimeType = 'image/png';
+      else if (lower.indexOf('.doc') !== -1) mimeType = 'application/msword';
+      else mimeType = 'image/jpeg';
     }
-  } else {
-    var exist = folder.getFilesByName(fName);
-    while (exist.hasNext()) exist.next().setTrashed(true);
+    var bytes;
+    try {
+      bytes = Utilities.base64Decode(base64Data);
+    } catch (e) {
+      bytes = Utilities.base64Decode(base64Data.replace(/[^A-Za-z0-9+/=]/g, ''));
+    }
+    var blob = Utilities.newBlob(bytes, mimeType, fName);
+    if (fName.indexOf('ملخص_بيانات_الموظف') !== -1) {
+      var allFiles = folder.getFiles();
+      while (allFiles.hasNext()) {
+        var cf = allFiles.next();
+        var cfName = cf.getName();
+        if (cfName.indexOf('ملخص_بيانات_الموظف') !== -1 || cfName === fName) cf.setTrashed(true);
+      }
+    } else {
+      var exist = folder.getFilesByName(fName);
+      while (exist.hasNext()) exist.next().setTrashed(true);
+    }
+    var file = folder.createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    return createJsonResponse({ success: true, fileId: file.getId(), fileName: file.getName(), fileUrl: file.getUrl() });
+  } catch (err) {
+    return createJsonResponse({ success: false, error: err.toString() });
   }
-  var file = folder.createFile(blob);
-  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-  return createJsonResponse({ success: true, fileId: file.getId(), fileName: file.getName(), fileUrl: file.getUrl() });
 }
 
 function createJsonResponse(obj) {
