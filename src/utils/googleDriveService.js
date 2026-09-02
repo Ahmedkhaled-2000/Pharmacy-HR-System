@@ -654,3 +654,61 @@ export async function syncEmployeeEntireDrive(emp, orgSettings = {}, onProgress 
     return { success: false, error: err.message || 'حدث خطأ أثناء المزامنة مع Google Drive' };
   }
 }
+
+/**
+ * Upload Biometric Attendance Photo to Employee's Drive Folder
+ * Saved in the employee's '📸 صور البصمة الإلكترونية' subfolder
+ */
+export async function uploadBiometricAttendancePhoto({ employee, photoDataUrl, actionType, driveConfig }) {
+  if (!driveConfig || !driveConfig.serviceUrl || !photoDataUrl) {
+    return { success: false, error: 'خدمة Google Drive غير مهيأة أو صورة البصمة مفقودة' };
+  }
+
+  try {
+    let targetFolderId = employee?.biometricFolderId;
+
+    if (!targetFolderId) {
+      // Create or get employee folder structure
+      const folderRes = await createOrGetEmployeeFolder(employee, driveConfig);
+      if (folderRes && (folderRes.biometricFolderId || folderRes.folderId)) {
+        targetFolderId = folderRes.biometricFolderId || folderRes.folderId;
+      }
+    }
+
+    if (!targetFolderId) {
+      throw new Error('تعذر العثور على مجلد البصمة الخاص بالموظف في Google Drive');
+    }
+
+    const actionNames = {
+      shift_start: 'بداية_دوام',
+      shift_end: 'نهاية_دوام',
+      break_start: 'بدء_استراحة',
+      break_end: 'انتهاء_استراحة'
+    };
+    const actionLabel = actionNames[actionType] || actionType || 'حضور';
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10);
+    const timeStr = `${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}-${String(now.getSeconds()).padStart(2, '0')}`;
+    const fileName = `بصمة_حضور_${actionLabel}_${employee.code || 'EMP'}_${dateStr}_${timeStr}.jpg`;
+
+    const uploadRes = await uploadFileToDrive({
+      folderId: targetFolderId,
+      fileName,
+      mimeType: 'image/jpeg',
+      base64Content: photoDataUrl,
+      driveConfig
+    });
+
+    return {
+      success: true,
+      fileId: uploadRes.fileId,
+      fileUrl: uploadRes.fileUrl,
+      downloadUrl: uploadRes.downloadUrl,
+      fileName
+    };
+  } catch (err) {
+    console.warn('[GoogleDriveService] Failed to upload biometric attendance photo:', err);
+    return { success: false, error: err.message || String(err) };
+  }
+}
+

@@ -184,39 +184,58 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
     }
   };
 
+  const [isWaitingRetry, setIsWaitingRetry] = useState(false);
+  const [isCapturing, setIsCapturing] = useState(false);
+
   const handleFailure = (msg) => {
     const newFails = failedAttempts + 1;
     setFailedAttempts(newFails);
     setErrorMsg(`❌ ${msg}`);
-    
+    setLivenessStage(0); // إيقاف فحص الذكاء الاصطناعي التلقائي فوراً
+    setIsWaitingRetry(true);
+
     if (newFails >= 3) {
-      setStatus('فشل التحقق 3 مرات متتالية. يرجى التقاط صورة لإرسال طلب للمدير.');
-      setLivenessStage(-1);
+      setStatus('تعذر التحقق بعد 3 محاولات متتالية. يرجى الضغط على الزر أدناه لالتقاط صورة حية واعتماد الحضور من الإدارة.');
     } else {
-      setStatus('يرجى المحاولة مرة أخرى...');
-      setLivenessStage(1);
+      setStatus('تعذر التحقق من البصمة. يرجى الوقوف بثبات ثم الضغط على "محاولة مرة أخرى".');
     }
   };
 
+  const handleRetry = () => {
+    setIsWaitingRetry(false);
+    setErrorMsg(null);
+    setStatus(isHand ? 'يرجى وضع يدك وفتح أصابعك أمام الكاميرا...' : 'يرجى النظر مباشرة للكاميرا والابتسام أو الرمش بعينيك 😉');
+    setLivenessStage(1);
+  };
+
   const captureAndSend = () => {
-    if (!videoRef.current) return;
-    const canvas = document.createElement('canvas');
-    canvas.width = videoRef.current.videoWidth;
-    canvas.height = videoRef.current.videoHeight;
-    const ctx = canvas.getContext('2d');
-    
-    if (facingMode === 'user') {
-      ctx.translate(canvas.width, 0);
-      ctx.scale(-1, 1);
+    if (!videoRef.current || isCapturing) return;
+    setIsCapturing(true);
+    setStatus('جاري التقاط الصورة الحية وتجهيز طلب الاعتماد...');
+
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = videoRef.current.videoWidth || 1280;
+      canvas.height = videoRef.current.videoHeight || 720;
+      const ctx = canvas.getContext('2d');
+      
+      if (facingMode === 'user') {
+        ctx.translate(canvas.width, 0);
+        ctx.scale(-1, 1);
+      }
+      
+      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+      const photoDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+
+      setStatus('جاري إرسال الطلب للإدارة العليا ومدير الفرع ورفع الصورة...');
+      setTimeout(() => {
+        onVerifyFailed(actionType, photoDataUrl);
+      }, 600);
+    } catch (err) {
+      console.error('Error capturing frame:', err);
+      setIsCapturing(false);
+      setStatus('فشل التقاط الصورة من الكاميرا. يرجى إعادة المحاولة.');
     }
-    
-    ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-    const photoDataUrl = canvas.toDataURL('image/jpeg', 0.6);
-    
-    setStatus('جاري إرسال الطلب للإدارة...');
-    setTimeout(() => {
-      onVerifyFailed(actionType, photoDataUrl);
-    }, 1000);
   };
 
   const actionName = {
@@ -316,12 +335,58 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
 
         </div>
         <div className="modal-footer" style={{ flexDirection: 'column', gap: '10px' }}>
-          {failedAttempts >= 3 && (
-            <button className="btn btn-primary" style={{ width: '100%' }} onClick={captureAndSend}>
-              📸 التقاط صورة وإرسال الطلب للمدير
+          {/* بعد 3 محاولات فاشلة: زر التقاط الصورة وإرسال طلب الاعتماد البديل */}
+          {failedAttempts >= 3 ? (
+            <button 
+              type="button"
+              className="btn btn-primary" 
+              style={{ 
+                width: '100%', 
+                padding: '13px', 
+                fontSize: '15px', 
+                fontWeight: 800,
+                background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '10px',
+                boxShadow: '0 4px 14px rgba(2, 132, 199, 0.4)',
+                cursor: isCapturing ? 'wait' : 'pointer'
+              }} 
+              onClick={captureAndSend}
+              disabled={isCapturing}
+            >
+              {isCapturing ? '⏳ جاري التقاط الصورة وتجهيز الطلب...' : '📸 التقاط الصورة وإرسال طلب اعتماد بديل'}
             </button>
-          )}
-          <button className="btn btn-secondary" style={{ width: '100%' }} onClick={onCancel}>
+          ) : isWaitingRetry ? (
+            /* في المحاولات 1 و 2: زر محاولة مرة أخرى */
+            <button 
+              type="button"
+              className="btn btn-start" 
+              style={{ 
+                width: '100%', 
+                padding: '13px', 
+                fontSize: '15px', 
+                fontWeight: 800,
+                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '10px',
+                boxShadow: '0 4px 14px rgba(16, 185, 129, 0.4)',
+                cursor: 'pointer'
+              }} 
+              onClick={handleRetry}
+            >
+              🔄 محاولة مرة أخرى (المحاولة {failedAttempts + 1} من 3)
+            </button>
+          ) : null}
+
+          <button 
+            type="button" 
+            className="btn btn-secondary" 
+            style={{ width: '100%', padding: '10px' }} 
+            onClick={onCancel} 
+            disabled={isCapturing}
+          >
             إلغاء
           </button>
         </div>

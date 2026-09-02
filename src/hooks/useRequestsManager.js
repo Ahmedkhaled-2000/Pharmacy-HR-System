@@ -286,6 +286,45 @@ export function useRequestsManager() {
           }
         }
 
+        // 7.5. Biometric Verification (Photo Attendance) Approval Integration
+        if (target.type === 'biometric_verification' || target.type === 'تأكيد بصمة الوجه' || target.type === 'تأكيد بصمة اليد') {
+          const action = target.targetAction;
+          const empId = target.employeeId;
+          const reqDate = target.date || new Date().toISOString().slice(0, 10);
+          const reqTime = target.time || new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+          const approverTitle = role === 'admin' ? 'الإدارة العليا' : 'مدير الفرع';
+
+          if (action === 'shift_start') {
+            const hasShiftToday = updatedShifts.some(s => String(s.employeeId) === String(empId) && s.date === reqDate && !s.endTime);
+            if (!hasShiftToday) {
+              const newShift = {
+                id: `shift_${Date.now()}`,
+                employeeId: empId,
+                date: reqDate,
+                startTime: reqTime,
+                branchId: target.branchId || null,
+                source: 'photo_attendance_approved',
+                approvedBy: approverTitle,
+                photoUrl: target.photoUrl || null,
+                drivePhotoUrl: target.drivePhotoUrl || null,
+                note: `✅ تم تسجيل الحضور بالصورة (معتمد من ${approverTitle})`
+              };
+              updatedShifts.unshift(newShift);
+            }
+          } else if (action === 'shift_end') {
+            const openShiftIdx = updatedShifts.findIndex(s => String(s.employeeId) === String(empId) && (!s.endTime || s.endTime === '—'));
+            if (openShiftIdx >= 0) {
+              updatedShifts[openShiftIdx] = {
+                ...updatedShifts[openShiftIdx],
+                endTime: reqTime,
+                photoUrl: target.photoUrl || updatedShifts[openShiftIdx].photoUrl,
+                drivePhotoUrl: target.drivePhotoUrl || updatedShifts[openShiftIdx].drivePhotoUrl,
+                note: (updatedShifts[openShiftIdx].note || '') + ` | ✅ انصراف بالصورة معتمد (${approverTitle})`
+              };
+            }
+          }
+        }
+
         // 8. Resignation Request Integration
         if (target.type === 'resignation') {
           updatedResignations = updatedResignations.map((r) => {
@@ -404,7 +443,7 @@ export function useRequestsManager() {
       const isDisc = target.type === 'disciplinary_penalty' || target.type === 'violation' || target.type === 'penalty' || String(target.id || '').startsWith('disc_');
       const isSwap = ['swap', 'shift_swap', 'shift_edit'].includes(target.type);
       const isRoster = ['roster_update', 'roster_edit', 'roster_edit_request'].includes(target.type);
-      const isPunch = ['punch_correction', 'manual_punch', 'attendance_punch', 'تأكيد بصمة الوجه', 'تأكيد بصمة اليد'].includes(target.type);
+      const isPunch = ['punch_correction', 'manual_punch', 'attendance_punch', 'تأكيد بصمة الوجه', 'تأكيد بصمة اليد', 'biometric_verification'].includes(target.type);
       const isResignation = target.type === 'resignation';
       const isBonus = target.type === 'bonus';
       const isComplaint = ['complaint', 'eval_edit_request', 'penalty_objection', 'objection'].includes(target.type);
@@ -469,9 +508,9 @@ export function useRequestsManager() {
         return;
       }
 
-      if (isPunch && locks.lockApproveManualPunches) {
+      if (isPunch && (locks.lockApproveManualPunches || (target.type === 'biometric_verification' && locks.lockApproveBiometricVerification))) {
         executeWithOwnerGuard({
-          lockKey: 'lockApproveManualPunches',
+          lockKey: (target.type === 'biometric_verification' && locks.lockApproveBiometricVerification) ? 'lockApproveBiometricVerification' : 'lockApproveManualPunches',
           actionTitle: `اعتماد تسجيل/تصحيح بصمة (${target.employeeName || target.employeeId})`,
           actionDetails: `التاريخ: ${target.date || ''} - الوقت: ${target.time || ''}`,
           onExecute: performApprove

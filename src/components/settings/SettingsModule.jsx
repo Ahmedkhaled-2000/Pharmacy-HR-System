@@ -33,7 +33,8 @@ const ALL_REQUEST_TYPES = [
   { type: 'penalty', label: 'طلبات الخصومات والجزاءات' },
   { type: 'resignation', label: 'طلبات استقالة الموظفين' },
   { type: 'complaint', label: 'الشكاوى وملاحظات التقييم' },
-  { type: 'punch_correction', label: 'طلبات تأكيد وتصحيح بصمات الوجه واليد' }
+  { type: 'punch_correction', label: 'طلبات تأكيد وتصحيح بصمات الوجه واليد' },
+  { type: 'biometric_verification', label: 'طلبات اعتماد الحضور بالصورة (عند تعذر بصمة الوجه/اليد)' }
 ];
 
 export default function SettingsModule({
@@ -103,6 +104,7 @@ export default function SettingsModule({
     lockApproveShiftSwaps: false,
     lockApproveRosters: false,
     lockApproveManualPunches: false,
+    lockApproveBiometricVerification: false,
     lockApproveResignations: false,
     lockApproveBonuses: false,
     lockApproveComplaints: false,
@@ -502,7 +504,8 @@ export default function SettingsModule({
     { id: 'rule_leave', requestType: 'leave', typeLabel: 'طلبات الإجازات (سنوية / مرضي / عارضة <= 3 أيام)', reqBranch: true, reqAdmin: true },
     { id: 'rule_swap', requestType: 'swap', typeLabel: 'طلبات تبديل الشفتات والورديات', reqBranch: true, reqAdmin: true },
     { id: 'rule_permission', requestType: 'permission', typeLabel: 'طلبات أذونات وتأخيرات الموظفين', reqBranch: true, reqAdmin: true },
-    { id: 'rule_bonus', requestType: 'bonus', typeLabel: 'طلبات المكافآت والحوافز', reqBranch: true, reqAdmin: true }
+    { id: 'rule_bonus', requestType: 'bonus', typeLabel: 'طلبات المكافآت والحوافز', reqBranch: true, reqAdmin: true },
+    { id: 'rule_biometric_verification', requestType: 'biometric_verification', typeLabel: 'طلبات اعتماد الحضور بالصورة (عند تعذر بصمة الوجه/اليد)', reqBranch: true, reqAdmin: true }
   ]));
   const [showAddRuleModal, setShowAddRuleModal] = useState(false);
   const [newRuleType, setNewRuleType] = useState('long_leave');
@@ -2563,6 +2566,16 @@ export default function SettingsModule({
                             type="checkbox"
                             checked={Boolean(ownerLocks.lockApproveManualPunches)}
                             onChange={() => handleToggleOwnerLock('lockApproveManualPunches')}
+                            style={{ width: '17px', height: '17px', cursor: 'pointer', accentColor: '#d97706' }}
+                          />
+                        </label>
+
+                        <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '12.5px', fontWeight: 600, color: '#334155' }}>
+                          <span>📸 قفل قبول واعتماد طلبات الحضور بالصورة (تعذر البصمة)</span>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(ownerLocks.lockApproveBiometricVerification)}
+                            onChange={() => handleToggleOwnerLock('lockApproveBiometricVerification')}
                             style={{ width: '17px', height: '17px', cursor: 'pointer', accentColor: '#d97706' }}
                           />
                         </label>

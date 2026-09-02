@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { fetchCurrentIP, checkDeviceAuthorization } from '../../utils/deviceAuth';
 import FaceVerificationOverlay from '../attendance/FaceVerificationOverlay';
+import { useData } from '../../context/DataContext';
+import { uploadBiometricAttendancePhoto } from '../../utils/googleDriveService';
+import { sendBiometricAttendanceEmail } from '../../utils/gmailService';
 import '../../kiosk-modern.css';
 
 export default function ElectronicKioskView({
@@ -12,6 +15,7 @@ export default function ElectronicKioskView({
   submitRequest,
   kioskBranchId
 }) {
+  const { setState, saveState } = useData();
   const { orgSettings, employees, ipRestrictions } = state;
   const [now, setNow] = useState(Date.now());
   const [currentIp, setCurrentIp] = useState('');
@@ -146,31 +150,121 @@ export default function ElectronicKioskView({
     executeAction(actionType);
   };
 
-  const onVerifyFailed = (actionType, photoUrl) => {
+  const onVerifyFailed = async (actionType, photoUrl) => {
     setActiveAction(null);
     const empBiometricType = matchedEmp?.preferred_biometric || orgSettings?.biometricType || 'face';
     const isHand = empBiometricType === 'hand';
-    
+
+    const actionLabels = {
+      shift_start: 'تسجيل بداية الدوام',
+      shift_end: 'تسجيل نهاية الدوام',
+      break_start: 'تسجيل بداية الاستراحة',
+      break_end: 'تسجيل نهاية الاستراحة'
+    };
+    const actionLabel = actionLabels[actionType] || actionType;
+    const effectiveBranchId = selectedBranchId || matchedEmp?.branchId || kioskBranchId;
+    const branchObj = (state?.branches || []).find(b => String(b.id) === String(effectiveBranchId));
+    const branchName = branchObj ? branchObj.name : 'الفرع الرئيسي';
+
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10);
+    const timeStr = now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+
+    // 1. Upload photo to employee's Google Drive folder if configured
+    let driveResult = null;
+    const driveConfig = orgSettings?.googleDrive || state?.orgSettings?.googleDrive;
+    if (driveConfig && driveConfig.serviceUrl && photoUrl) {
+      try {
+        driveResult = await uploadBiometricAttendancePhoto({
+          employee: matchedEmp,
+          photoDataUrl: photoUrl,
+          actionType,
+          driveConfig
+        });
+      } catch (driveErr) {
+        console.warn('Failed to upload attendance photo to Google Drive:', driveErr);
+      }
+    }
+
+    // 2. Build standardized Biometric Attendance Request
+    const requestId = 'REQ-BIO-' + Date.now();
     const requestData = {
-      id: 'REQ-' + Date.now(),
-      type: `تأكيد بصمة ${isHand ? 'اليد' : 'الوجه'}`,
+      id: requestId,
+      type: 'biometric_verification',
+      requestType: 'biometric_verification',
+      typeLabel: `اعتماد حضور بالصورة (${actionLabel})`,
+      employeeId: matchedEmp.id,
+      employeeCode: matchedEmp.code,
+      employeeName: matchedEmp.name,
+      branchId: effectiveBranchId,
+      branchName: branchName,
+      targetAction: actionType,
+      date: dateStr,
+      time: timeStr,
+      createdAt: now.toISOString(),
+      status: 'pending',
+      requiresBranchManager: true,
+      requiresSuperAdmin: true,
+      branchApproved: false,
+      adminApproved: false,
+      notes: `تعذر التحقق من بصمة ${isHand ? 'اليد' : 'الوجه'} لـ 3 مرات متتالية عند محاولة (${actionLabel}). تم التقاط صورة حية للموظف وإرسالها للاعتماد.`,
+      photoUrl: photoUrl || null,
+      drivePhotoUrl: driveResult?.fileUrl || null,
+      driveFileId: driveResult?.fileId || null
+    };
+
+    // 3. Create Notification for Higher Management and Branch Manager
+    const newNotif = {
+      id: 'NOTIF-BIO-' + Date.now(),
+      type: 'biometric_verification',
+      targetRole: 'branch_and_admin',
+      branchId: effectiveBranchId,
+      title: `📸 طلب اعتماد حضور بالصورة: ${matchedEmp.name}`,
+      message: `تعذر التحقق من بصمة ${isHand ? 'اليد' : 'الوجه'} للموظف ${matchedEmp.name} (${actionLabel}). يرجى مراجعة الصورة واعتماد الحضور.`,
+      requestId: requestId,
       employeeId: matchedEmp.id,
       employeeName: matchedEmp.name,
-      targetAction: actionType,
-      date: new Date().toISOString().split('T')[0],
-      createdAt: new Date().toISOString(),
-      status: 'pending',
-      notes: `فشل التعرف على ${isHand ? 'اليد' : 'الوجه'} 3 مرات متتالية عند محاولة: ${
-        actionType === 'shift_start' ? 'بداية الوردية' : 
-        actionType === 'shift_end' ? 'نهاية الوردية' : 
-        actionType === 'break_start' ? 'بداية بريك' : 'نهاية بريك'
-      }`,
-      photoUrl: photoUrl || null
+      photoUrl: photoUrl || null,
+      drivePhotoUrl: driveResult?.fileUrl || null,
+      createdAt: now.toISOString(),
+      read: false,
+      readBy: []
     };
+
+    // 4. Save into state and Supabase / DB
+    const currentRequests = state?.requests || [];
+    const currentNotifs = state?.notifications || [];
+    const updatedState = {
+      ...state,
+      requests: [requestData, ...currentRequests],
+      notifications: [newNotif, ...currentNotifs],
+      _requestsUpdatedAt: now.toISOString(),
+      _notificationsUpdatedAt: now.toISOString()
+    };
+
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+
     if (submitRequest) {
       submitRequest(requestData);
     }
-    alert('تم إرسال طلب تأكيد بصمة للإدارة العليا بنجاح.');
+
+    // 5. Send Gmail Email Notification if configured
+    const gmailConfig = orgSettings?.gmailConfig || state?.orgSettings?.gmailConfig;
+    if (gmailConfig && gmailConfig.serviceUrl && (gmailConfig.notifyOnAttendanceAnomaly !== false || gmailConfig.notifyOnNewRequest !== false)) {
+      sendBiometricAttendanceEmail({
+        gmailConfig,
+        empName: matchedEmp.name,
+        empCode: matchedEmp.code,
+        branchName,
+        actionType,
+        timeStr,
+        dateStr,
+        drivePhotoUrl: driveResult?.fileUrl || null
+      }).catch(err => console.warn('Gmail biometric notification failed:', err));
+    }
+
+    alert(`📸 تم التقاط الصورة وإرسال طلب اعتماد (${actionLabel}) بنجاح!\n\nتم إرسال الطلب لمدير الفرع والإدارة العليا، ${driveResult?.success ? 'وتم حفظ الصورة بمجلد الموظف على Google Drive ☁️' : 'وجاري المراجعة والاعتماد.'}`);
     setMatchedEmp(null);
     setInputCode('');
   };

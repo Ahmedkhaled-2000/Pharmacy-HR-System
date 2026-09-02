@@ -246,6 +246,17 @@ export function DataProvider({ children, showToast = () => {} }) {
         requiresBranchManager: true,
         requiresSuperAdmin: true,
         autoExecuteOnBoth: true
+      },
+      {
+        id: 'rule_biometric_verification',
+        requestType: 'biometric_verification',
+        name: 'طلبات اعتماد الحضور بالصورة (عند تعذر بصمة الوجه/اليد)',
+        typeLabel: 'طلبات اعتماد الحضور بالصورة (عند تعذر بصمة الوجه/اليد)',
+        reqBranch: true,
+        reqAdmin: true,
+        requiresBranchManager: true,
+        requiresSuperAdmin: true,
+        autoExecuteOnBoth: true
       }
     ],
     shifts: [],

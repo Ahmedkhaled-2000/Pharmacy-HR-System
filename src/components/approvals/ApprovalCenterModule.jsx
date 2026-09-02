@@ -25,12 +25,20 @@ export default function ApprovalCenterModule({
   const [directAdjType, setDirectAdjType] = useState('bonus'); // 'bonus' | 'penalty'
   const [directAdjAmount, setDirectAdjAmount] = useState('');
   const [directAdjNotes, setDirectAdjNotes] = useState('');
+  const [previewPhotoUrl, setPreviewPhotoUrl] = useState(null);
 
   // Rules Editor State
   const [rules, setRules] = useState(state.approvalRules || [
     {
       id: 'rule_general',
       name: 'طلبات المكافآت والجزاءات وتعديل البصمات والأذون وتأخير/خروج وإجازات <= 3 أيام والإضافي وتبديل الشفتات',
+      requiresBranchManager: true,
+      requiresSuperAdmin: true,
+      autoExecuteOnBoth: true
+    },
+    {
+      id: 'rule_biometric_verification',
+      name: 'طلبات اعتماد الحضور بالصورة (عند تعذر بصمة الوجه/اليد)',
       requiresBranchManager: true,
       requiresSuperAdmin: true,
       autoExecuteOnBoth: true
@@ -269,6 +277,29 @@ export default function ApprovalCenterModule({
                       {req.date && ` | التاريخ: ${req.date}`}
                     </div>
 
+                    {(req.photoUrl || req.drivePhotoUrl) && (
+                      <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '6px', background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', fontWeight: 800, cursor: 'pointer' }}
+                          onClick={() => setPreviewPhotoUrl(req.photoUrl || req.drivePhotoUrl)}
+                        >
+                          👁️ معاينة صورة الحضور
+                        </button>
+                        {req.drivePhotoUrl && (
+                          <a
+                            href={req.drivePhotoUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ fontSize: '12px', color: '#0284c7', textDecoration: 'none', fontWeight: 700 }}
+                          >
+                            ☁️ فتح بدرايف ↗
+                          </a>
+                        )}
+                      </div>
+                    )}
+
                     {/* Dual Approval Status Indicators */}
                     {(() => {
                       const effectiveBranchId = req.branchId || emp?.branchesDetails?.[0]?.branchId || emp?.branchId;
@@ -483,6 +514,24 @@ export default function ApprovalCenterModule({
                 💾 إضافة وتنفيذ على الأجور
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Photo Preview Modal */}
+      {previewPhotoUrl && (
+        <div className="modal-backdrop" onClick={() => setPreviewPhotoUrl(null)} style={{ zIndex: 9999 }}>
+          <div className="modal-card" style={{ maxWidth: '540px', width: '94%', textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+              <h3 style={{ margin: 0, fontFamily: 'Cairo', color: 'var(--primary-dark)' }}>📸 صورة التحقق من الحضور</h3>
+              <button className="close-btn" onClick={() => setPreviewPhotoUrl(null)}>×</button>
+            </div>
+            <div style={{ borderRadius: '12px', overflow: 'hidden', border: '2px solid var(--border)', background: '#000', marginBottom: '14px' }}>
+              <img src={previewPhotoUrl} alt="صورة الحضور" style={{ width: '100%', maxHeight: '420px', objectFit: 'contain', display: 'block' }} />
+            </div>
+            <button className="btn btn-secondary" style={{ width: '100%' }} onClick={() => setPreviewPhotoUrl(null)}>
+              إغلاق
+            </button>
           </div>
         </div>
       )}

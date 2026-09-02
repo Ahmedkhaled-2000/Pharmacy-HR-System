@@ -677,4 +677,72 @@ export async function notifyAdminOnOvertime({ state, emp, branchName, overtimeHo
   });
 }
 
+/**
+ * 13. إرسال بريد طلب اعتماد حضور بالصورة بعد تعذر بصمة الوجه 3 مرات
+ */
+export async function sendBiometricAttendanceEmail({
+  gmailConfig,
+  empName,
+  empCode,
+  branchName,
+  actionType,
+  timeStr,
+  dateStr,
+  drivePhotoUrl,
+  targetEmail: customTargetEmail
+}) {
+  const targetEmail = customTargetEmail || gmailConfig?.adminEmail;
+  if (!targetEmail) return { success: false, error: 'بريد الإدارة غير محدد' };
+
+  const actionLabels = {
+    shift_start: 'تسجيل بداية الدوام (حضور)',
+    shift_end: 'تسجيل نهاية الدوام (انصراف)',
+    break_start: 'تسجيل بداية الاستراحة',
+    break_end: 'تسجيل نهاية الاستراحة'
+  };
+  const actionLabel = actionLabels[actionType] || actionType || 'تسجيل حضور';
+
+  const content = `
+    <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+      <h3 style="color: #991b1b; margin: 0 0 8px 0; font-size: 16px;">⚠️ تعذر التحقق من بصمة الوجه (3 محاولات)</h3>
+      <p style="margin: 0; color: #7f1d1d; font-size: 14px; line-height: 1.6;">
+        قام الموظف <strong>${empName}</strong> بمحاولة تسجيل <strong>${actionLabel}</strong> عبر كشك البصمة، وتعذر مطابقة بصمة الوجه لـ 3 مرات متتالية، فتم التقاط صورة حية له وإرسال طلب اعتماد بديل للإدارة العليا ومدير الفرع.
+      </p>
+    </div>
+
+    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr><td style="padding: 6px 0; font-weight: bold; width: 140px;">👤 الموظف:</td><td>${empName} (كود: ${empCode || '—'})</td></tr>
+        <tr><td style="padding: 6px 0; font-weight: bold;">📍 الفرع:</td><td>${branchName || 'الفرع الرئيسي'}</td></tr>
+        <tr><td style="padding: 6px 0; font-weight: bold;">⚡ الإجراء المطلوب:</td><td><strong style="color: #0284c7;">${actionLabel}</strong></td></tr>
+        <tr><td style="padding: 6px 0; font-weight: bold;">📅 التاريخ والوقت:</td><td>${dateStr || ''} الساعة ${timeStr || ''}</td></tr>
+        ${drivePhotoUrl ? `<tr><td style="padding: 6px 0; font-weight: bold;">📁 صورة البصمة بدرايف:</td><td><a href="${drivePhotoUrl}" target="_blank" style="color: #0284c7; font-weight: bold;">🔗 فتح الصورة في Google Drive</a></td></tr>` : ''}
+      </table>
+    </div>
+
+    <p style="text-align: center; margin-top: 20px;">
+      <a href="https://pharmacy-time-tracker.vercel.app" style="display: inline-block; background: #0284c7; color: #ffffff; text-decoration: none; padding: 10px 22px; border-radius: 8px; font-weight: bold;">
+        🔗 الدخول لمراجعة الصورة واعتماد أو رفض الحضور
+      </a>
+    </p>
+  `;
+
+  const html = buildEmailTemplate({
+    title: `📸 طلب اعتماد حضور بالصورة: ${empName}`,
+    subtitle: `تعذر التحقق من بصمة الوجه 3 مرات — فرع ${branchName || 'العام'}`,
+    badgeText: 'اعتماد حضور بالصورة',
+    badgeColor: '#dc2626',
+    bodyContent: content,
+    footerText: 'يمكن للإدارة العليا ومدير الفرع اتخاذ القرار المناسب من مركز الموافقات'
+  });
+
+  return sendGmailEmail({
+    gmailConfig,
+    recipientEmail: targetEmail,
+    subject: `📸 طلب اعتماد حضور بالصورة (${actionLabel}): ${empName} — فرع ${branchName || 'العام'}`,
+    htmlContent: html
+  });
+}
+
+
 

@@ -68,8 +68,8 @@ export function getFormattedRequestBadge(type, leaveType) {
   if (cleanType === 'withdraw' || cleanType === 'resignation_withdraw' || cleanType === 'تراجع') {
     return <span className="badge badge-primary">↩️ تراجع عن استقالة</span>;
   }
-  if (cleanType === 'punch_correction' || cleanType === 'attendance_punch' || cleanType === 'تأكيد بصمة الوجه') {
-    return <span className="badge badge-primary">📸 تأكيد بصمة الوجه</span>;
+  if (cleanType === 'punch_correction' || cleanType === 'attendance_punch' || cleanType === 'تأكيد بصمة الوجه' || cleanType === 'تأكيد بصمة اليد' || cleanType === 'biometric_verification') {
+    return <span className="badge badge-primary" style={{ background: '#0284c7', color: '#fff' }}>📸 اعتماد حضور بالصورة</span>;
   }
   if (cleanType === 'adjustment') {
     return <span className="badge badge-info">⚖️ تعديل إداري / مالي</span>;
@@ -2937,10 +2937,10 @@ export default function RequestsModule({
                   </div>
 
                   {(() => {
-                    const attData = previewModalReq.attachmentData || previewModalReq.photoUrl || previewModalReq.videoUrl || previewModalReq.attachment || previewModalReq.fileData || previewModalReq.fileUrl || previewModalReq.mediaUrl;
+                    const attData = previewModalReq.attachmentData || previewModalReq.photoUrl || previewModalReq.drivePhotoUrl || previewModalReq.videoUrl || previewModalReq.attachment || previewModalReq.fileData || previewModalReq.fileUrl || previewModalReq.mediaUrl;
                     const attName = previewModalReq.attachmentName || previewModalReq.fileName || (typeof attData === 'string' && attData.startsWith('data:video/') ? 'فيديو توثيق المخالفة.mp4' : typeof attData === 'string' && attData.startsWith('data:application/pdf') ? 'مستند_التحقيق.pdf' : 'مستند / مرفق رسمي');
                     const attType = previewModalReq.attachmentType || (
-                      (typeof attData === 'string' && (attData.startsWith('data:image/') || /\.(jpg|jpeg|png|webp|gif)$/i.test(attData) || previewModalReq.photoUrl)) ? 'image' :
+                      (typeof attData === 'string' && (attData.startsWith('data:image/') || /\.(jpg|jpeg|png|webp|gif)$/i.test(attData) || previewModalReq.photoUrl || previewModalReq.drivePhotoUrl)) ? 'image' :
                       (typeof attData === 'string' && (attData.startsWith('data:application/pdf') || /\.pdf$/i.test(attData) || /\.pdf$/i.test(attName))) ? 'pdf' :
                       (typeof attData === 'string' && (attData.startsWith('data:video/') || /\.(mp4|webm|mov|ogg)$/i.test(attData) || previewModalReq.videoUrl)) ? 'video' :
                       'image'
@@ -2966,6 +2966,19 @@ export default function RequestsModule({
                               title="انقر لفتح الصورة بالحجم الكامل"
                             />
                             <div style={{ color: '#94a3b8', fontSize: '11px', marginTop: '6px' }}>🔍 انقر على الصورة لفتحها بالحجم الكامل</div>
+                            {previewModalReq.drivePhotoUrl && (
+                              <div style={{ marginTop: '8px' }}>
+                                <a
+                                  href={previewModalReq.drivePhotoUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="btn btn-ghost"
+                                  style={{ color: '#38bdf8', fontSize: '12px', textDecoration: 'none', fontWeight: 800, background: 'rgba(255,255,255,0.08)', padding: '4px 12px', borderRadius: '6px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                >
+                                  ☁️ فتح الصورة في Google Drive ↗
+                                </a>
+                              </div>
+                            )}
                           </div>
                         )}
 
