@@ -6,6 +6,7 @@ import { syncNow } from '../../utils/offlineSync';
 import { smartMergeStates } from '../../utils/stateMerger';
 import { normalizeState } from '../../utils/formatters';
 import { getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
+import { syncEmployeeEntireDrive } from '../../utils/googleDriveService';
 
 import EmployeeModal from '../employees/EmployeeModal';
 import EmployeeIDCardModal from '../employees/EmployeeIDCardModal';
@@ -223,6 +224,26 @@ export default function GlobalModalsContainer() {
     setState(updatedState);
     await saveState(updatedState);
     setIsEmpModalOpen(false);
+
+    // Auto-sync Word document to Google Drive in background
+    const driveConfig = state?.orgSettings?.driveConfig;
+    if (driveConfig && driveConfig.enabled && driveConfig.serviceUrl && driveConfig.autoSyncOnEmployeeSave !== false) {
+      const targetEmp = updatedEmps.find(e => e.id === (editingEmp ? editingEmp.id : updatedEmps[updatedEmps.length - 1]?.id));
+      if (targetEmp) {
+        syncEmployeeEntireDrive(targetEmp, state.orgSettings)
+          .then(res => {
+            if (res.success && res.updatedEmp && setState) {
+              setState(prev => {
+                const emps = (prev.employees || []).map(e => String(e.id) === String(res.updatedEmp.id) ? res.updatedEmp : e);
+                const nextState = { ...prev, employees: emps };
+                if (saveState) saveState(nextState);
+                return nextState;
+              });
+            }
+          })
+          .catch(err => console.warn('Drive auto sync error:', err));
+      }
+    }
   };
 
   return (

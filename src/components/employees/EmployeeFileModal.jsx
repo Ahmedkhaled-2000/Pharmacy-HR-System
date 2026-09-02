@@ -459,14 +459,13 @@ export default function EmployeeFileModal({
     setNewDocTitle('');
   };
 
-  const handleDocFileUpload = (e, docId) => {
+  const handleDocFileUpload = async (e, docId) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const fileUrl = event.target.result;
+    try {
+      const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+      const fileUrl = await compressImage(file, 1600, 0.85);
       setDocuments((prevDocs) =>
         prevDocs.map((d) =>
           d.id === docId
@@ -474,14 +473,18 @@ export default function EmployeeFileModal({
                 ...d,
                 fileUrl,
                 fileName: file.name,
-                fileType: isPdf ? 'pdf' : 'image',
-                uploadedAt: new Date().toISOString()
+                fileType: isPdf ? 'application/pdf' : (file.type || 'image/jpeg'),
+                uploadedAt: new Date().toISOString(),
+                driveFileId: null,
+                driveViewLink: null,
+                driveDownloadUrl: null
               }
             : d
         )
       );
-    };
-    reader.readAsDataURL(file);
+    } catch (err) {
+      console.error('Error reading/compressing doc file:', err);
+    }
   };
 
   const handleDeleteDocument = (docId) => {
@@ -722,7 +725,7 @@ export default function EmployeeFileModal({
 
     // Trigger auto background sync to Google Drive if configured
     const driveConfig = state?.orgSettings?.driveConfig;
-    if (driveConfig && driveConfig.enabled && driveConfig.autoSyncOnEmployeeSave && driveConfig.serviceUrl) {
+    if (driveConfig && driveConfig.enabled && driveConfig.serviceUrl && driveConfig.autoSyncOnEmployeeSave !== false) {
       syncEmployeeEntireDrive(employeeData, state.orgSettings)
         .then((res) => {
           if (res.success && res.updatedEmp && setState && state) {
