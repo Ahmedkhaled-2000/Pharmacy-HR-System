@@ -6,7 +6,9 @@ export default function GmailConfigCard({
   state,
   setState,
   saveState,
-  showToast
+  showToast,
+  executeWithOwnerGuard,
+  ownerLocks
 }) {
   const orgSettings = state.orgSettings || {};
   const currentConfig = orgSettings.gmailConfig || {
@@ -33,6 +35,74 @@ export default function GmailConfigCard({
 
   const [isSendingTest, setIsSendingTest] = useState(false);
   const [isSendingDigest, setIsSendingDigest] = useState(false);
+  const [showScriptModal, setShowScriptModal] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
+
+  const gmailScriptCode = `/**
+ * ✉️ كود Google Apps Script لإرسال إشعارات بريد Gmail ونظام الموارد البشرية
+ * قم بلصقه في https://script.google.com/ وانشره كتطبيق ويب (Web app).
+ */
+function doPost(e) {
+  try {
+    var rawData = e.postData.contents;
+    var data = JSON.parse(rawData);
+    
+    if (data.action === 'ping' || data.action === 'test') {
+      return ContentService.createTextOutput(JSON.stringify({
+        success: true,
+        message: 'خدمة بريد Gmail ونظام الموارد البشرية متصلة وتعمل بكفاءة ✅'
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    var recipient = data.recipient || data.to || data.targetEmail;
+    var subject = data.subject || 'تنبيه من نظام الموارد البشرية للصيدليات';
+    var htmlBody = data.htmlBody || data.htmlContent || data.html || data.body;
+    var textBody = data.textBody || data.textContent || data.text || 'يرجى تفعيل عرض HTML لعرض تفاصيل الإشعار.';
+    var senderName = data.senderName || 'نظام إدارة الصيدليات والموارد البشرية';
+
+    if (!recipient) {
+      return ContentService.createTextOutput(JSON.stringify({
+        success: false,
+        error: 'لم يتم تحديد البريد الإلكتروني للمستلم'
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    MailApp.sendEmail({
+      to: recipient,
+      subject: subject,
+      body: textBody,
+      htmlBody: htmlBody,
+      name: senderName
+    });
+
+    return ContentService.createTextOutput(JSON.stringify({
+      success: true,
+      message: 'تم إرسال البريد الإلكتروني بنجاح ✅'
+    })).setMimeType(ContentService.MimeType.JSON);
+
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({
+      success: false,
+      error: err.toString()
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function doGet(e) {
+  return ContentService.createTextOutput(JSON.stringify({
+    success: true,
+    status: 'online',
+    message: 'خدمة إرسال إشعارات بريد Gmail لنظام الموارد البشرية تعمل بكفاءة ✅'
+  })).setMimeType(ContentService.MimeType.JSON);
+}`;
+
+  const copyScriptToClipboard = () => {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(gmailScriptCode);
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 2000);
+    }
+  };
 
   const handleSave = async (e) => {
     e.preventDefault();
@@ -47,11 +117,26 @@ export default function GmailConfigCard({
       sendOnPenalty,
       sendDailyDigest
     };
-    const updatedOrgSettings = { ...orgSettings, gmailConfig: updatedConfig };
-    const updatedState = { ...state, orgSettings: updatedOrgSettings };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    showToast?.('💾 تم حفظ وتفعيل إعدادات بريد Gmail والتنبيهات بنجاح');
+
+    const performSave = async () => {
+      const updatedOrgSettings = { ...orgSettings, gmailConfig: updatedConfig };
+      const updatedState = { ...state, orgSettings: updatedOrgSettings };
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      showToast?.('💾 تم حفظ وتفعيل إعدادات بريد Gmail والتنبيهات بنجاح');
+    };
+
+    if (executeWithOwnerGuard && (ownerLocks?.lockEditGmailConfig || state.orgSettings?.ownerModificationLocks?.lockEditGmailConfig || state.orgSettings?.ownerModificationLocks?.lockEditOrgSettings)) {
+      executeWithOwnerGuard({
+        lockKey: 'lockEditGmailConfig',
+        actionTitle: 'تعديل إعدادات بريد Gmail والتنبيهات الفورية',
+        actionDetails: 'تحديث حساب بريد الإدارة أو رابط خدمة إرسال الإشعارات البريدية',
+        onExecute: performSave
+      });
+      return;
+    }
+
+    await performSave();
   };
 
   const handleSendTestEmail = async () => {
@@ -154,10 +239,35 @@ export default function GmailConfigCard({
           </p>
         </div>
 
-        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontWeight: 'bold' }}>
-          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} style={{ width: '18px', height: '18px' }} />
-          تفعيل خدمة الإشعارات عبر Gmail
-        </label>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => setShowScriptModal(true)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '8px 16px',
+              fontSize: '12.5px',
+              fontWeight: 'bold',
+              background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              boxShadow: '0 2px 6px rgba(2, 132, 199, 0.25)'
+            }}
+          >
+            <span>📖</span>
+            <span>طريقة التفعيل في دقيقة (مع الكود الجاهز)</span>
+          </button>
+
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontWeight: 'bold' }}>
+            <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} style={{ width: '18px', height: '18px' }} />
+            تفعيل خدمة الإشعارات عبر Gmail
+          </label>
+        </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '14px', marginBottom: '20px' }}>
@@ -242,6 +352,70 @@ export default function GmailConfigCard({
           💾 حفظ وتفعيل إعدادات بريد Gmail
         </button>
       </div>
+
+      {/* ── Script & Setup Modal for Gmail (Exact match to Drive Modal) ── */}
+      {showScriptModal && (
+        <div className="modal-overlay" onClick={() => setShowScriptModal(false)} style={{ zIndex: 9999 }}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '780px', width: '95%' }}>
+            <div className="badge-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{ fontSize: '24px' }}>✉️</span>
+                <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 800 }}>طريقة تفعيل إعدادات بريد Gmail والإشعارات الفورية مع المنظومة في دقيقة واحدة</h3>
+              </div>
+              <button type="button" className="close-btn" onClick={() => setShowScriptModal(false)}>✕</button>
+            </div>
+
+            <div className="badge-body" style={{ textAlign: 'right', maxHeight: '70vh', overflowY: 'auto' }}>
+              <div style={{ background: 'rgba(59, 130, 246, 0.08)', border: '1px solid rgba(59, 130, 246, 0.2)', padding: '16px', borderRadius: '12px', marginBottom: '18px' }}>
+                <h4 style={{ margin: '0 0 10px', color: '#1d4ed8', fontSize: '15px' }}>📌 خطوات الإعداد البسيطة:</h4>
+                <ol style={{ margin: 0, paddingRight: '20px', lineHeight: 1.8, fontSize: '13.5px' }}>
+                  <li>افتح الرابط: <a href="https://script.google.com/home/start" target="_blank" rel="noreferrer" style={{ color: '#0284c7', fontWeight: 'bold' }}>Google Apps Script</a> بحساب الجيميل الخاص بك.</li>
+                  <li>اضغط على <strong>"مشروع جديد" (New project)</strong>.</li>
+                  <li>امسح أي كود موجود، واضغط على زر <strong>"نسخ الكود"</strong> بالأسفل والصقه في المحرر.</li>
+                  <li>اضغط على زر <strong>"نشر" (Deploy)</strong> بالأعلى ثم اختر <strong>"نشر جديد" (New deployment)</strong>.</li>
+                  <li>اضغط على أيقونة الترس ⚙️ واختر <strong>"تطبيق ويب" (Web app)</strong>.</li>
+                  <li>في حقل <i>"من يمكنه الوصول" (Who has access)</i> اختر: <strong>"أي مستخدم" (Anyone)</strong>.</li>
+                  <li>اضغط <strong>"نشر" (Deploy)</strong> وامنح الأذونات لحسابك (Authorize Access).</li>
+                  <li>انسخ رابط <strong>"عنوان URL لتطبيق الويب" (Web app URL)</strong> والصقه في حقل الإعدادات أعلاه!</li>
+                </ol>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <span style={{ fontWeight: 'bold', fontSize: '13px' }}>كود السكربت الجاهز:</span>
+                <button
+                  type="button"
+                  className="btn btn-start"
+                  onClick={copyScriptToClipboard}
+                  style={{ padding: '6px 16px', fontSize: '12.5px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}
+                >
+                  {isCopied ? '✅ تم النسخ!' : '📋 نسخ الكود بالكامل'}
+                </button>
+              </div>
+
+              <pre style={{
+                background: '#0f172a',
+                color: '#38bdf8',
+                padding: '16px',
+                borderRadius: '10px',
+                fontSize: '12px',
+                lineHeight: 1.5,
+                overflowX: 'auto',
+                direction: 'ltr',
+                textAlign: 'left',
+                maxHeight: '260px'
+              }}>
+                {gmailScriptCode}
+              </pre>
+            </div>
+
+            <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'flex-end' }}>
+              <button type="button" className="btn btn-ghost" onClick={() => setShowScriptModal(false)} style={{ padding: '8px 20px', borderRadius: '8px', cursor: 'pointer' }}>
+                إغلاق
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </form>
   );
 }

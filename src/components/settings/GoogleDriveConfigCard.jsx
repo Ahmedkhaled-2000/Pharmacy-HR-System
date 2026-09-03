@@ -6,7 +6,8 @@ export default function GoogleDriveConfigCard({
   setState,
   saveState,
   showToast,
-  executeWithOwnerGuard
+  executeWithOwnerGuard,
+  ownerLocks
 }) {
   const orgSettings = state.orgSettings || {};
   const currentDriveConfig = orgSettings.driveConfig || {};
@@ -78,10 +79,10 @@ export default function GoogleDriveConfigCard({
       showToast('💾 تم حفظ إعدادات Google Drive بنجاح');
     };
 
-    if (executeWithOwnerGuard && state.orgSettings?.ownerModificationLocks?.lockEditOrgSettings) {
+    if (executeWithOwnerGuard && (ownerLocks?.lockEditDriveConfig || state.orgSettings?.ownerModificationLocks?.lockEditDriveConfig || state.orgSettings?.ownerModificationLocks?.lockEditOrgSettings)) {
       executeWithOwnerGuard({
-        lockKey: 'lockEditOrgSettings',
-        actionTitle: 'تعديل إعدادات Google Drive',
+        lockKey: 'lockEditDriveConfig',
+        actionTitle: 'تعديل إعدادات Google Drive والمزامنة السحابية',
         actionDetails: 'تحديث رابط خدمة المزامنة السحابية لمجلدات الموظفين',
         onExecute: performSave
       });

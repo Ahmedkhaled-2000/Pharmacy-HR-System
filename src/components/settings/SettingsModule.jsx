@@ -120,7 +120,9 @@ export default function SettingsModule({
     lockFactoryReset: true,
     lockRestoreBackup: true,
     lockChangeAdminCredentials: true,
-    lockEditOrgSettings: false
+    lockEditOrgSettings: false,
+    lockEditGmailConfig: false,
+    lockEditDriveConfig: false
   };
 
   const [ownerLocks, setOwnerLocks] = useState(() => {
@@ -1125,6 +1127,8 @@ export default function SettingsModule({
           setState={setState}
           saveState={saveState}
           showToast={showToast}
+          executeWithOwnerGuard={executeWithOwnerGuard}
+          ownerLocks={ownerLocks}
         />
       )}
 
@@ -1136,6 +1140,7 @@ export default function SettingsModule({
           saveState={saveState}
           showToast={showToast}
           executeWithOwnerGuard={executeWithOwnerGuard}
+          ownerLocks={ownerLocks}
         />
       )}
 
@@ -2716,6 +2721,24 @@ export default function SettingsModule({
                           type="checkbox"
                           checked={Boolean(ownerLocks.lockEditOrgSettings)}
                           onChange={() => handleToggleOwnerLock('lockEditOrgSettings')}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#d97706' }}
+                        />
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#334155' }}>
+                        <span>✉️ قفل تعديل إعدادات بريد Gmail والتنبيهات الفورية</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(ownerLocks.lockEditGmailConfig)}
+                          onChange={() => handleToggleOwnerLock('lockEditGmailConfig')}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#d97706' }}
+                        />
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#334155' }}>
+                        <span>☁️ قفل تعديل إعدادات Google Drive والمزامنة السحابية</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(ownerLocks.lockEditDriveConfig)}
+                          onChange={() => handleToggleOwnerLock('lockEditDriveConfig')}
                           style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#d97706' }}
                         />
                       </label>
