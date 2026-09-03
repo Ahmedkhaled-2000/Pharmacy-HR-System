@@ -25,8 +25,9 @@ export default function OwnerOverrideModal({
 
   if (!isOpen) return null;
 
-  const validOwnerUser = (state?.orgSettings?.ownerUsername || 'owner').trim().toLowerCase();
-  const validOwnerPass = (state?.orgSettings?.ownerPassword || 'owner123').trim();
+  const orgSettings = state?.orgSettings || {};
+  const validOwnerUser = String(orgSettings.ownerUsername || 'owner').trim().toLowerCase();
+  const validOwnerPass = String(orgSettings.ownerPassword || 'owner123').trim();
 
   const handleVerify = (e) => {
     e.preventDefault();
@@ -42,20 +43,11 @@ export default function OwnerOverrideModal({
 
     setIsVerifying(true);
 
-    const isMatch =
-      (inputUser === validOwnerUser ||
-       inputUser === 'owner' ||
-       inputUser === 'المالك' ||
-       inputUser === 'مالك' ||
-       inputUser === 'admin' ||
-       inputUser === 'الإدارة العليا' ||
-       inputUser === 'الادارة العليا') &&
-      (inputPass === validOwnerPass ||
-       inputPass === 'owner123' ||
-       inputPass === (state?.orgSettings?.adminPassword || '123') ||
-       inputPass === '123');
+    // التحقق الصارم من بيانات المالك الحقيقية حصراً - استبعاد تام لبيانات الأدمن أو كلمات المرور الافتراضية
+    const isUserValid = (inputUser === validOwnerUser) || (validOwnerUser === 'owner' && (inputUser === 'المالك' || inputUser === 'مالك'));
+    const isPassValid = (inputPass === validOwnerPass);
 
-    if (isMatch) {
+    if (isUserValid && isPassValid) {
       setIsVerifying(false);
       setUsername('');
       setPassword('');
@@ -67,7 +59,7 @@ export default function OwnerOverrideModal({
       onClose?.();
     } else {
       setIsVerifying(false);
-      setErrorMsg('بيانات دخول المالك غير صحيحة. تم رفض العملية.');
+      setErrorMsg('بيانات دخول المالك غير صحيحة. تم رفض العملية. (هذا الإجراء يتطلب حصراً كلمة مرور المالك وليس الإدارة)');
     }
   };
 

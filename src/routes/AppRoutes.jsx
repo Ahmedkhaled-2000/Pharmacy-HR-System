@@ -292,7 +292,9 @@ export default function AppRoutes() {
     const adminPass = String(orgSettings.adminPassword || orgSettings.adminPass || '123').trim();
 
     // 1. Check Owner
-    if ((cleanUser === ownerUser || cleanUser === 'owner') && (cleanPass === ownerPass || cleanPass === 'owner123')) {
+    const isOwnerUser = (cleanUser === ownerUser) || (ownerUser === 'owner' && (cleanUser === 'المالك' || cleanUser === 'مالك'));
+    const isOwnerPass = (cleanPass === ownerPass);
+    if (isOwnerUser && isOwnerPass) {
       handleUnifiedLogin({ role: 'owner', redirectTab: 'dashboard' });
       return { success: true };
     }
@@ -742,6 +744,7 @@ export default function AppRoutes() {
                     filterMode={adminFilterMode}
                     customFrom={adminCustomFrom}
                     customTo={adminCustomTo}
+                    executeWithOwnerGuard={executeWithOwnerGuard}
                   />
                 )}
 

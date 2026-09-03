@@ -19,7 +19,8 @@ export default function EmployeePermissionsManagementModule({
   filterMode = 'month',
   customFrom = '',
   customTo = '',
-  hidePolicySettings = false
+  hidePolicySettings = false,
+  executeWithOwnerGuard
 }) {
   const isBranchManager = authRole === 'branch';
   const effectiveBranchId = isBranchManager ? currentBranch?.id : null;
@@ -85,29 +86,43 @@ export default function EmployeePermissionsManagementModule({
 
   // ── حفظ سياسة الأذونات ──
   const handleSavePolicy = async () => {
-    setIsSavingPolicy(true);
-    try {
-      const updatedPolicy = {
-        ...permPolicy,
-        maxHoursPerPermission: parseFloat(maxHours) || 2,
-        maxPermissionsPerMonth: parseInt(maxMonthlyCount, 10) || 2,
-        cycleStartDay: parseInt(cycleStartDay, 10) || 21,
-        cycleEndDay: parseInt(cycleEndDay, 10) || 20,
-        updatedAt: new Date().toISOString()
-      };
-      const updatedState = {
-        ...state,
-        permissionPolicy: updatedPolicy
-      };
-      if (setState) setState(updatedState);
-      if (saveState) await saveState(updatedState);
-      showToast?.('✅ تم حفظ ضوابط وسياسة أذونات الموظفين بنجاح');
-    } catch (err) {
-      console.error(err);
-      showToast?.('❌ حدث خطأ أثناء حفظ السياسة');
-    } finally {
-      setIsSavingPolicy(false);
+    const performSavePolicy = async () => {
+      setIsSavingPolicy(true);
+      try {
+        const updatedPolicy = {
+          ...permPolicy,
+          maxHoursPerPermission: parseFloat(maxHours) || 2,
+          maxPermissionsPerMonth: parseInt(maxMonthlyCount, 10) || 2,
+          cycleStartDay: parseInt(cycleStartDay, 10) || 21,
+          cycleEndDay: parseInt(cycleEndDay, 10) || 20,
+          updatedAt: new Date().toISOString()
+        };
+        const updatedState = {
+          ...state,
+          permissionPolicy: updatedPolicy
+        };
+        if (setState) setState(updatedState);
+        if (saveState) await saveState(updatedState);
+        showToast?.('✅ تم حفظ ضوابط وسياسة أذونات الموظفين بنجاح');
+      } catch (err) {
+        console.error(err);
+        showToast?.('❌ حدث خطأ أثناء حفظ السياسة');
+      } finally {
+        setIsSavingPolicy(false);
+      }
+    };
+
+    if (state.orgSettings?.ownerModificationLocks?.lockEditSystemPermissions && authRole !== 'owner') {
+      executeWithOwnerGuard?.({
+        lockKey: 'lockEditSystemPermissions',
+        actionTitle: 'حفظ وتعديل سياسة وضوابط الأذونات',
+        actionDetails: `الحد الأقصى للإذن: ${maxHours} ساعات · الحد الشهري: ${maxMonthlyCount} أذونات`,
+        onExecute: performSavePolicy
+      });
+      return;
     }
+
+    await performSavePolicy();
   };
 
   // ── جميع طلبات الأذونات ──
@@ -206,87 +221,118 @@ export default function EmployeePermissionsManagementModule({
     const targetPerm = allPermissions.find((p) => p.id === permId);
     if (!targetPerm) return;
 
-    const updatedRequests = (state.requests || []).map((r) => {
-      if (r.id === permId) {
-        return {
-          ...r,
-          status: 'approved',
-          adminApproved: true,
-          branchApproved: true,
-          approvedAt: new Date().toISOString()
-        };
+    const performApprove = async () => {
+      const updatedRequests = (state.requests || []).map((r) => {
+        if (r.id === permId) {
+          return {
+            ...r,
+            status: 'approved',
+            adminApproved: true,
+            branchApproved: true,
+            approvedAt: new Date().toISOString()
+          };
+        }
+        return r;
+      });
+
+      // 1. مزامنة البصمات (shifts) وتعويض الساعات
+      const updatedShifts = applyApprovedPermissionsToShifts({
+        ...state,
+        requests: updatedRequests
+      });
+
+      // 2. إلغاء أي جزاء تأخير أو خصم
+      let updatedLateIncidents = [...(state.lateIncidents || [])];
+      if (targetPerm.employeeId) {
+        try {
+          const { incidents } = recalculateEmployeeCycleLateness({
+            employeeId: targetPerm.employeeId,
+            cycleFilterFn: null,
+            state: { ...state, requests: updatedRequests, shifts: updatedShifts },
+            payrollCycleId: (targetPerm.reqDate || new Date().toISOString()).slice(0, 7)
+          });
+          const incidentIds = new Set(incidents.map((i) => i.id));
+          updatedLateIncidents = [
+            ...updatedLateIncidents.filter((i) => !incidentIds.has(i.id) && String(i.employeeId) !== String(targetPerm.employeeId)),
+            ...incidents
+          ];
+        } catch (e) {
+          console.error('Error recalculating upon permission approval:', e);
+        }
       }
-      return r;
-    });
 
-    // 1. مزامنة البصمات (shifts) وتعويض الساعات
-    const updatedShifts = applyApprovedPermissionsToShifts({
-      ...state,
-      requests: updatedRequests
-    });
+      const updatedState = {
+        ...state,
+        requests: updatedRequests,
+        shifts: updatedShifts,
+        lateIncidents: updatedLateIncidents
+      };
 
-    // 2. إلغاء أي جزاء تأخير أو خصم
-    let updatedLateIncidents = [...(state.lateIncidents || [])];
-    if (targetPerm.employeeId) {
-      try {
-        const { incidents } = recalculateEmployeeCycleLateness({
-          employeeId: targetPerm.employeeId,
-          cycleFilterFn: null,
-          state: { ...state, requests: updatedRequests, shifts: updatedShifts },
-          payrollCycleId: (targetPerm.reqDate || new Date().toISOString()).slice(0, 7)
-        });
-        const incidentIds = new Set(incidents.map((i) => i.id));
-        updatedLateIncidents = [
-          ...updatedLateIncidents.filter((i) => !incidentIds.has(i.id) && String(i.employeeId) !== String(targetPerm.employeeId)),
-          ...incidents
-        ];
-      } catch (e) {
-        console.error('Error recalculating upon permission approval:', e);
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      showToast?.('✅ تم اعتماد الإذن، وتعديل البصمة، وإلغاء الخصم بنجاح');
+      if (previewReq?.id === permId) {
+        setPreviewReq({ ...previewReq, status: 'approved', adminApproved: true, branchApproved: true });
       }
-    }
-
-    const updatedState = {
-      ...state,
-      requests: updatedRequests,
-      shifts: updatedShifts,
-      lateIncidents: updatedLateIncidents
     };
 
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    showToast?.('✅ تم اعتماد الإذن، وتعديل البصمة، وإلغاء الخصم بنجاح');
-    if (previewReq?.id === permId) {
-      setPreviewReq({ ...previewReq, status: 'approved', adminApproved: true, branchApproved: true });
+    const locks = state.orgSettings?.ownerModificationLocks || {};
+    if ((locks.lockApprovePermissions || locks.lockApproveRequests) && authRole !== 'owner') {
+      executeWithOwnerGuard?.({
+        lockKey: locks.lockApprovePermissions ? 'lockApprovePermissions' : 'lockApproveRequests',
+        actionTitle: `اعتماد إذن (${targetPerm.employeeName || targetPerm.employeeId})`,
+        actionDetails: `تاريخ الإذن: ${targetPerm.reqDate || targetPerm.date || '—'} · المدة: ${targetPerm.durationText || ''}`,
+        onExecute: performApprove
+      });
+      return;
     }
+
+    await performApprove();
   };
 
   // ── رفض إذن ──
   const handleRejectPermission = async (permId) => {
-    const updatedRequests = (state.requests || []).map((r) => {
-      if (r.id === permId) {
-        return {
-          ...r,
-          status: 'rejected',
-          isRejected: true,
-          adminApproved: false,
-          branchApproved: false,
-          rejectedAt: new Date().toISOString()
-        };
-      }
-      return r;
-    });
+    const targetPerm = allPermissions.find((p) => p.id === permId);
+    const performReject = async () => {
+      const updatedRequests = (state.requests || []).map((r) => {
+        if (r.id === permId) {
+          return {
+            ...r,
+            status: 'rejected',
+            isRejected: true,
+            adminApproved: false,
+            branchApproved: false,
+            rejectedAt: new Date().toISOString()
+          };
+        }
+        return r;
+      });
 
-    const updatedState = {
-      ...state,
-      requests: updatedRequests
+      const updatedState = {
+        ...state,
+        requests: updatedRequests
+      };
+
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      showToast?.('⚠️ تم رفض طلب الإذن');
+      if (previewReq?.id === permId) {
+        setPreviewReq({ ...previewReq, status: 'rejected', isRejected: true });
+      }
     };
 
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    showToast?.('⚠️ تم رفض طلب الإذن');
-    if (previewReq?.id === permId) {
-      setPreviewReq({ ...previewReq, status: 'rejected', isRejected: true });
+    const locks = state.orgSettings?.ownerModificationLocks || {};
+    if (locks.lockRejectRequests && authRole !== 'owner') {
+      executeWithOwnerGuard?.({
+        lockKey: 'lockRejectRequests',
+        actionTitle: `رفض إذن (${targetPerm?.employeeName || permId})`,
+        actionDetails: 'رفض طلب الإذن',
+        onExecute: performReject
+      });
+      return;
     }
+
+    await performReject();
   };
 
   // ── إصدار إذن استثنائي ──
@@ -333,58 +379,73 @@ export default function EmployeePermissionsManagementModule({
 
       const updatedRequests = [newExcPerm, ...(state.requests || [])];
 
-      if (isAdmin) {
-        // مزامنة فورية مع البصمات (shifts) فقط عند إصدار الإذن مباشرة من الإدارة العليا
-        const updatedShifts = applyApprovedPermissionsToShifts({
-          ...state,
-          requests: updatedRequests
-        });
-
-        // إلغاء الجزاءات اللائحية لليوم المعني
-        let updatedLateIncidents = [...(state.lateIncidents || [])];
-        try {
-          const { incidents } = recalculateEmployeeCycleLateness({
-            employeeId: emp.id,
-            cycleFilterFn: null,
-            state: { ...state, requests: updatedRequests, shifts: updatedShifts },
-            payrollCycleId: excDate.slice(0, 7)
+      const performCreateExceptional = async () => {
+        if (isAdmin) {
+          // مزامنة فورية مع البصمات (shifts) فقط عند إصدار الإذن مباشرة من الإدارة العليا
+          const updatedShifts = applyApprovedPermissionsToShifts({
+            ...state,
+            requests: updatedRequests
           });
-          const incidentIds = new Set(incidents.map((i) => i.id));
-          updatedLateIncidents = [
-            ...updatedLateIncidents.filter((i) => !incidentIds.has(i.id) && String(i.employeeId) !== String(emp.id)),
-            ...incidents
-          ];
-        } catch (err) {
-          console.error('Error in recalculation:', err);
+
+          // إلغاء الجزاءات اللائحية لليوم المعني
+          let updatedLateIncidents = [...(state.lateIncidents || [])];
+          try {
+            const { incidents } = recalculateEmployeeCycleLateness({
+              employeeId: emp.id,
+              cycleFilterFn: null,
+              state: { ...state, requests: updatedRequests, shifts: updatedShifts },
+              payrollCycleId: excDate.slice(0, 7)
+            });
+            const incidentIds = new Set(incidents.map((i) => i.id));
+            updatedLateIncidents = [
+              ...updatedLateIncidents.filter((i) => !incidentIds.has(i.id) && String(i.employeeId) !== String(emp.id)),
+              ...incidents
+            ];
+          } catch (err) {
+            console.error('Error in recalculation:', err);
+          }
+
+          const updatedState = {
+            ...state,
+            requests: updatedRequests,
+            shifts: updatedShifts,
+            lateIncidents: updatedLateIncidents
+          };
+
+          if (setState) setState(updatedState);
+          if (saveState) await saveState(updatedState);
+
+          showToast?.(`✅ تم إصدار واعتماد الإذن الاستثنائي للموظف (${emp.name}) وتعديل بصمته فورياً`);
+        } else {
+          // عند طلبه من مدير الفرع، يتم حفظه كطلب معلق بانتظار موافقة واعتماد الإدارة العليا
+          const updatedState = {
+            ...state,
+            requests: updatedRequests
+          };
+
+          if (setState) setState(updatedState);
+          if (saveState) await saveState(updatedState);
+
+          showToast?.(`⏳ تم إرسال طلب الإذن الاستثنائي للموظف (${emp.name}) إلى الإدارة العليا للاعتماد`);
         }
 
-        const updatedState = {
-          ...state,
-          requests: updatedRequests,
-          shifts: updatedShifts,
-          lateIncidents: updatedLateIncidents
-        };
+        setShowExceptionalModal(false);
+        setExcEmpId('');
+        setExcReason('');
+      };
 
-        if (setState) setState(updatedState);
-        if (saveState) await saveState(updatedState);
-
-        showToast?.(`✅ تم إصدار واعتماد الإذن الاستثنائي للموظف (${emp.name}) وتعديل بصمته فورياً`);
-      } else {
-        // عند طلبه من مدير الفرع، يتم حفظه كطلب معلق بانتظار موافقة واعتماد الإدارة العليا
-        const updatedState = {
-          ...state,
-          requests: updatedRequests
-        };
-
-        if (setState) setState(updatedState);
-        if (saveState) await saveState(updatedState);
-
-        showToast?.(`⏳ تم إرسال طلب الإذن الاستثنائي للموظف (${emp.name}) إلى الإدارة العليا للاعتماد`);
+      const locks = state.orgSettings?.ownerModificationLocks || {};
+      if (isAdmin && (locks.lockApprovePermissions || locks.lockApproveRequests) && authRole !== 'owner') {
+        executeWithOwnerGuard?.({
+          lockKey: locks.lockApprovePermissions ? 'lockApprovePermissions' : 'lockApproveRequests',
+          actionTitle: `إصدار واعتماد إذن استثنائي (${emp.name})`,
+          actionDetails: `تاريخ: ${excDate} · المدة: ${durObj.text}`,
+          onExecute: performCreateExceptional
+        });
+        return;
       }
 
-      setShowExceptionalModal(false);
-      setExcEmpId('');
-      setExcReason('');
+      await performCreateExceptional();
     } catch (err) {
       console.error(err);
       showToast?.('❌ حدث خطأ أثناء إنشاء الإذن الاستثنائي');

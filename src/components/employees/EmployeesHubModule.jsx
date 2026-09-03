@@ -96,6 +96,7 @@ export default function EmployeesHubModule({
           exportEmployeesToExcel={exportEmployeesToExcel}
           openAddEmpModal={openAddEmpModal}
           openEmpPhonesModal={openEmpPhonesModal}
+          executeWithOwnerGuard={executeWithOwnerGuard}
         />
       )}
 

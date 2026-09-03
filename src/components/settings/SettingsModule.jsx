@@ -160,33 +160,24 @@ export default function SettingsModule({
   const handleUnlockOwnerTab = (e) => {
     e.preventDefault();
     setOwnerUnlockError('');
-    const validOwnerUser = (orgSettings.ownerUsername || state?.orgSettings?.ownerUsername || 'owner').trim().toLowerCase();
-    const validOwnerPass = (orgSettings.ownerPassword || state?.orgSettings?.ownerPassword || 'owner123').trim();
+    const validOwnerUser = String(orgSettings.ownerUsername || state?.orgSettings?.ownerUsername || 'owner').trim().toLowerCase();
+    const validOwnerPass = String(orgSettings.ownerPassword || state?.orgSettings?.ownerPassword || 'owner123').trim();
 
     const inputUser = ownerUnlockUser.trim().toLowerCase();
     const inputPass = ownerUnlockPass.trim();
 
-    const isMatch =
-      (inputUser === validOwnerUser ||
-       inputUser === 'owner' ||
-       inputUser === 'المالك' ||
-       inputUser === 'مالك' ||
-       inputUser === 'admin' ||
-       inputUser === 'الإدارة العليا' ||
-       inputUser === 'الادارة العليا') &&
-      (inputPass === validOwnerPass ||
-       inputPass === 'owner123' ||
-       inputPass === (orgSettings.adminPassword || state?.orgSettings?.adminPassword || '123') ||
-       inputPass === '123');
+    // التحقق الصارم من بيانات المالك الحقيقية حصراً ومنع بيانات الأدمن
+    const isUserValid = (inputUser === validOwnerUser) || (validOwnerUser === 'owner' && (inputUser === 'المالك' || inputUser === 'مالك'));
+    const isPassValid = (inputPass === validOwnerPass);
 
-    if (isMatch) {
+    if (isUserValid && isPassValid) {
       setIsOwnerUnlocked(true);
       setOwnerUnlockUser('');
       setOwnerUnlockPass('');
       setOwnerUnlockError('');
       showToast?.('👑 تم فتح وتصريح شاشة تحكم المالك بنجاح');
     } else {
-      setOwnerUnlockError('بيانات دخول المالك غير صحيحة. يرجى التأكد من اسم المستخدم وكلمة المرور.');
+      setOwnerUnlockError('بيانات دخول المالك غير صحيحة. يتطلب حصراً بيانات حساب المالك وليس الإدارة.');
     }
   };
 
@@ -586,25 +577,49 @@ export default function SettingsModule({
       return;
     }
 
+    if (state.orgSettings?.ownerModificationLocks?.lockEditOrgSettings && authRole !== 'owner') {
+      executeWithOwnerGuard?.({
+        lockKey: 'lockEditOrgSettings',
+        actionTitle: 'حفظ وتعديل إعدادات المؤسسة والنظام',
+        actionDetails: 'تعديل البيانات الأساسية وضوابط المنشأة',
+        onExecute: performSaveGeneral
+      });
+      return;
+    }
+
     await performSaveGeneral();
   };
 
   const handleToggleRule = async (ruleId, field) => {
-    const updatedRules = rules.map((r) => {
-      if (r.id === ruleId) {
-        return { ...r, [field]: !r[field] };
-      }
-      return r;
-    });
-    setRules(updatedRules);
-    const updatedState = {
-      ...state,
-      approvalRules: updatedRules,
-      _approvalRulesUpdatedAt: new Date().toISOString()
+    const performToggle = async () => {
+      const updatedRules = rules.map((r) => {
+        if (r.id === ruleId) {
+          return { ...r, [field]: !r[field] };
+        }
+        return r;
+      });
+      setRules(updatedRules);
+      const updatedState = {
+        ...state,
+        approvalRules: updatedRules,
+        _approvalRulesUpdatedAt: new Date().toISOString()
+      };
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      showToast?.('✅ تم التحديث والتأثير على قواعد التسلسل والموافقات');
     };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    showToast?.('✅ تم التحديث والتأثير على قواعد التسلسل والموافقات');
+
+    if ((state.orgSettings?.ownerModificationLocks?.lockEditSystemPermissions || state.orgSettings?.ownerModificationLocks?.lockEditOrgSettings) && authRole !== 'owner') {
+      executeWithOwnerGuard?.({
+        lockKey: state.orgSettings?.ownerModificationLocks?.lockEditSystemPermissions ? 'lockEditSystemPermissions' : 'lockEditOrgSettings',
+        actionTitle: 'تعديل مصفوفة قواعد تسلسل الموافقات',
+        actionDetails: 'تعديل صلاحيات الاعتماد للطلب',
+        onExecute: performToggle
+      });
+      return;
+    }
+
+    await performToggle();
   };
 
   const handleAddIP = () => {

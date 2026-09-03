@@ -355,11 +355,18 @@ export function smartMergeStates(localState, remoteState) {
         }
       }
 
-      // دمج عميق لأقفال المالك لضمان عدم فقدان أي قفل عند التزامن
-      mergedSettings.ownerModificationLocks = {
-        ...(localSettings.ownerModificationLocks || {}),
-        ...(remoteSettings.ownerModificationLocks || {})
-      };
+      // دمج عميق لأقفال المالك لضمان عدم فقدان أي قفل عند التزامن مع احترام الإعدادات الأحدث
+      if (localTime >= remoteTime) {
+        mergedSettings.ownerModificationLocks = {
+          ...(remoteSettings.ownerModificationLocks || {}),
+          ...(localSettings.ownerModificationLocks || {})
+        };
+      } else {
+        mergedSettings.ownerModificationLocks = {
+          ...(localSettings.ownerModificationLocks || {}),
+          ...(remoteSettings.ownerModificationLocks || {})
+        };
+      }
 
       return mergedSettings;
     })(),

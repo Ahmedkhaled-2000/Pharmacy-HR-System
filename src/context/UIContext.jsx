@@ -121,7 +121,16 @@ export function UIProvider({ children }) {
       onExecute?.();
       return;
     }
-    const isLocked = state?.orgSettings?.ownerModificationLocks?.[lockKey];
+    let isLocked = Boolean(state?.orgSettings?.ownerModificationLocks?.[lockKey]);
+    if (!isLocked) {
+      try {
+        const raw = localStorage.getItem('pharmacy-owner-locks');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && parsed[lockKey]) isLocked = true;
+        }
+      } catch {}
+    }
     if (isLocked) {
       setOwnerOverrideModal({
         isOpen: true,

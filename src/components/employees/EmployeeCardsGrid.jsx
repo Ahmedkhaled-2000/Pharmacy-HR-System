@@ -24,7 +24,8 @@ export default function EmployeeCardsGrid({
   openAddEmpModal,
   openEmpPhonesModal,
   onTerminateEmployee,
-  onReinstateEmployee
+  onReinstateEmployee,
+  executeWithOwnerGuard
 }) {
   const [activeMainTab, setActiveMainTab] = useState('active'); // 'active' | 'resigned'
   const [searchTerm, setSearchTerm] = useState('');
@@ -139,48 +140,62 @@ export default function EmployeeCardsGrid({
 
   // Handle Termination
   const handleConfirmTermination = async (empId, data) => {
-    if (onTerminateEmployee) {
-      await onTerminateEmployee(empId, data);
-      setTerminationModalEmp(null);
-      return;
-    }
-
-    // Default internal handler
-    const updatedEmployees = employees.map((e) => {
-      if (String(e.id) === String(empId)) {
-        return {
-          ...e,
-          status: 'تم الاستقالة',
-          is_active: false,
-          fingerprint_active: false,
-          terminationReason: data.terminationReason,
-          terminationDate: data.terminationDate,
-          resignationDate: data.terminationDate,
-          terminationNotes: data.clearanceNotes,
-          terminatedAt: new Date().toISOString(),
-          finalSettlement: data.settlement,
-          signedClearanceDoc: data.signedClearanceDoc || e.signedClearanceDoc || null,
-          updatedAt: new Date().toISOString()
-        };
+    const targetEmp = employees.find((e) => String(e.id) === String(empId));
+    const performTermination = async () => {
+      if (onTerminateEmployee) {
+        await onTerminateEmployee(empId, data);
+        setTerminationModalEmp(null);
+        return;
       }
-      return e;
-    });
 
-    const updatedActiveShifts = { ...(state.activeShifts || {}) };
-    delete updatedActiveShifts[empId];
-    delete updatedActiveShifts[String(empId)];
+      // Default internal handler
+      const updatedEmployees = employees.map((e) => {
+        if (String(e.id) === String(empId)) {
+          return {
+            ...e,
+            status: 'تم الاستقالة',
+            is_active: false,
+            fingerprint_active: false,
+            terminationReason: data.terminationReason,
+            terminationDate: data.terminationDate,
+            resignationDate: data.terminationDate,
+            terminationNotes: data.clearanceNotes,
+            terminatedAt: new Date().toISOString(),
+            finalSettlement: data.settlement,
+            signedClearanceDoc: data.signedClearanceDoc || e.signedClearanceDoc || null,
+            updatedAt: new Date().toISOString()
+          };
+        }
+        return e;
+      });
 
-    const updatedState = {
-      ...state,
-      employees: updatedEmployees,
-      activeShifts: updatedActiveShifts
+      const updatedActiveShifts = { ...(state.activeShifts || {}) };
+      delete updatedActiveShifts[empId];
+      delete updatedActiveShifts[String(empId)];
+
+      const updatedState = {
+        ...state,
+        employees: updatedEmployees,
+        activeShifts: updatedActiveShifts
+      };
+
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      if (showToast) showToast('✅ تم إنهاء خدمة الموظف وتصفية حسابه المالي ونقله لتبويبة المستقيلين');
+
+      setTerminationModalEmp(null);
     };
 
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    if (showToast) showToast('✅ تم إنهاء خدمة الموظف وتصفية حسابه المالي ونقله لتبويبة المستقيلين');
-
-    setTerminationModalEmp(null);
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockTerminateEmployee',
+        actionTitle: `اعتماد إنهاء خدمة الموظف (${targetEmp?.name || empId})`,
+        actionDetails: `سبب الإنهاء: ${data.terminationReason || '—'} · تاريخ السريان: ${data.terminationDate || '—'}`,
+        onExecute: performTermination
+      });
+    } else {
+      await performTermination();
+    }
   };
 
   // Handle Save / Delete Signed Clearance Document

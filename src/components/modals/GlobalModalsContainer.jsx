@@ -19,12 +19,14 @@ import OwnerOverrideModal from '../common/OwnerOverrideModal';
 import OfflineStateOverlay from '../common/OfflineStateOverlay';
 import ConfirmDialogModal from '../common/ConfirmDialogModal';
 
+import { useAuth } from '../../context/AuthContext';
 import { useData } from '../../context/DataContext';
 import { useUI } from '../../context/UIContext';
 import { useAttendanceEngine } from '../../hooks/useAttendanceEngine';
 import { useExcelOperations } from '../../hooks/useExcelOperations';
 
 export default function GlobalModalsContainer() {
+  const { authRole } = useAuth();
   const {
     state,
     setState,
@@ -42,6 +44,7 @@ export default function GlobalModalsContainer() {
     monthPicker,
     ownerOverrideModal,
     setOwnerOverrideModal,
+    executeWithOwnerGuard,
     isEmpModalOpen,
     setIsEmpModalOpen,
     editingEmp,
@@ -176,74 +179,93 @@ export default function GlobalModalsContainer() {
     const workDaysPerMonth = parseArabicFloat(empWorkDays) || 26;
     const annualLeaveBalance = parseArabicFloat(empAnnualLeaveBalance) || 0;
 
-    let updatedEmps = [];
-    if (editingEmp) {
-      updatedEmps = (state.employees || []).map((e) =>
-        e.id === editingEmp.id
-          ? {
-              ...e,
-              name: empName.trim(),
-              nickname: empNickname.trim(),
-              code: empCode.trim(),
-              username: empCode.trim(),
-              phone: empPhone.trim(),
-              jobTitle: empJobTitle.trim() || 'موظف',
-              salary,
-              workHoursPerDay,
-              workDaysPerMonth,
-              password: empPassword.trim() || '123',
-              annualLeaveBalance,
-              photoUrl: empPhotoUrl.trim()
-            }
-          : e
-      );
-      showToast(`تم تعديل بيانات الموظف "${empName}" بنجاح`);
-    } else {
-      const newEmp = {
-        id: 'emp_' + uid(),
-        name: empName.trim(),
-        nickname: empNickname.trim(),
-        code: empCode.trim(),
-        username: empCode.trim(),
-        phone: empPhone.trim(),
-        jobTitle: empJobTitle.trim() || 'موظف',
-        salary,
-        workHoursPerDay,
-        workDaysPerMonth,
-        password: empPassword.trim() || '123',
-        annualLeaveBalance,
-        photoUrl: empPhotoUrl.trim(),
-        createdAt: getRealTodayStr(),
-        devices: []
-      };
-      updatedEmps = [...(state.employees || []), newEmp];
-      showToast(`تمت إضافة الموظف الجديد "${newEmp.name}" بنجاح`);
-    }
+    const isSalaryChanged = editingEmp && parseFloat(editingEmp.salary) !== salary;
 
-    const updatedState = { ...state, employees: updatedEmps };
-    setState(updatedState);
-    await saveState(updatedState);
-    setIsEmpModalOpen(false);
+    const performSaveEmp = async () => {
+      let updatedEmps = [];
+      if (editingEmp) {
+        updatedEmps = (state.employees || []).map((e) =>
+          e.id === editingEmp.id
+            ? {
+                ...e,
+                name: empName.trim(),
+                nickname: empNickname.trim(),
+                code: empCode.trim(),
+                username: empCode.trim(),
+                phone: empPhone.trim(),
+                jobTitle: empJobTitle.trim() || 'موظف',
+                salary,
+                workHoursPerDay,
+                workDaysPerMonth,
+                password: empPassword.trim() || '123',
+                annualLeaveBalance,
+                photoUrl: empPhotoUrl.trim()
+              }
+            : e
+        );
+        showToast(`تم تعديل بيانات الموظف "${empName}" بنجاح`);
+      } else {
+        const newEmp = {
+          id: 'emp_' + uid(),
+          name: empName.trim(),
+          nickname: empNickname.trim(),
+          code: empCode.trim(),
+          username: empCode.trim(),
+          phone: empPhone.trim(),
+          jobTitle: empJobTitle.trim() || 'موظف',
+          salary,
+          workHoursPerDay,
+          workDaysPerMonth,
+          password: empPassword.trim() || '123',
+          annualLeaveBalance,
+          photoUrl: empPhotoUrl.trim(),
+          createdAt: getRealTodayStr(),
+          devices: []
+        };
+        updatedEmps = [...(state.employees || []), newEmp];
+        showToast(`تمت إضافة الموظف الجديد "${newEmp.name}" بنجاح`);
+      }
 
-    // Auto-sync Word document to Google Drive in background
-    const driveConfig = state?.orgSettings?.driveConfig;
-    if (driveConfig && driveConfig.enabled && driveConfig.serviceUrl && driveConfig.autoSyncOnEmployeeSave !== false) {
-      const targetEmp = updatedEmps.find(e => e.id === (editingEmp ? editingEmp.id : updatedEmps[updatedEmps.length - 1]?.id));
-      if (targetEmp) {
-        syncEmployeeEntireDrive(targetEmp, state.orgSettings)
-          .then(res => {
-            if (res.success && res.updatedEmp && setState) {
-              setState(prev => {
-                const emps = (prev.employees || []).map(e => String(e.id) === String(res.updatedEmp.id) ? res.updatedEmp : e);
-                const nextState = { ...prev, employees: emps };
-                if (saveState) saveState(nextState);
-                return nextState;
-              });
-            }
-          })
-          .catch(err => console.warn('Drive auto sync error:', err));
+      const updatedState = { ...state, employees: updatedEmps };
+      setState(updatedState);
+      await saveState(updatedState);
+      setIsEmpModalOpen(false);
+
+      // Auto-sync Word document to Google Drive in background
+      const driveConfig = state?.orgSettings?.driveConfig;
+      if (driveConfig && driveConfig.enabled && driveConfig.serviceUrl && driveConfig.autoSyncOnEmployeeSave !== false) {
+        const targetEmp = updatedEmps.find(e => e.id === (editingEmp ? editingEmp.id : updatedEmps[updatedEmps.length - 1]?.id));
+        if (targetEmp) {
+          syncEmployeeEntireDrive(targetEmp, state.orgSettings)
+            .then(res => {
+              if (res.success && res.updatedEmp && setState) {
+                setState(prev => {
+                  const emps = (prev.employees || []).map(e => String(e.id) === String(res.updatedEmp.id) ? res.updatedEmp : e);
+                  const nextState = { ...prev, employees: emps };
+                  if (saveState) saveState(nextState);
+                  return nextState;
+                });
+              }
+            })
+            .catch(err => console.warn('Drive auto sync error:', err));
+        }
+      }
+    };
+
+    if (isSalaryChanged && authRole !== 'owner') {
+      const isSalaryLocked = Boolean(state?.orgSettings?.ownerModificationLocks?.lockEditSalary);
+      if (isSalaryLocked && executeWithOwnerGuard) {
+        executeWithOwnerGuard({
+          lockKey: 'lockEditSalary',
+          actionTitle: `تعديل الراتب الأساسي للموظف (${empName.trim()})`,
+          actionDetails: `الراتب السابق: ${parseFloat(editingEmp.salary) || 0} ج.م -> الراتب الجديد: ${salary} ج.م`,
+          onExecute: performSaveEmp
+        });
+        return;
       }
     }
+
+    await performSaveEmp();
   };
 
   return (
