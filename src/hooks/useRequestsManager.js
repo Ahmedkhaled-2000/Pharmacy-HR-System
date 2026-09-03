@@ -52,6 +52,7 @@ export function useRequestsManager() {
       let updatedEmps = [...(state.employees || [])];
       let updatedShifts = [...(state.shifts || [])];
       let updatedLeaveRequests = [...(state.leaveRequests || [])];
+      let updatedPermRequests = [...(state.permissionRequests || [])];
       let updatedLeaveHistory = [...(state.leaveHistory || [])];
       let updatedResignations = [...(state.resignationRequests || [])];
       let updatedLateIncidents = [...(state.lateIncidents || [])];
@@ -251,8 +252,21 @@ export function useRequestsManager() {
         }
 
         // 6. Approved Permissions Integration
-        if (target.type === 'permission' || target.type === 'إذن' || target.type === 'late_permission' || target.type === 'early_leave') {
+        if (target.type === 'permission' || target.type === 'إذن' || target.type === 'late_permission' || target.type === 'early_leave' || target.type === 'permission_request' || target.permType) {
           updatedShifts = applyApprovedPermissionsToShifts([target], updatedShifts, state.bylaws, updatedEmps);
+          const pIdx = updatedPermRequests.findIndex(p => p.id === target.id || (String(p.employeeId) === String(target.employeeId) && p.date === target.date));
+          const approvedPermObj = {
+            ...target,
+            branchApproved: isBranchApproved,
+            adminApproved: isAdminApproved,
+            status: isFullyApproved ? 'approved' : 'pending_admin',
+            approvedAt: isFullyApproved ? new Date().toISOString() : target.approvedAt
+          };
+          if (pIdx >= 0) {
+            updatedPermRequests[pIdx] = { ...updatedPermRequests[pIdx], ...approvedPermObj };
+          } else {
+            updatedPermRequests.unshift(approvedPermObj);
+          }
         }
 
         // 7. Roster Request Integration
@@ -475,8 +489,14 @@ export function useRequestsManager() {
           const descriptors = target.descriptors;
           const bioType = target.biometricType || 'face';
 
+          const targetCode = target.employeeCode;
+
           updatedEmps = updatedEmps.map((e) => {
-            if (String(e.id) === String(empId)) {
+            const isMatch = String(e.id) === String(empId) ||
+              (targetCode && String(e.code) === String(targetCode)) ||
+              (e.code && String(e.code) === String(empId));
+
+            if (isMatch) {
               return {
                 ...e,
                 has_face_descriptor: bioType !== 'hand',
@@ -502,9 +522,14 @@ export function useRequestsManager() {
         // 7.7. Biometric Reset Approval Integration
         if (target.type === 'biometric_reset') {
           const empId = target.employeeId;
+          const targetCode = target.employeeCode;
 
           updatedEmps = updatedEmps.map((e) => {
-            if (String(e.id) === String(empId)) {
+            const isMatch = String(e.id) === String(empId) ||
+              (targetCode && String(e.code) === String(targetCode)) ||
+              (e.code && String(e.code) === String(empId));
+
+            if (isMatch) {
               return {
                 ...e,
                 has_face_descriptor: false,
@@ -609,6 +634,7 @@ export function useRequestsManager() {
         shifts: updatedShifts,
         activeShifts: updatedActiveShifts,
         leaveRequests: updatedLeaveRequests,
+        permissionRequests: updatedPermRequests,
         leaveHistory: updatedLeaveHistory,
         resignationRequests: updatedResignations,
         lateIncidents: updatedLateIncidents,
@@ -813,6 +839,12 @@ export function useRequestsManager() {
           : lr
       );
 
+      const updatedPermRequests = (state.permissionRequests || []).map((p) =>
+        p.id === requestId || (targetReq && String(p.employeeId) === String(targetReq.employeeId) && p.date === targetReq.date)
+          ? { ...p, status: 'rejected', adminApproved: false, rejectedAt: new Date().toISOString() }
+          : p
+      );
+
       const updatedLoans = (state.loans || []).map((l) =>
         l.id === requestId || l.requestId === requestId ? { ...l, status: 'rejected', adminApproved: false } : l
       );
@@ -842,6 +874,7 @@ export function useRequestsManager() {
         requests: updatedRequests,
         shifts: updatedShifts,
         leaveRequests: updatedLeaveRequests,
+        permissionRequests: updatedPermRequests,
         loans: updatedLoans,
         shiftSwaps: updatedSwaps,
         resignationRequests: updatedResignations,

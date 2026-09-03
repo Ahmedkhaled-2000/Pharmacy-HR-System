@@ -62,18 +62,34 @@ export default function EmployeeLoansModule({
 
     const map = new Map();
     reqs.forEach((r) => {
-      map.set(String(r.id), r);
+      if (!r) return;
+      map.set(String(r.id), { ...r });
     });
     directLoans.forEach((item) => {
-      const existing = map.get(String(item.id));
+      if (!item) return;
+      const itemIdStr = String(item.id);
+      const existing = map.get(itemIdStr) || (item.requestId ? map.get(String(item.requestId)) : null);
       const history = (item?.paymentsHistory && item.paymentsHistory.length > 0) ? item.paymentsHistory : (existing?.paymentsHistory || existing?.payments || existing?.paidHistory || []);
       const paidVal = item?.paidAmount !== undefined ? item.paidAmount : (existing?.paidAmount || 0);
-      map.set(String(item.id), {
+
+      const isApproved = item.status === 'approved' || item.adminApproved || existing?.status === 'approved' || existing?.adminApproved;
+      const isRejected = !isApproved && (item.status === 'rejected' || existing?.status === 'rejected');
+      let finalStatus = existing?.status || item.status || 'pending';
+      if (isApproved) finalStatus = 'approved';
+      else if (isRejected) finalStatus = 'rejected';
+      else if (item.status === 'cancelled' || existing?.status === 'cancelled') finalStatus = 'cancelled';
+
+      const mergedObj = {
         ...(existing || {}),
         ...item,
+        status: finalStatus,
+        adminApproved: isApproved,
         paidAmount: parseFloat(paidVal) || 0,
         paymentsHistory: history
-      });
+      };
+
+      map.set(itemIdStr, mergedObj);
+      if (item.requestId) map.set(String(item.requestId), mergedObj);
     });
     return Array.from(map.values()).sort((a, b) => {
       const getT = (r) => {

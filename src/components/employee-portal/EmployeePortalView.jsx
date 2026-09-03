@@ -1447,178 +1447,271 @@ export default function EmployeePortalView({
     ).length;
   }, [state.lateIncidents, emp?.id, filterFn]);
 
+  const isEmpRequestMatch = (r, targetEmp) => {
+    if (!r || !targetEmp) return false;
+    const rId = String(r.employeeId || '').trim();
+    const rCode = String(r.employeeCode || '').trim();
+    const eId = String(targetEmp.id || '').trim();
+    const eCode = String(targetEmp.code || '').trim();
+    const eUser = String(targetEmp.username || '').trim();
+    return (
+      (eId && (rId === eId || rCode === eId)) ||
+      (eCode && (rId === eCode || rCode === eCode)) ||
+      (eUser && (rId === eUser || rCode === eUser))
+    );
+  };
+
   // ── Biometric Self-Registration & Reset Handlers ──
   const handleRegisterBiometricSuccess = async (descriptors, type, photoUrl) => {
-    setShowBiometricRegisterModal(false);
+    try {
+      const activeEmp = emp || currentEmpUser || {};
+      const empId = activeEmp.id || activeEmp.code || 'emp_' + Date.now();
+      const empCode = activeEmp.code || activeEmp.id || '';
+      const empName = activeEmp.name || 'موظف';
+      const empBranchId = activeEmp.branchId || selectedBranchId || null;
 
-    if (emp?.has_face_descriptor || emp?.has_hand_descriptor) {
-      alert('بصمتك مسجلة بالفعل ولا يمكن إعادة تسجيلها إلا بعد مسحها أو موافقة الإدارة العليا.');
-      return;
-    }
+      const hasBioAlready = Boolean(
+        activeEmp.has_face_descriptor || activeEmp.face_descriptor ||
+        activeEmp.has_hand_descriptor || activeEmp.hand_descriptor
+      );
 
-    const hasPending = (state.requests || []).some(
-      r => String(r.employeeId) === String(emp.id) &&
-           r.type === 'biometric_registration' &&
-           r.status === 'pending'
-    );
-    if (hasPending) {
-      alert('لديك طلب تسجيل بصمة قيد المراجعة لدى الإدارة العليا بالفعل.');
-      return;
-    }
-
-    const now = new Date();
-    const dateStr = now.toISOString().slice(0, 10);
-    const branchObj = (state.branches || []).find(b => String(b.id) === String(emp.branchId || selectedBranchId));
-    const branchName = branchObj ? branchObj.name : 'الفرع الرئيسي';
-
-    let driveResult = null;
-    const driveConfig = orgSettings?.googleDrive || state?.orgSettings?.googleDrive;
-    if (driveConfig && driveConfig.serviceUrl && photoUrl) {
-      try {
-        driveResult = await uploadBiometricAttendancePhoto({
-          employee: emp,
-          photoDataUrl: photoUrl,
-          actionType: 'تسجيل_بصمة',
-          driveConfig
-        });
-      } catch (driveErr) {
-        console.warn('Could not upload registration photo to Google Drive:', driveErr);
+      if (hasBioAlready) {
+        setShowBiometricRegisterModal(false);
+        alert('بصمتك مسجلة بالفعل ولا يمكن إعادة تسجيلها إلا بعد مسحها أو موافقة الإدارة العليا.');
+        return;
       }
-    }
 
-    const requestId = 'REQ-BIO-REG-' + Date.now();
-    const bioLabel = type === 'hand' ? 'بصمة اليد' : 'بصمة الوجه';
-    const requestData = {
-      id: requestId,
-      type: 'biometric_registration',
-      requestType: 'biometric_registration',
-      typeLabel: `تسجيل ${bioLabel} جديدة (ذاتي)`,
-      employeeId: emp.id,
-      employeeCode: emp.code,
-      employeeName: emp.name,
-      branchId: emp.branchId || selectedBranchId,
-      branchName: branchName,
-      biometricType: type || 'face',
-      descriptors: descriptors,
-      photoUrl: photoUrl || null,
-      drivePhotoUrl: driveResult?.fileUrl || null,
-      driveFileId: driveResult?.fileId || null,
-      date: dateStr,
-      createdAt: now.toISOString(),
-      status: 'pending',
-      requiresSuperAdmin: true,
-      requiresBranchManager: false,
-      adminApproved: false,
-      notes: `قام الموظف بتسجيل ${bioLabel} ذاتياً من حسابه وبانتظار مراجعة واعتماد الإدارة العليا لتفعيلها.`
-    };
+      const hasPending = (state?.requests || []).some(
+        r => isEmpRequestMatch(r, activeEmp) &&
+             r.type === 'biometric_registration' &&
+             (r.status === 'pending' || r.status === 'pending_admin')
+      );
+      if (hasPending) {
+        setShowBiometricRegisterModal(false);
+        alert('لديك طلب تسجيل بصمة قيد المراجعة لدى الإدارة العليا بالفعل.');
+        return;
+      }
 
-    const newNotif = {
-      id: 'NOTIF-BIO-REG-' + Date.now(),
-      type: 'biometric_registration',
-      targetRole: 'admin',
-      title: `📸 تسجيل بصمة جديدة: ${emp.name}`,
-      message: `قام الموظف ${emp.name} بالتقاط ${bioLabel} ذاتياً وبانتظار اعتماد الإدارة العليا.`,
-      requestId: requestId,
-      employeeId: emp.id,
-      employeeName: emp.name,
-      photoUrl: photoUrl || null,
-      drivePhotoUrl: driveResult?.fileUrl || null,
-      createdAt: now.toISOString(),
-      read: false,
-      readBy: []
-    };
+      // Close modal now that validation passed
+      setShowBiometricRegisterModal(false);
 
-    const updatedState = {
-      ...state,
-      requests: [requestData, ...(state.requests || [])],
-      notifications: [newNotif, ...(state.notifications || [])],
-      _requestsUpdatedAt: now.toISOString()
-    };
+      // Clean and sanitize descriptor arrays to pure number lists
+      const cleanDescriptors = Array.isArray(descriptors)
+        ? descriptors.map(d => {
+            if (d instanceof Float32Array || Array.isArray(d)) return Array.from(d);
+            if (d && typeof d === 'object') return Object.values(d).map(Number);
+            return [];
+          })
+        : [];
 
-    setState(updatedState);
-    if (saveState) await saveState(updatedState);
+      // Create compressed thumbnail (< 15KB) to prevent storage quota exhaustion
+      let thumbnailPhoto = photoUrl;
+      if (photoUrl && photoUrl.length > 40000) {
+        try {
+          const img = new Image();
+          await new Promise((resolve) => {
+            img.onload = resolve;
+            img.onerror = resolve;
+            img.src = photoUrl;
+          });
+          if (img.width && img.height) {
+            const canvas = document.createElement('canvas');
+            const maxDim = 160;
+            const scale = Math.min(maxDim / img.width, maxDim / img.height, 1);
+            canvas.width = Math.round(img.width * scale);
+            canvas.height = Math.round(img.height * scale);
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            thumbnailPhoto = canvas.toDataURL('image/jpeg', 0.65);
+          }
+        } catch (thumbErr) {
+          console.warn('Thumbnail generation skipped:', thumbErr);
+        }
+      }
 
-    const gmailConfig = orgSettings?.gmailConfig || state?.orgSettings?.gmailConfig;
-    if (gmailConfig && gmailConfig.serviceUrl) {
-      sendBiometricRegistrationRequestEmail({
-        gmailConfig,
-        empName: emp.name,
-        empCode: emp.code,
-        branchName,
+      const now = new Date();
+      const dateStr = now.toISOString().slice(0, 10);
+      const branchObj = (state?.branches || []).find(b => String(b.id) === String(empBranchId));
+      const branchName = branchObj ? branchObj.name : 'الفرع الرئيسي';
+
+      const requestId = 'REQ-BIO-REG-' + Date.now();
+      const bioLabel = type === 'hand' ? 'بصمة اليد' : 'بصمة الوجه';
+      const requestData = {
+        id: requestId,
+        type: 'biometric_registration',
+        requestType: 'biometric_registration',
+        typeLabel: `تسجيل ${bioLabel} جديدة (ذاتي)`,
+        employeeId: empId,
+        employeeCode: empCode,
+        employeeName: empName,
+        branchId: empBranchId,
+        branchName: branchName,
         biometricType: type || 'face',
-        dateStr,
-        drivePhotoUrl: driveResult?.fileUrl || null
-      }).catch(err => console.warn('Gmail biometric notification failed:', err));
-    }
+        descriptors: cleanDescriptors,
+        photoUrl: thumbnailPhoto || null,
+        date: dateStr,
+        createdAt: now.toISOString(),
+        status: 'pending',
+        requiresSuperAdmin: true,
+        requiresBranchManager: false,
+        adminApproved: false,
+        notes: `قام الموظف ${empName} بتسجيل ${bioLabel} ذاتياً من حسابه وبانتظار مراجعة واعتماد الإدارة العليا لتفعيلها.`
+      };
 
-    if (showToast) {
-      showToast('🎉 تم التقاط البصمة بنجاح وإرسالها للإدارة العليا للاعتماد!');
-    } else {
-      alert('🎉 تم التقاط البصمة بنجاح وإرسالها للإدارة العليا للاعتماد! سيتم تفعيلها فور الموافقة.');
+      const newNotif = {
+        id: 'NOTIF-BIO-REG-' + Date.now(),
+        type: 'biometric_registration',
+        targetRole: 'admin',
+        title: `📸 تسجيل بصمة جديدة: ${empName}`,
+        message: `قام الموظف ${empName} بالتقاط ${bioLabel} ذاتياً وبانتظار اعتماد الإدارة العليا.`,
+        requestId: requestId,
+        employeeId: empId,
+        employeeName: empName,
+        photoUrl: thumbnailPhoto || null,
+        createdAt: now.toISOString(),
+        read: false,
+        readBy: []
+      };
+
+      const updatedState = {
+        ...state,
+        requests: [requestData, ...(state.requests || [])],
+        notifications: [newNotif, ...(state.notifications || [])],
+        _requestsUpdatedAt: now.toISOString()
+      };
+
+      setState(updatedState);
+      if (showToast) {
+        showToast('🎉 تم التقاط البصمة بنجاح وإرسالها للإدارة العليا للاعتماد!');
+      }
+
+      if (saveState) {
+        saveState(updatedState).catch(err => console.warn('Save state background warning:', err));
+      }
+
+      // Non-blocking background sync for Drive upload & Gmail notification
+      (async () => {
+        try {
+          let driveResult = null;
+          const driveConfig = orgSettings?.googleDrive || state?.orgSettings?.googleDrive;
+          if (driveConfig && driveConfig.serviceUrl && photoUrl) {
+            driveResult = await uploadBiometricAttendancePhoto({
+              employee: activeEmp,
+              photoDataUrl: photoUrl,
+              actionType: 'تسجيل_بصمة',
+              driveConfig
+            });
+          }
+
+          if (driveResult?.fileUrl) {
+            setState(prev => ({
+              ...prev,
+              requests: (prev.requests || []).map(r => r.id === requestId ? {
+                ...r,
+                drivePhotoUrl: driveResult.fileUrl,
+                driveFileId: driveResult.fileId || null
+              } : r)
+            }));
+          }
+
+          const gmailConfig = orgSettings?.gmailConfig || state?.orgSettings?.gmailConfig;
+          if (gmailConfig && gmailConfig.serviceUrl) {
+            sendBiometricRegistrationRequestEmail({
+              gmailConfig,
+              empName,
+              empCode,
+              branchName,
+              biometricType: type || 'face',
+              dateStr,
+              drivePhotoUrl: driveResult?.fileUrl || null
+            }).catch(err => console.warn('Gmail biometric notification skipped:', err));
+          }
+        } catch (bgErr) {
+          console.warn('Background sync error:', bgErr);
+        }
+      })();
+
+    } catch (err) {
+      console.error('Error during biometric self-registration submission:', err);
+      alert('حدث خطأ أثناء حفظ طلب البصمة، يرجى المحاولة مرة أخرى: ' + (err.message || ''));
     }
   };
 
   const handleSubmitResetRequest = async (reason) => {
-    const now = new Date();
-    const dateStr = now.toISOString().slice(0, 10);
-    const branchObj = (state.branches || []).find(b => String(b.id) === String(emp.branchId || selectedBranchId));
-    const branchName = branchObj ? branchObj.name : 'الفرع الرئيسي';
+    try {
+      const activeEmp = emp || currentEmpUser || {};
+      const empId = activeEmp.id || activeEmp.code || 'emp_' + Date.now();
+      const empCode = activeEmp.code || activeEmp.id || '';
+      const empName = activeEmp.name || 'موظف';
+      const empBranchId = activeEmp.branchId || selectedBranchId || null;
 
-    const requestId = 'REQ-BIO-RESET-' + Date.now();
-    const requestData = {
-      id: requestId,
-      type: 'biometric_reset',
-      requestType: 'biometric_reset',
-      typeLabel: 'طلب إعادة تسجيل بصمة الوجه/اليد',
-      employeeId: emp.id,
-      employeeCode: emp.code,
-      employeeName: emp.name,
-      branchId: emp.branchId || selectedBranchId,
-      branchName: branchName,
-      reason: reason,
-      date: dateStr,
-      createdAt: now.toISOString(),
-      status: 'pending',
-      requiresSuperAdmin: true,
-      requiresBranchManager: false,
-      adminApproved: false,
-      notes: `طلب الموظف مسح بصمته الحالية وإعادة تسجيل بصمة جديدة. السبب: ${reason}`
-    };
+      const now = new Date();
+      const dateStr = now.toISOString().slice(0, 10);
+      const branchObj = (state?.branches || []).find(b => String(b.id) === String(empBranchId));
+      const branchName = branchObj ? branchObj.name : 'الفرع الرئيسي';
 
-    const newNotif = {
-      id: 'NOTIF-BIO-RESET-' + Date.now(),
-      type: 'biometric_reset',
-      targetRole: 'admin',
-      title: `🔄 طلب إعادة تسجيل بصمة: ${emp.name}`,
-      message: `طلب الموظف ${emp.name} مسح بصمته وإعادة التسجيل. السبب: ${reason}`,
-      requestId: requestId,
-      employeeId: emp.id,
-      employeeName: emp.name,
-      createdAt: now.toISOString(),
-      read: false,
-      readBy: []
-    };
+      const requestId = 'REQ-BIO-RESET-' + Date.now();
+      const requestData = {
+        id: requestId,
+        type: 'biometric_reset',
+        requestType: 'biometric_reset',
+        typeLabel: 'طلب إعادة تسجيل بصمة الوجه/اليد',
+        employeeId: empId,
+        employeeCode: empCode,
+        employeeName: empName,
+        branchId: empBranchId,
+        branchName: branchName,
+        reason: reason,
+        date: dateStr,
+        createdAt: now.toISOString(),
+        status: 'pending',
+        requiresSuperAdmin: true,
+        requiresBranchManager: false,
+        adminApproved: false,
+        notes: `طلب الموظف ${empName} مسح بصمته الحالية وإعادة تسجيل بصمة جديدة. السبب: ${reason}`
+      };
 
-    const updatedState = {
-      ...state,
-      requests: [requestData, ...(state.requests || [])],
-      notifications: [newNotif, ...(state.notifications || [])],
-      _requestsUpdatedAt: now.toISOString()
-    };
+      const newNotif = {
+        id: 'NOTIF-BIO-RESET-' + Date.now(),
+        type: 'biometric_reset',
+        targetRole: 'admin',
+        title: `🔄 طلب إعادة تسجيل بصمة: ${empName}`,
+        message: `طلب الموظف ${empName} مسح بصمته وإعادة التسجيل. السبب: ${reason}`,
+        requestId: requestId,
+        employeeId: empId,
+        employeeName: empName,
+        createdAt: now.toISOString(),
+        read: false,
+        readBy: []
+      };
 
-    setState(updatedState);
-    if (saveState) await saveState(updatedState);
+      const updatedState = {
+        ...state,
+        requests: [requestData, ...(state.requests || [])],
+        notifications: [newNotif, ...(state.notifications || [])],
+        _requestsUpdatedAt: now.toISOString()
+      };
 
-    const gmailConfig = orgSettings?.gmailConfig || state?.orgSettings?.gmailConfig;
-    if (gmailConfig && gmailConfig.serviceUrl) {
-      sendBiometricResetRequestEmail({
-        gmailConfig,
-        empName: emp.name,
-        empCode: emp.code,
-        branchName,
-        reason,
-        dateStr
-      }).catch(err => console.warn('Gmail reset notification failed:', err));
+      setState(updatedState);
+      if (showToast) showToast('✅ تم إرسال طلب إعادة تسجيل البصمة للإدارة العليا بنجاح');
+      if (saveState) {
+        saveState(updatedState).catch(err => console.warn('Save state warning:', err));
+      }
+
+      const gmailConfig = orgSettings?.gmailConfig || state?.orgSettings?.gmailConfig;
+      if (gmailConfig && gmailConfig.serviceUrl) {
+        sendBiometricResetRequestEmail({
+          gmailConfig,
+          empName,
+          empCode,
+          branchName,
+          reason,
+          dateStr
+        }).catch(err => console.warn('Gmail biometric reset notification failed:', err));
+      }
+    } catch (err) {
+      console.error('Error submitting reset request:', err);
+      alert('حدث خطأ أثناء إرسال طلب إعادة التسجيل');
     }
   };
 
@@ -3392,11 +3485,14 @@ export default function EmployeePortalView({
 
           {/* ── Universal Biometric Registration Reminder Banner (Across ALL employee tabs) ── */}
           {(() => {
-            const hasBio = Boolean(emp?.has_face_descriptor || emp?.has_hand_descriptor);
+            const hasBio = Boolean(
+              emp?.has_face_descriptor || emp?.face_descriptor ||
+              emp?.has_hand_descriptor || emp?.hand_descriptor
+            );
             const pendingBioReg = (state?.requests || []).find(
-              r => String(r.employeeId) === String(emp?.id) &&
+              r => isEmpRequestMatch(r, emp) &&
                    r.type === 'biometric_registration' &&
-                   r.status === 'pending'
+                   (r.status === 'pending' || r.status === 'pending_admin')
             );
 
             if (!hasBio && !pendingBioReg) {

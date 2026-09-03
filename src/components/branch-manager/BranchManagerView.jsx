@@ -744,6 +744,7 @@ export default function BranchManagerView({
     let updatedRosters = [...(state.rosters || [])];
     let updatedShifts = [...(state.shifts || [])];
     let updatedLeaveRequests = [...(state.leaveRequests || [])];
+    let updatedPermRequests = [...(state.permissionRequests || [])];
     let updatedSwaps = [...(state.shiftSwaps || [])];
 
     // 1. If fully approved roster edit/update (only if admin approved)
@@ -815,8 +816,15 @@ export default function BranchManagerView({
     }
 
     // 5. If permission request approved
-    if (updatedTargetReq.type === 'permission' || updatedTargetReq.type === 'إذن' || updatedTargetReq.type === 'late_permission' || updatedTargetReq.type === 'early_leave' || updatedTargetReq.permType === 'late' || updatedTargetReq.permType === 'early') {
+    if (updatedTargetReq.type === 'permission' || updatedTargetReq.type === 'إذن' || updatedTargetReq.type === 'late_permission' || updatedTargetReq.type === 'early_leave' || updatedTargetReq.permType === 'late' || updatedTargetReq.permType === 'early' || updatedTargetReq.type === 'permission_request') {
       const permDate = updatedTargetReq.date || updatedTargetReq.startDate;
+      const pIdx = updatedPermRequests.findIndex(p => p.id === reqId || (String(p.employeeId) === String(updatedTargetReq.employeeId) && p.date === permDate));
+      if (pIdx >= 0) {
+        updatedPermRequests[pIdx] = { ...updatedPermRequests[pIdx], branchApproved: true, branchDecision: 'approved', status: isFullyApproved ? 'approved' : 'pending_admin' };
+      } else {
+        updatedPermRequests.unshift({ ...updatedTargetReq, branchApproved: true, branchDecision: 'approved', status: isFullyApproved ? 'approved' : 'pending_admin' });
+      }
+
       updatedRequests = updatedRequests.map((r) => {
         if (
           String(r.employeeId) === String(updatedTargetReq.employeeId) &&
@@ -871,6 +879,7 @@ export default function BranchManagerView({
       rosters: updatedRosters,
       shifts: updatedShifts,
       leaveRequests: updatedLeaveRequests,
+      permissionRequests: updatedPermRequests,
       shiftSwaps: updatedSwaps,
       notifications: updatedNotifications,
       lateIncidents: updatedLateIncidents
@@ -930,6 +939,16 @@ export default function BranchManagerView({
       }
     }
 
+    let updatedPermRequests = [...(state.permissionRequests || [])];
+    if (updatedTargetReq.type === 'permission' || updatedTargetReq.type === 'إذن' || updatedTargetReq.type === 'late_permission' || updatedTargetReq.type === 'early_leave' || updatedTargetReq.permType || updatedTargetReq.type === 'permission_request') {
+      const pIdx = updatedPermRequests.findIndex(p => p.id === reqId || (String(p.employeeId) === String(updatedTargetReq.employeeId) && p.date === updatedTargetReq.date));
+      if (pIdx >= 0) {
+        updatedPermRequests[pIdx] = { ...updatedPermRequests[pIdx], branchApproved: false, branchDecision: 'rejected', branchRejected: true, status: 'pending' };
+      } else {
+        updatedPermRequests.unshift({ ...updatedTargetReq, branchApproved: false, branchDecision: 'rejected', branchRejected: true, status: 'pending' });
+      }
+    }
+
     const updatedNotifications = (state.notifications || []).map((n) => {
       if (n.requestId === reqId) return { ...n, isRead: true, status: 'pending' };
       return n;
@@ -939,6 +958,7 @@ export default function BranchManagerView({
       ...state,
       requests: updatedRequests,
       leaveRequests: updatedLeaveRequests,
+      permissionRequests: updatedPermRequests,
       shiftSwaps: updatedSwaps,
       notifications: updatedNotifications
     };

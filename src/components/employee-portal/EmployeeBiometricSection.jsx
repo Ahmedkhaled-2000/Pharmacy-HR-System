@@ -12,21 +12,37 @@ export default function EmployeeBiometricSection({
   const [resetReason, setResetReason] = useState('');
   const [isSubmittingReset, setIsSubmittingReset] = useState(false);
 
-  const hasBiometric = Boolean(employee?.has_face_descriptor || employee?.has_hand_descriptor);
+  const hasBiometric = Boolean(
+    employee?.has_face_descriptor || employee?.face_descriptor ||
+    employee?.has_hand_descriptor || employee?.hand_descriptor
+  );
   const biometricType = employee?.preferred_biometric || state?.orgSettings?.biometricType || 'face';
   const isHand = biometricType === 'hand';
 
+  const empIdStr = String(employee?.id || '').trim();
+  const empCodeStr = String(employee?.code || '').trim();
+
+  const isEmpMatch = (r) => {
+    if (!r) return false;
+    const rId = String(r.employeeId || '').trim();
+    const rCode = String(r.employeeCode || '').trim();
+    return (
+      (empIdStr && (rId === empIdStr || rCode === empIdStr)) ||
+      (empCodeStr && (rId === empCodeStr || rCode === empCodeStr))
+    );
+  };
+
   // Check pending requests
   const pendingRegistration = (state?.requests || []).find(
-    r => String(r.employeeId) === String(employee?.id) &&
+    r => isEmpMatch(r) &&
          r.type === 'biometric_registration' &&
-         r.status === 'pending'
+         (r.status === 'pending' || r.status === 'pending_admin')
   );
 
   const pendingReset = (state?.requests || []).find(
-    r => String(r.employeeId) === String(employee?.id) &&
+    r => isEmpMatch(r) &&
          r.type === 'biometric_reset' &&
-         r.status === 'pending'
+         (r.status === 'pending' || r.status === 'pending_admin')
   );
 
   const handleSendReset = async (e) => {

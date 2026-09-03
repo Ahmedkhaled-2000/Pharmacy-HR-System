@@ -63,9 +63,34 @@ export default function EmployeePermissionsModule({
       );
     };
 
-    [...(state.requests || []), ...(state.permissionRequests || [])].forEach((r) => {
+    const allPerms = [...(state.requests || []), ...(state.permissionRequests || [])];
+    allPerms.forEach((r) => {
       if (!r || !isPermType(r) || !isEmpMatch(r)) return;
-      map.set(String(r.id), r);
+      const rId = String(r.id || `${r.date || ''}_${r.startTime || ''}_${r.endTime || ''}`);
+      if (!map.has(rId)) {
+        map.set(rId, { ...r });
+      } else {
+        const existing = map.get(rId);
+        const isApproved = r.status === 'approved' || r.adminApproved || existing.status === 'approved' || existing.adminApproved;
+        const isRejected = !isApproved && (r.status === 'rejected' || existing.status === 'rejected');
+        const isBranchApproved = Boolean(r.branchApproved || existing.branchApproved || r.branchDecision === 'approved' || existing.branchDecision === 'approved');
+        const isBranchRejected = Boolean(r.branchRejected || existing.branchRejected || r.branchDecision === 'rejected' || existing.branchDecision === 'rejected');
+        
+        let finalStatus = existing.status || r.status || 'pending';
+        if (isApproved) finalStatus = 'approved';
+        else if (isRejected) finalStatus = 'rejected';
+        else if (isBranchApproved || r.status === 'pending_admin' || existing.status === 'pending_admin') finalStatus = 'pending_admin';
+        else if (r.status === 'cancelled' || existing.status === 'cancelled') finalStatus = 'cancelled';
+
+        map.set(rId, {
+          ...existing,
+          ...r,
+          status: finalStatus,
+          adminApproved: isApproved,
+          branchApproved: isBranchApproved,
+          branchRejected: isBranchRejected
+        });
+      }
     });
 
     return Array.from(map.values()).sort((a, b) => {

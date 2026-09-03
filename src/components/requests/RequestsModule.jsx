@@ -748,13 +748,27 @@ export default function RequestsModule({
         updatedRosters = applyShiftSwapToRosters(approvedTargetReq, updatedRosters, state.employees || []);
       }
 
-      if (approvedTargetReq.type === 'permission' || approvedTargetReq.type === 'إذن' || approvedTargetReq.type === 'late_permission' || approvedTargetReq.type === 'early_leave' || approvedTargetReq.permType === 'late' || approvedTargetReq.permType === 'early') {
+      let updatedPermRequests = [...(state.permissionRequests || [])];
+      if (approvedTargetReq.type === 'permission' || approvedTargetReq.type === 'إذن' || approvedTargetReq.type === 'late_permission' || approvedTargetReq.type === 'early_leave' || approvedTargetReq.permType === 'late' || approvedTargetReq.permType === 'early' || approvedTargetReq.type === 'permission_request') {
         const permDate = approvedTargetReq.date || approvedTargetReq.startDate;
         updatedShifts = applyApprovedPermissionsToShifts({
           ...state,
           requests: updatedRequests,
           shifts: updatedShifts
         });
+
+        const pIdx = updatedPermRequests.findIndex(p => p.id === approvedTargetReq.id || (String(p.employeeId) === String(approvedTargetReq.employeeId) && p.date === permDate));
+        const approvedPermObj = {
+          ...approvedTargetReq,
+          status: 'approved',
+          adminApproved: true,
+          approvedAt: new Date().toISOString()
+        };
+        if (pIdx >= 0) {
+          updatedPermRequests[pIdx] = { ...updatedPermRequests[pIdx], ...approvedPermObj };
+        } else {
+          updatedPermRequests.unshift(approvedPermObj);
+        }
 
         // Cancel any late penalties on this date and employee
         updatedRequests = updatedRequests.map((r) => {
@@ -1024,6 +1038,7 @@ export default function RequestsModule({
         adjustments: updatedAdjustments,
         shifts: updatedShifts,
         leaveRequests: updatedLeaveRequests,
+        permissionRequests: updatedPermRequests,
         leaveHistory: updatedLeaveHistory,
         shiftSwaps,
         resignationRequests: updatedResignations,
@@ -1177,6 +1192,18 @@ export default function RequestsModule({
         : lr
     );
 
+    const updatedLoans = (state.loans || []).map((l) =>
+      l.id === reqId || l.requestId === reqId || (rejectedTargetReq && String(l.employeeId) === String(rejectedTargetReq.employeeId) && (l.amount === rejectedTargetReq.amount || l.totalAmount === rejectedTargetReq.totalAmount))
+        ? { ...l, status: 'rejected', adminApproved: false, rejectedAt: new Date().toISOString() }
+        : l
+    );
+
+    const updatedPermRequests = (state.permissionRequests || []).map((p) =>
+      p.id === reqId || (rejectedTargetReq && String(p.employeeId) === String(rejectedTargetReq.employeeId) && p.date === rejectedTargetReq.date)
+        ? { ...p, status: 'rejected', adminApproved: false, rejectedAt: new Date().toISOString() }
+        : p
+    );
+
     const updatedShiftSwaps = (state.shiftSwaps || []).map((s) =>
       s.id === reqId ? { ...s, status: 'rejected', adminApproved: false } : s
     );
@@ -1219,6 +1246,8 @@ export default function RequestsModule({
       adjustments: updatedAdjustments,
       shifts: updatedShifts,
       leaveRequests: updatedLeaveRequests,
+      permissionRequests: updatedPermRequests,
+      loans: updatedLoans,
       shiftSwaps: updatedShiftSwaps,
       resignationRequests: updatedResignations,
       notifications: updatedNotifications

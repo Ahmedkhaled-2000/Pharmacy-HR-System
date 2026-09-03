@@ -28,19 +28,41 @@ export default function EmployeeResignationModule({
     const isEmpMatch = (r) => {
       if (!r) return false;
       const rId = String(r.employeeId || '').trim();
-      return rId === empIdStr || (empCodeStr && rId === empCodeStr) || (empUserStr && rId === empUserStr);
+      const rCode = String(r.employeeCode || '').trim();
+      return (
+        (empIdStr && (rId === empIdStr || rCode === empIdStr)) ||
+        (empCodeStr && (rId === empCodeStr || rCode === empCodeStr)) ||
+        (empUserStr && (rId === empUserStr || rCode === empUserStr))
+      );
     };
 
     (state.resignationRequests || []).forEach(r => {
-      if (r && isEmpMatch(r)) map.set(String(r.id), r);
+      if (r && isEmpMatch(r)) map.set(String(r.id), { ...r });
     });
 
     (state.requests || []).forEach(r => {
       if (r && (r.type === 'resignation' || r.type === 'withdraw' || r.type === 'resignation_request') && isEmpMatch(r)) {
-        if (!map.has(String(r.id))) {
-          map.set(String(r.id), r);
+        const rId = String(r.id);
+        if (!map.has(rId)) {
+          map.set(rId, { ...r });
         } else {
-          map.set(String(r.id), { ...map.get(String(r.id)), ...r });
+          const existing = map.get(rId);
+          const isApproved = r.adminStatus === 'approved' || r.status === 'approved' || r.adminApproved || existing.adminStatus === 'approved' || existing.status === 'approved';
+          const isRejected = !isApproved && (r.adminStatus === 'rejected' || r.status === 'rejected' || existing.adminStatus === 'rejected' || existing.status === 'rejected');
+          const isCancelled = r.adminStatus === 'cancelled' || r.status === 'cancelled' || r.isCancelled || existing.isCancelled;
+
+          let finalAdminStatus = existing.adminStatus || r.adminStatus || 'pending';
+          if (isApproved) finalAdminStatus = 'approved';
+          else if (isRejected) finalAdminStatus = 'rejected';
+          else if (isCancelled) finalAdminStatus = 'cancelled';
+
+          map.set(rId, {
+            ...existing,
+            ...r,
+            status: finalAdminStatus,
+            adminStatus: finalAdminStatus,
+            adminApproved: isApproved
+          });
         }
       }
     });

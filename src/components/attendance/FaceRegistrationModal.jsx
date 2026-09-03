@@ -229,9 +229,15 @@ export default function FaceRegistrationModal({ employee, onClose, onSuccess, bi
               console.warn(e);
             }
             setStatus('تم التقاط جميع زوايا اليد بنجاح! ✅ جاري الإرسال...');
+            const pureDescriptors = newDescriptors.map(d => {
+              if (d instanceof Float32Array || Array.isArray(d)) return Array.from(d);
+              if (d && typeof d === 'object') return Object.values(d).map(Number);
+              return [];
+            });
             setTimeout(() => {
-              onSuccess(newDescriptors, 'hand', photoDataUrl);
-            }, 800);
+              onSuccess(pureDescriptors, 'hand', photoDataUrl);
+            }, 600);
+            return;
           }
         }
       } else {
@@ -260,9 +266,15 @@ export default function FaceRegistrationModal({ employee, onClose, onSuccess, bi
               console.warn(e);
             }
             setStatus('تم تسجيل بروفايل الوجه متعدد الزوايا بنجاح! 🎉 جاري الإرسال...');
+            const pureDescriptors = newDescriptors.map(d => {
+              if (d instanceof Float32Array || Array.isArray(d)) return Array.from(d);
+              if (d && typeof d === 'object') return Object.values(d).map(Number);
+              return [];
+            });
             setTimeout(() => {
-              onSuccess(newDescriptors, 'face', photoDataUrl);
-            }, 800);
+              onSuccess(pureDescriptors, 'face', photoDataUrl);
+            }, 600);
+            return;
           }
         }
       }
