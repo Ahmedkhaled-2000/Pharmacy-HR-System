@@ -17,6 +17,7 @@ import EmployeeResignationModule from './EmployeeResignationModule';
 import EmployeeBiometricSection from './EmployeeBiometricSection';
 import FaceRegistrationModal from '../attendance/FaceRegistrationModal';
 import FaceTestModal from '../attendance/FaceTestModal';
+import { preWarmFaceModels } from '../../utils/faceApiHelper';
 import { uploadBiometricAttendancePhoto } from '../../utils/googleDriveService';
 import { sendBiometricRegistrationRequestEmail, sendBiometricResetRequestEmail } from '../../utils/gmailService';
 import { computeLatenessFinancialAmount, isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
@@ -201,6 +202,14 @@ export default function EmployeePortalView({
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // التحميل الاستباقي في الخلفية لمحرك التعرف على الوجه ليعمل فورياً دون تأخير
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      preWarmFaceModels();
+    }, 1500);
+    return () => clearTimeout(timer);
   }, []);
 
   const [isPrivacyMode, setIsPrivacyMode] = useState(() => {

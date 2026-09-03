@@ -4,6 +4,7 @@ import FaceVerificationOverlay from '../attendance/FaceVerificationOverlay';
 import { useData } from '../../context/DataContext';
 import { uploadBiometricAttendancePhoto } from '../../utils/googleDriveService';
 import { sendBiometricAttendanceEmail } from '../../utils/gmailService';
+import { preWarmFaceModels } from '../../utils/faceApiHelper';
 import '../../kiosk-modern.css';
 
 export default function ElectronicKioskView({
@@ -31,6 +32,8 @@ export default function ElectronicKioskView({
   const activeShift = matchedEmp ? state.activeShifts?.[matchedEmp.id] : null;
 
   useEffect(() => {
+    // التحميل الاستباقي لمحرك الوجه في الكشك ليعمل فورياً عند وقوف أي موظف
+    preWarmFaceModels();
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);

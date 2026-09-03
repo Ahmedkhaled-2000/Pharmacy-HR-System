@@ -3,27 +3,55 @@ import { HandLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
 let isHandApiLoaded = false;
 let handLandmarker = null;
 
+export const isHandEngineReady = () => {
+  return isHandApiLoaded && Boolean(handLandmarker);
+};
+
 export const initHandRecognition = async () => {
-  if (isHandApiLoaded && handLandmarker) return;
+  if (isHandEngineReady()) return;
 
   try {
-    const vision = await FilesetResolver.forVisionTasks(
-      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm'
-    );
-    
-    handLandmarker = await HandLandmarker.createFromOptions(vision, {
-      baseOptions: {
-        modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
-        delegate: 'GPU'
-      },
-      runningMode: 'VIDEO',
-      numHands: 1
-    });
+    let vision = null;
+    try {
+      vision = await FilesetResolver.forVisionTasks('/mediapipe-wasm');
+    } catch (localWasmErr) {
+      console.warn('Local mediapipe wasm fallback to CDN for hands:', localWasmErr);
+      vision = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm');
+    }
+
+    let landmarkerCreated = false;
+    const modelPaths = ['/models/hand_landmarker.task', 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task'];
+    const delegates = ['GPU', 'CPU'];
+
+    for (const mPath of modelPaths) {
+      if (landmarkerCreated) break;
+      for (const dlg of delegates) {
+        try {
+          handLandmarker = await HandLandmarker.createFromOptions(vision, {
+            baseOptions: {
+              modelAssetPath: mPath,
+              delegate: dlg
+            },
+            runningMode: 'VIDEO',
+            numHands: 1
+          });
+          landmarkerCreated = true;
+          console.log(`✅ [HandEngine] HandLandmarker loaded (${mPath}, ${dlg})`);
+          break;
+        } catch (landmarkerErr) {
+          console.warn(`HandLandmarker attempt failed (${mPath}, ${dlg}):`, landmarkerErr.message || landmarkerErr);
+        }
+      }
+    }
+
+    if (!landmarkerCreated || !handLandmarker) {
+      throw new Error('تعذر تحميل نموذج معالم اليد (HandLandmarker).');
+    }
     
     isHandApiLoaded = true;
-    console.log('MediaPipe HandLandmarker loaded successfully.');
+    console.log('✅ تم تحميل محرك التعرف على اليد بنجاح.');
   } catch (error) {
-    console.error('Error initializing hand recognition model:', error);
+    console.error('❌ خطأ في تحميل نموذج اليد:', error);
     throw error;
   }
 };

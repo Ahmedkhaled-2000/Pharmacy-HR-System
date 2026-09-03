@@ -1,70 +1,169 @@
-import React, { useRef, useEffect, useState } from 'react';
-import { initFaceRecognition, getFaceEmbedding } from '../../utils/faceApiHelper';
-import { initHandRecognition, getHandEmbedding } from '../../utils/handApiHelper';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { initFaceRecognition, getFaceEmbedding, isFaceEngineReady } from '../../utils/faceApiHelper';
+import { initHandRecognition, getHandEmbedding, isHandEngineReady } from '../../utils/handApiHelper';
 
 export default function FaceRegistrationModal({ employee, onClose, onSuccess, biometricType = 'face' }) {
   const videoRef = useRef(null);
+  const streamRef = useRef(null);
+
   const [currentType, setCurrentType] = useState(biometricType);
-  const [status, setStatus] = useState('جارِ التحميل...');
-  const [errorMsg, setErrorMsg] = useState(null);
-  const [isInitializing, setIsInitializing] = useState(true);
+  const isHand = currentType === 'hand';
+
+  const [cameraReady, setCameraReady] = useState(false);
+  const [modelReady, setModelReady] = useState(false);
+  const [status, setStatus] = useState('جاري بدء الكاميرا والمحرك الذكي...');
+  const [cameraError, setCameraError] = useState(null);
+  const [modelError, setModelError] = useState(null);
+  const [permissionDenied, setPermissionDenied] = useState(false);
+
   const [isFlashActive, setIsFlashActive] = useState(false);
   const [captureStage, setCaptureStage] = useState(0);
   const [descriptors, setDescriptors] = useState([]);
-  
-  const isHand = currentType === 'hand';
   const [facingMode, setFacingMode] = useState('user');
+  const [isCapturing, setIsCapturing] = useState(false);
 
-  useEffect(() => {
-    let stream = null;
+  // 1. دالة تشغيل الكاميرا بنظام الطبقات المتعددة (Multi-Tier Camera Fallback)
+  const startCameraStream = useCallback(async () => {
+    setCameraError(null);
+    setPermissionDenied(false);
 
-    const startCamera = async () => {
-      setIsInitializing(true);
-      setErrorMsg(null);
-      setStatus('جارِ التحميل...');
-      
+    // التحقق من دعم البيئة الآمنة (HTTPS / localhost)
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      const isHttps = window.isSecureContext || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      if (!isHttps) {
+        setCameraError('المتصفح يشترط اتصالاً آمناً (HTTPS) أو localhost لتشغيل الكاميرا.');
+      } else {
+        setCameraError('المتصفح لا يدعم الوصول للكاميرا عبر mediaDevices.');
+      }
+      return false;
+    }
+
+    // إيقاف أي ستريم سابق
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+
+    const constraintTiers = [
+      // المستوى 1: دقة عالية مع الوضع المطلوب
+      { video: { facingMode: { ideal: facingMode }, width: { ideal: 1280 }, height: { ideal: 720 } } },
+      // المستوى 2: الوضع المطلوب بدقة تلقائية
+      { video: { facingMode: { ideal: facingMode } } },
+      // المستوى 3: أي كاميرا متاحة بالجهاز
+      { video: true }
+    ];
+
+    let activeStream = null;
+    let lastError = null;
+
+    for (let i = 0; i < constraintTiers.length; i++) {
       try {
-        if (isHand) {
+        activeStream = await navigator.mediaDevices.getUserMedia(constraintTiers[i]);
+        if (activeStream) break;
+      } catch (err) {
+        lastError = err;
+        // إذا كان خطأ رفض الصلاحيات نتوقف فوراً لتوجيه المستخدم
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+          break;
+        }
+      }
+    }
+
+    if (activeStream) {
+      streamRef.current = activeStream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = activeStream;
+        try {
+          await videoRef.current.play();
+        } catch (playErr) {
+          console.warn('Auto play video was interrupted:', playErr);
+        }
+      }
+      setCameraReady(true);
+      return true;
+    } else {
+      console.error('Camera stream error:', lastError);
+      if (lastError?.name === 'NotAllowedError' || lastError?.name === 'PermissionDeniedError') {
+        setPermissionDenied(true);
+        setCameraError('تم حظر إذن الكاميرا. يرجى الضغط على علامة القفل 🔒 بجانب رابط المتصفح والسماح بالكاميرا.');
+      } else if (lastError?.name === 'NotFoundError' || lastError?.name === 'DevicesNotFoundError') {
+        setCameraError('لم يتم العثور على أي كاميرا متصلة بالجهاز.');
+      } else if (lastError?.name === 'NotReadableError' || lastError?.name === 'TrackStartError') {
+        setCameraError('الكاميرا قيد الاستخدام بواسطة برنامج آخر (مثل Zoom أو تطبيق كاميرا مفتوح).');
+      } else {
+        setCameraError('تعذر فتح الكاميرا: ' + (lastError?.message || 'تأكد من صلاحيات الكاميرا'));
+      }
+      setCameraReady(false);
+      return false;
+    }
+  }, [facingMode]);
+
+  // 2. دالة تحميل وتجهيز محركات الذكاء الاصطناعي بالتوازي
+  const startModelInit = useCallback(async () => {
+    setModelError(null);
+    try {
+      if (isHand) {
+        if (!isHandEngineReady()) {
           await initHandRecognition();
-        } else {
+        }
+      } else {
+        if (!isFaceEngineReady()) {
           await initFaceRecognition();
         }
-        
-        if (videoRef.current?.srcObject) {
-          videoRef.current.srcObject.getTracks().forEach(track => track.stop());
-          videoRef.current.srcObject = null;
-        }
+      }
+      setModelReady(true);
+      return true;
+    } catch (err) {
+      console.error('Model initialization error:', err);
+      setModelError('تعذر تحميل محرك الذكاء الاصطناعي. يرجى التأكد من الاتصال.');
+      setModelReady(false);
+      return false;
+    }
+  }, [isHand]);
 
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { 
-            facingMode: facingMode,
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          }
-        });
-        
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.play();
+  // تشغيل الكاميرا والمحرك بالتوازي التام عند الفتح أو تغيير الكاميرا
+  useEffect(() => {
+    let isMounted = true;
+
+    const initAll = async () => {
+      // بدء الكاميرا فوراً دون انتظار المحرك ليرى الموظف صورته خلال 300 مللي ثانية
+      const camPromise = startCameraStream();
+      // تشغيل المحرك بالتوازي
+      const modelPromise = startModelInit();
+
+      const [camOk, modelOk] = await Promise.all([camPromise, modelPromise]);
+      if (isMounted) {
+        if (camOk && modelOk) {
+          setStatus(isHand ? 'يرجى وضع يدك أمام الكاميرا بشكل واضح' : 'الخطوة 1 من 3: انظر مباشرة للكاميرا في إضاءة جيدة');
+        } else if (camOk && !modelOk) {
+          setStatus('الكاميرا جاهزة ✅ | جاري استكمال تهيئة المحرك الذكي...');
         }
-        
-        setIsInitializing(false);
-        setStatus(isHand ? 'يرجى وضع يدك أمام الكاميرا بشكل واضح' : 'الخطوة 1 من 3: انظر مباشرة للكاميرا في إضاءة جيدة');
-      } catch (err) {
-        console.error('Camera/Model error:', err);
-        setErrorMsg('فشل في تشغيل الكاميرا أو تحميل النماذج. تأكد من الصلاحيات.');
-        setIsInitializing(false);
       }
     };
 
-    startCamera();
+    initAll();
 
     return () => {
-      if (videoRef.current && videoRef.current.srcObject) {
-        videoRef.current.srcObject.getTracks().forEach(track => track.stop());
+      isMounted = false;
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
       }
     };
-  }, [isHand, facingMode]);
+  }, [startCameraStream, startModelInit, isHand]);
+
+  // تحديث نص الحالة بحسب الجاهزية
+  useEffect(() => {
+    if (cameraReady && modelReady && !cameraError && !modelError) {
+      if (captureStage === 0) {
+        setStatus(isHand ? 'يرجى وضع باطن يدك أمام الكاميرا بوضوح' : 'الخطوة 1 من 3: انظر مباشرة للكاميرا في إضاءة جيدة');
+      } else if (captureStage === 1) {
+        setStatus(isHand ? 'الخطوة 2: اقلب يدك لتصوير ظهر اليد' : 'الخطوة 2 من 3: التفت قليلاً لليمين (~15°)');
+      } else if (captureStage === 2) {
+        setStatus(isHand ? 'الخطوة 3: أمل يدك قليلاً للجانب' : 'الخطوة 3 من 3: التفت قليلاً لليسار (~15°)');
+      }
+    }
+  }, [cameraReady, modelReady, cameraError, modelError, captureStage, isHand]);
 
   const toggleCamera = () => {
     setFacingMode(prev => (prev === 'user' ? 'environment' : 'user'));
@@ -74,136 +173,128 @@ export default function FaceRegistrationModal({ employee, onClose, onSuccess, bi
     setIsFlashActive(prev => !prev);
   };
 
-  useEffect(() => {
-    setCaptureStage(0);
-    setDescriptors([]);
-  }, [currentType]);
+  const handleRetryAll = () => {
+    setCameraError(null);
+    setModelError(null);
+    setStatus('جاري إعادة المحاولة وتشغيل الكاميرا والمحرك...');
+    startCameraStream();
+    startModelInit();
+  };
 
   const captureBiometric = async () => {
-    if (!videoRef.current || isInitializing) return;
+    if (!videoRef.current || !cameraReady || !modelReady || isCapturing) return;
 
-    setStatus(`جاري تحليل ${isHand ? 'اليد' : 'الوجه واستخراج البصمة الذكية'}...`);
-    setErrorMsg(null);
+    setIsCapturing(true);
+    setStatus(`جاري تحليل ${isHand ? 'اليد' : 'الوجه واستخراج البصمة الذكية (ArcFace 512D)'}...`);
 
     try {
       if (isHand) {
         const result = getHandEmbedding(videoRef.current, 0);
-        
         if (!result || !result.hasHand) {
-          setErrorMsg('لم يتم التعرف على يد. يرجى توجيه يدك للكاميرا وفتح أصابعك.');
+          alert('لم يتم التعرف على يد بوضوح. يرجى توجيه يدك للكاميرا وفتح الأصابع.');
           setStatus('يرجى المحاولة مرة أخرى');
         } else {
           const newDescriptors = [...descriptors, result.descriptor];
-          
           if (captureStage === 0) {
             setDescriptors(newDescriptors);
             setCaptureStage(1);
-            setStatus('تم التقاط (باطن اليد) ✅. يرجى قلب اليد لتصوير (ظهر اليد) والنقر على التقاط.');
           } else if (captureStage === 1) {
             setDescriptors(newDescriptors);
             setCaptureStage(2);
-            setStatus('تم التقاط (ظهر اليد) ✅. يرجى إمالة اليد قليلاً للجانب والنقر على التقاط.');
           } else {
             let photoDataUrl = null;
             try {
-              if (videoRef.current) {
-                const canvas = document.createElement('canvas');
-                canvas.width = videoRef.current.videoWidth || 640;
-                canvas.height = videoRef.current.videoHeight || 480;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-                photoDataUrl = canvas.toDataURL('image/jpeg', 0.85);
-              }
-            } catch (snapErr) {
-              console.warn('Could not extract snapshot frame:', snapErr);
+              const canvas = document.createElement('canvas');
+              canvas.width = videoRef.current.videoWidth || 640;
+              canvas.height = videoRef.current.videoHeight || 480;
+              const ctx = canvas.getContext('2d');
+              ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+              photoDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+            } catch (e) {
+              console.warn(e);
             }
-
-            setStatus('تم التقاط جميع زوايا اليد بنجاح! ✅ جاري الحفظ...');
+            setStatus('تم التقاط جميع زوايا اليد بنجاح! ✅ جاري الإرسال...');
             setTimeout(() => {
               onSuccess(newDescriptors, 'hand', photoDataUrl);
-            }, 1200);
+            }, 800);
           }
         }
       } else {
         const result = await getFaceEmbedding(videoRef.current);
-        
         if (result.error) {
-          setErrorMsg(result.error);
-          setStatus('يرجى المحاولة مرة أخرى');
+          alert(result.error);
+          setStatus('يرجى المحاولة مرة أخرى والتأكد من إضاءة الوجه');
         } else {
           const newDescriptors = [...descriptors, result.descriptor];
-          
           if (captureStage === 0) {
             setDescriptors(newDescriptors);
             setCaptureStage(1);
-            setStatus('تم التقاط الوجه (الأمام) ✅. الخطوة 2: يرجى الالتفات قليلاً لليمين (~15 درجة) ثم النقر على التقاط.');
           } else if (captureStage === 1) {
             setDescriptors(newDescriptors);
             setCaptureStage(2);
-            setStatus('تم التقاط الوجه (اليمين) ✅. الخطوة 3: يرجى الالتفات قليلاً لليسار (~15 درجة) ثم النقر على التقاط.');
           } else {
             let photoDataUrl = null;
             try {
-              if (videoRef.current) {
-                const canvas = document.createElement('canvas');
-                canvas.width = videoRef.current.videoWidth || 640;
-                canvas.height = videoRef.current.videoHeight || 480;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-                photoDataUrl = canvas.toDataURL('image/jpeg', 0.85);
-              }
-            } catch (snapErr) {
-              console.warn('Could not extract snapshot frame:', snapErr);
+              const canvas = document.createElement('canvas');
+              canvas.width = videoRef.current.videoWidth || 640;
+              canvas.height = videoRef.current.videoHeight || 480;
+              const ctx = canvas.getContext('2d');
+              ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+              photoDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+            } catch (e) {
+              console.warn(e);
             }
-
-            setStatus('تم تسجيل بروفايل الوجه متعدد الزوايا بنجاح! 🎉 جاري الحفظ في قاعدة البيانات...');
+            setStatus('تم تسجيل بروفايل الوجه متعدد الزوايا بنجاح! 🎉 جاري الإرسال...');
             setTimeout(() => {
               onSuccess(newDescriptors, 'face', photoDataUrl);
-            }, 1200);
+            }, 800);
           }
         }
       }
     } catch (err) {
       console.error(err);
-      setErrorMsg('حدث خطأ أثناء معالجة البصمة.');
-      setStatus('حاول مرة أخرى');
+      alert('حدث خطأ أثناء تحليل البصمة، يرجى المحاولة مرة أخرى.');
+    } finally {
+      setIsCapturing(false);
     }
   };
 
+  const isReadyToCapture = cameraReady && modelReady && !cameraError && !modelError && !isCapturing;
+
   return (
-    <div className={`modal-overlay ${isFlashActive ? 'screen-flash-active' : ''}`}>
+    <div className={`modal-overlay ${isFlashActive ? 'screen-flash-active' : ''}`} style={{ zIndex: 10000 }}>
       {isFlashActive && (
         <div style={{
           position: 'fixed',
           inset: 0,
-          backgroundColor: 'rgba(255, 255, 255, 0.92)',
+          backgroundColor: 'rgba(255, 255, 255, 0.95)',
           zIndex: 9998,
           pointerEvents: 'none'
         }} />
       )}
 
-      <div className="modal-content" style={{ maxWidth: '520px', textAlign: 'center', position: 'relative', zIndex: 9999 }}>
-        <div className="modal-header">
+      <div className="modal-content" style={{ maxWidth: '520px', textAlign: 'center', position: 'relative', zIndex: 9999, borderRadius: '16px' }}>
+        <div className="modal-header" style={{ paddingBottom: '12px' }}>
           <div>
-            <h3 style={{ margin: 0 }}>تسجيل بصمة {isHand ? 'اليد' : 'الوجه الذكية (HD)'}</h3>
-            <small style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>الموظف: {employee.name}</small>
+            <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800 }}>تسجيل بصمة {isHand ? 'اليد' : 'الوجه الذكية (HD)'}</h3>
+            <small style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>الموظف: {employee?.name}</small>
           </div>
-          <button className="close-btn" onClick={onClose}>×</button>
+          <button className="close-btn" onClick={onClose} style={{ fontSize: '20px' }}>×</button>
         </div>
         
-        <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px' }}>
+        <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px', paddingTop: '8px' }}>
           
-          {/* شريط مراحل الالتقاط */}
+          {/* شريط مؤشرات الحالة العلوية */}
           <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
             <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-              <span className={`badge ${captureStage >= 0 ? 'badge-primary' : ''}`} style={{ padding: '4px 8px', borderRadius: '50%', background: captureStage >= 1 ? '#4caf50' : 'var(--primary)', color: '#fff', fontSize: '0.8rem' }}>1</span>
-              <span style={{ fontSize: '0.8rem', fontWeight: captureStage === 0 ? 'bold' : 'normal' }}>الأمام</span>
+              <span style={{ padding: '3px 8px', borderRadius: '50%', background: captureStage >= 1 ? '#10b981' : 'var(--primary)', color: '#fff', fontSize: '0.8rem', fontWeight: 700 }}>1</span>
+              <span style={{ fontSize: '0.8rem', fontWeight: captureStage === 0 ? 800 : 500 }}>الأمام</span>
               <span>←</span>
-              <span className={`badge ${captureStage >= 1 ? 'badge-primary' : ''}`} style={{ padding: '4px 8px', borderRadius: '50%', background: captureStage >= 2 ? '#4caf50' : captureStage === 1 ? 'var(--primary)' : '#ccc', color: '#fff', fontSize: '0.8rem' }}>2</span>
-              <span style={{ fontSize: '0.8rem', fontWeight: captureStage === 1 ? 'bold' : 'normal' }}>اليمين</span>
+              <span style={{ padding: '3px 8px', borderRadius: '50%', background: captureStage >= 2 ? '#10b981' : captureStage === 1 ? 'var(--primary)' : '#e2e8f0', color: captureStage >= 1 ? '#fff' : '#64748b', fontSize: '0.8rem', fontWeight: 700 }}>2</span>
+              <span style={{ fontSize: '0.8rem', fontWeight: captureStage === 1 ? 800 : 500 }}>اليمين</span>
               <span>←</span>
-              <span className={`badge ${captureStage >= 2 ? 'badge-primary' : ''}`} style={{ padding: '4px 8px', borderRadius: '50%', background: captureStage === 2 ? 'var(--primary)' : '#ccc', color: '#fff', fontSize: '0.8rem' }}>3</span>
-              <span style={{ fontSize: '0.8rem', fontWeight: captureStage === 2 ? 'bold' : 'normal' }}>اليسار</span>
+              <span style={{ padding: '3px 8px', borderRadius: '50%', background: captureStage >= 2 ? 'var(--primary)' : '#e2e8f0', color: captureStage >= 2 ? '#fff' : '#64748b', fontSize: '0.8rem', fontWeight: 700 }}>3</span>
+              <span style={{ fontSize: '0.8rem', fontWeight: captureStage === 2 ? 800 : 500 }}>اليسار</span>
             </div>
 
             <div style={{ display: 'flex', gap: '6px' }}>
@@ -211,7 +302,8 @@ export default function FaceRegistrationModal({ employee, onClose, onSuccess, bi
                 type="button"
                 className="btn btn-ghost"
                 onClick={toggleFlash}
-                style={{ fontSize: '0.8rem', padding: '4px 8px' }}
+                style={{ fontSize: '0.8rem', padding: '4px 8px', border: '1px solid var(--border)' }}
+                title="إضاءة الشاشة"
               >
                 {isFlashActive ? '💡 إطفاء' : '💡 إضاءة'}
               </button>
@@ -219,46 +311,115 @@ export default function FaceRegistrationModal({ employee, onClose, onSuccess, bi
                 type="button"
                 className="btn btn-ghost"
                 onClick={toggleCamera}
-                style={{ fontSize: '0.8rem', padding: '4px 8px' }}
+                style={{ fontSize: '0.8rem', padding: '4px 8px', border: '1px solid var(--border)' }}
+                title="تبديل الكاميرا"
               >
                 🔄 {facingMode === 'user' ? 'أمامي' : 'خلفي'}
               </button>
             </div>
           </div>
 
-          <div style={{ position: 'relative', width: '100%', maxWidth: '420px', borderRadius: '16px', overflow: 'hidden', backgroundColor: '#000', border: '3px solid var(--border)' }}>
+          {/* شاشة الكاميرا والفيديو الحية */}
+          <div style={{ position: 'relative', width: '100%', maxWidth: '420px', borderRadius: '16px', overflow: 'hidden', backgroundColor: '#0f172a', border: '3px solid var(--border)', minHeight: '260px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <video 
               ref={videoRef} 
               autoPlay 
               playsInline 
               muted 
-              style={{ width: '100%', display: 'block', transform: facingMode === 'user' ? 'scaleX(-1)' : 'none' }} 
+              style={{ width: '100%', display: cameraReady ? 'block' : 'none', transform: facingMode === 'user' ? 'scaleX(-1)' : 'none' }} 
             />
-            {isInitializing && (
-              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.7)', color: '#fff' }}>
-                <div className="spinner">جارِ تجهيز المحرك...</div>
+            
+            {/* في حال عدم جاهزية الكاميرا أو وجود خطأ */}
+            {!cameraReady && !cameraError && (
+              <div style={{ padding: '24px', color: '#94a3b8', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+                <div style={{ width: '32px', height: '32px', border: '3px solid #38bdf8', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                <span style={{ fontSize: '13.5px', color: '#f8fafc' }}>جاري تشغيل الكاميرا فورياً...</span>
+              </div>
+            )}
+
+            {/* مؤشر تحميل المحرك الذكي في الزاوية إذا كانت الكاميرا تعمل والمحرك ما زال يجهز */}
+            {cameraReady && !modelReady && !modelError && (
+              <div style={{ position: 'absolute', top: '10px', right: '10px', background: 'rgba(15, 23, 42, 0.85)', color: '#38bdf8', padding: '4px 10px', borderRadius: '20px', fontSize: '11.5px', display: 'flex', alignItems: 'center', gap: '6px', backdropFilter: 'blur(4px)', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
+                <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: '#38bdf8', animation: 'pulse 1s infinite' }}></span>
+                <span>جاري تجهيز محرك الذكاء الاصطناعي...</span>
+              </div>
+            )}
+
+            {/* شارة الجاهزية الكاملة */}
+            {cameraReady && modelReady && (
+              <div style={{ position: 'absolute', top: '10px', right: '10px', background: 'rgba(22, 101, 52, 0.85)', color: '#86efac', padding: '4px 10px', borderRadius: '20px', fontSize: '11.5px', display: 'flex', alignItems: 'center', gap: '6px', backdropFilter: 'blur(4px)', border: '1px solid rgba(134, 239, 172, 0.3)' }}>
+                <span>✓</span>
+                <span>المحرك جاهز</span>
+              </div>
+            )}
+
+            {/* طبقة الخطأ فوق الفيديو إن وجد */}
+            {(cameraError || modelError) && (
+              <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(15, 23, 42, 0.92)', color: '#fff', padding: '20px' }}>
+                <span style={{ fontSize: '36px', marginBottom: '8px' }}>⚠️</span>
+                <p style={{ margin: '0 0 10px', color: '#fca5a5', fontSize: '13.5px', fontWeight: 'bold', maxWidth: '320px', lineHeight: 1.5 }}>
+                  {cameraError || modelError}
+                </p>
+                {permissionDenied && (
+                  <div style={{ background: '#334155', padding: '8px 12px', borderRadius: '8px', fontSize: '12px', color: '#cbd5e1', marginBottom: '12px', textAlign: 'right', width: '100%', maxWidth: '320px' }}>
+                    📌 <strong>كيفية السماح:</strong> اضغط على أيقونة القفل بجانب رابط الموقع في شريط العناوين ➔ فعّل الكاميرا ➔ ثم انقر على زر إعادة المحاولة بالأسفل.
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={handleRetryAll}
+                  style={{ background: '#0284c7', color: '#fff', border: 'none', padding: '8px 18px', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+                >
+                  <span>🔄</span>
+                  <span>إعادة محاولة التشغيل</span>
+                </button>
               </div>
             )}
           </div>
 
-          <div style={{ padding: '12px', background: 'var(--surface)', borderRadius: '10px', width: '100%', border: '1px solid var(--border)' }}>
-            <p style={{ fontWeight: 'bold', color: 'var(--text)', margin: '0 0 6px 0' }}>{status}</p>
-            {errorMsg && (
-              <p style={{ color: 'var(--danger)', fontSize: '0.9rem', margin: 0, fontWeight: 'bold' }}>⚠️ {errorMsg}</p>
-            )}
+          {/* صندوق التعليمات والتوجيه */}
+          <div style={{ padding: '12px 14px', background: 'var(--surface)', borderRadius: '12px', width: '100%', border: '1px solid var(--border)', textAlign: 'right' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+              <span style={{ fontSize: '16px' }}>💬</span>
+              <p style={{ fontWeight: 800, color: 'var(--text)', margin: 0, fontSize: '13.5px' }}>{status}</p>
+            </div>
             
-            <p style={{ textAlign: 'right', fontSize: '0.8rem', color: 'var(--muted)', margin: '8px 0 0 0' }}>
-              💡 نظام ArcFace الذكي يستخرج 512 نقطة هندسية لكل زاوية لتحقيق دقة 99.8% في أصعب ظروف الإضاءة.
+            <p style={{ fontSize: '11.5px', color: 'var(--muted)', margin: 0, lineHeight: 1.6 }}>
+              💡 نظام ArcFace فائق الدقة يستخرج 512 نقطة مميزة بدعم التسريع المحلي للعمل بفاعلية في كافة ظروف الإضاءة.
             </p>
           </div>
 
+          {/* زر التقاط البصمة */}
           <button 
+            type="button"
             className="btn btn-primary" 
             onClick={captureBiometric}
-            disabled={isInitializing}
-            style={{ width: '100%', padding: '12px', fontSize: '1rem', marginTop: '6px' }}
+            disabled={!isReadyToCapture}
+            style={{
+              width: '100%',
+              padding: '13px',
+              fontSize: '1rem',
+              fontWeight: 800,
+              borderRadius: '10px',
+              opacity: isReadyToCapture ? 1 : 0.6,
+              cursor: isReadyToCapture ? 'pointer' : 'not-allowed',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px'
+            }}
           >
-            📸 التقاط الزاوية ({captureStage + 1}/3)
+            {isCapturing ? (
+              <>
+                <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true" />
+                <span>جاري استخراج البصمة...</span>
+              </>
+            ) : (
+              <>
+                <span>📸</span>
+                <span>التقاط الزاوية ({captureStage + 1}/3)</span>
+              </>
+            )}
           </button>
         </div>
       </div>

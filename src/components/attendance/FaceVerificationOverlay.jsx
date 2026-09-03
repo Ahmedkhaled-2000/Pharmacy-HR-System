@@ -19,39 +19,75 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
   useEffect(() => {
     let stream = null;
     let checkInterval = null;
+    let isCancelled = false;
 
     const startProcess = async () => {
       try {
-        if (isHand) {
-          await initHandRecognition();
-        } else {
-          await initFaceRecognition();
-        }
-        
-        if (videoRef.current?.srcObject) {
-          videoRef.current.srcObject.getTracks().forEach(track => track.stop());
-          videoRef.current.srcObject = null;
+        // 1. بدء تشغيل الكاميرا بالطبقات المتعددة فوراً
+        const startCamera = async () => {
+          if (!navigator.mediaDevices?.getUserMedia) {
+            throw new Error('المتصفح لا يدعم الوصول للكاميرا أو يتطلب اتصالاً آمناً (HTTPS).');
+          }
+
+          if (videoRef.current?.srcObject) {
+            videoRef.current.srcObject.getTracks().forEach(track => track.stop());
+            videoRef.current.srcObject = null;
+          }
+
+          const constraintTiers = [
+            { video: { facingMode: { ideal: facingMode }, width: { ideal: 1280 }, height: { ideal: 720 } } },
+            { video: { facingMode: { ideal: facingMode } } },
+            { video: true }
+          ];
+
+          let camStream = null;
+          let lastCamErr = null;
+          for (const tier of constraintTiers) {
+            try {
+              camStream = await navigator.mediaDevices.getUserMedia(tier);
+              if (camStream) break;
+            } catch (cErr) {
+              lastCamErr = cErr;
+              if (cErr.name === 'NotAllowedError' || cErr.name === 'PermissionDeniedError') break;
+            }
+          }
+
+          if (!camStream) throw lastCamErr || new Error('تعذر فتح الكاميرا.');
+          return camStream;
+        };
+
+        // 2. تشغيل الكاميرا والمحرك بالتوازي التام
+        const camPromise = startCamera();
+        const modelPromise = isHand ? initHandRecognition() : initFaceRecognition();
+
+        const [camStream] = await Promise.all([camPromise, modelPromise]);
+        if (isCancelled) {
+          camStream.getTracks().forEach(t => t.stop());
+          return;
         }
 
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { 
-            facingMode: facingMode,
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          }
-        });
-        
+        stream = camStream;
         if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.play();
+          videoRef.current.srcObject = camStream;
+          try {
+            await videoRef.current.play();
+          } catch (pErr) {
+            console.warn('Play video interrupted:', pErr);
+          }
         }
-        
+
         setIsInitializing(false);
         setStatus(isHand ? 'يرجى وضع يدك وفتح أصابعك أمام الكاميرا...' : 'يرجى النظر مباشرة للكاميرا...');
         setLivenessStage(1);
       } catch (err) {
         console.error('Camera/Model error:', err);
-        setErrorMsg('فشل في تشغيل الكاميرا أو تحميل محرك الذكاء الاصطناعي.');
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+          setErrorMsg('تم حظر إذن الكاميرا. يرجى الضغط على أيقونة القفل 🔒 بجانب رابط المتصفح وتفعيل الكاميرا.');
+        } else if (err.name === 'NotFoundError') {
+          setErrorMsg('لم يتم العثور على أي كاميرا متصلة بالجهاز.');
+        } else {
+          setErrorMsg('فشل في تشغيل الكاميرا أو تحميل محرك الذكاء الاصطناعي: ' + (err.message || 'تأكد من الصلاحيات'));
+        }
         setIsInitializing(false);
       }
     };
@@ -59,6 +95,7 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
     startProcess();
 
     return () => {
+      isCancelled = true;
       if (videoRef.current && videoRef.current.srcObject) {
         videoRef.current.srcObject.getTracks().forEach(track => track.stop());
       }

@@ -15,55 +15,115 @@ let faceLandmarker = null;
 let onnxSession = null;
 let alignCanvas = null;
 
+let initPromise = null;
+
+/**
+ * فحص ما إذا كان محرك الوجه جاهزاً بالفعل
+ */
+export const isFaceEngineReady = () => {
+  return isFaceModelLoaded && Boolean(faceLandmarker) && Boolean(onnxSession);
+};
+
 /**
  * تهيئة وتحميل محركات الذكاء الاصطناعي (MediaPipe + ONNX Runtime Web)
+ * تعتمد على النماذج المحلية فائقة السرعة مع التعافي التلقائي
  */
 export const initFaceRecognition = async () => {
-  if (isFaceModelLoaded && faceLandmarker && onnxSession) return;
+  if (isFaceEngineReady()) return;
+  if (initPromise) return initPromise;
 
-  try {
-    // 1. إعداد مسارات تشغيل ONNX WebAssembly
+  initPromise = (async () => {
     try {
-      ort.env.wasm.wasmPaths = '/onnx-wasm/';
-      ort.env.wasm.numThreads = Math.min(4, navigator.hardwareConcurrency || 2);
-      ort.env.wasm.simd = true;
-    } catch (e) {
-      console.warn('WASM path setup fallback to CDN', e);
-      ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
+      console.log('⚡ [FaceEngine] جاري تهيئة محرك التعرف على الوجه فائق السرعة...');
+
+      // 1. إعداد مسارات تشغيل ONNX WebAssembly
+      try {
+        ort.env.wasm.wasmPaths = '/onnx-wasm/';
+        ort.env.wasm.numThreads = Math.min(4, navigator.hardwareConcurrency || 2);
+        ort.env.wasm.simd = true;
+      } catch (e) {
+        console.warn('WASM path setup fallback to CDN', e);
+        ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
+      }
+
+      // 2. تحميل نموذج MediaPipe FaceLandmarker (كشف الوجه، 478 نقطة ثلاثية الأبعاد)
+      // الأولوية 1: المسار المحلي الفوري /mediapipe-wasm
+      let vision = null;
+      try {
+        vision = await FilesetResolver.forVisionTasks('/mediapipe-wasm');
+      } catch (localWasmErr) {
+        console.warn('⚡ Local mediapipe wasm fallback to CDN:', localWasmErr);
+        vision = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm');
+      }
+
+      // محاولة التحميل باستخدام المسار المحلي والـ GPU، مع التعافي التلقائي عند تعذر WebGL أو المسار
+      let landmarkerCreated = false;
+      const modelPaths = ['/models/face_landmarker.task', 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task'];
+      const delegates = ['GPU', 'CPU'];
+
+      for (const mPath of modelPaths) {
+        if (landmarkerCreated) break;
+        for (const dlg of delegates) {
+          try {
+            faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+              baseOptions: {
+                modelAssetPath: mPath,
+                delegate: dlg
+              },
+              outputFaceBlendshapes: true,
+              runningMode: 'VIDEO',
+              numFaces: 1
+            });
+            landmarkerCreated = true;
+            console.log(`✅ [FaceEngine] FaceLandmarker loaded (${mPath}, ${dlg})`);
+            break;
+          } catch (landmarkerErr) {
+            console.warn(`FaceLandmarker attempt failed (${mPath}, ${dlg}):`, landmarkerErr.message || landmarkerErr);
+          }
+        }
+      }
+
+      if (!landmarkerCreated || !faceLandmarker) {
+        throw new Error('تعذر تحميل نموذج معالم الوجه (FaceLandmarker). يرجى التحقق من الاتصال.');
+      }
+
+      // 3. تحميل نموذج MobileFaceNet (ArcFace 512D) عبر ONNX Runtime
+      const modelUrl = '/models/w600k_mbf.onnx';
+      try {
+        onnxSession = await ort.InferenceSession.create(modelUrl, {
+          executionProviders: ['wasm'],
+          graphOptimizationLevel: 'all'
+        });
+      } catch (sessionErr) {
+        console.warn('WASM session with optimization failed, retrying basic session:', sessionErr);
+        onnxSession = await ort.InferenceSession.create(modelUrl);
+      }
+
+      // تهيئة Canvas مؤقت لإجراء عمليات التحويل
+      alignCanvas = document.createElement('canvas');
+      alignCanvas.width = 112;
+      alignCanvas.height = 112;
+
+      isFaceModelLoaded = true;
+      console.log('✅ تم تحميل محرك التعرف على الوجه بنجاح (ONNX ArcFace 512D + MediaPipe Local).');
+    } catch (error) {
+      console.error('❌ خطأ في تحميل نماذج الذكاء الاصطناعي للوجه:', error);
+      initPromise = null;
+      throw error;
     }
+  })();
 
-    // 2. تحميل نموذج MediaPipe FaceLandmarker (كشف الوجه، 478 نقطة ثلاثية الأبعاد، وتحليل التعبيرات)
-    const vision = await FilesetResolver.forVisionTasks(
-      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm'
-    );
-    faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
-      baseOptions: {
-        modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
-        delegate: 'GPU'
-      },
-      outputFaceBlendshapes: true,
-      runningMode: 'VIDEO',
-      numFaces: 1
-    });
+  return initPromise;
+};
 
-    // 3. تحميل نموذج MobileFaceNet (ArcFace 512D) عبر ONNX Runtime
-    const modelUrl = '/models/w600k_mbf.onnx';
-    onnxSession = await ort.InferenceSession.create(modelUrl, {
-      executionProviders: ['wasm', 'webgl'],
-      graphOptimizationLevel: 'all'
-    });
-
-    // تهيئة Canvas مؤقت لإجراء عمليات التحويل
-    alignCanvas = document.createElement('canvas');
-    alignCanvas.width = 112;
-    alignCanvas.height = 112;
-
-    isFaceModelLoaded = true;
-    console.log('✅ تم تحميل محرك التعرف على الوجه الحديث (ONNX MobileFaceNet + MediaPipe) بنجاح.');
-  } catch (error) {
-    console.error('❌ خطأ في تحميل نماذج الذكاء الاصطناعي للوجه:', error);
-    throw error;
-  }
+/**
+ * التحميل الاستباقي في الخلفية (Pre-Warming) لتشغيل المحرك بدون أي تأخير عند النقر
+ */
+export const preWarmFaceModels = () => {
+  if (isFaceEngineReady()) return Promise.resolve();
+  return initFaceRecognition().catch(err => {
+    console.warn('[FacePreWarm] Pre-warming models encounter:', err);
+  });
 };
 
 /**
