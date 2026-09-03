@@ -15,12 +15,14 @@ export default function EmployeeFileModal({
   departments = DEFAULT_DEPARTMENTS,
   onSave,
   handleFileUpload,
+  executeWithOwnerGuard: propExecuteWithOwnerGuard,
   state,
   setState,
   saveState,
   showToast
 }) {
-  const { showConfirm } = useUI();
+  const { showConfirm, executeWithOwnerGuard: contextExecuteWithOwnerGuard } = useUI();
+  const executeWithOwnerGuard = propExecuteWithOwnerGuard || contextExecuteWithOwnerGuard;
   const currentEmp = editingEmp || emp;
   const [activeTab, setActiveTab] = useState('personal'); // 'personal' | 'job' | 'financial' | 'documents'
 
@@ -46,6 +48,34 @@ export default function EmployeeFileModal({
   const [address, setAddress] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
   const [maritalStatus, setMaritalStatus] = useState('أعزب');
+
+  // Employee Photo Upload Handler
+  const handlePhotoUpload = async (e) => {
+    const file = e.target?.files?.[0];
+    if (!file) return;
+
+    if (file.size > 10 * 1024 * 1024) {
+      if (showToast) showToast('حجم الصورة كبير جداً، يرجى اختيار صورة أقل من 10 ميجابايت');
+      else alert('حجم الصورة كبير جداً، يرجى اختيار صورة أقل من 10 ميجابايت');
+      if (e?.target) e.target.value = '';
+      return;
+    }
+
+    try {
+      if (handleFileUpload) {
+        await handleFileUpload(e, (url) => setPhotoUrl(url));
+      } else {
+        const compressedDataUrl = await compressImage(file, 1000, 0.75);
+        setPhotoUrl(compressedDataUrl);
+        if (showToast) showToast('تم رفع وتجهيز الصورة بنجاح');
+      }
+    } catch (err) {
+      console.error('Failed to upload employee photo:', err);
+      if (showToast) showToast('حدث خطأ أثناء رفع الصورة');
+    } finally {
+      if (e?.target) e.target.value = '';
+    }
+  };
 
   // Phone list handlers
   const handleAddPhoneField = () => {
@@ -708,40 +738,156 @@ export default function EmployeeFileModal({
       createdAt: editingEmp ? editingEmp.createdAt : new Date().toISOString()
     };
 
-    if (onSave) {
-      onSave(employeeData);
-    } else if (setState && state) {
-      const isExisting = (state.employees || []).some(e => e.id === employeeData.id);
-      let updatedEmps;
-      if (isExisting) {
-        updatedEmps = (state.employees || []).map(e => e.id === employeeData.id ? { ...e, ...employeeData } : e);
-      } else {
-        updatedEmps = [...(state.employees || []), employeeData];
+    const performActualSave = () => {
+      if (onSave) {
+        onSave(employeeData);
+      } else if (setState && state) {
+        const isExisting = (state.employees || []).some(e => e.id === employeeData.id);
+        let updatedEmps;
+        if (isExisting) {
+          updatedEmps = (state.employees || []).map(e => e.id === employeeData.id ? { ...e, ...employeeData } : e);
+        } else {
+          updatedEmps = [...(state.employees || []), employeeData];
+        }
+        const updatedState = { ...state, employees: updatedEmps };
+        setState(updatedState);
+        if (saveState) saveState(updatedState);
       }
-      const updatedState = { ...state, employees: updatedEmps };
-      setState(updatedState);
-      if (saveState) saveState(updatedState);
-    }
 
-    // Trigger auto background sync to Google Drive if configured
-    const driveConfig = state?.orgSettings?.driveConfig;
-    if (driveConfig && driveConfig.enabled && driveConfig.serviceUrl && driveConfig.autoSyncOnEmployeeSave !== false) {
-      syncEmployeeEntireDrive(employeeData, state.orgSettings)
-        .then((res) => {
-          if (res.success && res.updatedEmp && setState && state) {
-            const finalEmps = (state.employees || []).map(e => 
-              String(e.id) === String(res.updatedEmp.id) ? res.updatedEmp : e
-            );
-            const finalState = { ...state, employees: finalEmps };
-            setState(finalState);
-            if (saveState) saveState(finalState);
-            if (showToast) showToast(`☁️ تم إنشاء/تحديث مجلد الموظف (${employeeData.name}) على Google Drive بنجاح`);
+      // Trigger auto background sync to Google Drive if configured
+      const driveConfig = state?.orgSettings?.driveConfig;
+      if (driveConfig && driveConfig.enabled && driveConfig.serviceUrl && driveConfig.autoSyncOnEmployeeSave !== false) {
+        syncEmployeeEntireDrive(employeeData, state.orgSettings)
+          .then((res) => {
+            if (res.success && res.updatedEmp && setState && state) {
+              const finalEmps = (state.employees || []).map(e => 
+                String(e.id) === String(res.updatedEmp.id) ? res.updatedEmp : e
+              );
+              const finalState = { ...state, employees: finalEmps };
+              setState(finalState);
+              if (saveState) saveState(finalState);
+              if (showToast) showToast(`☁️ تم إنشاء/تحديث مجلد الموظف (${employeeData.name}) على Google Drive بنجاح`);
+            }
+          })
+          .catch(err => console.warn('Background Google Drive sync error:', err));
+      }
+
+      onClose();
+    };
+
+    // ── فحص أقفال المالك للتعديلات المالية والإدارية الحساسة ──
+    const targetEmp = editingEmp || emp;
+    const locks = state?.orgSettings?.ownerModificationLocks || {};
+
+    let isSalaryChanged = false;
+    let isAllowancesChanged = false;
+    let isCutoffChanged = false;
+
+    if (targetEmp && targetEmp.id && !targetEmp.isFromRecruitment) {
+      // 1. فحص تغير الراتب الأساسي وسعر الساعة
+      const oldSal = parseFloat(targetEmp.salary) || 0;
+      const newSal = parseFloat(employeeData.salary) || 0;
+      if (Math.abs(oldSal - newSal) > 0.01) {
+        isSalaryChanged = true;
+      }
+      const oldBranches = Array.isArray(targetEmp.branchesDetails) ? targetEmp.branchesDetails : [];
+      const newBranches = Array.isArray(employeeData.branchesDetails) ? employeeData.branchesDetails : [];
+      for (const nb of newBranches) {
+        const ob = oldBranches.find(b => String(b.branchId) === String(nb.branchId));
+        const nbSal = parseFloat(nb.salary) || 0;
+        const obSal = ob ? (parseFloat(ob.salary) || 0) : 0;
+        if (Math.abs(nbSal - obSal) > 0.01) {
+          isSalaryChanged = true;
+          break;
+        }
+      }
+
+      // 2. فحص تغير البدلات والأجور الإضافية
+      const oldMgmt = parseFloat(targetEmp.managementAllowance) || 0;
+      const newMgmt = parseFloat(employeeData.managementAllowance) || 0;
+      const oldTrans = parseFloat(targetEmp.transportAllowance) || 0;
+      const newTrans = parseFloat(employeeData.transportAllowance) || 0;
+      const oldExtra = parseFloat(targetEmp.extraAllowance) || 0;
+      const newExtra = parseFloat(employeeData.extraAllowance) || 0;
+      if (Math.abs(oldMgmt - newMgmt) > 0.01 ||
+          Math.abs(oldTrans - newTrans) > 0.01 ||
+          Math.abs(oldExtra - newExtra) > 0.01) {
+        isAllowancesChanged = true;
+      }
+      const oldExtraList = Array.isArray(targetEmp.extraAllowances) ? targetEmp.extraAllowances : [];
+      const newExtraList = Array.isArray(employeeData.extraAllowances) ? employeeData.extraAllowances : [];
+      if (oldExtraList.length !== newExtraList.length) {
+        isAllowancesChanged = true;
+      }
+
+      // 3. فحص تغير ساعات وأيام العمل (دورة المرتبات والقواعد)
+      const oldH = parseFloat(targetEmp.workHoursPerDay || targetEmp.workHours) || 8;
+      const newH = parseFloat(employeeData.workHoursPerDay) || 8;
+      const oldD = parseFloat(targetEmp.workDaysPerMonth || targetEmp.workDays) || 26;
+      const newD = parseFloat(employeeData.workDaysPerMonth) || 26;
+      if (Math.abs(oldH - newH) > 0.01 || Math.abs(oldD - newD) > 0.01) {
+        isCutoffChanged = true;
+      }
+      for (const nb of newBranches) {
+        const ob = oldBranches.find(b => String(b.branchId) === String(nb.branchId));
+        if (ob) {
+          const obH = parseFloat(ob.workHoursPerDay || ob.workHours) || 8;
+          const nbH = parseFloat(nb.workHoursPerDay || nb.workHours) || 8;
+          const obD = parseFloat(ob.workDaysPerMonth || ob.workDays) || 26;
+          const nbD = parseFloat(nb.workDaysPerMonth || nb.workDays) || 26;
+          if (Math.abs(obH - nbH) > 0.01 || Math.abs(obD - nbD) > 0.01) {
+            isCutoffChanged = true;
+            break;
           }
-        })
-        .catch(err => console.warn('Background Google Drive sync error:', err));
+        }
+      }
     }
 
-    onClose();
+    const isTerminatedChanged = isTerminated && targetEmp && targetEmp.status !== 'تم الاستقالة';
+
+    const triggeredLocks = [];
+    if (isSalaryChanged && Boolean(locks.lockEditSalary)) {
+      triggeredLocks.push({
+        key: 'lockEditSalary',
+        title: 'الرواتب الأساسية وأجر الساعة',
+        details: `تعديل الراتب الأساسي وسعر الساعة للموظف (${name.trim()}) إلى ${employeeData.salary} ج.م`
+      });
+    }
+    if (isAllowancesChanged && Boolean(locks.lockEditAllowances)) {
+      triggeredLocks.push({
+        key: 'lockEditAllowances',
+        title: 'البدلات والأجور الإضافية',
+        details: `تعديل البدلات والأجور الإضافية الشهرية للموظف (${name.trim()})`
+      });
+    }
+    if (isCutoffChanged && Boolean(locks.lockEditCutoffRules)) {
+      triggeredLocks.push({
+        key: 'lockEditCutoffRules',
+        title: 'دورة وساعات/أيام العمل (26/25)',
+        details: `تعديل ساعات/أيام العمل الشهرية للموظف (${name.trim()})`
+      });
+    }
+    if (isTerminatedChanged && Boolean(locks.lockTerminateEmployee)) {
+      triggeredLocks.push({
+        key: 'lockTerminateEmployee',
+        title: 'إنهاء الخدمة والاستقالة',
+        details: `إنهاء خدمة واستقالة الموظف (${name.trim()})`
+      });
+    }
+
+    if (triggeredLocks.length > 0 && executeWithOwnerGuard) {
+      const primaryLock = triggeredLocks[0];
+      const titles = triggeredLocks.map(t => t.title).join(' و ');
+      executeWithOwnerGuard({
+        lockKey: primaryLock.key,
+        actionTitle: `قفل المالك: تعديل ${titles}`,
+        actionDetails: triggeredLocks.map(t => t.details).join(' | '),
+        onExecute: performActualSave
+      });
+      return;
+    }
+
+    performActualSave();
   };
 
   return (
@@ -896,7 +1042,7 @@ export default function EmployeeFileModal({
                       type="file"
                       accept="image/*"
                       style={{ display: 'none' }}
-                      onChange={(e) => handleFileUpload(e, (url) => setPhotoUrl(url))}
+                      onChange={handlePhotoUpload}
                     />
                   </label>
                   {photoUrl && (
@@ -1260,6 +1406,13 @@ export default function EmployeeFileModal({
           {/* TAB 3: Financial & Work Schedule */}
           {activeTab === 'financial' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {Boolean(state?.orgSettings?.ownerModificationLocks?.lockEditSalary || state?.orgSettings?.ownerModificationLocks?.lockEditAllowances || state?.orgSettings?.ownerModificationLocks?.lockEditCutoffRules) && (
+                <div style={{ background: '#fffbeb', border: '1.5px solid #fde68a', borderRadius: '10px', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: '10px', color: '#92400e', fontSize: '13px', fontWeight: 700 }}>
+                  <span style={{ fontSize: '18px' }}>🔒</span>
+                  <span>تنبيه أمان المالك: تعديل الرواتب الأساسية أو البدلات أو دورة العمل محمي بقفل المالك. سيتطلب حفظ أي تعديل تصريحاً بكلمة مرور المالك.</span>
+                </div>
+              )}
+
               <div style={{ fontSize: '13px', color: 'var(--muted)', background: 'var(--surface)', padding: '12px 14px', borderRadius: '10px', lineHeight: '1.7', border: '1px solid var(--border)' }}>
                 ✨ <strong>معادلة احتساب أجر الموظف وسعر اليوم المعتمدة:</strong>
                 <br />

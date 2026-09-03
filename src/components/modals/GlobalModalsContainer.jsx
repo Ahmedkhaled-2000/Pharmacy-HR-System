@@ -180,6 +180,10 @@ export default function GlobalModalsContainer() {
     const annualLeaveBalance = parseArabicFloat(empAnnualLeaveBalance) || 0;
 
     const isSalaryChanged = editingEmp && parseFloat(editingEmp.salary) !== salary;
+    const isCutoffChanged = editingEmp && (
+      Math.abs((parseFloat(editingEmp.workHoursPerDay || editingEmp.workHours) || 8) - workHoursPerDay) > 0.01 ||
+      Math.abs((parseFloat(editingEmp.workDaysPerMonth || editingEmp.workDays) || 26) - workDaysPerMonth) > 0.01
+    );
 
     const performSaveEmp = async () => {
       let updatedEmps = [];
@@ -190,53 +194,56 @@ export default function GlobalModalsContainer() {
                 ...e,
                 name: empName.trim(),
                 nickname: empNickname.trim(),
-                code: empCode.trim(),
-                username: empCode.trim(),
+                code: cleanEmpCode,
                 phone: empPhone.trim(),
-                jobTitle: empJobTitle.trim() || 'موظف',
-                salary,
-                workHoursPerDay,
-                workDaysPerMonth,
-                password: empPassword.trim() || '123',
+                jobTitle: empJobTitle.trim(),
+                salary: String(salary),
+                workHoursPerDay: String(workHoursPerDay),
+                workDaysPerMonth: String(workDaysPerMonth),
+                password: empPassword.trim(),
                 annualLeaveBalance,
-                photoUrl: empPhotoUrl.trim()
+                photoUrl: empPhotoUrl,
+                updatedAt: new Date().toISOString()
               }
             : e
         );
-        showToast(`تم تعديل بيانات الموظف "${empName}" بنجاح`);
       } else {
         const newEmp = {
-          id: 'emp_' + uid(),
+          id: `emp_${Date.now()}`,
           name: empName.trim(),
           nickname: empNickname.trim(),
-          code: empCode.trim(),
-          username: empCode.trim(),
+          code: cleanEmpCode,
           phone: empPhone.trim(),
-          jobTitle: empJobTitle.trim() || 'موظف',
-          salary,
-          workHoursPerDay,
-          workDaysPerMonth,
-          password: empPassword.trim() || '123',
+          jobTitle: empJobTitle.trim(),
+          salary: String(salary),
+          workHoursPerDay: String(workHoursPerDay),
+          workDaysPerMonth: String(workDaysPerMonth),
+          password: empPassword.trim(),
           annualLeaveBalance,
-          photoUrl: empPhotoUrl.trim(),
-          createdAt: getRealTodayStr(),
-          devices: []
+          photoUrl: empPhotoUrl,
+          status: 'على رأس العمل',
+          is_active: true,
+          fingerprint_active: true,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
         };
         updatedEmps = [...(state.employees || []), newEmp];
-        showToast(`تمت إضافة الموظف الجديد "${newEmp.name}" بنجاح`);
       }
 
       const updatedState = { ...state, employees: updatedEmps };
       setState(updatedState);
-      await saveState(updatedState);
       setIsEmpModalOpen(false);
+      showToast(editingEmp ? 'تم تحديث بيانات الموظف بنجاح' : 'تمت إضافة الموظف الجديد بنجاح');
 
-      // Auto-sync Word document to Google Drive in background
-      const driveConfig = state?.orgSettings?.driveConfig;
-      if (driveConfig && driveConfig.enabled && driveConfig.serviceUrl && driveConfig.autoSyncOnEmployeeSave !== false) {
-        const targetEmp = updatedEmps.find(e => e.id === (editingEmp ? editingEmp.id : updatedEmps[updatedEmps.length - 1]?.id));
-        if (targetEmp) {
-          syncEmployeeEntireDrive(targetEmp, state.orgSettings)
+      if (saveState) {
+        await saveState(updatedState);
+      }
+
+      // Sync with Google Drive in background if configured
+      if (state.orgSettings?.driveConfig?.enabled && state.orgSettings?.driveConfig?.serviceUrl) {
+        const targetEmpData = updatedEmps.find(e => e.code === cleanEmpCode);
+        if (targetEmpData) {
+          syncEmployeeEntireDrive(targetEmpData, state.orgSettings)
             .then(res => {
               if (res.success && res.updatedEmp && setState) {
                 setState(prev => {
@@ -252,13 +259,35 @@ export default function GlobalModalsContainer() {
       }
     };
 
-    if (isSalaryChanged) {
-      const isSalaryLocked = Boolean(state?.orgSettings?.ownerModificationLocks?.lockEditSalary);
-      if (isSalaryLocked && executeWithOwnerGuard) {
+    if (isSalaryChanged && Boolean(state?.orgSettings?.ownerModificationLocks?.lockEditSalary)) {
+      if (executeWithOwnerGuard) {
         executeWithOwnerGuard({
           lockKey: 'lockEditSalary',
           actionTitle: `تعديل الراتب الأساسي للموظف (${empName.trim()})`,
           actionDetails: `الراتب السابق: ${parseFloat(editingEmp.salary) || 0} ج.م -> الراتب الجديد: ${salary} ج.م`,
+          onExecute: () => {
+            if (isCutoffChanged && Boolean(state?.orgSettings?.ownerModificationLocks?.lockEditCutoffRules)) {
+              executeWithOwnerGuard({
+                lockKey: 'lockEditCutoffRules',
+                actionTitle: `تعديل دورة وساعات العمل للموظف (${empName.trim()})`,
+                actionDetails: `ساعات العمل: ${workHoursPerDay} س | أيام العمل: ${workDaysPerMonth} يوم`,
+                onExecute: performSaveEmp
+              });
+            } else {
+              performSaveEmp();
+            }
+          }
+        });
+        return;
+      }
+    }
+
+    if (isCutoffChanged && Boolean(state?.orgSettings?.ownerModificationLocks?.lockEditCutoffRules)) {
+      if (executeWithOwnerGuard) {
+        executeWithOwnerGuard({
+          lockKey: 'lockEditCutoffRules',
+          actionTitle: `تعديل دورة وساعات العمل للموظف (${empName.trim()})`,
+          actionDetails: `ساعات العمل: ${workHoursPerDay} س | أيام العمل: ${workDaysPerMonth} يوم`,
           onExecute: performSaveEmp
         });
         return;
@@ -401,6 +430,8 @@ export default function GlobalModalsContainer() {
           allEmployees={state.employees || []}
           jobs={state.orgSettings?.jobs}
           departments={state.orgSettings?.departments}
+          handleFileUpload={handleFileUpload}
+          executeWithOwnerGuard={executeWithOwnerGuard}
           onClose={() => {
             setIsEmpFileModalOpen(false);
             setEditingEmpFile(null);
