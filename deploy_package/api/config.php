@@ -144,7 +144,6 @@ function jsonResponse(mixed $data, int $statusCode = 200): void
     header('Pragma: no-cache');
     header('Expires: Mon, 26 Jul 1997 05:00:00 GMT');
     header('X-LiteSpeed-Cache-Control: no-cache, no-store');
-    header('X-Accel-Buffering: no');
 
     $output = is_string($data) ? $data : json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
     if ($output === false) {
@@ -164,34 +163,11 @@ function jsonResponse(mixed $data, int $statusCode = 200): void
         $cleanServerEtag = trim($etag, '"');
         if ($cleanClientEtag === $cleanServerEtag || str_contains($ifNoneMatch, $cleanServerEtag)) {
             http_response_code(304);
-            if (function_exists('fastcgi_finish_request')) {
-                fastcgi_finish_request();
-            }
             exit();
         }
     }
 
-    // 2. تفعيل ضغط GZIP إذا كان المتصفح يدعمه لتوفير الـ Bandwidth بين الاستضافة والعميل
-    $acceptEncoding = $_SERVER['HTTP_ACCEPT_ENCODING'] ?? '';
-    if (function_exists('gzencode') && strlen($output) > 1024 && str_contains($acceptEncoding, 'gzip')) {
-        $compressed = gzencode($output, 6);
-        if ($compressed !== false) {
-            header('Content-Encoding: gzip');
-            header('Content-Length: ' . strlen($compressed));
-            echo $compressed;
-            if (function_exists('fastcgi_finish_request')) {
-                fastcgi_finish_request();
-            }
-            exit();
-        }
-    }
-
-    header('Content-Length: ' . strlen($output));
     echo $output;
-
-    if (function_exists('fastcgi_finish_request')) {
-        fastcgi_finish_request();
-    }
     exit();
 }
 

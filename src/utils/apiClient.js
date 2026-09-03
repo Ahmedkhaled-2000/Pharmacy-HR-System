@@ -34,6 +34,7 @@ export const API_BASE_URL = getApiBaseUrl();
  * لمنع انهيار المتصفح أو تسريب الذاكرة عند حدوث أخطاء سحابية 500
  */
 const activeETags = new Map();
+const inFlightRequests = new Map();
 
 // حاجز الحماية السحابي لمنع تكرار الاتصال العقيم بالسيرفر (Circuit Breaker)
 let consecutiveServerErrors = 0;
@@ -49,17 +50,25 @@ export function resetBackendCircuitBreaker() {
 }
 
 async function request(endpoint, options = {}) {
-  const isPostOrSave = options.method === 'POST' || endpoint.includes('settings');
+  const method = (options.method || 'GET').toUpperCase();
+  const isMutation = method === 'POST' || method === 'PUT' || method === 'DELETE';
 
   // إذا كان السيرفر في وضع التبريد والحماية من الانهيار، نسمح دائماً بعمليات الحفظ
-  if (Date.now() < circuitBreakerCoolingUntil && options.isBackground && !isPostOrSave) {
+  if (Date.now() < circuitBreakerCoolingUntil && options.isBackground && !isMutation) {
     throw new Error(`[CircuitBreaker] الخادم قيد إعادة التشغيل والتبريد مؤقتاً.`);
   }
 
-  const maxRetries = options.retries !== undefined ? options.retries : (isPostOrSave ? 2 : 0);
-  const baseTimeoutMs = options.timeout || (isPostOrSave ? 25000 : 10000);
-  
-  let lastError = null;
+  // منع تكرار الطلبات المتطابقة المتزامنة (In-Flight Request De-duplication)
+  const dedupeKey = !isMutation ? `${method}:${endpoint}:${Boolean(options.useETag)}` : null;
+  if (dedupeKey && inFlightRequests.has(dedupeKey)) {
+    return inFlightRequests.get(dedupeKey);
+  }
+
+  const executeRequest = async () => {
+    const maxRetries = options.retries !== undefined ? options.retries : (isMutation ? 2 : 1);
+    const baseTimeoutMs = options.timeout || (isMutation ? 25000 : 12000);
+    
+    let lastError = null;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const cleanUrl = `${API_BASE_URL}/${endpoint.replace(/^\/+/, '')}`;
@@ -149,10 +158,21 @@ async function request(endpoint, options = {}) {
     }
   }
 
-  if (lastError?.name === 'AbortError') {
-    throw new Error(`انتهت مهلة الاتصال بالخادم. سيتم الاعتماد على الحفظ المحلي.`);
+    if (lastError?.name === 'AbortError') {
+      throw new Error(`انتهت مهلة الاتصال بالخادم. سيتم الاعتماد على الحفظ المحلي.`);
+    }
+    throw lastError || new Error(`تعذر الاتصال بالخادم.`);
+  };
+
+  const reqPromise = executeRequest();
+  if (dedupeKey) {
+    inFlightRequests.set(dedupeKey, reqPromise);
+    reqPromise.finally(() => {
+      inFlightRequests.delete(dedupeKey);
+    });
   }
-  throw lastError || new Error(`تعذر الاتصال بالخادم.`);
+
+  return reqPromise;
 }
 
 // ── 1. دوال إعدادات وبيانات التطبيق الرئيسية (Settings / State) ────────────────

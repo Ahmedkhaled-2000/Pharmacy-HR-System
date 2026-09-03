@@ -56,6 +56,17 @@
 </IfModule>
 
 # ------------------------------------------------------------------------------
+# ضبط أنواع MIME للملفات الحديثة (WASM, JSON, Manifest, AI Models)
+# ------------------------------------------------------------------------------
+<IfModule mod_mime.c>
+  AddType application/wasm .wasm
+  AddType application/javascript .js .mjs
+  AddType application/json .json
+  AddType application/manifest+json .webmanifest
+  AddType application/octet-stream .task .bin .onnx
+</IfModule>
+
+# ------------------------------------------------------------------------------
 # تفعيل ضغط GZIP لتقليل استهلاك الـ Bandwidth
 # ------------------------------------------------------------------------------
 <IfModule mod_deflate.c>

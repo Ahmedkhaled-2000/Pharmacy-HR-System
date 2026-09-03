@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import {
   STORAGE_KEY,
   WORK_DAYS_PER_MONTH,
@@ -299,26 +299,49 @@ export function DataProvider({ children, showToast = () => {} }) {
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
 
-  // Sync active user session with fresh database data
+  const authRoleRef = useRef(authRole);
+  authRoleRef.current = authRole;
+  const currentEmpUserRef = useRef(currentEmpUser);
+  currentEmpUserRef.current = currentEmpUser;
+  const currentBranchRef = useRef(currentBranch);
+  currentBranchRef.current = currentBranch;
+
+  // Sync active user session with fresh database data safely without triggering re-render loops
   const syncSessionWithFreshData = useCallback((freshState) => {
     try {
-      if (authRole === 'employee' && currentEmpUser) {
-        const freshEmp = (freshState.employees || []).find((e) => e.id === currentEmpUser.id);
+      const activeRole = authRoleRef.current;
+      const activeEmp = currentEmpUserRef.current;
+      const activeBranch = currentBranchRef.current;
+
+      if (activeRole === 'employee' && activeEmp) {
+        const freshEmp = (freshState.employees || []).find(
+          (e) => String(e.id) === String(activeEmp.id) || (activeEmp.code && String(e.code) === String(activeEmp.code))
+        );
         if (freshEmp) {
-          setCurrentEmpUser(freshEmp);
-          localStorage.setItem('app_current_emp_user', JSON.stringify(freshEmp));
+          const oldJson = JSON.stringify(activeEmp);
+          const newJson = JSON.stringify(freshEmp);
+          if (oldJson !== newJson) {
+            setCurrentEmpUser(freshEmp);
+            localStorage.setItem('app_current_emp_user', newJson);
+          }
         }
-      } else if (authRole === 'branch' && currentBranch) {
-        const freshBranch = (freshState.branches || []).find((b) => b.id === currentBranch.id);
+      } else if (activeRole === 'branch' && activeBranch) {
+        const freshBranch = (freshState.branches || []).find(
+          (b) => String(b.id) === String(activeBranch.id)
+        );
         if (freshBranch) {
-          setCurrentBranch(freshBranch);
-          localStorage.setItem('app_current_branch', JSON.stringify(freshBranch));
+          const oldJson = JSON.stringify(activeBranch);
+          const newJson = JSON.stringify(freshBranch);
+          if (oldJson !== newJson) {
+            setCurrentBranch(freshBranch);
+            localStorage.setItem('app_current_branch', newJson);
+          }
         }
       }
     } catch {}
-  }, [authRole, currentEmpUser, currentBranch, setCurrentEmpUser, setCurrentBranch]);
+  }, [setCurrentEmpUser, setCurrentBranch]);
 
-  // Initial Load (Fast Local Cache -> Cloud Sync)
+  // Initial Load (Fast Local Cache -> Cloud Sync) - MUST RUN ONCE ON MOUNT
   useEffect(() => {
     let isMounted = true;
 
@@ -371,16 +394,20 @@ export function DataProvider({ children, showToast = () => {} }) {
       }
 
       // التحقق من صلاحية جلسة الموظف أو الفرع
-      if (authRole === 'employee' && currentEmpUser) {
-        const empExists = (normalized.employees || []).some(e => String(e.id) === String(currentEmpUser.id));
+      const activeRole = authRoleRef.current;
+      const activeEmp = currentEmpUserRef.current;
+      const activeBranch = currentBranchRef.current;
+
+      if (activeRole === 'employee' && activeEmp) {
+        const empExists = (normalized.employees || []).some(e => String(e.id) === String(activeEmp.id));
         if (!empExists) {
           localStorage.removeItem('app_auth_role');
           localStorage.removeItem('app_current_emp_user');
           setAuthRole('none');
           setCurrentEmpUser(null);
         }
-      } else if (authRole === 'branch' && currentBranch) {
-        const branchExists = (normalized.branches || []).some(b => String(b.id) === String(currentBranch.id));
+      } else if (activeRole === 'branch' && activeBranch) {
+        const branchExists = (normalized.branches || []).some(b => String(b.id) === String(activeBranch.id));
         if (!branchExists) {
           localStorage.removeItem('app_auth_role');
           localStorage.removeItem('app_current_branch');
@@ -402,7 +429,7 @@ export function DataProvider({ children, showToast = () => {} }) {
       isMounted = false;
       clearTimeout(safetyTimer);
     };
-  }, [syncSessionWithFreshData, setAuthRole, setIsAdminLoggedIn, setCurrentEmpUser, setCurrentBranch]);
+  }, []);
 
   // Unify Document Title and Dynamic Favicon
   useEffect(() => {
