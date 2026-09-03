@@ -1416,24 +1416,24 @@ export default function EmployeeFileModal({
               <div style={{ background: 'linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)', border: '1.5px solid #a7f3d0', borderRadius: '12px', padding: '14px 18px', color: '#065f46', fontSize: '13px', lineHeight: '1.8' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 800, fontSize: '14px', marginBottom: '8px', color: '#047857' }}>
                   <span style={{ fontSize: '18px' }}>✨</span>
-                  <span>القواعد المعتمدة لاحتساب أجر الموظف وسعر اليوم والساعة:</span>
+                  <span>معادلة احتساب أجر الموظف وسعر اليوم والساعة المعتمدة بالمؤسسة:</span>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '8px 16px' }}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
                     <span style={{ color: '#059669', fontWeight: 'bold' }}>1️⃣</span>
-                    <span><strong>سعر اليوم</strong> = الراتب الأساسي الشهري ÷ عدد أيام العمل الشهرية (مثال: 650 ÷ 26 = <strong>25 ج.م / يوم</strong>).</span>
+                    <span><strong>سعر اليوم</strong> = (سعر الساعة الشهري × عدد ساعات العمل المدخلة) ÷ عدد أيام العمل المدخلة.</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
                     <span style={{ color: '#059669', fontWeight: 'bold' }}>2️⃣</span>
-                    <span><strong>سعر الساعة</strong> = سعر اليوم ÷ صافي ساعات العمل اليومية (مثال: 25 ÷ 8 = <strong>3.13 ج.م / ساعة</strong>).</span>
+                    <span><strong>سعر الساعة اليومي</strong> = سعر اليوم ÷ صافي ساعات العمل الفعلية (بعد خصم ساعات البريك).</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
                     <span style={{ color: '#059669', fontWeight: 'bold' }}>3️⃣</span>
-                    <span><strong>أجر الوردية / اليوم</strong> = سعر الساعة × ساعات العمل الفعلية المعتمدة في الجدول.</span>
+                    <span><strong>الراتب الأساسي الشهري</strong> = سعر اليوم × أيام العمل = سعر الساعة الشهري × ساعات العمل.</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
                     <span style={{ color: '#059669', fontWeight: 'bold' }}>💡</span>
-                    <span style={{ fontSize: '12px', color: '#047857' }}><strong>نظام الأجر بالساعة:</strong> إذا أُدخل أجر ساعة مباشر (أقل من 200 ج.م)، يُحسب سعر اليوم = أجر الساعة × الساعات.</span>
+                    <span style={{ fontSize: '12px', color: '#047857' }}><strong>تطبيق بالقيم المدخلة:</strong> مثال (سعر ساعة شهري 650 ج.م × 8 س ÷ 26 يوم): سعر اليوم = <strong>200 ج.م</strong>، وسعر الساعة = <strong>25 ج.م</strong>، والأساسي = <strong>5,200 ج.م</strong>.</span>
                   </div>
                 </div>
               </div>
@@ -1456,17 +1456,14 @@ export default function EmployeeFileModal({
                   let calcDailyHourlyRate = 0;
                   let calcMonthlySalary = 0;
 
-                  if (rateVal > 0 && daysVal > 0) {
-                    if (rateVal >= 200) {
-                      calcDailyRate = Math.round((rateVal / daysVal) * 100) / 100;
-                      calcDailyHourlyRate = (netHoursVal > 0 ? calcDailyRate / netHoursVal : (hoursVal > 0 ? calcDailyRate / hoursVal : 0));
-                      calcDailyHourlyRate = Math.round(calcDailyHourlyRate * 100) / 100;
-                      calcMonthlySalary = rateVal;
-                    } else {
-                      calcDailyHourlyRate = rateVal;
-                      calcDailyRate = Math.round(calcDailyHourlyRate * (netHoursVal > 0 ? netHoursVal : hoursVal) * 100) / 100;
-                      calcMonthlySalary = Math.round(calcDailyRate * daysVal * 100) / 100;
-                    }
+                  if (rateVal > 0 && daysVal > 0 && hoursVal > 0) {
+                    // 1. سعر اليوم = (سعر الساعة الشهري * ساعات العمل) / أيام العمل
+                    calcDailyRate = Math.round(((rateVal * hoursVal) / daysVal) * 100) / 100;
+                    // 2. سعر الساعة اليومي الصافي = سعر اليوم / صافي ساعات العمل الفعلية
+                    const effectiveHours = netHoursVal > 0 ? netHoursVal : hoursVal;
+                    calcDailyHourlyRate = Math.round((calcDailyRate / effectiveHours) * 100) / 100;
+                    // 3. الراتب الأساسي الشهري = سعر اليوم * أيام العمل = سعر الساعة الشهري * ساعات العمل
+                    calcMonthlySalary = Math.round(calcDailyRate * daysVal * 100) / 100;
                   }
 
                   return (
@@ -1482,7 +1479,7 @@ export default function EmployeeFileModal({
                         <div className="field">
                           <label style={{ fontWeight: 700, fontSize: '12.5px', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '6px' }}>
                             <span>💰</span>
-                            <span>الراتب الأساسي الشهري</span>
+                            <span>سعر الساعة الشهري (الراتب الأساسي)</span>
                           </label>
                           <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
                             <input
@@ -1493,7 +1490,7 @@ export default function EmployeeFileModal({
                                 newBd[idx].salary = e.target.value;
                                 setBranchesDetails(newBd);
                               }}
-                              placeholder="0.00"
+                              placeholder="650"
                               required
                               style={{ paddingLeft: '42px', fontWeight: 'bold', fontSize: '14.5px', height: '42px', borderRadius: '8px', border: '1.5px solid #cbd5e1' }}
                             />
@@ -1629,17 +1626,11 @@ export default function EmployeeFileModal({
                     let calcDailyHourlyRate = 0;
                     let calcMonthlySalary = 0;
 
-                    if (rateVal > 0 && daysVal > 0) {
-                      if (rateVal >= 200) {
-                        calcDailyRate = Math.round((rateVal / daysVal) * 100) / 100;
-                        calcDailyHourlyRate = (netHoursVal > 0 ? calcDailyRate / netHoursVal : (hoursVal > 0 ? calcDailyRate / hoursVal : 0));
-                        calcDailyHourlyRate = Math.round(calcDailyHourlyRate * 100) / 100;
-                        calcMonthlySalary = rateVal;
-                      } else {
-                        calcDailyHourlyRate = rateVal;
-                        calcDailyRate = Math.round(calcDailyHourlyRate * (netHoursVal > 0 ? netHoursVal : hoursVal) * 100) / 100;
-                        calcMonthlySalary = Math.round(calcDailyRate * daysVal * 100) / 100;
-                      }
+                    if (rateVal > 0 && daysVal > 0 && hoursVal > 0) {
+                      calcDailyRate = Math.round(((rateVal * hoursVal) / daysVal) * 100) / 100;
+                      const effectiveHours = netHoursVal > 0 ? netHoursVal : hoursVal;
+                      calcDailyHourlyRate = Math.round((calcDailyRate / effectiveHours) * 100) / 100;
+                      calcMonthlySalary = Math.round(calcDailyRate * daysVal * 100) / 100;
                     }
 
                     return (
@@ -1776,7 +1767,10 @@ export default function EmployeeFileModal({
                   const rateVal = parseFloat(bd.salary) || 0;
                   const daysVal = parseFloat(bd.workDays) || 26;
                   const hoursVal = parseFloat(bd.workHours) || 8;
-                  const monthly = rateVal >= 200 ? rateVal : (rateVal * hoursVal * daysVal);
+                  // سعر اليوم = (سعر الساعة الشهري * ساعات العمل) / أيام العمل
+                  const daily = daysVal > 0 ? ((rateVal * hoursVal) / daysVal) : (rateVal * hoursVal);
+                  // الراتب الأساسي الشهري = سعر اليوم * أيام العمل = سعر الساعة الشهري * ساعات العمل
+                  const monthly = Math.round(daily * daysVal * 100) / 100;
                   return acc + monthly;
                 }, 0);
 

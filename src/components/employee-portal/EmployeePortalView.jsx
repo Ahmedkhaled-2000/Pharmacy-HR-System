@@ -1181,7 +1181,7 @@ export default function EmployeePortalView({
     : (parseFloat(emp?.workDaysPerMonth) || 26);
 
   const monthlyRequiredHours = workHoursPerDay * workDaysPerMonth;
-  const currentMonthlySalary = summary.monthlySalary || (currentHourlyRate * monthlyRequiredHours);
+  const currentMonthlySalary = summary.monthlySalary || (summary.dailyRate ? summary.dailyRate * workDaysPerMonth : currentHourlyRate * workHoursPerDay);
 
   // ── Active Month Roster Status Check ──
   const activeMonthStr = getRealTodayStr().slice(0, 7);
@@ -4011,7 +4011,7 @@ export default function EmployeePortalView({
                     const bHoursPerDay = parseFloat(bd.workHoursPerDay) || 8;
                     const bDaysPerMonth = parseFloat(bd.workDaysPerMonth) || 26;
                     const bReqHours = bDaysPerMonth * bHoursPerDay;
-                    const bMonthlySalary = bSummary.monthlySalary || (bSalary * bReqHours);
+                    const bMonthlySalary = bSummary.monthlySalary || (bSummary.dailyRate ? bSummary.dailyRate * bDaysPerMonth : bSalary * bHoursPerDay);
 
                     const activeShift = state.activeShifts[emp.id];
                     const isThisBranchActive = activeShift && String(activeShift.branchId || emp.branchId) === String(bId);
