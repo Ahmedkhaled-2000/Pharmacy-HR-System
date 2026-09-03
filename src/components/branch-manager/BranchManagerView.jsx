@@ -1691,7 +1691,7 @@ export default function BranchManagerView({
                     <div key={r.id} style={{ border: '1px solid var(--border)', borderRadius: '10px', padding: '12px', background: 'var(--surface-muted)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                         <span style={{ fontWeight: '800', fontSize: '13px' }}>{r.employeeName || 'موظف'}</span>
-                        <span>{getFormattedRequestBadge(r.type, r.leaveType)}</span>
+                        <span>{getFormattedRequestBadge(r.type, r.leaveType, r.targetAction)}</span>
                       </div>
                       <div style={{ fontSize: '12px', color: 'var(--text)', marginBottom: '8px', lineHeight: 1.4 }}>
                         {r.reason || r.details || '—'}
@@ -1726,7 +1726,7 @@ export default function BranchManagerView({
                       branchRequests.slice(0, 5).map((r) => (
                         <tr key={r.id}>
                           <td style={{ fontWeight: '700' }}>{r.employeeName || 'موظف'}</td>
-                          <td>{getFormattedRequestBadge(r.type, r.leaveType)}</td>
+                          <td>{getFormattedRequestBadge(r.type, r.leaveType, r.targetAction)}</td>
                           <td style={{ fontSize: '13px' }}>{r.reason || r.details || '—'}</td>
                           <td>{getArabicBranchApprovalBadge(r.branchApproved, r.status)}</td>
                           <td>{getArabicStatusBadge(r.status, r.adminApproved, r.branchApproved)}</td>
@@ -1804,7 +1804,7 @@ export default function BranchManagerView({
                         <span style={{ fontSize: '11px', color: 'var(--muted)' }}>📅 {r.createdAt ? r.createdAt.slice(0, 10) : r.startDate || '—'}</span>
                       </div>
                       <div>
-                        {getFormattedRequestBadge(r.type, r.leaveType)}
+                        {getFormattedRequestBadge(r.type, r.leaveType, r.targetAction)}
                       </div>
                     </div>
 
@@ -1891,7 +1891,7 @@ export default function BranchManagerView({
                       <tr key={r.id}>
                         <td style={{ fontSize: '12.5px' }}>{r.createdAt ? r.createdAt.slice(0, 10) : r.startDate || '—'}</td>
                         <td style={{ fontWeight: '700' }}>{r.employeeName || 'موظف'}</td>
-                        <td>{getFormattedRequestBadge(r.type, r.leaveType)}</td>
+                        <td>{getFormattedRequestBadge(r.type, r.leaveType, r.targetAction)}</td>
                         <td>{getArabicBranchApprovalBadge(r.branchApproved, r.status, r)}</td>
                         <td>{getArabicStatusBadge(r.status, r.adminApproved, r.branchApproved, r)}</td>
                         <td>
@@ -1994,7 +1994,7 @@ export default function BranchManagerView({
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  {getFormattedRequestBadge(previewModalReq.type, previewModalReq.leaveType)}
+                  {getFormattedRequestBadge(previewModalReq.type, previewModalReq.leaveType, previewModalReq.targetAction)}
                   <button className="btn btn-ghost" style={{ padding: '6px 12px', fontSize: '14px' }} onClick={() => setPreviewModalReq(null)}>✕ إغلاق</button>
                 </div>
               </div>
@@ -2416,6 +2416,55 @@ export default function BranchManagerView({
                         </div>
                       </div>
                     </div>
+                  </div>
+                )}
+                {Boolean(previewModalReq.type === 'biometric_verification' || previewModalReq.type === 'تأكيد بصمة الوجه' || previewModalReq.type === 'تأكيد بصمة اليد') && (
+                  <div style={{ background: '#f0fdfa', padding: '16px', borderRadius: '12px', border: '1px solid #99f6e4' }}>
+                    <h4 style={{ margin: '0 0 10px', color: '#0f766e', fontSize: '14.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      📸 تفاصيل طلب اعتماد الحضور بالصورة الحية:
+                    </h4>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '14px' }}>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#0f766e' }}>نوع الإجراء المطلوب:</span>
+                        <div style={{ fontWeight: 'bold', color: '#115e59', fontSize: '14px' }}>
+                          {previewModalReq.targetAction === 'shift_start' ? '🟢 تسجيل دخول (بداية الوردية)' :
+                           previewModalReq.targetAction === 'shift_end' ? '🔴 تسجيل خروج (نهاية الوردية)' :
+                           previewModalReq.targetAction === 'break_start' ? '☕ بدء استراحة (بريك)' :
+                           previewModalReq.targetAction === 'break_end' ? '⏱️ انتهاء استراحة (بريك)' :
+                           (previewModalReq.actionLabel || previewModalReq.targetAction || 'بصمة حية')}
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#0f766e' }}>وقت وتاريخ التوثيق بالكشك:</span>
+                        <div style={{ fontWeight: 'bold', color: '#115e59' }}>
+                          🕒 {previewModalReq.time || '—'} بتاريخ {previewModalReq.date || '—'}
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#0f766e' }}>حالة الاعتماد:</span>
+                        <div style={{ fontWeight: 'bold', color: '#d97706' }}>
+                          ⚠️ تعتمد رسمياً بموافقة الإدارة العليا
+                        </div>
+                      </div>
+                    </div>
+
+                    {(previewModalReq.photoUrl || previewModalReq.drivePhotoUrl) && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: '#fff', padding: '12px', borderRadius: '10px', border: '1px solid #ccfbf1' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontWeight: 'bold', fontSize: '13px', color: '#0f766e' }}>🖼️ الصورة الملتقطة من الكشك:</span>
+                          {previewModalReq.drivePhotoUrl && (
+                            <a href={previewModalReq.drivePhotoUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: '12.5px', color: '#0284c7', textDecoration: 'none', fontWeight: 700 }}>
+                              ☁️ فتح بالدرايف ↗
+                            </a>
+                          )}
+                        </div>
+                        <img
+                          src={previewModalReq.photoUrl || previewModalReq.drivePhotoUrl}
+                          alt="صورة الحضور"
+                          style={{ maxHeight: '220px', maxWidth: '100%', objectFit: 'contain', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#000' }}
+                        />
+                      </div>
+                    )}
                   </div>
                 )}
 

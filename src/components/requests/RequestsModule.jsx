@@ -8,9 +8,20 @@ import { syncNow, fetchRemoteState } from '../../utils/offlineSync';
 import { createRequestDecisionNotification } from '../../utils/notificationEngine';
 import { useUI } from '../../context/UIContext';
 
-export function getFormattedRequestBadge(type, leaveType) {
-  const cleanType = String(type || '').trim().toLowerCase();
-  const cleanLeaveType = String(leaveType || '').trim().toLowerCase();
+export function getFormattedRequestBadge(type, leaveType, targetAction) {
+  let resolvedType = type;
+  let resolvedLeaveType = leaveType;
+  let resolvedAction = targetAction;
+
+  if (type && typeof type === 'object') {
+    resolvedType = type.type || type.requestType;
+    resolvedLeaveType = type.leaveType;
+    resolvedAction = type.targetAction || type.actionType || targetAction;
+  }
+
+  const cleanType = String(resolvedType || '').trim().toLowerCase();
+  const cleanLeaveType = String(resolvedLeaveType || '').trim().toLowerCase();
+  const cleanAction = String(resolvedAction || '').trim().toLowerCase();
 
   if (cleanType === 'leave' || cleanType === 'leave_request' || cleanType === 'annual_leave' || cleanType === 'sick_leave' || cleanType === 'unpaid_leave') {
     if (cleanLeaveType === 'annual' || cleanType === 'annual_leave') return <span className="badge badge-success">🏖️ إجازة سنوية</span>;
@@ -23,29 +34,17 @@ export function getFormattedRequestBadge(type, leaveType) {
     return <span className="badge badge-success">🏖️ طلب إجازة</span>;
   }
 
-  if (cleanType === 'penalty_objection' || cleanType === 'objection' || cleanType === 'تظلم' || cleanType === 'اعتراض') {
-    return <span className="badge badge-danger" style={{ background: '#7c3aed', color: '#fff', border: '1px solid #6d28d9' }}>✋ تظلم على جزاء لائحى</span>;
+  if (cleanType === 'advance' || cleanType === 'loan' || cleanType === 'سلفة') {
+    return <span className="badge badge-warning">💰 طلب سلفة</span>;
   }
-  if (cleanType === 'disciplinary_penalty' || cleanType === 'violation' || cleanType === 'disciplinary') {
-    return <span className="badge badge-danger">⚠️ جزاء تأديبي لائحي</span>;
+  if (cleanType === 'permission' || cleanType === 'إذن' || cleanType === 'late_permission' || cleanType === 'early_leave') {
+    return <span className="badge badge-info">⏳ طلب إذن</span>;
   }
-  if (cleanType === 'penalty' || cleanType === 'deduction' || cleanType === 'late_penalty') {
-    return <span className="badge badge-danger">⚠️ خصم / جزاء مالي</span>;
+  if (cleanType === 'penalty' || cleanType === 'early_exit' || cleanType === 'disciplinary_penalty' || cleanType === 'violation' || String(type || '').startsWith('disc_')) {
+    return <span className="badge badge-danger">⚠️ جزاء تأديبي</span>;
   }
-  if (cleanType === 'early_exit' || cleanType === 'early_leave') {
-    return <span className="badge badge-danger">⚠️ انصراف مبكر</span>;
-  }
-  if (cleanType === 'late_permission' || cleanType === 'late_excuse') {
-    return <span className="badge badge-warning">⏰ إذن تأخير صباحي</span>;
-  }
-  if (cleanType === 'permission' || cleanType === 'إذن') {
-    return <span className="badge badge-warning">⏰ إذن خروج / تأخير</span>;
-  }
-  if (cleanType === 'loan' || cleanType === 'advance' || cleanType === 'سلفة') {
-    return <span className="badge badge-primary">💳 سلفة مالية</span>;
-  }
-  if (cleanType === 'meds' || cleanType === 'credit_medicine' || cleanType === 'أدوية') {
-    return <span className="badge badge-primary">💊 أدوية آجل</span>;
+  if (cleanType === 'penalty_objection' || cleanType === 'objection' || cleanType === 'تظلم') {
+    return <span className="badge badge-warning" style={{ background: '#b45309', color: '#fff' }}>⚖️ تظلم على جزاء</span>;
   }
   if (cleanType === 'swap' || cleanType === 'shift_swap' || cleanType === 'تبديل') {
     return <span className="badge badge-primary">🔄 تبديل وردية</span>;
@@ -69,7 +68,19 @@ export function getFormattedRequestBadge(type, leaveType) {
     return <span className="badge badge-primary">↩️ تراجع عن استقالة</span>;
   }
   if (cleanType === 'punch_correction' || cleanType === 'attendance_punch' || cleanType === 'تأكيد بصمة الوجه' || cleanType === 'تأكيد بصمة اليد' || cleanType === 'biometric_verification') {
-    return <span className="badge badge-primary" style={{ background: '#0284c7', color: '#fff' }}>📸 اعتماد حضور بالصورة</span>;
+    if (cleanAction === 'shift_start' || cleanAction === 'دخول' || cleanAction === 'حضور') {
+      return <span className="badge" style={{ background: '#059669', color: '#fff', fontWeight: 700, padding: '4px 8px', borderRadius: '6px' }}>🟢 بصمة دخول (بالصورة)</span>;
+    }
+    if (cleanAction === 'shift_end' || cleanAction === 'خروج' || cleanAction === 'انصراف') {
+      return <span className="badge" style={{ background: '#dc2626', color: '#fff', fontWeight: 700, padding: '4px 8px', borderRadius: '6px' }}>🔴 بصمة خروج (بالصورة)</span>;
+    }
+    if (cleanAction === 'break_start' || cleanAction === 'بدء بريك' || cleanAction === 'بريك') {
+      return <span className="badge" style={{ background: '#d97706', color: '#fff', fontWeight: 700, padding: '4px 8px', borderRadius: '6px' }}>☕ بدء بريك (بالصورة)</span>;
+    }
+    if (cleanAction === 'break_end' || cleanAction === 'انتهاء بريك') {
+      return <span className="badge" style={{ background: '#2563eb', color: '#fff', fontWeight: 700, padding: '4px 8px', borderRadius: '6px' }}>⏱️ انتهاء بريك (بالصورة)</span>;
+    }
+    return <span className="badge badge-primary" style={{ background: '#0284c7', color: '#fff', fontWeight: 700 }}>📸 اعتماد حضور بالصورة</span>;
   }
   if (cleanType === 'biometric_registration') {
     return <span className="badge badge-success" style={{ background: '#0d9488', color: '#fff', border: '1px solid #0f766e' }}>📸 تسجيل بصمة جديدة</span>;

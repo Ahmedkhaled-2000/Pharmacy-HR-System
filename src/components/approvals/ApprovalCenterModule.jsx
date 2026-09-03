@@ -274,7 +274,7 @@ export default function ApprovalCenterModule({
                 <div key={req.id} className="approval-card-item">
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      {getFormattedRequestBadge(req.type, req.leaveType)}
+                      {getFormattedRequestBadge(req.type, req.leaveType, req.targetAction)}
                       <strong style={{ fontSize: '16px', color: 'var(--text)' }}>
                         {emp ? emp.name : 'موظف غير محدد'} ({emp?.code})
                       </strong>
@@ -289,7 +289,23 @@ export default function ApprovalCenterModule({
                       📝 البيان: <strong>{req.details || req.reason || 'طلب إداري'}</strong>
                       {req.amount && ` | المبلغ/الساعات: ${req.amount}`}
                       {req.date && ` | التاريخ: ${req.date}`}
+                      {req.time && ` | وقت التوثيق: ${req.time}`}
                     </div>
+
+                    {req.type === 'biometric_verification' && (
+                      <div style={{ marginTop: '6px', fontSize: '12.5px', color: '#0f766e', background: '#f0fdfa', border: '1px solid #ccfbf1', padding: '8px 12px', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <span><strong>الإجراء المطلوب بالكشك:</strong> {req.targetAction === 'shift_start' ? '🟢 تسجيل دخول (بداية الوردية)' : req.targetAction === 'shift_end' ? '🔴 تسجيل خروج (نهاية الوردية)' : req.targetAction === 'break_start' ? '☕ بدء استراحة (بريك)' : req.targetAction === 'break_end' ? '⏱️ انتهاء استراحة (بريك)' : (req.targetAction || 'بصمة')}</span>
+                          <span>•</span>
+                          <span><strong>وقت التوثيق بالكشك:</strong> {req.time || '—'}</span>
+                          <span>•</span>
+                          <span><strong>تاريخ الطلب:</strong> {req.date || '—'}</span>
+                        </div>
+                        <div style={{ color: '#b45309', fontSize: '11.5px', fontWeight: 700 }}>
+                          ⚠️ تنبيه احتساب الوردية: فور اعتماد الإدارة العليا، سيتم تسجيل وتثبيت موعد الوردية/البريك في نفس وقت إرسال الطلب بالكشك ({req.time || '—'}).
+                        </div>
+                      </div>
+                    )}
 
                     {(req.photoUrl || req.drivePhotoUrl) && (
                       <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>

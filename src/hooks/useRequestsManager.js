@@ -55,6 +55,7 @@ export function useRequestsManager() {
       let updatedLeaveHistory = [...(state.leaveHistory || [])];
       let updatedResignations = [...(state.resignationRequests || [])];
       let updatedLateIncidents = [...(state.lateIncidents || [])];
+      let updatedActiveShifts = { ...(state.activeShifts || {}) };
 
       if (isFullyApproved) {
         // 0. Overtime Request Approval
@@ -289,40 +290,182 @@ export function useRequestsManager() {
 
         // 7.5. Biometric Verification (Photo Attendance) Approval Integration
         if (target.type === 'biometric_verification' || target.type === 'تأكيد بصمة الوجه' || target.type === 'تأكيد بصمة اليد') {
-          const action = target.targetAction;
+          const action = target.targetAction || target.actionType;
           const empId = target.employeeId;
-          const reqDate = target.date || new Date().toISOString().slice(0, 10);
-          const reqTime = target.time || new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+          const emp = (state.employees || []).find((e) => String(e.id) === String(empId));
+          const reqDate = target.date || (target.createdAt ? target.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10));
+          const reqTime = target.time || (target.createdAt ? new Date(target.createdAt).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }) : '09:00');
+          const reqTimestamp = target.timestamp || target.createdAt || new Date().toISOString();
+          const reqEpoch = target.epoch || new Date(reqTimestamp).getTime() || Date.now();
           const approverTitle = role === 'admin' ? 'الإدارة العليا' : 'مدير الفرع';
 
           if (action === 'shift_start') {
-            const hasShiftToday = updatedShifts.some(s => String(s.employeeId) === String(empId) && s.date === reqDate && !s.endTime);
-            if (!hasShiftToday) {
+            const todayStr = new Date().toISOString().slice(0, 10);
+            if (reqDate === todayStr) {
+              updatedActiveShifts[empId] = {
+                branchId: target.branchId || emp?.branchId || '',
+                date: reqDate,
+                timeIn: reqTime,
+                startEpoch: reqEpoch,
+                isPaused: false,
+                isOnBreak: false,
+                breakStartTime: null,
+                pauseStartEpoch: null,
+                accumulatedPauseMs: 0,
+                photoUrl: target.photoUrl || null,
+                drivePhotoUrl: target.drivePhotoUrl || null,
+                source: 'photo_attendance_approved',
+                approvedBy: approverTitle,
+                updatedAt: Date.now()
+              };
+            }
+
+            const hasShift = updatedShifts.some(s => String(s.employeeId) === String(empId) && s.date === reqDate);
+            if (!hasShift) {
               const newShift = {
                 id: `shift_${Date.now()}`,
                 employeeId: empId,
+                employeeCode: emp?.code || target.employeeCode || '',
+                employeeName: emp?.name || target.employeeName || '',
                 date: reqDate,
+                timeIn: reqTime,
                 startTime: reqTime,
-                branchId: target.branchId || null,
+                timeOut: '—',
+                endTime: '—',
+                branchId: target.branchId || emp?.branchId || null,
+                branchName: target.branchName || emp?.branchName || 'الفرع الرئيسي',
                 source: 'photo_attendance_approved',
                 approvedBy: approverTitle,
                 photoUrl: target.photoUrl || null,
                 drivePhotoUrl: target.drivePhotoUrl || null,
-                note: `✅ تم تسجيل الحضور بالصورة (معتمد من ${approverTitle})`
+                statusLabel: 'حضور بالصورة (معتمد)',
+                note: `✅ تم تسجيل الحضور بالصورة في نفس وقت إرسال الطلب (${reqTime}) معتمد من ${approverTitle}`,
+                createdAt: reqTimestamp
               };
               updatedShifts.unshift(newShift);
+            } else {
+              updatedShifts = updatedShifts.map(s => {
+                if (String(s.employeeId) === String(empId) && s.date === reqDate) {
+                  return {
+                    ...s,
+                    timeIn: reqTime,
+                    startTime: reqTime,
+                    source: 'photo_attendance_approved',
+                    approvedBy: approverTitle,
+                    photoUrl: target.photoUrl || s.photoUrl,
+                    drivePhotoUrl: target.drivePhotoUrl || s.drivePhotoUrl,
+                    statusLabel: 'حضور بالصورة (معتمد)',
+                    note: (s.note ? s.note + ' | ' : '') + `✅ تم تسجيل الحضور بالصورة في نفس وقت إرسال الطلب (${reqTime}) معتمد من ${approverTitle}`
+                  };
+                }
+                return s;
+              });
             }
           } else if (action === 'shift_end') {
-            const openShiftIdx = updatedShifts.findIndex(s => String(s.employeeId) === String(empId) && (!s.endTime || s.endTime === '—'));
+            const active = updatedActiveShifts[empId];
+            if (active) {
+              delete updatedActiveShifts[empId];
+            }
+
+            const openShiftIdx = updatedShifts.findIndex(
+              s => String(s.employeeId) === String(empId) && (s.date === reqDate || !s.timeOut || s.timeOut === '—' || !s.endTime || s.endTime === '—')
+            );
+
             if (openShiftIdx >= 0) {
+              const shiftRecord = updatedShifts[openShiftIdx];
+              const timeInVal = shiftRecord.timeIn || shiftRecord.startTime || active?.timeIn || '09:00';
+              const [sH, sM] = timeInVal.split(':').map(Number);
+              const [eH, eM] = reqTime.split(':').map(Number);
+              let diffM = (eH * 60 + eM) - (sH * 60 + sM);
+              if (diffM < 0) diffM += 24 * 60;
+              const calcHours = Math.round((diffM / 60) * 100) / 100;
+
               updatedShifts[openShiftIdx] = {
-                ...updatedShifts[openShiftIdx],
+                ...shiftRecord,
+                timeOut: reqTime,
                 endTime: reqTime,
-                photoUrl: target.photoUrl || updatedShifts[openShiftIdx].photoUrl,
-                drivePhotoUrl: target.drivePhotoUrl || updatedShifts[openShiftIdx].drivePhotoUrl,
-                note: (updatedShifts[openShiftIdx].note || '') + ` | ✅ انصراف بالصورة معتمد (${approverTitle})`
+                hours: calcHours,
+                actualWorkedHours: calcHours,
+                source: 'photo_attendance_approved',
+                approvedBy: approverTitle,
+                photoUrl: target.photoUrl || shiftRecord.photoUrl,
+                drivePhotoUrl: target.drivePhotoUrl || shiftRecord.drivePhotoUrl,
+                statusLabel: 'انصراف بالصورة (معتمد)',
+                note: (shiftRecord.note ? shiftRecord.note + ' | ' : '') + `✅ انصراف بالصورة في نفس وقت إرسال الطلب (${reqTime}) معتمد من ${approverTitle}`
+              };
+            } else {
+              updatedShifts.unshift({
+                id: `shift_${Date.now()}`,
+                employeeId: empId,
+                employeeCode: emp?.code || target.employeeCode || '',
+                employeeName: emp?.name || target.employeeName || '',
+                date: reqDate,
+                timeIn: '09:00',
+                startTime: '09:00',
+                timeOut: reqTime,
+                endTime: reqTime,
+                hours: 8,
+                actualWorkedHours: 8,
+                branchId: target.branchId || emp?.branchId || null,
+                branchName: target.branchName || emp?.branchName || 'الفرع الرئيسي',
+                source: 'photo_attendance_approved',
+                approvedBy: approverTitle,
+                photoUrl: target.photoUrl || null,
+                drivePhotoUrl: target.drivePhotoUrl || null,
+                statusLabel: 'انصراف بالصورة (معتمد)',
+                note: `✅ انصراف بالصورة في نفس وقت إرسال الطلب (${reqTime}) معتمد من ${approverTitle}`,
+                createdAt: reqTimestamp
+              });
+            }
+          } else if (action === 'break_start') {
+            if (updatedActiveShifts[empId]) {
+              updatedActiveShifts[empId] = {
+                ...updatedActiveShifts[empId],
+                isPaused: true,
+                isOnBreak: true,
+                breakStartTime: reqTime,
+                pauseStartEpoch: reqEpoch,
+                updatedAt: Date.now()
               };
             }
+            updatedShifts = updatedShifts.map(s => {
+              if (String(s.employeeId) === String(empId) && (s.date === reqDate || !s.timeOut || s.timeOut === '—')) {
+                return {
+                  ...s,
+                  note: (s.note ? s.note + ' | ' : '') + `☕ بدء بريك بالصورة في نفس وقت إرسال الطلب (${reqTime}) معتمد من ${approverTitle}`
+                };
+              }
+              return s;
+            });
+          } else if (action === 'break_end') {
+            if (updatedActiveShifts[empId]) {
+              let breakMin = 0;
+              if (updatedActiveShifts[empId].breakStartTime) {
+                const [bH, bM] = updatedActiveShifts[empId].breakStartTime.split(':').map(Number);
+                const [eH, eM] = reqTime.split(':').map(Number);
+                breakMin = (eH * 60 + eM) - (bH * 60 + bM);
+                if (breakMin < 0) breakMin += 24 * 60;
+              }
+              const breakDurationMs = breakMin > 0 ? (breakMin * 60000) : (Date.now() - (updatedActiveShifts[empId].pauseStartEpoch || Date.now()));
+              updatedActiveShifts[empId] = {
+                ...updatedActiveShifts[empId],
+                isPaused: false,
+                isOnBreak: false,
+                breakStartTime: null,
+                pauseStartEpoch: null,
+                accumulatedPauseMs: (updatedActiveShifts[empId].accumulatedPauseMs || 0) + breakDurationMs,
+                updatedAt: Date.now()
+              };
+            }
+            updatedShifts = updatedShifts.map(s => {
+              if (String(s.employeeId) === String(empId) && (s.date === reqDate || !s.timeOut || s.timeOut === '—')) {
+                return {
+                  ...s,
+                  note: (s.note ? s.note + ' | ' : '') + `⏱️ انتهاء بريك بالصورة في نفس وقت إرسال الطلب (${reqTime}) معتمد من ${approverTitle}`
+                };
+              }
+              return s;
+            });
           }
         }
 
@@ -464,6 +607,7 @@ export function useRequestsManager() {
         shiftSwaps: updatedSwaps,
         employees: updatedEmps,
         shifts: updatedShifts,
+        activeShifts: updatedActiveShifts,
         leaveRequests: updatedLeaveRequests,
         leaveHistory: updatedLeaveHistory,
         resignationRequests: updatedResignations,

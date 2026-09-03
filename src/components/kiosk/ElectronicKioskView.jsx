@@ -156,12 +156,19 @@ export default function ElectronicKioskView({
     const isHand = empBiometricType === 'hand';
 
     const actionLabels = {
-      shift_start: 'تسجيل بداية الدوام',
-      shift_end: 'تسجيل نهاية الدوام',
-      break_start: 'تسجيل بداية الاستراحة',
-      break_end: 'تسجيل نهاية الاستراحة'
+      shift_start: 'تسجيل دخول (بداية الوردية)',
+      shift_end: 'تسجيل خروج (نهاية الوردية)',
+      break_start: 'بدء استراحة (بريك)',
+      break_end: 'انتهاء استراحة (بريك)'
+    };
+    const actionBadges = {
+      shift_start: '🟢 بصمة دخول',
+      shift_end: '🔴 بصمة خروج',
+      break_start: '☕ بدء بريك',
+      break_end: '⏱️ انتهاء بريك'
     };
     const actionLabel = actionLabels[actionType] || actionType;
+    const actionBadge = actionBadges[actionType] || '📸 بصمة بالصورة';
     const effectiveBranchId = selectedBranchId || matchedEmp?.branchId || kioskBranchId;
     const branchObj = (state?.branches || []).find(b => String(b.id) === String(effectiveBranchId));
     const branchName = branchObj ? branchObj.name : 'الفرع الرئيسي';
@@ -186,28 +193,34 @@ export default function ElectronicKioskView({
       }
     }
 
-    // 2. Build standardized Biometric Attendance Request
+    // 2. Build standardized Biometric Attendance Request with exact punch action & timestamp
     const requestId = 'REQ-BIO-' + Date.now();
     const requestData = {
       id: requestId,
       type: 'biometric_verification',
       requestType: 'biometric_verification',
-      typeLabel: `اعتماد حضور بالصورة (${actionLabel})`,
+      typeLabel: `اعتماد حضور بالصورة: ${actionBadge}`,
       employeeId: matchedEmp.id,
       employeeCode: matchedEmp.code,
       employeeName: matchedEmp.name,
       branchId: effectiveBranchId,
       branchName: branchName,
       targetAction: actionType,
+      actionType: actionType,
+      actionLabel: actionLabel,
+      actionBadge: actionBadge,
       date: dateStr,
       time: timeStr,
+      timestamp: now.toISOString(),
+      epoch: now.getTime(),
       createdAt: now.toISOString(),
       status: 'pending',
       requiresBranchManager: true,
       requiresSuperAdmin: true,
       branchApproved: false,
       adminApproved: false,
-      notes: `تعذر التحقق من بصمة ${isHand ? 'اليد' : 'الوجه'} لـ 3 مرات متتالية عند محاولة (${actionLabel}). تم التقاط صورة حية للموظف وإرسالها للاعتماد.`,
+      details: `طلب اعتماد ${actionBadge} (${actionLabel}) بالصورة الحية. وقت التوثيق والطلب: ${timeStr} بتاريخ ${dateStr}.`,
+      notes: `تعذر التحقق من بصمة ${isHand ? 'اليد' : 'الوجه'} لـ 3 مرات متتالية عند محاولة (${actionLabel}). تم التقاط صورة حية للموظف في تمام ${timeStr} وإرسالها للاعتماد. لا تُعتمد الوردية إلا بموافقة الإدارة العليا وسيتم بدءها/إنهاؤها في نفس وقت إرسال الطلب (${timeStr}).`,
       photoUrl: photoUrl || null,
       drivePhotoUrl: driveResult?.fileUrl || null,
       driveFileId: driveResult?.fileId || null
@@ -219,11 +232,15 @@ export default function ElectronicKioskView({
       type: 'biometric_verification',
       targetRole: 'branch_and_admin',
       branchId: effectiveBranchId,
-      title: `📸 طلب اعتماد حضور بالصورة: ${matchedEmp.name}`,
-      message: `تعذر التحقق من بصمة ${isHand ? 'اليد' : 'الوجه'} للموظف ${matchedEmp.name} (${actionLabel}). يرجى مراجعة الصورة واعتماد الحضور.`,
+      title: `📸 طلب اعتماد [${actionBadge}]: ${matchedEmp.name}`,
+      message: `طلب اعتماد ${actionBadge} (${actionLabel}) بالصورة للموظف ${matchedEmp.name} في تمام الساعة ${timeStr} بتاريخ ${dateStr}. لن تُعتمد الوردية إلا بموافقة الإدارة العليا.`,
       requestId: requestId,
       employeeId: matchedEmp.id,
       employeeName: matchedEmp.name,
+      targetAction: actionType,
+      actionBadge: actionBadge,
+      time: timeStr,
+      date: dateStr,
       photoUrl: photoUrl || null,
       drivePhotoUrl: driveResult?.fileUrl || null,
       createdAt: now.toISOString(),
@@ -231,7 +248,7 @@ export default function ElectronicKioskView({
       readBy: []
     };
 
-    // 4. Save into state and Supabase / DB
+    // 4. Save into state and Supabase / DB (SHIFT IS NOT STARTED/STOPPED UNTIL SUPER ADMIN APPROVAL)
     const currentRequests = state?.requests || [];
     const currentNotifs = state?.notifications || [];
     const updatedState = {
@@ -260,11 +277,12 @@ export default function ElectronicKioskView({
         actionType,
         timeStr,
         dateStr,
-        drivePhotoUrl: driveResult?.fileUrl || null
+        drivePhotoUrl: driveResult?.fileUrl || null,
+        photoUrl: photoUrl || null
       }).catch(err => console.warn('Gmail biometric notification failed:', err));
     }
 
-    alert(`📸 تم التقاط الصورة وإرسال طلب اعتماد (${actionLabel}) بنجاح!\n\nتم إرسال الطلب لمدير الفرع والإدارة العليا، ${driveResult?.success ? 'وتم حفظ الصورة بمجلد الموظف على Google Drive ☁️' : 'وجاري المراجعة والاعتماد.'}`);
+    alert(`📸 تم التقاط الصورة وإرسال طلب اعتماد [${actionBadge}] بنجاح!\n\nوقت المحاولة المحفوظ: ${timeStr} بتاريخ ${dateStr}.\n\n⚠️ ملاحظة: لن تُعتمد البصمة في السجلات إلا بعد موافقة الإدارة العليا، وعند الموافقة سيتم احتساب وقت الوردية بنفس وقت التوثيق أعلاه (${timeStr}).\n\n${driveResult?.success ? 'تم حفظ الصورة بمجلد الموظف على Google Drive ☁️' : 'تم إرسال الإشعار للإدارة بنجاح.'}`);
     setMatchedEmp(null);
     setInputCode('');
   };

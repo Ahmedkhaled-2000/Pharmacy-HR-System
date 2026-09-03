@@ -678,7 +678,7 @@ export async function notifyAdminOnOvertime({ state, emp, branchName, overtimeHo
 }
 
 /**
- * 13. إرسال بريد طلب اعتماد حضور بالصورة بعد تعذر بصمة الوجه 3 مرات
+ * 13. إرسال بريد طلب اعتماد حضور بالصورة بعد تعذر البصمة الحيوية 3 مرات
  */
 export async function sendBiometricAttendanceEmail({
   gmailConfig,
@@ -689,24 +689,27 @@ export async function sendBiometricAttendanceEmail({
   timeStr,
   dateStr,
   drivePhotoUrl,
+  photoUrl,
   targetEmail: customTargetEmail
 }) {
-  const targetEmail = customTargetEmail || gmailConfig?.adminEmail;
-  if (!targetEmail) return { success: false, error: 'بريد الإدارة غير محدد' };
+  if (!gmailConfig || !gmailConfig.enabled) return { success: false, error: 'خدمة البريد غير مفعلة' };
 
-  const actionLabels = {
-    shift_start: 'تسجيل بداية الدوام (حضور)',
-    shift_end: 'تسجيل نهاية الدوام (انصراف)',
-    break_start: 'تسجيل بداية الاستراحة',
-    break_end: 'تسجيل نهاية الاستراحة'
+  const targetEmail = customTargetEmail || gmailConfig.targetAdminEmail || gmailConfig.adminEmail || gmailConfig.userEmail;
+  if (!targetEmail) return { success: false, error: 'لم يتم تحديد بريد المستلم' };
+
+  const actionMap = {
+    shift_start: { label: 'تسجيل دخول (بداية الوردية)', badge: '🟢 بصمة دخول', color: '#059669' },
+    shift_end: { label: 'تسجيل خروج (نهاية الوردية)', badge: '🔴 بصمة خروج', color: '#dc2626' },
+    break_start: { label: 'بدء استراحة (بريك)', badge: '☕ بدء بريك', color: '#d97706' },
+    break_end: { label: 'انتهاء استراحة (بريك)', badge: '⏱️ انتهاء بريك', color: '#2563eb' }
   };
-  const actionLabel = actionLabels[actionType] || actionType || 'تسجيل حضور';
+  const actInfo = actionMap[actionType] || { label: actionType || 'تسجيل حضور', badge: '📸 بصمة بالصورة', color: '#0284c7' };
 
   const content = `
-    <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 14px; margin-bottom: 16px;">
-      <h3 style="color: #991b1b; margin: 0 0 8px 0; font-size: 16px;">⚠️ تعذر التحقق من بصمة الوجه (3 محاولات)</h3>
-      <p style="margin: 0; color: #7f1d1d; font-size: 14px; line-height: 1.6;">
-        قام الموظف <strong>${empName}</strong> بمحاولة تسجيل <strong>${actionLabel}</strong> عبر كشك البصمة، وتعذر مطابقة بصمة الوجه لـ 3 مرات متتالية، فتم التقاط صورة حية له وإرسال طلب اعتماد بديل للإدارة العليا ومدير الفرع.
+    <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+      <h3 style="color: #166534; margin: 0 0 8px 0; font-size: 16px;">📸 طلب اعتماد حضور بالصورة الحية (${actInfo.label})</h3>
+      <p style="margin: 0; color: #166534; font-size: 14px; line-height: 1.6;">
+        تعذر مطابقة البصمة الحيوية للموظف <strong>${empName}</strong> لـ 3 مرات متتالية في كشك الفرع. تم التقاط صورة حية للموظف في تمام <strong>${timeStr}</strong> وإرسال طلب الاعتماد للمدير والإدارة العليا.
       </p>
     </div>
 
@@ -714,32 +717,38 @@ export async function sendBiometricAttendanceEmail({
       <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
         <tr><td style="padding: 6px 0; font-weight: bold; width: 140px;">👤 الموظف:</td><td>${empName} (كود: ${empCode || '—'})</td></tr>
         <tr><td style="padding: 6px 0; font-weight: bold;">📍 الفرع:</td><td>${branchName || 'الفرع الرئيسي'}</td></tr>
-        <tr><td style="padding: 6px 0; font-weight: bold;">⚡ الإجراء المطلوب:</td><td><strong style="color: #0284c7;">${actionLabel}</strong></td></tr>
-        <tr><td style="padding: 6px 0; font-weight: bold;">📅 التاريخ والوقت:</td><td>${dateStr || ''} الساعة ${timeStr || ''}</td></tr>
-        ${drivePhotoUrl ? `<tr><td style="padding: 6px 0; font-weight: bold;">📁 صورة البصمة بدرايف:</td><td><a href="${drivePhotoUrl}" target="_blank" style="color: #0284c7; font-weight: bold;">🔗 فتح الصورة في Google Drive</a></td></tr>` : ''}
+        <tr><td style="padding: 6px 0; font-weight: bold;">⚡ نوع البصمة المطلوب:</td><td><strong style="color: ${actInfo.color};">${actInfo.badge} — ${actInfo.label}</strong></td></tr>
+        <tr><td style="padding: 6px 0; font-weight: bold;">🕒 وقت وتاريخ التوثيق:</td><td>${timeStr} بتاريخ ${dateStr}</td></tr>
+        ${drivePhotoUrl ? `
+        <tr><td style="padding: 6px 0; font-weight: bold;">☁️ صورة Google Drive:</td><td><a href="${drivePhotoUrl}" target="_blank" style="color: #0284c7; font-weight: bold;">فتح ومعاينة الصورة في الدرايف ↗</a></td></tr>
+        ` : ''}
       </table>
     </div>
 
+    <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 12px; margin-top: 14px; color: #92400e; font-size: 13px;">
+      ⚠️ <strong>ضابط اللائحة والاعتماد:</strong> لا تُعتمد الوردية في السجلات الرسمية إلا بعد موافقة الإدارة العليا. وعند الموافقة، سيتم بدء/إنهاء الوردية أو البريك في نفس وقت إرسال الطلب (<strong>${timeStr}</strong>).
+    </div>
+
     <p style="text-align: center; margin-top: 20px;">
-      <a href="https://pharmacy-time-tracker.vercel.app" style="display: inline-block; background: #0284c7; color: #ffffff; text-decoration: none; padding: 10px 22px; border-radius: 8px; font-weight: bold;">
-        🔗 الدخول لمراجعة الصورة واعتماد أو رفض الحضور
+      <a href="https://pharmacy-time-tracker.vercel.app" style="display: inline-block; background: #059669; color: #ffffff; text-decoration: none; padding: 10px 22px; border-radius: 8px; font-weight: bold;">
+        🔗 فتح مركز موافقات الإدارة العليا
       </a>
     </p>
   `;
 
   const html = buildEmailTemplate({
-    title: `📸 طلب اعتماد حضور بالصورة: ${empName}`,
-    subtitle: `تعذر التحقق من بصمة الوجه 3 مرات — فرع ${branchName || 'العام'}`,
-    badgeText: 'اعتماد حضور بالصورة',
-    badgeColor: '#dc2626',
+    title: `📸 طلب اعتماد [${actInfo.badge}]: ${empName}`,
+    subtitle: `إشعار بالتقاط صورة عند تعذر البصمة الحيوية 3 مرات في الكشك`,
+    badgeText: actInfo.badge,
+    badgeColor: actInfo.color,
     bodyContent: content,
-    footerText: 'يمكن للإدارة العليا ومدير الفرع اتخاذ القرار المناسب من مركز الموافقات'
+    footerText: `وقت المحاولة المحفوظ بالنظام: ${timeStr} · التاريخ: ${dateStr}`
   });
 
   return sendGmailEmail({
     gmailConfig,
     recipientEmail: targetEmail,
-    subject: `📸 طلب اعتماد حضور بالصورة (${actionLabel}): ${empName} — فرع ${branchName || 'العام'}`,
+    subject: `📸 طلب اعتماد [${actInfo.badge}]: ${empName} (كود: ${empCode || '—'}) — ${timeStr}`,
     htmlContent: html
   });
 }
