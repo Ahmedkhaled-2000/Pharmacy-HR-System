@@ -137,11 +137,27 @@ export default function DesktopLayout({
       ]
     },
     {
-      id: 'branches',
+      id: 'branches-group',
       label: 'الفروع',
       icon: '🏢',
-      isSingle: true,
-      targetTab: 'branches'
+      children: [
+        {
+          id: 'branches:list',
+          targetTab: 'branches',
+          targetSubTab: 'list',
+          label: 'إدارة وبيانات الفروع',
+          icon: '🏢',
+          desc: 'بيانات الفروع، المديرين المكلفين، وأرقام التواصل'
+        },
+        {
+          id: 'branches:roster',
+          targetTab: 'branches',
+          targetSubTab: 'roster',
+          label: 'الجدول الشهري للفرع',
+          icon: '📅',
+          desc: 'مواعيد وورديات الموظفين، الحضور، وتغطية الفروع'
+        }
+      ]
     },
     {
       id: 'requests-group',
@@ -574,6 +590,9 @@ export default function DesktopLayout({
         }
         if (child.targetTab === activeTab) {
           if (child.targetSubTab) {
+            if (activeTab === 'branches' && child.targetSubTab === 'list' && (!activeSubTab || activeSubTab === 'branches' || activeSubTab === 'list')) {
+              return true;
+            }
             return activeSubTab === child.targetSubTab;
           }
           return true;
@@ -661,7 +680,12 @@ for (const menu of currentMenuItems) {
         }
       }
       if (c.targetTab === activeTab) {
-        if (c.targetSubTab && activeSubTab !== c.targetSubTab) continue;
+        if (c.targetSubTab && activeSubTab !== c.targetSubTab) {
+          if (c.targetTab === 'branches' && c.targetSubTab === 'list' && (!activeSubTab || activeSubTab === 'branches' || activeSubTab === 'list')) {
+            return { group: menu.label, item: c.label, icon: c.icon };
+          }
+          continue;
+        }
         return { group: menu.label, item: c.label, icon: c.icon };
       }
     }
@@ -1621,7 +1645,7 @@ return (
                 }}
               >
                 {menu.children.map((child) => {
-                  const isChildActive = child.targetTab === activeTab && (!child.targetSubTab || activeSubTab === child.targetSubTab);
+                  const isChildActive = child.targetTab === activeTab && (!child.targetSubTab || activeSubTab === child.targetSubTab || (child.targetTab === 'branches' && child.targetSubTab === 'list' && (!activeSubTab || activeSubTab === 'branches' || activeSubTab === 'list')));
                   const hasSubChildren = child.subChildren && child.subChildren.length > 0;
                   const isFlyoutOpen = hoveredFlyoutId === child.id;
 
@@ -2021,7 +2045,7 @@ return (
                 {isExpanded && menu.children && (
                   <div style={{ padding: '4px 10px 8px 14px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
                     {menu.children.map((child) => {
-                      const isChildActive = child.targetTab === activeTab && (!child.targetSubTab || activeSubTab === child.targetSubTab);
+                      const isChildActive = child.targetTab === activeTab && (!child.targetSubTab || activeSubTab === child.targetSubTab || (child.targetTab === 'branches' && child.targetSubTab === 'list' && (!activeSubTab || activeSubTab === 'branches' || activeSubTab === 'list')));
                       return (
                         <button
                           key={child.id}

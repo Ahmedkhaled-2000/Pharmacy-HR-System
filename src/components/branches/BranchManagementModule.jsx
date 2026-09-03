@@ -2,7 +2,13 @@ import React, { useState } from 'react';
 import BranchPhonesDirectoryModal from './BranchPhonesDirectoryModal';
 import { getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 
-export default function BranchManagementModule({ state, onSaveBranch, onDeleteBranch }) {
+export default function BranchManagementModule({
+  state,
+  onSaveBranch,
+  onDeleteBranch,
+  onSwitchSubTab,
+  onOpenBranchRoster
+}) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isPhonesModalOpen, setIsPhonesModalOpen] = useState(false);
   const [editingBranch, setEditingBranch] = useState(null);
@@ -255,6 +261,23 @@ export default function BranchManagementModule({ state, onSaveBranch, onDeleteBr
           <button
             type="button"
             className="btn btn-ghost"
+            onClick={() => onSwitchSubTab && onSwitchSubTab('roster')}
+            style={{
+              background: '#ecfdf5',
+              color: '#065f46',
+              border: '1px solid #a7f3d0',
+              fontWeight: 800,
+              fontSize: '13.5px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            <span>📅</span> الجدول الشهري للفرع
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost"
             onClick={() => setIsPhonesModalOpen(true)}
             style={{
               background: 'var(--primary-light)',
@@ -354,6 +377,29 @@ export default function BranchManagementModule({ state, onSaveBranch, onDeleteBr
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          style={{
+                            fontSize: '12px',
+                            background: '#ecfdf5',
+                            color: '#065f46',
+                            border: '1px solid #a7f3d0',
+                            fontWeight: 700,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}
+                          onClick={() => {
+                            if (onOpenBranchRoster) {
+                              onOpenBranchRoster(b.id);
+                            } else if (onSwitchSubTab) {
+                              onSwitchSubTab('roster');
+                            }
+                          }}
+                        >
+                          📅 جدول الفرع
+                        </button>
                         <button type="button" className="btn btn-ghost" style={{ fontSize: '12px' }} onClick={() => handleOpenEdit(b)}>
                           ✏️ تعديل
                         </button>

@@ -1,4 +1,4 @@
-import React, { Suspense, lazy } from 'react';
+import React, { Suspense, lazy, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 
 import ErrorBoundary from '../components/common/ErrorBoundary';
@@ -9,6 +9,7 @@ import BranchManagerView from '../components/branch-manager/BranchManagerView';
 import Dashboard from '../components/dashboard/Dashboard';
 import EmployeesHubModule from '../components/employees/EmployeesHubModule';
 import BranchManagementModule from '../components/branches/BranchManagementModule';
+import BranchMonthlyRosterModule from '../components/branches/BranchMonthlyRosterModule';
 import RequestsModule from '../components/requests/RequestsModule';
 import LeavesTrackingModule from '../components/leaves/LeavesTrackingModule';
 import EmployeePermissionsManagementModule from '../components/permissions/EmployeePermissionsManagementModule';
@@ -43,6 +44,7 @@ import { arabicMonthLabel, fmt } from '../utils/formatters';
 
 export default function AppRoutes() {
   const location = useLocation();
+  const [selectedRosterBranchId, setSelectedRosterBranchId] = useState('');
 
   const {
     themeMode,
@@ -695,13 +697,27 @@ export default function AppRoutes() {
                   />
                 )}
 
-                {/* 3. Branch Management */}
+                {/* 3. Branch Management & Branch Monthly Roster */}
                 {activeNavTab === 'branches' && (
-                  <BranchManagementModule
-                    state={state}
-                    onSaveBranch={handleSaveBranch}
-                    onDeleteBranch={handleDeleteBranch}
-                  />
+                  activeSubTab === 'roster' ? (
+                    <BranchMonthlyRosterModule
+                      state={state}
+                      initialBranchId={selectedRosterBranchId}
+                      onNavigateTab={setActiveNavTab}
+                      onSwitchSubTab={setActiveSubTab}
+                    />
+                  ) : (
+                    <BranchManagementModule
+                      state={state}
+                      onSaveBranch={handleSaveBranch}
+                      onDeleteBranch={handleDeleteBranch}
+                      onSwitchSubTab={setActiveSubTab}
+                      onOpenBranchRoster={(branchId) => {
+                        setSelectedRosterBranchId(branchId);
+                        setActiveSubTab('roster');
+                      }}
+                    />
+                  )
                 )}
 
                 {/* 4. Requests Center */}
