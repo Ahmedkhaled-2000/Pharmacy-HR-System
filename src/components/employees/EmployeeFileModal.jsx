@@ -1413,14 +1413,29 @@ export default function EmployeeFileModal({
                 </div>
               )}
 
-              <div style={{ fontSize: '13px', color: 'var(--muted)', background: 'var(--surface)', padding: '12px 14px', borderRadius: '10px', lineHeight: '1.7', border: '1px solid var(--border)' }}>
-                ✨ <strong>معادلة احتساب أجر الموظف وسعر اليوم المعتمدة:</strong>
-                <br />
-                1. <strong>سعر اليوم</strong> = (سعر الساعة الشهري × عدد ساعات العمل المدخلة) ÷ عدد أيام العمل المدخلة.
-                <br />
-                2. <strong>سعر الساعة اليومي</strong> = سعر اليوم ÷ عدد ساعات العمل المدخلة.
-                <br />
-                3. <strong>احتساب أجر اليوم / الوردية</strong> = سعر الساعة اليومي × عدد الساعات الموضوعة في الجدول الشهري / الفعلية.
+              <div style={{ background: 'linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)', border: '1.5px solid #a7f3d0', borderRadius: '12px', padding: '14px 18px', color: '#065f46', fontSize: '13px', lineHeight: '1.8' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 800, fontSize: '14px', marginBottom: '8px', color: '#047857' }}>
+                  <span style={{ fontSize: '18px' }}>✨</span>
+                  <span>القواعد المعتمدة لاحتساب أجر الموظف وسعر اليوم والساعة:</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '8px 16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                    <span style={{ color: '#059669', fontWeight: 'bold' }}>1️⃣</span>
+                    <span><strong>سعر اليوم</strong> = الراتب الأساسي الشهري ÷ عدد أيام العمل الشهرية (مثال: 650 ÷ 26 = <strong>25 ج.م / يوم</strong>).</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                    <span style={{ color: '#059669', fontWeight: 'bold' }}>2️⃣</span>
+                    <span><strong>سعر الساعة</strong> = سعر اليوم ÷ صافي ساعات العمل اليومية (مثال: 25 ÷ 8 = <strong>3.13 ج.م / ساعة</strong>).</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                    <span style={{ color: '#059669', fontWeight: 'bold' }}>3️⃣</span>
+                    <span><strong>أجر الوردية / اليوم</strong> = سعر الساعة × ساعات العمل الفعلية المعتمدة في الجدول.</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                    <span style={{ color: '#059669', fontWeight: 'bold' }}>💡</span>
+                    <span style={{ fontSize: '12px', color: '#047857' }}><strong>نظام الأجر بالساعة:</strong> إذا أُدخل أجر ساعة مباشر (أقل من 200 ج.م)، يُحسب سعر اليوم = أجر الساعة × الساعات.</span>
+                  </div>
+                </div>
               </div>
               
               {/* Active Branches Financial Cards */}
@@ -1456,82 +1471,134 @@ export default function EmployeeFileModal({
 
                   return (
                     <div key={bd.id} style={{ background: 'var(--primary-tint)', padding: '16px', borderRadius: '12px', border: '1.5px solid var(--primary-light, #bfdbfe)' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                         <h4 style={{ margin: 0, color: 'var(--primary-dark)', fontFamily: 'Cairo', display: 'flex', alignItems: 'center', gap: '8px' }}>
                           💰 بيانات وأجور: {branchName}
                         </h4>
                         <span className="badge badge-success" style={{ fontSize: '11.5px' }}>🟢 فرع نشط ومعين</span>
                       </div>
 
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '12px' }}>
                         <div className="field">
-                          <label>سعر الساعة الشهري (الراتب الأساسي)</label>
-                          <input
-                            type="number"
-                            value={bd.salary !== undefined ? bd.salary : ''}
-                            onChange={(e) => {
-                              const newBd = [...branchesDetails];
-                              newBd[idx].salary = e.target.value;
-                              setBranchesDetails(newBd);
-                            }}
-                            placeholder="الراتب الأساسي / سعر الساعة"
-                            required
-                          />
+                          <label style={{ fontWeight: 700, fontSize: '12.5px', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '6px' }}>
+                            <span>💰</span>
+                            <span>الراتب الأساسي الشهري</span>
+                          </label>
+                          <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                            <input
+                              type="number"
+                              value={bd.salary !== undefined ? bd.salary : ''}
+                              onChange={(e) => {
+                                const newBd = [...branchesDetails];
+                                newBd[idx].salary = e.target.value;
+                                setBranchesDetails(newBd);
+                              }}
+                              placeholder="0.00"
+                              required
+                              style={{ paddingLeft: '42px', fontWeight: 'bold', fontSize: '14.5px', height: '42px', borderRadius: '8px', border: '1.5px solid #cbd5e1' }}
+                            />
+                            <span style={{ position: 'absolute', left: '10px', fontSize: '11px', color: '#64748b', fontWeight: 600, pointerEvents: 'none' }}>ج.م</span>
+                          </div>
                         </div>
 
                         <div className="field">
-                          <label>ساعات العمل اليومية المدخلة</label>
-                          <input
-                            type="number"
-                            value={bd.workHours !== undefined ? bd.workHours : ''}
-                            onChange={(e) => {
-                              const newBd = [...branchesDetails];
-                              newBd[idx].workHours = e.target.value;
-                              setBranchesDetails(newBd);
-                            }}
-                            placeholder="ساعات العمل"
-                            required
-                          />
+                          <label style={{ fontWeight: 700, fontSize: '12.5px', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '6px' }}>
+                            <span>⏱️</span>
+                            <span>ساعات العمل اليومية</span>
+                          </label>
+                          <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                            <input
+                              type="number"
+                              value={bd.workHours !== undefined ? bd.workHours : ''}
+                              onChange={(e) => {
+                                const newBd = [...branchesDetails];
+                                newBd[idx].workHours = e.target.value;
+                                setBranchesDetails(newBd);
+                              }}
+                              placeholder="8"
+                              required
+                              style={{ paddingLeft: '40px', fontWeight: 'bold', fontSize: '14.5px', height: '42px', borderRadius: '8px', border: '1.5px solid #cbd5e1' }}
+                            />
+                            <span style={{ position: 'absolute', left: '10px', fontSize: '11px', color: '#64748b', fontWeight: 600, pointerEvents: 'none' }}>ساعة</span>
+                          </div>
                         </div>
 
                         <div className="field">
-                          <label>أيام العمل الشهرية المدخلة</label>
-                          <input
-                            type="number"
-                            value={bd.workDays !== undefined ? bd.workDays : ''}
-                            onChange={(e) => {
-                              const newBd = [...branchesDetails];
-                              newBd[idx].workDays = e.target.value;
-                              setBranchesDetails(newBd);
-                            }}
-                            placeholder="أيام العمل"
-                            required
-                          />
+                          <label style={{ fontWeight: 700, fontSize: '12.5px', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '6px' }}>
+                            <span>📅</span>
+                            <span>أيام العمل الشهرية</span>
+                          </label>
+                          <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                            <input
+                              type="number"
+                              value={bd.workDays !== undefined ? bd.workDays : ''}
+                              onChange={(e) => {
+                                const newBd = [...branchesDetails];
+                                newBd[idx].workDays = e.target.value;
+                                setBranchesDetails(newBd);
+                              }}
+                              placeholder="26"
+                              required
+                              style={{ paddingLeft: '38px', fontWeight: 'bold', fontSize: '14.5px', height: '42px', borderRadius: '8px', border: '1.5px solid #cbd5e1' }}
+                            />
+                            <span style={{ position: 'absolute', left: '10px', fontSize: '11px', color: '#64748b', fontWeight: 600, pointerEvents: 'none' }}>يوم</span>
+                          </div>
                         </div>
 
                         <div className="field">
-                          <label>ساعات البريك اليومية (تخصم تلقائياً)</label>
-                          <input
-                            type="number"
-                            step="0.25"
-                            min="0"
-                            max="12"
-                            value={bd.breakHours !== undefined ? bd.breakHours : ''}
-                            onChange={(e) => {
-                              const newBd = [...branchesDetails];
-                              newBd[idx].breakHours = e.target.value;
-                              setBranchesDetails(newBd);
-                            }}
-                            placeholder="0"
-                          />
+                          <label style={{ fontWeight: 700, fontSize: '12.5px', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '6px' }}>
+                            <span>☕</span>
+                            <span>ساعات البريك اليومية</span>
+                          </label>
+                          <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                            <input
+                              type="number"
+                              step="0.25"
+                              min="0"
+                              max="12"
+                              value={bd.breakHours !== undefined ? bd.breakHours : ''}
+                              onChange={(e) => {
+                                const newBd = [...branchesDetails];
+                                newBd[idx].breakHours = e.target.value;
+                                setBranchesDetails(newBd);
+                              }}
+                              placeholder="0"
+                              style={{ paddingLeft: '38px', fontWeight: 'bold', fontSize: '14.5px', height: '42px', borderRadius: '8px', border: '1.5px solid #cbd5e1' }}
+                            />
+                            <span style={{ position: 'absolute', left: '10px', fontSize: '11px', color: '#64748b', fontWeight: 600, pointerEvents: 'none' }}>ساعة</span>
+                          </div>
                         </div>
                       </div>
 
-                      <div style={{ marginTop: '10px', padding: '8px 12px', background: '#fff', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '12.5px', color: '#166534', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
-                        <span>📅 سعر اليوم: <strong>{calcDailyRate > 0 ? `${calcDailyRate.toLocaleString()} ج.م / يوم` : '0 ج.م'}</strong></span>
-                        <span>💵 سعر الساعة اليومي: <strong>{calcDailyHourlyRate > 0 ? `${calcDailyHourlyRate.toLocaleString()} ج.م / ساعة` : '0 ج.م'}</strong></span>
-                        <span>☕ ساعات البريك: <strong>{breakVal > 0 ? `${breakVal} س` : '0 س'}</strong></span>
-                        <span>💰 الراتب الأساسي الشهري: <strong>{calcMonthlySalary > 0 ? `${calcMonthlySalary.toLocaleString()} ج.م` : '0 ج.م'}</strong></span>
+                      {/* KPI Summary Cards */}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px', marginTop: '12px' }}>
+                        <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '10px', padding: '8px 12px', textAlign: 'center' }}>
+                          <div style={{ fontSize: '11.5px', color: '#1e40af', fontWeight: 600 }}>الراتب الأساسي الشهري</div>
+                          <div style={{ fontSize: '15px', fontWeight: 800, color: '#1d4ed8', marginTop: '2px' }}>
+                            {calcMonthlySalary > 0 ? `${calcMonthlySalary.toLocaleString()} ج.م` : '0 ج.م'}
+                          </div>
+                        </div>
+
+                        <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '8px 12px', textAlign: 'center' }}>
+                          <div style={{ fontSize: '11.5px', color: '#166534', fontWeight: 600 }}>سعر اليوم المعتمد</div>
+                          <div style={{ fontSize: '15px', fontWeight: 800, color: '#15803d', marginTop: '2px' }}>
+                            {calcDailyRate > 0 ? `${calcDailyRate.toLocaleString()} ج.م / يوم` : '0 ج.م'}
+                          </div>
+                        </div>
+
+                        <div style={{ background: '#ecfeff', border: '1px solid #a5f3fc', borderRadius: '10px', padding: '8px 12px', textAlign: 'center' }}>
+                          <div style={{ fontSize: '11.5px', color: '#155e75', fontWeight: 600 }}>سعر الساعة الصافي</div>
+                          <div style={{ fontSize: '15px', fontWeight: 800, color: '#0e7490', marginTop: '2px' }}>
+                            {calcDailyHourlyRate > 0 ? `${calcDailyHourlyRate.toLocaleString()} ج.م / س` : '0 ج.م'}
+                          </div>
+                        </div>
+
+                        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '10px', padding: '8px 12px', textAlign: 'center' }}>
+                          <div style={{ fontSize: '11.5px', color: '#92400e', fontWeight: 600 }}>ساعات البريك</div>
+                          <div style={{ fontSize: '15px', fontWeight: 800, color: '#b45309', marginTop: '2px' }}>
+                            {breakVal > 0 ? `${breakVal} ساعة` : '0 س (بدون)'}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   );
@@ -1709,8 +1776,8 @@ export default function EmployeeFileModal({
                   const rateVal = parseFloat(bd.salary) || 0;
                   const daysVal = parseFloat(bd.workDays) || 26;
                   const hoursVal = parseFloat(bd.workHours) || 8;
-                  const daily = daysVal > 0 ? (rateVal * hoursVal) / daysVal : 0;
-                  return acc + (daily * daysVal);
+                  const monthly = rateVal >= 200 ? rateVal : (rateVal * hoursVal * daysVal);
+                  return acc + monthly;
                 }, 0);
 
                 const mgmtVal = isMgmt ? (parseFloat(managementAllowance) || 0) : 0;
