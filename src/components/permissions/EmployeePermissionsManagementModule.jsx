@@ -112,7 +112,7 @@ export default function EmployeePermissionsManagementModule({
       }
     };
 
-    if (state.orgSettings?.ownerModificationLocks?.lockEditSystemPermissions && authRole !== 'owner') {
+    if (state.orgSettings?.ownerModificationLocks?.lockEditSystemPermissions) {
       executeWithOwnerGuard?.({
         lockKey: 'lockEditSystemPermissions',
         actionTitle: 'حفظ وتعديل سياسة وضوابط الأذونات',
@@ -277,7 +277,7 @@ export default function EmployeePermissionsManagementModule({
     };
 
     const locks = state.orgSettings?.ownerModificationLocks || {};
-    if ((locks.lockApprovePermissions || locks.lockApproveRequests) && authRole !== 'owner') {
+    if (locks.lockApprovePermissions || locks.lockApproveRequests) {
       executeWithOwnerGuard?.({
         lockKey: locks.lockApprovePermissions ? 'lockApprovePermissions' : 'lockApproveRequests',
         actionTitle: `اعتماد إذن (${targetPerm.employeeName || targetPerm.employeeId})`,
@@ -322,7 +322,7 @@ export default function EmployeePermissionsManagementModule({
     };
 
     const locks = state.orgSettings?.ownerModificationLocks || {};
-    if (locks.lockRejectRequests && authRole !== 'owner') {
+    if (locks.lockRejectRequests) {
       executeWithOwnerGuard?.({
         lockKey: 'lockRejectRequests',
         actionTitle: `رفض إذن (${targetPerm?.employeeName || permId})`,
@@ -435,7 +435,7 @@ export default function EmployeePermissionsManagementModule({
       };
 
       const locks = state.orgSettings?.ownerModificationLocks || {};
-      if (isAdmin && (locks.lockApprovePermissions || locks.lockApproveRequests) && authRole !== 'owner') {
+      if (isAdmin && (locks.lockApprovePermissions || locks.lockApproveRequests)) {
         executeWithOwnerGuard?.({
           lockKey: locks.lockApprovePermissions ? 'lockApprovePermissions' : 'lockApproveRequests',
           actionTitle: `إصدار واعتماد إذن استثنائي (${emp.name})`,

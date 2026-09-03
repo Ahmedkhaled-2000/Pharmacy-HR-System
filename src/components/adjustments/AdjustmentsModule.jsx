@@ -157,6 +157,10 @@ export default function AdjustmentsModule({
   };
 
   const handleDeleteAdjustment = async (adjId) => {
+    const targetAdj = (state.adjustments || []).find((a) => String(a.id) === String(adjId)) ||
+                      (state.requests || []).find((r) => String(r.id) === String(adjId));
+    const isPenalty = targetAdj?.type === 'penalty' || targetAdj?.type === 'disciplinary_penalty' || targetAdj?.type === 'lateness' || targetAdj?.type === 'deduction';
+
     const isConfirmed = await showConfirm({
       title: 'حذف البند الإداري / الجزاء',
       message: 'هل أنت متأكد من رغبتك في حذف وإلغاء هذا الجزاء / البند الإداري نهائياً من سجلات النظام؟',
@@ -185,10 +189,12 @@ export default function AdjustmentsModule({
     };
 
     if (executeWithOwnerGuard) {
+      const locks = state.orgSettings?.ownerModificationLocks || {};
+      const chosenLockKey = isPenalty && locks.lockDeletePenalties ? 'lockDeletePenalties' : 'lockDirectBonusDeduction';
       executeWithOwnerGuard({
-        lockKey: 'lockDirectBonusDeduction',
-        actionTitle: 'حذف وإلغاء بند مالي / مكافأة / جزاء',
-        actionDetails: `معرف البند: ${adjId}`,
+        lockKey: chosenLockKey,
+        actionTitle: isPenalty ? 'حذف وإلغاء جزاء مالي / عقوبة' : 'حذف وإلغاء بند مالي / مكافأة',
+        actionDetails: `معرف البند: ${adjId} · الموظف: ${targetAdj?.employeeName || targetAdj?.employeeId || ''}`,
         onExecute: performDelete
       });
     } else {

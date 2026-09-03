@@ -143,11 +143,10 @@ export default function SettingsModule({
   // مزامنة حالة الأقفال فور ورودها من السحابة أو الكاش
   useEffect(() => {
     if (state?.orgSettings?.ownerModificationLocks) {
-      setOwnerLocks((prev) => ({
+      setOwnerLocks({
         ...DEFAULT_OWNER_LOCKS,
-        ...prev,
         ...state.orgSettings.ownerModificationLocks
-      }));
+      });
     }
   }, [state?.orgSettings?.ownerModificationLocks]);
 
@@ -557,7 +556,7 @@ export default function SettingsModule({
       showToast?.('✅ تم حفظ إعدادات المؤسسة وضوابط السلف وحماية النظام بنجاح');
     };
 
-    if (isAdminCredsChanged && state.orgSettings?.ownerModificationLocks?.lockChangeAdminCredentials && authRole !== 'owner') {
+    if (isAdminCredsChanged && state.orgSettings?.ownerModificationLocks?.lockChangeAdminCredentials) {
       executeWithOwnerGuard?.({
         lockKey: 'lockChangeAdminCredentials',
         actionTitle: 'تغيير بيانات دخول المدير العام (Admin Credentials)',
@@ -567,7 +566,7 @@ export default function SettingsModule({
       return;
     }
 
-    if (isCutoffRulesChanged && state.orgSettings?.ownerModificationLocks?.lockEditCutoffRules && authRole !== 'owner') {
+    if (isCutoffRulesChanged && state.orgSettings?.ownerModificationLocks?.lockEditCutoffRules) {
       executeWithOwnerGuard?.({
         lockKey: 'lockEditCutoffRules',
         actionTitle: 'تعديل فترات وقيود دورة السلف والرواتب',
@@ -577,7 +576,7 @@ export default function SettingsModule({
       return;
     }
 
-    if (state.orgSettings?.ownerModificationLocks?.lockEditOrgSettings && authRole !== 'owner') {
+    if (state.orgSettings?.ownerModificationLocks?.lockEditOrgSettings) {
       executeWithOwnerGuard?.({
         lockKey: 'lockEditOrgSettings',
         actionTitle: 'حفظ وتعديل إعدادات المؤسسة والنظام',
@@ -609,7 +608,7 @@ export default function SettingsModule({
       showToast?.('✅ تم التحديث والتأثير على قواعد التسلسل والموافقات');
     };
 
-    if ((state.orgSettings?.ownerModificationLocks?.lockEditSystemPermissions || state.orgSettings?.ownerModificationLocks?.lockEditOrgSettings) && authRole !== 'owner') {
+    if (state.orgSettings?.ownerModificationLocks?.lockEditSystemPermissions || state.orgSettings?.ownerModificationLocks?.lockEditOrgSettings) {
       executeWithOwnerGuard?.({
         lockKey: state.orgSettings?.ownerModificationLocks?.lockEditSystemPermissions ? 'lockEditSystemPermissions' : 'lockEditOrgSettings',
         actionTitle: 'تعديل مصفوفة قواعد تسلسل الموافقات',
@@ -1814,24 +1813,29 @@ export default function SettingsModule({
                   style={{ width: '100%', border: '1px solid var(--accent)', color: 'var(--accent)', fontWeight: 800 }}
                   disabled={isRestoring}
                   onClick={async () => {
-                    const currentOwnerPass = state.orgSettings?.ownerPassword || 'owner123';
-                    if (authRole !== 'owner') {
-                      const inputPass = window.prompt('👑 استعادة النسخ الاحتياطية مقصورة على المالك فقط.\nيرجى إدخال كلمة مرور المالك (Owner Password) للمتابعة:');
-                      if (!inputPass || (inputPass.trim() !== String(currentOwnerPass).trim() && inputPass.trim() !== 'owner123')) {
-                        showToast?.('❌ كلمة مرور المالك غير صحيحة! تم إلغاء الاسترجاع.');
-                        return;
+                    const performRestoreFromFile = async () => {
+                      const isConfirmed = await showConfirm({
+                        title: 'استرجاع نسخة احتياطية من ملف',
+                        message: 'هل أنت متأكد من رغبتك في استرجاع البيانات من ملف خارجي؟\nسيتم استبدال البيانات الحالية بالبيانات الموجودة في الملف.',
+                        confirmText: 'تأكيد الاسترجاع',
+                        cancelText: 'إلغاء وتراجع',
+                        type: 'warning',
+                        icon: '📤'
+                      });
+                      if (isConfirmed && fileInputRef.current) {
+                        fileInputRef.current.click();
                       }
-                    }
-                    const isConfirmed = await showConfirm({
-                      title: 'استرجاع نسخة احتياطية من ملف',
-                      message: 'هل أنت متأكد من رغبتك في استرجاع البيانات من ملف خارجي؟\nسيتم استبدال البيانات الحالية بالبيانات الموجودة في الملف.',
-                      confirmText: 'تأكيد الاسترجاع',
-                      cancelText: 'إلغاء وتراجع',
-                      type: 'warning',
-                      icon: '📤'
-                    });
-                    if (isConfirmed && fileInputRef.current) {
-                      fileInputRef.current.click();
+                    };
+
+                    if (executeWithOwnerGuard) {
+                      executeWithOwnerGuard({
+                        lockKey: 'lockBackupExportRestore',
+                        actionTitle: 'استعادة نسخة احتياطية من ملف خارجي',
+                        actionDetails: 'استبدال بيانات النظام بالنسخة الاحتياطية',
+                        onExecute: performRestoreFromFile
+                      });
+                    } else {
+                      await performRestoreFromFile();
                     }
                   }}
                 >
@@ -1897,28 +1901,33 @@ export default function SettingsModule({
                               className="btn btn-start"
                               style={{ padding: '4px 10px', fontSize: '11.5px' }}
                               onClick={async () => {
-                                const currentOwnerPass = state.orgSettings?.ownerPassword || 'owner123';
-                                if (authRole !== 'owner') {
-                                  const inputPass = window.prompt('👑 استعادة اللقطات الاحتياطية مقصورة على المالك فقط.\nيرجى إدخال كلمة مرور المالك للمتابعة:');
-                                  if (!inputPass || (inputPass.trim() !== String(currentOwnerPass).trim() && inputPass.trim() !== 'owner123')) {
-                                    showToast?.('❌ كلمة مرور المالك غير صحيحة! تم إلغاء الاسترجاع.');
-                                    return;
+                                const performRestoreSnapshot = async () => {
+                                  const isConfirmed = await showConfirm({
+                                    title: 'استرجاع اللقطة الاحتياطية',
+                                    message: `هل أنت متأكد من رغبتك في استرجاع هذه اللقطة الاحتياطية المأخوذة في ${snap.isoDate || ''}؟`,
+                                    confirmText: 'تأكيد الاسترجاع',
+                                    cancelText: 'إلغاء وتراجع',
+                                    type: 'warning',
+                                    icon: '📸'
+                                  });
+                                  if (isConfirmed) {
+                                    if (snap.appState) {
+                                      setState(snap.appState);
+                                      await saveState(snap.appState);
+                                      showToast?.('✅ تم استرجاع اللقطة الاحتياطية بنجاح!');
+                                    }
                                   }
-                                }
-                                const isConfirmed = await showConfirm({
-                                  title: 'استرجاع اللقطة الاحتياطية',
-                                  message: `هل أنت متأكد من رغبتك في استرجاع هذه اللقطة الاحتياطية المأخوذة في ${snap.isoDate || ''}؟`,
-                                  confirmText: 'تأكيد الاسترجاع',
-                                  cancelText: 'إلغاء وتراجع',
-                                  type: 'warning',
-                                  icon: '📸'
-                                });
-                                if (isConfirmed) {
-                                  if (snap.appState) {
-                                    setState(snap.appState);
-                                    await saveState(snap.appState);
-                                    showToast?.('✅ تم استرجاع اللقطة الاحتياطية بنجاح!');
-                                  }
+                                };
+
+                                if (executeWithOwnerGuard) {
+                                  executeWithOwnerGuard({
+                                    lockKey: 'lockBackupExportRestore',
+                                    actionTitle: 'استرجاع لقطة احتياطية للنظام',
+                                    actionDetails: `تاريخ اللقطة: ${snap.isoDate || ''}`,
+                                    onExecute: performRestoreSnapshot
+                                  });
+                                } else {
+                                  await performRestoreSnapshot();
                                 }
                               }}
                             >

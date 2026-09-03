@@ -293,9 +293,18 @@ export default function AdminResignationModule({
     };
 
     if (status === 'approved' && !isWithdraw && executeWithOwnerGuard) {
+      const locks = state.orgSettings?.ownerModificationLocks || {};
+      const chosenLock = locks.lockApproveResignations ? 'lockApproveResignations' : 'lockTerminateEmployee';
       executeWithOwnerGuard({
-        lockKey: 'lockTerminateEmployee',
+        lockKey: chosenLock,
         actionTitle: 'اعتماد وقبول طلب استقالة موظف',
+        actionDetails: `الموظف: ${targetReq.employeeName || targetReq.employeeId}`,
+        onExecute: performAction
+      });
+    } else if (status === 'rejected' && executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockRejectRequests',
+        actionTitle: 'رفض طلب استقالة موظف',
         actionDetails: `الموظف: ${targetReq.employeeName || targetReq.employeeId}`,
         onExecute: performAction
       });
@@ -387,8 +396,10 @@ export default function AdminResignationModule({
     };
 
     if (executeWithOwnerGuard) {
+      const locks = state.orgSettings?.ownerModificationLocks || {};
+      const chosenLock = manualData.type === 'resignation' && locks.lockApproveResignations ? 'lockApproveResignations' : 'lockTerminateEmployee';
       executeWithOwnerGuard({
-        lockKey: 'lockTerminateEmployee',
+        lockKey: chosenLock,
         actionTitle: manualData.type === 'resignation' ? 'تسجيل استقالة يدوية لموظف' : 'إنهاء خدمة موظف',
         actionDetails: `الموظف: ${emp.name}`,
         onExecute: performManualSubmit

@@ -212,13 +212,26 @@ export default function AppRoutes() {
   };
 
   const handleSaveEvaluation = async (evalData) => {
-    const updatedState = {
-      ...state,
-      evaluations: [...(state.evaluations || []), evalData]
+    const performSaveEval = async () => {
+      const updatedState = {
+        ...state,
+        evaluations: [...(state.evaluations || []), evalData]
+      };
+      setState(updatedState);
+      await saveState(updatedState);
+      showToast('⭐ تم حفظ التقييم الدوري بنجاح');
     };
-    setState(updatedState);
-    await saveState(updatedState);
-    showToast('⭐ تم حفظ التقييم الدوري بنجاح');
+
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockEditEvaluations',
+        actionTitle: 'إضافة / تعديل تقييم أداء لموظف',
+        actionDetails: `الموظف: ${evalData?.employeeName || evalData?.employeeId || ''}`,
+        onExecute: performSaveEval
+      });
+    } else {
+      await performSaveEval();
+    }
   };
 
   const handleSaveEmployeeNote = async (noteData) => {

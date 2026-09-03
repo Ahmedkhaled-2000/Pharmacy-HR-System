@@ -252,7 +252,7 @@ export default function GlobalModalsContainer() {
       }
     };
 
-    if (isSalaryChanged && authRole !== 'owner') {
+    if (isSalaryChanged) {
       const isSalaryLocked = Boolean(state?.orgSettings?.ownerModificationLocks?.lockEditSalary);
       if (isSalaryLocked && executeWithOwnerGuard) {
         executeWithOwnerGuard({

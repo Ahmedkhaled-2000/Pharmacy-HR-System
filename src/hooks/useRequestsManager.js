@@ -648,7 +648,7 @@ export function useRequestsManager() {
       }
     };
 
-    if (role === 'admin') {
+    if (role === 'admin' || role === 'owner') {
       const locks = state.orgSettings?.ownerModificationLocks || {};
 
       if (locks.lockApproveRequests) {
@@ -762,9 +762,9 @@ export function useRequestsManager() {
         return;
       }
 
-      if (isResignation && locks.lockApproveResignations) {
+      if (isResignation && (locks.lockApproveResignations || locks.lockTerminateEmployee)) {
         executeWithOwnerGuard({
-          lockKey: 'lockApproveResignations',
+          lockKey: locks.lockApproveResignations ? 'lockApproveResignations' : 'lockTerminateEmployee',
           actionTitle: `اعتماد طلب استقالة (${target.employeeName || target.employeeId})`,
           actionDetails: `تاريخ السريان: ${target.date || target.lastWorkingDate || ''}`,
           onExecute: performApprove
@@ -887,7 +887,7 @@ export function useRequestsManager() {
       }
     };
 
-    if (role === 'admin' && state.orgSettings?.ownerModificationLocks?.lockRejectRequests) {
+    if ((role === 'admin' || role === 'owner') && state.orgSettings?.ownerModificationLocks?.lockRejectRequests) {
       const targetReq = (state.requests || []).find((r) => r.id === requestId);
       executeWithOwnerGuard({
         lockKey: 'lockRejectRequests',

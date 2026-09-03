@@ -1063,7 +1063,44 @@ export default function RequestsModule({
     };
 
     if (effectiveRole === 'admin' || effectiveRole === 'owner') {
-      if (targetReq.type === 'loan' || targetReq.type === 'advance' || targetReq.type === 'meds' || targetReq.type === 'credit_medicine') {
+      const locks = state.orgSettings?.ownerModificationLocks || {};
+
+      // 1. Master lock for all requests
+      if (locks.lockApproveRequests) {
+        executeWithOwnerGuard?.({
+          lockKey: 'lockApproveRequests',
+          actionTitle: `اعتماد طلب (${targetReq.employeeName || targetReq.employeeId})`,
+          actionDetails: `نوع الطلب: ${targetReq.typeLabel || targetReq.type || 'طلب عام'}`,
+          onExecute: performApprove
+        });
+        return;
+      }
+
+      const reqType = String(targetReq.type || '').trim().toLowerCase();
+      const isLeave = ['leave', 'leave_request', 'annual_leave', 'sick_leave', 'emergency_leave', 'unpaid_leave', 'casual', 'marriage', 'maternity', 'bereavement'].includes(reqType);
+      const isLoan = ['loan', 'advance', 'meds', 'credit_medicine', 'سلفة'].includes(reqType);
+      const isPermission = ['permission', 'permission_request', 'إذن', 'late_permission', 'early_leave'].includes(reqType);
+      const isDisc = reqType === 'disciplinary_penalty' || reqType === 'violation' || reqType === 'penalty' || reqType === 'early_exit' || String(targetReq.id || '').startsWith('disc_');
+      const isSwap = ['swap', 'shift_swap', 'shift_edit', 'تبديل'].includes(reqType);
+      const isRoster = ['roster_update', 'roster_edit', 'roster_edit_request', 'schedule_edit'].includes(reqType);
+      const isPunch = ['punch_correction', 'manual_punch', 'attendance_punch', 'تأكيد بصمة الوجه', 'تأكيد بصمة اليد', 'biometric_verification'].includes(reqType);
+      const isBiometricReg = reqType === 'biometric_registration';
+      const isBiometricReset = reqType === 'biometric_reset';
+      const isResignation = ['resignation', 'resignation_request', 'استقالة'].includes(reqType);
+      const isBonus = ['bonus', 'reward', 'overtime', 'مكافأة'].includes(reqType);
+      const isComplaint = ['complaint', 'eval_edit_request', 'penalty_objection', 'objection', 'شكوى'].includes(reqType);
+
+      if (isLeave && locks.lockApproveLeaves) {
+        executeWithOwnerGuard?.({
+          lockKey: 'lockApproveLeaves',
+          actionTitle: `اعتماد طلب إجازة (${targetReq.employeeName || targetReq.employeeId})`,
+          actionDetails: `نوع الإجازة: ${targetReq.leaveType || 'سنوية'} · المدة: ${targetReq.daysCount || targetReq.days || 1} يوم`,
+          onExecute: performApprove
+        });
+        return;
+      }
+
+      if (isLoan && locks.lockApproveLoans) {
         executeWithOwnerGuard?.({
           lockKey: 'lockApproveLoans',
           actionTitle: `اعتماد طلب سلفة / أدوية آجل (${targetReq.employeeName || targetReq.employeeId})`,
@@ -1072,11 +1109,102 @@ export default function RequestsModule({
         });
         return;
       }
-      if (targetReq.type === 'bonus' || targetReq.type === 'penalty' || targetReq.type === 'early_exit') {
+
+      if (isPermission && locks.lockApprovePermissions) {
         executeWithOwnerGuard?.({
-          lockKey: 'lockDirectBonusDeduction',
-          actionTitle: `اعتماد تسوية مالية (${targetReq.type === 'bonus' ? 'مكافأة' : 'خصم/جزاء'})`,
-          actionDetails: `الموظف: ${targetReq.employeeName || targetReq.employeeId}`,
+          lockKey: 'lockApprovePermissions',
+          actionTitle: `اعتماد إذن استئذان (${targetReq.employeeName || targetReq.employeeId})`,
+          actionDetails: `التاريخ: ${targetReq.date || ''} · الساعات: ${targetReq.hours || targetReq.time || ''}`,
+          onExecute: performApprove
+        });
+        return;
+      }
+
+      if (isDisc && locks.lockApproveDisciplinaryPenalties) {
+        executeWithOwnerGuard?.({
+          lockKey: 'lockApproveDisciplinaryPenalties',
+          actionTitle: `اعتماد جزاء تأديبي لائحى (${targetReq.employeeName || targetReq.employeeId})`,
+          actionDetails: `المخالفة: ${targetReq.ruleTitle || targetReq.violationTitle || targetReq.reason || 'مخالفة لائحية'}`,
+          onExecute: performApprove
+        });
+        return;
+      }
+
+      if (isSwap && locks.lockApproveShiftSwaps) {
+        executeWithOwnerGuard?.({
+          lockKey: 'lockApproveShiftSwaps',
+          actionTitle: `اعتماد تبديل وردية (${targetReq.employeeName || targetReq.employeeId})`,
+          actionDetails: `التاريخ: ${targetReq.date || ''}`,
+          onExecute: performApprove
+        });
+        return;
+      }
+
+      if (isRoster && locks.lockApproveRosters) {
+        executeWithOwnerGuard?.({
+          lockKey: 'lockApproveRosters',
+          actionTitle: `اعتماد تعديل جدول شهري (${targetReq.employeeName || targetReq.employeeId})`,
+          actionDetails: `الشهر: ${targetReq.month || ''}`,
+          onExecute: performApprove
+        });
+        return;
+      }
+
+      if (isPunch && (locks.lockApproveManualPunches || (reqType === 'biometric_verification' && locks.lockApproveBiometricVerification))) {
+        executeWithOwnerGuard?.({
+          lockKey: (reqType === 'biometric_verification' && locks.lockApproveBiometricVerification) ? 'lockApproveBiometricVerification' : 'lockApproveManualPunches',
+          actionTitle: `اعتماد تسجيل/تصحيح بصمة (${targetReq.employeeName || targetReq.employeeId})`,
+          actionDetails: `التاريخ: ${targetReq.date || ''} · الوقت: ${targetReq.time || ''}`,
+          onExecute: performApprove
+        });
+        return;
+      }
+
+      if (isBiometricReg && locks.lockApproveBiometricRegistration) {
+        executeWithOwnerGuard?.({
+          lockKey: 'lockApproveBiometricRegistration',
+          actionTitle: `اعتماد تسجيل بصمة جديدة (${targetReq.employeeName || targetReq.employeeId})`,
+          actionDetails: `النوع: ${targetReq.biometricType === 'hand' ? 'بصمة اليد' : 'بصمة الوجه'}`,
+          onExecute: performApprove
+        });
+        return;
+      }
+
+      if (isBiometricReset && locks.lockApproveBiometricReset) {
+        executeWithOwnerGuard?.({
+          lockKey: 'lockApproveBiometricReset',
+          actionTitle: `اعتماد مسح وإعادة تسجيل البصمة (${targetReq.employeeName || targetReq.employeeId})`,
+          actionDetails: `السبب: ${targetReq.reason || ''}`,
+          onExecute: performApprove
+        });
+        return;
+      }
+
+      if (isResignation && (locks.lockApproveResignations || locks.lockTerminateEmployee)) {
+        executeWithOwnerGuard?.({
+          lockKey: locks.lockApproveResignations ? 'lockApproveResignations' : 'lockTerminateEmployee',
+          actionTitle: `اعتماد طلب استقالة (${targetReq.employeeName || targetReq.employeeId})`,
+          actionDetails: `تاريخ السريان: ${targetReq.date || targetReq.lastWorkingDate || ''}`,
+          onExecute: performApprove
+        });
+        return;
+      }
+
+      if (isBonus && (locks.lockApproveBonuses || locks.lockDirectBonusDeduction)) {
+        executeWithOwnerGuard?.({
+          lockKey: locks.lockApproveBonuses ? 'lockApproveBonuses' : 'lockDirectBonusDeduction',
+          actionTitle: `اعتماد مكافأة مالية (${targetReq.employeeName || targetReq.employeeId})`,
+          actionDetails: `المبلغ: ${targetReq.amount || 0} ج.م`,
+          onExecute: performApprove
+        });
+        return;
+      }
+
+      if (isComplaint && locks.lockApproveComplaints) {
+        executeWithOwnerGuard?.({
+          lockKey: 'lockApproveComplaints',
+          actionTitle: `اعتماد شكوى / تظلم (${targetReq.employeeName || targetReq.employeeId})`,
+          actionDetails: `الموضوع: ${targetReq.subject || targetReq.title || 'تظلم'}`,
           onExecute: performApprove
         });
         return;
@@ -1093,7 +1221,8 @@ export default function RequestsModule({
                     (state.loans || []).find((r) => r.id === reqId) ||
                     allRequests.find((r) => r.id === reqId);
 
-    let rejectedTargetReq = targetReq ? { ...targetReq, status: 'rejected', adminApproved: false, rejectedAt: new Date().toISOString() } : null;
+    const performReject = async () => {
+      let rejectedTargetReq = targetReq ? { ...targetReq, status: 'rejected', adminApproved: false, rejectedAt: new Date().toISOString() } : null;
 
     let updatedRequests = [...(state.requests || [])];
     const rIdx = updatedRequests.findIndex((r) => r.id === reqId);
@@ -1252,9 +1381,21 @@ export default function RequestsModule({
       resignationRequests: updatedResignations,
       notifications: updatedNotifications
     };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    showToast?.('❌ تم رفض الطلب واستبعاد الإجراء');
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      showToast?.('❌ تم رفض الطلب واستبعاد الإجراء');
+    };
+
+    if ((effectiveRole === 'admin' || effectiveRole === 'owner') && executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockRejectRequests',
+        actionTitle: `رفض واستبعاد طلب (${targetReq?.employeeName || targetReq?.employeeId || reqId})`,
+        actionDetails: `نوع الطلب: ${targetReq?.typeLabel || targetReq?.type || 'طلب عام'}`,
+        onExecute: performReject
+      });
+    } else {
+      await performReject();
+    }
   };
 
   const handleWaive = async (reqId) => {
@@ -1307,49 +1448,62 @@ export default function RequestsModule({
       icon: '🗑️'
     });
     if (!isConfirmed) return;
-    const idStr = String(reqId);
-    const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
-    const updatedDeleted = Array.from(new Set([
-      ...(state._deletedIds || []),
-      idStr,
-      rawId,
-      `req_${idStr}`,
-      `req_${rawId}`,
-      `leave_${idStr}`,
-      `leave_${rawId}`,
-      `swap_${idStr}`,
-      `swap_${rawId}`,
-      `res_${idStr}`,
-      `res_${rawId}`,
-      `loan_${idStr}`,
-      `loan_${rawId}`,
-      `notif_${idStr}`,
-      `notif_${rawId}`
-    ])).filter(Boolean).slice(-5000);
+    const performDelete = async () => {
+      const idStr = String(reqId);
+      const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
+      const updatedDeleted = Array.from(new Set([
+        ...(state._deletedIds || []),
+        idStr,
+        rawId,
+        `req_${idStr}`,
+        `req_${rawId}`,
+        `leave_${idStr}`,
+        `leave_${rawId}`,
+        `swap_${idStr}`,
+        `swap_${rawId}`,
+        `res_${idStr}`,
+        `res_${rawId}`,
+        `loan_${idStr}`,
+        `loan_${rawId}`,
+        `notif_${idStr}`,
+        `notif_${rawId}`
+      ])).filter(Boolean).slice(-5000);
 
-    const matchesId = (item) => {
-      if (!item) return false;
-      const itemIdStr = String(item.id || '');
-      const itemRaw = itemIdStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
-      return itemIdStr === idStr || itemIdStr === rawId || itemRaw === idStr || (rawId && itemRaw === rawId) || (item.originalRequestId && (String(item.originalRequestId) === idStr || String(item.originalRequestId) === rawId));
+      const matchesId = (item) => {
+        if (!item) return false;
+        const itemIdStr = String(item.id || '');
+        const itemRaw = itemIdStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
+        return itemIdStr === idStr || itemIdStr === rawId || itemRaw === idStr || (rawId && itemRaw === rawId) || (item.originalRequestId && (String(item.originalRequestId) === idStr || String(item.originalRequestId) === rawId));
+      };
+
+      const updatedState = {
+        ...state,
+        requests: (state.requests || []).filter((r) => !matchesId(r)),
+        leaveRequests: (state.leaveRequests || []).filter((r) => !matchesId(r)),
+        shiftSwaps: (state.shiftSwaps || []).filter((r) => !matchesId(r)),
+        loans: (state.loans || []).filter((r) => !matchesId(r)),
+        resignationRequests: (state.resignationRequests || []).filter((r) => !matchesId(r)),
+        leaveHistory: (state.leaveHistory || []).filter((r) => !matchesId(r)),
+        notifications: (state.notifications || []).filter((n) => !matchesId(n) && String(n.requestId || '') !== idStr && String(n.requestId || '') !== rawId),
+        _deletedIds: updatedDeleted
+      };
+
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      if (previewModalReq?.id === reqId || matchesId(previewModalReq)) setPreviewModalReq(null);
+      showToast?.('🗑️ تم حذف الطلب نهائياً بنجاح');
     };
 
-    const updatedState = {
-      ...state,
-      requests: (state.requests || []).filter((r) => !matchesId(r)),
-      leaveRequests: (state.leaveRequests || []).filter((r) => !matchesId(r)),
-      shiftSwaps: (state.shiftSwaps || []).filter((r) => !matchesId(r)),
-      loans: (state.loans || []).filter((r) => !matchesId(r)),
-      resignationRequests: (state.resignationRequests || []).filter((r) => !matchesId(r)),
-      leaveHistory: (state.leaveHistory || []).filter((r) => !matchesId(r)),
-      notifications: (state.notifications || []).filter((n) => !matchesId(n) && String(n.requestId || '') !== idStr && String(n.requestId || '') !== rawId),
-      _deletedIds: updatedDeleted
-    };
-
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    if (previewModalReq?.id === reqId || matchesId(previewModalReq)) setPreviewModalReq(null);
-    showToast?.('🗑️ تم حذف الطلب نهائياً بنجاح');
+    if ((effectiveRole === 'admin' || effectiveRole === 'owner') && executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockDeleteRequests',
+        actionTitle: 'حذف طلب وسجل نهائياً من الأرشيف',
+        actionDetails: `معرف الطلب: ${reqId}`,
+        onExecute: performDelete
+      });
+    } else {
+      await performDelete();
+    }
   };
 
   const handleApprovePenaltyObjection = async (reqId) => {
@@ -1392,7 +1546,7 @@ export default function RequestsModule({
 
     if (executeWithOwnerGuard) {
       executeWithOwnerGuard({
-        lockKey: 'lockDirectBonusDeduction',
+        lockKey: state.orgSettings?.ownerModificationLocks?.lockDeletePenalties ? 'lockDeletePenalties' : 'lockDirectBonusDeduction',
         actionTitle: 'قبول اعتراض وإلغاء جزاء مالي',
         actionDetails: 'إلغاء الخصم المالي للجزاء من راتب الموظف',
         onExecute: performApproveObjection
@@ -1403,28 +1557,41 @@ export default function RequestsModule({
   };
 
   const handleRejectPenaltyObjection = async (reqId, reply = '') => {
-    const updatedRequests = requests.map((r) => {
-      if (r.id === reqId) {
-        return {
-          ...r,
-          objection: {
-            ...(r.objection || {}),
-            status: 'rejected',
-            adminReply: reply || 'تمت دراسة مبررات الاعتراض وتثبيت الجزاء المالي',
-            resolvedAt: new Date().toISOString()
-          }
-        };
-      }
-      return r;
-    });
+    const performRejectObjection = async () => {
+      const updatedRequests = requests.map((r) => {
+        if (r.id === reqId) {
+          return {
+            ...r,
+            objection: {
+              ...(r.objection || {}),
+              status: 'rejected',
+              adminReply: reply || 'تمت دراسة مبررات الاعتراض وتثبيت الجزاء المالي',
+              resolvedAt: new Date().toISOString()
+            }
+          };
+        }
+        return r;
+      });
 
-    const updatedState = { ...state, requests: updatedRequests };
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-    if (previewModalReq?.id === reqId) {
-      setPreviewModalReq(prev => ({ ...prev, objection: { ...prev.objection, status: 'rejected', adminReply: reply } }));
+      const updatedState = { ...state, requests: updatedRequests };
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      if (previewModalReq?.id === reqId) {
+        setPreviewModalReq(prev => ({ ...prev, objection: { ...prev.objection, status: 'rejected', adminReply: reply } }));
+      }
+      showToast?.('❌ تم رفض الاعتراض وتثبيت الجزاء المالي');
+    };
+
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockRejectRequests',
+        actionTitle: 'رفض اعتراض وتثبيت الجزاء المالي',
+        actionDetails: 'رفض التظلم وتثبيت الخصم المالي',
+        onExecute: performRejectObjection
+      });
+    } else {
+      await performRejectObjection();
     }
-    showToast?.('❌ تم رفض الاعتراض وتثبيت الجزاء المالي');
   };
 
   const handleReplyObjection = async (reqId, reply, isAccepted) => {

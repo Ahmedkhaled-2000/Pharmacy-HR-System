@@ -144,7 +144,7 @@ export default function DatesPeriodsSettingsCard({
     };
 
     const isCutoffRulesLocked = Boolean(state.orgSettings?.ownerModificationLocks?.lockEditCutoffRules);
-    if (isCutoffRulesLocked && executeWithOwnerGuard && authRole !== 'owner') {
+    if (isCutoffRulesLocked && executeWithOwnerGuard) {
       executeWithOwnerGuard({
         lockKey: 'lockEditCutoffRules',
         actionTitle: 'تعديل إعدادات التواريخ ودورة الرواتب وتقفيل الشهر',

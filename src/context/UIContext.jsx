@@ -117,10 +117,6 @@ export function UIProvider({ children }) {
   });
 
   const executeWithOwnerGuard = useCallback(({ lockKey, actionTitle, actionDetails, onExecute }) => {
-    if (authRole === 'owner') {
-      onExecute?.();
-      return;
-    }
     let isLocked = Boolean(state?.orgSettings?.ownerModificationLocks?.[lockKey]);
     if (!isLocked) {
       try {
@@ -141,7 +137,7 @@ export function UIProvider({ children }) {
     } else {
       onExecute?.();
     }
-  }, [authRole, state?.orgSettings?.ownerModificationLocks]);
+  }, [state?.orgSettings?.ownerModificationLocks]);
 
   // Employee Add/Edit Modal
   const [isEmpModalOpen, setIsEmpModalOpen] = useState(false);
