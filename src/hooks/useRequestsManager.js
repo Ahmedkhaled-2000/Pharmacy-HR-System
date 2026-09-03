@@ -5,6 +5,7 @@ import {
 import { applyApprovedPermissionsToShifts } from '../utils/latePenaltyEngine';
 import { applyShiftSwapToRosters } from '../utils/rosterEngine';
 import { normalizeSchedule } from '../components/roster/RosterModule';
+import { saveFaceDescriptor, saveHandDescriptor, deleteFaceDescriptor, deleteHandDescriptor } from '../utils/faceStorage';
 import { useData } from '../context/DataContext';
 import { useUI } from '../context/UIContext';
 
@@ -325,6 +326,59 @@ export function useRequestsManager() {
           }
         }
 
+        // 7.6. Biometric Self-Registration Approval Integration
+        if (target.type === 'biometric_registration') {
+          const empId = target.employeeId;
+          const descriptors = target.descriptors;
+          const bioType = target.biometricType || 'face';
+
+          updatedEmps = updatedEmps.map((e) => {
+            if (String(e.id) === String(empId)) {
+              return {
+                ...e,
+                has_face_descriptor: bioType !== 'hand',
+                face_descriptor: bioType !== 'hand' ? descriptors : e.face_descriptor,
+                has_hand_descriptor: bioType === 'hand',
+                hand_descriptor: bioType === 'hand' ? descriptors : e.hand_descriptor,
+                preferred_biometric: bioType,
+                biometricApprovedAt: new Date().toISOString(),
+                biometricApprovedBy: 'الإدارة العليا'
+              };
+            }
+            return e;
+          });
+
+          // Persistent database storage
+          if (bioType === 'hand') {
+            saveHandDescriptor(empId, descriptors).catch(err => console.warn('Failed saving hand descriptor to DB:', err));
+          } else {
+            saveFaceDescriptor(empId, descriptors).catch(err => console.warn('Failed saving face descriptor to DB:', err));
+          }
+        }
+
+        // 7.7. Biometric Reset Approval Integration
+        if (target.type === 'biometric_reset') {
+          const empId = target.employeeId;
+
+          updatedEmps = updatedEmps.map((e) => {
+            if (String(e.id) === String(empId)) {
+              return {
+                ...e,
+                has_face_descriptor: false,
+                face_descriptor: null,
+                has_hand_descriptor: false,
+                hand_descriptor: null,
+                biometricResetAt: new Date().toISOString()
+              };
+            }
+            return e;
+          });
+
+          // Delete from persistent database
+          deleteFaceDescriptor(empId).catch(err => console.warn('Failed deleting face descriptor from DB:', err));
+          deleteHandDescriptor(empId).catch(err => console.warn('Failed deleting hand descriptor from DB:', err));
+        }
+
         // 8. Resignation Request Integration
         if (target.type === 'resignation') {
           updatedResignations = updatedResignations.map((r) => {
@@ -513,6 +567,26 @@ export function useRequestsManager() {
           lockKey: (target.type === 'biometric_verification' && locks.lockApproveBiometricVerification) ? 'lockApproveBiometricVerification' : 'lockApproveManualPunches',
           actionTitle: `اعتماد تسجيل/تصحيح بصمة (${target.employeeName || target.employeeId})`,
           actionDetails: `التاريخ: ${target.date || ''} - الوقت: ${target.time || ''}`,
+          onExecute: performApprove
+        });
+        return;
+      }
+
+      if (target.type === 'biometric_registration' && locks.lockApproveBiometricRegistration) {
+        executeWithOwnerGuard({
+          lockKey: 'lockApproveBiometricRegistration',
+          actionTitle: `اعتماد تسجيل بصمة جديدة (${target.employeeName || target.employeeId})`,
+          actionDetails: `النوع: ${target.biometricType === 'hand' ? 'بصمة اليد' : 'بصمة الوجه'}`,
+          onExecute: performApprove
+        });
+        return;
+      }
+
+      if (target.type === 'biometric_reset' && locks.lockApproveBiometricReset) {
+        executeWithOwnerGuard({
+          lockKey: 'lockApproveBiometricReset',
+          actionTitle: `اعتماد مسح وإعادة تسجيل البصمة (${target.employeeName || target.employeeId})`,
+          actionDetails: `السبب: ${target.reason || ''}`,
           onExecute: performApprove
         });
         return;

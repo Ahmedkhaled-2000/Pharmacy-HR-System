@@ -71,6 +71,12 @@ export function getFormattedRequestBadge(type, leaveType) {
   if (cleanType === 'punch_correction' || cleanType === 'attendance_punch' || cleanType === 'تأكيد بصمة الوجه' || cleanType === 'تأكيد بصمة اليد' || cleanType === 'biometric_verification') {
     return <span className="badge badge-primary" style={{ background: '#0284c7', color: '#fff' }}>📸 اعتماد حضور بالصورة</span>;
   }
+  if (cleanType === 'biometric_registration') {
+    return <span className="badge badge-success" style={{ background: '#0d9488', color: '#fff', border: '1px solid #0f766e' }}>📸 تسجيل بصمة جديدة</span>;
+  }
+  if (cleanType === 'biometric_reset') {
+    return <span className="badge badge-warning" style={{ background: '#d97706', color: '#fff', border: '1px solid #b45309' }}>🔄 طلب إعادة تسجيل بصمة</span>;
+  }
   if (cleanType === 'adjustment') {
     return <span className="badge badge-info">⚖️ تعديل إداري / مالي</span>;
   }

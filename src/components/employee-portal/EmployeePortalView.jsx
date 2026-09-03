@@ -14,6 +14,11 @@ import EmployeeEvaluationsModule from './EmployeeEvaluationsModule';
 import PayslipPrintModal from '../payroll/PayslipPrintModal';
 import BylawsModule from '../bylaws/BylawsModule';
 import EmployeeResignationModule from './EmployeeResignationModule';
+import EmployeeBiometricSection from './EmployeeBiometricSection';
+import FaceRegistrationModal from '../attendance/FaceRegistrationModal';
+import FaceTestModal from '../attendance/FaceTestModal';
+import { uploadBiometricAttendancePhoto } from '../../utils/googleDriveService';
+import { sendBiometricRegistrationRequestEmail, sendBiometricResetRequestEmail } from '../../utils/gmailService';
 import { computeLatenessFinancialAmount, isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
 import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
 import { printEmployeePayslipDirect } from '../../utils/printHelper';
@@ -83,6 +88,7 @@ const NAV_ITEMS = [
   { id: 'loans',       icon: '💳', label: 'السلف والأدوية الآجل' },
   { id: 'permissions', icon: '⏰', label: 'طلب الأذونات' },
   { id: 'shifts',      icon: '📋', label: 'سجل البصمات' },
+  { id: 'biometric',   icon: '📸', label: 'البصمة الإلكترونية' },
   { id: 'roster',      icon: '🗓️', label: 'الجدول الشهري' },
   { id: 'swaps',       icon: '🔄', label: 'تبديل الشيفتات' },
   { id: 'evaluations', icon: '⭐', label: 'التقييمات والشكاوي' },
@@ -177,6 +183,8 @@ export default function EmployeePortalView({
   });
   const [showPhotoPreview, setShowPhotoPreview] = useState(false);
   const [autoOpenRosterModal, setAutoOpenRosterModal] = useState(false);
+  const [showBiometricRegisterModal, setShowBiometricRegisterModal] = useState(false);
+  const [showBiometricTestModal, setShowBiometricTestModal] = useState(false);
 
   // Modern Navigation & UI States
   const [openDropdown, setOpenDropdown] = useState(null);
@@ -1430,6 +1438,181 @@ export default function EmployeePortalView({
     ).length;
   }, [state.lateIncidents, emp?.id, filterFn]);
 
+  // ── Biometric Self-Registration & Reset Handlers ──
+  const handleRegisterBiometricSuccess = async (descriptors, type, photoUrl) => {
+    setShowBiometricRegisterModal(false);
+
+    if (emp?.has_face_descriptor || emp?.has_hand_descriptor) {
+      alert('بصمتك مسجلة بالفعل ولا يمكن إعادة تسجيلها إلا بعد مسحها أو موافقة الإدارة العليا.');
+      return;
+    }
+
+    const hasPending = (state.requests || []).some(
+      r => String(r.employeeId) === String(emp.id) &&
+           r.type === 'biometric_registration' &&
+           r.status === 'pending'
+    );
+    if (hasPending) {
+      alert('لديك طلب تسجيل بصمة قيد المراجعة لدى الإدارة العليا بالفعل.');
+      return;
+    }
+
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10);
+    const branchObj = (state.branches || []).find(b => String(b.id) === String(emp.branchId || selectedBranchId));
+    const branchName = branchObj ? branchObj.name : 'الفرع الرئيسي';
+
+    let driveResult = null;
+    const driveConfig = orgSettings?.googleDrive || state?.orgSettings?.googleDrive;
+    if (driveConfig && driveConfig.serviceUrl && photoUrl) {
+      try {
+        driveResult = await uploadBiometricAttendancePhoto({
+          employee: emp,
+          photoDataUrl: photoUrl,
+          actionType: 'تسجيل_بصمة',
+          driveConfig
+        });
+      } catch (driveErr) {
+        console.warn('Could not upload registration photo to Google Drive:', driveErr);
+      }
+    }
+
+    const requestId = 'REQ-BIO-REG-' + Date.now();
+    const bioLabel = type === 'hand' ? 'بصمة اليد' : 'بصمة الوجه';
+    const requestData = {
+      id: requestId,
+      type: 'biometric_registration',
+      requestType: 'biometric_registration',
+      typeLabel: `تسجيل ${bioLabel} جديدة (ذاتي)`,
+      employeeId: emp.id,
+      employeeCode: emp.code,
+      employeeName: emp.name,
+      branchId: emp.branchId || selectedBranchId,
+      branchName: branchName,
+      biometricType: type || 'face',
+      descriptors: descriptors,
+      photoUrl: photoUrl || null,
+      drivePhotoUrl: driveResult?.fileUrl || null,
+      driveFileId: driveResult?.fileId || null,
+      date: dateStr,
+      createdAt: now.toISOString(),
+      status: 'pending',
+      requiresSuperAdmin: true,
+      requiresBranchManager: false,
+      adminApproved: false,
+      notes: `قام الموظف بتسجيل ${bioLabel} ذاتياً من حسابه وبانتظار مراجعة واعتماد الإدارة العليا لتفعيلها.`
+    };
+
+    const newNotif = {
+      id: 'NOTIF-BIO-REG-' + Date.now(),
+      type: 'biometric_registration',
+      targetRole: 'admin',
+      title: `📸 تسجيل بصمة جديدة: ${emp.name}`,
+      message: `قام الموظف ${emp.name} بالتقاط ${bioLabel} ذاتياً وبانتظار اعتماد الإدارة العليا.`,
+      requestId: requestId,
+      employeeId: emp.id,
+      employeeName: emp.name,
+      photoUrl: photoUrl || null,
+      drivePhotoUrl: driveResult?.fileUrl || null,
+      createdAt: now.toISOString(),
+      read: false,
+      readBy: []
+    };
+
+    const updatedState = {
+      ...state,
+      requests: [requestData, ...(state.requests || [])],
+      notifications: [newNotif, ...(state.notifications || [])],
+      _requestsUpdatedAt: now.toISOString()
+    };
+
+    setState(updatedState);
+    if (saveState) await saveState(updatedState);
+
+    const gmailConfig = orgSettings?.gmailConfig || state?.orgSettings?.gmailConfig;
+    if (gmailConfig && gmailConfig.serviceUrl) {
+      sendBiometricRegistrationRequestEmail({
+        gmailConfig,
+        empName: emp.name,
+        empCode: emp.code,
+        branchName,
+        biometricType: type || 'face',
+        dateStr,
+        drivePhotoUrl: driveResult?.fileUrl || null
+      }).catch(err => console.warn('Gmail biometric notification failed:', err));
+    }
+
+    if (showToast) {
+      showToast('🎉 تم التقاط البصمة بنجاح وإرسالها للإدارة العليا للاعتماد!');
+    } else {
+      alert('🎉 تم التقاط البصمة بنجاح وإرسالها للإدارة العليا للاعتماد! سيتم تفعيلها فور الموافقة.');
+    }
+  };
+
+  const handleSubmitResetRequest = async (reason) => {
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10);
+    const branchObj = (state.branches || []).find(b => String(b.id) === String(emp.branchId || selectedBranchId));
+    const branchName = branchObj ? branchObj.name : 'الفرع الرئيسي';
+
+    const requestId = 'REQ-BIO-RESET-' + Date.now();
+    const requestData = {
+      id: requestId,
+      type: 'biometric_reset',
+      requestType: 'biometric_reset',
+      typeLabel: 'طلب إعادة تسجيل بصمة الوجه/اليد',
+      employeeId: emp.id,
+      employeeCode: emp.code,
+      employeeName: emp.name,
+      branchId: emp.branchId || selectedBranchId,
+      branchName: branchName,
+      reason: reason,
+      date: dateStr,
+      createdAt: now.toISOString(),
+      status: 'pending',
+      requiresSuperAdmin: true,
+      requiresBranchManager: false,
+      adminApproved: false,
+      notes: `طلب الموظف مسح بصمته الحالية وإعادة تسجيل بصمة جديدة. السبب: ${reason}`
+    };
+
+    const newNotif = {
+      id: 'NOTIF-BIO-RESET-' + Date.now(),
+      type: 'biometric_reset',
+      targetRole: 'admin',
+      title: `🔄 طلب إعادة تسجيل بصمة: ${emp.name}`,
+      message: `طلب الموظف ${emp.name} مسح بصمته وإعادة التسجيل. السبب: ${reason}`,
+      requestId: requestId,
+      employeeId: emp.id,
+      employeeName: emp.name,
+      createdAt: now.toISOString(),
+      read: false,
+      readBy: []
+    };
+
+    const updatedState = {
+      ...state,
+      requests: [requestData, ...(state.requests || [])],
+      notifications: [newNotif, ...(state.notifications || [])],
+      _requestsUpdatedAt: now.toISOString()
+    };
+
+    setState(updatedState);
+    if (saveState) await saveState(updatedState);
+
+    const gmailConfig = orgSettings?.gmailConfig || state?.orgSettings?.gmailConfig;
+    if (gmailConfig && gmailConfig.serviceUrl) {
+      sendBiometricResetRequestEmail({
+        gmailConfig,
+        empName: emp.name,
+        empCode: emp.code,
+        branchName,
+        reason,
+        dateStr
+      }).catch(err => console.warn('Gmail reset notification failed:', err));
+    }
+  };
+
   // Categorized Menu Items (Matching Senior Management Style)
   const employeeMenuItems = useMemo(() => {
     return [
@@ -1492,6 +1675,15 @@ export default function EmployeePortalView({
             icon: '📋',
             badge: empShifts.length,
             desc: 'سجل الحضور والانصراف، البريك، واحتساب ساعات العمل',
+            visible: true
+          },
+          {
+            id: 'biometric',
+            targetTab: 'biometric',
+            label: 'البصمة الإلكترونية والتحقق الذاتي',
+            icon: '📸',
+            badge: (!emp?.has_face_descriptor && !emp?.has_hand_descriptor) ? 1 : 0,
+            desc: 'تسجيل البصمة لمرة واحدة، اختبار المطابقة، ومتابعة الاعتماد',
             visible: true
           },
           {
@@ -1632,9 +1824,10 @@ export default function EmployeePortalView({
       };
       return { group: 'الرواتب والمالية', item: itemMap[activeTab]?.name || activeTab, icon: itemMap[activeTab]?.icon || '💼' };
     }
-    if (['shifts', 'roster', 'swaps'].includes(activeTab)) {
+    if (['shifts', 'roster', 'swaps', 'biometric'].includes(activeTab)) {
       const itemMap = {
         shifts: { name: 'سجل البصمات وساعات العمل', icon: '📋' },
+        biometric: { name: 'البصمة الإلكترونية والتحقق الذاتي', icon: '📸' },
         roster: { name: 'الجدول الشهري ومناوبات العمل', icon: '🗓️' },
         swaps: { name: 'تبديل ونقل الشيفتات', icon: '🔄' }
       };
@@ -3187,6 +3380,108 @@ export default function EmployeePortalView({
         maxWidth: '100%',
         boxSizing: 'border-box'
       }}>
+
+          {/* ── Universal Biometric Registration Reminder Banner (Across ALL employee tabs) ── */}
+          {(() => {
+            const hasBio = Boolean(emp?.has_face_descriptor || emp?.has_hand_descriptor);
+            const pendingBioReg = (state?.requests || []).find(
+              r => String(r.employeeId) === String(emp?.id) &&
+                   r.type === 'biometric_registration' &&
+                   r.status === 'pending'
+            );
+
+            if (!hasBio && !pendingBioReg) {
+              return (
+                <div
+                  style={{
+                    background: 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)',
+                    border: '2px solid #ea580c',
+                    borderRadius: '16px',
+                    padding: '16px 22px',
+                    marginBottom: '20px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '14px',
+                    boxShadow: '0 4px 14px rgba(234, 88, 12, 0.15)'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                    <span style={{ fontSize: '32px' }}>📸</span>
+                    <div>
+                      <div style={{ fontWeight: '900', fontSize: '15px', color: '#9a3412' }}>
+                        تنبيه نظام البصمة: لم يتم تسجيل بصمتك الإلكترونية بعد!
+                      </div>
+                      <div style={{ fontSize: '13px', color: '#c2410c', marginTop: '3px', lineHeight: '1.5' }}>
+                        ينبغي عليك تسجيل بصمتك الذكية (لمرة واحدة فقط) لتتمكن من إثبات حضورك وانصرافك اليومي عبر كشك الصيدلية.
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-start"
+                    onClick={() => setShowBiometricRegisterModal(true)}
+                    style={{
+                      background: '#ea580c',
+                      color: '#ffffff',
+                      padding: '10px 20px',
+                      fontSize: '13.5px',
+                      fontWeight: 'bold',
+                      border: 'none',
+                      borderRadius: '10px',
+                      cursor: 'pointer',
+                      boxShadow: '0 2px 8px rgba(234, 88, 12, 0.3)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px'
+                    }}
+                  >
+                    <span>📸</span>
+                    <span>تسجيل البصمة الآن (خطوة واحدة)</span>
+                    <span>➔</span>
+                  </button>
+                </div>
+              );
+            }
+
+            if (pendingBioReg) {
+              return (
+                <div
+                  style={{
+                    background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)',
+                    border: '1.5px solid #3b82f6',
+                    borderRadius: '14px',
+                    padding: '12px 20px',
+                    marginBottom: '20px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '12px',
+                    boxShadow: '0 2px 8px rgba(59, 130, 246, 0.1)'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <span style={{ fontSize: '26px' }}>⏳</span>
+                    <div style={{ fontSize: '13px', color: '#1e40af' }}>
+                      <strong>بصمتك قيد المراجعة:</strong> تم إرسال بصمتك بنجاح بتاريخ ({pendingBioReg.date || pendingBioReg.createdAt?.slice(0, 10)}) وهي الآن بانتظار اعتماد الإدارة العليا لتفعيلها.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => setActiveTab('biometric')}
+                    style={{ fontSize: '12px', padding: '5px 12px', background: '#bfdbfe', color: '#1e3a8a', fontWeight: 'bold', borderRadius: '8px', cursor: 'pointer' }}
+                  >
+                    عرض التفاصيل ➔
+                  </button>
+                </div>
+              );
+            }
+
+            return null;
+          })()}
 
           {/* ── Active Resignation Notice Period Banner ── */}
           {activeResignationNotice && activeResignationNotice.remainingDays > 0 && (
@@ -4801,6 +5096,18 @@ export default function EmployeePortalView({
               selectedBranchId={selectedBranchId || null}
             />
           )}
+
+          {/* ── 13. Tab: Biometric (البصمة الإلكترونية) ── */}
+          {activeTab === 'biometric' && (
+            <EmployeeBiometricSection
+              employee={emp}
+              state={state}
+              onRequestRegister={() => setShowBiometricRegisterModal(true)}
+              onRequestTest={() => setShowBiometricTestModal(true)}
+              onSubmitResetRequest={handleSubmitResetRequest}
+              showToast={showToast}
+            />
+          )}
         </main>
 
         {/* ── Payslip Print Modal (Global to portal) ── */}
@@ -4817,6 +5124,25 @@ export default function EmployeePortalView({
           selectedBranchId={selectedBranchId || null}
           state={state}
         />
+
+        {/* ── Biometric Self-Registration Modal ── */}
+        {showBiometricRegisterModal && (
+          <FaceRegistrationModal
+            employee={emp}
+            onClose={() => setShowBiometricRegisterModal(false)}
+            onSuccess={handleRegisterBiometricSuccess}
+            biometricType={emp.preferred_biometric || orgSettings?.biometricType || state?.orgSettings?.biometricType || 'face'}
+          />
+        )}
+
+        {/* ── Biometric Live Matching Test Modal ── */}
+        {showBiometricTestModal && (
+          <FaceTestModal
+            employee={emp}
+            onClose={() => setShowBiometricTestModal(false)}
+            biometricType={emp.preferred_biometric || orgSettings?.biometricType || state?.orgSettings?.biometricType || 'face'}
+          />
+        )}
 
         {/* ── Export Modal ── */}
         {showExportModal && (

@@ -34,7 +34,9 @@ const ALL_REQUEST_TYPES = [
   { type: 'resignation', label: 'طلبات استقالة الموظفين' },
   { type: 'complaint', label: 'الشكاوى وملاحظات التقييم' },
   { type: 'punch_correction', label: 'طلبات تأكيد وتصحيح بصمات الوجه واليد' },
-  { type: 'biometric_verification', label: 'طلبات اعتماد الحضور بالصورة (عند تعذر بصمة الوجه/اليد)' }
+  { type: 'biometric_verification', label: 'طلبات اعتماد الحضور بالصورة (عند تعذر بصمة الوجه/اليد)' },
+  { type: 'biometric_registration', label: 'طلبات اعتماد تسجيل بصمة جديدة ذاتياً' },
+  { type: 'biometric_reset', label: 'طلبات إعادة تسجيل ومسح البصمة الإلكترونية' }
 ];
 
 export default function SettingsModule({
@@ -105,6 +107,8 @@ export default function SettingsModule({
     lockApproveRosters: false,
     lockApproveManualPunches: false,
     lockApproveBiometricVerification: false,
+    lockApproveBiometricRegistration: false,
+    lockApproveBiometricReset: false,
     lockApproveResignations: false,
     lockApproveBonuses: false,
     lockApproveComplaints: false,
@@ -505,7 +509,9 @@ export default function SettingsModule({
     { id: 'rule_swap', requestType: 'swap', typeLabel: 'طلبات تبديل الشفتات والورديات', reqBranch: true, reqAdmin: true },
     { id: 'rule_permission', requestType: 'permission', typeLabel: 'طلبات أذونات وتأخيرات الموظفين', reqBranch: true, reqAdmin: true },
     { id: 'rule_bonus', requestType: 'bonus', typeLabel: 'طلبات المكافآت والحوافز', reqBranch: true, reqAdmin: true },
-    { id: 'rule_biometric_verification', requestType: 'biometric_verification', typeLabel: 'طلبات اعتماد الحضور بالصورة (عند تعذر بصمة الوجه/اليد)', reqBranch: true, reqAdmin: true }
+    { id: 'rule_biometric_verification', requestType: 'biometric_verification', typeLabel: 'طلبات اعتماد الحضور بالصورة (عند تعذر بصمة الوجه/اليد)', reqBranch: true, reqAdmin: true },
+    { id: 'rule_biometric_registration', requestType: 'biometric_registration', typeLabel: 'طلبات اعتماد تسجيل بصمة جديدة ذاتياً', reqBranch: false, reqAdmin: true },
+    { id: 'rule_biometric_reset', requestType: 'biometric_reset', typeLabel: 'طلبات إعادة تسجيل ومسح البصمة الإلكترونية', reqBranch: false, reqAdmin: true }
   ]));
   const [showAddRuleModal, setShowAddRuleModal] = useState(false);
   const [newRuleType, setNewRuleType] = useState('long_leave');
@@ -2576,6 +2582,26 @@ export default function SettingsModule({
                             type="checkbox"
                             checked={Boolean(ownerLocks.lockApproveBiometricVerification)}
                             onChange={() => handleToggleOwnerLock('lockApproveBiometricVerification')}
+                            style={{ width: '17px', height: '17px', cursor: 'pointer', accentColor: '#d97706' }}
+                          />
+                        </label>
+
+                        <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '12.5px', fontWeight: 600, color: '#334155' }}>
+                          <span>📸 قفل قبول واعتماد تسجيل بصمة جديدة ذاتياً</span>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(ownerLocks.lockApproveBiometricRegistration)}
+                            onChange={() => handleToggleOwnerLock('lockApproveBiometricRegistration')}
+                            style={{ width: '17px', height: '17px', cursor: 'pointer', accentColor: '#d97706' }}
+                          />
+                        </label>
+
+                        <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '12.5px', fontWeight: 600, color: '#334155' }}>
+                          <span>🔄 قفل قبول طلبات إعادة تسجيل ومسح البصمة الإلكترونية</span>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(ownerLocks.lockApproveBiometricReset)}
+                            onChange={() => handleToggleOwnerLock('lockApproveBiometricReset')}
                             style={{ width: '17px', height: '17px', cursor: 'pointer', accentColor: '#d97706' }}
                           />
                         </label>

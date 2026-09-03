@@ -257,6 +257,28 @@ export function DataProvider({ children, showToast = () => {} }) {
         requiresBranchManager: true,
         requiresSuperAdmin: true,
         autoExecuteOnBoth: true
+      },
+      {
+        id: 'rule_biometric_registration',
+        requestType: 'biometric_registration',
+        name: 'طلبات اعتماد تسجيل بصمة جديدة ذاتياً',
+        typeLabel: 'طلبات اعتماد تسجيل بصمة جديدة ذاتياً',
+        reqBranch: false,
+        reqAdmin: true,
+        requiresBranchManager: false,
+        requiresSuperAdmin: true,
+        autoExecuteOnBoth: true
+      },
+      {
+        id: 'rule_biometric_reset',
+        requestType: 'biometric_reset',
+        name: 'طلبات إعادة تسجيل ومسح البصمة الإلكترونية',
+        typeLabel: 'طلبات إعادة تسجيل ومسح البصمة الإلكترونية',
+        reqBranch: false,
+        reqAdmin: true,
+        requiresBranchManager: false,
+        requiresSuperAdmin: true,
+        autoExecuteOnBoth: true
       }
     ],
     shifts: [],

@@ -744,5 +744,121 @@ export async function sendBiometricAttendanceEmail({
   });
 }
 
+/**
+ * 14. إرسال بريد طلب اعتماد تسجيل بصمة جديدة ذاتياً من صفحة الموظف
+ */
+export async function sendBiometricRegistrationRequestEmail({
+  gmailConfig,
+  empName,
+  empCode,
+  branchName,
+  biometricType = 'face',
+  dateStr,
+  drivePhotoUrl,
+  targetEmail: customTargetEmail
+}) {
+  const targetEmail = customTargetEmail || gmailConfig?.adminEmail;
+  if (!targetEmail) return { success: false, error: 'بريد الإدارة غير محدد' };
+
+  const bioLabel = biometricType === 'hand' ? 'بصمة اليد الذكية' : 'بصمة الوجه الذكية';
+
+  const content = `
+    <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+      <h3 style="color: #1e40af; margin: 0 0 8px 0; font-size: 16px;">📸 تسجيل بصمة موظف جديدة (بانتظار الاعتماد)</h3>
+      <p style="margin: 0; color: #1e3a8a; font-size: 14px; line-height: 1.6;">
+        قام الموظف <strong>${empName}</strong> بالتقاط وتسجيل <strong>${bioLabel}</strong> ذاتياً من صفحته الشخصية، وتنتظر البصمة اعتماد وتفعيل الإدارة العليا.
+      </p>
+    </div>
+
+    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr><td style="padding: 6px 0; font-weight: bold; width: 140px;">👤 الموظف:</td><td>${empName} (كود: ${empCode || '—'})</td></tr>
+        <tr><td style="padding: 6px 0; font-weight: bold;">📍 الفرع:</td><td>${branchName || 'الفرع الرئيسي'}</td></tr>
+        <tr><td style="padding: 6px 0; font-weight: bold;">🧬 نوع البصمة:</td><td><strong style="color: #0d9488;">${bioLabel} (متعددة الزوايا)</strong></td></tr>
+        <tr><td style="padding: 6px 0; font-weight: bold;">📅 تاريخ الإرسال:</td><td>${dateStr || new Date().toISOString().slice(0, 10)}</td></tr>
+        ${drivePhotoUrl ? `<tr><td style="padding: 6px 0; font-weight: bold;">📁 صورة التسجيل بدرايف:</td><td><a href="${drivePhotoUrl}" target="_blank" style="color: #0284c7; font-weight: bold;">🔗 فتح صورة البصمة في Google Drive</a></td></tr>` : ''}
+      </table>
+    </div>
+
+    <p style="text-align: center; margin-top: 20px;">
+      <a href="https://pharmacy-time-tracker.vercel.app" style="display: inline-block; background: #0d9488; color: #ffffff; text-decoration: none; padding: 10px 22px; border-radius: 8px; font-weight: bold;">
+        🔗 الدخول لمراجعة واعتماد البصمة في مركز الموافقات
+      </a>
+    </p>
+  `;
+
+  const html = buildEmailTemplate({
+    title: `📸 تسجيل بصمة جديدة: ${empName}`,
+    subtitle: `بانتظار موافقة الإدارة العليا لتفعيل البصمة في الكشك — فرع ${branchName || 'العام'}`,
+    badgeText: 'تسجيل بصمة جديدة',
+    badgeColor: '#0d9488',
+    bodyContent: content,
+    footerText: 'يتم تفعيل البصمة وحفظها في قاعدة البيانات فور موافقة الإدارة العليا'
+  });
+
+  return sendGmailEmail({
+    gmailConfig,
+    recipientEmail: targetEmail,
+    subject: `📸 طلب اعتماد بصمة جديدة: ${empName} (كود: ${empCode || '—'}) — فرع ${branchName || 'العام'}`,
+    htmlContent: html
+  });
+}
+
+/**
+ * 15. إرسال بريد طلب إعادة تسجيل البصمة ومسح البصمة القديمة
+ */
+export async function sendBiometricResetRequestEmail({
+  gmailConfig,
+  empName,
+  empCode,
+  branchName,
+  reason,
+  dateStr,
+  targetEmail: customTargetEmail
+}) {
+  const targetEmail = customTargetEmail || gmailConfig?.adminEmail;
+  if (!targetEmail) return { success: false, error: 'بريد الإدارة غير محدد' };
+
+  const content = `
+    <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+      <h3 style="color: #b45309; margin: 0 0 8px 0; font-size: 16px;">🔄 طلب إعادة تسجيل بصمة الموظف ومسح القديمة</h3>
+      <p style="margin: 0; color: #92400e; font-size: 14px; line-height: 1.6;">
+        تقدم الموظف <strong>${empName}</strong> بطلب للإدارة العليا للسماح له بإعادة تسجيل بصمته الإلكترونية ومسح بيانات بصمته الحالية.
+      </p>
+    </div>
+
+    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr><td style="padding: 6px 0; font-weight: bold; width: 140px;">👤 الموظف:</td><td>${empName} (كود: ${empCode || '—'})</td></tr>
+        <tr><td style="padding: 6px 0; font-weight: bold;">📍 الفرع:</td><td>${branchName || 'الفرع الرئيسي'}</td></tr>
+        <tr><td style="padding: 6px 0; font-weight: bold;">📝 سبب طلب الإعادة:</td><td><strong style="color: #b45309;">${reason || 'غير محدد'}</strong></td></tr>
+        <tr><td style="padding: 6px 0; font-weight: bold;">📅 تاريخ الطلب:</td><td>${dateStr || new Date().toISOString().slice(0, 10)}</td></tr>
+      </table>
+    </div>
+
+    <p style="text-align: center; margin-top: 20px;">
+      <a href="https://pharmacy-time-tracker.vercel.app" style="display: inline-block; background: #d97706; color: #ffffff; text-decoration: none; padding: 10px 22px; border-radius: 8px; font-weight: bold;">
+        🔗 فتح مركز الموافقات لاتخاذ القرار
+      </a>
+    </p>
+  `;
+
+  const html = buildEmailTemplate({
+    title: `🔄 طلب إعادة تسجيل بصمة: ${empName}`,
+    subtitle: `طلب مسح البصمة القديمة وإتاحة التسجيل لمرة واحدة — فرع ${branchName || 'العام'}`,
+    badgeText: 'طلب إعادة تسجيل بصمة',
+    badgeColor: '#d97706',
+    bodyContent: content,
+    footerText: 'عند موافقة الإدارة سيتم مسح البصمة القديمة آلياً وإشعار الموظف لإعادة التسجيل'
+  });
+
+  return sendGmailEmail({
+    gmailConfig,
+    recipientEmail: targetEmail,
+    subject: `🔄 طلب إعادة تسجيل بصمة: ${empName} (كود: ${empCode || '—'}) — فرع ${branchName || 'العام'}`,
+    htmlContent: html
+  });
+}
+
 
 

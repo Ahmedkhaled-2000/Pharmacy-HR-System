@@ -104,9 +104,23 @@ export default function FaceRegistrationModal({ employee, onClose, onSuccess, bi
             setCaptureStage(2);
             setStatus('تم التقاط (ظهر اليد) ✅. يرجى إمالة اليد قليلاً للجانب والنقر على التقاط.');
           } else {
+            let photoDataUrl = null;
+            try {
+              if (videoRef.current) {
+                const canvas = document.createElement('canvas');
+                canvas.width = videoRef.current.videoWidth || 640;
+                canvas.height = videoRef.current.videoHeight || 480;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+                photoDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+              }
+            } catch (snapErr) {
+              console.warn('Could not extract snapshot frame:', snapErr);
+            }
+
             setStatus('تم التقاط جميع زوايا اليد بنجاح! ✅ جاري الحفظ...');
             setTimeout(() => {
-              onSuccess(newDescriptors, 'hand');
+              onSuccess(newDescriptors, 'hand', photoDataUrl);
             }, 1200);
           }
         }
@@ -128,9 +142,23 @@ export default function FaceRegistrationModal({ employee, onClose, onSuccess, bi
             setCaptureStage(2);
             setStatus('تم التقاط الوجه (اليمين) ✅. الخطوة 3: يرجى الالتفات قليلاً لليسار (~15 درجة) ثم النقر على التقاط.');
           } else {
+            let photoDataUrl = null;
+            try {
+              if (videoRef.current) {
+                const canvas = document.createElement('canvas');
+                canvas.width = videoRef.current.videoWidth || 640;
+                canvas.height = videoRef.current.videoHeight || 480;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+                photoDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+              }
+            } catch (snapErr) {
+              console.warn('Could not extract snapshot frame:', snapErr);
+            }
+
             setStatus('تم تسجيل بروفايل الوجه متعدد الزوايا بنجاح! 🎉 جاري الحفظ في قاعدة البيانات...');
             setTimeout(() => {
-              onSuccess(newDescriptors, 'face');
+              onSuccess(newDescriptors, 'face', photoDataUrl);
             }, 1200);
           }
         }

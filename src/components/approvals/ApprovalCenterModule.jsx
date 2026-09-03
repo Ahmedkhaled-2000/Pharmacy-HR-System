@@ -44,6 +44,20 @@ export default function ApprovalCenterModule({
       autoExecuteOnBoth: true
     },
     {
+      id: 'rule_biometric_registration',
+      name: 'طلبات اعتماد تسجيل بصمة جديدة ذاتياً',
+      requiresBranchManager: false,
+      requiresSuperAdmin: true,
+      autoExecuteOnBoth: true
+    },
+    {
+      id: 'rule_biometric_reset',
+      name: 'طلبات إعادة تسجيل ومسح البصمة الإلكترونية',
+      requiresBranchManager: false,
+      requiresSuperAdmin: true,
+      autoExecuteOnBoth: true
+    },
+    {
       id: 'rule_long_leave',
       name: 'طلبات الإجازة أكثر من ثلاث أيام في الشهر (سنوية أو بدون أجر)',
       requiresBranchManager: false,

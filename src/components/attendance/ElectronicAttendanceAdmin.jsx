@@ -66,14 +66,28 @@ export default function ElectronicAttendanceAdmin({ state, setState, saveState, 
         return emp;
       });
 
-      const updatedState = { ...state, employees: updatedEmployees };
+      const empNotif = {
+        id: 'NOTIF-BIO-DELETED-' + Date.now(),
+        type: 'biometric_cleared',
+        title: '⚠️ تم مسح بصمتك الإلكترونية من قِبل الإدارة',
+        message: `قامت الإدارة بمسح بصمة ${isHand ? 'اليد' : 'الوجه'} المسجلة لحسابك. يرجى تسجيل بصمة جديدة من صفحتك الشخصية لتتمكن من إثبات الحضور في الكشك.`,
+        employeeId: empId,
+        createdAt: new Date().toISOString(),
+        read: false
+      };
+
+      const updatedState = { 
+        ...state, 
+        employees: updatedEmployees,
+        notifications: [empNotif, ...(state.notifications || [])]
+      };
       setState(updatedState);
       if (saveState) await saveState(updatedState);
       
       if (showToast) {
-        showToast(`🗑️ تم حذف بصمة ${isHand ? 'اليد' : 'الوجه'} بنجاح.`);
+        showToast(`🗑️ تم حذف بصمة ${isHand ? 'اليد' : 'الوجه'} بنجاح وإشعار الموظف.`);
       } else {
-        alert(`تم حذف بصمة ${isHand ? 'اليد' : 'الوجه'} بنجاح.`);
+        alert(`تم حذف بصمة ${isHand ? 'اليد' : 'الوجه'} بنجاح وإشعار الموظف.`);
       }
     };
 
