@@ -29,11 +29,11 @@ export default function FaceRegistrationModal({ employee, onClose, onSuccess, bi
 
     // التحقق من دعم البيئة الآمنة (HTTPS / localhost)
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      const isHttps = window.isSecureContext || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-      if (!isHttps) {
-        setCameraError('المتصفح يشترط اتصالاً آمناً (HTTPS) أو localhost لتشغيل الكاميرا.');
+      const isSecure = window.isSecureContext || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      if (!isSecure) {
+        setCameraError('المتصفح على الهواتف يشترط اتصالاً آمناً (HTTPS) لتشغيل الكاميرا. يرجى فتح النظام برابط https:// أو الدخول من جهاز السيرفر.');
       } else {
-        setCameraError('المتصفح لا يدعم الوصول للكاميرا عبر mediaDevices.');
+        setCameraError('المتصفح أو التطبيق الحالي لا يدعم الوصول للكاميرا.');
       }
       return false;
     }
@@ -44,12 +44,15 @@ export default function FaceRegistrationModal({ employee, onClose, onSuccess, bi
       streamRef.current = null;
     }
 
+    // تدرج قيود الكاميرا الرباعي المصمم للهواتف والمتصفحات المتنوعة
     const constraintTiers = [
-      // المستوى 1: دقة عالية مع الوضع المطلوب
+      // المستوى 1: الوضع المطلوب بدقة مثالية
       { video: { facingMode: { ideal: facingMode }, width: { ideal: 1280 }, height: { ideal: 720 } } },
-      // المستوى 2: الوضع المطلوب بدقة تلقائية
+      // المستوى 2: الوضع المطلوب بدون قيود دقة (الأنسب لمعظم الهواتف)
       { video: { facingMode: { ideal: facingMode } } },
-      // المستوى 3: أي كاميرا متاحة بالجهاز
+      // المستوى 3: اسم الوضع المباشر
+      { video: { facingMode: facingMode } },
+      // المستوى 4: أي كاميرا متاحة بالجهاز
       { video: true }
     ];
 
@@ -62,7 +65,6 @@ export default function FaceRegistrationModal({ employee, onClose, onSuccess, bi
         if (activeStream) break;
       } catch (err) {
         lastError = err;
-        // إذا كان خطأ رفض الصلاحيات نتوقف فوراً لتوجيه المستخدم
         if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
           break;
         }
@@ -73,10 +75,18 @@ export default function FaceRegistrationModal({ employee, onClose, onSuccess, bi
       streamRef.current = activeStream;
       if (videoRef.current) {
         videoRef.current.srcObject = activeStream;
+        videoRef.current.muted = true;
+        videoRef.current.defaultMuted = true;
+        videoRef.current.playsInline = true;
+        videoRef.current.setAttribute('playsinline', 'true');
+        videoRef.current.setAttribute('webkit-playsinline', 'true');
         try {
-          await videoRef.current.play();
+          const playPromise = videoRef.current.play();
+          if (playPromise !== undefined) {
+            await playPromise;
+          }
         } catch (playErr) {
-          console.warn('Auto play video was interrupted:', playErr);
+          console.warn('Auto play video was interrupted on mobile/browser:', playErr);
         }
       }
       setCameraReady(true);
@@ -89,7 +99,7 @@ export default function FaceRegistrationModal({ employee, onClose, onSuccess, bi
       } else if (lastError?.name === 'NotFoundError' || lastError?.name === 'DevicesNotFoundError') {
         setCameraError('لم يتم العثور على أي كاميرا متصلة بالجهاز.');
       } else if (lastError?.name === 'NotReadableError' || lastError?.name === 'TrackStartError') {
-        setCameraError('الكاميرا قيد الاستخدام بواسطة برنامج آخر (مثل Zoom أو تطبيق كاميرا مفتوح).');
+        setCameraError('الكاميرا قيد الاستخدام بواسطة تطبيق آخر في الهاتف/الجهاز.');
       } else {
         setCameraError('تعذر فتح الكاميرا: ' + (lastError?.message || 'تأكد من صلاحيات الكاميرا'));
       }
@@ -330,8 +340,9 @@ export default function FaceRegistrationModal({ employee, onClose, onSuccess, bi
               ref={videoRef} 
               autoPlay 
               playsInline 
+              webkit-playsinline="true"
               muted 
-              style={{ width: '100%', display: cameraReady ? 'block' : 'none', transform: facingMode === 'user' ? 'scaleX(-1)' : 'none' }} 
+              style={{ width: '100%', height: 'auto', display: cameraReady ? 'block' : 'none', transform: facingMode === 'user' ? 'scaleX(-1)' : 'none', objectFit: 'cover' }} 
             />
             
             {/* في حال عدم جاهزية الكاميرا أو وجود خطأ */}

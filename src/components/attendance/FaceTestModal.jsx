@@ -25,11 +25,11 @@ export default function FaceTestModal({ employee, onClose, biometricType = 'face
     setPermissionDenied(false);
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      const isHttps = window.isSecureContext || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-      if (!isHttps) {
-        setCameraError('المتصفح يشترط اتصالاً آمناً (HTTPS) أو localhost لتشغيل الكاميرا.');
+      const isSecure = window.isSecureContext || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      if (!isSecure) {
+        setCameraError('المتصفح على الهواتف يشترط اتصالاً آمناً (HTTPS) لتشغيل الكاميرا. يرجى فتح النظام برابط https:// أو الدخول من جهاز السيرفر.');
       } else {
-        setCameraError('المتصفح لا يدعم الوصول للكاميرا عبر mediaDevices.');
+        setCameraError('المتصفح أو التطبيق الحالي لا يدعم الوصول للكاميرا.');
       }
       return false;
     }
@@ -40,7 +40,8 @@ export default function FaceTestModal({ employee, onClose, biometricType = 'face
     }
 
     const tiers = [
-      { video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } } },
+      { video: { facingMode: { ideal: 'user' }, width: { ideal: 1280 }, height: { ideal: 720 } } },
+      { video: { facingMode: { ideal: 'user' } } },
       { video: { facingMode: 'user' } },
       { video: true }
     ];
@@ -62,10 +63,18 @@ export default function FaceTestModal({ employee, onClose, biometricType = 'face
       streamRef.current = activeStream;
       if (videoRef.current) {
         videoRef.current.srcObject = activeStream;
+        videoRef.current.muted = true;
+        videoRef.current.defaultMuted = true;
+        videoRef.current.playsInline = true;
+        videoRef.current.setAttribute('playsinline', 'true');
+        videoRef.current.setAttribute('webkit-playsinline', 'true');
         try {
-          await videoRef.current.play();
+          const playPromise = videoRef.current.play();
+          if (playPromise !== undefined) {
+            await playPromise;
+          }
         } catch (e) {
-          console.warn('Video play interrupted:', e);
+          console.warn('Video play interrupted on mobile/browser:', e);
         }
       }
       setCameraReady(true);
@@ -78,7 +87,7 @@ export default function FaceTestModal({ employee, onClose, biometricType = 'face
       } else if (lastErr?.name === 'NotFoundError' || lastErr?.name === 'DevicesNotFoundError') {
         setCameraError('لم يتم العثور على أي كاميرا متصلة بالجهاز.');
       } else if (lastErr?.name === 'NotReadableError' || lastErr?.name === 'TrackStartError') {
-        setCameraError('الكاميرا قيد الاستخدام من تطبيق آخر (مثل Zoom أو تطبيق كاميرا مفتوح).');
+        setCameraError('الكاميرا قيد الاستخدام بواسطة تطبيق آخر في الهاتف/الجهاز.');
       } else {
         setCameraError('تعذر فتح الكاميرا: ' + (lastErr?.message || 'تأكد من الصلاحيات'));
       }
@@ -270,9 +279,11 @@ export default function FaceTestModal({ employee, onClose, biometricType = 'face
           <div style={{ position: 'relative', width: '100%', maxWidth: '420px', borderRadius: '16px', overflow: 'hidden', backgroundColor: '#0f172a', border: '3px solid var(--border)', minHeight: '260px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <video 
               ref={videoRef}
-              style={{ width: '100%', height: 'auto', display: cameraReady ? 'block' : 'none', transform: 'scaleX(-1)' }}
-              muted
+              autoPlay
               playsInline
+              webkit-playsinline="true"
+              muted
+              style={{ width: '100%', height: 'auto', display: cameraReady ? 'block' : 'none', transform: 'scaleX(-1)', objectFit: 'cover' }}
             />
             
             {!cameraReady && !cameraError && (

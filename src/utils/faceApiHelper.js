@@ -18,6 +18,22 @@ let alignCanvas = null;
 let initPromise = null;
 
 /**
+ * فحص ما إذا كان المتصفح يدعم تعليمات WebAssembly SIMD
+ */
+export const isWasmSimdSupported = () => {
+  try {
+    return typeof WebAssembly === 'object' && typeof WebAssembly.validate === 'function' &&
+      WebAssembly.validate(new Uint8Array([
+        0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 26, 11
+      ]));
+  } catch {
+    return false;
+  }
+};
+
+let lastFaceTimestamp = 0;
+
+/**
  * فحص ما إذا كان محرك الوجه جاهزاً بالفعل
  */
 export const isFaceEngineReady = () => {
@@ -26,7 +42,7 @@ export const isFaceEngineReady = () => {
 
 /**
  * تهيئة وتحميل محركات الذكاء الاصطناعي (MediaPipe + ONNX Runtime Web)
- * تعتمد على النماذج المحلية فائقة السرعة مع التعافي التلقائي
+ * متوافقة 100% مع الهواتف الذكية (iOS Safari, Android Chrome) وكافة المتصفحات
  */
 export const initFaceRecognition = async () => {
   if (isFaceEngineReady()) return;
@@ -34,67 +50,89 @@ export const initFaceRecognition = async () => {
 
   initPromise = (async () => {
     try {
-      console.log('⚡ [FaceEngine] جاري تهيئة محرك التعرف على الوجه فائق السرعة...');
+      console.log('⚡ [FaceEngine] جاري تهيئة محرك التعرف على الوجه مع دعم الهواتف والمتصفحات...');
 
-      // 1. إعداد مسارات تشغيل ONNX WebAssembly (وضع Single-Threaded فائق السرعة والموثوقية 100%)
+      // 1. إعداد مسارات تشغيل ONNX WebAssembly مع الكشف التلقائي عن دعم SIMD في الهاتف/المتصفح
+      const supportsSimd = isWasmSimdSupported();
       try {
         ort.env.wasm.numThreads = 1;
-        ort.env.wasm.simd = true;
+        ort.env.wasm.simd = supportsSimd;
         ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.29.0/dist/';
       } catch (e) {
         console.warn('[FaceEngine] WASM path setup note:', e);
       }
 
-      // 2. تحميل نموذج MediaPipe FaceLandmarker (كشف الوجه، 478 نقطة ثلاثية الأبعاد)
-      // الأولوية 1: المسار المحلي الفوري /mediapipe-wasm
-      let vision = null;
-      try {
-        vision = await FilesetResolver.forVisionTasks('/mediapipe-wasm');
-      } catch (localWasmErr) {
-        console.warn('⚡ Local mediapipe wasm fallback to CDN:', localWasmErr);
-        vision = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm');
-      }
+      // 2. تحميل نموذج MediaPipe FaceLandmarker مع الدعم المزدوج للمتصفحات والهواتف
+      const visionResolvers = [
+        { type: 'local', path: '/mediapipe-wasm' },
+        { type: 'cdn', path: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm' }
+      ];
 
-      // محاولة التحميل باستخدام المسار المحلي والـ GPU، مع التعافي التلقائي عند تعذر WebGL أو المسار
-      let landmarkerCreated = false;
-      const modelPaths = ['/models/face_landmarker.task', 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task'];
+      const modelPaths = [
+        '/models/face_landmarker.task',
+        'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task'
+      ];
+      // على الهواتف المتطورة يتم تجربة GPU أولاً، ثم CPU فوراً إذا تعذر WebGL
       const delegates = ['GPU', 'CPU'];
 
-      for (const mPath of modelPaths) {
+      let landmarkerCreated = false;
+      let lastLandmarkerErr = null;
+
+      for (const res of visionResolvers) {
         if (landmarkerCreated) break;
-        for (const dlg of delegates) {
-          try {
-            faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
-              baseOptions: {
-                modelAssetPath: mPath,
-                delegate: dlg
-              },
-              outputFaceBlendshapes: true,
-              runningMode: 'VIDEO',
-              numFaces: 1
-            });
-            landmarkerCreated = true;
-            console.log(`✅ [FaceEngine] FaceLandmarker loaded (${mPath}, ${dlg})`);
-            break;
-          } catch (landmarkerErr) {
-            console.warn(`FaceLandmarker attempt failed (${mPath}, ${dlg}):`, landmarkerErr.message || landmarkerErr);
+        let vision = null;
+        try {
+          vision = await FilesetResolver.forVisionTasks(res.path);
+        } catch (visErr) {
+          console.warn(`[FaceEngine] Vision resolver (${res.type}) error:`, visErr);
+          continue;
+        }
+
+        for (const mPath of modelPaths) {
+          if (landmarkerCreated) break;
+          for (const dlg of delegates) {
+            try {
+              faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+                baseOptions: {
+                  modelAssetPath: mPath,
+                  delegate: dlg
+                },
+                outputFaceBlendshapes: true,
+                runningMode: 'VIDEO',
+                numFaces: 1
+              });
+              landmarkerCreated = true;
+              console.log(`✅ [FaceEngine] FaceLandmarker loaded (${res.type}, ${mPath}, ${dlg})`);
+              break;
+            } catch (landmarkerErr) {
+              lastLandmarkerErr = landmarkerErr;
+              console.warn(`FaceLandmarker attempt failed (${res.type}, ${mPath}, ${dlg}):`, landmarkerErr.message || landmarkerErr);
+            }
           }
         }
       }
 
       if (!landmarkerCreated || !faceLandmarker) {
-        throw new Error('تعذر تحميل نموذج معالم الوجه (FaceLandmarker). يرجى التحقق من الاتصال.');
+        throw new Error('تعذر تحميل نموذج معالم الوجه (FaceLandmarker): ' + (lastLandmarkerErr?.message || 'تأكد من الاتصال بالإنترنت'));
       }
 
-      // 3. تحميل نموذج MobileFaceNet (ArcFace 512D) عبر ONNX Runtime
+      // 3. تحميل نموذج MobileFaceNet (ArcFace 512D) عبر ONNX Runtime مع تعافي SIMD تلقائي
       const modelUrl = '/models/w600k_mbf.onnx';
       try {
         onnxSession = await ort.InferenceSession.create(modelUrl, {
           executionProviders: ['wasm']
         });
       } catch (sessionErr) {
-        console.warn('[FaceEngine] First session attempt failed, retrying default session:', sessionErr);
-        onnxSession = await ort.InferenceSession.create(modelUrl);
+        console.warn('[FaceEngine] First session attempt failed, retrying with simd=false and basic config:', sessionErr);
+        try {
+          ort.env.wasm.simd = false;
+          onnxSession = await ort.InferenceSession.create(modelUrl, {
+            executionProviders: ['wasm']
+          });
+        } catch (retryErr) {
+          console.warn('[FaceEngine] Second session attempt failed, final fallback:', retryErr);
+          onnxSession = await ort.InferenceSession.create(modelUrl);
+        }
       }
 
       // تهيئة Canvas مؤقت لإجراء عمليات التحويل
@@ -103,7 +141,7 @@ export const initFaceRecognition = async () => {
       alignCanvas.height = 112;
 
       isFaceModelLoaded = true;
-      console.log('✅ تم تحميل محرك التعرف على الوجه بنجاح (ONNX ArcFace 512D + MediaPipe).');
+      console.log('✅ تم تحميل محرك التعرف على الوجه بنجاح (ONNX ArcFace 512D + MediaPipe Mobile-Ready).');
     } catch (error) {
       console.error('❌ خطأ في تحميل نماذج الذكاء الاصطناعي للوجه:', error);
       initPromise = null;
@@ -128,7 +166,7 @@ export const preWarmFaceModels = () => {
 };
 
 /**
- * استخراج بصمة الوجه (512D Vector) مع دعم الإضاءة المنخفضة والزوايا الحادة
+ * استخراج بصمة الوجه (512D Vector) مع دعم الهواتف والإضاءة المنخفضة والزوايا الحادة
  * @param {HTMLVideoElement|HTMLCanvasElement} videoElement
  * @param {Object} options
  * @returns {Promise<{ descriptor?: number[], error?: string, luminance?: number, isLowLight?: boolean }>}
@@ -138,21 +176,26 @@ export const getFaceEmbedding = async (videoElement, options = {}) => {
     throw new Error('النماذج لم تكتمل في التحميل بعد.');
   }
 
-  const startTimeMs = performance.now();
-  const width = videoElement.videoWidth || videoElement.width || 640;
-  const height = videoElement.videoHeight || videoElement.height || 480;
+  const width = videoElement.videoWidth || videoElement.width || 0;
+  const height = videoElement.videoHeight || videoElement.height || 0;
 
-  if (width === 0 || height === 0) {
+  // التحقق من جاهزية الفيديو واستلام أول إطار من الكاميرا
+  if (width === 0 || height === 0 || (videoElement.readyState !== undefined && videoElement.readyState < 2)) {
     return { error: 'جاري تشغيل الكاميرا وتجهيز الإطار...' };
   }
+
+  // ضمان زيادة زمنية مستمرة صارمة لتفادي انهيار MediaPipe على الهواتف
+  const now = performance.now();
+  const startTimeMs = Math.max(now, lastFaceTimestamp + 10);
+  lastFaceTimestamp = startTimeMs;
 
   // 1. كشف الوجه والمعالم باستخدام MediaPipe
   let results;
   try {
     results = faceLandmarker.detectForVideo(videoElement, startTimeMs);
   } catch (e) {
-    // Fallback if video frame wasn't ready
-    return { error: 'تعذر تحليل إطار الكاميرا. يرجى الانتظار ثانية.' };
+    console.warn('[FaceEngine] detectForVideo frame error:', e);
+    return { error: 'تعذر تحليل إطار الكاميرا. يرجى الانتظار ثانية والمحاولة مجدداً.' };
   }
 
   if (!results.faceLandmarks || results.faceLandmarks.length === 0) {

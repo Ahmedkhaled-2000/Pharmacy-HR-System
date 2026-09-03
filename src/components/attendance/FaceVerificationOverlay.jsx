@@ -23,10 +23,15 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
 
     const startProcess = async () => {
       try {
-        // 1. بدء تشغيل الكاميرا بالطبقات المتعددة فوراً
+        // 1. بدء تشغيل الكاميرا بالطبقات المتعددة فوراً مع التوافق التام للهواتف
         const startCamera = async () => {
           if (!navigator.mediaDevices?.getUserMedia) {
-            throw new Error('المتصفح لا يدعم الوصول للكاميرا أو يتطلب اتصالاً آمناً (HTTPS).');
+            const isSecure = window.isSecureContext || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+            if (!isSecure) {
+              throw new Error('المتصفح على الهواتف يشترط اتصالاً آمناً (HTTPS) لتشغيل الكاميرا. يرجى الدخول برابط https://.');
+            } else {
+              throw new Error('المتصفح أو التطبيق الحالي لا يدعم الوصول للكاميرا.');
+            }
           }
 
           if (videoRef.current?.srcObject) {
@@ -37,6 +42,7 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
           const constraintTiers = [
             { video: { facingMode: { ideal: facingMode }, width: { ideal: 1280 }, height: { ideal: 720 } } },
             { video: { facingMode: { ideal: facingMode } } },
+            { video: { facingMode: facingMode } },
             { video: true }
           ];
 
@@ -69,10 +75,18 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
         stream = camStream;
         if (videoRef.current) {
           videoRef.current.srcObject = camStream;
+          videoRef.current.muted = true;
+          videoRef.current.defaultMuted = true;
+          videoRef.current.playsInline = true;
+          videoRef.current.setAttribute('playsinline', 'true');
+          videoRef.current.setAttribute('webkit-playsinline', 'true');
           try {
-            await videoRef.current.play();
+            const playPromise = videoRef.current.play();
+            if (playPromise !== undefined) {
+              await playPromise;
+            }
           } catch (pErr) {
-            console.warn('Play video interrupted:', pErr);
+            console.warn('Play video interrupted on mobile/browser:', pErr);
           }
         }
 
@@ -83,10 +97,10 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
         console.error('Camera/Model error:', err);
         if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
           setErrorMsg('تم حظر إذن الكاميرا. يرجى الضغط على أيقونة القفل 🔒 بجانب رابط المتصفح وتفعيل الكاميرا.');
-        } else if (err.name === 'NotFoundError') {
+        } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
           setErrorMsg('لم يتم العثور على أي كاميرا متصلة بالجهاز.');
         } else {
-          setErrorMsg('فشل في تشغيل الكاميرا أو تحميل محرك الذكاء الاصطناعي: ' + (err.message || 'تأكد من الصلاحيات'));
+          setErrorMsg('فشل في تشغيل الكاميرا أو تحميل محرك الذكاء الاصطناعي: ' + (err.message || 'تأكد من الصلاحيات والاتصال'));
         }
         setIsInitializing(false);
       }
@@ -352,9 +366,11 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
           <div style={{ position: 'relative', width: '100%', maxWidth: '420px', borderRadius: '16px', overflow: 'hidden', backgroundColor: '#000', border: '3px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.15)' }}>
             <video 
               ref={videoRef}
-              style={{ width: '100%', height: 'auto', display: 'block', transform: facingMode === 'user' ? 'scaleX(-1)' : 'none' }}
-              muted
+              autoPlay
               playsInline
+              webkit-playsinline="true"
+              muted
+              style={{ width: '100%', height: 'auto', display: 'block', transform: facingMode === 'user' ? 'scaleX(-1)' : 'none', objectFit: 'cover' }}
             />
             {isInitializing && (
               <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', backgroundColor: 'rgba(0,0,0,0.7)' }}>

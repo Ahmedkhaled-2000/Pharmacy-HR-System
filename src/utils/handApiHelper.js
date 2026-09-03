@@ -3,6 +3,8 @@ import { HandLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
 let isHandApiLoaded = false;
 let handLandmarker = null;
 
+let lastHandTimestamp = 0;
+
 export const isHandEngineReady = () => {
   return isHandApiLoaded && Boolean(handLandmarker);
 };
@@ -11,47 +13,63 @@ export const initHandRecognition = async () => {
   if (isHandEngineReady()) return;
 
   try {
-    let vision = null;
-    try {
-      vision = await FilesetResolver.forVisionTasks('/mediapipe-wasm');
-    } catch (localWasmErr) {
-      console.warn('Local mediapipe wasm fallback to CDN for hands:', localWasmErr);
-      vision = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm');
-    }
+    const visionResolvers = [
+      { type: 'local', path: '/mediapipe-wasm' },
+      { type: 'cdn', path: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm' }
+    ];
 
-    let landmarkerCreated = false;
-    const modelPaths = ['/models/hand_landmarker.task', 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task'];
+    const modelPaths = [
+      '/models/hand_landmarker.task',
+      'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task'
+    ];
     const delegates = ['GPU', 'CPU'];
 
-    for (const mPath of modelPaths) {
+    let landmarkerCreated = false;
+    let lastHandErr = null;
+
+    for (const res of visionResolvers) {
       if (landmarkerCreated) break;
-      for (const dlg of delegates) {
-        try {
-          handLandmarker = await HandLandmarker.createFromOptions(vision, {
-            baseOptions: {
-              modelAssetPath: mPath,
-              delegate: dlg
-            },
-            runningMode: 'VIDEO',
-            numHands: 1
-          });
-          landmarkerCreated = true;
-          console.log(`✅ [HandEngine] HandLandmarker loaded (${mPath}, ${dlg})`);
-          break;
-        } catch (landmarkerErr) {
-          console.warn(`HandLandmarker attempt failed (${mPath}, ${dlg}):`, landmarkerErr.message || landmarkerErr);
+      let vision = null;
+      try {
+        vision = await FilesetResolver.forVisionTasks(res.path);
+      } catch (visErr) {
+        console.warn(`[HandEngine] Vision resolver (${res.type}) error:`, visErr);
+        continue;
+      }
+
+      for (const mPath of modelPaths) {
+        if (landmarkerCreated) break;
+        for (const dlg of delegates) {
+          try {
+            handLandmarker = await HandLandmarker.createFromOptions(vision, {
+              baseOptions: {
+                modelAssetPath: mPath,
+                delegate: dlg
+              },
+              runningMode: 'VIDEO',
+              numHands: 1
+            });
+            landmarkerCreated = true;
+            console.log(`✅ [HandEngine] HandLandmarker loaded (${res.type}, ${mPath}, ${dlg})`);
+            break;
+          } catch (landmarkerErr) {
+            lastHandErr = landmarkerErr;
+            console.warn(`HandLandmarker attempt failed (${res.type}, ${mPath}, ${dlg}):`, landmarkerErr.message || landmarkerErr);
+          }
         }
       }
     }
 
     if (!landmarkerCreated || !handLandmarker) {
-      throw new Error('تعذر تحميل نموذج معالم اليد (HandLandmarker).');
+      throw new Error('تعذر تحميل نموذج معالم اليد (HandLandmarker): ' + (lastHandErr?.message || 'تأكد من الاتصال بالإنترنت'));
     }
     
     isHandApiLoaded = true;
-    console.log('✅ تم تحميل محرك التعرف على اليد بنجاح.');
+    console.log('✅ تم تحميل محرك التعرف على اليد بنجاح (Mobile-Ready).');
   } catch (error) {
     console.error('❌ خطأ في تحميل نموذج اليد:', error);
+    isHandApiLoaded = false;
+    handLandmarker = null;
     throw error;
   }
 };
@@ -64,8 +82,18 @@ export const getHandEmbedding = (videoElement, lastVideoTime) => {
     throw new Error('HandLandmarker not loaded');
   }
 
-  const startTimeMs = performance.now();
-  if (videoElement.currentTime !== lastVideoTime) {
+  const width = videoElement.videoWidth || videoElement.width || 0;
+  const height = videoElement.videoHeight || videoElement.height || 0;
+
+  if (width === 0 || height === 0 || (videoElement.readyState !== undefined && videoElement.readyState < 2)) {
+    return { hasHand: false, error: 'جاري تشغيل الكاميرا وتجهيز الإطار...' };
+  }
+
+  const now = performance.now();
+  const startTimeMs = Math.max(now, lastHandTimestamp + 10);
+  lastHandTimestamp = startTimeMs;
+
+  try {
     const results = handLandmarker.detectForVideo(videoElement, startTimeMs);
     
     if (results.landmarks && results.landmarks.length > 0) {
@@ -111,6 +139,9 @@ export const getHandEmbedding = (videoElement, lastVideoTime) => {
       };
     }
     return { hasHand: false, results };
+  } catch (err) {
+    console.warn('[HandEngine] detectForVideo frame error:', err);
+    return { hasHand: false, error: 'تعذر تحليل إطار اليد. يرجى تحريك اليد ببطء.' };
   }
   return null;
 };
