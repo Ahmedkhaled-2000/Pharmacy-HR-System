@@ -233,6 +233,7 @@ export function normalizeState(parsed) {
   let requests = toSafeArray(parsed.requests);
   const resignationRequests = toSafeArray(parsed.resignationRequests);
   const leaveRequests = toSafeArray(parsed.leaveRequests);
+  const permissionRequests = toSafeArray(parsed.permissionRequests);
   const shiftSwaps = toSafeArray(parsed.shiftSwaps);
   let loans = toSafeArray(parsed.loans);
   const evaluations = toSafeArray(parsed.evaluations);
@@ -478,6 +479,7 @@ export function normalizeState(parsed) {
     lateIncidents,
     resignationRequests,
     leaveRequests,
+    permissionRequests,
     leaveHistory: toSafeArray(parsed.leaveHistory),
     shiftSwaps,
     loans,

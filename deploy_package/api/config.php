@@ -296,6 +296,30 @@ function mergeServerState(array $existing, array $incoming): array
                         $merged['paymentsHistory'] = array_values($pMap);
                     }
 
+                    // الحفاظ على بصمة الوجه واليد للموظف من التصفير غير المقصود أثناء دمج الخادم
+                    if ($prefix === 'emp') {
+                        $oldHasFace = !empty($old['has_face_descriptor']) && !empty($old['face_descriptor']);
+                        $newHasFace = !empty($item['has_face_descriptor']) && !empty($item['face_descriptor']);
+                        if ($oldHasFace && !$newHasFace && empty($item['biometricResetAt'])) {
+                            $merged['has_face_descriptor'] = true;
+                            $merged['face_descriptor'] = $old['face_descriptor'];
+                            if (!empty($old['preferred_biometric'])) $merged['preferred_biometric'] = $old['preferred_biometric'];
+                        } elseif ($newHasFace) {
+                            $merged['has_face_descriptor'] = true;
+                            $merged['face_descriptor'] = $item['face_descriptor'];
+                        }
+
+                        $oldHasHand = !empty($old['has_hand_descriptor']) && !empty($old['hand_descriptor']);
+                        $newHasHand = !empty($item['has_hand_descriptor']) && !empty($item['hand_descriptor']);
+                        if ($oldHasHand && !$newHasHand && empty($item['biometricResetAt'])) {
+                            $merged['has_hand_descriptor'] = true;
+                            $merged['hand_descriptor'] = $old['hand_descriptor'];
+                        } elseif ($newHasHand) {
+                            $merged['has_hand_descriptor'] = true;
+                            $merged['hand_descriptor'] = $item['hand_descriptor'];
+                        }
+                    }
+
                     $map[$key] = $merged;
                 }
             }

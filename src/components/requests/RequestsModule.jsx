@@ -7,6 +7,7 @@ import { normalizeSchedule } from '../roster/RosterModule';
 import { syncNow, fetchRemoteState } from '../../utils/offlineSync';
 import { createRequestDecisionNotification } from '../../utils/notificationEngine';
 import { useUI } from '../../context/UIContext';
+import { saveFaceDescriptor, saveHandDescriptor, deleteFaceDescriptor, deleteHandDescriptor } from '../../utils/faceStorage';
 
 export function getFormattedRequestBadge(type, leaveType, targetAction) {
   let resolvedType = type;
@@ -573,6 +574,7 @@ export default function RequestsModule({
       let updatedRosters = [...(state.rosters || [])];
       let updatedAdjustments = [...(state.adjustments || [])];
       let updatedShifts = [...(state.shifts || [])];
+      let updatedEmployees = [...(state.employees || [])];
 
       // 0. Overtime Request Approval
       if (approvedTargetReq.type === 'overtime') {
@@ -1014,14 +1016,81 @@ export default function RequestsModule({
         });
       }
 
+      // ── Biometric Self-Registration Approval Integration ──
+      if (approvedTargetReq.type === 'biometric_registration' || approvedTargetReq.requestType === 'biometric_registration') {
+        const empId = approvedTargetReq.employeeId;
+        const targetCode = approvedTargetReq.employeeCode;
+        const descriptors = approvedTargetReq.descriptors || approvedTargetReq.descriptor || approvedTargetReq.face_descriptor;
+        const bioType = approvedTargetReq.biometricType || 'face';
+
+        updatedEmployees = updatedEmployees.map((e) => {
+          const isMatch = String(e.id) === String(empId) ||
+            (targetCode && String(e.code) === String(targetCode)) ||
+            (e.code && String(e.code) === String(empId));
+
+          if (isMatch) {
+            return {
+              ...e,
+              has_face_descriptor: bioType !== 'hand',
+              face_descriptor: bioType !== 'hand' ? descriptors : e.face_descriptor,
+              has_hand_descriptor: bioType === 'hand',
+              hand_descriptor: bioType === 'hand' ? descriptors : e.hand_descriptor,
+              preferred_biometric: bioType,
+              biometricApprovedAt: new Date().toISOString(),
+              biometricApprovedBy: 'الإدارة العليا'
+            };
+          }
+          return e;
+        });
+
+        // Persistent database / IndexedDB storage
+        if (bioType === 'hand') {
+          saveHandDescriptor(empId, descriptors).catch(err => console.warn('[Biometric] Failed saving hand descriptor to DB:', err));
+        } else {
+          saveFaceDescriptor(empId, descriptors).catch(err => console.warn('[Biometric] Failed saving face descriptor to DB:', err));
+        }
+      }
+
+      // ── Biometric Reset Approval Integration ──
+      if (approvedTargetReq.type === 'biometric_reset' || approvedTargetReq.requestType === 'biometric_reset') {
+        const empId = approvedTargetReq.employeeId;
+        const targetCode = approvedTargetReq.employeeCode;
+
+        updatedEmployees = updatedEmployees.map((e) => {
+          const isMatch = String(e.id) === String(empId) ||
+            (targetCode && String(e.code) === String(targetCode)) ||
+            (e.code && String(e.code) === String(empId));
+
+          if (isMatch) {
+            return {
+              ...e,
+              has_face_descriptor: false,
+              face_descriptor: null,
+              has_hand_descriptor: false,
+              hand_descriptor: null,
+              biometricResetAt: new Date().toISOString()
+            };
+          }
+          return e;
+        });
+
+        // Delete from persistent database / IndexedDB
+        deleteFaceDescriptor(empId).catch(() => {});
+        deleteHandDescriptor(empId).catch(() => {});
+      }
+
       const decisionNotif = createRequestDecisionNotification({
         requestId: approvedTargetReq.id,
         employeeId: approvedTargetReq.employeeId,
         type: approvedTargetReq.type,
         action: 'approved',
         approverRole: 'admin',
-        title: approvedTargetReq.type === 'penalty_objection' ? '✅ تم قبول تظلمك وإلغاء الجزاء' : undefined,
-        message: approvedTargetReq.type === 'penalty_objection' ? 'تم قبول تظلمك من قِبل الإدارة العليا وإلغاء الجزاء والخصم المالي' : undefined,
+        title: approvedTargetReq.type === 'penalty_objection' ? '✅ تم قبول تظلمك وإلغاء الجزاء' :
+               (approvedTargetReq.type === 'biometric_registration' ? '🎉 تم اعتماد وتفعيل بصمتك الذكية' :
+               (approvedTargetReq.type === 'biometric_reset' ? '🔄 تمت الموافقة على إعادة تسجيل بصمتك' : undefined)),
+        message: approvedTargetReq.type === 'penalty_objection' ? 'تم قبول تظلمك من قِبل الإدارة العليا وإلغاء الجزاء والخصم المالي' :
+                 (approvedTargetReq.type === 'biometric_registration' ? 'تمت مراجعة بصمتك واعتمادها بنجاح، يمكنك الآن تسجيل الحضور والانصراف بها عبر الكشك الذكي' :
+                 (approvedTargetReq.type === 'biometric_reset' ? 'تمت الموافقة على طلبك ومسح البصمة القديمة، يرجى تسجيل بصمتك الجديدة الآن' : undefined)),
         details: approvedTargetReq.details || approvedTargetReq.reason || (approvedTargetReq.amount ? `${approvedTargetReq.amount} ج.م` : '')
       });
 
@@ -1033,6 +1102,7 @@ export default function RequestsModule({
       const updatedState = {
         ...state,
         requests: updatedRequests,
+        employees: updatedEmployees,
         loans: updatedLoans,
         rosters: updatedRosters,
         adjustments: updatedAdjustments,
@@ -1356,8 +1426,12 @@ export default function RequestsModule({
       type: rejectedTargetReq?.type,
       action: 'rejected',
       approverRole: 'admin',
-      title: rejectedTargetReq?.type === 'penalty_objection' ? '❌ تم رفض التظلم وتثبيت الجزاء' : undefined,
-      message: rejectedTargetReq?.type === 'penalty_objection' ? 'تمت دراسة التظلم ورؤي عدم كفاية المبررات وتثبيت القرار التأديبي' : undefined,
+      title: rejectedTargetReq?.type === 'penalty_objection' ? '❌ تم رفض التظلم وتثبيت الجزاء' :
+             (rejectedTargetReq?.type === 'biometric_registration' ? '❌ تم رفض طلب اعتماد البصمة' :
+             (rejectedTargetReq?.type === 'biometric_reset' ? '❌ تم رفض طلب إعادة تسجيل البصمة' : undefined)),
+      message: rejectedTargetReq?.type === 'penalty_objection' ? 'تمت دراسة التظلم ورؤي عدم كفاية المبررات وتثبيت القرار التأديبي' :
+               (rejectedTargetReq?.type === 'biometric_registration' ? 'تم رفض اعتماد البصمة الملتقطة، يرجى إعادة تسجيل بصمة أوضح وفق الإرشادات' :
+               (rejectedTargetReq?.type === 'biometric_reset' ? 'تم رفض طلب مسح البصمة من قِبل الإدارة العليا' : undefined)),
       details: rejectedTargetReq?.reason || rejectedTargetReq?.details || ''
     });
 

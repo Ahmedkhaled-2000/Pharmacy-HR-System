@@ -9,7 +9,9 @@ export function getItemKey(item, fallbackPrefix = 'item') {
   if (!item || typeof item !== 'object') return null;
   if (item.id !== undefined && item.id !== null && item.id !== '') return String(item.id);
   if (item._id !== undefined && item._id !== null && item._id !== '') return String(item._id);
-  if (item.requestId !== undefined && item.requestId !== null && item.requestId !== '') return String(item.requestId);
+  if (item.requestId !== undefined && item.requestId !== null && item.requestId !== '') {
+    return fallbackPrefix === 'req' ? String(item.requestId) : `${fallbackPrefix}_req_${item.requestId}`;
+  }
   if (item.deviceId) return String(item.deviceId);
   if (fallbackPrefix === 'branch' && item.branchCode) return `branch_${item.branchCode}`;
   if (fallbackPrefix === 'emp' && item.code) return `emp_${item.code}`;
@@ -107,7 +109,7 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
   if (!localItem) return remoteItem;
   if (!remoteItem) return localItem;
 
-  // 0. معالجة وحسم الموظفين والصلاحيات الصارمة
+  // 0. معالجة وحسم الموظفين والصلاحيات الصارمة وحماية البصمات الحيوية
   if (options.prefix === 'emp') {
     const localTime = getItemTime(localItem);
     const remoteTime = getItemTime(remoteItem);
@@ -124,6 +126,43 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
         mergedEmp.permissions = remoteItem.permissions;
       }
     }
+
+    // ── حماية وصيانة البصمة الإلكترونية من المسح العرضي أثناء الدمج ──
+    const localHasFace = Boolean(localItem.has_face_descriptor && localItem.face_descriptor);
+    const remoteHasFace = Boolean(remoteItem.has_face_descriptor && remoteItem.face_descriptor);
+    const localFaceReset = localItem.biometricResetAt ? new Date(localItem.biometricResetAt).getTime() : 0;
+    const remoteFaceReset = remoteItem.biometricResetAt ? new Date(remoteItem.biometricResetAt).getTime() : 0;
+    const localFaceApproved = localItem.biometricApprovedAt ? new Date(localItem.biometricApprovedAt).getTime() : 0;
+    const remoteFaceApproved = remoteItem.biometricApprovedAt ? new Date(remoteItem.biometricApprovedAt).getTime() : 0;
+
+    if (localHasFace && !remoteHasFace) {
+      if (remoteFaceReset <= localFaceApproved) {
+        mergedEmp.has_face_descriptor = true;
+        mergedEmp.face_descriptor = localItem.face_descriptor;
+        if (localItem.preferred_biometric) mergedEmp.preferred_biometric = localItem.preferred_biometric;
+      }
+    } else if (remoteHasFace && !localHasFace) {
+      if (localFaceReset <= remoteFaceApproved) {
+        mergedEmp.has_face_descriptor = true;
+        mergedEmp.face_descriptor = remoteItem.face_descriptor;
+        if (remoteItem.preferred_biometric) mergedEmp.preferred_biometric = remoteItem.preferred_biometric;
+      }
+    }
+
+    const localHasHand = Boolean(localItem.has_hand_descriptor && localItem.hand_descriptor);
+    const remoteHasHand = Boolean(remoteItem.has_hand_descriptor && remoteItem.hand_descriptor);
+    if (localHasHand && !remoteHasHand) {
+      if (remoteFaceReset <= localFaceApproved) {
+        mergedEmp.has_hand_descriptor = true;
+        mergedEmp.hand_descriptor = localItem.hand_descriptor;
+      }
+    } else if (remoteHasHand && !localHasHand) {
+      if (localFaceReset <= remoteFaceApproved) {
+        mergedEmp.has_hand_descriptor = true;
+        mergedEmp.hand_descriptor = remoteItem.hand_descriptor;
+      }
+    }
+
     return mergedEmp;
   }
 
@@ -416,6 +455,7 @@ export function smartMergeStates(localState, remoteState) {
     requests: mergeArrays(localState.requests, remoteState.requests, { prefix: 'req', deletedIds }),
     resignationRequests: mergeArrays(localState.resignationRequests, remoteState.resignationRequests, { prefix: 'res', deletedIds }),
     leaveRequests: mergeArrays(localState.leaveRequests, remoteState.leaveRequests, { prefix: 'leave', deletedIds }),
+    permissionRequests: mergeArrays(localState.permissionRequests, remoteState.permissionRequests, { prefix: 'perm', deletedIds }),
     leaveHistory: mergeArrays(localState.leaveHistory, remoteState.leaveHistory, { prefix: 'lhist', deletedIds }),
     shiftSwaps: mergeArrays(localState.shiftSwaps, remoteState.shiftSwaps, { prefix: 'swap', deletedIds }),
     loans: mergeArrays(localState.loans, remoteState.loans, { prefix: 'loan', deletedIds }),

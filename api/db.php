@@ -35,23 +35,25 @@ class MicroCache
         }
 
         $now = time();
+        $filePath = self::getCacheDir() . '/' . md5($key) . '.cache';
 
-        // 1. فحص ذاكرة الرام الفورية في نفس الطلب (In-Memory Request Cache)
+        // 1. فحص ذاكرة الرام الفورية مع التحقق من صلاحية الملف لتجنب اختلاف العمال (Multi-Worker Stale Read)
         if (isset(self::$memoryCache[$key])) {
             $item = self::$memoryCache[$key];
-            if ($item['exp'] > $now) {
+            $fileMtime = @filemtime($filePath);
+            if ($item['exp'] > $now && $fileMtime !== false && $fileMtime <= ($item['mtime'] ?? 0)) {
                 return $item['data'];
             }
             unset(self::$memoryCache[$key]);
         }
 
         // 2. فحص كاش ملفات السيرفر السريعة (File-based Micro Cache)
-        $filePath = self::getCacheDir() . '/' . md5($key) . '.cache';
         if (file_exists($filePath)) {
             $raw = @file_get_contents($filePath);
             if ($raw) {
                 $cached = @unserialize($raw);
                 if (is_array($cached) && isset($cached['exp'], $cached['data']) && $cached['exp'] > $now) {
+                    $cached['mtime'] = @filemtime($filePath) ?: $now;
                     self::$memoryCache[$key] = $cached;
                     return $cached['data'];
                 }
@@ -69,13 +71,14 @@ class MicroCache
         }
 
         $ttl = $ttl ?? (defined('MICRO_CACHE_TTL') ? MICRO_CACHE_TTL : 8);
-        $exp = time() + $ttl;
-        $cached = ['exp' => $exp, 'data' => $data];
-
-        self::$memoryCache[$key] = $cached;
+        $now = time();
+        $exp = $now + $ttl;
+        $cached = ['exp' => $exp, 'mtime' => $now, 'data' => $data];
 
         $filePath = self::getCacheDir() . '/' . md5($key) . '.cache';
         @file_put_contents($filePath, serialize($cached), LOCK_EX);
+        $cached['mtime'] = @filemtime($filePath) ?: $now;
+        self::$memoryCache[$key] = $cached;
     }
 
     public static function invalidate(?string $key = null): void

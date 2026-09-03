@@ -314,6 +314,9 @@ try {
                     'value' => is_array($finalValueData) ? $finalValueData : null
                 ];
 
+                // إبطال أي كاش سابق فورياً وتحديثه بالبيانات المدمجة الجديدة
+                MicroCache::invalidate('settings_' . $targetKey);
+                MicroCache::invalidate('version_' . $targetKey);
                 MicroCache::set('settings_' . $targetKey, $savedResponse, MICRO_CACHE_TTL);
                 MicroCache::set('version_' . $targetKey, [
                     'success' => true,

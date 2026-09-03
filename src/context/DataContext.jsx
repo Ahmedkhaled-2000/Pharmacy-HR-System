@@ -390,7 +390,7 @@ export function DataProvider({ children, showToast = () => {} }) {
       }
 
       const synced = syncAllEmployeesPermissionsAndLateness(normalized);
-      setState(synced);
+      setState((prev) => smartMergeStates(prev, synced));
       setLastSyncTime(nowTimeStr());
       syncSessionWithFreshData(synced);
     }).catch((err) => {
@@ -447,9 +447,6 @@ export function DataProvider({ children, showToast = () => {} }) {
       onSyncSuccess: (finalMerged) => {
         setLastSyncTime(nowTimeStr());
         setPendingSyncCount(0);
-        if (finalMerged) {
-          setState((prev) => smartMergeStates(prev, normalizeState(finalMerged)));
-        }
       },
       onSyncFail: (msg) => {
         console.error('Database write error:', msg);
