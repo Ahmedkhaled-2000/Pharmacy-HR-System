@@ -333,16 +333,24 @@ async function instantiateArrayBuffer(binaryFile, imports) {
 async function instantiateAsync(binary, binaryFile, imports) {
   if (!binary && !isFileURI(binaryFile) && !ENVIRONMENT_IS_NODE) {
     try {
-      var response = fetch(binaryFile, {
-        credentials: "same-origin"
-      });
-      var instantiationResult = await WebAssembly.instantiateStreaming(response, imports);
-      return instantiationResult;
+      var rawRes = await fetch(binaryFile, { credentials: "same-origin" });
+      var contentType = (rawRes.headers && rawRes.headers.get("content-type")) || "";
+      if (!contentType.includes("application/wasm")) {
+        var buf = await rawRes.arrayBuffer();
+        var fixedRes = new Response(buf, {
+          status: 200,
+          headers: { "Content-Type": "application/wasm" }
+        });
+        try {
+          return await WebAssembly.instantiateStreaming(fixedRes, imports);
+        } catch {
+          var inst = await WebAssembly.instantiate(buf, imports);
+          return inst.instance ? inst : { instance: inst, module: null };
+        }
+      }
+      return await WebAssembly.instantiateStreaming(rawRes, imports);
     } catch (reason) {
-      // We expect the most common failure cause to be a bad MIME type for the binary,
-      // in which case falling back to ArrayBuffer instantiation should work.
-      err(`wasm streaming compile failed: ${reason}`);
-      err("falling back to ArrayBuffer instantiation");
+      // Fallback seamlessly
     }
   }
   return instantiateArrayBuffer(binaryFile, imports);
