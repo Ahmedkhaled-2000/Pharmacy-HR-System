@@ -91,16 +91,25 @@ export default function FaceTestModal({ employee, onClose, biometricType = 'face
   const startModelInit = useCallback(async () => {
     setModelError(null);
     try {
-      if (isHand) {
-        if (!isHandEngineReady()) await initHandRecognition();
-      } else {
-        if (!isFaceEngineReady()) await initFaceRecognition();
-      }
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('استغرق تحميل محرك الذكاء الاصطناعي وقتاً أطول من المتوقع.')), 15000)
+      );
+
+      const initTask = async () => {
+        if (isHand) {
+          if (!isHandEngineReady()) await initHandRecognition();
+        } else {
+          if (!isFaceEngineReady()) await initFaceRecognition();
+        }
+        return true;
+      };
+
+      await Promise.race([initTask(), timeoutPromise]);
       setModelReady(true);
       return true;
     } catch (err) {
       console.error('Model error:', err);
-      setModelError('تعذر تحميل محرك الذكاء الاصطناعي.');
+      setModelError(err.message || 'تعذر تحميل محرك الذكاء الاصطناعي.');
       setModelReady(false);
       return false;
     }
@@ -118,7 +127,7 @@ export default function FaceTestModal({ employee, onClose, biometricType = 'face
         if (cOk && mOk) {
           setStatus(isHand ? 'انظر للكاميرا وارفع يدك لاختبار البصمة' : 'انظر للكاميرا واضغط "بدء الاختبار الذكي"');
         } else if (cOk && !mOk) {
-          setStatus('الكاميرا جاهزة ✅ | جاري استكمال تهيئة المحرك الذكي...');
+          setStatus('تعذر تجهيز المحرك الذكي. يرجى الضغط على زر "إعادة محاولة التشغيل" بالأسفل.');
         }
       }
     };

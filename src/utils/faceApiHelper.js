@@ -36,14 +36,13 @@ export const initFaceRecognition = async () => {
     try {
       console.log('⚡ [FaceEngine] جاري تهيئة محرك التعرف على الوجه فائق السرعة...');
 
-      // 1. إعداد مسارات تشغيل ONNX WebAssembly
+      // 1. إعداد مسارات تشغيل ONNX WebAssembly (وضع Single-Threaded فائق السرعة والموثوقية 100%)
       try {
-        ort.env.wasm.wasmPaths = '/onnx-wasm/';
-        ort.env.wasm.numThreads = Math.min(4, navigator.hardwareConcurrency || 2);
+        ort.env.wasm.numThreads = 1;
         ort.env.wasm.simd = true;
+        ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.29.0/dist/';
       } catch (e) {
-        console.warn('WASM path setup fallback to CDN', e);
-        ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
+        console.warn('[FaceEngine] WASM path setup note:', e);
       }
 
       // 2. تحميل نموذج MediaPipe FaceLandmarker (كشف الوجه، 478 نقطة ثلاثية الأبعاد)
@@ -91,11 +90,10 @@ export const initFaceRecognition = async () => {
       const modelUrl = '/models/w600k_mbf.onnx';
       try {
         onnxSession = await ort.InferenceSession.create(modelUrl, {
-          executionProviders: ['wasm'],
-          graphOptimizationLevel: 'all'
+          executionProviders: ['wasm']
         });
       } catch (sessionErr) {
-        console.warn('WASM session with optimization failed, retrying basic session:', sessionErr);
+        console.warn('[FaceEngine] First session attempt failed, retrying default session:', sessionErr);
         onnxSession = await ort.InferenceSession.create(modelUrl);
       }
 
@@ -105,10 +103,13 @@ export const initFaceRecognition = async () => {
       alignCanvas.height = 112;
 
       isFaceModelLoaded = true;
-      console.log('✅ تم تحميل محرك التعرف على الوجه بنجاح (ONNX ArcFace 512D + MediaPipe Local).');
+      console.log('✅ تم تحميل محرك التعرف على الوجه بنجاح (ONNX ArcFace 512D + MediaPipe).');
     } catch (error) {
       console.error('❌ خطأ في تحميل نماذج الذكاء الاصطناعي للوجه:', error);
       initPromise = null;
+      isFaceModelLoaded = false;
+      faceLandmarker = null;
+      onnxSession = null;
       throw error;
     }
   })();

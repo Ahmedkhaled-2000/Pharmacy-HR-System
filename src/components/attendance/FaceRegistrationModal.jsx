@@ -102,20 +102,25 @@ export default function FaceRegistrationModal({ employee, onClose, onSuccess, bi
   const startModelInit = useCallback(async () => {
     setModelError(null);
     try {
-      if (isHand) {
-        if (!isHandEngineReady()) {
-          await initHandRecognition();
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('استغرق تحميل محرك الذكاء الاصطناعي وقتاً أطول من المتوقع.')), 15000)
+      );
+
+      const initTask = async () => {
+        if (isHand) {
+          if (!isHandEngineReady()) await initHandRecognition();
+        } else {
+          if (!isFaceEngineReady()) await initFaceRecognition();
         }
-      } else {
-        if (!isFaceEngineReady()) {
-          await initFaceRecognition();
-        }
-      }
+        return true;
+      };
+
+      await Promise.race([initTask(), timeoutPromise]);
       setModelReady(true);
       return true;
     } catch (err) {
       console.error('Model initialization error:', err);
-      setModelError('تعذر تحميل محرك الذكاء الاصطناعي. يرجى التأكد من الاتصال.');
+      setModelError(err.message || 'تعذر تحميل محرك الذكاء الاصطناعي.');
       setModelReady(false);
       return false;
     }
@@ -136,7 +141,7 @@ export default function FaceRegistrationModal({ employee, onClose, onSuccess, bi
         if (camOk && modelOk) {
           setStatus(isHand ? 'يرجى وضع يدك أمام الكاميرا بشكل واضح' : 'الخطوة 1 من 3: انظر مباشرة للكاميرا في إضاءة جيدة');
         } else if (camOk && !modelOk) {
-          setStatus('الكاميرا جاهزة ✅ | جاري استكمال تهيئة المحرك الذكي...');
+          setStatus('تعذر تجهيز المحرك الذكي. يرجى الضغط على زر "إعادة محاولة التشغيل" بالأسفل.');
         }
       }
     };
