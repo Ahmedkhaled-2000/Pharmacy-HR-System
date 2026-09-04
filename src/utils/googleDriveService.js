@@ -790,6 +790,34 @@ export async function createOrGetExpensesMonthFolder(monthStr, driveConfig) {
 }
 
 /**
+ * Generate formatted attachment filename: [اسم_الفاتورة]_[الفرع]_[التاريخ].[الامتداد]
+ */
+export function generateExpenseAttachmentFileName({
+  category = '',
+  branchName = '',
+  dateStr = '',
+  originalFileName = '',
+  mimeType = ''
+}) {
+  const cleanCat = (category || 'فاتورة').trim().replace(/[\\/:*?"<>|\s]+/g, '_');
+  const cleanBranch = (branchName || 'الفرع').trim().replace(/[\\/:*?"<>|\s]+/g, '_');
+  const cleanDate = (dateStr || new Date().toISOString().slice(0, 10)).trim();
+
+  let ext = 'jpg';
+  if (originalFileName && originalFileName.includes('.')) {
+    ext = originalFileName.split('.').pop().toLowerCase();
+  } else if (mimeType === 'application/pdf') {
+    ext = 'pdf';
+  } else if (mimeType === 'image/png') {
+    ext = 'png';
+  } else if (mimeType === 'image/webp') {
+    ext = 'webp';
+  }
+
+  return `${cleanCat}_${cleanBranch}_${cleanDate}.${ext}`;
+}
+
+/**
  * Upload Expense / Revenue Attachment to Google Drive
  */
 export async function uploadExpenseAttachmentToDrive({
@@ -812,12 +840,16 @@ export async function uploadExpenseAttachmentToDrive({
   const folderInfo = await createOrGetExpensesMonthFolder(monthStr, driveConfig);
 
   const cleanExt = (fileName && fileName.includes('.'))
-    ? fileName.split('.').pop()
+    ? fileName.split('.').pop().toLowerCase()
     : (mimeType === 'application/pdf' ? 'pdf' : 'jpg');
-  const sanitizedCat = (category || 'حركة_مالية').replace(/[\\/:*?"<>|\s]+/g, '_');
-  const sanitizedBranch = (branchName || 'عام').replace(/[\\/:*?"<>|\s]+/g, '_');
-  const typeLabel = type === 'expense' ? 'مصروف' : 'إيراد';
-  const customFileName = `${typeLabel}_${sanitizedCat}_${sanitizedBranch}_${dateStr || monthStr}_${Date.now()}.${cleanExt}`;
+  const sanitizedCat = (category || 'فاتورة').trim().replace(/[\\/:*?"<>|\s]+/g, '_');
+  const sanitizedBranch = (branchName || 'الفرع').trim().replace(/[\\/:*?"<>|\s]+/g, '_');
+  const cleanDate = (dateStr || monthStr || new Date().toISOString().slice(0, 10)).trim();
+
+  // اسم الملف بصيغة: [اسم_الفاتورة]_[الفرع]_[التاريخ].[الامتداد]
+  const customFileName = (fileName && fileName.includes('.'))
+    ? fileName
+    : `${sanitizedCat}_${sanitizedBranch}_${cleanDate}.${cleanExt}`;
 
   onProgress('جاري رفع الفاتورة/المستند إلى مجلد الشهر في Google Drive...');
   const uploadRes = await uploadFileToDrive({
