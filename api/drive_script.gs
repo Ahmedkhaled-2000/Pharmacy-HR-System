@@ -27,6 +27,8 @@ function doPost(e) {
       return handleTestConnection(data);
     } else if (action === 'create_or_get_employee_folder') {
       return handleCreateOrGetEmployeeFolder(data);
+    } else if (action === 'create_or_get_expenses_folder') {
+      return handleCreateOrGetExpensesFolder(data);
     } else if (action === 'upload_file') {
       return handleUploadFile(data);
     } else {
@@ -138,7 +140,59 @@ function handleCreateOrGetEmployeeFolder(data) {
 }
 
 /**
- * 3. رفع ملف إلى مجلد محدد
+ * 3. إنشاء أو جلب مجلد "مصروفات" والمجلد الفرعي المخصص للشهر (مثل: 2026-09)
+ */
+function handleCreateOrGetExpensesFolder(data) {
+  var parentFolderId = data.parentFolderId;
+  var monthStr = data.month || new Date().toISOString().slice(0, 7); // مثل 2026-09
+
+  var rootFolder;
+  if (parentFolderId && parentFolderId.trim() !== '') {
+    rootFolder = DriveApp.getFolderById(parentFolderId.trim());
+  } else {
+    var rootFolders = DriveApp.getFoldersByName('HR_Employees_Archive');
+    if (rootFolders.hasNext()) {
+      rootFolder = rootFolders.next();
+    } else {
+      rootFolder = DriveApp.createFolder('HR_Employees_Archive');
+      rootFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    }
+  }
+
+  // 1. مجلد "مصروفات" الرئيسي
+  var expensesRootName = 'مصروفات';
+  var expFolders = rootFolder.getFoldersByName(expensesRootName);
+  var expensesFolder = null;
+  if (expFolders.hasNext()) {
+    expensesFolder = expFolders.next();
+  } else {
+    expensesFolder = rootFolder.createFolder(expensesRootName);
+    expensesFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  }
+
+  // 2. المجلد المخصص للشهر داخل مجلد "مصروفات"
+  var monthFolderName = monthStr;
+  var mFolders = expensesFolder.getFoldersByName(monthFolderName);
+  var monthFolder = null;
+  if (mFolders.hasNext()) {
+    monthFolder = mFolders.next();
+  } else {
+    monthFolder = expensesFolder.createFolder(monthFolderName);
+    monthFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  }
+
+  return createJsonResponse({
+    success: true,
+    expensesFolderId: expensesFolder.getId(),
+    expensesFolderUrl: expensesFolder.getUrl(),
+    folderId: monthFolder.getId(),
+    folderName: monthFolder.getName(),
+    folderUrl: monthFolder.getUrl()
+  });
+}
+
+/**
+ * 4. رفع ملف إلى مجلد محدد
  */
 function handleUploadFile(data) {
   try {

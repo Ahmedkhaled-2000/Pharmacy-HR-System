@@ -11,6 +11,8 @@
  * 6. الاحتفاظ بالسجل التاريخي ثابتاً وموثقاً في سجل التدقيق (Audit Log) ودعم الإلغاء المسبب.
  */
 
+import { getActivePayrollMonth } from './periodEngine';
+
 // ── الفئات القياسية المعتمدة للمخالفات التأديبية ──
 export const DEFAULT_DISCIPLINARY_CATEGORIES = [
   {
@@ -355,7 +357,9 @@ export function calculateViolationCounter({
   ruleId = null,
   allRequests = [],
   disciplinaryPolicy = DEFAULT_DISCIPLINARY_CATEGORIES,
-  resetPeriodMonths = 12
+  resetPeriodMonths = 12,
+  orgSettings = null,
+  targetDate = null
 }) {
   if (!employeeId || !categoryId) {
     return {
@@ -388,18 +392,39 @@ export function calculateViolationCounter({
   // الترتيب زمنيًا من الأقدم للأحدث
   empCategoryHistory.sort((a, b) => (a.createdAt || a.date || '').localeCompare(a.createdAt || b.date || ''));
 
-  const effectiveResetMonths = category.resetMonths !== undefined ? category.resetMonths : resetPeriodMonths;
+  // تحديد نمط التصفير: دورة شهرية (cycle) أو بدون تصفير (none) أو بعدد شهور محدد (months)
+  const isCycleReset = category.resetType === 'cycle' || category.resetMonths === 'cycle' || category.resetMonths === -1;
+  const isNoReset = category.resetType === 'none' || category.resetMonths === 0 || category.resetMonths === '0';
+  const customMonths = parseInt(category.resetMonths !== undefined ? category.resetMonths : resetPeriodMonths, 10) || 12;
+
   let activeHistory = [];
   let isResetApplied = false;
 
-  if (effectiveResetMonths > 0 && empCategoryHistory.length > 0) {
-    const now = new Date();
+  if (isCycleReset && empCategoryHistory.length > 0) {
+    // تصفير حسب الدورة الشهرية (دورة الرواتب المحددة)
+    const lastViolation = empCategoryHistory[empCategoryHistory.length - 1];
+    const lastDateStr = (lastViolation.date || lastViolation.createdAt || '').slice(0, 10);
+    const currentDateStr = (targetDate || new Date().toISOString()).slice(0, 10);
+
+    const lastCycleMonth = getActivePayrollMonth(orgSettings || {}, new Date(lastDateStr + 'T00:00:00'));
+    const currentCycleMonth = getActivePayrollMonth(orgSettings || {}, new Date(currentDateStr + 'T00:00:00'));
+
+    if (lastCycleMonth && currentCycleMonth && lastCycleMonth !== currentCycleMonth) {
+      // المخالفة السابقة تقع في دورة شهرية سابقة -> يتم تصفير العداد والبدء من 1
+      isResetApplied = true;
+      activeHistory = [];
+    } else {
+      activeHistory = empCategoryHistory;
+    }
+  } else if (!isNoReset && customMonths > 0 && empCategoryHistory.length > 0) {
+    // تصفير بعد مرور عدد الشهور المحددة من تاريخ آخر مخالفة
+    const now = new Date(targetDate || new Date());
     const lastViolation = empCategoryHistory[empCategoryHistory.length - 1];
     const lastDate = new Date(lastViolation.createdAt || lastViolation.date || now);
 
     const diffMonths = (now.getFullYear() - lastDate.getFullYear()) * 12 + (now.getMonth() - lastDate.getMonth());
 
-    if (diffMonths >= effectiveResetMonths) {
+    if (diffMonths >= customMonths) {
       // مرّت فترة التصفير دون تكرار -> تصفير العداد والبدء من 1
       isResetApplied = true;
       activeHistory = [];
@@ -407,6 +432,7 @@ export function calculateViolationCounter({
       activeHistory = empCategoryHistory;
     }
   } else {
+    // بدون تصفير (تراكمي دائم)
     activeHistory = empCategoryHistory;
   }
 

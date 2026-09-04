@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useUI } from '../../context/UIContext';
+import { uploadExpenseAttachmentToDrive } from '../../utils/googleDriveService';
 
 export default function IncomeExpensesModule({
   state,
@@ -34,6 +35,14 @@ export default function IncomeExpensesModule({
   const [notes, setNotes] = useState('');
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
 
+  // Attachment State
+  const [attachmentName, setAttachmentName] = useState('');
+  const [attachmentData, setAttachmentData] = useState('');
+  const [attachmentType, setAttachmentType] = useState('');
+  const [attachmentSize, setAttachmentSize] = useState('');
+  const [isUploading, setIsUploading] = useState(false);
+  const [previewAttachmentModal, setPreviewAttachmentModal] = useState(null);
+
   const branches = state.branches || [];
   const transactions = state.finances || state.transactions || [];
 
@@ -57,6 +66,45 @@ export default function IncomeExpensesModule({
 
   const netBalance = totalIncome - totalExpenses;
 
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 25 * 1024 * 1024) {
+      showToast?.('⚠️ حجم الملف كبير جداً. الحد الأقصى 25 ميجابايت.');
+      return;
+    }
+
+    let detectedType = 'file';
+    if (file.type.startsWith('image/')) detectedType = 'image';
+    else if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) detectedType = 'pdf';
+
+    setIsUploading(true);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setAttachmentData(ev.target.result);
+      setAttachmentName(file.name);
+      setAttachmentType(detectedType);
+      const sizeStr = file.size > 1024 * 1024
+        ? `${(file.size / (1024 * 1024)).toFixed(1)} ميجابايت`
+        : `${Math.round(file.size / 1024)} كيلوبايت`;
+      setAttachmentSize(sizeStr);
+      setIsUploading(false);
+    };
+    reader.onerror = () => {
+      showToast?.('❌ تعذر قراءة الملف المرفق.');
+      setIsUploading(false);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemoveAttachment = () => {
+    setAttachmentName('');
+    setAttachmentData('');
+    setAttachmentType('');
+    setAttachmentSize('');
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     const parsedAmount = parseFloat(amount);
@@ -69,6 +117,32 @@ export default function IncomeExpensesModule({
     const branchObj = branches.find((b) => b.id === targetBranchId) || currentBranch;
     const branchName = branchObj?.name || 'المركز الرئيسي / عام';
 
+    // ── رفع الملف إلى Google Drive في مجلد "مصروفات" ثم مجلد الشهر (مثل: 2026-09) ──
+    let driveUploadInfo = null;
+    const driveConfig = state?.orgSettings?.driveConfig;
+    const isDriveActive = driveConfig && driveConfig.enabled && driveConfig.serviceUrl;
+
+    if (attachmentData && isDriveActive) {
+      try {
+        const monthStr = date.slice(0, 7);
+        showToast?.('☁️ جاري رفع المرفق إلى Google Drive بمجلد مصروفات / ' + monthStr + '...');
+        driveUploadInfo = await uploadExpenseAttachmentToDrive({
+          fileContent: attachmentData,
+          fileName: attachmentName,
+          mimeType: attachmentType === 'pdf' ? 'application/pdf' : 'image/jpeg',
+          monthStr,
+          type,
+          category: category.trim(),
+          branchName,
+          dateStr: date,
+          driveConfig
+        });
+      } catch (err) {
+        console.warn('Failed to upload to Google Drive, retaining local attachment:', err);
+        showToast?.('⚠️ تعذر رفع الملف إلى جوجل درايف، تم حفظه محلياً في المنظومة');
+      }
+    }
+
     const newTransaction = {
       id: `tx_${Date.now()}`,
       type,
@@ -78,6 +152,14 @@ export default function IncomeExpensesModule({
       branchName: branchName,
       createdBy: isBranchRole ? `مدير فرع ${branchName}` : 'admin',
       notes: notes.trim(),
+      attachmentName: attachmentName || null,
+      attachmentData: attachmentData || null,
+      attachmentType: attachmentType || null,
+      attachmentSize: attachmentSize || null,
+      driveFileId: driveUploadInfo?.fileId || null,
+      driveFileUrl: driveUploadInfo?.fileUrl || null,
+      driveWebViewLink: driveUploadInfo?.webViewLink || null,
+      driveMonthFolderUrl: driveUploadInfo?.monthFolderUrl || null,
       date,
       createdAt: new Date().toISOString()
     };
@@ -108,6 +190,7 @@ export default function IncomeExpensesModule({
     setCategory('');
     setAmount('');
     setNotes('');
+    handleRemoveAttachment();
   };
 
   const handleDelete = async (id) => {
@@ -252,8 +335,122 @@ export default function IncomeExpensesModule({
             <input type="text" placeholder="اكتب أي ملاحظات إضافية..." value={notes} onChange={(e) => setNotes(e.target.value)} />
           </div>
 
+          {/* File Attachment / Invoice / Receipt */}
+          <div className="field" style={{ gridColumn: '1 / -1' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <span>📎 إرفاق ملف / فاتورة / إيصال (اختياري)</span>
+              {state?.orgSettings?.driveConfig?.enabled ? (
+                <span style={{ fontSize: '11px', color: '#0284c7', background: '#e0f2fe', padding: '2px 8px', borderRadius: '4px', fontWeight: 'bold' }}>
+                  ☁️ رفع مباشر إلى Google Drive (مجلد مصروفات / {date ? date.slice(0, 7) : 'الشهر'})
+                </span>
+              ) : (
+                <span style={{ fontSize: '11px', color: '#64748b', background: '#f1f5f9', padding: '2px 8px', borderRadius: '4px' }}>
+                  💾 حفظ محلي في المنظومة
+                </span>
+              )}
+            </label>
+
+            {!attachmentData ? (
+              <div
+                style={{
+                  border: '2px dashed var(--border)',
+                  borderRadius: '10px',
+                  padding: '16px',
+                  textAlign: 'center',
+                  background: 'var(--surface-muted)',
+                  cursor: isUploading ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.2s ease'
+                }}
+                onClick={() => !isUploading && document.getElementById('expense-attachment-input')?.click()}
+              >
+                <input
+                  id="expense-attachment-input"
+                  type="file"
+                  accept="image/*,application/pdf"
+                  style={{ display: 'none' }}
+                  onChange={handleFileUpload}
+                  disabled={isUploading}
+                />
+                <div style={{ fontSize: '26px', marginBottom: '6px' }}>
+                  {isUploading ? '⏳' : '🧾'}
+                </div>
+                <p style={{ margin: '0 0 4px 0', fontSize: '13.5px', fontWeight: 'bold', color: 'var(--text)' }}>
+                  {isUploading ? 'جاري قراءة الملف المرفق...' : 'اضغط لاختيار صورة الإيصال أو ملف PDF (حتى 25 ميجابايت)'}
+                </p>
+                <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>
+                  يدعم صور الفواتير (JPG, PNG, WEBP) ومستندات PDF — يتم أرشفة الملفات شهرياً
+                </span>
+              </div>
+            ) : (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '12px 16px',
+                  background: 'var(--surface-muted)',
+                  border: '1px solid #10b981',
+                  borderRadius: '10px',
+                  gap: '12px',
+                  flexWrap: 'wrap'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  {attachmentType === 'image' ? (
+                    <img
+                      src={attachmentData}
+                      alt="preview"
+                      style={{ width: '48px', height: '48px', objectFit: 'cover', borderRadius: '8px', border: '1px solid var(--border)' }}
+                    />
+                  ) : (
+                    <div style={{ width: '48px', height: '48px', borderRadius: '8px', background: '#fee2e2', color: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', fontWeight: 'bold' }}>
+                      PDF
+                    </div>
+                  )}
+                  <div>
+                    <div style={{ fontWeight: 'bold', fontSize: '13px', color: 'var(--text)' }}>
+                      {attachmentName}
+                    </div>
+                    <div style={{ fontSize: '11.5px', color: 'var(--muted)' }}>
+                      الحجم: {attachmentSize} • النوع: {attachmentType === 'pdf' ? 'مستند PDF' : 'صورة'}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    style={{ padding: '4px 10px', fontSize: '12px' }}
+                    onClick={() => setPreviewAttachmentModal({
+                      attachmentName,
+                      attachmentData,
+                      attachmentType,
+                      attachmentSize,
+                      category,
+                      amount,
+                      date
+                    })}
+                  >
+                    👁️ معاينة
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    style={{ padding: '4px 10px', fontSize: '12px', color: '#dc2626', borderColor: 'rgba(220,38,38,0.2)' }}
+                    onClick={handleRemoveAttachment}
+                  >
+                    ❌ إزالة الملف
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
           <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end' }}>
-            <button type="submit" className="btn btn-start">💾 تسجيل وحفظ الحركة المالية</button>
+            <button type="submit" className="btn btn-start" disabled={isUploading}>
+              💾 تسجيل وحفظ الحركة المالية
+            </button>
           </div>
         </form>
       </div>
@@ -325,6 +522,30 @@ export default function IncomeExpensesModule({
                   </div>
                 )}
 
+                {/* Attachment Badge / View Button in Mobile Card */}
+                {(t.attachmentData || t.driveFileUrl || t.driveWebViewLink) && (
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', paddingTop: '4px' }}>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      style={{ padding: '4px 10px', fontSize: '11.5px', color: '#0284c7', borderColor: '#bae6fd', background: '#f0f9ff', fontWeight: 'bold' }}
+                      onClick={() => setPreviewAttachmentModal(t)}
+                    >
+                      📎 عرض المرفق / الفاتورة
+                    </button>
+                    {t.driveWebViewLink && (
+                      <a
+                        href={t.driveWebViewLink}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ fontSize: '11.5px', color: '#10b981', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '3px' }}
+                      >
+                        ☁️ Google Drive
+                      </a>
+                    )}
+                  </div>
+                )}
+
                 <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: '4px' }}>
                   <button
                     className="btn btn-ghost"
@@ -349,13 +570,14 @@ export default function IncomeExpensesModule({
                 <th>التصنيف / البيان</th>
                 <th>الفرع</th>
                 <th>المبلغ</th>
+                <th>المرفق / الإيصال</th>
                 <th>الملاحظات</th>
                 <th>الإجراءات</th>
               </tr>
             </thead>
             <tbody>
               {filteredList.length === 0 ? (
-                <tr><td colSpan="8" style={{ textAlign: 'center', color: 'var(--muted)', padding: '24px' }}>لا توجد حركات مالية مسجلة حتى الآن.</td></tr>
+                <tr><td colSpan="9" style={{ textAlign: 'center', color: 'var(--muted)', padding: '24px' }}>لا توجد حركات مالية مسجلة حتى الآن.</td></tr>
               ) : (
                 filteredList.map((t, idx) => (
                   <tr key={t.id}>
@@ -373,6 +595,34 @@ export default function IncomeExpensesModule({
                     <td style={{ fontWeight: '800', color: t.type === 'income' ? '#16a34a' : '#dc2626' }}>
                       {t.type === 'income' ? '+' : '-'}{parseFloat(t.amount).toLocaleString()} ج.م
                     </td>
+                    <td>
+                      {(t.attachmentData || t.driveFileUrl || t.driveWebViewLink) ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            style={{ padding: '3px 8px', fontSize: '11.5px', color: '#0284c7', borderColor: '#bae6fd', background: '#f0f9ff' }}
+                            onClick={() => setPreviewAttachmentModal(t)}
+                            title="معاينة المرفق"
+                          >
+                            📎 عرض
+                          </button>
+                          {t.driveWebViewLink && (
+                            <a
+                              href={t.driveWebViewLink}
+                              target="_blank"
+                              rel="noreferrer"
+                              title="فتح في Google Drive"
+                              style={{ textDecoration: 'none', fontSize: '14px' }}
+                            >
+                              ☁️
+                            </a>
+                          )}
+                        </div>
+                      ) : (
+                        <span style={{ color: 'var(--muted)', fontSize: '12px' }}>—</span>
+                      )}
+                    </td>
                     <td style={{ fontSize: '12.5px' }}>{t.notes || '—'}</td>
                     <td>
                       <button
@@ -388,6 +638,143 @@ export default function IncomeExpensesModule({
               )}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Attachment Preview Modal */}
+      {previewAttachmentModal && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1050,
+            padding: '16px'
+          }}
+          onClick={() => setPreviewAttachmentModal(null)}
+        >
+          <div
+            style={{
+              background: 'var(--surface)',
+              borderRadius: '16px',
+              maxWidth: '800px',
+              width: '100%',
+              maxHeight: '90vh',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)',
+              overflow: 'hidden',
+              border: '1px solid var(--border)'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '16px', fontFamily: 'Cairo', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>📎 معاينة إيصال / فاتورة الحركة المالية</span>
+                  {previewAttachmentModal.driveWebViewLink && (
+                    <span style={{ fontSize: '11px', background: '#e0f2fe', color: '#0369a1', padding: '2px 8px', borderRadius: '4px' }}>
+                      ☁️ محفوظ على Google Drive
+                    </span>
+                  )}
+                </h3>
+                <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: 'var(--muted)' }}>
+                  {previewAttachmentModal.category} • {previewAttachmentModal.amount ? `${previewAttachmentModal.amount} ج.م` : ''} • {previewAttachmentModal.date || ''}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                style={{ fontSize: '16px', padding: '4px 8px' }}
+                onClick={() => setPreviewAttachmentModal(null)}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '16px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--surface-muted)' }}>
+              {previewAttachmentModal.attachmentType === 'image' || (previewAttachmentModal.attachmentData && previewAttachmentModal.attachmentData.startsWith('data:image')) ? (
+                <img
+                  src={previewAttachmentModal.attachmentData}
+                  alt={previewAttachmentModal.attachmentName || 'فاتورة'}
+                  style={{ maxWidth: '100%', maxHeight: '65vh', objectFit: 'contain', borderRadius: '8px', border: '1px solid var(--border)' }}
+                />
+              ) : previewAttachmentModal.attachmentType === 'pdf' || (previewAttachmentModal.attachmentData && previewAttachmentModal.attachmentData.startsWith('data:application/pdf')) ? (
+                <iframe
+                  src={previewAttachmentModal.attachmentData}
+                  title="PDF Preview"
+                  style={{ width: '100%', height: '65vh', border: 'none', borderRadius: '8px' }}
+                />
+              ) : previewAttachmentModal.driveWebViewLink ? (
+                <iframe
+                  src={previewAttachmentModal.driveWebViewLink.replace('/view', '/preview')}
+                  title="Drive Preview"
+                  style={{ width: '100%', height: '65vh', border: 'none', borderRadius: '8px' }}
+                />
+              ) : (
+                <div style={{ textAlign: 'center', padding: '32px' }}>
+                  <div style={{ fontSize: '48px', marginBottom: '12px' }}>📄</div>
+                  <p style={{ fontWeight: 'bold' }}>{previewAttachmentModal.attachmentName || 'مرفق الحركة المالية'}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {previewAttachmentModal.attachmentData && (
+                  <a
+                    href={previewAttachmentModal.attachmentData}
+                    download={previewAttachmentModal.attachmentName || `receipt_${previewAttachmentModal.date || 'file'}`}
+                    className="btn btn-ghost"
+                    style={{ fontSize: '12.5px', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    📥 تنزيل الملف
+                  </a>
+                )}
+                {previewAttachmentModal.driveWebViewLink && (
+                  <a
+                    href={previewAttachmentModal.driveWebViewLink}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="btn btn-ghost"
+                    style={{ fontSize: '12.5px', color: '#0284c7', borderColor: '#bae6fd', background: '#f0f9ff', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    ☁️ فتح في Google Drive
+                  </a>
+                )}
+                {previewAttachmentModal.driveMonthFolderUrl && (
+                  <a
+                    href={previewAttachmentModal.driveMonthFolderUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="btn btn-ghost"
+                    style={{ fontSize: '12.5px', color: '#059669', borderColor: '#a7f3d0', background: '#ecfdf5', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    📁 فتح مجلد الشهر في Drive
+                  </a>
+                )}
+              </div>
+
+              <button
+                type="button"
+                className="btn btn-start"
+                style={{ fontSize: '13px', padding: '6px 16px' }}
+                onClick={() => setPreviewAttachmentModal(null)}
+              >
+                إغلاق
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

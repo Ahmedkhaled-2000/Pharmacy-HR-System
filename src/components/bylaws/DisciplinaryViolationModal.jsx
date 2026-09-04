@@ -184,9 +184,11 @@ export default function DisciplinaryViolationModal({
       categoryId: selectedCategoryId,
       ruleId: selectedRuleId,
       allRequests: allViolationHistory,
-      disciplinaryPolicy: policy
+      disciplinaryPolicy: policy,
+      orgSettings: state.orgSettings,
+      targetDate: violationDate
     });
-  }, [selectedEmpId, selectedCategoryId, selectedRuleId, allViolationHistory, policy]);
+  }, [selectedEmpId, selectedCategoryId, selectedRuleId, allViolationHistory, policy, state.orgSettings, violationDate]);
 
   const dailyRate = useMemo(() => {
     return getEmployeeDailyRate(selectedEmp, currentBranchId || selectedEmp?.branchId);

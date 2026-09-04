@@ -8,8 +8,19 @@ import {
 } from '../../utils/disciplinaryPenaltyEngine';
 import { computeLatenessFinancialAmount, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
 import { getEmpDisplayName } from '../../utils/formatters';
-import DisciplinaryViolationModal from './DisciplinaryViolationModal';
 import { useUI } from '../../context/UIContext';
+
+export function formatCategoryResetPeriod(cat) {
+  if (!cat) return '—';
+  if (cat.resetType === 'cycle' || cat.resetMonths === 'cycle' || cat.resetMonths === -1) {
+    return 'مع كل دورة شهرية (دورة الرواتب)';
+  }
+  if (cat.resetType === 'none' || cat.resetMonths === 0 || cat.resetMonths === '0') {
+    return 'لا تصفير (تراكمي دائم)';
+  }
+  const m = parseInt(cat.resetMonths, 10) || 12;
+  return `${m} شهر من آخر مخالفة`;
+}
 
 export default function DisciplinaryPenaltiesTab({
   state,
@@ -1553,7 +1564,7 @@ export default function DisciplinaryPenaltiesTab({
                     </p>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
                       <span style={{ color: 'var(--muted)' }}>
-                        ⏱️ تصفير العداد: <strong>{cat.resetMonths > 0 ? `${cat.resetMonths} شهر` : 'بدون تصفير'}</strong>
+                        ⏱️ تصفير العداد: <strong>{formatCategoryResetPeriod(cat)}</strong>
                       </span>
                       <button
                         type="button"
@@ -1646,7 +1657,7 @@ export default function DisciplinaryPenaltiesTab({
                   </div>
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                     <span className="badge badge-primary">
-                      🔄 فترة تصفير العداد: {cat.resetMonths > 0 ? `${cat.resetMonths} شهر من آخر مخالفة` : 'لا تصفير (تراكمي)'}
+                      🔄 فترة تصفير العداد: {formatCategoryResetPeriod(cat)}
                     </span>
 
                     {isAdmin && (
@@ -2760,18 +2771,91 @@ export default function DisciplinaryPenaltiesTab({
 
                   <div>
                     <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 'bold', marginBottom: '4px' }}>
-                      مدة تصفير العداد (Reset Period):
+                      مدة ونظام تصفير العداد (Reset Period):
                     </label>
                     <select
-                      value={catFormData.resetMonths}
-                      onChange={(e) => setCatFormData({ ...catFormData, resetMonths: parseInt(e.target.value) || 0 })}
-                      style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: '#fff' }}
+                      value={
+                        (catFormData.resetType === 'cycle' || catFormData.resetMonths === 'cycle' || catFormData.resetMonths === -1)
+                          ? 'cycle'
+                          : (catFormData.resetType === 'none' || catFormData.resetMonths === 0 || catFormData.resetMonths === '0')
+                            ? 'none'
+                            : 'months'
+                      }
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === 'cycle') {
+                          setCatFormData({ ...catFormData, resetType: 'cycle', resetMonths: -1 });
+                        } else if (val === 'none') {
+                          setCatFormData({ ...catFormData, resetType: 'none', resetMonths: 0 });
+                        } else {
+                          const prevMonths = (catFormData.resetMonths && catFormData.resetMonths > 0) ? catFormData.resetMonths : 12;
+                          setCatFormData({ ...catFormData, resetType: 'months', resetMonths: prevMonths });
+                        }
+                      }}
+                      style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1.5px solid var(--border)', background: '#fff', fontWeight: 600 }}
                     >
-                      <option value={12}>12 شهرًا من آخر مخالفة (الافتراضي الموصى به)</option>
-                      <option value={6}>6 أشهر من آخر مخالفة</option>
-                      <option value={24}>24 شهرًا (سنتان)</option>
-                      <option value={0}>بدون تصفير (تراكمي دائم)</option>
+                      <option value="months">🗓️ بعدد شهور مخصص من آخر مخالفة (إدخال عدد الشهور)</option>
+                      <option value="cycle">🔄 تصفير حسب الدورة الشهرية المعتمدة (Payroll Cycle)</option>
+                      <option value="none">♾️ بدون تصفير (تراكمي دائم)</option>
                     </select>
+
+                    {/* إذا اختار بعدد الشهور: يظهر حقل إدخال رقمي مرن وأزرار سريعة */}
+                    {catFormData.resetType !== 'cycle' && catFormData.resetMonths !== 'cycle' && catFormData.resetMonths !== -1 && catFormData.resetType !== 'none' && catFormData.resetMonths !== 0 && catFormData.resetMonths !== '0' && (
+                      <div style={{ marginTop: '8px', padding: '10px 12px', background: '#f8fafc', borderRadius: '8px', border: '1px dashed #cbd5e1' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text)' }}>أدخل عدد الشهور:</span>
+                          <input
+                            type="number"
+                            min="1"
+                            max="120"
+                            step="1"
+                            value={catFormData.resetMonths > 0 ? catFormData.resetMonths : 12}
+                            onChange={(e) => {
+                              const val = Math.max(1, parseInt(e.target.value) || 1);
+                              setCatFormData({ ...catFormData, resetType: 'months', resetMonths: val });
+                            }}
+                            style={{ width: '85px', padding: '6px 10px', borderRadius: '6px', border: '1.5px solid var(--primary, #0f766e)', fontWeight: 'bold', fontSize: '13.5px', textAlign: 'center' }}
+                          />
+                          <span style={{ fontSize: '12.5px', fontWeight: 700, color: '#0369a1' }}>شهرًا من آخر مخالفة</span>
+
+                          <div style={{ display: 'flex', gap: '4px', marginRight: 'auto' }}>
+                            {[3, 6, 12, 24].map(m => (
+                              <button
+                                key={m}
+                                type="button"
+                                onClick={() => setCatFormData({ ...catFormData, resetType: 'months', resetMonths: m })}
+                                style={{
+                                  padding: '3px 8px',
+                                  fontSize: '11px',
+                                  borderRadius: '5px',
+                                  border: '1px solid #cbd5e1',
+                                  background: catFormData.resetMonths === m ? '#0f766e' : '#ffffff',
+                                  color: catFormData.resetMonths === m ? '#ffffff' : '#334155',
+                                  cursor: 'pointer',
+                                  fontWeight: 700
+                                }}
+                              >
+                                {m} شهر
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* توضيح في حالة اختيار الدورة الشهرية */}
+                    {(catFormData.resetType === 'cycle' || catFormData.resetMonths === 'cycle' || catFormData.resetMonths === -1) && (
+                      <div style={{ marginTop: '8px', padding: '8px 12px', background: '#ecfdf5', borderRadius: '8px', border: '1px solid #a7f3d0', fontSize: '12px', color: '#065f46', lineHeight: 1.5 }}>
+                        🔄 <strong>تصفير دوري معتمد:</strong> يتم تصفير عداد المخالفات تلقائياً مع بداية كل دورة شهرية (دورة الرواتب المحددة بالمنظومة). عند ارتكاب مخالفة في دورة شهرية جديدة، يبدأ احتساب سلم التدرج التأديبي من المستوى الأول.
+                      </div>
+                    )}
+
+                    {/* توضيح في حالة اختيار بدون تصفير */}
+                    {(catFormData.resetType === 'none' || catFormData.resetMonths === 0 || catFormData.resetMonths === '0') && (
+                      <div style={{ marginTop: '8px', padding: '8px 12px', background: '#fffbeb', borderRadius: '8px', border: '1px solid #fde68a', fontSize: '12px', color: '#92400e', lineHeight: 1.5 }}>
+                        ♾️ <strong>تراكمي دائم:</strong> تستمر المخالفات بالتصعيد طوال فترة خدمة الموظف دون أي تصفير للعداد.
+                      </div>
+                    )}
                   </div>
                 </div>
 

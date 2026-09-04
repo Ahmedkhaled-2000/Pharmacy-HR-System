@@ -712,3 +712,132 @@ export async function uploadBiometricAttendancePhoto({ employee, photoDataUrl, a
   }
 }
 
+/**
+ * Create or Get Expenses Folder and Month Subfolder in Google Drive
+ * Structure: [Parent] ➔ 📁 مصروفات ➔ 📁 YYYY-MM
+ */
+export async function createOrGetExpensesMonthFolder(monthStr, driveConfig) {
+  if (!driveConfig || !driveConfig.serviceUrl) {
+    throw new Error('Google Drive service is not configured');
+  }
+
+  const targetMonth = monthStr || new Date().toISOString().slice(0, 7);
+
+  // 1. Attempt direct action 'create_or_get_expenses_folder'
+  try {
+    const res = await fetch(driveConfig.serviceUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: 'create_or_get_expenses_folder',
+        parentFolderId: driveConfig.parentFolderId || '',
+        month: targetMonth
+      })
+    });
+    const data = await res.json();
+    if (data && (data.success || data.folderId)) {
+      return {
+        expensesFolderId: data.expensesFolderId,
+        expensesFolderUrl: data.expensesFolderUrl,
+        folderId: data.folderId,
+        folderName: data.folderName,
+        folderUrl: data.folderUrl || `https://drive.google.com/drive/folders/${data.folderId}`
+      };
+    }
+  } catch (err) {
+    console.warn('[GoogleDriveService] Direct create_or_get_expenses_folder failed, trying fallback...', err);
+  }
+
+  // 2. Seamless Fallback (works even if Google Apps Script has not yet been redeployed)
+  // Step A: Create or get 'مصروفات' folder under root
+  const rootExpensesRes = await fetch(driveConfig.serviceUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({
+      action: 'create_or_get_employee_folder',
+      parentFolderId: driveConfig.parentFolderId || '',
+      folderName: 'مصروفات'
+    })
+  });
+  const rootData = await rootExpensesRes.json();
+  const expensesFolderId = rootData?.folderId;
+  if (!expensesFolderId) {
+    throw new Error(rootData?.error || 'تعذر إنشاء مجلد مصروفات في جوجل درايف');
+  }
+
+  // Step B: Create or get month folder under 'مصروفات'
+  const monthRes = await fetch(driveConfig.serviceUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({
+      action: 'create_or_get_employee_folder',
+      parentFolderId: expensesFolderId,
+      folderName: targetMonth
+    })
+  });
+  const monthData = await monthRes.json();
+  if (monthData && (monthData.success || monthData.folderId)) {
+    return {
+      expensesFolderId: expensesFolderId,
+      expensesFolderUrl: rootData.folderUrl || `https://drive.google.com/drive/folders/${expensesFolderId}`,
+      folderId: monthData.folderId,
+      folderName: targetMonth,
+      folderUrl: monthData.folderUrl || `https://drive.google.com/drive/folders/${monthData.folderId}`
+    };
+  }
+
+  throw new Error(monthData?.error || 'تعذر إنشاء مجلد الشهر في جوجل درايف');
+}
+
+/**
+ * Upload Expense / Revenue Attachment to Google Drive
+ */
+export async function uploadExpenseAttachmentToDrive({
+  fileContent,
+  fileName,
+  mimeType,
+  monthStr,
+  type = 'expense',
+  category = '',
+  branchName = '',
+  dateStr = '',
+  driveConfig,
+  onProgress = () => {}
+}) {
+  if (!driveConfig || !driveConfig.enabled || !driveConfig.serviceUrl) {
+    return { success: false, reason: 'خدمة Google Drive غير مفعلة' };
+  }
+
+  onProgress('جاري الاتصال بمجلد مصروفات في Google Drive...');
+  const folderInfo = await createOrGetExpensesMonthFolder(monthStr, driveConfig);
+
+  const cleanExt = (fileName && fileName.includes('.'))
+    ? fileName.split('.').pop()
+    : (mimeType === 'application/pdf' ? 'pdf' : 'jpg');
+  const sanitizedCat = (category || 'حركة_مالية').replace(/[\\/:*?"<>|\s]+/g, '_');
+  const sanitizedBranch = (branchName || 'عام').replace(/[\\/:*?"<>|\s]+/g, '_');
+  const typeLabel = type === 'expense' ? 'مصروف' : 'إيراد';
+  const customFileName = `${typeLabel}_${sanitizedCat}_${sanitizedBranch}_${dateStr || monthStr}_${Date.now()}.${cleanExt}`;
+
+  onProgress('جاري رفع الفاتورة/المستند إلى مجلد الشهر في Google Drive...');
+  const uploadRes = await uploadFileToDrive({
+    folderId: folderInfo.folderId,
+    fileName: customFileName,
+    mimeType: mimeType || 'application/octet-stream',
+    base64Content: fileContent,
+    driveConfig
+  });
+
+  return {
+    success: true,
+    fileId: uploadRes.fileId,
+    fileUrl: uploadRes.fileUrl,
+    webViewLink: uploadRes.webViewLink || uploadRes.fileUrl,
+    downloadUrl: uploadRes.downloadUrl,
+    fileName: uploadRes.fileName || customFileName,
+    monthFolderId: folderInfo.folderId,
+    monthFolderUrl: folderInfo.folderUrl,
+    expensesFolderUrl: folderInfo.expensesFolderUrl
+  };
+}
+
