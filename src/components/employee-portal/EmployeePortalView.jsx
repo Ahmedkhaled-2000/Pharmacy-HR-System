@@ -595,6 +595,16 @@ export default function EmployeePortalView({
         } else if ((summary.extraAllowance || 0) > 0) {
           grandAllowanceItems.push([summary.extraAllowanceTitle || 'أجر إضافي', 'أجر وبدل إضافي مخصص من الإدارة', parseFloat(fmt(summary.extraAllowance))]);
         }
+        // Daily attendance allowance items
+        if (Array.isArray(summary.dailyAllowancesBreakdown) && summary.dailyAllowancesBreakdown.length > 0) {
+          summary.dailyAllowancesBreakdown.forEach(da => {
+            if (da.totalAmount > 0) {
+              grandAllowanceItems.push([da.title || 'بدل يومي', `بدل حضور يومي بالبصمة (${da.attendedDaysCount} يوم × ${da.dailyRate} ج.م)`, parseFloat(fmt(da.totalAmount))]);
+            }
+          });
+        } else if ((summary.dailyAllowanceTotal || 0) > 0) {
+          grandAllowanceItems.push([summary.dailyAllowanceTitle || 'بدل يومي', `بدل حضور يومي بالبصمة (${summary.attendedDaysCount || 0} يوم × ${summary.dailyAllowanceAmount || 0} ج.م)`, parseFloat(fmt(summary.dailyAllowanceTotal))]);
+        }
 
         if (grandAllowanceItems.length > 0) {
           sr++;
@@ -717,6 +727,16 @@ export default function EmployeePortalView({
           });
         } else if ((summary.extraAllowance || 0) > 0) {
           allowanceItems.push([summary.extraAllowanceTitle || 'أجر إضافي', 'أجر وبدل إضافي مخصص من الإدارة', parseFloat(fmt(summary.extraAllowance))]);
+        }
+        // Daily attendance allowance items
+        if (Array.isArray(summary.dailyAllowancesBreakdown) && summary.dailyAllowancesBreakdown.length > 0) {
+          summary.dailyAllowancesBreakdown.forEach(da => {
+            if (da.totalAmount > 0) {
+              allowanceItems.push([da.title || 'بدل يومي', `بدل حضور يومي بالبصمة (${da.attendedDaysCount} يوم × ${da.dailyRate} ج.م)`, parseFloat(fmt(da.totalAmount))]);
+            }
+          });
+        } else if ((summary.dailyAllowanceTotal || 0) > 0) {
+          allowanceItems.push([summary.dailyAllowanceTitle || 'بدل يومي', `بدل حضور يومي بالبصمة (${summary.attendedDaysCount || 0} يوم × ${summary.dailyAllowanceAmount || 0} ج.م)`, parseFloat(fmt(summary.dailyAllowanceTotal))]);
         }
 
         if (allowanceItems.length > 0) {
@@ -4204,7 +4224,7 @@ export default function EmployeePortalView({
                   {summary.totalAllowances > 0 && (
                     <SummaryCard
                       icon="💼"
-                      label="إجمالي البدلات الثابتة"
+                      label="إجمالي البدلات المستحقة"
                       value={canViewSalary ? `+${fmt(summary.totalAllowances)} ج.م` : '🔒 مقيد'}
                       colorVar="--success"
                       isPrivacy={isPrivacyMode}
@@ -4213,7 +4233,8 @@ export default function EmployeePortalView({
                         summary.transportAllowance > 0 && `مواصلات: ${fmt(summary.transportAllowance)}`,
                         Array.isArray(summary.extraAllowances) && summary.extraAllowances.length > 0
                           ? summary.extraAllowances.map(a => `${a.title || 'إضافي'}: ${fmt(a.amount)}`).join(' | ')
-                          : (summary.extraAllowance > 0 && `${summary.extraAllowanceTitle || 'إضافي'}: ${fmt(summary.extraAllowance)}`)
+                          : (summary.extraAllowance > 0 && `${summary.extraAllowanceTitle || 'إضافي'}: ${fmt(summary.extraAllowance)}`),
+                        (summary.dailyAllowanceTotal > 0 && `${summary.dailyAllowanceTitle || 'بدل يومي'}: ${fmt(summary.dailyAllowanceTotal)} (${summary.attendedDaysCount || 0} يوم)`)
                       ].filter(Boolean).join(' | ') : '🔒 مقيد'}
                     />
                   )}
@@ -4950,7 +4971,7 @@ export default function EmployeePortalView({
                   {summary.totalAllowances > 0 && (
                     <div className="ep-breakdown-section" style={{ borderColor: '#86efac', background: '#f0fdf4' }}>
                       <div className="ep-breakdown-title" style={{ color: '#166534' }}>
-                        <span className="ep-breakdown-icon">💼</span>تفاصيل البدلات الثابتة والأجور الإضافية
+                        <span className="ep-breakdown-icon">💼</span>تفاصيل البدلات والأجور الإضافية
                       </div>
                       <div className="ep-breakdown-rows">
                         {summary.managementAllowance > 0 && (
@@ -4980,8 +5001,24 @@ export default function EmployeePortalView({
                             </div>
                           )
                         )}
+                        {/* Daily Attendance Allowance breakdown */}
+                        {Array.isArray(summary.dailyAllowancesBreakdown) && summary.dailyAllowancesBreakdown.length > 0 ? (
+                          summary.dailyAllowancesBreakdown.filter(da => da.totalAmount > 0).map((da, i) => (
+                            <div key={da.id || i} className="ep-breakdown-row">
+                              <span className="ep-breakdown-label">📅 {da.title || 'بدل يومي'} ({da.attendedDaysCount} يوم حضور بالبصمة × {fmt(da.dailyRate)} ج.م)</span>
+                              <span className="ep-breakdown-value" style={{ color: '#059669', fontWeight: 'bold' }}>+{fmt(da.totalAmount)} ج.م</span>
+                            </div>
+                          ))
+                        ) : (
+                          (summary.dailyAllowanceTotal || 0) > 0 && (
+                            <div className="ep-breakdown-row">
+                              <span className="ep-breakdown-label">📅 {summary.dailyAllowanceTitle || 'بدل يومي'} ({summary.attendedDaysCount || 0} يوم حضور بالبصمة × {fmt(summary.dailyAllowanceAmount || 0)} ج.م)</span>
+                              <span className="ep-breakdown-value" style={{ color: '#059669', fontWeight: 'bold' }}>+{fmt(summary.dailyAllowanceTotal)} ج.م</span>
+                            </div>
+                          )
+                        )}
                         <div className="ep-breakdown-row ep-breakdown-result">
-                          <span className="ep-breakdown-label">✅ إجمالي البدلات الثابتة المستحقة</span>
+                          <span className="ep-breakdown-label">✅ إجمالي البدلات المستحقة</span>
                           <span className="ep-breakdown-value highlight" style={{ color: '#166534' }}>+{fmt(summary.totalAllowances)} ج.م</span>
                         </div>
                       </div>

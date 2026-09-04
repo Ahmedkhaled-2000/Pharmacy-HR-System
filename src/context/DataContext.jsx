@@ -760,7 +760,49 @@ export function DataProvider({ children, showToast = () => {} }) {
     const managementAllowance = parseFloat(emp.managementAllowance) || 0;
     const transportAllowance = parseFloat(emp.transportAllowance) || 0;
     const extraAllowance = parseFloat(emp.extraAllowance) || 0;
-    const totalAllowances = managementAllowance + transportAllowance + extraAllowance;
+
+    // Daily Attendance Allowance (البدل اليومي المرتبط بالحضور وبصمة الدخول)
+    const allEmpShifts = (state.shifts || []).filter(s =>
+      String(s.employeeId) === String(empId) &&
+      effectiveFilterFn(s.date) &&
+      (!targetBranchId || s.branchId === targetBranchId || !s.branchId || branches.length === 1)
+    );
+    // Count distinct dates where the employee registered a punch-in or worked hours, and not excluded
+    const attendedDatesSet = new Set(
+      allEmpShifts
+        .filter(s => (s.timeIn || s.checkIn || getEffectiveShiftHours(s, state) > 0) && !s.excludeDailyAllowance)
+        .map(s => s.date)
+    );
+    const attendedDaysCount = attendedDatesSet.size;
+
+    const baseDailyAllowanceAmount = parseFloat(emp.dailyAllowanceAmount) || 0;
+    const dailyAllowanceTitle = emp.dailyAllowanceTitle?.trim() || 'بدل يومي';
+
+    // Support multiple daily allowances if configured
+    let dailyAllowancesList = Array.isArray(emp.dailyAllowances) && emp.dailyAllowances.length > 0
+      ? emp.dailyAllowances.filter(a => (parseFloat(a.amount) || 0) > 0)
+      : [];
+
+    if (dailyAllowancesList.length === 0 && baseDailyAllowanceAmount > 0) {
+      dailyAllowancesList = [{
+        id: 'default_daily_allowance',
+        title: dailyAllowanceTitle,
+        amount: baseDailyAllowanceAmount
+      }];
+    }
+
+    const totalDailyAllowanceRate = dailyAllowancesList.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0) || baseDailyAllowanceAmount;
+    const dailyAllowanceTotal = attendedDaysCount * totalDailyAllowanceRate;
+
+    const dailyAllowancesBreakdown = dailyAllowancesList.map(item => ({
+      id: item.id,
+      title: item.title || 'بدل يومي',
+      dailyRate: parseFloat(item.amount) || 0,
+      attendedDaysCount,
+      totalAmount: attendedDaysCount * (parseFloat(item.amount) || 0)
+    }));
+
+    const totalAllowances = managementAllowance + transportAllowance + extraAllowance + dailyAllowanceTotal;
 
     const totalEarnings = totalBaseEarnings + totalOvertimeEarnings;
     const netSalary = totalBaseEarnings + totalOvertimeEarnings + totalBonus + totalAllowances - totalDeduction;
@@ -785,6 +827,12 @@ export function DataProvider({ children, showToast = () => {} }) {
       managementAllowance,
       transportAllowance,
       extraAllowance,
+      // Daily Attendance Allowance fields
+      dailyAllowanceAmount: totalDailyAllowanceRate,
+      dailyAllowanceTitle,
+      attendedDaysCount,
+      dailyAllowanceTotal,
+      dailyAllowancesBreakdown,
       isManagement: isMgmt,
       totalDeduction,
       lateDeduction,
@@ -813,6 +861,7 @@ export function DataProvider({ children, showToast = () => {} }) {
     const totalOvertimeEarnings = Object.values(perEmp).reduce((s, e) => s + (e.overtimeEarnings || 0), 0);
     const totalBonus = Object.values(perEmp).reduce((s, e) => s + e.totalBonus, 0);
     const totalAllowances = Object.values(perEmp).reduce((s, e) => s + (e.totalAllowances || 0), 0);
+    const totalDailyAllowances = Object.values(perEmp).reduce((s, e) => s + (e.dailyAllowanceTotal || 0), 0);
     const totalDeduction = Object.values(perEmp).reduce((s, e) => s + e.totalDeduction, 0);
     const totalNetSalary = Object.values(perEmp).reduce((s, e) => s + e.netSalary, 0);
 
@@ -824,6 +873,7 @@ export function DataProvider({ children, showToast = () => {} }) {
       totalOvertimeEarnings,
       totalBonus,
       totalAllowances,
+      totalDailyAllowances,
       totalDeduction,
       totalNetSalary
     };

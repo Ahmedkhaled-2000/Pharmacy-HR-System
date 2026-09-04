@@ -497,7 +497,14 @@ export function generateOfficialPayslipHTML({
   const transAllowance = summary.transportAllowance !== undefined ? summary.transportAllowance : (parseFloat(emp?.transportAllowance) || 0);
   const extAllowance = summary.extraAllowance !== undefined ? summary.extraAllowance : (parseFloat(emp?.extraAllowance) || 0);
   const extTitle = summary.extraAllowanceTitle || emp?.extraAllowanceTitle || 'أجر إضافي';
-  const totalAllowances = summary.totalAllowances !== undefined ? summary.totalAllowances : (mgmtAllowance + transAllowance + extAllowance);
+
+  const dailyAllowanceAmount = summary.dailyAllowanceAmount !== undefined ? summary.dailyAllowanceAmount : (parseFloat(emp?.dailyAllowanceAmount) || 0);
+  const dailyAllowanceTitle = summary.dailyAllowanceTitle || emp?.dailyAllowanceTitle || 'بدل يومي';
+  const attendedDaysCount = summary.attendedDaysCount !== undefined ? summary.attendedDaysCount : 0;
+  const dailyAllowanceTotal = summary.dailyAllowanceTotal !== undefined ? summary.dailyAllowanceTotal : (attendedDaysCount * dailyAllowanceAmount);
+  const dailyAllowancesBreakdown = summary.dailyAllowancesBreakdown || [];
+
+  const totalAllowances = summary.totalAllowances !== undefined ? summary.totalAllowances : (mgmtAllowance + transAllowance + extAllowance + dailyAllowanceTotal);
 
   // 1. Allowances breakdown
   const allowanceItems = [];
@@ -547,6 +554,33 @@ export function generateOfficialPayslipHTML({
       isPositive: true,
       details: 'أجر وبدل إضافي مخصص من قبل الإدارة',
       color: '#15803d'
+    });
+  }
+
+  // Daily attendance allowance items (بدل الحضور اليومي المرتبط ببصمة الدخول)
+  if (Array.isArray(dailyAllowancesBreakdown) && dailyAllowancesBreakdown.length > 0) {
+    dailyAllowancesBreakdown.forEach((da, idx) => {
+      if (da.totalAmount > 0 || (da.dailyRate > 0 && attendedDaysCount > 0)) {
+        allowanceItems.push({
+          id: `allowance_daily_${da.id || idx}`,
+          date: `${attendedDaysCount} يوم حضور`,
+          typeLabel: `📅 ${da.title || 'بدل يومي'}`,
+          amount: da.totalAmount,
+          isPositive: true,
+          details: `احتساب بالحضور الفعلي: (${da.attendedDaysCount} يوم حضور بالبصمة × ${da.dailyRate} ج.م)`,
+          color: '#059669'
+        });
+      }
+    });
+  } else if (dailyAllowanceTotal > 0 || (dailyAllowanceAmount > 0 && attendedDaysCount > 0)) {
+    allowanceItems.push({
+      id: 'allowance_daily_default',
+      date: `${attendedDaysCount} يوم حضور`,
+      typeLabel: `📅 ${dailyAllowanceTitle}`,
+      amount: dailyAllowanceTotal,
+      isPositive: true,
+      details: `احتساب بالحضور الفعلي: (${attendedDaysCount} يوم حضور بالبصمة × ${dailyAllowanceAmount} ج.م)`,
+      color: '#059669'
     });
   }
 

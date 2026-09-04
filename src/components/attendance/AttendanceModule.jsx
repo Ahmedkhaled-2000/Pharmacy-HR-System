@@ -38,6 +38,7 @@ export default function AttendanceModule({
   const [manualBreakHours, setManualBreakHours] = useState('0');
   const [manualNotes, setManualNotes] = useState('');
   const [manualBranchId, setManualBranchId] = useState('');
+  const [includeDailyAllowance, setIncludeDailyAllowance] = useState(true);
 
   const employees = state.employees || [];
   const branches = state.branches || [];
@@ -93,6 +94,7 @@ export default function AttendanceModule({
         acknowledgedByAdmin: true,
         note: manualNotes.trim() || (bH > 0 ? `تسجيل بصمة يدوية من الأدمن (بريك: ${bH} س)` : 'تسجيل بصمة يدوية من الأدمن'),
         statusLabel: 'تسجيل يدوي',
+        excludeDailyAllowance: !includeDailyAllowance,
         createdAt: new Date().toISOString()
       };
 
@@ -145,6 +147,7 @@ export default function AttendanceModule({
       setManualBreakHours('0');
       setManualNotes('');
       setManualBranchId('');
+      setIncludeDailyAllowance(true);
 
       const lateInc = markedIncidents.find((inc) => (inc.shiftId === newPunch.id || inc.date === manualDate) && inc.lateMinutes > 0);
       if (lateInc && lateInc.deductionMinutes > 0) {
@@ -274,6 +277,50 @@ export default function AttendanceModule({
             <label>ملاحظات ومبرر البصمة اليدوية</label>
             <input type="text" placeholder="سبب الإضافة اليدوية..." value={manualNotes} onChange={(e) => setManualNotes(e.target.value)} />
           </div>
+
+          {(() => {
+            const empObj = employees.find((e) => e.id === manualEmpId);
+            const dailyRate = (empObj && (parseFloat(empObj.dailyAllowanceAmount) || 0)) ||
+              (empObj?.dailyAllowances?.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0) || 0);
+            if (!empObj || dailyRate <= 0) return null;
+
+            return (
+              <div style={{
+                gridColumn: '1 / -1',
+                background: '#ecfdf5',
+                border: '1px solid #6ee7b7',
+                borderRadius: '8px',
+                padding: '10px 14px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '10px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#065f46', fontSize: '13px' }}>
+                  <span style={{ fontSize: '18px' }}>💰</span>
+                  <div>
+                    <strong>البدل اليومي للموظف ({empObj.dailyAllowanceTitle || 'بدل يومي'}):</strong>
+                    <span style={{ marginRight: '6px', color: '#047857', fontWeight: 800 }}>
+                      +{dailyRate} ج.م / يوم
+                    </span>
+                    <span style={{ fontSize: '11.5px', color: '#059669', display: 'block' }}>
+                      يتم احتساب البدل تلقائياً في كشف الراتب عند تسجيل بصمة الدخول لهذا اليوم
+                    </span>
+                  </div>
+                </div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '12.5px', color: '#065f46', fontWeight: 'bold' }}>
+                  <input
+                    type="checkbox"
+                    checked={includeDailyAllowance}
+                    onChange={(e) => setIncludeDailyAllowance(e.target.checked)}
+                    style={{ width: '16px', height: '16px', accentColor: '#059669' }}
+                  />
+                  احتساب البدل اليومي مع هذه البصمة
+                </label>
+              </div>
+            );
+          })()}
 
           <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end' }}>
             <button type="submit" className="btn btn-start">💾 تسجيل البصمة اليدوية</button>

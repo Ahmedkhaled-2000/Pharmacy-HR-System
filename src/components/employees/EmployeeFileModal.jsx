@@ -127,6 +127,26 @@ export default function EmployeeFileModal({
   // Multiple Extra Allowances: Array of { id, title, amount }
   const [extraAllowances, setExtraAllowances] = useState([]);
 
+  // Daily Attendance Allowance States (البدل اليومي المرتبط بالبصمة)
+  const [dailyAllowanceAmount, setDailyAllowanceAmount] = useState('0');
+  const [dailyAllowanceTitle, setDailyAllowanceTitle] = useState('بدل يومي');
+  const [dailyAllowances, setDailyAllowances] = useState([]);
+
+  const handleAddDailyAllowance = () => {
+    setDailyAllowances([
+      ...dailyAllowances,
+      { id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 4), title: '', amount: '0' }
+    ]);
+  };
+
+  const handleDailyAllowanceChange = (id, field, value) => {
+    setDailyAllowances(dailyAllowances.map(a => a.id === id ? { ...a, [field]: value } : a));
+  };
+
+  const handleRemoveDailyAllowance = (id) => {
+    setDailyAllowances(dailyAllowances.filter(a => a.id !== id));
+  };
+
   const handleAddExtraAllowance = () => {
     setExtraAllowances([
       ...extraAllowances,
@@ -313,6 +333,25 @@ export default function EmployeeFileModal({
         setExtraAllowances([]);
       }
 
+      // Load daily attendance allowance (البدل اليومي)
+      setDailyAllowanceAmount(String(editingEmp.dailyAllowanceAmount !== undefined ? editingEmp.dailyAllowanceAmount : '0'));
+      setDailyAllowanceTitle(editingEmp.dailyAllowanceTitle || 'بدل يومي');
+      if (Array.isArray(editingEmp.dailyAllowances) && editingEmp.dailyAllowances.length > 0) {
+        setDailyAllowances(editingEmp.dailyAllowances.map(a => ({
+          id: a.id || Math.random().toString(),
+          title: a.title || '',
+          amount: String(a.amount !== undefined ? a.amount : '0')
+        })));
+      } else if ((parseFloat(editingEmp.dailyAllowanceAmount) || 0) > 0) {
+        setDailyAllowances([{
+          id: 'daily_1',
+          title: editingEmp.dailyAllowanceTitle || 'بدل يومي',
+          amount: String(editingEmp.dailyAllowanceAmount || '0')
+        }]);
+      } else {
+        setDailyAllowances([]);
+      }
+
       // Load branchesDetails if they exist, otherwise fallback to legacy fields
       let loadedActiveBranches = [];
       if (editingEmp.branchesDetails && editingEmp.branchesDetails.length > 0) {
@@ -425,6 +464,9 @@ export default function EmployeeFileModal({
       setExtraAllowance('0');
       setExtraAllowanceTitle('');
       setExtraAllowances([]);
+      setDailyAllowanceAmount('0');
+      setDailyAllowanceTitle('بدل يومي');
+      setDailyAllowances([]);
 
       setBranchesDetails([
         { id: Math.random().toString(), branchId: branches[0]?.id || '', salary: '', workHours: '', workDays: '', breakHours: '' }
@@ -709,6 +751,20 @@ export default function EmployeeFileModal({
       extraAllowances: validExtraAllowances,
       extraAllowance: totalExtraAllowance,
       extraAllowanceTitle: combinedExtraTitle.trim(),
+      // Daily Attendance Allowance (البدل اليومي المرتبط بالحضور الفعلي)
+      dailyAllowanceAmount: (dailyAllowances.filter(a => (parseFloat(a.amount) || 0) > 0).length > 0)
+        ? dailyAllowances.filter(a => (parseFloat(a.amount) || 0) > 0).reduce((s, a) => s + (parseFloat(a.amount) || 0), 0)
+        : (parseFloat(dailyAllowanceAmount) || 0),
+      dailyAllowanceTitle: (dailyAllowances.filter(a => (parseFloat(a.amount) || 0) > 0).length > 0)
+        ? dailyAllowances.filter(a => (parseFloat(a.amount) || 0) > 0).map(a => a.title?.trim() || 'بدل يومي').join(' + ')
+        : (dailyAllowanceTitle.trim() || 'بدل يومي'),
+      dailyAllowances: dailyAllowances
+        .filter(a => (parseFloat(a.amount) > 0) || (a.title && a.title.trim()))
+        .map(a => ({
+          id: a.id || Math.random().toString(),
+          title: a.title?.trim() || 'بدل يومي',
+          amount: parseFloat(a.amount) || 0
+        })),
       // For backwards compatibility and main branch logic, use the first branch's details
       branchId: validBranchesDetails[0]?.branchId || '',
       salary: validBranchesDetails[0]?.salary || '0',
@@ -1918,6 +1974,122 @@ export default function EmployeeFileModal({
                           ))}
                         </div>
                       )}
+                    </div>
+
+                    {/* 4. البدل اليومي المرتبط ببصمة الدخول (Daily Attendance Allowance) */}
+                    <div style={{ background: '#ecfdf5', padding: '16px', borderRadius: '12px', border: '1.5px solid #6ee7b7', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                        <div>
+                          <label style={{ color: '#065f46', fontWeight: 'bold', margin: 0, fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span>📅</span>
+                            <span>البدل اليومي المرتبط ببصمة الدخول (Daily Attendance Allowance)</span>
+                          </label>
+                          <p style={{ margin: '3px 0 0 0', fontSize: '12px', color: '#047857' }}>
+                            يتم احتساب هذا البدل آلياً في كشف الراتب بضرب (عدد أيام الحضور المسجلة ببصمة دخول × قيمة البدل اليومي)، ولا يُصرف في أيام الغياب.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          onClick={handleAddDailyAllowance}
+                          style={{
+                            background: '#d1fae5',
+                            color: '#065f46',
+                            border: '1px solid #a7f3d0',
+                            fontWeight: 'bold',
+                            fontSize: '12px',
+                            padding: '4px 10px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}
+                        >
+                          ➕ إضافة بدل يومي مخصص
+                        </button>
+                      </div>
+
+                      {/* Main / Default Daily Allowance inputs */}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px', background: '#fff', padding: '12px', borderRadius: '8px', border: '1px solid #a7f3d0' }}>
+                        <div className="field" style={{ margin: 0 }}>
+                          <label style={{ color: '#065f46', fontWeight: 'bold', fontSize: '12px' }}>
+                            🏷️ مسمى البدل اليومي
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="مثال: بدل انتقال يومي / بدل وجبة / بدل يومي"
+                            value={dailyAllowanceTitle}
+                            onChange={(e) => setDailyAllowanceTitle(e.target.value)}
+                            style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #6ee7b7', fontSize: '13px', background: '#f0fdf4', fontWeight: 'bold' }}
+                          />
+                        </div>
+                        <div className="field" style={{ margin: 0 }}>
+                          <label style={{ color: '#065f46', fontWeight: 'bold', fontSize: '12px' }}>
+                            💰 قيمة البدل لليوم الواحد (ج.م / يوم)
+                          </label>
+                          <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                            <input
+                              type="number"
+                              min="0"
+                              step="any"
+                              placeholder="0"
+                              value={dailyAllowanceAmount}
+                              onChange={(e) => setDailyAllowanceAmount(e.target.value)}
+                              style={{ width: '100%', padding: '8px 10px', paddingLeft: '65px', borderRadius: '6px', border: '1px solid #6ee7b7', fontSize: '14px', fontWeight: 'bold', color: '#047857', background: '#fff' }}
+                            />
+                            <span style={{ position: 'absolute', left: '10px', fontSize: '11px', color: '#059669', fontWeight: 'bold', pointerEvents: 'none' }}>ج.م / يوم</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Extra Daily Allowances if any */}
+                      {dailyAllowances.length > 0 && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
+                          <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#065f46' }}>
+                            📌 بدلات يومية إضافية مخصصة:
+                          </div>
+                          {dailyAllowances.map((da, idx) => (
+                            <div key={da.id || idx} style={{ display: 'flex', gap: '8px', alignItems: 'center', background: '#fff', padding: '8px 10px', borderRadius: '8px', border: '1px solid #a7f3d0' }}>
+                              <div style={{ flex: 1 }}>
+                                <input
+                                  type="text"
+                                  placeholder="مسمى البدل اليومي الإضافي"
+                                  value={da.title}
+                                  onChange={(e) => handleDailyAllowanceChange(da.id, 'title', e.target.value)}
+                                  style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid #6ee7b7', fontSize: '13px', background: '#f0fdf4' }}
+                                />
+                              </div>
+                              <div style={{ width: '170px', position: 'relative', display: 'flex', alignItems: 'center' }}>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="any"
+                                  placeholder="0"
+                                  value={da.amount}
+                                  onChange={(e) => handleDailyAllowanceChange(da.id, 'amount', e.target.value)}
+                                  style={{ width: '100%', padding: '7px 10px', paddingLeft: '55px', borderRadius: '6px', border: '1px solid #6ee7b7', fontSize: '13px', fontWeight: 'bold', color: '#047857', background: '#fff' }}
+                                />
+                                <span style={{ position: 'absolute', left: '8px', fontSize: '10.5px', color: '#059669', fontWeight: 'bold', pointerEvents: 'none' }}>ج.م / يوم</span>
+                              </div>
+                              <button
+                                type="button"
+                                className="del-btn"
+                                onClick={() => handleRemoveDailyAllowance(da.id)}
+                                style={{ padding: '6px 10px', fontSize: '12px' }}
+                                title="حذف هذا البدل اليومي"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <div style={{ fontSize: '11.5px', color: '#065f46', background: 'rgba(255,255,255,0.7)', padding: '6px 10px', borderRadius: '6px', border: '1px dashed #6ee7b7', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span>💡</span>
+                        <span>
+                          <strong>تطبيق عملي:</strong> في حال كان إجمالي البدل اليومي <strong>{(parseFloat(dailyAllowanceAmount) || 0) + dailyAllowances.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0)} ج.م/يوم</strong> وسجل الموظف <strong>20 يوم حضور</strong> بالبصمة، سيتم صرف <strong>{((parseFloat(dailyAllowanceAmount) || 0) + dailyAllowances.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0)) * 20} ج.م</strong> تلقائياً في كشف الراتب.
+                        </span>
+                      </div>
                     </div>
 
                     {/* Live Total Compensation Card */}
