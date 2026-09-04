@@ -834,64 +834,79 @@ export default function SettingsModule({
   const normalizePermObject = (rawObj) => {
     if (!rawObj || typeof rawObj !== 'object') return {};
     const out = {};
+
+    // 1. Process non-prefixed and 'allow' keys first
     Object.entries(rawObj).forEach(([k, v]) => {
-      let action = k;
-      if (k.startsWith('can')) action = k.slice(3);
-      else if (k.startsWith('allow')) action = k.slice(5);
-      out['can' + action] = Boolean(v);
-      out['allow' + action] = Boolean(v);
-      out[k] = Boolean(v);
-      out[action] = Boolean(v);
+      if (!k.startsWith('can')) {
+        let action = k.startsWith('allow') ? k.slice(5) : k;
+        out['can' + action] = Boolean(v);
+        out['allow' + action] = Boolean(v);
+        out[k] = Boolean(v);
+        out[action] = Boolean(v);
+      }
     });
+
+    // 2. Canonical 'can...' keys take highest priority and overwrite any legacy non-prefixed values
+    Object.entries(rawObj).forEach(([k, v]) => {
+      if (k.startsWith('can')) {
+        let action = k.slice(3);
+        out['can' + action] = Boolean(v);
+        out['allow' + action] = Boolean(v);
+        out[k] = Boolean(v);
+        out[action] = Boolean(v);
+      }
+    });
+
     return out;
   };
 
   const getResolvedPerms = (empIdOrAll) => {
     const merged = { ...defaultPerms };
-    if (empIdOrAll === 'all') {
-      const globalNorm = normalizePermObject(state.orgSettings?.permissions);
-      SYSTEM_PERMISSION_CATALOG.forEach((p) => {
-        let action = p.key.startsWith('can') ? p.key.slice(3) : p.key;
-        if (globalNorm['can' + action] !== undefined) merged[p.key] = globalNorm['can' + action];
-        else if (globalNorm[p.key] !== undefined) merged[p.key] = globalNorm[p.key];
-      });
-      // also copy any non-catalog custom keys
-      Object.keys(globalNorm).forEach(k => {
-        if (!k.startsWith('allow') && merged[k] === undefined) {
-          merged[k] = Boolean(globalNorm[k]);
-        }
-      });
-    } else {
-      const emp = (state.employees || []).find((e) => String(e.id) === String(empIdOrAll) || String(e.code) === String(empIdOrAll));
-      const targetId = emp ? String(emp.id) : String(empIdOrAll);
-      const targetCode = emp ? String(emp.code) : String(empIdOrAll);
-      const empCustom = state.orgSettings?.empPermissions?.[targetId] || state.orgSettings?.empPermissions?.[targetCode] || emp?.permissions;
-      if (empCustom) {
-        const customNorm = normalizePermObject(empCustom);
-        SYSTEM_PERMISSION_CATALOG.forEach((p) => {
-          let action = p.key.startsWith('can') ? p.key.slice(3) : p.key;
-          if (customNorm['can' + action] !== undefined) merged[p.key] = customNorm['can' + action];
-          else if (customNorm[p.key] !== undefined) merged[p.key] = customNorm[p.key];
-        });
-        Object.keys(customNorm).forEach(k => {
-          if (!k.startsWith('allow') && merged[k] === undefined) {
-            merged[k] = Boolean(customNorm[k]);
-          }
-        });
-      } else {
-        const globalNorm = normalizePermObject(state.orgSettings?.permissions);
-        SYSTEM_PERMISSION_CATALOG.forEach((p) => {
-          let action = p.key.startsWith('can') ? p.key.slice(3) : p.key;
-          if (globalNorm['can' + action] !== undefined) merged[p.key] = globalNorm['can' + action];
-          else if (globalNorm[p.key] !== undefined) merged[p.key] = globalNorm[p.key];
-        });
-        Object.keys(globalNorm).forEach(k => {
-          if (!k.startsWith('allow') && merged[k] === undefined) {
-            merged[k] = Boolean(globalNorm[k]);
-          }
-        });
+    const catalogActionNames = new Set(
+      SYSTEM_PERMISSION_CATALOG.map(p => p.key.startsWith('can') ? p.key.slice(3) : p.key)
+    );
+    const catalogKeys = new Set(SYSTEM_PERMISSION_CATALOG.map(p => p.key));
+
+    const sourcePerms = empIdOrAll === 'all'
+      ? state.orgSettings?.permissions
+      : (() => {
+          const emp = (state.employees || []).find((e) => String(e.id) === String(empIdOrAll) || String(e.code) === String(empIdOrAll));
+          const targetId = emp ? String(emp.id) : String(empIdOrAll);
+          const targetCode = emp ? String(emp.code) : String(empIdOrAll);
+          return state.orgSettings?.empPermissions?.[targetId] ||
+                 state.orgSettings?.empPermissions?.[targetCode] ||
+                 emp?.permissions ||
+                 state.orgSettings?.permissions;
+        })();
+
+    const norm = normalizePermObject(sourcePerms);
+
+    SYSTEM_PERMISSION_CATALOG.forEach((p) => {
+      let action = p.key.startsWith('can') ? p.key.slice(3) : p.key;
+      if (norm[p.key] !== undefined) {
+        merged[p.key] = norm[p.key];
+      } else if (norm['can' + action] !== undefined) {
+        merged[p.key] = norm['can' + action];
+      } else if (norm[action] !== undefined) {
+        merged[p.key] = norm[action];
       }
-    }
+    });
+
+    // Only copy genuine custom keys that are NOT catalog permissions or catalog aliases
+    Object.keys(norm).forEach(k => {
+      const cleanAction = k.replace(/^(can|allow)/, '');
+      if (
+        !catalogKeys.has(k) &&
+        !catalogActionNames.has(cleanAction) &&
+        !catalogActionNames.has(k) &&
+        !k.startsWith('allow') &&
+        !k.startsWith('can') &&
+        merged[k] === undefined
+      ) {
+        merged[k] = Boolean(norm[k]);
+      }
+    });
+
     return merged;
   };
 
@@ -916,25 +931,44 @@ export default function SettingsModule({
     setIsSavingPerms(true);
 
     const performSave = async () => {
+      const catalogActionNames = new Set(
+        SYSTEM_PERMISSION_CATALOG.map(p => p.key.startsWith('can') ? p.key.slice(3) : p.key)
+      );
+      const catalogKeys = new Set(SYSTEM_PERMISSION_CATALOG.map(p => p.key));
+
       const expandedPerms = {};
+
+      // 1. Process all catalog permissions from targetPerms
       SYSTEM_PERMISSION_CATALOG.forEach((p) => {
-        const isChecked = targetPerms[p.key] !== false;
         let actionName = p.key.startsWith('can') ? p.key.slice(3) : p.key;
+        let isChecked = p.defaultVal;
+        if (targetPerms[p.key] !== undefined) {
+          isChecked = Boolean(targetPerms[p.key]);
+        } else if (targetPerms['can' + actionName] !== undefined) {
+          isChecked = Boolean(targetPerms['can' + actionName]);
+        } else if (targetPerms['allow' + actionName] !== undefined) {
+          isChecked = Boolean(targetPerms['allow' + actionName]);
+        } else if (targetPerms[actionName] !== undefined) {
+          isChecked = Boolean(targetPerms[actionName]);
+        }
+        expandedPerms[p.key] = isChecked;
         expandedPerms['can' + actionName] = isChecked;
         expandedPerms['allow' + actionName] = isChecked;
-        expandedPerms[p.key] = isChecked;
         expandedPerms[actionName] = isChecked;
       });
 
+      // 2. Only process genuine custom keys (keys that are NOT catalog permissions or catalog aliases)
       Object.keys(targetPerms).forEach((k) => {
-        let actionName = k;
-        if (k.startsWith('can')) actionName = k.slice(3);
-        else if (k.startsWith('allow')) actionName = k.slice(5);
+        const cleanAction = k.replace(/^(can|allow)/, '');
+        if (catalogActionNames.has(cleanAction) || catalogKeys.has(k) || catalogActionNames.has(k)) {
+          // This is a catalog item or catalog alias, already handled above!
+          return;
+        }
         const isChecked = Boolean(targetPerms[k]);
-        expandedPerms['can' + actionName] = isChecked;
-        expandedPerms['allow' + actionName] = isChecked;
         expandedPerms[k] = isChecked;
-        expandedPerms[actionName] = isChecked;
+        expandedPerms['can' + cleanAction] = isChecked;
+        expandedPerms['allow' + cleanAction] = isChecked;
+        expandedPerms[cleanAction] = isChecked;
       });
 
       const nowTime = Date.now();
@@ -991,7 +1025,7 @@ export default function SettingsModule({
 
       permSaveTimeoutRef.current = setTimeout(() => {
         isUserTogglingPermRef.current = false;
-      }, 1500);
+      }, 3000);
     };
 
     if (ownerLocks?.lockEditSystemPermissions && executeWithOwnerGuard && !isOwnerUnlocked) {
@@ -1009,10 +1043,22 @@ export default function SettingsModule({
   // Instant optimistic toggle with auto-save
   const handleTogglePermission = (key, nextChecked) => {
     isUserTogglingPermRef.current = true;
-    const nextPerms = { ...permState, [key]: nextChecked };
+    let actionName = key.startsWith('can') ? key.slice(3) : (key.startsWith('allow') ? key.slice(5) : key);
+    const canKey = 'can' + actionName;
+
+    const catalogItem = SYSTEM_PERMISSION_CATALOG.find(p => p.key === key || p.key === canKey);
+    const canonicalKey = catalogItem ? catalogItem.key : key;
+
+    const nextPerms = { ...permState };
+    if (catalogItem) {
+      delete nextPerms[actionName];
+      delete nextPerms['allow' + actionName];
+      nextPerms[canonicalKey] = nextChecked;
+    } else {
+      nextPerms[key] = nextChecked;
+    }
     setPermState(nextPerms);
 
-    const catalogItem = SYSTEM_PERMISSION_CATALOG.find(p => p.key === key);
     const label = catalogItem ? catalogItem.label : key;
 
     persistPermissionsMap(
@@ -1049,25 +1095,39 @@ export default function SettingsModule({
   };
 
   const handleRemovePermissionFromActive = async (permKey) => {
+    isUserTogglingPermRef.current = true;
+    let actionName = permKey.replace(/^(can|allow)/, '');
     const updated = { ...permState };
     delete updated[permKey];
+    delete updated['can' + actionName];
+    delete updated['allow' + actionName];
+    delete updated[actionName];
     setPermState(updated);
     await persistPermissionsMap(updated, selectedEmpForPerm, `🗑️ تم حذف الصلاحية المخصصة`);
   };
 
   const handleGrantAllPermissions = async () => {
+    isUserTogglingPermRef.current = true;
     const allTrue = {};
+    const catalogKeys = new Set(SYSTEM_PERMISSION_CATALOG.map(p => p.key));
+    const catalogActionNames = new Set(
+      SYSTEM_PERMISSION_CATALOG.map(p => p.key.startsWith('can') ? p.key.slice(3) : (p.key.startsWith('allow') ? p.key.slice(5) : p.key))
+    );
     SYSTEM_PERMISSION_CATALOG.forEach((p) => {
       allTrue[p.key] = true;
     });
     Object.keys(permState).forEach((k) => {
-      allTrue[k] = true;
+      const cleanAction = k.replace(/^(can|allow)/, '');
+      if (!catalogKeys.has(k) && !catalogActionNames.has(k) && !catalogActionNames.has(cleanAction) && !k.startsWith('can') && !k.startsWith('allow')) {
+        allTrue[k] = true;
+      }
     });
     setPermState(allTrue);
     await persistPermissionsMap(allTrue, selectedEmpForPerm, '🔓 تم تفعيل ومنح كافة الصلاحيات بنجاح');
   };
 
   const handleSavePermissions = async () => {
+    isUserTogglingPermRef.current = true;
     await persistPermissionsMap(permState, selectedEmpForPerm, '💾 تم حفظ وتثبيت كافة الصلاحيات بالنظام بنجاح');
   };
 
@@ -1082,12 +1142,20 @@ export default function SettingsModule({
     });
     if (!isConfirmed) return;
 
+    isUserTogglingPermRef.current = true;
     const allFalse = {};
+    const catalogKeys = new Set(SYSTEM_PERMISSION_CATALOG.map(p => p.key));
+    const catalogActionNames = new Set(
+      SYSTEM_PERMISSION_CATALOG.map(p => p.key.startsWith('can') ? p.key.slice(3) : (p.key.startsWith('allow') ? p.key.slice(5) : p.key))
+    );
     SYSTEM_PERMISSION_CATALOG.forEach((p) => {
       allFalse[p.key] = false;
     });
     Object.keys(permState).forEach((k) => {
-      allFalse[k] = false;
+      const cleanAction = k.replace(/^(can|allow)/, '');
+      if (!catalogKeys.has(k) && !catalogActionNames.has(k) && !catalogActionNames.has(cleanAction) && !k.startsWith('can') && !k.startsWith('allow')) {
+        allFalse[k] = false;
+      }
     });
     setPermState(allFalse);
     await persistPermissionsMap(allFalse, selectedEmpForPerm, '🚫 تم إيقاف وتعطيل جميع الصلاحيات بنجاح');
@@ -1104,6 +1172,7 @@ export default function SettingsModule({
     });
     if (!isConfirmed) return;
 
+    isUserTogglingPermRef.current = true;
     const standardPerms = {};
     SYSTEM_PERMISSION_CATALOG.forEach((p) => {
       standardPerms[p.key] = p.defaultVal;
@@ -1657,9 +1726,21 @@ export default function SettingsModule({
               return matchesCategory && matchesSearch;
             });
 
-            // Additional custom keys in permState not in catalog
+            // Additional genuine custom keys in permState not in catalog and not catalog aliases
             const catalogKeys = new Set(SYSTEM_PERMISSION_CATALOG.map(p => p.key));
-            const customKeys = Object.keys(permState).filter(k => !catalogKeys.has(k) && !k.startsWith('allow') && !k.startsWith('can'));
+            const catalogActionNames = new Set(
+              SYSTEM_PERMISSION_CATALOG.map(p => p.key.startsWith('can') ? p.key.slice(3) : (p.key.startsWith('allow') ? p.key.slice(5) : p.key))
+            );
+            const customKeys = Object.keys(permState).filter(k => {
+              const cleanAction = k.replace(/^(can|allow)/, '');
+              return (
+                !catalogKeys.has(k) &&
+                !catalogActionNames.has(k) &&
+                !catalogActionNames.has(cleanAction) &&
+                !k.startsWith('allow') &&
+                !k.startsWith('can')
+              );
+            });
 
             if (filteredCatalog.length === 0 && customKeys.length === 0) {
               return (

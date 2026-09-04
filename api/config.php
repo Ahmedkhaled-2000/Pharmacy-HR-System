@@ -367,6 +367,18 @@ function mergeServerState(array $existing, array $incoming): array
         $iOrg = is_array($incoming['orgSettings'] ?? null) ? $incoming['orgSettings'] : [];
         $mergedOrg = array_merge($eOrg, $iOrg);
 
+        // الحفاظ الصارم على صلاحيات الموظفين المحدثة وعدم إعادة ترقيم مفاتيح الـ IDs الرقمية
+        if (isset($iOrg['permissions']) && is_array($iOrg['permissions'])) {
+            $mergedOrg['permissions'] = $iOrg['permissions'];
+        }
+        if (isset($iOrg['empPermissions']) && is_array($iOrg['empPermissions'])) {
+            $mergedEmpPerms = is_array($eOrg['empPermissions'] ?? null) ? $eOrg['empPermissions'] : [];
+            foreach ($iOrg['empPermissions'] as $empKey => $perms) {
+                $mergedEmpPerms[(string)$empKey] = $perms;
+            }
+            $mergedOrg['empPermissions'] = $mergedEmpPerms;
+        }
+
         $eLocks = is_array($eOrg['ownerModificationLocks'] ?? null) ? $eOrg['ownerModificationLocks'] : [];
         $iLocks = is_array($iOrg['ownerModificationLocks'] ?? null) ? $iOrg['ownerModificationLocks'] : [];
         if (!empty($eLocks) || !empty($iLocks)) {

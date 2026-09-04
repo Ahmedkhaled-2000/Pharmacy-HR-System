@@ -375,10 +375,22 @@ export function smartMergeStates(localState, remoteState) {
       const remoteTime = getItemTime(remoteSettings);
       
       let mergedSettings = {};
-      if (remoteTime > localTime) {
-        mergedSettings = { ...localSettings, ...remoteSettings };
-      } else if (localTime > remoteTime) {
+      if (localTime >= remoteTime) {
         mergedSettings = { ...remoteSettings, ...localSettings };
+        if (localSettings.permissions !== undefined) {
+          mergedSettings.permissions = localSettings.permissions;
+        } else if (remoteSettings.permissions !== undefined) {
+          mergedSettings.permissions = remoteSettings.permissions;
+        }
+        
+        if (localSettings.empPermissions !== undefined) {
+          mergedSettings.empPermissions = {
+            ...(remoteSettings.empPermissions || {}),
+            ...(localSettings.empPermissions || {})
+          };
+        } else if (remoteSettings.empPermissions !== undefined) {
+          mergedSettings.empPermissions = remoteSettings.empPermissions;
+        }
       } else {
         mergedSettings = { ...localSettings, ...remoteSettings };
         if (remoteSettings.permissions !== undefined) {
@@ -388,7 +400,10 @@ export function smartMergeStates(localState, remoteState) {
         }
         
         if (remoteSettings.empPermissions !== undefined) {
-          mergedSettings.empPermissions = remoteSettings.empPermissions;
+          mergedSettings.empPermissions = {
+            ...(localSettings.empPermissions || {}),
+            ...(remoteSettings.empPermissions || {})
+          };
         } else if (localSettings.empPermissions !== undefined) {
           mergedSettings.empPermissions = localSettings.empPermissions;
         }
