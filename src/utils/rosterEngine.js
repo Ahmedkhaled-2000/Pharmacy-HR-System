@@ -1,6 +1,6 @@
 import { arabicWeekday } from './formatters';
 import { getRealTodayStr } from './timeEngine';
-import { getActivePayrollMonth } from './periodEngine';
+import { getActivePayrollMonth, getCycleDateRange, extractPayrollSettings } from './periodEngine';
 
 export const AR_WEEKDAYS_MAP = {
   0: ['sunday', ' الأحد', 'الأحد', 'الاحد'],
@@ -438,3 +438,91 @@ export function applyShiftSwapToRosters(targetReq, currentRosters = [], employee
 
   return updatedRosters;
 }
+
+/**
+ * فحص اقتراب/انتهاء الدورة الشهرية وتوليد إشعار رسمي للموظف بوجوب إرسال جدوله الشهري
+ * @param {object} state - حالة المنظومة
+ * @param {object} emp - بيانات الموظف
+ * @returns {object|null} - إشعار جديد إذا وجب الإرسال، أو null إذا كان مرسلاً بالفعل أو الموظف لديه جدول
+ */
+export function checkAndTriggerCycleEndRosterReminder(state, emp) {
+  if (!emp || !state) return null;
+  const empIdStr = String(emp.id || emp.code || '');
+  if (!empIdStr) return null;
+
+  const todayStr = getRealTodayStr();
+  const orgSettings = state.orgSettings || {};
+  const currentActiveMonth = getActivePayrollMonth(orgSettings);
+  const currentCycle = getCycleDateRange(currentActiveMonth, orgSettings);
+
+  // حساب موعد نهاية الدورة الحالية:
+  // إذا كنا في آخر 5 أيام من الدورة الحالية أو بعدها، الهدف هو الدورة التالية أو الحالية إن لم يكن لها جدول
+  const today = new Date(todayStr + 'T00:00:00');
+  const cycleEnd = new Date(currentCycle.endDate + 'T00:00:00');
+  const diffDays = Math.round((cycleEnd.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+  // تحديد الشهر المستهدف للجدول
+  let targetMonth = currentActiveMonth;
+  if (diffDays <= 5) {
+    const [y, m] = currentActiveMonth.split('-').map(Number);
+    const nextM = m === 12 ? 1 : m + 1;
+    const nextY = m === 12 ? y + 1 : y;
+    targetMonth = `${nextY}-${String(nextM).padStart(2, '0')}`;
+  }
+
+  const targetCycle = getCycleDateRange(targetMonth, orgSettings);
+
+  // 1. فحص هل للموظف جدول معتمد لهذا الشهر المستهدف
+  const targetBranch = emp.branchId || (emp.branchesDetails?.[0]?.branchId) || null;
+  const approvedRoster = findEmployeeRoster(emp.id, targetCycle.startDate, state, targetBranch);
+  if (approvedRoster && approvedRoster.schedule && Object.keys(approvedRoster.schedule).length > 0) {
+    return null; // لديه جدول معتمد بالفعل
+  }
+
+  // 2. فحص هل الموظف لديه طلب تعديل/إنشاء جدول قيد المراجعة بالفعل لهذا الشهر
+  const hasPendingReq = (state.requests || []).some(
+    (r) =>
+      (String(r.employeeId) === empIdStr || (emp.code && String(r.employeeCode) === String(emp.code))) &&
+      (r.type === 'roster_update' || r.type === 'roster_edit' || r.type === 'roster_edit_request') &&
+      (r.month === targetMonth || (r.fromDate && r.fromDate <= targetCycle.endDate && r.toDate >= targetCycle.startDate)) &&
+      (r.status === 'pending' || r.status === 'pending_admin' || r.status === 'pending_branch')
+  );
+  if (hasPendingReq) {
+    return null; // الموظف أرسل طلبه وهو قيد المراجعة
+  }
+
+  // 3. فحص هل تم إرسال إشعار تذكير لهذا الموظف لنفس الدورة الشهرية مسبقاً (لمنع التكرار المزعج)
+  const alreadyNotified = (state.notifications || []).some(
+    (n) =>
+      n.type === 'roster_reminder' &&
+      (String(n.targetEmployeeId) === empIdStr || String(n.employeeId) === empIdStr) &&
+      n.targetMonth === targetMonth
+  );
+  if (alreadyNotified) {
+    return null; // تم إشعاره بالفعل لهذه الدورة
+  }
+
+  // 4. إنشاء إشعار تذكير رسمي للموظف
+  const notifId = `notif_roster_reminder_${targetMonth}_${empIdStr}_${Date.now()}`;
+  const newNotification = {
+    id: notifId,
+    type: 'roster_reminder',
+    typeLabel: 'تذكير الجدول الشهري',
+    icon: '📅',
+    title: `📅 تذكير دورة الرواتب: مطلوب إرسال الجدول الشهري لشهر (${targetMonth})`,
+    message: `اقتربت/انتهت دورة العمل الحالية، يرجى إعداد وإرسال جدول الشيفتات الشهري للدورة الجديدة (${targetCycle.shortLabel}) لمدير الفرع والإدارة العليا للاعتماد.`,
+    targetEmployeeId: String(emp.id || emp.code),
+    employeeId: String(emp.id || emp.code),
+    targetRole: 'employee',
+    targetMonth,
+    linkTab: 'roster',
+    autoOpenModal: true,
+    actionRequired: true,
+    read: false,
+    date: todayStr,
+    timestamp: new Date().toISOString()
+  };
+
+  return newNotification;
+}
+

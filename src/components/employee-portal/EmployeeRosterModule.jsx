@@ -18,18 +18,28 @@ const WEEKDAY_AR_MAP = {
 
 const daysOfWeek = ['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة'];
 
-const DEFAULT_SCHEDULE = {
+export const DEFAULT_SCHEDULE = {
   'السبت': { type: 'shift', start: '08:00', end: '16:00' },
   'الأحد': { type: 'shift', start: '08:00', end: '16:00' },
   'الاثنين': { type: 'shift', start: '08:00', end: '16:00' },
-  'الثلاثاء': { type: 'shift', start: '16:00', end: '00:00' },
+  'الثلاثاء': { type: 'shift', start: '08:00', end: '16:00' },
   'الأربعاء': { type: 'shift', start: '08:00', end: '16:00' },
   'الخميس': { type: 'shift', start: '08:00', end: '16:00' },
   'الجمعة': { type: 'off', start: '', end: '' }
 };
 
+export const BLANK_SCHEDULE = {
+  'السبت': { type: 'shift', start: '', end: '' },
+  'الأحد': { type: 'shift', start: '', end: '' },
+  'الاثنين': { type: 'shift', start: '', end: '' },
+  'الثلاثاء': { type: 'shift', start: '', end: '' },
+  'الأربعاء': { type: 'shift', start: '', end: '' },
+  'الخميس': { type: 'shift', start: '', end: '' },
+  'الجمعة': { type: 'off', start: '', end: '' }
+};
+
 function getDayScheduleFromSchedule(schedule, dateStr, arDayName) {
-  if (!schedule || typeof schedule !== 'object') return { type: arDayName === 'الجمعة' ? 'off' : 'shift', start: '08:00', end: '16:00' };
+  if (!schedule || typeof schedule !== 'object') return null;
   
   if (schedule[dateStr]) return schedule[dateStr];
   if (schedule[arDayName]) return schedule[arDayName];
@@ -46,7 +56,7 @@ function getDayScheduleFromSchedule(schedule, dateStr, arDayName) {
   const enDay = enDays[jsDay];
   if (enDay && schedule[enDay]) return schedule[enDay];
 
-  return { type: arDayName === 'الجمعة' ? 'off' : 'shift', start: '08:00', end: '16:00' };
+  return null;
 }
 
 /**
@@ -55,6 +65,8 @@ function getDayScheduleFromSchedule(schedule, dateStr, arDayName) {
  */
 function buildMonthCalendar(selectedMonth, schedule, fromDate, toDate, empId = null, state = null) {
   const result = [];
+  const hasApprovedSchedule = Boolean(schedule && typeof schedule === 'object' && Object.keys(schedule).length > 0);
+
   if (fromDate && toDate) {
     let current = new Date(fromDate);
     const end = new Date(toDate);
@@ -67,17 +79,17 @@ function buildMonthCalendar(selectedMonth, schedule, fromDate, toDate, empId = n
         const jsDay = current.getDay();
         const arDayName = Object.keys(WEEKDAY_AR_MAP).find(k => WEEKDAY_AR_MAP[k] === jsDay) || '';
         
-        let daySchedule;
+        let daySchedule = null;
         if (empId && state) {
           const dynamicSchedule = getEmployeeDaySchedule(empId, dateStr, state);
           if (dynamicSchedule?.isSwapped) {
             daySchedule = dynamicSchedule;
-          } else if (schedule) {
+          } else if (hasApprovedSchedule) {
             daySchedule = getDayScheduleFromSchedule(schedule, dateStr, arDayName);
           } else {
-            daySchedule = dynamicSchedule;
+            daySchedule = null;
           }
-        } else {
+        } else if (hasApprovedSchedule) {
           daySchedule = getDayScheduleFromSchedule(schedule, dateStr, arDayName);
         }
 
@@ -96,17 +108,17 @@ function buildMonthCalendar(selectedMonth, schedule, fromDate, toDate, empId = n
     const jsDay = new Date(dateStr).getDay(); // 0=Sun..6=Sat
     const arDayName = Object.keys(WEEKDAY_AR_MAP).find(k => WEEKDAY_AR_MAP[k] === jsDay) || '';
     
-    let daySchedule;
+    let daySchedule = null;
     if (empId && state) {
       const dynamicSchedule = getEmployeeDaySchedule(empId, dateStr, state);
       if (dynamicSchedule?.isSwapped) {
         daySchedule = dynamicSchedule;
-      } else if (schedule) {
+      } else if (hasApprovedSchedule) {
         daySchedule = getDayScheduleFromSchedule(schedule, dateStr, arDayName);
       } else {
-        daySchedule = dynamicSchedule;
+        daySchedule = null;
       }
-    } else {
+    } else if (hasApprovedSchedule) {
       daySchedule = getDayScheduleFromSchedule(schedule, dateStr, arDayName);
     }
 
@@ -220,7 +232,9 @@ export default function EmployeeRosterModule({
   })();
 
   // Form states
-  const [scheduleInputs, setScheduleInputs] = useState(DEFAULT_SCHEDULE);
+  const [scheduleInputs, setScheduleInputs] = useState(() => {
+    return { ...BLANK_SCHEDULE };
+  });
   const [fromDate, setFromDate] = useState(defaultCycleFrom);
   const [toDate, setToDate] = useState(defaultCycleTo);
 
@@ -245,9 +259,9 @@ export default function EmployeeRosterModule({
       lastSyncKeyRef.current = syncKey;
 
       if (approved?.schedule) {
-        setScheduleInputs(approved.schedule);
+        setScheduleInputs({ ...approved.schedule });
       } else {
-        setScheduleInputs(DEFAULT_SCHEDULE);
+        setScheduleInputs({ ...BLANK_SCHEDULE });
       }
 
       setFromDate(approved?.fromDate || defaultCycleFrom);
@@ -261,12 +275,12 @@ export default function EmployeeRosterModule({
       (String(r.employeeId) === String(emp.id) || (emp.code && String(r.employeeCode) === String(emp.code))) &&
       (r.type === 'roster_update' || r.type === 'roster_edit' || r.type === 'roster_edit_request') &&
       (r.month === selectedMonth || !r.month) &&
-      (r.status === 'pending' || r.status === 'pending_admin') &&
+      (r.status === 'pending' || r.status === 'pending_admin' || r.status === 'pending_branch') &&
       (String(r.branchId || '') === String(curBranch || '') || (!r.branchId && String(primaryBranch || '') === String(curBranch || '')))
   );
 
-  // The active schedule to display (approved or form defaults)
-  const activeSchedule = currentRoster?.schedule || scheduleInputs;
+  // The active schedule to display (STRICTLY ONLY if approved roster exists)
+  const activeSchedule = currentRoster?.schedule || null;
 
   // Build full month calendar with swap integration
   const monthCalendar = buildMonthCalendar(
@@ -278,21 +292,45 @@ export default function EmployeeRosterModule({
     state
   );
 
-  // Stats
-  const workDays = monthCalendar.filter(d => d.daySchedule?.type !== 'off').length;
-  const offDays = monthCalendar.length - workDays;
+  // Stats (Only count when actual scheduled shift exists)
+  const workDays = monthCalendar.filter(d => d.daySchedule && d.daySchedule.type !== 'off' && !d.daySchedule.isOff).length;
+  const offDays = monthCalendar.filter(d => d.daySchedule && (d.daySchedule.type === 'off' || d.daySchedule.isOff)).length;
 
   // Handle Roster Schedule Field Change
   const handleScheduleChange = (day, field, value) => {
-    setScheduleInputs((prev) => ({
-      ...prev,
-      [day]: { ...prev[day], [field]: value }
-    }));
+    setScheduleInputs((prev) => {
+      const cur = prev[day] || { type: 'shift', start: '', end: '' };
+      if (field === 'type' && value === 'off') {
+        return {
+          ...prev,
+          [day]: { ...cur, type: 'off', start: '', end: '' }
+        };
+      }
+      return {
+        ...prev,
+        [day]: { ...cur, [field]: value }
+      };
+    });
   };
 
   // Submit Roster for Approval
   const handleSubmitRoster = async (e) => {
     e.preventDefault();
+
+    // Validation: check for incomplete shifts
+    const hasIncompleteShift = Object.entries(scheduleInputs).some(([day, conf]) => {
+      return conf?.type === 'shift' && (!conf.start || !conf.end);
+    });
+    if (hasIncompleteShift) {
+      showToast?.('يرجى تحديد وقت بداية ونهاية الشيفت لكافة أيام العمل أو تحويلها إلى راحة أسبوعية (OFF)');
+      return;
+    }
+
+    const hasAnyShift = Object.values(scheduleInputs).some((conf) => conf?.type === 'shift' && conf.start && conf.end);
+    if (!hasAnyShift) {
+      showToast?.('يرجى تحديد وردية عمل واحدة على الأقل في الأسبوع قبل تقديم الجدول');
+      return;
+    }
 
     const targetBranch = activeFormBranchId || selectedBranchId || primaryBranch;
 
@@ -344,34 +382,68 @@ export default function EmployeeRosterModule({
         style={{ padding: '18px', background: 'var(--surface-muted)', border: '1px solid var(--primary-tint)', margin: '16px 0 20px' }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '10px' }}>
-          <h4 style={{ margin: 0, fontSize: '15px', color: 'var(--primary)' }}>
-            ⚙️ إعداد نمط الشيفت الأسبوعي
-          </h4>
-          {isMultiBranch && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <label style={{ fontSize: '13px', fontWeight: 'bold' }}>الفرع:</label>
-              <select
-                value={targetBranchId}
-                onChange={(e) => setActiveFormBranchId(e.target.value)}
-                style={{ padding: '4px 10px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px' }}
-              >
-                {emp.branchesDetails.map((bd) => {
-                  const bObj = (state.branches || []).find((b) => b.id === bd.branchId);
-                  return (
-                    <option key={bd.branchId} value={bd.branchId}>
-                      {bObj ? bObj.name : `فرع ${bd.branchId}`}
-                    </option>
-                  );
-                })}
-              </select>
-            </div>
-          )}
+          <div>
+            <h4 style={{ margin: 0, fontSize: '15.5px', color: 'var(--primary)', fontWeight: 800 }}>
+              ⚙️ إعداد وتصميم جدول الشيفتات الشهري ({selectedMonth})
+            </h4>
+            <p style={{ fontSize: '12.5px', color: 'var(--muted)', margin: '4px 0 0' }}>
+              حدد أوقات الورديات والراحات الأسبوعية بحرية كاملة، وسيُرسل للاعتماد المزدوج من <strong>مدير الفرع والإدارة العليا</strong>.
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ fontSize: '12px', padding: '4px 10px', border: '1px solid var(--border)', background: 'var(--surface)' }}
+              onClick={() => {
+                const std = {};
+                daysOfWeek.forEach((d) => {
+                  if (d === 'الجمعة') {
+                    std[d] = { type: 'off', start: '', end: '' };
+                  } else {
+                    std[d] = { type: 'shift', start: '08:00', end: '16:00' };
+                  }
+                });
+                setScheduleInputs(std);
+              }}
+            >
+              ⚡ تطبيق دوام قياسي (8 ص - 4 م)
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ fontSize: '12px', padding: '4px 10px', border: '1px solid var(--border)', background: 'var(--surface)' }}
+              onClick={() => {
+                const empty = {};
+                daysOfWeek.forEach((d) => {
+                  empty[d] = { type: 'off', start: '', end: '' };
+                });
+                setScheduleInputs(empty);
+              }}
+            >
+              🧹 تفريغ جميع الأيام
+            </button>
+            {isMultiBranch && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <label style={{ fontSize: '12px', fontWeight: 'bold' }}>الفرع:</label>
+                <select
+                  value={targetBranchId}
+                  onChange={(e) => setActiveFormBranchId(e.target.value)}
+                  style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px' }}
+                >
+                  {emp.branchesDetails.map((bd) => {
+                    const bObj = (state.branches || []).find((b) => b.id === bd.branchId);
+                    return (
+                      <option key={bd.branchId} value={bd.branchId}>
+                        {bObj ? bObj.name : `فرع ${bd.branchId}`}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+            )}
+          </div>
         </div>
-
-        <p style={{ fontSize: '13px', color: 'var(--muted)', margin: '0 0 14px' }}>
-          حدد أوقات العمل والأوف لكل يوم في الأسبوع. يتم تكرار هذا النمط على كل أسابيع الشهر. سيُرسل طلب الاعتماد إلى
-          <strong> مدير الفرع والإدارة العليا</strong> معاً.
-        </p>
 
         <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap', marginBottom: '16px' }}>
           <div className="field">
@@ -412,8 +484,9 @@ export default function EmployeeRosterModule({
                     {scheduleInputs[day]?.type === 'shift' ? (
                       <input
                         type="time"
-                        value={scheduleInputs[day]?.start || '08:00'}
+                        value={scheduleInputs[day]?.start || ''}
                         onChange={(e) => handleScheduleChange(day, 'start', e.target.value)}
+                        placeholder="08:00"
                         required
                       />
                     ) : (
@@ -424,8 +497,9 @@ export default function EmployeeRosterModule({
                     {scheduleInputs[day]?.type === 'shift' ? (
                       <input
                         type="time"
-                        value={scheduleInputs[day]?.end || '16:00'}
+                        value={scheduleInputs[day]?.end || ''}
                         onChange={(e) => handleScheduleChange(day, 'end', e.target.value)}
+                        placeholder="16:00"
                         required
                       />
                     ) : (
@@ -478,10 +552,10 @@ export default function EmployeeRosterModule({
 
           const bRoster = getResolvedEmployeeRoster(emp, bId, selectedMonth, state);
 
-          const bSchedule = bRoster?.schedule || DEFAULT_SCHEDULE;
+          const bSchedule = bRoster?.schedule || null;
           const bCalendar = buildMonthCalendar(selectedMonth, bSchedule, bRoster?.fromDate || fromDate, bRoster?.toDate || toDate, emp?.id, state);
-          const bWorkDays = bCalendar.filter(d => d.daySchedule?.type !== 'off').length;
-          const bOffDays = bCalendar.length - bWorkDays;
+          const bWorkDays = bCalendar.filter(d => d.daySchedule && d.daySchedule.type !== 'off' && !d.daySchedule.isOff).length;
+          const bOffDays = bCalendar.filter(d => d.daySchedule && (d.daySchedule.type === 'off' || d.daySchedule.isOff)).length;
 
           return (
             <div key={bId} style={{ marginTop: '20px', padding: '16px', background: 'var(--surface-muted)', border: '1px solid var(--border)', borderRadius: '12px' }}>
@@ -491,11 +565,15 @@ export default function EmployeeRosterModule({
                     🏢 جدول فرع: {bName}
                   </h4>
                   <span className={`badge ${bRoster?.status === 'approved' ? 'badge-success' : 'badge-warning'}`} style={{ fontSize: '11.5px' }}>
-                    {bRoster?.status === 'approved' ? '🟢 معتمد' : '⏳ بانتظار الاعتماد'}
+                    {bRoster?.status === 'approved' ? '🟢 معتمد' : '⚠️ غير معتمد (لم يحدد جدول)'}
                   </span>
                 </div>
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  <span className="badge info">أيام عمل: {bWorkDays} | أيام راحة: {bOffDays}</span>
+                  {bRoster?.status === 'approved' ? (
+                    <span className="badge info">أيام عمل: {bWorkDays} | أيام راحة: {bOffDays}</span>
+                  ) : (
+                    <span className="badge secondary">بانتظار إنشاء واعتماد الجدول</span>
+                  )}
                   <button
                     className="btn btn-start"
                     style={{ fontSize: '12px', padding: '4px 10px' }}
@@ -509,24 +587,31 @@ export default function EmployeeRosterModule({
                 </div>
               </div>
 
+              {!bSchedule && (
+                <div style={{ padding: '10px 14px', background: '#fffbeb', border: '1px dashed #fde68a', borderRadius: '8px', marginBottom: '12px', fontSize: '12.5px', color: '#92400e' }}>
+                  ⚠️ لم يتم اعتماد جدول تشغيلي لهذا الفرع في شهر ({selectedMonth}) حتى الآن.
+                </div>
+              )}
+
               {isMobileScreen ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   {bCalendar.map(({ date, day, arDayName, daySchedule }) => {
-                    const isOff = daySchedule?.type === 'off';
+                    const isOff = daySchedule?.type === 'off' || daySchedule?.isOff === true;
                     const isSwapped = daySchedule?.isSwapped;
+                    const isUnset = !daySchedule;
                     return (
                       <div
                         key={date}
                         style={{
-                          background: isSwapped ? 'rgba(245, 158, 11, 0.08)' : (isOff ? 'var(--surface-muted)' : 'var(--surface)'),
-                          border: isSwapped ? '1px solid #f59e0b' : (isOff ? '1px dashed var(--border)' : '1px solid var(--border)'),
+                          background: isSwapped ? 'rgba(245, 158, 11, 0.08)' : (isOff ? 'var(--surface-muted)' : (isUnset ? 'rgba(241,245,249,0.6)' : 'var(--surface)')),
+                          border: isSwapped ? '1px solid #f59e0b' : (isOff ? '1px dashed var(--border)' : (isUnset ? '1px dashed #cbd5e1' : '1px solid var(--border)')),
                           borderRadius: '12px',
                           padding: '12px 14px',
                           display: 'flex',
                           justifyContent: 'space-between',
                           alignItems: 'center',
-                          boxShadow: isOff ? 'none' : '0 1px 3px rgba(0,0,0,0.04)',
-                          opacity: (isOff && !isSwapped) ? 0.8 : 1
+                          boxShadow: (isOff || isUnset) ? 'none' : '0 1px 3px rgba(0,0,0,0.04)',
+                          opacity: (isOff && !isSwapped) ? 0.8 : (isUnset ? 0.75 : 1)
                         }}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -534,8 +619,8 @@ export default function EmployeeRosterModule({
                             padding: '4px 10px',
                             borderRadius: '8px',
                             fontSize: '12px',
-                            background: isSwapped ? '#fef3c7' : (isOff ? 'var(--surface)' : 'var(--primary-tint)'),
-                            color: isSwapped ? '#b45309' : (isOff ? 'var(--muted)' : 'var(--primary-dark)'),
+                            background: isSwapped ? '#fef3c7' : (isOff ? 'var(--surface)' : (isUnset ? '#f1f5f9' : 'var(--primary-tint)')),
+                            color: isSwapped ? '#b45309' : (isOff ? 'var(--muted)' : (isUnset ? '#64748b' : 'var(--primary-dark)')),
                             fontWeight: 700
                           }}>
                             {arDayName}
@@ -548,7 +633,9 @@ export default function EmployeeRosterModule({
                           </div>
                         </div>
                         <div style={{ textAlign: 'left' }}>
-                          {isOff ? (
+                          {isUnset ? (
+                            <span className="badge secondary" style={{ fontSize: '11.5px', color: '#64748b' }}>💤 — لم يُحدد شيفت بعد</span>
+                          ) : isOff ? (
                             isSwapped ? (
                               <span className="badge warning" style={{ fontSize: '11.5px' }}>🔄 💤 راحة متبدلة</span>
                             ) : (
@@ -582,25 +669,28 @@ export default function EmployeeRosterModule({
                     </thead>
                     <tbody>
                       {bCalendar.map(({ date, day, arDayName, daySchedule }) => {
-                        const isOff = daySchedule?.type === 'off';
+                        const isOff = daySchedule?.type === 'off' || daySchedule?.isOff === true;
                         const isSwapped = daySchedule?.isSwapped;
+                        const isUnset = !daySchedule;
                         return (
-                          <tr key={date} style={{ background: isSwapped ? 'rgba(245, 158, 11, 0.08)' : (isOff ? 'rgba(100,116,139,0.06)' : undefined), opacity: (isOff && !isSwapped) ? 0.75 : 1 }}>
+                          <tr key={date} style={{ background: isSwapped ? 'rgba(245, 158, 11, 0.08)' : ((isOff || isUnset) ? 'rgba(100,116,139,0.06)' : undefined), opacity: (isOff || isUnset) && !isSwapped ? 0.75 : 1 }}>
                             <td style={{ fontWeight: 600 }}>{date}</td>
                             <td>
-                              <span style={{ padding: '2px 8px', borderRadius: '99px', fontSize: '12px', background: isSwapped ? '#fef3c7' : (isOff ? 'var(--surface)' : 'var(--primary-tint)'), color: isSwapped ? '#b45309' : (isOff ? 'var(--muted)' : 'var(--primary-dark)'), fontWeight: 600 }}>
+                              <span style={{ padding: '2px 8px', borderRadius: '99px', fontSize: '12px', background: isSwapped ? '#fef3c7' : ((isOff || isUnset) ? 'var(--surface)' : 'var(--primary-tint)'), color: isSwapped ? '#b45309' : ((isOff || isUnset) ? 'var(--muted)' : 'var(--primary-dark)'), fontWeight: 600 }}>
                                 {arDayName}
                               </span>
                             </td>
                             <td>
-                              {isOff ? (
+                              {isUnset ? (
+                                <span className="badge secondary" style={{ fontSize: '11px', color: '#64748b' }}>💤 غير محدد</span>
+                              ) : isOff ? (
                                 isSwapped ? <span className="badge warning">🔄 💤 راحة متبدلة</span> : <span className="badge secondary">💤 راحة (OFF)</span>
                               ) : (
                                 isSwapped ? <span className="badge warning">🔄 وردية متبدلة</span> : <span className="badge success">⏰ وردية عمل</span>
                               )}
                             </td>
-                            <td style={{ color: isSwapped ? '#b45309' : (isOff ? 'var(--muted)' : 'var(--primary)'), fontWeight: isOff && !isSwapped ? 400 : 600 }}>
-                              {isOff ? (isSwapped ? (daySchedule.swapNote || 'راحة متبدلة') : '—') : `${daySchedule?.start} – ${daySchedule?.end}${isSwapped && daySchedule.swappedWithName ? ` (مع ${daySchedule.swappedWithName})` : ''}`}
+                            <td style={{ color: isSwapped ? '#b45309' : ((isOff || isUnset) ? 'var(--muted)' : 'var(--primary)'), fontWeight: (isOff || isUnset) && !isSwapped ? 400 : 600 }}>
+                              {isUnset ? '—' : isOff ? (isSwapped ? (daySchedule.swapNote || 'راحة متبدلة') : '—') : `${daySchedule?.start} – ${daySchedule?.end}${isSwapped && daySchedule.swappedWithName ? ` (مع ${daySchedule.swappedWithName})` : ''}`}
                             </td>
                           </tr>
                         );
@@ -671,14 +761,54 @@ export default function EmployeeRosterModule({
       )}
 
       {/* Roster status badge */}
-      <div style={{ marginTop: '12px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+      <div style={{ marginTop: '12px', display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
         {currentRoster ? (
           <span className="badge success">✅ الجدول معتمد لشهر {selectedMonth} ({currentBranchName})</span>
         ) : (
-          <span className="badge secondary">⚠️ لا يوجد جدول معتمد لهذا الشهر ({currentBranchName}) — يُعرض النمط الافتراضي</span>
+          <span className="badge warning" style={{ background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a', fontWeight: 'bold' }}>
+            ⚠️ لا يوجد جدول معتمد لهذا الشهر ({currentBranchName})
+          </span>
         )}
-        <span className="badge info">🗓️ أيام عمل: {workDays} | أيام راحة: {offDays} | إجمالي أيام الشهر: {monthCalendar.length}</span>
+        {currentRoster ? (
+          <span className="badge info">🗓️ أيام عمل: {workDays} | أيام راحة: {offDays} | إجمالي أيام الدورة: {monthCalendar.length}</span>
+        ) : (
+          <span className="badge secondary">إجمالي أيام الدورة: {monthCalendar.length} يوم</span>
+        )}
       </div>
+
+      {/* Unapproved Roster Banner with Quick Action */}
+      {!currentRoster && (
+        <div style={{
+          marginTop: '16px',
+          padding: '16px 20px',
+          borderRadius: '12px',
+          background: 'linear-gradient(135deg, #fff7ed, #ffedd5)',
+          border: '1.5px solid #f97316',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '12px',
+          boxShadow: '0 2px 8px rgba(249, 115, 22, 0.1)'
+        }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: '14.5px', color: '#c2410c' }}>
+              ⚠️ لم يتم اعتماد جدول تشغيلي لشهر ({selectedMonth}) حتى الآن
+            </div>
+            <div style={{ fontSize: '13px', color: '#9a3412', marginTop: '3px' }}>
+              لا توجد شيفتات مسجلة لهذا الشهر. يرجى إعداد وتصميم جدول الشيفتات الشهري وإرساله للاعتماد المزدوج من مدير الفرع والإدارة العليا.
+            </div>
+          </div>
+          <button
+            type="button"
+            className="btn btn-start"
+            style={{ background: '#ea580c', color: '#fff', padding: '8px 16px', fontWeight: 'bold', fontSize: '13px', borderRadius: '8px', border: 'none', cursor: 'pointer' }}
+            onClick={() => setShowRosterModal(true)}
+          >
+            ➕ إنشاء وتحديد جدول الشهر الآن
+          </button>
+        </div>
+      )}
 
       {/* ── Roster Builder Form ── */}
       {showRosterModal && renderRosterModal()}
@@ -687,33 +817,52 @@ export default function EmployeeRosterModule({
       {viewMode === 'week' && (
         <div style={{ marginTop: '20px' }}>
           <h4 style={{ margin: '0 0 12px', fontSize: '15px' }}>📋 نمط الأسبوع المعتمد ({currentBranchName})</h4>
-          <div className="ep-summary-grid">
-            {daysOfWeek.map((day) => {
-              const item = activeSchedule[day] || { type: 'shift', start: '08:00', end: '16:00' };
-              const isOff = item?.type === 'off';
-              return (
-                <div
-                  key={day}
-                  className="ep-summary-card"
-                  style={{ border: isOff ? '1px dashed var(--muted)' : '1px solid var(--primary-tint)' }}
-                >
-                  <div className="ep-summary-icon">{isOff ? '💤' : '⏰'}</div>
-                  <div className="ep-summary-body">
-                    <div className="ep-summary-label">{day}</div>
-                    <div
-                      className="ep-summary-value"
-                      style={{ fontSize: '15px', color: isOff ? 'var(--muted)' : 'var(--primary)' }}
-                    >
-                      {isOff ? 'عطلة (OFF)' : `${item.start} – ${item.end}`}
-                    </div>
-                    <div className="ep-summary-sub">
-                      {isOff ? 'يوم راحة رسمي' : 'وردية العمل المعتمدة'}
+          {!currentRoster ? (
+            <div style={{ padding: '24px', textAlign: 'center', background: 'var(--surface-muted)', borderRadius: '12px', border: '1px dashed var(--border)' }}>
+              <span style={{ fontSize: '32px' }}>📅</span>
+              <div style={{ fontWeight: 'bold', margin: '8px 0 4px', color: 'var(--text)' }}>
+                لم يتم إعداد أو اعتماد نمط أسبوعي لهذا الشهر بعد
+              </div>
+              <p style={{ color: 'var(--muted)', fontSize: '13px', margin: '0 0 14px' }}>
+                اضغط على زر "إنشاء / تعديل Roster الشهر" بالأعلى لاختيار وردياتك وإرسالها للاعتماد.
+              </p>
+              <button
+                type="button"
+                className="btn btn-start"
+                onClick={() => setShowRosterModal(true)}
+              >
+                ➕ إعداد الجدول الآن
+              </button>
+            </div>
+          ) : (
+            <div className="ep-summary-grid">
+              {daysOfWeek.map((day) => {
+                const item = activeSchedule?.[day] || { type: 'off' };
+                const isOff = item?.type === 'off';
+                return (
+                  <div
+                    key={day}
+                    className="ep-summary-card"
+                    style={{ border: isOff ? '1px dashed var(--muted)' : '1px solid var(--primary-tint)' }}
+                  >
+                    <div className="ep-summary-icon">{isOff ? '💤' : '⏰'}</div>
+                    <div className="ep-summary-body">
+                      <div className="ep-summary-label">{day}</div>
+                      <div
+                        className="ep-summary-value"
+                        style={{ fontSize: '15px', color: isOff ? 'var(--muted)' : 'var(--primary)' }}
+                      >
+                        {isOff ? 'عطلة (OFF)' : `${item.start} – ${item.end}`}
+                      </div>
+                      <div className="ep-summary-sub">
+                        {isOff ? 'يوم راحة رسمي' : 'وردية العمل المعتمدة'}
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -726,21 +875,22 @@ export default function EmployeeRosterModule({
           {isMobileScreen ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {monthCalendar.map(({ date, day, arDayName, daySchedule }) => {
-                const isOff = daySchedule?.type === 'off';
+                const isOff = daySchedule?.type === 'off' || daySchedule?.isOff === true;
                 const isSwapped = daySchedule?.isSwapped;
+                const isUnset = !daySchedule;
                 return (
                   <div
                     key={date}
                     style={{
-                      background: isSwapped ? 'rgba(245, 158, 11, 0.08)' : (isOff ? 'var(--surface-muted)' : 'var(--surface)'),
-                      border: isSwapped ? '1px solid #f59e0b' : (isOff ? '1px dashed var(--border)' : '1px solid var(--border)'),
+                      background: isSwapped ? 'rgba(245, 158, 11, 0.08)' : (isOff ? 'var(--surface-muted)' : (isUnset ? 'rgba(241,245,249,0.6)' : 'var(--surface)')),
+                      border: isSwapped ? '1px solid #f59e0b' : (isOff ? '1px dashed var(--border)' : (isUnset ? '1px dashed #cbd5e1' : '1px solid var(--border)')),
                       borderRadius: '12px',
                       padding: '12px 14px',
                       display: 'flex',
                       justifyContent: 'space-between',
                       alignItems: 'center',
-                      boxShadow: isOff ? 'none' : '0 1px 3px rgba(0,0,0,0.04)',
-                      opacity: (isOff && !isSwapped) ? 0.8 : 1
+                      boxShadow: (isOff || isUnset) ? 'none' : '0 1px 3px rgba(0,0,0,0.04)',
+                      opacity: (isOff && !isSwapped) ? 0.8 : (isUnset ? 0.75 : 1)
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -748,8 +898,8 @@ export default function EmployeeRosterModule({
                         padding: '4px 10px',
                         borderRadius: '8px',
                         fontSize: '12px',
-                        background: isSwapped ? '#fef3c7' : (isOff ? 'var(--surface)' : 'var(--primary-tint)'),
-                        color: isSwapped ? '#b45309' : (isOff ? 'var(--muted)' : 'var(--primary-dark)'),
+                        background: isSwapped ? '#fef3c7' : (isOff ? 'var(--surface)' : (isUnset ? '#f1f5f9' : 'var(--primary-tint)')),
+                        color: isSwapped ? '#b45309' : (isOff ? 'var(--muted)' : (isUnset ? '#64748b' : 'var(--primary-dark)')),
                         fontWeight: 700
                       }}>
                         {arDayName}
@@ -762,7 +912,9 @@ export default function EmployeeRosterModule({
                       </div>
                     </div>
                     <div style={{ textAlign: 'left' }}>
-                      {isOff ? (
+                      {isUnset ? (
+                        <span className="badge secondary" style={{ fontSize: '11.5px', color: '#64748b' }}>💤 — لم يُحدد شيفت بعد</span>
+                      ) : isOff ? (
                         isSwapped ? (
                           <span className="badge warning" style={{ fontSize: '11.5px' }}>🔄 💤 راحة متبدلة</span>
                         ) : (
@@ -796,14 +948,15 @@ export default function EmployeeRosterModule({
                 </thead>
                 <tbody>
                   {monthCalendar.map(({ date, day, arDayName, daySchedule }) => {
-                    const isOff = daySchedule?.type === 'off';
+                    const isOff = daySchedule?.type === 'off' || daySchedule?.isOff === true;
                     const isSwapped = daySchedule?.isSwapped;
+                    const isUnset = !daySchedule;
                     return (
                       <tr
                         key={date}
                         style={{
-                          background: isSwapped ? 'rgba(245, 158, 11, 0.08)' : (isOff ? 'rgba(100,116,139,0.06)' : undefined),
-                          opacity: (isOff && !isSwapped) ? 0.75 : 1
+                          background: isSwapped ? 'rgba(245, 158, 11, 0.08)' : ((isOff || isUnset) ? 'rgba(100,116,139,0.06)' : undefined),
+                          opacity: (isOff || isUnset) && !isSwapped ? 0.75 : 1
                         }}
                       >
                         <td style={{ fontWeight: 600 }}>{date}</td>
@@ -812,22 +965,24 @@ export default function EmployeeRosterModule({
                             padding: '2px 8px',
                             borderRadius: '99px',
                             fontSize: '12px',
-                            background: isSwapped ? '#fef3c7' : (isOff ? 'var(--surface)' : 'var(--primary-tint)'),
-                            color: isSwapped ? '#b45309' : (isOff ? 'var(--muted)' : 'var(--primary-dark)'),
+                            background: isSwapped ? '#fef3c7' : ((isOff || isUnset) ? 'var(--surface)' : 'var(--primary-tint)'),
+                            color: isSwapped ? '#b45309' : ((isOff || isUnset) ? 'var(--muted)' : 'var(--primary-dark)'),
                             fontWeight: 600
                           }}>
                             {arDayName}
                           </span>
                         </td>
                         <td>
-                          {isOff ? (
+                          {isUnset ? (
+                            <span className="badge secondary" style={{ fontSize: '11px', color: '#64748b' }}>💤 غير محدد</span>
+                          ) : isOff ? (
                             isSwapped ? <span className="badge warning">🔄 💤 راحة متبدلة</span> : <span className="badge secondary">💤 راحة (OFF)</span>
                           ) : (
                             isSwapped ? <span className="badge warning">🔄 وردية متبدلة</span> : <span className="badge success">⏰ وردية عمل</span>
                           )}
                         </td>
-                        <td style={{ color: isSwapped ? '#b45309' : (isOff ? 'var(--muted)' : 'var(--primary)'), fontWeight: isOff && !isSwapped ? 400 : 600 }}>
-                          {isOff ? (isSwapped ? (daySchedule.swapNote || 'راحة متبدلة') : '—') : `${daySchedule?.start} – ${daySchedule?.end}${isSwapped && daySchedule.swappedWithName ? ` (مع ${daySchedule.swappedWithName})` : ''}`}
+                        <td style={{ color: isSwapped ? '#b45309' : ((isOff || isUnset) ? 'var(--muted)' : 'var(--primary)'), fontWeight: (isOff || isUnset) && !isSwapped ? 400 : 600 }}>
+                          {isUnset ? '—' : isOff ? (isSwapped ? (daySchedule.swapNote || 'راحة متبدلة') : '—') : `${daySchedule?.start} – ${daySchedule?.end}${isSwapped && daySchedule.swappedWithName ? ` (مع ${daySchedule.swappedWithName})` : ''}`}
                         </td>
                       </tr>
                     );

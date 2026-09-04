@@ -21,7 +21,7 @@ import { preWarmFaceModels } from '../../utils/faceApiHelper';
 import { uploadBiometricAttendancePhoto } from '../../utils/googleDriveService';
 import { sendBiometricRegistrationRequestEmail, sendBiometricResetRequestEmail } from '../../utils/gmailService';
 import { computeLatenessFinancialAmount, isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
-import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
+import { getEmployeeDaySchedule, checkAndTriggerCycleEndRosterReminder } from '../../utils/rosterEngine';
 import { printEmployeePayslipDirect } from '../../utils/printHelper';
 import { useLiveRealTime } from '../../hooks/useLiveRealTime';
 import '../../portal.css';
@@ -304,6 +304,26 @@ export default function EmployeePortalView({
       }
     }
   }, [selectedBranchId, emp?.branchesDetails, activeTab]);
+
+  // ── Auto-trigger reminder notification when payroll cycle end is near/finished and no roster submitted ──
+  useEffect(() => {
+    if (!emp || !state || !setState) return;
+    try {
+      const newNotif = checkAndTriggerCycleEndRosterReminder(state, emp);
+      if (newNotif) {
+        const updatedState = {
+          ...state,
+          notifications: [newNotif, ...(state.notifications || [])]
+        };
+        setState(updatedState);
+        if (typeof saveState === 'function') {
+          saveState(updatedState);
+        }
+      }
+    } catch (err) {
+      console.warn('Error checking cycle end roster reminder:', err);
+    }
+  }, [emp?.id, state?.orgSettings, state?.rosters?.length, state?.requests?.length]);
 
   // ── Form States for Employee Actions ───────────
   const [showManualForm, setShowManualForm] = useState(false);
@@ -1190,32 +1210,49 @@ export default function EmployeePortalView({
   const hasApprovedRosterForActiveMonth = useMemo(() => {
     if (!emp) return true;
     const targetBId = selectedBranchId || (emp.branchesDetails?.[0]?.branchId) || emp.branchId;
+    const empIdStr = String(emp.id || emp.code || '');
 
     // 1. Check resolved roster for active calendar month
     const resolvedActive = getResolvedEmployeeRoster(emp, targetBId, activeMonthStr, state);
-    if (resolvedActive) return true;
+    if (resolvedActive && resolvedActive.schedule && Object.keys(resolvedActive.schedule).length > 0) return true;
 
     // 2. Check resolved roster for selectedMonth
     if (selectedMonth && selectedMonth !== activeMonthStr) {
       const resolvedSelected = getResolvedEmployeeRoster(emp, targetBId, selectedMonth, state);
-      if (resolvedSelected) return true;
+      if (resolvedSelected && resolvedSelected.schedule && Object.keys(resolvedSelected.schedule).length > 0) return true;
     }
 
     // 3. Check any approved roster in state covering activeMonthStr or selectedMonth
-    const anyApprovedRoster = (state.rosters || []).some(
-      (r) => String(r.employeeId) === String(emp.id) && r.status === 'approved' && (r.month === activeMonthStr || r.month === selectedMonth || !r.month)
+    const anyApprovedRoster = (state?.rosters || []).some(
+      (r) =>
+        (String(r.employeeId) === empIdStr || (emp.code && String(r.employeeCode) === String(emp.code))) &&
+        r.status === 'approved' &&
+        (r.month === activeMonthStr || r.month === selectedMonth) &&
+        r.schedule && Object.keys(r.schedule).length > 0
     );
     if (anyApprovedRoster) return true;
 
-    const anyApprovedReq = (state.requests || []).some(
+    const anyApprovedReq = (state?.requests || []).some(
       (r) =>
-        String(r.employeeId) === String(emp.id) &&
+        (String(r.employeeId) === empIdStr || (emp.code && String(r.employeeCode) === String(emp.code))) &&
         (r.type === 'roster_update' || r.type === 'roster_edit' || r.type === 'roster_edit_request') &&
         (r.status === 'approved' || r.adminApproved) &&
-        (r.month === activeMonthStr || r.month === selectedMonth || !r.month)
+        (r.month === activeMonthStr || r.month === selectedMonth)
     );
     return anyApprovedReq;
-  }, [emp, state.rosters, state.requests, selectedBranchId, activeMonthStr, selectedMonth]);
+  }, [emp, state?.rosters, state?.requests, selectedBranchId, activeMonthStr, selectedMonth]);
+
+  const hasPendingRosterReqForMonth = useMemo(() => {
+    if (!emp) return false;
+    const empIdStr = String(emp.id || emp.code || '');
+    return (state?.requests || []).some(
+      (r) =>
+        (String(r.employeeId) === empIdStr || (emp.code && String(r.employeeCode) === String(emp.code))) &&
+        (r.type === 'roster_update' || r.type === 'roster_edit' || r.type === 'roster_edit_request') &&
+        (r.status === 'pending' || r.status === 'pending_admin' || r.status === 'pending_branch') &&
+        (r.month === activeMonthStr || r.month === selectedMonth)
+    );
+  }, [emp, state?.requests, activeMonthStr, selectedMonth]);
 
   // ── Compute automatic absence shifts for the selected month ──
   const approvedRoster = useMemo(() => {
@@ -2735,6 +2772,9 @@ export default function EmployeePortalView({
                           if (isUnread) handleMarkNotifRead(n.id);
                           setIsNotifDropdownOpen(false);
                           setActiveTab(targetTab);
+                          if (n.autoOpenModal || n.type === 'roster_reminder') {
+                            setAutoOpenRosterModal(true);
+                          }
                           showToast?.(`الانتقال إلى: ${tabLabel}`);
                         };
 
@@ -3636,8 +3676,10 @@ export default function EmployeePortalView({
           {!hasApprovedRosterForActiveMonth && (
             <div
               style={{
-                background: 'linear-gradient(135deg, #fff7ed, #ffedd5)',
-                border: '2px solid #f97316',
+                background: hasPendingRosterReqForMonth
+                  ? 'linear-gradient(135deg, #eff6ff, #dbeafe)'
+                  : 'linear-gradient(135deg, #fff7ed, #ffedd5)',
+                border: hasPendingRosterReqForMonth ? '2px solid #3b82f6' : '2px solid #f97316',
                 borderRadius: '16px',
                 padding: '16px 22px',
                 marginBottom: '20px',
@@ -3650,20 +3692,24 @@ export default function EmployeePortalView({
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                <span style={{ fontSize: '32px' }}>🔔</span>
+                <span style={{ fontSize: '32px' }}>{hasPendingRosterReqForMonth ? '⏳' : '🔔'}</span>
                 <div>
-                  <div style={{ fontWeight: '900', fontSize: '15px', color: '#c2410c' }}>
-                    تنبيه نظام الصيدليات: مطلوب إنشاء وتقديم جدول شهري جديد لشهر ({activeMonthLabel})!
+                  <div style={{ fontWeight: '900', fontSize: '15px', color: hasPendingRosterReqForMonth ? '#1d4ed8' : '#c2410c' }}>
+                    {hasPendingRosterReqForMonth
+                      ? `طلب اعتماد الجدول الشهري لشهر (${selectedMonth || activeMonthLabel}) قيد المراجعة!`
+                      : `تنبيه نظام الصيدليات: مطلوب إنشاء وتقديم جدول شهري لشهر (${selectedMonth || activeMonthLabel})!`}
                   </div>
-                  <div style={{ fontSize: '13px', color: '#9a3412', marginTop: '3px', lineHeight: '1.5' }}>
-                    لقد انتصف/بدأ شهر جديد ولا يوجد جدول شهري معتمد لك لشهر الحالي. يرجى إعداد وتصميم جدول الشيفتات للاعتماد المزدوج.
+                  <div style={{ fontSize: '13px', color: hasPendingRosterReqForMonth ? '#1e40af' : '#9a3412', marginTop: '3px', lineHeight: '1.5' }}>
+                    {hasPendingRosterReqForMonth
+                      ? 'تم إرسال جدولك بنجاح وهو الآن قيد المراجعة والموافقة من مدير الفرع والإدارة العليا.'
+                      : 'لا يوجد جدول تشغيلي معتمد لك لهذا الشهر حتى الآن. يرجى إعداد وتصميم مواعيد وردياتك وإرسالها للاعتماد المزدوج.'}
                   </div>
                 </div>
               </div>
               <button
                 className="btn"
                 style={{
-                  background: '#ea580c',
+                  background: hasPendingRosterReqForMonth ? '#2563eb' : '#ea580c',
                   color: '#ffffff',
                   padding: '10px 20px',
                   fontSize: '13px',
@@ -3671,14 +3717,18 @@ export default function EmployeePortalView({
                   border: 'none',
                   borderRadius: '10px',
                   cursor: 'pointer',
-                  boxShadow: '0 2px 8px rgba(234, 88, 12, 0.3)'
+                  boxShadow: hasPendingRosterReqForMonth
+                    ? '0 2px 8px rgba(37, 99, 235, 0.3)'
+                    : '0 2px 8px rgba(234, 88, 12, 0.3)'
                 }}
                 onClick={() => {
                   setActiveTab('roster');
-                  setAutoOpenRosterModal(true);
+                  if (!hasPendingRosterReqForMonth) {
+                    setAutoOpenRosterModal(true);
+                  }
                 }}
               >
-                📅 إنشاء وحفظ الجدول الشهري الآن 🔗
+                {hasPendingRosterReqForMonth ? '📋 عرض تفاصيل الجدول والطلب 🔗' : '📅 إنشاء وتحديد الجدول الشهري الآن 🔗'}
               </button>
             </div>
           )}
