@@ -10,8 +10,8 @@ import { getCycleDateRange } from './periodEngine';
  */
 
 export function triggerDirectPrint(htmlContent, documentTitle = 'طباعة كشف المرتب', pageOrientation = 'portrait') {
-  const isLandscape = pageOrientation === 'landscape' || (typeof htmlContent === 'string' && (htmlContent.includes('A4 landscape') || htmlContent.includes('size: A4 landscape')));
-  const pageSizeRule = isLandscape ? 'A4 landscape' : 'A4 portrait';
+  const isLandscape = pageOrientation === 'landscape' || (typeof htmlContent === 'string' && (htmlContent.includes('landscape') || htmlContent.includes('A4 landscape') || htmlContent.includes('size: A4 landscape')));
+  const pageSizeRule = isLandscape ? 'landscape' : 'portrait';
 
   const fullDocumentHTML = `
     <!DOCTYPE html>
@@ -26,7 +26,7 @@ export function triggerDirectPrint(htmlContent, documentTitle = 'طباعة كش
       <style>
         @page {
           size: ${pageSizeRule};
-          margin: 5mm 6mm;
+          margin: 4mm 5mm;
         }
         * {
           box-sizing: border-box;
@@ -149,8 +149,8 @@ export function triggerDirectPrint(htmlContent, documentTitle = 'طباعة كش
   iframe.style.position = 'fixed';
   iframe.style.top = '-10000px';
   iframe.style.left = '-10000px';
-  iframe.style.width = isLandscape ? '297mm' : '210mm';
-  iframe.style.height = isLandscape ? '210mm' : '297mm';
+  iframe.style.width = isLandscape ? '280mm' : '210mm';
+  iframe.style.height = isLandscape ? '200mm' : '280mm';
   iframe.style.border = 'none';
   iframe.style.zIndex = '-9999';
   document.body.appendChild(iframe);

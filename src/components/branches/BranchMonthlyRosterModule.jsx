@@ -66,22 +66,26 @@ function generateOfficialWeeklyShiftsHTML({
     const isPharm = (employee?.jobTitle || '').includes('صيدل');
     const dayCells = DAYS_OF_WEEK.map(d => {
       if (!isApproved || !schedule) {
-        return `<td style="border:1.5px solid #cbd5e1; padding:6px 4px; text-align:center; color:#94a3b8; font-size:10px;">—</td>`;
+        return `<td style="border:1.5px solid #cbd5e1; padding:3px 2px; text-align:center; color:#94a3b8; font-size:9px; vertical-align:middle;">—</td>`;
       }
       const dayConf = schedule[d.label];
       const isShift = dayConf && dayConf.type === 'shift' && dayConf.start && dayConf.end;
       if (isShift) {
         return `
-          <td style="border:1.5px solid #cbd5e1; padding:6px 4px; text-align:center; background:#f0fdf4;">
-            <div style="font-weight:800; color:#15803d; font-size:10.5px; white-space:nowrap; direction:rtl;">
-              من ${formatTime12H(dayConf.start)} إلى ${formatTime12H(dayConf.end)}
+          <td style="border:1.5px solid #cbd5e1; padding:3px 2px; text-align:center; background:#f0fdf4; vertical-align:middle;">
+            <div style="font-weight:900; color:#15803d; font-size:9.5px; line-height:1.15; direction:rtl;">
+              <div>${formatTime12H(dayConf.start)}</div>
+              <div style="font-size:7px; color:#64748b; margin:1px 0; font-weight:700;">إلى</div>
+              <div>${formatTime12H(dayConf.end)}</div>
             </div>
           </td>
         `;
       } else {
         return `
-          <td style="border:1.5px solid #cbd5e1; padding:6px 4px; text-align:center; background:#fffbeb;">
-            <span style="color:#92400e; font-weight:800; font-size:10.5px;">راحة أسبوعية</span>
+          <td style="border:1.5px solid #cbd5e1; padding:3px 2px; text-align:center; background:#fffbeb; vertical-align:middle;">
+            <div style="color:#92400e; font-weight:900; font-size:9px; line-height:1.2;">
+              راحة<br><span style="font-size:7.5px; font-weight:700;">أسبوعية</span>
+            </div>
           </td>
         `;
       }
@@ -89,17 +93,17 @@ function generateOfficialWeeklyShiftsHTML({
 
     return `
       <tr>
-        <td style="border:1.5px solid #cbd5e1; padding:6px 8px; text-align:right;">
-          <div style="display:flex; align-items:center; justify-content:space-between; gap:6px;">
-            <span style="font-weight:900; color:#0f172a; font-size:12px;">${getEmpDisplayName(employee)}</span>
-            ${isPharm ? '<span style="color:#15803d; font-size:9.5px; background:#dcfce7; padding:2px 6px; border-radius:4px; font-weight:800; border:1px solid #86efac;">صيدلي</span>' : ''}
+        <td style="border:1.5px solid #cbd5e1; padding:3px 5px; text-align:right; vertical-align:middle;">
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:3px;">
+            <span style="font-weight:900; color:#0f172a; font-size:10.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${getEmpDisplayName(employee)}</span>
+            ${isPharm ? '<span style="color:#15803d; font-size:8px; background:#dcfce7; padding:1px 4px; border-radius:3px; font-weight:800; border:1px solid #86efac; flex-shrink:0;">صيدلي</span>' : ''}
           </div>
-          <div style="font-size:10px; color:#475569; font-weight:600; margin-top:2px;">${employee.jobTitle || 'موظف'}</div>
+          <div style="font-size:8.5px; color:#475569; font-weight:600; margin-top:1px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${employee.jobTitle || 'موظف'}</div>
         </td>
         ${dayCells}
-        <td style="border:1.5px solid #cbd5e1; padding:6px 4px; text-align:center; font-weight:900; color:#0f766e; font-size:11px; white-space:nowrap; background:#f8fafc;">
-          ${totalWeeklyHours} ساعة
-          <div style="font-size:9.5px; color:#64748b; font-weight:normal; margin-top:2px;">(${workDaysCount} أيام عمل)</div>
+        <td style="border:1.5px solid #cbd5e1; padding:3px 2px; text-align:center; font-weight:900; color:#0f766e; font-size:10px; background:#f8fafc; vertical-align:middle;">
+          <div>${totalWeeklyHours} س</div>
+          <div style="font-size:7.5px; color:#64748b; font-weight:600; margin-top:1px;">(${workDaysCount} أيام)</div>
         </td>
       </tr>
     `;
@@ -117,16 +121,16 @@ function generateOfficialWeeklyShiftsHTML({
           const staffHTML = group.staff.map(st => {
             const isPharm = (st.employee.jobTitle || '').includes('صيدل');
             return `
-              <div style="display:flex; justify-content:space-between; align-items:center; background:#ffffff; padding:5px 7px; border-radius:6px; border:1px solid #e2e8f0; margin-bottom:4px; box-shadow:0 1px 2px rgba(0,0,0,0.02); gap:4px;">
-                <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; flex:1;">
-                  <span style="font-weight:800; color:#0f172a; font-size:11px;">${getEmpDisplayName(st.employee)}</span>
+              <div style="display:flex; justify-content:space-between; align-items:center; background:#ffffff; padding:2px 4px; border-radius:4px; border:1px solid #e2e8f0; margin-bottom:2px; gap:2px;">
+                <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; flex:1; min-width:0;">
+                  <span style="font-weight:900; color:#0f172a; font-size:9.5px;">${getEmpDisplayName(st.employee)}</span>
                 </div>
                 ${isPharm ? `
-                  <span style="background:#dcfce7; color:#15803d; font-size:9px; font-weight:800; padding:2px 5px; border-radius:4px; flex-shrink:0; border:1px solid #86efac;">
+                  <span style="background:#dcfce7; color:#15803d; font-size:8px; font-weight:800; padding:1px 3px; border-radius:3px; flex-shrink:0; border:1px solid #86efac;">
                     صيدلي
                   </span>
                 ` : `
-                  <span style="background:#f1f5f9; color:#475569; font-size:9px; font-weight:700; padding:2px 5px; border-radius:4px; flex-shrink:0; border:1px solid #cbd5e1;">
+                  <span style="background:#f1f5f9; color:#475569; font-size:7.5px; font-weight:700; padding:1px 3px; border-radius:3px; flex-shrink:0; border:1px solid #cbd5e1; max-width:45px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
                     ${st.employee.jobTitle || 'كادر'}
                   </span>
                 `}
@@ -135,45 +139,51 @@ function generateOfficialWeeklyShiftsHTML({
           }).join('');
 
           return `
-            <div style="background:#f8fafc; border:1.5px solid ${isConcurrent ? '#10b981' : '#cbd5e1'}; border-radius:7px; padding:6px 6px; margin-bottom:6px;">
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; border-bottom:1px solid #e2e8f0; padding-bottom:3px; gap:4px;">
-                <div style="font-weight:900; color:${isConcurrent ? '#047857' : '#0f766e'}; font-size:10.5px; white-space:nowrap; direction:rtl;">
+            <div style="background:#f8fafc; border:1.5px solid ${isConcurrent ? '#10b981' : '#cbd5e1'}; border-radius:6px; padding:3px 3px; margin-bottom:3px;">
+              <div style="background:#f1f5f9; border-radius:4px; padding:2px 2px; margin-bottom:2px; border:1px solid #e2e8f0; text-align:center;">
+                <div style="font-weight:900; color:${isConcurrent ? '#047857' : '#0f766e'}; font-size:9px; direction:rtl; line-height:1.2;">
                   ⏰ ${formatTime12H(group.start)} – ${formatTime12H(group.end)}
                 </div>
-                <div style="font-size:9px; color:#334155; font-weight:800; background:#e2e8f0; padding:1px 5px; border-radius:4px; white-space:nowrap;">
-                  ${group.hours} س
+                <div style="display:flex; justify-content:center; align-items:center; gap:3px; margin-top:1px;">
+                  <span style="font-size:8px; color:#1e293b; font-weight:800; background:#ffffff; border:1px solid #cbd5e1; padding:0 4px; border-radius:3px; line-height:1.2;">
+                    ${group.hours} ساعات
+                  </span>
+                  ${isConcurrent ? `
+                    <span style="font-size:7.5px; color:#047857; font-weight:800; background:#dcfce7; border:1px solid #86efac; padding:0 3px; border-radius:3px; line-height:1.2;">
+                      👥 ${group.staff.length} كادر
+                    </span>
+                  ` : ''}
                 </div>
               </div>
-              ${isConcurrent ? `<div style="font-size:8.5px; color:#047857; font-weight:700; margin-bottom:4px;">👥 وردية مشتركة (${group.staff.length} موظفين)</div>` : ''}
               <div>${staffHTML}</div>
             </div>
           `;
         }).join('');
 
     const offHTML = dayData.offStaff.length > 0 ? `
-      <div style="background:#fffbeb; border:1px solid #fde68a; border-radius:6px; padding:5px 6px; margin-top:auto;">
-        <div style="font-size:10px; font-weight:900; color:#92400e; margin-bottom:3px; display:flex; justify-content:space-between; align-items:center;">
-          <span>🏖️ راحة أسبوعية</span>
-          <span style="background:#fef3c7; border:1px solid #fcd34d; border-radius:4px; padding:1px 5px; font-size:9px;">${dayData.offStaff.length}</span>
+      <div style="background:#fffbeb; border:1px solid #fde68a; border-radius:5px; padding:2px 4px; margin-top:auto;">
+        <div style="font-size:8.5px; font-weight:900; color:#92400e; margin-bottom:1px; display:flex; justify-content:space-between; align-items:center;">
+          <span>🏖️ راحة</span>
+          <span style="background:#fef3c7; border:1px solid #fcd34d; border-radius:3px; padding:0 3px; font-size:8px; font-weight:800;">${dayData.offStaff.length}</span>
         </div>
-        <div style="font-size:9.5px; color:#78350f; font-weight:700; line-height:1.4;">
-          ${dayData.offStaff.map(s => `• ${getEmpDisplayName(s.employee)}`).join('<br>')}
+        <div style="font-size:8px; color:#78350f; font-weight:700; line-height:1.2;">
+          ${dayData.offStaff.map(s => `<div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">• ${getEmpDisplayName(s.employee)}</div>`).join('')}
         </div>
       </div>
     ` : '';
 
     return `
       <div class="day-card">
-        <div style="background:${isFriday ? 'linear-gradient(135deg, #fef3c7, #fde68a)' : 'linear-gradient(135deg, #f0fdf4, #dcfce7)'}; padding:7px 8px; border-bottom:2px solid #cbd5e1; display:flex; justify-content:space-between; align-items:center;">
-          <div style="font-weight:900; font-size:12.5px; color:${isFriday ? '#92400e' : '#166534'};">
+        <div style="background:${isFriday ? 'linear-gradient(135deg, #fef3c7, #fde68a)' : 'linear-gradient(135deg, #f0fdf4, #dcfce7)'}; padding:3px 5px; border-bottom:1.5px solid #cbd5e1; display:flex; justify-content:space-between; align-items:center;">
+          <div style="font-weight:900; font-size:10.5px; color:${isFriday ? '#92400e' : '#166534'}; white-space:nowrap;">
             ${isFriday ? '🕌' : '🗓️'} ${day.label}
           </div>
-          <div style="display:flex; gap:3px;">
-            <span style="background:#ffffff; color:#166534; font-size:9px; font-weight:800; padding:2px 6px; border-radius:6px; border:1px solid #bbf7d0;">
+          <div style="display:flex; gap:2px; flex-shrink:0;">
+            <span style="background:#ffffff; color:#166534; font-size:8px; font-weight:800; padding:1px 3px; border-radius:3px; border:1px solid #bbf7d0;">
               🟢 ${dayData.totalWorking}
             </span>
             ${dayData.totalOff > 0 ? `
-              <span style="background:#ffffff; color:#b45309; font-size:9px; font-weight:800; padding:2px 6px; border-radius:6px; border:1px solid #fde68a;">
+              <span style="background:#ffffff; color:#b45309; font-size:8px; font-weight:800; padding:1px 3px; border-radius:3px; border:1px solid #fde68a;">
                 🏖️ ${dayData.totalOff}
               </span>
             ` : ''}
@@ -190,8 +200,8 @@ function generateOfficialWeeklyShiftsHTML({
   return `
     <style>
       @page {
-        size: A4 landscape !important;
-        margin: 6mm 8mm !important;
+        size: landscape;
+        margin: 4mm 5mm !important;
       }
       * {
         box-sizing: border-box !important;
@@ -209,131 +219,132 @@ function generateOfficialWeeklyShiftsHTML({
       }
       .print-landscape-wrapper {
         box-sizing: border-box;
-        width: 100%;
-        max-width: 281mm;
-        min-height: 195mm;
+        width: 100% !important;
+        max-width: 100% !important;
         margin: 0 auto;
-        padding: 4px 6px;
+        padding: 2px 3px;
         background: #ffffff;
         display: flex;
         flex-direction: column;
-        justify-content: space-between;
+        justify-content: flex-start;
+        gap: 3px;
       }
       @media screen {
         body {
           background: #f1f5f9 !important;
-          padding: 14px 10px !important;
+          padding: 10px 8px !important;
         }
         .print-landscape-wrapper {
-          min-width: 980px;
+          max-width: 1080px;
           border: 1px solid #cbd5e1;
           box-shadow: 0 4px 16px rgba(0,0,0,0.08);
-          border-radius: 10px;
-          margin-top: 10px;
-          margin-bottom: 20px;
-          padding: 16px 20px;
+          border-radius: 8px;
+          margin-top: 6px;
+          margin-bottom: 12px;
+          padding: 12px 14px;
         }
       }
       @media print {
         html, body {
-          width: 297mm !important;
-          height: 210mm !important;
+          width: 100% !important;
+          height: 100% !important;
           margin: 0 !important;
           padding: 0 !important;
           overflow: hidden !important;
         }
         .print-landscape-wrapper {
           width: 100% !important;
-          min-width: 100% !important;
-          max-width: none !important;
-          height: 195mm !important;
-          min-height: 195mm !important;
+          max-width: 100% !important;
+          height: auto !important;
+          max-height: 100% !important;
           padding: 0 !important;
           margin: 0 !important;
           border: none !important;
           box-shadow: none !important;
           display: flex !important;
           flex-direction: column !important;
-          justify-content: space-between !important;
+          justify-content: flex-start !important;
+          gap: 2px !important;
           page-break-after: avoid !important;
           page-break-inside: avoid !important;
+          break-after: avoid !important;
+          break-inside: avoid !important;
         }
         .no-print { display: none !important; }
       }
       .print-grid {
-        display: grid;
-        grid-template-columns: repeat(7, 1fr);
-        gap: 6px;
-        align-items: stretch;
-        margin: 6px 0;
-        flex: 1;
-        min-height: 190px;
+        display: grid !important;
+        grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
+        gap: 3.5px !important;
+        align-items: stretch !important;
+        margin: 2px 0 !important;
+        width: 100% !important;
       }
       .day-card {
         border: 1.5px solid #cbd5e1;
-        border-radius: 8px;
+        border-radius: 6px;
         overflow: hidden;
         display: flex;
         flex-direction: column;
         background: #ffffff;
         page-break-inside: avoid;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.03);
-        min-height: 180px;
+        min-width: 0 !important;
       }
       .day-card-body {
-        padding: 6px 5px;
+        padding: 3px 3px;
         flex: 1;
         display: flex;
         flex-direction: column;
         justify-content: flex-start;
-        gap: 5px;
+        gap: 2px;
         background: #fafafa;
       }
       .empty-shift-box {
         text-align: center;
-        padding: 14px 4px;
+        padding: 10px 2px;
         color: #94a3b8;
-        font-size: 10px;
+        font-size: 9px;
         background: #f8fafc;
-        border-radius: 6px;
+        border-radius: 5px;
         border: 1px dashed #cbd5e1;
       }
       .staff-matrix-table {
-        width: 100%;
-        border-collapse: collapse;
-        margin: 6px 0 4px 0;
-        page-break-inside: avoid;
-        background: #ffffff;
+        width: 100% !important;
+        table-layout: fixed !important;
+        border-collapse: collapse !important;
+        margin: 3px 0 2px 0 !important;
+        page-break-inside: avoid !important;
+        background: #ffffff !important;
       }
       .staff-matrix-table th {
         background: #f1f5f9;
         font-weight: 900;
         border: 1.5px solid #94a3b8;
-        padding: 6px 6px;
-        font-size: 11px;
+        padding: 4px 3px;
+        font-size: 10px;
         color: #1e293b;
       }
       .staff-matrix-table td {
         border: 1.5px solid #cbd5e1;
-        padding: 6px 6px;
+        padding: 3px 2px;
         vertical-align: middle;
       }
       .print-signatures-footer {
-        margin-top: 8px;
-        border-top: 2px solid #94a3b8;
-        padding-top: 6px;
+        margin-top: 3px;
+        border-top: 1.5px solid #94a3b8;
+        padding-top: 3px;
         display: grid;
         grid-template-columns: repeat(3, 1fr);
-        gap: 16px;
+        gap: 12px;
         text-align: center;
         page-break-inside: avoid;
       }
       .signature-box {
-        border: 1.5px dashed #94a3b8;
-        border-radius: 8px;
-        padding: 6px 8px;
+        border: 1px dashed #94a3b8;
+        border-radius: 6px;
+        padding: 4px 6px;
         background: #f8fafc;
-        min-height: 75px;
+        min-height: 44px;
         display: flex;
         flex-direction: column;
         justify-content: space-between;
@@ -342,34 +353,34 @@ function generateOfficialWeeklyShiftsHTML({
 
     <div class="print-landscape-wrapper">
       <!-- Header Banner -->
-      <div style="border-bottom:2.5px solid #0f766e; padding-bottom:5px; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
+      <div style="border-bottom:2px solid #0f766e; padding-bottom:3px; margin-bottom:4px; display:flex; justify-content:space-between; align-items:center;">
         <div>
-          <div style="font-size:12.5px; font-weight:900; color:#0f766e;">${companyName}</div>
-          <h1 style="margin:2px 0 0 0; font-size:16.5px; font-weight:900; color:#0f172a;">
+          <div style="font-size:11px; font-weight:900; color:#0f766e;">${companyName}</div>
+          <h1 style="margin:1px 0 0 0; font-size:14.5px; font-weight:900; color:#0f172a; line-height:1.2;">
             خريطة الورديات الأسبوعية وتوزيع الكادر التشغيلي — فرع ${branchName}
           </h1>
-          <div style="font-size:11px; color:#475569; margin-top:2px;">
+          <div style="font-size:9.5px; color:#475569; margin-top:1px;">
             دورة التشغيل المعتمدة: <strong>${cycleRange?.label || monthLabel(selectedMonth).arabic}</strong>
           </div>
         </div>
-        <div style="text-align:left; background:#f8fafc; border:1.5px solid #cbd5e1; padding:6px 12px; border-radius:8px;">
-          <div style="font-size:10px; color:#475569;">
+        <div style="text-align:left; background:#f8fafc; border:1px solid #cbd5e1; padding:3px 8px; border-radius:6px; flex-shrink:0;">
+          <div style="font-size:9px; color:#475569;">
             تاريخ الطباعة: <strong>${printDate}</strong> (${printTime})
           </div>
-          <div style="font-size:10px; color:#0f766e; font-weight:800; margin-top:2px;">
+          <div style="font-size:9px; color:#0f766e; font-weight:800; margin-top:1px;">
             الاعتماد: معتمد من إدارة التشغيل والموارد البشرية
           </div>
         </div>
       </div>
 
       <!-- KPI Metrics Strip -->
-      <div style="background:#f8fafc; border:1.5px solid #cbd5e1; border-radius:8px; padding:5px 12px; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center; font-size:10.5px;">
+      <div style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; padding:3px 8px; margin-bottom:4px; display:flex; justify-content:space-between; align-items:center; font-size:9.5px;">
         <div>👥 <strong>قوة الكادر:</strong> ${branchMetrics?.totalStaff || (staffSchedules || []).length} موظف</div>
-        <div style="border-right:1.5px solid #cbd5e1; height:14px;"></div>
+        <div style="border-right:1px solid #cbd5e1; height:12px;"></div>
         <div>⏱️ <strong>ساعات التغطية الأسبوعية:</strong> ${branchMetrics?.totalWeeklyScheduledHours || 0} ساعة</div>
-        <div style="border-right:1.5px solid #cbd5e1; height:14px;"></div>
+        <div style="border-right:1px solid #cbd5e1; height:12px;"></div>
         <div>💊 <strong>تغطية الصيدلي القانونية:</strong> ${branchMetrics?.daysWithPharmacist || 0} من 7 أيام</div>
-        <div style="border-right:1.5px solid #cbd5e1; height:14px;"></div>
+        <div style="border-right:1px solid #cbd5e1; height:12px;"></div>
         <div>🏢 <strong>الفرع:</strong> ${branchName} | <strong>المدينة:</strong> ${currentBranch?.city || '—'}</div>
       </div>
 
@@ -380,17 +391,17 @@ function generateOfficialWeeklyShiftsHTML({
 
       <!-- Detailed Staff Schedule Matrix Table (Directly Below Grid) -->
       ${(staffSchedules || []).length > 0 ? `
-        <div style="margin-top:6px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
-            <span style="font-weight:900; font-size:11px; color:#0f766e;">📋 تفصيل جدول وساعات عمل كادر الفرع (المصفوفة التشغيلية):</span>
-            <span style="font-size:9.5px; color:#64748b; font-weight:600;">(توزيع الورديات والراحات الأسبوعية لكل موظف)</span>
+        <div style="margin-top:3px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
+            <span style="font-weight:900; font-size:10px; color:#0f766e;">📋 تفصيل جدول وساعات عمل كادر الفرع (المصفوفة التشغيلية):</span>
+            <span style="font-size:8.5px; color:#64748b; font-weight:600;">(توزيع الورديات والراحات الأسبوعية لكل موظف)</span>
           </div>
           <table class="staff-matrix-table">
             <thead>
               <tr>
-                <th style="width:20%; text-align:right;">الموظف / الوظيفة</th>
-                ${DAYS_OF_WEEK.map(d => `<th style="text-align:center;">${d.label}</th>`).join('')}
-                <th style="width:11%; text-align:center;">إجمالي الأسبوع</th>
+                <th style="width:18%; text-align:right;">الموظف / الوظيفة</th>
+                ${DAYS_OF_WEEK.map(d => `<th style="width:10.28%; text-align:center;">${d.label}</th>`).join('')}
+                <th style="width:10%; text-align:center;">إجمالي الأسبوع</th>
               </tr>
             </thead>
             <tbody>
@@ -401,39 +412,39 @@ function generateOfficialWeeklyShiftsHTML({
       ` : ''}
 
       <!-- Operational Governance Instructions Note -->
-      <div style="background:#eff6ff; border:1.5px solid #93c5fd; border-radius:6px; padding:5px 10px; margin-top:6px; font-size:9px; color:#1e40af; line-height:1.4;">
-        <strong style="color:#1e3a8a;">📌 ضوابط تشغيلية ملزمة:</strong> (1) الالتزام بالحضور قبل بداية الوردية بـ 10 دقائق لضمان التسليم والتسلم الدقيق. (2) يمنع تبديل الورديات أو الراحات إلا بإذن كتابي مسبق ومعتمد من إدارة الموارد البشرية. (3) يُحظر مغادرة مقر العمل أثناء الوردية دون تواجد صيدلي بديل مرخص.
+      <div style="background:#eff6ff; border:1px solid #93c5fd; border-radius:5px; padding:3px 8px; margin-top:3px; font-size:8px; color:#1e40af; line-height:1.3;">
+        <strong style="color:#1e3a8a;">📌 ضوابط تشغيلية ملزمة:</strong> (1) الالتزام بالحضور قبل بداية الوردية بـ 10 دقائق لضمان التسليم والتسلم الدقيق. (2) يمنع تبديل الورديات أو الراحات إلا بإذن مسبق ومعتمد. (3) يُحظر مغادرة مقر العمل أثناء الوردية دون تواجد صيدلي بديل مرخص.
       </div>
 
       <!-- Signatures Footer -->
       <div class="print-signatures-footer">
         <div class="signature-box">
-          <div style="font-weight:900; font-size:11px; color:#0f172a;">
+          <div style="font-weight:900; font-size:10px; color:#0f172a;">
             توقيع مدير الفرع
           </div>
-          <div style="border-bottom:1.5px dashed #94a3b8; width:75%; margin:16px auto 4px auto;"></div>
-          <div style="font-size:9.5px; color:#64748b;">التاريخ: .... / .... / 2026 م</div>
+          <div style="border-bottom:1.5px dashed #94a3b8; width:70%; margin:8px auto 2px auto;"></div>
+          <div style="font-size:8.5px; color:#64748b;">التاريخ: .... / .... / 2026 م</div>
         </div>
 
         <div class="signature-box">
-          <div style="font-weight:900; font-size:11px; color:#0f172a;">
+          <div style="font-weight:900; font-size:10px; color:#0f172a;">
             اعتماد إدارة الموارد البشرية (HR)
           </div>
-          <div style="border-bottom:1.5px dashed #94a3b8; width:75%; margin:16px auto 4px auto;"></div>
-          <div style="font-size:9.5px; color:#64748b;">التاريخ: .... / .... / 2026 م</div>
+          <div style="border-bottom:1.5px dashed #94a3b8; width:70%; margin:8px auto 2px auto;"></div>
+          <div style="font-size:8.5px; color:#64748b;">التاريخ: .... / .... / 2026 م</div>
         </div>
 
         <div class="signature-box">
-          <div style="font-weight:900; font-size:11px; color:#0f172a;">
+          <div style="font-weight:900; font-size:10px; color:#0f172a;">
             اعتماد الإدارة العليا والتشغيل
           </div>
-          <div style="border-bottom:1.5px dashed #94a3b8; width:75%; margin:16px auto 4px auto;"></div>
-          <div style="font-size:9.5px; color:#64748b;">الختم والتوقيع الرسمي</div>
+          <div style="border-bottom:1.5px dashed #94a3b8; width:70%; margin:8px auto 2px auto;"></div>
+          <div style="font-size:8.5px; color:#64748b;">الختم والتوقيع الرسمي</div>
         </div>
       </div>
 
       <!-- Legal Watermark Note -->
-      <div style="text-align:center; margin-top:4px; font-size:8.5px; color:#94a3b8;">
+      <div style="text-align:center; margin-top:2px; font-size:7.5px; color:#94a3b8;">
         وثيقة تشغيلية رسمية صادرة آلياً من المنظومة الإدارية — ${companyName} — أي كشط أو تعديل يدوي يلغي العمل بهذه الوثيقة.
       </div>
     </div>
@@ -442,7 +453,7 @@ function generateOfficialWeeklyShiftsHTML({
 
 /**
  * توليد كود HTML متكامل ومعزول لمصفوفة موظفي الفرع وجدول وردياتهم الأسبوعية
- * جاهز للطباعة المباشرة بصيغة A4 Landscape مع توقيعات الاعتماد الرسمية
+ * جاهز للطباعة المباشرة بصيغة Landscape مع توقيعات الاعتماد الرسمية
  */
 function generateOfficialMatrixHTML({
   currentBranch,
@@ -461,19 +472,23 @@ function generateOfficialMatrixHTML({
     const isPharm = (employee.jobTitle || '').includes('صيدل');
     const daysCells = DAYS_OF_WEEK.map(d => {
       if (!isApproved || !schedule) {
-        return `<td style="border:1.5px solid #cbd5e1; padding:8px 6px; text-align:center; color:#94a3b8; font-size:10.5px;">غير معتمد</td>`;
+        return `<td style="border:1.5px solid #cbd5e1; padding:4px 3px; text-align:center; color:#94a3b8; font-size:9.5px; vertical-align:middle;">غير معتمد</td>`;
       }
       const dInfo = schedule[d.label];
       const isShift = dInfo && dInfo.type === 'shift' && dInfo.start && dInfo.end;
       return `
-        <td style="border:1.5px solid #cbd5e1; padding:8px 6px; text-align:center; background:${isShift ? '#f0fdf4' : '#fffbeb'};">
+        <td style="border:1.5px solid #cbd5e1; padding:4px 3px; text-align:center; background:${isShift ? '#f0fdf4' : '#fffbeb'}; vertical-align:middle;">
           ${isShift ? `
-            <div style="font-weight:800; color:#15803d; font-size:11px; white-space:nowrap; direction:rtl;">
-              من ${formatTime12H(dInfo.start)} إلى ${formatTime12H(dInfo.end)}
+            <div style="font-weight:900; color:#15803d; font-size:10px; line-height:1.2; direction:rtl;">
+              <div>${formatTime12H(dInfo.start)}</div>
+              <div style="font-size:7.5px; color:#64748b; margin:1px 0; font-weight:700;">إلى</div>
+              <div>${formatTime12H(dInfo.end)}</div>
             </div>
-            <div style="font-size:9px; color:#166534; margin-top:2px; font-weight:700;">وردية عمل</div>
+            <div style="font-size:8px; color:#166534; margin-top:2px; font-weight:700;">وردية عمل</div>
           ` : `
-            <div style="font-weight:800; color:#92400e; font-size:11px;">راحة أسبوعية</div>
+            <div style="font-weight:900; color:#92400e; font-size:10px; line-height:1.2;">
+              راحة<br><span style="font-size:8px; font-weight:700;">أسبوعية</span>
+            </div>
           `}
         </td>
       `;
@@ -481,17 +496,17 @@ function generateOfficialMatrixHTML({
 
     return `
       <tr>
-        <td style="border:1.5px solid #cbd5e1; padding:8px 10px; text-align:right;">
-          <div style="display:flex; align-items:center; justify-content:space-between; gap:6px;">
-            <span style="font-weight:900; color:#0f172a; font-size:12.5px;">${getEmpDisplayName(employee)}</span>
-            ${isPharm ? '<span style="color:#15803d; font-size:9.5px; background:#dcfce7; padding:2px 6px; border-radius:4px; font-weight:800; border:1px solid #86efac;">صيدلي</span>' : ''}
+        <td style="border:1.5px solid #cbd5e1; padding:4px 6px; text-align:right; vertical-align:middle;">
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:4px;">
+            <span style="font-weight:900; color:#0f172a; font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${getEmpDisplayName(employee)}</span>
+            ${isPharm ? '<span style="color:#15803d; font-size:8.5px; background:#dcfce7; padding:1px 5px; border-radius:3px; font-weight:800; border:1px solid #86efac; flex-shrink:0;">صيدلي</span>' : ''}
           </div>
-          <div style="font-size:10.5px; color:#475569; font-weight:600; margin-top:3px;">${employee.jobTitle || 'موظف'}</div>
+          <div style="font-size:9px; color:#475569; font-weight:600; margin-top:1px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${employee.jobTitle || 'موظف'}</div>
         </td>
         ${daysCells}
-        <td style="border:1.5px solid #cbd5e1; padding:8px 6px; text-align:center; font-weight:900; color:#0f766e; font-size:11.5px; white-space:nowrap; background:#f8fafc;">
-          ${totalWeeklyHours} ساعة
-          <div style="font-size:9.5px; color:#64748b; font-weight:normal; margin-top:2px;">(${workDaysCount} أيام عمل)</div>
+        <td style="border:1.5px solid #cbd5e1; padding:4px 3px; text-align:center; font-weight:900; color:#0f766e; font-size:10.5px; background:#f8fafc; vertical-align:middle;">
+          <div>${totalWeeklyHours} س</div>
+          <div style="font-size:8px; color:#64748b; font-weight:normal; margin-top:1px;">(${workDaysCount} أيام عمل)</div>
         </td>
       </tr>
     `;
@@ -500,8 +515,8 @@ function generateOfficialMatrixHTML({
   return `
     <style>
       @page {
-        size: A4 landscape !important;
-        margin: 6mm 8mm !important;
+        size: landscape;
+        margin: 4mm 5mm !important;
       }
       * {
         box-sizing: border-box !important;
@@ -519,64 +534,65 @@ function generateOfficialMatrixHTML({
       }
       .print-landscape-wrapper {
         box-sizing: border-box;
-        width: 100%;
-        max-width: 281mm;
-        min-height: 195mm;
+        width: 100% !important;
+        max-width: 100% !important;
         margin: 0 auto;
-        padding: 4px 6px;
+        padding: 2px 3px;
         background: #ffffff;
         display: flex;
         flex-direction: column;
-        justify-content: space-between;
+        justify-content: flex-start;
+        gap: 4px;
       }
       @media screen {
         body {
           background: #f1f5f9 !important;
-          padding: 14px 10px !important;
+          padding: 10px 8px !important;
         }
         .print-landscape-wrapper {
-          min-width: 980px;
+          max-width: 1080px;
           border: 1px solid #cbd5e1;
           box-shadow: 0 4px 16px rgba(0,0,0,0.08);
-          border-radius: 10px;
-          margin-top: 10px;
-          margin-bottom: 20px;
-          padding: 16px 20px;
+          border-radius: 8px;
+          margin-top: 6px;
+          margin-bottom: 12px;
+          padding: 12px 14px;
         }
       }
       @media print {
         html, body {
-          width: 297mm !important;
-          height: 210mm !important;
+          width: 100% !important;
+          height: 100% !important;
           margin: 0 !important;
           padding: 0 !important;
           overflow: hidden !important;
         }
         .print-landscape-wrapper {
           width: 100% !important;
-          min-width: 100% !important;
-          max-width: none !important;
-          height: 195mm !important;
-          min-height: 195mm !important;
+          max-width: 100% !important;
+          height: auto !important;
+          max-height: 100% !important;
           padding: 0 !important;
           margin: 0 !important;
           border: none !important;
           box-shadow: none !important;
           display: flex !important;
           flex-direction: column !important;
-          justify-content: space-between !important;
+          justify-content: flex-start !important;
           page-break-after: avoid !important;
           page-break-inside: avoid !important;
+          break-after: avoid !important;
+          break-inside: avoid !important;
         }
         .no-print { display: none !important; }
       }
       table {
-        width: 100%;
-        border-collapse: collapse;
-        margin: 8px 0;
-        page-break-inside: avoid;
-        background: #ffffff;
-        flex: 1;
+        width: 100% !important;
+        table-layout: fixed !important;
+        border-collapse: collapse !important;
+        margin: 4px 0 !important;
+        page-break-inside: avoid !important;
+        background: #ffffff !important;
       }
       tr {
         page-break-inside: avoid;
@@ -586,31 +602,31 @@ function generateOfficialMatrixHTML({
         background: #f1f5f9;
         font-weight: 900;
         border: 1.5px solid #94a3b8;
-        padding: 8px 6px;
-        font-size: 11.5px;
+        padding: 5px 4px;
+        font-size: 10.5px;
         color: #1e293b;
       }
       td {
         border: 1.5px solid #cbd5e1;
-        padding: 8px 6px;
+        padding: 4px 3px;
         vertical-align: middle;
       }
       .print-signatures-footer {
-        margin-top: 10px;
-        border-top: 2px solid #94a3b8;
-        padding-top: 8px;
+        margin-top: 4px;
+        border-top: 1.5px solid #94a3b8;
+        padding-top: 4px;
         display: grid;
         grid-template-columns: repeat(3, 1fr);
-        gap: 16px;
+        gap: 12px;
         text-align: center;
         page-break-inside: avoid;
       }
       .signature-box {
-        border: 1.5px dashed #94a3b8;
-        border-radius: 8px;
-        padding: 8px 10px;
+        border: 1px dashed #94a3b8;
+        border-radius: 6px;
+        padding: 4px 6px;
         background: #f8fafc;
-        min-height: 75px;
+        min-height: 46px;
         display: flex;
         flex-direction: column;
         justify-content: space-between;
@@ -618,39 +634,39 @@ function generateOfficialMatrixHTML({
     </style>
     <div class="print-landscape-wrapper">
       <!-- Header Banner -->
-      <div style="border-bottom:2.5px solid #0f766e; padding-bottom:6px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+      <div style="border-bottom:2px solid #0f766e; padding-bottom:4px; margin-bottom:4px; display:flex; justify-content:space-between; align-items:center;">
         <div>
-          <div style="font-size:12.5px; font-weight:900; color:#0f766e;">${companyName}</div>
-          <h1 style="margin:2px 0 0 0; font-size:17px; font-weight:900; color:#0f172a;">
+          <div style="font-size:11px; font-weight:900; color:#0f766e;">${companyName}</div>
+          <h1 style="margin:1px 0 0 0; font-size:15px; font-weight:900; color:#0f172a;">
             مصفوفة مواعيد وورديات العمل الرسمية — فرع ${branchName}
           </h1>
-          <div style="font-size:11px; color:#475569; margin-top:2px;">
+          <div style="font-size:9.5px; color:#475569; margin-top:1px;">
             دورة التشغيل: <strong>${cycleRange?.label || monthLabel(selectedMonth).arabic}</strong>
           </div>
         </div>
-        <div style="text-align:left; background:#f8fafc; border:1.5px solid #cbd5e1; padding:6px 12px; border-radius:8px; font-size:10px; color:#475569;">
+        <div style="text-align:left; background:#f8fafc; border:1px solid #cbd5e1; padding:3px 8px; border-radius:6px; font-size:9px; color:#475569; flex-shrink:0;">
           <div>تاريخ الطباعة: <strong>${printDate}</strong> (${printTime})</div>
-          <div style="font-size:10px; color:#0f766e; font-weight:800; margin-top:2px;">الاعتماد: معتمد من الإدارة</div>
+          <div style="font-size:9px; color:#0f766e; font-weight:800; margin-top:1px;">الاعتماد: معتمد من الإدارة</div>
         </div>
       </div>
 
       <!-- KPI Metrics Strip -->
-      <div style="background:#f8fafc; border:1.5px solid #cbd5e1; border-radius:8px; padding:6px 12px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; font-size:11px;">
+      <div style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; padding:3px 8px; margin-bottom:4px; display:flex; justify-content:space-between; align-items:center; font-size:9.5px;">
         <div>👥 <strong>قوة الكادر:</strong> ${branchMetrics?.totalStaff || (staffSchedules || []).length} موظف</div>
-        <div style="border-right:1.5px solid #cbd5e1; height:14px;"></div>
+        <div style="border-right:1px solid #cbd5e1; height:12px;"></div>
         <div>⏱️ <strong>ساعات التغطية الأسبوعية:</strong> ${branchMetrics?.totalWeeklyScheduledHours || 0} ساعة</div>
-        <div style="border-right:1.5px solid #cbd5e1; height:14px;"></div>
+        <div style="border-right:1px solid #cbd5e1; height:12px;"></div>
         <div>💊 <strong>تغطية الصيدلي:</strong> ${branchMetrics?.daysWithPharmacist || 0} من 7 أيام</div>
-        <div style="border-right:1.5px solid #cbd5e1; height:14px;"></div>
+        <div style="border-right:1px solid #cbd5e1; height:12px;"></div>
         <div>🏢 <strong>الفرع:</strong> ${branchName} | <strong>المدينة:</strong> ${currentBranch?.city || '—'}</div>
       </div>
 
       <table>
         <thead>
           <tr>
-            <th style="width:20%; text-align:right;">الموظف / الوظيفة</th>
-            ${DAYS_OF_WEEK.map(d => `<th style="text-align:center;">${d.label}</th>`).join('')}
-            <th style="width:11%; text-align:center;">إجمالي الأسبوع</th>
+            <th style="width:18%; text-align:right;">الموظف / الوظيفة</th>
+            ${DAYS_OF_WEEK.map(d => `<th style="width:10.28%; text-align:center;">${d.label}</th>`).join('')}
+            <th style="width:10%; text-align:center;">إجمالي الأسبوع</th>
           </tr>
         </thead>
         <tbody>
@@ -659,30 +675,30 @@ function generateOfficialMatrixHTML({
       </table>
 
       <!-- Operational Governance Instructions Note -->
-      <div style="background:#eff6ff; border:1.5px solid #93c5fd; border-radius:6px; padding:6px 10px; margin-top:8px; font-size:9.5px; color:#1e40af; line-height:1.4;">
-        <strong style="color:#1e3a8a;">📌 ضوابط تشغيلية ملزمة:</strong> (1) الالتزام بالحضور قبل بداية الوردية بـ 10 دقائق لضمان التسليم والتسلم الدقيق. (2) يمنع تبديل الورديات أو الراحات إلا بإذن كتابي مسبق ومعتمد من مدير الفرع وإدارة الموارد البشرية. (3) يُحظر مغادرة مقر العمل أثناء الوردية دون تواجد صيدلي بديل مرخص.
+      <div style="background:#eff6ff; border:1px solid #93c5fd; border-radius:5px; padding:3px 8px; margin-top:4px; font-size:8.5px; color:#1e40af; line-height:1.3;">
+        <strong style="color:#1e3a8a;">📌 ضوابط تشغيلية ملزمة:</strong> (1) الالتزام بالحضور قبل بداية الوردية بـ 10 دقائق لضمان التسليم والتسلم الدقيق. (2) يمنع تبديل الورديات أو الراحات إلا بإذن مسبق ومعتمد من مدير الفرع وإدارة الموارد البشرية. (3) يُحظر مغادرة مقر العمل أثناء الوردية دون تواجد صيدلي بديل مرخص.
       </div>
 
       <div class="print-signatures-footer">
         <div class="signature-box">
-          <div style="font-weight:900; font-size:11px; color:#0f172a;">توقيع مدير الفرع</div>
-          <div style="border-bottom:1.5px dashed #94a3b8; width:75%; margin:16px auto 4px auto;"></div>
-          <div style="font-size:9.5px; color:#64748b;">التاريخ: .... / .... / 2026 م</div>
+          <div style="font-weight:900; font-size:10px; color:#0f172a;">توقيع مدير الفرع</div>
+          <div style="border-bottom:1.5px dashed #94a3b8; width:70%; margin:8px auto 2px auto;"></div>
+          <div style="font-size:8.5px; color:#64748b;">التاريخ: .... / .... / 2026 م</div>
         </div>
         <div class="signature-box">
-          <div style="font-weight:900; font-size:11px; color:#0f172a;">اعتماد إدارة الموارد البشرية (HR)</div>
-          <div style="border-bottom:1.5px dashed #94a3b8; width:75%; margin:16px auto 4px auto;"></div>
-          <div style="font-size:9.5px; color:#64748b;">التاريخ: .... / .... / 2026 م</div>
+          <div style="font-weight:900; font-size:10px; color:#0f172a;">اعتماد إدارة الموارد البشرية (HR)</div>
+          <div style="border-bottom:1.5px dashed #94a3b8; width:70%; margin:8px auto 2px auto;"></div>
+          <div style="font-size:8.5px; color:#64748b;">التاريخ: .... / .... / 2026 م</div>
         </div>
         <div class="signature-box">
-          <div style="font-weight:900; font-size:11px; color:#0f172a;">اعتماد الإدارة العليا والتشغيل</div>
-          <div style="border-bottom:1.5px dashed #94a3b8; width:75%; margin:16px auto 4px auto;"></div>
-          <div style="font-size:9.5px; color:#64748b;">الختم والتوقيع الرسمي</div>
+          <div style="font-weight:900; font-size:10px; color:#0f172a;">اعتماد الإدارة العليا والتشغيل</div>
+          <div style="border-bottom:1.5px dashed #94a3b8; width:70%; margin:8px auto 2px auto;"></div>
+          <div style="font-size:8.5px; color:#64748b;">الختم والتوقيع الرسمي</div>
         </div>
       </div>
 
       <!-- Legal Watermark Note -->
-      <div style="text-align:center; margin-top:5px; font-size:8.5px; color:#94a3b8;">
+      <div style="text-align:center; margin-top:2px; font-size:7.5px; color:#94a3b8;">
         وثيقة تشغيلية رسمية صادرة آلياً من المنظومة الإدارية — ${companyName} — أي كشط أو تعديل يدوي يلغي العمل بهذه الوثيقة.
       </div>
     </div>
