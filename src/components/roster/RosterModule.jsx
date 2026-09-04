@@ -83,7 +83,8 @@ export function getResolvedEmployeeRoster(employee, targetBranchId, state, selec
   rosters.forEach((r) => {
     if (String(r.employeeId) !== empIdStr) return;
     if (r.status !== 'approved') return;
-    if (selectedMonth && r.month && r.month !== selectedMonth) return;
+    const rMonth = r.month || (r.fromDate ? r.fromDate.slice(0, 7) : (r.approvedAt ? String(r.approvedAt).slice(0, 7) : null));
+    if (selectedMonth && (!rMonth || rMonth !== selectedMonth)) return;
     if (branchMatches(r.branchId)) {
       candidates.push({
         ...r,
@@ -98,7 +99,8 @@ export function getResolvedEmployeeRoster(employee, targetBranchId, state, selec
     if (String(req.employeeId) !== empIdStr) return;
     if (req.type !== 'roster_update' && req.type !== 'roster_edit' && req.type !== 'roster_edit_request') return;
     if (req.status !== 'approved' && !req.adminApproved) return;
-    if (selectedMonth && req.month && req.month !== selectedMonth) return;
+    const reqMonth = req.month || (req.fromDate ? req.fromDate.slice(0, 7) : (req.approvedAt ? String(req.approvedAt).slice(0, 7) : null));
+    if (selectedMonth && (!reqMonth || reqMonth !== selectedMonth)) return;
     if (branchMatches(req.branchId)) {
       candidates.push({
         id: req.id,
