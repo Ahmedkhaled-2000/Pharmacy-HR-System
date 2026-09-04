@@ -639,23 +639,169 @@ export default function SettingsModule({
     setIsFetchingIp(false);
   };
 
-  // System Permission Catalog
+  // ── Complete System Permission Catalog (19 Unified Core Permissions) ──
   const SYSTEM_PERMISSION_CATALOG = [
-    { key: 'canViewSalary', label: '💵 مشاهدة تفاصيل الراتب ورصيد الحساب وصافي المستحقات', category: 'الرواتب والماليات', defaultVal: true },
-    { key: 'canViewAdjustments', label: '📊 مشاهدة سجل السلف والمكافآت والخصومات', category: 'الرواتب والماليات', defaultVal: true },
-    { key: 'canAddAdjustment', label: '➕ تسجيل وتوثيق مكافأة أو خصم مباشر', category: 'الرواتب والماليات', defaultVal: false },
-    { key: 'canApplyLoan', label: '💳 إمكانية تقديم طلبات السلف المالية وشراء الأدوية آجل', category: 'الطلبات والخدمات', defaultVal: true },
-    { key: 'canApplyLeave', label: '🏖️ إمكانية تقديم طلبات الإجازات (سنوية / مرضية / عارضة)', category: 'الطلبات والخدمات', defaultVal: true },
-    { key: 'canApplyPermission', label: '⏰ إمكانية تقديم طلبات الأذونات والخروج المؤقت', category: 'الطلبات والخدمات', defaultVal: true },
-    { key: 'canApplySwap', label: '🔄 إمكانية تقديم طلبات تبديل وتنازل عن الشيفتات', category: 'الطلبات والخدمات', defaultVal: true },
-    { key: 'canViewBylaws', label: '📜 استعراض نصوص لائحة العمل وجدول الجزاءات', category: 'اللائحة والانضباط', defaultVal: true },
-    { key: 'canSubmitComplaint', label: '📋 إرسال تقييمات وملاحظات وشكاوى للإدارة', category: 'اللائحة والانضباط', defaultVal: true },
-    { key: 'canViewRoster', label: '📅 استعراض ومتابعة الجدول الشهري والورديات', category: 'الحضور والانصراف', defaultVal: true },
-    { key: 'canStartEnd', label: '📸 تسجيل الحضور والانصراف بلمسة واحدة عبر البوابة', category: 'الحضور والانصراف', defaultVal: true },
-    { key: 'canLivePunch', label: '👤 إمكانية بداية الوردية عبر البصمة الحية (الوجه / الكاميرا)', category: 'الحضور والانصراف', defaultVal: true },
-    { key: 'canManualShift', label: '⏱️ تسجيل وردية يدوية وتوثيق ساعات العمل', category: 'الحضور والانصراف', defaultVal: false },
-    { key: 'canEditShift', label: '✏️ تعديل وتصحيح ساعات الورديات المسجلة', category: 'الحضور والانصراف', defaultVal: false },
-    { key: 'canExportExcel', label: '📥 تصدير واستخراج كشوفات وشيتات Excel الرسمية', category: 'التقارير والإكسل', defaultVal: true }
+    // 💵 الرواتب والماليات
+    {
+      key: 'canViewSalary',
+      label: '💵 تفاصيل ومسير الراتب وصافي المستحقات',
+      category: 'الرواتب والماليات',
+      defaultVal: true,
+      icon: '💵',
+      desc: 'إتاحة صفحة الراتب وتفاصيل الأجر والبدلات والحساب وتفاصيل ساعات العمل'
+    },
+    {
+      key: 'canViewAdjustments',
+      label: '📊 سجل المكافآت والخصومات والتسويات',
+      category: 'الرواتب والماليات',
+      defaultVal: true,
+      icon: '📊',
+      desc: 'إتاحة صفحة وسجل التسويات المالية والخصومات والمكافآت المعتمدة'
+    },
+    {
+      key: 'canAddAdjustment',
+      label: '➕ تسجيل وتوثيق مكافأة أو خصم مباشر للموظف',
+      category: 'الرواتب والماليات',
+      defaultVal: false,
+      icon: '➕',
+      desc: 'صلاحية إضافة بنود تسوية مالية مباشرة من خلال البوابة'
+    },
+    {
+      key: 'canExportExcel',
+      label: '📥 تصدير واستخراج كشوفات وشيتات Excel الرسمية',
+      category: 'الرواتب والماليات',
+      defaultVal: true,
+      icon: '📥',
+      desc: 'إمكانية تحميل وتصدير تقارير الإكسل ومسيرات الرواتب الرسمية'
+    },
+    {
+      key: 'canApplyLoan',
+      label: '💳 تقديم ومتابعة السلف المالية وشراء الأدوية آجل',
+      category: 'الرواتب والماليات',
+      defaultVal: true,
+      icon: '💳',
+      desc: 'إتاحة صفحة ونموذج طلب سلفة نقدية أو شراء علاج بالآجل'
+    },
+
+    // 📋 الطلبات والخدمات
+    {
+      key: 'canApplyLeave',
+      label: '🏖️ تقديم طلبات الإجازات واستعراض رصيد الإجازات',
+      category: 'الطلبات والخدمات',
+      defaultVal: true,
+      icon: '🏖️',
+      desc: 'إتاحة صفحة طلب إجازة (سنوية / مرضية / عارضة) ومتابعة الرصيد المتبقي'
+    },
+    {
+      key: 'canApplyPermission',
+      label: '⏰ تقديم طلبات أذونات الاستئذان وساعات الخروج',
+      category: 'الطلبات والخدمات',
+      defaultVal: true,
+      icon: '⏰',
+      desc: 'إتاحة صفحة تقديم إذن خروج مؤقت ومتابعة الساعات المعتمدة'
+    },
+    {
+      key: 'canApplySwap',
+      label: '🔄 تقديم ومتابعة طلبات تبديل ونقل الشيفتات',
+      category: 'الطلبات والخدمات',
+      defaultVal: true,
+      icon: '🔄',
+      desc: 'إتاحة صفحة ونموذج مبادلة الشيفتات والتنازل عنها للزملاء بالفرع'
+    },
+    {
+      key: 'canApplyResignation',
+      label: '🚪 تقديم ومتابعة طلبات الاستقالة وإخلاء الطرف',
+      category: 'الطلبات والخدمات',
+      defaultVal: true,
+      icon: '🚪',
+      desc: 'إتاحة صفحة تقديم طلب استقالة رسمي ومتابعة فترة الإشعار القانونية'
+    },
+
+    // ⏱️ الحضور والانصراف والجدول
+    {
+      key: 'canViewShifts',
+      label: '⏱️ استعراض سجل البصمات وساعات العمل والبريك',
+      category: 'الحضور والانصراف',
+      defaultVal: true,
+      icon: '⏱️',
+      desc: 'إتاحة صفحة سجل الحضور والانصراف والورديات المنفذة وحساب البريك'
+    },
+    {
+      key: 'canViewRoster',
+      label: '📅 استعراض وتصميم الجدول الشهري لورديات الفرع',
+      category: 'الحضور والانصراف',
+      defaultVal: true,
+      icon: '📅',
+      desc: 'إتاحة صفحة جدول ورديات الفرع والتقديم على الجداول الشهرية'
+    },
+    {
+      key: 'canStartEnd',
+      label: '🟢 تسجيل الحضور والانصراف المباشر بلمسة واحدة',
+      category: 'الحضور والانصراف',
+      defaultVal: true,
+      icon: '🟢',
+      desc: 'تفعيل أزرار الحضور والانصراف السريع من داخل لوحة التحكم'
+    },
+    {
+      key: 'canLivePunch',
+      label: '📸 تسجيل الحضور بالبصمة الحية (الوجه / الكاميرا)',
+      category: 'الحضور والانصراف',
+      defaultVal: true,
+      icon: '📸',
+      desc: 'التحقق ومطابقة الوجه بالكاميرا الحية أثناء تسجيل الدخول بالفرع'
+    },
+    {
+      key: 'canEnrollBiometric',
+      label: '👤 تسجيل وتحديث البصمة الإلكترونية الذاتية',
+      category: 'الحضور والانصراف',
+      defaultVal: true,
+      icon: '👤',
+      desc: 'إتاحة صفحة تسجيل بصمة الوجه أو البصمة البيومترية وإرسالها للاعتماد'
+    },
+    {
+      key: 'canManualShift',
+      label: '⏱️ تسجيل وردية يدوية وتوثيق ساعات العمل',
+      category: 'الحضور والانصراف',
+      defaultVal: false,
+      icon: '⏱️',
+      desc: 'السماح بإضافة وتوثيق ساعات عمل يدوياً بدون بصمة حية'
+    },
+    {
+      key: 'canEditShift',
+      label: '✏️ تعديل وتصحيح ساعات الورديات المسجلة',
+      category: 'الحضور والانصراف',
+      defaultVal: false,
+      icon: '✏️',
+      desc: 'السماح للموظف بتعديل أوقات وردياته السابقة المصرح بها'
+    },
+
+    // ⚖️ اللائحة والتقييمات
+    {
+      key: 'canViewBylaws',
+      label: '📜 استعراض نصوص لائحة العمل وجدول الجزاءات',
+      category: 'اللائحة والتقييمات',
+      defaultVal: true,
+      icon: '📜',
+      desc: 'إتاحة صفحة اللائحة الداخلية وجدول المخالفات والجزاءات المعتمدة'
+    },
+    {
+      key: 'canSubmitComplaint',
+      label: '⭐ استعراض تقييمات الأداء وإرسال الشكاوى والتظلمات',
+      category: 'اللائحة والتقييمات',
+      defaultVal: true,
+      icon: '⭐',
+      desc: 'إتاحة صفحة استعراض تقييمات الأداء الشهرية وتقديم الشكاوى للإدارة'
+    },
+
+    // 🪪 الملف الشخصي
+    {
+      key: 'canViewProfile',
+      label: '🪪 استعراض وتحديث الملف الشخصي وبيانات التعاقد',
+      category: 'الملف الشخصي',
+      defaultVal: true,
+      icon: '🪪',
+      desc: 'إتاحة صفحة بيانات الموظف والتعاقد والوثائق والمستندات الشخصية'
+    }
   ];
 
   const defaultPerms = SYSTEM_PERMISSION_CATALOG.reduce((acc, p) => ({ ...acc, [p.key]: p.defaultVal }), {});
@@ -669,6 +815,22 @@ export default function SettingsModule({
   const [customPermKey, setCustomPermKey] = useState('');
   const [customPermLabel, setCustomPermLabel] = useState('');
 
+  // Search & category filters
+  const [permSearchQuery, setPermSearchQuery] = useState('');
+  const [permCategoryFilter, setPermCategoryFilter] = useState('all');
+  const [isSavingPerms, setIsSavingPerms] = useState(false);
+  const [lastSavedPermTime, setLastSavedPermTime] = useState(null);
+
+  // Protection flags to prevent background sync from reverting active user edits
+  const isUserTogglingPermRef = useRef(false);
+  const permSaveTimeoutRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (permSaveTimeoutRef.current) clearTimeout(permSaveTimeoutRef.current);
+    };
+  }, []);
+
   const normalizePermObject = (rawObj) => {
     if (!rawObj || typeof rawObj !== 'object') return {};
     const out = {};
@@ -679,6 +841,7 @@ export default function SettingsModule({
       out['can' + action] = Boolean(v);
       out['allow' + action] = Boolean(v);
       out[k] = Boolean(v);
+      out[action] = Boolean(v);
     });
     return out;
   };
@@ -692,6 +855,12 @@ export default function SettingsModule({
         if (globalNorm['can' + action] !== undefined) merged[p.key] = globalNorm['can' + action];
         else if (globalNorm[p.key] !== undefined) merged[p.key] = globalNorm[p.key];
       });
+      // also copy any non-catalog custom keys
+      Object.keys(globalNorm).forEach(k => {
+        if (!k.startsWith('allow') && merged[k] === undefined) {
+          merged[k] = Boolean(globalNorm[k]);
+        }
+      });
     } else {
       const emp = (state.employees || []).find((e) => String(e.id) === String(empIdOrAll) || String(e.code) === String(empIdOrAll));
       const targetId = emp ? String(emp.id) : String(empIdOrAll);
@@ -704,6 +873,11 @@ export default function SettingsModule({
           if (customNorm['can' + action] !== undefined) merged[p.key] = customNorm['can' + action];
           else if (customNorm[p.key] !== undefined) merged[p.key] = customNorm[p.key];
         });
+        Object.keys(customNorm).forEach(k => {
+          if (!k.startsWith('allow') && merged[k] === undefined) {
+            merged[k] = Boolean(customNorm[k]);
+          }
+        });
       } else {
         const globalNorm = normalizePermObject(state.orgSettings?.permissions);
         SYSTEM_PERMISSION_CATALOG.forEach((p) => {
@@ -711,87 +885,63 @@ export default function SettingsModule({
           if (globalNorm['can' + action] !== undefined) merged[p.key] = globalNorm['can' + action];
           else if (globalNorm[p.key] !== undefined) merged[p.key] = globalNorm[p.key];
         });
+        Object.keys(globalNorm).forEach(k => {
+          if (!k.startsWith('allow') && merged[k] === undefined) {
+            merged[k] = Boolean(globalNorm[k]);
+          }
+        });
       }
     }
     return merged;
   };
 
-  // Synchronize permissions state when selecting an employee or when state updates
+  // Synchronize permissions state when selecting an employee or when external state updates,
+  // BUT do NOT wipe user state while they are actively toggling permissions!
   useEffect(() => {
+    if (isUserTogglingPermRef.current) return;
     setPermState(getResolvedPerms(selectedEmpForPerm));
   }, [selectedEmpForPerm, state.orgSettings?.permissions, state.orgSettings?.empPermissions, state.employees]);
 
   const handleSelectEmpForPerm = (empId) => {
+    isUserTogglingPermRef.current = false;
+    if (permSaveTimeoutRef.current) clearTimeout(permSaveTimeoutRef.current);
     setSelectedEmpForPerm(empId);
     setPermState(getResolvedPerms(empId));
   };
 
-  const handleAddPermissionToActive = () => {
-    if (selectedCatalogPermKey) {
-      const catalogItem = SYSTEM_PERMISSION_CATALOG.find((p) => p.key === selectedCatalogPermKey);
-      if (catalogItem) {
-        setPermState({ ...permState, [catalogItem.key]: true });
-        showToast?.(`✅ تمت إضافة وتفعيل صلاحية (${catalogItem.label}) في القائمة`);
-      }
-    } else if (customPermKey.trim() && customPermLabel.trim()) {
-      const cleanKey = customPermKey.trim().replace(/\s+/g, '_');
-      setPermState({ ...permState, [cleanKey]: true });
-      showToast?.(`✅ تمت إضافة وتفعيل الصلاحية المخصصة (${customPermLabel}) في القائمة`);
-    }
-    setShowAddPermModal(false);
-    setSelectedCatalogPermKey('');
-    setCustomPermKey('');
-    setCustomPermLabel('');
-  };
+  // Robust Unified Persist Function
+  const persistPermissionsMap = async (targetPerms, empScope = selectedEmpForPerm, customToast = null) => {
+    isUserTogglingPermRef.current = true;
+    if (permSaveTimeoutRef.current) clearTimeout(permSaveTimeoutRef.current);
+    setIsSavingPerms(true);
 
-  const handleRemovePermissionFromActive = (permKey) => {
-    const updated = { ...permState };
-    delete updated[permKey];
-    setPermState(updated);
-    showToast?.(`🗑️ تم حذف الصلاحية من القائمة`);
-  };
+    const performSave = async () => {
+      const expandedPerms = {};
+      SYSTEM_PERMISSION_CATALOG.forEach((p) => {
+        const isChecked = targetPerms[p.key] !== false;
+        let actionName = p.key.startsWith('can') ? p.key.slice(3) : p.key;
+        expandedPerms['can' + actionName] = isChecked;
+        expandedPerms['allow' + actionName] = isChecked;
+        expandedPerms[p.key] = isChecked;
+        expandedPerms[actionName] = isChecked;
+      });
 
-  const handleGrantAllPermissions = () => {
-    const allTrue = {};
-    SYSTEM_PERMISSION_CATALOG.forEach((p) => {
-      allTrue[p.key] = true;
-      let actionName = p.key.startsWith('can') ? p.key.slice(3) : p.key;
-      allTrue['can' + actionName] = true;
-      allTrue['allow' + actionName] = true;
-    });
-    setPermState(allTrue);
-    showToast?.('🔓 تم تفعيل وتحديد كافة الصلاحيات — اضغط حفظ لتطبيقها فوراً');
-  };
+      Object.keys(targetPerms).forEach((k) => {
+        let actionName = k;
+        if (k.startsWith('can')) actionName = k.slice(3);
+        else if (k.startsWith('allow')) actionName = k.slice(5);
+        const isChecked = Boolean(targetPerms[k]);
+        expandedPerms['can' + actionName] = isChecked;
+        expandedPerms['allow' + actionName] = isChecked;
+        expandedPerms[k] = isChecked;
+        expandedPerms[actionName] = isChecked;
+      });
 
-  const handleSavePermissions = async () => {
-    // Generate full expanded permissions map with both canX and allowX
-    const expandedPerms = {};
-    SYSTEM_PERMISSION_CATALOG.forEach((p) => {
-      const isChecked = permState[p.key] !== false;
-      let actionName = p.key.startsWith('can') ? p.key.slice(3) : p.key;
-      expandedPerms['can' + actionName] = isChecked;
-      expandedPerms['allow' + actionName] = isChecked;
-      expandedPerms[p.key] = isChecked;
-      expandedPerms[actionName] = isChecked;
-    });
-
-    Object.keys(permState).forEach((k) => {
-      let actionName = k;
-      if (k.startsWith('can')) actionName = k.slice(3);
-      else if (k.startsWith('allow')) actionName = k.slice(5);
-      const isChecked = Boolean(permState[k]);
-      expandedPerms['can' + actionName] = isChecked;
-      expandedPerms['allow' + actionName] = isChecked;
-      expandedPerms[k] = isChecked;
-      expandedPerms[actionName] = isChecked;
-    });
-
-    const performSavePermissions = async () => {
       const nowTime = Date.now();
       let updatedOrgSettings = { ...(state.orgSettings || orgSettings), updatedAt: nowTime };
       let updatedEmployees = [...(state.employees || [])];
 
-      if (selectedEmpForPerm === 'all') {
+      if (empScope === 'all') {
         updatedOrgSettings = {
           ...updatedOrgSettings,
           permissions: { ...expandedPerms },
@@ -802,11 +952,10 @@ export default function SettingsModule({
           permissions: { ...expandedPerms },
           updatedAt: nowTime
         }));
-        showToast?.('💾 تم حفظ وتطبيق الصلاحيات بنجاح على جميع الموظفين بالنظام');
       } else {
-        const targetEmp = updatedEmployees.find((e) => String(e.id) === String(selectedEmpForPerm) || String(e.code) === String(selectedEmpForPerm));
-        const targetId = targetEmp ? String(targetEmp.id) : String(selectedEmpForPerm);
-        const targetCode = targetEmp ? String(targetEmp.code) : String(selectedEmpForPerm);
+        const targetEmp = updatedEmployees.find((e) => String(e.id) === String(empScope) || String(e.code) === String(empScope));
+        const targetId = targetEmp ? String(targetEmp.id) : String(empScope);
+        const targetCode = targetEmp ? String(targetEmp.code) : String(empScope);
 
         const updatedEmpPerms = {
           ...(updatedOrgSettings.empPermissions || {}),
@@ -818,26 +967,108 @@ export default function SettingsModule({
           empPermissions: updatedEmpPerms
         };
         updatedEmployees = updatedEmployees.map((e) =>
-          (String(e.id) === targetId || String(e.code) === targetCode) ? { ...e, permissions: { ...expandedPerms }, updatedAt: nowTime } : e
+          (String(e.id) === targetId || String(e.code) === targetCode)
+            ? { ...e, permissions: { ...expandedPerms }, updatedAt: nowTime }
+            : e
         );
-        showToast?.(`💾 تم حفظ وتطبيق الصلاحيات للموظف (${targetEmp?.name || selectedEmpForPerm}) بنجاح`);
       }
 
       const updatedState = { ...state, orgSettings: updatedOrgSettings, employees: updatedEmployees };
       if (setState) setState(updatedState);
       if (saveState) await saveState(updatedState);
+
+      setIsSavingPerms(false);
+      setLastSavedPermTime(new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+
+      if (customToast) {
+        showToast?.(customToast);
+      } else if (empScope === 'all') {
+        showToast?.('💾 تم حفظ وتطبيق الصلاحيات بنجاح لجميع الموظفين');
+      } else {
+        const targetEmp = (state.employees || []).find(e => String(e.id) === String(empScope) || String(e.code) === String(empScope));
+        showToast?.(`💾 تم حفظ وتطبيق الصلاحيات للموظف (${targetEmp?.name || empScope}) بنجاح`);
+      }
+
+      permSaveTimeoutRef.current = setTimeout(() => {
+        isUserTogglingPermRef.current = false;
+      }, 1500);
     };
 
-    if (executeWithOwnerGuard) {
+    if (ownerLocks?.lockEditSystemPermissions && executeWithOwnerGuard && !isOwnerUnlocked) {
       executeWithOwnerGuard({
         lockKey: 'lockEditSystemPermissions',
-        actionTitle: 'حفظ وتحديث مصفوفة الصلاحيات',
-        actionDetails: selectedEmpForPerm === 'all' ? 'تعديل الصلاحيات العامة لجميع الموظفين' : `تعديل صلاحيات الموظف المحدد`,
-        onExecute: performSavePermissions
+        actionTitle: 'حفظ وتعديل الصلاحيات بالنظام',
+        actionDetails: empScope === 'all' ? 'تعديل الصلاحيات العامة لجميع الموظفين' : 'تعديل صلاحيات الموظف المحدد',
+        onExecute: performSave
       });
     } else {
-      await performSavePermissions();
+      await performSave();
     }
+  };
+
+  // Instant optimistic toggle with auto-save
+  const handleTogglePermission = (key, nextChecked) => {
+    isUserTogglingPermRef.current = true;
+    const nextPerms = { ...permState, [key]: nextChecked };
+    setPermState(nextPerms);
+
+    const catalogItem = SYSTEM_PERMISSION_CATALOG.find(p => p.key === key);
+    const label = catalogItem ? catalogItem.label : key;
+
+    persistPermissionsMap(
+      nextPerms,
+      selectedEmpForPerm,
+      nextChecked ? `✅ تم تفعيل صلاحية: ${label}` : `🔒 تم تعطيل وتقييد صلاحية: ${label}`
+    );
+  };
+
+  const handleAddPermissionToActive = async () => {
+    let nextKey = null;
+    let nextLabel = null;
+    if (selectedCatalogPermKey) {
+      const catalogItem = SYSTEM_PERMISSION_CATALOG.find((p) => p.key === selectedCatalogPermKey);
+      if (catalogItem) {
+        nextKey = catalogItem.key;
+        nextLabel = catalogItem.label;
+      }
+    } else if (customPermKey.trim() && customPermLabel.trim()) {
+      nextKey = customPermKey.trim().replace(/\s+/g, '_');
+      nextLabel = customPermLabel.trim();
+    }
+
+    if (nextKey) {
+      const nextPerms = { ...permState, [nextKey]: true };
+      setPermState(nextPerms);
+      await persistPermissionsMap(nextPerms, selectedEmpForPerm, `✅ تمت إضافة وتفعيل الصلاحية (${nextLabel})`);
+    }
+
+    setShowAddPermModal(false);
+    setSelectedCatalogPermKey('');
+    setCustomPermKey('');
+    setCustomPermLabel('');
+  };
+
+  const handleRemovePermissionFromActive = async (permKey) => {
+    const updated = { ...permState };
+    delete updated[permKey];
+    setPermState(updated);
+    await persistPermissionsMap(updated, selectedEmpForPerm, `🗑️ تم حذف الصلاحية المخصصة`);
+  };
+
+  const handleGrantAllPermissions = async () => {
+    const allTrue = {};
+    SYSTEM_PERMISSION_CATALOG.forEach((p) => {
+      allTrue[p.key] = true;
+    });
+    Object.keys(permState).forEach((k) => {
+      allTrue[k] = true;
+    });
+    setPermState(allTrue);
+    await persistPermissionsMap(allTrue, selectedEmpForPerm, '🔓 تم تفعيل ومنح كافة الصلاحيات بنجاح');
+  };
+
+  const handleSavePermissions = async () => {
+    await persistPermissionsMap(permState, selectedEmpForPerm, '💾 تم حفظ وتثبيت كافة الصلاحيات بالنظام بنجاح');
   };
 
   const handleRevokeAllPermissions = async () => {
@@ -851,131 +1082,57 @@ export default function SettingsModule({
     });
     if (!isConfirmed) return;
 
-    const performRevoke = async () => {
-      const allFalse = {};
-      SYSTEM_PERMISSION_CATALOG.forEach((p) => {
-        let actionName = p.key.startsWith('can') ? p.key.slice(3) : p.key;
-        allFalse['can' + actionName] = false;
-        allFalse['allow' + actionName] = false;
-        allFalse[p.key] = false;
-        allFalse[actionName] = false;
-      });
-      setPermState(allFalse);
-
-      let updatedOrgSettings = { ...(state.orgSettings || orgSettings) };
-      let updatedEmployees = [...(state.employees || [])];
-
-      if (selectedEmpForPerm === 'all') {
-        updatedOrgSettings = {
-          ...updatedOrgSettings,
-          permissions: { ...allFalse },
-          empPermissions: {}
-        };
-        updatedEmployees = updatedEmployees.map((e) => ({
-          ...e,
-          permissions: { ...allFalse }
-        }));
-        showToast?.('🚫 تم إيقاف وتعطيل جميع الصلاحيات لجميع الموظفين بالنظام');
-      } else {
-        const targetEmp = updatedEmployees.find((e) => String(e.id) === String(selectedEmpForPerm) || String(e.code) === String(selectedEmpForPerm));
-        const targetId = targetEmp ? String(targetEmp.id) : String(selectedEmpForPerm);
-        const targetCode = targetEmp ? String(targetEmp.code) : String(selectedEmpForPerm);
-
-        const updatedEmpPerms = {
-          ...(updatedOrgSettings.empPermissions || {}),
-          [targetId]: { ...allFalse },
-          [targetCode]: { ...allFalse }
-        };
-        updatedOrgSettings = {
-          ...updatedOrgSettings,
-          empPermissions: updatedEmpPerms
-        };
-        updatedEmployees = updatedEmployees.map((e) =>
-          (String(e.id) === targetId || String(e.code) === targetCode) ? { ...e, permissions: { ...allFalse } } : e
-        );
-        showToast?.(`🚫 تم إيقاف وتعطيل جميع الصلاحيات للموظف (${targetEmp?.name || selectedEmpForPerm}) بنجاح`);
-      }
-
-      const updatedState = { ...state, orgSettings: updatedOrgSettings, employees: updatedEmployees };
-      if (setState) setState(updatedState);
-      if (saveState) await saveState(updatedState);
-    };
-
-    if (executeWithOwnerGuard) {
-      executeWithOwnerGuard({
-        lockKey: 'lockEditSystemPermissions',
-        actionTitle: 'تعطيل وإلغاء كافة الصلاحيات',
-        actionDetails: 'إلغاء الصلاحيات للنطاق المحدد',
-        onExecute: performRevoke
-      });
-    } else {
-      await performRevoke();
-    }
+    const allFalse = {};
+    SYSTEM_PERMISSION_CATALOG.forEach((p) => {
+      allFalse[p.key] = false;
+    });
+    Object.keys(permState).forEach((k) => {
+      allFalse[k] = false;
+    });
+    setPermState(allFalse);
+    await persistPermissionsMap(allFalse, selectedEmpForPerm, '🚫 تم إيقاف وتعطيل جميع الصلاحيات بنجاح');
   };
 
   const handleResetDefaultPermissions = async () => {
-    const performReset = async () => {
-      const standardPerms = {};
-      SYSTEM_PERMISSION_CATALOG.forEach((p) => {
-        let actionName = p.key.startsWith('can') ? p.key.slice(3) : p.key;
-        standardPerms['can' + actionName] = p.defaultVal;
-        standardPerms['allow' + actionName] = p.defaultVal;
-        standardPerms[p.key] = p.defaultVal;
-        standardPerms[actionName] = p.defaultVal;
-      });
-      setPermState(standardPerms);
+    const isConfirmed = await showConfirm({
+      title: 'استعادة الصلاحيات القياسية',
+      message: '🔄 هل ترغب باستعادة الصلاحيات الافتراضية الموصى بها للنظام؟',
+      confirmText: 'استعادة القياسي',
+      cancelText: 'إلغاء وتراجع',
+      type: 'info',
+      icon: '🔄'
+    });
+    if (!isConfirmed) return;
 
-      let updatedOrgSettings = { ...(state.orgSettings || orgSettings) };
-      let updatedEmployees = [...(state.employees || [])];
+    const standardPerms = {};
+    SYSTEM_PERMISSION_CATALOG.forEach((p) => {
+      standardPerms[p.key] = p.defaultVal;
+    });
+    setPermState(standardPerms);
 
-      if (selectedEmpForPerm === 'all') {
-        updatedOrgSettings = {
-          ...updatedOrgSettings,
-          permissions: { ...standardPerms },
-          empPermissions: {}
-        };
-        updatedEmployees = updatedEmployees.map((e) => {
+    if (selectedEmpForPerm !== 'all') {
+      const updatedOrgSettings = { ...(state.orgSettings || orgSettings) };
+      const updatedEmpPerms = { ...(updatedOrgSettings.empPermissions || {}) };
+      const targetEmp = (state.employees || []).find(e => String(e.id) === String(selectedEmpForPerm) || String(e.code) === String(selectedEmpForPerm));
+      const targetId = targetEmp ? String(targetEmp.id) : String(selectedEmpForPerm);
+      const targetCode = targetEmp ? String(targetEmp.code) : String(selectedEmpForPerm);
+      delete updatedEmpPerms[targetId];
+      delete updatedEmpPerms[targetCode];
+      updatedOrgSettings.empPermissions = updatedEmpPerms;
+
+      const updatedEmployees = (state.employees || []).map((e) => {
+        if (String(e.id) === targetId || String(e.code) === targetCode) {
           const { permissions, ...rest } = e;
-          return { ...rest, permissions: { ...standardPerms } };
-        });
-        showToast?.('🔄 تمت استعادة الصلاحيات القياسية لجميع الموظفين');
-      } else {
-        const targetEmp = updatedEmployees.find((e) => String(e.id) === String(selectedEmpForPerm) || String(e.code) === String(selectedEmpForPerm));
-        const targetId = targetEmp ? String(targetEmp.id) : String(selectedEmpForPerm);
-        const targetCode = targetEmp ? String(targetEmp.code) : String(selectedEmpForPerm);
-
-        const updatedEmpPerms = { ...(updatedOrgSettings.empPermissions || {}) };
-        delete updatedEmpPerms[targetId];
-        delete updatedEmpPerms[targetCode];
-
-        updatedOrgSettings = {
-          ...updatedOrgSettings,
-          empPermissions: updatedEmpPerms
-        };
-        updatedEmployees = updatedEmployees.map((e) => {
-          if (String(e.id) === targetId || String(e.code) === targetCode) {
-            const { permissions, ...rest } = e;
-            return rest;
-          }
-          return e;
-        });
-        showToast?.(`🔄 تمت استعادة الصلاحيات الافتراضية للموظف (${targetEmp?.name || selectedEmpForPerm})`);
-      }
-
+          return rest;
+        }
+        return e;
+      });
       const updatedState = { ...state, orgSettings: updatedOrgSettings, employees: updatedEmployees };
       if (setState) setState(updatedState);
       if (saveState) await saveState(updatedState);
-    };
-
-    if (executeWithOwnerGuard) {
-      executeWithOwnerGuard({
-        lockKey: 'lockEditSystemPermissions',
-        actionTitle: 'استعادة الصلاحيات الافتراضية',
-        actionDetails: 'إعادة ضبط الصلاحيات القياسية للنظام',
-        onExecute: performReset
-      });
+      showToast?.(`🔄 تمت استعادة الصلاحيات العامة الافتراضية للموظف (${targetEmp?.name || selectedEmpForPerm})`);
     } else {
-      await performReset();
+      await persistPermissionsMap(standardPerms, 'all', '🔄 تمت استعادة الصلاحيات القياسية لجميع الموظفين');
     }
   };
 
@@ -1275,137 +1432,472 @@ export default function SettingsModule({
 
       {/* Tab: Permissions Management */}
       {activeTab === 'permissions' && (
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', padding: '20px', borderRadius: '14px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', padding: '22px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(0,0,0,0.03)' }}>
+          {/* Header & Live Status Bar */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '18px', flexWrap: 'wrap', gap: '14px', borderBottom: '1px solid var(--border)', paddingBottom: '16px' }}>
             <div>
-              <h4 style={{ margin: 0, fontFamily: 'Cairo', color: 'var(--primary-dark)', fontSize: '17px' }}>
-                🔒 تفويض وإدارة صلاحيات الموظفين الصارمة بالنظام
-              </h4>
-              <p style={{ fontSize: '13px', color: 'var(--muted)', margin: '4px 0 0' }}>
-                تحكم صارم وديناميكي في إضافة وحذف صلاحيات النظام للموظفين أو لجميع كوادر المؤسسة:
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <h4 style={{ margin: 0, fontFamily: 'Cairo', color: 'var(--primary-dark)', fontSize: '18px', fontWeight: '800' }}>
+                  🔒 تفويض وإدارة صلاحيات الموظفين الصارمة بالنظام
+                </h4>
+                <span style={{
+                  fontSize: '11px',
+                  background: isSavingPerms ? '#fef3c7' : '#dcfce7',
+                  color: isSavingPerms ? '#b45309' : '#166534',
+                  border: isSavingPerms ? '1px solid #fcd34d' : '1px solid #86efac',
+                  padding: '2px 8px',
+                  borderRadius: '99px',
+                  fontWeight: '700',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}>
+                  {isSavingPerms ? '⏳ جاري الحفظ التلقائي...' : '⚡ حفظ فوري ومباشر مفعل'}
+                </span>
+                {lastSavedPermTime && (
+                  <span style={{ fontSize: '11px', color: 'var(--muted)', background: 'var(--surface-muted)', padding: '2px 8px', borderRadius: '99px' }}>
+                    🕒 آخر حفظ: {lastSavedPermTime}
+                  </span>
+                )}
+              </div>
+              <p style={{ fontSize: '13px', color: 'var(--muted)', margin: '6px 0 0' }}>
+                تحكم ديناميكي كامل في صفحات وخدمات النظام للموظفين مع التحديث اللحظي الفوري عند تفعيل أو تعطيل أي صلاحية:
               </p>
             </div>
-            <button
-              type="button"
-              className="btn btn-start"
-              style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-              onClick={() => setShowAddPermModal(true)}
-            >
-              ➕ إضافة صلاحية من قائمة النظام
-            </button>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn btn-outline"
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', padding: '7px 12px' }}
+                onClick={() => setShowAddPermModal(true)}
+              >
+                ➕ إضافة صلاحية جديدة
+              </button>
+            </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '14px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '20px', background: 'var(--surface-muted)', padding: '14px 16px', borderRadius: '10px', border: '1px solid var(--border)' }}>
-            <div style={{ flex: '1', minWidth: '240px', maxWidth: '420px' }}>
-              <label style={{ fontSize: '13px', fontWeight: 'bold', display: 'block', marginBottom: '6px' }}>👤 تحديد نطاق الصلاحية (الموظف المستهدف):</label>
+          {/* Scope Selector: All Employees vs Individual */}
+          <div style={{
+            display: 'flex',
+            gap: '16px',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            marginBottom: '20px',
+            background: 'var(--surface-muted)',
+            padding: '16px 18px',
+            borderRadius: '12px',
+            border: '1px solid var(--border)'
+          }}>
+            <div style={{ flex: '1', minWidth: '260px', maxWidth: '440px' }}>
+              <label style={{ fontSize: '13px', fontWeight: '800', display: 'block', marginBottom: '6px', color: 'var(--text)' }}>
+                👤 تحديد نطاق الصلاحيات (الموظف المستهدف):
+              </label>
               <select
                 value={selectedEmpForPerm}
                 onChange={(e) => handleSelectEmpForPerm(e.target.value)}
-                style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: '#fff', fontWeight: 'bold' }}
+                style={{
+                  width: '100%',
+                  padding: '10px 14px',
+                  borderRadius: '10px',
+                  border: '1.5px solid var(--primary)',
+                  background: '#fff',
+                  fontWeight: '700',
+                  fontSize: '13.5px',
+                  color: 'var(--text)'
+                }}
               >
                 <option value="all">👥 جميع الموظفين بالمنظومة (الصلاحيات العامة الافتراضية)</option>
-                {(state.employees || []).filter(isEmployeeActive).map((emp) => (
-                  <option key={emp.id} value={emp.id}>
-                    {getEmpDisplayName(emp)} ({emp.code}) {emp.permissions ? '⭐ [صلاحية مخصصة]' : ''}
-                  </option>
-                ))}
+                {(state.employees || []).filter(isEmployeeActive).map((emp) => {
+                  const targetId = String(emp.id);
+                  const targetCode = String(emp.code);
+                  const hasCustomOverride = Boolean(
+                    state.orgSettings?.empPermissions?.[targetId] ||
+                    state.orgSettings?.empPermissions?.[targetCode] ||
+                    emp.permissions
+                  );
+                  return (
+                    <option key={emp.id} value={emp.id}>
+                      {getEmpDisplayName(emp)} ({emp.code}) {hasCustomOverride ? '⭐ [صلاحية فردية مخصصة]' : ''}
+                    </option>
+                  );
+                })}
               </select>
             </div>
-            <div style={{ fontSize: '12.5px', color: 'var(--muted)', flex: '2', minWidth: '200px' }}>
-              {selectedEmpForPerm === 'all'
-                ? 'ℹ️ التعديل هنا ينطبق كقواعد عامة صارمة على جميع الموظفين مالم يتم تخصيص صلاحيات فردية.'
-                : `ℹ️ يتم الآن تخصيص الصلاحيات الصارمة فقط للموظف المعين (${(state.employees || []).find(e => e.id === selectedEmpForPerm)?.name})`}
+
+            <div style={{ fontSize: '12.5px', color: 'var(--muted)', flex: '2', minWidth: '220px', lineHeight: '1.6' }}>
+              {selectedEmpForPerm === 'all' ? (
+                <div>
+                  <span style={{ fontWeight: 'bold', color: 'var(--primary-dark)' }}>ℹ️ نطاق عام (المؤسسة بالكامل):</span>
+                  <div>التعديل هنا يُحفظ كقواعد قياسية صارمة لجميع الموظفين، ويُطبق فوراً على حساباتهم وبواباتهم ما لم يكن للموظف تخصيص استثنائي خاص به.</div>
+                </div>
+              ) : (
+                <div>
+                  <span style={{ fontWeight: 'bold', color: '#b45309' }}>⭐ نطاق فردي مخصص:</span>
+                  <div>
+                    يتم الآن تخصيص الصلاحيات فقط للموظف: <strong>{(state.employees || []).find(e => String(e.id) === String(selectedEmpForPerm) || String(e.code) === String(selectedEmpForPerm))?.name || selectedEmpForPerm}</strong>. هذا التخصيص يعلو الصلاحيات العامة.
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '12px', marginBottom: '24px' }}>
-            {Object.keys(permState).map((key) => {
-              const catalogItem = SYSTEM_PERMISSION_CATALOG.find((p) => p.key === key);
-              const label = catalogItem ? catalogItem.label : key;
-              const category = catalogItem ? catalogItem.category : 'صلاحية مخصصة';
-              const isEnabled = permState[key] !== false;
+          {/* Search Bar & Category Tabs */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+              {/* Category Pills */}
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {[
+                  { id: 'all', label: 'الكل', count: SYSTEM_PERMISSION_CATALOG.length },
+                  { id: 'الرواتب والماليات', label: '💵 الرواتب والماليات', count: SYSTEM_PERMISSION_CATALOG.filter(p => p.category === 'الرواتب والماليات').length },
+                  { id: 'الطلبات والخدمات', label: '📋 الطلبات والخدمات', count: SYSTEM_PERMISSION_CATALOG.filter(p => p.category === 'الطلبات والخدمات').length },
+                  { id: 'الحضور والانصراف', label: '⏱️ الحضور والجدول', count: SYSTEM_PERMISSION_CATALOG.filter(p => p.category === 'الحضور والانصراف').length },
+                  { id: 'اللائحة والتقييمات', label: '⚖️ اللائحة والتقييم', count: SYSTEM_PERMISSION_CATALOG.filter(p => p.category === 'اللائحة والتقييمات').length },
+                  { id: 'الملف الشخصي', label: '🪪 الملف الشخصي', count: SYSTEM_PERMISSION_CATALOG.filter(p => p.category === 'الملف الشخصي').length }
+                ].map(cat => {
+                  const isSelected = permCategoryFilter === cat.id;
+                  return (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => setPermCategoryFilter(cat.id)}
+                      style={{
+                        padding: '6px 12px',
+                        borderRadius: '8px',
+                        border: isSelected ? '1.5px solid var(--primary)' : '1px solid var(--border)',
+                        background: isSelected ? 'var(--primary)' : 'var(--surface)',
+                        color: isSelected ? '#ffffff' : 'var(--text)',
+                        fontSize: '12px',
+                        fontWeight: isSelected ? '800' : '600',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <span>{cat.label}</span>
+                      <span style={{
+                        background: isSelected ? 'rgba(255,255,255,0.25)' : 'var(--surface-muted)',
+                        color: isSelected ? '#ffffff' : 'var(--muted)',
+                        padding: '1px 5px',
+                        borderRadius: '99px',
+                        fontSize: '10px'
+                      }}>
+                        {cat.count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
 
-              return (
-                <div
-                  key={key}
+              {/* Live Count Summary */}
+              {(() => {
+                const totalCatalog = SYSTEM_PERMISSION_CATALOG.length;
+                const activeCatalog = SYSTEM_PERMISSION_CATALOG.filter(p => permState[p.key] !== false).length;
+                const pct = Math.round((activeCatalog / totalCatalog) * 100);
+                return (
+                  <div style={{ fontSize: '12px', fontWeight: '800', color: activeCatalog > 0 ? '#166534' : '#dc2626', background: activeCatalog > 0 ? '#dcfce7' : '#fee2e2', padding: '4px 10px', borderRadius: '8px' }}>
+                    {activeCatalog} من {totalCatalog} صلاحية مفعلة ({pct}%)
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Quick Search */}
+            <div style={{ position: 'relative', width: '100%' }}>
+              <input
+                type="text"
+                value={permSearchQuery}
+                onChange={(e) => setPermSearchQuery(e.target.value)}
+                placeholder="🔍 ابحث في الصلاحيات بالاسم، الوصف، أو الكود..."
+                style={{
+                  width: '100%',
+                  padding: '9px 14px',
+                  paddingLeft: permSearchQuery ? '36px' : '14px',
+                  borderRadius: '10px',
+                  border: '1px solid var(--border)',
+                  fontSize: '13px',
+                  background: 'var(--surface)',
+                  color: 'var(--text)'
+                }}
+              />
+              {permSearchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setPermSearchQuery('')}
                   style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: '10px',
-                    background: isEnabled ? '#f0fdf4' : '#f8fafc',
-                    padding: '12px 16px',
-                    borderRadius: '10px',
-                    border: isEnabled ? '1px solid #86efac' : '1px solid var(--border)',
-                    transition: 'all 0.2s ease'
+                    position: 'absolute',
+                    left: '10px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: 'var(--muted)',
+                    fontSize: '14px'
                   }}
                 >
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', flex: 1 }}>
-                    <input
-                      type="checkbox"
-                      checked={isEnabled}
-                      onChange={(e) => setPermState({ ...permState, [key]: e.target.checked })}
-                      style={{ width: '19px', height: '19px', cursor: 'pointer' }}
-                    />
-                    <div>
-                      <div style={{ fontWeight: '700', fontSize: '13.5px', color: isEnabled ? '#15803d' : 'var(--muted)' }}>
-                        {label}
-                      </div>
-                      <span style={{ fontSize: '11px', background: isEnabled ? '#dcfce7' : '#e2e8f0', color: isEnabled ? '#166534' : '#64748b', padding: '2px 6px', borderRadius: '4px', display: 'inline-block', marginTop: '3px' }}>
-                        {category} • {isEnabled ? 'مفعلة ✅' : 'مقيدة ومحظورة 🚫'}
-                      </span>
-                    </div>
-                  </label>
+                  ✕
+                </button>
+              )}
+            </div>
+          </div>
 
-                  <button
-                    type="button"
-                    title="حذف هذه الصلاحية من القائمة"
-                    onClick={() => handleRemovePermissionFromActive(key)}
-                    style={{
-                      background: '#fee2e2',
-                      border: '1px solid #fca5a5',
-                      color: '#b91c1c',
-                      borderRadius: '6px',
-                      padding: '4px 8px',
-                      fontSize: '12px',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    🗑️ حذف
+          {/* Permissions Cards Grid */}
+          {(() => {
+            const filteredCatalog = SYSTEM_PERMISSION_CATALOG.filter((item) => {
+              const matchesCategory = permCategoryFilter === 'all' || item.category === permCategoryFilter;
+              const q = permSearchQuery.trim().toLowerCase();
+              const matchesSearch = !q ||
+                item.label.toLowerCase().includes(q) ||
+                (item.desc && item.desc.toLowerCase().includes(q)) ||
+                item.key.toLowerCase().includes(q) ||
+                item.category.toLowerCase().includes(q);
+              return matchesCategory && matchesSearch;
+            });
+
+            // Additional custom keys in permState not in catalog
+            const catalogKeys = new Set(SYSTEM_PERMISSION_CATALOG.map(p => p.key));
+            const customKeys = Object.keys(permState).filter(k => !catalogKeys.has(k) && !k.startsWith('allow') && !k.startsWith('can'));
+
+            if (filteredCatalog.length === 0 && customKeys.length === 0) {
+              return (
+                <div style={{ textAlign: 'center', padding: '40px 20px', background: 'var(--surface-muted)', borderRadius: '12px', color: 'var(--muted)' }}>
+                  <div style={{ fontSize: '36px', marginBottom: '8px' }}>🔍</div>
+                  <div style={{ fontWeight: 'bold' }}>لا توجد صلاحيات تطابق معايير البحث الحالية</div>
+                  <button type="button" className="btn btn-ghost" style={{ marginTop: '10px', fontSize: '12px' }} onClick={() => { setPermSearchQuery(''); setPermCategoryFilter('all'); }}>
+                    إعادة تعيين الفلاتر
                   </button>
                 </div>
               );
-            })}
-          </div>
+            }
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', borderTop: '1px solid var(--border)', paddingTop: '16px' }}>
+            return (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(330px, 1fr))', gap: '12px', marginBottom: '24px' }}>
+                {filteredCatalog.map((item) => {
+                  const key = item.key;
+                  const isEnabled = permState[key] !== false;
+
+                  return (
+                    <div
+                      key={key}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '12px',
+                        background: isEnabled ? 'linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%)' : 'linear-gradient(135deg, #f8fafc 0%, #ffffff 100%)',
+                        padding: '14px 16px',
+                        borderRadius: '12px',
+                        border: isEnabled ? '1.5px solid #86efac' : '1px solid var(--border)',
+                        boxShadow: isEnabled ? '0 2px 8px rgba(34, 197, 94, 0.08)' : 'none',
+                        transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                          <span style={{ fontSize: '18px', flexShrink: 0 }}>{item.icon}</span>
+                          <span style={{ fontWeight: '800', fontSize: '13.5px', color: isEnabled ? '#15803d' : 'var(--text)', whiteSpace: 'normal', lineHeight: '1.4' }}>
+                            {item.label.replace(/^[\p{Emoji}\s]+/u, '')}
+                          </span>
+                        </div>
+                        {item.desc && (
+                          <p style={{ margin: '0 0 6px', fontSize: '11.5px', color: 'var(--muted)', lineHeight: '1.4' }}>
+                            {item.desc}
+                          </p>
+                        )}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                          <span style={{
+                            fontSize: '10.5px',
+                            background: isEnabled ? '#dcfce7' : '#e2e8f0',
+                            color: isEnabled ? '#166534' : '#64748b',
+                            padding: '2px 8px',
+                            borderRadius: '6px',
+                            fontWeight: '700'
+                          }}>
+                            {item.category}
+                          </span>
+                          <span style={{
+                            fontSize: '10.5px',
+                            background: isEnabled ? '#22c55e' : '#94a3b8',
+                            color: '#ffffff',
+                            padding: '2px 7px',
+                            borderRadius: '6px',
+                            fontWeight: '800'
+                          }}>
+                            {isEnabled ? 'مفعلة ومتاحة ✅' : 'مقيدة ومحظورة 🚫'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Modern Interactive Switch Toggle */}
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={isEnabled}
+                        onClick={() => handleTogglePermission(key, !isEnabled)}
+                        style={{
+                          width: '52px',
+                          height: '28px',
+                          background: isEnabled ? '#16a34a' : '#cbd5e1',
+                          borderRadius: '99px',
+                          border: 'none',
+                          cursor: 'pointer',
+                          position: 'relative',
+                          flexShrink: 0,
+                          transition: 'background-color 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                          padding: '2px',
+                          outline: 'none',
+                          boxShadow: isEnabled ? '0 2px 6px rgba(22, 163, 74, 0.4)' : 'none'
+                        }}
+                        title={isEnabled ? 'انقر للتعطيل والحجب الفوري' : 'انقر للتفعيل والمنح الفوري'}
+                      >
+                        <span style={{
+                          display: 'block',
+                          width: '24px',
+                          height: '24px',
+                          background: '#ffffff',
+                          borderRadius: '50%',
+                          transform: isEnabled ? 'translateX(0)' : 'translateX(-24px)',
+                          transition: 'transform 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                          boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                        }} />
+                      </button>
+                    </div>
+                  );
+                })}
+
+                {/* Additional Custom Keys if any */}
+                {customKeys.length > 0 && (
+                  <div style={{ gridColumn: '1 / -1', marginTop: '10px' }}>
+                    <div style={{ fontWeight: 'bold', fontSize: '13px', color: 'var(--primary-dark)', marginBottom: '8px' }}>
+                      ⚙️ صلاحيات إضافية مخصصة:
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '10px' }}>
+                      {customKeys.map(k => {
+                        const isEnabled = Boolean(permState[k]);
+                        return (
+                          <div
+                            key={k}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              background: '#f8fafc',
+                              border: '1px solid var(--border)',
+                              borderRadius: '10px',
+                              padding: '10px 14px'
+                            }}
+                          >
+                            <div>
+                              <div style={{ fontWeight: 'bold', fontSize: '13px' }}>{k}</div>
+                              <span style={{ fontSize: '10px', color: 'var(--muted)' }}>صلاحية مخصصة</span>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <button
+                                type="button"
+                                role="switch"
+                                aria-checked={isEnabled}
+                                onClick={() => handleTogglePermission(k, !isEnabled)}
+                                style={{
+                                  width: '46px',
+                                  height: '24px',
+                                  background: isEnabled ? '#16a34a' : '#cbd5e1',
+                                  borderRadius: '99px',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  position: 'relative',
+                                  padding: '2px'
+                                }}
+                              >
+                                <span style={{
+                                  display: 'block',
+                                  width: '20px',
+                                  height: '20px',
+                                  background: '#ffffff',
+                                  borderRadius: '50%',
+                                  transform: isEnabled ? 'translateX(0)' : 'translateX(-22px)',
+                                  transition: 'transform 0.2s'
+                                }} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRemovePermissionFromActive(k)}
+                                style={{ background: '#fee2e2', border: '1px solid #fca5a5', color: '#b91c1c', borderRadius: '6px', padding: '3px 7px', fontSize: '11px', cursor: 'pointer' }}
+                              >
+                                🗑️
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* Action Bar Footer */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '12px',
+            borderTop: '1px solid var(--border)',
+            paddingTop: '16px'
+          }}>
             <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-              <button type="button" className="btn btn-outline" style={{ color: '#16a34a', borderColor: '#86efac' }} onClick={handleGrantAllPermissions}>
-                🔓 منح وتفعيل كافة الصلاحيات
+              <button
+                type="button"
+                className="btn btn-outline"
+                style={{ color: '#16a34a', borderColor: '#86efac', background: '#f0fdf4' }}
+                onClick={handleGrantAllPermissions}
+              >
+                🔓 تفعيل ومنح كافة الصلاحيات
               </button>
-              <button type="button" className="btn btn-outline" style={{ color: '#dc2626', borderColor: '#fca5a5' }} onClick={handleRevokeAllPermissions}>
+              <button
+                type="button"
+                className="btn btn-outline"
+                style={{ color: '#dc2626', borderColor: '#fca5a5', background: '#fef2f2' }}
+                onClick={handleRevokeAllPermissions}
+              >
                 🔒 إيقاف وتعطيل جميع الصلاحيات
               </button>
-              <button type="button" className="btn btn-ghost" onClick={handleResetDefaultPermissions}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={handleResetDefaultPermissions}
+              >
                 🔄 استعادة الصلاحيات القياسية
               </button>
             </div>
 
-            <button type="button" className="btn btn-start" onClick={handleSavePermissions}>
-              💾 حفظ وتطبيق الصلاحيات الصارمة
+            <button
+              type="button"
+              className="btn btn-start"
+              onClick={handleSavePermissions}
+              disabled={isSavingPerms}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: '150px', justifyContent: 'center' }}
+            >
+              {isSavingPerms ? '⏳ جاري الحفظ والتثبيت...' : '💾 حفظ وتثبيت الصلاحيات'}
             </button>
           </div>
 
           {/* Add Permission Modal */}
           {showAddPermModal && (
             <div className="modal-overlay" onClick={() => setShowAddPermModal(false)} style={{ zIndex: 1200 }}>
-              <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '540px', width: '90%', padding: '24px', borderRadius: '16px' }}>
+              <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '560px', width: '92%', padding: '24px', borderRadius: '16px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '12px' }}>
-                  <h3 style={{ margin: 0, fontSize: '17px', color: 'var(--primary-dark)' }}>➕ إضافة صلاحية من قائمة صلاحيات النظام</h3>
+                  <h3 style={{ margin: 0, fontSize: '17px', color: 'var(--primary-dark)', fontWeight: '800' }}>
+                    ➕ إضافة صلاحية من كتالوج النظام المعتمد
+                  </h3>
                   <button className="btn btn-ghost" onClick={() => setShowAddPermModal(false)}>✕</button>
                 </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                   <div>
                     <label style={{ fontSize: '13px', fontWeight: 'bold', display: 'block', marginBottom: '6px' }}>
                       📋 اختر الصلاحية من قائمة النظام المعتمدة:
@@ -1419,7 +1911,7 @@ export default function SettingsModule({
                           setCustomPermLabel('');
                         }
                       }}
-                      style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px' }}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px' }}
                     >
                       <option value="">-- اختر من الكتالوج الرسمي للصلاحيات --</option>
                       {SYSTEM_PERMISSION_CATALOG.filter(p => !Object.keys(permState).includes(p.key)).map((p) => (
@@ -1434,9 +1926,11 @@ export default function SettingsModule({
                     ── أو أضف صلاحية مخصصة جديدة ──
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                     <div>
-                      <label style={{ fontSize: '12px', fontWeight: 'bold' }}>مفتاح الصلاحية (Key بالإنجليزية):</label>
+                      <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>
+                        مفتاح الصلاحية (Key بالإنجليزية):
+                      </label>
                       <input
                         type="text"
                         placeholder="canManageInventory"
@@ -1445,26 +1939,28 @@ export default function SettingsModule({
                           setCustomPermKey(e.target.value);
                           if (e.target.value) setSelectedCatalogPermKey('');
                         }}
-                        style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px' }}
+                        style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px' }}
                       />
                     </div>
                     <div>
-                      <label style={{ fontSize: '12px', fontWeight: 'bold' }}>اسم ووصف الصلاحية (بالعربية):</label>
+                      <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>
+                        اسم ووصف الصلاحية (بالعربية):
+                      </label>
                       <input
                         type="text"
                         placeholder="إدارة الجرد والمخزون"
                         value={customPermLabel}
                         onChange={(e) => setCustomPermLabel(e.target.value)}
-                        style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px' }}
+                        style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px' }}
                       />
                     </div>
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px', borderTop: '1px solid var(--border)', paddingTop: '14px' }}>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '22px', borderTop: '1px solid var(--border)', paddingTop: '14px' }}>
                   <button type="button" className="btn btn-ghost" onClick={() => setShowAddPermModal(false)}>إلغاء</button>
                   <button type="button" className="btn btn-start" onClick={handleAddPermissionToActive}>
-                    ➕ إضافة وتثبيت الصلاحية
+                    ➕ إضافة وتفعيل الصلاحية فوراً
                   </button>
                 </div>
               </div>

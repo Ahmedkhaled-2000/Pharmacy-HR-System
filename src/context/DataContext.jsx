@@ -537,34 +537,39 @@ export function DataProvider({ children, showToast = () => {} }) {
     const targetId = freshEmp?.id !== undefined ? String(freshEmp.id) : empId;
     const targetCode = freshEmp?.code !== undefined ? String(freshEmp.code) : empCode;
 
-    // 1. Employee Overrides
+    // Helper to check key in a permissions object across all naming variations
+    const checkInPermObj = (permObj) => {
+      if (!permObj || typeof permObj !== 'object') return undefined;
+      if (permObj[canKey] !== undefined) return Boolean(permObj[canKey]);
+      if (permObj[allowKey] !== undefined) return Boolean(permObj[allowKey]);
+      if (permObj[actionName] !== undefined) return Boolean(permObj[actionName]);
+      if (permObj[permKey] !== undefined) return Boolean(permObj[permKey]);
+      const lowerKey = actionName.toLowerCase();
+      for (const [k, v] of Object.entries(permObj)) {
+        const cleanK = k.replace(/^(can|allow)/i, '').toLowerCase();
+        if (cleanK === lowerKey && v !== undefined) return Boolean(v);
+      }
+      return undefined;
+    };
+
+    // 1. Employee Specific Overrides in orgSettings.empPermissions (Highest Priority)
     const empOverrides = state.orgSettings?.empPermissions;
     if (empOverrides && typeof empOverrides === 'object') {
       const specificPerms = (targetId && empOverrides[targetId]) || 
                             (targetCode && empOverrides[targetCode]);
-      if (specificPerms && typeof specificPerms === 'object') {
-        if (specificPerms[canKey] !== undefined) return Boolean(specificPerms[canKey]);
-        if (specificPerms[allowKey] !== undefined) return Boolean(specificPerms[allowKey]);
-        if (specificPerms[actionName] !== undefined) return Boolean(specificPerms[actionName]);
-        if (specificPerms[permKey] !== undefined) return Boolean(specificPerms[permKey]);
-      }
+      const specificVal = checkInPermObj(specificPerms);
+      if (specificVal !== undefined) return specificVal;
     }
 
-    // 2. Employee Object internal permissions
+    // 2. Global Permissions set by Top Management in orgSettings.permissions
+    const globalPerms = state.orgSettings?.permissions;
+    const globalVal = checkInPermObj(globalPerms);
+    if (globalVal !== undefined) return globalVal;
+
+    // 3. Fallback to Employee Object internal permissions (if any specific legacy override)
     const empPerms = freshEmp?.permissions;
-    if (empPerms && typeof empPerms === 'object' && Object.keys(empPerms).length > 0) {
-      if (empPerms[canKey] !== undefined) return Boolean(empPerms[canKey]);
-      if (empPerms[allowKey] !== undefined) return Boolean(empPerms[allowKey]);
-      if (empPerms[actionName] !== undefined) return Boolean(empPerms[actionName]);
-      if (empPerms[permKey] !== undefined) return Boolean(empPerms[permKey]);
-    }
-
-    // 3. Global Permissions Default
-    const globalPerms = state.orgSettings?.permissions || {};
-    if (globalPerms[canKey] !== undefined) return Boolean(globalPerms[canKey]);
-    if (globalPerms[allowKey] !== undefined) return Boolean(globalPerms[allowKey]);
-    if (globalPerms[actionName] !== undefined) return Boolean(globalPerms[actionName]);
-    if (globalPerms[permKey] !== undefined) return Boolean(globalPerms[permKey]);
+    const empVal = checkInPermObj(empPerms);
+    if (empVal !== undefined) return empVal;
 
     // 4. Default Permission Policies
     // Actions that are restricted/disabled by default (require explicit admin grant)

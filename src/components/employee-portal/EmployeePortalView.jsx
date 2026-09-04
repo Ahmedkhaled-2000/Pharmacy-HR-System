@@ -945,37 +945,34 @@ export default function EmployeePortalView({
     const targetId = emp ? String(emp.id) : (currentEmpUser ? String(currentEmpUser.id) : null);
     const targetCode = emp ? String(emp.code) : (currentEmpUser ? String(currentEmpUser.code) : null);
 
-    // 1. فحص الصلاحيات المخصصة للموظف المحدد في empPermissions
+    const checkInPermObj = (obj) => {
+      if (!obj || typeof obj !== 'object') return null;
+      if (obj[canKey] !== undefined) return Boolean(obj[canKey]);
+      if (obj[allowKey] !== undefined) return Boolean(obj[allowKey]);
+      if (obj[actionName] !== undefined) return Boolean(obj[actionName]);
+      if (obj[permKey] !== undefined) return Boolean(obj[permKey]);
+      return null;
+    };
+
+    // 1. Employee-specific override in orgSettings.empPermissions (Top management manual override)
     const empOverrides = state?.orgSettings?.empPermissions || orgSettings?.empPermissions;
     if (empOverrides && typeof empOverrides === 'object') {
       const specific = (targetId && empOverrides[targetId]) || (targetCode && empOverrides[targetCode]);
-      if (specific && typeof specific === 'object') {
-        if (specific[canKey] !== undefined) return Boolean(specific[canKey]);
-        if (specific[allowKey] !== undefined) return Boolean(specific[allowKey]);
-        if (specific[actionName] !== undefined) return Boolean(specific[actionName]);
-        if (specific[permKey] !== undefined) return Boolean(specific[permKey]);
-      }
+      const res = checkInPermObj(specific);
+      if (res !== null) return res;
     }
 
-    // 2. فحص الصلاحيات المسجلة داخل كائن الموظف نفسه emp.permissions
-    const empPerms = emp?.permissions || currentEmpUser?.permissions;
-    if (empPerms && typeof empPerms === 'object' && Object.keys(empPerms).length > 0) {
-      if (empPerms[canKey] !== undefined) return Boolean(empPerms[canKey]);
-      if (empPerms[allowKey] !== undefined) return Boolean(empPerms[allowKey]);
-      if (empPerms[actionName] !== undefined) return Boolean(empPerms[actionName]);
-      if (empPerms[permKey] !== undefined) return Boolean(empPerms[permKey]);
-    }
-
-    // 3. فحص الصلاحيات العامة للمؤسسة في orgSettings.permissions
+    // 2. Global org settings permissions (Top management global rules)
     const globalPerms = state?.orgSettings?.permissions || orgSettings?.permissions;
-    if (globalPerms && typeof globalPerms === 'object') {
-      if (globalPerms[canKey] !== undefined) return Boolean(globalPerms[canKey]);
-      if (globalPerms[allowKey] !== undefined) return Boolean(globalPerms[allowKey]);
-      if (globalPerms[actionName] !== undefined) return Boolean(globalPerms[actionName]);
-      if (globalPerms[permKey] !== undefined) return Boolean(globalPerms[permKey]);
-    }
+    const globalRes = checkInPermObj(globalPerms);
+    if (globalRes !== null) return globalRes;
 
-    // 4. استدعاء دالة getEmpPermission الممررة
+    // 3. Emp object permissions (Legacy fallback)
+    const empPerms = emp?.permissions || currentEmpUser?.permissions;
+    const empRes = checkInPermObj(empPerms);
+    if (empRes !== null) return empRes;
+
+    // 4. getEmpPermission passed from DataContext
     if (typeof getEmpPermission === 'function') {
       return Boolean(getEmpPermission(emp || currentEmpUser, permKey));
     }
@@ -983,21 +980,67 @@ export default function EmployeePortalView({
     return defaultVal;
   };
 
+  // ── All 19 Unified Permissions mapped dynamically ──
   const canViewSalary = isPermActive('canViewSalary', true);
-  const canStartEnd = isPermActive('canStartEnd', true);
-  const canLivePunch = isPermActive('canLivePunch', true);
-  const canManualShift = isPermActive('canManualShift', false);
-  const canEditShift = isPermActive('canEditShift', false);
-  const canAddAdjustment = isPermActive('canAddAdjustment', false);
   const canViewAdjustments = isPermActive('canViewAdjustments', true);
+  const canAddAdjustment = isPermActive('canAddAdjustment', false);
   const canExportExcel = isPermActive('canExportExcel', true);
   const canApplyLoan = isPermActive('canApplyLoan', true);
+
   const canApplyLeave = isPermActive('canApplyLeave', true);
   const canApplyPermission = isPermActive('canApplyPermission', true);
   const canApplySwap = isPermActive('canApplySwap', true);
+  const canApplyResignation = isPermActive('canApplyResignation', true);
+
+  const canViewShifts = isPermActive('canViewShifts', true);
+  const canViewRoster = isPermActive('canViewRoster', true);
+  const canStartEnd = isPermActive('canStartEnd', true);
+  const canLivePunch = isPermActive('canLivePunch', true);
+  const canEnrollBiometric = isPermActive('canEnrollBiometric', true);
+  const canManualShift = isPermActive('canManualShift', false);
+  const canEditShift = isPermActive('canEditShift', false);
+
   const canViewBylaws = isPermActive('canViewBylaws', true);
   const canSubmitComplaint = isPermActive('canSubmitComplaint', true);
-  const canViewRoster = isPermActive('canViewRoster', true);
+  const canViewProfile = isPermActive('canViewProfile', true);
+
+  // Active Tab Security Guard: Redirect immediately to 'dashboard' if the employee is viewing a tab that gets turned off
+  useEffect(() => {
+    const tabPermMap = {
+      salary: canViewSalary,
+      adjustments: canViewAdjustments,
+      loans: canApplyLoan,
+      shifts: canViewShifts,
+      biometric: canEnrollBiometric,
+      roster: canViewRoster,
+      swaps: canApplySwap,
+      leaves: canApplyLeave,
+      permissions: canApplyPermission,
+      resignations: canApplyResignation,
+      evaluations: canSubmitComplaint,
+      bylaws: canViewBylaws,
+      profile: canViewProfile
+    };
+
+    if (tabPermMap[activeTab] === false) {
+      setActiveTab('dashboard');
+    }
+  }, [
+    activeTab,
+    canViewSalary,
+    canViewAdjustments,
+    canApplyLoan,
+    canViewShifts,
+    canEnrollBiometric,
+    canViewRoster,
+    canApplySwap,
+    canApplyLeave,
+    canApplyPermission,
+    canApplyResignation,
+    canSubmitComplaint,
+    canViewBylaws,
+    canViewProfile
+  ]);
 
   const isCustomMode = filterMode === 'range' || filterMode === 'custom';
   const effectiveStart = (rangeStart && rangeEnd) ? (rangeStart <= rangeEnd ? rangeStart : rangeEnd) : (rangeStart || rangeEnd);
@@ -1754,8 +1797,9 @@ export default function EmployeePortalView({
   };
 
   // Categorized Menu Items (Matching Senior Management Style)
+  // Categorized Menu Items (Matching Senior Management Style with Strict Dynamic Permissions)
   const employeeMenuItems = useMemo(() => {
-    return [
+    const rawGroups = [
       {
         id: 'dashboard',
         label: 'لوحة التحكم',
@@ -1815,7 +1859,7 @@ export default function EmployeePortalView({
             icon: '📋',
             badge: empShifts.length,
             desc: 'سجل الحضور والانصراف، البريك، واحتساب ساعات العمل',
-            visible: true
+            visible: canViewShifts !== false
           },
           {
             id: 'biometric',
@@ -1824,7 +1868,7 @@ export default function EmployeePortalView({
             icon: '📸',
             badge: (!emp?.has_face_descriptor && !emp?.has_hand_descriptor) ? 1 : 0,
             desc: 'تسجيل البصمة لمرة واحدة، اختبار المطابقة، ومتابعة الاعتماد',
-            visible: true
+            visible: canEnrollBiometric !== false
           },
           {
             id: 'roster',
@@ -1873,7 +1917,7 @@ export default function EmployeePortalView({
             icon: '🚪',
             badge: resignationBadgeCount,
             desc: 'تقديم طلب الاستقالة ومتابعة فترة الإشعار',
-            visible: true
+            visible: canApplyResignation !== false
           }
         ].filter(item => item.visible !== false)
       },
@@ -1903,18 +1947,25 @@ export default function EmployeePortalView({
         ].filter(item => item.visible !== false)
       }
     ];
+
+    // Filter out groups with no visible children to avoid empty dropdown headers
+    return rawGroups.filter(menu => menu.isSingle || (menu.children && menu.children.length > 0));
   }, [
     emp,
     selectedBranchId,
     canViewSalary,
     canViewAdjustments,
     canApplyLoan,
+    canViewShifts,
+    canEnrollBiometric,
     canViewRoster,
     canApplySwap,
     canApplyLeave,
     canApplyPermission,
+    canApplyResignation,
     canSubmitComplaint,
     canViewBylaws,
+    canViewProfile,
     empAdjs.length,
     empShifts.length,
     resignationBadgeCount,
@@ -3430,59 +3481,63 @@ export default function EmployeePortalView({
             <span>الرئيسية</span>
           </button>
 
-          <button
-            type="button"
-            className={`ep-bottom-nav-btn ${activeTab === 'shifts' ? 'active' : ''}`}
-            onClick={() => setActiveTab('shifts')}
-            style={{
-              flex: 1,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '2px',
-              height: '100%',
-              background: 'none',
-              border: 'none',
-              color: activeTab === 'shifts' ? 'var(--primary, #0d9488)' : 'var(--muted)',
-              fontSize: '11px',
-              fontWeight: activeTab === 'shifts' ? 800 : 600,
-              cursor: 'pointer',
-              padding: '4px 0',
-              fontFamily: 'inherit',
-              position: 'relative'
-            }}
-          >
-            <span style={{ fontSize: '18px' }}>⏱️</span>
-            <span>الدوام</span>
-          </button>
+          {canViewShifts && (
+            <button
+              type="button"
+              className={`ep-bottom-nav-btn ${activeTab === 'shifts' ? 'active' : ''}`}
+              onClick={() => setActiveTab('shifts')}
+              style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '2px',
+                height: '100%',
+                background: 'none',
+                border: 'none',
+                color: activeTab === 'shifts' ? 'var(--primary, #0d9488)' : 'var(--muted)',
+                fontSize: '11px',
+                fontWeight: activeTab === 'shifts' ? 800 : 600,
+                cursor: 'pointer',
+                padding: '4px 0',
+                fontFamily: 'inherit',
+                position: 'relative'
+              }}
+            >
+              <span style={{ fontSize: '18px' }}>⏱️</span>
+              <span>الدوام</span>
+            </button>
+          )}
 
-          <button
-            type="button"
-            className={`ep-bottom-nav-btn ${activeTab === 'salary' ? 'active' : ''}`}
-            onClick={() => setActiveTab('salary')}
-            style={{
-              flex: 1,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '2px',
-              height: '100%',
-              background: 'none',
-              border: 'none',
-              color: activeTab === 'salary' ? 'var(--primary, #0d9488)' : 'var(--muted)',
-              fontSize: '11px',
-              fontWeight: activeTab === 'salary' ? 800 : 600,
-              cursor: 'pointer',
-              padding: '4px 0',
-              fontFamily: 'inherit',
-              position: 'relative'
-            }}
-          >
-            <span style={{ fontSize: '18px' }}>💰</span>
-            <span>الراتب</span>
-          </button>
+          {canViewSalary && (
+            <button
+              type="button"
+              className={`ep-bottom-nav-btn ${activeTab === 'salary' ? 'active' : ''}`}
+              onClick={() => setActiveTab('salary')}
+              style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '2px',
+                height: '100%',
+                background: 'none',
+                border: 'none',
+                color: activeTab === 'salary' ? 'var(--primary, #0d9488)' : 'var(--muted)',
+                fontSize: '11px',
+                fontWeight: activeTab === 'salary' ? 800 : 600,
+                cursor: 'pointer',
+                padding: '4px 0',
+                fontFamily: 'inherit',
+                position: 'relative'
+              }}
+            >
+              <span style={{ fontSize: '18px' }}>💰</span>
+              <span>الراتب</span>
+            </button>
+          )}
 
           <button
             type="button"
@@ -3525,7 +3580,7 @@ export default function EmployeePortalView({
       }}>
 
           {/* ── Universal Biometric Registration Reminder Banner (Across ALL employee tabs) ── */}
-          {(() => {
+          {canEnrollBiometric && (() => {
             const hasBio = Boolean(
               emp?.has_face_descriptor || emp?.face_descriptor ||
               emp?.has_hand_descriptor || emp?.hand_descriptor
@@ -3630,7 +3685,7 @@ export default function EmployeePortalView({
           })()}
 
           {/* ── Active Resignation Notice Period Banner ── */}
-          {activeResignationNotice && activeResignationNotice.remainingDays > 0 && (
+          {canApplyResignation && activeResignationNotice && activeResignationNotice.remainingDays > 0 && (
             <div
               style={{
                 background: 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)',
@@ -3674,7 +3729,7 @@ export default function EmployeePortalView({
           )}
 
           {/* ── Active Month New Roster Alert Banner ── */}
-          {!hasApprovedRosterForActiveMonth && (
+          {canViewRoster && !hasApprovedRosterForActiveMonth && (
             <div
               style={{
                 background: hasPendingRosterReqForMonth
@@ -4184,7 +4239,7 @@ export default function EmployeePortalView({
           )}
 
           {/* ── Tab: Shifts ── */}
-          {activeTab === 'shifts' && (
+          {activeTab === 'shifts' && canViewShifts && (
             <div className="card ep-tab-content fade-in">
               <div className="ep-section-header" style={{ flexWrap: 'wrap', gap: '10px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
@@ -4736,7 +4791,7 @@ export default function EmployeePortalView({
           )}
 
           {/* ── Tab: Salary Details ── */}
-          {activeTab === 'salary' && (
+          {activeTab === 'salary' && canViewSalary && (
             <div className="card ep-tab-content fade-in">
               <div className="ep-section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
                 <h3>💼 تفاصيل المرتب — {lbl.raw}</h3>
@@ -4768,6 +4823,15 @@ export default function EmployeePortalView({
                     >
                       👁️ معاينة الكشف
                     </button>
+                    {canExportExcel && (
+                      <button
+                        className="btn btn-outline"
+                        onClick={() => setShowExportModal(true)}
+                        style={{ fontSize: '12.5px', padding: '6px 12px' }}
+                      >
+                        📥 تصدير إكسل
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -4976,7 +5040,7 @@ export default function EmployeePortalView({
           )}
 
           {/* ── Tab: Adjustments ── */}
-          {activeTab === 'adjustments' && (
+          {activeTab === 'adjustments' && canViewAdjustments && (
             <div className="card ep-tab-content fade-in">
               <div className="ep-section-header" style={{ flexWrap: 'wrap', gap: '10px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -5152,7 +5216,7 @@ export default function EmployeePortalView({
           )}
 
           {/* ── 4. Tab: Leaves ── */}
-          {activeTab === 'leaves' && (
+          {activeTab === 'leaves' && canApplyLeave && (
             <EmployeeLeaveModule
               emp={emp}
               state={state}
@@ -5165,7 +5229,7 @@ export default function EmployeePortalView({
           )}
 
           {/* ── 5. Tab: Loans ── */}
-          {activeTab === 'loans' && (
+          {activeTab === 'loans' && canApplyLoan && (
             <EmployeeLoansModule
               emp={emp}
               state={state}
@@ -5177,7 +5241,7 @@ export default function EmployeePortalView({
           )}
 
           {/* ── 6. Tab: Permissions ── */}
-          {activeTab === 'permissions' && (
+          {activeTab === 'permissions' && canApplyPermission && (
             <EmployeePermissionsModule
               emp={emp}
               state={state}
@@ -5189,7 +5253,7 @@ export default function EmployeePortalView({
           )}
 
           {/* ── 8. Tab: Monthly Roster ── */}
-          {activeTab === 'roster' && (
+          {activeTab === 'roster' && canViewRoster && (
             <EmployeeRosterModule
               emp={emp}
               state={state}
@@ -5206,7 +5270,7 @@ export default function EmployeePortalView({
           )}
 
           {/* ── 9. Tab: Shift Swaps ── */}
-          {activeTab === 'swaps' && (
+          {activeTab === 'swaps' && canApplySwap && (
             <EmployeeShiftSwapModule
               emp={emp}
               state={state}
@@ -5219,7 +5283,7 @@ export default function EmployeePortalView({
           )}
 
           {/* ── 10. Tab: Evaluations ── */}
-          {activeTab === 'evaluations' && (
+          {activeTab === 'evaluations' && canSubmitComplaint && (
             <EmployeeEvaluationsModule
               emp={emp}
               state={state}
@@ -5231,7 +5295,7 @@ export default function EmployeePortalView({
           )}
 
           {/* ── 11. Tab: Work Bylaws ── */}
-          {activeTab === 'bylaws' && (
+          {activeTab === 'bylaws' && canViewBylaws && (
             <BylawsModule
               state={state}
               setState={setState}
@@ -5246,7 +5310,7 @@ export default function EmployeePortalView({
           )}
 
           {/* ── 12. Tab: Resignations ── */}
-          {activeTab === 'resignations' && (
+          {activeTab === 'resignations' && canApplyResignation && (
             <EmployeeResignationModule
               emp={emp}
               state={state}
@@ -5258,7 +5322,7 @@ export default function EmployeePortalView({
           )}
 
           {/* ── 13. Tab: Biometric (البصمة الإلكترونية) ── */}
-          {activeTab === 'biometric' && (
+          {activeTab === 'biometric' && canEnrollBiometric && (
             <EmployeeBiometricSection
               employee={emp}
               state={state}
