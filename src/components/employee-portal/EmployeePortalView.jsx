@@ -8,7 +8,7 @@ import { filterEmployeeNotifications, countUnreadEmployeeNotifications, getNotif
 import EmployeeLeaveModule from './EmployeeLeaveModule';
 import EmployeeLoansModule from './EmployeeLoansModule';
 import EmployeePermissionsModule from './EmployeePermissionsModule';
-import EmployeeRosterModule, { getResolvedEmployeeRoster } from './EmployeeRosterModule';
+import EmployeeRosterModule from './EmployeeRosterModule';
 import EmployeeShiftSwapModule from './EmployeeShiftSwapModule';
 import EmployeeEvaluationsModule from './EmployeeEvaluationsModule';
 import PayslipPrintModal from '../payroll/PayslipPrintModal';
@@ -21,7 +21,7 @@ import { preWarmFaceModels } from '../../utils/faceApiHelper';
 import { uploadBiometricAttendancePhoto } from '../../utils/googleDriveService';
 import { sendBiometricRegistrationRequestEmail, sendBiometricResetRequestEmail } from '../../utils/gmailService';
 import { computeLatenessFinancialAmount, isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
-import { getEmployeeDaySchedule, checkAndTriggerCycleEndRosterReminder } from '../../utils/rosterEngine';
+import { getEmployeeDaySchedule, checkAndTriggerCycleEndRosterReminder, getResolvedEmployeeRoster } from '../../utils/rosterEngine';
 import { printEmployeePayslipDirect } from '../../utils/printHelper';
 import { useLiveRealTime } from '../../hooks/useLiveRealTime';
 import '../../portal.css';

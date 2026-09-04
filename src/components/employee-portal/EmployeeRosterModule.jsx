@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { arabicWeekday } from '../../utils/formatters';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import { shouldRouteDirectToAdmin } from '../../utils/jobsHelper';
-import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
+import { getEmployeeDaySchedule, getResolvedEmployeeRoster } from '../../utils/rosterEngine';
 import { getCycleDateRange } from '../../utils/periodEngine';
 
 // Arabic weekday names mapped to JS getDay() index (0=Sunday)
@@ -183,7 +183,7 @@ export function normalizeSchedule(rawSchedule) {
   return normalized;
 }
 
-export { getResolvedEmployeeRoster } from '../roster/RosterModule';
+export { getResolvedEmployeeRoster };
 
 export default function EmployeeRosterModule({
   emp,
