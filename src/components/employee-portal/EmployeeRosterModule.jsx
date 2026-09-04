@@ -4,6 +4,7 @@ import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import { shouldRouteDirectToAdmin } from '../../utils/jobsHelper';
 import { getEmployeeDaySchedule, getResolvedEmployeeRoster } from '../../utils/rosterEngine';
 import { getCycleDateRange } from '../../utils/periodEngine';
+import PendingRosterModal from './PendingRosterModal';
 
 // Arabic weekday names mapped to JS getDay() index (0=Sunday)
 const WEEKDAY_AR_MAP = {
@@ -194,7 +195,9 @@ export default function EmployeeRosterModule({
   selectedMonth,
   selectedBranchId,
   autoOpenRosterModal,
-  setAutoOpenRosterModal
+  setAutoOpenRosterModal,
+  autoOpenPendingRosterModal,
+  setAutoOpenPendingRosterModal
 }) {
   const isMultiBranch = emp.branchesDetails && emp.branchesDetails.length > 1;
   const primaryBranch = emp.branchesDetails?.[0]?.branchId || emp.branchId || '';
@@ -207,6 +210,8 @@ export default function EmployeeRosterModule({
   }, []);
 
   const [showRosterModal, setShowRosterModal] = useState(false);
+  const [showPendingPreviewModal, setShowPendingPreviewModal] = useState(false);
+  const [activePendingReq, setActivePendingReq] = useState(null);
 
   useEffect(() => {
     if (autoOpenRosterModal) {
@@ -278,6 +283,24 @@ export default function EmployeeRosterModule({
       (r.status === 'pending' || r.status === 'pending_admin' || r.status === 'pending_branch') &&
       (String(r.branchId || '') === String(curBranch || '') || (!r.branchId && String(primaryBranch || '') === String(curBranch || '')))
   );
+
+  // Auto-open pending roster request modal when navigating from notification banner
+  useEffect(() => {
+    if (autoOpenPendingRosterModal) {
+      const targetReq = pendingRosterReq || (state?.requests || []).find(
+        (r) =>
+          (String(r.employeeId) === String(emp.id) || (emp.code && String(r.employeeCode) === String(emp.code))) &&
+          (r.type === 'roster_update' || r.type === 'roster_edit' || r.type === 'roster_edit_request') &&
+          (r.month === selectedMonth || !r.month) &&
+          (r.status === 'pending' || r.status === 'pending_admin' || r.status === 'pending_branch')
+      );
+      if (targetReq) {
+        setActivePendingReq(targetReq);
+        setShowPendingPreviewModal(true);
+      }
+      setAutoOpenPendingRosterModal?.(false);
+    }
+  }, [autoOpenPendingRosterModal, setAutoOpenPendingRosterModal, pendingRosterReq, state?.requests, emp, selectedMonth]);
 
   // The active schedule to display (STRICTLY ONLY if approved roster exists)
   const activeSchedule = currentRoster?.schedule || null;
@@ -551,6 +574,14 @@ export default function EmployeeRosterModule({
           const bName = branchObj ? branchObj.name : `فرع ${bId}`;
 
           const bRoster = getResolvedEmployeeRoster(emp, bId, selectedMonth, state);
+          const bPendingReq = (state?.requests || []).find(
+            (r) =>
+              (String(r.employeeId) === String(emp.id) || (emp.code && String(r.employeeCode) === String(emp.code))) &&
+              (r.type === 'roster_update' || r.type === 'roster_edit' || r.type === 'roster_edit_request') &&
+              (r.month === selectedMonth || !r.month) &&
+              (r.status === 'pending' || r.status === 'pending_admin' || r.status === 'pending_branch') &&
+              String(r.branchId || '') === String(bId)
+          );
 
           const bSchedule = bRoster?.schedule || null;
           const bCalendar = buildMonthCalendar(selectedMonth, bSchedule, bRoster?.fromDate || fromDate, bRoster?.toDate || toDate, emp?.id, state);
@@ -587,7 +618,37 @@ export default function EmployeeRosterModule({
                 </div>
               </div>
 
-              {!bSchedule && (
+              {bPendingReq && (
+                <div style={{
+                  padding: '10px 14px',
+                  background: 'linear-gradient(135deg, #fefce8, #fef9c3)',
+                  border: '1px solid #facc15',
+                  borderRadius: '8px',
+                  marginBottom: '12px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: '8px'
+                }}>
+                  <span style={{ fontSize: '12.5px', color: '#854d0e', fontWeight: 'bold' }}>
+                    ⏳ يوجد طلب جدول مرسل لهذا الفرع قيد الاعتماد والمراجعة
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => {
+                      setActivePendingReq(bPendingReq);
+                      setShowPendingPreviewModal(true);
+                    }}
+                    style={{ fontSize: '12px', padding: '5px 12px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}
+                  >
+                    📋 عرض تفاصيل الجدول والطلب المرسل 👁️
+                  </button>
+                </div>
+              )}
+
+              {!bSchedule && !bPendingReq && (
                 <div style={{ padding: '10px 14px', background: '#fffbeb', border: '1px dashed #fde68a', borderRadius: '8px', marginBottom: '12px', fontSize: '12.5px', color: '#92400e' }}>
                   ⚠️ لم يتم اعتماد جدول تشغيلي لهذا الفرع في شهر ({selectedMonth}) حتى الآن.
                 </div>
@@ -702,6 +763,19 @@ export default function EmployeeRosterModule({
             </div>
           );
         })}
+
+        <PendingRosterModal
+          isOpen={showPendingPreviewModal}
+          onClose={() => {
+            setShowPendingPreviewModal(false);
+            setActivePendingReq(null);
+          }}
+          pendingReq={activePendingReq || pendingRosterReq}
+          emp={emp}
+          state={state}
+          selectedMonth={selectedMonth}
+          cycleRange={cycleRange}
+        />
       </div>
     );
   }
@@ -753,10 +827,56 @@ export default function EmployeeRosterModule({
         </div>
       </div>
 
-      {/* Pending request notice */}
+      {/* Pending request notice with quick view action */}
       {pendingRosterReq && (
-        <div style={{ margin: '12px 0 0', padding: '10px 14px', background: 'rgba(234,179,8,0.1)', border: '1px solid #eab308', borderRadius: '8px' }}>
-          <span className="badge warning">⏳ يوجد طلب تعديل جدول قيد الاعتماد من مدير الفرع والإدارة العليا</span>
+        <div style={{
+          margin: '14px 0 16px',
+          padding: '12px 18px',
+          background: 'linear-gradient(135deg, #fefce8, #fef9c3)',
+          border: '1.5px solid #facc15',
+          borderRadius: '12px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '12px',
+          boxShadow: '0 2px 8px rgba(234, 179, 8, 0.15)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span style={{ fontSize: '24px' }}>⏳</span>
+            <div>
+              <div style={{ fontWeight: 800, fontSize: '14px', color: '#854d0e' }}>
+                يوجد طلب تعديل جدول شهري قيد الاعتماد من مدير الفرع والإدارة العليا
+              </div>
+              <div style={{ fontSize: '12.5px', color: '#a16207', marginTop: '2px' }}>
+                تم إرسال جدولك بنجاح وهو الآن قيد المراجعة. يمكنك الاطلاع على تفاصيل ومواعيد الشيفتات المرسلة قبل قبولها.
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="btn btn-start"
+            onClick={() => {
+              setActivePendingReq(pendingRosterReq);
+              setShowPendingPreviewModal(true);
+            }}
+            style={{
+              fontSize: '13px',
+              padding: '8px 16px',
+              background: '#0284c7',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '8px',
+              fontWeight: 800,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: '0 2px 6px rgba(2, 132, 199, 0.25)'
+            }}
+          >
+            📋 عرض تفاصيل الجدول والطلب المرسل 👁️
+          </button>
         </div>
       )}
 
@@ -993,6 +1113,20 @@ export default function EmployeeRosterModule({
           )}
         </div>
       )}
+
+      {/* Modal to display submitted monthly roster request details before approval */}
+      <PendingRosterModal
+        isOpen={showPendingPreviewModal}
+        onClose={() => {
+          setShowPendingPreviewModal(false);
+          setActivePendingReq(null);
+        }}
+        pendingReq={activePendingReq || pendingRosterReq}
+        emp={emp}
+        state={state}
+        selectedMonth={selectedMonth}
+        cycleRange={cycleRange}
+      />
     </div>
   );
 }

@@ -9,7 +9,10 @@ import { getCycleDateRange } from './periodEngine';
  * مُحرك طباعة احترافي معزول ومستقل بنسبة 100% يمنع تماماً أي ظهور لصفحات بيضاء أو مشاكل في الـ CSS
  */
 
-export function triggerDirectPrint(htmlContent, documentTitle = 'طباعة كشف المرتب') {
+export function triggerDirectPrint(htmlContent, documentTitle = 'طباعة كشف المرتب', pageOrientation = 'portrait') {
+  const isLandscape = pageOrientation === 'landscape' || (typeof htmlContent === 'string' && (htmlContent.includes('A4 landscape') || htmlContent.includes('size: A4 landscape')));
+  const pageSizeRule = isLandscape ? 'A4 landscape' : 'A4 portrait';
+
   const fullDocumentHTML = `
     <!DOCTYPE html>
     <html dir="rtl" lang="ar">
@@ -21,8 +24,8 @@ export function triggerDirectPrint(htmlContent, documentTitle = 'طباعة كش
       <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
       <style>
         @page {
-          size: A4 portrait;
-          margin: 6mm 8mm;
+          size: ${pageSizeRule};
+          margin: 5mm 6mm;
         }
         * {
           box-sizing: border-box;
@@ -31,7 +34,9 @@ export function triggerDirectPrint(htmlContent, documentTitle = 'طباعة كش
         }
         html, body {
           margin: 0;
-          padding: 8px 12px;
+          padding: 0;
+          height: 100%;
+          min-height: 100%;
           background: #ffffff !important;
           color: #0f172a !important;
           font-family: 'Cairo', 'Tajawal', sans-serif;

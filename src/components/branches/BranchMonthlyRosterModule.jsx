@@ -64,29 +64,29 @@ function generateOfficialWeeklyShiftsHTML({
     const isFriday = day.key === 'friday';
 
     const shiftGroupsHTML = dayData.shiftGroups.length === 0
-      ? `<div style="text-align:center; padding:12px 6px; color:#94a3b8; font-size:10.5px; background:#f8fafc; border-radius:6px; border:1px dashed #cbd5e1;">🚫 لا توجد ورديات عمل مجدولة</div>`
+      ? `<div class="empty-shift-box">🚫 لا توجد ورديات عمل مجدولة</div>`
       : dayData.shiftGroups.map(group => {
           const isConcurrent = group.staff.length > 1;
           const staffHTML = group.staff.map(st => {
             const isPharm = (st.employee.jobTitle || '').includes('صيدل');
             return `
-              <div style="display:flex; justify-content:space-between; align-items:center; background:#ffffff; padding:4px 6px; border-radius:5px; border:1px solid #e2e8f0; margin-bottom:3px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; background:#ffffff; padding:5px 7px; border-radius:6px; border:1px solid #e2e8f0; margin-bottom:4px; box-shadow:0 1px 2px rgba(0,0,0,0.03);">
                 <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                  <span style="font-weight:700; color:#0f172a; font-size:10.5px;">${getEmpDisplayName(st.employee)}</span>
-                  <span style="color:#64748b; font-size:9px; margin-right:3px;">(${st.employee.jobTitle || 'موظف'})</span>
+                  <span style="font-weight:700; color:#0f172a; font-size:11px;">${getEmpDisplayName(st.employee)}</span>
+                  <span style="color:#64748b; font-size:9.5px; margin-right:3px;">(${st.employee.jobTitle || 'موظف'})</span>
                 </div>
-                ${isPharm ? '<span style="background:#dcfce7; color:#166534; font-size:8.5px; font-weight:800; padding:1px 4px; border-radius:3px; flex-shrink:0;">💊 صيدلي</span>' : ''}
+                ${isPharm ? '<span style="background:#dcfce7; color:#166534; font-size:9px; font-weight:800; padding:2px 5px; border-radius:4px; flex-shrink:0;">💊 صيدلي</span>' : ''}
               </div>
             `;
           }).join('');
 
           return `
-            <div style="background:#f8fafc; border:1px solid ${isConcurrent ? '#6ee7b7' : '#cbd5e1'}; border-radius:7px; padding:5px; margin-bottom:5px;">
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; border-bottom:1px solid #e2e8f0; padding-bottom:3px;">
-                <span style="font-weight:800; color:${isConcurrent ? '#047857' : '#0f766e'}; font-size:11px; direction:ltr;">
+            <div style="background:#f8fafc; border:1.5px solid ${isConcurrent ? '#34d399' : '#cbd5e1'}; border-radius:8px; padding:7px; margin-bottom:6px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px; border-bottom:1px solid #e2e8f0; padding-bottom:4px;">
+                <span style="font-weight:800; color:${isConcurrent ? '#047857' : '#0f766e'}; font-size:11.5px; direction:ltr;">
                   ${formatTime12H(group.start)} إلى ${formatTime12H(group.end)}
                 </span>
-                <span style="font-size:9px; color:#64748b; font-weight:600;">
+                <span style="font-size:9.5px; color:#475569; font-weight:700;">
                   (${group.hours} س) ${isConcurrent ? `• 👥 متزامن (${group.staff.length})` : ''}
                 </span>
               </div>
@@ -96,34 +96,34 @@ function generateOfficialWeeklyShiftsHTML({
         }).join('');
 
     const offHTML = dayData.offStaff.length > 0 ? `
-      <div style="background:#fffbeb; border:1px solid #fde68a; border-radius:6px; padding:4px 6px; margin-top:3px;">
-        <div style="font-size:9.5px; font-weight:800; color:#92400e; margin-bottom:2px;">
+      <div style="background:#fffbeb; border:1px solid #fde68a; border-radius:7px; padding:6px 8px; margin-top:auto;">
+        <div style="font-size:10px; font-weight:800; color:#92400e; margin-bottom:3px;">
           🏖️ راحة أسبوعية (${dayData.offStaff.length}):
         </div>
-        <div style="font-size:9px; color:#78350f; line-height:1.3;">
+        <div style="font-size:9.5px; color:#78350f; line-height:1.4;">
           ${dayData.offStaff.map(s => `• ${getEmpDisplayName(s.employee)} (${s.employee.jobTitle || 'موظف'})`).join('<br>')}
         </div>
       </div>
     ` : '';
 
     return `
-      <div style="border:1.5px solid #cbd5e1; border-radius:8px; overflow:hidden; display:flex; flex-direction:column; background:#ffffff; page-break-inside:avoid;">
-        <div style="background:${isFriday ? 'linear-gradient(135deg, #fef3c7, #fde68a)' : 'linear-gradient(135deg, #f0fdf4, #dcfce7)'}; padding:6px 8px; border-bottom:1.5px solid #cbd5e1; display:flex; justify-content:space-between; align-items:center;">
-          <div style="font-weight:800; font-size:12px; color:${isFriday ? '#92400e' : '#166534'};">
+      <div class="day-card">
+        <div style="background:${isFriday ? 'linear-gradient(135deg, #fef3c7, #fde68a)' : 'linear-gradient(135deg, #f0fdf4, #dcfce7)'}; padding:8px 8px; border-bottom:1.5px solid #cbd5e1; display:flex; justify-content:space-between; align-items:center;">
+          <div style="font-weight:800; font-size:12.5px; color:${isFriday ? '#92400e' : '#166534'};">
             ${isFriday ? '🕌' : '🗓️'} يوم ${day.label}
           </div>
           <div style="display:flex; gap:3px;">
-            <span style="background:#ffffff; color:#166534; font-size:9px; font-weight:700; padding:1px 5px; border-radius:8px; border:1px solid #bbf7d0;">
+            <span style="background:#ffffff; color:#166534; font-size:9.5px; font-weight:800; padding:1px 6px; border-radius:8px; border:1px solid #bbf7d0;">
               🟢 ${dayData.totalWorking} حضور
             </span>
             ${dayData.totalOff > 0 ? `
-              <span style="background:#ffffff; color:#b45309; font-size:9px; font-weight:700; padding:1px 5px; border-radius:8px; border:1px solid #fde68a;">
+              <span style="background:#ffffff; color:#b45309; font-size:9.5px; font-weight:800; padding:1px 6px; border-radius:8px; border:1px solid #fde68a;">
                 🏖️ ${dayData.totalOff} راحة
               </span>
             ` : ''}
           </div>
         </div>
-        <div style="padding:6px; flex:1; display:flex; flex-direction:column; gap:3px;">
+        <div class="day-card-body">
           ${shiftGroupsHTML}
           ${offHTML}
         </div>
@@ -135,32 +135,100 @@ function generateOfficialWeeklyShiftsHTML({
     <style>
       @page {
         size: A4 landscape !important;
-        margin: 6mm 8mm !important;
+        margin: 5mm 6mm !important;
       }
       * {
         box-sizing: border-box !important;
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
       }
-      body {
+      html, body {
+        height: 100% !important;
+        min-height: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
         font-family: 'Cairo', 'Tajawal', sans-serif !important;
         color: #0f172a !important;
         background: #ffffff !important;
         direction: rtl !important;
-        padding: 4px 6px !important;
+      }
+      .print-page-wrapper {
+        box-sizing: border-box;
+        min-height: 100vh;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        padding: 4px 6px;
       }
       .print-grid {
         display: grid;
         grid-template-columns: repeat(7, 1fr);
-        gap: 5px;
+        gap: 6px;
         align-items: stretch;
+        flex: 1;
+        min-height: 130mm;
+        margin: 6px 0;
+      }
+      .day-card {
+        border: 1.5px solid #cbd5e1;
+        border-radius: 8px;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        background: #ffffff;
+        page-break-inside: avoid;
+        height: 100%;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+      }
+      .day-card-body {
+        padding: 8px 6px;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-start;
+        gap: 5px;
+      }
+      .empty-shift-box {
+        flex: 1;
+        min-height: 100px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 12px 6px;
+        color: #94a3b8;
+        font-size: 11px;
+        background: #f8fafc;
+        border-radius: 6px;
+        border: 1px dashed #cbd5e1;
+      }
+      .print-signatures-footer {
+        margin-top: auto;
+        border-top: 1.5px solid #cbd5e1;
+        padding-top: 8px;
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+        text-align: center;
+        page-break-inside: avoid;
+      }
+      .signature-box {
+        border: 1px dashed #cbd5e1;
+        border-radius: 6px;
+        padding: 6px 8px;
+        background: #f8fafc;
+        min-height: 65px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
       }
       @media print {
         .no-print { display: none !important; }
       }
     </style>
 
-    <div style="direction:rtl; font-family:'Cairo', 'Tajawal', sans-serif;">
+    <div class="print-page-wrapper">
       <!-- Header Banner -->
       <div style="border-bottom:2.5px solid #0f766e; padding-bottom:6px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
         <div>
@@ -188,25 +256,25 @@ function generateOfficialWeeklyShiftsHTML({
       </div>
 
       <!-- Signatures Footer -->
-      <div style="margin-top:10px; border-top:1.5px solid #cbd5e1; padding-top:8px; display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; text-align:center; page-break-inside:avoid;">
-        <div style="border:1px dashed #cbd5e1; border-radius:6px; padding:6px 8px; background:#f8fafc;">
-          <div style="font-weight:800; font-size:10.5px; color:#0f172a; margin-bottom:16px;">
+      <div class="print-signatures-footer">
+        <div class="signature-box">
+          <div style="font-weight:800; font-size:10.5px; color:#0f172a; margin-bottom:12px;">
             توقيع مدير الفرع
           </div>
           <div style="border-bottom:1px solid #94a3b8; width:70%; margin:0 auto 3px auto;"></div>
           <div style="font-size:9px; color:#64748b;">التاريخ: .... / .... / 2026</div>
         </div>
 
-        <div style="border:1px dashed #cbd5e1; border-radius:6px; padding:6px 8px; background:#f8fafc;">
-          <div style="font-weight:800; font-size:10.5px; color:#0f172a; margin-bottom:16px;">
+        <div class="signature-box">
+          <div style="font-weight:800; font-size:10.5px; color:#0f172a; margin-bottom:12px;">
             اعتماد إدارة الموارد البشرية (HR)
           </div>
           <div style="border-bottom:1px solid #94a3b8; width:70%; margin:0 auto 3px auto;"></div>
           <div style="font-size:9px; color:#64748b;">التاريخ: .... / .... / 2026</div>
         </div>
 
-        <div style="border:1px dashed #cbd5e1; border-radius:6px; padding:6px 8px; background:#f8fafc;">
-          <div style="font-weight:800; font-size:10.5px; color:#0f172a; margin-bottom:16px;">
+        <div class="signature-box">
+          <div style="font-weight:800; font-size:10.5px; color:#0f172a; margin-bottom:12px;">
             اعتماد الإدارة العليا والتشغيل
           </div>
           <div style="border-bottom:1px solid #94a3b8; width:70%; margin:0 auto 3px auto;"></div>
@@ -280,31 +348,75 @@ function generateOfficialMatrixHTML({
     <style>
       @page {
         size: A4 landscape !important;
-        margin: 6mm 8mm !important;
+        margin: 5mm 6mm !important;
       }
       * {
         box-sizing: border-box !important;
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
       }
-      body {
+      html, body {
+        height: 100% !important;
+        min-height: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
         font-family: 'Cairo', 'Tajawal', sans-serif !important;
         color: #0f172a !important;
         background: #ffffff !important;
         direction: rtl !important;
-        padding: 4px 6px !important;
+      }
+      .print-page-wrapper {
+        box-sizing: border-box;
+        min-height: 100vh;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        padding: 4px 6px;
       }
       table {
         width: 100%;
         border-collapse: collapse;
         page-break-inside: auto;
+        margin: 8px 0;
       }
       tr {
         page-break-inside: avoid;
         page-break-after: auto;
       }
+      th {
+        background: #f1f5f9;
+        font-weight: 800;
+      }
+      td, th {
+        border: 1px solid #cbd5e1;
+        padding: 6px;
+      }
+      .print-signatures-footer {
+        margin-top: auto;
+        border-top: 1.5px solid #cbd5e1;
+        padding-top: 8px;
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+        text-align: center;
+        page-break-inside: avoid;
+      }
+      .signature-box {
+        border: 1px dashed #cbd5e1;
+        border-radius: 6px;
+        padding: 6px 8px;
+        background: #f8fafc;
+        min-height: 65px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+      @media print {
+        .no-print { display: none !important; }
+      }
     </style>
-    <div style="direction:rtl; font-family:'Cairo', 'Tajawal', sans-serif;">
+    <div class="print-page-wrapper">
       <div style="border-bottom:2.5px solid #0f766e; padding-bottom:6px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
         <div>
           <div style="font-size:12px; font-weight:800; color:#0f766e;">${companyName}</div>
@@ -320,12 +432,12 @@ function generateOfficialMatrixHTML({
         </div>
       </div>
 
-      <table>
+      <table style="flex: 1;">
         <thead>
           <tr style="background:#f1f5f9;">
-            <th style="border:1px solid #cbd5e1; padding:5px; width:18%; text-align:right;">الموظف / الوظيفة</th>
-            ${DAYS_OF_WEEK.map(d => `<th style="border:1px solid #cbd5e1; padding:5px; text-align:center;">${d.label}</th>`).join('')}
-            <th style="border:1px solid #cbd5e1; padding:5px; width:9%; text-align:center;">إجمالي الأسبوع</th>
+            <th style="width:18%; text-align:right;">الموظف / الوظيفة</th>
+            ${DAYS_OF_WEEK.map(d => `<th style="text-align:center;">${d.label}</th>`).join('')}
+            <th style="width:9%; text-align:center;">إجمالي الأسبوع</th>
           </tr>
         </thead>
         <tbody>
@@ -333,19 +445,19 @@ function generateOfficialMatrixHTML({
         </tbody>
       </table>
 
-      <div style="margin-top:10px; border-top:1.5px solid #cbd5e1; padding-top:8px; display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; text-align:center; page-break-inside:avoid;">
-        <div style="border:1px dashed #cbd5e1; border-radius:6px; padding:6px 8px; background:#f8fafc;">
-          <div style="font-weight:800; font-size:10.5px; color:#0f172a; margin-bottom:16px;">توقيع مدير الفرع</div>
+      <div class="print-signatures-footer">
+        <div class="signature-box">
+          <div style="font-weight:800; font-size:10.5px; color:#0f172a; margin-bottom:12px;">توقيع مدير الفرع</div>
           <div style="border-bottom:1px solid #94a3b8; width:70%; margin:0 auto 3px auto;"></div>
           <div style="font-size:9px; color:#64748b;">التاريخ: .... / .... / 2026</div>
         </div>
-        <div style="border:1px dashed #cbd5e1; border-radius:6px; padding:6px 8px; background:#f8fafc;">
-          <div style="font-weight:800; font-size:10.5px; color:#0f172a; margin-bottom:16px;">اعتماد إدارة الموارد البشرية (HR)</div>
+        <div class="signature-box">
+          <div style="font-weight:800; font-size:10.5px; color:#0f172a; margin-bottom:12px;">اعتماد إدارة الموارد البشرية (HR)</div>
           <div style="border-bottom:1px solid #94a3b8; width:70%; margin:0 auto 3px auto;"></div>
           <div style="font-size:9px; color:#64748b;">التاريخ: .... / .... / 2026</div>
         </div>
-        <div style="border:1px dashed #cbd5e1; border-radius:6px; padding:6px 8px; background:#f8fafc;">
-          <div style="font-weight:800; font-size:10.5px; color:#0f172a; margin-bottom:16px;">اعتماد الإدارة العليا</div>
+        <div class="signature-box">
+          <div style="font-weight:800; font-size:10.5px; color:#0f172a; margin-bottom:12px;">اعتماد الإدارة العليا</div>
           <div style="border-bottom:1px solid #94a3b8; width:70%; margin:0 auto 3px auto;"></div>
           <div style="font-size:9px; color:#64748b;">الختم والتوقيع الرسمي</div>
         </div>
@@ -645,7 +757,7 @@ export default function BranchMonthlyRosterModule({
         staffSchedules,
         orgSettings: state?.orgSettings
       });
-      triggerDirectPrint(html, `مصفوفة_ورديات_فرع_${currentBranch.name.replace(/\s+/g, '_')}_${selectedMonth}`);
+      triggerDirectPrint(html, `مصفوفة_ورديات_فرع_${currentBranch.name.replace(/\s+/g, '_')}_${selectedMonth}`, 'landscape');
     } else {
       const html = generateOfficialWeeklyShiftsHTML({
         currentBranch,
@@ -655,7 +767,7 @@ export default function BranchMonthlyRosterModule({
         branchMetrics,
         orgSettings: state?.orgSettings
       });
-      triggerDirectPrint(html, `خريطة_ورديات_فرع_${currentBranch.name.replace(/\s+/g, '_')}_${selectedMonth}`);
+      triggerDirectPrint(html, `خريطة_ورديات_فرع_${currentBranch.name.replace(/\s+/g, '_')}_${selectedMonth}`, 'landscape');
     }
   };
 

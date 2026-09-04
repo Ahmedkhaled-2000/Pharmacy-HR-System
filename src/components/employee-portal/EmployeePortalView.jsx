@@ -184,6 +184,7 @@ export default function EmployeePortalView({
   });
   const [showPhotoPreview, setShowPhotoPreview] = useState(false);
   const [autoOpenRosterModal, setAutoOpenRosterModal] = useState(false);
+  const [autoOpenPendingRosterModal, setAutoOpenPendingRosterModal] = useState(false);
   const [showBiometricRegisterModal, setShowBiometricRegisterModal] = useState(false);
   const [showBiometricTestModal, setShowBiometricTestModal] = useState(false);
 
@@ -3723,7 +3724,9 @@ export default function EmployeePortalView({
                 }}
                 onClick={() => {
                   setActiveTab('roster');
-                  if (!hasPendingRosterReqForMonth) {
+                  if (hasPendingRosterReqForMonth) {
+                    setAutoOpenPendingRosterModal(true);
+                  } else {
                     setAutoOpenRosterModal(true);
                   }
                 }}
@@ -5197,6 +5200,8 @@ export default function EmployeePortalView({
               selectedBranchId={selectedBranchId || null}
               autoOpenRosterModal={autoOpenRosterModal}
               setAutoOpenRosterModal={setAutoOpenRosterModal}
+              autoOpenPendingRosterModal={autoOpenPendingRosterModal}
+              setAutoOpenPendingRosterModal={setAutoOpenPendingRosterModal}
             />
           )}
 
