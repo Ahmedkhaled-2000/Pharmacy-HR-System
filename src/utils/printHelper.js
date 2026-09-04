@@ -149,8 +149,8 @@ export function triggerDirectPrint(htmlContent, documentTitle = 'طباعة كش
   iframe.style.position = 'fixed';
   iframe.style.top = '-10000px';
   iframe.style.left = '-10000px';
-  iframe.style.width = '210mm';
-  iframe.style.height = '297mm';
+  iframe.style.width = isLandscape ? '297mm' : '210mm';
+  iframe.style.height = isLandscape ? '210mm' : '297mm';
   iframe.style.border = 'none';
   iframe.style.zIndex = '-9999';
   document.body.appendChild(iframe);
