@@ -26,11 +26,115 @@ export default function EmploymentContractModule({
 
   // Org Settings
   const orgSettings = state.orgSettings || {};
-  const orgName = orgSettings.orgName || 'مجموعة الصيدليات الطبية';
-  const gmName = orgSettings.generalManagerName || 'المدير العام';
+  const orgName = orgSettings.orgName || 'صيدليات مداواه';
+  const gmName = orgSettings.generalManagerName || 'د. سيف مقرب - المدير العام للصيدليات';
   const orgAddress = orgSettings.address || 'الفرع الرئيسي - مصر';
   const commercialReg = orgSettings.commercialRegister || '104859';
-  const taxNumber = orgSettings.taxNumber || '948-284-102';
+  const taxNumber = orgSettings.taxNumber || '102-284-948';
+  const contractDept = orgSettings.contractDepartment || 'الإدارة العامة والشؤون القانونية والموارد البشرية';
+  const contractTitle = orgSettings.contractTitle || 'عَقْدُ عَمَلٍ فَرْدِيّ مُوَحَّد';
+  const contractPrefix = orgSettings.contractNumberPrefix !== undefined ? orgSettings.contractNumberPrefix : 'CNT-Modawa@kane-';
+
+  // Modal State for Editing Organization Contract Header Details
+  const [isOrgSettingsModalOpen, setIsOrgSettingsModalOpen] = useState(false);
+  const [editOrgName, setEditOrgName] = useState(orgName);
+  const [editContractDept, setEditContractDept] = useState(contractDept);
+  const [editCommercialReg, setEditCommercialReg] = useState(commercialReg);
+  const [editTaxNumber, setEditTaxNumber] = useState(taxNumber);
+  const [editGmName, setEditGmName] = useState(gmName);
+  const [editOrgAddress, setEditOrgAddress] = useState(orgAddress);
+  const [editContractTitle, setEditContractTitle] = useState(contractTitle);
+  const [editContractPrefix, setEditContractPrefix] = useState(contractPrefix);
+  const [editLogoUrl, setEditLogoUrl] = useState(orgSettings.logoUrl || '');
+
+  // Synchronize modal state whenever modal opens or state updates
+  useEffect(() => {
+    if (isOrgSettingsModalOpen) {
+      setEditOrgName(orgSettings.orgName || 'صيدليات مداواه');
+      setEditContractDept(orgSettings.contractDepartment || 'الإدارة العامة والشؤون القانونية والموارد البشرية');
+      setEditCommercialReg(orgSettings.commercialRegister || '104859');
+      setEditTaxNumber(orgSettings.taxNumber || '102-284-948');
+      setEditGmName(orgSettings.generalManagerName || 'د. سيف مقرب - المدير العام للصيدليات');
+      setEditOrgAddress(orgSettings.address || 'الفرع الرئيسي - مصر');
+      setEditContractTitle(orgSettings.contractTitle || 'عَقْدُ عَمَلٍ فَرْدِيّ مُوَحَّد');
+      setEditContractPrefix(orgSettings.contractNumberPrefix !== undefined ? orgSettings.contractNumberPrefix : 'CNT-Modawa@kane-');
+      setEditLogoUrl(orgSettings.logoUrl || '');
+    }
+  }, [isOrgSettingsModalOpen, orgSettings]);
+
+  const handleLogoUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      showToast?.('⚠️ حجم الشعار يجب أن يكون أقل من 2 ميجابايت');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (uploadEvent) => {
+      setEditLogoUrl(uploadEvent.target.result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleResetOrgContractSettings = () => {
+    setEditOrgName('صيدليات مداواه');
+    setEditContractDept('الإدارة العامة والشؤون القانونية والموارد البشرية');
+    setEditCommercialReg('104859');
+    setEditTaxNumber('102-284-948');
+    setEditGmName('د. سيف مقرب - المدير العام للصيدليات');
+    setEditOrgAddress('الفرع الرئيسي - مصر');
+    setEditContractTitle('عَقْدُ عَمَلٍ فَرْدِيّ مُوَحَّد');
+    setEditContractPrefix('CNT-Modawa@kane-');
+  };
+
+  const handleSaveOrgContractSettings = async () => {
+    const updatedOrgSettings = {
+      ...(state.orgSettings || {}),
+      orgName: editOrgName.trim() || 'صيدليات مداواه',
+      contractDepartment: editContractDept.trim() || 'الإدارة العامة والشؤون القانونية والموارد البشرية',
+      commercialRegister: editCommercialReg.trim() || '',
+      taxNumber: editTaxNumber.trim() || '',
+      generalManagerName: editGmName.trim() || 'د. سيف مقرب - المدير العام للصيدليات',
+      address: editOrgAddress.trim() || '',
+      contractTitle: editContractTitle.trim() || 'عَقْدُ عَمَلٍ فَرْدِيّ مُوَحَّد',
+      contractNumberPrefix: editContractPrefix.trim() || '',
+      logoUrl: editLogoUrl || ''
+    };
+
+    const performSave = async () => {
+      const updatedState = {
+        ...state,
+        orgSettings: updatedOrgSettings
+      };
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      setIsOrgSettingsModalOpen(false);
+      showToast?.('✅ تم حفظ وتحديث بيانات المؤسسة وترويسة عقد العمل بنجاح');
+    };
+
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockEditSystemPermissions',
+        actionTitle: 'تعديل بيانات وترويسة المنشأة بعقود العمل',
+        actionDetails: `المنشأة: ${editOrgName}`,
+        onExecute: performSave
+      });
+    } else {
+      await performSave();
+    }
+  };
+
+  const getFormattedContractNo = (prefix, targetEmp) => {
+    const year = new Date().getFullYear();
+    const cleanPrefix = (prefix !== undefined ? prefix : 'CNT-Modawa@kane-').trim();
+    if (!cleanPrefix) {
+      return `CNT-${targetEmp?.code || targetEmp?.id || '101'}-${year}`;
+    }
+    if (cleanPrefix.endsWith('-') || cleanPrefix.endsWith('@') || cleanPrefix.endsWith('_')) {
+      return `${cleanPrefix}${year}`;
+    }
+    return `${cleanPrefix}-${year}`;
+  };
 
   // Branch Names for selected employee
   const isMultiBranch = emp?.branchesDetails && emp.branchesDetails.length > 1;
@@ -216,7 +320,7 @@ export default function EmploymentContractModule({
     if (!emp) return;
 
     const issueDateStr = new Date().toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' });
-    const contractNo = `CNT-${emp.code || emp.id}-${new Date().getFullYear()}`;
+    const contractNo = getFormattedContractNo(orgSettings.contractNumberPrefix, emp);
     const contractBylawsSections = getBylawsSectionsFromState(state);
 
     const html = `
@@ -225,16 +329,16 @@ export default function EmploymentContractModule({
         <!-- Official Header -->
         <div style="border-bottom: 2.5px double #0f766e; padding-bottom: 8px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; page-break-inside: avoid; break-inside: avoid;">
           <div style="text-align: right; display: flex; align-items: center; gap: 8px;">
-            ${(state.orgSettings?.logoUrl) ? `<img src="${state.orgSettings.logoUrl}" alt="Logo" style="max-height: 48px; max-width: 110px; object-fit: contain;" />` : `<span style="font-size: 20px;">🏥</span>`}
+            ${(orgSettings?.logoUrl) ? `<img src="${orgSettings.logoUrl}" alt="Logo" style="max-height: 48px; max-width: 110px; object-fit: contain;" />` : `<span style="font-size: 20px;">🏥</span>`}
             <div>
               <h2 style="margin: 0; color: #0f766e; font-size: 18px; font-weight: 800;">${orgName}</h2>
-              <span style="font-size: 11px; color: #475569; font-weight: 600;">الإدارة العامة والشؤون القانونية والموارد البشرية</span>
+              <span style="font-size: 11px; color: #475569; font-weight: 600;">${contractDept}</span>
               <div style="font-size: 10px; color: #64748b; margin-top: 2px;">س.ت: ${commercialReg} | ب.ض: ${taxNumber}</div>
             </div>
           </div>
           <div style="text-align: center;">
             <div style="background: #f0fdf4; border: 2px solid #0f766e; padding: 4px 18px; border-radius: 6px;">
-              <h3 style="margin: 0; color: #0f766e; font-size: 14.5px; font-weight: 800;">عَقْـدُ عَمَـلٍ فَرْدِيّ مُوَحَّـد</h3>
+              <h3 style="margin: 0; color: #0f766e; font-size: 14.5px; font-weight: 800;">${contractTitle}</h3>
             </div>
             <span style="font-size: 10.5px; color: #64748b; margin-top: 3px; display: block;">رقم العقد: <strong>${contractNo}</strong></span>
           </div>
@@ -419,6 +523,25 @@ export default function EmploymentContractModule({
               <button
                 type="button"
                 className="btn btn-ghost"
+                onClick={() => setIsOrgSettingsModalOpen(true)}
+                style={{
+                  padding: '8px 14px',
+                  borderRadius: '8px',
+                  border: '1.5px solid #0f766e',
+                  color: '#0f766e',
+                  fontWeight: 'bold',
+                  background: '#f0fdfa',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+                title="تعديل بيانات وترويسة المنشأة بعقود العمل المطبوعة"
+              >
+                🏢 تعديل بيانات المنشأة بالعقد
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
                 onClick={() => setIsEditing(true)}
                 style={{ padding: '8px 14px', borderRadius: '8px', border: '1px solid var(--border)', fontWeight: 'bold' }}
               >
@@ -435,6 +558,61 @@ export default function EmploymentContractModule({
             </>
           )}
         </div>
+      </div>
+
+      {/* ── Organization Contract Header Quick Info Strip ── */}
+      <div style={{
+        background: '#f0fdfa',
+        border: '1.5px solid #99f6e4',
+        borderRadius: '12px',
+        padding: '12px 18px',
+        marginBottom: '18px',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: '12px',
+        boxShadow: '0 2px 6px rgba(15, 118, 110, 0.05)'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {orgSettings.logoUrl ? (
+            <img src={orgSettings.logoUrl} alt="Logo" style={{ maxHeight: '42px', maxWidth: '100px', objectFit: 'contain' }} />
+          ) : (
+            <span style={{ fontSize: '28px' }}>🏥</span>
+          )}
+          <div>
+            <div style={{ fontWeight: 800, color: '#0f766e', fontSize: '15px' }}>
+              {orgName} <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#475569' }}>({contractDept})</span>
+            </div>
+            <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '2px', display: 'flex', gap: '14px', flexWrap: 'wrap' }}>
+              <span>س.ت: <strong style={{ color: '#0f172a' }}>{commercialReg}</strong></span>
+              <span>ب.ض: <strong style={{ color: '#0f172a' }}>{taxNumber}</strong></span>
+              <span>المفوض بالتوقيع: <strong style={{ color: '#0f172a' }}>{gmName}</strong></span>
+              <span>عنوان العقد: <strong style={{ color: '#0f766e' }}>{contractTitle}</strong></span>
+            </div>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setIsOrgSettingsModalOpen(true)}
+          style={{
+            background: '#ffffff',
+            border: '1.5px solid #0f766e',
+            color: '#0f766e',
+            borderRadius: '8px',
+            padding: '7px 16px',
+            fontSize: '12.5px',
+            fontWeight: 800,
+            cursor: 'pointer',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+          }}
+        >
+          <span>⚙️</span> تعديل ترويسة وبيانات المنشأة
+        </button>
       </div>
 
       {/* ── 2. Employee Selector & Dossier Summary ── */}
@@ -652,6 +830,468 @@ export default function EmploymentContractModule({
         )}
 
       </div>
+
+      {/* ── 4. Modal: Edit Organization Contract Header & Details ── */}
+      {isOrgSettingsModalOpen && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 9999,
+          background: 'rgba(15, 23, 42, 0.7)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '16px',
+          overflowY: 'auto'
+        }}>
+          <div style={{
+            background: '#ffffff',
+            borderRadius: '16px',
+            border: '1px solid #cbd5e1',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.25), 0 10px 10px -5px rgba(0, 0, 0, 0.1)',
+            maxWidth: '900px',
+            width: '100%',
+            maxHeight: '92vh',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }}>
+            
+            {/* Modal Header */}
+            <div style={{
+              background: 'linear-gradient(135deg, #0f766e, #0d9488)',
+              color: '#ffffff',
+              padding: '16px 22px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>🏢</span> تعديل بيانات وترويسة المنشأة في عقود العمل
+                </h3>
+                <p style={{ margin: '3px 0 0', fontSize: '12px', opacity: 0.9 }}>
+                  البيانات المدخلة هنا ستظهر في أعلى صفحات عقود العمل عند الطباعة وفي تمهيد وتوقيعات العقد
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsOrgSettingsModalOpen(false)}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.2)',
+                  border: 'none',
+                  color: '#ffffff',
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '8px',
+                  fontSize: '16px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body with Scroll */}
+            <div style={{ padding: '20px 24px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '18px' }}>
+              
+              {/* Live Preview Box */}
+              <div style={{
+                background: '#f8fafc',
+                border: '1.5px solid #0f766e',
+                borderRadius: '12px',
+                padding: '14px 18px',
+                boxShadow: 'inset 0 1px 4px rgba(0,0,0,0.03)'
+              }}>
+                <div style={{ fontSize: '12.5px', fontWeight: 800, color: '#0f766e', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span>👁️</span> معاينة حية ومباشرة لشكل الترويسة المطبوعة (Live Print Header Preview):
+                </div>
+
+                {/* The Header as it appears in Print */}
+                <div style={{
+                  background: '#ffffff',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: '8px',
+                  padding: '12px 16px',
+                  borderBottom: '2.5px double #0f766e'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                    
+                    {/* Right: Logo & Name & Dept & Tax/CR */}
+                    <div style={{ textAlign: 'right', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      {editLogoUrl ? (
+                        <img src={editLogoUrl} alt="Logo" style={{ maxHeight: '46px', maxWidth: '100px', objectFit: 'contain' }} />
+                      ) : (
+                        <span style={{ fontSize: '26px' }}>🏥</span>
+                      )}
+                      <div>
+                        <div style={{ color: '#0f766e', fontSize: '17px', fontWeight: 800, margin: 0 }}>
+                          {editOrgName || 'صيدليات مداواه'}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#475569', fontWeight: 600 }}>
+                          {editContractDept || 'الإدارة العامة والشؤون القانونية والموارد البشرية'}
+                        </div>
+                        <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>
+                          س.ت: <strong>{editCommercialReg || '—'}</strong> | ب.ض: <strong>{editTaxNumber || '—'}</strong>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Center: Title & Number */}
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ background: '#f0fdf4', border: '2px solid #0f766e', padding: '4px 16px', borderRadius: '6px' }}>
+                        <div style={{ color: '#0f766e', fontSize: '13.5px', fontWeight: 800, margin: 0 }}>
+                          {editContractTitle || 'عَقْدُ عَمَلٍ فَرْدِيّ مُوَحَّد'}
+                        </div>
+                      </div>
+                      <span style={{ fontSize: '10.5px', color: '#64748b', marginTop: '3px', display: 'block' }}>
+                        رقم العقد: <strong>{getFormattedContractNo(editContractPrefix, emp)}</strong>
+                      </span>
+                    </div>
+
+                    {/* Left: Date & Signatory */}
+                    <div style={{ textAlign: 'left', fontSize: '10.5px', color: '#475569' }}>
+                      <div>تاريخ التحرير: <strong>{new Date().toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' })}</strong></div>
+                      <div>المدير العام: <strong>{editGmName || '—'}</strong></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Form Input Fields Grid */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '14px' }}>
+                
+                {/* 1. Organization Name */}
+                <div>
+                  <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
+                    🏢 اسم المنشأة / مجموعة الصيدليات:
+                  </label>
+                  <input
+                    type="text"
+                    value={editOrgName}
+                    onChange={(e) => setEditOrgName(e.target.value)}
+                    placeholder="مثال: صيدليات مداواه"
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      border: '1.5px solid #cbd5e1',
+                      fontSize: '13px',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+
+                {/* 2. Department / Subtitle */}
+                <div>
+                  <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
+                    📑 الإدارة التابعة / السطر التعريفي:
+                  </label>
+                  <input
+                    type="text"
+                    value={editContractDept}
+                    onChange={(e) => setEditContractDept(e.target.value)}
+                    placeholder="مثال: الإدارة العامة والشؤون القانونية والموارد البشرية"
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      border: '1.5px solid #cbd5e1',
+                      fontSize: '13px',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+
+                {/* 3. Commercial Register (س.ت) */}
+                <div>
+                  <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
+                    📄 رقم السجل التجاري (س.ت):
+                  </label>
+                  <input
+                    type="text"
+                    value={editCommercialReg}
+                    onChange={(e) => setEditCommercialReg(e.target.value)}
+                    placeholder="مثال: 104859"
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      border: '1.5px solid #cbd5e1',
+                      fontSize: '13px',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+
+                {/* 4. Tax Card (ب.ض) */}
+                <div>
+                  <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
+                    💳 رقم البطاقة الضريبية (ب.ض):
+                  </label>
+                  <input
+                    type="text"
+                    value={editTaxNumber}
+                    onChange={(e) => setEditTaxNumber(e.target.value)}
+                    placeholder="مثال: 102-284-948"
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      border: '1.5px solid #cbd5e1',
+                      fontSize: '13px',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+
+                {/* 5. General Manager / Signatory */}
+                <div>
+                  <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
+                    ✍️ المدير العام / المفوض بالتوقيع:
+                  </label>
+                  <input
+                    type="text"
+                    value={editGmName}
+                    onChange={(e) => setEditGmName(e.target.value)}
+                    placeholder="مثال: د. سيف مقرب - المدير العام للصيدليات"
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      border: '1.5px solid #cbd5e1',
+                      fontSize: '13px',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+
+                {/* 6. Headquarters Address */}
+                <div>
+                  <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
+                    📍 عنوان المقر الرئيسي للمنشأة:
+                  </label>
+                  <input
+                    type="text"
+                    value={editOrgAddress}
+                    onChange={(e) => setEditOrgAddress(e.target.value)}
+                    placeholder="مثال: الفرع الرئيسي - مصر"
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      border: '1.5px solid #cbd5e1',
+                      fontSize: '13px',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+
+                {/* 7. Contract Title */}
+                <div>
+                  <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
+                    🏷️ عنوان العقد في الترويسة:
+                  </label>
+                  <input
+                    type="text"
+                    value={editContractTitle}
+                    onChange={(e) => setEditContractTitle(e.target.value)}
+                    placeholder="مثال: عَقْدُ عَمَلٍ فَرْدِيّ مُوَحَّد"
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      border: '1.5px solid #cbd5e1',
+                      fontSize: '13px',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+
+                {/* 8. Contract Number Prefix */}
+                <div>
+                  <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
+                    🔢 بادئة أو صيغة رقم العقد:
+                  </label>
+                  <input
+                    type="text"
+                    value={editContractPrefix}
+                    onChange={(e) => setEditContractPrefix(e.target.value)}
+                    placeholder="مثال: CNT-Modawa@kane-"
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      border: '1.5px solid #cbd5e1',
+                      fontSize: '13px',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                  <span style={{ fontSize: '11px', color: '#64748b', marginTop: '2px', display: 'block' }}>
+                    سيظهر الرقم بالصيغة: <strong>{getFormattedContractNo(editContractPrefix, emp)}</strong>
+                  </span>
+                </div>
+
+              </div>
+
+              {/* 9. Logo Upload / URL Section */}
+              <div style={{
+                background: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: '10px',
+                padding: '14px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '12px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                  {editLogoUrl ? (
+                    <div style={{ position: 'relative' }}>
+                      <img src={editLogoUrl} alt="Logo" style={{ maxHeight: '50px', maxWidth: '120px', objectFit: 'contain', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '2px', background: '#fff' }} />
+                      <button
+                        type="button"
+                        onClick={() => setEditLogoUrl('')}
+                        style={{ position: 'absolute', top: '-6px', right: '-6px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: '50%', width: '18px', height: '18px', fontSize: '11px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        title="إزالة الشعار"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ width: '48px', height: '48px', borderRadius: '8px', background: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px', color: '#64748b' }}>
+                      🏥
+                    </div>
+                  )}
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '13px', color: '#1e293b' }}>شعار المنشأة (Logo):</div>
+                    <div style={{ fontSize: '11.5px', color: '#64748b' }}>يمكنك رفع صورة شعار بدقة عالية ليظهر في ترويسة العقد المطبوع</div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <label style={{
+                    background: '#0f766e',
+                    color: '#ffffff',
+                    padding: '7px 14px',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}>
+                    <span>📤</span> رفع شعار من الجهاز
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleLogoUpload}
+                      style={{ display: 'none' }}
+                    />
+                  </label>
+                  {editLogoUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setEditLogoUrl('')}
+                      style={{
+                        background: '#fee2e2',
+                        color: '#dc2626',
+                        border: '1px solid #fca5a5',
+                        padding: '7px 12px',
+                        borderRadius: '8px',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      حذف الشعار
+                    </button>
+                  )}
+                </div>
+              </div>
+
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{
+              background: '#f8fafc',
+              borderTop: '1px solid #e2e8f0',
+              padding: '14px 24px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '10px'
+            }}>
+              <button
+                type="button"
+                onClick={handleResetOrgContractSettings}
+                style={{
+                  background: 'none',
+                  border: '1px solid #cbd5e1',
+                  color: '#64748b',
+                  padding: '8px 14px',
+                  borderRadius: '8px',
+                  fontSize: '12.5px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}
+              >
+                🔄 استعادة القيم الافتراضية
+              </button>
+
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button
+                  type="button"
+                  onClick={() => setIsOrgSettingsModalOpen(false)}
+                  style={{
+                    background: '#f1f5f9',
+                    border: '1px solid #cbd5e1',
+                    color: '#475569',
+                    padding: '8px 16px',
+                    borderRadius: '8px',
+                    fontSize: '13px',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveOrgContractSettings}
+                  style={{
+                    background: 'linear-gradient(135deg, #0f766e, #0d9488)',
+                    border: 'none',
+                    color: '#ffffff',
+                    padding: '8px 22px',
+                    borderRadius: '8px',
+                    fontSize: '13px',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    boxShadow: '0 2px 6px rgba(15, 118, 110, 0.2)'
+                  }}
+                >
+                  <span>💾</span> حفظ واعتماد بيانات الترويسة
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
 
     </div>
   );
