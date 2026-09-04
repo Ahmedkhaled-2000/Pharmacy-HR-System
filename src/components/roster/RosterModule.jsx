@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import RosterPreviewModal from './RosterPreviewModal';
 import { getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
+import { getCycleDateRange } from '../../utils/periodEngine';
 
 export const DEFAULT_ROSTER_SCHEDULE = {
   'السبت': { type: 'shift', start: '08:00', end: '16:00' },
@@ -34,18 +35,32 @@ export function normalizeSchedule(rawSchedule) {
     'الأربعاء': 'الأربعاء',
     'الاربعاء': 'الأربعاء',
     'الخميس': 'الخميس',
-    'الجمعة': 'الجمعة'
+    'الجمعة': 'الجمعة',
+    '0': 'الأحد',
+    '1': 'الاثنين',
+    '2': 'الثلاثاء',
+    '3': 'الأربعاء',
+    '4': 'الخميس',
+    '5': 'الجمعة',
+    '6': 'السبت',
+    'day_0': 'الأحد',
+    'day_1': 'الاثنين',
+    'day_2': 'الثلاثاء',
+    'day_3': 'الأربعاء',
+    'day_4': 'الخميس',
+    'day_5': 'الجمعة',
+    'day_6': 'السبت'
   };
 
   Object.entries(rawSchedule).forEach(([key, val]) => {
     const cleanKey = String(key).trim().toLowerCase();
     const mappedDay = dayKeyMap[cleanKey] || dayKeyMap[key];
     if (mappedDay && val && typeof val === 'object') {
-      const isOff = val.type === 'off' || val.isOff === true;
+      const isOff = val.type === 'off' || val.isOff === true || val.type === 'راحة';
       normalized[mappedDay] = {
         type: isOff ? 'off' : 'shift',
-        start: val.start || val.checkIn || '08:00',
-        end: val.end || val.checkOut || '16:00'
+        start: isOff ? '' : (val.start || val.checkIn || '08:00'),
+        end: isOff ? '' : (val.end || val.checkOut || '16:00')
       };
     }
   });
@@ -53,83 +68,266 @@ export function normalizeSchedule(rawSchedule) {
   return normalized;
 }
 
-export function getResolvedEmployeeRoster(employee, targetBranchId, state, selectedMonth = null) {
-  if (!employee || !state) return null;
+export function getResolvedEmployeeRoster(employee, targetBranchId, arg3, arg4 = null) {
+  if (!employee) return null;
+
+  // 1. Flexible Argument Normalization (handles both (emp, bId, state, month) and (emp, bId, month, state))
+  let state = null;
+  let selectedMonth = null;
+
+  if (arg3 && typeof arg3 === 'object' && (arg3.rosters || arg3.requests || arg3.employees || arg3.branches || arg3.orgSettings !== undefined)) {
+    state = arg3;
+    selectedMonth = typeof arg4 === 'string' ? arg4 : null;
+  } else if (arg4 && typeof arg4 === 'object' && (arg4.rosters || arg4.requests || arg4.employees || arg4.branches || arg4.orgSettings !== undefined)) {
+    state = arg4;
+    selectedMonth = typeof arg3 === 'string' ? arg3 : null;
+  } else if (typeof arg3 === 'object' && arg3 !== null) {
+    state = arg3;
+    selectedMonth = typeof arg4 === 'string' ? arg4 : null;
+  } else {
+    selectedMonth = typeof arg3 === 'string' ? arg3 : null;
+    state = typeof arg4 === 'object' ? arg4 : null;
+  }
+
+  if (!state) return null;
+
   const rosters = state.rosters || [];
   const requests = state.requests || [];
-  const empIdStr = String(employee.id);
-  const branchIdStr = targetBranchId ? String(targetBranchId) : null;
-  const isMultiBranch = employee.branchesDetails && employee.branchesDetails.length > 1;
+  const empIdStr = String(employee.id || '').trim();
+  const empCodeStr = String(employee.code || '').trim();
+  const targetBIdStr = targetBranchId ? String(targetBranchId).trim() : null;
 
+  // Find target branch object in state.branches if available
+  const targetBObj = targetBIdStr ? (state.branches || []).find(b => 
+    String(b.id) === targetBIdStr || 
+    String(b.branchCode || '') === targetBIdStr || 
+    b.name === targetBIdStr
+  ) : null;
+
+  const isMultiBranch = Array.isArray(employee.branchesDetails) && employee.branchesDetails.length > 1;
+
+  // Flexible Employee matching (by id or code in both directions)
+  const matchesEmployee = (item) => {
+    if (!item) return false;
+    const itemEmpId = String(item.employeeId || '').trim();
+    const itemEmpCode = String(item.employeeCode || '').trim();
+    return (
+      (empIdStr && itemEmpId === empIdStr) ||
+      (empCodeStr && itemEmpCode === empCodeStr) ||
+      (empCodeStr && itemEmpId === empCodeStr) ||
+      (empIdStr && itemEmpCode === empIdStr)
+    );
+  };
+
+  // Flexible Branch matching
   const branchMatches = (itemBranchId) => {
-    if (!branchIdStr) return true;
-    const itemBStr = itemBranchId ? String(itemBranchId) : '';
-    if (itemBStr === branchIdStr) return true;
-    
-    // Check match against branch object ID and Name
-    const targetBObj = (state.branches || []).find(b => String(b.id) === branchIdStr || b.name === branchIdStr);
-    if (targetBObj && (itemBStr === String(targetBObj.id) || itemBStr === targetBObj.name)) return true;
+    if (!targetBIdStr) return true;
+    const itemBStr = itemBranchId ? String(itemBranchId).trim() : '';
 
-    // If item has no branch specified and employee is single-branch, match primary branch
-    if (!itemBStr && !isMultiBranch) {
-      return String(employee.branchId || '') === branchIdStr || String(employee.branchesDetails?.[0]?.branchId || '') === branchIdStr;
+    if (itemBStr === targetBIdStr) return true;
+
+    if (targetBObj) {
+      if (itemBStr === String(targetBObj.id) || 
+          (targetBObj.branchCode && itemBStr === String(targetBObj.branchCode)) || 
+          itemBStr === targetBObj.name) {
+        return true;
+      }
     }
+
+    // If item has no branch specified:
+    if (!itemBStr) {
+      const isAssigned = 
+        String(employee.branchId || '') === targetBIdStr ||
+        (targetBObj && String(employee.branchId || '') === String(targetBObj.id)) ||
+        (Array.isArray(employee.branchesDetails) && employee.branchesDetails.some(bd => 
+          String(bd.branchId) === targetBIdStr || 
+          (targetBObj && String(bd.branchId) === String(targetBObj.id))
+        ));
+      if (isAssigned) return true;
+      if (!isMultiBranch) return true;
+    }
+
     return false;
+  };
+
+  // Determine Cycle Date Range if selectedMonth is provided
+  let cycleRange = null;
+  if (selectedMonth && typeof selectedMonth === 'string') {
+    try {
+      cycleRange = getCycleDateRange(selectedMonth, state?.orgSettings || {});
+    } catch {
+      const parts = selectedMonth.split('-').map(Number);
+      if (parts.length >= 2) {
+        const y = parts[0];
+        const m = parts[1];
+        const daysInM = new Date(y, m, 0).getDate();
+        cycleRange = {
+          startDate: `${selectedMonth}-01`,
+          endDate: `${selectedMonth}-${String(daysInM).padStart(2, '0')}`
+        };
+      }
+    }
+  }
+
+  // Scoring function to pick the most relevant approved roster
+  const getCandidateScore = (item) => {
+    let score = 0;
+    const itemMonth = item.month || (item.fromDate ? String(item.fromDate).slice(0, 7) : null);
+
+    if (selectedMonth) {
+      // 1. Direct exact month match
+      if (item.month === selectedMonth) {
+        score = 100;
+      }
+      // 2. Date range overlaps with this month's payroll cycle
+      else if (cycleRange && item.fromDate && item.toDate) {
+        if (item.fromDate <= cycleRange.endDate && item.toDate >= cycleRange.startDate) {
+          score = 95;
+        }
+      }
+      // 3. fromDate starts within this cycle
+      else if (cycleRange && item.fromDate && item.fromDate >= cycleRange.startDate && item.fromDate <= cycleRange.endDate) {
+        score = 90;
+      }
+      // 4. fromDate starts with selectedMonth
+      else if (item.fromDate && String(item.fromDate).slice(0, 7) === selectedMonth) {
+        score = 85;
+      }
+      // 5. Standing / Recurring schedule (perpetual operational roster without month/date boundaries)
+      else if (!item.month && !item.fromDate) {
+        score = 80;
+      }
+      // 6. Most recent approved roster from an earlier month/cycle that carries forward
+      else if (itemMonth && itemMonth < selectedMonth) {
+        score = 70;
+      }
+      // 7. Approved roster starting earlier
+      else if (cycleRange && item.fromDate && item.fromDate < cycleRange.startDate) {
+        score = (!item.toDate || item.toDate >= cycleRange.startDate) ? 68 : 60;
+      }
+      // 8. General approved roster
+      else {
+        score = 50;
+      }
+    } else {
+      // No selectedMonth filter requested -> prefer standing or newest
+      if (!item.month && !item.fromDate) score = 90;
+      else score = 75;
+    }
+
+    // Give priority to rosters with an actual schedule object and valid days
+    if (item.schedule && typeof item.schedule === 'object' && Object.keys(item.schedule).length > 0) {
+      score += 5;
+    }
+
+    return score;
   };
 
   const candidates = [];
 
   // 1. Gather all matching approved records from state.rosters
   rosters.forEach((r) => {
-    if (String(r.employeeId) !== empIdStr) return;
-    if (r.status !== 'approved') return;
-    const rMonth = r.month || (r.fromDate ? r.fromDate.slice(0, 7) : (r.approvedAt ? String(r.approvedAt).slice(0, 7) : null));
-    if (selectedMonth && (!rMonth || rMonth !== selectedMonth)) return;
-    if (branchMatches(r.branchId)) {
-      candidates.push({
-        ...r,
-        approvedAt: r.approvedAt || r.updatedAt || r.createdAt || '2000-01-01',
-        source: 'rosters'
-      });
-    }
+    if (!matchesEmployee(r)) return;
+    const isApproved = r.status === 'approved' || r.status === 'active' || r.status === 'معتمد' || r.adminApproved === true || (!r.status && r.schedule);
+    if (!isApproved) return;
+    if (r.status === 'rejected' || r.status === 'draft') return;
+    if (!branchMatches(r.branchId)) return;
+
+    const score = getCandidateScore(r);
+    candidates.push({
+      ...r,
+      score,
+      approvedAt: r.approvedAt || r.updatedAt || r.createdAt || '2000-01-01',
+      source: 'rosters'
+    });
   });
 
   // 2. Gather all matching approved records from state.requests
   requests.forEach((req) => {
-    if (String(req.employeeId) !== empIdStr) return;
-    if (req.type !== 'roster_update' && req.type !== 'roster_edit' && req.type !== 'roster_edit_request') return;
-    if (req.status !== 'approved' && !req.adminApproved) return;
-    const reqMonth = req.month || (req.fromDate ? req.fromDate.slice(0, 7) : (req.approvedAt ? String(req.approvedAt).slice(0, 7) : null));
-    if (selectedMonth && (!reqMonth || reqMonth !== selectedMonth)) return;
-    if (branchMatches(req.branchId)) {
+    if (!matchesEmployee(req)) return;
+    const isRosterType = req.type === 'roster_update' || req.type === 'roster_edit' || req.type === 'roster_edit_request' || req.type === 'roster';
+    if (!isRosterType) return;
+    const isApproved = req.status === 'approved' || req.adminApproved === true;
+    if (!isApproved) return;
+    const rawSch = req.schedule || req.newSchedule;
+    if (!rawSch) return;
+    if (!branchMatches(req.branchId)) return;
+
+    const reqItem = {
+      id: req.id,
+      employeeId: req.employeeId || employee.id,
+      branchId: req.branchId || targetBranchId || employee.branchId,
+      month: req.month,
+      fromDate: req.fromDate,
+      toDate: req.toDate,
+      schedule: rawSch,
+      status: 'approved',
+      approvedAt: req.approvedAt || req.adminApprovedAt || req.updatedAt || req.createdAt || '2000-01-01',
+      source: 'requests'
+    };
+
+    const score = getCandidateScore(reqItem);
+    candidates.push({
+      ...reqItem,
+      score
+    });
+  });
+
+  // 3. Fallback: Employee profile branch assignment schedule (employee.branchesDetails)
+  if (Array.isArray(employee.branchesDetails)) {
+    const bd = employee.branchesDetails.find(b => 
+      String(b.branchId) === targetBIdStr || 
+      (targetBObj && String(b.branchId) === String(targetBObj.id))
+    );
+    if (bd && bd.schedule && typeof bd.schedule === 'object' && Object.keys(bd.schedule).length > 0) {
       candidates.push({
-        id: req.id,
-        employeeId: req.employeeId,
-        branchId: req.branchId || targetBranchId || employee.branchId,
-        month: req.month,
-        fromDate: req.fromDate,
-        toDate: req.toDate,
-        schedule: req.schedule,
+        id: `emp_bd_${employee.id}_${bd.branchId}`,
+        employeeId: employee.id,
+        branchId: bd.branchId,
+        schedule: bd.schedule,
         status: 'approved',
-        approvedAt: req.approvedAt || req.updatedAt || req.createdAt || '2000-01-01',
-        source: 'requests'
+        score: 45,
+        approvedAt: employee.updatedAt || employee.createdAt || '2000-01-01',
+        source: 'employee_branchesDetails'
       });
     }
-  });
+  }
+
+  // 4. Fallback: Employee profile direct roster (employee.roster or employee.workSchedule or employee.schedule)
+  const profileSchedule = employee.roster?.schedule || employee.workSchedule || employee.schedule;
+  if (profileSchedule && typeof profileSchedule === 'object' && Object.keys(profileSchedule).length > 0) {
+    const isBranchApplicable = !targetBIdStr || !isMultiBranch || branchMatches(employee.branchId);
+    if (isBranchApplicable) {
+      candidates.push({
+        id: `emp_profile_${employee.id}`,
+        employeeId: employee.id,
+        branchId: employee.branchId || targetBranchId,
+        schedule: profileSchedule,
+        status: 'approved',
+        score: 40,
+        approvedAt: employee.roster?.approvedAt || employee.updatedAt || employee.createdAt || '2000-01-01',
+        source: 'employee_profile'
+      });
+    }
+  }
 
   if (candidates.length === 0) return null;
 
-  // Always pick the MOST RECENT approved roster!
+  // Sort candidates by score descending, then by approval timestamp descending
   candidates.sort((a, b) => {
+    if (b.score !== a.score) {
+      return b.score - a.score;
+    }
     const timeA = new Date(a.approvedAt || 0).getTime() || 0;
     const timeB = new Date(b.approvedAt || 0).getTime() || 0;
     return timeB - timeA;
   });
 
-  const latest = candidates[0];
+  const winner = candidates[0];
   return {
-    ...latest,
-    schedule: normalizeSchedule(latest.schedule)
+    ...winner,
+    status: 'approved',
+    schedule: normalizeSchedule(winner.schedule)
   };
 }
 

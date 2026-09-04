@@ -138,18 +138,32 @@ export function normalizeSchedule(rawSchedule) {
     'الأربعاء': 'الأربعاء',
     'الاربعاء': 'الأربعاء',
     'الخميس': 'الخميس',
-    'الجمعة': 'الجمعة'
+    'الجمعة': 'الجمعة',
+    '0': 'الأحد',
+    '1': 'الاثنين',
+    '2': 'الثلاثاء',
+    '3': 'الأربعاء',
+    '4': 'الخميس',
+    '5': 'الجمعة',
+    '6': 'السبت',
+    'day_0': 'الأحد',
+    'day_1': 'الاثنين',
+    'day_2': 'الثلاثاء',
+    'day_3': 'الأربعاء',
+    'day_4': 'الخميس',
+    'day_5': 'الجمعة',
+    'day_6': 'السبت'
   };
 
   Object.entries(rawSchedule).forEach(([key, val]) => {
     const cleanKey = String(key).trim().toLowerCase();
     const mappedDay = dayKeyMap[cleanKey] || dayKeyMap[key];
     if (mappedDay && val && typeof val === 'object') {
-      const isOff = val.type === 'off' || val.isOff === true;
+      const isOff = val.type === 'off' || val.isOff === true || val.type === 'راحة';
       normalized[mappedDay] = {
         type: isOff ? 'off' : 'shift',
-        start: val.start || val.checkIn || '08:00',
-        end: val.end || val.checkOut || '16:00'
+        start: isOff ? '' : (val.start || val.checkIn || '08:00'),
+        end: isOff ? '' : (val.end || val.checkOut || '16:00')
       };
     }
   });
@@ -157,98 +171,7 @@ export function normalizeSchedule(rawSchedule) {
   return normalized;
 }
 
-export function getResolvedEmployeeRoster(emp, targetBranchId, selectedMonth, state) {
-  if (!emp || !state) return null;
-  const empIdStr = String(emp.id || '');
-  const empCodeStr = String(emp.code || '');
-  const targetBIdStr = targetBranchId ? String(targetBranchId).trim() : null;
-  const rosters = state.rosters || [];
-  const requests = state.requests || [];
-  const isMultiBranch = Array.isArray(emp.branchesDetails) && emp.branchesDetails.length > 1;
-
-  const matchesEmployee = (item) => {
-    if (!item) return false;
-    const itemEmpId = String(item.employeeId || '');
-    const itemEmpCode = String(item.employeeCode || '');
-    return (
-      (empIdStr && itemEmpId === empIdStr) ||
-      (empCodeStr && itemEmpCode === empCodeStr) ||
-      (empCodeStr && itemEmpId === empCodeStr) ||
-      (empIdStr && itemEmpCode === empIdStr)
-    );
-  };
-
-  const branchMatches = (itemBranchId) => {
-    if (!targetBIdStr) return true;
-    const itemBStr = itemBranchId ? String(itemBranchId).trim() : '';
-    if (!itemBStr) return true; // If unassigned, consider matching
-    if (itemBStr === targetBIdStr) return true;
-    
-    // Check match against branch object ID, branchCode and Name
-    const targetBObj = (state.branches || []).find(b => String(b.id) === targetBIdStr || String(b.branchCode) === targetBIdStr || b.name === targetBIdStr);
-    if (targetBObj && (itemBStr === String(targetBObj.id) || itemBStr === String(targetBObj.branchCode) || itemBStr === targetBObj.name)) return true;
-
-    // Fallback if employee is single-branch or item branch was empty
-    if (!isMultiBranch) {
-      const singleB = String(emp.branchesDetails?.[0]?.branchId || emp.branchId || '');
-      return singleB === targetBIdStr || singleB === itemBStr;
-    }
-    return false;
-  };
-
-  const candidates = [];
-
-  // 1. Gather all matching approved records from state.rosters
-  rosters.forEach((r) => {
-    if (!matchesEmployee(r)) return;
-    if (r.status !== 'approved' && !r.adminApproved) return;
-    if (selectedMonth && r.month && r.month !== selectedMonth) return;
-    if (branchMatches(r.branchId)) {
-      candidates.push({
-        ...r,
-        approvedAt: r.approvedAt || r.updatedAt || r.createdAt || '2000-01-01',
-        source: 'rosters'
-      });
-    }
-  });
-
-  // 2. Gather all matching approved records from state.requests
-  requests.forEach((req) => {
-    if (!matchesEmployee(req)) return;
-    if (req.type !== 'roster_update' && req.type !== 'roster_edit' && req.type !== 'roster_edit_request') return;
-    if (req.status !== 'approved' && !req.adminApproved) return;
-    if (selectedMonth && req.month && req.month !== selectedMonth) return;
-    if (branchMatches(req.branchId)) {
-      candidates.push({
-        id: req.id,
-        employeeId: req.employeeId,
-        branchId: req.branchId || targetBranchId || emp.branchId,
-        month: req.month,
-        fromDate: req.fromDate,
-        toDate: req.toDate,
-        schedule: req.schedule || req.newSchedule,
-        status: 'approved',
-        approvedAt: req.approvedAt || req.updatedAt || req.createdAt || '2000-01-01',
-        source: 'requests'
-      });
-    }
-  });
-
-  if (candidates.length === 0) return null;
-
-  // Sort candidates so the MOST RECENT approved roster is first!
-  candidates.sort((a, b) => {
-    const timeA = new Date(a.approvedAt || 0).getTime() || 0;
-    const timeB = new Date(b.approvedAt || 0).getTime() || 0;
-    return timeB - timeA;
-  });
-
-  const latest = candidates[0];
-  return {
-    ...latest,
-    schedule: normalizeSchedule(latest.schedule)
-  };
-}
+export { getResolvedEmployeeRoster } from '../roster/RosterModule';
 
 export default function EmployeeRosterModule({
   emp,

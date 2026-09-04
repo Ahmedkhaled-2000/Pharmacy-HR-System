@@ -433,32 +433,34 @@ export default function BranchMonthlyRosterModule({
     const map = new Map();
     branchEmployees.forEach(emp => {
       const r = getResolvedEmployeeRoster(emp, currentBranch.id, state, selectedMonth);
-      map.set(emp.id, r);
+      map.set(String(emp.id), r);
+      if (emp.code) map.set(`code_${emp.code}`, r);
     });
     return map;
   }, [branchEmployees, currentBranch, state, selectedMonth]);
 
   const approvedRostersCount = useMemo(() => {
     let count = 0;
-    resolvedRostersMap.forEach(r => {
-      if (r !== null && r.schedule) count++;
+    branchEmployees.forEach(emp => {
+      const r = resolvedRostersMap.get(String(emp.id));
+      if (r !== null && r?.schedule) count++;
     });
     return count;
-  }, [resolvedRostersMap]);
+  }, [branchEmployees, resolvedRostersMap]);
 
   const hasApprovedRosters = approvedRostersCount > 0;
 
   // Staff members in this branch without an approved roster for this month
   const unapprovedStaff = useMemo(() => {
     if (!currentBranch) return [];
-    return branchEmployees.filter(emp => !resolvedRostersMap.get(emp.id)?.schedule);
+    return branchEmployees.filter(emp => !resolvedRostersMap.get(String(emp.id))?.schedule);
   }, [branchEmployees, currentBranch, resolvedRostersMap]);
 
   // Map each employee to their resolved schedule for this branch and month
   const staffSchedules = useMemo(() => {
     if (!currentBranch) return [];
     return filteredEmployees.map(emp => {
-      const rosterObj = resolvedRostersMap.get(emp.id) || null;
+      const rosterObj = resolvedRostersMap.get(String(emp.id)) || (emp.code ? resolvedRostersMap.get(`code_${emp.code}`) : null) || null;
       const isApproved = Boolean(rosterObj && rosterObj.schedule);
       const schedule = isApproved ? rosterObj.schedule : null;
 
