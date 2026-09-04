@@ -314,12 +314,23 @@ export default function EmployeeCardsGrid({
           >
             <span>📞</span> أرقام الموظفين
           </button>
-          <label className="btn btn-ghost" style={{ cursor: 'pointer', margin: 0, fontSize: '13px' }}>
-            📤 استيراد Excel
-            <input type="file" accept=".xlsx, .xls" onChange={importEmployeesFromExcel} style={{ display: 'none' }} />
+          <label className="btn btn-ghost" style={{ cursor: 'pointer', margin: 0, fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span>📤</span> استيراد الموظفين Excel
+            <input
+              type="file"
+              accept=".xlsx, .xls"
+              onClick={(e) => { e.target.value = ''; }}
+              onChange={importEmployeesFromExcel}
+              style={{ display: 'none' }}
+            />
           </label>
-          <button className="btn btn-ghost" onClick={exportEmployeesToExcel} style={{ fontSize: '13px' }}>
-            📥 تصدير Excel
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={exportEmployeesToExcel}
+            style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <span>📥</span> تصدير الموظفين Excel
           </button>
           <button className="btn-add-job" onClick={openAddEmpModal} style={{ fontSize: '13px' }}>
             + إضافة موظف جديد

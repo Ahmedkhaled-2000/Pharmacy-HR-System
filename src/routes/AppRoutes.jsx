@@ -128,7 +128,8 @@ export default function AppRoutes() {
   const {
     exportEmpExcel,
     exportAllPayrollExcel,
-    handleExcelImport
+    handleExcelImport,
+    exportEmployeesDirectoryExcel
   } = useExcelOperations();
 
   // Run 23:59 Daily Digest Background Automated Cron
@@ -685,7 +686,7 @@ export default function AppRoutes() {
                     sendWhatsAppMsg={sendWhatsAppMsg}
                     generatePayslipMsg={generatePayslipMsg}
                     importEmployeesFromExcel={handleExcelImport}
-                    exportEmployeesToExcel={exportAllPayrollExcel}
+                    exportEmployeesToExcel={exportEmployeesDirectoryExcel}
                     openAddEmpModal={() => {
                       setEditingEmpFile(null);
                       setIsEmpFileModalOpen(true);
