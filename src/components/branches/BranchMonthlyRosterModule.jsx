@@ -1,21 +1,226 @@
 import React, { useState, useMemo } from 'react';
-import { getResolvedEmployeeRoster, DEFAULT_ROSTER_SCHEDULE } from '../roster/RosterModule';
+import { getResolvedEmployeeRoster } from '../roster/RosterModule';
 import { getEmpDisplayName, isEmployeeActive, getRealTodayStr, arabicMonthLabel } from '../../utils/formatters';
 import { loadExcelJS, mergedTitle, tableHeaderRow, dataRow } from '../../utils/excelExport';
+import { getCycleDateRange } from '../../utils/periodEngine';
+import { getJobsList } from '../../utils/jobsHelper';
+import { triggerDirectPrint } from '../../utils/printHelper';
 
 const monthLabel = (monthStr) => {
   return { arabic: arabicMonthLabel(monthStr), raw: monthStr };
 };
 
-const DAYS_OF_WEEK = [
-  { key: 'saturday', label: 'السبت', short: 'سبت' },
-  { key: 'sunday', label: 'الأحد', short: 'أحد' },
-  { key: 'monday', label: 'الاثنين', short: 'اثنين' },
-  { key: 'tuesday', label: 'الثلاثاء', short: 'ثلاثاء' },
-  { key: 'wednesday', label: 'الأربعاء', short: 'أربعاء' },
-  { key: 'thursday', label: 'الخميس', short: 'خميس' },
-  { key: 'friday', label: 'الجمعة', short: 'جمعة' }
+export const DAYS_OF_WEEK = [
+  { key: 'saturday', label: 'السبت', short: 'سبت', dayIndex: 6 },
+  { key: 'sunday', label: 'الأحد', short: 'أحد', dayIndex: 0 },
+  { key: 'monday', label: 'الاثنين', short: 'اثنين', dayIndex: 1 },
+  { key: 'tuesday', label: 'الثلاثاء', short: 'ثلاثاء', dayIndex: 2 },
+  { key: 'wednesday', label: 'الأربعاء', short: 'أربعاء', dayIndex: 3 },
+  { key: 'thursday', label: 'الخميس', short: 'خميس', dayIndex: 4 },
+  { key: 'friday', label: 'الجمعة', short: 'جمعة', dayIndex: 5 }
 ];
+
+/**
+ * تحويل الوقت من نظام 24 ساعة إلى نظام 12 ساعة للعرض الشكلي والتصميم فقط
+ * مثال: 08:00 -> 08:00 ص | 16:00 -> 04:00 م | 00:00 -> 12:00 ص | 12:00 -> 12:00 م
+ */
+export function formatTime12H(time24) {
+  if (!time24 || typeof time24 !== 'string') return '';
+  const parts = time24.trim().split(':');
+  if (parts.length < 2) return time24;
+  let h = parseInt(parts[0], 10);
+  const m = parts[1].padStart(2, '0');
+  if (isNaN(h)) return time24;
+
+  const period = h >= 12 ? 'م' : 'ص';
+  h = h % 12;
+  if (h === 0) h = 12;
+  return `${String(h).padStart(2, '0')}:${m} ${period}`;
+}
+
+export function formatShiftRange12H(start24, end24) {
+  if (!start24 || !end24) return '';
+  return `${formatTime12H(start24)} - ${formatTime12H(end24)}`;
+}
+
+/**
+ * توليد كود HTML متكامل ومعزول لخريطة الورديات الأسبوعية وتوزيع الكادر
+ * جاهز للطباعة المباشرة بصيغة A4 Landscape مع توقيعات الاعتماد الرسمية
+ */
+function generateOfficialWeeklyShiftsHTML({
+  currentBranch,
+  selectedMonth,
+  cycleRange,
+  dayRosterMap,
+  branchMetrics,
+  orgSettings
+}) {
+  const companyName = orgSettings?.companyName || 'مجموعة صيدليات د. منار الكومي';
+  const branchName = currentBranch?.name || 'الفرع';
+  const printDate = new Date().toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' });
+
+  const daysHTML = DAYS_OF_WEEK.map(day => {
+    const dayData = dayRosterMap[day.key] || { shiftGroups: [], offStaff: [], totalWorking: 0, totalOff: 0 };
+    const isFriday = day.key === 'friday';
+
+    const shiftGroupsHTML = dayData.shiftGroups.length === 0
+      ? `<div style="text-align:center; padding:12px 6px; color:#94a3b8; font-size:10.5px; background:#f8fafc; border-radius:6px; border:1px dashed #cbd5e1;">🚫 لا توجد ورديات عمل مجدولة</div>`
+      : dayData.shiftGroups.map(group => {
+          const isConcurrent = group.staff.length > 1;
+          const staffHTML = group.staff.map(st => {
+            const isPharm = (st.employee.jobTitle || '').includes('صيدل');
+            return `
+              <div style="display:flex; justify-content:space-between; align-items:center; background:#ffffff; padding:4px 6px; border-radius:5px; border:1px solid #e2e8f0; margin-bottom:3px;">
+                <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                  <span style="font-weight:700; color:#0f172a; font-size:10.5px;">${getEmpDisplayName(st.employee)}</span>
+                  <span style="color:#64748b; font-size:9px; margin-right:3px;">(${st.employee.jobTitle || 'موظف'})</span>
+                </div>
+                ${isPharm ? '<span style="background:#dcfce7; color:#166534; font-size:8.5px; font-weight:800; padding:1px 4px; border-radius:3px; flex-shrink:0;">💊 صيدلي</span>' : ''}
+              </div>
+            `;
+          }).join('');
+
+          return `
+            <div style="background:#f8fafc; border:1px solid ${isConcurrent ? '#6ee7b7' : '#cbd5e1'}; border-radius:7px; padding:5px; margin-bottom:5px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; border-bottom:1px solid #e2e8f0; padding-bottom:3px;">
+                <span style="font-weight:800; color:${isConcurrent ? '#047857' : '#0f766e'}; font-size:11px; direction:ltr;">
+                  ${formatTime12H(group.start)} إلى ${formatTime12H(group.end)}
+                </span>
+                <span style="font-size:9px; color:#64748b; font-weight:600;">
+                  (${group.hours} س) ${isConcurrent ? `• 👥 متزامن (${group.staff.length})` : ''}
+                </span>
+              </div>
+              <div>${staffHTML}</div>
+            </div>
+          `;
+        }).join('');
+
+    const offHTML = dayData.offStaff.length > 0 ? `
+      <div style="background:#fffbeb; border:1px solid #fde68a; border-radius:6px; padding:4px 6px; margin-top:3px;">
+        <div style="font-size:9.5px; font-weight:800; color:#92400e; margin-bottom:2px;">
+          🏖️ راحة أسبوعية (${dayData.offStaff.length}):
+        </div>
+        <div style="font-size:9px; color:#78350f; line-height:1.3;">
+          ${dayData.offStaff.map(s => `• ${getEmpDisplayName(s.employee)} (${s.employee.jobTitle || 'موظف'})`).join('<br>')}
+        </div>
+      </div>
+    ` : '';
+
+    return `
+      <div style="border:1.5px solid #cbd5e1; border-radius:8px; overflow:hidden; display:flex; flex-direction:column; background:#ffffff; page-break-inside:avoid;">
+        <div style="background:${isFriday ? 'linear-gradient(135deg, #fef3c7, #fde68a)' : 'linear-gradient(135deg, #f0fdf4, #dcfce7)'}; padding:6px 8px; border-bottom:1.5px solid #cbd5e1; display:flex; justify-content:space-between; align-items:center;">
+          <div style="font-weight:800; font-size:12px; color:${isFriday ? '#92400e' : '#166534'};">
+            ${isFriday ? '🕌' : '🗓️'} يوم ${day.label}
+          </div>
+          <div style="display:flex; gap:3px;">
+            <span style="background:#ffffff; color:#166534; font-size:9px; font-weight:700; padding:1px 5px; border-radius:8px; border:1px solid #bbf7d0;">
+              🟢 ${dayData.totalWorking} حضور
+            </span>
+            ${dayData.totalOff > 0 ? `
+              <span style="background:#ffffff; color:#b45309; font-size:9px; font-weight:700; padding:1px 5px; border-radius:8px; border:1px solid #fde68a;">
+                🏖️ ${dayData.totalOff} راحة
+              </span>
+            ` : ''}
+          </div>
+        </div>
+        <div style="padding:6px; flex:1; display:flex; flex-direction:column; gap:3px;">
+          ${shiftGroupsHTML}
+          ${offHTML}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <style>
+      @page {
+        size: A4 landscape !important;
+        margin: 6mm 8mm !important;
+      }
+      * {
+        box-sizing: border-box !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      body {
+        font-family: 'Cairo', 'Tajawal', sans-serif !important;
+        color: #0f172a !important;
+        background: #ffffff !important;
+        direction: rtl !important;
+        padding: 4px 6px !important;
+      }
+      .print-grid {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 5px;
+        align-items: stretch;
+      }
+      @media print {
+        .no-print { display: none !important; }
+      }
+    </style>
+
+    <div style="direction:rtl; font-family:'Cairo', 'Tajawal', sans-serif;">
+      <!-- Header Banner -->
+      <div style="border-bottom:2.5px solid #0f766e; padding-bottom:6px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <div style="font-size:12px; font-weight:800; color:#0f766e;">${companyName}</div>
+          <h1 style="margin:2px 0 0 0; font-size:16px; font-weight:900; color:#0f172a;">
+            خريطة الورديات الأسبوعية وتوزيع الكادر التشغيلي — فرع ${branchName}
+          </h1>
+          <div style="font-size:11px; color:#475569; margin-top:2px;">
+            دورة التشغيل المعتمدة: <strong>${cycleRange?.label || monthLabel(selectedMonth).arabic}</strong>
+          </div>
+        </div>
+        <div style="text-align:left; background:#f8fafc; border:1px solid #e2e8f0; padding:5px 10px; border-radius:8px;">
+          <div style="font-size:10px; color:#475569;">
+            تاريخ الاستخراج والطباعة: <strong>${printDate}</strong>
+          </div>
+          <div style="font-size:10px; color:#0f766e; font-weight:700; margin-top:2px;">
+            قوة الفرع: ${branchMetrics.totalStaff} موظف | التغطية: ${branchMetrics.totalWeeklyScheduledHours} س/أسبوع | الصيدلي: ${branchMetrics.daysWithPharmacist} من 7 أيام
+          </div>
+        </div>
+      </div>
+
+      <!-- 7 Days Grid -->
+      <div class="print-grid">
+        ${daysHTML}
+      </div>
+
+      <!-- Signatures Footer -->
+      <div style="margin-top:10px; border-top:1.5px solid #cbd5e1; padding-top:8px; display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; text-align:center; page-break-inside:avoid;">
+        <div style="border:1px dashed #cbd5e1; border-radius:6px; padding:6px 8px; background:#f8fafc;">
+          <div style="font-weight:800; font-size:10.5px; color:#0f172a; margin-bottom:16px;">
+            توقيع مدير الفرع
+          </div>
+          <div style="border-bottom:1px solid #94a3b8; width:70%; margin:0 auto 3px auto;"></div>
+          <div style="font-size:9px; color:#64748b;">التاريخ: .... / .... / 2026</div>
+        </div>
+
+        <div style="border:1px dashed #cbd5e1; border-radius:6px; padding:6px 8px; background:#f8fafc;">
+          <div style="font-weight:800; font-size:10.5px; color:#0f172a; margin-bottom:16px;">
+            اعتماد إدارة الموارد البشرية (HR)
+          </div>
+          <div style="border-bottom:1px solid #94a3b8; width:70%; margin:0 auto 3px auto;"></div>
+          <div style="font-size:9px; color:#64748b;">التاريخ: .... / .... / 2026</div>
+        </div>
+
+        <div style="border:1px dashed #cbd5e1; border-radius:6px; padding:6px 8px; background:#f8fafc;">
+          <div style="font-weight:800; font-size:10.5px; color:#0f172a; margin-bottom:16px;">
+            اعتماد الإدارة العليا والتشغيل
+          </div>
+          <div style="border-bottom:1px solid #94a3b8; width:70%; margin:0 auto 3px auto;"></div>
+          <div style="font-size:9px; color:#64748b;">الختم والتوقيع الرسمي</div>
+        </div>
+      </div>
+
+      <!-- Legal Watermark Note -->
+      <div style="text-align:center; margin-top:6px; font-size:8.5px; color:#94a3b8;">
+        وثيقة تشغيلية رسمية صادرة من المنظومة الإدارية المعتمدة — أي شطب أو تعديل يدوي يُعتبر لاغياً ما لم يعتمد ومختوم رسمياً من الإدارة العليا.
+      </div>
+    </div>
+  `;
+}
 
 export default function BranchMonthlyRosterModule({
   state,
@@ -57,15 +262,25 @@ export default function BranchMonthlyRosterModule({
     });
   }, [employees, currentBranch]);
 
+  // 1. Dynamic Jobs List from registered system jobs & branch employees
+  const systemJobs = useMemo(() => {
+    const jobs = getJobsList(state);
+    const titles = new Set();
+    jobs.forEach(j => {
+      const t = typeof j === 'string' ? j : (j.title || j.name || '');
+      if (t && t.trim()) titles.add(t.trim());
+    });
+    branchEmployees.forEach(e => {
+      if (e.jobTitle && e.jobTitle.trim()) titles.add(e.jobTitle.trim());
+    });
+    return Array.from(titles).sort();
+  }, [state, branchEmployees]);
+
   // Filtered Branch Employees by Search & Job
   const filteredEmployees = useMemo(() => {
     return branchEmployees.filter(emp => {
       if (jobFilter !== 'all') {
-        const title = (emp.jobTitle || '').toLowerCase();
-        if (jobFilter === 'pharmacist' && !title.includes('صيدل')) return false;
-        if (jobFilter === 'assistant' && !title.includes('مساعد') && !title.includes('فني')) return false;
-        if (jobFilter === 'cashier' && !title.includes('كاشير') && !title.includes('محاسب')) return false;
-        if (jobFilter === 'other' && (title.includes('صيدل') || title.includes('مساعد') || title.includes('كاشير'))) return false;
+        if ((emp.jobTitle || '').trim() !== jobFilter) return false;
       }
       if (searchQuery) {
         const q = searchQuery.toLowerCase().trim();
@@ -79,38 +294,62 @@ export default function BranchMonthlyRosterModule({
     });
   }, [branchEmployees, jobFilter, searchQuery]);
 
+  // 2. Check Approved Rosters for Selected Month & Branch (Prevent showing fake schedules for unapproved months)
+  const resolvedRostersMap = useMemo(() => {
+    if (!currentBranch) return new Map();
+    const map = new Map();
+    branchEmployees.forEach(emp => {
+      const r = getResolvedEmployeeRoster(emp, currentBranch.id, state, selectedMonth);
+      map.set(emp.id, r);
+    });
+    return map;
+  }, [branchEmployees, currentBranch, state, selectedMonth]);
+
+  const approvedRostersCount = useMemo(() => {
+    let count = 0;
+    resolvedRostersMap.forEach(r => {
+      if (r !== null && r.schedule) count++;
+    });
+    return count;
+  }, [resolvedRostersMap]);
+
+  const hasApprovedRosters = approvedRostersCount > 0;
+
   // Map each employee to their resolved schedule for this branch and month
   const staffSchedules = useMemo(() => {
     if (!currentBranch) return [];
     return filteredEmployees.map(emp => {
-      const rosterObj = getResolvedEmployeeRoster(emp, currentBranch.id, state, selectedMonth);
-      const schedule = rosterObj?.schedule || DEFAULT_ROSTER_SCHEDULE;
+      const rosterObj = resolvedRostersMap.get(emp.id) || null;
+      const isApproved = Boolean(rosterObj && rosterObj.schedule);
+      const schedule = isApproved ? rosterObj.schedule : null;
 
-      // Calculate total weekly hours and work days
       let totalWeeklyHours = 0;
       let workDaysCount = 0;
-      DAYS_OF_WEEK.forEach(d => {
-        const dayInfo = schedule[d.label] || { type: 'off' };
-        if (dayInfo.type === 'shift' && dayInfo.start && dayInfo.end) {
-          workDaysCount++;
-          // Compute hours between start and end
-          const [sh, sm] = dayInfo.start.split(':').map(Number);
-          const [eh, em] = dayInfo.end.split(':').map(Number);
-          let h = eh - sh + (em - sm) / 60;
-          if (h <= 0) h += 24; // Overnight shift
-          totalWeeklyHours += h;
-        }
-      });
+
+      if (schedule) {
+        DAYS_OF_WEEK.forEach(d => {
+          const dayInfo = schedule[d.label] || { type: 'off' };
+          if (dayInfo.type === 'shift' && dayInfo.start && dayInfo.end) {
+            workDaysCount++;
+            const [sh, sm] = dayInfo.start.split(':').map(Number);
+            const [eh, em] = dayInfo.end.split(':').map(Number);
+            let h = eh - sh + (em - sm) / 60;
+            if (h <= 0) h += 24;
+            totalWeeklyHours += h;
+          }
+        });
+      }
 
       return {
         employee: emp,
         rosterObj,
         schedule,
+        isApproved,
         totalWeeklyHours: Math.round(totalWeeklyHours * 10) / 10,
         workDaysCount
       };
     });
-  }, [filteredEmployees, currentBranch, state, selectedMonth]);
+  }, [filteredEmployees, currentBranch, resolvedRostersMap]);
 
   // Day-by-Day Roster Structure
   const dayRosterMap = useMemo(() => {
@@ -119,7 +358,9 @@ export default function BranchMonthlyRosterModule({
       const workingStaff = [];
       const offStaff = [];
 
-      staffSchedules.forEach(({ employee, schedule }) => {
+      staffSchedules.forEach(({ employee, schedule, isApproved }) => {
+        if (!isApproved || !schedule) return;
+
         const dayInfo = schedule[day.label] || { type: 'off', start: '', end: '' };
         if (dayInfo.type === 'shift' && dayInfo.start && dayInfo.end) {
           const shiftKey = `${dayInfo.start} - ${dayInfo.end}`;
@@ -160,7 +401,7 @@ export default function BranchMonthlyRosterModule({
         shiftGroups[st.shiftKey].staff.push(st);
       });
 
-      // Sort shift groups chronologically by start time
+      // Sort shift groups chronologically by start time (24h)
       const sortedShiftGroups = Object.values(shiftGroups).sort((a, b) => a.start.localeCompare(b.start));
 
       map[day.key] = {
@@ -181,15 +422,18 @@ export default function BranchMonthlyRosterModule({
     const totalStaff = branchEmployees.length;
     let totalWeeklyScheduledHours = 0;
     let totalShiftsCount = 0;
-    Object.values(dayRosterMap).forEach(d => {
-      totalShiftsCount += d.totalWorking;
-      d.workingStaff.forEach(s => {
-        totalWeeklyScheduledHours += s.hours;
+
+    if (hasApprovedRosters) {
+      Object.values(dayRosterMap).forEach(d => {
+        totalShiftsCount += d.totalWorking;
+        d.workingStaff.forEach(s => {
+          totalWeeklyScheduledHours += s.hours;
+        });
       });
-    });
+    }
 
     const avgHoursPerEmp = totalStaff > 0 ? Math.round((totalWeeklyScheduledHours / totalStaff) * 10) / 10 : 0;
-    const daysWithPharmacist = Object.values(dayRosterMap).filter(d => d.hasPharmacist).length;
+    const daysWithPharmacist = hasApprovedRosters ? Object.values(dayRosterMap).filter(d => d.hasPharmacist).length : 0;
 
     return {
       totalStaff,
@@ -198,37 +442,64 @@ export default function BranchMonthlyRosterModule({
       avgHoursPerEmp,
       daysWithPharmacist
     };
-  }, [branchEmployees, dayRosterMap]);
+  }, [branchEmployees, dayRosterMap, hasApprovedRosters]);
 
-  // Calendar dates generator for selected month
+  // 3. Cycle Date Range from periodEngine (Following Management Approved Payroll/Roster Cycle)
+  const cycleRange = useMemo(() => {
+    return getCycleDateRange(selectedMonth, state?.orgSettings);
+  }, [selectedMonth, state?.orgSettings]);
+
+  // Calendar dates generator according to the cycle date range
   const calendarDays = useMemo(() => {
-    if (!selectedMonth) return [];
-    const [y, m] = selectedMonth.split('-').map(Number);
-    const date = new Date(y, m - 1, 1);
+    if (!cycleRange || !cycleRange.startDate || !cycleRange.endDate) return [];
     const days = [];
-    while (date.getMonth() === m - 1) {
-      const dateStr = date.toISOString().slice(0, 10);
-      const dayIndex = date.getDay(); // 0 = Sunday, 6 = Saturday
+    const curr = new Date(cycleRange.startDate + 'T00:00:00');
+    const end = new Date(cycleRange.endDate + 'T00:00:00');
+
+    while (curr <= end) {
+      const y = curr.getFullYear();
+      const m = String(curr.getMonth() + 1).padStart(2, '0');
+      const d = String(curr.getDate()).padStart(2, '0');
+      const dateStr = `${y}-${m}-${d}`;
+      const dayOfWeek = curr.getDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
+
       const dayMapIndex = [
-        DAYS_OF_WEEK[1], // Sunday
-        DAYS_OF_WEEK[2], // Monday
-        DAYS_OF_WEEK[3], // Tuesday
-        DAYS_OF_WEEK[4], // Wednesday
-        DAYS_OF_WEEK[5], // Thursday
-        DAYS_OF_WEEK[6], // Friday
-        DAYS_OF_WEEK[0]  // Saturday
-      ][dayIndex];
+        DAYS_OF_WEEK[1], // Sunday (0)
+        DAYS_OF_WEEK[2], // Monday (1)
+        DAYS_OF_WEEK[3], // Tuesday (2)
+        DAYS_OF_WEEK[4], // Wednesday (3)
+        DAYS_OF_WEEK[5], // Thursday (4)
+        DAYS_OF_WEEK[6], // Friday (5)
+        DAYS_OF_WEEK[0]  // Saturday (6)
+      ][dayOfWeek];
 
       days.push({
-        dayNum: date.getDate(),
+        dayNum: curr.getDate(),
+        monthNum: curr.getMonth() + 1,
+        year: y,
         dateStr,
         dayInfo: dayMapIndex,
-        rosterData: dayRosterMap[dayMapIndex.key]
+        rosterData: dayRosterMap[dayMapIndex.key] || { shiftGroups: [], offStaff: [], totalWorking: 0 }
       });
-      date.setDate(date.getDate() + 1);
+
+      curr.setDate(curr.getDate() + 1);
     }
     return days;
-  }, [selectedMonth, dayRosterMap]);
+  }, [cycleRange, dayRosterMap]);
+
+  // 4. Print Handler using isolated triggerDirectPrint
+  const handlePrint = () => {
+    if (!currentBranch) return;
+    const html = generateOfficialWeeklyShiftsHTML({
+      currentBranch,
+      selectedMonth,
+      cycleRange,
+      dayRosterMap,
+      branchMetrics,
+      orgSettings: state?.orgSettings
+    });
+    triggerDirectPrint(html, `خريطة_ورديات_فرع_${currentBranch.name.replace(/\s+/g, '_')}_${selectedMonth}`);
+  };
 
   // Export to Excel handler using ExcelJS
   const handleExportExcel = async () => {
@@ -242,7 +513,7 @@ export default function BranchMonthlyRosterModule({
         views: [{ rightToLeft: true, showGridLines: true }]
       });
 
-      mergedTitle(wsMatrix, 1, `جدول تشغيل فرع ${currentBranch.name} — شهر ${monthLabel(selectedMonth).arabic}`, 11, 'FF0F766E', 14, 28);
+      mergedTitle(wsMatrix, 1, `جدول تشغيل فرع ${currentBranch.name} — شهر ${monthLabel(selectedMonth).arabic} (${cycleRange?.label || ''})`, 11, 'FF0F766E', 14, 28);
 
       const matrixHeaders = [
         'كود الموظف',
@@ -260,9 +531,10 @@ export default function BranchMonthlyRosterModule({
           getEmpDisplayName(item.employee),
           item.employee.jobTitle || '—',
           ...DAYS_OF_WEEK.map(d => {
+            if (!item.isApproved || !item.schedule) return 'غير معتمد';
             const dInfo = item.schedule[d.label];
             return (dInfo && dInfo.type === 'shift' && dInfo.start && dInfo.end)
-              ? `${dInfo.start} إلى ${dInfo.end}`
+              ? `${formatTime12H(dInfo.start)} إلى ${formatTime12H(dInfo.end)}`
               : 'راحة أسبوعية';
           }),
           item.totalWeeklyHours,
@@ -276,12 +548,12 @@ export default function BranchMonthlyRosterModule({
       });
 
       // Sheet 2: ملخص الورديات اليومية
-      const wsShifts = wb.addWorksheet('ملخص الورديات اليومية', {
+      const wsShifts = wb.addWorksheet('ملخص خريطة الورديات', {
         views: [{ rightToLeft: true, showGridLines: true }]
       });
 
       mergedTitle(wsShifts, 1, `ملخص الورديات والتواجد المتزامن — فرع ${currentBranch.name}`, 5, 'FF134E4A', 14, 28);
-      tableHeaderRow(wsShifts, 2, ['اليوم', 'توقيت الوردية', 'المدة (ساعات)', 'عدد الكادر', 'الموظفون المكلفون']);
+      tableHeaderRow(wsShifts, 2, ['اليوم', 'توقيت الوردية (12 ساعة)', 'المدة (ساعات)', 'عدد الكادر', 'الموظفون المكلفون']);
 
       let sRow = 3;
       DAYS_OF_WEEK.forEach(d => {
@@ -289,7 +561,7 @@ export default function BranchMonthlyRosterModule({
         dData.shiftGroups.forEach(sg => {
           dataRow(wsShifts, sRow++, [
             d.label,
-            `${sg.start} - ${sg.end}`,
+            formatShiftRange12H(sg.start, sg.end),
             sg.hours,
             sg.staff.length,
             sg.staff.map(s => `${s.employee.name} (${s.employee.jobTitle || 'موظف'})`).join(' | ')
@@ -434,7 +706,7 @@ export default function BranchMonthlyRosterModule({
               />
             </div>
 
-            {/* Job Filter */}
+            {/* Job Filter - Dynamic Registered System Jobs */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <label style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text)' }}>💼 التخصص:</label>
               <select
@@ -450,10 +722,14 @@ export default function BranchMonthlyRosterModule({
                 }}
               >
                 <option value="all">جميع الوظائف ({branchEmployees.length})</option>
-                <option value="pharmacist">💊 صيادلة فقط</option>
-                <option value="assistant">🩺 مساعدين وفنيين</option>
-                <option value="cashier">💵 كاشير ومحاسبين</option>
-                <option value="other">⚙️ وظائف أخرى</option>
+                {systemJobs.map(job => {
+                  const count = branchEmployees.filter(e => (e.jobTitle || '').trim() === job).length;
+                  return (
+                    <option key={job} value={job}>
+                      {job} ({count})
+                    </option>
+                  );
+                })}
               </select>
             </div>
 
@@ -558,7 +834,7 @@ export default function BranchMonthlyRosterModule({
                 alignItems: 'center',
                 gap: '6px'
               }}
-              title="طباعة جدول تشغيل الفرع A4"
+              title="معاينة وطباعة خريطة الورديات A4 بنظام معزول"
             >
               🖨️ طباعة الجدول A4
             </button>
@@ -639,7 +915,7 @@ export default function BranchMonthlyRosterModule({
         </div>
       </div>
 
-      {/* ── Empty State ── */}
+      {/* ── Empty State 1: No employees in branch ── */}
       {branchEmployees.length === 0 ? (
         <div style={{ background: '#fff', padding: '48px 24px', borderRadius: '16px', border: '2px dashed #cbd5e1', textAlign: 'center', color: '#64748b' }}>
           <div style={{ fontSize: '48px', marginBottom: '12px' }}>🏢</div>
@@ -647,6 +923,71 @@ export default function BranchMonthlyRosterModule({
           <p style={{ margin: 0, fontSize: '14px', maxWidth: '460px', marginInline: 'auto' }}>
             يرجى تعيين موظفين في فرع <strong>"{currentBranch?.name}"</strong> من خلال شاشة ملفات الموظفين أو إضافة فرع إضافي لهم لعرض جدولهم التشغيلي هنا.
           </p>
+        </div>
+      ) : !hasApprovedRosters ? (
+        /* ── Empty State 2: No approved roster for this month in this branch ── */
+        <div style={{
+          background: '#ffffff',
+          borderRadius: '16px',
+          border: '2px dashed #f59e0b',
+          padding: '48px 24px',
+          textAlign: 'center',
+          boxShadow: '0 4px 14px rgba(245, 158, 11, 0.08)'
+        }}>
+          <div style={{ fontSize: '50px', marginBottom: '14px' }}>📋⚠️</div>
+          <h3 style={{ margin: '0 0 10px 0', color: '#92400e', fontSize: '20px', fontWeight: 800 }}>
+            لم يتم اعتماد جدول تشغيلي لهذا الشهر حتى الآن
+          </h3>
+          <p style={{ margin: '0 auto 20px auto', fontSize: '14px', color: '#64748b', maxWidth: '560px', lineHeight: '1.7' }}>
+            لا توجد جداول تشغيل أو ورديات عمل معتمدة رسمياً لموظفي فرع <strong>"{currentBranch?.name}"</strong> خلال دورة شهر <strong>{monthLabel(selectedMonth).arabic} ({selectedMonth})</strong>.
+            <br />
+            للحفاظ على دقة العمل المؤسسي، لن يتم عرض أي ورديات افتراضية. يرجى اعتماد جداول موظفي الفرع من شاشة <strong>إدارة الجداول والورديات</strong>.
+          </p>
+
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => onNavigateTab ? onNavigateTab('roster') : null}
+              style={{
+                background: 'linear-gradient(135deg, #0f766e, #0d9488)',
+                color: '#fff',
+                border: 'none',
+                padding: '10px 22px',
+                borderRadius: '10px',
+                fontWeight: 800,
+                fontSize: '13.5px',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                boxShadow: '0 4px 12px rgba(15, 118, 110, 0.25)'
+              }}
+            >
+              <span>📅</span> الانتقال لاعتماد جدول الورديات (Roster)
+            </button>
+
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => setSelectedMonth(getRealTodayStr().slice(0, 7))}
+              style={{
+                background: '#f8fafc',
+                color: '#334155',
+                border: '1px solid #cbd5e1',
+                padding: '10px 20px',
+                borderRadius: '10px',
+                fontWeight: 700,
+                fontSize: '13.5px',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}
+            >
+              <span>🔄</span> العودة للشهر الحالي
+            </button>
+          </div>
         </div>
       ) : (
         <>
@@ -723,7 +1064,7 @@ export default function BranchMonthlyRosterModule({
                                 overflow: 'hidden'
                               }}
                             >
-                              {/* Shift Timing Header */}
+                              {/* Shift Timing Header with 12H display */}
                               <div
                                 style={{
                                   padding: '8px 12px',
@@ -737,7 +1078,7 @@ export default function BranchMonthlyRosterModule({
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                   <span style={{ fontSize: '14px' }}>⏱️</span>
                                   <span style={{ fontSize: '13px', fontWeight: 800, color: isConcurrent ? '#047857' : '#334155' }}>
-                                    {group.start} إلى {group.end}
+                                    {formatTime12H(group.start)} إلى {formatTime12H(group.end)}
                                   </span>
                                   <span style={{ fontSize: '11px', color: '#64748b' }}>({group.hours} س)</span>
                                 </div>
@@ -867,7 +1208,7 @@ export default function BranchMonthlyRosterModule({
                   </tr>
                 </thead>
                 <tbody>
-                  {staffSchedules.map(({ employee, schedule, totalWeeklyHours, workDaysCount }) => {
+                  {staffSchedules.map(({ employee, schedule, isApproved, totalWeeklyHours, workDaysCount }) => {
                     const isPharm = (employee.jobTitle || '').includes('صيدل');
 
                     return (
@@ -895,6 +1236,14 @@ export default function BranchMonthlyRosterModule({
 
                         {/* 7 Days Columns */}
                         {DAYS_OF_WEEK.map(d => {
+                          if (!isApproved || !schedule) {
+                            return (
+                              <td key={d.key} style={{ textAlign: 'center', verticalAlign: 'middle', padding: '8px 6px' }}>
+                                <span style={{ fontSize: '11px', color: '#94a3b8' }}>لم يُعتمد جدول</span>
+                              </td>
+                            );
+                          }
+
                           const dInfo = schedule[d.label];
                           const isShift = dInfo && dInfo.type === 'shift' && dInfo.start && dInfo.end;
 
@@ -913,8 +1262,8 @@ export default function BranchMonthlyRosterModule({
                                     gap: '2px'
                                   }}
                                 >
-                                  <span style={{ fontSize: '11.5px', fontWeight: 800, color: '#166534', direction: 'ltr' }}>
-                                    {dInfo.start} - {dInfo.end}
+                                  <span style={{ fontSize: '11px', fontWeight: 800, color: '#166534', direction: 'ltr' }}>
+                                    {formatShiftRange12H(dInfo.start, dInfo.end)}
                                   </span>
                                   <span style={{ fontSize: '10px', color: '#15803d', fontWeight: 600 }}>
                                     🟢 وردية عمل
@@ -967,13 +1316,18 @@ export default function BranchMonthlyRosterModule({
           {/* ══════════════════════════════════════════════════════════════════════════════ */}
           {viewMode === 'calendar' && (
             <div style={{ background: 'var(--surface)', borderRadius: '16px', border: '1px solid var(--border)', padding: '18px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                <h4 style={{ margin: 0, color: 'var(--primary-dark)', fontSize: '16px', fontWeight: 800 }}>
-                  🗓️ روزنامة تشغيل فرع {currentBranch?.name} لشهر {monthLabel(selectedMonth).arabic}
-                </h4>
-                <span style={{ fontSize: '12.5px', color: 'var(--muted)' }}>
-                  توزيع المناوبات والورديات اليومية على مدار كامل أيام الشهر ({calendarDays.length} يوم)
-                </span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '16px' }}>
+                <div>
+                  <h4 style={{ margin: 0, color: 'var(--primary-dark)', fontSize: '16px', fontWeight: 800 }}>
+                    🗓️ روزنامة تشغيل فرع {currentBranch?.name} — {cycleRange.label}
+                  </h4>
+                  <span style={{ fontSize: '12.5px', color: 'var(--muted)', display: 'block', marginTop: '3px' }}>
+                    توزيع المناوبات والورديات اليومية طبقا للدورة التشغيلية المحددة من الإدارة ({calendarDays.length} يوم: من {cycleRange.startDate} إلى {cycleRange.endDate})
+                  </span>
+                </div>
+                <div style={{ fontSize: '12px', background: '#f0fdf4', color: '#166534', padding: '4px 10px', borderRadius: '8px', border: '1px solid #86efac', fontWeight: 700 }}>
+                  دورة معتمدة: {cycleRange.shortLabel}
+                </div>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
@@ -995,9 +1349,12 @@ export default function BranchMonthlyRosterModule({
                       }}
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px dashed #cbd5e1', paddingBottom: '4px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <span style={{ fontSize: '14px', fontWeight: 800, color: isFriday ? '#b45309' : '#0f766e' }}>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+                          <span style={{ fontSize: '15px', fontWeight: 800, color: isFriday ? '#b45309' : '#0f766e' }}>
                             {cd.dayNum}
+                          </span>
+                          <span style={{ fontSize: '10.5px', color: '#64748b' }}>
+                            ({cd.dateStr.slice(5)})
                           </span>
                           <span style={{ fontSize: '12px', fontWeight: 700, color: '#475569' }}>
                             {cd.dayInfo.label}
@@ -1011,8 +1368,8 @@ export default function BranchMonthlyRosterModule({
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '140px', overflowY: 'auto' }}>
                         {data.shiftGroups.map((sg, idx) => (
                           <div key={idx} style={{ background: '#fff', padding: '4px 6px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '11px' }}>
-                            <div style={{ fontWeight: 800, color: '#0369a1', fontSize: '10.5px' }}>
-                              ⏱️ {sg.start} - {sg.end} ({sg.staff.length})
+                            <div style={{ fontWeight: 800, color: '#0369a1', fontSize: '10.5px', direction: 'ltr', textAlign: 'right' }}>
+                              ⏱️ {formatShiftRange12H(sg.start, sg.end)} ({sg.staff.length})
                             </div>
                             <div style={{ color: '#334155', fontSize: '10px', marginTop: '1px' }}>
                               {sg.staff.map(s => s.employee.name).join('، ')}
@@ -1034,97 +1391,126 @@ export default function BranchMonthlyRosterModule({
         </>
       )}
 
-      {/* ── High-Res Print Modal ── */}
+      {/* ── High-Res Isolated Print Preview Modal ── */}
       {isPrintModalOpen && (
-        <div className="modal-backdrop">
-          <div className="modal-content card" style={{ maxWidth: '1100px', width: '96%', padding: '24px', maxHeight: '92vh', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '2px solid #0f766e', paddingBottom: '10px' }}>
+        <div className="modal-backdrop" style={{ zIndex: 2200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="modal-content card" style={{ maxWidth: '1150px', width: '96%', padding: '24px', maxHeight: '92vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '2px solid #0f766e', paddingBottom: '10px', flexWrap: 'wrap', gap: '10px' }}>
               <div>
-                <h3 style={{ margin: 0, color: '#0f766e' }}>
-                  🖨️ معاينة وطباعة جدول تشغيل الفرع A4
+                <h3 style={{ margin: 0, color: '#0f766e', fontSize: '18px', fontWeight: 800 }}>
+                  🖨️ معاينة وطباعة خريطة ورديات الفرع A4
                 </h3>
                 <span style={{ fontSize: '12.5px', color: 'var(--muted)' }}>
-                  الفرع: <strong>{currentBranch?.name}</strong> | الشهر: <strong>{monthLabel(selectedMonth).arabic}</strong>
+                  الفرع: <strong>{currentBranch?.name}</strong> | الدورة: <strong>{cycleRange?.label || monthLabel(selectedMonth).arabic}</strong>
                 </span>
               </div>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button
                   type="button"
                   className="btn btn-start"
-                  onClick={() => window.print()}
-                  style={{ fontSize: '13px', padding: '6px 16px' }}
+                  onClick={handlePrint}
+                  style={{
+                    fontSize: '13px',
+                    padding: '8px 18px',
+                    background: 'linear-gradient(135deg, #0f766e, #0d9488)',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    boxShadow: '0 2px 6px rgba(15, 118, 110, 0.25)'
+                  }}
                 >
-                  🖨️ طباعة الآن (Print)
+                  🖨️ طباعة الآن (Print A4)
                 </button>
                 <button
                   type="button"
                   className="btn btn-ghost"
                   onClick={() => setIsPrintModalOpen(false)}
-                  style={{ fontSize: '13px' }}
+                  style={{ fontSize: '13px', padding: '8px 14px', borderRadius: '8px' }}
                 >
                   ✕ إغلاق
                 </button>
               </div>
             </div>
 
-            {/* Printable Schedule Table */}
-            <div id="printable-branch-schedule" style={{ direction: 'rtl', padding: '10px' }}>
-              <div style={{ textAlign: 'center', marginBottom: '14px' }}>
-                <h2 style={{ margin: 0, fontSize: '18px', color: '#0f172a' }}>
-                  جدول مواعيد وورديات العمل الرسمية — فرع {currentBranch?.name}
+            {/* Live Visual Preview of Weekly Shifts Board for A4 Print */}
+            <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #cbd5e1' }}>
+              <div style={{ textAlign: 'center', marginBottom: '14px', borderBottom: '2px solid #0f766e', paddingBottom: '8px' }}>
+                <h2 style={{ margin: 0, fontSize: '17px', color: '#0f172a', fontWeight: 900 }}>
+                  خريطة الورديات الأسبوعية وتوزيع الكادر التشغيلي — فرع {currentBranch?.name}
                 </h2>
-                <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#475569' }}>
-                  فترة تشغيل شهر: {monthLabel(selectedMonth).arabic} | تاريخ الاعتماد: {new Date().toLocaleDateString('ar-EG')}
+                <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: '#475569' }}>
+                  دورة التشغيل: {cycleRange?.label || monthLabel(selectedMonth).arabic} | تاريخ الطباعة: {new Date().toLocaleDateString('ar-EG')}
                 </p>
               </div>
 
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', textAlign: 'center' }}>
-                <thead>
-                  <tr style={{ background: '#f1f5f9' }}>
-                    <th style={{ border: '1px solid #cbd5e1', padding: '6px', width: '16%' }}>الموظف / الوظيفة</th>
-                    {DAYS_OF_WEEK.map(d => (
-                      <th key={d.key} style={{ border: '1px solid #cbd5e1', padding: '6px', width: '11%' }}>
-                        {d.label}
-                      </th>
-                    ))}
-                    <th style={{ border: '1px solid #cbd5e1', padding: '6px', width: '7%' }}>ساعات</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {staffSchedules.map(({ employee, schedule, totalWeeklyHours }) => (
-                    <tr key={employee.id}>
-                      <td style={{ border: '1px solid #cbd5e1', padding: '5px', textAlign: 'right', fontWeight: 'bold' }}>
-                        <div>{employee.name}</div>
-                        <div style={{ fontSize: '9.5px', color: '#64748b' }}>{employee.jobTitle || 'موظف'} ({employee.code})</div>
-                      </td>
-                      {DAYS_OF_WEEK.map(d => {
-                        const dInfo = schedule[d.label];
-                        const isShift = dInfo && dInfo.type === 'shift' && dInfo.start && dInfo.end;
-                        return (
-                          <td key={d.key} style={{ border: '1px solid #cbd5e1', padding: '4px', background: isShift ? '#f0fdf4' : '#fffbeb' }}>
-                            {isShift ? (
-                              <div style={{ fontWeight: 'bold', color: '#166534', direction: 'ltr' }}>
-                                {dInfo.start} - {dInfo.end}
-                              </div>
-                            ) : (
-                              <div style={{ color: '#92400e', fontWeight: 'bold' }}>
-                                راحة
-                              </div>
-                            )}
-                          </td>
-                        );
-                      })}
-                      <td style={{ border: '1px solid #cbd5e1', padding: '4px', fontWeight: 'bold', color: '#0f766e' }}>
-                        {totalWeeklyHours} س
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              {/* 7 Days Preview Columns */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px', alignItems: 'stretch' }}>
+                {DAYS_OF_WEEK.map(day => {
+                  const dayData = dayRosterMap[day.key];
+                  const isFriday = day.key === 'friday';
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '20px', fontSize: '11px', color: '#475569', borderTop: '1px solid #e2e8f0', paddingTop: '10px' }}>
-                <div>توقيع مدير الفرع: ........................................</div>
-                <div>اعتماد الإدارة العليا والموارد البشرية: ........................................</div>
+                  return (
+                    <div
+                      key={day.key}
+                      style={{
+                        border: '1.5px solid #cbd5e1',
+                        borderRadius: '8px',
+                        overflow: 'hidden',
+                        background: '#fff',
+                        display: 'flex',
+                        flexDirection: 'column'
+                      }}
+                    >
+                      <div style={{ background: isFriday ? '#fef3c7' : '#f0fdf4', padding: '6px 8px', borderBottom: '1px solid #cbd5e1', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontWeight: 800, fontSize: '12px', color: isFriday ? '#92400e' : '#166534' }}>
+                          {day.label}
+                        </span>
+                        <span style={{ fontSize: '9px', background: '#fff', padding: '1px 5px', borderRadius: '6px', fontWeight: 700, color: '#166534' }}>
+                          🟢 {dayData.totalWorking}
+                        </span>
+                      </div>
+
+                      <div style={{ padding: '6px', flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        {dayData.shiftGroups.map((sg, idx) => (
+                          <div key={idx} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px' }}>
+                            <div style={{ fontSize: '10px', fontWeight: 800, color: '#0f766e', direction: 'ltr', textAlign: 'right' }}>
+                              ⏱️ {formatShiftRange12H(sg.start, sg.end)}
+                            </div>
+                            <div style={{ fontSize: '9.5px', color: '#334155', marginTop: '2px' }}>
+                              {sg.staff.map(s => s.employee.name).join('، ')}
+                            </div>
+                          </div>
+                        ))}
+                        {dayData.offStaff.length > 0 && (
+                          <div style={{ fontSize: '9px', color: '#92400e', background: '#fffbeb', padding: '3px 4px', borderRadius: '4px' }}>
+                            🏖️ راحة: {dayData.offStaff.map(s => s.employee.name.split(' ')[0]).join('، ')}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Signatures Preview */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginTop: '16px', paddingTop: '10px', borderTop: '1px solid #cbd5e1', textAlign: 'center', fontSize: '11px', color: '#475569' }}>
+                <div style={{ background: '#fff', border: '1px dashed #cbd5e1', padding: '8px', borderRadius: '6px' }}>
+                  <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '14px' }}>توقيع مدير الفرع</div>
+                  <div>........................................</div>
+                </div>
+                <div style={{ background: '#fff', border: '1px dashed #cbd5e1', padding: '8px', borderRadius: '6px' }}>
+                  <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '14px' }}>اعتماد الموارد البشرية (HR)</div>
+                  <div>........................................</div>
+                </div>
+                <div style={{ background: '#fff', border: '1px dashed #cbd5e1', padding: '8px', borderRadius: '6px' }}>
+                  <div style={{ fontWeight: 800, color: '#0f172a', marginBottom: '14px' }}>اعتماد الإدارة العليا</div>
+                  <div>........................................</div>
+                </div>
               </div>
             </div>
           </div>
@@ -1134,3 +1520,4 @@ export default function BranchMonthlyRosterModule({
     </div>
   );
 }
+
