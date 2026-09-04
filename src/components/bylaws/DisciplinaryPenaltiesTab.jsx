@@ -9,6 +9,7 @@ import {
 import { computeLatenessFinancialAmount, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
 import { getEmpDisplayName } from '../../utils/formatters';
 import { useUI } from '../../context/UIContext';
+import DisciplinaryViolationModal from './DisciplinaryViolationModal';
 
 export function formatCategoryResetPeriod(cat) {
   if (!cat) return '—';
