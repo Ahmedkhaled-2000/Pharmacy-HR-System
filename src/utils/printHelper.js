@@ -18,6 +18,7 @@ export function triggerDirectPrint(htmlContent, documentTitle = 'طباعة كش
     <html dir="rtl" lang="ar">
     <head>
       <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
       <title>${documentTitle}</title>
       <link rel="preconnect" href="https://fonts.googleapis.com">
       <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -35,8 +36,6 @@ export function triggerDirectPrint(htmlContent, documentTitle = 'طباعة كش
         html, body {
           margin: 0;
           padding: 0;
-          height: 100%;
-          min-height: 100%;
           background: #ffffff !important;
           color: #0f172a !important;
           font-family: 'Cairo', 'Tajawal', sans-serif;
@@ -44,6 +43,18 @@ export function triggerDirectPrint(htmlContent, documentTitle = 'طباعة كش
           font-size: 11px;
           line-height: 1.4;
           width: 100%;
+        }
+        @media screen {
+          body {
+            background: #f8fafc !important;
+            padding: 8px !important;
+          }
+        }
+        @media print {
+          body {
+            background: #ffffff !important;
+            padding: 0 !important;
+          }
         }
         table {
           width: 100%;

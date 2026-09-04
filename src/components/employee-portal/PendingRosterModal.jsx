@@ -111,8 +111,8 @@ export default function PendingRosterModal({
               : '<span style="background: #dcfce7; color: #166534; padding: 2px 8px; border-radius: 6px; font-weight: 700; font-size: 11px;">🟢 وردية عمل</span>'
             }
           </td>
-          <td style="padding: 8px 10px; text-align: center; direction: ltr; font-weight: 700; color: ${isOff ? '#94a3b8' : '#0f766e'};">
-            ${isOff ? '—' : `${start12} إلى ${end12}`}
+          <td style="padding: 8px 10px; text-align: center; font-weight: 700; color: ${isOff ? '#94a3b8' : '#0f766e'}; white-space: nowrap; direction: rtl;">
+            ${isOff ? '—' : `من <strong>${start12}</strong> إلى <strong>${end12}</strong>`}
           </td>
           <td style="padding: 8px 10px; text-align: center; font-weight: 800; color: #0f172a;">
             ${isOff ? '0 س' : `${hours} س`}
@@ -439,8 +439,8 @@ export default function PendingRosterModal({
                       </div>
                     ) : (
                       <div>
-                        <div style={{ fontSize: '13px', fontWeight: 800, color: '#0f766e', direction: 'ltr', textAlign: 'right' }}>
-                          ⏱️ {formatTime12H(conf.start)} إلى {formatTime12H(conf.end)}
+                        <div style={{ fontSize: '12.5px', fontWeight: 800, color: '#0f766e', direction: 'rtl', whiteSpace: 'nowrap' }}>
+                          ⏱️ من <strong>{formatTime12H(conf.start)}</strong> إلى <strong>{formatTime12H(conf.end)}</strong>
                         </div>
                         <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '4px', display: 'flex', justifyContent: 'space-between' }}>
                           <span>مدة الشيفت:</span>
