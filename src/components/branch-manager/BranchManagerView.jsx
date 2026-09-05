@@ -12,6 +12,7 @@ import EvaluationsModule, { getJobEvaluationCriteria } from '../evaluations/Eval
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import BranchResignationModule from '../resignation/BranchResignationModule';
 import { normalizeSchedule } from '../roster/RosterModule';
+import BranchMonthlyRosterModule from '../branches/BranchMonthlyRosterModule';
 import { shouldShowRequestToBranch, getEmpDisplayName, isEmployeeActive, getEmployeeManualPunchesCount, isShiftManualPunch, calculateEmployeeLeaveStats, getEmployeeApprovedLeaves, fmt } from '../../utils/formatters';
 import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
 import EmployeePermissionsManagementModule from '../permissions/EmployeePermissionsManagementModule';
@@ -2891,6 +2892,20 @@ export default function BranchManagerView({
           </div>
         );
       })()}
+
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* ── 2.5. BRANCH MONTHLY OPERATIONAL ROSTER TAB (A4 Landscape Print) ── */}
+      {/* ───────────────────────────────────────────────────────────── */}
+      {activeTab === 'branch-monthly-operational-roster' && (
+        <div className="fade-in" style={{ width: '100%', marginBottom: '24px' }}>
+          <BranchMonthlyRosterModule
+            state={state}
+            initialBranchId={currentBranch?.id}
+            lockBranchId={currentBranch?.id}
+            isBranchManager={true}
+          />
+        </div>
+      )}
 
       {/* ───────────────────────────────────────────────────────────── */}
       {/* ── 3. BRANCH ROSTER TAB (With Preview Modal) ── */}

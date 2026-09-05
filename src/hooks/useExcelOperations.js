@@ -157,6 +157,26 @@ export function useExcelOperations() {
         const transportAllowance = parseFloat(getCellVal(row, colMap.transportAllowance)) || 0;
         const extraAllowance = parseFloat(getCellVal(row, colMap.extraAllowance)) || 0;
         const extraAllowanceTitle = getCellVal(row, colMap.extraAllowanceTitle);
+        const extraBranchesRaw = getCellVal(row, colMap.extraBranches);
+
+        // تحليل واستخراج الفروع الإضافية من العمود L
+        const parsedExtraBranchIds = [];
+        if (extraBranchesRaw) {
+          const tokens = extraBranchesRaw.split(/[,|،]/).map(t => t.trim()).filter(Boolean);
+          tokens.forEach(tok => {
+            const cleanTok = tok.replace(/\(.*?\)/g, '').trim().toLowerCase();
+            const matched = branches.find(b =>
+              b.name?.trim().toLowerCase() === cleanTok ||
+              String(b.id).toLowerCase() === cleanTok ||
+              String(b.branchCode).toLowerCase() === cleanTok
+            );
+            if (matched && String(matched.id) !== String(resolvedBranchId)) {
+              if (!parsedExtraBranchIds.includes(matched.id)) {
+                parsedExtraBranchIds.push(matched.id);
+              }
+            }
+          });
+        }
 
         const nationalId = getCellVal(row, colMap.nationalId);
         const phone = getCellVal(row, colMap.phone);
@@ -217,29 +237,69 @@ export function useExcelOperations() {
             updatedAt: new Date().toISOString()
           };
 
-          // تحديث فروع الموظف
-          if (Array.isArray(existing.branchesDetails) && existing.branchesDetails.length > 0) {
-            updatedEmp.branchesDetails = existing.branchesDetails.map((bd, i) => {
-              if (i === 0 || String(bd.branchId) === String(resolvedBranchId)) {
-                return { ...bd, branchId: resolvedBranchId, salary, workHours: workHoursPerDay, workDays: workDaysPerMonth };
+          // تحديث فروع الموظف الأساسية والإضافية
+          const primaryBranchDetail = {
+            id: existing.branchesDetails?.[0]?.id || (Date.now().toString() + '_' + Math.random().toString(36).substr(2, 4)),
+            branchId: resolvedBranchId,
+            salary,
+            workHours: workHoursPerDay,
+            workDays: workDaysPerMonth,
+            breakHours: existing.branchesDetails?.[0]?.breakHours || 0
+          };
+
+          let finalBranchesDetails = [primaryBranchDetail];
+
+          if (colMap.extraBranches && extraBranchesRaw !== '') {
+            parsedExtraBranchIds.forEach(ebId => {
+              const prevBd = (existing.branchesDetails || []).find(b => String(b.branchId) === String(ebId));
+              if (prevBd) {
+                finalBranchesDetails.push(prevBd);
+              } else {
+                finalBranchesDetails.push({
+                  id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 4),
+                  branchId: ebId,
+                  salary: 0,
+                  workHours: workHoursPerDay,
+                  workDays: workDaysPerMonth,
+                  breakHours: 0
+                });
               }
-              return bd;
             });
-          } else {
-            updatedEmp.branchesDetails = [{
-              id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 4),
-              branchId: resolvedBranchId,
-              salary,
-              workHours: workHoursPerDay,
-              workDays: workDaysPerMonth,
-              breakHours: 0
-            }];
+          } else if (colMap.extraBranches && extraBranchesRaw === '') {
+            finalBranchesDetails = [primaryBranchDetail];
+          } else if (Array.isArray(existing.branchesDetails) && existing.branchesDetails.length > 1) {
+            existing.branchesDetails.slice(1).forEach(bd => {
+              if (String(bd.branchId) !== String(resolvedBranchId)) {
+                finalBranchesDetails.push(bd);
+              }
+            });
           }
+
+          updatedEmp.branchesDetails = finalBranchesDetails;
 
           currentEmps[existingIdx] = updatedEmp;
           updatedCount++;
         } else {
           // إضافة موظف جديد (INSERT)
+          const newBranchesDetails = [{
+            id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 4),
+            branchId: resolvedBranchId,
+            salary,
+            workHours: workHoursPerDay,
+            workDays: workDaysPerMonth,
+            breakHours: 0
+          }];
+          parsedExtraBranchIds.forEach((ebId, idx) => {
+            newBranchesDetails.push({
+              id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 4) + '_' + idx,
+              branchId: ebId,
+              salary: 0,
+              workHours: workHoursPerDay,
+              workDays: workDaysPerMonth,
+              breakHours: 0
+            });
+          });
+
           const newEmp = {
             id: 'emp_' + uid(),
             code,
@@ -256,14 +316,7 @@ export function useExcelOperations() {
             department,
             branchId: resolvedBranchId,
             branchName: resolvedBranchName,
-            branchesDetails: [{
-              id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 4),
-              branchId: resolvedBranchId,
-              salary,
-              workHours: workHoursPerDay,
-              workDays: workDaysPerMonth,
-              breakHours: 0
-            }],
+            branchesDetails: newBranchesDetails,
             salary,
             workHoursPerDay,
             workDaysPerMonth,
@@ -463,7 +516,7 @@ export function useExcelOperations() {
             .filter(bd => String(bd.branchId) !== String(emp.branchId))
             .map(bd => {
               const b = branches.find(br => String(br.id) === String(bd.branchId));
-              return `${b ? b.name : bd.branchId} (${bd.salary || 0} ج.م - ${bd.workHours || 8}س)`;
+              return b ? b.name : bd.branchId;
             })
             .join(' | ');
         }
@@ -525,6 +578,7 @@ export function useExcelOperations() {
         r.getCell(8).dataValidation = { type: 'list', allowBlank: true, formulae: [`قوائم_النظام!$D$2:$D$${numJobs + 1}`] };
         r.getCell(9).dataValidation = { type: 'list', allowBlank: true, formulae: [`قوائم_النظام!$F$2:$F$${numDepts + 1}`] };
         r.getCell(10).dataValidation = { type: 'list', allowBlank: true, formulae: [`قوائم_النظام!$A$2:$A$${numBranches + 1}`] };
+        r.getCell(12).dataValidation = { type: 'list', allowBlank: true, formulae: [`قوائم_النظام!$A$2:$A$${numBranches + 1}`] };
         r.getCell(22).dataValidation = { type: 'list', allowBlank: true, formulae: ['قوائم_النظام!$H$2:$H$5'] };
         r.getCell(24).dataValidation = { type: 'list', allowBlank: true, formulae: ['قوائم_النظام!$J$2:$J$4'] };
         r.getCell(26).dataValidation = { type: 'list', allowBlank: true, formulae: ['قوائم_النظام!$L$2:$L$6'] };
@@ -585,6 +639,7 @@ export function useExcelOperations() {
         r.getCell(8).dataValidation = { type: 'list', allowBlank: true, formulae: [`قوائم_النظام!$D$2:$D$${numJobs + 1}`] };
         r.getCell(9).dataValidation = { type: 'list', allowBlank: true, formulae: [`قوائم_النظام!$F$2:$F$${numDepts + 1}`] };
         r.getCell(10).dataValidation = { type: 'list', allowBlank: true, formulae: [`قوائم_النظام!$A$2:$A$${numBranches + 1}`] };
+        r.getCell(12).dataValidation = { type: 'list', allowBlank: true, formulae: [`قوائم_النظام!$A$2:$A$${numBranches + 1}`] };
         r.getCell(22).dataValidation = { type: 'list', allowBlank: true, formulae: ['قوائم_النظام!$H$2:$H$5'] };
         r.getCell(24).dataValidation = { type: 'list', allowBlank: true, formulae: ['قوائم_النظام!$J$2:$J$4'] };
         r.getCell(26).dataValidation = { type: 'list', allowBlank: true, formulae: ['قوائم_النظام!$L$2:$L$6'] };

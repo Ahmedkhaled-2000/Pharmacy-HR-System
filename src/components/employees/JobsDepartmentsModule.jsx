@@ -405,7 +405,6 @@ export default function JobsDepartmentsModule({
                 <th style={{ padding: '12px' }}>المسمى الوظيفي</th>
                 <th style={{ padding: '12px' }}>القسم التابع له</th>
                 <th style={{ padding: '12px' }}>تصنيف الوظيفة</th>
-                <th style={{ padding: '12px' }}>الوصف والمهام</th>
                 <th style={{ padding: '12px', textAlign: 'center' }}>الموظفون الحاليون</th>
                 <th style={{ padding: '12px', textAlign: 'center' }}>الإجراءات</th>
               </tr>
@@ -442,9 +441,6 @@ export default function JobsDepartmentsModule({
                             🏬 كادر تشغيلي / فني
                           </span>
                         )}
-                      </td>
-                      <td style={{ padding: '12px', color: 'var(--muted)', fontSize: '12.5px', maxWidth: '280px' }}>
-                        {j.description || '—'}
                       </td>
                       <td style={{ padding: '12px', textAlign: 'center' }}>
                         <span style={{ background: assignedEmps.length > 0 ? '#e0f2fe' : '#f1f5f9', color: assignedEmps.length > 0 ? '#0369a1' : '#94a3b8', padding: '3px 8px', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold' }}>

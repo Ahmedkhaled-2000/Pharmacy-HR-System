@@ -247,9 +247,20 @@ export function isNotificationReadForEmployee(notification, employeeId = null) {
 /**
  * Filter notifications strictly meant for a specific employee
  */
-export function filterEmployeeNotifications(notifications = [], employeeId = null) {
+export function filterEmployeeNotifications(notifications = [], employeeId = null, state = null) {
   if (!employeeId) return [];
-  const empIdStr = String(employeeId).trim();
+  const empIdStr = (typeof employeeId === 'object' ? String(employeeId.id || employeeId.employeeId || '') : String(employeeId)).trim();
+  const empCodeStr = (typeof employeeId === 'object' ? String(employeeId.code || employeeId.employeeCode || '') : '').trim();
+  if (!empIdStr && !empCodeStr) return [];
+
+  let empJobTitle = (typeof employeeId === 'object' && employeeId?.jobTitle) ? String(employeeId.jobTitle).trim().toLowerCase() : '';
+  if (!empJobTitle && state && Array.isArray(state.employees)) {
+    const matchedEmp = state.employees.find(e => String(e.id) === empIdStr || (empCodeStr && String(e.code) === empCodeStr));
+    if (matchedEmp?.jobTitle) {
+      empJobTitle = String(matchedEmp.jobTitle).trim().toLowerCase();
+    }
+  }
+
   return (notifications || []).filter((n) => {
     if (!n) return false;
 
@@ -261,25 +272,37 @@ export function filterEmployeeNotifications(notifications = [], employeeId = nul
       return false;
     }
 
+    // 1.5. If notification is targeted to a specific job title
+    if (n.targetJobTitle) {
+      const targetJ = String(n.targetJobTitle).trim().toLowerCase();
+      if (empJobTitle && empJobTitle === targetJ) return true;
+      return false;
+    }
+
     // 2. Direct match by targetEmployeeId (standard for employee decision notifications and shift swaps)
-    if (n.targetEmployeeId && String(n.targetEmployeeId).trim() === empIdStr) {
+    if (n.targetEmployeeId && (String(n.targetEmployeeId).trim() === empIdStr || (empCodeStr && String(n.targetEmployeeId).trim() === empCodeStr))) {
       return true;
     }
 
     // 3. Targeted specifically to employee role
     if (n.targetRole === 'employee') {
-      if (n.targetEmployeeId && String(n.targetEmployeeId).trim() === empIdStr) return true;
-      if (n.employeeId && String(n.employeeId).trim() === empIdStr) return true;
+      if (n.targetEmployeeId && (String(n.targetEmployeeId).trim() === empIdStr || (empCodeStr && String(n.targetEmployeeId).trim() === empCodeStr))) return true;
+      if (n.employeeId && (String(n.employeeId).trim() === empIdStr || (empCodeStr && String(n.employeeId).trim() === empCodeStr))) return true;
+      if (empCodeStr && n.employeeCode && String(n.employeeCode).trim() === empCodeStr) return true;
       return false;
     }
 
     // 4. Decision notifications (approvals / rejections) for this employee
-    if ((n.action === 'approved' || n.action === 'rejected' || n.action === 'decision') && (String(n.employeeId).trim() === empIdStr || String(n.targetEmployeeId).trim() === empIdStr)) {
+    if ((n.action === 'approved' || n.action === 'rejected' || n.action === 'decision') && 
+        (String(n.employeeId).trim() === empIdStr || String(n.targetEmployeeId).trim() === empIdStr || 
+        (empCodeStr && (String(n.employeeCode).trim() === empCodeStr || String(n.targetEmployeeCode).trim() === empCodeStr)))) {
       return true;
     }
 
     // 5. Evaluation notification for this employee (even if created before targetRole was saved)
-    if ((n.type === 'eval_pending_employee' || n.type === 'eval_finalized' || n.evalId || (n.linkTab === 'evaluations' && n.title?.includes('تقييم'))) && (String(n.employeeId).trim() === empIdStr || String(n.targetEmployeeId).trim() === empIdStr)) {
+    if ((n.type === 'eval_pending_employee' || n.type === 'eval_finalized' || n.evalId || (n.linkTab === 'evaluations' && n.title?.includes('تقييم'))) && 
+        (String(n.employeeId).trim() === empIdStr || String(n.targetEmployeeId).trim() === empIdStr ||
+        (empCodeStr && (String(n.employeeCode).trim() === empCodeStr || String(n.targetEmployeeCode).trim() === empCodeStr)))) {
       return true;
     }
 
@@ -555,31 +578,41 @@ export function filterBranchManagerNotifications(notifications = [], currentBran
       return false;
     }
 
-    // 2. Block general employee personal decisions unless targeted to this manager directly
-    if (n.targetRole === 'employee') {
-      if (mgrIdStr && (String(n.targetEmployeeId).trim() === mgrIdStr || String(n.employeeId).trim() === mgrIdStr)) {
-        return true;
-      }
+    // 2. Block employee personal decisions/notifications from branch manager inbox completely!
+    // As per requirement: Even if the manager is an employee, his personal employee notifications appear ONLY in his personal employee portal!
+    if (n.targetRole === 'employee' || n.targetRole === 'all_employees') {
       return false;
     }
 
     // 3. Notifications targeted to branch manager or branch
-    if (n.targetRole === 'branch' || n.targetRole === 'branch_manager' || n.targetRole === 'manager' || n.targetRole === 'branch_and_admin' || !n.targetRole) {
-      if (!branchIdStr && !branchCodeStr && !branchName) return true;
-      if (n.branchId && (String(n.branchId).trim() === branchIdStr || (branchCodeStr && String(n.branchId).trim() === branchCodeStr) || (branchName && String(n.branchId).trim() === branchName))) return true;
-      if (n.branchCode && (String(n.branchCode).trim() === branchCodeStr || (branchIdStr && String(n.branchCode).trim() === branchIdStr))) return true;
-      if (n.branchName && branchName && n.branchName === branchName) return true;
+    if (n.targetRole === 'branch' || n.targetRole === 'branch_manager' || n.targetRole === 'manager' || n.targetRole === 'branch_and_admin') {
+      if (!branchIdStr && !branchCodeStr && !branchName) return false;
+      const directBranchMatch = (n.branchId && (String(n.branchId).trim() === branchIdStr || (branchCodeStr && String(n.branchId).trim() === branchCodeStr) || (branchName && String(n.branchId).trim() === branchName))) ||
+                                (n.branchCode && (String(n.branchCode).trim() === branchCodeStr || (branchIdStr && String(n.branchCode).trim() === branchIdStr))) ||
+                                (n.branchName && branchName && n.branchName === branchName);
+      if (directBranchMatch) return true;
+
+      // Don't show notifications where the manager himself is the subject
+      if (mgrIdStr && (String(n.employeeId).trim() === mgrIdStr || String(n.targetEmployeeId).trim() === mgrIdStr)) {
+        return false;
+      }
+
       if (n.employeeId && branchEmpIds.has(String(n.employeeId).trim())) return true;
       if (n.employeeCode && branchEmpIds.has(String(n.employeeCode).trim())) return true;
-      if (!n.branchId && !n.branchName && !n.employeeId) return true; // General branch update
       return false;
     }
 
     // 4. Branch-specific operational notifications or requests from employees of this branch
     if (n.branchId && (String(n.branchId).trim() === branchIdStr || (branchCodeStr && String(n.branchId).trim() === branchCodeStr))) {
+      if (mgrIdStr && (String(n.employeeId).trim() === mgrIdStr || String(n.targetEmployeeId).trim() === mgrIdStr)) {
+        return false;
+      }
       return true;
     }
     if (n.employeeId && branchEmpIds.has(String(n.employeeId).trim())) {
+      if (mgrIdStr && (String(n.employeeId).trim() === mgrIdStr || String(n.targetEmployeeId).trim() === mgrIdStr)) {
+        return false;
+      }
       return true;
     }
 
@@ -602,6 +635,11 @@ export function filterBranchManagerNotifications(notifications = [], currentBran
       const rIdStr = String(r.id);
       if (deletedIdsSet.has(rIdStr) || seenBranchReqs.has(rIdStr)) return false;
 
+      // Never show manager's own requests to himself in branch manager view! They route to Admin only.
+      if (mgrIdStr && (String(r.employeeId).trim() === mgrIdStr || String(r.targetEmployeeId).trim() === mgrIdStr)) {
+        return false;
+      }
+
       // Loans, advances, and credit medicines are strictly for Senior Management
       if (['loan', 'advance', 'credit_medicine', 'meds'].includes(r.type)) return false;
 
@@ -614,7 +652,7 @@ export function filterBranchManagerNotifications(notifications = [], currentBran
       if (r.status !== 'pending' && r.status) return false;
 
       // Branch match
-      if (!branchIdStr && !branchCodeStr && !branchName) return true;
+      if (!branchIdStr && !branchCodeStr && !branchName) return false;
       if (r.branchId && (String(r.branchId).trim() === branchIdStr || (branchCodeStr && String(r.branchId).trim() === branchCodeStr) || (branchName && String(r.branchId).trim() === branchName))) return true;
       if (r.employeeId && branchEmpIds.has(String(r.employeeId).trim())) return true;
       if (r.employeeCode && branchEmpIds.has(String(r.employeeCode).trim())) return true;

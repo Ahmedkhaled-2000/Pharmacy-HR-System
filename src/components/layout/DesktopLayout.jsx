@@ -238,6 +238,13 @@ export default function DesktopLayout({
       icon: '💬',
       children: [
         {
+          id: 'admin-directives',
+          targetTab: 'admin-directives',
+          label: 'تعليمات وتوجيهات الإدارة',
+          icon: '📢',
+          desc: 'بث القرارات الإدارية للموظفين وإلزام الموافقة بالكشك'
+        },
+        {
           id: 'whatsapp-center',
           targetTab: 'whatsapp-center',
           label: 'مركز مراسلات الواتساب',
@@ -460,10 +467,17 @@ export default function DesktopLayout({
           desc: 'متابعة الحضور الحي والبصمات لموظفي الفرع'
         },
         {
+          id: 'branch-monthly-operational-roster',
+          targetTab: 'branch-monthly-operational-roster',
+          label: 'الجدول التشغيلي الشهري للفرع',
+          icon: '📅',
+          desc: 'خريطة الورديات والراحات الأسبوعية للفرع وطباعة A4'
+        },
+        {
           id: 'branch-roster',
           targetTab: 'branch-roster',
           label: 'الجدول الشهري للموظفين',
-          icon: '📅',
+          icon: '📋',
           desc: 'جدول ورديات وشفتات الفرع المعتمدة'
         }
       ]

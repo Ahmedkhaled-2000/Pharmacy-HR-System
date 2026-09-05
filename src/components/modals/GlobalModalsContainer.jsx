@@ -7,6 +7,7 @@ import { smartMergeStates } from '../../utils/stateMerger';
 import { normalizeState } from '../../utils/formatters';
 import { getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
 import { syncEmployeeEntireDrive } from '../../utils/googleDriveService';
+import { getJobsList, getDepartmentsList } from '../../utils/jobsHelper';
 
 import EmployeeModal from '../employees/EmployeeModal';
 import EmployeeIDCardModal from '../employees/EmployeeIDCardModal';
@@ -428,8 +429,8 @@ export default function GlobalModalsContainer() {
           editingEmp={editingEmpFile}
           branches={state.branches || []}
           allEmployees={state.employees || []}
-          jobs={state.orgSettings?.jobs}
-          departments={state.orgSettings?.departments}
+          jobs={getJobsList(state)}
+          departments={getDepartmentsList(state)}
           handleFileUpload={handleFileUpload}
           executeWithOwnerGuard={executeWithOwnerGuard}
           onClose={() => {

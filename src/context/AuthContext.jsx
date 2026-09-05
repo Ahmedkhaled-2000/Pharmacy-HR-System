@@ -88,10 +88,10 @@ export function AuthProvider({ children }) {
   const validateSessionAgainstData = (latestState) => {
     if (!latestState) return;
 
-    // 1. إذا كان الموظف المسجل غير موجود في قائمة الموظفين بعد التصفير
+    // 1. إذا كان الموظف المسجل غير موجود أو تم إيقاف حسابه أو إنهاء خدمته
     if (currentEmpUser && latestState.employees) {
-      const exists = (latestState.employees || []).some(e => String(e.id) === String(currentEmpUser.id) || String(e.code) === String(currentEmpUser.code));
-      if (!exists) {
+      const liveEmp = (latestState.employees || []).find(e => String(e.id) === String(currentEmpUser.id) || String(e.code) === String(currentEmpUser.code));
+      if (!liveEmp || liveEmp.accountSuspended || liveEmp.status === 'معلق' || liveEmp.isTerminated || liveEmp.status === 'تم الاستقالة' || liveEmp.is_active === false) {
         handleLogout();
         return;
       }
@@ -134,6 +134,24 @@ export function AuthProvider({ children }) {
   // Employee Login
   const handleEmpLogin = (emp, passwordInput) => {
     if (!emp) return { success: false, message: 'الموظف غير موجود' };
+
+    // فحص الإيقاف المؤقت وبصمة وحساب الموظف
+    if (emp.accountSuspended || emp.biometricSuspended || emp.punchDisabled || emp.status === 'معلق') {
+      const reason = emp.suspensionReason || 'إحالة فورية للتحقيق أو إيقاف مؤقت عن العمل لحين انتهاء التحقيق';
+      return {
+        success: false,
+        message: `⛔ تم إيقاف بصمة وحساب الموظف مؤقتاً (${reason}). يرجى مراجعة إدارة الموارد البشرية.`
+      };
+    }
+
+    // فحص إنهاء الخدمة
+    if (emp.isTerminated || emp.status === 'تم الاستقالة' || emp.is_active === false) {
+      return {
+        success: false,
+        message: `🚫 تم إنهاء خدمة هذا الموظف (${emp.terminationReason || 'استقالة أو إنهاء تعاقد'}) ولا يمكن تسجيل الدخول.`
+      };
+    }
+
     const empPass = String(emp.password || '123').trim();
     if (String(passwordInput || '').trim() !== empPass) {
       return { success: false, message: 'كلمة المرور غير صحيحة' };

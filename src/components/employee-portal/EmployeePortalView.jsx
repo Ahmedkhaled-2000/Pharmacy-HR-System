@@ -15,6 +15,7 @@ import PayslipPrintModal from '../payroll/PayslipPrintModal';
 import BylawsModule from '../bylaws/BylawsModule';
 import EmployeeResignationModule from './EmployeeResignationModule';
 import EmployeeBiometricSection from './EmployeeBiometricSection';
+import EmployeeProfileModule from './EmployeeProfileModule';
 import FaceRegistrationModal from '../attendance/FaceRegistrationModal';
 import FaceTestModal from '../attendance/FaceTestModal';
 import { preWarmFaceModels } from '../../utils/faceApiHelper';
@@ -83,6 +84,7 @@ function SummaryCard({ icon, label, value, colorVar, sub, isPrivacy = false }) {
 // ─────────────────────────────────────────
 const NAV_ITEMS = [
   { id: 'dashboard',   icon: '📊', label: 'لوحة التحكم' },
+  { id: 'profile',     icon: '👤', label: 'الملف الشخصي' },
   { id: 'salary',      icon: '💼', label: 'تفاصيل المرتب' },
   { id: 'adjustments', icon: '📝', label: 'المكافآت والخصومات' },
   { id: 'leaves',      icon: '🏖️', label: 'الإجازات' },
@@ -1828,6 +1830,13 @@ export default function EmployeePortalView({
         targetTab: 'dashboard'
       },
       {
+        id: 'profile',
+        label: 'الملف الشخصي',
+        icon: '👤',
+        isSingle: true,
+        targetTab: 'profile'
+      },
+      {
         id: 'finance-group',
         label: 'الرواتب والمالية',
         icon: '💼',
@@ -2027,6 +2036,7 @@ export default function EmployeePortalView({
 
   const getActiveBreadcrumb = () => {
     if (activeTab === 'dashboard') return { group: 'لوحة التحكم', item: 'الرئيسية', icon: '📊' };
+    if (activeTab === 'profile') return { group: 'الملف الشخصي', item: 'بيانات الموظف والتعاقد', icon: '👤' };
     if (['salary', 'adjustments', 'loans'].includes(activeTab)) {
       const itemMap = {
         salary: { name: 'تفاصيل ومسير الراتب', icon: '💵' },
@@ -4256,6 +4266,19 @@ export default function EmployeePortalView({
                   <SummaryCard icon="🏆" label={`صافي المرتب — ${lbl.arabic}`} value={canViewSalary ? `${fmt(summary.netSalary)} ج.م` : '🔒 مقيد'} colorVar="--primary" isPrivacy={isPrivacyMode} />
                 </div>
               )}
+            </div>
+          )}
+
+          {/* ── 1.5. Tab: Profile (الملف الشخصي) ── */}
+          {activeTab === 'profile' && (
+            <div className="card ep-tab-content fade-in" style={{ background: 'transparent', border: 'none', padding: 0, boxShadow: 'none' }}>
+              <EmployeeProfileModule
+                emp={emp}
+                state={state}
+                setState={setState}
+                saveState={saveState}
+                showToast={showToast}
+              />
             </div>
           )}
 

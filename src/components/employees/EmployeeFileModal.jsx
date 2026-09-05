@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { compressImage } from '../../utils/imageCompressor';
-import { DEFAULT_JOBS, isManagementJob, DEFAULT_DEPARTMENTS } from '../../utils/jobsHelper';
+import { DEFAULT_JOBS, isManagementJob, DEFAULT_DEPARTMENTS, getJobsList, getDepartmentsList } from '../../utils/jobsHelper';
 import { syncEmployeeEntireDrive } from '../../utils/googleDriveService';
 import { useUI } from '../../context/UIContext';
 
@@ -24,6 +24,15 @@ export default function EmployeeFileModal({
   const { showConfirm, executeWithOwnerGuard: contextExecuteWithOwnerGuard } = useUI();
   const executeWithOwnerGuard = propExecuteWithOwnerGuard || contextExecuteWithOwnerGuard;
   const currentEmp = editingEmp || emp;
+
+  // Reactively derive jobs and departments from state if custom ones exist
+  const effectiveJobs = (jobs && jobs !== DEFAULT_JOBS && jobs.length > 0)
+    ? jobs
+    : (state ? getJobsList(state) : (jobs || DEFAULT_JOBS));
+  const effectiveDepartments = (departments && departments !== DEFAULT_DEPARTMENTS && departments.length > 0)
+    ? departments
+    : (state ? getDepartmentsList(state) : (departments || DEFAULT_DEPARTMENTS));
+
   const [activeTab, setActiveTab] = useState('personal'); // 'personal' | 'job' | 'financial' | 'documents'
 
   // Google Drive Cloud State
@@ -1252,7 +1261,7 @@ export default function EmployeeFileModal({
                   onChange={(e) => {
                     const newTitle = e.target.value;
                     setJobTitle(newTitle);
-                    const matchedJob = jobs.find(j => j.title?.trim() === newTitle?.trim());
+                    const matchedJob = effectiveJobs.find(j => j.title?.trim() === newTitle?.trim());
                     if (matchedJob && matchedJob.department) {
                       setDepartment(matchedJob.department);
                     }
@@ -1261,8 +1270,8 @@ export default function EmployeeFileModal({
                   required
                 >
                   <option value="">-- اختر المسمى الوظيفي --</option>
-                  {jobs.map((j) => {
-                    const isMgmt = isManagementJob(j.title, jobs);
+                  {effectiveJobs.map((j) => {
+                    const isMgmt = isManagementJob(j.title, effectiveJobs);
                     return (
                       <option key={j.id || j.title} value={j.title}>
                         {isMgmt ? `👔 ${j.title} (إدارية)` : `🏬 ${j.title}`}
@@ -1270,7 +1279,7 @@ export default function EmployeeFileModal({
                     );
                   })}
                   {/* Keep current jobTitle if it was custom */}
-                  {jobTitle && !jobs.some(j => j.title?.trim() === jobTitle.trim()) && (
+                  {jobTitle && !effectiveJobs.some(j => j.title?.trim() === jobTitle.trim()) && (
                     <option value={jobTitle}>
                       📌 {jobTitle} (مخصص)
                     </option>
@@ -1279,7 +1288,7 @@ export default function EmployeeFileModal({
 
                 {/* Job Classification Info Badge */}
                 {jobTitle && (() => {
-                  const isMgmt = isManagementJob(jobTitle, jobs);
+                  const isMgmt = isManagementJob(jobTitle, effectiveJobs);
                   return isMgmt ? (
                     <div style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #86efac', padding: '6px 10px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 'bold', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                       👔 وظيفة إدارية: تمنح الموظف أحقية صرف بدل الإدارة وتوجه كافة طلباته للإدارة العليا مباشرة.
@@ -1301,12 +1310,12 @@ export default function EmployeeFileModal({
                   required
                 >
                   <option value="">-- اختر القسم --</option>
-                  {departments.map((d) => (
+                  {effectiveDepartments.map((d) => (
                     <option key={d} value={d}>
                       🏢 {d}
                     </option>
                   ))}
-                  {department && !departments.includes(department) && (
+                  {department && !effectiveDepartments.includes(department) && (
                     <option value={department}>
                       📌 {department} (مخصص)
                     </option>
@@ -1469,30 +1478,6 @@ export default function EmployeeFileModal({
                 </div>
               )}
 
-              <div style={{ background: 'linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)', border: '1.5px solid #a7f3d0', borderRadius: '12px', padding: '14px 18px', color: '#065f46', fontSize: '13px', lineHeight: '1.8' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 800, fontSize: '14px', marginBottom: '8px', color: '#047857' }}>
-                  <span style={{ fontSize: '18px' }}>✨</span>
-                  <span>معادلة احتساب أجر الموظف وسعر اليوم والساعة المعتمدة بالمؤسسة:</span>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '8px 16px' }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
-                    <span style={{ color: '#059669', fontWeight: 'bold' }}>1️⃣</span>
-                    <span><strong>سعر اليوم</strong> = (سعر الساعة الشهري × عدد ساعات العمل المدخلة) ÷ عدد أيام العمل المدخلة.</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
-                    <span style={{ color: '#059669', fontWeight: 'bold' }}>2️⃣</span>
-                    <span><strong>سعر الساعة اليومي</strong> = سعر اليوم ÷ صافي ساعات العمل الفعلية (بعد خصم ساعات البريك).</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
-                    <span style={{ color: '#059669', fontWeight: 'bold' }}>3️⃣</span>
-                    <span><strong>الراتب الأساسي الشهري</strong> = سعر اليوم × أيام العمل = سعر الساعة الشهري × ساعات العمل.</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
-                    <span style={{ color: '#059669', fontWeight: 'bold' }}>💡</span>
-                    <span style={{ fontSize: '12px', color: '#047857' }}><strong>تطبيق بالقيم المدخلة:</strong> مثال (سعر ساعة شهري 650 ج.م × 8 س ÷ 26 يوم): سعر اليوم = <strong>200 ج.م</strong>، وسعر الساعة = <strong>25 ج.م</strong>، والأساسي = <strong>5,200 ج.م</strong>.</span>
-                  </div>
-                </div>
-              </div>
               
               {/* Active Branches Financial Cards */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>

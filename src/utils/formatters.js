@@ -696,7 +696,7 @@ export function isEmployeeActive(emp) {
   if (!emp) return false;
   if (emp.is_active === false) return false;
   const s = String(emp.status || '').trim().toLowerCase();
-  if (s === 'تم الاستقالة' || s === 'resigned' || s === 'terminated' || s === 'منتهية خدمته' || s === 'مستقيل' || s === 'inactive' || s === 'معلق') return false;
+  if (s === 'تم الاستقالة' || s === 'resigned' || s === 'terminated' || s === 'منتهية خدمته' || s === 'مستقيل' || s === 'inactive') return false;
   if (emp.isTerminated === true || emp.isResigned === true) return false;
   if (emp.resignationStatus === 'approved') return false;
   return true;

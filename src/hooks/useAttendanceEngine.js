@@ -306,8 +306,8 @@ export function useAttendanceEngine() {
       showToast(`❌ لا يمكن تسجيل الحضور: تم إنهاء خدمة هذا الموظف (استقالة أو إنهاء تعاقد${emp.terminationReason ? `: ${emp.terminationReason}` : ''})`);
       return;
     }
-    if (emp && (emp.biometricSuspended || emp.punchDisabled)) {
-      showToast(`⛔ لا يمكن تسجيل الحضور: تم إيقاف بصمة الموظف مؤقتاً (${emp.suspensionReason || 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق'})`);
+    if (emp && (emp.biometricSuspended || emp.punchDisabled || emp.accountSuspended || emp.status === 'معلق')) {
+      showToast(`⛔ لا يمكن تسجيل الحضور: تم إيقاف بصمة وحساب الموظف مؤقتاً (${emp.suspensionReason || 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق'})`);
       return;
     }
     if (!getEmpPermission(empId, 'canStartEnd') || !getEmpPermission(empId, 'canLivePunch')) {
@@ -499,6 +499,14 @@ export function useAttendanceEngine() {
     }
 
     const shiftId = uid();
+    // التحقق مما إذا كان للموظف وردية سابقة في نفس اليوم بفرع آخر لحصر البدل اليومي على أول فرع فقط
+    const sameDateShifts = (state.shifts || []).filter(
+      (s) => String(s.employeeId) === String(empId) && s.date === active.date && s.id !== shiftId
+    );
+    const hasEarlierShiftInAnotherBranch = sameDateShifts.some(
+      (s) => s.branchId && String(s.branchId) !== String(bId) && ((s.timeIn || '') <= (active.timeIn || ''))
+    );
+
     const newShift = {
       id: shiftId,
       employeeId: empId,
@@ -516,6 +524,7 @@ export function useAttendanceEngine() {
       overtimeHours,
       overtimeStatus,
       breakHours,
+      excludeDailyAllowance: Boolean(hasEarlierShiftInAnotherBranch),
       note: overtimeHours > 0 ? `ساعات إضافية (+${overtimeHours} س) بانتظار الاعتماد` : 'تسجيل انصراف بلمسة واحدة',
       statusLabel: 'حضور حي',
       createdAt: new Date().toISOString()

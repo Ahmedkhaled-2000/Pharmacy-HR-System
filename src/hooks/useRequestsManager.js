@@ -172,13 +172,25 @@ export function useRequestsManager() {
               }
               return e;
             });
-          } else if (target.actionTitle === 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق' || target.penaltyAction === 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق') {
+          } else if (
+            target.actionTitle === 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق' ||
+            target.penaltyAction === 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق' ||
+            target.actionTitle === 'إحالة فورية للتحقيق والشئون القانونية' ||
+            target.penaltyAction === 'إحالة فورية للتحقيق والشئون القانونية' ||
+            target.actionTitle?.includes('إيقاف مؤقت') ||
+            target.penaltyAction?.includes('إيقاف مؤقت') ||
+            target.actionTitle?.includes('تحقيق') ||
+            target.penaltyAction?.includes('تحقيق')
+          ) {
             updatedEmps = updatedEmps.map(e => {
               if (String(e.id) === String(target.employeeId)) {
                 return {
                   ...e,
                   biometricSuspended: true,
-                  suspensionReason: target.reason || target.details || 'إيقاف مؤقت معتمد',
+                  punchDisabled: true,
+                  accountSuspended: true,
+                  status: e.status === 'تم الاستقالة' ? 'تم الاستقالة' : 'معلق',
+                  suspensionReason: target.reason || target.details || target.ruleTitle || 'إيقاف مؤقت وإحالة للتحقيق معتمد',
                   suspendedAt: new Date().toISOString(),
                   suspendedBy: 'الإدارة العليا'
                 };
@@ -853,6 +865,38 @@ export function useRequestsManager() {
         r.id === requestId ? { ...r, status: 'rejected', adminStatus: 'rejected', adminApproved: false } : r
       );
 
+      // إذا تم رفض مقترح جزاء تأديبي كان قد تسبب في تعليق الموظف أو بصمته، يتم إعادة تنشيطه فورياً
+      let updatedEmps = [...(state.employees || [])];
+      if (targetReq && (targetReq.type === 'disciplinary_penalty' || targetReq.type === 'penalty' || targetReq.type === 'violation' || String(targetReq.id || '').startsWith('disc_'))) {
+        const isSevere = 
+          targetReq.actionTitle === 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق' ||
+          targetReq.penaltyAction === 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق' ||
+          targetReq.actionTitle === 'إحالة فورية للتحقيق والشئون القانونية' ||
+          targetReq.penaltyAction === 'إحالة فورية للتحقيق والشئون القانونية' ||
+          targetReq.actionTitle?.includes('إيقاف مؤقت') ||
+          targetReq.penaltyAction?.includes('إيقاف مؤقت') ||
+          targetReq.actionTitle?.includes('تحقيق') ||
+          targetReq.penaltyAction?.includes('تحقيق');
+
+        if (isSevere) {
+          updatedEmps = updatedEmps.map(e => {
+            if (String(e.id) === String(targetReq.employeeId)) {
+              const { biometricSuspended, punchDisabled, accountSuspended, suspensionReason, suspendedAt, suspendedBy, ...rest } = e;
+              return {
+                ...rest,
+                biometricSuspended: false,
+                punchDisabled: false,
+                accountSuspended: false,
+                status: e.status === 'معلق' ? 'على رأس العمل' : e.status,
+                reactivatedAt: new Date().toISOString(),
+                reactivatedBy: 'الإدارة العليا'
+              };
+            }
+            return e;
+          });
+        }
+      }
+
       const decisionNotif = createRequestDecisionNotification({
         requestId: targetReq?.id || requestId,
         employeeId: targetReq?.employeeId,
@@ -871,6 +915,7 @@ export function useRequestsManager() {
 
       const updatedState = {
         ...state,
+        employees: updatedEmps,
         requests: updatedRequests,
         shifts: updatedShifts,
         leaveRequests: updatedLeaveRequests,

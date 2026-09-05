@@ -331,17 +331,26 @@ export default function DisciplinaryViolationModal({
       let updatedAdjustments = state.adjustments || [];
       let updatedEmployees = state.employees || [];
 
-      // إذا كانت الإدارة العليا وتم اختيار إيقاف مؤقت عن العمل، يتم إيقاف بصمة الموظف فورياً
-      if (isAdmin && effectiveActionName === 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق') {
-        const suspReason = overrideReason?.trim() || incidentDetails?.trim() || ruleTitle || 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق';
+      // التحقق مما إذا كانت المخالفة تستوجب الإيقاف المؤقت أو الإحالة للتحقيق، فيتم إيقاف بصمة الموظف وحسابه فورياً
+      const isSevereSuspension = 
+        effectiveActionName === 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق' ||
+        effectiveActionName === 'إحالة فورية للتحقيق والشئون القانونية' ||
+        effectiveActionName?.includes('إيقاف مؤقت') ||
+        effectiveActionName?.includes('تحقيق');
+
+      if (isSevereSuspension) {
+        const suspReason = overrideReason?.trim() || incidentDetails?.trim() || ruleTitle || 'إيقاف مؤقت لحين انتهاء التحقيق';
         updatedEmployees = updatedEmployees.map((emp) => {
           if (String(emp.id) === String(selectedEmp.id)) {
             return {
               ...emp,
               biometricSuspended: true,
+              punchDisabled: true,
+              accountSuspended: true,
+              status: emp.status === 'تم الاستقالة' ? 'تم الاستقالة' : 'معلق',
               suspensionReason: suspReason,
               suspendedAt: new Date().toISOString(),
-              suspendedBy: 'الإدارة العليا'
+              suspendedBy: isAdmin ? 'الإدارة العليا' : 'مدير الفرع'
             };
           }
           return emp;
@@ -525,14 +534,24 @@ export default function DisciplinaryViolationModal({
           {/* Employee Quick Info Badge */}
           {selectedEmp && (
             <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '10px 14px', marginBottom: '16px', display: 'flex', gap: '20px', flexWrap: 'wrap', fontSize: '13px' }}>
-              <div>
-                <strong>الراتب الأساسي: </strong>
-                <span style={{ color: 'var(--primary-dark)', fontWeight: 'bold' }}>{parseFloat(selectedEmp.salary || 0).toLocaleString()} ج.م</span>
-              </div>
-              <div>
-                <strong>سعر اليوم الأساسي: </strong>
-                <span style={{ color: '#047857', fontWeight: 'bold' }}>{dailyRate} ج.م / يوم</span>
-              </div>
+              {isAdmin && (
+                <>
+                  <div>
+                    <strong>الراتب الأساسي: </strong>
+                    <span style={{ color: 'var(--primary-dark)', fontWeight: 'bold' }}>{parseFloat(selectedEmp.salary || 0).toLocaleString()} ج.م</span>
+                  </div>
+                  <div>
+                    <strong>سعر اليوم الأساسي: </strong>
+                    <span style={{ color: '#047857', fontWeight: 'bold' }}>{dailyRate} ج.م / يوم</span>
+                  </div>
+                </>
+              )}
+              {!isAdmin && (
+                <div>
+                  <strong>المسمى الوظيفي: </strong>
+                  <span style={{ color: 'var(--primary-dark)', fontWeight: 'bold' }}>{selectedEmp.jobTitle || 'موظف'}</span>
+                </div>
+              )}
               <div>
                 <strong>ساعات العمل: </strong>
                 <span>{selectedEmp.workHoursPerDay || 8} ساعات</span>
@@ -631,7 +650,9 @@ export default function DisciplinaryViolationModal({
                 <div style={{ background: '#ffffff', padding: '10px', borderRadius: '8px', border: '1px solid #bbf7d0' }}>
                   <span style={{ fontSize: '12px', color: 'var(--muted)', display: 'block' }}>الخصم المالي المقترح:</span>
                   <strong style={{ fontSize: '15px', color: counterResult.deductionDays > 0 ? '#b91c1c' : '#059669' }}>
-                    {counterResult.deductionDays > 0 ? `${counterResult.deductionDays} يوم (${(dailyRate * counterResult.deductionDays).toFixed(2)} ج.م)` : 'بدون خصم مالي'}
+                    {counterResult.deductionDays > 0
+                      ? (isAdmin ? `${counterResult.deductionDays} يوم (${(dailyRate * counterResult.deductionDays).toFixed(2)} ج.م)` : `${counterResult.deductionDays} يوم`)
+                      : 'بدون خصم مالي'}
                   </strong>
                 </div>
               </div>
@@ -713,7 +734,7 @@ export default function DisciplinaryViolationModal({
                       {deductionType === 'days' && (
                         <div style={{ maxWidth: '280px' }}>
                           <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', marginBottom: '4px' }}>
-                            عدد أيام الخصم (أيام):
+                            {isAdmin ? 'عدد أيام الخصم (أيام):' : 'عدد أيام الخصم المقترحة (أيام):'}
                           </label>
                           <input
                             type="number"
@@ -731,7 +752,7 @@ export default function DisciplinaryViolationModal({
                       {deductionType === 'fixed_amount' && (
                         <div style={{ maxWidth: '280px' }}>
                           <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', marginBottom: '4px' }}>
-                            المبلغ المالي المخصوم (ج.م):
+                            {isAdmin ? 'المبلغ المالي المخصوم (ج.م):' : 'المبلغ المالي المقترح خصمه (ج.م):'}
                           </label>
                           <input
                             type="number"
@@ -782,22 +803,40 @@ export default function DisciplinaryViolationModal({
 
                       {/* Live Calculation Preview */}
                       <div style={{ marginTop: '10px', padding: '8px 12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '12.5px', display: 'flex', gap: '14px', flexWrap: 'wrap', alignItems: 'center' }}>
-                        <span style={{ color: '#0369a1', fontWeight: 'bold' }}>
-                          💡 أجر اليوم: {dailyRate} ج.م · أجر الساعة ({empHoursPerDay} س): {hourlyRate} ج.م
-                        </span>
-                        <span style={{ color: '#dc2626', fontWeight: '800' }}>
-                          💰 إجمالي الخصم المحتسب: {effectiveDeductionAmount} ج.م (معادل {effectiveDeductionDays} يوم)
-                        </span>
+                        {isAdmin ? (
+                          <>
+                            <span style={{ color: '#0369a1', fontWeight: 'bold' }}>
+                              💡 أجر اليوم: {dailyRate} ج.م · أجر الساعة ({empHoursPerDay} س): {hourlyRate} ج.م
+                            </span>
+                            <span style={{ color: '#dc2626', fontWeight: '800' }}>
+                              💰 إجمالي الخصم المحتسب: {effectiveDeductionAmount} ج.م (معادل {effectiveDeductionDays} يوم)
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <span style={{ color: '#0369a1', fontWeight: 'bold' }}>
+                              💡 ساعات العمل اليومية: {empHoursPerDay} ساعات
+                            </span>
+                            <span style={{ color: '#dc2626', fontWeight: '800' }}>
+                              {deductionType === 'fixed_amount'
+                                ? `💰 المبلغ المالي المقترح خصمه: ${parseFloat(deductionFixedAmount) || 0} ج.م`
+                                : `⚖️ إجمالي الخصم المقترح: ${effectiveDeductionDays} يوم`}
+                            </span>
+                          </>
+                        )}
                       </div>
                     </div>
                   )}
 
                   {/* Suspension Notice Banner */}
-                  {overrideAction === 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق' && (
+                  {(overrideAction === 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق' ||
+                    overrideAction === 'إحالة فورية للتحقيق والشئون القانونية' ||
+                    overrideAction?.includes('تحقيق') ||
+                    overrideAction?.includes('إيقاف مؤقت')) && (
                     <div style={{ gridColumn: '1 / -1', background: '#fef2f2', border: '1.5px solid #f87171', padding: '12px 16px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '10px' }}>
                       <span style={{ fontSize: '24px' }}>⛔</span>
                       <div style={{ fontSize: '12.5px', color: '#991b1b', lineHeight: '1.5' }}>
-                        <strong>تنبيه إداري أمني:</strong> عند اعتماد هذا الإجراء، سيتم <strong>إيقاف بصمة الموظف الإلكترونية وصلاحية تسجيل الحضور فورياً</strong>، ولن يتمكن من فتح شيفت حتى يتم مراجعة التحقيق وإعادة تفعيل بصمته من صفحة البصمة الإلكترونية.
+                        <strong>تنبيه إداري وأمني:</strong> عند رفع أو توثيق هذا الإجراء (إحالة للتحقيق أو إيقاف مؤقت)، سيتم <strong>إيقاف بصمة الموظف الإلكترونية وحسابه فورياً</strong> وتعليق صلاحية تسجيل الحضور والدخول للنظام لحين انتهاء التحقيق، مع إمكانية إعادة تنشيط الحساب والبصمة بواسطة الإدارة العليا.
                       </div>
                     </div>
                   )}

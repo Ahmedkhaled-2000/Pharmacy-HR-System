@@ -1,7 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import { fmt, getRealTodayStr, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
+import { getJobsList } from '../../utils/jobsHelper';
 import EmployeeTerminationModal from './EmployeeTerminationModal';
 import EmployeeComprehensiveDossierModal from './EmployeeComprehensiveDossierModal';
+import EmployeeSalaryDetailsModal from './EmployeeSalaryDetailsModal';
 
 export default function EmployeeCardsGrid({
   state,
@@ -32,6 +34,7 @@ export default function EmployeeCardsGrid({
   const [selectedBranchFilter, setSelectedBranchFilter] = useState('all');
 
   // Modals state
+  const [selectedSalaryEmp, setSelectedSalaryEmp] = useState(null);
   const [terminationModalEmp, setTerminationModalEmp] = useState(null);
   const [dossierModalEmp, setDossierModalEmp] = useState(null);
   const [dossierInitialTab, setDossierInitialTab] = useState('summary');
@@ -280,6 +283,45 @@ export default function EmployeeCardsGrid({
       console.error(err);
     } finally {
       setIsRehiring(false);
+    }
+  };
+
+  // Handle Reactivate Account & Biometric for Suspended Employees
+  const handleReactivateAccountAndBiometric = async (emp) => {
+    if (!window.confirm(`هل أنت متأكد من إعادة تنشيط بصمة وحساب الموظف (${emp.name}) ورفع الإيقاف المؤقت؟`)) return;
+
+    const performReactivate = async () => {
+      const updatedEmployees = employees.map((e) => {
+        if (String(e.id) === String(emp.id)) {
+          const { biometricSuspended, punchDisabled, accountSuspended, suspensionReason, suspendedAt, suspendedBy, ...rest } = e;
+          return {
+            ...rest,
+            biometricSuspended: false,
+            punchDisabled: false,
+            accountSuspended: false,
+            status: e.status === 'معلق' ? 'على رأس العمل' : e.status,
+            reactivatedAt: new Date().toISOString(),
+            reactivatedBy: 'الإدارة العليا'
+          };
+        }
+        return e;
+      });
+
+      const updatedState = { ...state, employees: updatedEmployees };
+      if (setState) setState(updatedState);
+      if (saveState) await saveState(updatedState);
+      if (showToast) showToast(`🟢 تم إعادة تنشيط بصمة وحساب الموظف (${emp.name}) بنجاح!`);
+    };
+
+    if (executeWithOwnerGuard) {
+      executeWithOwnerGuard({
+        lockKey: 'lockSuspendBiometric',
+        actionTitle: `إعادة تنشيط بصمة وحساب الموظف (${emp.name})`,
+        actionDetails: 'إلغاء الإيقاف المؤقت وإعادة تفعيل الحساب والبصمة',
+        onExecute: performReactivate
+      });
+    } else {
+      await performReactivate();
     }
   };
 
@@ -580,13 +622,30 @@ export default function EmployeeCardsGrid({
                   }
 
                   const isEmpTerminated = emp.status === 'تم الاستقالة' || emp.is_active === false;
+                  const isEmpSuspended = Boolean(emp.accountSuspended || emp.biometricSuspended || emp.punchDisabled || emp.status === 'معلق');
+
+                  let suspStatusBadge = null;
+                  if (isEmpSuspended && !isEmpTerminated) {
+                    suspStatusBadge = (
+                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '6px' }}>
+                        <span style={{ background: '#fff1f2', color: '#be123c', padding: '3px 9px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 'bold', border: '1px solid #fda4af' }}>
+                          ⏸️ موقوف مؤقتاً وموقوفة بصمته: {emp.suspensionReason || 'إحالة فورية للتحقيق / إيقاف مؤقت'}
+                        </span>
+                        {emp.suspendedBy && (
+                          <span style={{ background: '#f8fafc', color: '#475569', padding: '3px 8px', borderRadius: '6px', fontSize: '11.5px', border: '1px solid #cbd5e1' }}>
+                            الجهة: {emp.suspendedBy}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  }
 
                   return (
                     <div
                       key={emp.id}
                       style={{
                         background: 'var(--surface)',
-                        border: isEmpTerminated ? '1px solid var(--danger-border, #fca5a5)' : '1px solid var(--border)',
+                        border: isEmpTerminated ? '1px solid var(--danger-border, #fca5a5)' : isEmpSuspended ? '1.5px solid #fda4af' : '1px solid var(--border)',
                         borderRadius: '16px',
                         padding: '18px 22px',
                         display: 'flex',
@@ -655,18 +714,19 @@ export default function EmployeeCardsGrid({
                             {emp.jobTitle} {emp.department ? ` · قسم: ${emp.department}` : ''} {emp.phone ? ` · 📞 ${emp.phone}` : ''}
                           </span>
                           {resStatusBadge}
+                          {suspStatusBadge}
                         </div>
                       </div>
 
                       {/* Middle Block: Live Punch Clock Status (Only for active tab) */}
                       {!isEmpTerminated ? (
                         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: '220px' }}>
-                          <span className={`dot ${active ? (active.isPaused ? 'paused' : 'live') : ''}`}></span>
+                          <span className={`dot ${active ? (active.isPaused ? 'paused' : 'live') : isEmpSuspended ? 'paused' : ''}`}></span>
                           <div>
-                            <div style={{ fontWeight: 'bold', fontSize: '15px', color: 'var(--text)' }}>
-                              {active ? getActiveElapsedStr(emp.id) : 'لا توجد وردية نشطة الآن'}
+                            <div style={{ fontWeight: 'bold', fontSize: '15px', color: isEmpSuspended ? '#be123c' : 'var(--text)' }}>
+                              {active ? getActiveElapsedStr(emp.id) : (isEmpSuspended ? 'البصمة والحساب موقوفان' : 'لا توجد وردية نشطة الآن')}
                             </div>
-                            <div style={{ fontSize: '12.5px', color: 'var(--muted)' }}>
+                            <div style={{ fontSize: '12.5px', color: isEmpSuspended ? '#9f1239' : 'var(--muted)' }}>
                               {active ? (
                                 active.isPaused ? (
                                   <span style={{ color: 'var(--accent)', fontWeight: 'bold' }}>
@@ -676,7 +736,7 @@ export default function EmployeeCardsGrid({
                                   `جارية منذ ${active.timeIn}${getActiveBreakStr(emp.id) ? ` · (بريك: ${getActiveBreakStr(emp.id)})` : ''}`
                                 )
                               ) : (
-                                'تتم البصمة من بوابة الحضور / الكشك'
+                                isEmpSuspended ? 'ممنوع من تسجيل الحضور لحين انتهاء التحقيق' : 'تتم البصمة من بوابة الحضور / الكشك'
                               )}
                             </div>
                           </div>
@@ -737,28 +797,53 @@ export default function EmployeeCardsGrid({
 
                       {/* Action Buttons Group */}
                       <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-                        {/* 1. If Active: End of Service Button */}
+                        {/* 1. If Active: End of Service Button & Reactivate Button */}
                         {!isEmpTerminated ? (
-                          <button
-                            type="button"
-                            className="btn btn-ghost"
-                            onClick={() => setTerminationModalEmp(emp)}
-                            title="إنهاء الخدمة النهائي وتصفية الحساب"
-                            style={{
-                              background: '#fef2f2',
-                              color: '#991b1b',
-                              border: '1px solid #fecaca',
-                              fontWeight: 'bold',
-                              fontSize: '12px',
-                              padding: '6px 12px',
-                              borderRadius: '8px',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '4px'
-                            }}
-                          >
-                            <span>🛑</span> إنهاء الخدمة النهائي
-                          </button>
+                          <>
+                            {isEmpSuspended && (
+                              <button
+                                type="button"
+                                className="btn btn-start"
+                                onClick={() => handleReactivateAccountAndBiometric(emp)}
+                                title="إعادة تنشيط البصمة وحساب الموظف ورفع الإيقاف المؤقت"
+                                style={{
+                                  background: '#10b981',
+                                  color: '#fff',
+                                  fontWeight: 'bold',
+                                  fontSize: '12px',
+                                  padding: '6px 12px',
+                                  borderRadius: '8px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  boxShadow: '0 2px 5px rgba(16,185,129,0.25)'
+                                }}
+                              >
+                                <span>🟢</span> تنشيط البصمة والحساب
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              onClick={() => setTerminationModalEmp(emp)}
+                              title="إنهاء الخدمة النهائي وتصفية الحساب"
+                              style={{
+                                background: '#fef2f2',
+                                color: '#991b1b',
+                                border: '1px solid #fecaca',
+                                fontWeight: 'bold',
+                                fontSize: '12px',
+                                padding: '6px 12px',
+                                borderRadius: '8px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                              }}
+                            >
+                              <span>🛑</span> إنهاء الخدمة النهائي
+                            </button>
+                          </>
                         ) : (
                           /* 2. If Resigned: Rehire & Dossier Buttons */
                           <>
@@ -863,6 +948,18 @@ export default function EmployeeCardsGrid({
                             📁
                           </a>
                         )}
+                        <button
+                          className="icon-btn"
+                          title="تفاصيل مفردات المرتب والبدلات التعاقدية"
+                          style={{
+                            background: '#ecfdf5',
+                            borderColor: '#a7f3d0',
+                            color: '#047857'
+                          }}
+                          onClick={() => setSelectedSalaryEmp(emp)}
+                        >
+                          💵
+                        </button>
                         <button className="icon-btn" title="بطاقة الموظف والـ QR" onClick={() => openEmpCard(emp)}>
                           🪪 QR
                         </button>
@@ -1075,6 +1172,16 @@ export default function EmployeeCardsGrid({
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── MODAL 4: SALARY & CONTRACTUAL ALLOWANCES DETAILS ── */}
+      {selectedSalaryEmp && (
+        <EmployeeSalaryDetailsModal
+          emp={selectedSalaryEmp}
+          branches={branches}
+          jobs={getJobsList(state)}
+          onClose={() => setSelectedSalaryEmp(null)}
+        />
       )}
     </>
   );

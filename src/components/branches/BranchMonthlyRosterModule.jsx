@@ -709,13 +709,20 @@ export default function BranchMonthlyRosterModule({
   state,
   initialBranchId = '',
   onNavigateTab,
-  onSwitchSubTab
+  onSwitchSubTab,
+  isBranchManager = false,
+  lockBranchId = null
 }) {
   const branches = state.branches || [];
   const employees = state.employees || [];
 
+  const effectiveLockId = lockBranchId || (isBranchManager ? initialBranchId : null);
+
   // Active state
   const [selectedBranchId, setSelectedBranchId] = useState(() => {
+    if (effectiveLockId && branches.some(b => String(b.id) === String(effectiveLockId))) {
+      return String(effectiveLockId);
+    }
     if (initialBranchId && branches.some(b => String(b.id) === String(initialBranchId))) {
       return String(initialBranchId);
     }
@@ -1128,46 +1135,48 @@ export default function BranchMonthlyRosterModule({
           </div>
 
           {/* Sub-Nav Toggle Tabs */}
-          <div style={{ display: 'inline-flex', background: '#f1f5f9', padding: '4px', borderRadius: '12px', border: '1px solid #e2e8f0', gap: '4px' }}>
-            <button
-              type="button"
-              onClick={() => onSwitchSubTab ? onSwitchSubTab('list') : (onNavigateTab && onNavigateTab('branches'))}
-              style={{
-                border: 'none',
-                background: 'transparent',
-                color: '#64748b',
-                padding: '8px 16px',
-                borderRadius: '8px',
-                fontSize: '13px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px'
-              }}
-            >
-              <span>🏢</span> إدارة وبيانات الفروع
-            </button>
-            <button
-              type="button"
-              style={{
-                border: 'none',
-                background: '#ffffff',
-                color: '#0f766e',
-                padding: '8px 18px',
-                borderRadius: '8px',
-                fontSize: '13.5px',
-                fontWeight: 800,
-                cursor: 'default',
-                boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px'
-              }}
-            >
-              <span>📅</span> الجدول الشهري للفرع
-            </button>
-          </div>
+          {!isBranchManager && (
+            <div style={{ display: 'inline-flex', background: '#f1f5f9', padding: '4px', borderRadius: '12px', border: '1px solid #e2e8f0', gap: '4px' }}>
+              <button
+                type="button"
+                onClick={() => onSwitchSubTab ? onSwitchSubTab('list') : (onNavigateTab && onNavigateTab('branches'))}
+                style={{
+                  border: 'none',
+                  background: 'transparent',
+                  color: '#64748b',
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  fontSize: '13px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <span>🏢</span> إدارة وبيانات الفروع
+              </button>
+              <button
+                type="button"
+                style={{
+                  border: 'none',
+                  background: '#ffffff',
+                  color: '#0f766e',
+                  padding: '8px 18px',
+                  borderRadius: '8px',
+                  fontSize: '13.5px',
+                  fontWeight: 800,
+                  cursor: 'default',
+                  boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <span>📅</span> الجدول الشهري للفرع
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Filters & Control Bar */}
@@ -1176,27 +1185,44 @@ export default function BranchMonthlyRosterModule({
             
             {/* Branch Selector */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <label style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text)' }}>📍 اختر الفرع:</label>
-              <select
-                value={selectedBranchId}
-                onChange={(e) => setSelectedBranchId(e.target.value)}
-                style={{
-                  padding: '7px 14px',
+              <label style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text)' }}>📍 الفرع:</label>
+              {effectiveLockId ? (
+                <div style={{
+                  padding: '6px 14px',
                   borderRadius: '10px',
-                  border: '1.5px solid var(--primary-light, #bfdbfe)',
-                  background: '#f8fafc',
-                  color: 'var(--text)',
+                  border: '1.5px solid #0d9488',
+                  background: '#f0fdfa',
+                  color: '#0f766e',
                   fontSize: '13.5px',
-                  fontWeight: 700,
-                  cursor: 'pointer'
-                }}
-              >
-                {branches.map(b => (
-                  <option key={b.id} value={b.id}>
-                    {b.name} ({employees.filter(e => isEmployeeActive(e) && (String(e.branchId) === String(b.id) || (e.branchesDetails && e.branchesDetails.some(bd => String(bd.branchId) === String(b.id))))).length} موظف)
-                  </option>
-                ))}
-              </select>
+                  fontWeight: 800,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}>
+                  <span>🏢</span> {currentBranch?.name || 'الفرع'}
+                </div>
+              ) : (
+                <select
+                  value={selectedBranchId}
+                  onChange={(e) => setSelectedBranchId(e.target.value)}
+                  style={{
+                    padding: '7px 14px',
+                    borderRadius: '10px',
+                    border: '1.5px solid var(--primary-light, #bfdbfe)',
+                    background: '#f8fafc',
+                    color: 'var(--text)',
+                    fontSize: '13.5px',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                >
+                  {branches.map(b => (
+                    <option key={b.id} value={b.id}>
+                      {b.name} ({employees.filter(e => isEmployeeActive(e) && (String(e.branchId) === String(b.id) || (e.branchesDetails && e.branchesDetails.some(bd => String(bd.branchId) === String(b.id))))).length} موظف)
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
 
             {/* Month Picker */}

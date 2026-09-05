@@ -538,13 +538,22 @@ export default function DisciplinaryPenaltiesTab({
 
       // Update Employee Status if Suspension or Dismissal
       let updatedEmployees = state.employees || [];
-      if (pen.actionTitle === 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق') {
+      const isSevereSuspension = 
+        pen.actionTitle === 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق' ||
+        pen.actionTitle === 'إحالة فورية للتحقيق والشئون القانونية' ||
+        pen.actionTitle?.includes('إيقاف مؤقت') ||
+        pen.actionTitle?.includes('تحقيق');
+
+      if (isSevereSuspension) {
         const suspReason = pen.overrideReason?.trim() || pen.details?.trim() || pen.reason || pen.ruleTitle || 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق';
         updatedEmployees = updatedEmployees.map((e) => {
           if (String(e.id) === String(pen.employeeId)) {
             return {
               ...e,
               biometricSuspended: true,
+              punchDisabled: true,
+              accountSuspended: true,
+              status: e.status === 'تم الاستقالة' ? 'تم الاستقالة' : 'معلق',
               suspensionReason: suspReason,
               suspendedAt: new Date().toISOString(),
               suspendedBy: 'الإدارة العليا'
@@ -635,10 +644,35 @@ export default function DisciplinaryPenaltiesTab({
       return r;
     });
 
-    const updatedState = { ...state, requests: updatedRequests };
+    let updatedEmployees = state.employees || [];
+    const isSevere = 
+      pen.actionTitle === 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق' ||
+      pen.actionTitle === 'إحالة فورية للتحقيق والشئون القانونية' ||
+      pen.actionTitle?.includes('إيقاف مؤقت') ||
+      pen.actionTitle?.includes('تحقيق');
+
+    if (isSevere) {
+      updatedEmployees = updatedEmployees.map(e => {
+        if (String(e.id) === String(pen.employeeId)) {
+          const { biometricSuspended, punchDisabled, accountSuspended, suspensionReason, suspendedAt, suspendedBy, ...rest } = e;
+          return {
+            ...rest,
+            biometricSuspended: false,
+            punchDisabled: false,
+            accountSuspended: false,
+            status: e.status === 'معلق' ? 'على رأس العمل' : e.status,
+            reactivatedAt: new Date().toISOString(),
+            reactivatedBy: 'الإدارة العليا'
+          };
+        }
+        return e;
+      });
+    }
+
+    const updatedState = { ...state, requests: updatedRequests, employees: updatedEmployees };
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.('❌ تم رفض مقترح الجزاء التأديبي وإلغاؤه');
+    showToast?.('❌ تم رفض مقترح الجزاء التأديبي وإلغاؤه وإعادة تنشيط الموظف');
   };
 
   const handleConfirmCancelPenalty = async () => {
@@ -682,10 +716,41 @@ export default function DisciplinaryPenaltiesTab({
         return true;
       });
 
+      // إذا كان الجزاء الملغي قد تسبب في إيقاف الموظف، يتم رفع الإيقاف فورياً
+      let updatedEmployees = [...(state.employees || [])];
+      const isSevere = 
+        cancellingPenalty.actionTitle === 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق' ||
+        cancellingPenalty.penaltyAction === 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق' ||
+        cancellingPenalty.actionTitle === 'إحالة فورية للتحقيق والشئون القانونية' ||
+        cancellingPenalty.penaltyAction === 'إحالة فورية للتحقيق والشئون القانونية' ||
+        cancellingPenalty.actionTitle?.includes('إيقاف مؤقت') ||
+        cancellingPenalty.penaltyAction?.includes('إيقاف مؤقت') ||
+        cancellingPenalty.actionTitle?.includes('تحقيق') ||
+        cancellingPenalty.penaltyAction?.includes('تحقيق');
+
+      if (isSevere) {
+        updatedEmployees = updatedEmployees.map(e => {
+          if (String(e.id) === String(cancellingPenalty.employeeId)) {
+            const { biometricSuspended, punchDisabled, accountSuspended, suspensionReason, suspendedAt, suspendedBy, ...rest } = e;
+            return {
+              ...rest,
+              biometricSuspended: false,
+              punchDisabled: false,
+              accountSuspended: false,
+              status: e.status === 'معلق' ? 'على رأس العمل' : e.status,
+              reactivatedAt: new Date().toISOString(),
+              reactivatedBy: 'الإدارة العليا'
+            };
+          }
+          return e;
+        });
+      }
+
       const updatedState = {
         ...state,
         requests: updatedRequests,
-        adjustments: updatedAdjustments
+        adjustments: updatedAdjustments,
+        employees: updatedEmployees
       };
 
       if (setState) setState(updatedState);
@@ -693,7 +758,7 @@ export default function DisciplinaryPenaltiesTab({
 
       setCancellingPenalty(null);
       setCancellationReason('');
-      showToast?.('✅ تم إلغاء الجزاء وسحب الخصم من مسير الأجور وتوثيق الإلغاء في سجل التدقيق');
+      showToast?.('✅ تم إلغاء الجزاء وسحب الخصم من مسير الأجور وإعادة تنشيط الموظف بنجاح');
     };
 
     if (executeWithOwnerGuard) {

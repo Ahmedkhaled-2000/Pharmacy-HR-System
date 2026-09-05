@@ -762,17 +762,46 @@ export function DataProvider({ children, showToast = () => {} }) {
     const extraAllowance = parseFloat(emp.extraAllowance) || 0;
 
     // Daily Attendance Allowance (البدل اليومي المرتبط بالحضور وبصمة الدخول)
-    const allEmpShifts = (state.shifts || []).filter(s =>
+    // القاعدة المعتمدة: إذا كان الموظف مسجلاً بأكثر من فرع، يُحسب له البدل اليومي عند تسجيل أول بصمة بالفرع الأول فقط من اليوم، وأي ورديات يسجلها بنفس اليوم بفروع أخرى لا يصرف لها بدل يومي
+    const allEmployeeShifts = (state.shifts || []).filter(s =>
       String(s.employeeId) === String(empId) &&
       effectiveFilterFn(s.date) &&
-      (!targetBranchId || s.branchId === targetBranchId || !s.branchId || branches.length === 1)
+      (s.timeIn || s.checkIn || getEffectiveShiftHours(s, state) > 0)
     );
-    // Count distinct dates where the employee registered a punch-in or worked hours, and not excluded
-    const attendedDatesSet = new Set(
-      allEmpShifts
-        .filter(s => (s.timeIn || s.checkIn || getEffectiveShiftHours(s, state) > 0) && !s.excludeDailyAllowance)
-        .map(s => s.date)
-    );
+
+    // تحديد أول فرع حضر به الموظف في كل تاريخ (First branch of the day)
+    const firstBranchByDate = {};
+    allEmployeeShifts.forEach(s => {
+      if (!s.date) return;
+      const bId = s.branchId || (branches[0] ? branches[0].branchId : null);
+      if (!firstBranchByDate[s.date]) {
+        firstBranchByDate[s.date] = { branchId: bId, timeIn: s.timeIn || '99:99', createdAt: s.createdAt || '' };
+      } else {
+        const currentFirst = firstBranchByDate[s.date];
+        const sTime = s.timeIn || '99:99';
+        if (sTime < currentFirst.timeIn || (sTime === currentFirst.timeIn && s.createdAt && s.createdAt < currentFirst.createdAt)) {
+          firstBranchByDate[s.date] = { branchId: bId, timeIn: sTime, createdAt: s.createdAt || '' };
+        }
+      }
+    });
+
+    const attendedDatesSet = new Set();
+    allEmployeeShifts.forEach(s => {
+      if (!s.date) return;
+      if (s.excludeDailyAllowance) return;
+      const firstBranch = firstBranchByDate[s.date];
+      const sBranchId = s.branchId || (branches[0] ? branches[0].branchId : null);
+
+      if (targetBranchId) {
+        // حصر البدل اليومي على أول فرع داوم به الموظف في ذلك اليوم فقط
+        if (String(sBranchId) === String(targetBranchId) && firstBranch && String(firstBranch.branchId) === String(targetBranchId)) {
+          attendedDatesSet.add(s.date);
+        }
+      } else {
+        // في الحساب الإجمالي للموظف، يُحتسب اليوم المستحق مرة واحدة فقط
+        attendedDatesSet.add(s.date);
+      }
+    });
     const attendedDaysCount = attendedDatesSet.size;
 
     const baseDailyAllowanceAmount = parseFloat(emp.dailyAllowanceAmount) || 0;

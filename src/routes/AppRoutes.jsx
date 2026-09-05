@@ -16,6 +16,7 @@ import EmployeePermissionsManagementModule from '../components/permissions/Emplo
 import PayrollModule from '../components/payroll/PayrollModule';
 import AdjustmentsModule from '../components/adjustments/AdjustmentsModule';
 import WhatsAppCenterModule from '../components/whatsapp/WhatsAppCenterModule';
+import AdminDirectivesModule from '../components/directives/AdminDirectivesModule';
 import BylawsModule from '../components/bylaws/BylawsModule';
 import AdminResignationModule from '../components/resignation/AdminResignationModule';
 import EvaluationsModule from '../components/evaluations/EvaluationsModule';
@@ -812,6 +813,16 @@ export default function AppRoutes() {
                     customFrom={adminCustomFrom}
                     customTo={adminCustomTo}
                     executeWithOwnerGuard={executeWithOwnerGuard}
+                  />
+                )}
+
+                {/* 8.5. Admin Directives */}
+                {activeNavTab === 'admin-directives' && (
+                  <AdminDirectivesModule
+                    state={state}
+                    setState={setState}
+                    saveState={saveState}
+                    showToast={showToast}
                   />
                 )}
 

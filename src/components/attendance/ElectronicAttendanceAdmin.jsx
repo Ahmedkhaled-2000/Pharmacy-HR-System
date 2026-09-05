@@ -173,6 +173,9 @@ export default function ElectronicAttendanceAdmin({ state, setState, saveState, 
           return {
             ...emp,
             biometricSuspended: true,
+            punchDisabled: true,
+            accountSuspended: true,
+            status: emp.status === 'تم الاستقالة' ? 'تم الاستقالة' : 'معلق',
             suspensionReason: reason,
             suspendedAt: new Date().toISOString(),
             suspendedBy: 'الإدارة العليا'
@@ -186,7 +189,7 @@ export default function ElectronicAttendanceAdmin({ state, setState, saveState, 
       if (saveState) await saveState(updatedState);
 
       if (showToast) {
-        showToast(`⛔ تم إيقاف بصمة الموظف (${suspendingEmp.name}) مؤقتاً بنجاح.`);
+        showToast(`⛔ تم إيقاف بصمة وحساب الموظف (${suspendingEmp.name}) مؤقتاً بنجاح.`);
       }
       setSuspendingEmp(null);
       setSuspensionReasonInput('');
@@ -211,12 +214,15 @@ export default function ElectronicAttendanceAdmin({ state, setState, saveState, 
     const performReactivate = async () => {
       const updatedEmployees = employees.map(emp => {
         if (emp.id === reactivatingEmp.id) {
-          const { biometricSuspended, suspensionReason, suspendedAt, suspendedBy, punchDisabled, ...rest } = emp;
+          const { biometricSuspended, suspensionReason, suspendedAt, suspendedBy, punchDisabled, accountSuspended, ...rest } = emp;
           return {
             ...rest,
             biometricSuspended: false,
             punchDisabled: false,
-            reactivatedAt: new Date().toISOString()
+            accountSuspended: false,
+            status: emp.status === 'معلق' ? 'على رأس العمل' : emp.status,
+            reactivatedAt: new Date().toISOString(),
+            reactivatedBy: 'الإدارة العليا'
           };
         }
         return emp;
@@ -227,7 +233,7 @@ export default function ElectronicAttendanceAdmin({ state, setState, saveState, 
       if (saveState) await saveState(updatedState);
 
       if (showToast) {
-        showToast(`🟢 تم إعادة تفعيل بصمة وصلاحية حضور الموظف (${reactivatingEmp.name}) بنجاح!`);
+        showToast(`🟢 تم إعادة تفعيل بصمة وحساب وصلاحية حضور الموظف (${reactivatingEmp.name}) بنجاح!`);
       }
       setReactivatingEmp(null);
     };
@@ -253,7 +259,7 @@ export default function ElectronicAttendanceAdmin({ state, setState, saveState, 
       const hasBiometric = isHand 
         ? Boolean(emp.has_hand_descriptor || emp.hand_descriptor)
         : Boolean(emp.has_face_descriptor || emp.face_descriptor);
-      const isSuspended = Boolean(emp.biometricSuspended || emp.punchDisabled);
+      const isSuspended = Boolean(emp.biometricSuspended || emp.punchDisabled || emp.accountSuspended || emp.status === 'معلق');
 
       // Status filter
       if (filterStatus === 'active') {
@@ -279,8 +285,8 @@ export default function ElectronicAttendanceAdmin({ state, setState, saveState, 
   }, [employees, filterStatus, searchQuery, globalBiometricType]);
 
   const activeEmployeesOnly = employees.filter(isEmployeeActive);
-  const activeCount = activeEmployeesOnly.filter(e => !e.biometricSuspended && !e.punchDisabled && (e.has_face_descriptor || e.face_descriptor || e.has_hand_descriptor || e.hand_descriptor)).length;
-  const suspendedCount = activeEmployeesOnly.filter(e => e.biometricSuspended || e.punchDisabled).length;
+  const activeCount = activeEmployeesOnly.filter(e => !e.biometricSuspended && !e.punchDisabled && !e.accountSuspended && e.status !== 'معلق' && (e.has_face_descriptor || e.face_descriptor || e.has_hand_descriptor || e.hand_descriptor)).length;
+  const suspendedCount = activeEmployeesOnly.filter(e => e.biometricSuspended || e.punchDisabled || e.accountSuspended || e.status === 'معلق').length;
   const unregisteredCount = activeEmployeesOnly.filter(e => !e.has_face_descriptor && !e.face_descriptor && !e.has_hand_descriptor && !e.hand_descriptor).length;
 
   return (
