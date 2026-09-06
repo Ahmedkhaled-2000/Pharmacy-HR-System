@@ -156,6 +156,14 @@ export default function DesktopLayout({
           label: 'الجدول الشهري للفرع',
           icon: '📅',
           desc: 'مواعيد وورديات الموظفين، الحضور، وتغطية الفروع'
+        },
+        {
+          id: 'branches:sales',
+          targetTab: 'branches',
+          targetSubTab: 'sales',
+          label: 'مبيعات الفروع والتارجت',
+          icon: '📈',
+          desc: 'تسجيل ومتابعة مبيعات الصيدليات اليومية، التارجت، والفرع المتصدر'
         }
       ]
     },

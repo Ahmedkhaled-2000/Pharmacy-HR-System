@@ -498,6 +498,24 @@ export function smartMergeStates(localState, remoteState) {
 
     recruitmentApplications: mergeArrays(localState.recruitmentApplications, remoteState.recruitmentApplications, { prefix: 'app', deletedIds }),
     jobVacancies: mergeArrays(localState.jobVacancies, remoteState.jobVacancies, { prefix: 'vac', deletedIds }),
+    branchSales: mergeArrays(localState.branchSales, remoteState.branchSales, { prefix: 'sale', deletedIds }),
+    branchSalesTargets: (() => {
+      const merged = { ...(remoteState.branchSalesTargets || {}) };
+      const localTargets = localState.branchSalesTargets || {};
+      Object.keys(localTargets).forEach((mKey) => {
+        merged[mKey] = {
+          ...(merged[mKey] || {}),
+          ...(localTargets[mKey] || {})
+        };
+      });
+      return merged;
+    })(),
+    branchSalesSettings: {
+      allowBranchManagersEntry: false,
+      topN: 3,
+      ...(remoteState.branchSalesSettings || {}),
+      ...(localState.branchSalesSettings || {})
+    },
     rosters: mergeRosters(localState.rosters, remoteState.rosters, { deletedIds }),
     activeShifts: mergeActiveShifts(localState.activeShifts, remoteState.activeShifts, mergedShifts, { deletedIds }),
     _notificationsClearedAt: localState._notificationsClearedAt || remoteState._notificationsClearedAt || null,

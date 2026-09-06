@@ -13,6 +13,7 @@ import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import BranchResignationModule from '../resignation/BranchResignationModule';
 import { normalizeSchedule } from '../roster/RosterModule';
 import BranchMonthlyRosterModule from '../branches/BranchMonthlyRosterModule';
+import BranchSalesEntryModal from '../branches/BranchSalesEntryModal';
 import { shouldShowRequestToBranch, getEmpDisplayName, isEmployeeActive, getEmployeeManualPunchesCount, isShiftManualPunch, calculateEmployeeLeaveStats, getEmployeeApprovedLeaves, fmt } from '../../utils/formatters';
 import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
 import EmployeePermissionsManagementModule from '../permissions/EmployeePermissionsManagementModule';
@@ -226,6 +227,9 @@ export default function BranchManagerView({
   const [bmEvalMonth, setBmEvalMonth] = useState('');
   const [bmEvalNotes, setBmEvalNotes] = useState('');
   const [bmEvalItems, setBmEvalItems] = useState([]);
+
+  // 5. Branch Sales Entry by Manager State
+  const [showBranchSalesModal, setShowBranchSalesModal] = useState(false);
 
   // ── State for "طلبات الفرع المرسلة للإدارة" Tab ──
   const [sentCategoryFilter, setSentCategoryFilter] = useState('all');
@@ -1582,6 +1586,15 @@ export default function BranchManagerView({
               >
                 🏖️ طلب إجازة
               </button>
+              {Boolean(state?.branchSalesSettings?.allowBranchManagersEntry) && (
+                <button
+                  className="btn btn-start"
+                  style={{ padding: isMobileScreen ? '8px 10px' : '8px 16px', fontSize: isMobileScreen ? '12px' : '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px', background: '#0f766e' }}
+                  onClick={() => setShowBranchSalesModal(true)}
+                >
+                  📈 تسجيل مبيعات الفرع اليومية
+                </button>
+              )}
             </div>
           </div>
 
@@ -5206,6 +5219,49 @@ export default function BranchManagerView({
             </form>
           </div>
         </div>
+      )}
+
+      {/* Branch Sales Entry Modal for Branch Manager */}
+      {showBranchSalesModal && (
+        <BranchSalesEntryModal
+          isOpen={showBranchSalesModal}
+          onClose={() => setShowBranchSalesModal(false)}
+          onSave={async (newSale) => {
+            const existingIndex = (state.branchSales || []).findIndex((s) => s.id === newSale.id);
+            let updatedList;
+            if (existingIndex >= 0) {
+              updatedList = [...(state.branchSales || [])];
+              updatedList[existingIndex] = newSale;
+            } else {
+              updatedList = [newSale, ...(state.branchSales || [])];
+            }
+
+            const newSalesNotif = {
+              id: `notif_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+              type: 'branch_sales_entry',
+              title: `💰 مبيعات يومية مسجلة: ${currentBranch?.name || ''}`,
+              message: `قام مدير فرع ${currentBranch?.name || ''} بتسجيل مبيعات يوم (${newSale.date}) بإجمالي ${newSale.totalSales.toLocaleString('ar-EG')} ج.م.`,
+              branchId: currentBranch?.id,
+              branchName: currentBranch?.name,
+              date: newSale.date,
+              timestamp: new Date().toISOString(),
+              read: false
+            };
+
+            const updatedState = {
+              ...state,
+              branchSales: updatedList,
+              notifications: [newSalesNotif, ...(state.notifications || [])]
+            };
+            setState(updatedState);
+            if (saveState) await saveState(updatedState);
+            showToast?.(`✅ تم حفظ مبيعات الفرع ليوم (${newSale.date}) بنجاح`);
+            setShowBranchSalesModal(false);
+          }}
+          branches={state.branches || []}
+          preselectedBranchId={currentBranch?.id}
+          isBranchManager={true}
+        />
       )}
 
     </div>

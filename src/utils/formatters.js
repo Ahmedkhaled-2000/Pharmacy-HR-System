@@ -549,6 +549,13 @@ export function normalizeState(parsed) {
     bylaws,
     recruitmentApplications: toSafeArray(parsed.recruitmentApplications),
     jobVacancies: toSafeArray(parsed.jobVacancies),
+    branchSales: toSafeArray(parsed.branchSales),
+    branchSalesTargets: (parsed.branchSalesTargets && typeof parsed.branchSalesTargets === 'object' && !Array.isArray(parsed.branchSalesTargets)) ? parsed.branchSalesTargets : {},
+    branchSalesSettings: {
+      allowBranchManagersEntry: false,
+      topN: 3,
+      ...(parsed.branchSalesSettings && typeof parsed.branchSalesSettings === 'object' ? parsed.branchSalesSettings : {})
+    },
     _deletedIds: toSafeArray(parsed._deletedIds || [])
   };
 }

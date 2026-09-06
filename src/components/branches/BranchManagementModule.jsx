@@ -278,6 +278,23 @@ export default function BranchManagementModule({
           <button
             type="button"
             className="btn btn-ghost"
+            onClick={() => onSwitchSubTab && onSwitchSubTab('sales')}
+            style={{
+              background: '#eff6ff',
+              color: '#1e40af',
+              border: '1px solid #bfdbfe',
+              fontWeight: 800,
+              fontSize: '13.5px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            <span>📈</span> مبيعات الفروع والتارجت
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost"
             onClick={() => setIsPhonesModalOpen(true)}
             style={{
               background: 'var(--primary-light)',

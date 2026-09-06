@@ -10,6 +10,7 @@ import Dashboard from '../components/dashboard/Dashboard';
 import EmployeesHubModule from '../components/employees/EmployeesHubModule';
 import BranchManagementModule from '../components/branches/BranchManagementModule';
 import BranchMonthlyRosterModule from '../components/branches/BranchMonthlyRosterModule';
+import BranchSalesModule from '../components/branches/BranchSalesModule';
 import RequestsModule from '../components/requests/RequestsModule';
 import LeavesTrackingModule from '../components/leaves/LeavesTrackingModule';
 import EmployeePermissionsManagementModule from '../components/permissions/EmployeePermissionsManagementModule';
@@ -699,9 +700,17 @@ export default function AppRoutes() {
                   />
                 )}
 
-                {/* 3. Branch Management & Branch Monthly Roster */}
+                {/* 3. Branch Management & Branch Monthly Roster & Branch Sales */}
                 {activeNavTab === 'branches' && (
-                  activeSubTab === 'roster' ? (
+                  activeSubTab === 'sales' ? (
+                    <BranchSalesModule
+                      state={state}
+                      setState={setState}
+                      saveState={saveState}
+                      showToast={showToast}
+                      onSwitchSubTab={setActiveSubTab}
+                    />
+                  ) : activeSubTab === 'roster' ? (
                     <BranchMonthlyRosterModule
                       state={state}
                       initialBranchId={selectedRosterBranchId}
