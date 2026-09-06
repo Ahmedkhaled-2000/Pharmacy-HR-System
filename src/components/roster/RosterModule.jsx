@@ -431,7 +431,7 @@ export default function RosterModule({
                 >
                   {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
                     <option key={d} value={d}>
-                      يوم {d} من كل شهر {d === 25 ? '⭐ (الموصى به قبل بداية الدورة)' : ''}
+                      يوم {d} من كل شهر
                     </option>
                   ))}
                 </select>
