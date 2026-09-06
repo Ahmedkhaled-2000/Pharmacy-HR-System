@@ -236,6 +236,8 @@ export function computeComprehensiveFinancialReport({
   let totalGrossPayroll = 0;
   let totalNetPayroll = 0;
   let totalHoursWorked = 0;
+  let empBonusesSum = 0;
+  let empDeductionsSum = 0;
 
   const targetEmployees = employees.filter((emp) => {
     if (!emp) return false;
@@ -254,12 +256,24 @@ export function computeComprehensiveFinancialReport({
         isSingleBranch ? filterBranchId : null
       );
 
-      totalBaseEarnings += (summary.baseEarnings || 0);
-      totalOvertimeEarnings += (summary.overtimeEarnings || 0);
-      totalAllowances += (summary.totalAllowances || 0) + (summary.dailyAllowanceTotal || 0);
-      totalGrossPayroll += ((summary.baseEarnings || 0) + (summary.overtimeEarnings || 0) + (summary.totalAllowances || 0));
-      totalNetPayroll += (summary.netSalary || 0);
-      totalHoursWorked += (summary.hours || 0);
+      const baseEarn = Math.max(0, summary.baseEarnings || 0);
+      const otEarn = Math.max(0, summary.overtimeEarnings || 0);
+      const allowEarn = Math.max(0, summary.totalAllowances || 0);
+      const hours = summary.hours || 0;
+
+      totalBaseEarnings += baseEarn;
+      totalOvertimeEarnings += otEarn;
+      totalAllowances += allowEarn;
+      totalHoursWorked += hours;
+      totalGrossPayroll += (baseEarn + otEarn + allowEarn);
+
+      empBonusesSum += Math.max(0, summary.totalBonus || 0);
+      empDeductionsSum += Math.max(0, summary.totalDeduction || 0);
+
+      // في الحسابات المالية للمنشأة، صافي الراتب المستحق للموظف لا يمكن أن يكون سالباً في مسير الأجور المنصرف:
+      // إذا لم يكن لدى الموظف ساعات عمل أو كانت الاستقطاعات أكبر من مستحقاته، يكون المستحق الصافي المنصرف = 0 ج.م
+      const payableSalary = Math.max(0, summary.netSalary || 0);
+      totalNetPayroll += payableSalary;
     }
   });
 
@@ -277,17 +291,21 @@ export function computeComprehensiveFinancialReport({
     return true;
   });
 
-  let totalBonuses = 0;
-  let totalDeductions = 0;
+  let rawBonusSum = 0;
+  let rawDeductionSum = 0;
 
   filteredAdjustments.forEach((adj) => {
     const amt = parseFloat(adj.amount) || 0;
     if (adj.type === 'bonus' || adj.type === 'مكافأة') {
-      totalBonuses += amt;
+      rawBonusSum += amt;
     } else if (adj.type === 'deduction' || adj.type === 'penalty' || adj.type === 'خصم' || adj.type === 'جزاء') {
-      totalDeductions += amt;
+      rawDeductionSum += amt;
     }
   });
+
+  const totalBonuses = empBonusesSum > 0 ? empBonusesSum : rawBonusSum;
+  // إذا لم يكن هناك ساعات عمل مسجلة، لا تُحتسب استقطاعات الغياب كخصم مسير
+  const totalDeductions = totalHoursWorked > 0 ? (empDeductionsSum > 0 ? empDeductionsSum : rawDeductionSum) : rawDeductionSum;
 
   // ── 5. حركة السلف والأجل (Loans Movement) ──
   const filteredLoans = rawLoans.filter((l) => {
@@ -315,12 +333,18 @@ export function computeComprehensiveFinancialReport({
   });
 
   // ── 6. الحسابات الصافية وهوامش الربحية (Net Profit & Margins) ──
-  // إجمالي التكاليف = صافي مسير الرواتب + المصروفات التشغيلية
-  const totalOperatingCosts = totalNetPayroll + totalOperatingExpenses;
+  // التكاليف والمصروفات قيم موجبة دائماً في القوائم المالية
+  const safePayroll = Math.max(0, totalNetPayroll);
+  const safeOperatingExpenses = Math.max(0, totalOperatingExpenses);
+  const totalOperatingCosts = safePayroll + safeOperatingExpenses;
+
+  // صافي الربح التشغيلي = مجمل الإيرادات - إجمالي التكاليف
   const netProfit = totalGrossRevenues - totalOperatingCosts;
-  const profitMargin = totalGrossRevenues > 0 ? ((netProfit / totalGrossRevenues) * 100) : 0;
-  const payrollRatio = totalGrossRevenues > 0 ? ((totalNetPayroll / totalGrossRevenues) * 100) : 0;
-  const expensesRatio = totalGrossRevenues > 0 ? ((totalOperatingExpenses / totalGrossRevenues) * 100) : 0;
+  const profitMargin = totalGrossRevenues > 0
+    ? ((netProfit / totalGrossRevenues) * 100)
+    : (netProfit < 0 ? -100 : 0);
+  const payrollRatio = totalGrossRevenues > 0 ? ((safePayroll / totalGrossRevenues) * 100) : 0;
+  const expensesRatio = totalGrossRevenues > 0 ? ((safeOperatingExpenses / totalGrossRevenues) * 100) : 0;
 
   // ── 7. مقارنة الفروع المعيارية (Branch Benchmark Breakdown) ──
   const branchBenchmarks = branches.map((b) => {
@@ -343,7 +367,7 @@ export function computeComprehensiveFinancialReport({
     const bExpenses = rawFinances.filter((f) => f && (f.type === 'expense' || f.type === 'مصروف') && dateFilterFn(f.date || f.createdAt) && String(f.branchId) === bId);
     const bTotalExpenses = bExpenses.reduce((acc, f) => acc + (parseFloat(f.amount) || 0), 0);
 
-    // Branch Payroll
+    // Branch Payroll (always non-negative)
     let bPayroll = 0;
     const bEmployees = employees.filter((emp) => {
       if (!emp) return false;
@@ -353,14 +377,18 @@ export function computeComprehensiveFinancialReport({
     bEmployees.forEach((emp) => {
       if (computeEmpSummary) {
         const sum = computeEmpSummary(emp.id, dateFilterFn, periodMode === 'month' ? selectedMonth : null, bId);
-        bPayroll += (sum.netSalary || 0);
+        bPayroll += Math.max(0, sum.netSalary || 0);
       }
     });
 
-    const bTotalCosts = bPayroll + bTotalExpenses;
+    const bSafePayroll = Math.max(0, bPayroll);
+    const bSafeExpenses = Math.max(0, bTotalExpenses);
+    const bTotalCosts = bSafePayroll + bSafeExpenses;
     const bNetProfit = bGrossRevenue - bTotalCosts;
-    const bMargin = bGrossRevenue > 0 ? ((bNetProfit / bGrossRevenue) * 100) : 0;
-    const bPayrollRatio = bGrossRevenue > 0 ? ((bPayroll / bGrossRevenue) * 100) : 0;
+    const bMargin = bGrossRevenue > 0
+      ? ((bNetProfit / bGrossRevenue) * 100)
+      : (bNetProfit < 0 ? -100 : 0);
+    const bPayrollRatio = bGrossRevenue > 0 ? ((bSafePayroll / bGrossRevenue) * 100) : 0;
 
     return {
       branchId: bId,
@@ -372,7 +400,7 @@ export function computeComprehensiveFinancialReport({
       deliverySales: bDelivery,
       otherIncome: bOtherIncome,
       grossRevenue: bGrossRevenue,
-      operatingExpenses: bTotalExpenses,
+      operatingExpenses: bSafeExpenses,
       payroll: bPayroll,
       totalCosts: bTotalCosts,
       netProfit: bNetProfit,

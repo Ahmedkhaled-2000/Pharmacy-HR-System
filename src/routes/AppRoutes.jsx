@@ -1027,6 +1027,8 @@ export default function AppRoutes() {
                   'payroll',
                   'adjustments-module',
                   'admin-directives',
+                  'branch-directives',
+                  'financial-reports',
                   'whatsapp-center',
                   'bylaws',
                   'evaluations',

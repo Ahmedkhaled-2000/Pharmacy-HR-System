@@ -62,7 +62,7 @@ export default function FinancialReportsModule({
 
   // ── Handlers: Print Formal A4 P&L Statement ──
   const handlePrintReport = () => {
-    const isProfit = report.netProfit >= 0;
+    const isProfit = report.netProfit > 0 || (report.netProfit === 0 && report.totalGrossRevenues === 0 && report.totalOperatingCosts === 0);
     const printHtml = `
       <div style="direction: rtl; font-family: 'Cairo', 'Tajawal', sans-serif; padding: 25px; color: #0f172a;">
         <!-- Header -->
@@ -193,13 +193,13 @@ export default function FinancialReportsModule({
 
             <tr style="background: ${isProfit ? '#dcfce7' : '#fee2e2'}; font-weight: 900; font-size: 16px;">
               <td style="padding: 12px 10px; border: 2px solid ${isProfit ? '#16a34a' : '#dc2626'}; color: ${isProfit ? '#15803d' : '#991b1b'};">
-                ${isProfit ? '🏆 صافي الربح التشغيلي الفعلي (Net Profit)' : '⚠️ صافي العجز المالي (Net Operating Loss)'}
+                ${isProfit ? '🏆 صافي الربح التشغيلي الفعلي (Net Profit)' : (report.netProfit < 0 ? '🚨 صافي العجز المالي والتشغيلي (Net Operating Loss)' : '⚖️ نقطة التعادل (Break-even)')}
               </td>
               <td style="padding: 12px 10px; border: 2px solid ${isProfit ? '#16a34a' : '#dc2626'}; text-align: center; color: ${isProfit ? '#15803d' : '#991b1b'}; font-size: 18px;">
                 ${report.netProfit.toLocaleString('ar-EG', { minimumFractionDigits: 2 })} ج.م
               </td>
               <td style="padding: 12px 10px; border: 2px solid ${isProfit ? '#16a34a' : '#dc2626'}; text-align: center; color: ${isProfit ? '#15803d' : '#991b1b'};">
-                هامش الربح الصافي: <strong>${report.profitMargin}%</strong>
+                هامش الربح: <strong>${report.totalGrossRevenues > 0 ? `${report.profitMargin}%` : (report.netProfit < 0 ? '— (عجز بدون مبيعات)' : '0%')}</strong>
               </td>
             </tr>
           </tbody>
@@ -257,7 +257,7 @@ export default function FinancialReportsModule({
     triggerDirectPrint(printHtml, `تقرير-قائمة-الدخل-والأرباح-${report.periodLabel.replace(/\s+/g, '-')}`);
   };
 
-  const isNetProfitPositive = report.netProfit >= 0;
+  const isNetProfitPositive = report.netProfit > 0 || (report.netProfit === 0 && report.totalGrossRevenues === 0 && report.totalOperatingCosts === 0);
 
   return (
     <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '20px', direction: 'rtl' }}>
@@ -406,16 +406,16 @@ export default function FinancialReportsModule({
           background: isNetProfitPositive ? 'linear-gradient(135deg, #f0fdf4, #dcfce7)' : 'linear-gradient(135deg, #fef2f2, #fee2e2)'
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <span style={{ fontSize: '13px', color: isNetProfitPositive ? '#166534' : '#991b1b', fontWeight: '800' }}>
-              {isNetProfitPositive ? '💎 صافي الربح الفعلي' : '⚠️ صافي العجز المالي'}
+            <span style={{ fontSize: '13px', color: isNetProfitPositive ? '#166534' : (report.netProfit < 0 ? '#991b1b' : '#334155'), fontWeight: '800' }}>
+              {isNetProfitPositive ? '💎 صافي الربح الفعلي' : (report.netProfit < 0 ? '🚨 صافي العجز المالي (خسارة)' : '⚖️ نقطة التعادل')}
             </span>
-            <span style={{ fontSize: '20px' }}>{isNetProfitPositive ? '🏆' : '🚨'}</span>
+            <span style={{ fontSize: '20px' }}>{isNetProfitPositive ? '🏆' : (report.netProfit < 0 ? '🚨' : '⚖️')}</span>
           </div>
-          <div style={{ fontSize: '24px', fontWeight: '900', color: isNetProfitPositive ? '#15803d' : '#b91c1c', marginTop: '6px' }}>
+          <div style={{ fontSize: '24px', fontWeight: '900', color: isNetProfitPositive ? '#15803d' : (report.netProfit < 0 ? '#b91c1c' : '#334155'), marginTop: '6px' }}>
             {report.netProfit.toLocaleString('ar-EG', { minimumFractionDigits: 2 })} <span style={{ fontSize: '13px' }}>ج.م</span>
           </div>
-          <div style={{ fontSize: '12px', marginTop: '6px', color: isNetProfitPositive ? '#166534' : '#991b1b', fontWeight: '800' }}>
-            هامش الربح الصافي: {report.profitMargin}%
+          <div style={{ fontSize: '12px', marginTop: '6px', color: isNetProfitPositive ? '#166534' : (report.netProfit < 0 ? '#991b1b' : 'var(--muted)'), fontWeight: '800' }}>
+            هامش الربح الصافي: {report.totalGrossRevenues > 0 ? `${report.profitMargin}%` : (report.netProfit < 0 ? '— (عجز بدون مبيعات)' : '0%')}
           </div>
         </div>
       </div>
@@ -780,16 +780,18 @@ export default function FinancialReportsModule({
                 </tr>
 
                 <tr style={{
-                  background: isNetProfitPositive ? '#dcfce7' : '#fee2e2',
+                  background: isNetProfitPositive ? '#dcfce7' : (report.netProfit < 0 ? '#fee2e2' : '#f8fafc'),
                   fontWeight: '900'
                 }}>
-                  <td style={{ padding: '16px', textAlign: 'right', color: isNetProfitPositive ? '#166534' : '#991b1b', fontSize: '16px' }}>
-                    {isNetProfitPositive ? '🏆 صافي الربح الفعلي (Net Operating Profit)' : '⚠️ صافي العجز المالي (Net Operating Loss)'}
+                  <td style={{ padding: '16px', textAlign: 'right', color: isNetProfitPositive ? '#166534' : (report.netProfit < 0 ? '#991b1b' : '#334155'), fontSize: '16px' }}>
+                    {isNetProfitPositive
+                      ? '🏆 صافي الربح الفعلي (Net Operating Profit)'
+                      : (report.netProfit < 0 ? '🚨 صافي العجز المالي والتشغيلي (Net Operating Loss)' : '⚖️ نقطة التعادل (Break-even)')}
                   </td>
-                  <td style={{ padding: '16px', color: isNetProfitPositive ? '#166534' : '#991b1b', fontSize: '14px' }}>
-                    هامش الربح: {report.profitMargin}%
+                  <td style={{ padding: '16px', color: isNetProfitPositive ? '#166534' : (report.netProfit < 0 ? '#991b1b' : 'var(--muted)'), fontSize: '14px' }}>
+                    هامش الربح: {report.totalGrossRevenues > 0 ? `${report.profitMargin}%` : (report.netProfit < 0 ? '— (عجز بدون مبيعات)' : '0%')}
                   </td>
-                  <td style={{ padding: '16px', color: isNetProfitPositive ? '#15803d' : '#b91c1c', fontSize: '20px' }}>
+                  <td style={{ padding: '16px', color: isNetProfitPositive ? '#15803d' : (report.netProfit < 0 ? '#b91c1c' : '#334155'), fontSize: '20px' }}>
                     {report.netProfit.toLocaleString('ar-EG', { minimumFractionDigits: 2 })} ج.م
                   </td>
                 </tr>
