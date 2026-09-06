@@ -30,21 +30,27 @@ export default function EmployeeSalaryDetailsModal({
   const computedBranches = branchesList.map((bd, idx) => {
     const bObj = branches.find((b) => String(b.id) === String(bd.branchId));
     const bName = bObj ? bObj.name : (bd.branchName || (idx === 0 && mainBranch ? mainBranch.name : `فرع ${idx + 1}`));
-    const salary = parseFloat(bd.salary) || 0;
+    const hourlyRateInput = parseFloat(bd.salary) || 0; // سعر الساعة الشهري المدخل
     const workHours = parseFloat(bd.workHours) || 8;
     const workDays = parseFloat(bd.workDays) || 26;
     const breakHours = parseFloat(bd.breakHours) || 0;
     const netHours = Math.max(0, workHours - breakHours);
+    const effectiveHours = netHours > 0 ? netHours : workHours;
 
-    // Rate calculations
-    const dayRate = workDays > 0 ? (salary / workDays) : 0;
-    const hourRate = netHours > 0 ? (dayRate / netHours) : 0;
+    // تطبيق نفس معادلة البيانات المالية للموظف:
+    // 1. سعر اليوم = (سعر الساعة الشهري * ساعات العمل) / أيام العمل
+    const dayRate = workDays > 0 ? Math.round(((hourlyRateInput * workHours) / workDays) * 100) / 100 : 0;
+    // 2. سعر الساعة اليومي الصافي = سعر اليوم / صافي ساعات العمل الفعلية
+    const hourRate = effectiveHours > 0 ? Math.round((dayRate / effectiveHours) * 100) / 100 : 0;
+    // 3. الراتب الأساسي الشهري = سعر الساعة الشهري * ساعات العمل
+    const basicSalary = Math.round(hourlyRateInput * workHours * 100) / 100;
 
     return {
       branchId: bd.branchId,
       branchName: bName,
       branchCode: bObj?.branchCode || bd.branchCode || '',
-      salary,
+      hourlyRateInput,
+      basicSalary,
       workHours,
       workDays,
       breakHours,
@@ -54,7 +60,7 @@ export default function EmployeeSalaryDetailsModal({
     };
   });
 
-  const totalBasicSalary = computedBranches.reduce((acc, b) => acc + b.salary, 0);
+  const totalBasicSalary = computedBranches.reduce((acc, b) => acc + b.basicSalary, 0);
 
   // 2. Allowances
   const mgmtAllowance = parseFloat(emp.managementAllowance || emp.managementBonus) || 0;
@@ -173,11 +179,12 @@ export default function EmployeeSalaryDetailsModal({
               <thead>
                 <tr style={{ background: '#f8fafc', borderBottom: '1.5px solid #cbd5e1' }}>
                   <th style={{ padding: '9px 12px' }}>الفرع</th>
-                  <th style={{ padding: '9px 12px' }}>الراتب الأساسي</th>
+                  <th style={{ padding: '9px 12px', textAlign: 'center' }}>سعر الساعة الشهري</th>
+                  <th style={{ padding: '9px 12px', textAlign: 'center' }}>الراتب الأساسي</th>
                   <th style={{ padding: '9px 12px', textAlign: 'center' }}>ساعات / يوم</th>
                   <th style={{ padding: '9px 12px', textAlign: 'center' }}>أيام / شهر</th>
                   <th style={{ padding: '9px 12px', textAlign: 'center' }}>سعر اليوم</th>
-                  <th style={{ padding: '9px 12px', textAlign: 'center' }}>سعر الساعة</th>
+                  <th style={{ padding: '9px 12px', textAlign: 'center' }}>سعر الساعة الصافي</th>
                 </tr>
               </thead>
               <tbody>
@@ -187,8 +194,11 @@ export default function EmployeeSalaryDetailsModal({
                       📍 {b.branchName}
                       {b.branchCode && <span style={{ fontSize: '11px', color: '#64748b', marginRight: '4px' }}>({b.branchCode})</span>}
                     </td>
-                    <td style={{ padding: '10px 12px', fontWeight: 800, color: '#047857' }}>
-                      {fmt(b.salary)} ج.م
+                    <td style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 700, color: '#4f46e5' }}>
+                      {fmt(b.hourlyRateInput)} ج.م
+                    </td>
+                    <td style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 800, color: '#047857' }}>
+                      {fmt(b.basicSalary)} ج.م
                     </td>
                     <td style={{ padding: '10px 12px', textAlign: 'center' }}>
                       <strong>{b.workHours}</strong> س

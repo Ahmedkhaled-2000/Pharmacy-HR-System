@@ -342,10 +342,8 @@ export function getEmployeeDailyRate(employee, branchId = null) {
   const workDays = targetBranchDetails ? (parseFloat(targetBranchDetails.workDaysPerMonth) || 26) : (parseFloat(employee.workDaysPerMonth) || 26);
 
   // المعادلة المعتمدة في النظام:
-  // سعر اليوم = إذا كان الراتب شهرياً: الراتب / أيام العمل، وإذا كان سعر ساعة: (سعر الساعة * ساعات العمل) / أيام العمل
-  const dailyRate = workDays > 0 
-    ? (salary >= 200 ? salary / workDays : (salary * workHours) / workDays) 
-    : (salary >= 200 ? salary : salary * workHours);
+  // سعر اليوم = (سعر الساعة الشهري * ساعات العمل اليومية) / أيام العمل الشهرية
+  const dailyRate = workDays > 0 ? (salary * workHours) / workDays : (salary * workHours);
   return Math.round(dailyRate * 100) / 100;
 }
 

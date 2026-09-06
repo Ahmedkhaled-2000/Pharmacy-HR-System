@@ -1109,7 +1109,7 @@ export default function EmployeePortalView({
     const hrRate = bDetail ? (parseFloat(bDetail.salary) || 0) : (parseFloat(emp?.salary) || 0);
     const wHours = bDetail ? (parseFloat(bDetail.workHoursPerDay) || 8) : (parseFloat(emp?.workHoursPerDay) || 8);
     const wDays = bDetail ? (parseFloat(bDetail.workDaysPerMonth) || 26) : (parseFloat(emp?.workDaysPerMonth) || 26);
-    const calcDailyRate = wDays > 0 ? (hrRate >= 200 ? hrRate / wDays : (hrRate * wHours) / wDays) : (hrRate >= 200 ? hrRate : hrRate * wHours);
+    const calcDailyRate = wDays > 0 ? (hrRate * wHours) / wDays : (hrRate * wHours);
 
     // 1. Direct Adjustments (state.adjustments)
     const directAdjs = (state.adjustments || []).filter(
