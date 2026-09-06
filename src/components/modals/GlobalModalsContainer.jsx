@@ -99,9 +99,9 @@ export default function GlobalModalsContainer() {
   const [empCode, setEmpCode] = useState('');
   const [empPhone, setEmpPhone] = useState('');
   const [empJobTitle, setEmpJobTitle] = useState('مساعد صيدلي');
-  const [empSalary, setEmpSalary] = useState('4000');
-  const [empWorkHours, setEmpWorkHours] = useState('8');
-  const [empWorkDays, setEmpWorkDays] = useState('26');
+  const [empSalary, setEmpSalary] = useState('');
+  const [empWorkHours, setEmpWorkHours] = useState('');
+  const [empWorkDays, setEmpWorkDays] = useState('');
   const [empPassword, setEmpPassword] = useState('123');
   const [empAnnualLeaveBalance, setEmpAnnualLeaveBalance] = useState('21');
   const [empPhotoUrl, setEmpPhotoUrl] = useState('');
@@ -125,9 +125,9 @@ export default function GlobalModalsContainer() {
       setEmpCode(String(101 + (state.employees || []).length));
       setEmpPhone('');
       setEmpJobTitle('مساعد صيدلي');
-      setEmpSalary('4000');
-      setEmpWorkHours('8');
-      setEmpWorkDays('26');
+      setEmpSalary('');
+      setEmpWorkHours('');
+      setEmpWorkDays('');
       setEmpPassword('123');
       setEmpAnnualLeaveBalance('21');
       setEmpPhotoUrl('');

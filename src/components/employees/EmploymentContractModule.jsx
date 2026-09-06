@@ -151,20 +151,17 @@ export default function EmploymentContractModule({
   const workHours = targetBranchDetails ? (parseFloat(targetBranchDetails.workHours || targetBranchDetails.workHoursPerDay) || 8) : (parseFloat(emp?.workHoursPerDay) || 8);
   const workDays = targetBranchDetails ? (parseFloat(targetBranchDetails.workDays || targetBranchDetails.workDaysPerMonth) || 26) : (parseFloat(emp?.workDaysPerMonth) || 26);
 
-  const calcDailyRate = workDays > 0 ? (rateVal * workHours) / workDays : 0;
+  const calcDailyRate = workDays > 0 ? (rateVal >= 200 ? rateVal / workDays : (rateVal * workHours) / workDays) : rateVal;
   const calcHourlyRate = workHours > 0 ? calcDailyRate / workHours : (workDays > 0 ? rateVal / workDays : rateVal);
 
   const monthlySalary = parseFloat(emp?.monthlySalary) || (
     isMultiBranch
       ? emp.branchesDetails.reduce((sum, bd) => {
           const r = parseFloat(bd.salary) || 0;
-          const h = parseFloat(bd.workHours || bd.workHoursPerDay) || 8;
-          const d = parseFloat(bd.workDays || bd.workDaysPerMonth) || 26;
-          const daily = d > 0 ? (r * h) / d : 0;
-          return sum + (daily * d);
+          return sum + (r >= 200 ? r : (r * (parseFloat(bd.workHours || bd.workHoursPerDay) || 8)));
         }, 0)
-      : (calcDailyRate * workDays)
-  ) || (rateVal * workHours);
+      : (rateVal >= 200 ? rateVal : rateVal * workHours)
+  ) || rateVal;
 
   const hireDate = emp?.hireDate || emp?.hiring_date || getRealTodayStr();
 

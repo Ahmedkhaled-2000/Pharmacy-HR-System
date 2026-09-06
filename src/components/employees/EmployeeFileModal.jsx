@@ -704,7 +704,7 @@ export default function EmployeeFileModal({
           branchId: ab.branchId,
           branchName: branchObj ? branchObj.name : (ab.branchName || 'فرع غير معروف'),
           branchCode: branchObj ? branchObj.branchCode : (ab.branchCode || ''),
-          salary: String(ab.salary || '4000'),
+          salary: String(ab.salary !== undefined && ab.salary !== null ? ab.salary : ''),
           workHoursPerDay: String(ab.workHours || ab.workHoursPerDay || '8'),
           workDaysPerMonth: String(ab.workDays || ab.workDaysPerMonth || '26'),
           breakHours: String(ab.breakHours || ab.defaultBreakHours || '0'),
@@ -1331,7 +1331,7 @@ export default function EmployeeFileModal({
                     className="btn btn-ghost" 
                     style={{ fontSize: '12px' }}
                     onClick={() => {
-                      setBranchesDetails([...branchesDetails, { id: Math.random().toString(), branchId: '', salary: '4000', workHours: '8', workDays: '26' }]);
+                      setBranchesDetails([...branchesDetails, { id: Math.random().toString(), branchId: '', salary: '', workHours: '', workDays: '', breakHours: '' }]);
                     }}
                   >
                     ➕ إضافة فرع آخر
@@ -1497,14 +1497,11 @@ export default function EmployeeFileModal({
                   let calcDailyHourlyRate = 0;
                   let calcMonthlySalary = 0;
 
-                  if (rateVal > 0 && daysVal > 0 && hoursVal > 0) {
-                    // 1. سعر اليوم = (سعر الساعة الشهري * ساعات العمل) / أيام العمل
-                    calcDailyRate = Math.round(((rateVal * hoursVal) / daysVal) * 100) / 100;
-                    // 2. سعر الساعة اليومي الصافي = سعر اليوم / صافي ساعات العمل الفعلية
+                  if (rateVal > 0) {
+                    calcMonthlySalary = rateVal;
+                    calcDailyRate = daysVal > 0 ? Math.round((rateVal / daysVal) * 100) / 100 : 0;
                     const effectiveHours = netHoursVal > 0 ? netHoursVal : hoursVal;
-                    calcDailyHourlyRate = Math.round((calcDailyRate / effectiveHours) * 100) / 100;
-                    // 3. الراتب الأساسي الشهري = سعر اليوم * أيام العمل = سعر الساعة الشهري * ساعات العمل
-                    calcMonthlySalary = Math.round(calcDailyRate * daysVal * 100) / 100;
+                    calcDailyHourlyRate = effectiveHours > 0 ? Math.round((calcDailyRate / effectiveHours) * 100) / 100 : 0;
                   }
 
                   return (
@@ -1520,7 +1517,7 @@ export default function EmployeeFileModal({
                         <div className="field">
                           <label style={{ fontWeight: 700, fontSize: '12.5px', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '6px' }}>
                             <span>💰</span>
-                            <span>سعر الساعة الشهري (الراتب الأساسي)</span>
+                            <span>الراتب الأساسي الشهري بالفرع</span>
                           </label>
                           <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
                             <input
@@ -1667,11 +1664,11 @@ export default function EmployeeFileModal({
                     let calcDailyHourlyRate = 0;
                     let calcMonthlySalary = 0;
 
-                    if (rateVal > 0 && daysVal > 0 && hoursVal > 0) {
-                      calcDailyRate = Math.round(((rateVal * hoursVal) / daysVal) * 100) / 100;
+                    if (rateVal > 0) {
+                      calcMonthlySalary = rateVal;
+                      calcDailyRate = daysVal > 0 ? Math.round((rateVal / daysVal) * 100) / 100 : 0;
                       const effectiveHours = netHoursVal > 0 ? netHoursVal : hoursVal;
-                      calcDailyHourlyRate = Math.round((calcDailyRate / effectiveHours) * 100) / 100;
-                      calcMonthlySalary = Math.round(calcDailyRate * daysVal * 100) / 100;
+                      calcDailyHourlyRate = effectiveHours > 0 ? Math.round((calcDailyRate / effectiveHours) * 100) / 100 : 0;
                     }
 
                     return (
@@ -1721,7 +1718,7 @@ export default function EmployeeFileModal({
 
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '14px' }}>
                           <div className="field">
-                            <label style={{ color: '#64748b', fontSize: '12px' }}>سعر الساعة الشهري (محفوظ)</label>
+                            <label style={{ color: '#64748b', fontSize: '12px' }}>الراتب الأساسي الشهري (محفوظ)</label>
                             <input
                               type="number"
                               value={ab.salary !== undefined ? ab.salary : ''}
@@ -1806,13 +1803,7 @@ export default function EmployeeFileModal({
                 const isMgmt = isManagementJob(jobTitle, jobs);
                 const baseMonthly = branchesDetails.reduce((acc, bd) => {
                   const rateVal = parseFloat(bd.salary) || 0;
-                  const daysVal = parseFloat(bd.workDays) || 26;
-                  const hoursVal = parseFloat(bd.workHours) || 8;
-                  // سعر اليوم = (سعر الساعة الشهري * ساعات العمل) / أيام العمل
-                  const daily = daysVal > 0 ? ((rateVal * hoursVal) / daysVal) : (rateVal * hoursVal);
-                  // الراتب الأساسي الشهري = سعر اليوم * أيام العمل = سعر الساعة الشهري * ساعات العمل
-                  const monthly = Math.round(daily * daysVal * 100) / 100;
-                  return acc + monthly;
+                  return acc + rateVal;
                 }, 0);
 
                 const mgmtVal = isMgmt ? (parseFloat(managementAllowance) || 0) : 0;
