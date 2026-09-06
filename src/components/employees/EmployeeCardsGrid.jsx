@@ -779,22 +779,6 @@ export default function EmployeeCardsGrid({
                         </div>
                       )}
 
-                      {/* Right-Middle Block: Financial Summary */}
-                      {!isEmpTerminated && (() => {
-                        const bdObj = emp.branchesDetails?.find((b) => String(b.branchId) === String(branchKey));
-                        const branchHourlyRate = bdObj ? parseFloat(bdObj.salary) || 0 : (parseFloat(emp.salary) || 0);
-                        const branchSum = empSum.perBranch?.[branchKey] || empSum;
-                        const branchMonthlySalary = branchSum.monthlySalary || (branchHourlyRate * (parseFloat(bdObj?.workHoursPerDay) || 8) * (parseFloat(bdObj?.workDaysPerMonth) || 26));
-                        return (
-                          <div style={{ display: 'flex', gap: '16px', fontSize: '13px', background: 'var(--surface)', padding: '10px 16px', borderRadius: '10px', border: '1px solid var(--border)' }}>
-                            <div>سعر الساعة: <strong style={{ color: 'var(--primary-dark)' }}>{fmt(branchHourlyRate)} ج.م</strong></div>
-                            <div>الراتب الأساسي: <strong style={{ color: 'var(--primary-dark)' }}>{fmt(branchMonthlySalary)} ج.م</strong></div>
-                            <div>الساعات: <strong>{fmt(branchSum.hours)} س</strong></div>
-                            <div>الصافي: <strong style={{ color: '#0d9488' }}>{fmt(branchSum.baseEarnings || empSum.netSalary)} ج.م</strong></div>
-                          </div>
-                        );
-                      })()}
-
                       {/* Action Buttons Group */}
                       <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
                         {/* 1. If Active: End of Service Button & Reactivate Button */}
