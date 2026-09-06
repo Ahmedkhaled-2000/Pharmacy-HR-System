@@ -23,6 +23,7 @@ import AdminResignationModule from '../components/resignation/AdminResignationMo
 import EvaluationsModule from '../components/evaluations/EvaluationsModule';
 import LoansMedsModule from '../components/loans/LoansMedsModule';
 import IncomeExpensesModule from '../components/finance/IncomeExpensesModule';
+import FinancialReportsModule from '../components/finance/FinancialReportsModule';
 import SettingsModule from '../components/settings/SettingsModule';
 import NotificationCenterModule from '../components/notifications/NotificationCenterModule';
 import ApprovalCenterModule from '../components/approvals/ApprovalCenterModule';
@@ -914,6 +915,31 @@ export default function AppRoutes() {
                     customFrom={adminCustomFrom}
                     customTo={adminCustomTo}
                   />
+                )}
+
+                {/* 14.5. Financial Reports & Comprehensive P&L */}
+                {activeNavTab === 'financial-reports' && (
+                  authRole !== 'branch' ? (
+                    <FinancialReportsModule
+                      state={{ ...state, computeEmpSummary }}
+                      setState={setState}
+                      saveState={saveState}
+                      showToast={showToast}
+                      monthPicker={monthPicker}
+                      setMonthPicker={setMonthPicker}
+                      filterMode={adminFilterMode}
+                      setFilterMode={setAdminFilterMode}
+                      customFrom={adminCustomFrom}
+                      setCustomFrom={setAdminCustomFrom}
+                      customTo={adminCustomTo}
+                      setCustomTo={setAdminCustomTo}
+                    />
+                  ) : (
+                    <div className="card settings-card" style={{ padding: '30px', textAlign: 'center' }}>
+                      <h3 style={{ color: '#dc2626' }}>⛔ غير مصرح بالدخول</h3>
+                      <p style={{ color: 'var(--muted)' }}>التقارير المالية والأرباح مخصصة حصرياً للإدارة العليا والمالك.</p>
+                    </div>
+                  )
                 )}
 
                 {/* 15. System Settings */}

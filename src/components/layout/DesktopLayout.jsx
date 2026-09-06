@@ -237,6 +237,13 @@ export default function DesktopLayout({
           label: 'المصروفات والإيرادات',
           icon: '📈',
           desc: 'سجل الإيرادات والمصروفات النقدية اليومية'
+        },
+        {
+          id: 'financial-reports',
+          targetTab: 'financial-reports',
+          label: 'التقارير المالية والأرباح',
+          icon: '📊',
+          desc: 'التقرير المالي الشامل، المبيعات، الرواتب، المصروفات، وصافي الأرباح'
         }
       ]
     },

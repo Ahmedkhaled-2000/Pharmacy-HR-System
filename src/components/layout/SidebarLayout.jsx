@@ -54,6 +54,7 @@ export default function SidebarLayout({
     { id: 'evaluations', label: 'التقييمات', icon: '⭐️' },
     { id: 'loans-meds', label: 'السلف والأجل', icon: '💳' },
     { id: 'income-expenses', label: 'المصروفات والإيرادات', icon: '📈' },
+    { id: 'financial-reports', label: 'التقارير المالية', icon: '📊' },
     { id: 'pharmacy-archive', label: 'أرشيف الفواتير والمستندات', icon: '🗄️', openInNewTab: true },
     { id: 'settings', label: 'الإعدادات', icon: '⚙️' },
   ];
