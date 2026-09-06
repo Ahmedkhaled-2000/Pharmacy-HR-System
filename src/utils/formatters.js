@@ -248,7 +248,15 @@ export function normalizeState(parsed) {
   const shiftSwaps = toSafeArray(parsed.shiftSwaps);
   let loans = toSafeArray(parsed.loans);
   const evaluations = toSafeArray(parsed.evaluations);
-  const notifications = toSafeArray(parsed.notifications);
+  // ── Remove old automated cycle reminder spam and keep only management notifications ──
+  const notifications = toSafeArray(parsed.notifications).filter((n) => {
+    if (!n) return false;
+    const isOldAutoReminder = (
+      n.title?.includes('تذكير دورة الرواتب') ||
+      n.message?.includes('اقتربت/انتهت دورة العمل الحالية')
+    ) && n.createdBy !== 'admin';
+    return !isOldAutoReminder;
+  });
   const employeeNotes = toSafeArray(parsed.employeeNotes);
   const authorizedDevices = toSafeArray(parsed.authorizedDevices);
   const logs = toSafeArray(parsed.logs);

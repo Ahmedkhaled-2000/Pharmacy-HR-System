@@ -22,7 +22,7 @@ import { preWarmFaceModels } from '../../utils/faceApiHelper';
 import { uploadBiometricAttendancePhoto } from '../../utils/googleDriveService';
 import { sendBiometricRegistrationRequestEmail, sendBiometricResetRequestEmail } from '../../utils/gmailService';
 import { computeLatenessFinancialAmount, isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
-import { getEmployeeDaySchedule, checkAndTriggerCycleEndRosterReminder, getResolvedEmployeeRoster } from '../../utils/rosterEngine';
+import { getEmployeeDaySchedule, getResolvedEmployeeRoster } from '../../utils/rosterEngine';
 import { printEmployeePayslipDirect } from '../../utils/printHelper';
 import { useLiveRealTime } from '../../hooks/useLiveRealTime';
 import '../../portal.css';
@@ -308,25 +308,7 @@ export default function EmployeePortalView({
     }
   }, [selectedBranchId, emp?.branchesDetails, activeTab]);
 
-  // ── Auto-trigger reminder notification when payroll cycle end is near/finished and no roster submitted ──
-  useEffect(() => {
-    if (!emp || !state || !setState) return;
-    try {
-      const newNotif = checkAndTriggerCycleEndRosterReminder(state, emp);
-      if (newNotif) {
-        const updatedState = {
-          ...state,
-          notifications: [newNotif, ...(state.notifications || [])]
-        };
-        setState(updatedState);
-        if (typeof saveState === 'function') {
-          saveState(updatedState);
-        }
-      }
-    } catch (err) {
-      console.warn('Error checking cycle end roster reminder:', err);
-    }
-  }, [emp?.id, state?.orgSettings, state?.rosters?.length, state?.requests?.length]);
+
 
   // ── Form States for Employee Actions ───────────
   const [showManualForm, setShowManualForm] = useState(false);
