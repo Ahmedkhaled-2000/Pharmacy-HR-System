@@ -92,12 +92,18 @@ export default function RosterModule({
   const [schedAutoSend, setSchedAutoSend] = useState(() => (
     orgSettings.rosterNotificationAutoSend !== undefined ? Boolean(orgSettings.rosterNotificationAutoSend) : true
   ));
-  const [schedMessage, setSchedMessage] = useState(() => (
-    orgSettings.rosterNotificationMessage || 'تم اعتماد وإصدار الجدول الشهري ومناوبات العمل، يرجى الدخول لمراجعة شفتاتك وأيام الراحة المقررة عبر بوابة الموظف.'
-  ));
-  const [schedTarget, setSchedTarget] = useState(() => (
-    orgSettings.rosterNotificationTarget || 'all'
-  ));
+  const [schedMessage, setSchedMessage] = useState(() => {
+    const existing = orgSettings.rosterNotificationMessage;
+    if (existing && !existing.includes('تم اعتماد وإصدار الجدول الشهري')) {
+      return existing;
+    }
+    return 'يرجى التكرم بالدخول على بوابة الموظف لإعداد وتحديد جدول شفتاتك ومناوبات العمل للشهر الجديد، وإرسال الجدول لمدير الفرع والإدارة للاعتماد.';
+  });
+  const [schedTarget, setSchedTarget] = useState(() => {
+    const existing = orgSettings.rosterNotificationTarget;
+    if (existing === 'approved_only') return 'unsubmitted';
+    return existing || 'unsubmitted';
+  });
   const [schedBranchFilter, setSchedBranchFilter] = useState('');
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [isSendingNotifs, setIsSendingNotifs] = useState(false);
@@ -112,10 +118,10 @@ export default function RosterModule({
     if (orgSettings.rosterNotificationAutoSend !== undefined) {
       setSchedAutoSend(Boolean(orgSettings.rosterNotificationAutoSend));
     }
-    if (orgSettings.rosterNotificationMessage) {
+    if (orgSettings.rosterNotificationMessage && !orgSettings.rosterNotificationMessage.includes('تم اعتماد وإصدار الجدول الشهري')) {
       setSchedMessage(orgSettings.rosterNotificationMessage);
     }
-    if (orgSettings.rosterNotificationTarget) {
+    if (orgSettings.rosterNotificationTarget && orgSettings.rosterNotificationTarget !== 'approved_only') {
       setSchedTarget(orgSettings.rosterNotificationTarget);
     }
   }, [
@@ -127,20 +133,42 @@ export default function RosterModule({
 
   // Compute eligible recipients based on target group and branch filters
   const eligibleEmployees = useMemo(() => {
+    const today = new Date();
+    const todayStr = getRealTodayStr ? getRealTodayStr() : today.toISOString().slice(0, 10);
+    const currentMonthKey = todayStr.slice(0, 7);
+    const [y, m] = currentMonthKey.split('-').map(Number);
+    const nextMonthKey = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
+    // If today is day 15 or later, the upcoming schedule being planned is next month's, else current month
+    const targetMonthKey = today.getDate() >= 15 ? nextMonthKey : currentMonthKey;
+
     return (state.employees || []).filter((emp) => {
       if (!isEmployeeActive(emp)) return false;
       if (schedBranchFilter && emp.branchId !== schedBranchFilter && (!emp.branchesDetails || !emp.branchesDetails.some(bd => String(bd.branchId) === String(schedBranchFilter)))) {
         return false;
       }
-      if (schedTarget === 'approved_only') {
-        const r = getResolvedEmployeeRoster(emp, schedBranchFilter || emp.branchId, state);
-        if (r?.status !== 'approved' || !r?.schedule || Object.keys(r.schedule).length === 0) {
-          return false;
-        }
+      if (schedTarget === 'all') return true;
+
+      const bId = schedBranchFilter || emp.branchId || emp.branchesDetails?.[0]?.branchId;
+      const r = getResolvedEmployeeRoster(emp, bId, targetMonthKey, state);
+      const hasApproved = Boolean(r?.status === 'approved' && r?.schedule && Object.keys(r.schedule).length > 0);
+
+      const hasPending = (state.requests || []).some(
+        req =>
+          (String(req.employeeId) === String(emp.id) || (emp.code && String(req.employeeCode) === String(emp.code))) &&
+          (req.type === 'roster_update' || req.type === 'roster_edit' || req.type === 'roster_edit_request') &&
+          (req.month === targetMonthKey || req.month === currentMonthKey || !req.month) &&
+          (req.status === 'pending' || req.status === 'pending_admin' || req.status === 'pending_branch')
+      );
+
+      if (schedTarget === 'unsubmitted') {
+        return !hasApproved && !hasPending;
+      }
+      if (schedTarget === 'not_approved') {
+        return !hasApproved;
       }
       return true;
     });
-  }, [state.employees, state.rosters, schedTarget, schedBranchFilter]);
+  }, [state.employees, state.rosters, state.requests, schedTarget, schedBranchFilter]);
 
   // Save Settings to orgSettings
   const handleSaveSettings = async () => {
@@ -153,7 +181,7 @@ export default function RosterModule({
         ...(state.orgSettings || {}),
         rosterNotificationDay: validDay,
         rosterNotificationAutoSend: schedAutoSend,
-        rosterNotificationMessage: schedMessage.trim() || 'تم اعتماد وإصدار الجدول الشهري ومناوبات العمل، يرجى الدخول لمراجعة شفتاتك وأيام الراحة المقررة عبر بوابة الموظف.',
+        rosterNotificationMessage: schedMessage.trim() || 'يرجى التكرم بالدخول على بوابة الموظف لإعداد وتحديد جدول شفتاتك ومناوبات العمل للشهر الجديد، وإرسال الجدول لمدير الفرع والإدارة للاعتماد.',
         rosterNotificationTarget: schedTarget
       };
 
@@ -166,7 +194,7 @@ export default function RosterModule({
       if (typeof saveState === 'function') {
         await saveState(updatedState);
       }
-      showToast?.('✅ تم حفظ إعدادات إشعار الجدول الشهري بنجاح');
+      showToast?.('✅ تم حفظ إعدادات تذكير الجدول الشهري بنجاح');
     } catch (err) {
       console.error('Error saving roster notification settings:', err);
       showToast?.('❌ حدث خطأ أثناء حفظ الإعدادات');
@@ -178,7 +206,7 @@ export default function RosterModule({
   // Broadcast Notification to Employees
   const executeSendNotifications = async (isAuto = false) => {
     if (eligibleEmployees.length === 0) {
-      if (!isAuto) showToast?.('⚠️ لا يوجد موظفين مستحقين للإشعار وفق الخيارات المحددة!');
+      if (!isAuto) showToast?.('⚠️ لا يوجد موظفين مستحقين للتذكير وفق الخيارات المحددة!');
       return;
     }
 
@@ -186,22 +214,27 @@ export default function RosterModule({
     try {
       const todayStr = getRealTodayStr ? getRealTodayStr() : new Date().toISOString().slice(0, 10);
       const currentMonthKey = todayStr.slice(0, 7);
+      const [y, m] = currentMonthKey.split('-').map(Number);
+      const nextMonthKey = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
+      const targetMonthKey = new Date().getDate() >= 15 ? nextMonthKey : currentMonthKey;
       const nowIso = new Date().toISOString();
 
       const newNotifications = eligibleEmployees.map((emp) => ({
-        id: `notif_roster_announcement_${currentMonthKey}_${emp.id}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        type: 'roster_announcement',
-        typeLabel: 'الجدول الشهري',
+        id: `notif_roster_reminder_${targetMonthKey}_${emp.id}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        type: 'roster_reminder',
+        typeLabel: 'تذكير الجدول الشهري',
         icon: '📅',
-        title: '📅 اعتماد وإصدار الجدول الشهري',
-        message: schedMessage.trim() || 'تم اعتماد وإصدار الجدول الشهري ومناوبات العمل، يرجى الدخول لمراجعة شفتاتك وأيام الراحة المقررة عبر بوابة الموظف.',
+        title: `📅 تذكير: مطلوب إعداد وإرسال الجدول الشهري لشهر (${targetMonthKey})`,
+        message: schedMessage.trim() || 'يرجى التكرم بالدخول على بوابة الموظف لإعداد وتحديد جدول شفتاتك ومناوبات العمل للشهر الجديد، وإرسال الجدول لمدير الفرع والإدارة للاعتماد.',
         targetEmployeeId: String(emp.id || emp.code),
         employeeId: String(emp.id || emp.code),
         employeeCode: emp.code,
         employeeName: emp.name,
         targetRole: 'employee',
-        targetMonth: currentMonthKey,
+        targetMonth: targetMonthKey,
         linkTab: 'roster',
+        autoOpenModal: true,
+        actionRequired: true,
         read: false,
         date: todayStr,
         timestamp: nowIso,
@@ -233,13 +266,13 @@ export default function RosterModule({
 
       setShowConfirmModal(false);
       if (isAuto) {
-        showToast?.(`🔔 تم إرسال إشعار الجدول الشهري تلقائياً لموظفي الصيدليات (${eligibleEmployees.length} موظف)`);
+        showToast?.(`🔔 تم إرسال تذكير الجدول الشهري تلقائياً لموظفي الصيدليات (${eligibleEmployees.length} موظف)`);
       } else {
-        showToast?.(`📢 تم إرسال إشعار الجدول الشهري بنجاح إلى (${eligibleEmployees.length}) موظف!`);
+        showToast?.(`📢 تم إرسال تذكير إعداد الجدول الشهري بنجاح إلى (${eligibleEmployees.length}) موظف!`);
       }
     } catch (err) {
-      console.error('Error sending roster notifications:', err);
-      showToast?.('❌ حدث خطأ أثناء إرسال الإشعارات');
+      console.error('Error sending roster reminder notifications:', err);
+      showToast?.('❌ حدث خطأ أثناء إرسال التذكيرات');
     } finally {
       setIsSendingNotifs(false);
     }
@@ -326,12 +359,12 @@ export default function RosterModule({
               fontSize: '20px',
               boxShadow: '0 2px 8px rgba(15, 118, 110, 0.25)'
             }}>
-              🔔
+              ⏰
             </div>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                 <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: 'var(--text, #1e293b)' }}>
-                  جدولة وإرسال إشعار الجدول الشهري للموظفين
+                  تذكير الموظفين بعمل وإرسال الجدول الشهري للاعتماد
                 </h3>
                 <span style={{
                   fontSize: '12px',
@@ -342,11 +375,11 @@ export default function RosterModule({
                   color: schedAutoSend ? '#059669' : '#64748b',
                   border: `1px solid ${schedAutoSend ? '#a7f3d0' : '#cbd5e1'}`
                 }}>
-                  {schedAutoSend ? `🟢 إرسال آلي مجدول: يوم ${schedDay} من كل شهر` : '⚪ الإرسال التلقائي: متوقف'}
+                  {schedAutoSend ? `🟢 تذكير آلي مجدول: يوم ${schedDay} من كل شهر` : '⚪ التذكير التلقائي: متوقف'}
                 </span>
               </div>
               <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--muted, #64748b)' }}>
-                تحديد يوم محدد شهرياً لإشعار الموظفين تلقائياً باعتماد وإصدار جداول شفتاتهم، مع إمكانية البث الفوري الآن
+                تحديد يوم محدد شهرياً لتذكير الموظفين تلقائياً بعمل وإعداد جدول شفتاتهم ومناوباتهم وإرساله للاعتماد، مع إمكانية إرسال تذكير فوري الآن
               </p>
             </div>
           </div>
@@ -369,7 +402,7 @@ export default function RosterModule({
                 gap: '6px'
               }}
             >
-              <span>{isSettingsExpanded ? '▲ إخفاء الإعدادات' : '▼ ضبط وجدولة الإشعار'}</span>
+              <span>{isSettingsExpanded ? '▲ إخفاء الإعدادات' : '▼ ضبط وجدولة التذكير'}</span>
             </button>
           </div>
         </div>
@@ -386,7 +419,7 @@ export default function RosterModule({
               {/* 1. Day of Month Selector */}
               <div style={{ background: 'var(--background, #f8fafc)', padding: '14px', borderRadius: '10px', border: '1px solid var(--border, #e2e8f0)' }}>
                 <label style={{ display: 'block', fontWeight: 800, fontSize: '13.5px', marginBottom: '6px', color: 'var(--text, #1e293b)' }}>
-                  📅 اليوم المحدد شهرياً للإشعار:
+                  📅 اليوم المحدد شهرياً للتذكير:
                 </label>
                 <select
                   value={schedDay}
@@ -408,7 +441,7 @@ export default function RosterModule({
                   ))}
                 </select>
                 <div style={{ fontSize: '12px', color: 'var(--muted, #64748b)', marginTop: '6px', lineHeight: 1.4 }}>
-                  سيتم إرسال إشعار للموظفين تلقائياً فور حلول هذا اليوم من كل شهر.
+                  سيتم إرسال تذكير للموظفين تلقائياً فور حلول هذا اليوم لإعداد جدول الشهر الجديد.
                 </div>
               </div>
 
@@ -441,7 +474,7 @@ export default function RosterModule({
               {/* 3. Target Group */}
               <div style={{ background: 'var(--background, #f8fafc)', padding: '14px', borderRadius: '10px', border: '1px solid var(--border, #e2e8f0)' }}>
                 <label style={{ display: 'block', fontWeight: 800, fontSize: '13.5px', marginBottom: '6px', color: 'var(--text, #1e293b)' }}>
-                  👥 الفئة المستهدفة بالإشعار:
+                  👥 الفئة المستهدفة بالتذكير:
                 </label>
                 <select
                   value={schedTarget}
@@ -456,11 +489,12 @@ export default function RosterModule({
                     color: 'var(--text, #0f172a)'
                   }}
                 >
+                  <option value="unsubmitted">الموظفون الذين لم يقدموا جداولهم بعد (الموصى به)</option>
+                  <option value="not_approved">الموظفون الذين ليس لديهم جدول معتمد حتى الآن</option>
                   <option value="all">جميع الموظفين النشطين ({employees.filter(isEmployeeActive).length} موظف)</option>
-                  <option value="approved_only">الموظفون ذوو الجداول المعتمدة فقط</option>
                 </select>
                 <div style={{ fontSize: '12px', color: 'var(--muted, #64748b)', marginTop: '6px', lineHeight: 1.4 }}>
-                  المستهدفون حالياً: <strong style={{ color: 'var(--primary, #0f766e)' }}>{eligibleEmployees.length} موظف</strong>
+                  المستهدفون بالتذكير حالياً: <strong style={{ color: 'var(--primary, #0f766e)' }}>{eligibleEmployees.length} موظف</strong>
                 </div>
               </div>
 
@@ -488,7 +522,7 @@ export default function RosterModule({
                   ))}
                 </select>
                 <div style={{ fontSize: '12px', color: 'var(--muted, #64748b)', marginTop: '6px', lineHeight: 1.4 }}>
-                  تخصيص الإرسال لفرع محدد أو لجميع الصيدليات.
+                  تخصيص التذكير لفرع محدد أو لجميع الصيدليات.
                 </div>
               </div>
             </div>
@@ -496,9 +530,9 @@ export default function RosterModule({
             {/* Custom Message */}
             <div style={{ marginBottom: '16px' }}>
               <label style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: '13.5px', marginBottom: '6px', color: 'var(--text, #1e293b)' }}>
-                <span>📝 نص رسالة الإشعار المرسلة للموظفين:</span>
+                <span>📝 نص رسالة التذكير المرسلة للموظفين:</span>
                 <span style={{ fontSize: '12px', fontWeight: 'normal', color: 'var(--muted, #64748b)' }}>
-                  ينتقل الموظف عند الضغط على الإشعار مباشرة لتبويب الجدول الشهري
+                  ينتقل الموظف عند الضغط على الإشعار مباشرة لصفحة إعداد وتعديل الجدول الشهري
                 </span>
               </label>
               <textarea
@@ -517,7 +551,7 @@ export default function RosterModule({
                   resize: 'vertical',
                   boxSizing: 'border-box'
                 }}
-                placeholder="اكتب نص الإشعار هنا..."
+                placeholder="اكتب نص رسالة التذكير هنا..."
               />
             </div>
 
@@ -535,7 +569,7 @@ export default function RosterModule({
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap', fontSize: '13px', color: 'var(--muted, #64748b)' }}>
                 <div>
-                  <span>🕒 آخر إرسال: </span>
+                  <span>🕒 آخر تذكير: </span>
                   <strong style={{ color: 'var(--text, #1e293b)' }}>
                     {orgSettings.rosterNotificationLastSentDate
                       ? `${new Date(orgSettings.rosterNotificationLastSentDate).toLocaleDateString('ar-EG')} - ${new Date(orgSettings.rosterNotificationLastSentDate).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })} (${orgSettings.rosterNotificationLastSentCount || 0} موظف)`
@@ -543,7 +577,7 @@ export default function RosterModule({
                   </strong>
                 </div>
                 <div>
-                  <span>🎯 عدد المستلمين المؤهلين: </span>
+                  <span>🎯 عدد المستلمين المستحقين للتذكير: </span>
                   <strong style={{ color: '#0d9488', fontSize: '14px' }}>
                     {eligibleEmployees.length} موظف
                   </strong>
@@ -570,7 +604,7 @@ export default function RosterModule({
                     boxShadow: '0 2px 6px rgba(2, 132, 199, 0.25)'
                   }}
                 >
-                  <span>{isSavingSettings ? '⏳ جارِ الحفظ...' : '💾 حفظ الإعدادات'}</span>
+                  <span>{isSavingSettings ? '⏳ جارِ الحفظ...' : '💾 حفظ إعدادات التذكير'}</span>
                 </button>
 
                 <button
@@ -592,7 +626,7 @@ export default function RosterModule({
                     boxShadow: '0 2px 6px rgba(5, 150, 105, 0.25)'
                   }}
                 >
-                  <span>{isSendingNotifs ? '⏳ جارِ الإرسال...' : `📢 إرسال إشعار فوري الآن (${eligibleEmployees.length})`}</span>
+                  <span>{isSendingNotifs ? '⏳ جارِ الإرسال...' : `📢 إرسال تذكير فوري الآن (${eligibleEmployees.length})`}</span>
                 </button>
               </div>
             </div>
@@ -637,14 +671,14 @@ export default function RosterModule({
                 justifyContent: 'center',
                 fontSize: '22px'
               }}>
-                📢
+                ⏰
               </div>
               <div>
                 <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 800, color: 'var(--text, #1e293b)' }}>
-                  تأكيد بث إشعار فوري بالجدول الشهري
+                  تأكيد إرسال تذكير فوري بعمل الجدول الشهري
                 </h3>
                 <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--muted, #64748b)' }}>
-                  سيتم إرسال هذا الإشعار فوراً إلى بوابة الموظف لجميع المشمولين
+                  سيتم إرسال إشعار تذكير فوراً لبوابة الموظف لحثهم على إعداد وإرسال جدول الشفتات للاعتماد
                 </p>
               </div>
             </div>
@@ -657,13 +691,13 @@ export default function RosterModule({
               marginBottom: '16px'
             }}>
               <div style={{ fontSize: '13px', marginBottom: '8px', color: 'var(--muted, #64748b)' }}>
-                👥 عدد الموظفين المستلمين: <strong style={{ color: '#059669', fontSize: '15px' }}>{eligibleEmployees.length} موظف</strong>
+                👥 عدد الموظفين المستلمين للتذكير: <strong style={{ color: '#059669', fontSize: '15px' }}>{eligibleEmployees.length} موظف</strong>
               </div>
               <div style={{ fontSize: '13px', marginBottom: '8px', color: 'var(--muted, #64748b)' }}>
                 🏢 نطاق الفروع: <strong style={{ color: 'var(--text, #1e293b)' }}>{schedBranchFilter ? branches.find(b => b.id === schedBranchFilter)?.name || schedBranchFilter : 'كافة فروع الصيدليات'}</strong>
               </div>
               <div style={{ fontSize: '13px', color: 'var(--muted, #64748b)' }}>
-                📝 نص الإشعار:
+                📝 نص رسالة التذكير:
               </div>
               <div style={{
                 marginTop: '6px',
@@ -714,7 +748,7 @@ export default function RosterModule({
                   boxShadow: '0 2px 8px rgba(5, 150, 105, 0.3)'
                 }}
               >
-                {isSendingNotifs ? '⏳ جارِ الإرسال...' : '🚀 نعم، إرسال الآن'}
+                {isSendingNotifs ? '⏳ جارِ الإرسال...' : '🚀 نعم، إرسال التذكير الآن'}
               </button>
             </div>
           </div>
