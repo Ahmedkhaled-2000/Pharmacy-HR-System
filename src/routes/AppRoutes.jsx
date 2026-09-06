@@ -981,6 +981,7 @@ export default function AppRoutes() {
                   'leaves-tracking',
                   'payroll',
                   'adjustments-module',
+                  'admin-directives',
                   'whatsapp-center',
                   'bylaws',
                   'evaluations',

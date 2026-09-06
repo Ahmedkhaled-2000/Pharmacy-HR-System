@@ -611,9 +611,29 @@ export default function ElectronicKioskView({
                       };
                       const updatedDirs = (state?.adminDirectives || []).map(d => {
                         if (d.id === pendingDirectiveModal.id) {
+                          const newConfirmations = [...(d.readConfirmations || []), newConfirmation];
+                          
+                          // Check if all targeted employees have read it
+                          const allEmps = (state?.employees || []).filter(e => e.status !== 'تم الاستقالة' && e.is_active !== false);
+                          let targeted = allEmps;
+                          if (d.scope === 'employee') {
+                            targeted = allEmps.filter(e => String(e.id) === String(d.targetEmployeeId));
+                          } else if (d.scope === 'branch') {
+                            const bId = String(d.targetBranchId);
+                            targeted = allEmps.filter(e => String(e.branchId) === bId || (e.branchesDetails && e.branchesDetails.some(bd => String(bd.branchId) === bId)));
+                          } else if (d.scope === 'job') {
+                            const jTitle = String(d.targetJobTitle || '').trim().toLowerCase();
+                            targeted = allEmps.filter(e => String(e.jobTitle || '').trim().toLowerCase() === jTitle);
+                          }
+
+                          const uniqueConfirmedIds = new Set(newConfirmations.map(c => String(c.employeeId)));
+                          const allRead = targeted.length > 0 && targeted.every(e => uniqueConfirmedIds.has(String(e.id)));
+
                           return {
                             ...d,
-                            readConfirmations: [...(d.readConfirmations || []), newConfirmation]
+                            readConfirmations: newConfirmations,
+                            status: allRead ? 'archived' : 'active',
+                            archivedAt: allRead ? new Date().toISOString() : null
                           };
                         }
                         return d;
