@@ -494,6 +494,13 @@ export default function DesktopLayout({
           label: 'الجدول الشهري للموظفين',
           icon: '📋',
           desc: 'جدول ورديات وشفتات الفرع المعتمدة'
+        },
+        {
+          id: 'branch-directives',
+          targetTab: 'branch-directives',
+          label: 'تعليمات مدير الفرع',
+          icon: '📢',
+          desc: 'إصدار تعليمات وتوجيهات لموظفي الفرع وإلزام قراءتها في البصمة'
         }
       ]
     },

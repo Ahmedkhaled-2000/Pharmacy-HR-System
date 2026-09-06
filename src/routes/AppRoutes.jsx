@@ -836,6 +836,16 @@ export default function AppRoutes() {
                   />
                 )}
 
+                {activeNavTab === 'branch-directives' && (
+                  <AdminDirectivesModule
+                    state={state}
+                    setState={setState}
+                    saveState={saveState}
+                    showToast={showToast}
+                    initialTab="branch_directives"
+                  />
+                )}
+
                 {/* 9. WhatsApp Center */}
                 {activeNavTab === 'whatsapp-center' && (
                   <WhatsAppCenterModule

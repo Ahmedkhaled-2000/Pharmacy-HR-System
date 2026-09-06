@@ -14,6 +14,7 @@ import BranchResignationModule from '../resignation/BranchResignationModule';
 import { normalizeSchedule } from '../roster/RosterModule';
 import BranchMonthlyRosterModule from '../branches/BranchMonthlyRosterModule';
 import BranchSalesEntryModal from '../branches/BranchSalesEntryModal';
+import BranchDirectivesModule from '../branches/BranchDirectivesModule';
 import { shouldShowRequestToBranch, getEmpDisplayName, isEmployeeActive, getEmployeeManualPunchesCount, isShiftManualPunch, calculateEmployeeLeaveStats, getEmployeeApprovedLeaves, fmt } from '../../utils/formatters';
 import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
 import EmployeePermissionsManagementModule from '../permissions/EmployeePermissionsManagementModule';
@@ -1772,6 +1773,44 @@ export default function BranchManagerView({
               </div>
             )}
           </div>
+
+          {/* Branch Directives Quick Widget */}
+          {(() => {
+            const bDirectives = (state.branchDirectives || []).filter(d => String(d.branchId) === String(currentBranch?.id));
+            const activeCount = bDirectives.filter(d => d.status !== 'archived').length;
+            const urgentCount = bDirectives.filter(d => d.status !== 'archived' && d.priority === 'urgent').length;
+            return (
+              <div className="card settings-card" style={{
+                padding: isMobileScreen ? '14px' : '20px',
+                background: 'linear-gradient(135deg, rgba(37, 99, 235, 0.04), rgba(59, 130, 246, 0.02))',
+                border: '1px solid rgba(37, 99, 235, 0.2)',
+                borderRadius: '16px'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ fontSize: '26px' }}>📢</span>
+                    <div>
+                      <h3 style={{ margin: 0, fontSize: isMobileScreen ? '15px' : '16px', color: '#1e293b' }}>
+                        تعليمات وتوجيهات مدير الفرع (لكشك البصمة)
+                      </h3>
+                      <p style={{ margin: '3px 0 0', fontSize: '12px', color: 'var(--muted)' }}>
+                        {activeCount > 0
+                          ? `يوجد حالياً ${activeCount} توجيه نشط لموظفي الفرع (${urgentCount} عاجل) تظهر عند وضع الكود بالكشك.`
+                          : 'لا توجد تعليمات نشطة حالياً. يمكنك إصدار توجيهات لموظفي فرعك في أي وقت.'}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    className="btn btn-start"
+                    onClick={() => setActiveTab('branch-directives')}
+                    style={{ fontSize: '12.5px', padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    <span>إدارة وبث التعليمات ➔</span>
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -4014,6 +4053,17 @@ export default function BranchManagerView({
       {/* ── 11. RESIGNATION TAB ── */}
       {activeTab === 'resignation' && (
         <BranchResignationModule
+          state={state}
+          setState={setState}
+          saveState={saveState}
+          showToast={showToast}
+          currentBranch={currentBranch}
+        />
+      )}
+
+      {/* ── 11.5. BRANCH DIRECTIVES TAB ── */}
+      {activeTab === 'branch-directives' && (
+        <BranchDirectivesModule
           state={state}
           setState={setState}
           saveState={saveState}

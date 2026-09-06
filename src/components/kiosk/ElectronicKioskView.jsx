@@ -28,6 +28,7 @@ export default function ElectronicKioskView({
   const [blockedStatusModal, setBlockedStatusModal] = useState(null);
   const [confirmModalData, setConfirmModalData] = useState(null);
   const [pendingDirectiveModal, setPendingDirectiveModal] = useState(null);
+  const [pendingDirectivesQueue, setPendingDirectivesQueue] = useState([]);
   
   const [activeAction, setActiveAction] = useState(null);
   const [selectedBranchId, setSelectedBranchId] = useState(null);
@@ -119,8 +120,9 @@ export default function ElectronicKioskView({
       setMatchedEmp(emp);
 
       // Check if there is an active unconfirmed directive requiring kiosk confirmation
-      const activeDirs = (state?.adminDirectives || []).filter(d => d.status !== 'archived' && d.requireKioskConfirm !== false);
-      const unconfirmed = activeDirs.find(d => {
+      // 1. Admin Directives (Higher Management)
+      const activeAdminDirs = (state?.adminDirectives || []).filter(d => d.status !== 'archived' && d.requireKioskConfirm !== false);
+      const unconfirmedAdmin = activeAdminDirs.filter(d => {
         const matchesScope = d.scope === 'all' ||
           (d.scope === 'branch' && String(d.targetBranchId) === String(defaultBranchId || emp.branchId)) ||
           (d.scope === 'employee' && String(d.targetEmployeeId) === String(emp.id)) ||
@@ -128,16 +130,35 @@ export default function ElectronicKioskView({
         if (!matchesScope) return false;
         const alreadyConfirmed = (d.readConfirmations || []).some(c => String(c.employeeId) === String(emp.id));
         return !alreadyConfirmed;
-      });
+      }).map(d => ({ ...d, sourceType: 'admin', sourceTitle: '👑 الإدارة العليا' }));
 
-      if (unconfirmed) {
-        setPendingDirectiveModal(unconfirmed);
+      // 2. Branch Directives (Branch Manager)
+      const activeBranchDirs = (state?.branchDirectives || []).filter(d => d.status !== 'archived' && d.requireKioskConfirm !== false);
+      const unconfirmedBranch = activeBranchDirs.filter(d => {
+        const matchesBranch = String(d.branchId) === String(defaultBranchId || emp.branchId);
+        if (!matchesBranch) return false;
+        const matchesScope = d.scope === 'all' ||
+          (d.scope === 'employee' && String(d.targetEmployeeId) === String(emp.id)) ||
+          (d.scope === 'job' && String(d.targetJobTitle || '').trim().toLowerCase() === String(emp.jobTitle || '').trim().toLowerCase());
+        if (!matchesScope) return false;
+        const alreadyConfirmed = (d.readConfirmations || []).some(c => String(c.employeeId) === String(emp.id));
+        return !alreadyConfirmed;
+      }).map(d => ({ ...d, sourceType: 'branch', sourceTitle: `🏢 مدير الفرع (${d.branchName || 'الفرع'})` }));
+
+      const allUnconfirmed = [...unconfirmedAdmin, ...unconfirmedBranch];
+
+      if (allUnconfirmed.length > 0) {
+        setPendingDirectiveModal(allUnconfirmed[0]);
+        setPendingDirectivesQueue(allUnconfirmed.slice(1));
       } else {
         setPendingDirectiveModal(null);
+        setPendingDirectivesQueue([]);
       }
     } else {
       alert('كود الموظف غير صحيح.');
       setMatchedEmp(null);
+      setPendingDirectiveModal(null);
+      setPendingDirectivesQueue([]);
     }
   };
 
@@ -559,28 +580,65 @@ export default function ElectronicKioskView({
                 </button>
               </div>
 
-              {/* ── Admin Directive Interception (Requirement 8) ── */}
+              {/* ── Directives Interception (Admin & Branch Manager) ── */}
               {pendingDirectiveModal ? (
                 <div style={{
-                  background: 'linear-gradient(135deg, #fffbeb, #fef3c7)',
-                  border: '2px solid #f59e0b',
+                  background: pendingDirectiveModal.priority === 'urgent'
+                    ? 'linear-gradient(135deg, #fff1f2, #ffe4e6)'
+                    : 'linear-gradient(135deg, #fffbeb, #fef3c7)',
+                  border: pendingDirectiveModal.priority === 'urgent'
+                    ? '2px solid #ef4444'
+                    : '2px solid #f59e0b',
                   borderRadius: '20px',
                   padding: '24px 20px',
-                  boxShadow: '0 10px 30px rgba(245,158,11,0.2)',
+                  boxShadow: pendingDirectiveModal.priority === 'urgent'
+                    ? '0 10px 30px rgba(239,68,68,0.2)'
+                    : '0 10px 30px rgba(245,158,11,0.2)',
                   textAlign: 'center',
                   width: '100%'
                 }}>
-                  <div style={{ fontSize: '38px', marginBottom: '8px' }}>🚨</div>
-                  <h3 style={{ margin: '0 0 4px 0', fontSize: '18px', fontWeight: 900, color: '#92400e', fontFamily: 'Cairo, sans-serif' }}>
-                    تعليمات إدارية ملزمة من الإدارة العليا
+                  <div style={{ fontSize: '38px', marginBottom: '8px' }}>
+                    {pendingDirectiveModal.priority === 'urgent' ? '🚨' : '📢'}
+                  </div>
+
+                  {/* Sender Badge */}
+                  <div style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '4px 14px',
+                    borderRadius: '20px',
+                    fontSize: '12.5px',
+                    fontWeight: 800,
+                    marginBottom: '10px',
+                    background: pendingDirectiveModal.sourceType === 'branch' ? '#dbeafe' : '#fef3c7',
+                    color: pendingDirectiveModal.sourceType === 'branch' ? '#1e40af' : '#92400e',
+                    border: pendingDirectiveModal.sourceType === 'branch' ? '1px solid #bfdbfe' : '1px solid #fde68a'
+                  }}>
+                    <span>{pendingDirectiveModal.sourceTitle}</span>
+                  </div>
+
+                  <h3 style={{
+                    margin: '0 0 4px 0',
+                    fontSize: '18px',
+                    fontWeight: 900,
+                    color: pendingDirectiveModal.priority === 'urgent' ? '#991b1b' : '#92400e',
+                    fontFamily: 'Cairo, sans-serif'
+                  }}>
+                    {pendingDirectiveModal.sourceType === 'branch' ? 'توجيهات وتعليمات مدير الفرع' : 'تعليمات إدارية ملزمة من الإدارة العليا'}
                   </h3>
-                  <div style={{ fontSize: '12.5px', color: '#b45309', fontWeight: 700, marginBottom: '16px' }}>
+                  <div style={{
+                    fontSize: '12.5px',
+                    color: pendingDirectiveModal.priority === 'urgent' ? '#b91c1c' : '#b45309',
+                    fontWeight: 700,
+                    marginBottom: '16px'
+                  }}>
                     مطلوب قراءة القرار والموافقة عليه قبل إتاحة تسجيل البصمة
                   </div>
                   
                   <div style={{
                     background: '#ffffff',
-                    border: '1.5px solid #fde68a',
+                    border: pendingDirectiveModal.priority === 'urgent' ? '1.5px solid #fecdd3' : '1.5px solid #fde68a',
                     borderRadius: '12px',
                     padding: '14px 16px',
                     textAlign: 'right',
@@ -609,39 +667,84 @@ export default function ElectronicKioskView({
                         employeeCode: matchedEmp.code,
                         confirmedAt: new Date().toISOString()
                       };
-                      const updatedDirs = (state?.adminDirectives || []).map(d => {
-                        if (d.id === pendingDirectiveModal.id) {
-                          const newConfirmations = [...(d.readConfirmations || []), newConfirmation];
-                          
-                          // Check if all targeted employees have read it
-                          const allEmps = (state?.employees || []).filter(e => e.status !== 'تم الاستقالة' && e.is_active !== false);
-                          let targeted = allEmps;
-                          if (d.scope === 'employee') {
-                            targeted = allEmps.filter(e => String(e.id) === String(d.targetEmployeeId));
-                          } else if (d.scope === 'branch') {
-                            const bId = String(d.targetBranchId);
-                            targeted = allEmps.filter(e => String(e.branchId) === bId || (e.branchesDetails && e.branchesDetails.some(bd => String(bd.branchId) === bId)));
-                          } else if (d.scope === 'job') {
-                            const jTitle = String(d.targetJobTitle || '').trim().toLowerCase();
-                            targeted = allEmps.filter(e => String(e.jobTitle || '').trim().toLowerCase() === jTitle);
+
+                      let updatedState = { ...state };
+
+                      if (pendingDirectiveModal.sourceType === 'branch') {
+                        // Update branchDirectives
+                        const updatedBranchDirs = (state?.branchDirectives || []).map(d => {
+                          if (d.id === pendingDirectiveModal.id) {
+                            const newConfirmations = [...(d.readConfirmations || []), newConfirmation];
+                            const allEmps = (state?.employees || []).filter(e => {
+                              if (e.status === 'تم الاستقالة' || e.is_active === false) return false;
+                              const matchesMain = String(e.branchId) === String(d.branchId);
+                              const matchesSecondary = e.branchesDetails && e.branchesDetails.some(bd => String(bd.branchId) === String(d.branchId));
+                              return matchesMain || matchesSecondary;
+                            });
+
+                            let targeted = allEmps;
+                            if (d.scope === 'employee') {
+                              targeted = allEmps.filter(e => String(e.id) === String(d.targetEmployeeId));
+                            } else if (d.scope === 'job') {
+                              const jTitle = String(d.targetJobTitle || '').trim().toLowerCase();
+                              targeted = allEmps.filter(e => String(e.jobTitle || '').trim().toLowerCase() === jTitle);
+                            }
+
+                            const uniqueConfirmedIds = new Set(newConfirmations.map(c => String(c.employeeId)));
+                            const allRead = targeted.length > 0 && targeted.every(e => uniqueConfirmedIds.has(String(e.id)));
+
+                            return {
+                              ...d,
+                              readConfirmations: newConfirmations,
+                              status: allRead ? 'archived' : 'active',
+                              archivedAt: allRead ? new Date().toISOString() : null
+                            };
                           }
+                          return d;
+                        });
+                        updatedState = { ...updatedState, branchDirectives: updatedBranchDirs };
+                      } else {
+                        // Update adminDirectives
+                        const updatedAdminDirs = (state?.adminDirectives || []).map(d => {
+                          if (d.id === pendingDirectiveModal.id) {
+                            const newConfirmations = [...(d.readConfirmations || []), newConfirmation];
+                            const allEmps = (state?.employees || []).filter(e => e.status !== 'تم الاستقالة' && e.is_active !== false);
+                            let targeted = allEmps;
+                            if (d.scope === 'employee') {
+                              targeted = allEmps.filter(e => String(e.id) === String(d.targetEmployeeId));
+                            } else if (d.scope === 'branch') {
+                              const bId = String(d.targetBranchId);
+                              targeted = allEmps.filter(e => String(e.branchId) === bId || (e.branchesDetails && e.branchesDetails.some(bd => String(bd.branchId) === bId)));
+                            } else if (d.scope === 'job') {
+                              const jTitle = String(d.targetJobTitle || '').trim().toLowerCase();
+                              targeted = allEmps.filter(e => String(e.jobTitle || '').trim().toLowerCase() === jTitle);
+                            }
 
-                          const uniqueConfirmedIds = new Set(newConfirmations.map(c => String(c.employeeId)));
-                          const allRead = targeted.length > 0 && targeted.every(e => uniqueConfirmedIds.has(String(e.id)));
+                            const uniqueConfirmedIds = new Set(newConfirmations.map(c => String(c.employeeId)));
+                            const allRead = targeted.length > 0 && targeted.every(e => uniqueConfirmedIds.has(String(e.id)));
 
-                          return {
-                            ...d,
-                            readConfirmations: newConfirmations,
-                            status: allRead ? 'archived' : 'active',
-                            archivedAt: allRead ? new Date().toISOString() : null
-                          };
-                        }
-                        return d;
-                      });
-                      const updatedState = { ...state, adminDirectives: updatedDirs };
+                            return {
+                              ...d,
+                              readConfirmations: newConfirmations,
+                              status: allRead ? 'archived' : 'active',
+                              archivedAt: allRead ? new Date().toISOString() : null
+                            };
+                          }
+                          return d;
+                        });
+                        updatedState = { ...updatedState, adminDirectives: updatedAdminDirs };
+                      }
+
                       if (setState) setState(updatedState);
                       if (saveState) await saveState(updatedState);
-                      setPendingDirectiveModal(null);
+
+                      // Check if there are more unconfirmed directives in queue
+                      if (pendingDirectivesQueue.length > 0) {
+                        setPendingDirectiveModal(pendingDirectivesQueue[0]);
+                        setPendingDirectivesQueue(pendingDirectivesQueue.slice(1));
+                      } else {
+                        setPendingDirectiveModal(null);
+                      }
                     }}
                     style={{
                       width: '100%',

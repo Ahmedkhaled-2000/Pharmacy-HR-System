@@ -6,9 +6,10 @@ export default function AdminDirectivesModule({
   state,
   setState,
   saveState,
-  showToast
+  showToast,
+  initialTab = 'active'
 }) {
-  const [activeTab, setActiveTab] = useState('active'); // 'active' | 'archived'
+  const [activeTab, setActiveTab] = useState(initialTab); // 'active' | 'archived' | 'branch_directives'
   const [showAddModal, setShowAddModal] = useState(false);
   const [expandedDirectiveId, setExpandedDirectiveId] = useState(null);
 
@@ -35,6 +36,18 @@ export default function AdminDirectivesModule({
   const archivedDirectives = useMemo(() => {
     return allDirectives.filter(d => d.status === 'archived').sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
   }, [allDirectives]);
+
+  const [supervisedBranchFilter, setSupervisedBranchFilter] = useState('all');
+  const allBranchDirectives = state.branchDirectives || [];
+
+  const filteredBranchDirectives = useMemo(() => {
+    return allBranchDirectives.filter(d => {
+      if (supervisedBranchFilter !== 'all' && String(d.branchId) !== String(supervisedBranchFilter)) {
+        return false;
+      }
+      return true;
+    }).sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  }, [allBranchDirectives, supervisedBranchFilter]);
 
   // Compute targeted employees for a directive
   const getTargetedEmployees = (d) => {
@@ -325,14 +338,14 @@ export default function AdminDirectivesModule({
       </div>
 
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: '8px', borderBottom: '2px solid #e2e8f0', marginBottom: '20px' }}>
+      <div style={{ display: 'flex', gap: '8px', borderBottom: '2px solid #e2e8f0', marginBottom: '20px', flexWrap: 'wrap' }}>
         <button
           type="button"
           className={`btn ${activeTab === 'active' ? 'btn-start' : 'btn-ghost'}`}
           onClick={() => setActiveTab('active')}
           style={{ borderRadius: '10px 10px 0 0', padding: '9px 18px', fontSize: '13.5px' }}
         >
-          🟢 التعليمات النشطة والمفعلة ({activeDirectives.length})
+          🟢 تعليمات الإدارة النشطة ({activeDirectives.length})
         </button>
         <button
           type="button"
@@ -340,19 +353,183 @@ export default function AdminDirectivesModule({
           onClick={() => setActiveTab('archived')}
           style={{ borderRadius: '10px 10px 0 0', padding: '9px 18px', fontSize: '13.5px' }}
         >
-          📁 تعليمات تم قراءتها / الأرشيف ({archivedDirectives.length})
+          📁 أرشيف تعليمات الإدارة ({archivedDirectives.length})
+        </button>
+        <button
+          type="button"
+          className={`btn ${activeTab === 'branch_directives' ? 'btn-start' : 'btn-ghost'}`}
+          onClick={() => setActiveTab('branch_directives')}
+          style={{ borderRadius: '10px 10px 0 0', padding: '9px 18px', fontSize: '13.5px', background: activeTab === 'branch_directives' ? 'linear-gradient(135deg, #2563eb, #1d4ed8)' : 'transparent', color: activeTab === 'branch_directives' ? '#fff' : '#64748b' }}
+        >
+          🏢 توجيهات وتعليمات مديري الفروع ({allBranchDirectives.length})
         </button>
       </div>
 
-      {/* Directives List */}
-      {((activeTab === 'active' ? activeDirectives : archivedDirectives).length === 0) ? (
-        <div style={{ textAlign: 'center', padding: '40px 20px', color: '#94a3b8' }}>
-          <div style={{ fontSize: '48px', marginBottom: '12px' }}>📭</div>
-          <p style={{ fontSize: '14px', margin: 0 }}>
-            {activeTab === 'active' ? 'لا توجد تعليمات إدارية نشطة حالياً.' : 'الأرشيف فارغ.'}
-          </p>
+      {activeTab === 'branch_directives' ? (
+        <div>
+          {/* Branch Directives Supervision Filter */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: '16px',
+            background: '#f8fafc',
+            padding: '12px 16px',
+            borderRadius: '12px',
+            border: '1px solid #e2e8f0',
+            flexWrap: 'wrap',
+            gap: '10px'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontWeight: 800, fontSize: '13px', color: '#1e293b' }}>🏢 فلتر حسب الفرع:</span>
+              <select
+                value={supervisedBranchFilter}
+                onChange={(e) => setSupervisedBranchFilter(e.target.value)}
+                style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+              >
+                <option value="all">-- جميع الفروع ({branches.length}) --</option>
+                {branches.map(b => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            </div>
+            <div style={{ fontSize: '12.5px', color: '#64748b' }}>
+              إجمالي توجيهات مديري الفروع: <strong>{filteredBranchDirectives.length}</strong>
+            </div>
+          </div>
+
+          {filteredBranchDirectives.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '40px 20px', color: '#94a3b8' }}>
+              <div style={{ fontSize: '48px', marginBottom: '12px' }}>📭</div>
+              <p style={{ fontSize: '14px', margin: 0 }}>لا توجد توجيهات مسجلة من مديري الفروع لهذا الفرع حتى الآن.</p>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              {filteredBranchDirectives.map((d) => {
+                const branchEmps = employees.filter(e => String(e.branchId) === String(d.branchId) || (e.branchesDetails && e.branchesDetails.some(bd => String(bd.branchId) === String(d.branchId))));
+                let targeted = branchEmps;
+                if (d.scope === 'employee') {
+                  targeted = branchEmps.filter(e => String(e.id) === String(d.targetEmployeeId));
+                } else if (d.scope === 'job') {
+                  const jTitle = String(d.targetJobTitle || '').trim().toLowerCase();
+                  targeted = branchEmps.filter(e => String(e.jobTitle || '').trim().toLowerCase() === jTitle);
+                }
+                const confirmedIds = new Set((d.readConfirmations || []).map(c => String(c.employeeId)));
+                const confirmedList = d.readConfirmations || [];
+                const pendingList = targeted.filter(e => !confirmedIds.has(String(e.id)));
+                const isExpanded = expandedDirectiveId === d.id;
+                const completionPct = targeted.length > 0 ? Math.round((confirmedList.length / targeted.length) * 100) : 100;
+
+                return (
+                  <div
+                    key={d.id}
+                    style={{
+                      background: '#ffffff',
+                      border: `1.5px solid ${d.priority === 'urgent' ? '#fca5a5' : '#cbd5e1'}`,
+                      borderRadius: '14px',
+                      padding: '18px',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '6px' }}>
+                          <span style={{ fontSize: '18px' }}>{d.priority === 'urgent' ? '🚨' : '📌'}</span>
+                          <h3 style={{ margin: 0, fontSize: '16.5px', fontWeight: 800, color: '#0f172a' }}>
+                            {d.title}
+                          </h3>
+                          <span style={{ background: '#dbeafe', color: '#1e40af', padding: '2px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 800 }}>
+                            🏢 فرع {d.branchName || 'الفرع'}
+                          </span>
+                          <span style={{ background: '#f1f5f9', color: '#475569', padding: '2px 8px', borderRadius: '6px', fontSize: '11.5px' }}>
+                            👤 مدير الفرع: {d.managerName || 'مدير الفرع'}
+                          </span>
+                          {d.priority === 'urgent' && (
+                            <span style={{ background: '#fee2e2', color: '#b91c1c', border: '1px solid #fca5a5', padding: '2px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 800 }}>
+                              عاجل
+                            </span>
+                          )}
+                          <span style={{ background: d.status === 'archived' ? '#f1f5f9' : '#dcfce7', color: d.status === 'archived' ? '#64748b' : '#15803d', padding: '2px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700 }}>
+                            {d.status === 'archived' ? '📁 مؤرشف' : '🟢 نشط'}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#64748b' }}>
+                          نطاق الاستهداف: <strong>{d.scope === 'all' ? 'كامل طاقم الفرع' : d.scope === 'job' ? `وظيفة (${d.targetJobTitle})` : `موظف (${d.targetEmployeeName})`}</strong>
+                          {' · '}تاريخ الصدور: {d.date || (d.createdAt ? d.createdAt.split('T')[0] : '')}
+                        </div>
+                      </div>
+
+                      <div style={{ textAlign: 'left', minWidth: '140px' }}>
+                        <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>
+                          نسبة الإقرار: <strong style={{ color: completionPct === 100 ? '#15803d' : '#0284c7' }}>{completionPct}%</strong>
+                        </div>
+                        <div style={{ width: '120px', height: '6px', background: '#e2e8f0', borderRadius: '3px', overflow: 'hidden' }}>
+                          <div style={{ width: `${completionPct}%`, height: '100%', background: completionPct === 100 ? '#10b981' : '#0284c7' }} />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px 14px', margin: '14px 0', fontSize: '13.5px', color: '#334155', lineHeight: '1.6', whiteSpace: 'pre-line' }}>
+                      {d.content}
+                    </div>
+
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() => setExpandedDirectiveId(isExpanded ? null : d.id)}
+                      style={{ fontSize: '12px', padding: '6px 14px', border: '1px solid #cbd5e1', borderRadius: '8px' }}
+                    >
+                      {isExpanded ? '🔼 إخفاء سجل القراءة' : `🔽 استعراض سجل الإقرار (${confirmedList.length} أقروا / ${pendingList.length} متبقي)`}
+                    </button>
+
+                    {isExpanded && (
+                      <div style={{ marginTop: '14px', padding: '14px', background: '#f1f5f9', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px' }}>
+                          <div>
+                            <h4 style={{ margin: '0 0 6px', fontSize: '12.5px', color: '#166534', fontWeight: 800 }}>✅ من أقروا بالقراءة ({confirmedList.length}):</h4>
+                            {confirmedList.length === 0 ? (
+                              <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8' }}>لم يقرأ أي موظف بعد.</p>
+                            ) : (
+                              confirmedList.map((c, i) => (
+                                <div key={i} style={{ fontSize: '12px', padding: '4px 8px', background: '#fff', borderRadius: '6px', marginBottom: '4px', display: 'flex', justifyContent: 'space-between' }}>
+                                  <span>{c.employeeName} ({c.employeeCode})</span>
+                                  <span style={{ color: '#166534', fontSize: '11px' }}>{new Date(c.confirmedAt).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}</span>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                          <div>
+                            <h4 style={{ margin: '0 0 6px', fontSize: '12.5px', color: '#991b1b', fontWeight: 800 }}>⏳ في انتظار القراءة ({pendingList.length}):</h4>
+                            {pendingList.length === 0 ? (
+                              <p style={{ margin: 0, fontSize: '12px', color: '#166534' }}>🎉 أقر جميع الكوادر!</p>
+                            ) : (
+                              pendingList.map((e, i) => (
+                                <div key={i} style={{ fontSize: '12px', padding: '4px 8px', background: '#fff', borderRadius: '6px', marginBottom: '4px' }}>
+                                  {getEmpDisplayName(e)} ({e.jobTitle || 'موظف'})
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       ) : (
+        /* Directives List */
+        ((activeTab === 'active' ? activeDirectives : archivedDirectives).length === 0) ? (
+          <div style={{ textAlign: 'center', padding: '40px 20px', color: '#94a3b8' }}>
+            <div style={{ fontSize: '48px', marginBottom: '12px' }}>📭</div>
+            <p style={{ fontSize: '14px', margin: 0 }}>
+              {activeTab === 'active' ? 'لا توجد تعليمات إدارية نشطة حالياً.' : 'الأرشيف فارغ.'}
+            </p>
+          </div>
+        ) : (
+
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           {(activeTab === 'active' ? activeDirectives : archivedDirectives).map((d) => {
             const targeted = getTargetedEmployees(d);
@@ -552,7 +729,8 @@ export default function AdminDirectivesModule({
             );
           })}
         </div>
-      )}
+      )
+    )}
 
       {/* ── MODAL: CREATE DIRECTIVE ── */}
       {showAddModal && (
