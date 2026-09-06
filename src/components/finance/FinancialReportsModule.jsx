@@ -110,6 +110,16 @@ export default function FinancialReportsModule({
               <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; color: #64748b;">${report.totalGrossRevenues > 0 ? ((report.totalVisaSales / report.totalGrossRevenues) * 100).toFixed(1) : 0}% من الإيراد</td>
             </tr>
             <tr>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0;">  • مبيعات محفظة إلكترونية (فودافون كاش / محافظ)</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: bold;">${(report.totalWalletSales || 0).toLocaleString('ar-EG', { minimumFractionDigits: 2 })}</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; color: #64748b;">${report.totalGrossRevenues > 0 ? (((report.totalWalletSales || 0) / report.totalGrossRevenues) * 100).toFixed(1) : 0}% من الإيراد</td>
+            </tr>
+            <tr>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0;">  • مبيعات إنستاباي (InstaPay - IPN)</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: bold;">${(report.totalInstapaySales || 0).toLocaleString('ar-EG', { minimumFractionDigits: 2 })}</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; color: #64748b;">${report.totalGrossRevenues > 0 ? (((report.totalInstapaySales || 0) / report.totalGrossRevenues) * 100).toFixed(1) : 0}% من الإيراد</td>
+            </tr>
+            <tr>
               <td style="padding: 6px 10px; border: 1px solid #e2e8f0;">  • مبيعات دليفري وخدمة توصيل</td>
               <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: bold;">${report.totalDeliverySales.toLocaleString('ar-EG', { minimumFractionDigits: 2 })}</td>
               <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; color: #64748b;">${report.totalGrossRevenues > 0 ? ((report.totalDeliverySales / report.totalGrossRevenues) * 100).toFixed(1) : 0}% من الإيراد</td>
@@ -366,7 +376,7 @@ export default function FinancialReportsModule({
             {report.totalGrossRevenues.toLocaleString('ar-EG', { minimumFractionDigits: 2 })} <span style={{ fontSize: '12.5px', fontWeight: 'normal' }}>ج.م</span>
           </div>
           <div style={{ fontSize: '11.5px', marginTop: '6px', color: 'var(--muted)' }}>
-            كاش: <strong>{report.totalCashSales.toLocaleString('ar-EG')}</strong> | فيزا: <strong>{report.totalVisaSales.toLocaleString('ar-EG')}</strong>
+            كاش: <strong>{report.totalCashSales.toLocaleString('ar-EG')}</strong> | فيزا: <strong>{report.totalVisaSales.toLocaleString('ar-EG')}</strong> | إلكتروني: <strong>{((report.totalWalletSales || 0) + (report.totalInstapaySales || 0)).toLocaleString('ar-EG')}</strong>
           </div>
         </div>
 
@@ -648,6 +658,20 @@ export default function FinancialReportsModule({
                   <td style={{ padding: '8px', color: 'var(--muted)' }}>—</td>
                 </tr>
                 <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
+                  <td style={{ padding: '8px 16px', textAlign: 'right', fontSize: '13px' }}>📱 مبيعات محفظة إلكترونية (Vodafone Cash ومحافظ)</td>
+                  <td style={{ padding: '8px', color: '#7c3aed', fontWeight: '700' }}>
+                    {(report.totalWalletSales || 0).toLocaleString('ar-EG', { minimumFractionDigits: 2 })}
+                  </td>
+                  <td style={{ padding: '8px', color: 'var(--muted)' }}>—</td>
+                </tr>
+                <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
+                  <td style={{ padding: '8px 16px', textAlign: 'right', fontSize: '13px' }}>⚡ مبيعات إنستاباي وتحويلات IPN</td>
+                  <td style={{ padding: '8px', color: '#0284c7', fontWeight: '700' }}>
+                    {(report.totalInstapaySales || 0).toLocaleString('ar-EG', { minimumFractionDigits: 2 })}
+                  </td>
+                  <td style={{ padding: '8px', color: 'var(--muted)' }}>—</td>
+                </tr>
+                <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
                   <td style={{ padding: '8px 16px', textAlign: 'right', fontSize: '13px' }}>🛵 مبيعات دليفري وتوصيل</td>
                   <td style={{ padding: '8px', color: '#b45309', fontWeight: '700' }}>
                     {report.totalDeliverySales.toLocaleString('ar-EG', { minimumFractionDigits: 2 })}
@@ -912,6 +936,8 @@ export default function FinancialReportsModule({
               {[
                 { label: '💵 كاش نقدي', amount: report.totalCashSales, color: '#16a34a' },
                 { label: '💳 فيزا وبطاقات بنكية', amount: report.totalVisaSales, color: '#1d4ed8' },
+                { label: '📱 محفظة إلكترونية', amount: report.totalWalletSales || 0, color: '#7c3aed' },
+                { label: '⚡ إنستاباي - InstaPay', amount: report.totalInstapaySales || 0, color: '#0284c7' },
                 { label: '🛵 مبيعات دليفري', amount: report.totalDeliverySales, color: '#d97706' },
                 { label: '📑 آجل وشركات', amount: report.totalCreditSales, color: '#64748b' }
               ].map((item, idx) => {

@@ -97,6 +97,8 @@ export function calculateBranchSalesMetrics({
     const bMonthTotal = bSalesInMonth.reduce((acc, s) => acc + (parseFloat(s.totalSales) || 0), 0);
     const bCashTotal = bSalesInMonth.reduce((acc, s) => acc + (parseFloat(s.cashSales) || 0), 0);
     const bVisaTotal = bSalesInMonth.reduce((acc, s) => acc + (parseFloat(s.visaSales) || 0), 0);
+    const bWalletTotal = bSalesInMonth.reduce((acc, s) => acc + (parseFloat(s.walletSales ?? s.electronicWalletSales) || 0), 0);
+    const bInstapayTotal = bSalesInMonth.reduce((acc, s) => acc + (parseFloat(s.instapaySales) || 0), 0);
     const bDeliveryTotal = bSalesInMonth.reduce((acc, s) => acc + (parseFloat(s.deliverySales) || 0), 0);
     const bCreditTotal = bSalesInMonth.reduce((acc, s) => acc + (parseFloat(s.creditSales) || 0), 0);
     const bReceiptsTotal = bSalesInMonth.reduce((acc, s) => acc + (parseInt(s.receiptsCount, 10) || 0), 0);
@@ -125,6 +127,8 @@ export function calculateBranchSalesMetrics({
       monthTotal: bMonthTotal,
       cashTotal: bCashTotal,
       visaTotal: bVisaTotal,
+      walletTotal: bWalletTotal,
+      instapayTotal: bInstapayTotal,
       deliveryTotal: bDeliveryTotal,
       creditTotal: bCreditTotal,
       receiptsTotal: bReceiptsTotal,
@@ -146,11 +150,22 @@ export function calculateBranchSalesMetrics({
     };
   });
 
+  const monthCashTotal = monthSales.reduce((acc, s) => acc + (parseFloat(s.cashSales) || 0), 0);
+  const monthVisaTotal = monthSales.reduce((acc, s) => acc + (parseFloat(s.visaSales) || 0), 0);
+  const monthWalletTotal = monthSales.reduce((acc, s) => acc + (parseFloat(s.walletSales ?? s.electronicWalletSales) || 0), 0);
+  const monthInstapayTotal = monthSales.reduce((acc, s) => acc + (parseFloat(s.instapaySales) || 0), 0);
+  const monthDeliveryTotal = monthSales.reduce((acc, s) => acc + (parseFloat(s.deliverySales) || 0), 0);
+
   return {
     todayTotal,
     yesterdayTotal,
     dayGrowthPct,
     monthTotal,
+    monthCashTotal,
+    monthVisaTotal,
+    monthWalletTotal,
+    monthInstapayTotal,
+    monthDeliveryTotal,
     totalMonthlyTarget,
     overallAchievementRate: parseFloat(overallAchievementRate),
     projectedMonthTotal: Math.round(projectedMonthTotal),
@@ -224,7 +239,7 @@ export async function exportBranchSalesToExcel({
     });
 
     // Header Title
-    ws1.mergeCells('A1:K1');
+    ws1.mergeCells('A1:M1');
     const titleCell = ws1.getCell('A1');
     titleCell.value = `تقرير مبيعات الفروع اليومية - لشهر (${monthName})`;
     titleCell.font = { name: 'Arial', bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
@@ -239,6 +254,8 @@ export async function exportBranchSalesToExcel({
       'الفرع',
       'كاش (ج.م)',
       'فيزا / بطاقة (ج.م)',
+      'محفظة إلكترونية (ج.م)',
+      'إنستاباي (ج.م)',
       'دليفري (ج.م)',
       'آجل / أخرى (ج.م)',
       'إجمالي المبيعات (ج.م)',
@@ -268,19 +285,23 @@ export async function exportBranchSalesToExcel({
       return mMatch && bMatch;
     }).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 
-    let sumCash = 0, sumVisa = 0, sumDeliv = 0, sumCredit = 0, sumTotal = 0, sumReceipts = 0;
+    let sumCash = 0, sumVisa = 0, sumWallet = 0, sumInstapay = 0, sumDeliv = 0, sumCredit = 0, sumTotal = 0, sumReceipts = 0;
 
     filteredSales.forEach((s, idx) => {
       const c = parseFloat(s.cashSales) || 0;
       const v = parseFloat(s.visaSales) || 0;
+      const w = parseFloat(s.walletSales ?? s.electronicWalletSales) || 0;
+      const ip = parseFloat(s.instapaySales) || 0;
       const d = parseFloat(s.deliverySales) || 0;
       const cr = parseFloat(s.creditSales) || 0;
-      const tot = parseFloat(s.totalSales) || (c + v + d + cr);
+      const tot = parseFloat(s.totalSales) || (c + v + w + ip + d + cr);
       const rec = parseInt(s.receiptsCount, 10) || 0;
       const avg = rec > 0 ? (tot / rec) : (parseFloat(s.averageBasket) || 0);
 
       sumCash += c;
       sumVisa += v;
+      sumWallet += w;
+      sumInstapay += ip;
       sumDeliv += d;
       sumCredit += cr;
       sumTotal += tot;
@@ -292,6 +313,8 @@ export async function exportBranchSalesToExcel({
         s.branchName || `فرع ${s.branchId}`,
         c,
         v,
+        w,
+        ip,
         d,
         cr,
         tot,
@@ -310,8 +333,8 @@ export async function exportBranchSalesToExcel({
           left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
           right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
         };
-        // Format money columns
-        if ([4, 5, 6, 7, 8, 10].includes(colIdx)) {
+        // Format money columns: 4(cash), 5(visa), 6(wallet), 7(instapay), 8(deliv), 9(credit), 10(total), 12(avg)
+        if ([4, 5, 6, 7, 8, 9, 10, 12].includes(colIdx)) {
           cell.numFmt = '#,##0.00';
         }
       });
@@ -324,6 +347,8 @@ export async function exportBranchSalesToExcel({
       '-',
       sumCash,
       sumVisa,
+      sumWallet,
+      sumInstapay,
       sumDeliv,
       sumCredit,
       sumTotal,
@@ -336,7 +361,7 @@ export async function exportBranchSalesToExcel({
       cell.font = { name: 'Arial', bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F766E' } };
       cell.alignment = { horizontal: 'center', vertical: 'middle' };
-      if ([4, 5, 6, 7, 8, 10].includes(colIdx)) {
+      if ([4, 5, 6, 7, 8, 9, 10, 12].includes(colIdx)) {
         cell.numFmt = '#,##0.00';
       }
     });
@@ -347,7 +372,7 @@ export async function exportBranchSalesToExcel({
     });
     ws1.getColumn(1).width = 6;
     ws1.getColumn(3).width = 22;
-    ws1.getColumn(11).width = 28;
+    ws1.getColumn(13).width = 28;
 
     // ── ورقة 2: ملخص التارجت والأداء المقارن ──
     const ws2 = wb.addWorksheet('ملخص التارجت والأداء', {

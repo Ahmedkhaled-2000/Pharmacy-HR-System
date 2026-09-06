@@ -938,6 +938,8 @@ export default function BranchSalesModule({
                   <th style={{ padding: '10px 8px', fontSize: '12.5px', textAlign: 'right' }}>الفرع</th>
                   <th style={{ padding: '10px 8px', fontSize: '12.5px' }}>💵 كاش (ج.م)</th>
                   <th style={{ padding: '10px 8px', fontSize: '12.5px' }}>💳 فيزا (ج.م)</th>
+                  <th style={{ padding: '10px 8px', fontSize: '12.5px' }}>📱 محفظة (ج.م)</th>
+                  <th style={{ padding: '10px 8px', fontSize: '12.5px' }}>⚡ إنستاباي (ج.م)</th>
                   <th style={{ padding: '10px 8px', fontSize: '12.5px' }}>🛵 دليفري (ج.م)</th>
                   <th style={{ padding: '10px 8px', fontSize: '12.5px', background: '#115e59' }}>💎 الإجمالي (ج.م)</th>
                   <th style={{ padding: '10px 8px', fontSize: '12.5px' }}>🧾 الفواتير</th>
@@ -950,7 +952,7 @@ export default function BranchSalesModule({
               <tbody>
                 {filteredSalesLog.length === 0 ? (
                   <tr>
-                    <td colSpan="12" style={{ padding: '30px', textAlign: 'center', color: 'var(--muted)' }}>
+                    <td colSpan="14" style={{ padding: '30px', textAlign: 'center', color: 'var(--muted)' }}>
                       لا توجد سجلات مبيعات تطابق الفلاتر المحددة.
                     </td>
                   </tr>
@@ -967,6 +969,12 @@ export default function BranchSalesModule({
                       </td>
                       <td style={{ padding: '8px 6px', fontSize: '12.5px', color: '#1d4ed8', fontWeight: '700' }}>
                         {(parseFloat(sale.visaSales) || 0).toLocaleString('ar-EG', { minimumFractionDigits: 2 })}
+                      </td>
+                      <td style={{ padding: '8px 6px', fontSize: '12.5px', color: '#7c3aed', fontWeight: '700' }}>
+                        {(parseFloat(sale.walletSales ?? sale.electronicWalletSales) || 0).toLocaleString('ar-EG', { minimumFractionDigits: 2 })}
+                      </td>
+                      <td style={{ padding: '8px 6px', fontSize: '12.5px', color: '#0284c7', fontWeight: '700' }}>
+                        {(parseFloat(sale.instapaySales) || 0).toLocaleString('ar-EG', { minimumFractionDigits: 2 })}
                       </td>
                       <td style={{ padding: '8px 6px', fontSize: '12.5px', color: '#b45309', fontWeight: '700' }}>
                         {(parseFloat(sale.deliverySales) || 0).toLocaleString('ar-EG', { minimumFractionDigits: 2 })}

@@ -35,6 +35,8 @@ export default function BranchBatchSalesModal({
         branchCode: b.code || b.branchCode || '',
         cashSales: existing?.cashSales !== undefined ? String(existing.cashSales) : '',
         visaSales: existing?.visaSales !== undefined ? String(existing.visaSales) : '',
+        walletSales: existing?.walletSales !== undefined ? String(existing.walletSales) : (existing?.electronicWalletSales !== undefined ? String(existing.electronicWalletSales) : ''),
+        instapaySales: existing?.instapaySales !== undefined ? String(existing.instapaySales) : '',
         deliverySales: existing?.deliverySales !== undefined ? String(existing.deliverySales) : '',
         totalSales: existing?.totalSales !== undefined ? String(existing.totalSales) : '',
         receiptsCount: existing?.receiptsCount !== undefined ? String(existing.receiptsCount) : '',
@@ -52,13 +54,15 @@ export default function BranchBatchSalesModal({
       const next = [...prev];
       const r = { ...next[index], [field]: value };
 
-      // Auto-compute total if cash/visa/delivery change
-      if (field === 'cashSales' || field === 'visaSales' || field === 'deliverySales') {
+      // Auto-compute total if any payment channel changes
+      if (['cashSales', 'visaSales', 'walletSales', 'instapaySales', 'deliverySales'].includes(field)) {
         const c = parseFloat(field === 'cashSales' ? value : r.cashSales) || 0;
         const v = parseFloat(field === 'visaSales' ? value : r.visaSales) || 0;
+        const w = parseFloat(field === 'walletSales' ? value : r.walletSales) || 0;
+        const ip = parseFloat(field === 'instapaySales' ? value : r.instapaySales) || 0;
         const d = parseFloat(field === 'deliverySales' ? value : r.deliverySales) || 0;
-        const sum = c + v + d;
-        if (sum > 0 || (r.cashSales !== '' || r.visaSales !== '' || r.deliverySales !== '')) {
+        const sum = c + v + w + ip + d;
+        if (sum > 0 || (r.cashSales !== '' || r.visaSales !== '' || r.walletSales !== '' || r.instapaySales !== '' || r.deliverySales !== '')) {
           r.totalSales = sum > 0 ? String(sum) : '';
         }
       }
@@ -75,6 +79,8 @@ export default function BranchBatchSalesModal({
       ...r,
       cashSales: '',
       visaSales: '',
+      walletSales: '',
+      instapaySales: '',
       deliverySales: '',
       totalSales: '',
       receiptsCount: '',
@@ -91,12 +97,16 @@ export default function BranchBatchSalesModal({
       const tot = parseFloat(r.totalSales) || (
         (parseFloat(r.cashSales) || 0) +
         (parseFloat(r.visaSales) || 0) +
+        (parseFloat(r.walletSales) || 0) +
+        (parseFloat(r.instapaySales) || 0) +
         (parseFloat(r.deliverySales) || 0)
       );
 
-      if (tot > 0 || r.totalSales !== '' || r.cashSales !== '' || r.visaSales !== '') {
+      if (tot > 0 || r.totalSales !== '' || r.cashSales !== '' || r.visaSales !== '' || r.walletSales !== '' || r.instapaySales !== '') {
         const c = parseFloat(r.cashSales) || 0;
         const v = parseFloat(r.visaSales) || 0;
+        const w = parseFloat(r.walletSales) || 0;
+        const ip = parseFloat(r.instapaySales) || 0;
         const d = parseFloat(r.deliverySales) || 0;
         const rec = parseInt(r.receiptsCount, 10) || 0;
         const avg = rec > 0 ? parseFloat((tot / rec).toFixed(2)) : 0;
@@ -110,6 +120,8 @@ export default function BranchBatchSalesModal({
           totalSales: parseFloat(tot.toFixed(2)),
           cashSales: parseFloat(c.toFixed(2)),
           visaSales: parseFloat(v.toFixed(2)),
+          walletSales: parseFloat(w.toFixed(2)),
+          instapaySales: parseFloat(ip.toFixed(2)),
           deliverySales: parseFloat(d.toFixed(2)),
           creditSales: 0,
           receiptsCount: rec,
@@ -137,6 +149,8 @@ export default function BranchBatchSalesModal({
     const tot = parseFloat(r.totalSales) || (
       (parseFloat(r.cashSales) || 0) +
       (parseFloat(r.visaSales) || 0) +
+      (parseFloat(r.walletSales) || 0) +
+      (parseFloat(r.instapaySales) || 0) +
       (parseFloat(r.deliverySales) || 0)
     );
     return acc + tot;
@@ -237,12 +251,14 @@ export default function BranchBatchSalesModal({
               <thead>
                 <tr style={{ background: '#0f766e', color: '#ffffff', position: 'sticky', top: 0, zIndex: 2 }}>
                   <th style={{ padding: '10px', fontSize: '12.5px', minWidth: '150px' }}>الفرع</th>
-                  <th style={{ padding: '10px', fontSize: '12.5px', minWidth: '110px' }}>💵 كاش (ج.م)</th>
-                  <th style={{ padding: '10px', fontSize: '12.5px', minWidth: '110px' }}>💳 فيزا (ج.م)</th>
-                  <th style={{ padding: '10px', fontSize: '12.5px', minWidth: '110px' }}>🛵 دليفري (ج.م)</th>
-                  <th style={{ padding: '10px', fontSize: '12.5px', minWidth: '130px', background: '#115e59' }}>💎 الإجمالي (ج.م)</th>
-                  <th style={{ padding: '10px', fontSize: '12.5px', minWidth: '90px' }}>🧾 الفواتير</th>
-                  <th style={{ padding: '10px', fontSize: '12.5px', minWidth: '140px' }}>ملاحظات</th>
+                  <th style={{ padding: '10px', fontSize: '12.5px', minWidth: '105px' }}>💵 كاش (ج.م)</th>
+                  <th style={{ padding: '10px', fontSize: '12.5px', minWidth: '105px' }}>💳 فيزا (ج.م)</th>
+                  <th style={{ padding: '10px', fontSize: '12.5px', minWidth: '105px' }}>📱 محفظة (ج.م)</th>
+                  <th style={{ padding: '10px', fontSize: '12.5px', minWidth: '105px' }}>⚡ إنستاباي (ج.م)</th>
+                  <th style={{ padding: '10px', fontSize: '12.5px', minWidth: '105px' }}>🛵 دليفري (ج.م)</th>
+                  <th style={{ padding: '10px', fontSize: '12.5px', minWidth: '125px', background: '#115e59' }}>💎 الإجمالي (ج.م)</th>
+                  <th style={{ padding: '10px', fontSize: '12.5px', minWidth: '85px' }}>🧾 الفواتير</th>
+                  <th style={{ padding: '10px', fontSize: '12.5px', minWidth: '130px' }}>ملاحظات</th>
                 </tr>
               </thead>
               <tbody>
@@ -276,6 +292,30 @@ export default function BranchBatchSalesModal({
                         value={row.visaSales}
                         onChange={(e) => handleRowChange(idx, 'visaSales', e.target.value)}
                         style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', textAlign: 'center', fontWeight: '700' }}
+                      />
+                    </td>
+
+                    <td style={{ padding: '6px' }}>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder="0"
+                        value={row.walletSales}
+                        onChange={(e) => handleRowChange(idx, 'walletSales', e.target.value)}
+                        style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid #ddd6fe', background: '#faf5ff', fontSize: '13px', textAlign: 'center', fontWeight: '700' }}
+                      />
+                    </td>
+
+                    <td style={{ padding: '6px' }}>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder="0"
+                        value={row.instapaySales}
+                        onChange={(e) => handleRowChange(idx, 'instapaySales', e.target.value)}
+                        style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid #bae6fd', background: '#f0f9ff', fontSize: '13px', textAlign: 'center', fontWeight: '700' }}
                       />
                     </td>
 
@@ -332,7 +372,7 @@ export default function BranchBatchSalesModal({
           {/* Action Buttons & Footer Summary */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px', borderTop: '1px solid var(--border)', paddingTop: '16px', flexWrap: 'wrap', gap: '10px' }}>
             <div style={{ fontSize: '13px', color: 'var(--muted)' }}>
-              💡 يمكنك إدخال الكاش والفيزا والدليفري ليتم احتساب الإجمالي آلياً، أو إدخال الإجمالي مباشرة في خانته الخضراء.
+              💡 يمكنك إدخال الكاش، الفيزا، المحفظة الإلكترونية، إنستاباي، والدليفري ليتم احتساب الإجمالي آلياً، أو إدخال الإجمالي مباشرة في خانته الخضراء.
             </div>
 
             <div style={{ display: 'flex', gap: '10px' }}>

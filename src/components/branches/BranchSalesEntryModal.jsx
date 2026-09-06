@@ -17,6 +17,8 @@ export default function BranchSalesEntryModal({
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [cashSales, setCashSales] = useState('');
   const [visaSales, setVisaSales] = useState('');
+  const [walletSales, setWalletSales] = useState('');
+  const [instapaySales, setInstapaySales] = useState('');
   const [deliverySales, setDeliverySales] = useState('');
   const [creditSales, setCreditSales] = useState('');
   const [manualTotal, setManualTotal] = useState('');
@@ -32,6 +34,8 @@ export default function BranchSalesEntryModal({
       setDate(editingSale.date || new Date().toISOString().slice(0, 10));
       setCashSales(editingSale.cashSales !== undefined ? String(editingSale.cashSales) : '');
       setVisaSales(editingSale.visaSales !== undefined ? String(editingSale.visaSales) : '');
+      setWalletSales(editingSale.walletSales !== undefined ? String(editingSale.walletSales) : (editingSale.electronicWalletSales !== undefined ? String(editingSale.electronicWalletSales) : ''));
+      setInstapaySales(editingSale.instapaySales !== undefined ? String(editingSale.instapaySales) : '');
       setDeliverySales(editingSale.deliverySales !== undefined ? String(editingSale.deliverySales) : '');
       setCreditSales(editingSale.creditSales !== undefined ? String(editingSale.creditSales) : '');
       setManualTotal(editingSale.totalSales !== undefined ? String(editingSale.totalSales) : '');
@@ -46,6 +50,8 @@ export default function BranchSalesEntryModal({
       setDate(new Date().toISOString().slice(0, 10));
       setCashSales('');
       setVisaSales('');
+      setWalletSales('');
+      setInstapaySales('');
       setDeliverySales('');
       setCreditSales('');
       setManualTotal('');
@@ -63,6 +69,8 @@ export default function BranchSalesEntryModal({
   const calculatedTotal = (
     (parseFloat(cashSales) || 0) +
     (parseFloat(visaSales) || 0) +
+    (parseFloat(walletSales) || 0) +
+    (parseFloat(instapaySales) || 0) +
     (parseFloat(deliverySales) || 0) +
     (parseFloat(creditSales) || 0)
   );
@@ -119,6 +127,8 @@ export default function BranchSalesEntryModal({
       totalSales: parseFloat(effectiveTotal.toFixed(2)),
       cashSales: parseFloat((parseFloat(cashSales) || 0).toFixed(2)),
       visaSales: parseFloat((parseFloat(visaSales) || 0).toFixed(2)),
+      walletSales: parseFloat((parseFloat(walletSales) || 0).toFixed(2)),
+      instapaySales: parseFloat((parseFloat(instapaySales) || 0).toFixed(2)),
       deliverySales: parseFloat((parseFloat(deliverySales) || 0).toFixed(2)),
       creditSales: parseFloat((parseFloat(creditSales) || 0).toFixed(2)),
       isManualTotal,
@@ -249,7 +259,7 @@ export default function BranchSalesEntryModal({
             </div>
 
             {!isManualTotal ? (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '10px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(135px, 1fr))', gap: '10px' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '4px', color: '#15803d' }}>
                     💵 كاش نقدي (ج.م)
@@ -277,6 +287,36 @@ export default function BranchSalesEntryModal({
                     value={visaSales}
                     onChange={(e) => setVisaSales(e.target.value)}
                     style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', fontWeight: '700' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '4px', color: '#7c3aed' }}>
+                    📱 محفظة إلكترونية (ج.م)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="فودافون / اتصالات"
+                    value={walletSales}
+                    onChange={(e) => setWalletSales(e.target.value)}
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #ddd6fe', background: '#faf5ff', fontSize: '13px', fontWeight: '700' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '4px', color: '#0284c7' }}>
+                    ⚡ إنستاباي - InstaPay (ج.م)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="تحويل لحظي"
+                    value={instapaySales}
+                    onChange={(e) => setInstapaySales(e.target.value)}
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #bae6fd', background: '#f0f9ff', fontSize: '13px', fontWeight: '700' }}
                   />
                 </div>
 

@@ -167,6 +167,8 @@ export function computeComprehensiveFinancialReport({
 
   let totalCashSales = 0;
   let totalVisaSales = 0;
+  let totalWalletSales = 0;
+  let totalInstapaySales = 0;
   let totalDeliverySales = 0;
   let totalCreditSales = 0;
   let totalBranchSales = 0;
@@ -175,13 +177,17 @@ export function computeComprehensiveFinancialReport({
   filteredSales.forEach((s) => {
     const c = parseFloat(s.cashSales) || 0;
     const v = parseFloat(s.visaSales) || 0;
+    const w = parseFloat(s.walletSales ?? s.electronicWalletSales) || 0;
+    const ip = parseFloat(s.instapaySales) || 0;
     const d = parseFloat(s.deliverySales) || 0;
     const cr = parseFloat(s.creditSales) || 0;
-    const tot = parseFloat(s.totalSales) || (c + v + d + cr);
+    const tot = parseFloat(s.totalSales) || (c + v + w + ip + d + cr);
     const rec = parseInt(s.receiptsCount, 10) || 0;
 
     totalCashSales += c;
     totalVisaSales += v;
+    totalWalletSales += w;
+    totalInstapaySales += ip;
     totalDeliverySales += d;
     totalCreditSales += cr;
     totalBranchSales += tot;
@@ -356,6 +362,8 @@ export function computeComprehensiveFinancialReport({
     const bTotalSales = bSales.reduce((acc, s) => acc + (parseFloat(s.totalSales) || 0), 0);
     const bCash = bSales.reduce((acc, s) => acc + (parseFloat(s.cashSales) || 0), 0);
     const bVisa = bSales.reduce((acc, s) => acc + (parseFloat(s.visaSales) || 0), 0);
+    const bWallet = bSales.reduce((acc, s) => acc + (parseFloat(s.walletSales ?? s.electronicWalletSales) || 0), 0);
+    const bInstapay = bSales.reduce((acc, s) => acc + (parseFloat(s.instapaySales) || 0), 0);
     const bDelivery = bSales.reduce((acc, s) => acc + (parseFloat(s.deliverySales) || 0), 0);
 
     // Branch Other Incomes
@@ -397,6 +405,8 @@ export function computeComprehensiveFinancialReport({
       sales: bTotalSales,
       cashSales: bCash,
       visaSales: bVisa,
+      walletSales: bWallet,
+      instapaySales: bInstapay,
       deliverySales: bDelivery,
       otherIncome: bOtherIncome,
       grossRevenue: bGrossRevenue,
@@ -449,6 +459,8 @@ export function computeComprehensiveFinancialReport({
     totalBranchSales,
     totalCashSales,
     totalVisaSales,
+    totalWalletSales,
+    totalInstapaySales,
     totalDeliverySales,
     totalCreditSales,
     totalReceiptsCount,
@@ -510,6 +522,8 @@ export async function exportComprehensiveFinancialToExcel({
       totalBranchSales,
       totalCashSales,
       totalVisaSales,
+      totalWalletSales,
+      totalInstapaySales,
       totalDeliverySales,
       totalCreditSales,
       totalOtherIncome,
@@ -573,6 +587,8 @@ export async function exportComprehensiveFinancialToExcel({
     addSection('1. إجمالي الإيرادات والمبيعات (Revenues)');
     addRow('مبيعات نقدية (كاش)', totalCashSales, '');
     addRow('مبيعات فيزا وبطاقات بنكية', totalVisaSales, '');
+    addRow('مبيعات محفظة إلكترونية (فودافون كاش ومحافظ)', totalWalletSales, '');
+    addRow('مبيعات إنستاباي وتحويلات IPN', totalInstapaySales, '');
     addRow('مبيعات دليفري وتوصيل', totalDeliverySales, '');
     addRow('مبيعات آجل وشركات', totalCreditSales, '');
     addRow('إجمالي مبيعات الفروع والصيدليات', '', totalBranchSales, '100%', true);
