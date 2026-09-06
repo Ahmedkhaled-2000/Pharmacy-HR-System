@@ -49,6 +49,14 @@ export function parseArabicFloat(val) {
   return parseFloat(str) || 0;
 }
 
+export function normalizeDigits(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/[٠١٢٣٤٥٦٧٨٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d))
+    .replace(/[۰۱۲۳۴۵۶۷۸۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d))
+    .trim();
+}
+
 export function fmt(n) {
   const num = parseArabicFloat(n);
   return (Math.round(num * 100) / 100).toFixed(2);
@@ -556,6 +564,8 @@ export function normalizeState(parsed) {
       topN: 3,
       ...(parsed.branchSalesSettings && typeof parsed.branchSalesSettings === 'object' ? parsed.branchSalesSettings : {})
     },
+    branchDirectives: toSafeArray(parsed.branchDirectives),
+    adminDirectives: toSafeArray(parsed.adminDirectives),
     _deletedIds: toSafeArray(parsed._deletedIds || [])
   };
 }

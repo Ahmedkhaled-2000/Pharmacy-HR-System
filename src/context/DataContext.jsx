@@ -290,7 +290,9 @@ export function DataProvider({ children, showToast = () => {} }) {
     employeeNotes: [],
     loans: [],
     ipRestrictions: { enabled: false, allowedIps: [] },
-    authorizedDevices: []
+    authorizedDevices: [],
+    branchDirectives: [],
+    adminDirectives: []
   });
 
   const [isLoading, setIsLoading] = useState(true);

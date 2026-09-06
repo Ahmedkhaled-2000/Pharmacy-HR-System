@@ -223,6 +223,22 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
   if (mergedBiometrics !== undefined) mergedBase.biometrics = mergedBiometrics;
   if (mergedDevices !== undefined) mergedBase.devices = mergedDevices;
 
+  // 3.5. معالجة وتوحيد تأكيدات قراءة التعليمات والتوجيهات (Read Confirmations)
+  if (Array.isArray(localItem.readConfirmations) || Array.isArray(remoteItem.readConfirmations)) {
+    const cMap = new Map();
+    const allConfirms = [
+      ...toSafeArray(remoteItem.readConfirmations),
+      ...toSafeArray(localItem.readConfirmations)
+    ];
+    for (const c of allConfirms) {
+      if (c && (c.employeeId || c.employeeCode)) {
+        const cKey = String(c.employeeId || c.employeeCode);
+        if (!cMap.has(cKey)) cMap.set(cKey, c);
+      }
+    }
+    mergedBase.readConfirmations = Array.from(cMap.values());
+  }
+
   // 5. حماية حالة الاعتماد والسداد للسلف والطلبات من الارتداد لحالة معلقة
   if (options.prefix === 'loan' || options.prefix === 'req') {
     const isApprovedOrPaid = localItem.adminApproved === true || remoteItem.adminApproved === true ||
@@ -518,6 +534,8 @@ export function smartMergeStates(localState, remoteState) {
     },
     rosters: mergeRosters(localState.rosters, remoteState.rosters, { deletedIds }),
     activeShifts: mergeActiveShifts(localState.activeShifts, remoteState.activeShifts, mergedShifts, { deletedIds }),
+    branchDirectives: mergeArrays(localState.branchDirectives, remoteState.branchDirectives, { prefix: 'bdir', deletedIds }),
+    adminDirectives: mergeArrays(localState.adminDirectives, remoteState.adminDirectives, { prefix: 'adir', deletedIds }),
     _notificationsClearedAt: localState._notificationsClearedAt || remoteState._notificationsClearedAt || null,
     _deletedIds: Array.from(deletedIds).slice(-3000)
   };

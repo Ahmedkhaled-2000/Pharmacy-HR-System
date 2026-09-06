@@ -302,43 +302,100 @@ export function useAttendanceEngine() {
   // 5. بدء الوردية (Start Shift)
   const startShift = async (empId, source = 'admin', branchId = null) => {
     const emp = getEmp(empId);
-    if (emp && (emp.is_active === false || emp.fingerprint_active === false || emp.status === 'تم الاستقالة' || emp.isTerminated || emp.resignationStatus === 'approved')) {
-      showToast(`❌ لا يمكن تسجيل الحضور: تم إنهاء خدمة هذا الموظف (استقالة أو إنهاء تعاقد${emp.terminationReason ? `: ${emp.terminationReason}` : ''})`);
-      return;
+    if (!emp) {
+      const reason = '❌ الموظف غير مسجل بالنظام';
+      showToast(reason);
+      return { success: false, reason };
     }
-    if (emp && (emp.biometricSuspended || emp.punchDisabled || emp.accountSuspended || emp.status === 'معلق')) {
-      showToast(`⛔ لا يمكن تسجيل الحضور: تم إيقاف بصمة وحساب الموظف مؤقتاً (${emp.suspensionReason || 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق'})`);
-      return;
+    if (emp.is_active === false || emp.fingerprint_active === false || emp.status === 'تم الاستقالة' || emp.isTerminated || emp.resignationStatus === 'approved') {
+      const reason = `❌ لا يمكن تسجيل الحضور: تم إنهاء خدمة هذا الموظف (استقالة أو إنهاء تعاقد${emp.terminationReason ? `: ${emp.terminationReason}` : ''})`;
+      showToast(reason);
+      return { success: false, reason };
     }
-    if (!getEmpPermission(empId, 'canStartEnd') || !getEmpPermission(empId, 'canLivePunch')) {
-      showToast('❌ تم تقييد الصلاحيات: لا تمتلك صلاحية لبدء أو إنهاء الوردية عن طريق البصمة الحية');
-      return;
+    if (emp.biometricSuspended || emp.punchDisabled || emp.accountSuspended || emp.status === 'معلق') {
+      const reason = `⛔ لا يمكن تسجيل الحضور: تم إيقاف بصمة وحساب الموظف مؤقتاً (${emp.suspensionReason || 'إيقاف مؤقت عن العمل لحين انتهاء التحقيق'})`;
+      showToast(reason);
+      return { success: false, reason };
     }
-    if (state.activeShifts?.[empId]) {
-      showToast('⚠️ الموظف لديه وردية عمل نشطة بالفعل');
-      return;
+    if (source !== 'kiosk') {
+      if (!getEmpPermission(empId, 'canStartEnd') || !getEmpPermission(empId, 'canLivePunch')) {
+        const reason = '❌ تم تقييد الصلاحيات: لا تمتلك صلاحية لبدء أو إنهاء الوردية عن طريق البصمة الحية';
+        showToast(reason);
+        return { success: false, reason };
+      }
     }
+
     const punchDate = getRealTodayStr();
     const punchTime = nowTimeStr().slice(0, 5);
     const effectiveBranchId = branchId || emp?.branchId || (emp?.branchesDetails && emp.branchesDetails[0]?.branchId) || '';
 
-    const updatedActive = {
-      ...state.activeShifts,
-      [empId]: {
-        branchId: effectiveBranchId,
-        date: punchDate,
-        timeIn: punchTime,
-        startEpoch: Date.now(),
-        isPaused: false,
-        isOnBreak: false,
-        breakStartTime: null,
-        pauseStartEpoch: null,
-        accumulatedPauseMs: 0,
-        updatedAt: Date.now()
+    // فحص ومعالجة الوردية النشطة السابقة إن وجدت
+    const existingActive = state.activeShifts?.[empId] || state.activeShifts?.[String(empId)];
+    let currentActiveShifts = { ...state.activeShifts };
+    let currentShifts = [...(state.shifts || [])];
+
+    if (existingActive) {
+      if (existingActive.date && existingActive.date !== punchDate) {
+        // إذا كانت الوردية المفتوحة من يوم سابق، يتم إغلاقها تلقائياً لإتاحة بدء وردية اليوم
+        console.warn(`[startShift] Auto-closing stale shift from ${existingActive.date} for emp ${empId}`);
+        const staleShiftId = uid();
+        const bObjOld = (state.branches || []).find((b) => String(b.id) === String(existingActive.branchId || effectiveBranchId));
+        const autoClosedShift = {
+          id: staleShiftId,
+          employeeId: empId,
+          employeeCode: emp.code || '',
+          employeeName: emp.name || '',
+          branchId: existingActive.branchId || effectiveBranchId,
+          branchName: bObjOld?.name || '',
+          date: existingActive.date,
+          timeIn: existingActive.timeIn,
+          timeOut: '17:00',
+          hours: parseFloat(emp.workHoursPerDay) || 8,
+          actualWorkedHours: parseFloat(emp.workHoursPerDay) || 8,
+          scheduledHours: parseFloat(emp.workHoursPerDay) || 8,
+          regularHours: parseFloat(emp.workHoursPerDay) || 8,
+          overtimeHours: 0,
+          overtimeStatus: 'none',
+          breakHours: 0,
+          note: 'إغلاق تلقائي لوردية سابقة لم يتم تسجيل انصرافها',
+          statusLabel: 'حضور حي',
+          createdAt: new Date().toISOString()
+        };
+        currentShifts = [autoClosedShift, ...currentShifts];
+        delete currentActiveShifts[empId];
+        delete currentActiveShifts[String(empId)];
+      } else {
+        const reason = '⚠️ الموظف لديه وردية عمل نشطة بالفعل لليوم';
+        showToast(reason);
+        return { success: false, reason };
       }
+    }
+
+    const shiftData = {
+      branchId: effectiveBranchId,
+      date: punchDate,
+      timeIn: punchTime,
+      startEpoch: Date.now(),
+      isPaused: false,
+      isOnBreak: false,
+      breakStartTime: null,
+      pauseStartEpoch: null,
+      accumulatedPauseMs: 0,
+      updatedAt: Date.now()
     };
-    let updatedState = { ...state, activeShifts: updatedActive };
-    updatedState = checkAndRecordLateness(empId, punchDate, punchTime, updatedState);
+
+    const updatedActive = {
+      ...currentActiveShifts,
+      [empId]: shiftData,
+      [String(empId)]: shiftData
+    };
+    let updatedState = { ...state, activeShifts: updatedActive, shifts: currentShifts };
+
+    try {
+      updatedState = checkAndRecordLateness(empId, punchDate, punchTime, updatedState);
+    } catch (lateErr) {
+      console.error('[startShift] Error in checkAndRecordLateness (safely ignored):', lateErr);
+    }
 
     setState(updatedState);
     await saveState(updatedState);
@@ -346,8 +403,11 @@ export function useAttendanceEngine() {
     const bObj = (state.branches || []).find((b) => String(b.id) === String(effectiveBranchId));
     const branchNameStr = bObj ? ` (فرع ${bObj.name})` : '';
     const msg = `تم تسجيل حضور ${emp ? emp.name : ''}${branchNameStr} بنجاح الساعة ${punchTime}`;
+    
     if (source === 'kiosk') {
-      playFingerprintChime('success');
+      try {
+        playFingerprintChime('success');
+      } catch {}
       setKioskConfirmModal({
         open: true,
         type: 'checkin',
@@ -361,31 +421,41 @@ export function useAttendanceEngine() {
     } else {
       showToast(msg);
     }
+
+    return { success: true, punchTime, punchDate, branchName: bObj?.name || '' };
   };
 
   // 6. الإيقاف المؤقت للوردية (Pause Shift)
   const pauseShift = async (empId, source = 'admin') => {
-    const active = state.activeShifts?.[empId];
-    if (!active || active.isPaused) return;
+    const active = state.activeShifts?.[empId] || state.activeShifts?.[String(empId)];
+    if (!active || active.isPaused) {
+      const reason = !active ? 'لا توجد وردية نشطة لهذا الموظف' : 'الوردية في فترة بريك بالفعل';
+      showToast(reason);
+      return { success: false, reason };
+    }
     const emp = getEmp(empId);
     const nowTime = nowTimeStr().slice(0, 5);
+    const pausedData = {
+      ...active,
+      isPaused: true,
+      isOnBreak: true,
+      breakStartTime: nowTime,
+      pauseStartEpoch: Date.now(),
+      updatedAt: Date.now()
+    };
     const updatedActive = {
       ...state.activeShifts,
-      [empId]: {
-        ...active,
-        isPaused: true,
-        isOnBreak: true,
-        breakStartTime: nowTime,
-        pauseStartEpoch: Date.now(),
-        updatedAt: Date.now()
-      }
+      [empId]: pausedData,
+      [String(empId)]: pausedData
     };
     const updatedState = { ...state, activeShifts: updatedActive };
     setState(updatedState);
     await saveState(updatedState);
 
     if (source === 'kiosk') {
-      playFingerprintChime('success');
+      try {
+        playFingerprintChime('success');
+      } catch {}
       setKioskConfirmModal({
         open: true,
         type: 'pause',
@@ -399,32 +469,42 @@ export function useAttendanceEngine() {
     } else {
       showToast(`تم إيقاف وردية ${emp ? emp.name : ''} مؤقتاً (بريك)`);
     }
+
+    return { success: true, nowTime };
   };
 
   // 7. استئناف الوردية (Resume Shift)
   const resumeShift = async (empId, source = 'admin') => {
-    const active = state.activeShifts?.[empId];
-    if (!active || !active.isPaused) return;
+    const active = state.activeShifts?.[empId] || state.activeShifts?.[String(empId)];
+    if (!active || !active.isPaused) {
+      const reason = !active ? 'لا توجد وردية نشطة لهذا الموظف' : 'الموظف ليس في فترة بريك';
+      showToast(reason);
+      return { success: false, reason };
+    }
     const emp = getEmp(empId);
     const pauseDuration = Date.now() - (active.pauseStartEpoch || Date.now());
+    const resumedData = {
+      ...active,
+      isPaused: false,
+      isOnBreak: false,
+      breakStartTime: null,
+      pauseStartEpoch: null,
+      accumulatedPauseMs: (active.accumulatedPauseMs || 0) + pauseDuration,
+      updatedAt: Date.now()
+    };
     const updatedActive = {
       ...state.activeShifts,
-      [empId]: {
-        ...active,
-        isPaused: false,
-        isOnBreak: false,
-        breakStartTime: null,
-        pauseStartEpoch: null,
-        accumulatedPauseMs: (active.accumulatedPauseMs || 0) + pauseDuration,
-        updatedAt: Date.now()
-      }
+      [empId]: resumedData,
+      [String(empId)]: resumedData
     };
     const updatedState = { ...state, activeShifts: updatedActive };
     setState(updatedState);
     await saveState(updatedState);
 
     if (source === 'kiosk') {
-      playFingerprintChime('success');
+      try {
+        playFingerprintChime('success');
+      } catch {}
       setKioskConfirmModal({
         open: true,
         type: 'resume',
@@ -438,12 +518,18 @@ export function useAttendanceEngine() {
     } else {
       showToast(`تم استئناف وردية ${emp ? emp.name : ''}`);
     }
+
+    return { success: true };
   };
 
   // 8. إنهاء الوردية (Stop Shift)
   const stopShift = async (empId, source = 'admin') => {
-    const active = state.activeShifts?.[empId];
-    if (!active) return;
+    const active = state.activeShifts?.[empId] || state.activeShifts?.[String(empId)];
+    if (!active) {
+      const reason = '⚠️ لا توجد وردية نشطة مفتوحة لهذا الموظف لتسجيل الانصراف';
+      showToast(reason);
+      return { success: false, reason };
+    }
     const emp = getEmp(empId);
     const timeOut = nowTimeStr().slice(0, 5);
     const nowMs = Date.now();
@@ -605,6 +691,7 @@ export function useAttendanceEngine() {
     const updatedShifts = [newShift, ...(state.shifts || [])];
     const updatedActive = { ...state.activeShifts };
     delete updatedActive[empId];
+    delete updatedActive[String(empId)];
 
     let updatedState = {
       ...state,
@@ -614,14 +701,20 @@ export function useAttendanceEngine() {
       notifications: updatedNotifications
     };
 
-    updatedState = checkAndRecordEarlyExit(empId, active.date, timeOut, updatedState);
+    try {
+      updatedState = checkAndRecordEarlyExit(empId, active.date, timeOut, updatedState);
+    } catch (earlyErr) {
+      console.error('[stopShift] Error in checkAndRecordEarlyExit (safely ignored):', earlyErr);
+    }
 
     setState(updatedState);
     await saveState(updatedState);
 
     const msg = `تم تسجيل انصراف ${emp ? emp.name : ''} بنجاح الساعة ${timeOut} (إجمالي الساعات: ${netHours} س)`;
     if (source === 'kiosk') {
-      playFingerprintChime('success');
+      try {
+        playFingerprintChime('success');
+      } catch {}
       setKioskConfirmModal({
         open: true,
         type: 'checkout',
@@ -635,6 +728,8 @@ export function useAttendanceEngine() {
     } else {
       showToast(msg);
     }
+
+    return { success: true, netHours, timeOut, date: active.date };
   };
 
   // 9. إضافة وردية يدوية (Add Manual Shift)

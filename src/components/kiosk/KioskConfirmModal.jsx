@@ -1,11 +1,20 @@
 import React, { useEffect, useState } from 'react';
 
-export default function KioskConfirmModal({ confirmData, onClose }) {
+export default function KioskConfirmModal({ confirmData, kioskConfirmModal, onClose }) {
   const [progress, setProgress] = useState(100);
 
+  const effectiveData = confirmData || (kioskConfirmModal?.open ? {
+    actionType: kioskConfirmModal.type === 'checkin' ? 'shift_start' : (kioskConfirmModal.type === 'checkout' ? 'shift_end' : (kioskConfirmModal.type === 'pause' ? 'break_start' : 'break_end')),
+    empName: kioskConfirmModal.empName,
+    branchName: kioskConfirmModal.branchName || '',
+    timeStr: kioskConfirmModal.timestamp || '',
+    dateStr: '',
+    autoCloseMs: 3500
+  } : null);
+
   useEffect(() => {
-    if (!confirmData) return;
-    const duration = confirmData.autoCloseMs || 3500;
+    if (!effectiveData) return;
+    const duration = effectiveData.autoCloseMs || 3500;
     const intervalTime = 50;
     const step = (intervalTime / duration) * 100;
 
@@ -21,11 +30,11 @@ export default function KioskConfirmModal({ confirmData, onClose }) {
     }, intervalTime);
 
     return () => clearInterval(timer);
-  }, [confirmData, onClose]);
+  }, [effectiveData, onClose]);
 
-  if (!confirmData) return null;
+  if (!effectiveData) return null;
 
-  const { actionType, empName, branchName, timeStr, dateStr } = confirmData;
+  const { actionType, empName, branchName, timeStr, dateStr } = effectiveData;
 
   const actionConfigs = {
     shift_start: {

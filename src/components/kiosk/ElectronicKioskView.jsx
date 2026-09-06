@@ -6,6 +6,7 @@ import { useData } from '../../context/DataContext';
 import { uploadBiometricAttendancePhoto } from '../../utils/googleDriveService';
 import { sendBiometricAttendanceEmail } from '../../utils/gmailService';
 import { preWarmFaceModels } from '../../utils/faceApiHelper';
+import { normalizeDigits, getRealTodayStr } from '../../utils/formatters';
 import '../../kiosk-modern.css';
 
 export default function ElectronicKioskView({
@@ -33,7 +34,10 @@ export default function ElectronicKioskView({
   const [activeAction, setActiveAction] = useState(null);
   const [selectedBranchId, setSelectedBranchId] = useState(null);
   
-  const activeShift = matchedEmp ? state.activeShifts?.[matchedEmp.id] : null;
+  const todayStr = getRealTodayStr ? getRealTodayStr() : new Date().toISOString().slice(0, 10);
+  const rawActiveShift = matchedEmp ? (state.activeShifts?.[matchedEmp.id] || state.activeShifts?.[String(matchedEmp.id)]) : null;
+  const isStaleActiveShift = rawActiveShift && rawActiveShift.date && rawActiveShift.date !== todayStr;
+  const activeShift = rawActiveShift && !isStaleActiveShift ? rawActiveShift : null;
 
   useEffect(() => {
     // التحميل الاستباقي لمحرك الوجه في الكشك ليعمل فورياً عند وقوف أي موظف
@@ -59,7 +63,13 @@ export default function ElectronicKioskView({
   const handleCodeSubmit = (e) => {
     e.preventDefault();
     if (!inputCode) return;
-    const emp = employees.find(e => e.code === inputCode.trim());
+    const cleanCode = normalizeDigits(inputCode);
+    const emp = (employees || []).find(e => 
+      String(e.code || '').trim() === cleanCode || 
+      normalizeDigits(e.code) === cleanCode || 
+      String(e.id || '').trim() === cleanCode
+    );
+
     if (emp) {
       // 1. Check if employee is Resigned or Terminated
       if (emp.status === 'تم الاستقالة' || emp.is_active === false || emp.isTerminated || emp.resignationStatus === 'approved') {
@@ -88,9 +98,14 @@ export default function ElectronicKioskView({
       }
 
       if (kioskBranchId) {
-        const belongsToBranch = emp.branchId === kioskBranchId || (emp.branchesDetails && emp.branchesDetails.some(b => b.branchId === kioskBranchId));
+        const cleanKioskBranch = String(kioskBranchId).trim().replace(/^branch_/, '');
+        const empBranchClean = String(emp.branchId || '').trim().replace(/^branch_/, '');
+        const hasSecondaryBranch = Array.isArray(emp.branchesDetails) && emp.branchesDetails.some(b => 
+          String(b?.branchId || '').trim().replace(/^branch_/, '') === cleanKioskBranch
+        );
+        const belongsToBranch = empBranchClean === cleanKioskBranch || hasSecondaryBranch;
         if (!belongsToBranch) {
-          alert('هذا الموظف غير مسموح له بالدخول إلى هذا الفرع.');
+          alert('هذا الموظف غير مسجل أو غير مسموح له بالدخول في هذا الفرع.');
           setMatchedEmp(null);
           setInputCode('');
           return;
@@ -124,28 +139,85 @@ export default function ElectronicKioskView({
       const activeAdminDirs = (state?.adminDirectives || []).filter(d => d.status !== 'archived' && d.requireKioskConfirm !== false);
       const unconfirmedAdmin = activeAdminDirs.filter(d => {
         const matchesScope = d.scope === 'all' ||
-          (d.scope === 'branch' && String(d.targetBranchId) === String(defaultBranchId || emp.branchId)) ||
-          (d.scope === 'employee' && String(d.targetEmployeeId) === String(emp.id)) ||
-          (d.scope === 'job' && String(d.targetJobTitle || '').trim().toLowerCase() === String(emp.jobTitle || '').trim().toLowerCase());
+          (d.scope === 'branch' && (
+            String(d.targetBranchId) === String(defaultBranchId) ||
+            String(d.targetBranchId) === String(emp.branchId) ||
+            (kioskBranchId && String(d.targetBranchId) === String(kioskBranchId)) ||
+            (Array.isArray(emp.branchesDetails) && emp.branchesDetails.some(bd => String(bd?.branchId) === String(d.targetBranchId)))
+          )) ||
+          (d.scope === 'employee' && (
+            String(d.targetEmployeeId) === String(emp.id) ||
+            (d.targetEmployeeCode && String(d.targetEmployeeCode) === String(emp.code)) ||
+            (d.targetEmployeeId && String(d.targetEmployeeId) === String(emp.code))
+          )) ||
+          (d.scope === 'job' && (
+            String(d.targetJobTitle || '').trim().toLowerCase() === String(emp.jobTitle || '').trim().toLowerCase() ||
+            String(emp.jobTitle || '').trim().toLowerCase().includes(String(d.targetJobTitle || '').trim().toLowerCase())
+          ));
         if (!matchesScope) return false;
-        const alreadyConfirmed = (d.readConfirmations || []).some(c => String(c.employeeId) === String(emp.id));
+        const alreadyConfirmed = (d.readConfirmations || []).some(c => 
+          String(c.employeeId) === String(emp.id) || (emp.code && String(c.employeeCode) === String(emp.code))
+        );
         return !alreadyConfirmed;
       }).map(d => ({ ...d, sourceType: 'admin', sourceTitle: '👑 الإدارة العليا' }));
 
       // 2. Branch Directives (Branch Manager)
       const activeBranchDirs = (state?.branchDirectives || []).filter(d => d.status !== 'archived' && d.requireKioskConfirm !== false);
       const unconfirmedBranch = activeBranchDirs.filter(d => {
-        const matchesBranch = String(d.branchId) === String(defaultBranchId || emp.branchId);
-        if (!matchesBranch) return false;
-        const matchesScope = d.scope === 'all' ||
-          (d.scope === 'employee' && String(d.targetEmployeeId) === String(emp.id)) ||
-          (d.scope === 'job' && String(d.targetJobTitle || '').trim().toLowerCase() === String(emp.jobTitle || '').trim().toLowerCase());
-        if (!matchesScope) return false;
-        const alreadyConfirmed = (d.readConfirmations || []).some(c => String(c.employeeId) === String(emp.id));
+        // A. Employee-specific target
+        if (d.scope === 'employee') {
+          const isTargetEmp = (d.targetEmployeeId && String(d.targetEmployeeId) === String(emp.id)) ||
+                              (d.targetEmployeeCode && String(d.targetEmployeeCode) === String(emp.code)) ||
+                              (d.targetEmployeeId && String(d.targetEmployeeId) === String(emp.code));
+          if (!isTargetEmp) return false;
+        } else {
+          // B. Branch check (Matches employee's main branch, kiosk branch, default branch, or any secondary branch)
+          const dBranchStr = String(d.branchId || '').trim();
+          const cleanDBranch = dBranchStr.replace(/^branch_/, '');
+          
+          const empMainBranchStr = String(emp.branchId || '').trim();
+          const cleanEmpMain = empMainBranchStr.replace(/^branch_/, '');
+          
+          const kioskBranchStr = String(kioskBranchId || '').trim();
+          const cleanKiosk = kioskBranchStr.replace(/^branch_/, '');
+          
+          const defaultBranchStr = String(defaultBranchId || '').trim();
+          const cleanDefault = defaultBranchStr.replace(/^branch_/, '');
+
+          const isMainBranch = cleanDBranch && cleanEmpMain && cleanDBranch === cleanEmpMain;
+          const isKioskBranch = cleanDBranch && cleanKiosk && cleanDBranch === cleanKiosk;
+          const isDefaultBranch = cleanDBranch && cleanDefault && cleanDBranch === cleanDefault;
+          
+          const isSecondaryBranch = Array.isArray(emp.branchesDetails) && emp.branchesDetails.some(bd => {
+            const bIdStr = String(bd?.branchId || '').trim().replace(/^branch_/, '');
+            return bIdStr && bIdStr === cleanDBranch;
+          });
+
+          const matchesBranch = isMainBranch || isKioskBranch || isDefaultBranch || isSecondaryBranch;
+          if (!matchesBranch) return false;
+
+          // C. Scope check for job
+          if (d.scope === 'job') {
+            const targetJob = String(d.targetJobTitle || '').trim().toLowerCase();
+            const empJob = String(emp.jobTitle || '').trim().toLowerCase();
+            const matchesJob = targetJob === empJob || empJob.includes(targetJob) || targetJob.includes(empJob);
+            if (!matchesJob) return false;
+          }
+        }
+
+        // D. Has employee already confirmed reading this directive?
+        const alreadyConfirmed = (d.readConfirmations || []).some(c => 
+          String(c.employeeId) === String(emp.id) || (emp.code && String(c.employeeCode) === String(emp.code))
+        );
         return !alreadyConfirmed;
       }).map(d => ({ ...d, sourceType: 'branch', sourceTitle: `🏢 مدير الفرع (${d.branchName || 'الفرع'})` }));
 
-      const allUnconfirmed = [...unconfirmedAdmin, ...unconfirmedBranch];
+      // Put urgent directives first
+      const allUnconfirmed = [...unconfirmedBranch, ...unconfirmedAdmin].sort((a, b) => {
+        if (a.priority === 'urgent' && b.priority !== 'urgent') return -1;
+        if (b.priority === 'urgent' && a.priority !== 'urgent') return 1;
+        return 0;
+      });
 
       if (allUnconfirmed.length > 0) {
         setPendingDirectiveModal(allUnconfirmed[0]);
@@ -336,17 +408,25 @@ export default function ElectronicKioskView({
     const dateStr = nowD.toLocaleDateString('ar-EG');
 
     try {
+      let res = null;
       if (actionType === 'shift_start') {
-        if (startShift) await startShift(empId, 'kiosk', effectiveBranchId);
+        if (startShift) res = await startShift(empId, 'kiosk', effectiveBranchId);
       } else if (actionType === 'break_start') {
-        if (pauseShift) await pauseShift(empId, 'kiosk');
+        if (pauseShift) res = await pauseShift(empId, 'kiosk');
       } else if (actionType === 'break_end') {
-        if (resumeShift) await resumeShift(empId, 'kiosk');
+        if (resumeShift) res = await resumeShift(empId, 'kiosk');
       } else if (actionType === 'shift_end') {
-        if (stopShift) await stopShift(empId, 'kiosk');
+        if (stopShift) res = await stopShift(empId, 'kiosk');
+      }
+
+      if (res && res.success === false) {
+        alert(res.reason || 'تعذر إتمام الإجراء بنجاح.');
+        return;
       }
     } catch (err) {
       console.error('Kiosk punch execution error:', err);
+      alert('حدث خطأ أثناء حفظ الوردية. يرجى المحاولة مرة أخرى.');
+      return;
     }
 
     setConfirmModalData({
