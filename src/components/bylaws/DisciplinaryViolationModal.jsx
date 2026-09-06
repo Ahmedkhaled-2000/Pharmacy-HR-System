@@ -478,7 +478,9 @@ export default function DisciplinaryViolationModal({
               {isAdmin ? '⚖️ توثيق وتطبيق جزاء تأديبي فوري' : '⚠️ توثيق مخالفة تأديبية وإرسالها للإدارة العليا'}
             </h3>
             <p style={{ margin: 0, color: 'var(--muted)', fontSize: '13px' }}>
-              نظام العداد المستقل: احتساب تلقائي لمرات التكرار وتطبيق سلم الجزاءات المعتمد مع ربط مباشر بالأجور
+              {isAdmin 
+                ? 'نظام العداد المستقل: احتساب تلقائي لمرات التكرار وتطبيق سلم الجزاءات المعتمد مع ربط مباشر بالأجور'
+                : 'نظام العداد المستقل: احتساب تلقائي لمرات التكرار ورفع مقترح الجزاء للإدارة العليا للاعتماد'}
             </p>
           </div>
           <button
@@ -648,11 +650,13 @@ export default function DisciplinaryViolationModal({
                 </div>
 
                 <div style={{ background: '#ffffff', padding: '10px', borderRadius: '8px', border: '1px solid #bbf7d0' }}>
-                  <span style={{ fontSize: '12px', color: 'var(--muted)', display: 'block' }}>الخصم المالي المقترح:</span>
+                  <span style={{ fontSize: '12px', color: 'var(--muted)', display: 'block' }}>
+                    {isAdmin ? 'الخصم المالي المقترح:' : 'الخصم المقترح:'}
+                  </span>
                   <strong style={{ fontSize: '15px', color: counterResult.deductionDays > 0 ? '#b91c1c' : '#059669' }}>
                     {counterResult.deductionDays > 0
                       ? (isAdmin ? `${counterResult.deductionDays} يوم (${(dailyRate * counterResult.deductionDays).toFixed(2)} ج.م)` : `${counterResult.deductionDays} يوم`)
-                      : 'بدون خصم مالي'}
+                      : (isAdmin ? 'بدون خصم مالي' : 'بدون خصم')}
                   </strong>
                 </div>
               </div>
@@ -1038,15 +1042,15 @@ export default function DisciplinaryViolationModal({
             )}
           </div>
 
-          {/* Financial Summary Line before Submission */}
-          {effectiveDeductionAmount > 0 && (
+          {/* Financial Summary Line before Submission (Admin Only) */}
+          {isAdmin && effectiveDeductionAmount > 0 && (
             <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', padding: '12px 16px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
               <div style={{ color: '#991b1b', fontSize: '13.5px' }}>
                 <strong>💰 التأثير المالي للجزاء: </strong>
                 خصم <strong>{effectiveDeductionDays} يوم</strong> من الأجر الأساسي = <strong style={{ fontSize: '15px' }}>{effectiveDeductionAmount} ج.م</strong>
               </div>
               <div style={{ fontSize: '12px', color: '#7f1d1d' }}>
-                {isAdmin ? '✅ سيرحل فوراً إلى مسير الرواتب كبند خصم تأديبي' : '⏳ ينتظر موافقة الإدارة العليا للترحيل'}
+                ✅ سيرحل فوراً إلى مسير الرواتب كبند خصم تأديبي
               </div>
             </div>
           )}
