@@ -101,8 +101,8 @@ export default function RosterModule({
   });
   const [schedTarget, setSchedTarget] = useState(() => {
     const existing = orgSettings.rosterNotificationTarget;
-    if (existing === 'approved_only') return 'unsubmitted';
-    return existing || 'unsubmitted';
+    if (existing === 'all') return 'all';
+    return 'unsubmitted';
   });
   const [schedBranchFilter, setSchedBranchFilter] = useState('');
   const [isSavingSettings, setIsSavingSettings] = useState(false);
@@ -121,8 +121,8 @@ export default function RosterModule({
     if (orgSettings.rosterNotificationMessage && !orgSettings.rosterNotificationMessage.includes('تم اعتماد وإصدار الجدول الشهري')) {
       setSchedMessage(orgSettings.rosterNotificationMessage);
     }
-    if (orgSettings.rosterNotificationTarget && orgSettings.rosterNotificationTarget !== 'approved_only') {
-      setSchedTarget(orgSettings.rosterNotificationTarget);
+    if (orgSettings.rosterNotificationTarget) {
+      setSchedTarget(orgSettings.rosterNotificationTarget === 'all' ? 'all' : 'unsubmitted');
     }
   }, [
     orgSettings.rosterNotificationDay,
@@ -160,13 +160,8 @@ export default function RosterModule({
           (req.status === 'pending' || req.status === 'pending_admin' || req.status === 'pending_branch')
       );
 
-      if (schedTarget === 'unsubmitted') {
-        return !hasApproved && !hasPending;
-      }
-      if (schedTarget === 'not_approved') {
-        return !hasApproved;
-      }
-      return true;
+      // يرسل فقط لمن لم يعتمد له جدول ولم يرسل طلباً قيد المراجعة
+      return !hasApproved && !hasPending;
     });
   }, [state.employees, state.rosters, state.requests, schedTarget, schedBranchFilter]);
 
@@ -489,9 +484,8 @@ export default function RosterModule({
                     color: 'var(--text, #0f172a)'
                   }}
                 >
-                  <option value="unsubmitted">الموظفون الذين لم يقدموا جداولهم بعد (الموصى به)</option>
-                  <option value="not_approved">الموظفون الذين ليس لديهم جدول معتمد حتى الآن</option>
-                  <option value="all">جميع الموظفين النشطين ({employees.filter(isEmployeeActive).length} موظف)</option>
+                  <option value="unsubmitted">الموظفون الذين لم يرسلوا جداولهم بعد (المتأخرون فقط)</option>
+                  <option value="all">جميع الموظفين النشطين (تعميم لكافة الموظفين)</option>
                 </select>
                 <div style={{ fontSize: '12px', color: 'var(--muted, #64748b)', marginTop: '6px', lineHeight: 1.4 }}>
                   المستهدفون بالتذكير حالياً: <strong style={{ color: 'var(--primary, #0f766e)' }}>{eligibleEmployees.length} موظف</strong>

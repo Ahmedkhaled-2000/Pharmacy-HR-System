@@ -206,8 +206,8 @@ export function normalizeState(parsed) {
     rosterNotificationMessage: (parsed.orgSettings?.rosterNotificationMessage && !parsed.orgSettings.rosterNotificationMessage.includes('تم اعتماد وإصدار الجدول الشهري'))
       ? parsed.orgSettings.rosterNotificationMessage
       : 'يرجى التكرم بالدخول على بوابة الموظف لإعداد وتحديد جدول شفتاتك ومناوبات العمل للشهر الجديد، وإرسال الجدول لمدير الفرع والإدارة للاعتماد.',
-    rosterNotificationTarget: (parsed.orgSettings?.rosterNotificationTarget && parsed.orgSettings.rosterNotificationTarget !== 'approved_only')
-      ? parsed.orgSettings.rosterNotificationTarget
+    rosterNotificationTarget: (parsed.orgSettings?.rosterNotificationTarget && parsed.orgSettings.rosterNotificationTarget === 'all')
+      ? 'all'
       : 'unsubmitted',
     rosterNotificationLastSentMonth: parsed.orgSettings?.rosterNotificationLastSentMonth || '',
     rosterNotificationLastSentDate: parsed.orgSettings?.rosterNotificationLastSentDate || '',
