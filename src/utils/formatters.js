@@ -467,6 +467,42 @@ export function normalizeState(parsed) {
     deductionOptions: []
   };
 
+  // ── Auto-sync approved profile_update requests to employee data ──
+  const approvedProfileUpdates = requests.filter(
+    (r) =>
+      (r.type === 'profile_update' || r.type === 'profile_edit' || r.type === 'profile_update_request' || String(r.type || '').includes('profile')) &&
+      (r.status === 'approved' || r.adminApproved === true)
+  );
+
+  if (approvedProfileUpdates.length > 0) {
+    approvedProfileUpdates.sort((a, b) => new Date(a.approvedAt || a.submittedAt || a.createdAt || 0) - new Date(b.approvedAt || b.submittedAt || b.createdAt || 0));
+    approvedProfileUpdates.forEach((req) => {
+      const proposed = req.proposedChanges || req.proposed || {};
+      const newPhoto = proposed.photoUrl || req.photoUrl;
+      const newPhones = proposed.phones || (proposed.phone ? [proposed.phone] : (req.phones || []));
+      const newAddress = proposed.address !== undefined ? proposed.address : req.address;
+      const newMaritalStatus = proposed.maritalStatus || req.maritalStatus;
+
+      employees = employees.map((emp) => {
+        const isMatch = String(emp.id) === String(req.employeeId) || (req.employeeCode && String(emp.code) === String(req.employeeCode));
+        if (isMatch) {
+          const cleanPhones = Array.isArray(newPhones) && newPhones.length > 0
+            ? newPhones.map(p => (typeof p === 'object' && p ? (p.number || '') : String(p))).filter(Boolean)
+            : emp.phones;
+
+          return {
+            ...emp,
+            ...(newPhoto ? { photoUrl: newPhoto, photo: newPhoto } : {}),
+            ...(cleanPhones && cleanPhones.length > 0 ? { phones: cleanPhones, phone: cleanPhones[0] } : {}),
+            ...(newAddress !== undefined && newAddress !== '' ? { address: newAddress } : {}),
+            ...(newMaritalStatus ? { maritalStatus: newMaritalStatus } : {})
+          };
+        }
+        return emp;
+      });
+    });
+  }
+
   return {
     ...parsed,
     orgSettings,
@@ -513,12 +549,17 @@ export function shouldShowRequestToBranch(req, state) {
   const isLoanOrCredit = ['loan', 'advance', 'credit_medicine', 'meds'].includes(req.type);
   if (isLoanOrCredit) return false;
 
-  // 2. Direct-to-admin flags
+  // 2. Profile update requests are strictly Higher Management only
+  if (['profile_update', 'profile_edit', 'profile_update_request'].includes(req.type) || String(req.type || '').includes('profile')) {
+    return false;
+  }
+
+  // 3. Direct-to-admin flags
   if (req.targetApproval === 'admin_only' || req.targetApproval === 'admin' || req.branchNotRequired || req.isDirectToAdmin) {
     return false;
   }
 
-  // 3. Evaluations and complaints are direct to upper management
+  // 4. Evaluations and complaints are direct to upper management
   if (['eval_edit_request', 'complaint'].includes(req.type)) {
     return false;
   }

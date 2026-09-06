@@ -87,6 +87,12 @@ export default function EmployeeProfileModule({
           maritalStatus,
           photoUrl
         },
+        currentData: {
+          phones: Array.isArray(emp.phones) ? emp.phones : (emp.phone ? [emp.phone] : []),
+          address: emp.address || '',
+          maritalStatus: emp.maritalStatus || 'أعزب',
+          photoUrl: emp.photoUrl || ''
+        },
         // Display summary for admin review
         summary: `طلب تحديث: ${cleanPhones.length} أرقام تواصل، العنوان: ${address || '—'}، الحالة: ${maritalStatus}`
       };
@@ -135,10 +141,55 @@ export default function EmployeeProfileModule({
         {
           branchId: emp.branchId || '',
           salary: emp.salary || 0,
-          workHours: emp.workHours || 8,
-          workDays: emp.workDays || 26
+          workHours: emp.workHours || emp.workHoursPerDay || 8,
+          workDays: emp.workDays || emp.workDaysPerMonth || 26,
+          breakHours: emp.breakHours || emp.defaultBreakHours || 0
         }
       ];
+
+  // Calculations per branch according to the approved formula:
+  const computedBranches = branchesList.map((bd, idx) => {
+    const bObj = branches.find((b) => String(b.id) === String(bd.branchId));
+    const bName = bObj ? bObj.name : (bd.branchName || (idx === 0 && mainBranch ? mainBranch.name : `فرع ${idx + 1}`));
+    const hourlyRateInput = parseFloat(bd.salary) || 0; // سعر الساعة الشهري المدخل
+    const workHours = parseFloat(bd.workHours) || 8;
+    const workDays = parseFloat(bd.workDays) || 26;
+    const breakHours = parseFloat(bd.breakHours) || 0;
+    const netHours = Math.max(0, workHours - breakHours);
+    const effectiveHours = netHours > 0 ? netHours : workHours;
+
+    // تطبيق نفس معادلة تفاصيل الراتب في الإدارة:
+    // 1. سعر اليوم = (سعر الساعة الشهري * ساعات العمل) / أيام العمل
+    const dayRate = workDays > 0 ? Math.round(((hourlyRateInput * workHours) / workDays) * 100) / 100 : 0;
+    // 2. سعر الساعة اليومي الصافي = سعر اليوم / صافي ساعات العمل الفعلية
+    const hourRate = effectiveHours > 0 ? Math.round((dayRate / effectiveHours) * 100) / 100 : 0;
+    // 3. الراتب الأساسي الشهري = سعر الساعة الشهري * ساعات العمل
+    const basicSalary = Math.round(hourlyRateInput * workHours * 100) / 100;
+
+    return {
+      branchId: bd.branchId,
+      branchName: bName,
+      branchCode: bObj?.branchCode || bd.branchCode || '',
+      hourlyRateInput,
+      basicSalary,
+      workHours,
+      workDays,
+      breakHours,
+      netHours,
+      dayRate,
+      hourRate
+    };
+  });
+
+  const totalBasicSalary = computedBranches.reduce((acc, b) => acc + b.basicSalary, 0);
+
+  const mgmtAllowance = parseFloat(emp.managementAllowance || emp.managementBonus) || 0;
+  const transportAllowance = parseFloat(emp.transportAllowance) || 0;
+  const dailyAttendanceAllowance = parseFloat(emp.dailyAttendanceAllowance) || 0;
+  const customAllowances = Array.isArray(emp.customAllowances) ? emp.customAllowances : [];
+  const totalCustomAllowances = customAllowances.reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
+  const totalFixedAllowances = mgmtAllowance + transportAllowance + totalCustomAllowances;
+  const totalMonthlyPackage = totalBasicSalary + totalFixedAllowances;
 
   return (
     <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '1100px', margin: '0 auto' }}>
@@ -342,7 +393,7 @@ export default function EmployeeProfileModule({
 
       {/* ── SECTION 4: FINANCIAL PACKAGE BREAKDOWN (Read-Only) ── */}
       <div style={{ background: '#fff', border: '1.5px solid #10b981', borderRadius: '14px', padding: '20px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
           <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: '#065f46', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span>💵</span> الباقة المالية والتعاقدية المعتمدة
           </h3>
@@ -351,60 +402,119 @@ export default function EmployeeProfileModule({
           </span>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
-          {branchesList.map((bd, idx) => {
-            const bObj = branches.find(b => String(b.id) === String(bd.branchId));
-            const salary = parseFloat(bd.salary) || 0;
-            const days = parseFloat(bd.workDays) || 26;
-            const hours = parseFloat(bd.workHours) || 8;
-            const dayRate = days > 0 ? salary / days : 0;
-            const hourRate = hours > 0 ? dayRate / hours : 0;
+        {/* Big Total Monthly Package Banner */}
+        <div
+          style={{
+            background: 'linear-gradient(135deg, #065f46 0%, #047857 100%)',
+            borderRadius: '14px',
+            padding: '16px 20px',
+            color: '#ffffff',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: '20px',
+            boxShadow: '0 4px 14px rgba(4,120,87,0.25)'
+          }}
+        >
+          <div>
+            <span style={{ fontSize: '12.5px', opacity: 0.9, display: 'block' }}>إجمالي الباقة التعاقدية الشهرية الثابتة</span>
+            <div style={{ fontSize: '24px', fontWeight: 900, marginTop: '2px' }}>
+              {fmt(totalMonthlyPackage)} <span style={{ fontSize: '14px', fontWeight: 600 }}>ج.م / شهرياً</span>
+            </div>
+          </div>
+          <div style={{ textAlign: 'left', borderRight: '1px solid rgba(255,255,255,0.25)', paddingRight: '16px' }}>
+            <div style={{ fontSize: '12px', opacity: 0.85 }}>الأساسي: {fmt(totalBasicSalary)} ج.م</div>
+            <div style={{ fontSize: '12px', opacity: 0.85, marginTop: '2px' }}>البدلات: {fmt(totalFixedAllowances)} ج.م</div>
+          </div>
+        </div>
 
-            return (
-              <div key={idx} style={{ background: '#f0fdf4', border: '1px solid #a7f3d0', borderRadius: '10px', padding: '12px' }}>
-                <div style={{ fontWeight: 800, color: '#0f766e', fontSize: '13.5px', marginBottom: '6px' }}>
-                  📍 {bObj?.name || `فرع ${idx + 1}`}
-                </div>
-                <div style={{ fontSize: '13px', color: '#334155' }}>
-                  الراتب الأساسي: <strong>{fmt(salary)} ج.م</strong>
-                </div>
-                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
-                  سعر اليوم: <strong>{fmt(dayRate)} ج.م</strong> | الساعة: <strong>{fmt(hourRate)} ج.م</strong>
-                </div>
-                <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '2px' }}>
-                  ساعات العمل: {hours} س/يوم — {days} يوم/شهر
-                </div>
-              </div>
-            );
-          })}
+        {/* 1. Branch Salaries & Hourly Rates Table */}
+        <div style={{ marginBottom: '20px' }}>
+          <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', fontWeight: 800, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span>🏢</span> تفاصيل الراتب وساعات العمل حسب الفروع ({computedBranches.length})
+          </h4>
+          <div style={{ overflowX: 'auto', border: '1px solid #e2e8f0', borderRadius: '12px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'right', fontSize: '12px' }}>
+              <thead>
+                <tr style={{ background: '#f8fafc', borderBottom: '1.5px solid #cbd5e1' }}>
+                  <th style={{ padding: '8px 10px', whiteSpace: 'nowrap' }}>الفرع</th>
+                  <th style={{ padding: '8px 10px', textAlign: 'center', whiteSpace: 'nowrap' }}>سعر الساعة الشهري</th>
+                  <th style={{ padding: '8px 10px', textAlign: 'center', whiteSpace: 'nowrap' }}>الراتب الأساسي</th>
+                  <th style={{ padding: '8px 10px', textAlign: 'center', whiteSpace: 'nowrap' }}>ساعات / يوم</th>
+                  <th style={{ padding: '8px 10px', textAlign: 'center', whiteSpace: 'nowrap' }}>أيام / شهر</th>
+                  <th style={{ padding: '8px 10px', textAlign: 'center', whiteSpace: 'nowrap' }}>سعر اليوم</th>
+                  <th style={{ padding: '8px 10px', textAlign: 'center', whiteSpace: 'nowrap' }}>سعر الساعة الصافي</th>
+                </tr>
+              </thead>
+              <tbody>
+                {computedBranches.map((b, idx) => (
+                  <tr key={b.branchId || idx} style={{ borderBottom: '1px solid #e2e8f0', background: idx % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
+                    <td style={{ padding: '9px 10px', fontWeight: 700, color: '#0f766e', whiteSpace: 'nowrap' }}>
+                      📍 {b.branchName}
+                      {b.branchCode && <span style={{ fontSize: '11px', color: '#64748b', marginRight: '4px' }}>({b.branchCode})</span>}
+                    </td>
+                    <td style={{ padding: '9px 10px', textAlign: 'center', fontWeight: 700, color: '#4f46e5', whiteSpace: 'nowrap' }}>
+                      {fmt(b.hourlyRateInput)} ج.م
+                    </td>
+                    <td style={{ padding: '9px 10px', textAlign: 'center', fontWeight: 800, color: '#047857', whiteSpace: 'nowrap' }}>
+                      {fmt(b.basicSalary)} ج.م
+                    </td>
+                    <td style={{ padding: '9px 10px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                      <strong>{b.workHours}</strong> س
+                      {b.breakHours > 0 && <span style={{ fontSize: '10.5px', color: '#94a3b8', display: 'block' }}>({b.breakHours}س بريك)</span>}
+                    </td>
+                    <td style={{ padding: '9px 10px', textAlign: 'center', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                      {b.workDays} يوم
+                    </td>
+                    <td style={{ padding: '9px 10px', textAlign: 'center', fontWeight: 700, color: '#0369a1', whiteSpace: 'nowrap' }}>
+                      {fmt(b.dayRate)} ج.م
+                    </td>
+                    <td style={{ padding: '9px 10px', textAlign: 'center', fontWeight: 800, color: '#b45309', whiteSpace: 'nowrap' }}>
+                      {fmt(b.hourRate)} ج.م
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-          {/* Allowances */}
-          {parseFloat(emp.managementAllowance || emp.managementBonus) > 0 && (
-            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px' }}>
-              <div style={{ fontSize: '12px', color: '#64748b' }}>بدل إدارة (شهري)</div>
-              <div style={{ fontSize: '15px', fontWeight: 800, color: '#15803d', marginTop: '2px' }}>
-                {fmt(parseFloat(emp.managementAllowance || emp.managementBonus))} ج.م
+        {/* 2. Allowances Breakdown Grid */}
+        <div>
+          <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', fontWeight: 800, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span>🎁</span> البدلات والمخصصات التعاقدية
+          </h4>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' }}>
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '10px 12px' }}>
+              <div style={{ fontSize: '11.5px', color: '#64748b' }}>بدل الإدارة (شهري)</div>
+              <div style={{ fontSize: '16px', fontWeight: 800, color: mgmtAllowance > 0 ? '#15803d' : '#94a3b8', marginTop: '2px' }}>
+                {mgmtAllowance > 0 ? `${fmt(mgmtAllowance)} ج.م` : 'غير مخصص'}
               </div>
             </div>
-          )}
 
-          {parseFloat(emp.transportAllowance) > 0 && (
-            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px' }}>
-              <div style={{ fontSize: '12px', color: '#64748b' }}>بدل انتقال (شهري)</div>
-              <div style={{ fontSize: '15px', fontWeight: 800, color: '#0369a1', marginTop: '2px' }}>
-                {fmt(parseFloat(emp.transportAllowance))} ج.م
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '10px 12px' }}>
+              <div style={{ fontSize: '11.5px', color: '#64748b' }}>بدل الانتقال (شهري)</div>
+              <div style={{ fontSize: '16px', fontWeight: 800, color: transportAllowance > 0 ? '#0369a1' : '#94a3b8', marginTop: '2px' }}>
+                {transportAllowance > 0 ? `${fmt(transportAllowance)} ج.م` : 'غير مخصص'}
               </div>
             </div>
-          )}
 
-          {parseFloat(emp.dailyAttendanceAllowance) > 0 && (
-            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px' }}>
-              <div style={{ fontSize: '12px', color: '#64748b' }}>بدل حضور يومي بالبصمة</div>
-              <div style={{ fontSize: '15px', fontWeight: 800, color: '#b45309', marginTop: '2px' }}>
-                {fmt(parseFloat(emp.dailyAttendanceAllowance))} ج.م / يوم
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '10px 12px' }}>
+              <div style={{ fontSize: '11.5px', color: '#64748b' }}>بدل الحضور اليومي (بالبصمة)</div>
+              <div style={{ fontSize: '16px', fontWeight: 800, color: dailyAttendanceAllowance > 0 ? '#b45309' : '#94a3b8', marginTop: '2px' }}>
+                {dailyAttendanceAllowance > 0 ? `${fmt(dailyAttendanceAllowance)} ج.م / يوم` : 'غير مخصص'}
               </div>
             </div>
-          )}
+
+            {customAllowances.map((ca, cIdx) => (
+              <div key={ca.id || cIdx} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '10px 12px' }}>
+                <div style={{ fontSize: '11.5px', color: '#64748b' }}>{ca.title || `بدل إضافي ${cIdx + 1}`}</div>
+                <div style={{ fontSize: '16px', fontWeight: 800, color: '#047857', marginTop: '2px' }}>
+                  {fmt(parseFloat(ca.amount) || 0)} ج.م
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 

@@ -92,6 +92,9 @@ export function getFormattedRequestBadge(type, leaveType, targetAction) {
   if (cleanType === 'adjustment') {
     return <span className="badge badge-info">⚖️ تعديل إداري / مالي</span>;
   }
+  if (cleanType === 'profile_update' || cleanType === 'profile_edit' || cleanType === 'profile_update_request' || cleanType.includes('profile')) {
+    return <span className="badge badge-primary" style={{ background: '#0d9488', color: '#fff', border: '1px solid #0f766e', fontWeight: 700 }}>👤 طلب تحديث بيانات شخصية</span>;
+  }
 
   // إذا كان النص يحتوي على حروف إنجليزية ولم يطابق ما سبق
   if (/[a-zA-Z]/.test(type)) {
@@ -2315,6 +2318,7 @@ export default function RequestsModule({
         const isPenaltyObjection = previewModalReq.type === 'penalty_objection' || previewModalReq.type === 'objection' || Boolean(previewModalReq.penaltyId) || Boolean(previewModalReq.objection);
         const isRoster = ['roster_update', 'roster_edit', 'roster_edit_request'].includes(previewModalReq.type);
         const isComplaint = ['complaint', 'eval_edit_request'].includes(previewModalReq.type);
+        const isProfileUpdate = ['profile_update', 'profile_edit', 'profile_update_request'].includes(previewModalReq.type) || String(previewModalReq.type || '').includes('profile');
 
         const totalAmount = parseFloat(previewModalReq.amount) || 0;
         const monthlyDed = parseFloat(previewModalReq.monthlyDeduction || previewModalReq.installmentAmount) || 0;
@@ -2326,6 +2330,7 @@ export default function RequestsModule({
           isLoan ||
           isComplaint ||
           isPenaltyObjection ||
+          isProfileUpdate ||
           previewModalReq.branchNotRequired ||
           previewModalReq.isDirectToAdmin ||
           shouldRouteDirectToAdmin(empObj, effectiveReqBranchId, state) ||
@@ -3209,6 +3214,197 @@ export default function RequestsModule({
                             })}
                           </tbody>
                         </table>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* ── PROFILE UPDATE DETAILS & COMPARISON (البيانات السابقة مقابل الجديدة) ── */}
+                {isProfileUpdate && (() => {
+                  const proposed = previewModalReq.proposedChanges || previewModalReq.proposed || {};
+                  const current = previewModalReq.currentData || {
+                    phones: empObj?.phones || (empObj?.phone ? [empObj.phone] : []),
+                    address: empObj?.address || '',
+                    maritalStatus: empObj?.maritalStatus || 'أعزب',
+                    photoUrl: empObj?.photoUrl || empObj?.photo || ''
+                  };
+
+                  const prevPhoto = current.photoUrl || empObj?.photoUrl || empObj?.photo || '';
+                  const newPhoto = proposed.photoUrl || previewModalReq.photoUrl || '';
+                  const hasPhotoChange = Boolean(newPhoto && newPhoto !== prevPhoto);
+
+                  const normalizePhonesList = (list) => {
+                    if (!list) return [];
+                    if (Array.isArray(list)) {
+                      return list.map(p => (typeof p === 'object' && p ? (p.number || '') : String(p))).filter(Boolean);
+                    }
+                    if (typeof list === 'string') return [list];
+                    return [];
+                  };
+
+                  const prevPhones = normalizePhonesList(current.phones);
+                  const newPhones = normalizePhonesList(proposed.phones || proposed.phone);
+                  const hasPhonesChange = JSON.stringify(prevPhones) !== JSON.stringify(newPhones) && newPhones.length > 0;
+
+                  const prevAddress = current.address || empObj?.address || '—';
+                  const newAddress = proposed.address !== undefined ? proposed.address : '—';
+                  const hasAddressChange = newAddress !== '—' && newAddress !== prevAddress;
+
+                  const prevMarital = current.maritalStatus || empObj?.maritalStatus || 'أعزب';
+                  const newMarital = proposed.maritalStatus || '—';
+                  const hasMaritalChange = newMarital !== '—' && newMarital !== prevMarital;
+
+                  return (
+                    <div style={{ background: 'var(--surface-muted)', padding: '18px', borderRadius: '14px', border: '1.5px solid #0d9488' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                        <h4 style={{ margin: 0, color: '#0f766e', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 800 }}>
+                          <span>👤</span>
+                          <span>مقارنة البيانات الشخصية المطلوبة (البيانات السابقة ⬅️ البيانات الجديدة):</span>
+                        </h4>
+                        <span style={{ fontSize: '12px', background: '#ccfbf1', color: '#0f766e', padding: '3px 10px', borderRadius: '6px', fontWeight: 700 }}>
+                          تحديث ملف شخصي
+                        </span>
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        
+                        {/* 1. Profile Photo Comparison */}
+                        <div style={{ background: hasPhotoChange ? '#f0fdf4' : 'var(--surface)', border: hasPhotoChange ? '1.5px solid #86efac' : '1px solid var(--border)', borderRadius: '10px', padding: '12px 16px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                            <span style={{ fontWeight: 700, fontSize: '13px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span>📷</span> الصورة الشخصية:
+                            </span>
+                            {hasPhotoChange ? (
+                              <span style={{ fontSize: '11px', background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: '6px', fontWeight: 800 }}>
+                                ⚡ تم رفع صورة شخصية جديدة
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: '11px', color: 'var(--muted)' }}>لم يتم تعديل الصورة</span>
+                            )}
+                          </div>
+                          
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '24px', flexWrap: 'wrap' }}>
+                            {/* Old Photo */}
+                            <div style={{ textAlign: 'center' }}>
+                              <span style={{ display: 'block', fontSize: '11px', color: 'var(--muted)', marginBottom: '4px' }}>الصورة السابقة (الحالية)</span>
+                              <div style={{ width: '65px', height: '65px', borderRadius: '50%', overflow: 'hidden', border: '2px solid #cbd5e1', background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto' }}>
+                                {prevPhoto ? (
+                                  <img src={prevPhoto} alt="السابقة" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                ) : (
+                                  <span style={{ fontSize: '24px', color: '#94a3b8' }}>👤</span>
+                                )}
+                              </div>
+                            </div>
+
+                            <div style={{ fontSize: '20px', color: '#0d9488', fontWeight: 'bold' }}>➔</div>
+
+                            {/* New Photo */}
+                            <div style={{ textAlign: 'center' }}>
+                              <span style={{ display: 'block', fontSize: '11px', color: hasPhotoChange ? '#15803d' : 'var(--muted)', fontWeight: 700, marginBottom: '4px' }}>
+                                الصورة الجديدة المقترحة
+                              </span>
+                              <div
+                                style={{ width: '65px', height: '65px', borderRadius: '50%', overflow: 'hidden', border: hasPhotoChange ? '3px solid #10b981' : '2px dashed #cbd5e1', background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto', boxShadow: hasPhotoChange ? '0 4px 10px rgba(16,185,129,0.3)' : 'none', cursor: newPhoto ? 'pointer' : 'default' }}
+                                onClick={() => { if (newPhoto) window.open(newPhoto, '_blank'); }}
+                                title={newPhoto ? 'انقر لتكبير الصورة' : ''}
+                              >
+                                {newPhoto ? (
+                                  <img src={newPhoto} alt="الجديدة" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                ) : (
+                                  <span style={{ fontSize: '11px', color: '#94a3b8' }}>بدون تعديل</span>
+                                )}
+                              </div>
+                              {newPhoto && (
+                                <span style={{ fontSize: '10.5px', color: '#0d9488', display: 'block', marginTop: '3px', cursor: 'pointer' }} onClick={() => window.open(newPhoto, '_blank')}>
+                                  🔍 تكبير الصورة
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 2. Phone Numbers Comparison */}
+                        <div style={{ background: hasPhonesChange ? '#f0fdf4' : 'var(--surface)', border: hasPhonesChange ? '1.5px solid #86efac' : '1px solid var(--border)', borderRadius: '10px', padding: '12px 16px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                            <span style={{ fontWeight: 700, fontSize: '13px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span>📞</span> أرقام التواصل والهاتف:
+                            </span>
+                            {hasPhonesChange ? (
+                              <span style={{ fontSize: '11px', background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: '6px', fontWeight: 800 }}>
+                                ⚡ تم تعديل أرقام الهاتف
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: '11px', color: 'var(--muted)' }}>مطابق</span>
+                            )}
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px', fontSize: '12.5px' }}>
+                            <div style={{ background: 'var(--surface-muted)', padding: '8px 12px', borderRadius: '6px' }}>
+                              <span style={{ color: 'var(--muted)', display: 'block', fontSize: '11px' }}>الأرقام السابقة:</span>
+                              <strong style={{ color: '#64748b' }}>
+                                {prevPhones.length > 0 ? prevPhones.join(' ، ') : 'لا يوجد أرقام مسجلة'}
+                              </strong>
+                            </div>
+                            <div style={{ background: hasPhonesChange ? '#dcfce7' : 'var(--surface-muted)', padding: '8px 12px', borderRadius: '6px' }}>
+                              <span style={{ color: hasPhonesChange ? '#166534' : 'var(--muted)', display: 'block', fontSize: '11px', fontWeight: 700 }}>الأرقام الجديدة:</span>
+                              <strong style={{ color: hasPhonesChange ? '#15803d' : 'var(--text)' }}>
+                                {newPhones.length > 0 ? newPhones.join(' ، ') : (prevPhones.join(' ، ') || '—')}
+                              </strong>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 3. Address Comparison */}
+                        <div style={{ background: hasAddressChange ? '#f0fdf4' : 'var(--surface)', border: hasAddressChange ? '1.5px solid #86efac' : '1px solid var(--border)', borderRadius: '10px', padding: '12px 16px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                            <span style={{ fontWeight: 700, fontSize: '13px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span>📍</span> محل الإقامة / العنوان:
+                            </span>
+                            {hasAddressChange ? (
+                              <span style={{ fontSize: '11px', background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: '6px', fontWeight: 800 }}>
+                                ⚡ تم تعديل العنوان
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: '11px', color: 'var(--muted)' }}>مطابق</span>
+                            )}
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px', fontSize: '12.5px' }}>
+                            <div style={{ background: 'var(--surface-muted)', padding: '8px 12px', borderRadius: '6px' }}>
+                              <span style={{ color: 'var(--muted)', display: 'block', fontSize: '11px' }}>العنوان السابق:</span>
+                              <strong style={{ color: '#64748b' }}>{prevAddress}</strong>
+                            </div>
+                            <div style={{ background: hasAddressChange ? '#dcfce7' : 'var(--surface-muted)', padding: '8px 12px', borderRadius: '6px' }}>
+                              <span style={{ color: hasAddressChange ? '#166534' : 'var(--muted)', display: 'block', fontSize: '11px', fontWeight: 700 }}>العنوان الجديد:</span>
+                              <strong style={{ color: hasAddressChange ? '#15803d' : 'var(--text)' }}>{newAddress !== '—' ? newAddress : prevAddress}</strong>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 4. Marital Status Comparison */}
+                        <div style={{ background: hasMaritalChange ? '#f0fdf4' : 'var(--surface)', border: hasMaritalChange ? '1.5px solid #86efac' : '1px solid var(--border)', borderRadius: '10px', padding: '12px 16px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                            <span style={{ fontWeight: 700, fontSize: '13px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span>💍</span> الحالة الاجتماعية:
+                            </span>
+                            {hasMaritalChange ? (
+                              <span style={{ fontSize: '11px', background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: '6px', fontWeight: 800 }}>
+                                ⚡ تم تعديل الحالة الاجتماعية
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: '11px', color: 'var(--muted)' }}>مطابق</span>
+                            )}
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px', fontSize: '12.5px' }}>
+                            <div style={{ background: 'var(--surface-muted)', padding: '8px 12px', borderRadius: '6px' }}>
+                              <span style={{ color: 'var(--muted)', display: 'block', fontSize: '11px' }}>الحالة السابقة:</span>
+                              <strong style={{ color: '#64748b' }}>{prevMarital}</strong>
+                            </div>
+                            <div style={{ background: hasMaritalChange ? '#dcfce7' : 'var(--surface-muted)', padding: '8px 12px', borderRadius: '6px' }}>
+                              <span style={{ color: hasMaritalChange ? '#166534' : 'var(--muted)', display: 'block', fontSize: '11px', fontWeight: 700 }}>الحالة الجديدة:</span>
+                              <strong style={{ color: hasMaritalChange ? '#15803d' : 'var(--text)' }}>{newMarital !== '—' ? newMarital : prevMarital}</strong>
+                            </div>
+                          </div>
+                        </div>
+
                       </div>
                     </div>
                   );

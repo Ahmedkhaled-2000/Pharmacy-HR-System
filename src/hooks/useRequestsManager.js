@@ -619,6 +619,33 @@ export function useRequestsManager() {
             return true;
           });
         }
+
+        // 10. Profile Data & Photo Update Integration
+        if (target.type === 'profile_update' || target.type === 'profile_edit' || target.type === 'profile_update_request' || String(target.type || '').includes('profile')) {
+          const proposed = target.proposedChanges || target.proposed || {};
+          const newPhoto = proposed.photoUrl || target.photoUrl;
+          const newPhones = proposed.phones || (proposed.phone ? [proposed.phone] : (target.phones || []));
+          const newAddress = proposed.address !== undefined ? proposed.address : target.address;
+          const newMaritalStatus = proposed.maritalStatus || target.maritalStatus;
+
+          updatedEmps = updatedEmps.map(e => {
+            const isMatch = String(e.id) === String(target.employeeId) || (target.employeeCode && String(e.code) === String(target.employeeCode));
+            if (isMatch) {
+              const cleanPhones = Array.isArray(newPhones) && newPhones.length > 0
+                ? newPhones.map(p => (typeof p === 'object' && p ? (p.number || '') : String(p))).filter(Boolean)
+                : e.phones;
+
+              return {
+                ...e,
+                ...(newPhoto ? { photoUrl: newPhoto, photo: newPhoto } : {}),
+                ...(cleanPhones && cleanPhones.length > 0 ? { phones: cleanPhones, phone: cleanPhones[0] } : {}),
+                ...(newAddress !== undefined && newAddress !== '' ? { address: newAddress } : {}),
+                ...(newMaritalStatus ? { maritalStatus: newMaritalStatus } : {})
+              };
+            }
+            return e;
+          });
+        }
       }
 
       const decisionNotif = createRequestDecisionNotification({

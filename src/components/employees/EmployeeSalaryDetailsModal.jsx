@@ -82,7 +82,7 @@ export default function EmployeeSalaryDetailsModal({
       <div
         className="modal-card fade-in"
         style={{
-          maxWidth: '720px',
+          maxWidth: '890px',
           width: '95%',
           maxHeight: '92vh',
           overflowY: 'auto',
@@ -175,42 +175,42 @@ export default function EmployeeSalaryDetailsModal({
             <span>🏢</span> تفاصيل الراتب وساعات العمل حسب الفروع ({computedBranches.length})
           </h4>
           <div style={{ overflowX: 'auto', border: '1px solid #e2e8f0', borderRadius: '12px' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'right', fontSize: '12.5px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'right', fontSize: '12px' }}>
               <thead>
                 <tr style={{ background: '#f8fafc', borderBottom: '1.5px solid #cbd5e1' }}>
-                  <th style={{ padding: '9px 12px' }}>الفرع</th>
-                  <th style={{ padding: '9px 12px', textAlign: 'center' }}>سعر الساعة الشهري</th>
-                  <th style={{ padding: '9px 12px', textAlign: 'center' }}>الراتب الأساسي</th>
-                  <th style={{ padding: '9px 12px', textAlign: 'center' }}>ساعات / يوم</th>
-                  <th style={{ padding: '9px 12px', textAlign: 'center' }}>أيام / شهر</th>
-                  <th style={{ padding: '9px 12px', textAlign: 'center' }}>سعر اليوم</th>
-                  <th style={{ padding: '9px 12px', textAlign: 'center' }}>سعر الساعة الصافي</th>
+                  <th style={{ padding: '8px 10px', whiteSpace: 'nowrap' }}>الفرع</th>
+                  <th style={{ padding: '8px 10px', textAlign: 'center', whiteSpace: 'nowrap' }}>سعر الساعة الشهري</th>
+                  <th style={{ padding: '8px 10px', textAlign: 'center', whiteSpace: 'nowrap' }}>الراتب الأساسي</th>
+                  <th style={{ padding: '8px 10px', textAlign: 'center', whiteSpace: 'nowrap' }}>ساعات / يوم</th>
+                  <th style={{ padding: '8px 10px', textAlign: 'center', whiteSpace: 'nowrap' }}>أيام / شهر</th>
+                  <th style={{ padding: '8px 10px', textAlign: 'center', whiteSpace: 'nowrap' }}>سعر اليوم</th>
+                  <th style={{ padding: '8px 10px', textAlign: 'center', whiteSpace: 'nowrap' }}>سعر الساعة الصافي</th>
                 </tr>
               </thead>
               <tbody>
                 {computedBranches.map((b, idx) => (
                   <tr key={b.branchId || idx} style={{ borderBottom: '1px solid #e2e8f0', background: idx % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
-                    <td style={{ padding: '10px 12px', fontWeight: 700, color: '#0f766e' }}>
+                    <td style={{ padding: '9px 10px', fontWeight: 700, color: '#0f766e', whiteSpace: 'nowrap' }}>
                       📍 {b.branchName}
                       {b.branchCode && <span style={{ fontSize: '11px', color: '#64748b', marginRight: '4px' }}>({b.branchCode})</span>}
                     </td>
-                    <td style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 700, color: '#4f46e5' }}>
+                    <td style={{ padding: '9px 10px', textAlign: 'center', fontWeight: 700, color: '#4f46e5', whiteSpace: 'nowrap' }}>
                       {fmt(b.hourlyRateInput)} ج.م
                     </td>
-                    <td style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 800, color: '#047857' }}>
+                    <td style={{ padding: '9px 10px', textAlign: 'center', fontWeight: 800, color: '#047857', whiteSpace: 'nowrap' }}>
                       {fmt(b.basicSalary)} ج.م
                     </td>
-                    <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                    <td style={{ padding: '9px 10px', textAlign: 'center', whiteSpace: 'nowrap' }}>
                       <strong>{b.workHours}</strong> س
-                      {b.breakHours > 0 && <span style={{ fontSize: '11px', color: '#94a3b8', display: 'block' }}>({b.breakHours}س بريك)</span>}
+                      {b.breakHours > 0 && <span style={{ fontSize: '10.5px', color: '#94a3b8', display: 'block' }}>({b.breakHours}س بريك)</span>}
                     </td>
-                    <td style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 600 }}>
+                    <td style={{ padding: '9px 10px', textAlign: 'center', fontWeight: 600, whiteSpace: 'nowrap' }}>
                       {b.workDays} يوم
                     </td>
-                    <td style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 700, color: '#0369a1' }}>
+                    <td style={{ padding: '9px 10px', textAlign: 'center', fontWeight: 700, color: '#0369a1', whiteSpace: 'nowrap' }}>
                       {fmt(b.dayRate)} ج.م
                     </td>
-                    <td style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 800, color: '#b45309' }}>
+                    <td style={{ padding: '9px 10px', textAlign: 'center', fontWeight: 800, color: '#b45309', whiteSpace: 'nowrap' }}>
                       {fmt(b.hourRate)} ج.م
                     </td>
                   </tr>
