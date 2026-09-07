@@ -102,9 +102,6 @@ export default function EmployeeTerminationModal({
     <div
       className="modal-backdrop"
       style={{ zIndex: 1200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget && !isSubmitting) onClose?.();
-      }}
     >
       <style>{`
         @media print {

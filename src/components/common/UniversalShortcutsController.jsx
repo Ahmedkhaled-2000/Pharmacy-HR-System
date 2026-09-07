@@ -72,12 +72,10 @@ export default function UniversalShortcutsController() {
       if (ui.handleConfirmAction) ui.handleConfirmAction(false);
     };
 
-    // ── Universal Outside / Backdrop Click Handler ──────────────────────────────
-    const handleGlobalClick = (e) => {
+    // ── Strictly PREVENT Closing Modals on Outside / Backdrop Click ──────────────
+    // The user explicitly requested: "عدم اغلاق النوافذ المنبثقة في كامل النظام عند الضغط خارج النافذة منع ذلك"
+    const handlePreventBackdropClick = (e) => {
       const clickTarget = e.target;
-      const mouseDownTarget = mouseDownTargetRef.current;
-
-      // Find if clicked element is a modal overlay/backdrop
       const backdrop = clickTarget.closest(
         '.modal-overlay, .modal-backdrop, .central-modal-backdrop, .acc-modal-overlay, .portal-modal-overlay'
       );
@@ -86,36 +84,12 @@ export default function UniversalShortcutsController() {
         const cardSelectors =
           '.modal-card, .modal-content, .central-modal-card, .acc-modal, .acc-modal-card, .portal-modal-card, [role="document"]';
         const isClickInsideCard = Boolean(clickTarget.closest(cardSelectors));
-        const wasMouseDownInsideCard = Boolean(mouseDownTarget && mouseDownTarget.closest(cardSelectors));
 
-        // If clicked on backdrop outside card, and user didn't start click inside card (e.g. text selection)
-        if (!isClickInsideCard && !wasMouseDownInsideCard) {
-          // Look for close button inside this specific modal
-          const closeBtn =
-            backdrop.querySelector(
-              '.modal-close-circle-btn, .modal-close-btn, .del-btn, [data-action="close"], [aria-label*="إغلاق"], [aria-label*="Close"], .btn-close'
-            ) ||
-            Array.from(backdrop.querySelectorAll('button')).find((b) => {
-              const text = (b.textContent || '').trim();
-              return (
-                text === '✕' ||
-                text === '×' ||
-                text.includes('إغلاق') ||
-                text.includes('إلغاء') ||
-                text.includes('تراجع') ||
-                text === 'Close'
-              );
-            });
-
-          if (closeBtn) {
-            closeBtn.click();
-          } else {
-            // Fallback: reset global modal states in UIContext
-            closeAllGlobalUIModals();
-            window.dispatchEvent(
-              new CustomEvent('app:modal-close-request', { detail: { source: 'outside-click' } })
-            );
-          }
+        // If the click is on the backdrop itself outside any modal card, intercept and stop it completely!
+        if (!isClickInsideCard) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (e.stopImmediatePropagation) e.stopImmediatePropagation();
         }
       }
     };
@@ -401,13 +375,13 @@ export default function UniversalShortcutsController() {
       }
     };
 
-    window.addEventListener('mousedown', handleMouseDown, true);
-    window.addEventListener('click', handleGlobalClick, true);
+    window.addEventListener('mousedown', handlePreventBackdropClick, true);
+    window.addEventListener('click', handlePreventBackdropClick, true);
     window.addEventListener('keydown', handleGlobalKeyDown, true);
 
     return () => {
-      window.removeEventListener('mousedown', handleMouseDown, true);
-      window.removeEventListener('click', handleGlobalClick, true);
+      window.removeEventListener('mousedown', handlePreventBackdropClick, true);
+      window.removeEventListener('click', handlePreventBackdropClick, true);
       window.removeEventListener('keydown', handleGlobalKeyDown, true);
     };
   }, [isShortcutsModalOpen]);

@@ -37,13 +37,8 @@ export default function EmployeeModal({
   if (!isEmpModalOpen) return null;
 
   return (
-    <div
-      className="modal-overlay"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) setIsEmpModalOpen(false);
-      }}
-    >
-      <div className="modal-card emp-form-modal" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-overlay">
+      <div className="modal-card emp-form-modal">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
           <h3 style={{ margin: 0 }}>
             {editingEmp ? 'تعديل بيانات الموظف' : 'إضافة موظف جديد'}

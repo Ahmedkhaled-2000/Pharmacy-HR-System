@@ -4,13 +4,8 @@ export default function EditShiftModal({ editingShift, setEditingShift, saveEdit
   if (!editingShift) return null;
 
   return (
-    <div
-      className="modal-overlay"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) setEditingShift(null);
-      }}
-    >
-      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-overlay">
+      <div className="modal-card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
           <h3 style={{ margin: 0 }}>تعديل الوردية</h3>
           <button

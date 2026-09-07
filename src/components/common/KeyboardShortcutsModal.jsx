@@ -53,9 +53,6 @@ export default function KeyboardShortcutsModal({ isOpen, onClose, customShortcut
         backdropFilter: 'blur(10px)',
         padding: '16px'
       }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose?.();
-      }}
     >
       <div
         className="modal-card"
@@ -230,7 +227,7 @@ export default function KeyboardShortcutsModal({ isOpen, onClose, customShortcut
           }}
         >
           <span style={{ fontSize: '0.8rem', color: '#64748b' }}>
-            يمكنك إغلاق هذه النافذة في أي وقت بالضغط على <strong>Esc</strong> أو النقر خارجها.
+            يمكنك إغلاق هذه النافذة في أي وقت بالضغط على <strong>Esc</strong> أو زر الإغلاق ✕.
           </span>
           <button
             type="button"

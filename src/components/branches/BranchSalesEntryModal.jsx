@@ -149,9 +149,6 @@ export default function BranchSalesEntryModal({
   return (
     <div
       className="modal-overlay"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose?.();
-      }}
       style={{
         position: 'fixed',
         top: 0,

@@ -22,13 +22,8 @@ export default function ExportPayrollModal({
   if (!isExportModalOpen) return null;
 
   return (
-    <div
-      className="modal-overlay"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) setIsExportModalOpen(false);
-      }}
-    >
-      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-overlay">
+      <div className="modal-card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
           <h3 style={{ margin: 0 }}>تصدير تقرير الإكسل المخصص</h3>
           <button

@@ -138,16 +138,8 @@ export default function EmployeeSalaryDetailsModal({
   const totalMonthlyPackage = totalBasicSalary + totalFixedAllowances;
 
   return (
-    <div
-      className="modal-overlay"
-      style={{ zIndex: 99999 }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose?.();
-      }}
-    >
-      <div
-        className="modal-card fade-in"
-        onClick={(e) => e.stopPropagation()}
+    <div className="modal-overlay" style={{ zIndex: 99999 }}>
+      <div className="modal-card fade-in"
         style={{
           maxWidth: '890px',
           width: '95%',

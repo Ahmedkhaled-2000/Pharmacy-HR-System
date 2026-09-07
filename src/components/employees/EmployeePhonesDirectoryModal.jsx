@@ -117,16 +117,9 @@ export default function EmployeePhonesDirectoryModal({
   if (!isOpen) return null;
 
   return (
-    <div
-      className="modal-overlay"
-      style={{ zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose?.();
-      }}
-    >
+    <div className="modal-overlay" style={{ zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}>
       <div
         className="modal-card"
-        onClick={(e) => e.stopPropagation()}
         style={{
           maxWidth: '920px',
           width: '95%',
