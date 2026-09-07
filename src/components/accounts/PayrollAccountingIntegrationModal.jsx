@@ -55,15 +55,6 @@ export default function PayrollAccountingIntegrationModal({
     }
   }, [computeGrandPayroll, selectedMonth]);
 
-  if (!isOpen) return null;
-
-  const totalBasicAndAllowances = (payrollSummary.totalBaseEarnings || 0) + (payrollSummary.totalAllowances || 0) + (payrollSummary.totalDailyAllowances || 0);
-  const totalOvertime = payrollSummary.totalOvertimeEarnings || 0;
-  const totalBonus = payrollSummary.totalBonus || 0;
-  const totalGrossPayroll = totalBasicAndAllowances + totalOvertime + totalBonus;
-  const totalDeductionsAdvances = payrollSummary.totalDeduction || 0;
-  const netPayable = payrollSummary.totalNetSalary || (totalGrossPayroll - totalDeductionsAdvances);
-
   // Compute cashier shortages allocated for this month to offset against account 11603
   const cashierShortageAdjustments = useMemo(() => {
     return (state?.adjustments || []).filter((a) => {
@@ -77,8 +68,17 @@ export default function PayrollAccountingIntegrationModal({
     return cashierShortageAdjustments.reduce((sum, a) => sum + (Number(a.amount) || 0), 0);
   }, [cashierShortageAdjustments]);
 
+  const totalBasicAndAllowances = (payrollSummary.totalBaseEarnings || 0) + (payrollSummary.totalAllowances || 0) + (payrollSummary.totalDailyAllowances || 0);
+  const totalOvertime = payrollSummary.totalOvertimeEarnings || 0;
+  const totalBonus = payrollSummary.totalBonus || 0;
+  const totalGrossPayroll = totalBasicAndAllowances + totalOvertime + totalBonus;
+  const totalDeductionsAdvances = payrollSummary.totalDeduction || 0;
+  const netPayable = payrollSummary.totalNetSalary || (totalGrossPayroll - totalDeductionsAdvances);
+
   // Remaining general advances/penalties
   const totalOtherDeductions = Math.max(0, totalDeductionsAdvances - totalCashierShortageDeductions);
+
+  if (!isOpen) return null;
 
   const handlePostEntry = () => {
     if (totalGrossPayroll <= 0) {

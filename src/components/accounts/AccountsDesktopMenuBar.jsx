@@ -24,6 +24,7 @@ export default function AccountsDesktopMenuBar({
   onOpenAiPromptModal,
   onOpenAiAuditRadarModal,
   onOpenGuideModal,
+  onOpenZeroOutModal,
   themeMode = 'light',
   toggleTheme,
   isStandalone = false,
@@ -173,6 +174,19 @@ export default function AccountsDesktopMenuBar({
               <button type="button" onClick={() => handleAction(() => onSelectTab('entries'))}>
                 <span>📜 استعراض دفتر اليومية العامة</span>
               </button>
+              {onOpenZeroOutModal && (
+                <>
+                  <div className="acc-menu-divider"></div>
+                  <button
+                    type="button"
+                    onClick={() => handleAction(onOpenZeroOutModal)}
+                    style={{ color: '#dc2626' }}
+                  >
+                    <span>⚠️ تصفير نظام الحسابات بالكامل (خاص بالمالك)</span>
+                    <span className="acc-menu-badge" style={{ background: '#fee2e2', color: '#dc2626' }}>👑 المالك</span>
+                  </button>
+                </>
+              )}
               {isStandalone && onBackToDashboard && (
                 <button type="button" onClick={() => handleAction(onBackToDashboard)}>
                   <span>🏠 إغلاق والعودة للوحة الإدارة</span>
@@ -451,6 +465,23 @@ export default function AccountsDesktopMenuBar({
           >
             <span>📋 دليل الأكواد</span>
           </button>
+
+          {onOpenZeroOutModal && (
+            <button
+              type="button"
+              className="acc-ribbon-btn"
+              onClick={onOpenZeroOutModal}
+              style={{
+                color: '#dc2626',
+                borderColor: '#fecaca',
+                background: '#fef2f2',
+                fontWeight: '800',
+              }}
+              title="تصفير وتفريغ جميع سجلات وأرصدة نظام الحسابات (يتطلب تفويض المالك)"
+            >
+              <span>⚠️ تصفير الحسابات (المالك)</span>
+            </button>
+          )}
         </div>
 
         {/* Global Quick Search (Ctrl+K) & Dimension Pickers */}

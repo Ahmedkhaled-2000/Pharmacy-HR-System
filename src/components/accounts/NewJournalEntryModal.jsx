@@ -148,7 +148,7 @@ export default function NewJournalEntryModal({
           </div>
 
           {/* Body */}
-          <div className="acc-modal-body" style={{ maxHeight: '72vh' }}>
+          <div className="acc-modal-body">
             {/* Top row */}
             <div className="acc-form-row" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
               <div className="acc-form-group">

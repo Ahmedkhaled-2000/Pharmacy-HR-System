@@ -489,7 +489,7 @@ export default function PharmaVendorsTab({
               </button>
             </div>
 
-            <div className="acc-modal-body hide-scrollbar">
+            <div className="acc-modal-body">
               {/* Top Highlights */}
               <div style={{
                 display: 'grid',

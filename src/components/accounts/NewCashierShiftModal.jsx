@@ -26,14 +26,14 @@ export default function NewCashierShiftModal({
   const [closureNumber, setClosureNumber] = useState('');
 
   // POS System Sales Breakdown
-  const [openingFloat, setOpeningFloat] = useState(500); // رصيد عهدة الصباح/الفكة
-  const [grossSales, setGrossSales] = useState(12500); // إجمالي مبيعات الوردية
-  const [cashSales, setCashSales] = useState(8600); // مبيعات الكاش
-  const [visaSales, setVisaSales] = useState(2700); // مبيعات فيزا
-  const [walletSales, setWalletSales] = useState(800); // مبيعات محفظة / انستاباي
-  const [creditSales, setCreditSales] = useState(400); // مبيعات آجل / تعاقدات
-  const [drawerExpenses, setDrawerExpenses] = useState(100); // نثريات ومصروفات نقدية من الدرج
-  const [cashReturns, setCashReturns] = useState(50); // مرتجعات نقدية للعملاء
+  const [openingFloat, setOpeningFloat] = useState(0); // رصيد عهدة الصباح/الفكة
+  const [grossSales, setGrossSales] = useState(0); // إجمالي مبيعات الوردية
+  const [cashSales, setCashSales] = useState(0); // مبيعات الكاش
+  const [visaSales, setVisaSales] = useState(0); // مبيعات فيزا
+  const [walletSales, setWalletSales] = useState(0); // مبيعات محفظة / انستاباي
+  const [creditSales, setCreditSales] = useState(0); // مبيعات آجل / تعاقدات
+  const [drawerExpenses, setDrawerExpenses] = useState(0); // نثريات ومصروفات نقدية من الدرج
+  const [cashReturns, setCashReturns] = useState(0); // مرتجعات نقدية للعملاء
 
   // Actual Cash Count
   const [showDenominations, setShowDenominations] = useState(false);
@@ -47,7 +47,7 @@ export default function NewCashierShiftModal({
     1: 0,
     0.5: 0,
   });
-  const [directActualCash, setDirectActualCash] = useState(8950);
+  const [directActualCash, setDirectActualCash] = useState(0);
   const [notes, setNotes] = useState('');
 
   // Shortage Allocation Mode: 'single' (الكاشير المسؤول فقط) | 'custom_group' (موظفون محددون) | 'all_branch' (جميع موظفي الفرع بالتساوي)
@@ -363,9 +363,9 @@ export default function NewCashierShiftModal({
   return (
     <div className="acc-modal-overlay" onClick={onClose}>
       <div
-        className="acc-modal"
+        className="acc-modal acc-modal-lg"
         onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: '880px', width: '95vw', maxHeight: '92vh', overflowY: 'auto' }}
+        style={{ maxWidth: '900px', width: '95vw' }}
       >
         {/* Header */}
         <div className="acc-modal-header" style={{ background: '#f0fdf4', borderBottom: '1px solid #bbf7d0' }}>

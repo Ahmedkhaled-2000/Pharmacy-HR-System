@@ -23,6 +23,7 @@ import PayrollAccountingIntegrationModal from './PayrollAccountingIntegrationMod
 import NewCashierShiftModal from './NewCashierShiftModal';
 import AiJournalPromptModal from './AiJournalPromptModal';
 import AiAuditRadarModal from './AiAuditRadarModal';
+import ZeroOutAccountsModal from './ZeroOutAccountsModal';
 
 // Default Seeds
 import {
@@ -87,8 +88,9 @@ export default function AccountsSystemView({
   const [isAiPromptModalOpen, setIsAiPromptModalOpen] = useState(false);
   const [isAiAuditRadarModalOpen, setIsAiAuditRadarModalOpen] = useState(false);
   const [isGuideModalOpen, setIsGuideModalOpen] = useState(false);
+  const [isZeroOutModalOpen, setIsZeroOutModalOpen] = useState(false);
 
-  // Initialize Core Data from State or Defaults
+  // Initialize Core Data from State or Clean Defaults (0 balances)
   const accounts = useMemo(() => {
     return state?.accountsData?.accounts || DEFAULT_CHART_OF_ACCOUNTS;
   }, [state?.accountsData?.accounts]);
@@ -110,11 +112,15 @@ export default function AccountsSystemView({
   }, [state?.accountsData?.vendors]);
 
   const vendorTransactions = useMemo(() => {
-    return state?.accountsData?.vendorTransactions || DEFAULT_VENDOR_TRANSACTIONS;
+    const raw = state?.accountsData?.vendorTransactions || DEFAULT_VENDOR_TRANSACTIONS;
+    // Filter out any legacy demo seed records
+    return raw.filter((tx) => !tx.id?.startsWith('vtx-00'));
   }, [state?.accountsData?.vendorTransactions]);
 
   const cashierClosings = useMemo(() => {
-    return state?.accountsData?.cashierClosings || DEFAULT_CASHIER_CLOSINGS;
+    const raw = state?.accountsData?.cashierClosings || DEFAULT_CASHIER_CLOSINGS;
+    // Filter out any legacy demo seed records
+    return raw.filter((c) => !c.id?.startsWith('close-'));
   }, [state?.accountsData?.cashierClosings]);
 
   const branches = state?.branches || [];
@@ -461,6 +467,59 @@ export default function AccountsSystemView({
     }
   };
 
+  // 12. Full System Factory Reset / Zero-Out Guarded by Owner Authentication
+  const handleZeroOutAllAccounts = async () => {
+    // 1. Reset all account balances in Chart of Accounts to 0
+    const zeroedAccounts = accounts.map((acc) => ({
+      ...acc,
+      opening_balance: 0,
+      current_balance: 0,
+    }));
+
+    // 2. Reset all treasury & bank balances to 0
+    const zeroedTreasuries = treasuries.map((t) => ({
+      ...t,
+      current_balance: 0,
+    }));
+
+    // 3. Reset all pharma vendor balances to 0
+    const zeroedVendors = vendors.map((v) => ({
+      ...v,
+      current_balance: 0,
+    }));
+
+    // 4. Construct totally clean zeroed accountsData
+    const zeroedAccountsData = {
+      accounts: zeroedAccounts,
+      costCenters: costCenters,
+      treasuries: zeroedTreasuries,
+      entries: [],
+      vendors: zeroedVendors,
+      vendorTransactions: [],
+      cashierClosings: [],
+    };
+
+    // 5. Remove any accounts-related adjustments (cashier / inventory shortage) from payroll
+    const filteredAdjustments = (state?.adjustments || []).filter(
+      (a) => !a.isCashierShortage && !a.isInventoryShortage
+    );
+
+    const nextState = {
+      ...state,
+      accountsData: zeroedAccountsData,
+      adjustments: filteredAdjustments,
+    };
+
+    if (setState) setState(nextState);
+    if (saveState) await saveState(nextState);
+
+    if (showToast) {
+      showToast(
+        '✅ تم تصفير نظام الحسابات بالكامل وتفريغ كافة السجلات والأرصدة إلى الصفر بنجاح بتفويض معتمد من المالك.'
+      );
+    }
+  };
+
   const handleOpenVendorTxModal = (type) => {
     setVendorTxInitialType(type || 'payment');
     setIsVendorTxModalOpen(true);
@@ -581,6 +640,7 @@ export default function AccountsSystemView({
         onOpenAiPromptModal={() => setIsAiPromptModalOpen(true)}
         onOpenAiAuditRadarModal={() => setIsAiAuditRadarModalOpen(true)}
         onOpenGuideModal={() => setActiveTab('guide')}
+        onOpenZeroOutModal={() => setIsZeroOutModalOpen(true)}
         themeMode={themeMode}
         toggleTheme={toggleTheme}
         isStandalone={isStandalone}
@@ -980,6 +1040,15 @@ export default function AccountsSystemView({
           </div>
         </div>
       )}
+
+      {/* L. Zero-Out Accounts Full Reset Modal (Owner Guarded) */}
+      <ZeroOutAccountsModal
+        isOpen={isZeroOutModalOpen}
+        onClose={() => setIsZeroOutModalOpen(false)}
+        onZeroOut={handleZeroOutAllAccounts}
+        orgSettings={state?.orgSettings || {}}
+        state={state}
+      />
     </div>
   );
 }

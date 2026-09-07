@@ -93,7 +93,7 @@ export default function VendorTransactionModal({
           </div>
 
           {/* Body */}
-          <div className="acc-modal-body hide-scrollbar">
+          <div className="acc-modal-body">
             {/* Type Switcher */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: '16px' }}>
               <button
