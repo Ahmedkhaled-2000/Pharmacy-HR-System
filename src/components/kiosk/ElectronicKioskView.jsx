@@ -48,10 +48,51 @@ export default function ElectronicKioskView({
   const effectiveKioskBranchId = cleanKioskBranchId || cleanUrlParam || null;
   const isGeneralKioskLink = !effectiveKioskBranchId;
 
-  // Active company branches available for attendance
-  const allCompanyBranches = (state?.branches || []).filter(b => b && b.is_active !== false && String(b.name || '').trim());
-  // Show branch selector when accessing through the General Kiosk Link (/kiosk), and hide on branch-specific links
-  const showBranchSelector = Boolean(matchedEmp && isGeneralKioskLink && allCompanyBranches.length > 1);
+  // Extract all unique assigned branches for an employee (primary + multi-branch assignments)
+  const getEmployeeAssignedBranches = (emp) => {
+    if (!emp) return [];
+    const branchMap = new Map();
+
+    const addBranch = (bId, fallbackName = '') => {
+      if (!bId) return;
+      const strId = String(bId).trim();
+      if (!strId) return;
+      const foundBranch = (state?.branches || []).find((b) =>
+        String(b.id).trim() === strId ||
+        String(b.branchCode || '').trim() === strId ||
+        String(b.id).replace(/^branch_/, '') === strId.replace(/^branch_/, '')
+      );
+      const resolvedId = foundBranch ? String(foundBranch.id) : strId;
+      if (!branchMap.has(resolvedId)) {
+        branchMap.set(resolvedId, {
+          id: resolvedId,
+          name: foundBranch?.name || fallbackName || `فرع ${resolvedId}`,
+          code: foundBranch?.branchCode || ''
+        });
+      }
+    };
+
+    // 1. Primary branch
+    if (emp.branchId) {
+      addBranch(emp.branchId, emp.branchName);
+    }
+
+    // 2. Multi-branch assignments from branchesDetails
+    if (Array.isArray(emp.branchesDetails) && emp.branchesDetails.length > 0) {
+      emp.branchesDetails.forEach((bd) => {
+        if (bd?.branchId) {
+          addBranch(bd.branchId, bd.branchName);
+        }
+      });
+    }
+
+    return Array.from(branchMap.values());
+  };
+
+  const assignedBranches = matchedEmp ? getEmployeeAssignedBranches(matchedEmp) : [];
+  const isMultiBranchEmp = assignedBranches.length > 1;
+  // Show branch selector strictly on general kiosk link AND ONLY for employees working in more than 1 branch
+  const showBranchSelector = Boolean(matchedEmp && isGeneralKioskLink && isMultiBranchEmp);
 
   const todayStr = getRealTodayStr ? getRealTodayStr() : new Date().toISOString().slice(0, 10);
   const rawActiveShift = matchedEmp ? (state.activeShifts?.[matchedEmp.id] || state.activeShifts?.[String(matchedEmp.id)]) : null;
@@ -146,29 +187,17 @@ export default function ElectronicKioskView({
         }
       }
       
+      const assigned = getEmployeeAssignedBranches(emp);
       const activeS = (state?.activeShifts?.[emp.id] || state?.activeShifts?.[String(emp.id)]);
       let defaultBranchId = '';
       if (activeS && activeS.branchId) {
         defaultBranchId = String(activeS.branchId);
       } else if (effectiveKioskBranchId) {
         defaultBranchId = String(effectiveKioskBranchId);
-      } else if (emp.branchId) {
-        const foundB = allCompanyBranches.find(b => 
-          String(b.id) === String(emp.branchId) ||
-          String(b.branchCode || '').trim() === String(emp.branchId).trim() ||
-          String(b.id).replace(/^branch_/, '') === String(emp.branchId).replace(/^branch_/, '')
-        );
-        defaultBranchId = foundB ? String(foundB.id) : String(emp.branchId);
-      } else if (Array.isArray(emp.branchesDetails) && emp.branchesDetails.length > 0 && emp.branchesDetails[0]?.branchId) {
-        const bdId = emp.branchesDetails[0].branchId;
-        const foundB = allCompanyBranches.find(b => 
-          String(b.id) === String(bdId) ||
-          String(b.branchCode || '').trim() === String(bdId).trim() ||
-          String(b.id).replace(/^branch_/, '') === String(bdId).replace(/^branch_/, '')
-        );
-        defaultBranchId = foundB ? String(foundB.id) : String(bdId);
-      } else if (allCompanyBranches.length > 0) {
-        defaultBranchId = String(allCompanyBranches[0].id);
+      } else if (assigned.length > 0) {
+        defaultBranchId = String(assigned[0].id);
+      } else {
+        defaultBranchId = String(emp.branchId || '');
       }
       setSelectedBranchId(defaultBranchId);
       setMatchedEmp(emp);
@@ -891,7 +920,7 @@ export default function ElectronicKioskView({
                 </div>
               ) : (
                 <>
-                  {/* ── Branch Selection Card on General Kiosk Link ── */}
+                  {/* ── Branch Selection Card for Multi-Branch Employees on General Kiosk Link ── */}
                   {showBranchSelector && (
                     <div
                       className="kiosk-branch-selector-card"
@@ -971,7 +1000,7 @@ export default function ElectronicKioskView({
                                 border: '1px solid #a7f3d0'
                               }}
                             >
-                              الكشك العام ({allCompanyBranches.length} فروع متاحة)
+                              موظف متعدد الفروع ({assignedBranches.length} فروع معتمدة)
                             </span>
                           </div>
 
@@ -979,20 +1008,16 @@ export default function ElectronicKioskView({
                           <div
                             style={{
                               display: 'grid',
-                              gridTemplateColumns: allCompanyBranches.length <= 3 ? `repeat(${allCompanyBranches.length}, 1fr)` : 'repeat(auto-fit, minmax(140px, 1fr))',
+                              gridTemplateColumns: assignedBranches.length <= 3 ? `repeat(${assignedBranches.length}, 1fr)` : 'repeat(auto-fit, minmax(140px, 1fr))',
                               gap: '10px'
                             }}
                           >
-                            {allCompanyBranches.map((b) => {
+                            {assignedBranches.map((b) => {
                               const isSelected = String(selectedBranchId) === String(b.id);
                               const isPrimary = matchedEmp && (
                                 String(matchedEmp.branchId) === String(b.id) ||
                                 String(matchedEmp.branchCode || '').trim() === String(b.id).trim() ||
                                 String(matchedEmp.branchId || '').replace(/^branch_/, '') === String(b.id).replace(/^branch_/, '')
-                              );
-                              const isSecondary = Array.isArray(matchedEmp?.branchesDetails) && matchedEmp.branchesDetails.some(bd => 
-                                String(bd?.branchId) === String(b.id) ||
-                                String(bd?.branchId || '').replace(/^branch_/, '') === String(b.id).replace(/^branch_/, '')
                               );
 
                               return (
@@ -1021,21 +1046,19 @@ export default function ElectronicKioskView({
                                     <span style={{ fontSize: '17px' }}>{isSelected ? '✅' : '🏢'}</span>
                                     <span style={{ fontSize: '14px', fontWeight: 800 }}>{b.name}</span>
                                   </div>
-                                  {(isPrimary || isSecondary) && (
-                                    <span
-                                      style={{
-                                        fontSize: '10px',
-                                        fontWeight: 800,
-                                        padding: '2px 8px',
-                                        borderRadius: '999px',
-                                        background: isSelected ? 'rgba(255, 255, 255, 0.25)' : '#e0f2fe',
-                                        color: isSelected ? '#ffffff' : '#0369a1',
-                                        border: isSelected ? '1px solid rgba(255,255,255,0.4)' : '1px solid #bae6fd'
-                                      }}
-                                    >
-                                      {isPrimary ? '⭐ فرعك الأساسي' : '🏢 فرعك المعتمد'}
-                                    </span>
-                                  )}
+                                  <span
+                                    style={{
+                                      fontSize: '10px',
+                                      fontWeight: 800,
+                                      padding: '2px 8px',
+                                      borderRadius: '999px',
+                                      background: isSelected ? 'rgba(255, 255, 255, 0.25)' : '#e0f2fe',
+                                      color: isSelected ? '#ffffff' : '#0369a1',
+                                      border: isSelected ? '1px solid rgba(255,255,255,0.4)' : '1px solid #bae6fd'
+                                    }}
+                                  >
+                                    {isPrimary ? '⭐ الفرع الأساسي' : '🏢 فرع معتمد'}
+                                  </span>
                                 </button>
                               );
                             })}
