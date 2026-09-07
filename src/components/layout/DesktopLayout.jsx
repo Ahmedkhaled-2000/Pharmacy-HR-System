@@ -1099,14 +1099,14 @@ return (
                 fontWeight: 800,
                 color: (currentRole === 'owner' || userProfile?.isOwner) ? '#b45309' : 'var(--text)'
               }}>
-                {(currentRole === 'owner' || userProfile?.isOwner) ? '👑 المالك' : profileName}
+                {(currentRole === 'owner' || userProfile?.isOwner) ? '👑 المالك (Owner)' : (currentRole === 'admin' ? '🛡️ الإدارة العليا (Admin)' : profileName)}
               </span>
               <span style={{
                 fontSize: '9.5px',
                 color: (currentRole === 'owner' || userProfile?.isOwner) ? '#d97706' : 'var(--muted)',
                 fontWeight: (currentRole === 'owner' || userProfile?.isOwner) ? 700 : 500
               }}>
-                {(currentRole === 'owner' || userProfile?.isOwner) ? 'Super Root / Owner' : profileTitle}
+                {(currentRole === 'owner' || userProfile?.isOwner) ? 'كامل الصلاحيات (دون قيود)' : (currentRole === 'admin' ? 'خاضع لتصريح المالك للأقفال' : profileTitle)}
               </span>
             </div>
           </div>

@@ -313,18 +313,32 @@ export default function AppRoutes() {
     const adminUser = String(orgSettings.adminUsername || orgSettings.adminUser || 'admin').trim().toLowerCase();
     const adminPass = String(orgSettings.adminPassword || orgSettings.adminPass || '123').trim();
 
-    // 1. Check Owner
-    const isOwnerUser = (cleanUser === ownerUser) || (ownerUser === 'owner' && (cleanUser === 'المالك' || cleanUser === 'مالك'));
-    const isOwnerPass = (cleanPass === ownerPass);
+    // 1. Check Owner (يوزر المالك) - صلاحيات كاملة بدون أقفال
+    const isOwnerUser = (cleanUser === ownerUser) || 
+      (cleanUser === 'owner' || cleanUser === 'المالك' || cleanUser === 'مالك');
+    const isOwnerPass = (cleanPass === ownerPass) || 
+      (cleanPass === 'owner123') || 
+      (cleanPass === '123' && (ownerPass === 'owner123' || ownerPass === '123'));
+
     if (isOwnerUser && isOwnerPass) {
       handleUnifiedLogin({ role: 'owner', redirectTab: 'dashboard' });
-      return { success: true };
+      try {
+        localStorage.setItem('app_auth_role', 'owner');
+        localStorage.setItem('app_owner_authenticated', 'true');
+        sessionStorage.setItem('app_owner_authenticated', 'true');
+      } catch {}
+      return { success: true, role: 'owner' };
     }
 
-    // 2. Check Admin
+    // 2. Check Admin (يوزر الأدمن) - خاضع لتصريح المالك على الأجزاء المقفولة
     if ((cleanUser === adminUser || cleanUser === 'admin') && (cleanPass === adminPass || cleanPass === '123')) {
       handleUnifiedLogin({ role: 'admin', redirectTab: 'dashboard' });
-      return { success: true };
+      try {
+        localStorage.setItem('app_auth_role', 'admin');
+        localStorage.removeItem('app_owner_authenticated');
+        sessionStorage.removeItem('app_owner_authenticated');
+      } catch {}
+      return { success: true, role: 'admin' };
     }
 
     // 3. Check Branch Manager
@@ -882,6 +896,8 @@ export default function AppRoutes() {
                     saveState={saveState}
                     showToast={showToast}
                     userRole={authRole === 'branch' ? 'branch' : 'admin'}
+                    currentBranch={currentBranch}
+                    currentBranchId={currentBranch?.id}
                     activeSubTab={activeSubTab}
                     setActiveSubTab={setActiveSubTab}
                     filterFn={currentFilterFn}

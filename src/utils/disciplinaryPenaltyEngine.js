@@ -498,3 +498,147 @@ export function getEmployeeDisciplinarySummary(employeeId, allRequests = [], dis
 
   return summary;
 }
+
+/**
+ * جمع كافة معرفات الفرع (معرفات رقمية، أكواد، أسماء، أسماء مستخدمين)
+ * لضمان مطابقة دقيقة لا تترك ثغرات باختلاف الحقول (id, branchId, code, branchCode, name, username)
+ */
+export function getBranchIdentifiers(branchObj, allBranches = []) {
+  if (!branchObj) {
+    return {
+      ids: new Set(),
+      codes: new Set(),
+      names: new Set(),
+      branch: null
+    };
+  }
+
+  const bIdFromObj = branchObj.id || branchObj.branchId || '';
+  const bCodeFromObj = branchObj.branchCode || branchObj.code || '';
+  const bNameFromObj = String(branchObj.name || '').trim().toLowerCase();
+  const bUserFromObj = String(branchObj.username || '').trim().toLowerCase();
+
+  const matched = (allBranches || []).find((b) => {
+    if (bIdFromObj && String(b.id) === String(bIdFromObj)) return true;
+    if (bCodeFromObj && (String(b.branchCode) === String(bCodeFromObj) || String(b.code) === String(bCodeFromObj))) return true;
+    if (bNameFromObj && String(b.name || '').trim().toLowerCase() === bNameFromObj) return true;
+    if (bUserFromObj && String(b.username || '').trim().toLowerCase() === bUserFromObj) return true;
+    return false;
+  });
+
+  const ids = new Set(
+    [
+      branchObj.id,
+      branchObj.branchId,
+      matched?.id,
+      matched?.branchId
+    ]
+      .filter(Boolean)
+      .map(String)
+  );
+
+  const codes = new Set(
+    [
+      branchObj.branchCode,
+      branchObj.code,
+      matched?.branchCode,
+      matched?.code
+    ]
+      .filter(Boolean)
+      .map(String)
+  );
+
+  const names = new Set(
+    [
+      branchObj.name,
+      matched?.name
+    ]
+      .filter(Boolean)
+      .map((s) => String(s).trim().toLowerCase())
+  );
+
+  return { ids, codes, names, branch: matched || branchObj };
+}
+
+/**
+ * التحقق الحازم من انتماء الموظف للفرع المحدد
+ * يفحص: branchId, branchCode, branch, branchName بالإضافة لقائمة الفروع المتعددة branchesDetails
+ */
+export function isEmployeeInBranch(emp, branchIdentifiers) {
+  if (!emp || !branchIdentifiers) return false;
+  const { ids, codes, names } = branchIdentifiers;
+  if (ids.size === 0 && codes.size === 0 && names.size === 0) return false;
+
+  // 1. Direct branchId
+  if (emp.branchId && ids.has(String(emp.branchId))) return true;
+
+  // 2. Direct branchCode
+  if (emp.branchCode && (codes.has(String(emp.branchCode)) || ids.has(String(emp.branchCode)))) return true;
+  if (emp.branchId && codes.has(String(emp.branchId))) return true;
+
+  // 3. Direct branch name
+  if (emp.branch && names.has(String(emp.branch).trim().toLowerCase())) return true;
+  if (emp.branchName && names.has(String(emp.branchName).trim().toLowerCase())) return true;
+
+  // 4. Multi-branch assignments (branchesDetails)
+  if (Array.isArray(emp.branchesDetails)) {
+    return emp.branchesDetails.some((bd) => {
+      if (bd.branchId && ids.has(String(bd.branchId))) return true;
+      if (bd.branchCode && (codes.has(String(bd.branchCode)) || ids.has(String(bd.branchCode)))) return true;
+      if (bd.branchId && codes.has(String(bd.branchId))) return true;
+      if (bd.branchName && names.has(String(bd.branchName).trim().toLowerCase())) return true;
+      return false;
+    });
+  }
+
+  return false;
+}
+
+/**
+ * التحقق مما إذا كان الموظف هو مدير الفرع الحالي أو يحمل صفة إدارية
+ * لاستبعاده بشكل قاطع من قائمة الموظفين الخاضعين لتوثيق المخالفات بواسطة نفسه
+ */
+export function isBranchManagerEmployee(emp, branchObj) {
+  if (!emp) return false;
+  const empIdStr = String(emp.id || '').trim();
+  const empCodeStr = String(emp.code || '').trim();
+  const empUserStr = String(emp.username || '').trim().toLowerCase();
+  const empNameStr = String(emp.name || '').trim().toLowerCase();
+
+  if (branchObj) {
+    const mgrIds = [
+      branchObj.managerId,
+      branchObj.manager_id,
+      branchObj.managerEmpId
+    ].filter(Boolean).map((v) => String(v).trim());
+    if (mgrIds.some((id) => empIdStr === id || empCodeStr === id)) return true;
+
+    const mgrCodes = [
+      branchObj.managerCode,
+      branchObj.manager_code
+    ].filter(Boolean).map((v) => String(v).trim());
+    if (mgrCodes.some((code) => empCodeStr === code || empIdStr === code)) return true;
+
+    if (branchObj.manager && typeof branchObj.manager === 'object') {
+      const m = branchObj.manager;
+      if (m.id && String(m.id).trim() === empIdStr) return true;
+      if (m.code && String(m.code).trim() === empCodeStr) return true;
+    }
+
+    const mgrName = String(branchObj.managerName || '').trim().toLowerCase();
+    if (mgrName && empNameStr === mgrName) return true;
+
+    const bUser = String(branchObj.username || '').trim().toLowerCase();
+    if (bUser && (empUserStr === bUser || empCodeStr.toLowerCase() === bUser)) return true;
+  }
+
+  if (emp.isBranchManager === true || emp.isManager === true || emp.is_manager === true) return true;
+  if (emp.role === 'branch_manager' || emp.role === 'manager' || emp.role === 'branch') return true;
+
+  if (emp.jobTitle) {
+    const t = String(emp.jobTitle).trim().toLowerCase();
+    if (t.includes('مدير') || t.includes('manager')) return true;
+  }
+
+  return false;
+}

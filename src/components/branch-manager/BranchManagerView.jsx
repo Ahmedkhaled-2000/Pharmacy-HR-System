@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import EmployeeLeaveModule from '../employee-portal/EmployeeLeaveModule';
+import { shouldRouteDirectToAdmin } from '../../utils/jobsHelper';
 import EmployeePermissionsModule from '../employee-portal/EmployeePermissionsModule';
 import EmployeeLoansModule from '../employee-portal/EmployeeLoansModule';
 import EmployeeEvaluationsModule from '../employee-portal/EmployeeEvaluationsModule';
@@ -21,6 +21,7 @@ import EmployeePermissionsManagementModule from '../permissions/EmployeePermissi
 import { getCycleDateRange, createDatePredicate, getActivePayrollMonth } from '../../utils/periodEngine';
 import { getRealDate, getRealTodayStr } from '../../utils/timeEngine';
 import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
+import { getBranchIdentifiers, isEmployeeInBranch } from '../../utils/disciplinaryPenaltyEngine';
 
 const WEEKDAYS_AR = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
 
@@ -536,19 +537,22 @@ export default function BranchManagerView({
   const branchEmployees = useMemo(() => {
     const branchToUse = liveBranch || currentBranch;
     const list = (state.employees || []).filter(isEmployeeActive);
-    if (!branchToUse?.id) {
-      return list.filter((e) => !isBranchManagerEmp(e));
+    if (!branchToUse) return [];
+
+    const branchIds = getBranchIdentifiers(branchToUse, state.branches || []);
+    // If no valid branch identifiers found, return empty array to prevent data leak
+    if (branchIds.ids.size === 0 && branchIds.codes.size === 0 && branchIds.names.size === 0) {
+      return [];
     }
-    const cIdStr = String(branchToUse.id);
+
     return list.filter((e) => {
       // Exclude Branch Manager
       if (isBranchManagerEmp(e)) return false;
 
-      if (e.branchId && String(e.branchId) === cIdStr) return true;
-      if (e.branchesDetails && e.branchesDetails.some((bd) => String(bd.branchId) === cIdStr)) return true;
-      return false;
+      // Strictly check that employee belongs to this branch (ID, Code, Name, or branchesDetails)
+      return isEmployeeInBranch(e, branchIds);
     });
-  }, [state.employees, liveBranch, currentBranch, state.currentUserId, managerEmp]);
+  }, [state.employees, state.branches, liveBranch, currentBranch, state.currentUserId, managerEmp]);
 
   const deletedIdsSet = useMemo(() => {
     return new Set((state._deletedIds || []).map(String));
@@ -596,10 +600,11 @@ export default function BranchManagerView({
       // 1. Must adhere strictly to Higher Management Double Approval Rules (Loans, advances, admin-only are excluded)
       if (!shouldShowRequestToBranch(r, state)) return false;
 
-      // Strictly exclude requests created by or belonging to the branch manager (those go to Higher Management)
+      // Strictly exclude requests created by or belonging to the branch manager or management employees (those go to Higher Management)
       const empObj = (state.employees || []).find((e) => String(e.id) === String(r.employeeId) || (r.employeeCode && String(e.code) === String(r.employeeCode)));
       if (isBranchManagerEmp(empObj)) return false;
       if (managerEmp?.id && String(r.employeeId) === String(managerEmp.id)) return false;
+      if (empObj && shouldRouteDirectToAdmin(empObj, r.branchId || currentBranch?.id, state)) return false;
       if (r.submittedByBranchManager || r.creatorRole === 'branch' || r.createdRole === 'branch' || r.createdRole === 'branch_manager') return false;
 
       if (!cIdStr) return true;
@@ -1753,7 +1758,7 @@ export default function BranchManagerView({
                 style={{ padding: isMobileScreen ? '8px 10px' : '8px 16px', fontSize: isMobileScreen ? '12px' : '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px', background: '#0284c7' }}
                 onClick={() => setShowLeaveModal(true)}
               >
-                🏖️ طلب إجازة
+                🏖️ طلب إجازة لموظف
               </button>
               {Boolean(state?.branchSalesSettings?.allowBranchManagersEntry) && (
                 <button
@@ -3432,21 +3437,6 @@ export default function BranchManagerView({
       )}
 
       {/* ───────────────────────────────────────────────────────────── */}
-      {/* ── 4. MANAGER LEAVES TAB (Personal) ── */}
-      {/* ───────────────────────────────────────────────────────────── */}
-      {activeTab === 'manager-leaves' && (
-        <EmployeeLeaveModule
-          emp={managerEmp}
-          state={state}
-          setState={setState}
-          saveState={saveState}
-          showToast={showToast}
-          selectedMonth={selectedMonth}
-          targetApproval="admin_only"
-        />
-      )}
-
-      {/* ───────────────────────────────────────────────────────────── */}
       {/* ── 5. MANAGER PERMISSIONS TAB (Personal) ── */}
       {/* ───────────────────────────────────────────────────────────── */}
       {activeTab === 'permissions' && (
@@ -4198,7 +4188,9 @@ export default function BranchManagerView({
           saveState={saveState}
           showToast={showToast}
           userRole="branch"
-          currentBranchId={currentBranch?.id}
+          currentBranch={liveBranch || currentBranch}
+          currentBranchId={(liveBranch || currentBranch)?.id}
+          branchEmployees={branchEmployees}
           filterFn={matchesDateRange}
           monthPicker={selectedMonth}
           filterMode={filterMode}

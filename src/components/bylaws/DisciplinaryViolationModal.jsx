@@ -2,7 +2,10 @@ import React, { useState, useMemo, useEffect } from 'react';
 import {
   DEFAULT_DISCIPLINARY_CATEGORIES,
   getEmployeeDailyRate,
-  calculateViolationCounter
+  calculateViolationCounter,
+  getBranchIdentifiers,
+  isEmployeeInBranch,
+  isBranchManagerEmployee
 } from '../../utils/disciplinaryPenaltyEngine';
 import { getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 
@@ -14,7 +17,9 @@ export default function DisciplinaryViolationModal({
   saveState,
   showToast,
   userRole = 'admin',
+  currentBranch = null,
   currentBranchId = null,
+  branchEmployees = null,
   preSelectedEmpId = null,
   onViolationSaved = null,
   executeWithOwnerGuard
@@ -22,22 +27,58 @@ export default function DisciplinaryViolationModal({
   const isAdmin = userRole === 'admin' || userRole === 'owner';
   const isBranch = userRole === 'branch';
 
+  const sessionBranch = (() => {
+    try {
+      const s = localStorage.getItem('app_current_branch');
+      return s ? JSON.parse(s) : null;
+    } catch { return null; }
+  })();
+  const effectiveBranch = currentBranch || sessionBranch;
+  const isBranchUser = isBranch || userRole === 'branch' || Boolean(effectiveBranch) || Boolean(currentBranchId) || (typeof localStorage !== 'undefined' && localStorage.getItem('app_auth_role') === 'branch');
+
   const employees = state.employees || [];
   const branches = state.branches || [];
   const policy = state.disciplinaryPolicy || DEFAULT_DISCIPLINARY_CATEGORIES;
 
   // Filter employees if branch manager and filter active employees
   const availableEmployees = useMemo(() => {
-    let list = employees.filter(isEmployeeActive);
-    if (isBranch && currentBranchId) {
-      return list.filter((emp) => {
-        const directMatch = String(emp.branchId) === String(currentBranchId);
-        const multiMatch = emp.branchesDetails && emp.branchesDetails.some((b) => String(b.branchId) === String(currentBranchId));
-        return directMatch || multiMatch;
+    const allActive = employees.filter(isEmployeeActive);
+
+    // If branch manager mode or branch specified, strictly filter by this branch
+    if (isBranchUser || currentBranchId || effectiveBranch) {
+      const bObj = effectiveBranch || (branches || []).find((b) => 
+        (currentBranchId && String(b.id) === String(currentBranchId)) ||
+        (currentBranchId && String(b.code) === String(currentBranchId)) ||
+        (currentBranchId && String(b.branchCode) === String(currentBranchId))
+      );
+
+      const branchIds = getBranchIdentifiers(bObj, branches);
+
+      // If branch could not be identified, but branchEmployees list was passed, filter it for active non-managers
+      if (branchIds.ids.size === 0 && branchIds.codes.size === 0 && branchIds.names.size === 0) {
+        if (Array.isArray(branchEmployees) && branchEmployees.length > 0) {
+          return branchEmployees.filter((e) => isEmployeeActive(e) && !isBranchManagerEmployee(e, bObj));
+        }
+        return [];
+      }
+
+      // Source list to check: if branchEmployees was passed, verify each employee; otherwise use allActive
+      const sourceList = (Array.isArray(branchEmployees) && branchEmployees.length > 0)
+        ? branchEmployees
+        : allActive;
+
+      return sourceList.filter((emp) => {
+        if (!isEmployeeActive(emp)) return false;
+        // Strictly exclude branch manager
+        if (isBranchManagerEmployee(emp, branchIds.branch || bObj)) return false;
+        // Strictly ensure employee belongs to THIS branch
+        return isEmployeeInBranch(emp, branchIds);
       });
     }
-    return list;
-  }, [employees, isBranch, currentBranchId]);
+
+    return allActive;
+  }, [employees, isBranchUser, currentBranchId, effectiveBranch, branchEmployees, branches]);
+
 
   // Form State
   const [selectedEmpId, setSelectedEmpId] = useState(preSelectedEmpId ? String(preSelectedEmpId) : '');
@@ -457,17 +498,17 @@ export default function DisciplinaryViolationModal({
   };
 
   return (
-    <div className="modal-backdrop" onClick={onClose} style={{ zIndex: 1050 }}>
+    <div className="modal-backdrop central-modal-backdrop" onClick={onClose} style={{ zIndex: 2200 }}>
       <div
-        className="modal-card"
+        className="modal-card central-modal-card"
         style={{
           maxWidth: '820px',
           width: '96%',
-          maxHeight: '92vh',
+          maxHeight: 'min(92vh, calc(100dvh - 24px))',
           overflowY: 'auto',
-          borderRadius: '16px',
+          borderRadius: '20px',
           padding: '24px',
-          fontFamily: "'Tajawal', sans-serif"
+          fontFamily: "'Cairo', 'Tajawal', sans-serif"
         }}
         onClick={(e) => e.stopPropagation()}
       >

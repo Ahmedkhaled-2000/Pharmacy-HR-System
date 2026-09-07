@@ -220,7 +220,7 @@ export default function EmployeePermissionsModule({
     setState(updatedState);
     setShowForm(false);
     setReason('');
-    showToast('تم إرسال طلب الإذن للاعتماد (لا يؤثر على الراتب وتحتسب وردية كاملة عند الموافقة) ⏰');
+    showToast(isDirectAdmin ? 'تم إرسال طلب الإذن مباشرة إلى الإدارة العليا للاعتماد ⏰' : 'تم إرسال طلب الإذن للاعتماد (لا يؤثر على الراتب وتحتسب وردية كاملة عند الموافقة) ⏰');
 
     // مزامنة فورية في السحابة
     if (saveState) {

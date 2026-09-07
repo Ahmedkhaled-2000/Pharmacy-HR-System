@@ -9,6 +9,7 @@ import {
   countEmployeeTierOccurrences
 } from '../../utils/latePenaltyEngine';
 import { fmt, isEmployeeActive } from '../../utils/formatters';
+import { getBranchIdentifiers, isEmployeeInBranch } from '../../utils/disciplinaryPenaltyEngine';
 import { useUI } from '../../context/UIContext';
 
 export default function LatePenaltyPolicyModule({
@@ -86,16 +87,23 @@ export default function LatePenaltyPolicyModule({
       return loggedInEmp ? [loggedInEmp] : [];
     }
     if (isBranchManager) {
-      const bId = currentBranchId;
-      return list.filter(
-        (e) => String(e.branchId) === String(bId) || (e.branchesDetails && e.branchesDetails.some((bd) => String(bd.branchId) === String(bId)))
+      const bObj = (state.branches || []).find((b) => 
+        (currentBranchId && String(b.id) === String(currentBranchId)) ||
+        (currentBranchId && String(b.code) === String(currentBranchId)) ||
+        (currentBranchId && String(b.branchCode) === String(currentBranchId))
       );
+      const branchIds = getBranchIdentifiers(bObj || { id: currentBranchId }, state.branches || []);
+      return list.filter((e) => isEmployeeInBranch(e, branchIds));
     }
     // Admin
     if (filterBranch) {
-      return list.filter(
-        (e) => String(e.branchId) === String(filterBranch) || (e.branchesDetails && e.branchesDetails.some((bd) => String(bd.branchId) === String(filterBranch)))
+      const bObj = (state.branches || []).find((b) => 
+        String(b.id) === String(filterBranch) ||
+        String(b.code) === String(filterBranch) ||
+        String(b.branchCode) === String(filterBranch)
       );
+      const branchIds = getBranchIdentifiers(bObj || { id: filterBranch }, state.branches || []);
+      return list.filter((e) => isEmployeeInBranch(e, branchIds));
     }
     return list;
   }, [employees, loggedInEmp, isEmployee, isBranchManager, currentBranchId, filterBranch]);

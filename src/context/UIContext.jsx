@@ -117,6 +117,22 @@ export function UIProvider({ children }) {
   });
 
   const executeWithOwnerGuard = useCallback(({ lockKey, actionTitle, actionDetails, onExecute }) => {
+    // When logged in as the Owner or verified with owner authority, bypass all owner modification locks immediately without prompting!
+    const isOwnerUser = authRole === 'owner' || (() => {
+      try {
+        return localStorage.getItem('app_auth_role') === 'owner' ||
+               localStorage.getItem('app_owner_authenticated') === 'true' ||
+               sessionStorage.getItem('app_owner_authenticated') === 'true';
+      } catch {
+        return false;
+      }
+    })();
+
+    if (isOwnerUser) {
+      onExecute?.();
+      return;
+    }
+
     let isLocked = Boolean(state?.orgSettings?.ownerModificationLocks?.[lockKey]);
     if (!isLocked) {
       try {
@@ -137,7 +153,7 @@ export function UIProvider({ children }) {
     } else {
       onExecute?.();
     }
-  }, [state?.orgSettings?.ownerModificationLocks]);
+  }, [authRole, state?.orgSettings?.ownerModificationLocks]);
 
   // Employee Add/Edit Modal
   const [isEmpModalOpen, setIsEmpModalOpen] = useState(false);

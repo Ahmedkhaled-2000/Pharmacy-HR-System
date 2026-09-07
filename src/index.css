@@ -1314,62 +1314,60 @@ tbody tr:hover {
   border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
-/* Modals & Overlays (Strict RTL) */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(11, 16, 23, 0.75);
-  backdrop-filter: blur(8px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-  padding: 16px;
+/* ══════════════════════════════════════════════════════════════════════ */
+/* 💎 CENTRAL RESPONSIVE MODAL ENGINE (Unified System-Wide Modals)        */
+/* ══════════════════════════════════════════════════════════════════════ */
+.modal-overlay,
+.modal-backdrop,
+.central-modal-backdrop {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  background: rgba(15, 23, 42, 0.78) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+  display: flex !important;
+  align-items: flex-start !important; /* Safe start: never clips top or pushes content out */
+  justify-content: center !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  -webkit-overflow-scrolling: touch !important;
+  padding: clamp(12px, 3vh, 28px) clamp(8px, 2vw, 20px) !important;
+  z-index: 2500 !important;
   direction: rtl;
+  box-sizing: border-box !important;
+  overscroll-behavior: contain !important;
+  scroll-behavior: smooth;
+  animation: modalBackdropFadeIn 0.2s ease-out;
 }
 
-.modal-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 22px;
-  padding: 28px 32px;
-  width: 100%;
-  max-width: 520px;
-  max-height: 88vh;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-  box-shadow: var(--shadow);
+.modal-card,
+.modal-content,
+.central-modal-card {
+  margin: auto !important;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: clamp(16px, 2.5vw, 24px) !important;
+  width: 100% !important;
+  max-width: min(780px, 96vw);
+  max-height: calc(100dvh - 28px) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important; /* CRITICAL: prevent outer card double-scrolling and pushing footer */
+  overscroll-behavior: contain !important;
+  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.25), 0 0 1px 1px rgba(15, 23, 42, 0.05) !important;
   direction: rtl;
   text-align: right;
+  box-sizing: border-box !important;
+  position: relative !important;
+  animation: modalScaleUp 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.65);
-  backdrop-filter: blur(6px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  padding: 16px;
-  direction: rtl;
-}
-
-.modal-content {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  padding: 28px 32px;
-  width: 96%;
-  max-width: min(1100px, 95vw);
-  max-height: 92vh;
-  overflow-y: auto;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
-  direction: rtl;
-  text-align: right;
-  margin: auto;
+.modal-header,
+.central-modal-header {
+  flex-shrink: 0 !important;
 }
 
 .modal-card h3 {
@@ -1378,11 +1376,66 @@ tbody tr:hover {
   margin-bottom: 18px;
 }
 
-.modal-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 24px;
+.modal-card-body,
+.central-modal-body,
+.modal-body {
+  flex: 1 1 auto !important;
+  min-height: 0 !important; /* CRITICAL: allow flex child to shrink and enable scrolling */
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  overscroll-behavior: contain !important;
+  padding: clamp(14px, 2.5vw, 24px) !important;
+  box-sizing: border-box !important;
+  scrollbar-width: thin;
+}
+
+.modal-actions,
+.central-modal-footer,
+.modal-footer {
+  display: flex !important;
+  justify-content: flex-end !important;
+  align-items: center !important;
+  gap: 10px !important;
+  margin-top: auto !important;
+  padding: 12px 18px !important;
+  flex-shrink: 0 !important; /* CRITICAL: footer never shrinks or disappears */
+  position: sticky !important;
+  bottom: 0 !important;
+  z-index: 20 !important;
+  background: var(--surface, #ffffff) !important;
+  border-top: 1px solid var(--border, #f1f5f9) !important;
+  box-sizing: border-box !important;
+}
+
+@keyframes modalBackdropFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modalScaleUp {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* Compact screens & short viewports: ensure no clipping whatsoever */
+@media (max-height: 720px) {
+  .modal-overlay,
+  .modal-backdrop,
+  .central-modal-backdrop {
+    padding: 8px !important;
+  }
+  .modal-card,
+  .modal-content,
+  .central-modal-card {
+    max-height: calc(100dvh - 16px) !important;
+    border-radius: 16px !important;
+  }
 }
 
 /* Redesigned Centered Employee Form Modal & Modal Inputs */

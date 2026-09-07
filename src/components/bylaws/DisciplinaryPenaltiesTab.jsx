@@ -4,10 +4,13 @@ import {
   getEmployeeDailyRate,
   calculateViolationCounter,
   getEmployeeDisciplinarySummary,
-  resolveDisciplinaryCategory
+  resolveDisciplinaryCategory,
+  getBranchIdentifiers,
+  isEmployeeInBranch,
+  isBranchManagerEmployee
 } from '../../utils/disciplinaryPenaltyEngine';
 import { computeLatenessFinancialAmount, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
-import { getEmpDisplayName } from '../../utils/formatters';
+import { getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 import { useUI } from '../../context/UIContext';
 import DisciplinaryViolationModal from './DisciplinaryViolationModal';
 
@@ -30,7 +33,9 @@ export default function DisciplinaryPenaltiesTab({
   showToast,
   userRole = 'admin',
   currentEmpId = null,
+  currentBranch = null,
   currentBranchId = null,
+  branchEmployees = null,
   filterFn = null,
   monthPicker = null,
   customFrom = '',
@@ -39,7 +44,7 @@ export default function DisciplinaryPenaltiesTab({
 }) {
   const { showConfirm } = useUI();
   const isEmployee = userRole === 'employee' || Boolean(currentEmpId);
-  const isBranch = userRole === 'branch' || (Boolean(currentBranchId) && !isEmployee && userRole !== 'admin' && userRole !== 'owner');
+  const isBranch = userRole === 'branch' || (Boolean(currentBranchId || currentBranch) && !isEmployee && userRole !== 'admin' && userRole !== 'owner') || (typeof localStorage !== 'undefined' && localStorage.getItem('app_auth_role') === 'branch');
   const isAdmin = (userRole === 'admin' || userRole === 'owner') && !isEmployee && !isBranch;
 
   const allEmployeesList = state.employees || [];
@@ -85,18 +90,41 @@ export default function DisciplinaryPenaltiesTab({
 
   // 1. Scoped Employees List according to User Role
   const employees = useMemo(() => {
+    const allActive = allEmployeesList.filter(isEmployeeActive);
     if (isEmployee && currentEmpId) {
-      return allEmployeesList.filter((e) => String(e.id) === String(currentEmpId));
+      return allActive.filter((e) => String(e.id) === String(currentEmpId));
     }
-    if (isBranch && currentBranchId) {
-      return allEmployeesList.filter((e) => {
-        const direct = String(e.branchId) === String(currentBranchId);
-        const multi = e.branchesDetails && e.branchesDetails.some((b) => String(b.branchId) === String(currentBranchId));
-        return direct || multi;
+    if (isBranch) {
+      const bObj = currentBranch || (branches || []).find((b) => 
+        (currentBranchId && String(b.id) === String(currentBranchId)) ||
+        (currentBranchId && String(b.code) === String(currentBranchId)) ||
+        (currentBranchId && String(b.branchCode) === String(currentBranchId))
+      );
+      const branchIds = getBranchIdentifiers(bObj, branches);
+
+      // If branch could not be identified, but branchEmployees list was passed, filter it for active non-managers
+      if (branchIds.ids.size === 0 && branchIds.codes.size === 0 && branchIds.names.size === 0) {
+        if (Array.isArray(branchEmployees) && branchEmployees.length > 0) {
+          return branchEmployees.filter((e) => isEmployeeActive(e) && !isBranchManagerEmployee(e, bObj));
+        }
+        return [];
+      }
+
+      // Source list to check: if branchEmployees was passed, verify each employee; otherwise use allActive
+      const sourceList = (Array.isArray(branchEmployees) && branchEmployees.length > 0)
+        ? branchEmployees
+        : allActive;
+
+      return sourceList.filter((emp) => {
+        if (!isEmployeeActive(emp)) return false;
+        // Strictly exclude branch manager
+        if (isBranchManagerEmployee(emp, branchIds.branch || bObj)) return false;
+        // Strictly ensure employee belongs to THIS branch
+        return isEmployeeInBranch(emp, branchIds);
       });
     }
-    return allEmployeesList;
-  }, [allEmployeesList, isEmployee, currentEmpId, isBranch, currentBranchId]);
+    return allActive;
+  }, [allEmployeesList, isEmployee, currentEmpId, isBranch, currentBranchId, currentBranch, branchEmployees, branches]);
 
   // Set of employee IDs within current user's scope
   const scopedEmpIds = useMemo(() => {
@@ -2484,7 +2512,9 @@ export default function DisciplinaryPenaltiesTab({
           saveState={saveState}
           showToast={showToast}
           userRole={userRole}
-          currentBranchId={currentBranchId}
+          currentBranch={currentBranch}
+          currentBranchId={currentBranchId || currentBranch?.id}
+          branchEmployees={isBranch ? (branchEmployees || employees) : null}
           preSelectedEmpId={targetEmpForModal}
           executeWithOwnerGuard={executeWithOwnerGuard}
           onViolationSaved={() => {

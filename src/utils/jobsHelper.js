@@ -47,17 +47,37 @@ export function isManagementJob(jobTitle, jobsList = DEFAULT_JOBS) {
   const matched = (jobsList || []).find(
     (j) => j.title?.trim() === cleanTitle || j.name?.trim() === cleanTitle || j.id === cleanTitle
   );
-  if (matched) return Boolean(matched.isManagement || matched.isAdminRole);
+  if (matched) {
+    if (Boolean(matched.isManagement || matched.isAdminRole)) return true;
+    const dept = String(matched.department || '').trim().toLowerCase();
+    if (dept.includes('إدارة') || dept.includes('ادارة') || dept.includes('hr') || dept.includes('admin')) {
+      return true;
+    }
+  }
   
-  // Fallback heuristics for common management titles
+  // Comprehensive heuristics for common management & administrative titles in Arabic and English
   const lower = cleanTitle.toLowerCase();
   return (
     lower.includes('مدير') ||
     lower.includes('إداري') ||
+    lower.includes('اداري') ||
+    lower.includes('إدارة') ||
+    lower.includes('ادارة') ||
     lower.includes('مسؤول') ||
+    lower.includes('مسئول') ||
     lower.includes('أول') ||
+    lower.includes('اول') ||
     lower.includes('مشرف') ||
-    lower.includes('hr')
+    lower.includes('رئيس') ||
+    lower.includes('قيادي') ||
+    lower.includes('hr') ||
+    lower.includes('admin') ||
+    lower.includes('manager') ||
+    lower.includes('supervisor') ||
+    lower.includes('director') ||
+    lower.includes('leader') ||
+    lower.includes('head') ||
+    lower.includes('executive')
   );
 }
 
@@ -92,19 +112,59 @@ export function isBranchWithoutManager(branchId, state) {
 /**
  * Determines whether requests for a given employee should be routed directly to Upper Management (Admin).
  * Conditions:
- * 1. The employee holds an administrative/management job title (eligible for management allowance).
- * 2. The employee's branch has no assigned manager.
+ * 1. The employee holds an administrative / management role or title.
+ * 2. The employee belongs to an administrative or HR department.
+ * 3. The employee is assigned as the manager of a branch.
+ * 4. The employee's target branch has no assigned manager.
  */
 export function shouldRouteDirectToAdmin(emp, branchId, state) {
   if (!emp) return false;
+
+  // 1. Check explicit manager or admin role flags
+  if (
+    emp.isBranchManager ||
+    emp.isManager ||
+    emp.isManagement ||
+    emp.role === 'branch_manager' ||
+    emp.role === 'manager' ||
+    emp.role === 'admin' ||
+    emp.role === 'owner'
+  ) {
+    return true;
+  }
+
+  // 2. Employee holds an administrative / management job title
   const jobsList = getJobsList(state);
-  
-  // 1. Employee holds an administrative job title
   if (isManagementJob(emp.jobTitle, jobsList)) {
     return true;
   }
-  
-  // 2. Employee's target branch has no manager
+
+  // 3. Employee belongs to an administrative / HR department
+  const cleanDept = String(emp.department || '').trim().toLowerCase();
+  if (
+    cleanDept.includes('إدارة') ||
+    cleanDept.includes('ادارة') ||
+    cleanDept.includes('موارد بشرية') ||
+    cleanDept.includes('hr') ||
+    cleanDept.includes('admin')
+  ) {
+    return true;
+  }
+
+  // 4. Employee is assigned as the manager of ANY branch in the organization
+  if (state?.branches && Array.isArray(state.branches)) {
+    const isAssignedAsManager = state.branches.some(
+      (b) =>
+        (b.managerId && (String(b.managerId) === String(emp.id) || (emp.code && String(b.managerId) === String(emp.code)))) ||
+        (b.managerCode && (String(b.managerCode) === String(emp.code) || String(b.managerCode) === String(emp.id))) ||
+        (b.managerName && emp.name && b.managerName.trim() === emp.name.trim())
+    );
+    if (isAssignedAsManager) {
+      return true;
+    }
+  }
+
+  // 5. Employee's target branch has no manager
   const targetBranchId = branchId || emp.branchesDetails?.[0]?.branchId || emp.branchId;
   if (targetBranchId && isBranchWithoutManager(targetBranchId, state)) {
     return true;

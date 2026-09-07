@@ -198,7 +198,7 @@ export default function EmployeeLeaveModule({
       id: `notif_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
       requestId: newRequest.id,
       type: 'leave',
-      targetRole: willExceedThreeDays ? 'admin' : 'branch_and_admin',
+      targetRole: (isDirectAdmin || willExceedThreeDays) ? 'admin' : 'branch_and_admin',
       title: `🏖️ طلب إجازة جديد: ${emp.name}`,
       message: `طلب إجازة (${newRequest.leaveType === 'annual' ? 'سنوية' : newRequest.leaveType === 'sick' ? 'مرضية' : 'اعتيادية'}) لمدة ${daysCount} يوم من ${startDate} إلى ${endDate}. السبب: ${reason.trim() || '—'}`,
       employeeId: emp.id,
@@ -221,7 +221,9 @@ export default function EmployeeLeaveModule({
     setShowForm(false);
     setReason('');
     showToast(
-      willExceedThreeDays
+      isDirectAdmin
+        ? 'تم إرسال طلب الإجازة مباشرة إلى الإدارة العليا للاعتماد 🏖️'
+        : willExceedThreeDays
         ? 'تم إرسال طلب الإجازة للإدارة العليا فقط (لتجاوزه 3 أيام في الشهر) 🏖️'
         : 'تم إرسال طلب الإجازة لمدير الفرع والإدارة العليا للاعتماد 🏖️'
     );

@@ -1,4 +1,4 @@
-import { isManagementJob, isBranchWithoutManager, getJobsList } from './jobsHelper';
+import { isManagementJob, isBranchWithoutManager, getJobsList, shouldRouteDirectToAdmin } from './jobsHelper';
 import { getActivePayrollMonth } from './periodEngine';
 export { getRealDate, getRealTodayStr, getRealNowTimeStr } from './timeEngine';
 import { getRealDate } from './timeEngine';
@@ -604,7 +604,7 @@ export function shouldShowRequestToBranch(req, state) {
   const emp = (state?.employees || []).find(
     (e) => String(e.id) === String(req.employeeId) || (req.employeeCode && String(e.code) === String(req.employeeCode))
   );
-  if (emp && isManagementJob(emp.jobTitle, getJobsList(state))) {
+  if (emp && shouldRouteDirectToAdmin(emp, req.branchId, state)) {
     return false;
   }
 

@@ -19,7 +19,9 @@ export default function BylawsModule({
   activeSubTab = 'disciplinary_penalties',
   setActiveSubTab,
   currentEmpId = null,
+  currentBranch = null,
   currentBranchId = null,
+  branchEmployees = null,
   filterFn = null,
   monthPicker = null,
   filterMode = 'all',
@@ -908,7 +910,9 @@ export default function BylawsModule({
           showToast={showToast}
           userRole={userRole}
           currentEmpId={currentEmpId}
-          currentBranchId={currentBranchId}
+          currentBranch={currentBranch}
+          currentBranchId={currentBranchId || currentBranch?.id}
+          branchEmployees={branchEmployees}
           filterFn={filterFn}
           monthPicker={monthPicker}
           customFrom={customFrom}

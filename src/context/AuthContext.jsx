@@ -115,18 +115,40 @@ export function AuthProvider({ children }) {
     const redirectTab = options.redirectTab || (role === 'employee' ? 'portal' : role === 'branch' ? 'branch' : 'dashboard');
 
     setAuthRole(role);
-    if (role === 'owner' || role === 'admin') {
+    if (role === 'owner') {
       setIsAdminLoggedIn(true);
       setCurrentBranch(null);
       setCurrentEmpUser(null);
+      try {
+        localStorage.setItem('app_auth_role', 'owner');
+        localStorage.setItem('app_owner_authenticated', 'true');
+        sessionStorage.setItem('app_owner_authenticated', 'true');
+      } catch {}
+    } else if (role === 'admin') {
+      setIsAdminLoggedIn(true);
+      setCurrentBranch(null);
+      setCurrentEmpUser(null);
+      try {
+        localStorage.setItem('app_auth_role', 'admin');
+        localStorage.removeItem('app_owner_authenticated');
+        sessionStorage.removeItem('app_owner_authenticated');
+      } catch {}
     } else if (role === 'branch') {
       setIsAdminLoggedIn(false);
       setCurrentBranch(branch || user);
       setCurrentEmpUser(null);
+      try {
+        localStorage.removeItem('app_owner_authenticated');
+        sessionStorage.removeItem('app_owner_authenticated');
+      } catch {}
     } else if (role === 'employee') {
       setIsAdminLoggedIn(false);
       setCurrentBranch(null);
       setCurrentEmpUser(user);
+      try {
+        localStorage.removeItem('app_owner_authenticated');
+        sessionStorage.removeItem('app_owner_authenticated');
+      } catch {}
     }
     setActiveNavTab(redirectTab);
   };
@@ -169,6 +191,8 @@ export function AuthProvider({ children }) {
       localStorage.removeItem('app_is_admin');
       localStorage.removeItem('app_active_nav_tab');
       localStorage.removeItem('app_active_sub_tab');
+      localStorage.removeItem('app_owner_authenticated');
+      sessionStorage.removeItem('app_owner_authenticated');
     } catch {}
 
     setAuthRole('none');
@@ -178,12 +202,21 @@ export function AuthProvider({ children }) {
     setActiveNavTab('dashboard');
   };
 
+  const isOwner = authRole === 'owner' || (() => {
+    try {
+      return localStorage.getItem('app_auth_role') === 'owner';
+    } catch {
+      return false;
+    }
+  })();
+
   const value = {
     themeMode,
     setThemeMode,
     toggleTheme,
     authRole,
     setAuthRole,
+    isOwner,
     currentBranch,
     setCurrentBranch,
     currentEmpUser,

@@ -79,10 +79,13 @@ export default function ConfirmDialogModal({
         backdropFilter: 'blur(8px)',
         WebkitBackdropFilter: 'blur(8px)',
         display: 'flex',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         justifyContent: 'center',
         zIndex: 999999,
-        padding: '16px',
+        padding: 'clamp(12px, 3vh, 28px) clamp(8px, 2vw, 20px)',
+        overflowY: 'auto',
+        overflowX: 'hidden',
+        boxSizing: 'border-box',
         direction: 'rtl',
         fontFamily: "'Cairo', 'Tajawal', sans-serif",
         animation: 'fadeIn 0.2s ease-out'
@@ -90,12 +93,19 @@ export default function ConfirmDialogModal({
       onClick={onCancel}
     >
       <div
+        className="modal-card central-modal-card"
         style={{
           background: 'var(--surface, #ffffff)',
           borderRadius: '24px',
-          padding: '28px 26px',
+          padding: '24px 22px',
           maxWidth: '460px',
           width: '100%',
+          maxHeight: 'calc(100dvh - 28px)',
+          display: 'flex',
+          flexDirection: 'column',
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          margin: 'auto',
           boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.35), 0 0 1px 1px rgba(0, 0, 0, 0.05)',
           border: '1px solid var(--border, #e2e8f0)',
           textAlign: 'center',

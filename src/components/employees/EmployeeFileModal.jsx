@@ -3,6 +3,7 @@ import { compressImage } from '../../utils/imageCompressor';
 import { DEFAULT_JOBS, isManagementJob, DEFAULT_DEPARTMENTS, getJobsList, getDepartmentsList } from '../../utils/jobsHelper';
 import { syncEmployeeEntireDrive } from '../../utils/googleDriveService';
 import { useUI } from '../../context/UIContext';
+import { useAuth } from '../../context/AuthContext';
 
 export default function EmployeeFileModal({
   isOpen,
@@ -22,6 +23,7 @@ export default function EmployeeFileModal({
   showToast
 }) {
   const { showConfirm, executeWithOwnerGuard: contextExecuteWithOwnerGuard } = useUI();
+  const { authRole } = useAuth?.() || {};
   const executeWithOwnerGuard = propExecuteWithOwnerGuard || contextExecuteWithOwnerGuard;
   const currentEmp = editingEmp || emp;
 
@@ -846,6 +848,21 @@ export default function EmployeeFileModal({
     };
 
     // ── فحص أقفال المالك للتعديلات المالية والإدارية الحساسة ──
+    const isOwnerSession = authRole === 'owner' || (() => {
+      try {
+        return localStorage.getItem('app_auth_role') === 'owner' ||
+               localStorage.getItem('app_owner_authenticated') === 'true' ||
+               sessionStorage.getItem('app_owner_authenticated') === 'true';
+      } catch {
+        return false;
+      }
+    })();
+
+    if (isOwnerSession) {
+      performActualSave();
+      return;
+    }
+
     const targetEmp = editingEmp || emp;
     const locks = state?.orgSettings?.ownerModificationLocks || {};
 
