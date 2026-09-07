@@ -16,6 +16,8 @@ export default function AccountsNavbar({
   onOpenAddAccount,
   isStandalone = false,
   onBackToDashboard,
+  themeMode = 'light',
+  toggleTheme,
 }) {
   return (
     <header className="acc-topbar">
@@ -27,7 +29,7 @@ export default function AccountsNavbar({
         <div className="acc-brand-info">
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <h1>منظومة الحسابات العامة وشجرة الحسابات (ERP)</h1>
-            <span style={{ fontSize: '11px', background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', padding: '2px 8px', borderRadius: '6px', fontWeight: '800' }}>
+            <span style={{ fontSize: '11px', background: '#e0f2fe', color: '#0284c7', padding: '2px 8px', borderRadius: '6px', fontWeight: '800' }}>
               PRO FINANCIAL
             </span>
           </div>
@@ -101,13 +103,25 @@ export default function AccountsNavbar({
           📝 قيد يومية جديد
         </button>
 
+        {/* Theme Toggle Button */}
+        {toggleTheme && (
+          <button
+            type="button"
+            className="acc-btn acc-btn-outline"
+            onClick={toggleTheme}
+            title={themeMode === 'dark' ? 'التحويل للوضع الفاتح' : 'التحويل للوضع الداكن'}
+            style={{ padding: '8px 12px' }}
+          >
+            <span>{themeMode === 'dark' ? '☀️' : '🌙'}</span>
+          </button>
+        )}
+
         {/* Back to main Dashboard if opened standalone */}
         {isStandalone && (
           <button
             type="button"
             className="acc-btn acc-btn-outline"
             onClick={onBackToDashboard}
-            style={{ color: '#94a3b8' }}
           >
             🏠 لوحة التحكم الرئيسية
           </button>

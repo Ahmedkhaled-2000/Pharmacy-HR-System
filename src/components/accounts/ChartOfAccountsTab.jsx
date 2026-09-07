@@ -2,8 +2,9 @@ import React, { useState, useMemo } from 'react';
 
 /**
  * ChartOfAccountsTab.jsx
- * شجرة تفاعلية بصرية متقدمة لعرض وإدارة دليل الحسابات
- * تتضمن فلترة وبحث سريع، توسيع وطي الشجرة، وزر فتح دليل الأكواد في نافذة منبثقة
+ * شجرة الحسابات المدمجة الاحترافية (Compact Tree Grid View)
+ * مصممة على غرار أنظمة ERP العالمية (SAP & Odoo):
+ * مظهر رشيق ومضغوط، أعمدة منظمة، فلاتر مستويات سريعة، وتحكم كامل
  */
 export default function ChartOfAccountsTab({
   accounts = [],
@@ -13,8 +14,11 @@ export default function ChartOfAccountsTab({
   onOpenNewRootAccount,
 }) {
   const [searchQuery, setSearchQuery] = useState('');
+  const [levelFilter, setLevelFilter] = useState('all'); // 'all' | '1' | '2' | '3' | '4'
+  const [typeFilter, setTypeFilter] = useState('all'); // 'all' | 'asset' | 'liability' | ...
+
   const [expandedNodes, setExpandedNodes] = useState(() => {
-    // Expand root level (1, 2, 3, 4, 5, 6) by default
+    // By default expand level 1 and 2 for optimal initial density
     const roots = {};
     accounts.filter((a) => a.level <= 2).forEach((a) => {
       roots[a.id] = true;
@@ -61,20 +65,36 @@ export default function ChartOfAccountsTab({
     return { rootAccounts: roots, childrenMap: map };
   }, [accounts]);
 
-  // Filter accounts if search query is provided
+  // Filter accounts if search or filters active
   const matchingAccountIds = useMemo(() => {
-    if (!searchQuery.trim()) return null;
+    const hasSearch = Boolean(searchQuery.trim());
+    const hasLevel = levelFilter !== 'all';
+    const hasType = typeFilter !== 'all';
+
+    if (!hasSearch && !hasLevel && !hasType) return null;
+
     const q = searchQuery.trim().toLowerCase();
+    const targetLvl = parseInt(levelFilter, 10);
     const set = new Set();
 
     accounts.forEach((a) => {
-      if (
-        (a.code && a.code.toLowerCase().includes(q)) ||
-        (a.name_ar && a.name_ar.toLowerCase().includes(q)) ||
-        (a.name_en && a.name_en.toLowerCase().includes(q))
-      ) {
+      let match = true;
+      if (hasSearch) {
+        const cMatch = a.code && a.code.toLowerCase().includes(q);
+        const arMatch = a.name_ar && a.name_ar.toLowerCase().includes(q);
+        const enMatch = a.name_en && a.name_en.toLowerCase().includes(q);
+        if (!cMatch && !arMatch && !enMatch) match = false;
+      }
+      if (hasLevel && a.level !== targetLvl) {
+        match = false;
+      }
+      if (hasType && a.account_type !== typeFilter) {
+        match = false;
+      }
+
+      if (match) {
         set.add(a.id);
-        // Also keep parents visible
+        // Also keep parents visible in tree view
         let cur = a;
         while (cur && cur.parent_id) {
           set.add(cur.parent_id);
@@ -82,20 +102,9 @@ export default function ChartOfAccountsTab({
         }
       }
     });
-    return set;
-  }, [accounts, searchQuery]);
 
-  const getTypeBadgeClass = (type) => {
-    switch (type) {
-      case 'asset': return 'type-asset';
-      case 'liability': return 'type-liability';
-      case 'equity': return 'type-equity';
-      case 'revenue': return 'type-revenue';
-      case 'cogs': return 'type-cogs';
-      case 'expense': return 'type-expense';
-      default: return '';
-    }
-  };
+    return set;
+  }, [accounts, searchQuery, levelFilter, typeFilter]);
 
   const getTypeName = (type) => {
     switch (type) {
@@ -109,128 +118,221 @@ export default function ChartOfAccountsTab({
     }
   };
 
-  // Recursive render node
-  const renderAccountNode = (account, depth = 0) => {
+  const getTypeStyle = (type) => {
+    switch (type) {
+      case 'asset': return { bg: '#f0fdf4', color: '#166534', border: '#bbf7d0' };
+      case 'liability': return { bg: '#fef2f2', color: '#991b1b', border: '#fecaca' };
+      case 'equity': return { bg: '#eff6ff', color: '#1e40af', border: '#bfdbfe' };
+      case 'revenue': return { bg: '#faf5ff', color: '#6b21a8', border: '#e9d5ff' };
+      case 'cogs': return { bg: '#fffbeb', color: '#92400e', border: '#fde68a' };
+      case 'expense': return { bg: '#fff1f2', color: '#9f1239', border: '#fecdd3' };
+      default: return { bg: '#f1f5f9', color: '#334155', border: '#e2e8f0' };
+    }
+  };
+
+  // Compact Row Renderer
+  const renderCompactRow = (account, depth = 0) => {
     const children = childrenMap[account.id] || [];
     const hasChildren = children.length > 0;
     const isExpanded = Boolean(expandedNodes[account.id] || matchingAccountIds !== null);
 
-    // If searching, skip non-matching nodes
     if (matchingAccountIds !== null && !matchingAccountIds.has(account.id)) {
       return null;
     }
 
-    const paddingRight = depth * 28 + 14;
+    const typeStyle = getTypeStyle(account.account_type);
+    const isParentNode = Boolean(account.is_parent || hasChildren);
+    const indentPx = depth * 22;
 
     return (
-      <div key={account.id} className="acc-tree-node">
-        <div
-          className="acc-node-row"
-          style={{ paddingRight: `${paddingRight}px` }}
-          onClick={() => hasChildren && toggleNode(account.id)}
+      <React.Fragment key={account.id}>
+        <tr
+          className={`acc-compact-tree-row level-${account.level} ${isParentNode ? 'parent-row' : 'leaf-row'}`}
+          style={{
+            background: isParentNode ? 'var(--surface-subtle, #f8fafc)' : '#ffffff',
+            fontWeight: account.level <= 2 ? '800' : '500',
+            fontSize: account.level === 1 ? '13.5px' : account.level === 2 ? '13px' : '12.5px',
+          }}
         >
-          {/* Left info */}
-          <div className="acc-node-left">
-            {hasChildren ? (
-              <span className="acc-toggle-icon" title={isExpanded ? 'طي الحساب' : 'توسيع الحساب'}>
-                {isExpanded ? '▼' : '◀'}
-              </span>
-            ) : (
-              <span className="acc-toggle-icon" style={{ opacity: 0.3 }}>•</span>
-            )}
-
-            <span className="acc-code-badge">{account.code}</span>
-
-            <span className="acc-node-name" style={{ fontSize: account.level <= 2 ? '15px' : '13.5px' }}>
-              {account.name_ar}
+          {/* 1. Code */}
+          <td style={{ width: '110px', whiteSpace: 'nowrap' }}>
+            <span
+              className="acc-code-badge"
+              style={{
+                fontSize: '12px',
+                fontFamily: 'monospace',
+                fontWeight: '700',
+                background: account.level === 1 ? '#0284c7' : undefined,
+                color: account.level === 1 ? '#fff' : undefined,
+              }}
+            >
+              {account.code}
             </span>
+          </td>
 
-            {account.name_en && (
-              <span style={{ fontSize: '11px', color: '#64748b', direction: 'ltr' }}>
-                ({account.name_en})
+          {/* 2. Account Name & Tree Indentation */}
+          <td>
+            <div style={{ display: 'flex', alignItems: 'center', paddingRight: `${indentPx}px` }}>
+              {/* Expand Toggle */}
+              {hasChildren ? (
+                <button
+                  type="button"
+                  className="acc-tree-toggle-btn"
+                  onClick={() => toggleNode(account.id)}
+                  title={isExpanded ? 'طي الحساب' : 'توسيع الحساب'}
+                >
+                  {isExpanded ? '▼' : '◀'}
+                </button>
+              ) : (
+                <span style={{ display: 'inline-block', width: '18px', textAlign: 'center', color: '#cbd5e1', fontSize: '10px' }}>
+                  └─
+                </span>
+              )}
+
+              {/* Folder/Leaf Icon */}
+              <span style={{ marginLeft: '6px', fontSize: '14px', opacity: 0.85 }}>
+                {isParentNode ? '📁' : '📄'}
               </span>
-            )}
 
-            <span className={`acc-node-type-badge ${getTypeBadgeClass(account.account_type)}`}>
+              {/* Account Arabic Name */}
+              <span style={{ color: 'var(--text, #0f172a)', marginRight: '4px' }}>
+                {account.name_ar}
+              </span>
+
+              {/* English Name (optional) */}
+              {account.name_en && (
+                <span style={{ fontSize: '11px', color: 'var(--muted, #64748b)', marginRight: '6px', direction: 'ltr' }}>
+                  ({account.name_en})
+                </span>
+              )}
+            </div>
+          </td>
+
+          {/* 3. Level */}
+          <td style={{ width: '80px', textAlign: 'center' }}>
+            <span style={{
+              fontSize: '10.5px',
+              padding: '2px 6px',
+              borderRadius: '4px',
+              background: 'var(--surface-muted, #f1f5f9)',
+              color: 'var(--muted, #64748b)',
+              fontWeight: '700',
+            }}>
+              مستوى {account.level}
+            </span>
+          </td>
+
+          {/* 4. Type */}
+          <td style={{ width: '100px', textAlign: 'center' }}>
+            <span style={{
+              fontSize: '11px',
+              background: typeStyle.bg,
+              color: typeStyle.color,
+              border: `1px solid ${typeStyle.border}`,
+              padding: '2px 8px',
+              borderRadius: '6px',
+              fontWeight: '700',
+            }}>
               {getTypeName(account.account_type)}
             </span>
+          </td>
 
-            <span style={{ fontSize: '11px', color: account.nature === 'debit' ? '#34d399' : '#f87171', fontWeight: '700' }}>
-              ({account.nature === 'debit' ? 'مدين' : 'دائن'})
-            </span>
-          </div>
+          {/* 5. Nature */}
+          <td style={{ width: '80px', textAlign: 'center', fontSize: '11px', fontWeight: '800', color: account.nature === 'debit' ? '#059669' : '#dc2626' }}>
+            {account.nature === 'debit' ? 'مدين (+)' : 'دائن (-)'}
+          </td>
 
-          {/* Right actions and balance */}
-          <div className="acc-node-right" onClick={(e) => e.stopPropagation()}>
-            <div className="acc-node-balance" style={{ color: (account.current_balance || 0) < 0 ? '#f87171' : '#f8fafc' }}>
+          {/* 6. Current Balance */}
+          <td style={{ width: '150px', textAlign: 'left', direction: 'ltr' }}>
+            <strong style={{
+              fontFamily: 'monospace',
+              fontSize: '13px',
+              color: (account.current_balance || 0) < 0 ? '#dc2626' : 'var(--text, #0f172a)',
+            }}>
               {Number(account.current_balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-              <span style={{ fontSize: '11px', color: '#64748b', marginRight: '4px' }}>ج.م</span>
-            </div>
+            </strong>
+            <span style={{ fontSize: '10px', color: 'var(--muted, #64748b)', marginLeft: '4px' }}>ج.م</span>
+          </td>
 
-            <div className="acc-node-actions">
+          {/* 7. Inline Actions */}
+          <td style={{ width: '90px', textAlign: 'center' }}>
+            <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
               <button
                 type="button"
-                className="acc-action-icon-btn"
+                className="acc-tree-action-icon"
                 onClick={() => onOpenAddChild(account)}
-                title="إضافة حساب فرعي تابع لهذا الحساب"
+                title="إضافة حساب فرعي تحت هذا الحساب"
               >
-                ➕ فرعي
+                ➕
               </button>
-
               <button
                 type="button"
-                className="acc-action-icon-btn"
+                className="acc-tree-action-icon"
                 onClick={() => onOpenEditAccount(account)}
-                title="تعديل بيانات الحساب"
+                title="تعديل الحساب"
               >
                 ✏️
               </button>
             </div>
-          </div>
-        </div>
+          </td>
+        </tr>
 
-        {/* Children Render */}
+        {/* Recursive Children */}
         {hasChildren && isExpanded && (
-          <div className="acc-tree-children">
-            {children.map((child) => renderAccountNode(child, depth + 1))}
-          </div>
+          children.map((child) => renderCompactRow(child, depth + 1))
         )}
-      </div>
+      </React.Fragment>
     );
   };
 
   return (
-    <div className="acc-tree-container">
-      {/* Toolbar */}
-      <div className="acc-tree-toolbar">
-        <div className="acc-search-input-wrap">
-          <span className="acc-search-icon">🔍</span>
-          <input
-            type="text"
-            className="acc-search-input"
-            placeholder="ابحث بكود الحساب أو بالاسم (عربي أو إنجليزي)..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
+    <div className="acc-compact-tree-container">
+      {/* ── Top Grid Control Panel ── */}
+      <div className="acc-tree-controls-bar">
+        <div style={{ display: 'flex', gap: '8px', flex: 1, minWidth: '320px', flexWrap: 'wrap' }}>
+          <div className="acc-search-input-wrap" style={{ flex: 1, minWidth: '220px' }}>
+            <span className="acc-search-icon">🔍</span>
+            <input
+              type="text"
+              className="acc-search-input"
+              placeholder="ابحث بالكود أو الاسم (عربي/إنجليزي)..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+
+          {/* Type Filter */}
+          <select
+            className="acc-filter-select"
+            value={typeFilter}
+            onChange={(e) => setTypeFilter(e.target.value)}
+          >
+            <option value="all">جميع الأنواع</option>
+            <option value="asset">1 - الأصول</option>
+            <option value="liability">2 - الالتزامات</option>
+            <option value="equity">3 - حقوق الملكية</option>
+            <option value="revenue">4 - الإيرادات</option>
+            <option value="cogs">5 - تكلفة المبيعات</option>
+            <option value="expense">6 - المصروفات</option>
+          </select>
         </div>
 
+        {/* Right Buttons: Cheatsheet, Expand, Collapse, Add */}
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          {/* User Requested Cheatsheet Popup Button! */}
           <button
             type="button"
             className="acc-btn acc-btn-outline"
             onClick={onOpenCodesCheatsheet}
-            style={{ borderColor: 'rgba(56, 189, 248, 0.4)', color: '#38bdf8' }}
-            title="فتح نافذة منبثقة سريعة للأكواد والبحث والنسخ"
+            title="فتح نافذة دليل الأكواد للبحث والنسخ السريع"
+            style={{ borderColor: '#0284c7', color: '#0284c7' }}
           >
-            📋 إظهار الأكواد في نافذة منبثقة
+            📋 دليل الأكواد
           </button>
-
-          <button type="button" className="acc-btn acc-btn-outline" onClick={expandAll} title="توسيع كافة الفروع">
-            توسيع الكل ⊞
+          <button type="button" className="acc-btn acc-btn-outline" onClick={expandAll} title="فتح كل المستويات">
+            ⊞ فتح الكل
           </button>
-          <button type="button" className="acc-btn acc-btn-outline" onClick={collapseAll} title="طي الحسابات الفرعية">
-            طي الكل ⊟
+          <button type="button" className="acc-btn acc-btn-outline" onClick={collapseAll} title="طي كل المستويات">
+            ⊟ طي الكل
           </button>
           <button type="button" className="acc-btn acc-btn-primary" onClick={onOpenNewRootAccount}>
             ➕ حساب رئيسي جديد
@@ -238,30 +340,61 @@ export default function ChartOfAccountsTab({
         </div>
       </div>
 
-      {/* Stats Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px 14px', borderBottom: '1px solid rgba(255,255,255,0.06)', marginBottom: '14px', fontSize: '13px', color: '#94a3b8' }}>
-        <span>
-          إجمالي حسابات الشجرة: <strong style={{ color: '#fff' }}>{accounts.length}</strong> حساب
+      {/* ── Level Filter Ribbon ── */}
+      <div className="acc-tree-levels-bar">
+        <span style={{ fontSize: '12px', fontWeight: '700', color: 'var(--muted, #64748b)' }}>
+          تصفية المستويات الشجرية:
         </span>
-        <div style={{ display: 'flex', gap: '12px' }}>
-          <span style={{ color: '#34d399' }}>● أصول</span>
-          <span style={{ color: '#f87171' }}>● التزامات</span>
-          <span style={{ color: '#60a5fa' }}>● حقوق ملكية</span>
-          <span style={{ color: '#c084fc' }}>● إيرادات</span>
-          <span style={{ color: '#fb923c' }}>● تكلفة مبيعات</span>
-          <span style={{ color: '#fb7185' }}>● مصروفات</span>
+        <div style={{ display: 'flex', gap: '6px' }}>
+          {[
+            { key: 'all', label: 'كافة المستويات' },
+            { key: '1', label: 'مستوى 1 (الأم)' },
+            { key: '2', label: 'مستوى 2 (المجموعات)' },
+            { key: '3', label: 'مستوى 3 (العامة)' },
+            { key: '4', label: 'مستوى 4 (الفرعية)' },
+          ].map((lvl) => (
+            <button
+              key={lvl.key}
+              type="button"
+              className={`acc-level-pill ${levelFilter === lvl.key ? 'active' : ''}`}
+              onClick={() => setLevelFilter(lvl.key)}
+            >
+              {lvl.label}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ marginRight: 'auto', fontSize: '12px', color: 'var(--muted, #64748b)' }}>
+          معروض: <strong>{matchingAccountIds !== null ? matchingAccountIds.size : accounts.length}</strong> من أصل {accounts.length} حساب
         </div>
       </div>
 
-      {/* Tree Content */}
-      <div className="acc-tree-body">
-        {rootAccounts.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>
-            لم يتم تهيئة شجرة الحسابات بعد.
-          </div>
-        ) : (
-          rootAccounts.map((root) => renderAccountNode(root, 0))
-        )}
+      {/* ── Compact Tree Table ── */}
+      <div className="acc-table-card" style={{ margin: 0, borderTopLeftRadius: 0, borderTopRightRadius: 0 }}>
+        <table className="acc-compact-tree-table">
+          <thead>
+            <tr>
+              <th style={{ width: '110px' }}>كود الحساب</th>
+              <th>اسم الحساب المحاسبي (التسلسل الهرمي)</th>
+              <th style={{ width: '80px', textAlign: 'center' }}>المستوى</th>
+              <th style={{ width: '100px', textAlign: 'center' }}>النوع</th>
+              <th style={{ width: '80px', textAlign: 'center' }}>الطبيعة</th>
+              <th style={{ width: '150px', textAlign: 'left' }}>الرصيد الحالي</th>
+              <th style={{ width: '90px', textAlign: 'center' }}>إجراءات</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rootAccounts.length === 0 ? (
+              <tr>
+                <td colSpan="7" style={{ textAlign: 'center', padding: '36px', color: 'var(--muted, #64748b)' }}>
+                  لم يتم العثور على حسابات مطابقة.
+                </td>
+              </tr>
+            ) : (
+              rootAccounts.map((root) => renderCompactRow(root, 0))
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );

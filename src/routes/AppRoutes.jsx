@@ -474,10 +474,13 @@ export default function AppRoutes() {
           <Suspense fallback={<div className="loading-fallback">جاري تحميل منظومة الحسابات...</div>}>
             <AccountsSystemView
               isStandalone={true}
+              themeMode={themeMode}
+              toggleTheme={toggleTheme}
               state={state}
               setState={setState}
               saveState={saveState}
               showToast={showToast}
+              computeGrandPayroll={computeGrandPayroll}
             />
           </Suspense>
         </ErrorBoundary>
@@ -1037,11 +1040,14 @@ export default function AppRoutes() {
                     <Suspense fallback={<div className="loading-fallback">جاري تحميل منظومة الحسابات...</div>}>
                       <AccountsSystemView
                         isStandalone={false}
+                        themeMode={themeMode}
+                        toggleTheme={toggleTheme}
                         state={state}
                         setState={setState}
                         saveState={saveState}
                         showToast={showToast}
                         onNavigateTab={setActiveNavTab}
+                        computeGrandPayroll={computeGrandPayroll}
                       />
                     </Suspense>
                   </ErrorBoundary>

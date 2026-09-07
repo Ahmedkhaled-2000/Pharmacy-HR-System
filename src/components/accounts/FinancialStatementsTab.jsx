@@ -301,22 +301,22 @@ export default function FinancialStatementsTab({
       {/* ── 1. ميزان المراجعة ── */}
       {reportType === 'trial-balance' && (
         <div>
-          <div style={{ background: 'rgba(30, 41, 59, 0.6)', padding: '16px 20px', borderRadius: '16px', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ background: 'var(--surface, #ffffff)', padding: '16px 20px', borderRadius: '16px', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid var(--border, #e2e8f0)', boxShadow: 'var(--acc-shadow-sm)' }}>
             <div>
-              <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '800', color: '#fff' }}>
+              <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '800', color: 'var(--text, #0f172a)' }}>
                 ميزان المراجعة بالأرصدة والمجاميع
               </h3>
-              <p style={{ margin: '3px 0 0', fontSize: '12px', color: '#94a3b8' }}>
+              <p style={{ margin: '3px 0 0', fontSize: '12px', color: 'var(--muted, #64748b)' }}>
                 التحقق التام من توازن الحسابات والقيود المحاسبية للفرع أو المجموعة
               </p>
             </div>
             <div>
               {trialTotals.isBalanced ? (
-                <span style={{ background: 'rgba(16, 185, 129, 0.2)', border: '1px solid rgba(16, 185, 129, 0.4)', color: '#34d399', padding: '6px 14px', borderRadius: '10px', fontSize: '13.5px', fontWeight: '800' }}>
+                <span style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', color: '#047857', padding: '6px 14px', borderRadius: '10px', fontSize: '13.5px', fontWeight: '800' }}>
                   ✅ الميزان متزن تماماً
                 </span>
               ) : (
-                <span style={{ background: 'rgba(239, 68, 68, 0.2)', border: '1px solid rgba(239, 68, 68, 0.4)', color: '#f87171', padding: '6px 14px', borderRadius: '10px', fontSize: '13.5px', fontWeight: '800' }}>
+                <span style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', padding: '6px 14px', borderRadius: '10px', fontSize: '13.5px', fontWeight: '800' }}>
                   ⚠️ يوجد فارق عدم اتزان
                 </span>
               )}
@@ -330,38 +330,38 @@ export default function FinancialStatementsTab({
                   <th style={{ width: '100px' }}>الكود</th>
                   <th>اسم الحساب</th>
                   <th style={{ width: '90px' }}>الطبيعة</th>
-                  <th style={{ width: '130px', color: '#34d399' }}>حركات مدينة (+)</th>
-                  <th style={{ width: '130px', color: '#f87171' }}>حركات دائنة (-)</th>
-                  <th style={{ width: '140px', color: '#38bdf8' }}>رصيد ختامي مدين</th>
-                  <th style={{ width: '140px', color: '#f59e0b' }}>رصيد ختامي دائن</th>
+                  <th style={{ width: '130px', color: '#059669' }}>حركات مدينة (+)</th>
+                  <th style={{ width: '130px', color: '#dc2626' }}>حركات دائنة (-)</th>
+                  <th style={{ width: '140px', color: '#0284c7' }}>رصيد ختامي مدين</th>
+                  <th style={{ width: '140px', color: '#d97706' }}>رصيد ختامي دائن</th>
                 </tr>
               </thead>
               <tbody>
                 {trialBalanceAccounts.map((acc) => (
                   <tr key={acc.id}>
                     <td><span className="acc-code-badge">{acc.code}</span></td>
-                    <td><strong style={{ color: '#fff' }}>{acc.name_ar}</strong></td>
-                    <td style={{ color: acc.nature === 'debit' ? '#34d399' : '#f87171', fontWeight: '700' }}>
+                    <td><strong style={{ color: 'var(--text, #0f172a)' }}>{acc.name_ar}</strong></td>
+                    <td style={{ color: acc.nature === 'debit' ? '#059669' : '#dc2626', fontWeight: '700' }}>
                       {acc.nature === 'debit' ? 'مدين' : 'دائن'}
                     </td>
                     <td style={{ fontFamily: 'monospace' }}>{acc.totalDebit > 0 ? acc.totalDebit.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '—'}</td>
                     <td style={{ fontFamily: 'monospace' }}>{acc.totalCredit > 0 ? acc.totalCredit.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '—'}</td>
-                    <td style={{ fontFamily: 'monospace', fontWeight: '800', color: acc.closingDebit > 0 ? '#38bdf8' : '#64748b' }}>
+                    <td style={{ fontFamily: 'monospace', fontWeight: '800', color: acc.closingDebit > 0 ? '#0284c7' : 'var(--muted, #64748b)' }}>
                       {acc.closingDebit > 0 ? acc.closingDebit.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '—'}
                     </td>
-                    <td style={{ fontFamily: 'monospace', fontWeight: '800', color: acc.closingCredit > 0 ? '#f59e0b' : '#64748b' }}>
+                    <td style={{ fontFamily: 'monospace', fontWeight: '800', color: acc.closingCredit > 0 ? '#d97706' : 'var(--muted, #64748b)' }}>
                       {acc.closingCredit > 0 ? acc.closingCredit.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '—'}
                     </td>
                   </tr>
                 ))}
               </tbody>
               <tfoot>
-                <tr style={{ background: 'rgba(15, 23, 42, 0.9)', fontWeight: '800', fontSize: '13.5px' }}>
+                <tr style={{ background: 'var(--surface-subtle, #f8fafc)', borderTop: '2px solid var(--border-strong, #cbd5e1)', fontWeight: '800', fontSize: '13.5px', color: 'var(--text, #0f172a)' }}>
                   <td colSpan="3" style={{ textAlign: 'left', paddingLeft: '20px' }}>الإجمالي العام للميزان:</td>
-                  <td style={{ color: '#34d399', fontFamily: 'monospace' }}>{trialTotals.totDebit.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م</td>
-                  <td style={{ color: '#f87171', fontFamily: 'monospace' }}>{trialTotals.totCredit.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م</td>
-                  <td style={{ color: '#38bdf8', fontFamily: 'monospace' }}>{trialTotals.totClosingDebit.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م</td>
-                  <td style={{ color: '#f59e0b', fontFamily: 'monospace' }}>{trialTotals.totClosingCredit.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م</td>
+                  <td style={{ color: '#059669', fontFamily: 'monospace' }}>{trialTotals.totDebit.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م</td>
+                  <td style={{ color: '#dc2626', fontFamily: 'monospace' }}>{trialTotals.totCredit.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م</td>
+                  <td style={{ color: '#0284c7', fontFamily: 'monospace' }}>{trialTotals.totClosingDebit.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م</td>
+                  <td style={{ color: '#d97706', fontFamily: 'monospace' }}>{trialTotals.totClosingCredit.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م</td>
                 </tr>
               </tfoot>
             </table>
@@ -373,18 +373,18 @@ export default function FinancialStatementsTab({
       {reportType === 'income-statement' && (
         <div style={{ maxWidth: '850px', margin: '0 auto' }}>
           <div className="acc-table-card" style={{ padding: '24px' }}>
-            <div style={{ textAlign: 'center', marginBottom: '24px', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '16px' }}>
-              <h2 style={{ margin: '0 0 6px', fontSize: '20px', fontWeight: '800', color: '#fff' }}>
+            <div style={{ textAlign: 'center', marginBottom: '24px', borderBottom: '1px solid var(--border, #e2e8f0)', paddingBottom: '16px' }}>
+              <h2 style={{ margin: '0 0 6px', fontSize: '20px', fontWeight: '800', color: 'var(--text, #0f172a)' }}>
                 قائمة الدخل والأرباح والخسائر (Income Statement)
               </h2>
-              <p style={{ margin: 0, fontSize: '13px', color: '#94a3b8' }}>
+              <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted, #64748b)' }}>
                 عن الفترة المالية المنتهية حتى {fiscalPeriod || 'الشهر الحالي'}
               </p>
             </div>
 
             {/* Revenues */}
             <div style={{ marginBottom: '18px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 14px', background: 'rgba(168, 85, 247, 0.12)', borderRadius: '10px', fontWeight: '800', color: '#c084fc' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: '12px', fontWeight: '800', color: '#6b21a8' }}>
                 <span>1. إجمالي إيرادات المبيعات والنشاط (+)</span>
                 <span style={{ fontFamily: 'monospace', fontSize: '16px' }}>
                   {pnlData.totalRevenues.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م
@@ -394,7 +394,7 @@ export default function FinancialStatementsTab({
 
             {/* COGS */}
             <div style={{ marginBottom: '18px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 14px', background: 'rgba(249, 115, 22, 0.12)', borderRadius: '10px', fontWeight: '800', color: '#fb923c' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', background: '#fff7ed', border: '1px solid #ffedd5', borderRadius: '12px', fontWeight: '800', color: '#c2410c' }}>
                 <span>2. تكلفة المبيعات والبضاعة المباعة (COGS) (-)</span>
                 <span style={{ fontFamily: 'monospace', fontSize: '16px' }}>
                   {pnlData.totalCogs.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م
@@ -404,7 +404,7 @@ export default function FinancialStatementsTab({
 
             {/* Gross Profit */}
             <div style={{ marginBottom: '22px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', background: 'rgba(56, 189, 248, 0.15)', border: '1px solid rgba(56, 189, 248, 0.3)', borderRadius: '12px', fontWeight: '800', color: '#38bdf8' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', background: '#f0f9ff', border: '1.5px solid #bae6fd', borderRadius: '12px', fontWeight: '800', color: '#0284c7' }}>
                 <span style={{ fontSize: '15px' }}>★ مجمل الربح الصيدلاني (Gross Profit)</span>
                 <span style={{ fontFamily: 'monospace', fontSize: '18px' }}>
                   {pnlData.grossProfit.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م
@@ -413,51 +413,51 @@ export default function FinancialStatementsTab({
             </div>
 
             {/* Operating Expenses */}
-            <div style={{ background: 'rgba(15, 23, 42, 0.4)', borderRadius: '14px', padding: '16px', marginBottom: '22px' }}>
-              <div style={{ fontSize: '14px', fontWeight: '800', color: '#f87171', marginBottom: '12px' }}>
+            <div style={{ background: 'var(--surface-subtle, #f8fafc)', border: '1px solid var(--border, #e2e8f0)', borderRadius: '14px', padding: '16px', marginBottom: '22px' }}>
+              <div style={{ fontSize: '14px', fontWeight: '800', color: '#dc2626', marginBottom: '12px' }}>
                 3. المصروفات التشغيلية والإدارية والعمولات البنكية (-):
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.04)', fontSize: '13.5px' }}>
-                <span style={{ color: '#cbd5e1' }}>• أجور ومصروفات الكادر الطبي والموظفين (رواتب وإضافي وبدلات)</span>
-                <span style={{ fontFamily: 'monospace' }}>{pnlData.totalEmployeeExpenses.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border, #e2e8f0)', fontSize: '13.5px' }}>
+                <span style={{ color: 'var(--text-secondary, #334155)' }}>• أجور ومصروفات الكادر الطبي والموظفين (رواتب وإضافي وبدلات)</span>
+                <span style={{ fontFamily: 'monospace', fontWeight: '700' }}>{pnlData.totalEmployeeExpenses.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م</span>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.04)', fontSize: '13.5px' }}>
-                <span style={{ color: '#cbd5e1' }}>• مصروفات تشغيل الفروع (إيجارات، كهرباء، مياه، إنترنت، صيانة، نظافة)</span>
-                <span style={{ fontFamily: 'monospace' }}>{pnlData.totalBranchExpenses.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border, #e2e8f0)', fontSize: '13.5px' }}>
+                <span style={{ color: 'var(--text-secondary, #334155)' }}>• مصروفات تشغيل الفروع (إيجارات، كهرباء، مياه، إنترنت، صيانة، نظافة)</span>
+                <span style={{ fontFamily: 'monospace', fontWeight: '700' }}>{pnlData.totalBranchExpenses.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م</span>
               </div>
 
               {/* Bank Fees explicitly highlighted as requested! */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.04)', fontSize: '13.5px', background: 'rgba(244, 63, 94, 0.08)', borderRadius: '6px' }}>
-                <span style={{ color: '#fda4af', fontWeight: '700' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 10px', borderBottom: '1px solid var(--border, #e2e8f0)', fontSize: '13.5px', background: '#fff1f2', borderRadius: '8px', border: '1px solid #fecdd3' }}>
+                <span style={{ color: '#be123c', fontWeight: '700' }}>
                   • عمولات ومصروفات نقاط البيع والمحافظ وإنستاباي (خصم البنك 651/652/653)
                 </span>
-                <span style={{ fontFamily: 'monospace', fontWeight: '800', color: '#f43f5e' }}>
+                <span style={{ fontFamily: 'monospace', fontWeight: '800', color: '#e11d48' }}>
                   {pnlData.totalBankFees.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م
                 </span>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: '13.5px' }}>
-                <span style={{ color: '#cbd5e1' }}>• مصروفات تسويق وتوصيل ومصروفات إدارية وعمومية</span>
-                <span style={{ fontFamily: 'monospace' }}>{pnlData.totalOtherExpenses.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', fontSize: '13.5px' }}>
+                <span style={{ color: 'var(--text-secondary, #334155)' }}>• مصروفات تسويق وتوصيل ومصروفات إدارية وعمومية</span>
+                <span style={{ fontFamily: 'monospace', fontWeight: '700' }}>{pnlData.totalOtherExpenses.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م</span>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '10px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.08)', fontWeight: '800', color: '#f87171' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '10px', paddingTop: '8px', borderTop: '1px solid var(--border, #e2e8f0)', fontWeight: '800', color: '#dc2626' }}>
                 <span>إجمالي المصروفات التشغيلية والبنكية:</span>
                 <span style={{ fontFamily: 'monospace' }}>{pnlData.totalOperatingExpenses.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م</span>
               </div>
             </div>
 
             {/* Net Profit */}
-            <div style={{ padding: '16px 20px', background: pnlData.netProfit >= 0 ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)', border: `2px solid ${pnlData.netProfit >= 0 ? '#10b981' : '#ef4444'}`, borderRadius: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ padding: '18px 22px', background: pnlData.netProfit >= 0 ? '#ecfdf5' : '#fef2f2', border: `2px solid ${pnlData.netProfit >= 0 ? '#10b981' : '#ef4444'}`, borderRadius: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <div style={{ fontSize: '12px', color: '#cbd5e1' }}>النتيجة النهائية لأعمال النشاط</div>
-                <div style={{ fontSize: '18px', fontWeight: '800', color: '#fff', marginTop: '2px' }}>
+                <div style={{ fontSize: '12px', color: 'var(--muted, #64748b)' }}>النتيجة النهائية لأعمال النشاط</div>
+                <div style={{ fontSize: '18px', fontWeight: '800', color: pnlData.netProfit >= 0 ? '#047857' : '#b91c1c', marginTop: '2px' }}>
                   {pnlData.netProfit >= 0 ? '🏆 صافي أرباح الفترة (Net Profit)' : '⚠️ صافي خسائر الفترة'}
                 </div>
               </div>
-              <div style={{ fontSize: '26px', fontWeight: '900', fontFamily: 'monospace', color: pnlData.netProfit >= 0 ? '#34d399' : '#f87171' }}>
+              <div style={{ fontSize: '26px', fontWeight: '900', fontFamily: 'monospace', color: pnlData.netProfit >= 0 ? '#059669' : '#dc2626' }}>
                 {pnlData.netProfit.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م
               </div>
             </div>
@@ -469,37 +469,37 @@ export default function FinancialStatementsTab({
       {reportType === 'balance-sheet' && (
         <div style={{ maxWidth: '900px', margin: '0 auto' }}>
           <div className="acc-table-card" style={{ padding: '24px' }}>
-            <div style={{ textAlign: 'center', marginBottom: '24px', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '16px' }}>
-              <h2 style={{ margin: '0 0 6px', fontSize: '20px', fontWeight: '800', color: '#fff' }}>
+            <div style={{ textAlign: 'center', marginBottom: '24px', borderBottom: '1px solid var(--border, #e2e8f0)', paddingBottom: '16px' }}>
+              <h2 style={{ margin: '0 0 6px', fontSize: '20px', fontWeight: '800', color: 'var(--text, #0f172a)' }}>
                 الميزانية العمومية وقائمة المركز المالي (Balance Sheet)
               </h2>
-              <p style={{ margin: 0, fontSize: '13px', color: '#94a3b8' }}>
+              <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted, #64748b)' }}>
                 المركز المالي كما في تاريخ اليوم · معادلة الميزانية: الأصول = الالتزامات + حقوق الملكية
               </p>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
               {/* Assets Side */}
-              <div style={{ background: 'rgba(15, 23, 42, 0.5)', borderRadius: '14px', padding: '16px' }}>
-                <h3 style={{ margin: '0 0 14px', fontSize: '16px', color: '#34d399', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '8px' }}>
+              <div style={{ background: 'var(--surface-subtle, #f8fafc)', border: '1px solid var(--border, #e2e8f0)', borderRadius: '14px', padding: '18px', boxShadow: '0 2px 8px -2px rgba(15, 23, 42, 0.04)' }}>
+                <h3 style={{ margin: '0 0 14px', fontSize: '16px', fontWeight: '800', color: '#047857', borderBottom: '1px solid var(--border, #e2e8f0)', paddingBottom: '8px' }}>
                   الجانب الأيمن: الأصول (Assets)
                 </h3>
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', fontSize: '13.5px' }}>
-                  <span style={{ color: '#cbd5e1' }}>1. الأصول المتداولة (نقدية، بنوك، مخزون، عملاء)</span>
-                  <span style={{ fontWeight: '700', fontFamily: 'monospace' }}>
+                  <span style={{ color: 'var(--text, #1e293b)' }}>1. الأصول المتداولة (نقدية، بنوك، مخزون، عملاء)</span>
+                  <span style={{ fontWeight: '700', fontFamily: 'monospace', color: 'var(--text, #0f172a)' }}>
                     {balanceSheetData.currentAssets.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م
                   </span>
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', fontSize: '13.5px' }}>
-                  <span style={{ color: '#cbd5e1' }}>2. الأصول الثابتة (أثاث، أجهزة، ديكورات)</span>
-                  <span style={{ fontWeight: '700', fontFamily: 'monospace' }}>
+                  <span style={{ color: 'var(--text, #1e293b)' }}>2. الأصول الثابتة (أثاث، أجهزة، ديكورات)</span>
+                  <span style={{ fontWeight: '700', fontFamily: 'monospace', color: 'var(--text, #0f172a)' }}>
                     {balanceSheetData.fixedAssets.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م
                   </span>
                 </div>
 
-                <div style={{ marginTop: '24px', paddingTop: '12px', borderTop: '2px solid rgba(52, 211, 153, 0.4)', display: 'flex', justifyContent: 'space-between', fontWeight: '800', color: '#34d399', fontSize: '16px' }}>
+                <div style={{ marginTop: '24px', paddingTop: '12px', borderTop: '2px solid #10b981', display: 'flex', justifyContent: 'space-between', fontWeight: '800', color: '#047857', fontSize: '16px' }}>
                   <span>إجمالي الأصول:</span>
                   <span style={{ fontFamily: 'monospace' }}>
                     {balanceSheetData.totalAssets.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م
@@ -508,40 +508,40 @@ export default function FinancialStatementsTab({
               </div>
 
               {/* Liabilities & Equity Side */}
-              <div style={{ background: 'rgba(15, 23, 42, 0.5)', borderRadius: '14px', padding: '16px' }}>
-                <h3 style={{ margin: '0 0 14px', fontSize: '16px', color: '#60a5fa', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '8px' }}>
+              <div style={{ background: 'var(--surface-subtle, #f8fafc)', border: '1px solid var(--border, #e2e8f0)', borderRadius: '14px', padding: '18px', boxShadow: '0 2px 8px -2px rgba(15, 23, 42, 0.04)' }}>
+                <h3 style={{ margin: '0 0 14px', fontSize: '16px', fontWeight: '800', color: '#1d4ed8', borderBottom: '1px solid var(--border, #e2e8f0)', paddingBottom: '8px' }}>
                   الجانب الأيسر: الالتزامات وحقوق الملكية
                 </h3>
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: '13px' }}>
-                  <span style={{ color: '#cbd5e1' }}>• الالتزامات المتداولة (موردون، رواتب ومستحقات)</span>
-                  <span style={{ fontWeight: '700', fontFamily: 'monospace' }}>
+                  <span style={{ color: 'var(--text, #1e293b)' }}>• الالتزامات المتداولة (موردون، رواتب ومستحقات)</span>
+                  <span style={{ fontWeight: '700', fontFamily: 'monospace', color: 'var(--text, #0f172a)' }}>
                     {balanceSheetData.currentLiabilities.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م
                   </span>
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: '13px' }}>
-                  <span style={{ color: '#cbd5e1' }}>• الالتزامات طويلة الأجل (قروض وتسهيلات)</span>
-                  <span style={{ fontWeight: '700', fontFamily: 'monospace' }}>
+                  <span style={{ color: 'var(--text, #1e293b)' }}>• الالتزامات طويلة الأجل (قروض وتسهيلات)</span>
+                  <span style={{ fontWeight: '700', fontFamily: 'monospace', color: 'var(--text, #0f172a)' }}>
                     {balanceSheetData.longTermLiabilities.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م
                   </span>
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: '13px' }}>
-                  <span style={{ color: '#cbd5e1' }}>• رأس المال والأرباح المرحلة السابقة</span>
-                  <span style={{ fontWeight: '700', fontFamily: 'monospace' }}>
+                  <span style={{ color: 'var(--text, #1e293b)' }}>• رأس المال والأرباح المرحلة السابقة</span>
+                  <span style={{ fontWeight: '700', fontFamily: 'monospace', color: 'var(--text, #0f172a)' }}>
                     {balanceSheetData.baseEquity.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م
                   </span>
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: '13px', color: '#38bdf8' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: '13px', color: '#0284c7' }}>
                   <span style={{ fontWeight: '700' }}>• صافي أرباح الفترة الحالية المنقولة (P&L)</span>
                   <span style={{ fontWeight: '800', fontFamily: 'monospace' }}>
                     {balanceSheetData.currentYearProfit.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م
                   </span>
                 </div>
 
-                <div style={{ marginTop: '24px', paddingTop: '12px', borderTop: '2px solid rgba(96, 165, 250, 0.4)', display: 'flex', justifyContent: 'space-between', fontWeight: '800', color: '#60a5fa', fontSize: '16px' }}>
+                <div style={{ marginTop: '24px', paddingTop: '12px', borderTop: '2px solid #3b82f6', display: 'flex', justifyContent: 'space-between', fontWeight: '800', color: '#1d4ed8', fontSize: '16px' }}>
                   <span>إجمالي الالتزامات وحقوق الملكية:</span>
                   <span style={{ fontFamily: 'monospace' }}>
                     {balanceSheetData.totalLiabilitiesAndEquity.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م
@@ -553,11 +553,11 @@ export default function FinancialStatementsTab({
             {/* Balanced Banner */}
             <div style={{ marginTop: '20px', textAlign: 'center' }}>
               {balanceSheetData.isBalanced ? (
-                <div style={{ background: 'rgba(16, 185, 129, 0.15)', border: '1px solid rgba(16, 185, 129, 0.3)', color: '#34d399', padding: '10px 20px', borderRadius: '12px', display: 'inline-block', fontWeight: '800' }}>
+                <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', color: '#047857', padding: '10px 20px', borderRadius: '12px', display: 'inline-block', fontWeight: '800' }}>
                   ⚖️ الميزانية متوازنة 100% (الأصول = الالتزامات + حقوق الملكية)
                 </div>
               ) : (
-                <div style={{ background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#f87171', padding: '10px 20px', borderRadius: '12px', display: 'inline-block', fontWeight: '800' }}>
+                <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', padding: '10px 20px', borderRadius: '12px', display: 'inline-block', fontWeight: '800' }}>
                   ⚠️ فارق التوازن: {balanceSheetData.difference.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م
                 </div>
               )}
@@ -569,9 +569,9 @@ export default function FinancialStatementsTab({
       {/* ── 4. دفتر الأستاذ العام ── */}
       {reportType === 'general-ledger' && (
         <div>
-          <div style={{ background: 'rgba(30, 41, 59, 0.6)', padding: '16px 20px', borderRadius: '16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ background: 'var(--surface, #ffffff)', padding: '16px 20px', borderRadius: '16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap', border: '1px solid var(--border, #e2e8f0)', boxShadow: '0 2px 8px -2px rgba(15, 23, 42, 0.04)' }}>
             <div style={{ flex: 1, minWidth: '250px' }}>
-              <label style={{ fontSize: '12.5px', fontWeight: '700', color: '#94a3b8', display: 'block', marginBottom: '6px' }}>
+              <label style={{ fontSize: '12.5px', fontWeight: '700', color: 'var(--text, #0f172a)', display: 'block', marginBottom: '6px' }}>
                 اختر الحساب المحاسبي لاستخراج كشف الحساب التحليلي:
               </label>
               <select
@@ -590,9 +590,9 @@ export default function FinancialStatementsTab({
             </div>
 
             {targetAccountObj && (
-              <div style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '10px 18px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.06)' }}>
-                <div style={{ fontSize: '11px', color: '#94a3b8' }}>الرصيد الافتتاحي للحساب:</div>
-                <div style={{ fontSize: '16px', fontWeight: '800', color: '#38bdf8', fontFamily: 'monospace' }}>
+              <div style={{ background: 'var(--surface-subtle, #f8fafc)', padding: '10px 18px', borderRadius: '12px', border: '1px solid var(--border, #e2e8f0)' }}>
+                <div style={{ fontSize: '11px', color: 'var(--muted, #64748b)' }}>الرصيد الافتتاحي للحساب:</div>
+                <div style={{ fontSize: '16px', fontWeight: '800', color: '#0284c7', fontFamily: 'monospace' }}>
                   {Number(targetAccountObj.opening_balance || 0).toLocaleString()} ج.م
                 </div>
               </div>
@@ -606,21 +606,21 @@ export default function FinancialStatementsTab({
                   <th style={{ width: '110px' }}>التاريخ</th>
                   <th style={{ width: '120px' }}>رقم السند</th>
                   <th>بيان القيد والسطر</th>
-                  <th style={{ width: '130px', color: '#34d399' }}>مدين (+)</th>
-                  <th style={{ width: '130px', color: '#f87171' }}>دائن (-)</th>
-                  <th style={{ width: '150px', color: '#38bdf8' }}>الرصيد التراكمي المتحرك</th>
+                  <th style={{ width: '130px', color: '#059669' }}>مدين (+)</th>
+                  <th style={{ width: '130px', color: '#dc2626' }}>دائن (-)</th>
+                  <th style={{ width: '150px', color: '#0284c7' }}>الرصيد التراكمي المتحرك</th>
                 </tr>
               </thead>
               <tbody>
                 {!selectedLedgerAccountId ? (
                   <tr>
-                    <td colSpan="6" style={{ textAlign: 'center', padding: '36px', color: '#94a3b8' }}>
+                    <td colSpan="6" style={{ textAlign: 'center', padding: '36px', color: 'var(--muted, #64748b)' }}>
                       يرجى اختيار حساب محاسبي من القائمة أعلاه لعرض حركاته التفصيلية.
                     </td>
                   </tr>
                 ) : ledgerLines.length === 0 ? (
                   <tr>
-                    <td colSpan="6" style={{ textAlign: 'center', padding: '36px', color: '#94a3b8' }}>
+                    <td colSpan="6" style={{ textAlign: 'center', padding: '36px', color: 'var(--muted, #64748b)' }}>
                       لا توجد حركات مسجلة على هذا الحساب خلال الفترة المحددة.
                     </td>
                   </tr>
@@ -630,18 +630,18 @@ export default function FinancialStatementsTab({
                       <td>{line.entry_date}</td>
                       <td><span className="acc-code-badge">{line.entry_number}</span></td>
                       <td>
-                        <div style={{ fontWeight: '700', color: '#fff' }}>{line.narration}</div>
+                        <div style={{ fontWeight: '700', color: 'var(--text, #0f172a)' }}>{line.narration}</div>
                         {line.line_desc && line.line_desc !== line.narration && (
-                          <div style={{ fontSize: '11.5px', color: '#94a3b8' }}>{line.line_desc}</div>
+                          <div style={{ fontSize: '11.5px', color: 'var(--muted, #64748b)' }}>{line.line_desc}</div>
                         )}
                       </td>
-                      <td style={{ fontWeight: '800', color: line.debit > 0 ? '#34d399' : '#64748b', fontFamily: 'monospace' }}>
+                      <td style={{ fontWeight: '800', color: line.debit > 0 ? '#059669' : 'var(--muted, #94a3b8)', fontFamily: 'monospace' }}>
                         {line.debit > 0 ? line.debit.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '—'}
                       </td>
-                      <td style={{ fontWeight: '800', color: line.credit > 0 ? '#f87171' : '#64748b', fontFamily: 'monospace' }}>
+                      <td style={{ fontWeight: '800', color: line.credit > 0 ? '#dc2626' : 'var(--muted, #94a3b8)', fontFamily: 'monospace' }}>
                         {line.credit > 0 ? line.credit.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '—'}
                       </td>
-                      <td style={{ fontWeight: '800', color: '#38bdf8', fontFamily: 'monospace', fontSize: '13.5px' }}>
+                      <td style={{ fontWeight: '800', color: '#0284c7', fontFamily: 'monospace', fontSize: '13.5px' }}>
                         {line.runningBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م
                       </td>
                     </tr>

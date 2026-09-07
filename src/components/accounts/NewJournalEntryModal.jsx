@@ -226,7 +226,7 @@ export default function NewJournalEntryModal({
             {/* Lines Table */}
             <div style={{ marginTop: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <span style={{ fontSize: '13.5px', fontWeight: '800', color: '#f8fafc' }}>
+                <span style={{ fontSize: '13.5px', fontWeight: '800', color: 'var(--text, #0f172a)' }}>
                   تفاصيل وأطراف القيد (المدين والدائن):
                 </span>
                 <button
@@ -278,7 +278,7 @@ export default function NewJournalEntryModal({
                             value={line.debit}
                             onChange={(e) => handleLineChange(idx, 'debit', e.target.value)}
                             placeholder="0.00"
-                            style={{ width: '100%', padding: '6px 10px', fontWeight: '700', color: '#34d399' }}
+                            style={{ width: '100%', padding: '6px 10px', fontWeight: '700', color: '#059669' }}
                           />
                         </td>
                         <td>
@@ -290,7 +290,7 @@ export default function NewJournalEntryModal({
                             value={line.credit}
                             onChange={(e) => handleLineChange(idx, 'credit', e.target.value)}
                             placeholder="0.00"
-                            style={{ width: '100%', padding: '6px 10px', fontWeight: '700', color: '#f87171' }}
+                            style={{ width: '100%', padding: '6px 10px', fontWeight: '700', color: '#dc2626' }}
                           />
                         </td>
                         <td>
@@ -308,7 +308,7 @@ export default function NewJournalEntryModal({
                             type="button"
                             className="acc-action-icon-btn"
                             onClick={() => removeLine(idx)}
-                            style={{ color: '#f43f5e', fontSize: '16px' }}
+                            style={{ color: '#e11d48', fontSize: '16px' }}
                             title="حذف هذا السطر"
                           >
                             🗑️

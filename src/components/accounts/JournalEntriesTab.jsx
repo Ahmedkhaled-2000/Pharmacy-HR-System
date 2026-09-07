@@ -128,7 +128,7 @@ export default function JournalEntriesTab({
           <tbody>
             {filteredEntries.length === 0 ? (
               <tr>
-                <td colSpan="8" style={{ textAlign: 'center', padding: '36px', color: '#94a3b8' }}>
+                <td colSpan="8" style={{ textAlign: 'center', padding: '36px', color: 'var(--muted, #64748b)' }}>
                   لا توجد قيود يومية مسجلة بعد.
                 </td>
               </tr>
@@ -142,7 +142,7 @@ export default function JournalEntriesTab({
                   </td>
                   <td>{entry.entry_date}</td>
                   <td>
-                    <span style={{ fontSize: '11.5px', background: 'rgba(255,255,255,0.06)', padding: '2px 6px', borderRadius: '4px' }}>
+                    <span style={{ fontSize: '11.5px', background: 'var(--surface-muted, #f1f5f9)', border: '1px solid var(--border, #e2e8f0)', padding: '2px 8px', borderRadius: '6px', color: 'var(--text-secondary, #334155)', fontWeight: '700' }}>
                       {entry.doc_type === 'sale' ? 'مبيعات' :
                        entry.doc_type === 'payroll' ? 'رواتب' :
                        entry.doc_type === 'purchase' ? 'مشتريات' :
@@ -150,19 +150,19 @@ export default function JournalEntriesTab({
                     </span>
                   </td>
                   <td>
-                    <div style={{ fontWeight: '700', color: '#fff' }}>{entry.narration}</div>
+                    <div style={{ fontWeight: '700', color: 'var(--text, #0f172a)' }}>{entry.narration}</div>
                     {entry.doc_reference && (
-                      <div style={{ fontSize: '11.5px', color: '#64748b' }}>مرجع: {entry.doc_reference}</div>
+                      <div style={{ fontSize: '11.5px', color: 'var(--muted, #64748b)' }}>مرجع: {entry.doc_reference}</div>
                     )}
                   </td>
                   <td>
-                    <span style={{ fontSize: '12px', color: '#cbd5e1' }}>{getBranchName(entry.branch_id)}</span>
+                    <span style={{ fontSize: '12px', color: 'var(--text-secondary, #334155)' }}>{getBranchName(entry.branch_id)}</span>
                   </td>
                   <td>
-                    <strong style={{ color: '#38bdf8', fontFamily: 'monospace', fontSize: '14px' }}>
+                    <strong style={{ color: '#0284c7', fontFamily: 'monospace', fontSize: '14px' }}>
                       {Number(entry.total_debit || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                     </strong>
-                    <span style={{ fontSize: '10.5px', color: '#64748b', marginRight: '4px' }}>ج.م</span>
+                    <span style={{ fontSize: '10.5px', color: 'var(--muted, #64748b)', marginRight: '4px' }}>ج.م</span>
                   </td>
                   <td>
                     <span className="status-posted">معتمد مرحل</span>
@@ -196,7 +196,7 @@ export default function JournalEntriesTab({
                 <span style={{ fontSize: '24px' }}>📜</span>
                 <div>
                   <h2>سند قيد محاسبي: {inspectedEntry.entry_number}</h2>
-                  <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#94a3b8' }}>
+                  <p style={{ margin: '2px 0 0', fontSize: '12px', color: 'var(--muted, #64748b)' }}>
                     التاريخ: {inspectedEntry.entry_date} · الفرع: {getBranchName(inspectedEntry.branch_id)}
                   </p>
                 </div>
@@ -212,9 +212,9 @@ export default function JournalEntriesTab({
             </div>
 
             <div className="acc-modal-body">
-              <div style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '14px', borderRadius: '12px', marginBottom: '14px' }}>
-                <div style={{ fontSize: '12px', color: '#94a3b8' }}>البيان العام للسند:</div>
-                <div style={{ fontSize: '15px', fontWeight: '800', color: '#fff', marginTop: '3px' }}>
+              <div style={{ background: 'var(--surface-subtle, #f8fafc)', border: '1px solid var(--border, #e2e8f0)', padding: '14px 18px', borderRadius: '12px', marginBottom: '14px' }}>
+                <div style={{ fontSize: '12px', color: 'var(--muted, #64748b)' }}>البيان العام للسند:</div>
+                <div style={{ fontSize: '15px', fontWeight: '800', color: 'var(--text, #0f172a)', marginTop: '3px' }}>
                   {inspectedEntry.narration}
                 </div>
               </div>
@@ -224,8 +224,8 @@ export default function JournalEntriesTab({
                   <tr>
                     <th>الحساب المحاسبي</th>
                     <th>مركز التكلفة</th>
-                    <th style={{ width: '130px', color: '#34d399' }}>مدين (+)</th>
-                    <th style={{ width: '130px', color: '#f87171' }}>دائن (-)</th>
+                    <th style={{ width: '130px', color: '#059669' }}>مدين (+)</th>
+                    <th style={{ width: '130px', color: '#dc2626' }}>دائن (-)</th>
                     <th>شرح السطر</th>
                   </tr>
                 </thead>
@@ -233,28 +233,28 @@ export default function JournalEntriesTab({
                   {(inspectedEntry.lines || []).map((l, i) => (
                     <tr key={i}>
                       <td>
-                        <strong style={{ color: '#f8fafc' }}>{getAccountName(l.account_id)}</strong>
+                        <strong style={{ color: 'var(--text, #0f172a)' }}>{getAccountName(l.account_id)}</strong>
                       </td>
                       <td>
-                        <span style={{ fontSize: '12px', color: '#94a3b8' }}>{getCostCenterName(l.cost_center_id)}</span>
+                        <span style={{ fontSize: '12px', color: 'var(--muted, #64748b)' }}>{getCostCenterName(l.cost_center_id)}</span>
                       </td>
-                      <td style={{ fontWeight: '800', color: l.debit > 0 ? '#34d399' : '#64748b', fontFamily: 'monospace' }}>
+                      <td style={{ fontWeight: '800', color: l.debit > 0 ? '#059669' : 'var(--muted, #64748b)', fontFamily: 'monospace' }}>
                         {l.debit > 0 ? Number(l.debit).toLocaleString(undefined, { minimumFractionDigits: 2 }) : '—'}
                       </td>
-                      <td style={{ fontWeight: '800', color: l.credit > 0 ? '#f87171' : '#64748b', fontFamily: 'monospace' }}>
+                      <td style={{ fontWeight: '800', color: l.credit > 0 ? '#dc2626' : 'var(--muted, #64748b)', fontFamily: 'monospace' }}>
                         {l.credit > 0 ? Number(l.credit).toLocaleString(undefined, { minimumFractionDigits: 2 }) : '—'}
                       </td>
-                      <td style={{ fontSize: '12.5px', color: '#cbd5e1' }}>{l.line_desc || '—'}</td>
+                      <td style={{ fontSize: '12.5px', color: 'var(--text-secondary, #334155)' }}>{l.line_desc || '—'}</td>
                     </tr>
                   ))}
                 </tbody>
                 <tfoot>
-                  <tr style={{ background: 'rgba(15, 23, 42, 0.8)', fontWeight: '800' }}>
+                  <tr style={{ background: 'var(--surface-subtle, #f8fafc)', borderTop: '2px solid var(--border-strong, #cbd5e1)', fontWeight: '800' }}>
                     <td colSpan="2" style={{ textAlign: 'left', paddingLeft: '20px' }}>الإجمالي العام للقيد:</td>
-                    <td style={{ color: '#34d399', fontFamily: 'monospace', fontSize: '15px' }}>
+                    <td style={{ color: '#059669', fontFamily: 'monospace', fontSize: '15px' }}>
                       {Number(inspectedEntry.total_debit || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م
                     </td>
-                    <td style={{ color: '#f87171', fontFamily: 'monospace', fontSize: '15px' }}>
+                    <td style={{ color: '#dc2626', fontFamily: 'monospace', fontSize: '15px' }}>
                       {Number(inspectedEntry.total_credit || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م
                     </td>
                     <td></td>

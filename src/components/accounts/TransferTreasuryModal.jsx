@@ -170,7 +170,7 @@ export default function TransferTreasuryModal({
                   className="acc-form-input"
                   value={`${computedFee.toFixed(2)} ج.م`}
                   disabled
-                  style={{ color: '#fda4af', fontWeight: 'bold' }}
+                  style={{ color: '#e11d48', fontWeight: 'bold' }}
                 />
               </div>
             </div>
@@ -179,23 +179,23 @@ export default function TransferTreasuryModal({
             {numAmount > 0 && (
               <div
                 style={{
-                  background: 'rgba(15, 23, 42, 0.7)',
-                  border: '1px solid rgba(56, 189, 248, 0.25)',
+                  background: 'var(--surface-subtle, #f8fafc)',
+                  border: '1px solid var(--border, #e2e8f0)',
                   borderRadius: '12px',
                   padding: '14px 18px',
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '13px' }}>
-                  <span style={{ color: '#94a3b8' }}>المسحوب من {fromTreasury?.name || 'الخزينة الأصل'}:</span>
-                  <span style={{ fontWeight: '800', color: '#fff' }}>{numAmount.toLocaleString()} ج.م</span>
+                  <span style={{ color: 'var(--muted, #64748b)' }}>المسحوب من {fromTreasury?.name || 'الخزينة الأصل'}:</span>
+                  <span style={{ fontWeight: '800', color: 'var(--text, #0f172a)' }}>{numAmount.toLocaleString()} ج.م</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '13px' }}>
-                  <span style={{ color: '#fda4af' }}>عمولة ومصروفات التحويل البنكي/اللحظي (-):</span>
-                  <span style={{ fontWeight: '800', color: '#f43f5e' }}>{computedFee.toFixed(2)} ج.م</span>
+                  <span style={{ color: '#be123c', fontWeight: '700' }}>عمولة ومصروفات التحويل البنكي/اللحظي (-):</span>
+                  <span style={{ fontWeight: '800', color: '#e11d48' }}>{computedFee.toFixed(2)} ج.م</span>
                 </div>
-                <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '6px', display: 'flex', justifyContent: 'space-between', fontSize: '14px' }}>
-                  <span style={{ color: '#6ee7b7', fontWeight: '800' }}>الصافي المودع في {toTreasury?.name || 'الجهة المستلمة'}:</span>
-                  <span style={{ fontWeight: '800', color: '#10b981' }}>{netTransferred.toLocaleString()} ج.م</span>
+                <div style={{ borderTop: '1px solid var(--border, #e2e8f0)', paddingTop: '6px', display: 'flex', justifyContent: 'space-between', fontSize: '14px' }}>
+                  <span style={{ color: '#047857', fontWeight: '800' }}>الصافي المودع في {toTreasury?.name || 'الجهة المستلمة'}:</span>
+                  <span style={{ fontWeight: '800', color: '#059669' }}>{netTransferred.toLocaleString()} ج.م</span>
                 </div>
               </div>
             )}

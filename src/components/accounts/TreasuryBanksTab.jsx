@@ -57,31 +57,31 @@ export default function TreasuryBanksTab({
           marginBottom: '22px',
         }}
       >
-        <div style={{ background: 'rgba(30, 41, 59, 0.7)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '16px', padding: '16px 20px' }}>
-          <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '4px' }}>إجمالي السيولة النقدية والبنكية</div>
-          <div style={{ fontSize: '22px', fontWeight: '800', color: '#38bdf8' }}>
-            {totalFunds.toLocaleString(undefined, { minimumFractionDigits: 2 })} <span style={{ fontSize: '12px', color: '#64748b' }}>ج.م</span>
+        <div style={{ background: 'var(--surface, #ffffff)', border: '1px solid var(--border, #e2e8f0)', borderTop: '3.5px solid #0284c7', borderRadius: '16px', padding: '16px 20px', boxShadow: 'var(--acc-shadow-sm)' }}>
+          <div style={{ fontSize: '12px', fontWeight: '700', color: 'var(--muted, #64748b)', marginBottom: '4px' }}>إجمالي السيولة النقدية والبنكية</div>
+          <div style={{ fontSize: '24px', fontWeight: '900', color: '#0284c7' }}>
+            {totalFunds.toLocaleString(undefined, { minimumFractionDigits: 2 })} <span style={{ fontSize: '12px', color: 'var(--muted, #64748b)' }}>ج.م</span>
           </div>
         </div>
 
-        <div style={{ background: 'rgba(30, 41, 59, 0.7)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '16px', padding: '16px 20px' }}>
-          <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '4px' }}>نقدية الخزائن بالفروع</div>
-          <div style={{ fontSize: '22px', fontWeight: '800', color: '#34d399' }}>
-            {totalCashboxes.toLocaleString(undefined, { minimumFractionDigits: 2 })} <span style={{ fontSize: '12px', color: '#64748b' }}>ج.م</span>
+        <div style={{ background: 'var(--surface, #ffffff)', border: '1px solid var(--border, #e2e8f0)', borderTop: '3.5px solid #0d9488', borderRadius: '16px', padding: '16px 20px', boxShadow: 'var(--acc-shadow-sm)' }}>
+          <div style={{ fontSize: '12px', fontWeight: '700', color: 'var(--muted, #64748b)', marginBottom: '4px' }}>نقدية الخزائن بالفروع</div>
+          <div style={{ fontSize: '24px', fontWeight: '900', color: '#0d9488' }}>
+            {totalCashboxes.toLocaleString(undefined, { minimumFractionDigits: 2 })} <span style={{ fontSize: '12px', color: 'var(--muted, #64748b)' }}>ج.م</span>
           </div>
         </div>
 
-        <div style={{ background: 'rgba(30, 41, 59, 0.7)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '16px', padding: '16px 20px' }}>
-          <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '4px' }}>أرصدة الحسابات البنكية</div>
-          <div style={{ fontSize: '22px', fontWeight: '800', color: '#60a5fa' }}>
-            {totalBanks.toLocaleString(undefined, { minimumFractionDigits: 2 })} <span style={{ fontSize: '12px', color: '#64748b' }}>ج.م</span>
+        <div style={{ background: 'var(--surface, #ffffff)', border: '1px solid var(--border, #e2e8f0)', borderTop: '3.5px solid #2563eb', borderRadius: '16px', padding: '16px 20px', boxShadow: 'var(--acc-shadow-sm)' }}>
+          <div style={{ fontSize: '12px', fontWeight: '700', color: 'var(--muted, #64748b)', marginBottom: '4px' }}>أرصدة الحسابات البنكية</div>
+          <div style={{ fontSize: '24px', fontWeight: '900', color: '#2563eb' }}>
+            {totalBanks.toLocaleString(undefined, { minimumFractionDigits: 2 })} <span style={{ fontSize: '12px', color: 'var(--muted, #64748b)' }}>ج.م</span>
           </div>
         </div>
 
-        <div style={{ background: 'rgba(30, 41, 59, 0.7)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '16px', padding: '16px 20px' }}>
-          <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '4px' }}>أرصدة نقاط البيع وإنستاباي والمحافظ</div>
-          <div style={{ fontSize: '22px', fontWeight: '800', color: '#c084fc' }}>
-            {totalEGateways.toLocaleString(undefined, { minimumFractionDigits: 2 })} <span style={{ fontSize: '12px', color: '#64748b' }}>ج.م</span>
+        <div style={{ background: 'var(--surface, #ffffff)', border: '1px solid var(--border, #e2e8f0)', borderTop: '3.5px solid #7c3aed', borderRadius: '16px', padding: '16px 20px', boxShadow: 'var(--acc-shadow-sm)' }}>
+          <div style={{ fontSize: '12px', fontWeight: '700', color: 'var(--muted, #64748b)', marginBottom: '4px' }}>أرصدة نقاط البيع وإنستاباي والمحافظ</div>
+          <div style={{ fontSize: '24px', fontWeight: '900', color: '#7c3aed' }}>
+            {totalEGateways.toLocaleString(undefined, { minimumFractionDigits: 2 })} <span style={{ fontSize: '12px', color: 'var(--muted, #64748b)' }}>ج.م</span>
           </div>
         </div>
       </div>
@@ -89,10 +89,10 @@ export default function TreasuryBanksTab({
       {/* Toolbar */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '18px' }}>
         <div>
-          <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '800', color: '#fff' }}>
+          <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '800', color: 'var(--text, #0f172a)' }}>
             دليل الخزائن وحسابات الدفع الإلكتروني ({treasuries.length})
           </h3>
-          <p style={{ margin: '3px 0 0', fontSize: '12px', color: '#94a3b8' }}>
+          <p style={{ margin: '3px 0 0', fontSize: '12px', color: 'var(--muted, #64748b)' }}>
             اضغط على زر "تعديل نسبة الخصم" لتغيير عمولة البنك أو المحفظة أو إنستاباي في أي وقت
           </p>
         </div>
@@ -115,7 +115,7 @@ export default function TreasuryBanksTab({
               <div className="acc-treasury-info">
                 <span className="acc-treasury-code">{treasury.code}</span>
                 <h3>{treasury.name}</h3>
-                <div style={{ fontSize: '11.5px', color: '#94a3b8', marginTop: '2px' }}>
+                <div style={{ fontSize: '11.5px', color: 'var(--muted, #64748b)', marginTop: '2px' }}>
                   🏢 {getBranchName(treasury.branch_id)}
                 </div>
               </div>
@@ -129,7 +129,7 @@ export default function TreasuryBanksTab({
               <div className="acc-treasury-balance-lbl">الرصيد الفعلي المتوفر:</div>
               <div className="acc-treasury-balance-val">
                 {Number(treasury.current_balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                <span style={{ fontSize: '13px', color: '#94a3b8', marginRight: '6px' }}>ج.م</span>
+                <span style={{ fontSize: '13px', color: 'var(--muted, #64748b)', marginRight: '6px' }}>ج.م</span>
               </div>
             </div>
 
@@ -147,7 +147,7 @@ export default function TreasuryBanksTab({
                 type="button"
                 className="acc-btn acc-btn-outline"
                 onClick={() => onOpenEditFee(treasury)}
-                style={{ padding: '4px 10px', fontSize: '11.5px', borderColor: 'rgba(56, 189, 248, 0.3)', color: '#38bdf8' }}
+                style={{ padding: '4px 10px', fontSize: '11.5px', borderColor: '#0284c7', color: '#0284c7', background: '#f0f9ff' }}
                 title="تعديل نسبة خصم وعمولة البنك أو المحفظة"
               >
                 ⚙️ تعديل النسبة

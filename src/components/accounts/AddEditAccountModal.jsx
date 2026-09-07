@@ -101,8 +101,8 @@ export default function AddEditAccountModal({ isOpen, onClose, parentAccount, ac
               <div>
                 <h2>{isEditing ? `تعديل الحساب (${accountToEdit.name_ar})` : 'إضافة حساب جديد إلى شجرة الحسابات'}</h2>
                 {parentAccount && !isEditing && (
-                  <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#94a3b8' }}>
-                    تحت الحساب الرئيسي: <strong style={{ color: '#38bdf8' }}>{parentAccount.code} - {parentAccount.name_ar}</strong>
+                  <p style={{ margin: '2px 0 0', fontSize: '12px', color: 'var(--muted, #64748b)' }}>
+                    تحت الحساب الرئيسي: <strong style={{ color: '#0284c7' }}>{parentAccount.code} - {parentAccount.name_ar}</strong>
                   </p>
                 )}
               </div>

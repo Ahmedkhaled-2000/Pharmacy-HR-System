@@ -54,8 +54,8 @@ export default function EditTreasuryFeeModal({ isOpen, onClose, treasury, onSave
               <span style={{ fontSize: '22px' }}>⚙️</span>
               <div>
                 <h2>تعديل نسبة خصم وعمولة التحصيل ({treasury.name})</h2>
-                <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#94a3b8' }}>
-                  كود الخزينة/البوابة: <strong style={{ color: '#38bdf8' }}>{treasury.code}</strong>
+                <p style={{ margin: '2px 0 0', fontSize: '12px', color: 'var(--muted, #64748b)' }}>
+                  كود الخزينة/البوابة: <strong style={{ color: '#0284c7' }}>{treasury.code}</strong>
                 </p>
               </div>
             </div>
@@ -87,11 +87,11 @@ export default function EditTreasuryFeeModal({ isOpen, onClose, treasury, onSave
                     required
                     style={{ width: '100%', paddingLeft: '32px' }}
                   />
-                  <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }}>
+                  <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--muted, #64748b)' }}>
                     %
                   </span>
                 </div>
-                <span style={{ fontSize: '11px', color: '#94a3b8' }}>
+                <span style={{ fontSize: '11px', color: 'var(--muted, #64748b)' }}>
                   مثل: 1.5% لنقاط البيع POS، أو 1.0% للمحافظ الذكية، أو 0% للكاش
                 </span>
               </div>
@@ -107,7 +107,7 @@ export default function EditTreasuryFeeModal({ isOpen, onClose, treasury, onSave
                   onChange={(e) => setFeeFixed(e.target.value)}
                   placeholder="0.00"
                 />
-                <span style={{ fontSize: '11px', color: '#94a3b8' }}>
+                <span style={{ fontSize: '11px', color: 'var(--muted, #64748b)' }}>
                   مبلغ مقطوع يُخصم في كل عملية تحويل أو سحب إن وُجد
                 </span>
               </div>
@@ -127,7 +127,7 @@ export default function EditTreasuryFeeModal({ isOpen, onClose, treasury, onSave
                   </option>
                 ))}
               </select>
-              <span style={{ fontSize: '11px', color: '#38bdf8' }}>
+              <span style={{ fontSize: '11px', color: 'var(--muted, #64748b)' }}>
                 الحساب المحاسبي الذي سيتم تحميل قيمة العمولة المقتطعة عليه تلقائياً كـ (مدين).
               </span>
             </div>
@@ -135,28 +135,28 @@ export default function EditTreasuryFeeModal({ isOpen, onClose, treasury, onSave
             {/* Live Calculation Preview Box */}
             <div
               style={{
-                background: 'rgba(15, 23, 42, 0.7)',
-                border: '1px solid rgba(56, 189, 248, 0.25)',
+                background: 'var(--surface-subtle, #f8fafc)',
+                border: '1px solid var(--border, #e2e8f0)',
                 borderRadius: '14px',
                 padding: '16px',
                 marginTop: '6px',
               }}
             >
-              <div style={{ fontSize: '12.5px', fontWeight: '800', color: '#38bdf8', marginBottom: '8px' }}>
+              <div style={{ fontSize: '13px', fontWeight: '800', color: '#0284c7', marginBottom: '10px' }}>
                 💡 محاكاة حية لمعاملة مبيعات بقيمة 1,000 ج.م:
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', textAlign: 'center' }}>
-                <div style={{ background: 'rgba(255,255,255,0.04)', padding: '8px', borderRadius: '8px' }}>
-                  <div style={{ fontSize: '11px', color: '#94a3b8' }}>إجمالي الفاتورة</div>
-                  <div style={{ fontSize: '15px', fontWeight: '700', color: '#fff' }}>1,000 ج.م</div>
+                <div style={{ background: '#ffffff', border: '1px solid var(--border, #e2e8f0)', padding: '10px 8px', borderRadius: '10px' }}>
+                  <div style={{ fontSize: '11.5px', color: 'var(--muted, #64748b)' }}>إجمالي المعاملة</div>
+                  <div style={{ fontSize: '15px', fontWeight: '800', color: 'var(--text, #0f172a)' }}>1,000 ج.م</div>
                 </div>
-                <div style={{ background: 'rgba(244, 63, 94, 0.1)', padding: '8px', borderRadius: '8px', border: '1px solid rgba(244, 63, 94, 0.2)' }}>
-                  <div style={{ fontSize: '11px', color: '#fda4af' }}>عمولة البنك/المحفظة (-)</div>
-                  <div style={{ fontSize: '15px', fontWeight: '700', color: '#f43f5e' }}>{calculatedFee.toFixed(2)} ج.م</div>
+                <div style={{ background: '#fff1f2', border: '1px solid #fecdd3', padding: '10px 8px', borderRadius: '10px' }}>
+                  <div style={{ fontSize: '11.5px', color: '#be123c' }}>عمولة البنك/المحفظة (-)</div>
+                  <div style={{ fontSize: '15px', fontWeight: '800', color: '#e11d48' }}>{calculatedFee.toFixed(2)} ج.م</div>
                 </div>
-                <div style={{ background: 'rgba(16, 185, 129, 0.1)', padding: '8px', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
-                  <div style={{ fontSize: '11px', color: '#6ee7b7' }}>الصافي المودع في الرصيد</div>
-                  <div style={{ fontSize: '15px', fontWeight: '700', color: '#10b981' }}>{netReceived.toFixed(2)} ج.م</div>
+                <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', padding: '10px 8px', borderRadius: '10px' }}>
+                  <div style={{ fontSize: '11.5px', color: '#047857' }}>الصافي المودع في الرصيد</div>
+                  <div style={{ fontSize: '15px', fontWeight: '800', color: '#059669' }}>{netReceived.toFixed(2)} ج.م</div>
                 </div>
               </div>
             </div>

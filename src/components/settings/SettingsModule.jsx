@@ -17,6 +17,7 @@ import { broadcastStateChange } from '../../utils/offlineSync';
 import GmailConfigCard from './GmailConfigCard';
 import GoogleDriveConfigCard from './GoogleDriveConfigCard';
 import DatesPeriodsSettingsCard from './DatesPeriodsSettingsCard';
+import AccountingSystemGuideCard from './AccountingSystemGuideCard';
 import { DEFAULT_JOBS, getJobsList, DEFAULT_DEPARTMENTS, getDepartmentsList } from '../../utils/jobsHelper';
 import { getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 import { useUI } from '../../context/UIContext';
@@ -1344,9 +1345,19 @@ export default function SettingsModule({
             {activeTab === 'ip' && '🌐 راوترات الفروع وبصمة الأجهزة'}
             {activeTab === 'backup' && '💾 النسخ الاحتياطي وقاعدة البيانات'}
             {activeTab === 'owner' && '👑 صلاحيات وتحكم المالك'}
+            {(activeTab === 'accounting_guide' || activeTab === 'accounting-guide') && '📖 دليل وشرح منظومة الحسابات'}
           </span>
         </div>
       </div>
+
+      {/* Tab: Accounting System Educational Guide */}
+      {(activeTab === 'accounting_guide' || activeTab === 'accounting-guide') && (
+        <AccountingSystemGuideCard
+          onNavigateToAccounts={() => {
+            window.location.href = '/accounts';
+          }}
+        />
+      )}
 
       {/* Tab: Dates, Periods & Payroll Cutoffs */}
       {(activeTab === 'dates' || activeTab === 'cutoff') && (

@@ -43,10 +43,10 @@ export default function CostCentersTab({
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '18px' }}>
         <div>
-          <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '800', color: '#fff' }}>
+          <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '800', color: 'var(--text, #0f172a)' }}>
             دليل مراكز التكلفة والأبعاد التحليلية ({costCenters.length})
           </h3>
-          <p style={{ margin: '3px 0 0', fontSize: '12px', color: '#94a3b8' }}>
+          <p style={{ margin: '3px 0 0', fontSize: '12px', color: 'var(--muted, #64748b)' }}>
             توزيع المصروفات والإيرادات على مستوى الفروع والأقسام (صيدليات، مخازن، إدارة)
           </p>
         </div>
@@ -70,27 +70,28 @@ export default function CostCentersTab({
           <div
             key={cc.id}
             style={{
-              background: 'rgba(30, 41, 59, 0.7)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
+              background: 'var(--surface, #ffffff)',
+              border: '1px solid var(--border, #e2e8f0)',
+              borderTop: '3.5px solid #0d9488',
               borderRadius: '16px',
               padding: '18px 20px',
-              backdropFilter: 'blur(8px)',
+              boxShadow: 'var(--acc-shadow-sm)',
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
               <span className="acc-code-badge">{cc.code}</span>
-              <span style={{ fontSize: '11px', background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', padding: '2px 8px', borderRadius: '6px', fontWeight: '700' }}>
+              <span style={{ fontSize: '11px', background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '2px 8px', borderRadius: '6px', fontWeight: '700' }}>
                 نشط
               </span>
             </div>
 
-            <h4 style={{ margin: '0 0 6px', fontSize: '16px', fontWeight: '800', color: '#fff' }}>
+            <h4 style={{ margin: '0 0 6px', fontSize: '16px', fontWeight: '800', color: 'var(--text, #0f172a)' }}>
               {cc.name}
             </h4>
 
-            <div style={{ fontSize: '12.5px', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div style={{ fontSize: '12.5px', color: 'var(--muted, #64748b)', display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span>🏢 الفرع المرتبط:</span>
-              <strong style={{ color: '#cbd5e1' }}>{getBranchName(cc.branch_id)}</strong>
+              <strong style={{ color: 'var(--text-secondary, #334155)' }}>{getBranchName(cc.branch_id)}</strong>
             </div>
           </div>
         ))}

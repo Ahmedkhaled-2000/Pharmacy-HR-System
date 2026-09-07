@@ -70,7 +70,7 @@ export default function AccountCodesCheatsheetModal({ isOpen, onClose, accounts 
             <span style={{ fontSize: '22px' }}>📋</span>
             <div>
               <h2>دليل أكواد شجرة الحسابات العامة (Cheatsheet)</h2>
-              <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#94a3b8' }}>
+              <p style={{ margin: '2px 0 0', fontSize: '12px', color: 'var(--muted, #64748b)' }}>
                 بحث سريع ونسخ أكواد الحسابات لاستخدامها في القيود والتحويلات ({filteredAccounts.length} حساب)
               </p>
             </div>
@@ -86,7 +86,7 @@ export default function AccountCodesCheatsheetModal({ isOpen, onClose, accounts 
         </div>
 
         {/* Toolbar & Filter */}
-        <div style={{ padding: '16px 24px 8px', display: 'flex', gap: '12px', flexWrap: 'wrap', background: 'rgba(15, 23, 42, 0.4)' }}>
+        <div style={{ padding: '14px 24px', display: 'flex', gap: '12px', flexWrap: 'wrap', background: 'var(--surface-subtle, #f8fafc)', borderBottom: '1px solid var(--border, #e2e8f0)' }}>
           <div style={{ flex: 1, minWidth: '220px', position: 'relative' }}>
             <input
               type="text"
@@ -129,7 +129,7 @@ export default function AccountCodesCheatsheetModal({ isOpen, onClose, accounts 
             <tbody>
               {filteredAccounts.length === 0 ? (
                 <tr>
-                  <td colSpan="5" style={{ textAlign: 'center', padding: '30px', color: '#94a3b8' }}>
+                  <td colSpan="5" style={{ textAlign: 'center', padding: '30px', color: 'var(--muted, #64748b)' }}>
                     لا توجد حسابات مطابقة لمعايير البحث.
                   </td>
                 </tr>
@@ -143,17 +143,17 @@ export default function AccountCodesCheatsheetModal({ isOpen, onClose, accounts 
                     </td>
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontWeight: acc.is_parent ? '800' : '600', color: acc.is_parent ? '#fff' : '#cbd5e1' }}>
+                        <span style={{ fontWeight: acc.is_parent ? '800' : '600', color: acc.is_parent ? 'var(--text, #0f172a)' : 'var(--text-secondary, #334155)' }}>
                           {acc.name_ar}
                         </span>
                         {acc.is_parent && (
-                          <span style={{ fontSize: '10px', background: 'rgba(255,255,255,0.08)', padding: '1px 6px', borderRadius: '4px', color: '#94a3b8' }}>
+                          <span style={{ fontSize: '10px', background: 'var(--surface-muted, #f1f5f9)', border: '1px solid var(--border, #e2e8f0)', padding: '1px 6px', borderRadius: '4px', color: 'var(--muted, #64748b)' }}>
                             حساب رئيسي
                           </span>
                         )}
                       </div>
                       {acc.name_en && (
-                        <div style={{ fontSize: '11px', color: '#64748b', direction: 'ltr', textAlign: 'right' }}>
+                        <div style={{ fontSize: '11px', color: 'var(--muted, #64748b)', direction: 'ltr', textAlign: 'right' }}>
                           {acc.name_en}
                         </div>
                       )}
@@ -164,7 +164,7 @@ export default function AccountCodesCheatsheetModal({ isOpen, onClose, accounts 
                       </span>
                     </td>
                     <td>
-                      <span style={{ fontSize: '11.5px', color: acc.nature === 'debit' ? '#34d399' : '#f87171', fontWeight: '700' }}>
+                      <span style={{ fontSize: '11.5px', color: acc.nature === 'debit' ? '#059669' : '#dc2626', fontWeight: '700' }}>
                         {acc.nature === 'debit' ? 'مدين' : 'دائن'}
                       </span>
                     </td>

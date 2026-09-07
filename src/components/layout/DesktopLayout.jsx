@@ -461,6 +461,14 @@ export default function DesktopLayout({
               label: 'صلاحيات وتحكم المالك',
               icon: '👑',
               desc: 'أقفال تعديلات الإدارة العليا وبيانات المالك'
+            },
+            {
+              id: 'settings:accounting_guide',
+              targetTab: 'settings',
+              targetSubTab: 'accounting_guide',
+              label: 'دليل وشرح منظومة الحسابات (ERP)',
+              icon: '📖',
+              desc: 'شرح تفصيلي مبسط لشجرة الحسابات والدورة المالية للصيدليات'
             }
           ]
         },
