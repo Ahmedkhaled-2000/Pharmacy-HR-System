@@ -954,10 +954,21 @@ export default function EvaluationsModule({
                             if (String(bId) !== String(currentBranchId)) return false;
 
                             const curBranch = branches.find(b => String(b.id) === String(currentBranchId));
-                            if (curBranch?.managerId && String(e.id) === String(curBranch.managerId)) return false;
-                            if (curBranch?.managerCode && String(e.code) === String(curBranch.managerCode)) return false;
-                            if (state.currentUserId && String(e.id) === String(state.currentUserId)) return false;
-                            if (e.jobTitle && (e.jobTitle.includes('مدير فرع') || e.jobTitle.includes('مدير الفرع'))) return false;
+                            const empIdStr = String(e.id || '').trim();
+                            const empCodeStr = String(e.code || '').trim();
+                            const mgrIds = [curBranch?.managerId, curBranch?.manager_id, curBranch?.managerEmpId].filter(Boolean).map(v => String(v).trim());
+                            if (mgrIds.some(id => empIdStr === id || empCodeStr === id)) return false;
+
+                            const mgrCodes = [curBranch?.managerCode, curBranch?.manager_code].filter(Boolean).map(v => String(v).trim());
+                            if (mgrCodes.some(code => empCodeStr === code || empIdStr === code)) return false;
+
+                            if (curBranch?.username && (String(e.username || '').toLowerCase() === String(curBranch.username).toLowerCase() || empCodeStr.toLowerCase() === String(curBranch.username).toLowerCase())) return false;
+                            if (state.currentUserId && (empIdStr === String(state.currentUserId).trim() || empCodeStr === String(state.currentUserId).trim())) return false;
+                            if (e.isBranchManager || e.isManager || e.is_manager || e.role === 'branch_manager' || e.role === 'manager' || e.role === 'branch') return false;
+                            if (e.jobTitle) {
+                              const t = String(e.jobTitle).trim().toLowerCase();
+                              if (t.includes('مدير') || t.includes('manager')) return false;
+                            }
                           }
 
                           // Requirement 32: Filter by selected job

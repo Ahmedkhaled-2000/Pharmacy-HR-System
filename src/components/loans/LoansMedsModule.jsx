@@ -100,9 +100,14 @@ export default function LoansMedsModule({
         const history = (directLoan?.paymentsHistory && directLoan.paymentsHistory.length > 0)
           ? directLoan.paymentsHistory
           : (r.paymentsHistory || r.payments || r.paidHistory || []);
-        const paidAmount = directLoan?.paidAmount !== undefined
+        const totalAmount = parseFloat(r.amount || r.totalAmount || directLoan?.amount) || 0;
+        const historySum = history.reduce((acc, p) => acc + (parseFloat(p.amount) || 0), 0);
+        const rawPaid = directLoan?.paidAmount !== undefined
           ? Math.max(parseFloat(directLoan.paidAmount) || 0, parseFloat(r.paidAmount) || 0)
           : (parseFloat(r.paidAmount) || 0);
+        const paidAmount = totalAmount > 0 
+          ? Math.min(totalAmount, history.length > 0 ? historySum : rawPaid) 
+          : (history.length > 0 ? historySum : rawPaid);
 
         const isMeds = r.type === 'meds' || r.type === 'credit_medicine';
 
@@ -138,9 +143,14 @@ export default function LoansMedsModule({
       if (l.status === 'rejected' || l.status === 'cancelled' || l.status === 'pending' || l.status === 'pending_admin') return;
       const idStr = String(l.id);
       const existing = map.get(idStr);
-      const paid = Math.max(parseFloat(l.paidAmount) || 0, parseFloat(existing?.paidAmount) || 0);
       const history = (l.paymentsHistory && l.paymentsHistory.length > 0) ? l.paymentsHistory : (existing?.paymentsHistory || []);
+      const historySum = history.reduce((acc, p) => acc + (parseFloat(p.amount) || 0), 0);
       const total = parseFloat(l.amount || existing?.amount) || 0;
+      const rawPaid = Math.max(parseFloat(l.paidAmount) || 0, parseFloat(existing?.paidAmount) || 0);
+      const paid = total > 0 
+        ? Math.min(total, history.length > 0 ? historySum : rawPaid)
+        : (history.length > 0 ? historySum : rawPaid);
+
       map.set(idStr, {
         ...(existing || {}),
         ...l,
@@ -289,8 +299,9 @@ export default function LoansMedsModule({
         if (String(l.id) === String(targetLoanId)) {
           foundInLoans = true;
           const total = parseFloat(l.amount) || 0;
-          const newPaid = (parseFloat(l.paidAmount) || 0) + parsedPay;
           const history = [...(l.paymentsHistory || []), payRecord];
+          const histSum = history.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+          const newPaid = Math.min(total, histSum > 0 ? histSum : ((parseFloat(l.paidAmount) || 0) + parsedPay));
           return {
             ...l,
             paidAmount: newPaid,
@@ -309,8 +320,9 @@ export default function LoansMedsModule({
         if (String(r.id) === String(targetLoanId)) {
           foundInRequests = true;
           const total = parseFloat(r.amount) || 0;
-          const newPaid = (parseFloat(r.paidAmount) || 0) + parsedPay;
           const history = [...(r.paymentsHistory || []), payRecord];
+          const histSum = history.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+          const newPaid = Math.min(total, histSum > 0 ? histSum : ((parseFloat(r.paidAmount) || 0) + parsedPay));
           return {
             ...r,
             paidAmount: newPaid,
@@ -326,14 +338,16 @@ export default function LoansMedsModule({
       if (!foundInLoans && foundInRequests) {
         const targetReq = reqsArr.find((r) => String(r.id) === String(targetLoanId));
         if (targetReq) {
+          const reqTotal = parseFloat(targetReq.amount) || 0;
+          const reqPaid = parseFloat(targetReq.paidAmount) || 0;
           loansArr.unshift({
             ...targetReq,
             id: targetReq.id,
             employeeId: targetReq.employeeId,
-            amount: parseFloat(targetReq.amount) || 0,
-            paidAmount: parseFloat(targetReq.paidAmount) || 0,
+            amount: reqTotal,
+            paidAmount: Math.min(reqTotal, reqPaid),
             paymentsHistory: targetReq.paymentsHistory || [payRecord],
-            status: (parseFloat(targetReq.paidAmount) || 0) >= (parseFloat(targetReq.amount) || 0) ? 'paid' : 'partial',
+            status: reqPaid >= reqTotal && reqTotal > 0 ? 'paid' : 'partial',
             updatedAt: new Date().toISOString()
           });
         }
@@ -381,21 +395,41 @@ export default function LoansMedsModule({
       let processedCount = 0;
       let loansArr = [...(state.loans || [])];
       let reqsArr = [...(state.requests || [])];
+      const processedMap = new Map();
 
       const processItem = (item) => {
-        const total = parseFloat(item.amount || item.totalAmount) || 0;
-        const paid = parseFloat(item.paidAmount) || 0;
-        const rem = Math.max(0, total - paid);
-        if (rem <= 0) return item;
+        const itemIdStr = String(item.id);
+        if (processedMap.has(itemIdStr)) {
+          return processedMap.get(itemIdStr);
+        }
 
+        const total = parseFloat(item.amount || item.totalAmount) || 0;
         const history = item.paymentsHistory || item.payments || item.paidHistory || [];
+        const historySum = history.reduce((acc, p) => acc + (parseFloat(p.amount) || 0), 0);
+        const currentPaid = Math.min(total, history.length > 0 ? historySum : (parseFloat(item.paidAmount) || 0));
+        const rem = Math.max(0, total - currentPaid);
+        if (rem <= 0) {
+          const finishedItem = {
+            ...item,
+            paidAmount: total,
+            status: 'paid'
+          };
+          processedMap.set(itemIdStr, finishedItem);
+          return finishedItem;
+        }
+
         const alreadyPaidThisMonth = history.some((p) => p.month === currentMonth || p.date === endDate || p.note?.includes(currentMonth));
-        if (alreadyPaidThisMonth) return item;
+        if (alreadyPaidThisMonth) {
+          processedMap.set(itemIdStr, item);
+          return item;
+        }
 
         const installmentVal = Math.min(rem, parseFloat(item.monthlyDeduction || item.installmentAmount) || rem);
         const roundedInstallment = Math.round(installmentVal * 100) / 100;
+        
+        // Deterministic ID preventing duplicate records across mergers
         const autoPayRecord = {
-          id: `auto_pay_${currentMonth}_${item.id}_${Date.now()}`,
+          id: `auto_pay_${currentMonth}_${String(item.id).trim()}`,
           month: currentMonth,
           date: endDate,
           amount: roundedInstallment,
@@ -404,19 +438,56 @@ export default function LoansMedsModule({
         };
 
         processedCount++;
-        const newPaid = Math.round((paid + roundedInstallment) * 100) / 100;
-        return {
+        const newHistory = [...history, autoPayRecord];
+        const newPaid = Math.min(total, Math.round((currentPaid + roundedInstallment) * 100) / 100);
+        const updatedItem = {
           ...item,
           paidAmount: newPaid,
-          paymentsHistory: [...history, autoPayRecord],
-          status: newPaid >= total ? 'paid' : 'partial'
+          paymentsHistory: newHistory,
+          status: newPaid >= total ? 'paid' : 'partial',
+          updatedAt: new Date().toISOString()
         };
+
+        processedMap.set(itemIdStr, updatedItem);
+        return updatedItem;
       };
 
       loansArr = loansArr.map(processItem);
       reqsArr = reqsArr.map((r) => {
+        const rIdStr = String(r.id);
+        if (processedMap.has(rIdStr)) {
+          return { ...r, ...processedMap.get(rIdStr) };
+        }
         if (r.status === 'approved' || r.adminApproved || r.status === 'partial') {
           return processItem(r);
+        }
+        return r;
+      });
+
+      // Auto-heal existing corrupted records in state where paidAmount > total or paidAmount !== historySum
+      loansArr = loansArr.map(l => {
+        const t = parseFloat(l.amount || l.totalAmount) || 0;
+        const h = l.paymentsHistory || [];
+        const hSum = h.reduce((acc, p) => acc + (parseFloat(p.amount) || 0), 0);
+        const p = Math.min(t, h.length > 0 ? hSum : (parseFloat(l.paidAmount) || 0));
+        return {
+          ...l,
+          paidAmount: p,
+          status: p >= t && t > 0 ? 'paid' : (p > 0 ? 'partial' : l.status)
+        };
+      });
+
+      reqsArr = reqsArr.map(r => {
+        if (r.type === 'loan' || r.type === 'advance' || r.type === 'meds' || r.type === 'credit_medicine') {
+          const t = parseFloat(r.amount || r.totalAmount) || 0;
+          const h = r.paymentsHistory || [];
+          const hSum = h.reduce((acc, p) => acc + (parseFloat(p.amount) || 0), 0);
+          const p = Math.min(t, h.length > 0 ? hSum : (parseFloat(r.paidAmount) || 0));
+          return {
+            ...r,
+            paidAmount: p,
+            status: p >= t && t > 0 ? 'paid' : (p > 0 ? 'partial' : r.status)
+          };
         }
         return r;
       });
@@ -784,9 +855,11 @@ export default function LoansMedsModule({
                       .filter((l) => l.employeeId === selectedEmpModal.id)
                       .map((l) => {
                         const total = parseFloat(l.amount) || 0;
-                        const paid = parseFloat(l.paidAmount) || 0;
-                        const rem = Math.max(0, total - paid);
                         const history = l.paymentsHistory || [];
+                        const historySum = history.reduce((acc, p) => acc + (parseFloat(p.amount) || 0), 0);
+                        const rawPaid = parseFloat(l.paidAmount) || 0;
+                        const paid = Math.min(total, history.length > 0 ? historySum : rawPaid);
+                        const rem = Math.max(0, total - paid);
 
                         return (
                           <React.Fragment key={l.id}>

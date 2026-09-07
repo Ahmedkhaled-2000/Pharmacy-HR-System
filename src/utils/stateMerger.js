@@ -175,17 +175,21 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
     const payMap = new Map();
     [...pRemote, ...pLocal].forEach((p) => {
       if (p && typeof p === 'object') {
-        const pKey = p.id || `${p.date}_${p.amount}_${p.paidAt || ''}`;
+        // Robust dedup key: prefer unique ID or month for auto deductions
+        const pKey = p.id || (p.month ? `auto_${p.month}_${p.amount}` : `${p.date}_${p.amount}_${p.paidAt || ''}`);
         payMap.set(pKey, p);
       }
     });
     mergedPaymentsHistory = Array.from(payMap.values());
+    const totalAmt = parseFloat(localItem.amount || remoteItem.amount || localItem.totalAmount || remoteItem.totalAmount) || 0;
     const totalFromHistory = mergedPaymentsHistory.reduce((acc, p) => acc + (parseFloat(p.amount) || 0), 0);
-    mergedPaidAmount = Math.max(
-      parseFloat(localItem.paidAmount) || 0,
-      parseFloat(remoteItem.paidAmount) || 0,
-      totalFromHistory
-    );
+    
+    if (mergedPaymentsHistory.length > 0) {
+      mergedPaidAmount = totalAmt > 0 ? Math.min(totalAmt, totalFromHistory) : totalFromHistory;
+    } else {
+      const fallbackPaid = Math.max(parseFloat(localItem.paidAmount) || 0, parseFloat(remoteItem.paidAmount) || 0);
+      mergedPaidAmount = totalAmt > 0 ? Math.min(totalAmt, fallbackPaid) : fallbackPaid;
+    }
   }
 
   // 2. معالجة وحسم بصمات الوجه والأجهزة البيومترية

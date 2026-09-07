@@ -678,9 +678,11 @@ export default function EmployeeLoansModule({
           ) : (
             employeeRequests.map((r, idx) => {
               const total = parseFloat(r.amount || r.totalAmount) || 0;
-              const paid = parseFloat(r.paidAmount) || 0;
-              const rem = Math.max(0, total - paid);
               const history = r.paymentsHistory || [];
+              const historySum = history.reduce((acc, p) => acc + (parseFloat(p.amount) || 0), 0);
+              const rawPaid = parseFloat(r.paidAmount) || 0;
+              const paid = Math.min(total, history.length > 0 ? historySum : rawPaid);
+              const rem = Math.max(0, total - paid);
               const isLoan = r.type === 'loan' || r.type === 'advance';
               const isMeds = r.type === 'meds' || r.type === 'credit_medicine';
               const medsList = r.medicines || r.medsItems || r.items || [];
@@ -791,9 +793,11 @@ export default function EmployeeLoansModule({
               ) : (
                 employeeRequests.map((r, idx) => {
                   const total = parseFloat(r.amount || r.totalAmount) || 0;
-                  const paid = parseFloat(r.paidAmount) || 0;
-                  const rem = Math.max(0, total - paid);
                   const history = r.paymentsHistory || [];
+                  const historySum = history.reduce((acc, p) => acc + (parseFloat(p.amount) || 0), 0);
+                  const rawPaid = parseFloat(r.paidAmount) || 0;
+                  const paid = Math.min(total, history.length > 0 ? historySum : rawPaid);
+                  const rem = Math.max(0, total - paid);
                   const isMeds = r.type === 'meds' || r.type === 'credit_medicine';
                   const medsList = r.medicines || r.medsItems || r.items || [];
 
@@ -852,17 +856,26 @@ export default function EmployeeLoansModule({
       {viewingPaymentsReq && (
         <div className="modal-backdrop">
           <div className="modal-content card" style={{ maxWidth: '950px', width: '96%', padding: '28px', maxHeight: '90vh', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <div>
-                <h3 style={{ margin: 0, color: '#0d9488', fontSize: '16px' }}>
-                  📜 تفاصيل {viewingPaymentsReq.type === 'credit_medicine' || viewingPaymentsReq.type === 'meds' ? 'طلب الأدوية الآجل' : 'السلفة المالية'}
-                </h3>
-                <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
-                  إجمالي المبلغ: {fmt(parseFloat(viewingPaymentsReq.amount || viewingPaymentsReq.totalAmount) || 0)} ج.م · المتبقي للسداد: {fmt(Math.max(0, (parseFloat(viewingPaymentsReq.amount || viewingPaymentsReq.totalAmount) || 0) - (parseFloat(viewingPaymentsReq.paidAmount) || 0)))} ج.م
-                </span>
-              </div>
-              <button className="btn btn-ghost" onClick={() => setViewingPaymentsReq(null)}>✕ إغلاق</button>
-            </div>
+            {(() => {
+              const viewTotal = parseFloat(viewingPaymentsReq.amount || viewingPaymentsReq.totalAmount) || 0;
+              const viewHistory = viewingPaymentsReq.paymentsHistory || [];
+              const viewHistorySum = viewHistory.reduce((acc, p) => acc + (parseFloat(p.amount) || 0), 0);
+              const viewPaid = Math.min(viewTotal, viewHistory.length > 0 ? viewHistorySum : (parseFloat(viewingPaymentsReq.paidAmount) || 0));
+              const viewRem = Math.max(0, viewTotal - viewPaid);
+              return (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  <div>
+                    <h3 style={{ margin: 0, color: '#0d9488', fontSize: '16px' }}>
+                      📜 تفاصيل {viewingPaymentsReq.type === 'credit_medicine' || viewingPaymentsReq.type === 'meds' ? 'طلب الأدوية الآجل' : 'السلفة المالية'}
+                    </h3>
+                    <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                      إجمالي المبلغ: {fmt(viewTotal)} ج.م · المدفوع: {fmt(viewPaid)} ج.م · المتبقي للسداد: {fmt(viewRem)} ج.م
+                    </span>
+                  </div>
+                  <button className="btn btn-ghost" onClick={() => setViewingPaymentsReq(null)}>✕ إغلاق</button>
+                </div>
+              );
+            })()}
 
             {/* If Credit Medicine, Render Table of Medicines */}
             {(viewingPaymentsReq.medicines || viewingPaymentsReq.medsItems || []).length > 0 && (

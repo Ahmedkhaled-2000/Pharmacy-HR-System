@@ -836,7 +836,7 @@ export default function RequestsModule({
           updatedRosters[existingIdx] = activeRosterObj;
         } else {
           updatedRosters = updatedRosters.filter(
-            (ros) => !(String(ros.employeeId) === String(approvedTargetReq.employeeId) && String(ros.branchId || '') === targetBStr && (ros.month === approvedTargetReq.month || !targetReq.month || !ros.month))
+            (ros) => !(String(ros.employeeId) === String(approvedTargetReq.employeeId) && String(ros.branchId || '') === targetBStr && (ros.month === approvedTargetReq.month || !approvedTargetReq.month || !ros.month))
           );
           updatedRosters.unshift(activeRosterObj);
         }

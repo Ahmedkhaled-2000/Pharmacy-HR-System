@@ -741,17 +741,40 @@ export default function BranchMonthlyRosterModule({
     return branches.find(b => String(b.id) === String(selectedBranchId)) || branches[0] || null;
   }, [branches, selectedBranchId]);
 
-  // Branch Employees (primary branch or secondary branchDetails)
+  // Branch Employees (primary branch or secondary branchDetails, excluding Branch Manager when in branch manager mode)
   const branchEmployees = useMemo(() => {
     if (!currentBranch) return [];
     const bIdStr = String(currentBranch.id);
     return employees.filter(emp => {
       if (!isEmployeeActive(emp)) return false;
+
+      // Exclude Branch Manager from employee lists when viewed by branch manager
+      if (isBranchManager) {
+        const empIdStr = String(emp.id || '').trim();
+        const empCodeStr = String(emp.code || '').trim();
+        const empUserStr = String(emp.username || '').trim().toLowerCase();
+
+        const mgrIds = [currentBranch.managerId, currentBranch.manager_id, currentBranch.managerEmpId].filter(Boolean).map(v => String(v).trim());
+        if (mgrIds.some(id => empIdStr === id || empCodeStr === id)) return false;
+
+        const mgrCodes = [currentBranch.managerCode, currentBranch.manager_code].filter(Boolean).map(v => String(v).trim());
+        if (mgrCodes.some(code => empCodeStr === code || empIdStr === code)) return false;
+
+        if (currentBranch.username && (empUserStr === String(currentBranch.username).trim().toLowerCase() || empCodeStr.toLowerCase() === String(currentBranch.username).trim().toLowerCase())) return false;
+
+        if (state.currentUserId && (empIdStr === String(state.currentUserId).trim() || empCodeStr === String(state.currentUserId).trim())) return false;
+        if (emp.isBranchManager || emp.isManager || emp.is_manager || emp.role === 'branch_manager' || emp.role === 'manager' || emp.role === 'branch') return false;
+        if (emp.jobTitle) {
+          const t = String(emp.jobTitle).trim().toLowerCase();
+          if (t.includes('مدير') || t.includes('manager')) return false;
+        }
+      }
+
       const isPrimary = String(emp.branchId || '') === bIdStr;
       const isSecondary = Array.isArray(emp.branchesDetails) && emp.branchesDetails.some(bd => String(bd.branchId) === bIdStr);
       return isPrimary || isSecondary;
     });
-  }, [employees, currentBranch]);
+  }, [employees, currentBranch, isBranchManager, state.currentUserId]);
 
   // 1. Dynamic Jobs List from registered system jobs & branch employees
   const systemJobs = useMemo(() => {
@@ -790,7 +813,62 @@ export default function BranchMonthlyRosterModule({
     if (!currentBranch) return new Map();
     const map = new Map();
     branchEmployees.forEach(emp => {
-      const r = getResolvedEmployeeRoster(emp, currentBranch.id, state, selectedMonth);
+      let r = getResolvedEmployeeRoster(emp, currentBranch.id, state, selectedMonth);
+
+      // Direct fallback matching: align with BranchManagerView's branch-roster tab logic
+      if (!r || !r.schedule) {
+        const empIdStr = String(emp.id || '').trim();
+        const empCodeStr = String(emp.code || '').trim();
+        const normSelectedMonth = selectedMonth ? String(selectedMonth).trim() : null;
+
+        // Check in state.rosters
+        const rosterCandidate = (state.rosters || []).find(item => {
+          const idMatch = String(item.employeeId || item.empId || item.id || '').trim() === empIdStr ||
+                          (empCodeStr && String(item.employeeCode || item.empCode || item.code || '').trim() === empCodeStr);
+          if (!idMatch) return false;
+          if (item.status === 'rejected' || item.status === 'draft') return false;
+
+          const itemMonth = item.month ? String(item.month).trim() : null;
+          const monthMatch = !itemMonth || !normSelectedMonth || itemMonth === normSelectedMonth || 
+                             itemMonth.replace('-0', '-') === normSelectedMonth.replace('-0', '-');
+          const rawSch = item.schedule || item.shifts || item.workSchedule;
+          const hasSch = Boolean(rawSch && typeof rawSch === 'object' && Object.keys(rawSch).length > 0);
+          const isAppr = item.status === 'approved' || item.status === 'active' || item.status === 'معتمد' || 
+                         Boolean(item.adminApproved) || Boolean(item.branchApproved) || (!item.status && hasSch);
+          return monthMatch && hasSch && isAppr;
+        });
+
+        // Check in state.requests
+        const reqCandidate = (state.requests || []).find(item => {
+          const idMatch = String(item.employeeId || item.empId || '').trim() === empIdStr ||
+                          (empCodeStr && String(item.employeeCode || item.empCode || '').trim() === empCodeStr);
+          if (!idMatch) return false;
+          if (item.status === 'rejected' || item.status === 'cancelled') return false;
+
+          const itemMonth = item.month ? String(item.month).trim() : null;
+          const monthMatch = !itemMonth || !normSelectedMonth || itemMonth === normSelectedMonth || 
+                             itemMonth.replace('-0', '-') === normSelectedMonth.replace('-0', '-');
+          const rawSch = item.schedule || item.newSchedule || item.details?.schedule;
+          const hasSch = Boolean(rawSch && typeof rawSch === 'object' && Object.keys(rawSch).length > 0);
+          const isAppr = item.status === 'approved' || item.status === 'active' || item.status === 'معتمد' || 
+                         Boolean(item.adminApproved) || Boolean(item.branchApproved);
+          return monthMatch && hasSch && isAppr;
+        });
+
+        const fallbackItem = rosterCandidate || reqCandidate;
+        if (fallbackItem) {
+          const rawSchedule = fallbackItem.schedule || fallbackItem.newSchedule || fallbackItem.shifts || fallbackItem.workSchedule || fallbackItem.details?.schedule;
+          if (rawSchedule) {
+            r = {
+              ...fallbackItem,
+              status: 'approved',
+              schedule: rawSchedule,
+              source: fallbackItem === rosterCandidate ? 'rosters_fallback' : 'requests_fallback'
+            };
+          }
+        }
+      }
+
       map.set(String(emp.id), r);
       if (emp.code) map.set(`code_${emp.code}`, r);
     });
@@ -1485,7 +1563,15 @@ export default function BranchMonthlyRosterModule({
             <button
               type="button"
               className="btn btn-primary"
-              onClick={() => onNavigateTab ? onNavigateTab('roster') : null}
+              onClick={() => {
+                if (onNavigateTab) {
+                  onNavigateTab('branch-roster');
+                  onNavigateTab('roster');
+                } else if (onSwitchSubTab) {
+                  onSwitchSubTab('branch-roster');
+                  onSwitchSubTab('roster');
+                }
+              }}
               style={{
                 background: 'linear-gradient(135deg, #0f766e, #0d9488)',
                 color: '#fff',

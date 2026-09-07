@@ -57,6 +57,26 @@ export default function EmployeePermissionsManagementModule({
   const branches = state.branches || [];
   const employees = (state.employees || []).filter((e) => {
     if (isBranchManager && effectiveBranchId) {
+      // Exclude branch manager
+      const liveBranch = (state.branches || []).find(b => String(b.id) === String(effectiveBranchId)) || currentBranch;
+      const empIdStr = String(e.id || '').trim();
+      const empCodeStr = String(e.code || '').trim();
+      const empUserStr = String(e.username || '').trim().toLowerCase();
+
+      const mgrIds = [liveBranch?.managerId, liveBranch?.manager_id, liveBranch?.managerEmpId, currentBranch?.managerId].filter(Boolean).map(v => String(v).trim());
+      if (mgrIds.some(id => empIdStr === id || empCodeStr === id)) return false;
+
+      const mgrCodes = [liveBranch?.managerCode, liveBranch?.manager_code, currentBranch?.managerCode].filter(Boolean).map(v => String(v).trim());
+      if (mgrCodes.some(code => empCodeStr === code || empIdStr === code)) return false;
+
+      if (liveBranch?.username && (empUserStr === String(liveBranch.username).trim().toLowerCase() || empCodeStr.toLowerCase() === String(liveBranch.username).trim().toLowerCase())) return false;
+
+      if (e.isBranchManager || e.isManager || e.is_manager || e.role === 'branch_manager' || e.role === 'manager' || e.role === 'branch') return false;
+      if (e.jobTitle) {
+        const t = String(e.jobTitle).trim().toLowerCase();
+        if (t.includes('مدير') || t.includes('manager')) return false;
+      }
+
       return (
         String(e.branchId) === String(effectiveBranchId) ||
         (e.branchesDetails && e.branchesDetails.some((bd) => String(bd.branchId) === String(effectiveBranchId)))

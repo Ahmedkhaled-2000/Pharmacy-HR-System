@@ -25,16 +25,33 @@ export default function BranchDirectivesModule({
   const branchId = currentBranch?.id;
   const branchName = currentBranch?.name || 'الفرع';
 
-  // Filter employees strictly to current branch
+  // Filter employees strictly to current branch (excluding branch manager)
   const branchEmployees = useMemo(() => {
     if (!branchId) return [];
+    const liveBranch = (state.branches || []).find(b => String(b.id) === String(branchId)) || currentBranch;
+    const mgrIds = [liveBranch?.managerId, liveBranch?.manager_id, liveBranch?.managerEmpId, currentBranch?.managerId].filter(Boolean).map(v => String(v).trim());
+    const mgrCodes = [liveBranch?.managerCode, liveBranch?.manager_code, currentBranch?.managerCode].filter(Boolean).map(v => String(v).trim());
+
     return (state.employees || []).filter(e => {
       if (e.status === 'تم الاستقالة' || e.is_active === false) return false;
+      const empIdStr = String(e.id || '').trim();
+      const empCodeStr = String(e.code || '').trim();
+      const empUserStr = String(e.username || '').trim().toLowerCase();
+
+      if (mgrIds.some(id => empIdStr === id || empCodeStr === id)) return false;
+      if (mgrCodes.some(code => empCodeStr === code || empIdStr === code)) return false;
+      if (liveBranch?.username && (empUserStr === String(liveBranch.username).trim().toLowerCase() || empCodeStr.toLowerCase() === String(liveBranch.username).trim().toLowerCase())) return false;
+      if (e.isBranchManager || e.isManager || e.is_manager || e.role === 'branch_manager' || e.role === 'manager' || e.role === 'branch') return false;
+      if (e.jobTitle) {
+        const t = String(e.jobTitle).trim().toLowerCase();
+        if (t.includes('مدير') || t.includes('manager')) return false;
+      }
+
       const matchesMain = String(e.branchId) === String(branchId);
       const matchesSecondary = e.branchesDetails && e.branchesDetails.some(bd => String(bd.branchId) === String(branchId));
       return matchesMain || matchesSecondary;
     });
-  }, [state.employees, branchId]);
+  }, [state.employees, branchId, currentBranch, state.branches]);
 
   // Extract jobs available among current branch employees
   const branchJobs = useMemo(() => {

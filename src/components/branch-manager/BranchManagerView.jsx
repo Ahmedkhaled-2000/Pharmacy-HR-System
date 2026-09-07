@@ -356,36 +356,199 @@ export default function BranchManagerView({
   const [mgrEditNotes, setMgrEditNotes] = useState('');
   const [mgrEditItems, setMgrEditItems] = useState([]);
 
+  // 0. Live Branch: Synchronize with state.branches to guarantee freshest data (managerId, managerCode, etc.)
+  const liveBranch = useMemo(() => {
+    if (!currentBranch) return null;
+    const cIdStr = String(currentBranch.id || '');
+    const cCodeStr = String(currentBranch.branchCode || currentBranch.code || '');
+    const cNameStr = String(currentBranch.name || '').trim().toLowerCase();
+
+    const found = (state.branches || []).find((b) => 
+      (b.id && String(b.id) === cIdStr) ||
+      (b.branchCode && String(b.branchCode) === cCodeStr) ||
+      (b.code && String(b.code) === cCodeStr) ||
+      (b.name && String(b.name).trim().toLowerCase() === cNameStr)
+    );
+    return { ...currentBranch, ...(found || {}) };
+  }, [currentBranch, state.branches]);
+
   // Identify Branch Manager Employee Profile
   const managerEmp = useMemo(() => {
-    const found = (state.employees || []).find((e) => e.id === currentBranch?.managerId);
-    if (found) return found;
-    const branchEmp = (state.employees || []).find((e) => e.branchId === currentBranch?.id);
-    if (branchEmp) return branchEmp;
+    const branchToUse = liveBranch || currentBranch;
+    const cIdStr = String(branchToUse?.id || '');
+
+    // 1. Explicit managerId on branch
+    const mgrId = branchToUse?.managerId || branchToUse?.manager_id || branchToUse?.managerEmpId;
+    if (mgrId) {
+      const mgrIdStr = String(mgrId).trim();
+      const found = (state.employees || []).find((e) => String(e.id) === mgrIdStr || String(e.code) === mgrIdStr);
+      if (found) return found;
+    }
+
+    // 2. Explicit managerCode on branch
+    const mgrCode = branchToUse?.managerCode || branchToUse?.manager_code;
+    if (mgrCode) {
+      const mgrCodeStr = String(mgrCode).trim();
+      const found = (state.employees || []).find((e) => String(e.code) === mgrCodeStr || String(e.id) === mgrCodeStr);
+      if (found) return found;
+    }
+
+    // 3. Manager object or name on branch
+    if (branchToUse?.manager && typeof branchToUse.manager === 'object') {
+      const mObj = branchToUse.manager;
+      const found = (state.employees || []).find((e) => 
+        (mObj.id && String(e.id) === String(mObj.id)) ||
+        (mObj.code && String(e.code) === String(mObj.code))
+      );
+      if (found) return found;
+    }
+    if (branchToUse?.managerName) {
+      const mName = String(branchToUse.managerName).trim().toLowerCase();
+      const found = (state.employees || []).find((e) => String(e.name || '').trim().toLowerCase() === mName);
+      if (found) return found;
+    }
+
+    // 4. Current logged in user
+    if (state.currentUserId) {
+      const curUserStr = String(state.currentUserId).trim();
+      const found = (state.employees || []).find((e) => String(e.id) === curUserStr || String(e.code) === curUserStr);
+      if (found) return found;
+    }
+
+    // 5. Branch username matching employee
+    const bUser = String(branchToUse?.username || '').trim().toLowerCase();
+    if (bUser) {
+      const found = (state.employees || []).find((e) => 
+        (e.username && String(e.username).trim().toLowerCase() === bUser) ||
+        (e.code && String(e.code).trim().toLowerCase() === bUser) ||
+        (e.phone && String(e.phone).trim() === bUser)
+      );
+      if (found) return found;
+    }
+
+    // 6. Employee with explicit manager title or role in this branch
+    const mgrTitleEmp = (state.employees || []).find((e) => {
+      const inBranch = String(e.branchId || '') === cIdStr || 
+        (Array.isArray(e.branchesDetails) && e.branchesDetails.some((bd) => String(bd.branchId) === cIdStr));
+      if (!inBranch) return false;
+      if (e.isBranchManager || e.isManager || e.role === 'branch_manager' || e.role === 'manager' || e.role === 'branch') return true;
+      if (e.jobTitle) {
+        const t = String(e.jobTitle).trim().toLowerCase();
+        return t.includes('مدير') || t.includes('manager');
+      }
+      return false;
+    });
+    if (mgrTitleEmp) return mgrTitleEmp;
+
     return {
-      id: `mgr_${currentBranch?.id || 'default'}`,
-      name: currentBranch?.name ? `مدير فرع ${currentBranch.name}` : 'مدير الفرع',
+      id: `mgr_${branchToUse?.id || 'default'}`,
+      name: branchToUse?.name ? `مدير فرع ${branchToUse.name}` : 'مدير الفرع',
       code: 'MGR',
       jobTitle: 'مدير فرع',
-      branchId: currentBranch?.id,
+      branchId: branchToUse?.id,
       salary: 650,
       annualLeaveBalance: 21,
       workHoursPerDay: 8,
       workDaysPerMonth: 26
     };
-  }, [state.employees, currentBranch]);
+  }, [state.employees, liveBranch, currentBranch, state.currentUserId]);
 
-  // Branch Employees (matching primary branch OR listed in branchesDetails, AND active)
+  // Comprehensive helper to identify if an employee is the Branch Manager (to strictly exclude from staff lists)
+  const isBranchManagerEmp = (emp) => {
+    if (!emp) return false;
+    const branchToUse = liveBranch || currentBranch;
+    const empIdStr = String(emp.id || '').trim();
+    const empCodeStr = String(emp.code || '').trim();
+    const empUserStr = String(emp.username || '').trim().toLowerCase();
+    const empNameStr = String(emp.name || '').trim().toLowerCase();
+
+    // 1. Explicit managerId / managerCode on branch
+    const mgrIds = [
+      branchToUse?.managerId,
+      branchToUse?.manager_id,
+      branchToUse?.managerEmpId,
+      currentBranch?.managerId,
+      currentBranch?.manager_id,
+      currentBranch?.managerEmpId
+    ].filter(Boolean).map(v => String(v).trim());
+
+    if (mgrIds.some(id => empIdStr === id || empCodeStr === id)) {
+      return true;
+    }
+
+    const mgrCodes = [
+      branchToUse?.managerCode,
+      branchToUse?.manager_code,
+      currentBranch?.managerCode,
+      currentBranch?.manager_code
+    ].filter(Boolean).map(v => String(v).trim());
+
+    if (mgrCodes.some(code => empCodeStr === code || empIdStr === code)) {
+      return true;
+    }
+
+    // 2. Manager object or name on branch
+    if (branchToUse?.manager && typeof branchToUse.manager === 'object') {
+      const m = branchToUse.manager;
+      if (m.id && String(m.id).trim() === empIdStr) return true;
+      if (m.code && String(m.code).trim() === empCodeStr) return true;
+    }
+    const mgrName = String(branchToUse?.managerName || currentBranch?.managerName || '').trim().toLowerCase();
+    if (mgrName && empNameStr === mgrName) {
+      return true;
+    }
+
+    // 3. Branch login username matches employee
+    const bUser = String(branchToUse?.username || currentBranch?.username || '').trim().toLowerCase();
+    if (bUser && (empUserStr === bUser || empCodeStr.toLowerCase() === bUser)) {
+      return true;
+    }
+
+    // 4. Current logged in user ID / Code
+    if (state.currentUserId) {
+      const curUserStr = String(state.currentUserId).trim();
+      if (empIdStr === curUserStr || empCodeStr === curUserStr) return true;
+    }
+
+    // 5. Matches resolved managerEmp profile
+    if (managerEmp && managerEmp.id && !String(managerEmp.id).startsWith('mgr_')) {
+      if (empIdStr === String(managerEmp.id).trim() || (managerEmp.code && empCodeStr === String(managerEmp.code).trim())) {
+        return true;
+      }
+    }
+
+    // 6. Explicit manager flags and roles
+    if (emp.isBranchManager === true || emp.isManager === true || emp.is_manager === true) return true;
+    if (emp.role === 'branch_manager' || emp.role === 'manager' || emp.role === 'branch') return true;
+
+    // 7. Manager Job Titles (مدير فرع، مدير صيدلية، مدير، صيدلي مدير، Branch Manager, etc.)
+    if (emp.jobTitle) {
+      const t = String(emp.jobTitle).trim().toLowerCase();
+      if (t.includes('مدير') || t.includes('manager')) {
+        return true;
+      }
+    }
+
+    return false;
+  };
+
+  // Branch Employees (matching primary branch OR listed in branchesDetails, AND active, STRICTLY EXCLUDING Branch Manager)
   const branchEmployees = useMemo(() => {
+    const branchToUse = liveBranch || currentBranch;
     const list = (state.employees || []).filter(isEmployeeActive);
-    if (!currentBranch?.id) return list;
-    const cIdStr = String(currentBranch.id);
+    if (!branchToUse?.id) {
+      return list.filter((e) => !isBranchManagerEmp(e));
+    }
+    const cIdStr = String(branchToUse.id);
     return list.filter((e) => {
+      // Exclude Branch Manager
+      if (isBranchManagerEmp(e)) return false;
+
       if (e.branchId && String(e.branchId) === cIdStr) return true;
       if (e.branchesDetails && e.branchesDetails.some((bd) => String(bd.branchId) === cIdStr)) return true;
       return false;
     });
-  }, [state.employees, currentBranch]);
+  }, [state.employees, liveBranch, currentBranch, state.currentUserId, managerEmp]);
 
   const deletedIdsSet = useMemo(() => {
     return new Set((state._deletedIds || []).map(String));
@@ -433,6 +596,12 @@ export default function BranchManagerView({
       // 1. Must adhere strictly to Higher Management Double Approval Rules (Loans, advances, admin-only are excluded)
       if (!shouldShowRequestToBranch(r, state)) return false;
 
+      // Strictly exclude requests created by or belonging to the branch manager (those go to Higher Management)
+      const empObj = (state.employees || []).find((e) => String(e.id) === String(r.employeeId) || (r.employeeCode && String(e.code) === String(r.employeeCode)));
+      if (isBranchManagerEmp(empObj)) return false;
+      if (managerEmp?.id && String(r.employeeId) === String(managerEmp.id)) return false;
+      if (r.submittedByBranchManager || r.creatorRole === 'branch' || r.createdRole === 'branch' || r.createdRole === 'branch_manager') return false;
+
       if (!cIdStr) return true;
 
       // 2. Direct branch match on request
@@ -441,7 +610,6 @@ export default function BranchManagerView({
       if (r.employeeId && branchEmpIdSet.has(String(r.employeeId))) return true;
       if (r.employeeCode && branchEmpIdSet.has(String(r.employeeCode))) return true;
       
-      const empObj = (state.employees || []).find((e) => String(e.id) === String(r.employeeId) || (r.employeeCode && String(e.code) === String(r.employeeCode)));
       if (empObj) {
         if (empObj.branchId && String(empObj.branchId) === cIdStr) return true;
         if (empObj.branchesDetails && empObj.branchesDetails.some((bd) => String(bd.branchId) === cIdStr)) return true;
@@ -2955,6 +3123,8 @@ export default function BranchManagerView({
             initialBranchId={currentBranch?.id}
             lockBranchId={currentBranch?.id}
             isBranchManager={true}
+            onNavigateTab={(tab) => setActiveTab(tab === 'roster' ? 'branch-roster' : tab)}
+            onSwitchSubTab={(tab) => setActiveTab(tab === 'roster' ? 'branch-roster' : tab)}
           />
         </div>
       )}
@@ -3264,7 +3434,7 @@ export default function BranchManagerView({
       {/* ───────────────────────────────────────────────────────────── */}
       {/* ── 4. MANAGER LEAVES TAB (Personal) ── */}
       {/* ───────────────────────────────────────────────────────────── */}
-      {activeTab === 'leaves' && (
+      {activeTab === 'manager-leaves' && (
         <EmployeeLeaveModule
           emp={managerEmp}
           state={state}
@@ -3487,13 +3657,17 @@ export default function BranchManagerView({
 
           {(() => {
             const allEmps = state.employees || [];
-            const cIdStr = String(currentBranch?.id || '');
+            const cIdStr = String(liveBranch?.id || currentBranch?.id || '');
             const filteredShifts = (state.shifts || []).filter((s) => {
               if (!s || !s.date) return false;
               const empObj = allEmps.find((e) => String(e.id) === String(s.employeeId)) || branchEmployees.find((e) => String(e.id) === String(s.employeeId));
               if (!empObj) return false;
+              // Strictly exclude branch manager from employee punches list
+              if (isBranchManagerEmp(empObj)) return false;
               if (selectedPunchEmpId && String(s.employeeId) !== String(selectedPunchEmpId)) return false;
-              // Check if shift strictly belongs to this branch
+              // Check if shift strictly belongs to branch staff in this branch
+              const isStaffInBranch = branchEmployees.some((e) => String(e.id) === String(s.employeeId));
+              if (!isStaffInBranch) return false;
               const isThisBranchShift = String(s.branchId) === cIdStr || (!s.branchId && String(empObj.branchId) === cIdStr);
               if (!isThisBranchShift) return false;
               return matchesDateRange(s.date);
@@ -4160,7 +4334,9 @@ export default function BranchManagerView({
             const map = new Map();
             allLeavesList.forEach(lr => {
               if (!lr) return;
-              const isMatchBranch = String(lr.branchId) === String(currentBranch?.id) || branchEmployees.some(e => String(e.id) === String(lr.employeeId));
+              const lrEmp = (state.employees || []).find(e => String(e.id) === String(lr.employeeId) || (lr.employeeCode && String(e.code) === String(lr.employeeCode)));
+              if (isBranchManagerEmp(lrEmp) || (managerEmp?.id && String(lr.employeeId) === String(managerEmp.id))) return;
+              const isMatchBranch = branchEmployees.some(e => String(e.id) === String(lr.employeeId));
               if (!isMatchBranch) return;
               if (leaveEmpFilter !== 'all' && String(lr.employeeId) !== String(leaveEmpFilter)) return;
               if (leaveStatusFilter === 'approved' && !(lr.status === 'approved' || lr.adminApproved)) return;

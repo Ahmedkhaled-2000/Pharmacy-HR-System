@@ -17,8 +17,18 @@ export default function BranchResignationModule({
 
     const isMatch = (r) => {
       if (!cIdStr) return true;
+      const liveB = (state.branches || []).find(b => String(b.id) === cIdStr) || currentBranch;
+      const mgrIds = [liveB?.managerId, liveB?.manager_id, currentBranch?.managerId].filter(Boolean).map(String);
+      const mgrCodes = [liveB?.managerCode, currentBranch?.managerCode].filter(Boolean).map(String);
+
+      const reqEmp = (state.employees || []).find(e => String(e.id) === String(r.employeeId) || (r.employeeCode && String(e.code) === String(r.employeeCode)));
+      if (reqEmp) {
+        if (mgrIds.includes(String(reqEmp.id)) || mgrCodes.includes(String(reqEmp.code))) return false;
+        if (reqEmp.isBranchManager || reqEmp.role === 'branch_manager' || reqEmp.role === 'manager') return false;
+        if (reqEmp.jobTitle && (reqEmp.jobTitle.toLowerCase().includes('مدير') || reqEmp.jobTitle.toLowerCase().includes('manager'))) return false;
+      }
+
       if (r.branchId && String(r.branchId) === cIdStr) return true;
-      const reqEmp = (state.employees || []).find(e => String(e.id) === String(r.employeeId));
       if (reqEmp) {
         if (reqEmp.branchId && String(reqEmp.branchId) === cIdStr) return true;
         if (reqEmp.branchesDetails && reqEmp.branchesDetails.some(bd => String(bd.branchId) === cIdStr)) return true;
