@@ -37,6 +37,17 @@ export default function EmployeeFileModal({
 
   const [activeTab, setActiveTab] = useState('personal'); // 'personal' | 'job' | 'financial' | 'documents'
 
+  // Escape key listener for keyboard navigation
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        onClose?.();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   // Google Drive Cloud State
   const [driveFolderId, setDriveFolderId] = useState('');
   const [driveFolderUrl, setDriveFolderUrl] = useState('');
@@ -978,139 +989,264 @@ export default function EmployeeFileModal({
   };
 
   return (
-    <div className="modal-overlay">
-      <div className="modal-card" style={{ maxWidth: '780px', width: '95%', maxHeight: 'min(92vh, calc(100dvh - 28px))', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <h3 style={{ fontFamily: 'Cairo', textAlign: 'center', margin: '0 0 16px 0' }}>
-          {editingEmp && editingEmp.isFromRecruitment
-            ? `🎯 إضافة وتعيين موظف جديد معتمد: ${editingEmp.name}`
-            : editingEmp && editingEmp.id
-            ? `📄 ملف الموظف: ${editingEmp.name}`
-            : '👤 إضافة ملف موظف جديد'}
-        </h3>
+    <div className="modal-overlay" onClick={onClose}>
+      <div
+        className="modal-card"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          maxWidth: 'min(940px, 96vw)',
+          width: '95%',
+          maxHeight: 'min(92vh, calc(100dvh - 28px))',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          borderRadius: '20px',
+          boxShadow: '0 25px 60px -15px rgba(15, 23, 42, 0.3)'
+        }}
+      >
+        {/* Modern Modal Header Pro */}
+        <div className="modal-header-pro">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0 }}>
+            <div
+              style={{
+                width: '46px',
+                height: '46px',
+                borderRadius: '14px',
+                background: 'linear-gradient(135deg, #0d9488, #0f766e)',
+                color: '#fff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '22px',
+                flexShrink: 0,
+                boxShadow: '0 4px 14px rgba(13, 148, 136, 0.28)',
+                overflow: 'hidden'
+              }}
+            >
+              {photoUrl ? (
+                <img src={photoUrl} alt="Avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : (
+                editingEmp?.isFromRecruitment ? '🎯' : (editingEmp?.id ? '📄' : '👤')
+              )}
+            </div>
 
-        {editingEmp && editingEmp.isFromRecruitment && (
-          <div style={{
-            background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(5, 150, 105, 0.08))',
-            border: '1px solid #10b981',
-            borderRadius: '10px',
-            padding: '10px 16px',
-            marginBottom: '16px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '10px',
-            color: '#065f46',
-            fontSize: '13px',
-            fontWeight: 700
-          }}>
-            <span style={{ fontSize: '18px' }}>✨</span>
-            <span>تم استيراد البيانات الشخصية والمؤهلات والوثائق تلقائياً من بوابة التوظيف وطلب التعيين. يرجى استكمال بيانات الوظيفة والفرع والراتب لاعتماد تعيين الموظف.</span>
-          </div>
-        )}
+            <div style={{ minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <h3
+                  style={{
+                    fontFamily: 'Cairo',
+                    fontSize: '17.5px',
+                    fontWeight: 800,
+                    margin: 0,
+                    color: 'var(--text, #0f172a)',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis'
+                  }}
+                >
+                  {editingEmp && editingEmp.isFromRecruitment
+                    ? `إضافة وتعيين موظف: ${editingEmp.name}`
+                    : editingEmp && editingEmp.id
+                    ? `ملف الموظف: ${editingEmp.name}`
+                    : 'إضافة ملف موظف جديد'}
+                </h3>
 
-        {/* Tab Header Navigation */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', borderBottom: '2px solid var(--border)', marginBottom: '16px', overflowX: 'hidden' }}>
-          <button
-            type="button"
-            className={`btn ${activeTab === 'personal' ? 'btn-start' : 'btn-ghost'}`}
-            style={{ fontSize: '13px', borderRadius: '10px 10px 0 0' }}
-            onClick={() => setActiveTab('personal')}
-          >
-            1️⃣ البيانات الشخصية
-          </button>
-          <button
-            type="button"
-            className={`btn ${activeTab === 'job' ? 'btn-start' : 'btn-ghost'}`}
-            style={{ fontSize: '13px', borderRadius: '10px 10px 0 0' }}
-            onClick={() => setActiveTab('job')}
-          >
-            2️⃣ بيانات الوظيفة
-          </button>
-          <button
-            type="button"
-            className={`btn ${activeTab === 'financial' ? 'btn-start' : 'btn-ghost'}`}
-            style={{ fontSize: '13px', borderRadius: '10px 10px 0 0' }}
-            onClick={() => setActiveTab('financial')}
-          >
-            3️⃣ البيانات المالية وساعات العمل
-          </button>
-          <button
-            type="button"
-            className={`btn ${activeTab === 'documents' ? 'btn-start' : 'btn-ghost'}`}
-            style={{ fontSize: '13px', borderRadius: '10px 10px 0 0' }}
-            onClick={() => setActiveTab('documents')}
-          >
-            4️⃣ المستندات والوثائق {documents.length > 0 && `(${documents.length})`}
-          </button>
-        </div>
-
-        {/* Google Drive Sync & Quick Access Bar */}
-        {state?.orgSettings?.driveConfig?.enabled && (
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            background: 'linear-gradient(135deg, rgba(66, 133, 244, 0.08), rgba(52, 168, 83, 0.08))',
-            border: '1px solid rgba(66, 133, 244, 0.25)',
-            borderRadius: '12px',
-            padding: '10px 16px',
-            marginBottom: '16px',
-            fontSize: '13px',
-            flexWrap: 'wrap',
-            gap: '10px'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '18px' }}>📁</span>
-              <div>
-                <strong>Google Drive للموظف: </strong>
-                {driveFolderUrl ? (
-                  <a
-                    href={driveFolderUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{ color: '#0284c7', fontWeight: 'bold', textDecoration: 'underline', marginRight: '6px' }}
+                {editingEmp?.code && (
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      background: 'rgba(13, 148, 136, 0.1)',
+                      color: 'var(--primary, #0d9488)',
+                      padding: '2px 8px',
+                      borderRadius: '6px',
+                      border: '1px solid rgba(13, 148, 136, 0.2)'
+                    }}
                   >
-                    فتح المجلد السحابي ↗
-                  </a>
-                ) : (
-                  <span style={{ color: 'var(--muted)' }}>سيتم إنشاء المجلد سحابياً عند الحفظ تلقائياً</span>
+                    كود: {editingEmp.code}
+                  </span>
                 )}
-                {driveLastSyncAt && (
-                  <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block', marginTop: '2px' }}>
-                    آخر مزامنة: {new Date(driveLastSyncAt).toLocaleString('ar-EG')}
+                {jobTitle && (
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      background: 'var(--surface-muted, #f1f5f9)',
+                      color: 'var(--text-secondary, #64748b)',
+                      padding: '2px 8px',
+                      borderRadius: '6px'
+                    }}
+                  >
+                    {jobTitle}
                   </span>
                 )}
               </div>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              {isDriveSyncing ? (
-                <span style={{ color: '#0284c7', fontWeight: 'bold', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span className="spinner" style={{ width: '14px', height: '14px', borderWidth: '2px' }}></span>
-                  {driveSyncMsg || 'جاري المزامنة مع Drive...'}
-                </span>
-              ) : (
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={handleManualDriveSync}
-                  style={{
-                    fontSize: '12px',
-                    padding: '5px 12px',
-                    background: '#fff',
-                    border: '1px solid #93c5fd',
-                    color: '#1d4ed8',
-                    fontWeight: 'bold',
-                    borderRadius: '8px'
-                  }}
-                >
-                  🔄 مزامنة درايف الآن
-                </button>
-              )}
+              <div style={{ fontSize: '12px', color: 'var(--muted, #64748b)', marginTop: '3px' }}>
+                {editingEmp?.id ? 'السجل الوظيفي والمالي والمستندات الرسمية للموظف' : 'إنشاء وتجهيز ملف وظيفي متكامل بالمنظومة'}
+              </div>
             </div>
           </div>
-        )}
 
-        <form onSubmit={handleSubmit} style={{ overflowY: 'auto', overflowX: 'hidden', flex: 1, minHeight: 0, padding: '4px 4px 16px 4px' }}>
+          {/* Close Button */}
+          <button
+            type="button"
+            onClick={onClose}
+            className="modal-close-circle-btn"
+            title="إغلاق النافذة (Esc)"
+            aria-label="إغلاق"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Header Top Sub-Bar (Recruitment Banner + Tabs + Drive Sync) - NEVER SCROLLS */}
+        <div style={{ padding: '14px 20px 0 20px', flexShrink: 0, overflow: 'visible' }}>
+          {editingEmp && editingEmp.isFromRecruitment && (
+            <div
+              style={{
+                background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(5, 150, 105, 0.08))',
+                border: '1px solid #10b981',
+                borderRadius: '10px',
+                padding: '10px 14px',
+                marginBottom: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                color: '#065f46',
+                fontSize: '12.5px',
+                fontWeight: 700
+              }}
+            >
+              <span style={{ fontSize: '18px' }}>✨</span>
+              <span>تم استيراد البيانات الشخصية والمؤهلات والوثائق تلقائياً من بوابة التوظيف وطلب التعيين. يرجى استكمال بيانات الوظيفة والفرع والراتب لاعتماد تعيين الموظف.</span>
+            </div>
+          )}
+
+          {/* Segmented Control Tab Navigation (Strictly Zero Vertical Scroll, 100% Full Visibility) */}
+          <div className="modal-tabs-pro">
+            <button
+              type="button"
+              className={`modal-tab-pill ${activeTab === 'personal' ? 'active' : ''}`}
+              onClick={() => setActiveTab('personal')}
+            >
+              <span>👤</span>
+              <span className="tab-label">1. البيانات الشخصية</span>
+            </button>
+
+            <button
+              type="button"
+              className={`modal-tab-pill ${activeTab === 'job' ? 'active' : ''}`}
+              onClick={() => setActiveTab('job')}
+            >
+              <span>💼</span>
+              <span className="tab-label">2. بيانات الوظيفة</span>
+            </button>
+
+            <button
+              type="button"
+              className={`modal-tab-pill ${activeTab === 'financial' ? 'active' : ''}`}
+              onClick={() => setActiveTab('financial')}
+            >
+              <span>💳</span>
+              <span className="tab-label">3. المالية وساعات العمل</span>
+            </button>
+
+            <button
+              type="button"
+              className={`modal-tab-pill ${activeTab === 'documents' ? 'active' : ''}`}
+              onClick={() => setActiveTab('documents')}
+            >
+              <span>📁</span>
+              <span className="tab-label">4. المستندات والوثائق</span>
+              {documents.length > 0 && (
+                <span
+                  style={{
+                    fontSize: '10.5px',
+                    fontWeight: 800,
+                    background: activeTab === 'documents' ? '#ffffff' : 'var(--primary, #0d9488)',
+                    color: activeTab === 'documents' ? 'var(--primary, #0d9488)' : '#ffffff',
+                    padding: '1px 6px',
+                    borderRadius: '10px',
+                    marginRight: '3px'
+                  }}
+                >
+                  {documents.length}
+                </span>
+              )}
+            </button>
+          </div>
+
+          {/* Google Drive Sync & Quick Access Bar */}
+          {state?.orgSettings?.driveConfig?.enabled && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                background: 'linear-gradient(135deg, rgba(66, 133, 244, 0.08), rgba(52, 168, 83, 0.08))',
+                border: '1px solid rgba(66, 133, 244, 0.25)',
+                borderRadius: '10px',
+                padding: '8px 14px',
+                marginBottom: '12px',
+                fontSize: '12.5px',
+                flexWrap: 'wrap',
+                gap: '8px'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '16px' }}>📁</span>
+                <div>
+                  <strong>Google Drive للموظف: </strong>
+                  {driveFolderUrl ? (
+                    <a
+                      href={driveFolderUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ color: '#0284c7', fontWeight: 'bold', textDecoration: 'underline', marginRight: '6px' }}
+                    >
+                      فتح المجلد السحابي ↗
+                    </a>
+                  ) : (
+                    <span style={{ color: 'var(--muted)' }}>سيتم إنشاء المجلد سحابياً عند الحفظ تلقائياً</span>
+                  )}
+                  {driveLastSyncAt && (
+                    <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block', marginTop: '1px' }}>
+                      آخر مزامنة: {new Date(driveLastSyncAt).toLocaleString('ar-EG')}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {isDriveSyncing ? (
+                  <span style={{ color: '#0284c7', fontWeight: 'bold', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span className="spinner" style={{ width: '14px', height: '14px', borderWidth: '2px' }}></span>
+                    {driveSyncMsg || 'جاري المزامنة مع Drive...'}
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={handleManualDriveSync}
+                    style={{
+                      fontSize: '11.5px',
+                      padding: '4px 10px',
+                      background: '#fff',
+                      border: '1px solid #93c5fd',
+                      color: '#1d4ed8',
+                      fontWeight: 'bold',
+                      borderRadius: '8px'
+                    }}
+                  >
+                    🔄 مزامنة درايف الآن
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <form onSubmit={handleSubmit} style={{ overflowY: 'auto', overflowX: 'hidden', flex: 1, minHeight: 0, padding: '6px 20px 16px 20px' }}>
           {/* TAB 1: Personal Data */}
           {activeTab === 'personal' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
@@ -2221,14 +2357,34 @@ export default function EmployeeFileModal({
             </div>
           )}
 
-          {/* Actions */}
-          <div className="modal-actions" style={{ justifyContent: 'center', marginTop: '20px', position: 'sticky', bottom: 0, background: 'var(--surface)', zIndex: 10, padding: '12px 0', borderTop: '1px solid var(--border)' }}>
-            <button type="button" className="btn btn-ghost" onClick={onClose}>
-              إلغاء
+          {/* Actions - Sticky Frosted Glass Footer */}
+          <div className="modal-actions-pro">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={onClose}
+              style={{ padding: '8px 18px', fontSize: '13px', borderRadius: '8px' }}
+            >
+              إلغاء وتراجع
             </button>
-            <button type="submit" className="btn btn-start" style={{ minWidth: '160px' }}>
-              💾 حفظ ملف الموظف
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span style={{ fontSize: '12px', color: 'var(--muted)', fontWeight: 600 }}>
+                {activeTab === 'personal'
+                  ? 'التبويب: البيانات الشخصية (1 من 4)'
+                  : activeTab === 'job'
+                  ? 'التبويب: بيانات الوظيفة (2 من 4)'
+                  : activeTab === 'financial'
+                  ? 'التبويب: المالية وساعات العمل (3 من 4)'
+                  : 'التبويب: المستندات والوثائق (4 من 4)'}
+              </span>
+              <button
+                type="submit"
+                className="btn btn-start"
+                style={{ minWidth: '165px', padding: '9px 24px', fontWeight: 800, borderRadius: '8px', fontSize: '13.5px' }}
+              >
+                💾 حفظ ملف الموظف
+              </button>
+            </div>
           </div>
         </form>
 

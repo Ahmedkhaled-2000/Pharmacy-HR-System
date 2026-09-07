@@ -1453,6 +1453,138 @@ tbody tr:hover {
   overflow-x: hidden !important;
 }
 
+/* ══════════════════════════════════════════════════════════════════════ */
+/* 🌟 ENTERPRISE MODAL ARCHITECTURE: HEADERS, TABS & CONTROLS             */
+/* ══════════════════════════════════════════════════════════════════════ */
+
+/* Pro Header styling */
+.modal-header-pro {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 14px !important;
+  padding: 16px 22px 14px 22px !important;
+  border-bottom: 1px solid var(--border, #e2e8f0) !important;
+  background: var(--surface, #ffffff) !important;
+  flex-shrink: 0 !important;
+  overflow: visible !important;
+  box-sizing: border-box !important;
+}
+
+/* Close circular button */
+.modal-close-circle-btn {
+  width: 36px !important;
+  height: 36px !important;
+  min-width: 36px !important;
+  border-radius: 50% !important;
+  background: var(--surface-muted, #f1f5f9) !important;
+  border: 1px solid var(--border, #e2e8f0) !important;
+  color: var(--text-secondary, #64748b) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+  cursor: pointer !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  padding: 0 !important;
+  flex-shrink: 0 !important;
+}
+
+.modal-close-circle-btn:hover {
+  background: #fee2e2 !important;
+  color: #ef4444 !important;
+  border-color: #fca5a5 !important;
+  transform: rotate(90deg) scale(1.05) !important;
+}
+
+/* Modern segmented pill tab navigation */
+.modal-tabs-pro {
+  display: grid !important;
+  grid-template-columns: repeat(4, 1fr) !important;
+  gap: 6px !important;
+  padding: 4px !important;
+  background: var(--surface-muted, #f1f5f9) !important;
+  border-radius: 12px !important;
+  border: 1px solid var(--border, #e2e8f0) !important;
+  margin-bottom: 14px !important;
+  flex-shrink: 0 !important;
+  overflow: visible !important;
+  box-sizing: border-box !important;
+}
+
+/* Prevent any accidental scroll on headers/tabs across the board */
+.modal-card .modal-tabs-pro,
+.modal-card .modal-header-pro,
+.modal-card .modal-header,
+.modal-card-header,
+.modal-card > div:not(.modal-card-body):not(.modal-body):not(.central-modal-body):not(form) {
+  overflow: visible !important;
+}
+
+.modal-tab-pill {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  padding: 9px 12px !important;
+  border-radius: 9px !important;
+  border: none !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  font-family: 'Cairo', 'Tajawal', sans-serif !important;
+  cursor: pointer !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  background: transparent;
+  color: var(--text-secondary, #64748b);
+  white-space: nowrap !important;
+  user-select: none !important;
+}
+
+.modal-tab-pill:hover:not(.active) {
+  background: rgba(255, 255, 255, 0.7) !important;
+  color: var(--text, #0f172a) !important;
+}
+
+.modal-tab-pill.active {
+  background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%) !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 12px rgba(13, 148, 136, 0.25) !important;
+}
+
+/* Responsive adjustment for small screens */
+@media (max-width: 680px) {
+  .modal-tabs-pro {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 4px !important;
+  }
+  .modal-tab-pill {
+    padding: 7px 8px !important;
+    font-size: 12px !important;
+  }
+  .modal-tab-pill .tab-label {
+    font-size: 11.5px !important;
+  }
+}
+
+/* Modal Actions Pro (Sticky Glassmorphism Footer) */
+.modal-actions-pro {
+  position: sticky !important;
+  bottom: 0 !important;
+  z-index: 25 !important;
+  background: rgba(255, 255, 255, 0.95) !important;
+  backdrop-filter: blur(10px) !important;
+  -webkit-backdrop-filter: blur(10px) !important;
+  border-top: 1px solid var(--border, #e2e8f0) !important;
+  padding: 12px 20px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  margin-top: auto !important;
+  flex-shrink: 0 !important;
+  box-sizing: border-box !important;
+}
+
 /* Universal scrollbars for all modals: vertical only, zero horizontal */
 .modal-overlay::-webkit-scrollbar,
 .modal-backdrop::-webkit-scrollbar,
