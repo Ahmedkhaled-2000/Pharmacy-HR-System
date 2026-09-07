@@ -64,6 +64,22 @@ export default function PayrollAccountingIntegrationModal({
   const totalDeductionsAdvances = payrollSummary.totalDeduction || 0;
   const netPayable = payrollSummary.totalNetSalary || (totalGrossPayroll - totalDeductionsAdvances);
 
+  // Compute cashier shortages allocated for this month to offset against account 11603
+  const cashierShortageAdjustments = useMemo(() => {
+    return (state?.adjustments || []).filter((a) => {
+      const isShortage = a.isCashierShortage || (a.reason && (a.reason.includes('عجز') || a.reason.includes('خزينة')));
+      const matchMonth = !selectedMonth || (a.date && a.date.startsWith(selectedMonth));
+      return a.type === 'deduction' && isShortage && matchMonth;
+    });
+  }, [state?.adjustments, selectedMonth]);
+
+  const totalCashierShortageDeductions = useMemo(() => {
+    return cashierShortageAdjustments.reduce((sum, a) => sum + (Number(a.amount) || 0), 0);
+  }, [cashierShortageAdjustments]);
+
+  // Remaining general advances/penalties
+  const totalOtherDeductions = Math.max(0, totalDeductionsAdvances - totalCashierShortageDeductions);
+
   const handlePostEntry = () => {
     if (totalGrossPayroll <= 0) {
       alert('لا توجد بيانات مسير رواتب مسجلة لهذا الشهر، أو أن إجمالي الرواتب يساوي صفر.');
@@ -75,6 +91,7 @@ export default function PayrollAccountingIntegrationModal({
     const accBonus = accounts.find((a) => a.code === '612') || { id: 'acc-612', code: '612', name_ar: 'مكافآت تشجيعية وتارجت' };
     const accOvertime = accounts.find((a) => a.code === '613') || { id: 'acc-613', code: '613', name_ar: 'أجور ساعات عمل إضافي' };
     const accAdvances = accounts.find((a) => a.code === '11601') || { id: 'acc-11601', code: '11601', name_ar: 'سلف العاملين المؤقتة والمستديمة' };
+    const accCashierShortage = accounts.find((a) => a.code === '11603') || { id: 'acc-11603', code: '11603', name_ar: 'عجز خزائن الفروع تحت التحصيل من الرواتب' };
     const accAccrued = accounts.find((a) => a.code === '21201') || { id: 'acc-21201', code: '21201', name_ar: 'رواتب وأجور مستحقة للعاملين' };
 
     const selectedTreasury = treasuries.find((t) => t.id === selectedTreasuryId);
@@ -115,18 +132,29 @@ export default function PayrollAccountingIntegrationModal({
       });
     }
 
-    // 4. Advances & Deductions recovery (Credit)
-    if (totalDeductionsAdvances > 0) {
+    // 4. Advances & General Deductions recovery (Credit)
+    if (totalOtherDeductions > 0) {
       lines.push({
         account_id: accAdvances.id,
         debit: 0,
-        credit: totalDeductionsAdvances,
+        credit: totalOtherDeductions,
         cost_center_id: '',
         line_desc: `استقطاع وتسوية سلف وخصومات العاملين لشهر ${selectedMonth}`,
       });
     }
 
-    // 5. Net Salary Payable or Paid (Credit)
+    // 5. Cashier Shortage Deductions recovery (Credit to 11603)
+    if (totalCashierShortageDeductions > 0) {
+      lines.push({
+        account_id: accCashierShortage.id,
+        debit: 0,
+        credit: totalCashierShortageDeductions,
+        cost_center_id: '',
+        line_desc: `استقطاع عجز خزائن الكاشير للفروع من رواتب العاملين لشهر ${selectedMonth} (تسوية حـ/ 11603)`,
+      });
+    }
+
+    // 6. Net Salary Payable or Paid (Credit)
     lines.push({
       account_id: creditPayoutAccountId,
       debit: 0,
@@ -246,6 +274,31 @@ export default function PayrollAccountingIntegrationModal({
               </div>
             </div>
           </div>
+
+          {totalCashierShortageDeductions > 0 && (
+            <div style={{
+              background: '#fff1f2',
+              border: '1px solid #fecdd3',
+              borderRadius: '10px',
+              padding: '10px 14px',
+              marginBottom: '16px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              fontSize: '12px',
+              color: '#9f1239',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '18px' }}>🔒</span>
+                <span>
+                  يشمل المسير <strong>{cashierShortageAdjustments.length}</strong> استقطاعات عجز ورديات كاشير صيدليات مسجلة هذا الشهر:
+                </span>
+              </div>
+              <strong style={{ fontFamily: 'monospace', fontSize: '13px' }}>
+                {totalCashierShortageDeductions.toLocaleString()} ج.م (حـ/ 11603)
+              </strong>
+            </div>
+          )}
 
           {/* Net Highlight */}
           <div style={{
@@ -384,12 +437,20 @@ export default function PayrollAccountingIntegrationModal({
                     <td>حوافز تشجيعية</td>
                   </tr>
                 )}
-                {totalDeductionsAdvances > 0 && (
+                {totalOtherDeductions > 0 && (
                   <tr>
-                    <td><strong>11601 - سلف العاملين المستردة</strong></td>
+                    <td><strong>11601 - سلف وخصومات العاملين</strong></td>
                     <td>—</td>
-                    <td style={{ fontWeight: '800', color: '#dc2626', fontFamily: 'monospace' }}>{totalDeductionsAdvances.toLocaleString()}</td>
+                    <td style={{ fontWeight: '800', color: '#dc2626', fontFamily: 'monospace' }}>{totalOtherDeductions.toLocaleString()}</td>
                     <td>استقطاع وتسوية سلف</td>
+                  </tr>
+                )}
+                {totalCashierShortageDeductions > 0 && (
+                  <tr style={{ background: '#fff1f2' }}>
+                    <td><strong style={{ color: '#9f1239' }}>11603 - عجز خزائن الكاشير (رواتب)</strong></td>
+                    <td>—</td>
+                    <td style={{ fontWeight: '800', color: '#b91c1c', fontFamily: 'monospace' }}>{totalCashierShortageDeductions.toLocaleString()}</td>
+                    <td style={{ color: '#9f1239' }}>استرداد عجز الخزائن المحمل ع الموظفين</td>
                   </tr>
                 )}
                 <tr>

@@ -20,6 +20,7 @@ export default function AccountsDesktopMenuBar({
   onOpenVendorTxModal,
   onOpenAddVendor,
   onOpenPayrollModal,
+  onOpenNewCashierShift,
   onOpenAiPromptModal,
   onOpenAiAuditRadarModal,
   onOpenGuideModal,
@@ -252,7 +253,38 @@ export default function AccountsDesktopMenuBar({
           )}
         </div>
 
-        {/* 4. Payroll & HR */}
+        {/* 4. Cashier Treasury, Closings & Discrepancies */}
+        <div className="acc-menu-item">
+          <button
+            type="button"
+            className={`acc-menu-btn ${openMenu === 'cashier' || activeTab === 'cashier-closing' ? 'active' : ''}`}
+            onClick={() => handleMenuClick('cashier')}
+          >
+            🔒 خزينة الكاشير والعجز والزيادة ▾
+          </button>
+          {openMenu === 'cashier' && (
+            <div className="acc-dropdown-menu">
+              <button type="button" onClick={() => handleAction(() => onSelectTab('cashier-closing'))}>
+                <span>📊 متابعة عجز وزيادة كل صيدلية (يومي وشهري)</span>
+              </button>
+              <button type="button" onClick={() => handleAction(onOpenNewCashierShift)}>
+                <span>🔒 تقفيل خزينة وردية كاشير جديدة</span>
+              </button>
+              <div className="acc-menu-divider"></div>
+              <button type="button" onClick={() => handleAction(() => onSelectTab('cashier-closing', 'ledger'))}>
+                <span>📜 دفتر ورديات وتقفيل الكاشير التفصيلي</span>
+              </button>
+              <button type="button" onClick={() => handleAction(() => onSelectTab('cashier-closing', 'inventory_reconciliation'))}>
+                <span>📦 تسوية الجرد الشهري ومقاصة الأمانات (21804)</span>
+              </button>
+              <button type="button" onClick={() => handleAction(() => onSelectTab('cashier-closing', 'cashier_ledger'))}>
+                <span>👤 كشف حساب ومسؤولية الكاشير</span>
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* 5. Payroll & HR */}
         <div className="acc-menu-item">
           <button
             type="button"
@@ -372,6 +404,16 @@ export default function AccountsDesktopMenuBar({
             title="تحويل نقدية بين الخزائن والبنوك أو سحب من المحافظ"
           >
             <span>🔄 تحويل نقدية</span>
+          </button>
+
+          <button
+            type="button"
+            className="acc-ribbon-btn"
+            style={{ background: '#f0fdf4', borderColor: '#86efac', color: '#166534', fontWeight: '800' }}
+            onClick={onOpenNewCashierShift}
+            title="تقفيل خزينة وردية صيدلية وحساب العجز أو الزيادة والتوزيع على الرواتب"
+          >
+            <span>🔒 تقفيل الخزينة</span>
           </button>
 
           <button

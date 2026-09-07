@@ -8,6 +8,7 @@ import JournalEntriesTab from './JournalEntriesTab';
 import PharmaVendorsTab from './PharmaVendorsTab';
 import CostCentersTab from './CostCentersTab';
 import FinancialStatementsTab from './FinancialStatementsTab';
+import CashierClosingTab from './CashierClosingTab';
 import AccountingSystemGuideCard from '../settings/AccountingSystemGuideCard';
 
 // Modals
@@ -19,6 +20,7 @@ import AddEditAccountModal from './AddEditAccountModal';
 import VendorTransactionModal from './VendorTransactionModal';
 import AddEditVendorModal from './AddEditVendorModal';
 import PayrollAccountingIntegrationModal from './PayrollAccountingIntegrationModal';
+import NewCashierShiftModal from './NewCashierShiftModal';
 import AiJournalPromptModal from './AiJournalPromptModal';
 import AiAuditRadarModal from './AiAuditRadarModal';
 
@@ -32,6 +34,7 @@ import {
   DEFAULT_PHARMA_VENDORS,
   DEFAULT_VENDOR_TRANSACTIONS,
 } from '../../utils/defaultPharmaVendors';
+import { DEFAULT_CASHIER_CLOSINGS } from '../../utils/defaultCashierClosings';
 
 /**
  * AccountsSystemView.jsx
@@ -80,6 +83,7 @@ export default function AccountsSystemView({
 
   // Other Feature Modals
   const [isPayrollModalOpen, setIsPayrollModalOpen] = useState(false);
+  const [isNewCashierShiftModalOpen, setIsNewCashierShiftModalOpen] = useState(false);
   const [isAiPromptModalOpen, setIsAiPromptModalOpen] = useState(false);
   const [isAiAuditRadarModalOpen, setIsAiAuditRadarModalOpen] = useState(false);
   const [isGuideModalOpen, setIsGuideModalOpen] = useState(false);
@@ -109,6 +113,10 @@ export default function AccountsSystemView({
     return state?.accountsData?.vendorTransactions || DEFAULT_VENDOR_TRANSACTIONS;
   }, [state?.accountsData?.vendorTransactions]);
 
+  const cashierClosings = useMemo(() => {
+    return state?.accountsData?.cashierClosings || DEFAULT_CASHIER_CLOSINGS;
+  }, [state?.accountsData?.cashierClosings]);
+
   const branches = state?.branches || [];
 
   // Helper to persist accounts state
@@ -121,6 +129,7 @@ export default function AccountsSystemView({
         entries: [],
         vendors: DEFAULT_PHARMA_VENDORS,
         vendorTransactions: DEFAULT_VENDOR_TRANSACTIONS,
+        cashierClosings: DEFAULT_CASHIER_CLOSINGS,
       };
 
       const merged = { ...current, ...updatedPartial };
@@ -370,6 +379,88 @@ export default function AccountsSystemView({
     }
   };
 
+  // 9. Save Cashier Shift Closing & Integrate with Payroll Deductions and GL
+  const handleSaveCashierClosing = async (closingRecord, journalEntry, payrollDeductions = []) => {
+    const updatedClosings = [closingRecord, ...cashierClosings];
+    let updatedEntries = entries;
+    if (journalEntry) {
+      updatedEntries = [journalEntry, ...entries];
+    }
+
+    const currentAccountsData = state?.accountsData || {};
+    const updatedAccountsData = {
+      ...currentAccountsData,
+      cashierClosings: updatedClosings,
+      entries: updatedEntries,
+    };
+
+    // Integrate deductions into state.adjustments for immediate HR / Payroll calculation
+    const updatedAdjustments = payrollDeductions.length > 0
+      ? [...(state?.adjustments || []), ...payrollDeductions]
+      : (state?.adjustments || []);
+
+    const nextState = {
+      ...state,
+      accountsData: updatedAccountsData,
+      adjustments: updatedAdjustments,
+    };
+
+    if (setState) setState(nextState);
+    if (saveState) await saveState(nextState);
+
+    if (showToast) {
+      showToast(`✅ تم تقفيل وردية الكاشير بنجاح (${closingRecord.closure_number}) وتوليد القيد المحاسبي وترحيل استقطاعات العجز للرواتب.`);
+    }
+  };
+
+  // 10. Delete Cashier Shift Closing
+  const handleDeleteCashierClosing = async (closingId) => {
+    const updatedClosings = cashierClosings.filter((c) => c.id !== closingId);
+    await persistAccountsData({ cashierClosings: updatedClosings });
+    if (showToast) {
+      showToast('🗑️ تم حذف تقفيل الوردية المحدد.');
+    }
+  };
+
+  // 11. Settle Monthly Inventory Shortage Against Cash Surplus Escrow
+  const handleSettleInventoryShortage = async (branchId, month, netShortage) => {
+    const bEmps = (state?.employees || []).filter((e) => {
+      return e.branches?.some((b) => b.branchId === branchId) || e.branchId === branchId || e.branch === branchId;
+    });
+
+    if (bEmps.length === 0) {
+      alert('لا يوجد موظفون مسجلون بهذا الفرع لتوزيع العجز عليهم.');
+      return;
+    }
+
+    const splitEach = Number((netShortage / bEmps.length).toFixed(2));
+    const bName = branches.find((b) => b.id === branchId)?.name || 'الفرع';
+
+    const newAdjs = bEmps.map((emp) => ({
+      id: `adj-inv-shortage-${Date.now()}-${emp.id}`,
+      employeeId: emp.id,
+      branchId,
+      type: 'deduction',
+      amount: splitEach,
+      reason: `صافي عجز الجرد الشهري للأصناف بعد مقاصة أمانات الزيادة النقدية (${bName}) - شهر ${month}`,
+      date: `${month}-28`,
+      createdAt: new Date().toISOString(),
+      isInventoryShortage: true,
+    }));
+
+    const nextState = {
+      ...state,
+      adjustments: [...(state?.adjustments || []), ...newAdjs],
+    };
+
+    if (setState) setState(nextState);
+    if (saveState) await saveState(nextState);
+
+    if (showToast) {
+      showToast(`✅ تم توزيع صافي عجز الجرد (${netShortage.toLocaleString()} ج.م) بالتساوي على ${bEmps.length} موظفاً بصيدلية ${bName} وخصمه من الرواتب.`);
+    }
+  };
+
   const handleOpenVendorTxModal = (type) => {
     setVendorTxInitialType(type || 'payment');
     setIsVendorTxModalOpen(true);
@@ -482,6 +573,7 @@ export default function AccountsSystemView({
           setIsAddEditVendorModalOpen(true);
         }}
         onOpenPayrollModal={() => setIsPayrollModalOpen(true)}
+        onOpenNewCashierShift={() => setIsNewCashierShiftModalOpen(true)}
         onOpenAiPromptModal={() => setIsAiPromptModalOpen(true)}
         onOpenAiAuditRadarModal={() => setIsAiAuditRadarModalOpen(true)}
         onOpenGuideModal={() => setActiveTab('guide')}
@@ -698,6 +790,19 @@ export default function AccountsSystemView({
           />
         )}
 
+        {activeTab === 'cashier-closing' && (
+          <CashierClosingTab
+            closings={cashierClosings}
+            branches={branches}
+            employees={state?.employees || []}
+            selectedBranchId={selectedBranchId}
+            fiscalPeriod={fiscalPeriod}
+            onOpenNewShiftModal={() => setIsNewCashierShiftModalOpen(true)}
+            onDeleteClosing={handleDeleteCashierClosing}
+            onSettleInventoryShortage={handleSettleInventoryShortage}
+          />
+        )}
+
         {activeTab === 'reports' && (
           <FinancialStatementsTab
             accounts={accounts}
@@ -809,7 +914,18 @@ export default function AccountsSystemView({
         onPostPayrollEntry={handlePostPayrollEntry}
       />
 
-      {/* I. Natural Language AI Journal Prompt Modal */}
+      {/* I. Cashier Shift Closing, Shortage, Surplus & Payroll Allocation Modal */}
+      <NewCashierShiftModal
+        isOpen={isNewCashierShiftModalOpen}
+        onClose={() => setIsNewCashierShiftModalOpen(false)}
+        branches={branches}
+        selectedBranchId={selectedBranchId}
+        employees={state?.employees || []}
+        treasuries={treasuries}
+        onSaveClosing={handleSaveCashierClosing}
+      />
+
+      {/* J. Natural Language AI Journal Prompt Modal */}
       <AiJournalPromptModal
         isOpen={isAiPromptModalOpen}
         onClose={() => setIsAiPromptModalOpen(false)}
