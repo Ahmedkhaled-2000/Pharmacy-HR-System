@@ -40,6 +40,58 @@ export default function ElectronicKioskView({
   const [activeAction, setActiveAction] = useState(null);
   const [selectedBranchId, setSelectedBranchId] = useState(null);
   
+  const urlBranchParam = typeof window !== 'undefined'
+    ? (new URLSearchParams(window.location.search).get('branchId') || new URLSearchParams(window.location.search).get('branch'))
+    : null;
+  const effectiveKioskBranchId = kioskBranchId || urlBranchParam || null;
+  const isGeneralKioskLink = !effectiveKioskBranchId;
+
+  // Extract all unique assigned branches for an employee (primary + multi-branch assignments)
+  const getEmployeeAssignedBranches = (emp) => {
+    if (!emp) return [];
+    const branchMap = new Map();
+
+    const addBranch = (bId, fallbackName = '') => {
+      if (!bId) return;
+      const strId = String(bId).trim();
+      if (!strId) return;
+      const foundBranch = (state?.branches || []).find((b) =>
+        String(b.id).trim() === strId ||
+        String(b.branchCode || '').trim() === strId ||
+        String(b.id).replace(/^branch_/, '') === strId.replace(/^branch_/, '')
+      );
+      const resolvedId = foundBranch ? String(foundBranch.id) : strId;
+      if (!branchMap.has(resolvedId)) {
+        branchMap.set(resolvedId, {
+          id: resolvedId,
+          name: foundBranch?.name || fallbackName || `فرع ${resolvedId}`,
+          code: foundBranch?.branchCode || ''
+        });
+      }
+    };
+
+    // 1. Primary branch
+    if (emp.branchId) {
+      addBranch(emp.branchId, emp.branchName);
+    }
+
+    // 2. Multi-branch assignments from branchesDetails
+    if (Array.isArray(emp.branchesDetails) && emp.branchesDetails.length > 0) {
+      emp.branchesDetails.forEach((bd) => {
+        if (bd?.branchId) {
+          addBranch(bd.branchId, bd.branchName);
+        }
+      });
+    }
+
+    return Array.from(branchMap.values());
+  };
+
+  const assignedBranches = matchedEmp ? getEmployeeAssignedBranches(matchedEmp) : [];
+  const isMultiBranchEmp = assignedBranches.length > 1;
+  // Show selector ONLY on general kiosk link AND when employee is assigned to more than 1 branch
+  const showBranchSelector = Boolean(matchedEmp && isGeneralKioskLink && isMultiBranchEmp);
+
   const todayStr = getRealTodayStr ? getRealTodayStr() : new Date().toISOString().slice(0, 10);
   const rawActiveShift = matchedEmp ? (state.activeShifts?.[matchedEmp.id] || state.activeShifts?.[String(matchedEmp.id)]) : null;
   const isStaleActiveShift = rawActiveShift && rawActiveShift.date && rawActiveShift.date !== todayStr;
@@ -133,9 +185,17 @@ export default function ElectronicKioskView({
         }
       }
       
-      let defaultBranchId = kioskBranchId || emp.branchId || '';
-      if (!defaultBranchId && emp.branchesDetails && emp.branchesDetails.length > 0) {
-        defaultBranchId = emp.branchesDetails[0].branchId;
+      const assigned = getEmployeeAssignedBranches(emp);
+      const activeS = (state?.activeShifts?.[emp.id] || state?.activeShifts?.[String(emp.id)]);
+      let defaultBranchId = '';
+      if (activeS && activeS.branchId) {
+        defaultBranchId = String(activeS.branchId);
+      } else if (effectiveKioskBranchId) {
+        defaultBranchId = String(effectiveKioskBranchId);
+      } else if (assigned.length > 0) {
+        defaultBranchId = String(assigned[0].id);
+      } else {
+        defaultBranchId = String(emp.branchId || '');
       }
       setSelectedBranchId(defaultBranchId);
       setMatchedEmp(emp);
@@ -438,6 +498,7 @@ export default function ElectronicKioskView({
     // Reset matched employee and input code so kiosk is immediately ready for next person
     setMatchedEmp(null);
     setInputCode('');
+    setSelectedBranchId(null);
 
     // If global modal in GlobalModalsContainer was not already triggered, trigger local fallback
     if (!kioskConfirmModal?.open) {
@@ -666,7 +727,7 @@ export default function ElectronicKioskView({
                 </div>
                 <button 
                   className="kiosk-logout-btn" 
-                  onClick={() => { setMatchedEmp(null); setInputCode(''); }}
+                  onClick={() => { setMatchedEmp(null); setInputCode(''); setSelectedBranchId(null); }}
                   style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', color: '#475569', padding: '0.7rem 1.2rem', borderRadius: '12px', fontSize: '0.95rem', fontWeight: 700, cursor: 'pointer' }}
                 >
                   تغيير الموظف
@@ -856,8 +917,137 @@ export default function ElectronicKioskView({
                   </button>
                 </div>
               ) : (
-                /* Actions Grid */
-                <div className="kiosk-action-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.2rem', width: '100%' }}>
+                <>
+                  {/* ── Branch Selection Card for Multi-Branch Employees on General Kiosk ── */}
+                  {showBranchSelector && (
+                    <div
+                      className="kiosk-branch-selector-card"
+                      style={{
+                        width: '100%',
+                        marginBottom: '18px',
+                        animation: 'fadeIn 0.3s ease-out'
+                      }}
+                    >
+                      {activeShift ? (
+                        <div
+                          style={{
+                            background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)',
+                            border: '1.5px solid #93c5fd',
+                            borderRadius: '16px',
+                            padding: '12px 16px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: '10px'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontSize: '22px' }}>🏢</span>
+                            <div style={{ textAlign: 'right' }}>
+                              <div style={{ fontSize: '12.5px', fontWeight: 800, color: '#1e40af' }}>
+                                الوردية الحالية نشطة ومسجلة في:
+                              </div>
+                              <div style={{ fontSize: '15px', fontWeight: 900, color: '#1d4ed8' }}>
+                                {(state?.branches || []).find(b => String(b.id) === String(activeShift.branchId))?.name || activeShift.branchName || 'الفرع المحدد'}
+                              </div>
+                            </div>
+                          </div>
+                          <span
+                            style={{
+                              fontSize: '11px',
+                              fontWeight: 800,
+                              background: '#bfdbfe',
+                              color: '#1e3a8a',
+                              padding: '4px 10px',
+                              borderRadius: '999px'
+                            }}
+                          >
+                            وردية قيد العمل ⏱️
+                          </span>
+                        </div>
+                      ) : (
+                        <div
+                          style={{
+                            background: 'linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)',
+                            border: '2px solid #10b981',
+                            borderRadius: '18px',
+                            padding: '16px 18px',
+                            boxShadow: '0 6px 20px rgba(16, 185, 129, 0.12)'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ fontSize: '22px' }}>🏢</span>
+                              <div style={{ textAlign: 'right' }}>
+                                <div style={{ fontSize: '14.5px', fontWeight: 800, color: '#065f46' }}>
+                                  اختر الفرع المراد تسجيل الحضور والعمل به:
+                                </div>
+                                <div style={{ fontSize: '11.5px', color: '#047857' }}>
+                                  حدد الفرع لبدء الوردية وتطبيق لائحة ومعدلات الأجر الخاصة به
+                                </div>
+                              </div>
+                            </div>
+                            <span
+                              style={{
+                                fontSize: '11px',
+                                fontWeight: 800,
+                                background: '#d1fae5',
+                                color: '#047857',
+                                padding: '3px 10px',
+                                borderRadius: '999px',
+                                border: '1px solid #a7f3d0'
+                              }}
+                            >
+                              موظف متعدد الفروع ({assignedBranches.length} فروع)
+                            </span>
+                          </div>
+
+                          {/* Branch Selection Buttons Grid */}
+                          <div
+                            style={{
+                              display: 'grid',
+                              gridTemplateColumns: assignedBranches.length <= 3 ? `repeat(${assignedBranches.length}, 1fr)` : 'repeat(auto-fit, minmax(140px, 1fr))',
+                              gap: '10px'
+                            }}
+                          >
+                            {assignedBranches.map((b) => {
+                              const isSelected = String(selectedBranchId) === String(b.id);
+                              return (
+                                <button
+                                  key={b.id}
+                                  type="button"
+                                  onClick={() => setSelectedBranchId(b.id)}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '8px',
+                                    padding: '12px 14px',
+                                    borderRadius: '14px',
+                                    fontSize: '14px',
+                                    fontWeight: 800,
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s ease',
+                                    background: isSelected ? 'linear-gradient(135deg, #059669 0%, #10b981 100%)' : '#ffffff',
+                                    color: isSelected ? '#ffffff' : '#1e293b',
+                                    border: isSelected ? '2.5px solid #047857' : '1.5px solid #cbd5e1',
+                                    boxShadow: isSelected ? '0 6px 16px rgba(16, 185, 129, 0.3)' : '0 2px 5px rgba(0,0,0,0.04)',
+                                    transform: isSelected ? 'translateY(-2px)' : 'none'
+                                  }}
+                                >
+                                  <span style={{ fontSize: '16px' }}>{isSelected ? '✅' : '🏢'}</span>
+                                  <span>{b.name}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Actions Grid */}
+                  <div className="kiosk-action-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.2rem', width: '100%' }}>
                   <div 
                     className={`kiosk-action-card start ${activeShift ? 'disabled' : ''}`} 
                     onClick={() => handleActionClick('shift_start')} 
@@ -898,7 +1088,8 @@ export default function ElectronicKioskView({
                     <div className="kiosk-action-sub" style={{ fontSize: '0.9rem', color: '#64748b', textAlign: 'center' }}>استكمال الوردية</div>
                   </div>
                 </div>
-              )}
+              </>
+            )}
             </div>
           )}
         </div>
