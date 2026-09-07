@@ -22,9 +22,33 @@ export default function ExportPayrollModal({
   if (!isExportModalOpen) return null;
 
   return (
-    <div className="modal-overlay">
-      <div className="modal-card">
-        <h3>تصدير تقرير الإكسل المخصص</h3>
+    <div
+      className="modal-overlay"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) setIsExportModalOpen(false);
+      }}
+    >
+      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+          <h3 style={{ margin: 0 }}>تصدير تقرير الإكسل المخصص</h3>
+          <button
+            type="button"
+            className="modal-close-circle-btn"
+            onClick={() => setIsExportModalOpen(false)}
+            aria-label="إغلاق"
+            style={{
+              background: '#f1f5f9',
+              border: 'none',
+              borderRadius: '50%',
+              width: '30px',
+              height: '30px',
+              cursor: 'pointer',
+              fontSize: '15px'
+            }}
+          >
+            ✕
+          </button>
+        </div>
         <div className="field" style={{ marginBottom: '14px' }}>
           <label>نوع التقرير</label>
           <select value={exportType} onChange={(e) => setExportType(e.target.value)}>

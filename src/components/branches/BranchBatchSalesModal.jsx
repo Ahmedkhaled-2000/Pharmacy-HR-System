@@ -159,22 +159,31 @@ export default function BranchBatchSalesModal({
   const batchReceiptsTotal = rows.reduce((acc, r) => acc + (parseInt(r.receiptsCount, 10) || 0), 0);
 
   return (
-    <div className="modal-overlay" style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      backgroundColor: 'rgba(15, 23, 42, 0.75)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 10000,
-      padding: '16px',
-      backdropFilter: 'blur(4px)'
-    }}>
-      <div className="modal-content card" style={{
-        maxWidth: '1050px',
+    <div
+      className="modal-overlay"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose?.();
+      }}
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(15, 23, 42, 0.75)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 10000,
+        padding: '16px',
+        backdropFilter: 'blur(4px)'
+      }}
+    >
+      <div
+        className="modal-content card"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          maxWidth: '1050px',
         width: '100%',
         maxHeight: '94vh',
         overflowY: 'auto',

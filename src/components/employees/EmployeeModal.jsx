@@ -37,11 +37,38 @@ export default function EmployeeModal({
   if (!isEmpModalOpen) return null;
 
   return (
-    <div className="modal-overlay">
-      <div className="modal-card emp-form-modal">
-        <h3 style={{ textAlign: 'center', marginBottom: '18px' }}>
-          {editingEmp ? 'تعديل بيانات الموظف' : 'إضافة موظف جديد'}
-        </h3>
+    <div
+      className="modal-overlay"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) setIsEmpModalOpen(false);
+      }}
+    >
+      <div className="modal-card emp-form-modal" onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
+          <h3 style={{ margin: 0 }}>
+            {editingEmp ? 'تعديل بيانات الموظف' : 'إضافة موظف جديد'}
+          </h3>
+          <button
+            type="button"
+            className="modal-close-circle-btn"
+            onClick={() => setIsEmpModalOpen(false)}
+            aria-label="إغلاق"
+            style={{
+              background: '#f1f5f9',
+              border: 'none',
+              borderRadius: '50%',
+              width: '32px',
+              height: '32px',
+              cursor: 'pointer',
+              fontSize: '16px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            ✕
+          </button>
+        </div>
 
         <div className="emp-modal-vertical-layout">
           {/* Photo Upload Section at TOP Center */}

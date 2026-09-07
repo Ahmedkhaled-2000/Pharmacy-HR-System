@@ -147,22 +147,31 @@ export default function BranchSalesEntryModal({
   };
 
   return (
-    <div className="modal-overlay" style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      backgroundColor: 'rgba(15, 23, 42, 0.75)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 10000,
-      padding: '16px',
-      backdropFilter: 'blur(4px)'
-    }}>
-      <div className="modal-content card" style={{
-        maxWidth: '650px',
+    <div
+      className="modal-overlay"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose?.();
+      }}
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(15, 23, 42, 0.75)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 10000,
+        padding: '16px',
+        backdropFilter: 'blur(4px)'
+      }}
+    >
+      <div
+        className="modal-content card"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          maxWidth: '650px',
         width: '100%',
         maxHeight: '92vh',
         overflowY: 'auto',

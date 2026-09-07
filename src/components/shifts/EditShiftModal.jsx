@@ -4,9 +4,33 @@ export default function EditShiftModal({ editingShift, setEditingShift, saveEdit
   if (!editingShift) return null;
 
   return (
-    <div className="modal-overlay">
-      <div className="modal-card">
-        <h3>تعديل الوردية</h3>
+    <div
+      className="modal-overlay"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) setEditingShift(null);
+      }}
+    >
+      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+          <h3 style={{ margin: 0 }}>تعديل الوردية</h3>
+          <button
+            type="button"
+            className="modal-close-circle-btn"
+            onClick={() => setEditingShift(null)}
+            aria-label="إغلاق"
+            style={{
+              background: '#f1f5f9',
+              border: 'none',
+              borderRadius: '50%',
+              width: '30px',
+              height: '30px',
+              cursor: 'pointer',
+              fontSize: '15px'
+            }}
+          >
+            ✕
+          </button>
+        </div>
         <div className="form-row" style={{ flexDirection: 'column', gap: '12px' }}>
           <div className="field grow">
             <label>التاريخ</label>

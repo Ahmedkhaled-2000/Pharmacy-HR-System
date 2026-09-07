@@ -99,7 +99,13 @@ export default function EmployeeTerminationModal({
   };
 
   return (
-    <div className="modal-backdrop" style={{ zIndex: 1200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <div
+      className="modal-backdrop"
+      style={{ zIndex: 1200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !isSubmitting) onClose?.();
+      }}
+    >
       <style>{`
         @media print {
           body * {
@@ -126,6 +132,7 @@ export default function EmployeeTerminationModal({
 
       <div
         className="modal-content"
+        onClick={(e) => e.stopPropagation()}
         style={{
           maxWidth: '900px',
           width: '95%',

@@ -18,6 +18,7 @@ import GmailConfigCard from './GmailConfigCard';
 import GoogleDriveConfigCard from './GoogleDriveConfigCard';
 import DatesPeriodsSettingsCard from './DatesPeriodsSettingsCard';
 import AccountingSystemGuideCard from './AccountingSystemGuideCard';
+import KeyboardShortcutsSettingsCard from './KeyboardShortcutsSettingsCard';
 import { DEFAULT_JOBS, getJobsList, DEFAULT_DEPARTMENTS, getDepartmentsList } from '../../utils/jobsHelper';
 import { getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 import { useUI } from '../../context/UIContext';
@@ -1372,9 +1373,20 @@ export default function SettingsModule({
             {activeTab === 'backup' && '💾 النسخ الاحتياطي وقاعدة البيانات'}
             {activeTab === 'owner' && '👑 صلاحيات وتحكم المالك'}
             {(activeTab === 'accounting_guide' || activeTab === 'accounting-guide') && '📖 دليل وشرح منظومة الحسابات'}
+            {(activeTab === 'shortcuts' || activeTab === 'keyboard_shortcuts') && '⌨️ اختصارات لوحة المفاتيح والتحكم'}
           </span>
         </div>
       </div>
+
+      {/* Tab: Keyboard Shortcuts Management */}
+      {(activeTab === 'shortcuts' || activeTab === 'keyboard_shortcuts') && (
+        <KeyboardShortcutsSettingsCard
+          state={state}
+          setState={setState}
+          saveState={saveState}
+          showToast={showToast}
+        />
+      )}
 
       {/* Tab: Accounting System Educational Guide */}
       {(activeTab === 'accounting_guide' || activeTab === 'accounting-guide') && (

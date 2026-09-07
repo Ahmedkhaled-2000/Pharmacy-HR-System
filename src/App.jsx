@@ -6,6 +6,7 @@ import { NotificationProvider } from './context/NotificationContext';
 import AppRoutes from './routes/AppRoutes';
 import GlobalModalsContainer from './components/modals/GlobalModalsContainer';
 import AppUpdateWatcher from './components/common/AppUpdateWatcher';
+import UniversalShortcutsController from './components/common/UniversalShortcutsController';
 
 /**
  * Inner Application shell
@@ -16,6 +17,7 @@ function AppContent() {
       <AppRoutes />
       <GlobalModalsContainer />
       <AppUpdateWatcher />
+      <UniversalShortcutsController />
     </>
   );
 }

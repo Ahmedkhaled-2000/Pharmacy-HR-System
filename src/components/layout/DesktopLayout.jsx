@@ -870,6 +870,14 @@ export default function DesktopLayout({
               label: 'دليل وشرح منظومة الحسابات (ERP)',
               icon: '📖',
               desc: 'شرح تفصيلي مبسط لشجرة الحسابات والدورة المالية للصيدليات'
+            },
+            {
+              id: 'settings:shortcuts',
+              targetTab: 'settings',
+              targetSubTab: 'shortcuts',
+              label: 'اختصارات لوحة المفاتيح والتحكم',
+              icon: '⌨️',
+              desc: 'تخصيص وتعديل مفاتيح الوصول السريع للنظام'
             }
           ]
         },
@@ -1089,6 +1097,30 @@ export default function DesktopLayout({
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, []);
+
+  // Listen to system-wide navigation shortcuts (Alt+1 .. Alt+9) & dropdown close requests
+  useEffect(() => {
+    const handleNavigateTab = (e) => {
+      const tabIndex = e.detail?.tabIndex;
+      if (tabIndex !== undefined && currentMenuItems[tabIndex]) {
+        const targetMenu = currentMenuItems[tabIndex];
+        handleMenuClick(targetMenu);
+      }
+    };
+    const handleCloseDropdowns = () => {
+      setOpenDropdown(null);
+      setHoveredFlyoutId(null);
+      setIsNotifDropdownOpen(false);
+    };
+
+    window.addEventListener('app:navigate-tab', handleNavigateTab);
+    window.addEventListener('app:dropdown-close-request', handleCloseDropdowns);
+
+    return () => {
+      window.removeEventListener('app:navigate-tab', handleNavigateTab);
+      window.removeEventListener('app:dropdown-close-request', handleCloseDropdowns);
+    };
+  }, [currentMenuItems]);
 
 const handleMenuClick = (menu) => {
 if (menu.isSingle) {
