@@ -539,7 +539,7 @@ try {
                 jsonResponse(['success' => false, 'error' => 'كلمة مرور المالك غير صحيحة'], 403);
             }
 
-            // 1. تصفير ومسح كافة جداول العمليات والأرشيف والبصمات والنسخ
+            // 1. تصفير ومسح كافة جداول العمليات والأرشيف والبصمات والنسخ والقيود المحاسبية
             $tablesToTruncate = [
                 'public.archive_invoice_items',
                 'public.archive_invoices',
@@ -549,7 +549,11 @@ try {
                 'public.archive_suppliers',
                 'public.employee_faces',
                 'public.app_settings_backups',
-                'public.sync_logs'
+                'public.sync_logs',
+                'public.acc_journal_entries',
+                'public.acc_journal_lines',
+                'public.acc_cashier_closings',
+                'public.acc_vendor_transactions'
             ];
 
             foreach ($tablesToTruncate as $tbl) {
@@ -557,6 +561,12 @@ try {
                     Database::execute("TRUNCATE TABLE {$tbl} RESTART IDENTITY CASCADE");
                 } catch (Throwable) {}
             }
+
+            try {
+                Database::execute("UPDATE public.acc_accounts SET opening_balance = 0, current_balance = 0");
+                Database::execute("UPDATE public.acc_treasuries SET current_balance = 0");
+                Database::execute("UPDATE public.acc_vendors SET current_balance = 0");
+            } catch (Throwable) {}
 
             // 2. تحديث جدول app_settings بحالة مصفرة تماماً مع طابع زمني جديد للجلسات
             if ($wipedState !== null && is_array($wipedState)) {

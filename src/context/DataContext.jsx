@@ -385,6 +385,7 @@ export function DataProvider({ children, showToast = () => {} }) {
         localStorage.removeItem('app_is_admin');
         localStorage.removeItem('app_active_nav_tab');
         localStorage.removeItem('app_active_sub_tab');
+        localStorage.removeItem('app_owner_authenticated');
         sessionStorage.clear();
         clearLocalDatabase().catch(() => {});
         setAuthRole('none');

@@ -12,7 +12,7 @@ import {
   removeSnapshot
 } from '../../utils/backupHelper';
 import { apiFetchFaces, apiDeleteFace, apiSystemReset, STORAGE_KEY } from '../../utils/apiClient';
-import { clearPendingQueue, saveStateLocally } from '../../utils/offlineStorage';
+import { clearPendingQueue, saveStateLocally, clearLocalDatabase } from '../../utils/offlineStorage';
 import { broadcastStateChange } from '../../utils/offlineSync';
 import GmailConfigCard from './GmailConfigCard';
 import GoogleDriveConfigCard from './GoogleDriveConfigCard';
@@ -20,6 +20,13 @@ import DatesPeriodsSettingsCard from './DatesPeriodsSettingsCard';
 import AccountingSystemGuideCard from './AccountingSystemGuideCard';
 import KeyboardShortcutsSettingsCard from './KeyboardShortcutsSettingsCard';
 import { DEFAULT_JOBS, getJobsList, DEFAULT_DEPARTMENTS, getDepartmentsList } from '../../utils/jobsHelper';
+import { DEFAULT_PHARMACY_BYLAWS_SECTIONS } from '../../utils/bylawsDefaults';
+import {
+  DEFAULT_CHART_OF_ACCOUNTS,
+  DEFAULT_TREASURIES,
+  DEFAULT_COST_CENTERS
+} from '../../utils/defaultChartOfAccounts';
+import { DEFAULT_PHARMA_VENDORS } from '../../utils/defaultPharmaVendors';
 import { getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 import { useUI } from '../../context/UIContext';
 import { useAuth } from '../../context/AuthContext';
@@ -53,7 +60,7 @@ export default function SettingsModule({
   executeWithOwnerGuard
 }) {
   const { showConfirm } = useUI();
-  const { authRole: currentAuthRole, setAuthRole } = useAuth?.() || {};
+  const { authRole: currentAuthRole, setAuthRole, handleLogout } = useAuth?.() || {};
   const effectiveAuthRole = currentAuthRole || authRole;
   const [activeTab, setActiveTab] = useState(activeSubTab || 'general'); // 'general' | 'jobs' | 'permissions' | 'rules' | 'gmail' | 'ip' | 'backup' | 'owner'
 
@@ -361,7 +368,7 @@ export default function SettingsModule({
 
     try {
       setIsWiping(true);
-      showToast?.('⏳ جاري مسح وتصفير قاعدة البيانات السحابية بالكامل وتسجيل خروج كافة المستخدمين...');
+      showToast?.('⏳ جاري مسح وتصفير قاعدة البيانات مع الحفاظ على الإعدادات واللائحة والعقود والأجهزة...');
 
       // 1. If auto backup before wipe is checked, export full backup JSON
       if (wipeAutoBackup) {
@@ -387,21 +394,115 @@ export default function SettingsModule({
         console.warn('Error clearing biometric faces:', fErr);
       }
 
-      // 3. Construct clean wiped state with preserved org structure and bylaws
-      const preservedOwnerUser = state.orgSettings?.ownerUsername || 'owner';
-      const preservedOwnerPass = state.orgSettings?.ownerPassword || 'owner123';
-      const preservedAdminUser = state.orgSettings?.adminUsername || state.orgSettings?.adminUser || 'admin';
-      const preservedAdminPass = state.orgSettings?.adminPassword || state.orgSettings?.adminPass || '123';
-      const preservedOrgName = state.orgSettings?.orgName || 'منظومة إدارة الموارد البشرية والرواتب';
-      const preservedGmName = state.orgSettings?.generalManagerName || 'المدير العام';
-      const preservedGoogleDriveConfig = state.orgSettings?.googleDriveConfig || {};
-      const preservedGmailConfig = state.orgSettings?.gmailConfig || {};
-      const preservedLogo = state.orgSettings?.logoUrl || '';
+      // 3. Construct clean wiped state with strictly preserved:
+      // ⚙️ All HR System, Device, and Admin Settings
+      // 📱 All Authorized & Approved Devices
+      // 📜 The entire Bylaws system
+      // 📄 Employment Contracts headers, templates, & clauses
+      // 👑 Owner & Admin user credentials and modification locks
+      // 🏛️ Preserved Branches structure & Chart of Accounts structure (with 0 balances)
       const systemResetToken = 'rst_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
+      const sessionInvalidationEpoch = Date.now();
+
+      const preservedOrgSettings = {
+        ...(state.orgSettings || {}),
+        ownerUsername: state.orgSettings?.ownerUsername || 'owner',
+        ownerPassword: state.orgSettings?.ownerPassword || 'owner123',
+        adminUsername: state.orgSettings?.adminUsername || state.orgSettings?.adminUser || 'admin',
+        adminPassword: state.orgSettings?.adminPassword || state.orgSettings?.adminPass || '123',
+        adminUser: state.orgSettings?.adminUsername || state.orgSettings?.adminUser || 'admin',
+        adminPass: state.orgSettings?.adminPassword || state.orgSettings?.adminPass || '123',
+        ownerModificationLocks: state.orgSettings?.ownerModificationLocks || DEFAULT_OWNER_LOCKS,
+        contractDepartment: state.orgSettings?.contractDepartment || 'الإدارة العامة والشؤون القانونية والموارد البشرية',
+        contractTitle: state.orgSettings?.contractTitle || 'عَقْدُ عَمَلٍ فَرْدِيّ مُوَحَّد',
+        contractNumberPrefix: state.orgSettings?.contractNumberPrefix !== undefined ? state.orgSettings?.contractNumberPrefix : 'CNT-Modawa@kane-',
+        commercialRegister: state.orgSettings?.commercialRegister || '',
+        taxNumber: state.orgSettings?.taxNumber || '',
+        address: state.orgSettings?.address || '',
+        sessionInvalidationEpoch
+      };
+
+      const preservedAuthorizedDevices = Array.isArray(state.authorizedDevices) ? state.authorizedDevices : [];
+      const preservedApprovedDevices = Array.isArray(state.approvedDevices) ? state.approvedDevices : [];
+
+      const preservedBylaws = state.bylaws || {
+        gracePeriodMinutes: 15,
+        resetPeriodDays: 30,
+        latePenalties: [
+          { occurrence: 1, action: 'تنبيه', deductionFraction: 0 },
+          { occurrence: 2, action: 'إنذار كتابي', deductionFraction: 0 },
+          { occurrence: 3, action: 'خصم ¼ يوم', deductionFraction: 0.25 },
+          { occurrence: 4, action: 'خصم ½ يوم', deductionFraction: 0.5 },
+          { occurrence: 5, action: 'خصم يوم', deductionFraction: 1.0 }
+        ],
+        earlyExitPenalties: [
+          { occurrence: 1, action: 'إنذار', deductionFraction: 0 },
+          { occurrence: 2, action: 'خصم ¼ يوم', deductionFraction: 0.25 },
+          { occurrence: 3, action: 'خصم ½ يوم', deductionFraction: 0.5 },
+          { occurrence: 4, action: 'خصم يوم', deductionFraction: 1.0 }
+        ],
+        deductionOptions: [
+          { label: 'تنبيه / إنذار', value: 0 },
+          { label: 'خصم ¼ يوم', value: 0.25 },
+          { label: 'خصم ½ يوم', value: 0.5 },
+          { label: 'خصم يوم كامل', value: 1.0 },
+          { label: 'خصم يومين', value: 2.0 },
+          { label: 'خصم ثلاث أيام', value: 3.0 }
+        ]
+      };
+
+      const preservedBylawsSections = Array.isArray(state.bylawsSections) && state.bylawsSections.length > 0
+        ? state.bylawsSections
+        : DEFAULT_PHARMACY_BYLAWS_SECTIONS;
+      const preservedBylawsText = state.bylawsText || '';
+      const preservedDisciplinaryRules = Array.isArray(state.disciplinaryRules) ? state.disciplinaryRules : [];
+      const preservedApprovalRules = Array.isArray(state.approvalRules) && state.approvalRules.length > 0
+        ? state.approvalRules
+        : [];
+
+      const preservedContractTemplates = Array.isArray(state.contractTemplates) ? state.contractTemplates : [];
+      const preservedContractClauses = Array.isArray(state.contractClauses) ? state.contractClauses : [];
+      const preservedCustomContractClauses = Array.isArray(state.customContractClauses) ? state.customContractClauses : [];
+      const preservedDefaultContractClauses = Array.isArray(state.defaultContractClauses) ? state.defaultContractClauses : [];
+      const preservedEmploymentContracts = Array.isArray(state.employmentContracts) ? state.employmentContracts : [];
+
+      const preservedJobs = Array.isArray(state.jobs) && state.jobs.length > 0 ? state.jobs : DEFAULT_JOBS;
+      const preservedCustomJobs = Array.isArray(state.customJobs) ? state.customJobs : [];
+      const preservedCustomDepartments = Array.isArray(state.customDepartments) ? state.customDepartments : [];
+      const preservedIpRestrictions = state.ipRestrictions || { enabled: false, allowedIps: [] };
+
+      // Branches structure preserved (manager ties detached since employees are wiped)
+      const preservedBranches = (state.branches || []).map((b) => ({
+        ...b,
+        managerEmpId: null,
+        manager_id: null
+      }));
+
+      // Financial accounts data zeroed
+      const cleanAccountsData = {
+        accounts: (state.accountsData?.accounts || DEFAULT_CHART_OF_ACCOUNTS).map((acc) => ({
+          ...acc,
+          opening_balance: 0,
+          current_balance: 0
+        })),
+        costCenters: state.accountsData?.costCenters || DEFAULT_COST_CENTERS,
+        treasuries: (state.accountsData?.treasuries || DEFAULT_TREASURIES).map((t) => ({
+          ...t,
+          current_balance: 0
+        })),
+        entries: [],
+        vendors: (state.accountsData?.vendors || DEFAULT_PHARMA_VENDORS).map((v) => ({
+          ...v,
+          current_balance: 0
+        })),
+        vendorTransactions: [],
+        cashierClosings: []
+      };
 
       const wipedState = {
+        // Operational / Transactional entities wiped 100%
         employees: [],
-        branches: [],
+        branches: preservedBranches,
         shifts: [],
         activeShifts: {},
         adjustments: [],
@@ -414,63 +515,36 @@ export default function SettingsModule({
         evaluations: [],
         notifications: [],
         employeeNotes: [],
-        authorizedDevices: [],
         logs: [],
         rosters: [],
         lateIncidents: [],
         breakLogs: [],
         permissionRequests: [],
         pendingDeviceRegistrations: [],
-        approvedDevices: [],
-        jobs: state.jobs || DEFAULT_JOBS,
-        orgSettings: {
-          ownerUsername: preservedOwnerUser,
-          ownerPassword: preservedOwnerPass,
-          ownerModificationLocks: DEFAULT_OWNER_LOCKS,
-          adminUsername: preservedAdminUser,
-          adminPassword: preservedAdminPass,
-          adminUser: preservedAdminUser,
-          adminPass: preservedAdminPass,
-          orgName: preservedOrgName,
-          generalManagerName: preservedGmName,
-          logoUrl: preservedLogo,
-          googleDriveConfig: preservedGoogleDriveConfig,
-          gmailConfig: preservedGmailConfig,
-          biometricType: 'face',
-          loanRequestStartDay: 1,
-          loanRequestEndDay: 10,
-          maxMonthlyLoanSalaryPercent: 50,
-          sessionInvalidationEpoch: Date.now()
-        },
-        approvalRules: state.approvalRules || [],
-        bylaws: state.bylaws || {
-          gracePeriodMinutes: 15,
-          resetPeriodDays: 30,
-          latePenalties: [
-            { occurrence: 1, action: 'تنبيه', deductionFraction: 0 },
-            { occurrence: 2, action: 'إنذار كتابي', deductionFraction: 0 },
-            { occurrence: 3, action: 'خصم ¼ يوم', deductionFraction: 0.25 },
-            { occurrence: 4, action: 'خصم ½ يوم', deductionFraction: 0.5 },
-            { occurrence: 5, action: 'خصم يوم', deductionFraction: 1.0 }
-          ],
-          earlyExitPenalties: [
-            { occurrence: 1, action: 'إنذار', deductionFraction: 0 },
-            { occurrence: 2, action: 'خصم ¼ يوم', deductionFraction: 0.25 },
-            { occurrence: 3, action: 'خصم ½ يوم', deductionFraction: 0.5 },
-            { occurrence: 4, action: 'خصم يوم', deductionFraction: 1.0 }
-          ],
-          deductionOptions: [
-            { label: 'تنبيه / إنذار', value: 0 },
-            { label: 'خصم ¼ يوم', value: 0.25 },
-            { label: 'خصم ½ يوم', value: 0.5 },
-            { label: 'خصم يوم كامل', value: 1.0 },
-            { label: 'خصم يومين', value: 2.0 },
-            { label: 'خصم ثلاث أيام', value: 3.0 }
-          ]
-        },
-        ipRestrictions: { enabled: false, allowedIps: [] },
-        customJobs: [],
-        customDepartments: [],
+        branchSales: [],
+        branchDirectives: [],
+        adminDirectives: [],
+
+        // Strictly Preserved Foundations
+        orgSettings: preservedOrgSettings,
+        authorizedDevices: preservedAuthorizedDevices,
+        approvedDevices: preservedApprovedDevices,
+        bylaws: preservedBylaws,
+        bylawsSections: preservedBylawsSections,
+        bylawsText: preservedBylawsText,
+        disciplinaryRules: preservedDisciplinaryRules,
+        approvalRules: preservedApprovalRules,
+        contractTemplates: preservedContractTemplates,
+        contractClauses: preservedContractClauses,
+        customContractClauses: preservedCustomContractClauses,
+        defaultContractClauses: preservedDefaultContractClauses,
+        employmentContracts: preservedEmploymentContracts,
+        jobs: preservedJobs,
+        customJobs: preservedCustomJobs,
+        customDepartments: preservedCustomDepartments,
+        ipRestrictions: preservedIpRestrictions,
+        accountsData: cleanAccountsData,
+
         _deletedIds: [],
         _systemResetToken: systemResetToken,
         _wipedAt: new Date().toISOString()
@@ -491,27 +565,30 @@ export default function SettingsModule({
       await clearLocalDatabase().catch(() => {});
       await saveStateLocally(wipedState).catch(() => {});
 
-      // 6. Broadcast reset across all devices and open tabs
+      // 6. Broadcast reset across all open tabs and devices
       broadcastStateChange(wipedState);
 
-      // 7. Clear all sessions, credentials, and local storage
+      // 7. Clear all sessions, credentials, and local storage (immediate multi-account logout)
       const preservedTheme = localStorage.getItem('app-theme') || 'light';
       localStorage.clear();
       sessionStorage.clear();
       localStorage.setItem('app-theme', preservedTheme);
       localStorage.setItem('last_known_reset_token', systemResetToken);
+      localStorage.setItem('last_known_session_epoch', String(sessionInvalidationEpoch));
 
-      // 8. Update in-memory state
+      // 8. In-memory auth and state reset
+      if (handleLogout) handleLogout();
+      if (setAuthRole) setAuthRole('none');
       setState(wipedState);
 
-      showToast?.('✅ تم مسح وتصفير قاعدة البيانات السحابية بالكامل، وتسجيل الخروج من كافة الحسابات واليوزرات بنجاح.');
+      showToast?.('✅ تم مسح وتصفير قاعدة البيانات بالكامل مع الحفاظ على الإعدادات واللائحة والعقود والأجهزة. جاري تسجيل الخروج...');
       setShowWipeModal(false);
       setWipeConfirmPassword('');
 
-      // 9. Redirect to clean login screen to start fresh
+      // 9. Redirect immediately to clean login screen to start fresh
       setTimeout(() => {
-        window.location.href = '/';
-      }, 1000);
+        window.location.replace('/');
+      }, 750);
     } catch (err) {
       console.error('Data wipe failed:', err);
       showToast?.('❌ حدث خطأ أثناء مسح البيانات: ' + (err.message || err));
@@ -2615,8 +2692,8 @@ export default function SettingsModule({
                     إجراء نهائي
                   </span>
                 </div>
-                <p style={{ margin: 0, fontSize: '13px', color: 'var(--text)', lineHeight: '1.6', maxWidth: '820px' }}>
-                  يتيح هذا الإجراء تفريغ ومسح كافة بيانات المنظومة بالكامل من قاعدة البيانات والسيرفر فوراً (يشمل: جميع الموظفين، الفروع، الورديات، بصمات الوجه، سجلات الحضور والانصراف، الجداول، السلف، والطلبات)، مع <strong>تسجيل الخروج التلقائي الفوري لكافة المستخدمين واليوزرات من جميع الأجهزة</strong> والبدء من جديد مع الاحتفاظ ببيانات دخول الإدارة العليا والمالك.
+                <p style={{ margin: 0, fontSize: '13px', color: 'var(--text)', lineHeight: '1.7', maxWidth: '850px' }}>
+                  يتيح هذا الإجراء تصفير ومسح كافة البيانات التشغيلية (الموظفين، الحضور والانصراف، الورديات، بصمات الوجه، السلف، الرواتب، القيود، ومبيعات الفروع) مع <strong>الحفاظ الكامل على: إعدادات الموارد البشرية والأجهزة، اللائحة التنظيمية بالكامل، عقود العمل ونماذجها، وبيانات دخول الأدمن والمالك</strong>، وتنفيذ <strong>تسجيل خروج فوري عام من كافة الحسابات على جميع الأجهزة</strong> للبدء من جديد.
                 </p>
               </div>
 
@@ -3411,6 +3488,7 @@ export default function SettingsModule({
         <div className="modal-backdrop" style={{ zIndex: 1400, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div
             className="modal-content card"
+            onClick={(e) => e.stopPropagation()}
             style={{
               maxWidth: '650px',
               width: '95%',
@@ -3436,7 +3514,8 @@ export default function SettingsModule({
               </div>
               <button
                 type="button"
-                className="btn btn-ghost"
+                className="btn btn-ghost modal-close-btn"
+                data-action="close"
                 onClick={() => {
                   if (!isWiping) setShowWipeModal(false);
                 }}
@@ -3447,16 +3526,65 @@ export default function SettingsModule({
               </button>
             </div>
 
-            {/* Impact Details Box */}
-            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '12px', padding: '14px 16px', marginBottom: '18px' }}>
-              <div style={{ fontWeight: 800, color: '#991b1b', fontSize: '13.5px', marginBottom: '8px' }}>
-                📌 تفاصيل ومحتويات عملية المسح والتصفير:
+            {/* Impact Details: Preserved & Wiped Grid */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '18px' }}>
+              {/* Preserved Foundations (Green) */}
+              <div style={{ background: '#f0fdf4', border: '1.5px solid #86efac', borderRadius: '12px', padding: '12px 16px' }}>
+                <div style={{ fontWeight: 800, color: '#166534', fontSize: '13.5px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>🛡️</span>
+                  <span>عناصر ومكونات محفوظة ومحمية 100% (لن يتم المساس بها نهائياً):</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '8px', fontSize: '12px', color: '#14532d', lineHeight: '1.6' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
+                    <span>⚙️</span>
+                    <span><strong>إعدادات الموارد البشرية والأدمن:</strong> إعدادات النظام، قواعد الرواتب، السحابة، والتخصيصات بالكامل.</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
+                    <span>📱</span>
+                    <span><strong>الأجهزة المصرح بها:</strong> الأجهزة المعتمدة للبصمة والنظام لا يتم حذفها أو فك ترخيصها.</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
+                    <span>📜</span>
+                    <span><strong>اللائحة التنظيمية بالكامل:</strong> الفصول، المواد، سياسات وجداول الجزاءات، ومصفوفة الموافقات.</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
+                    <span>📄</span>
+                    <span><strong>عقود العمل ونماذجها:</strong> نماذج وبنود وترويسة عقود العمل والبنود المخصصة للموظفين.</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
+                    <span>👑</span>
+                    <span><strong>يوزرات الأدمن والمالك:</strong> بيانات الدخول وكلمات المرور وأقفال الحماية الصارمة.</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
+                    <span>🏢</span>
+                    <span><strong>الفروع ودليل الحسابات:</strong> هيكل الفروع والمسميات ومراكز التكلفة (مع تصفير الأرصدة).</span>
+                  </div>
+                </div>
               </div>
-              <ul style={{ margin: 0, paddingRight: '20px', fontSize: '12.5px', color: '#7f1d1d', lineHeight: '1.8' }}>
-                <li><strong>مسح قاعدة البيانات والسيرفر:</strong> مسح كافة الموظفين، الفروع، الورديات، بصمات الوجه واليد، الحضور والانصراف، والطلبات بالكامل.</li>
-                <li><strong>تسجيل الخروج الفوري العام:</strong> سيتم تسجيل الخروج فورياً من كافة حسابات الموظفين ومديري الفروع في جميع الأجهزة والمتصفحات.</li>
-                <li><strong>البدء من جديد:</strong> سيتم تصفير النظام وإعادة توجيهك لشاشة الدخول والتهيئة مع الاحتفاظ ببيانات دخول الإدارة العليا والمالك.</li>
-              </ul>
+
+              {/* Operational Data Wiped (Red) */}
+              <div style={{ background: '#fef2f2', border: '1.5px solid #fecaca', borderRadius: '12px', padding: '12px 16px' }}>
+                <div style={{ fontWeight: 800, color: '#991b1b', fontSize: '13.5px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>🔥</span>
+                  <span>بيانات تشغيلية سيتم مسحها وتصفيرها بالكامل (تصفير شامل):</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '6px', fontSize: '12px', color: '#7f1d1d', lineHeight: '1.6' }}>
+                  <div>• مسح كافة ملفات وبيانات الموظفين ومستنداتهم</div>
+                  <div>• مسح سجلات الحضور والانصراف والورديات والجداول (Roster)</div>
+                  <div>• مسح بصمات الوجه واليد من السيرفر وقاعدة البيانات</div>
+                  <div>• مسح مسيرات الرواتب والسلف والمكافآت والخصومات</div>
+                  <div>• مسح كافة طلبات الإجازات والأذونات والعهد</div>
+                  <div>• تصفير قيود اليومية، معاملات الموردين، وإقفالات الكاشير والخزائن ومبيعات الفروع</div>
+                </div>
+              </div>
+
+              {/* Instant Logout Notice (Indigo) */}
+              <div style={{ background: '#eef2ff', border: '1.5px solid #c7d2fe', borderRadius: '12px', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{ fontSize: '20px' }}>🚪</span>
+                <div style={{ fontSize: '12px', color: '#3730a3', lineHeight: '1.5' }}>
+                  <strong>تسجيل خروج فوري عام:</strong> فور تنفيذ التصفير، سيتم إنهاء وتسجيل الخروج الفوري لكافة الحسابات والجلسات المفتوحة للموظفين ومديري الفروع والأدمن على جميع الأجهزة والمتصفحات، وإعادة التوجيه للبدء من جديد.
+                </div>
+              </div>
             </div>
 
             {/* Safe Auto-Backup Checkbox */}

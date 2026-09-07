@@ -488,6 +488,14 @@ app.post('/api/system/reset', async (req, res) => {
   try {
     const { key = STORAGE_KEY, state } = req.body;
     await db.query('TRUNCATE TABLE public.app_settings, public.employee_faces, public.sync_logs CASCADE');
+    try {
+      await db.query('TRUNCATE TABLE public.acc_journal_entries, public.acc_journal_lines, public.acc_cashier_closings, public.acc_vendor_transactions CASCADE');
+      await db.query('UPDATE public.acc_accounts SET opening_balance = 0, current_balance = 0');
+      await db.query('UPDATE public.acc_treasuries SET current_balance = 0');
+      await db.query('UPDATE public.acc_vendors SET current_balance = 0');
+    } catch (accErr) {
+      console.warn('Accounting tables reset skipped or not present:', accErr?.message);
+    }
     if (isRedisConnected && redis) {
       await redis.flushdb();
     }

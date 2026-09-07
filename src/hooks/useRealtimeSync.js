@@ -61,17 +61,26 @@ export function useRealtimeSync(props = {}) {
     if (!parsed) return;
     const normalized = normalizeState(parsed);
 
-    // التحقق من حدوث تصفير شامل لقاعدة البيانات (Factory Reset)
+    // التحقق من حدوث تصفير شامل لقاعدة البيانات (Factory Reset) أو إبطال فوري للجلسات
     const currentKnownResetToken = localStorage.getItem('last_known_reset_token') || '';
-    if (normalized._systemResetToken && normalized._systemResetToken !== currentKnownResetToken) {
-      localStorage.setItem('last_known_reset_token', normalized._systemResetToken);
+    const currentKnownEpoch = localStorage.getItem('last_known_session_epoch') || '0';
+    const serverEpoch = String(normalized?.orgSettings?.sessionInvalidationEpoch || '0');
+
+    const isResetTriggered = (normalized._systemResetToken && normalized._systemResetToken !== currentKnownResetToken) ||
+                             (serverEpoch !== '0' && serverEpoch !== currentKnownEpoch);
+
+    if (isResetTriggered) {
+      if (normalized._systemResetToken) localStorage.setItem('last_known_reset_token', normalized._systemResetToken);
+      if (serverEpoch !== '0') localStorage.setItem('last_known_session_epoch', serverEpoch);
       localStorage.removeItem('app_auth_role');
       localStorage.removeItem('app_current_emp_user');
       localStorage.removeItem('app_current_branch');
       localStorage.removeItem('app_is_admin');
       localStorage.removeItem('app_active_nav_tab');
       localStorage.removeItem('app_active_sub_tab');
+      localStorage.removeItem('app_owner_authenticated');
       sessionStorage.clear();
+      clearLocalDatabase().catch(() => {});
 
       setAuthRole('none');
       setIsAdminLoggedIn(false);
