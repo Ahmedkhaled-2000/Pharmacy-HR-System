@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { fmt, getRealTodayStr, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 import { getJobsList } from '../../utils/jobsHelper';
+import { useUI } from '../../context/UIContext';
 import EmployeeTerminationModal from './EmployeeTerminationModal';
 import EmployeeComprehensiveDossierModal from './EmployeeComprehensiveDossierModal';
 import EmployeeSalaryDetailsModal from './EmployeeSalaryDetailsModal';
@@ -29,9 +30,20 @@ export default function EmployeeCardsGrid({
   onReinstateEmployee,
   executeWithOwnerGuard
 }) {
+  const ui = useUI();
   const [activeMainTab, setActiveMainTab] = useState('active'); // 'active' | 'resigned'
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedBranchFilter, setSelectedBranchFilter] = useState('all');
+
+  const handleOpenEmpPhones = () => {
+    if (typeof openEmpPhonesModal === 'function') {
+      openEmpPhonesModal();
+    } else if (ui?.openEmpPhonesModal) {
+      ui.openEmpPhonesModal();
+    } else if (ui?.setIsEmpPhonesModalOpen) {
+      ui.setIsEmpPhonesModalOpen(true);
+    }
+  };
 
   // Modals state
   const [selectedSalaryEmp, setSelectedSalaryEmp] = useState(null);
@@ -342,7 +354,7 @@ export default function EmployeeCardsGrid({
           <button
             type="button"
             className="btn btn-ghost"
-            onClick={openEmpPhonesModal}
+            onClick={handleOpenEmpPhones}
             style={{
               background: 'var(--primary-light, #e0f2fe)',
               color: 'var(--primary-dark, #0369a1)',

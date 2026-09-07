@@ -758,6 +758,7 @@ export default function AppRoutes() {
                       onSaveBranch={handleSaveBranch}
                       onDeleteBranch={handleDeleteBranch}
                       onSwitchSubTab={setActiveSubTab}
+                      showToast={showToast}
                       onOpenBranchRoster={(branchId) => {
                         setSelectedRosterBranchId(branchId);
                         setActiveSubTab('roster');

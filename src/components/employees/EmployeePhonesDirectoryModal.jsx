@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { getEmpDisplayName } from '../../utils/formatters';
 
 export default function EmployeePhonesDirectoryModal({
-  isOpen,
+  isOpen = true,
   onClose,
   employees = [],
   branches = []
@@ -114,12 +114,13 @@ export default function EmployeePhonesDirectoryModal({
     });
   }, [employeeList, searchQuery, branchFilter, statusFilter, typeFilter]);
 
-  if (!isOpen) return null;
+  if (isOpen === false) return null;
 
   return (
     <div className="modal-overlay" style={{ zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}>
       <div
         className="modal-card"
+        onClick={(e) => e.stopPropagation()}
         style={{
           maxWidth: '920px',
           width: '95%',
@@ -148,7 +149,8 @@ export default function EmployeePhonesDirectoryModal({
           </div>
           <button
             type="button"
-            className="btn btn-ghost"
+            className="btn btn-ghost modal-close-btn"
+            data-action="close"
             onClick={onClose}
             style={{ fontSize: '18px', borderRadius: '50%', width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
           >

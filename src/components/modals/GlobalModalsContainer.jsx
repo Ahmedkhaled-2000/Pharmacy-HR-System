@@ -448,6 +448,7 @@ export default function GlobalModalsContainer() {
       {/* 5. Employee Phones Directory Modal */}
       {isEmpPhonesModalOpen && (
         <EmployeePhonesDirectoryModal
+          isOpen={true}
           employees={state.employees || []}
           branches={state.branches || []}
           onClose={() => setIsEmpPhonesModalOpen(false)}
