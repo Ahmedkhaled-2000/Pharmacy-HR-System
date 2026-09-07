@@ -3,6 +3,405 @@ import { useLiveRealTime } from '../../hooks/useLiveRealTime';
 import { getCycleDateRange } from '../../utils/periodEngine';
 import { getNotificationTargetTab } from '../../utils/notificationEngine';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 🌟 ADAPTIVE DROPDOWN ITEM WITH SMART BIDIRECTIONAL FLYOUT (Anti-Clipping Engine)
+// ─────────────────────────────────────────────────────────────────────────────
+function DesktopNavDropdownItem({
+  child,
+  isChildActive,
+  hasSubChildren,
+  isFlyoutOpen,
+  onHover,
+  onLeave,
+  handleSubItemClick,
+  activeTab,
+  activeSubTab
+}) {
+  const itemContainerRef = useRef(null);
+  const [flyoutPlacement, setFlyoutPlacement] = useState({
+    direction: 'left', // 'left' or 'right'
+    top: '-4px',
+    bottom: 'auto',
+    maxHeight: 'calc(100vh - 40px)'
+  });
+
+  useEffect(() => {
+    if (!isFlyoutOpen || !itemContainerRef.current) return;
+
+    const calculatePlacement = () => {
+      if (!itemContainerRef.current) return;
+      const rect = itemContainerRef.current.getBoundingClientRect();
+      const flyoutWidth = 330;
+      const padding = 12;
+
+      // Available space on left and right of this item container
+      const spaceLeft = rect.left - padding;
+      const spaceRight = window.innerWidth - rect.right - padding;
+
+      // In RTL, default direction is left.
+      // BUT if space on the left is less than flyoutWidth and space on right has more clearance:
+      let direction = 'left';
+      if (spaceLeft < flyoutWidth && spaceRight > spaceLeft) {
+        direction = 'right';
+      } else if (spaceLeft >= flyoutWidth) {
+        direction = 'left';
+      } else {
+        direction = spaceRight >= spaceLeft ? 'right' : 'left';
+      }
+
+      // Calculate vertical space
+      const subItemsCount = child.subChildren?.length || 4;
+      const estimatedHeight = Math.min(subItemsCount * 56 + 24, 620);
+      let top = '-4px';
+      let bottom = 'auto';
+
+      if (rect.top + estimatedHeight > window.innerHeight - padding) {
+        if (rect.bottom >= estimatedHeight + padding) {
+          top = 'auto';
+          bottom = '-4px';
+        } else {
+          // If neither top nor bottom fits directly, shift upwards smoothly
+          const overflowBottom = (rect.top + estimatedHeight) - (window.innerHeight - padding);
+          top = `-${Math.max(4, overflowBottom)}px`;
+          bottom = 'auto';
+        }
+      }
+
+      const availableHeight = Math.min(620, window.innerHeight - 24);
+
+      setFlyoutPlacement({
+        direction,
+        top,
+        bottom,
+        maxHeight: `${availableHeight}px`
+      });
+    };
+
+    calculatePlacement();
+    window.addEventListener('resize', calculatePlacement);
+    return () => window.removeEventListener('resize', calculatePlacement);
+  }, [isFlyoutOpen, child.subChildren]);
+
+  return (
+    <div
+      ref={itemContainerRef}
+      style={{ position: 'relative' }}
+      onMouseEnter={onHover}
+      onMouseLeave={onLeave}
+    >
+      <button
+        type="button"
+        onClick={() => handleSubItemClick(child)}
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: '10px',
+          padding: '9px 12px',
+          borderRadius: '8px',
+          border: 'none',
+          background: isChildActive ? 'var(--primary-light)' : isFlyoutOpen ? 'var(--hover)' : 'transparent',
+          color: isChildActive ? 'var(--primary-dark)' : 'var(--text)',
+          cursor: 'pointer',
+          textAlign: 'right',
+          width: '100%',
+          transition: 'all 0.15s ease'
+        }}
+        onMouseEnter={(e) => {
+          if (!isChildActive && !isFlyoutOpen) {
+            e.currentTarget.style.background = 'var(--hover)';
+          }
+        }}
+        onMouseLeave={(e) => {
+          if (!isChildActive && !isFlyoutOpen) {
+            e.currentTarget.style.background = 'transparent';
+          }
+        }}
+      >
+        <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <span style={{ fontSize: '18px', marginTop: '1px' }}>
+            {child.icon}
+          </span>
+          {child.badge > 0 && (
+            <span
+              style={{
+                position: 'absolute',
+                top: '-4px',
+                right: '-4px',
+                background: '#dc2626',
+                color: '#ffffff',
+                borderRadius: '50%',
+                minWidth: '16px',
+                height: '16px',
+                padding: '0 3px',
+                fontSize: '10px',
+                fontWeight: '900',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 0 6px rgba(220, 38, 38, 0.6)',
+                border: '1.5px solid var(--surface)'
+              }}
+            >
+              {child.badge > 99 ? '99+' : child.badge}
+            </span>
+          )}
+        </div>
+
+        <div style={{ flex: 1, overflow: 'hidden' }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '6px'
+          }}>
+            <span style={{
+              fontWeight: isChildActive ? 800 : 700,
+              fontSize: '13px',
+              color: isChildActive ? 'var(--primary)' : 'var(--text)'
+            }}>
+              {child.label}
+            </span>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              {child.badge > 0 && (
+                <span style={{
+                  background: 'var(--danger)',
+                  color: '#ffffff',
+                  fontSize: '10px',
+                  fontWeight: 800,
+                  padding: '1px 5px',
+                  borderRadius: '99px'
+                }}>
+                  {child.badge}
+                </span>
+              )}
+
+              {hasSubChildren && (
+                <span style={{
+                  fontSize: '11px',
+                  color: isChildActive ? 'var(--primary)' : 'var(--muted)',
+                  opacity: 0.8,
+                  transform: isFlyoutOpen ? (flyoutPlacement.direction === 'right' ? 'translateX(2px)' : 'translateX(-2px)') : 'none',
+                  transition: 'transform 0.15s ease'
+                }}>
+                  {flyoutPlacement.direction === 'right' ? '▶' : '◀'}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {child.desc && (
+            <p style={{
+              margin: '2px 0 0',
+              fontSize: '11px',
+              color: 'var(--muted)',
+              lineHeight: 1.3,
+              whiteSpace: 'normal'
+            }}>
+              {child.desc}
+            </p>
+          )}
+        </div>
+      </button>
+
+      {hasSubChildren && isFlyoutOpen && (
+        <div
+          className={`desktop-flyout-animate ${flyoutPlacement.direction === 'right' ? 'flyout-to-right' : 'flyout-to-left'}`}
+          style={{
+            position: 'absolute',
+            top: flyoutPlacement.top,
+            bottom: flyoutPlacement.bottom,
+            right: flyoutPlacement.direction === 'left' ? 'calc(100% + 6px)' : 'auto',
+            left: flyoutPlacement.direction === 'right' ? 'calc(100% + 6px)' : 'auto',
+            minWidth: '280px',
+            maxWidth: '340px',
+            maxHeight: flyoutPlacement.maxHeight,
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+            borderRadius: '12px',
+            boxShadow: '0 14px 35px rgba(0,0,0,0.22)',
+            padding: '6px',
+            zIndex: 1100,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '3px',
+            direction: 'rtl'
+          }}
+          onMouseEnter={onHover}
+          onMouseLeave={onLeave}
+        >
+          {child.subChildren.map((subChild) => {
+            const isSubChildActive = subChild.targetTab === activeTab && (!subChild.targetSubTab || activeSubTab === subChild.targetSubTab);
+
+            return (
+              <button
+                key={subChild.id}
+                type="button"
+                onClick={() => handleSubItemClick(subChild)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '10px',
+                  padding: '8px 12px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  background: isSubChildActive ? 'var(--primary-light)' : 'transparent',
+                  color: isSubChildActive ? 'var(--primary-dark)' : 'var(--text)',
+                  cursor: 'pointer',
+                  textAlign: 'right',
+                  width: '100%',
+                  transition: 'all 0.15s ease'
+                }}
+                onMouseEnter={(e) => {
+                  if (!isSubChildActive) e.currentTarget.style.background = 'var(--hover)';
+                }}
+                onMouseLeave={(e) => {
+                  if (!isSubChildActive) e.currentTarget.style.background = 'transparent';
+                }}
+              >
+                <span style={{ fontSize: '17px', marginTop: '1px', flexShrink: 0 }}>
+                  {subChild.icon}
+                </span>
+
+                <div style={{ flex: 1, overflow: 'hidden' }}>
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '6px'
+                  }}>
+                    <span style={{
+                      fontWeight: isSubChildActive ? 800 : 700,
+                      fontSize: '12.5px',
+                      color: isSubChildActive ? 'var(--primary)' : 'var(--text)'
+                    }}>
+                      {subChild.label}
+                    </span>
+                  </div>
+
+                  {subChild.desc && (
+                    <p style={{
+                      margin: '2px 0 0',
+                      fontSize: '11px',
+                      color: 'var(--muted)',
+                      lineHeight: 1.3,
+                      whiteSpace: 'normal'
+                    }}>
+                      {subChild.desc}
+                    </p>
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 🌟 ADAPTIVE MAIN NAV DROPDOWN (Boundary & Space-Aware)
+// ─────────────────────────────────────────────────────────────────────────────
+function DesktopNavDropdown({
+  menu,
+  isOpen,
+  hoveredFlyoutId,
+  setHoveredFlyoutId,
+  handleSubItemClick,
+  activeTab,
+  activeSubTab
+}) {
+  const dropdownRef = useRef(null);
+  const [dropdownPlacement, setDropdownPlacement] = useState({
+    right: 0,
+    left: 'auto',
+    maxWidth: '380px'
+  });
+
+  useEffect(() => {
+    if (!isOpen || !dropdownRef.current) return;
+
+    const adjustDropdown = () => {
+      if (!dropdownRef.current) return;
+      const rect = dropdownRef.current.getBoundingClientRect();
+      const padding = 12;
+
+      // If the dropdown spills off the left edge of the screen:
+      if (rect.left < padding) {
+        setDropdownPlacement({
+          right: 'auto',
+          left: 0,
+          maxWidth: `${Math.min(380, window.innerWidth - padding * 2)}px`
+        });
+      } else if (rect.right > window.innerWidth - padding) {
+        setDropdownPlacement({
+          right: 0,
+          left: 'auto',
+          maxWidth: `${Math.min(380, window.innerWidth - padding * 2)}px`
+        });
+      }
+    };
+
+    adjustDropdown();
+    window.addEventListener('resize', adjustDropdown);
+    return () => window.removeEventListener('resize', adjustDropdown);
+  }, [isOpen]);
+
+  if (!isOpen || !menu.children) return null;
+
+  return (
+    <div
+      ref={dropdownRef}
+      className="desktop-dropdown-animate"
+      style={{
+        position: 'absolute',
+        top: 'calc(100% + 4px)',
+        right: dropdownPlacement.right,
+        left: dropdownPlacement.left,
+        minWidth: '310px',
+        maxWidth: dropdownPlacement.maxWidth,
+        background: 'var(--surface)',
+        border: '1px solid var(--border)',
+        borderRadius: '12px',
+        boxShadow: '0 12px 35px rgba(0,0,0,0.15)',
+        zIndex: 1000,
+        padding: '6px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '3px'
+      }}
+    >
+      {menu.children.map((child) => {
+        const isChildActive = child.targetTab === activeTab && (!child.targetSubTab || activeSubTab === child.targetSubTab || (child.targetTab === 'branches' && child.targetSubTab === 'list' && (!activeSubTab || activeSubTab === 'branches' || activeSubTab === 'list')));
+        const hasSubChildren = child.subChildren && child.subChildren.length > 0;
+        const isFlyoutOpen = hoveredFlyoutId === child.id;
+
+        return (
+          <DesktopNavDropdownItem
+            key={child.id}
+            child={child}
+            isChildActive={isChildActive}
+            hasSubChildren={hasSubChildren}
+            isFlyoutOpen={isFlyoutOpen}
+            onHover={() => {
+              if (hasSubChildren) setHoveredFlyoutId(child.id);
+            }}
+            onLeave={() => {
+              if (hasSubChildren) setHoveredFlyoutId(null);
+            }}
+            handleSubItemClick={handleSubItemClick}
+            activeTab={activeTab}
+            activeSubTab={activeSubTab}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
 export default function DesktopLayout({
   currentRole,
   currentBranch,
@@ -1694,249 +2093,16 @@ return (
               )}
             </button>
 
-            {!menu.isSingle && isOpen && menu.children && (
-              <div
-                className="desktop-dropdown-animate"
-                style={{
-                  position: 'absolute',
-                  top: 'calc(100% + 4px)',
-                  right: 0,
-                  minWidth: '310px',
-                  maxWidth: '380px',
-                  background: 'var(--surface)',
-                  border: '1px solid var(--border)',
-                  borderRadius: '12px',
-                  boxShadow: '0 12px 35px rgba(0,0,0,0.15)',
-                  zIndex: 1000,
-                  padding: '6px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '3px'
-                }}
-              >
-                {menu.children.map((child) => {
-                  const isChildActive = child.targetTab === activeTab && (!child.targetSubTab || activeSubTab === child.targetSubTab || (child.targetTab === 'branches' && child.targetSubTab === 'list' && (!activeSubTab || activeSubTab === 'branches' || activeSubTab === 'list')));
-                  const hasSubChildren = child.subChildren && child.subChildren.length > 0;
-                  const isFlyoutOpen = hoveredFlyoutId === child.id;
-
-                  return (
-                    <div
-                      key={child.id}
-                      style={{ position: 'relative' }}
-                      onMouseEnter={() => {
-                        if (hasSubChildren) setHoveredFlyoutId(child.id);
-                      }}
-                      onMouseLeave={() => {
-                        if (hasSubChildren) setHoveredFlyoutId(null);
-                      }}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => handleSubItemClick(child)}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'flex-start',
-                          gap: '10px',
-                          padding: '9px 12px',
-                          borderRadius: '8px',
-                          border: 'none',
-                          background: isChildActive ? 'var(--primary-light)' : isFlyoutOpen ? 'var(--hover)' : 'transparent',
-                          color: isChildActive ? 'var(--primary-dark)' : 'var(--text)',
-                          cursor: 'pointer',
-                          textAlign: 'right',
-                          width: '100%',
-                          transition: 'all 0.15s ease'
-                        }}
-                        onMouseEnter={(e) => {
-                          if (!isChildActive && !isFlyoutOpen) {
-                            e.currentTarget.style.background = 'var(--hover)';
-                          }
-                        }}
-                        onMouseLeave={(e) => {
-                          if (!isChildActive && !isFlyoutOpen) {
-                            e.currentTarget.style.background = 'transparent';
-                          }
-                        }}
-                      >
-                        <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                          <span style={{ fontSize: '18px', marginTop: '1px' }}>
-                            {child.icon}
-                          </span>
-                          {child.badge > 0 && (
-                            <span
-                              style={{
-                                position: 'absolute',
-                                top: '-4px',
-                                right: '-4px',
-                                background: '#dc2626',
-                                color: '#ffffff',
-                                borderRadius: '50%',
-                                minWidth: '16px',
-                                height: '16px',
-                                padding: '0 3px',
-                                fontSize: '10px',
-                                fontWeight: '900',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                boxShadow: '0 0 6px rgba(220, 38, 38, 0.6)',
-                                border: '1.5px solid var(--surface)'
-                              }}
-                            >
-                              {child.badge > 99 ? '99+' : child.badge}
-                            </span>
-                          )}
-                        </div>
-
-                        <div style={{ flex: 1, overflow: 'hidden' }}>
-                          <div style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            gap: '6px'
-                          }}>
-                            <span style={{
-                              fontWeight: isChildActive ? 800 : 700,
-                              fontSize: '13px',
-                              color: isChildActive ? 'var(--primary)' : 'var(--text)'
-                            }}>
-                              {child.label}
-                            </span>
-
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              {child.badge > 0 && (
-                                <span style={{
-                                  background: 'var(--danger)',
-                                  color: '#ffffff',
-                                  fontSize: '10px',
-                                  fontWeight: 800,
-                                  padding: '1px 5px',
-                                  borderRadius: '99px'
-                                }}>
-                                  {child.badge}
-                                </span>
-                              )}
-
-                              {hasSubChildren && (
-                                <span style={{
-                                  fontSize: '11px',
-                                  color: isChildActive ? 'var(--primary)' : 'var(--muted)',
-                                  opacity: 0.7,
-                                  transform: isFlyoutOpen ? 'translateX(-2px)' : 'none',
-                                  transition: 'transform 0.15s ease'
-                                }}>
-                                  ◀
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          {child.desc && (
-                            <p style={{
-                              margin: '2px 0 0',
-                              fontSize: '11px',
-                              color: 'var(--muted)',
-                              lineHeight: 1.3,
-                              whiteSpace: 'normal'
-                            }}>
-                              {child.desc}
-                            </p>
-                          )}
-                        </div>
-                      </button>
-
-                      {hasSubChildren && isFlyoutOpen && (
-                        <div
-                          className="desktop-flyout-animate"
-                          style={{
-                            position: 'absolute',
-                            top: '-4px',
-                            right: 'calc(100% + 6px)',
-                            minWidth: '280px',
-                            maxWidth: '340px',
-                            background: 'var(--surface)',
-                            border: '1px solid var(--border)',
-                            borderRadius: '12px',
-                            boxShadow: '0 14px 35px rgba(0,0,0,0.22)',
-                            padding: '6px',
-                            zIndex: 1100,
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: '3px'
-                          }}
-                          onMouseEnter={() => setHoveredFlyoutId(child.id)}
-                          onMouseLeave={() => setHoveredFlyoutId(null)}
-                        >
-                          {child.subChildren.map((subChild) => {
-                            const isSubChildActive = subChild.targetTab === activeTab && (!subChild.targetSubTab || activeSubTab === subChild.targetSubTab);
-
-                            return (
-                              <button
-                                key={subChild.id}
-                                type="button"
-                                onClick={() => handleSubItemClick(subChild)}
-                                style={{
-                                  display: 'flex',
-                                  alignItems: 'flex-start',
-                                  gap: '10px',
-                                  padding: '8px 12px',
-                                  borderRadius: '8px',
-                                  border: 'none',
-                                  background: isSubChildActive ? 'var(--primary-light)' : 'transparent',
-                                  color: isSubChildActive ? 'var(--primary-dark)' : 'var(--text)',
-                                  cursor: 'pointer',
-                                  textAlign: 'right',
-                                  width: '100%',
-                                  transition: 'all 0.15s ease'
-                                }}
-                                onMouseEnter={(e) => {
-                                  if (!isSubChildActive) e.currentTarget.style.background = 'var(--hover)';
-                                }}
-                                onMouseLeave={(e) => {
-                                  if (!isSubChildActive) e.currentTarget.style.background = 'transparent';
-                                }}
-                              >
-                                <span style={{ fontSize: '17px', marginTop: '1px', flexShrink: 0 }}>
-                                  {subChild.icon}
-                                </span>
-
-                                <div style={{ flex: 1, overflow: 'hidden' }}>
-                                  <div style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'space-between',
-                                    gap: '6px'
-                                  }}>
-                                    <span style={{
-                                      fontWeight: isSubChildActive ? 800 : 700,
-                                      fontSize: '12.5px',
-                                      color: isSubChildActive ? 'var(--primary)' : 'var(--text)'
-                                    }}>
-                                      {subChild.label}
-                                    </span>
-                                  </div>
-
-                                  {subChild.desc && (
-                                    <p style={{
-                                      margin: '2px 0 0',
-                                      fontSize: '11px',
-                                      color: 'var(--muted)',
-                                      lineHeight: 1.3,
-                                      whiteSpace: 'normal'
-                                    }}>
-                                      {subChild.desc}
-                                    </p>
-                                  )}
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+            {!menu.isSingle && (
+              <DesktopNavDropdown
+                menu={menu}
+                isOpen={isOpen}
+                hoveredFlyoutId={hoveredFlyoutId}
+                setHoveredFlyoutId={setHoveredFlyoutId}
+                handleSubItemClick={handleSubItemClick}
+                activeTab={activeTab}
+                activeSubTab={activeSubTab}
+              />
             )}
           </div>
         );

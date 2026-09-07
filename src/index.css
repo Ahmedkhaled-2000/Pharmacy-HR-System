@@ -2952,8 +2952,36 @@ tbody tr:hover {
 }
 
 .desktop-flyout-animate {
-  animation: desktopFlyoutFadeIn 0.16s cubic-bezier(0.16, 1, 0.3, 1);
   transform-origin: top right;
+  scrollbar-width: thin;
+}
+
+.desktop-flyout-animate.flyout-to-left {
+  animation: desktopFlyoutFadeInLeft 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+  transform-origin: top right;
+}
+
+.desktop-flyout-animate.flyout-to-right {
+  animation: desktopFlyoutFadeInRight 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+  transform-origin: top left;
+}
+
+.desktop-flyout-animate::-webkit-scrollbar {
+  width: 5px;
+  height: 0px;
+}
+
+.desktop-flyout-animate::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.desktop-flyout-animate::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.45);
+  border-radius: 99px;
+}
+
+.desktop-flyout-animate::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.7);
 }
 
 @keyframes desktopDropdownFadeIn {
@@ -2967,10 +2995,21 @@ tbody tr:hover {
   }
 }
 
-@keyframes desktopFlyoutFadeIn {
+@keyframes desktopFlyoutFadeInLeft {
   0% {
     opacity: 0;
     transform: translateX(8px) scale(0.98);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes desktopFlyoutFadeInRight {
+  0% {
+    opacity: 0;
+    transform: translateX(-8px) scale(0.98);
   }
   100% {
     opacity: 1;
