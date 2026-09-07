@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { normalizeKeyFromEvent } from '../../utils/shortcutsConfig';
 
 /**
  * AccountsDesktopMenuBar.jsx
@@ -46,14 +47,20 @@ export default function AccountsDesktopMenuBar({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Keyboard Shortcuts (Ctrl+N, Alt+N, Ctrl+K) - Capture phase
+  // Keyboard Shortcuts (Ctrl+N, Alt+N, Ctrl+K) - Cross-layout & event listener
   useEffect(() => {
-    const handleKeyDown = (e) => {
-      const isCtrlOrMeta = e.ctrlKey || e.metaKey;
-      const key = (e.key || '').toLowerCase();
+    const handleNewEntryBroadcast = () => {
+      onOpenNewEntry?.();
+    };
+    window.addEventListener('app:shortcut:new-entry', handleNewEntryBroadcast);
 
-      // Catch Ctrl+N, Alt+N, or Ctrl+Shift+N for New Journal Entry
-      if ((isCtrlOrMeta && key === 'n') || (e.altKey && key === 'n')) {
+    const handleKeyDown = (e) => {
+      const isCtrlOrMeta = Boolean(e.ctrlKey || e.metaKey);
+      const isAlt = Boolean(e.altKey);
+      const key = (normalizeKeyFromEvent(e) || '').toLowerCase();
+
+      // Catch Ctrl+N or Alt+N for New Journal Entry
+      if ((isCtrlOrMeta && key === 'n') || (isAlt && key === 'n')) {
         e.preventDefault();
         e.stopPropagation();
         if (e.stopImmediatePropagation) e.stopImmediatePropagation();
@@ -72,8 +79,11 @@ export default function AccountsDesktopMenuBar({
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
+    window.addEventListener('keydown', handleKeyDown, { capture: true, passive: false });
+    return () => {
+      window.removeEventListener('app:shortcut:new-entry', handleNewEntryBroadcast);
+      window.removeEventListener('keydown', handleKeyDown, { capture: true });
+    };
   }, [onOpenNewEntry]);
 
   const handleMenuClick = (menuKey) => {

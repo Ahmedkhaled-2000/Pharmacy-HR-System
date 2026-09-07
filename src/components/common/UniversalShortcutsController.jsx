@@ -2,7 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useUI } from '../../context/UIContext';
 import { useData } from '../../context/DataContext';
 import KeyboardShortcutsModal from './KeyboardShortcutsModal';
-import { getActiveShortcuts } from '../../utils/shortcutsConfig';
+import {
+  getActiveShortcuts,
+  matchesShortcutEvent,
+  normalizeKeyFromEvent
+} from '../../utils/shortcutsConfig';
 
 /**
  * المتحكم المركزي الشامل باختصارات لوحة المفاتيح وإغلاق النوافذ في كامل النظام
@@ -94,57 +98,62 @@ export default function UniversalShortcutsController() {
       }
     };
 
-    // Helper to check if event matches a defined shortcut item
-    const matchesItem = (item, e) => {
-      if (!item) return false;
-      const key = (e.key || '').toLowerCase();
-      const targetKey = (item.key || '').toLowerCase();
-
-      const isCtrl = Boolean(e.ctrlKey || e.metaKey);
-      const isAlt = Boolean(e.altKey);
-      const isShift = Boolean(e.shiftKey);
-
-      const mods = item.modifiers || [];
-      const reqCtrl = mods.includes('Ctrl');
-      const reqAlt = mods.includes('Alt');
-      const reqShift = mods.includes('Shift');
-
-      if (key === targetKey && isCtrl === reqCtrl && isAlt === reqAlt && isShift === reqShift) {
-        return true;
-      }
-
-      // Check fallback combination
-      if (item.fallbackKey) {
-        const fbTarget = item.fallbackKey.toLowerCase();
-        const fbMods = item.fallbackModifiers || [];
-        const fbCtrl = fbMods.includes('Ctrl');
-        const fbAlt = fbMods.includes('Alt');
-        const fbShift = fbMods.includes('Shift');
-        if (key === fbTarget && isCtrl === fbCtrl && isAlt === fbAlt && isShift === fbShift) {
-          return true;
-        }
-      }
-
-      return false;
-    };
-
     // ── Universal Keyboard Shortcuts Engine (Capture Phase) ─────────────────────
     const handleGlobalKeyDown = (e) => {
       const currentList = shortcutsRef.current || [];
       const getDef = (id) => currentList.find((s) => s.id === id);
 
-      // ── 1. Escape Key (Universal Modal & Popup Closer) ────────────────────────
-      if (e.key === 'Escape') {
-        // If Shortcuts Modal itself is open
+      const normKey = (normalizeKeyFromEvent(e) || '').toLowerCase();
+      const isCtrl = Boolean(e.ctrlKey || e.metaKey);
+      const isAlt = Boolean(e.altKey);
+      const isShift = Boolean(e.shiftKey);
+
+      const activeElem = document.activeElement;
+      const isTextInput =
+        activeElem &&
+        (activeElem.tagName === 'INPUT' ||
+          activeElem.tagName === 'TEXTAREA' ||
+          activeElem.isContentEditable);
+
+      // Helper to aggressively suppress browser native action and stop all propagation
+      const consumeEvent = () => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+      };
+
+      // ── 0. Native Input Editing Guard ──────────────────────────────────────────
+      // When inside an active text input/textarea, preserve standard native text editing
+      // commands (Ctrl+C, Ctrl+V, Ctrl+X, Ctrl+A, Ctrl+Z, Ctrl+Y)
+      if (isTextInput && isCtrl && !isAlt && !isShift && ['c', 'v', 'x', 'a', 'z', 'y'].includes(normKey)) {
+        return;
+      }
+
+      // ── 0.1 Destructive Browser History Navigation Guard ───────────────────────
+      // Prevent Alt+Left / Alt+Right from navigating away and discarding unsaved data
+      if (isAlt && !isCtrl && !isShift && (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
+        consumeEvent();
+        return;
+      }
+
+      // ── 1. Escape Key (Universal Modal & Popup Closer) ─────────────────────────
+      const closeDef = getDef('closeModal');
+      const isEscape =
+        normKey === 'escape' ||
+        (closeDef && matchesShortcutEvent(closeDef, e)) ||
+        e.key === 'Escape' ||
+        e.code === 'Escape';
+
+      if (isEscape) {
+        consumeEvent();
+
+        // A) If Shortcuts Cheatsheet is open, close it first
         if (isShortcutsModalOpen) {
-          e.preventDefault();
-          e.stopPropagation();
-          if (e.stopImmediatePropagation) e.stopImmediatePropagation();
           setIsShortcutsModalOpen(false);
           return;
         }
 
-        // Find visible modal backdrops across the DOM
+        // B) Find all visible modal overlays / backdrops across the entire application
         const visibleModals = Array.from(
           document.querySelectorAll(
             '.modal-overlay, .modal-backdrop, .central-modal-backdrop, .acc-modal-overlay, .portal-modal-overlay, [role="dialog"], [aria-modal="true"]'
@@ -155,17 +164,12 @@ export default function UniversalShortcutsController() {
         });
 
         if (visibleModals.length > 0) {
-          e.preventDefault();
-          e.stopPropagation();
-          if (e.stopImmediatePropagation) e.stopImmediatePropagation();
-
-          // Pick the top-most modal (last in DOM)
           const topModal = visibleModals[visibleModals.length - 1];
 
-          // Try clicking its close button
+          // Try clicking close / cancel button
           const closeBtn =
             topModal.querySelector(
-              '.modal-close-circle-btn, .modal-close-btn, .del-btn, [data-action="close"], [aria-label*="إغلاق"], [aria-label*="Close"], .btn-close'
+              '.modal-close-circle-btn, .modal-close-btn, .del-btn, [data-action="close"], [aria-label*="إغلاق"], [aria-label*="Close"], .btn-close, .acc-action-icon-btn'
             ) ||
             Array.from(topModal.querySelectorAll('button')).find((b) => {
               const text = (b.textContent || '').trim();
@@ -182,45 +186,48 @@ export default function UniversalShortcutsController() {
           if (closeBtn) {
             closeBtn.click();
           } else {
-            // Simulate click on backdrop or reset global state
-            topModal.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
             closeAllGlobalUIModals();
           }
 
-          // Broadcast custom event
           window.dispatchEvent(
             new CustomEvent('app:modal-close-request', { detail: { source: 'escape' } })
           );
           return;
         }
 
-        // If no modals were open, close any open dropdowns or menus
+        // C) If no modals were open, close any open dropdowns or menus
         window.dispatchEvent(new CustomEvent('app:dropdown-close-request'));
         return;
       }
 
-      // ── 2. Help & Shortcuts Cheatsheet ────────────────────────────────────────
-      const helpItem = getDef('help');
-      if (
-        (helpItem && matchesItem(helpItem, e)) ||
+      // ── 2. Help & Shortcuts Cheatsheet (F1 / Alt+H) ────────────────────────────
+      // STRICTLY PREVENTS CHROME HELP TAB (support.google.com)
+      const helpDef = getDef('help');
+      const isHelp =
+        (helpDef && matchesShortcutEvent(helpDef, e)) ||
+        normKey === 'f1' ||
         e.key === 'F1' ||
-        (e.altKey && (e.key || '').toLowerCase() === 'h')
-      ) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+        e.code === 'F1' ||
+        (isAlt && !isCtrl && normKey === 'h');
+
+      if (isHelp) {
+        consumeEvent();
         setIsShortcutsModalOpen((prev) => !prev);
         return;
       }
 
-      // ── 3. Quick Global Search ────────────────────────────────────────────────
-      const searchItem = getDef('quickSearch');
-      if (searchItem && matchesItem(searchItem, e)) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+      // ── 3. Quick Global Search (Ctrl+K / Alt+K) ────────────────────────────────
+      // STRICTLY PREVENTS CHROME OMNIBOX ADDRESS BAR FOCUS
+      const searchDef = getDef('quickSearch');
+      const isSearch =
+        (searchDef && matchesShortcutEvent(searchDef, e)) ||
+        (isCtrl && !isAlt && normKey === 'k') ||
+        (isAlt && !isCtrl && normKey === 'k');
 
-        // Check for accounts search
+      if (isSearch) {
+        consumeEvent();
+
+        // Focus accounts global search if available
         const accSearch = document.getElementById('acc-global-search-input');
         if (accSearch) {
           accSearch.focus();
@@ -228,9 +235,9 @@ export default function UniversalShortcutsController() {
           return;
         }
 
-        // Check for page search inputs
+        // Focus top navbar search or page search
         const pageSearch = document.querySelector(
-          'input[type="search"], input[placeholder*="بحث"], .search-box input, .filter-bar input'
+          'input[type="search"], input[placeholder*="بحث"], .search-box input, .filter-bar input, .top-search-input'
         );
         if (pageSearch) {
           pageSearch.focus();
@@ -242,34 +249,41 @@ export default function UniversalShortcutsController() {
         return;
       }
 
-      // ── 4. Table / Current View Search ─────────────────────────────────────────
-      const findItem = getDef('findInTable');
-      if (findItem && matchesItem(findItem, e)) {
-        const activeElem = document.activeElement;
-        const isInputFocused =
-          activeElem && (activeElem.tagName === 'INPUT' || activeElem.tagName === 'TEXTAREA');
+      // ── 4. Table / Current View Filter (Ctrl+F / Alt+F / F3) ───────────────────
+      // STRICTLY PREVENTS CHROME "FIND IN PAGE" (Ctrl+F / F3)
+      const findDef = getDef('findInTable');
+      const isFind =
+        (findDef && matchesShortcutEvent(findDef, e)) ||
+        (isCtrl && !isAlt && normKey === 'f') ||
+        (isAlt && !isCtrl && normKey === 'f') ||
+        normKey === 'f3' ||
+        e.key === 'F3' ||
+        e.code === 'F3';
 
-        if (!isInputFocused || e.ctrlKey) {
-          const tableSearch = document.querySelector(
-            'input[type="search"], input[placeholder*="بحث"], .search-box input'
-          );
-          if (tableSearch) {
-            e.preventDefault();
-            e.stopPropagation();
-            if (e.stopImmediatePropagation) e.stopImmediatePropagation();
-            tableSearch.focus();
-            tableSearch.select?.();
-            return;
-          }
+      if (isFind) {
+        consumeEvent();
+        const tableSearch = document.querySelector(
+          '.filter-bar input, input[type="search"], input[placeholder*="بحث"], .search-box input'
+        );
+        if (tableSearch) {
+          tableSearch.focus();
+          tableSearch.select?.();
+          return;
         }
+        uiRef.current?.showToast?.('🔍 ابدأ بالبحث في بيانات الجدول الحالية');
+        return;
       }
 
-      // ── 5. Save Form / Submit Modal ────────────────────────────────────────────
-      const saveItem = getDef('saveForm');
-      if (saveItem && matchesItem(saveItem, e)) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+      // ── 5. Save Form / Submit Modal (Ctrl+S / Alt+S) ───────────────────────────
+      // STRICTLY PREVENTS CHROME "SAVE PAGE AS HTML" DIALOG
+      const saveDef = getDef('saveForm');
+      const isSave =
+        (saveDef && matchesShortcutEvent(saveDef, e)) ||
+        (isCtrl && !isAlt && normKey === 's') ||
+        (isAlt && !isCtrl && normKey === 's');
+
+      if (isSave) {
+        consumeEvent();
 
         const activeModal = document.querySelector(
           '.modal-overlay, .modal-backdrop, .central-modal-backdrop, .acc-modal-overlay'
@@ -282,7 +296,11 @@ export default function UniversalShortcutsController() {
           ) ||
           Array.from(searchScope.querySelectorAll('button')).find((b) => {
             const text = (b.textContent || '').trim();
-            return text.includes('حفظ') || text.includes('تأكيد') || text.includes('Save');
+            return (
+              (text.includes('حفظ') || text.includes('تأكيد') || text.includes('Save')) &&
+              !text.includes('إلغاء') &&
+              !text.includes('تراجع')
+            );
           });
 
         if (saveBtn) {
@@ -294,12 +312,16 @@ export default function UniversalShortcutsController() {
         return;
       }
 
-      // ── 6. Print Active View / Slip ────────────────────────────────────────────
-      const printItem = getDef('printView');
-      if (printItem && matchesItem(printItem, e)) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+      // ── 6. Print Report / View (Ctrl+P / Alt+P) ────────────────────────────────
+      // STRICTLY PREVENTS CHROME RAW BROWSER PRINT PREVIEW
+      const printDef = getDef('printView');
+      const isPrint =
+        (printDef && matchesShortcutEvent(printDef, e)) ||
+        (isCtrl && !isAlt && normKey === 'p') ||
+        (isAlt && !isCtrl && normKey === 'p');
+
+      if (isPrint) {
+        consumeEvent();
 
         const printBtn =
           document.querySelector(
@@ -318,15 +340,16 @@ export default function UniversalShortcutsController() {
         return;
       }
 
-      // ── 7. New Item / New Entry ────────────────────────────────────────────────
-      const newItem = getDef('newEntry');
-      if (
-        (newItem && matchesItem(newItem, e)) ||
-        (e.altKey && (e.key || '').toLowerCase() === 'n')
-      ) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+      // ── 7. New Item / New Entry (Alt+N / Ctrl+N) ───────────────────────────────
+      // STRICTLY PREVENTS CHROME NEW WINDOW (Ctrl+N)
+      const newDef = getDef('newEntry');
+      const isNew =
+        (newDef && matchesShortcutEvent(newDef, e)) ||
+        (isAlt && !isCtrl && normKey === 'n') ||
+        (isCtrl && !isAlt && normKey === 'n');
+
+      if (isNew) {
+        consumeEvent();
 
         // Broadcast to modules (e.g. Accounts new entry)
         window.dispatchEvent(new CustomEvent('app:shortcut:new-entry'));
@@ -358,31 +381,56 @@ export default function UniversalShortcutsController() {
       }
 
       // ── 8. Quick Navigation (Alt+1 .. Alt+9) ───────────────────────────────────
+      // STRICTLY PREVENTS BROWSER TAB SWITCHING
+      if (isAlt && !isCtrl && !isShift && /^[1-9]$/.test(normKey)) {
+        consumeEvent();
+        const tabIndex = parseInt(normKey, 10) - 1;
+        window.dispatchEvent(
+          new CustomEvent('app:navigate-tab', { detail: { tabIndex } })
+        );
+        return;
+      }
+
+      // Check custom nav shortcuts if configured differently
       for (let i = 1; i <= 9; i++) {
-        const navItem = getDef(`nav${['Dashboard', 'Employees', 'Attendance', 'Payroll', 'Accounts', 'Branches', 'Leaves', 'Bylaws', 'Settings'][i - 1]}`);
-        if (
-          (navItem && matchesItem(navItem, e)) ||
-          (e.altKey && !e.ctrlKey && !e.shiftKey && e.key === String(i))
-        ) {
-          e.preventDefault();
-          e.stopPropagation();
-          if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+        const navDef = getDef(
+          `nav${['Dashboard', 'Employees', 'Attendance', 'Payroll', 'Accounts', 'Branches', 'Leaves', 'Bylaws', 'Settings'][i - 1]}`
+        );
+        if (navDef && matchesShortcutEvent(navDef, e)) {
+          consumeEvent();
           window.dispatchEvent(
             new CustomEvent('app:navigate-tab', { detail: { tabIndex: i - 1 } })
           );
           return;
         }
       }
+
+      // ── 9. General Prevention of Browser Conflicting Shortcuts ─────────────────
+      // (منع نهائي لتأثير الاختصارات على المتصفح)
+      // Intercept any leftover browser actions that cause unwanted popups or new tabs:
+      // - Ctrl+D: Bookmark page
+      // - Ctrl+H: History page
+      // - Ctrl+J: Downloads page
+      // - Ctrl+U: View Source
+      // - Ctrl+G: Find Next
+      if (isCtrl && !isAlt && ['d', 'h', 'j', 'u', 'g'].includes(normKey)) {
+        consumeEvent();
+        if (normKey === 'h') {
+          // Direct Ctrl+H to Help / Shortcuts
+          setIsShortcutsModalOpen((prev) => !prev);
+        }
+        return;
+      }
     };
 
-    window.addEventListener('mousedown', handlePreventBackdropClick, true);
-    window.addEventListener('click', handlePreventBackdropClick, true);
-    window.addEventListener('keydown', handleGlobalKeyDown, true);
+    window.addEventListener('mousedown', handlePreventBackdropClick, { capture: true, passive: false });
+    window.addEventListener('click', handlePreventBackdropClick, { capture: true, passive: false });
+    window.addEventListener('keydown', handleGlobalKeyDown, { capture: true, passive: false });
 
     return () => {
-      window.removeEventListener('mousedown', handlePreventBackdropClick, true);
-      window.removeEventListener('click', handlePreventBackdropClick, true);
-      window.removeEventListener('keydown', handleGlobalKeyDown, true);
+      window.removeEventListener('mousedown', handlePreventBackdropClick, { capture: true });
+      window.removeEventListener('click', handlePreventBackdropClick, { capture: true });
+      window.removeEventListener('keydown', handleGlobalKeyDown, { capture: true });
     };
   }, [isShortcutsModalOpen]);
 

@@ -3,7 +3,8 @@ import {
   DEFAULT_SHORTCUTS,
   STORAGE_SHORTCUTS_KEY,
   getActiveShortcuts,
-  formatShortcutDisplay
+  formatShortcutDisplay,
+  normalizeKeyFromEvent
 } from '../../utils/shortcutsConfig';
 
 /**
@@ -44,8 +45,9 @@ export default function KeyboardShortcutsSettingsCard({
     if (e.altKey) modifiers.push('Alt');
     if (e.shiftKey) modifiers.push('Shift');
 
-    let key = e.key;
-    if (key === 'Escape') key = 'Escape';
+    let key = normalizeKeyFromEvent(e) || e.key;
+    if (key.toLowerCase() === 'escape') key = 'Escape';
+    else if (/^f\d{1,2}$/i.test(key)) key = key.toUpperCase();
     else if (key.length === 1) key = key.toLowerCase();
 
     const updated = shortcuts.map((s) => {

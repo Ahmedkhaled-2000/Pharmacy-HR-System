@@ -184,3 +184,119 @@ export function formatShortcutDisplay(item) {
   parts.push(keyName);
   return parts.join(' + ');
 }
+
+/**
+ * Normalizes keyboard event key into a layout-independent lowercase letter or digit
+ * Handles English, Arabic keyboard layouts, Numpad, and physical hardware key codes
+ */
+export function normalizeKeyFromEvent(e) {
+  if (!e) return '';
+
+  // 1. Check physical code first (immune to keyboard language switch!)
+  if (e.code) {
+    if (e.code.startsWith('Key') && e.code.length === 4) {
+      return e.code.slice(3).toLowerCase(); // 'KeyS' -> 's', 'KeyN' -> 'n', 'KeyP' -> 'p'
+    }
+    if (e.code.startsWith('Digit') && e.code.length === 6) {
+      return e.code.slice(5); // 'Digit1' -> '1'
+    }
+    if (e.code.startsWith('Numpad') && /^Numpad\d$/.test(e.code)) {
+      return e.code.slice(6); // 'Numpad1' -> '1'
+    }
+    if (/^F\d{1,2}$/i.test(e.code)) {
+      return e.code.toUpperCase(); // 'F1'
+    }
+    if (e.code === 'Escape') return 'Escape';
+    if (e.code === 'Slash') return '/';
+  }
+
+  // 2. Direct key checks
+  if (e.key === 'Escape') return 'Escape';
+  if (/^F\d{1,2}$/i.test(e.key)) return e.key.toUpperCase();
+  if (e.key === '/' || e.key === '؟' || e.key === 'ظ') return '/';
+
+  // 3. Arabic layout character dictionary fallback (Arabic 101/102 keyboard layout)
+  const ARABIC_TO_LATIN = {
+    'ش': 'a',
+    'لا': 'b', 'لآ': 'b', 'لأ': 'b', 'لإ': 'b',
+    'ؤ': 'c',
+    'ي': 'd',
+    'ث': 'e',
+    'ب': 'f',
+    'ل': 'g',
+    'ا': 'h', 'أ': 'h', 'إ': 'h', 'آ': 'h',
+    'ه': 'i',
+    'ت': 'j',
+    'ن': 'k',
+    'م': 'l',
+    'ة': 'm',
+    'ى': 'n',
+    'خ': 'o',
+    'ح': 'p',
+    'ض': 'q',
+    'ق': 'r',
+    'س': 's',
+    'ف': 't',
+    'ع': 'u',
+    'ر': 'v',
+    'ص': 'w',
+    'ء': 'x',
+    'غ': 'y',
+    'ئ': 'z',
+    '١': '1', '٢': '2', '٣': '3', '٤': '4', '٥': '5',
+    '٦': '6', '٧': '7', '٨': '8', '٩': '9', '٠': '0'
+  };
+
+  const rawKey = (e.key || '').toLowerCase();
+  if (ARABIC_TO_LATIN[rawKey]) {
+    return ARABIC_TO_LATIN[rawKey];
+  }
+
+  return rawKey;
+}
+
+/**
+ * Checks if a keyboard event matches a configured shortcut item
+ */
+export function matchesShortcutEvent(item, e) {
+  if (!item) return false;
+
+  const eventChar = (normalizeKeyFromEvent(e) || '').toLowerCase();
+  const targetKey = (item.key || '').toLowerCase();
+
+  const isCtrl = Boolean(e.ctrlKey || e.metaKey);
+  const isAlt = Boolean(e.altKey);
+  const isShift = Boolean(e.shiftKey);
+
+  const mods = item.modifiers || [];
+  const reqCtrl = mods.includes('Ctrl');
+  const reqAlt = mods.includes('Alt');
+  const reqShift = mods.includes('Shift');
+
+  const primaryMatch =
+    eventChar === targetKey &&
+    isCtrl === reqCtrl &&
+    isAlt === reqAlt &&
+    isShift === reqShift;
+
+  if (primaryMatch) return true;
+
+  // Check fallback definition
+  if (item.fallbackKey) {
+    const fallbackTarget = (item.fallbackKey || '').toLowerCase();
+    const fbMods = item.fallbackModifiers || [];
+    const fbCtrl = fbMods.includes('Ctrl');
+    const fbAlt = fbMods.includes('Alt');
+    const fbShift = fbMods.includes('Shift');
+    if (
+      eventChar === fallbackTarget &&
+      isCtrl === fbCtrl &&
+      isAlt === fbAlt &&
+      isShift === fbShift
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}

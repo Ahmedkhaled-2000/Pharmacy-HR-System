@@ -90,6 +90,15 @@ export default function AccountsSystemView({
   const [isGuideModalOpen, setIsGuideModalOpen] = useState(false);
   const [isZeroOutModalOpen, setIsZeroOutModalOpen] = useState(false);
 
+  // Listen to system-wide New Entry shortcut (Alt+N / Ctrl+N)
+  useEffect(() => {
+    const handleNewEntry = () => {
+      setIsNewEntryModalOpen(true);
+    };
+    window.addEventListener('app:shortcut:new-entry', handleNewEntry);
+    return () => window.removeEventListener('app:shortcut:new-entry', handleNewEntry);
+  }, []);
+
   // Initialize Core Data from State or Clean Defaults (0 balances)
   const accounts = useMemo(() => {
     return state?.accountsData?.accounts || DEFAULT_CHART_OF_ACCOUNTS;
