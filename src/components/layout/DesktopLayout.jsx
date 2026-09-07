@@ -74,15 +74,6 @@ export default function DesktopLayout({
       targetTab: 'dashboard'
     },
     {
-      id: 'accounts',
-      label: 'الحسابات (ERP)',
-      icon: '🏛️',
-      isSingle: true,
-      targetTab: 'accounts',
-      navigateToAccounts: true,
-      openInNewTab: true
-    },
-    {
       id: 'employees',
       label: 'شؤون الموظفين',
       icon: '👥',
@@ -369,6 +360,15 @@ export default function DesktopLayout({
           openInNewTab: true
         }
       ]
+    },
+    {
+      id: 'accounts',
+      label: 'الحسابات (ERP)',
+      icon: '🏛️',
+      isSingle: true,
+      targetTab: 'accounts',
+      navigateToAccounts: true,
+      openInNewTab: true
     },
     {
       id: 'settings-group',
