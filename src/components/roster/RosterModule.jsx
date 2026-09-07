@@ -79,6 +79,7 @@ export default function RosterModule({
 }) {
   const [selectedBranch, setSelectedBranch] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'approved' | 'pending' | 'none'
   const [selectedRosterEmp, setSelectedRosterEmp] = useState(null);
 
   const orgSettings = state.orgSettings || {};
@@ -295,6 +296,90 @@ export default function RosterModule({
     }
   }, [state?.orgSettings?.rosterNotificationAutoSend, state?.orgSettings?.rosterNotificationDay, state?.orgSettings?.rosterNotificationLastSentMonth]);
 
+  // Helper to determine exact roster status for an employee
+  const getEmployeeRosterStatusInfo = (emp, targetBranch) => {
+    const bId = targetBranch || emp.branchId || emp.branchesDetails?.[0]?.branchId;
+    const empRoster = getResolvedEmployeeRoster(emp, bId, state);
+    const hasApproved = Boolean(
+      empRoster?.status === 'approved' && 
+      empRoster?.schedule && 
+      Object.keys(empRoster.schedule).length > 0
+    );
+
+    const pendingReq = (state.requests || []).find(
+      req =>
+        (String(req.employeeId) === String(emp.id) || (emp.code && String(req.employeeCode) === String(emp.code))) &&
+        ['roster_update', 'roster_edit', 'roster_edit_request', 'schedule_edit'].includes(req.type) &&
+        ['pending', 'pending_admin', 'pending_branch'].includes(req.status) &&
+        (!targetBranch || String(req.branchId || '') === String(targetBranch))
+    );
+
+    if (hasApproved) {
+      return {
+        key: 'approved',
+        badge: <span className="badge badge-success">🟢 معتمد من الإدارة والفرع</span>,
+        empRoster,
+        pendingReq: null
+      };
+    }
+
+    if (empRoster?.status === 'approved') {
+      return {
+        key: 'approved_empty',
+        badge: (
+          <span className="badge badge-danger" style={{ background: '#fef2f2', color: '#b91c1c', border: '1px solid #ef4444', fontWeight: 'bold' }}>
+            ⚠️ معتمد (بدون جدول تفصيلي!)
+          </span>
+        ),
+        empRoster,
+        pendingReq: null
+      };
+    }
+
+    if (pendingReq) {
+      return {
+        key: 'pending',
+        badge: (
+          <span className="badge badge-warning" style={{ background: '#fef3c7', color: '#b45309', border: '1px solid #f59e0b', fontWeight: 'bold' }}>
+            ⏳ قيد المراجعة والاعتماد
+          </span>
+        ),
+        empRoster: null,
+        pendingReq
+      };
+    }
+
+    return {
+      key: 'none',
+      badge: (
+        <span className="badge badge-danger" style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fca5a5', fontWeight: 'bold' }}>
+          ❌ عدم وجود جدول معتمد
+        </span>
+      ),
+      empRoster: null,
+      pendingReq: null
+    };
+  };
+
+  // Compute live roster statistics across employees
+  const rosterStats = useMemo(() => {
+    let activeTotal = 0;
+    let approved = 0;
+    let pending = 0;
+    let none = 0;
+
+    employees.forEach(emp => {
+      if (!isEmployeeActive(emp)) return;
+      activeTotal++;
+      const info = getEmployeeRosterStatusInfo(emp, selectedBranch);
+      if (info.key === 'approved' || info.key === 'approved_empty') approved++;
+      else if (info.key === 'pending') pending++;
+      else none++;
+    });
+
+    return { activeTotal, approved, pending, none };
+  }, [employees, selectedBranch, state.rosters, state.requests]);
+
   const filteredEmployees = employees.filter((emp) => {
     if (!isEmployeeActive(emp)) return false;
     if (selectedBranch && emp.branchId !== selectedBranch && (!emp.branchesDetails || !emp.branchesDetails.some(bd => String(bd.branchId) === String(selectedBranch)))) return false;
@@ -304,6 +389,12 @@ export default function RosterModule({
       const matchNickname = emp.nickname?.toLowerCase().includes(q);
       const matchCode = emp.code?.includes(q);
       if (!matchName && !matchNickname && !matchCode) return false;
+    }
+    if (statusFilter !== 'all') {
+      const info = getEmployeeRosterStatusInfo(emp, selectedBranch);
+      if (statusFilter === 'approved' && info.key !== 'approved' && info.key !== 'approved_empty') return false;
+      if (statusFilter === 'pending' && info.key !== 'pending') return false;
+      if (statusFilter === 'none' && info.key !== 'none') return false;
     }
     return true;
   });
@@ -749,6 +840,41 @@ export default function RosterModule({
         </div>
       )}
 
+      {/* Status Summary KPI Cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '18px' }}>
+        <div style={{ background: 'var(--surface, #ffffff)', border: '1px solid var(--border)', borderRadius: '12px', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ fontSize: '12px', color: 'var(--muted)' }}>إجمالي الموظفين</div>
+            <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--text)' }}>{rosterStats.activeTotal}</div>
+          </div>
+          <span style={{ fontSize: '24px' }}>👥</span>
+        </div>
+
+        <div style={{ background: '#f0fdf4', border: '1px solid #86efac', borderRadius: '12px', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ fontSize: '12px', color: '#166534', fontWeight: 700 }}>جداول معتمدة</div>
+            <div style={{ fontSize: '20px', fontWeight: 800, color: '#15803d' }}>{rosterStats.approved}</div>
+          </div>
+          <span style={{ fontSize: '24px' }}>🟢</span>
+        </div>
+
+        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '12px', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ fontSize: '12px', color: '#92400e', fontWeight: 700 }}>قيد المراجعة والاعتماد</div>
+            <div style={{ fontSize: '20px', fontWeight: 800, color: '#b45309' }}>{rosterStats.pending}</div>
+          </div>
+          <span style={{ fontSize: '24px' }}>⏳</span>
+        </div>
+
+        <div style={{ background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '12px', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ fontSize: '12px', color: '#991b1b', fontWeight: 700 }}>عدم وجود جدول معتمد</div>
+            <div style={{ fontSize: '20px', fontWeight: 800, color: '#dc2626' }}>{rosterStats.none}</div>
+          </div>
+          <span style={{ fontSize: '24px' }}>❌</span>
+        </div>
+      </div>
+
       {/* Filter and Search */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
         <h4 style={{ margin: 0, fontSize: '16px' }}>👥 جميع موظفي الصيدليات (اضغط على الموظف لمعاينة الجدول)</h4>
@@ -765,6 +891,12 @@ export default function RosterModule({
             {branches.map((b) => (
               <option key={b.id} value={b.id}>{b.name}</option>
             ))}
+          </select>
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontWeight: 600 }}>
+            <option value="all">-- جميع حالات الجداول --</option>
+            <option value="approved">🟢 معتمد من الإدارة والفرع</option>
+            <option value="pending">⏳ قيد المراجعة والاعتماد</option>
+            <option value="none">❌ عدم وجود جدول معتمد</option>
           </select>
         </div>
       </div>
@@ -787,7 +919,7 @@ export default function RosterModule({
             ) : (
               filteredEmployees.map((emp) => {
                 const b = branches.find((br) => String(br.id) === String(emp.branchId));
-                const empRoster = getResolvedEmployeeRoster(emp, selectedBranch, state);
+                const statusInfo = getEmployeeRosterStatusInfo(emp, selectedBranch);
 
                 return (
                   <tr key={emp.id}>
@@ -795,19 +927,7 @@ export default function RosterModule({
                     <td style={{ fontWeight: '800' }}>{getEmpDisplayName(emp)}</td>
                     <td>{b?.name || 'المركز الرئيسي'}</td>
                     <td>{emp.jobTitle}</td>
-                    <td>
-                      {empRoster?.status === 'approved' ? (
-                        (!empRoster?.schedule || Object.keys(empRoster.schedule).length === 0) ? (
-                          <span className="badge badge-danger" style={{ background: '#fef2f2', color: '#b91c1c', border: '1px solid #ef4444', fontWeight: 'bold' }}>
-                            ⚠️ معتمد (بدون جدول تفصيلي!)
-                          </span>
-                        ) : (
-                          <span className="badge badge-success">🟢 معتمد من الإدارة والفرع</span>
-                        )
-                      ) : (
-                        <span className="badge badge-warning">⏳ قيد المراجعة</span>
-                      )}
-                    </td>
+                    <td>{statusInfo.badge}</td>
                     <td>
                       <button
                         className="btn btn-start"
