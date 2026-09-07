@@ -160,7 +160,120 @@ CREATE TABLE IF NOT EXISTS public.archive_import_logs (
 );
 
 -- ==============================================================================
--- 12. إعدادات الأمان وسياسات الوصول (Row Level Security - RLS)
+-- جداول منظومة الحسابات العامة وشجرة الحسابات (General Ledger & Chart of Accounts)
+-- ==============================================================================
+
+-- 12. جدول شجرة الحسابات (Chart of Accounts)
+CREATE TABLE IF NOT EXISTS public.acc_accounts (
+    id VARCHAR(36) PRIMARY KEY,
+    code VARCHAR(30) NOT NULL UNIQUE,
+    name_ar VARCHAR(255) NOT NULL,
+    name_en VARCHAR(255) NULL,
+    account_type VARCHAR(50) NOT NULL, -- 'asset', 'liability', 'equity', 'revenue', 'expense', 'cogs'
+    nature VARCHAR(10) NOT NULL,       -- 'debit' أو 'credit'
+    parent_id VARCHAR(36) NULL REFERENCES public.acc_accounts(id) ON DELETE RESTRICT,
+    level INTEGER NOT NULL DEFAULT 1,
+    is_parent BOOLEAN NOT NULL DEFAULT false,
+    currency VARCHAR(10) NOT NULL DEFAULT 'EGP',
+    opening_balance NUMERIC(15, 2) NOT NULL DEFAULT 0.00,
+    current_balance NUMERIC(15, 2) NOT NULL DEFAULT 0.00,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    is_system BOOLEAN NOT NULL DEFAULT false,
+    notes TEXT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_acc_accounts_code ON public.acc_accounts(code);
+CREATE INDEX IF NOT EXISTS idx_acc_accounts_parent ON public.acc_accounts(parent_id);
+CREATE INDEX IF NOT EXISTS idx_acc_accounts_type ON public.acc_accounts(account_type);
+
+-- 13. جدول مراكز التكلفة (Cost Centers)
+CREATE TABLE IF NOT EXISTS public.acc_cost_centers (
+    id VARCHAR(36) PRIMARY KEY,
+    code VARCHAR(30) NOT NULL UNIQUE,
+    name VARCHAR(255) NOT NULL,
+    branch_id VARCHAR(50) NULL,
+    parent_id VARCHAR(36) NULL REFERENCES public.acc_cost_centers(id) ON DELETE SET NULL,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    notes TEXT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 14. جدول الخزائن والحسابات البنكية ونقاط البيع والمحافظ (Treasury, POS & Wallets)
+CREATE TABLE IF NOT EXISTS public.acc_treasuries (
+    id VARCHAR(36) PRIMARY KEY,
+    code VARCHAR(30) NOT NULL UNIQUE,
+    name VARCHAR(255) NOT NULL,
+    treasury_type VARCHAR(50) NOT NULL, -- 'cashbox', 'bank', 'pos', 'instapay', 'wallet'
+    branch_id VARCHAR(50) NULL,
+    account_id VARCHAR(36) NOT NULL REFERENCES public.acc_accounts(id) ON DELETE RESTRICT,
+    commission_account_id VARCHAR(36) NULL REFERENCES public.acc_accounts(id) ON DELETE SET NULL,
+    fee_percentage NUMERIC(5, 2) NOT NULL DEFAULT 0.00, -- نسبة الخصم/العمولة (مثل 1.50% للفيزا و1.00% للمحافظ)
+    fee_fixed NUMERIC(10, 2) NOT NULL DEFAULT 0.00,      -- مبلغ ثابت إضافي لكل معاملة إن وجد
+    current_balance NUMERIC(15, 2) NOT NULL DEFAULT 0.00,
+    currency VARCHAR(10) NOT NULL DEFAULT 'EGP',
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 15. جدول القيود اليومية العامة (General Journal Entries Header)
+CREATE TABLE IF NOT EXISTS public.acc_journal_entries (
+    id VARCHAR(36) PRIMARY KEY,
+    entry_number VARCHAR(50) NOT NULL UNIQUE,
+    entry_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    doc_type VARCHAR(50) NOT NULL DEFAULT 'manual', -- 'manual', 'sale', 'purchase', 'payroll', 'expense', 'transfer'
+    doc_reference VARCHAR(100) NULL,
+    branch_id VARCHAR(50) NULL,
+    cost_center_id VARCHAR(36) NULL REFERENCES public.acc_cost_centers(id) ON DELETE SET NULL,
+    narration TEXT NOT NULL,
+    total_debit NUMERIC(15, 2) NOT NULL DEFAULT 0.00,
+    total_credit NUMERIC(15, 2) NOT NULL DEFAULT 0.00,
+    status VARCHAR(30) NOT NULL DEFAULT 'posted',
+    created_by VARCHAR(100) NULL,
+    posted_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_balanced_entry CHECK (total_debit = total_credit)
+);
+
+CREATE INDEX IF NOT EXISTS idx_acc_entries_date ON public.acc_journal_entries(entry_date DESC);
+CREATE INDEX IF NOT EXISTS idx_acc_entries_branch ON public.acc_journal_entries(branch_id);
+CREATE INDEX IF NOT EXISTS idx_acc_entries_doctype ON public.acc_journal_entries(doc_type);
+
+-- 16. جدول تفاصيل وسطور القيود (Journal Entry Lines)
+CREATE TABLE IF NOT EXISTS public.acc_journal_lines (
+    id VARCHAR(36) PRIMARY KEY,
+    entry_id VARCHAR(36) NOT NULL REFERENCES public.acc_journal_entries(id) ON DELETE CASCADE,
+    account_id VARCHAR(36) NOT NULL REFERENCES public.acc_accounts(id) ON DELETE RESTRICT,
+    cost_center_id VARCHAR(36) NULL REFERENCES public.acc_cost_centers(id) ON DELETE SET NULL,
+    branch_id VARCHAR(50) NULL,
+    line_desc TEXT NULL,
+    debit NUMERIC(15, 2) NOT NULL DEFAULT 0.00,
+    credit NUMERIC(15, 2) NOT NULL DEFAULT 0.00,
+    currency VARCHAR(10) NOT NULL DEFAULT 'EGP',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_positive_amounts CHECK (debit >= 0 AND credit >= 0),
+    CONSTRAINT chk_debit_or_credit CHECK ((debit > 0 AND credit = 0) OR (credit > 0 AND debit = 0))
+);
+
+CREATE INDEX IF NOT EXISTS idx_acc_lines_entry ON public.acc_journal_lines(entry_id);
+CREATE INDEX IF NOT EXISTS idx_acc_lines_account ON public.acc_journal_lines(account_id);
+CREATE INDEX IF NOT EXISTS idx_acc_lines_branch ON public.acc_journal_lines(branch_id);
+CREATE INDEX IF NOT EXISTS idx_acc_lines_cc ON public.acc_journal_lines(cost_center_id);
+
+-- 17. جدول الفترات والسنوات المالية (Fiscal Years)
+CREATE TABLE IF NOT EXISTS public.acc_fiscal_years (
+    id VARCHAR(36) PRIMARY KEY,
+    year_name VARCHAR(50) NOT NULL UNIQUE,
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    is_closed BOOLEAN NOT NULL DEFAULT false,
+    closed_at TIMESTAMPTZ NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ==============================================================================
+-- 18. إعدادات الأمان وسياسات الوصول (Row Level Security - RLS)
 -- ==============================================================================
 ALTER TABLE public.app_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.app_settings_backups ENABLE ROW LEVEL SECURITY;

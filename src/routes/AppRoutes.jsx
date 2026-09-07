@@ -30,6 +30,7 @@ import ApprovalCenterModule from '../components/approvals/ApprovalCenterModule';
 
 // Lazy Loaded Independent Systems (Code-Splitting for Lightning Speed)
 const ArchiveSystemView = lazy(() => import('../components/archive/ArchiveSystemView'));
+const AccountsSystemView = lazy(() => import('../components/accounts/AccountsSystemView'));
 const PublicCandidateApplyPortal = lazy(() => import('../components/recruitment/PublicCandidateApplyPortal'));
 const InterviewerEvaluationPortal = lazy(() => import('../components/recruitment/InterviewerEvaluationPortal'));
 const ElectronicKioskView = lazy(() => import('../components/kiosk/ElectronicKioskView'));
@@ -145,6 +146,8 @@ export default function AppRoutes() {
     ? 'interview'
     : location.pathname.startsWith('/archive')
     ? 'archive'
+    : location.pathname.startsWith('/accounts')
+    ? 'accounts'
     : location.pathname.startsWith('/kiosk')
     ? 'kiosk'
     : location.pathname === '/employee'
@@ -466,6 +469,20 @@ export default function AppRoutes() {
         </ErrorBoundary>
       )}
 
+      {viewMode === 'accounts' && (
+        <ErrorBoundary fallbackTitle="حدث خطأ في منظومة الحسابات العامة">
+          <Suspense fallback={<div className="loading-fallback">جاري تحميل منظومة الحسابات...</div>}>
+            <AccountsSystemView
+              isStandalone={true}
+              state={state}
+              setState={setState}
+              saveState={saveState}
+              showToast={showToast}
+            />
+          </Suspense>
+        </ErrorBoundary>
+      )}
+
       {viewMode === 'careers' && (
         <ErrorBoundary fallbackTitle="حدث خطأ في بوابة التوظيف">
           <Suspense fallback={<div className="loading-fallback">جاري تحميل بوابة التوظيف...</div>}>
@@ -500,7 +517,7 @@ export default function AppRoutes() {
       )}
 
       {/* ── 2. Authenticated / Unauthenticated App Views ── */}
-      {viewMode !== 'kiosk' && viewMode !== 'archive' && viewMode !== 'careers' && viewMode !== 'interview' && (
+      {viewMode !== 'kiosk' && viewMode !== 'archive' && viewMode !== 'accounts' && viewMode !== 'careers' && viewMode !== 'interview' && (
         (!isAdminLoggedIn && !currentEmpUser && !currentBranch) || authRole === 'none' ? (
           <ErrorBoundary fallbackTitle="حدث خطأ في شاشة تسجيل الدخول">
             <LoginPage
@@ -1014,6 +1031,22 @@ export default function AppRoutes() {
                   </ErrorBoundary>
                 )}
 
+                {/* 19. General Accounts & Chart of Accounts System */}
+                {activeNavTab === 'accounts' && (
+                  <ErrorBoundary fallbackTitle="حدث خطأ في منظومة الحسابات العامة">
+                    <Suspense fallback={<div className="loading-fallback">جاري تحميل منظومة الحسابات...</div>}>
+                      <AccountsSystemView
+                        isStandalone={false}
+                        state={state}
+                        setState={setState}
+                        saveState={saveState}
+                        showToast={showToast}
+                        onNavigateTab={setActiveNavTab}
+                      />
+                    </Suspense>
+                  </ErrorBoundary>
+                )}
+
                 {/* Fallback for Unknown Tab */}
                 {![
                   'dashboard',
@@ -1035,6 +1068,7 @@ export default function AppRoutes() {
                   'loans-meds',
                   'income-expenses',
                   'pharmacy-archive',
+                  'accounts',
                   'permissions-management',
                   'settings',
                   'notifications',

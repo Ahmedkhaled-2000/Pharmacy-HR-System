@@ -140,7 +140,85 @@ async function initDatabaseTables() {
           created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
       CREATE INDEX IF NOT EXISTS idx_sync_logs_key_date ON public.sync_logs (entity_key, created_at DESC);
-    `;
+
+      -- 4. جداول منظومة الحسابات العامة (Accounting & General Ledger)
+      CREATE TABLE IF NOT EXISTS public.acc_accounts (
+          id VARCHAR(36) PRIMARY KEY,
+          code VARCHAR(30) NOT NULL UNIQUE,
+          name_ar VARCHAR(255) NOT NULL,
+          name_en VARCHAR(255) NULL,
+          account_type VARCHAR(50) NOT NULL,
+          nature VARCHAR(10) NOT NULL,
+          parent_id VARCHAR(36) NULL REFERENCES public.acc_accounts(id) ON DELETE RESTRICT,
+          level INTEGER NOT NULL DEFAULT 1,
+          is_parent BOOLEAN NOT NULL DEFAULT false,
+          currency VARCHAR(10) NOT NULL DEFAULT 'EGP',
+          opening_balance NUMERIC(15, 2) NOT NULL DEFAULT 0.00,
+          current_balance NUMERIC(15, 2) NOT NULL DEFAULT 0.00,
+          is_active BOOLEAN NOT NULL DEFAULT true,
+          is_system BOOLEAN NOT NULL DEFAULT false,
+          notes TEXT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS public.acc_cost_centers (
+          id VARCHAR(36) PRIMARY KEY,
+          code VARCHAR(30) NOT NULL UNIQUE,
+          name VARCHAR(255) NOT NULL,
+          branch_id VARCHAR(50) NULL,
+          parent_id VARCHAR(36) NULL REFERENCES public.acc_cost_centers(id) ON DELETE SET NULL,
+          is_active BOOLEAN NOT NULL DEFAULT true,
+          notes TEXT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS public.acc_treasuries (
+          id VARCHAR(36) PRIMARY KEY,
+          code VARCHAR(30) NOT NULL UNIQUE,
+          name VARCHAR(255) NOT NULL,
+          treasury_type VARCHAR(50) NOT NULL,
+          branch_id VARCHAR(50) NULL,
+          account_id VARCHAR(36) NOT NULL REFERENCES public.acc_accounts(id) ON DELETE RESTRICT,
+          commission_account_id VARCHAR(36) NULL REFERENCES public.acc_accounts(id) ON DELETE SET NULL,
+          fee_percentage NUMERIC(5, 2) NOT NULL DEFAULT 0.00,
+          fee_fixed NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+          current_balance NUMERIC(15, 2) NOT NULL DEFAULT 0.00,
+          currency VARCHAR(10) NOT NULL DEFAULT 'EGP',
+          is_active BOOLEAN NOT NULL DEFAULT true,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS public.acc_journal_entries (
+          id VARCHAR(36) PRIMARY KEY,
+          entry_number VARCHAR(50) NOT NULL UNIQUE,
+          entry_date DATE NOT NULL DEFAULT CURRENT_DATE,
+          doc_type VARCHAR(50) NOT NULL DEFAULT 'manual',
+          doc_reference VARCHAR(100) NULL,
+          branch_id VARCHAR(50) NULL,
+          cost_center_id VARCHAR(36) NULL REFERENCES public.acc_cost_centers(id) ON DELETE SET NULL,
+          narration TEXT NOT NULL,
+          total_debit NUMERIC(15, 2) NOT NULL DEFAULT 0.00,
+          total_credit NUMERIC(15, 2) NOT NULL DEFAULT 0.00,
+          status VARCHAR(30) NOT NULL DEFAULT 'posted',
+          created_by VARCHAR(100) NULL,
+          posted_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT chk_balanced_entry CHECK (total_debit = total_credit)
+      );
+
+      CREATE TABLE IF NOT EXISTS public.acc_journal_lines (
+          id VARCHAR(36) PRIMARY KEY,
+          entry_id VARCHAR(36) NOT NULL REFERENCES public.acc_journal_entries(id) ON DELETE CASCADE,
+          account_id VARCHAR(36) NOT NULL REFERENCES public.acc_accounts(id) ON DELETE RESTRICT,
+          cost_center_id VARCHAR(36) NULL REFERENCES public.acc_cost_centers(id) ON DELETE SET NULL,
+          branch_id VARCHAR(50) NULL,
+          line_desc TEXT NULL,
+          debit NUMERIC(15, 2) NOT NULL DEFAULT 0.00,
+          credit NUMERIC(15, 2) NOT NULL DEFAULT 0.00,
+          currency VARCHAR(10) NOT NULL DEFAULT 'EGP',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
 
     await db.query(schemaSql);
     console.log('🐘 [PostgreSQL] الجداول الأساسية مفهرسة ومجهزة بنجاح.');
@@ -418,6 +496,110 @@ app.post('/api/system/reset', async (req, res) => {
     }
     io.emit('system:reset', { key, timestamp: new Date().toISOString() });
     res.json({ success: true, message: 'System reset completed' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── 8.5. مسارات منظومة الحسابات العامة (Accounting & General Ledger API) ──
+app.get('/api/accounts', async (req, res) => {
+  try {
+    const q = await db.query('SELECT * FROM public.acc_accounts ORDER BY code ASC');
+    res.json({ success: true, accounts: q.rows });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/accounts', async (req, res) => {
+  try {
+    const acc = req.body;
+    if (!acc || !acc.code || !acc.name_ar) {
+      return res.status(400).json({ success: false, error: 'Missing required account fields' });
+    }
+    const query = `
+      INSERT INTO public.acc_accounts (
+        id, code, name_ar, name_en, account_type, nature, parent_id, level,
+        is_parent, currency, opening_balance, current_balance, is_active, notes, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        code = EXCLUDED.code,
+        name_ar = EXCLUDED.name_ar,
+        name_en = EXCLUDED.name_en,
+        account_type = EXCLUDED.account_type,
+        nature = EXCLUDED.nature,
+        parent_id = EXCLUDED.parent_id,
+        level = EXCLUDED.level,
+        is_parent = EXCLUDED.is_parent,
+        opening_balance = EXCLUDED.opening_balance,
+        current_balance = EXCLUDED.current_balance,
+        notes = EXCLUDED.notes,
+        updated_at = NOW()
+      RETURNING *;
+    `;
+    const result = await db.query(query, [
+      acc.id, acc.code, acc.name_ar, acc.name_en || null, acc.account_type, acc.nature,
+      acc.parent_id || null, acc.level || 1, Boolean(acc.is_parent), acc.currency || 'EGP',
+      acc.opening_balance || 0, acc.current_balance || 0, acc.is_active !== false, acc.notes || null
+    ]);
+
+    io.emit('account:saved', result.rows[0]);
+    res.json({ success: true, account: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/accounts/treasuries', async (req, res) => {
+  try {
+    const q = await db.query('SELECT * FROM public.acc_treasuries ORDER BY code ASC');
+    res.json({ success: true, treasuries: q.rows });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/accounts/treasuries/fee', async (req, res) => {
+  try {
+    const { id, fee_percentage, fee_fixed, commission_account_id } = req.body;
+    if (!id) return res.status(400).json({ success: false, error: 'Missing treasury id' });
+
+    const q = `
+      UPDATE public.acc_treasuries
+      SET fee_percentage = $2,
+          fee_fixed = $3,
+          commission_account_id = $4
+      WHERE id = $1
+      RETURNING *;
+    `;
+    const r = await db.query(q, [id, fee_percentage || 0, fee_fixed || 0, commission_account_id || null]);
+    io.emit('treasury:updated', r.rows[0]);
+    res.json({ success: true, treasury: r.rows[0] });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/accounts/journal-entries', async (req, res) => {
+  try {
+    const entriesRes = await db.query('SELECT * FROM public.acc_journal_entries ORDER BY entry_date DESC, created_at DESC LIMIT 100');
+    const entryIds = entriesRes.rows.map(e => e.id);
+
+    let linesByEntry = {};
+    if (entryIds.length > 0) {
+      const linesRes = await db.query('SELECT * FROM public.acc_journal_lines WHERE entry_id = ANY($1::varchar[])', [entryIds]);
+      linesRes.rows.forEach(l => {
+        if (!linesByEntry[l.entry_id]) linesByEntry[l.entry_id] = [];
+        linesByEntry[l.entry_id].push(l);
+      });
+    }
+
+    const fullEntries = entriesRes.rows.map(e => ({
+      ...e,
+      lines: linesByEntry[e.id] || []
+    }));
+
+    res.json({ success: true, entries: fullEntries });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

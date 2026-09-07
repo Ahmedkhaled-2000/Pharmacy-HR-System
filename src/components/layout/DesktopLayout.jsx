@@ -74,6 +74,14 @@ export default function DesktopLayout({
       targetTab: 'dashboard'
     },
     {
+      id: 'accounts',
+      label: 'الحسابات',
+      icon: '🏛️',
+      isSingle: true,
+      targetTab: 'accounts',
+      navigateToAccounts: true
+    },
+    {
       id: 'employees',
       label: 'شؤون الموظفين',
       icon: '👥',
@@ -244,6 +252,14 @@ export default function DesktopLayout({
           label: 'التقارير المالية والأرباح',
           icon: '📊',
           desc: 'التقرير المالي الشامل، المبيعات، الرواتب، المصروفات، وصافي الأرباح'
+        },
+        {
+          id: 'accounts',
+          targetTab: 'accounts',
+          label: 'الحسابات وشجرة الحسابات (ERP)',
+          icon: '🏛️',
+          desc: 'شجرة الحسابات، قيود اليومية، الخزائن ونقاط البيع، والقوائم الختامية',
+          navigateToAccounts: true
         }
       ]
     },
@@ -669,6 +685,10 @@ const handleMenuClick = (menu) => {
 if (menu.isSingle) {
   if (menu.openInNewTab || menu.targetTab === 'pharmacy-archive') {
     window.open(window.location.origin + '/archive', '_blank');
+  } else if (menu.targetTab === 'accounts' || menu.navigateToAccounts) {
+    window.history.pushState({}, '', '/accounts');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    setActiveTab('accounts');
   } else {
     setActiveTab(menu.targetTab);
   }
@@ -683,6 +703,14 @@ if (menu.isSingle) {
 const handleSubItemClick = (subItem) => {
 if (subItem.openInNewTab || subItem.targetTab === 'pharmacy-archive') {
   window.open(window.location.origin + '/archive', '_blank');
+  setOpenDropdown(null);
+  setHoveredFlyoutId(null);
+  return;
+}
+if (subItem.targetTab === 'accounts' || subItem.navigateToAccounts) {
+  window.history.pushState({}, '', '/accounts');
+  window.dispatchEvent(new PopStateEvent('popstate'));
+  setActiveTab('accounts');
   setOpenDropdown(null);
   setHoveredFlyoutId(null);
   return;
