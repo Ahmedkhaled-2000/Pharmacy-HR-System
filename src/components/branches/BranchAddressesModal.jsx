@@ -208,18 +208,19 @@ export default function BranchAddressesModal({
         style={{
           maxWidth: '960px',
           width: '95%',
-          maxHeight: '92vh',
+          height: '88vh',
+          maxHeight: '90vh',
           display: 'flex',
           flexDirection: 'column',
           background: 'var(--surface, #ffffff)',
           borderRadius: '18px',
-          padding: '24px',
+          padding: 0,
           boxShadow: '0 16px 48px rgba(0,0,0,0.2)',
           overflow: 'hidden'
         }}
       >
         {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border, #e2e8f0)', paddingBottom: '16px', marginBottom: '16px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border, #e2e8f0)', padding: '18px 24px 14px', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
             <div style={{ width: '48px', height: '48px', borderRadius: '14px', background: 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)', color: '#059669', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px', border: '1.5px solid #a7f3d0' }}>
               📍
@@ -260,7 +261,7 @@ export default function BranchAddressesModal({
         </div>
 
         {/* Search and Filters Bar */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '16px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '12px 24px', borderBottom: '1px solid var(--border, #f1f5f9)', background: 'var(--surface)', flexShrink: 0 }}>
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
             {/* Search Input */}
             <div style={{ flex: '1 1 260px', position: 'relative' }}>
@@ -362,7 +363,19 @@ export default function BranchAddressesModal({
         </div>
 
         {/* Branch Cards Content List */}
-        <div style={{ flex: '1 1 auto', overflowY: 'auto', minHeight: 0, paddingRight: '4px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        <div
+          className="modal-card-body"
+          style={{
+            flex: '1 1 auto',
+            overflowY: 'auto',
+            minHeight: 0,
+            padding: '16px 24px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '14px',
+            boxSizing: 'border-box'
+          }}
+        >
           {filteredBranches.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--muted)', background: 'var(--surface-muted, #f8fafc)', borderRadius: '12px', border: '1px dashed var(--border)' }}>
               <span style={{ fontSize: '36px', display: 'block', marginBottom: '8px' }}>🔍</span>
@@ -765,7 +778,21 @@ export default function BranchAddressesModal({
         </div>
 
         {/* Modal Footer */}
-        <div style={{ borderTop: '1px solid var(--border, #e2e8f0)', paddingTop: '14px', marginTop: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div
+          className="modal-footer"
+          style={{
+            borderTop: '1px solid var(--border, #e2e8f0)',
+            padding: '12px 24px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            background: 'var(--surface, #ffffff)',
+            flexShrink: 0,
+            marginTop: 'auto',
+            width: '100%',
+            boxSizing: 'border-box'
+          }}
+        >
           <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
             يتم تخزين ومزامنة العناوين والمواقع الجغرافية لكافة الفروع لحظياً مع قاعدة البيانات السحابية
           </span>
@@ -773,7 +800,7 @@ export default function BranchAddressesModal({
             type="button"
             className="btn btn-ghost"
             onClick={onClose}
-            style={{ padding: '8px 20px', fontWeight: 700, fontSize: '13px' }}
+            style={{ padding: '8px 24px', fontWeight: 700, fontSize: '13px' }}
           >
             إغلاق
           </button>

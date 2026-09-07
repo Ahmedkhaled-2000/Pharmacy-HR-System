@@ -239,7 +239,10 @@ export default function EmployeePhonesDirectoryModal({
         </div>
 
         {/* Directory List Container */}
-        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '14px', paddingRight: '4px' }}>
+        <div
+          className="modal-card-body"
+          style={{ flex: 1, overflowY: 'auto', minHeight: 0, display: 'flex', flexDirection: 'column', gap: '14px', paddingRight: '4px' }}
+        >
           {filteredEmployees.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--muted)', background: 'var(--surface-muted)', borderRadius: '12px' }}>
               <div style={{ fontSize: '36px', marginBottom: '8px' }}>🔍</div>
@@ -467,7 +470,10 @@ export default function EmployeePhonesDirectoryModal({
         </div>
 
         {/* Modal Footer */}
-        <div style={{ marginTop: '16px', borderTop: '1px solid var(--border)', paddingTop: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div
+          className="modal-footer"
+          style={{ marginTop: 'auto', borderTop: '1px solid var(--border)', paddingTop: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0, width: '100%', boxSizing: 'border-box' }}
+        >
           <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
             إجمالي الموظفين: <strong>{employeeList.length}</strong> · المعروضون: <strong>{filteredEmployees.length}</strong>
           </span>
