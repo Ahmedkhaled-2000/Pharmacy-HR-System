@@ -75,11 +75,12 @@ export default function DesktopLayout({
     },
     {
       id: 'accounts',
-      label: 'الحسابات',
+      label: 'الحسابات (ERP)',
       icon: '🏛️',
       isSingle: true,
       targetTab: 'accounts',
-      navigateToAccounts: true
+      navigateToAccounts: true,
+      openInNewTab: true
     },
     {
       id: 'employees',
@@ -258,8 +259,9 @@ export default function DesktopLayout({
           targetTab: 'accounts',
           label: 'الحسابات وشجرة الحسابات (ERP)',
           icon: '🏛️',
-          desc: 'شجرة الحسابات، قيود اليومية، الخزائن ونقاط البيع، والقوائم الختامية',
-          navigateToAccounts: true
+          desc: 'فتح المنظومة المحاسبية المتكاملة في نافذة منفصلة مستقلة',
+          navigateToAccounts: true,
+          openInNewTab: true
         }
       ]
     },
@@ -691,12 +693,10 @@ export default function DesktopLayout({
 
 const handleMenuClick = (menu) => {
 if (menu.isSingle) {
-  if (menu.openInNewTab || menu.targetTab === 'pharmacy-archive') {
+  if (menu.targetTab === 'accounts' || menu.navigateToAccounts || menu.id === 'accounts') {
+    window.open(window.location.origin + '/accounts', '_blank');
+  } else if (menu.openInNewTab || menu.targetTab === 'pharmacy-archive') {
     window.open(window.location.origin + '/archive', '_blank');
-  } else if (menu.targetTab === 'accounts' || menu.navigateToAccounts) {
-    window.history.pushState({}, '', '/accounts');
-    window.dispatchEvent(new PopStateEvent('popstate'));
-    setActiveTab('accounts');
   } else {
     setActiveTab(menu.targetTab);
   }
@@ -709,16 +709,14 @@ if (menu.isSingle) {
 };
 
 const handleSubItemClick = (subItem) => {
-if (subItem.openInNewTab || subItem.targetTab === 'pharmacy-archive') {
-  window.open(window.location.origin + '/archive', '_blank');
+if (subItem.targetTab === 'accounts' || subItem.navigateToAccounts || subItem.id === 'accounts') {
+  window.open(window.location.origin + '/accounts', '_blank');
   setOpenDropdown(null);
   setHoveredFlyoutId(null);
   return;
 }
-if (subItem.targetTab === 'accounts' || subItem.navigateToAccounts) {
-  window.history.pushState({}, '', '/accounts');
-  window.dispatchEvent(new PopStateEvent('popstate'));
-  setActiveTab('accounts');
+if (subItem.openInNewTab || subItem.targetTab === 'pharmacy-archive') {
+  window.open(window.location.origin + '/archive', '_blank');
   setOpenDropdown(null);
   setHoveredFlyoutId(null);
   return;

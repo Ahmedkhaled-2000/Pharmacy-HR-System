@@ -532,7 +532,11 @@ export default function AccountsSystemView({
 
   const handleBackToDashboard = () => {
     if (isStandalone) {
-      window.location.href = window.location.origin;
+      if (window.opener && !window.opener.closed) {
+        window.close();
+      } else {
+        window.location.href = window.location.origin;
+      }
     } else if (onNavigateTab) {
       onNavigateTab('dashboard');
     }

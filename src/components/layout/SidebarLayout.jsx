@@ -56,6 +56,7 @@ export default function SidebarLayout({
     { id: 'income-expenses', label: 'المصروفات والإيرادات', icon: '📈' },
     { id: 'financial-reports', label: 'التقارير المالية', icon: '📊' },
     { id: 'pharmacy-archive', label: 'أرشيف الفواتير والمستندات', icon: '🗄️', openInNewTab: true },
+    { id: 'accounts', label: 'منظومة الحسابات (ERP)', icon: '🏛️', openInNewTab: true },
     { id: 'settings', label: 'الإعدادات', icon: '⚙️' },
   ];
 
@@ -138,7 +139,9 @@ export default function SidebarLayout({
                 <button
                   key={item.id}
                   onClick={() => {
-                    if (item.openInNewTab || item.id === 'pharmacy-archive') {
+                    if (item.id === 'accounts') {
+                      window.open(window.location.origin + '/accounts', '_blank');
+                    } else if (item.openInNewTab || item.id === 'pharmacy-archive') {
                       window.open(window.location.origin + '/archive', '_blank');
                     } else {
                       setActiveTab(item.id);

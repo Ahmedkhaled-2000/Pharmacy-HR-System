@@ -1036,21 +1036,73 @@ export default function AppRoutes() {
 
                 {/* 19. General Accounts & Chart of Accounts System */}
                 {activeNavTab === 'accounts' && (
-                  <ErrorBoundary fallbackTitle="حدث خطأ في منظومة الحسابات العامة">
-                    <Suspense fallback={<div className="loading-fallback">جاري تحميل منظومة الحسابات...</div>}>
-                      <AccountsSystemView
-                        isStandalone={false}
-                        themeMode={themeMode}
-                        toggleTheme={toggleTheme}
-                        state={state}
-                        setState={setState}
-                        saveState={saveState}
-                        showToast={showToast}
-                        onNavigateTab={setActiveNavTab}
-                        computeGrandPayroll={computeGrandPayroll}
-                      />
-                    </Suspense>
-                  </ErrorBoundary>
+                  <div style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    minHeight: '65vh',
+                    padding: '40px 20px',
+                    textAlign: 'center',
+                    background: 'var(--surface, #ffffff)',
+                    borderRadius: '16px',
+                    border: '1px solid var(--border, #e2e8f0)',
+                    boxShadow: '0 4px 20px rgba(0,0,0,0.05)',
+                    maxWidth: '680px',
+                    margin: '30px auto',
+                  }}>
+                    <div style={{
+                      width: '64px',
+                      height: '64px',
+                      borderRadius: '16px',
+                      background: 'linear-gradient(135deg, #0d9488 0%, #0284c7 100%)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '32px',
+                      marginBottom: '16px',
+                      boxShadow: '0 8px 16px rgba(13, 148, 136, 0.25)',
+                    }}>
+                      🏛️
+                    </div>
+                    <h2 style={{ fontSize: '20px', fontWeight: '900', color: 'var(--text, #0f172a)', margin: '0 0 8px' }}>
+                      منظومة الحسابات العامة وشجرة الحسابات (ERP)
+                    </h2>
+                    <p style={{ fontSize: '13px', color: 'var(--muted, #64748b)', maxWidth: '480px', lineHeight: '1.6', margin: '0 0 20px' }}>
+                      تعمل منظومة الحسابات العامة في بيئة سطح مكتب احترافية منفصلة تماماً (مثل الأرشيف الإلكتروني) لمنحك أقصى قدر من السرعة والتركيز وسهولة مراجعة القيود والتقارير.
+                    </p>
+                    <div style={{ display: 'flex', gap: '10px' }}>
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={() => {
+                          window.open(window.location.origin + '/accounts', '_blank');
+                          setActiveNavTab('dashboard');
+                        }}
+                        style={{
+                          padding: '10px 24px',
+                          fontSize: '14px',
+                          fontWeight: '800',
+                          borderRadius: '10px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          background: '#0d9488',
+                          borderColor: '#0f766e',
+                        }}
+                      >
+                        🚀 فتح منظومة الحسابات في صفحة منفصلة
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => setActiveNavTab('dashboard')}
+                        style={{ padding: '10px 18px', fontSize: '13px', borderRadius: '10px' }}
+                      >
+                        العودة للوحة التحكم
+                      </button>
+                    </div>
+                  </div>
                 )}
 
                 {/* Fallback for Unknown Tab */}
