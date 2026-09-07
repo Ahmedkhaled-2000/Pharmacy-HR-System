@@ -1161,10 +1161,15 @@ export default function EmployeeCardsGrid({
       {/* ── MODAL 4: SALARY & CONTRACTUAL ALLOWANCES DETAILS ── */}
       {selectedSalaryEmp && (
         <EmployeeSalaryDetailsModal
-          emp={selectedSalaryEmp}
+          emp={state.employees?.find(e => String(e.id) === String(selectedSalaryEmp.id)) || selectedSalaryEmp}
           branches={branches}
           jobs={getJobsList(state)}
           onClose={() => setSelectedSalaryEmp(null)}
+          onEdit={() => {
+            const target = state.employees?.find(e => String(e.id) === String(selectedSalaryEmp.id)) || selectedSalaryEmp;
+            setSelectedSalaryEmp(null);
+            openEditEmpModal(target);
+          }}
         />
       )}
     </>

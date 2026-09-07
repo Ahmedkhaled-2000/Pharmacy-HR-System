@@ -354,7 +354,22 @@ export default function EmployeeComprehensiveDossierModal({
                 <div>أيام العمل بالشهر: <strong>{emp.workDaysPerMonth || 26} يوم</strong></div>
                 <div>بدل الإدارة: <strong>{fmt(emp.managementAllowance || 0)} ج.م</strong></div>
                 <div>بدل الانتقال: <strong>{fmt(emp.transportAllowance || 0)} ج.م</strong></div>
-                <div>الأجر الإضافي المخصص: <strong>{fmt(emp.extraAllowance || 0)} ج.م ({emp.extraAllowanceTitle || 'أجر إضافي'})</strong></div>
+                <div>
+                  الأجور والبدلات الإضافية المخصصة: <strong>{fmt(emp.extraAllowance || 0)} ج.م</strong>
+                  {Array.isArray(emp.extraAllowances) && emp.extraAllowances.length > 0 ? (
+                    <span style={{ fontSize: '11px', color: '#7c3aed', marginRight: '4px' }}>
+                      ({emp.extraAllowances.map(a => `${a.title}: ${fmt(a.amount)} ج.م`).join(' + ')})
+                    </span>
+                  ) : (
+                    emp.extraAllowanceTitle && <span style={{ fontSize: '11px', color: '#7c3aed', marginRight: '4px' }}>({emp.extraAllowanceTitle})</span>
+                  )}
+                </div>
+                {((parseFloat(emp.dailyAllowanceAmount) || 0) > 0 || (Array.isArray(emp.dailyAllowances) && emp.dailyAllowances.length > 0)) && (
+                  <div>
+                    بدل الحضور اليومي: <strong>{fmt(parseFloat(emp.dailyAllowanceAmount) || 0)} ج.م/يوم</strong>
+                    {emp.dailyAllowanceTitle && <span style={{ fontSize: '11px', color: '#047857', marginRight: '4px' }}>({emp.dailyAllowanceTitle})</span>}
+                  </div>
+                )}
               </div>
             </div>
           </div>

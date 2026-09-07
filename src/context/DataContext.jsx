@@ -761,7 +761,13 @@ export function DataProvider({ children, showToast = () => {} }) {
     const isMgmt = isManagementJob(emp.jobTitle, getJobsList(state)) || Boolean(emp.isManagement) || (parseFloat(emp.managementAllowance) || 0) > 0;
     const managementAllowance = parseFloat(emp.managementAllowance) || 0;
     const transportAllowance = parseFloat(emp.transportAllowance) || 0;
-    const extraAllowance = parseFloat(emp.extraAllowance) || 0;
+    let extraAllowance = parseFloat(emp.extraAllowance) || 0;
+    if (Array.isArray(emp.extraAllowances) && emp.extraAllowances.length > 0) {
+      const sumList = emp.extraAllowances.reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
+      if (sumList > 0 || extraAllowance === 0) {
+        extraAllowance = sumList;
+      }
+    }
 
     // Daily Attendance Allowance (البدل اليومي المرتبط بالحضور وبصمة الدخول)
     // القاعدة المعتمدة: إذا كان الموظف مسجلاً بأكثر من فرع، يُحسب له البدل اليومي عند تسجيل أول بصمة بالفرع الأول فقط من اليوم، وأي ورديات يسجلها بنفس اليوم بفروع أخرى لا يصرف لها بدل يومي
@@ -858,6 +864,10 @@ export function DataProvider({ children, showToast = () => {} }) {
       managementAllowance,
       transportAllowance,
       extraAllowance,
+      extraAllowances: Array.isArray(emp.extraAllowances) && emp.extraAllowances.length > 0
+        ? emp.extraAllowances
+        : (extraAllowance > 0 ? [{ id: '1', title: emp.extraAllowanceTitle || 'أجر إضافي', amount: extraAllowance }] : []),
+      extraAllowanceTitle: emp.extraAllowanceTitle || '',
       // Daily Attendance Allowance fields
       dailyAllowanceAmount: totalDailyAllowanceRate,
       dailyAllowanceTitle,

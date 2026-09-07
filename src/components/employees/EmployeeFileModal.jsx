@@ -326,8 +326,12 @@ export default function EmployeeFileModal({
       setExtraAllowanceTitle(editingEmp.extraAllowanceTitle || '');
 
       // Load multiple extra allowances
-      if (Array.isArray(editingEmp.extraAllowances) && editingEmp.extraAllowances.length > 0) {
-        setExtraAllowances(editingEmp.extraAllowances.map(a => ({
+      const existingExtraList = (Array.isArray(editingEmp.extraAllowances) && editingEmp.extraAllowances.length > 0)
+        ? editingEmp.extraAllowances
+        : (Array.isArray(editingEmp.customAllowances) && editingEmp.customAllowances.length > 0 ? editingEmp.customAllowances : null);
+
+      if (existingExtraList) {
+        setExtraAllowances(existingExtraList.map(a => ({
           id: a.id || Math.random().toString(),
           title: a.title || '',
           amount: String(a.amount !== undefined ? a.amount : '0')
@@ -758,6 +762,7 @@ export default function EmployeeFileModal({
       managementAllowance: isMgmt ? (parseFloat(managementAllowance) || 0) : 0,
       transportAllowance: parseFloat(transportAllowance) || 0,
       extraAllowances: validExtraAllowances,
+      customAllowances: validExtraAllowances,
       extraAllowance: totalExtraAllowance,
       extraAllowanceTitle: combinedExtraTitle.trim(),
       // Daily Attendance Allowance (البدل اليومي المرتبط بالحضور الفعلي)
@@ -807,10 +812,10 @@ export default function EmployeeFileModal({
       if (onSave) {
         onSave(employeeData);
       } else if (setState && state) {
-        const isExisting = (state.employees || []).some(e => e.id === employeeData.id);
+        const isExisting = (state.employees || []).some(e => String(e.id) === String(employeeData.id));
         let updatedEmps;
         if (isExisting) {
-          updatedEmps = (state.employees || []).map(e => e.id === employeeData.id ? { ...e, ...employeeData } : e);
+          updatedEmps = (state.employees || []).map(e => String(e.id) === String(employeeData.id) ? { ...e, ...employeeData } : e);
         } else {
           updatedEmps = [...(state.employees || []), employeeData];
         }

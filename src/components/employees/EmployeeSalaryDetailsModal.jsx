@@ -6,7 +6,8 @@ export default function EmployeeSalaryDetailsModal({
   emp,
   branches = [],
   jobs = [],
-  onClose
+  onClose,
+  onEdit
 }) {
   if (!emp) return null;
 
@@ -65,14 +66,73 @@ export default function EmployeeSalaryDetailsModal({
   // 2. Allowances
   const mgmtAllowance = parseFloat(emp.managementAllowance || emp.managementBonus) || 0;
   const transportAllowance = parseFloat(emp.transportAllowance) || 0;
-  const dailyAttendanceAllowance = parseFloat(emp.dailyAttendanceAllowance) || 0;
+  const dailyAttendanceAllowance = parseFloat(emp.dailyAllowanceAmount !== undefined ? emp.dailyAllowanceAmount : (emp.dailyAttendanceAllowance || 0)) || 0;
+  const dailyAllowanceTitle = emp.dailyAllowanceTitle?.trim() || 'بدل الحضور اليومي (بالبصمة)';
 
-  // Custom Extra Allowances (Array of { id, title, amount })
-  const customAllowances = Array.isArray(emp.customAllowances) ? emp.customAllowances : [];
-  const totalCustomAllowances = customAllowances.reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
+  // Extra / Custom Allowances (الأجور والبدلات الإضافية المخصصة: حوافز / بدلات مخصصة)
+  let extraAllowancesList = [];
+  const safeParseArray = (val) => {
+    if (Array.isArray(val)) return val;
+    if (typeof val === 'string' && val.trim().startsWith('[')) {
+      try {
+        const parsed = JSON.parse(val);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) {}
+    }
+    return null;
+  };
 
-  // Total Fixed Allowances
-  const totalFixedAllowances = mgmtAllowance + transportAllowance + totalCustomAllowances;
+  const rawList = safeParseArray(emp.extraAllowances) || safeParseArray(emp.customAllowances);
+
+  if (rawList) {
+    extraAllowancesList = rawList
+      .filter((a) => (parseFloat(a?.amount) || 0) > 0 || (a?.title && String(a.title).trim()))
+      .map((a, idx) => ({
+        id: a.id || `ea_${idx}`,
+        title: a.title?.trim() || 'أجر إضافي / بدل مخصص',
+        amount: parseFloat(a.amount) || 0
+      }));
+  }
+
+  // Fallback if extraAllowancesList is empty but emp.extraAllowance > 0 or emp.extraAllowanceTitle exists
+  if (extraAllowancesList.length === 0 && ((parseFloat(emp.extraAllowance) || 0) > 0 || (emp.extraAllowanceTitle && String(emp.extraAllowanceTitle).trim()))) {
+    extraAllowancesList = [{
+      id: '1',
+      title: emp.extraAllowanceTitle?.trim() || 'أجر إضافي / بدل مخصص',
+      amount: parseFloat(emp.extraAllowance) || 0
+    }];
+  }
+
+  const totalExtraAllowances = extraAllowancesList.reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0)
+    || (parseFloat(emp.extraAllowance) || 0);
+
+  if (extraAllowancesList.length === 0 && totalExtraAllowances > 0) {
+    extraAllowancesList.push({
+      id: '1',
+      title: emp.extraAllowanceTitle?.trim() || 'أجر إضافي / بدل مخصص',
+      amount: totalExtraAllowances
+    });
+  }
+
+  // Daily attendance allowances list
+  const dailyAllowancesList = Array.isArray(emp.dailyAllowances) && emp.dailyAllowances.length > 0
+    ? emp.dailyAllowances
+        .map((a) => ({
+          id: a.id || Math.random().toString(),
+          title: a.title?.trim() || 'بدل يومي بالبصمة',
+          amount: parseFloat(a.amount) || 0
+        }))
+        .filter((a) => a.amount > 0 || a.title)
+    : (dailyAttendanceAllowance > 0 ? [{
+        id: 'daily_1',
+        title: dailyAllowanceTitle,
+        amount: dailyAttendanceAllowance
+      }] : []);
+
+  const totalDailyAllowanceRate = dailyAllowancesList.reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0) || dailyAttendanceAllowance;
+
+  // Total Fixed Contractual Allowances (Management + Transport + Extra Allowances)
+  const totalFixedAllowances = mgmtAllowance + transportAllowance + totalExtraAllowances;
 
   // Total Guaranteed Contractual Monthly Package
   const totalMonthlyPackage = totalBasicSalary + totalFixedAllowances;
@@ -244,42 +304,109 @@ export default function EmployeeSalaryDetailsModal({
 
             {/* Daily Attendance Allowance */}
             <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '10px 12px' }}>
-              <div style={{ fontSize: '11.5px', color: '#64748b' }}>بدل الحضور اليومي (بالبصمة)</div>
-              <div style={{ fontSize: '16px', fontWeight: 800, color: dailyAttendanceAllowance > 0 ? '#b45309' : '#94a3b8', marginTop: '2px' }}>
-                {dailyAttendanceAllowance > 0 ? `${fmt(dailyAttendanceAllowance)} ج.م / يوم` : 'غير مخصص'}
+              <div style={{ fontSize: '11.5px', color: '#64748b' }}>
+                {dailyAllowanceTitle || 'بدل الحضور اليومي (بالبصمة)'}
               </div>
-              {dailyAttendanceAllowance > 0 && (
+              <div style={{ fontSize: '16px', fontWeight: 800, color: totalDailyAllowanceRate > 0 ? '#b45309' : '#94a3b8', marginTop: '2px' }}>
+                {totalDailyAllowanceRate > 0 ? `${fmt(totalDailyAllowanceRate)} ج.م / يوم` : 'غير مخصص'}
+              </div>
+              {totalDailyAllowanceRate > 0 && (
                 <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '2px' }}>
                   يصرف للوردية الأولى فقط في اليوم
                 </div>
               )}
             </div>
 
-            {/* Custom Allowances items if any */}
-            {customAllowances.map((ca, idx) => (
-              <div key={ca.id || idx} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '10px 12px' }}>
-                <div style={{ fontSize: '11.5px', color: '#64748b' }}>{ca.title || `بدل إضافي ${idx + 1}`}</div>
-                <div style={{ fontSize: '16px', fontWeight: 800, color: '#7c3aed', marginTop: '2px' }}>
-                  {fmt(parseFloat(ca.amount) || 0)} ج.م
-                </div>
+            {/* Custom Extra Allowances Total Badge */}
+            <div style={{ background: totalExtraAllowances > 0 ? '#faf5ff' : '#f8fafc', border: totalExtraAllowances > 0 ? '1.5px solid #d8b4fe' : '1px solid #e2e8f0', borderRadius: '10px', padding: '10px 12px' }}>
+              <div style={{ fontSize: '11.5px', color: totalExtraAllowances > 0 ? '#6b21a8' : '#64748b' }}>🏷️ إجمالي البدلات والحوافز الإضافية</div>
+              <div style={{ fontSize: '16px', fontWeight: 800, color: totalExtraAllowances > 0 ? '#7c3aed' : '#94a3b8', marginTop: '2px' }}>
+                {totalExtraAllowances > 0 ? `${fmt(totalExtraAllowances)} ج.م` : 'غير مخصص'}
               </div>
-            ))}
+            </div>
           </div>
         </div>
 
+        {/* 3. Dedicated Section: الأجور والبدلات الإضافية المخصصة (حوافز / بدلات مخصصة) */}
+        <div style={{ marginBottom: '20px', background: '#faf5ff', border: '1.5px solid #d8b4fe', borderRadius: '14px', padding: '16px 18px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+            <div>
+              <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 800, color: '#6b21a8', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span>🏷️</span> الأجور والبدلات الإضافية المخصصة (حوافز / بدلات مخصصة)
+              </h4>
+              <p style={{ margin: '3px 0 0 0', fontSize: '11.5px', color: '#7e22ce' }}>
+                البنود والمسميات الإضافية المعتمدة للموظف في نظام الأجور ومسير الرواتب.
+              </p>
+            </div>
+            {totalExtraAllowances > 0 && (
+              <span style={{ fontSize: '13px', background: '#f3e8ff', color: '#6b21a8', padding: '4px 10px', borderRadius: '8px', fontWeight: 800, border: '1px solid #d8b4fe' }}>
+                الإجمالي: {fmt(totalExtraAllowances)} ج.م
+              </span>
+            )}
+          </div>
+
+          {extraAllowancesList.length > 0 ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '10px' }}>
+              {extraAllowancesList.map((ea, idx) => (
+                <div
+                  key={ea.id || idx}
+                  style={{
+                    background: '#ffffff',
+                    border: '1.5px solid #e9d5ff',
+                    borderRadius: '10px',
+                    padding: '12px 14px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    boxShadow: '0 2px 5px rgba(124, 58, 237, 0.06)'
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: '13.5px', fontWeight: 800, color: '#4c1d95' }}>
+                      🏷️ {ea.title || `أجر إضافي ${idx + 1}`}
+                    </div>
+                    <span style={{ fontSize: '10.5px', color: '#7c3aed', background: '#faf5ff', padding: '1px 6px', borderRadius: '4px', border: '1px solid #e9d5ff', display: 'inline-block', marginTop: '3px' }}>
+                      حافز / بدل مخصص
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '17px', fontWeight: 900, color: '#6d28d9' }}>
+                    {fmt(parseFloat(ea.amount) || 0)} <span style={{ fontSize: '12px', fontWeight: 600 }}>ج.م</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ background: '#ffffff', border: '1px dashed #d8b4fe', borderRadius: '10px', padding: '14px', color: '#7e22ce', fontSize: '12.5px', textAlign: 'center' }}>
+              لا توجد أجور أو بدلات إضافية مخصصة مسجلة لهذا الموظف (يمكن إضافتها من زر تعديل الراتب ✏️).
+            </div>
+          )}
+        </div>
+
         {/* Read-Only Notice and Footer */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1.5px solid #e2e8f0', paddingTop: '16px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1.5px solid #e2e8f0', paddingTop: '16px', flexWrap: 'wrap', gap: '10px' }}>
           <span style={{ fontSize: '12px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px' }}>
             <span>🔒</span> بيانات الراتب للقراءة والاطلاع المعتمد فقط. لتعديل الراتب استخدم زر التعديل (✏️).
           </span>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={onClose}
-            style={{ padding: '7px 20px', borderRadius: '8px', fontSize: '13px' }}
-          >
-            إغلاق
-          </button>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            {onEdit && (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={onEdit}
+                style={{ padding: '7px 16px', borderRadius: '8px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '4px', background: '#059669', borderColor: '#059669' }}
+              >
+                <span>✏️</span> تعديل الراتب والبدلات
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={onClose}
+              style={{ padding: '7px 20px', borderRadius: '8px', fontSize: '13px' }}
+            >
+              إغلاق
+            </button>
+          </div>
         </div>
       </div>
     </div>

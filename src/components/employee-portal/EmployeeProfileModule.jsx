@@ -185,10 +185,55 @@ export default function EmployeeProfileModule({
 
   const mgmtAllowance = parseFloat(emp.managementAllowance || emp.managementBonus) || 0;
   const transportAllowance = parseFloat(emp.transportAllowance) || 0;
-  const dailyAttendanceAllowance = parseFloat(emp.dailyAttendanceAllowance) || 0;
-  const customAllowances = Array.isArray(emp.customAllowances) ? emp.customAllowances : [];
-  const totalCustomAllowances = customAllowances.reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
-  const totalFixedAllowances = mgmtAllowance + transportAllowance + totalCustomAllowances;
+  const dailyAttendanceAllowance = parseFloat(emp.dailyAllowanceAmount !== undefined ? emp.dailyAllowanceAmount : (emp.dailyAttendanceAllowance || 0)) || 0;
+  const dailyAllowanceTitle = emp.dailyAllowanceTitle?.trim() || 'بدل الحضور اليومي (بالبصمة)';
+
+  // Extra / Custom Allowances (حوافز / بدلات مخصصة)
+  let extraAllowancesList = [];
+  if (Array.isArray(emp.extraAllowances) && emp.extraAllowances.length > 0) {
+    extraAllowancesList = emp.extraAllowances
+      .map((a) => ({
+        id: a.id || Math.random().toString(),
+        title: a.title?.trim() || 'أجر إضافي / بدل مخصص',
+        amount: parseFloat(a.amount) || 0
+      }))
+      .filter((a) => a.amount > 0 || a.title);
+  } else if (Array.isArray(emp.customAllowances) && emp.customAllowances.length > 0) {
+    extraAllowancesList = emp.customAllowances
+      .map((a) => ({
+        id: a.id || Math.random().toString(),
+        title: a.title?.trim() || 'أجر إضافي / بدل مخصص',
+        amount: parseFloat(a.amount) || 0
+      }))
+      .filter((a) => a.amount > 0 || a.title);
+  } else if ((parseFloat(emp.extraAllowance) || 0) > 0 || (emp.extraAllowanceTitle && emp.extraAllowanceTitle.trim())) {
+    extraAllowancesList = [{
+      id: '1',
+      title: emp.extraAllowanceTitle?.trim() || 'أجر إضافي / بدل مخصص',
+      amount: parseFloat(emp.extraAllowance) || 0
+    }];
+  }
+
+  const totalExtraAllowances = extraAllowancesList.reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
+
+  // Daily attendance allowances list
+  const dailyAllowancesList = Array.isArray(emp.dailyAllowances) && emp.dailyAllowances.length > 0
+    ? emp.dailyAllowances
+        .map((a) => ({
+          id: a.id || Math.random().toString(),
+          title: a.title?.trim() || 'بدل يومي بالبصمة',
+          amount: parseFloat(a.amount) || 0
+        }))
+        .filter((a) => a.amount > 0 || a.title)
+    : (dailyAttendanceAllowance > 0 ? [{
+        id: 'daily_1',
+        title: dailyAllowanceTitle,
+        amount: dailyAttendanceAllowance
+      }] : []);
+
+  const totalDailyAllowanceRate = dailyAllowancesList.reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0) || dailyAttendanceAllowance;
+
+  const totalFixedAllowances = mgmtAllowance + transportAllowance + totalExtraAllowances;
   const totalMonthlyPackage = totalBasicSalary + totalFixedAllowances;
 
   return (
@@ -500,20 +545,47 @@ export default function EmployeeProfileModule({
             </div>
 
             <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '10px 12px' }}>
-              <div style={{ fontSize: '11.5px', color: '#64748b' }}>بدل الحضور اليومي (بالبصمة)</div>
-              <div style={{ fontSize: '16px', fontWeight: 800, color: dailyAttendanceAllowance > 0 ? '#b45309' : '#94a3b8', marginTop: '2px' }}>
-                {dailyAttendanceAllowance > 0 ? `${fmt(dailyAttendanceAllowance)} ج.م / يوم` : 'غير مخصص'}
+              <div style={{ fontSize: '11.5px', color: '#64748b' }}>
+                {dailyAllowanceTitle || 'بدل الحضور اليومي (بالبصمة)'}
+              </div>
+              <div style={{ fontSize: '16px', fontWeight: 800, color: totalDailyAllowanceRate > 0 ? '#b45309' : '#94a3b8', marginTop: '2px' }}>
+                {totalDailyAllowanceRate > 0 ? `${fmt(totalDailyAllowanceRate)} ج.م / يوم` : 'غير مخصص'}
               </div>
             </div>
 
-            {customAllowances.map((ca, cIdx) => (
-              <div key={ca.id || cIdx} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '10px 12px' }}>
-                <div style={{ fontSize: '11.5px', color: '#64748b' }}>{ca.title || `بدل إضافي ${cIdx + 1}`}</div>
-                <div style={{ fontSize: '16px', fontWeight: 800, color: '#047857', marginTop: '2px' }}>
-                  {fmt(parseFloat(ca.amount) || 0)} ج.م
+            {extraAllowancesList.length > 0 ? (
+              extraAllowancesList.map((ea, cIdx) => (
+                <div
+                  key={ea.id || cIdx}
+                  style={{
+                    background: '#faf5ff',
+                    border: '1.5px solid #e9d5ff',
+                    borderRadius: '10px',
+                    padding: '10px 12px',
+                    boxShadow: '0 1px 3px rgba(124, 58, 237, 0.05)'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '4px' }}>
+                    <span style={{ fontSize: '11.5px', color: '#6b21a8', fontWeight: 700 }} title={ea.title}>
+                      🏷️ {ea.title || `أجر إضافي ${cIdx + 1}`}
+                    </span>
+                    <span style={{ fontSize: '10px', background: '#f3e8ff', color: '#7e22ce', padding: '1px 5px', borderRadius: '4px', fontWeight: 700 }}>
+                      بدل مخصص
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '16px', fontWeight: 800, color: '#7c3aed', marginTop: '4px' }}>
+                    {fmt(parseFloat(ea.amount) || 0)} ج.م
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '10px 12px' }}>
+                <div style={{ fontSize: '11.5px', color: '#64748b' }}>🏷️ أجور وبدلات إضافية مخصصة</div>
+                <div style={{ fontSize: '16px', fontWeight: 800, color: '#94a3b8', marginTop: '2px' }}>
+                  غير مخصص
                 </div>
               </div>
-            ))}
+            )}
           </div>
         </div>
       </div>
