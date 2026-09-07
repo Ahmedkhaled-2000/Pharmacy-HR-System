@@ -3,6 +3,7 @@ import { fetchCurrentIP, checkDeviceAuthorization } from '../../utils/deviceAuth
 import FaceVerificationOverlay from '../attendance/FaceVerificationOverlay';
 import KioskConfirmModal from './KioskConfirmModal';
 import { useData } from '../../context/DataContext';
+import { useUI } from '../../context/UIContext';
 import { uploadBiometricAttendancePhoto } from '../../utils/googleDriveService';
 import { sendBiometricAttendanceEmail } from '../../utils/gmailService';
 import { preWarmFaceModels } from '../../utils/faceApiHelper';
@@ -19,6 +20,11 @@ export default function ElectronicKioskView({
   kioskBranchId
 }) {
   const { setState, saveState } = useData();
+  let uiContext = null;
+  try {
+    uiContext = useUI();
+  } catch (e) {}
+  const { kioskConfirmModal } = uiContext || {};
   const { orgSettings, employees, ipRestrictions } = state;
   const [now, setNow] = useState(Date.now());
   const [currentIp, setCurrentIp] = useState('');
@@ -429,15 +435,22 @@ export default function ElectronicKioskView({
       return;
     }
 
-    setConfirmModalData({
-      open: true,
-      actionType,
-      empName,
-      branchName,
-      timeStr,
-      dateStr,
-      autoCloseMs: 3500
-    });
+    // Reset matched employee and input code so kiosk is immediately ready for next person
+    setMatchedEmp(null);
+    setInputCode('');
+
+    // If global modal in GlobalModalsContainer was not already triggered, trigger local fallback
+    if (!kioskConfirmModal?.open) {
+      setConfirmModalData({
+        open: true,
+        actionType,
+        empName,
+        branchName,
+        timeStr,
+        dateStr,
+        autoCloseMs: 3500
+      });
+    }
   };
 
   if (!authStatus.isAuthorized) {
@@ -1010,8 +1023,8 @@ export default function ElectronicKioskView({
         </div>
       )}
 
-      {/* Kiosk Confirmation / Greeting Modal */}
-      {confirmModalData && (
+      {/* Kiosk Confirmation / Greeting Modal (Fallback only if global modal is not open) */}
+      {confirmModalData && !kioskConfirmModal?.open && (
         <KioskConfirmModal
           confirmData={confirmModalData}
           onClose={() => {

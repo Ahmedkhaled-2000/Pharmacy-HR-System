@@ -73,6 +73,7 @@ export default function GlobalModalsContainer() {
     exportEndDate,
     setExportEndDate,
     kioskConfirmModal,
+    setKioskConfirmModal,
     kioskInquiryModal,
     setKioskInquiryModal,
     inspectedEmp,
@@ -461,7 +462,12 @@ export default function GlobalModalsContainer() {
       />
 
       {/* 7. Kiosk Biometric Confirmation Modal */}
-      <KioskConfirmModal kioskConfirmModal={kioskConfirmModal} />
+      {kioskConfirmModal?.open && (
+        <KioskConfirmModal
+          kioskConfirmModal={kioskConfirmModal}
+          onClose={() => setKioskConfirmModal && setKioskConfirmModal({ open: false })}
+        />
+      )}
 
       {/* 8. Kiosk Inquiry Status Modal */}
       {kioskInquiryModal && (

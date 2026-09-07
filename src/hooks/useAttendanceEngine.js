@@ -416,7 +416,8 @@ export function useAttendanceEngine() {
         jobTitle: emp ? emp.jobTitle : '',
         photoUrl: emp ? emp.photoUrl : '',
         message: `تم تسجيل الدخول بنجاح! أهلاً بك على رأس العمل${branchNameStr}.`,
-        timestamp: `${punchDate} · ${punchTime}`
+        timestamp: `${punchDate} · ${punchTime}`,
+        branchName: bObj?.name || ''
       });
     } else {
       showToast(msg);
@@ -464,7 +465,8 @@ export function useAttendanceEngine() {
         jobTitle: emp ? emp.jobTitle : '',
         photoUrl: emp ? emp.photoUrl : '',
         message: 'تم بدء الاستراحة (البريك) بنجاح.',
-        timestamp: `${getRealTodayStr()} · ${nowTime}`
+        timestamp: `${getRealTodayStr()} · ${nowTime}`,
+        branchName: state.branches?.find(b => String(b.id) === String(active?.branchId))?.name || ''
       });
     } else {
       showToast(`تم إيقاف وردية ${emp ? emp.name : ''} مؤقتاً (بريك)`);
@@ -513,7 +515,8 @@ export function useAttendanceEngine() {
         jobTitle: emp ? emp.jobTitle : '',
         photoUrl: emp ? emp.photoUrl : '',
         message: 'تم إنهاء البريك واستئناف العمل بنجاح.',
-        timestamp: `${getRealTodayStr()} · ${nowTimeStr().slice(0, 5)}`
+        timestamp: `${getRealTodayStr()} · ${nowTimeStr().slice(0, 5)}`,
+        branchName: state.branches?.find(b => String(b.id) === String(active?.branchId))?.name || ''
       });
     } else {
       showToast(`تم استئناف وردية ${emp ? emp.name : ''}`);
@@ -723,7 +726,8 @@ export function useAttendanceEngine() {
         jobTitle: emp ? emp.jobTitle : '',
         photoUrl: emp ? emp.photoUrl : '',
         message: `تم تسجيل الانصراف بنجاح! إجمالي ساعات الشيفت: ${netHours} ساعة.`,
-        timestamp: `${getRealTodayStr()} · ${timeOut}`
+        timestamp: `${getRealTodayStr()} · ${timeOut}`,
+        branchName: branches?.find(b => String(b.id) === String(active?.branchId))?.name || ''
       });
     } else {
       showToast(msg);

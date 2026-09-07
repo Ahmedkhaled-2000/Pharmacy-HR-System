@@ -1,40 +1,140 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import { useUI } from '../../context/UIContext';
 
-export default function KioskConfirmModal({ confirmData, kioskConfirmModal, onClose }) {
+export default function KioskConfirmModal({ confirmData, kioskConfirmModal: propKioskConfirmModal, onClose }) {
+  let uiContext = null;
+  try {
+    // Safely attempt to read UIContext if inside UIProvider
+    uiContext = useUI();
+  } catch (e) {
+    uiContext = null;
+  }
+
+  const kioskConfirmModal = propKioskConfirmModal || uiContext?.kioskConfirmModal;
+  const setKioskConfirmModal = uiContext?.setKioskConfirmModal;
+
   const [progress, setProgress] = useState(100);
 
-  const effectiveData = confirmData || (kioskConfirmModal?.open ? {
-    actionType: kioskConfirmModal.type === 'checkin' ? 'shift_start' : (kioskConfirmModal.type === 'checkout' ? 'shift_end' : (kioskConfirmModal.type === 'pause' ? 'break_start' : 'break_end')),
-    empName: kioskConfirmModal.empName,
-    branchName: kioskConfirmModal.branchName || '',
-    timeStr: kioskConfirmModal.timestamp || '',
-    dateStr: '',
-    autoCloseMs: 3500
-  } : null);
+  // Normalize data from either local confirmData or UIContext kioskConfirmModal
+  const effectiveData = useMemo(() => {
+    if (confirmData && confirmData.open !== false) {
+      return {
+        actionType: confirmData.actionType || 'shift_start',
+        empName: confirmData.empName || '',
+        branchName: confirmData.branchName || '',
+        timeStr: confirmData.timeStr || '',
+        dateStr: confirmData.dateStr || '',
+        message: confirmData.message || '',
+        autoCloseMs: confirmData.autoCloseMs || 3500
+      };
+    }
+    if (kioskConfirmModal && kioskConfirmModal.open) {
+      const typeMap = {
+        checkin: 'shift_start',
+        shift_start: 'shift_start',
+        checkout: 'shift_end',
+        shift_end: 'shift_end',
+        pause: 'break_start',
+        break_start: 'break_start',
+        resume: 'break_end',
+        break_end: 'break_end'
+      };
+      const actionType = typeMap[kioskConfirmModal.type] || kioskConfirmModal.actionType || 'shift_start';
 
+      let timeStr = kioskConfirmModal.timestamp || '';
+      let dateStr = '';
+      if (timeStr && timeStr.includes('·')) {
+        const parts = timeStr.split('·').map(s => s.trim());
+        dateStr = parts[0] || '';
+        timeStr = parts[1] || '';
+      }
+
+      return {
+        actionType,
+        empName: kioskConfirmModal.empName || '',
+        branchName: kioskConfirmModal.branchName || '',
+        timeStr: timeStr || new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }),
+        dateStr: dateStr || new Date().toLocaleDateString('ar-EG'),
+        message: kioskConfirmModal.message || '',
+        autoCloseMs: kioskConfirmModal.autoCloseMs || 3500
+      };
+    }
+    return null;
+  }, [
+    confirmData,
+    kioskConfirmModal?.open,
+    kioskConfirmModal?.type,
+    kioskConfirmModal?.empName,
+    kioskConfirmModal?.branchName,
+    kioskConfirmModal?.timestamp,
+    kioskConfirmModal?.message,
+    kioskConfirmModal?.actionType,
+    kioskConfirmModal?.autoCloseMs
+  ]);
+
+  // Unified close handler that guarantees state clearance
+  const handleClose = useCallback(() => {
+    if (typeof onClose === 'function') {
+      try {
+        onClose();
+      } catch (err) {
+        console.error('KioskConfirmModal onClose error:', err);
+      }
+    }
+    if (typeof setKioskConfirmModal === 'function') {
+      try {
+        setKioskConfirmModal({ open: false });
+      } catch (err) {
+        console.error('KioskConfirmModal setKioskConfirmModal error:', err);
+      }
+    }
+  }, [onClose, setKioskConfirmModal]);
+
+  // Auto-dismiss countdown timer + smooth visual progress bar
   useEffect(() => {
-    if (!effectiveData) return;
-    const duration = effectiveData.autoCloseMs || 3500;
-    const intervalTime = 50;
-    const step = (intervalTime / duration) * 100;
+    if (!effectiveData) {
+      setProgress(100);
+      return;
+    }
 
-    const timer = setInterval(() => {
-      setProgress((prev) => {
-        if (prev <= step) {
-          clearInterval(timer);
-          if (onClose) onClose();
-          return 0;
-        }
-        return prev - step;
-      });
+    setProgress(100);
+    const duration = effectiveData.autoCloseMs || 3500;
+    const startTime = Date.now();
+
+    // 1. Guaranteed auto-close timeout
+    const closeTimer = setTimeout(() => {
+      handleClose();
+    }, duration);
+
+    // 2. Smooth progress bar decrement based on wall-clock elapsed time
+    const intervalTime = 35;
+    const progressTimer = setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      const remainingPct = Math.max(0, 100 - (elapsed / duration) * 100);
+      setProgress(remainingPct);
+      if (remainingPct <= 0) {
+        clearInterval(progressTimer);
+      }
     }, intervalTime);
 
-    return () => clearInterval(timer);
-  }, [effectiveData, onClose]);
+    // 3. Escape key listener to close
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        handleClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      clearTimeout(closeTimer);
+      clearInterval(progressTimer);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [effectiveData, handleClose]);
 
   if (!effectiveData) return null;
 
-  const { actionType, empName, branchName, timeStr, dateStr } = effectiveData;
+  const { actionType, empName, branchName, timeStr, dateStr, message } = effectiveData;
 
   const actionConfigs = {
     shift_start: {
@@ -72,6 +172,7 @@ export default function KioskConfirmModal({ confirmData, kioskConfirmModal, onCl
   };
 
   const config = actionConfigs[actionType] || actionConfigs.shift_start;
+  const displayGreeting = message || config.greeting;
 
   return (
     <div
@@ -90,7 +191,7 @@ export default function KioskConfirmModal({ confirmData, kioskConfirmModal, onCl
         justifyContent: 'center',
         padding: '20px'
       }}
-      onClick={onClose}
+      onClick={handleClose}
     >
       <div
         className="fade-in"
@@ -160,7 +261,7 @@ export default function KioskConfirmModal({ confirmData, kioskConfirmModal, onCl
               margin: '0 0 20px 0'
             }}
           >
-            {config.greeting}
+            {displayGreeting}
           </p>
 
           {/* Details Pill Strip */}
@@ -202,7 +303,7 @@ export default function KioskConfirmModal({ confirmData, kioskConfirmModal, onCl
           <button
             type="button"
             className="btn btn-start"
-            onClick={onClose}
+            onClick={handleClose}
             style={{
               width: '100%',
               padding: '12px',
@@ -220,7 +321,7 @@ export default function KioskConfirmModal({ confirmData, kioskConfirmModal, onCl
         </div>
 
         {/* Progress Bar (Auto-Close) */}
-        <div style={{ background: '#e2e8f0', height: '4px', width: '100%' }}>
+        <div style={{ background: '#e2e8f0', height: '5px', width: '100%', overflow: 'hidden' }}>
           <div
             style={{
               background: config.borderColor,
