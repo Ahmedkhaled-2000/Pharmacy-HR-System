@@ -18,6 +18,7 @@ export default function AccountsDesktopMenuBar({
   onOpenCodesCheatsheet,
   onOpenAddAccount,
   onOpenVendorTxModal,
+  onOpenAddVendor,
   onOpenPayrollModal,
   onOpenAiPromptModal,
   onOpenAiAuditRadarModal,
@@ -29,7 +30,7 @@ export default function AccountsDesktopMenuBar({
   searchQuery,
   onSearchChange,
 }) {
-  const [openMenu, setOpenMenu] = useState(null); // 'file' | 'coa' | 'vendors' | 'payroll' | 'ai' | 'reports' | 'guide' | 'settings'
+  const [openMenu, setOpenMenu] = useState(null); // 'file' | 'coa' | 'vendors' | 'payroll' | 'ai' | 'reports' | 'guide'
   const menuBarRef = useRef(null);
 
   // Close menus on click outside
@@ -43,21 +44,34 @@ export default function AccountsDesktopMenuBar({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Keyboard Shortcuts (Ctrl+N, Ctrl+K)
+  // Keyboard Shortcuts (Ctrl+N, Alt+N, Ctrl+K) - Capture phase
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
+      const isCtrlOrMeta = e.ctrlKey || e.metaKey;
+      const key = (e.key || '').toLowerCase();
+
+      // Catch Ctrl+N, Alt+N, or Ctrl+Shift+N for New Journal Entry
+      if ((isCtrlOrMeta && key === 'n') || (e.altKey && key === 'n')) {
         e.preventDefault();
+        e.stopPropagation();
+        if (e.stopImmediatePropagation) e.stopImmediatePropagation();
         onOpenNewEntry?.();
+        return false;
       }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+
+      // Catch Ctrl+K for Global Search
+      if (isCtrlOrMeta && key === 'k') {
         e.preventDefault();
+        e.stopPropagation();
+        if (e.stopImmediatePropagation) e.stopImmediatePropagation();
         const searchInput = document.getElementById('acc-global-search-input');
         if (searchInput) searchInput.focus();
+        return false;
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [onOpenNewEntry]);
 
   const handleMenuClick = (menuKey) => {
@@ -73,39 +87,60 @@ export default function AccountsDesktopMenuBar({
 
   return (
     <div className="acc-desktop-layer" ref={menuBarRef}>
-      {/* ── Top Window Bar / Brand Title ── */}
-      <div className="acc-window-bar">
-        <div className="acc-window-brand">
-          <span className="acc-window-icon">🏛️</span>
-          <span className="acc-window-title">منظومة الحسابات العامة وشجرة الحسابات (ERP Enterprise)</span>
-          <span className="acc-edition-badge">EDITION 2026</span>
-          <span className="acc-connected-pill">● متصل لحظياً</span>
-        </div>
+      {/* ── Top Window Bar (Displayed in Standalone Mode only to prevent clashing in embedded HR mode) ── */}
+      {isStandalone ? (
+        <div className="acc-window-bar">
+          <div className="acc-window-brand">
+            <span className="acc-window-icon">🏛️</span>
+            <span className="acc-window-title">منظومة الحسابات العامة وشجرة الحسابات (ERP Enterprise)</span>
+            <span className="acc-edition-badge">EDITION 2026</span>
+            <span className="acc-connected-pill">● متصل لحظياً</span>
+          </div>
 
-        <div className="acc-window-controls">
-          {toggleTheme && (
-            <button
-              type="button"
-              className="acc-menu-icon-btn"
-              onClick={toggleTheme}
-              title={themeMode === 'dark' ? 'التبديل للنظام الفاتح' : 'التبديل للنظام الداكن'}
-            >
-              {themeMode === 'dark' ? '☀️' : '🌙'}
-            </button>
-          )}
+          <div className="acc-window-controls">
+            {toggleTheme && (
+              <button
+                type="button"
+                className="acc-menu-icon-btn"
+                onClick={toggleTheme}
+                title={themeMode === 'dark' ? 'التبديل للنظام الفاتح' : 'التبديل للنظام الداكن'}
+              >
+                {themeMode === 'dark' ? '☀️' : '🌙'}
+              </button>
+            )}
 
-          {isStandalone && onBackToDashboard && (
-            <button
-              type="button"
-              className="acc-menu-link-btn"
-              onClick={onBackToDashboard}
-              title="العودة للوحة تحكم الإدارة"
-            >
-              🏠 لوحة التحكم الرئيسية
-            </button>
-          )}
+            {onBackToDashboard && (
+              <button
+                type="button"
+                className="acc-menu-link-btn"
+                onClick={onBackToDashboard}
+                title="العودة للوحة تحكم الإدارة"
+              >
+                🏠 لوحة التحكم الرئيسية
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '8px 20px',
+          background: 'var(--surface-subtle, #f8fafc)',
+          borderBottom: '1px solid var(--border, #e2e8f0)',
+          fontSize: '12px',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '18px' }}>🏛️</span>
+            <strong style={{ color: 'var(--text, #0f172a)' }}>شاشة الحسابات العامة وشجرة الحسابات (ERP)</strong>
+            <span className="acc-connected-pill">● متصل لحظياً</span>
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--muted, #64748b)' }}>
+            النطاق النشط: <strong>{selectedBranchName}</strong>
+          </div>
+        </div>
+      )}
 
       {/* ── Classic ERP Dropdown Menu Bar ── */}
       <nav className="acc-menubar-nav">
@@ -122,21 +157,20 @@ export default function AccountsDesktopMenuBar({
             <div className="acc-dropdown-menu">
               <button type="button" onClick={() => handleAction(onOpenNewEntry)}>
                 <span>📝 قيد يومية عامة جديد</span>
-                <kbd>Ctrl+N</kbd>
+                <kbd>Ctrl+N / Alt+N</kbd>
               </button>
               <button type="button" onClick={() => handleAction(onOpenTransfer)}>
                 <span>🔄 تحويل نقدية بين الخزائن والبنوك</span>
               </button>
               <button type="button" onClick={() => handleAction(() => onOpenVendorTxModal?.('payment'))}>
-                <span>💊 سداد دفعة أو شيك لشركة توزيع أدوية</span>
+                <span>💊 سداد دفعة أو شيك لشركة أدوية</span>
               </button>
               <button type="button" onClick={() => handleAction(() => onOpenVendorTxModal?.('invoice'))}>
-                <span>📥 إثبات فاتورة مشتريات أدوية ومستلزمات</span>
+                <span>📥 إثبات فاتورة مشتريات أدوية</span>
               </button>
               <div className="acc-menu-divider"></div>
-              <button type="button" onClick={() => handleAction(() => window.print())}>
-                <span>🖨️ طباعة الشاشة الحالية</span>
-                <kbd>Ctrl+P</kbd>
+              <button type="button" onClick={() => handleAction(() => onSelectTab('entries'))}>
+                <span>📜 استعراض دفتر اليومية العامة</span>
               </button>
               {isStandalone && onBackToDashboard && (
                 <button type="button" onClick={() => handleAction(onBackToDashboard)}>
@@ -151,7 +185,7 @@ export default function AccountsDesktopMenuBar({
         <div className="acc-menu-item">
           <button
             type="button"
-            className={`acc-menu-btn ${openMenu === 'coa' ? 'active' : ''}`}
+            className={`acc-menu-btn ${openMenu === 'coa' || activeTab === 'chart' ? 'active' : ''}`}
             onClick={() => handleMenuClick('coa')}
           >
             🌳 شجرة الحسابات والدليل ▾
@@ -182,7 +216,7 @@ export default function AccountsDesktopMenuBar({
         <div className="acc-menu-item">
           <button
             type="button"
-            className={`acc-menu-btn ${openMenu === 'vendors' ? 'active' : ''}`}
+            className={`acc-menu-btn ${openMenu === 'vendors' || activeTab === 'vendors' ? 'active' : ''}`}
             onClick={() => handleMenuClick('vendors')}
           >
             💊 شركات الأدوية والموزعين ▾
@@ -192,18 +226,27 @@ export default function AccountsDesktopMenuBar({
               <button type="button" onClick={() => handleAction(() => onSelectTab('vendors'))}>
                 <span>🏢 دليل وحسابات شركات التوزيع (المتحدة، ابن سينا، فارما...)</span>
               </button>
-              <button type="button" onClick={() => handleAction(() => onOpenVendorTxModal?.('invoice'))}>
-                <span>📥 تسجيل فاتورة مشتريات أدوية جديدة</span>
-              </button>
-              <button type="button" onClick={() => handleAction(() => onOpenVendorTxModal?.('payment'))}>
-                <span>📤 سداد دفعة نقدية أو شيك بنكي لموزع</span>
-              </button>
-              <button type="button" onClick={() => handleAction(() => onOpenVendorTxModal?.('credit_note'))}>
-                <span>🔄 تسجيل إشعار خصم مرتجع إكسباير (Credit Note)</span>
+              <button type="button" onClick={() => handleAction(onOpenAddVendor)}>
+                <span>➕ إضافة شركة توزيع أدوية جديدة</span>
               </button>
               <div className="acc-menu-divider"></div>
-              <button type="button" onClick={() => handleAction(() => onSelectTab('vendors'))}>
-                <span>📑 استخراج كشف حساب موزع تحليلي</span>
+              <button type="button" onClick={() => handleAction(() => {
+                onSelectTab('vendors');
+                onOpenVendorTxModal?.('invoice');
+              })}>
+                <span>📥 تسجيل فاتورة مشتريات أدوية جديدة</span>
+              </button>
+              <button type="button" onClick={() => handleAction(() => {
+                onSelectTab('vendors');
+                onOpenVendorTxModal?.('payment');
+              })}>
+                <span>📤 سداد دفعة نقدية أو شيك بنكي لموزع</span>
+              </button>
+              <button type="button" onClick={() => handleAction(() => {
+                onSelectTab('vendors');
+                onOpenVendorTxModal?.('credit_note');
+              })}>
+                <span>🔄 تسجيل إشعار خصم مرتجع إكسباير (Credit Note)</span>
               </button>
             </div>
           )}
@@ -261,28 +304,28 @@ export default function AccountsDesktopMenuBar({
         <div className="acc-menu-item">
           <button
             type="button"
-            className={`acc-menu-btn ${openMenu === 'reports' ? 'active' : ''}`}
+            className={`acc-menu-btn ${openMenu === 'reports' || activeTab === 'reports' ? 'active' : ''}`}
             onClick={() => handleMenuClick('reports')}
           >
             📊 القوائم والتقارير المالية ▾
           </button>
           {openMenu === 'reports' && (
             <div className="acc-dropdown-menu">
-              <button type="button" onClick={() => handleAction(() => onSelectTab('reports'))}>
+              <button type="button" onClick={() => handleAction(() => onSelectTab('reports', 'trial-balance'))}>
                 <span>⚖️ ميزان المراجعة بالأرصدة والمجاميع (Trial Balance)</span>
               </button>
-              <button type="button" onClick={() => handleAction(() => onSelectTab('reports'))}>
+              <button type="button" onClick={() => handleAction(() => onSelectTab('reports', 'income-statement'))}>
                 <span>📈 قائمة الدخل والأرباح والخسائر (P&L Statement)</span>
               </button>
-              <button type="button" onClick={() => handleAction(() => onSelectTab('reports'))}>
+              <button type="button" onClick={() => handleAction(() => onSelectTab('reports', 'balance-sheet'))}>
                 <span>🏛️ الميزانية العمومية وقائمة المركز المالي</span>
               </button>
-              <button type="button" onClick={() => handleAction(() => onSelectTab('reports'))}>
+              <button type="button" onClick={() => handleAction(() => onSelectTab('reports', 'general-ledger'))}>
                 <span>🔍 دفتر الأستاذ التحليلي وكشف الحساب</span>
               </button>
               <div className="acc-menu-divider"></div>
               <button type="button" onClick={() => handleAction(() => onSelectTab('entries'))}>
-                <span>📜 استعراض دفتر قيود اليومية العامة ({'>'}100 قيد)</span>
+                <span>📜 استعراض دفتر قيود اليومية العامة</span>
               </button>
             </div>
           )}
@@ -292,8 +335,8 @@ export default function AccountsDesktopMenuBar({
         <div className="acc-menu-item">
           <button
             type="button"
-            className={`acc-menu-btn ${openMenu === 'guide' ? 'active' : ''}`}
-            onClick={() => handleAction(onOpenGuideModal)}
+            className={`acc-menu-btn ${activeTab === 'guide' ? 'active' : ''}`}
+            onClick={() => handleAction(() => onSelectTab('guide'))}
             style={{ color: '#0284c7', fontWeight: '800' }}
           >
             📖 دليل وشرح المنظومة
@@ -308,7 +351,7 @@ export default function AccountsDesktopMenuBar({
             type="button"
             className="acc-ribbon-btn primary"
             onClick={onOpenNewEntry}
-            title="إنشاء قيد يومية عامة جديد (Ctrl+N)"
+            title="إنشاء قيد يومية عامة جديد (Ctrl+N أو Alt+N)"
           >
             <span>➕ قيد جديد</span>
           </button>
@@ -414,7 +457,7 @@ export default function AccountsDesktopMenuBar({
           <span className="acc-status-item">📅 الفترة المحاسبية: <strong>{fiscalPeriod}</strong></span>
         </div>
         <div className="acc-status-right">
-          <span className="acc-hint-text">💡 اختصارات: <code>Ctrl+N</code> لقيد جديد · <code>Ctrl+K</code> للبحث السريع</span>
+          <span className="acc-hint-text">💡 اختصارات: <code>Ctrl+N / Alt+N</code> لقيد جديد · <code>Ctrl+K</code> للبحث</span>
         </div>
       </div>
     </div>

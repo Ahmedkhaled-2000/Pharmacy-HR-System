@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { printIsolatedReport } from '../../utils/printAccountingReport';
 
 /**
  * PharmaVendorsTab.jsx
@@ -10,6 +11,8 @@ export default function PharmaVendorsTab({
   transactions = [],
   branches = [],
   onOpenNewTransaction,
+  onOpenAddVendor,
+  onOpenEditVendor,
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedVendorFilter, setSelectedVendorFilter] = useState('');
@@ -80,6 +83,35 @@ export default function PharmaVendorsTab({
       };
     });
   }, [inspectedVendorForStatement, transactions]);
+
+  const handlePrintStatement = () => {
+    if (!inspectedVendorForStatement) return;
+    printIsolatedReport({
+      title: `كشف حساب تفصيلي: ${inspectedVendorForStatement.name_ar}`,
+      subtitle: `كود الحساب: ${inspectedVendorForStatement.code} · ${inspectedVendorForStatement.contact_person || inspectedVendorForStatement.rep_name || ''} (${inspectedVendorForStatement.phone || ''})`,
+      documentNumber: `STMT-${inspectedVendorForStatement.code}-${new Date().toISOString().slice(0, 10)}`,
+      metadata: [
+        { label: 'اسم الشركة', value: inspectedVendorForStatement.name_ar },
+        { label: 'كود الحساب', value: inspectedVendorForStatement.code },
+        { label: 'فترة الائتمان المتفق عليها', value: `${inspectedVendorForStatement.credit_days} يوماً` },
+        { label: 'المندوب / الاتصال', value: `${inspectedVendorForStatement.contact_person || inspectedVendorForStatement.rep_name || 'غير محدد'} - ${inspectedVendorForStatement.phone || ''}` },
+      ],
+      summaryCards: [
+        { title: 'الرصيد الدائن الحالي', value: `${Number(inspectedVendorForStatement.current_balance || 0).toLocaleString()} ج.م`, color: '#dc2626' },
+        { title: 'سقف التسهيلات الائتمانية', value: `${Number(inspectedVendorForStatement.credit_limit || 0).toLocaleString()} ج.م`, color: '#0284c7' },
+        { title: 'فترة السماح', value: `${inspectedVendorForStatement.credit_days} يوماً`, color: '#0d9488' },
+      ],
+      headers: ['التاريخ', 'رقم السند', 'البيان والتفاصيل', 'مدين (سداد/إكسباير)', 'دائن (فاتورة)', 'الرصيد التراكمي المستحق'],
+      rows: vendorStatement.map((l) => [
+        l.tx_date,
+        l.tx_number,
+        l.narration + (l.cheque_number ? ` (شيك: ${l.cheque_number})` : ''),
+        l.debit > 0 ? `${l.debit.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م` : '—',
+        l.credit > 0 ? `${l.credit.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م` : '—',
+        `${l.runningBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م`,
+      ]),
+    });
+  };
 
   const getVendorName = (vId) => vendors.find((v) => v.id === vId)?.name_ar || vId;
   const getBranchName = (bId) => branches.find((b) => b.id === bId)?.name || 'عام / الإدارة';
@@ -220,10 +252,18 @@ export default function PharmaVendorsTab({
 
       {/* 3. Vendors Cards Grid */}
       <div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
           <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: 'var(--text, #0f172a)' }}>
             🏢 دليل وحسابات شركات توزيع الأدوية المعتمدة ({vendors.length} موزعين)
           </h3>
+          <button
+            type="button"
+            className="acc-btn acc-btn-primary"
+            onClick={onOpenAddVendor}
+            title="إضافة وتثبيت حساب شركة توزيع أدوية جديدة"
+          >
+            <span>➕ إضافة شركة توزيع جديدة</span>
+          </button>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(310px, 1fr))', gap: '14px' }}>
@@ -304,14 +344,23 @@ export default function PharmaVendorsTab({
                 </div>
 
                 {/* Card Footer Actions */}
-                <div style={{ marginTop: '16px', display: 'flex', gap: '8px', borderTop: '1px solid var(--border, #e2e8f0)', paddingTop: '12px' }}>
+                <div style={{ marginTop: '16px', display: 'flex', gap: '6px', borderTop: '1px solid var(--border, #e2e8f0)', paddingTop: '12px' }}>
                   <button
                     type="button"
                     className="acc-btn acc-btn-outline"
-                    style={{ flex: 1, padding: '6px 10px', fontSize: '12px', justifyContent: 'center' }}
+                    style={{ flex: 1, padding: '6px 8px', fontSize: '12px', justifyContent: 'center' }}
                     onClick={() => setInspectedVendorForStatement(v)}
                   >
-                    📑 كشف حساب تفصيلي
+                    📑 كشف حساب
+                  </button>
+                  <button
+                    type="button"
+                    className="acc-btn acc-btn-outline"
+                    style={{ padding: '6px 10px', fontSize: '12px' }}
+                    onClick={() => onOpenEditVendor?.(v)}
+                    title="تعديل بيانات وتسهيلات الموزع"
+                  >
+                    ✏️ تعديل
                   </button>
                   <button
                     type="button"
@@ -440,7 +489,7 @@ export default function PharmaVendorsTab({
               </button>
             </div>
 
-            <div className="acc-modal-body">
+            <div className="acc-modal-body hide-scrollbar">
               {/* Top Highlights */}
               <div style={{
                 display: 'grid',
@@ -473,56 +522,59 @@ export default function PharmaVendorsTab({
               </div>
 
               {/* Transactions Table */}
-              <table className="acc-table" style={{ fontSize: '12.5px' }}>
-                <thead>
-                  <tr>
-                    <th style={{ width: '100px' }}>التاريخ</th>
-                    <th style={{ width: '120px' }}>رقم السند</th>
-                    <th>البيان والتفاصيل</th>
-                    <th style={{ width: '120px', color: '#059669' }}>مدين (سداد/إكسباير)</th>
-                    <th style={{ width: '120px', color: '#dc2626' }}>دائن (فاتورة)</th>
-                    <th style={{ width: '130px', color: '#0284c7' }}>الرصيد التراكمي المستحق</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {vendorStatement.length === 0 ? (
+              <div className="hide-scrollbar" style={{ overflowX: 'auto', borderRadius: '8px', border: '1px solid var(--border, #e2e8f0)' }}>
+                <table className="acc-table" style={{ fontSize: '12.5px', margin: 0 }}>
+                  <thead>
                     <tr>
-                      <td colSpan="6" style={{ textAlign: 'center', padding: '30px', color: 'var(--muted, #64748b)' }}>
-                        لا توجد حركات مسجلة مع هذا الموزع حتى الآن.
-                      </td>
+                      <th style={{ width: '100px' }}>التاريخ</th>
+                      <th style={{ width: '120px' }}>رقم السند</th>
+                      <th>البيان والتفاصيل</th>
+                      <th style={{ width: '120px', color: '#059669' }}>مدين (سداد/إكسباير)</th>
+                      <th style={{ width: '120px', color: '#dc2626' }}>دائن (فاتورة)</th>
+                      <th style={{ width: '130px', color: '#0284c7' }}>الرصيد المستحق</th>
                     </tr>
-                  ) : (
-                    vendorStatement.map((line, idx) => (
-                      <tr key={idx}>
-                        <td>{line.tx_date}</td>
-                        <td><span className="acc-code-badge">{line.tx_number}</span></td>
-                        <td>
-                          <div>{line.narration}</div>
-                          {line.cheque_number && (
-                            <div style={{ fontSize: '11px', color: 'var(--muted, #64748b)' }}>شيك رقم: {line.cheque_number}</div>
-                          )}
-                        </td>
-                        <td style={{ fontWeight: '800', color: line.debit > 0 ? '#059669' : 'var(--muted, #94a3b8)', fontFamily: 'monospace' }}>
-                          {line.debit > 0 ? line.debit.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '—'}
-                        </td>
-                        <td style={{ fontWeight: '800', color: line.credit > 0 ? '#dc2626' : 'var(--muted, #94a3b8)', fontFamily: 'monospace' }}>
-                          {line.credit > 0 ? line.credit.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '—'}
-                        </td>
-                        <td style={{ fontWeight: '900', color: '#0284c7', fontFamily: 'monospace' }}>
-                          {line.runningBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م
+                  </thead>
+                  <tbody>
+                    {vendorStatement.length === 0 ? (
+                      <tr>
+                        <td colSpan="6" style={{ textAlign: 'center', padding: '30px', color: 'var(--muted, #64748b)' }}>
+                          لا توجد حركات مسجلة مع هذا الموزع حتى الآن.
                         </td>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+                    ) : (
+                      vendorStatement.map((line, idx) => (
+                        <tr key={idx}>
+                          <td>{line.tx_date}</td>
+                          <td><span className="acc-code-badge">{line.tx_number}</span></td>
+                          <td>
+                            <div>{line.narration}</div>
+                            {line.cheque_number && (
+                              <div style={{ fontSize: '11px', color: 'var(--muted, #64748b)' }}>شيك رقم: {line.cheque_number}</div>
+                            )}
+                          </td>
+                          <td style={{ fontWeight: '800', color: line.debit > 0 ? '#059669' : 'var(--muted, #94a3b8)', fontFamily: 'monospace' }}>
+                            {line.debit > 0 ? line.debit.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '—'}
+                          </td>
+                          <td style={{ fontWeight: '800', color: line.credit > 0 ? '#dc2626' : 'var(--muted, #94a3b8)', fontFamily: 'monospace' }}>
+                            {line.credit > 0 ? line.credit.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '—'}
+                          </td>
+                          <td style={{ fontWeight: '900', color: '#0284c7', fontFamily: 'monospace' }}>
+                            {line.runningBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })} ج.م
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             <div className="acc-modal-footer">
               <button
                 type="button"
                 className="acc-btn acc-btn-outline"
-                onClick={() => window.print()}
+                onClick={handlePrintStatement}
+                title="طباعة كشف الحساب في بيئة نظيفة معزولة A4"
               >
                 🖨️ طباعة كشف الحساب
               </button>

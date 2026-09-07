@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { printIsolatedReport } from '../../utils/printAccountingReport';
 
 /**
  * FinancialStatementsTab.jsx
@@ -14,8 +15,12 @@ export default function FinancialStatementsTab({
   branches = [],
   selectedBranchId = '',
   fiscalPeriod = '',
+  reportType: externalReportType,
+  onReportTypeChange,
 }) {
-  const [reportType, setReportType] = useState('trial-balance'); // 'trial-balance' | 'income-statement' | 'balance-sheet' | 'general-ledger'
+  const [internalReportType, setInternalReportType] = useState('trial-balance');
+  const reportType = externalReportType || internalReportType;
+  const setReportType = onReportTypeChange || setInternalReportType;
   const [selectedLedgerAccountId, setSelectedLedgerAccountId] = useState('');
 
   // 1. Calculate Movements and Balances per account from Journal Entries

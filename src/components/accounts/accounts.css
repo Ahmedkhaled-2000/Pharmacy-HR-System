@@ -624,6 +624,20 @@
   flex-direction: column;
   gap: 16px;
   background: var(--surface, var(--acc-surface));
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
+.acc-modal-body::-webkit-scrollbar,
+.hide-scrollbar::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+.hide-scrollbar {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
 }
 
 .acc-modal-footer {
@@ -640,6 +654,9 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .acc-form-group label {
@@ -651,12 +668,15 @@
 .acc-form-input,
 .acc-form-select,
 .acc-form-textarea {
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
   padding: 10px 14px;
   border-radius: 10px;
   background: var(--surface, var(--acc-surface));
   border: 1px solid var(--border-strong, var(--acc-border-strong));
   color: var(--text, var(--acc-text));
-  font-size: 14px;
+  font-size: 13.5px;
   font-family: inherit;
   outline: none;
   transition: all 0.2s;
@@ -670,9 +690,42 @@
 }
 
 .acc-form-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
+  display: grid !important;
+  grid-template-columns: 1fr 1fr !important;
+  gap: 14px !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+/* ── Interactive KPI Cards (Item 10) ── */
+.acc-kpi-card.interactive {
+  cursor: pointer;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  user-select: none;
+  position: relative;
+}
+
+.acc-kpi-card.interactive:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 24px -4px rgba(15, 23, 42, 0.08), 0 4px 10px -2px rgba(15, 23, 42, 0.04);
+}
+
+.acc-kpi-card.interactive:active {
+  transform: translateY(-1px);
+}
+
+.acc-kpi-click-hint {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--muted, #64748b);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: color 0.15s ease;
+}
+
+.acc-kpi-card.interactive:hover .acc-kpi-click-hint {
+  color: #0284c7;
 }
 
 /* شاشة ميزان القيد (Debit = Credit Validator) */

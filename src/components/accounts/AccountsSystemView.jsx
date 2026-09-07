@@ -17,6 +17,7 @@ import TransferTreasuryModal from './TransferTreasuryModal';
 import NewJournalEntryModal from './NewJournalEntryModal';
 import AddEditAccountModal from './AddEditAccountModal';
 import VendorTransactionModal from './VendorTransactionModal';
+import AddEditVendorModal from './AddEditVendorModal';
 import PayrollAccountingIntegrationModal from './PayrollAccountingIntegrationModal';
 import AiJournalPromptModal from './AiJournalPromptModal';
 import AiAuditRadarModal from './AiAuditRadarModal';
@@ -35,8 +36,8 @@ import {
 /**
  * AccountsSystemView.jsx
  * الحاوية الكبرى لمنظومة الحسابات العامة وشجرة الحسابات (ERP Enterprise)
- * مصممة بنظام سطح المكتب الاحترافي (Desktop Layer) مع قوائم منسدلة حقيقية
- * وتكامل ذكي كامل مع الرواتب، حسابات شركات الأدوية، والذكاء الاصطناعي
+ * مصممة بنظام سطح المكتب الاحترافي مع توجيه دقيق من القوائم المنسدلة
+ * وتكامل ذكي كامل مع الرواتب، حسابات شركات الأدوية، والطباعة المعزولة
  */
 export default function AccountsSystemView({
   isStandalone = false,
@@ -51,6 +52,7 @@ export default function AccountsSystemView({
 }) {
   // Active Navigation Tab: 'chart' | 'treasuries' | 'entries' | 'vendors' | 'cost-centers' | 'reports' | 'guide'
   const [activeTab, setActiveTab] = useState('chart');
+  const [reportsSubtype, setReportsSubtype] = useState('trial-balance');
 
   // Search query from ribbon
   const [searchQuery, setSearchQuery] = useState('');
@@ -70,9 +72,13 @@ export default function AccountsSystemView({
   const [parentAccountForNew, setParentAccountForNew] = useState(null);
   const [accountToEdit, setAccountToEdit] = useState(null);
 
-  // New Feature Modals
+  // Vendor Modals
   const [isVendorTxModalOpen, setIsVendorTxModalOpen] = useState(false);
   const [vendorTxInitialType, setVendorTxInitialType] = useState('payment');
+  const [isAddEditVendorModalOpen, setIsAddEditVendorModalOpen] = useState(false);
+  const [vendorToEdit, setVendorToEdit] = useState(null);
+
+  // Other Feature Modals
   const [isPayrollModalOpen, setIsPayrollModalOpen] = useState(false);
   const [isAiPromptModalOpen, setIsAiPromptModalOpen] = useState(false);
   const [isAiAuditRadarModalOpen, setIsAiAuditRadarModalOpen] = useState(false);
@@ -138,7 +144,6 @@ export default function AccountsSystemView({
       updated = [...accounts, accountData];
     }
 
-    // If parent was updated to is_parent = true
     if (accountData.parent_id) {
       updated = updated.map((a) =>
         a.id === accountData.parent_id ? { ...a, is_parent: true } : a
@@ -149,7 +154,7 @@ export default function AccountsSystemView({
     if (showToast) showToast('✅ تم حفظ الحساب بنجاح في شجرة الحسابات');
   };
 
-  // 2. Save Treasury Fee Adjustments (Bank / Digital Wallet / Instapay Fee)
+  // 2. Save Treasury Fee Adjustments
   const handleSaveTreasuryFee = async (updatedTreasury) => {
     const updated = treasuries.map((t) =>
       t.id === updatedTreasury.id ? updatedTreasury : t
@@ -157,7 +162,7 @@ export default function AccountsSystemView({
     await persistAccountsData({ treasuries: updated });
     if (showToast) {
       showToast(
-        `✅ تم تحديث نسبة خصم وعمولة ${updatedTreasury.name} إلى ${updatedTreasury.fee_percentage}% بنجاح`
+        `✅ تم تحديث نسبة عمولة ${updatedTreasury.name} إلى ${updatedTreasury.fee_percentage}% بنجاح`
       );
     }
   };
@@ -166,7 +171,6 @@ export default function AccountsSystemView({
   const handleSaveJournalEntry = async (newEntry) => {
     const updatedEntries = [newEntry, ...entries];
 
-    // Recalculate balances for touched accounts
     const accountDeltas = {};
     (newEntry.lines || []).forEach((l) => {
       if (!accountDeltas[l.account_id]) accountDeltas[l.account_id] = { debit: 0, credit: 0 };
@@ -189,7 +193,6 @@ export default function AccountsSystemView({
       return acc;
     });
 
-    // Also update treasuries balance if touched
     const updatedTreasuries = treasuries.map((t) => {
       if (accountDeltas[t.account_id]) {
         const d = accountDeltas[t.account_id];
@@ -209,7 +212,7 @@ export default function AccountsSystemView({
     if (showToast) showToast(`✅ تم ترحيل وحفظ سند القيد رقم ${newEntry.entry_number} بنجاح`);
   };
 
-  // 4. Execute Internal Transfer with Automatic Commission / Bank Fee Entry
+  // 4. Execute Internal Transfer
   const handleExecuteTransfer = async ({
     fromTreasury,
     toTreasury,
@@ -219,7 +222,6 @@ export default function AccountsSystemView({
     transferDate,
     notes,
   }) => {
-    // Generate Balanced Journal Entry
     const lines = [
       {
         id: `line-${Date.now()}-1`,
@@ -239,7 +241,6 @@ export default function AccountsSystemView({
       },
     ];
 
-    // If there is an electronic / bank fee, add the commission line!
     if (feeAmount > 0) {
       const commAccountId =
         fromTreasury.commission_account_id ||
@@ -252,7 +253,7 @@ export default function AccountsSystemView({
         account_id: commAccountId,
         debit: feeAmount,
         credit: 0,
-        line_desc: `عمولة ومصروفات تحويل لحظي / بنكي (${fromTreasury.name})`,
+        line_desc: `عمولة ومصروفات تحويل (${fromTreasury.name})`,
         branch_id: fromTreasury.branch_id || null,
       });
     }
@@ -273,7 +274,6 @@ export default function AccountsSystemView({
       lines: lines,
     };
 
-    // Update treasuries balance
     const updatedTreasuries = treasuries.map((t) => {
       if (t.id === fromTreasury.id) {
         return { ...t, current_balance: (parseFloat(t.current_balance) || 0) - grossAmount };
@@ -289,23 +289,47 @@ export default function AccountsSystemView({
 
     if (showToast) {
       showToast(
-        `✅ تم تحويل ${grossAmount.toLocaleString()} ج.م من (${fromTreasury.name}) إلى (${toTreasury.name}) مع خصم عمولة ${feeAmount.toFixed(2)} ج.م وإنشاء القيد المتزن فورياً.`
+        `✅ تم تحويل ${grossAmount.toLocaleString()} ج.م من (${fromTreasury.name}) إلى (${toTreasury.name}) مع خصم عمولة ${feeAmount.toFixed(2)} ج.م`
       );
     }
   };
 
-  // 5. Save Cost Center
-  const handleSaveCostCenter = async (newCC) => {
-    const updated = [...costCenters, newCC];
+  // 5. Cost Centers Management: Add/Edit and Delete (Item 9)
+  const handleSaveCostCenter = async (costCenterData) => {
+    const exists = costCenters.some((c) => c.id === costCenterData.id);
+    let updated;
+    if (exists) {
+      updated = costCenters.map((c) => (c.id === costCenterData.id ? { ...c, ...costCenterData } : c));
+    } else {
+      updated = [...costCenters, costCenterData];
+    }
     await persistAccountsData({ costCenters: updated });
-    if (showToast) showToast(`✅ تم حفظ مركز التكلفة (${newCC.name})`);
+    if (showToast) showToast(`✅ تم حفظ مركز التكلفة (${costCenterData.name}) بنجاح`);
   };
 
-  // 6. Save Pharma Vendor Transaction & Post Journal Entry
+  const handleDeleteCostCenter = async (costCenterId) => {
+    const updated = costCenters.filter((c) => c.id !== costCenterId);
+    await persistAccountsData({ costCenters: updated });
+    if (showToast) showToast('✅ تم حذف مركز التكلفة بنجاح');
+  };
+
+  // 6. Pharma Vendors Management: Add/Edit (Item 4)
+  const handleSaveVendor = async (vendorData) => {
+    const exists = vendors.some((v) => v.id === vendorData.id);
+    let updated;
+    if (exists) {
+      updated = vendors.map((v) => (v.id === vendorData.id ? { ...v, ...vendorData } : v));
+    } else {
+      updated = [vendorData, ...vendors];
+    }
+    await persistAccountsData({ vendors: updated });
+    if (showToast) showToast(`✅ تم حفظ بيانات شركة التوزيع (${vendorData.name_ar}) بنجاح`);
+  };
+
+  // 7. Save Pharma Vendor Transaction & Post Journal Entry
   const handleSaveVendorTransaction = async ({ tx, journalEntry }) => {
     const updatedTxs = [tx, ...vendorTransactions];
 
-    // Update vendor balance
     const updatedVendors = vendors.map((v) => {
       if (v.id === tx.vendor_id) {
         const prev = parseFloat(v.current_balance) || 0;
@@ -325,7 +349,6 @@ export default function AccountsSystemView({
       vendorTransactions: updatedTxs,
     });
 
-    // Automatically post balanced GL journal entry if generated
     if (journalEntry) {
       await handleSaveJournalEntry(journalEntry);
     }
@@ -338,7 +361,7 @@ export default function AccountsSystemView({
     }
   };
 
-  // 7. Post Automated Payroll Entry
+  // 8. Post Automated Payroll Entry
   const handlePostPayrollEntry = async (entry) => {
     await handleSaveJournalEntry(entry);
     setIsPayrollModalOpen(false);
@@ -347,13 +370,12 @@ export default function AccountsSystemView({
     }
   };
 
-  // 8. Open Vendor Tx Modal with specific type
   const handleOpenVendorTxModal = (type) => {
     setVendorTxInitialType(type || 'payment');
     setIsVendorTxModalOpen(true);
   };
 
-  // ── Calculate High-Level Financial Metrics (KPIs) ──
+  // ── High-Level Financial Metrics (KPIs) ──
   const metrics = useMemo(() => {
     let totalAssets = 0;
     let totalLiabilities = 0;
@@ -365,13 +387,22 @@ export default function AccountsSystemView({
     accounts.forEach((a) => {
       if (a.is_parent) return;
       const b = parseFloat(a.current_balance) || 0;
-      if (a.account_type === 'asset') totalAssets += b;
-      else if (a.account_type === 'liability') totalLiabilities += b;
-      else if (a.account_type === 'revenue') totalRevenues += b;
-      else if (a.account_type === 'cogs') totalCogs += b;
-      else if (a.account_type === 'expense') {
-        totalExpenses += b;
-        if (a.code.startsWith('65')) totalBankFees += b;
+      if (a.account_type === 'asset') {
+        // Normal assets are debit. Contra-assets (depreciation) reduce assets
+        if (a.code.startsWith('128') || a.nature === 'credit') {
+          totalAssets -= Math.abs(b);
+        } else {
+          totalAssets += Math.abs(b);
+        }
+      } else if (a.account_type === 'liability') {
+        totalLiabilities += Math.abs(b);
+      } else if (a.account_type === 'revenue') {
+        totalRevenues += Math.abs(b);
+      } else if (a.account_type === 'cogs') {
+        totalCogs += Math.abs(b);
+      } else if (a.account_type === 'expense') {
+        totalExpenses += Math.abs(b);
+        if (a.code.startsWith('65')) totalBankFees += Math.abs(b);
       }
     });
 
@@ -383,7 +414,7 @@ export default function AccountsSystemView({
     );
 
     return {
-      totalAssets,
+      totalAssets: Math.max(0, totalAssets),
       totalLiabilities,
       totalLiquid,
       totalRevenues,
@@ -393,11 +424,33 @@ export default function AccountsSystemView({
     };
   }, [accounts, treasuries]);
 
+  // Safe Currency Formatter preventing flipped negative signs in RTL
+  const renderFormattedAmount = (num) => {
+    const val = parseFloat(num) || 0;
+    const isNeg = val < 0;
+    const formatted = Math.abs(val).toLocaleString('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    return (
+      <span dir="ltr" style={{ display: 'inline-block', unicodeBidi: 'plaintext' }}>
+        {isNeg ? `- ${formatted}` : formatted}
+      </span>
+    );
+  };
+
   const handleBackToDashboard = () => {
     if (isStandalone) {
       window.location.href = window.location.origin;
     } else if (onNavigateTab) {
       onNavigateTab('dashboard');
+    }
+  };
+
+  const handleSelectTab = (targetTab, targetReportSubtype) => {
+    setActiveTab(targetTab);
+    if (targetReportSubtype) {
+      setReportsSubtype(targetReportSubtype);
     }
   };
 
@@ -411,7 +464,7 @@ export default function AccountsSystemView({
         fiscalPeriod={fiscalPeriod}
         onPeriodChange={setFiscalPeriod}
         activeTab={activeTab}
-        onSelectTab={setActiveTab}
+        onSelectTab={handleSelectTab}
         onOpenNewEntry={() => setIsNewEntryModalOpen(true)}
         onOpenTransfer={() => {
           setPreselectedTreasuryForTransfer(null);
@@ -424,10 +477,14 @@ export default function AccountsSystemView({
           setIsAddAccountModalOpen(true);
         }}
         onOpenVendorTxModal={handleOpenVendorTxModal}
+        onOpenAddVendor={() => {
+          setVendorToEdit(null);
+          setIsAddEditVendorModalOpen(true);
+        }}
         onOpenPayrollModal={() => setIsPayrollModalOpen(true)}
         onOpenAiPromptModal={() => setIsAiPromptModalOpen(true)}
         onOpenAiAuditRadarModal={() => setIsAiAuditRadarModalOpen(true)}
-        onOpenGuideModal={() => setIsGuideModalOpen(true)}
+        onOpenGuideModal={() => setActiveTab('guide')}
         themeMode={themeMode}
         toggleTheme={toggleTheme}
         isStandalone={isStandalone}
@@ -436,148 +493,131 @@ export default function AccountsSystemView({
         onSearchChange={setSearchQuery}
       />
 
-      {/* ── 2. KPIs Summary Ribbon ── */}
+      {/* ── 2. Interactive KPIs Summary Ribbon (Clickable - Item 10) ── */}
       <div className="acc-kpi-grid">
-        <div className="acc-kpi-card" style={{ borderTop: '3.5px solid #0284c7' }}>
+        {/* Card 1: Liquid Treasuries & Banks -> Go to treasuries */}
+        <div
+          className="acc-kpi-card interactive"
+          style={{ borderTop: '3.5px solid #0284c7' }}
+          onClick={() => setActiveTab('treasuries')}
+          title="انقر للانتقال إلى شاشة الخزائن والبنوك والدفع الإلكتروني"
+          role="button"
+          tabIndex={0}
+        >
           <div className="acc-kpi-header">
             <span className="acc-kpi-title">إجمالي النقدية والسيولة المتاحة</span>
             <span className="acc-kpi-icon">💰</span>
           </div>
           <div className="acc-kpi-value" style={{ color: '#0284c7' }}>
-            {metrics.totalLiquid.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            {renderFormattedAmount(metrics.totalLiquid)}
             <span className="acc-kpi-currency">ج.م</span>
           </div>
           <div className="acc-kpi-footer">
-            <span>الخزائن، البنوك، نقاط البيع، والمحافظ</span>
+            <span>الخزائن، البنوك، والمحافظ</span>
+            <span className="acc-kpi-click-hint">استعراض ↗</span>
           </div>
         </div>
 
-        <div className="acc-kpi-card" style={{ borderTop: '3.5px solid #0d9488' }}>
+        {/* Card 2: Total Assets -> Go to Chart of accounts */}
+        <div
+          className="acc-kpi-card interactive"
+          style={{ borderTop: '3.5px solid #0d9488' }}
+          onClick={() => setActiveTab('chart')}
+          title="انقر للانتقال إلى شجرة الحسابات واستعراض الأصول"
+          role="button"
+          tabIndex={0}
+        >
           <div className="acc-kpi-header">
             <span className="acc-kpi-title">إجمالي أصول المجموعة</span>
             <span className="acc-kpi-icon">🏛️</span>
           </div>
           <div className="acc-kpi-value" style={{ color: '#0d9488' }}>
-            {metrics.totalAssets.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            {renderFormattedAmount(metrics.totalAssets)}
             <span className="acc-kpi-currency">ج.م</span>
           </div>
           <div className="acc-kpi-footer">
             <span>النقدية + المخزون + الأصول الثابتة</span>
+            <span className="acc-kpi-click-hint">استعراض ↗</span>
           </div>
         </div>
 
-        <div className="acc-kpi-card" style={{ borderTop: '3.5px solid #7c3aed' }}>
+        {/* Card 3: Revenues -> Go to Income Statement */}
+        <div
+          className="acc-kpi-card interactive"
+          style={{ borderTop: '3.5px solid #7c3aed' }}
+          onClick={() => {
+            setActiveTab('reports');
+            setReportsSubtype('income-statement');
+          }}
+          title="انقر للانتقال إلى قائمة الدخل واستعراض المبيعات والإيرادات"
+          role="button"
+          tabIndex={0}
+        >
           <div className="acc-kpi-header">
             <span className="acc-kpi-title">إجمالي المبيعات المحققة</span>
             <span className="acc-kpi-icon">📈</span>
           </div>
           <div className="acc-kpi-value" style={{ color: '#7c3aed' }}>
-            {metrics.totalRevenues.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            {renderFormattedAmount(metrics.totalRevenues)}
             <span className="acc-kpi-currency">ج.م</span>
           </div>
           <div className="acc-kpi-footer">
-            <span>أدوية، مستحضرات، مكملات، ومستلزمات</span>
+            <span>أدوية، مستحضرات، ومستلزمات</span>
+            <span className="acc-kpi-click-hint">قائمة الدخل ↗</span>
           </div>
         </div>
 
-        {/* Bank & Digital Wallets Fees Card */}
-        <div className="acc-kpi-card" style={{ borderTop: '3.5px solid #e11d48' }}>
+        {/* Card 4: POS & Wallet Fees -> Go to treasuries / fees */}
+        <div
+          className="acc-kpi-card interactive"
+          style={{ borderTop: '3.5px solid #e11d48' }}
+          onClick={() => setActiveTab('treasuries')}
+          title="انقر للانتقال إلى الخزائن وإدارة عمولات الدفع الإلكتروني"
+          role="button"
+          tabIndex={0}
+        >
           <div className="acc-kpi-header">
             <span className="acc-kpi-title">عمولات نقاط البيع والمحافظ وإنستاباي</span>
             <span className="acc-kpi-icon">💳</span>
           </div>
           <div className="acc-kpi-value" style={{ color: '#e11d48' }}>
-            {metrics.totalBankFees.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            {renderFormattedAmount(metrics.totalBankFees)}
             <span className="acc-kpi-currency">ج.م</span>
           </div>
           <div className="acc-kpi-footer">
-            <span>خصومات بنكية مقتطعة ومثبتة آلياً (651/652)</span>
+            <span>عمولات مقتطعة ومثبتة آلياً (651/652)</span>
+            <span className="acc-kpi-click-hint">إدارة العمولات ↗</span>
           </div>
         </div>
 
-        <div className="acc-kpi-card" style={{ borderTop: metrics.netProfit >= 0 ? '3.5px solid #059669' : '3.5px solid #dc2626' }}>
+        {/* Card 5: Net Profit -> Go to Income statement / P&L */}
+        <div
+          className="acc-kpi-card interactive"
+          style={{ borderTop: metrics.netProfit >= 0 ? '3.5px solid #059669' : '3.5px solid #dc2626' }}
+          onClick={() => {
+            setActiveTab('reports');
+            setReportsSubtype('income-statement');
+          }}
+          title="انقر لاستعراض قائمة الأرباح والخسائر والتحليل المالي"
+          role="button"
+          tabIndex={0}
+        >
           <div className="acc-kpi-header">
             <span className="acc-kpi-title">صافي أرباح النشاط</span>
             <span className="acc-kpi-icon">🏆</span>
           </div>
           <div className="acc-kpi-value" style={{ color: metrics.netProfit >= 0 ? '#059669' : '#dc2626' }}>
-            {metrics.netProfit.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            {renderFormattedAmount(metrics.netProfit)}
             <span className="acc-kpi-currency">ج.م</span>
           </div>
           <div className="acc-kpi-footer">
-            <span>بعد خصم تكلفة البضاعة وكافة المصروفات</span>
+            <span>بعد خصم تكلفة البضاعة والمصروفات</span>
+            <span className="acc-kpi-click-hint">تقرير الأرباح ↗</span>
           </div>
         </div>
       </div>
 
-      {/* ── 3. Main Navigation Sub-tabs ── */}
-      <nav className="acc-nav-tabs">
-        <button
-          type="button"
-          className={`acc-tab-btn ${activeTab === 'chart' ? 'active' : ''}`}
-          onClick={() => setActiveTab('chart')}
-        >
-          <span>🌳</span>
-          <span>شجرة الحسابات (COA)</span>
-        </button>
-
-        <button
-          type="button"
-          className={`acc-tab-btn ${activeTab === 'treasuries' ? 'active' : ''}`}
-          onClick={() => setActiveTab('treasuries')}
-        >
-          <span>🏦</span>
-          <span>الخزائن والبنوك والدفع الإلكتروني</span>
-        </button>
-
-        <button
-          type="button"
-          className={`acc-tab-btn ${activeTab === 'entries' ? 'active' : ''}`}
-          onClick={() => setActiveTab('entries')}
-        >
-          <span>📜</span>
-          <span>دفتر القيود اليومية ({entries.length})</span>
-        </button>
-
-        <button
-          type="button"
-          className={`acc-tab-btn ${activeTab === 'vendors' ? 'active' : ''}`}
-          onClick={() => setActiveTab('vendors')}
-        >
-          <span>💊</span>
-          <span>شركات توزيع الأدوية ({vendors.length})</span>
-        </button>
-
-        <button
-          type="button"
-          className={`acc-tab-btn ${activeTab === 'cost-centers' ? 'active' : ''}`}
-          onClick={() => setActiveTab('cost-centers')}
-        >
-          <span>🎯</span>
-          <span>مراكز التكلفة ({costCenters.length})</span>
-        </button>
-
-        <button
-          type="button"
-          className={`acc-tab-btn ${activeTab === 'reports' ? 'active' : ''}`}
-          onClick={() => setActiveTab('reports')}
-        >
-          <span>📊</span>
-          <span>القوائم المالية وميزان المراجعة</span>
-        </button>
-
-        <button
-          type="button"
-          className={`acc-tab-btn ${activeTab === 'guide' ? 'active' : ''}`}
-          onClick={() => setActiveTab('guide')}
-          style={{ marginRight: 'auto', color: '#0284c7', fontWeight: '800' }}
-        >
-          <span>📖</span>
-          <span>دليل وشرح المنظومة</span>
-        </button>
-      </nav>
-
-      {/* ── 4. Tab Body Content ── */}
+      {/* ── 3. Content Container (Navigated 100% via Dropdown Menus & Cards) ── */}
       <main className="acc-content-container">
         {activeTab === 'chart' && (
           <ChartOfAccountsTab
@@ -638,6 +678,14 @@ export default function AccountsSystemView({
             transactions={vendorTransactions}
             branches={branches}
             onOpenNewTransaction={handleOpenVendorTxModal}
+            onOpenAddVendor={() => {
+              setVendorToEdit(null);
+              setIsAddEditVendorModalOpen(true);
+            }}
+            onOpenEditVendor={(v) => {
+              setVendorToEdit(v);
+              setIsAddEditVendorModalOpen(true);
+            }}
           />
         )}
 
@@ -646,6 +694,7 @@ export default function AccountsSystemView({
             costCenters={costCenters}
             branches={branches}
             onSaveCostCenter={handleSaveCostCenter}
+            onDeleteCostCenter={handleDeleteCostCenter}
           />
         )}
 
@@ -656,6 +705,8 @@ export default function AccountsSystemView({
             branches={branches}
             selectedBranchId={selectedBranchId}
             fiscalPeriod={fiscalPeriod}
+            reportType={reportsSubtype}
+            onReportTypeChange={setReportsSubtype}
           />
         )}
 
@@ -666,7 +717,7 @@ export default function AccountsSystemView({
         )}
       </main>
 
-      {/* ── 5. Modals ── */}
+      {/* ── 4. Modals ── */}
 
       {/* A. Account Codes Cheatsheet Popup Modal */}
       <AccountCodesCheatsheetModal
@@ -723,7 +774,7 @@ export default function AccountsSystemView({
         allAccounts={accounts}
       />
 
-      {/* F. Pharma Vendors Transaction Modal (Invoices, Payments, Expired Returns) */}
+      {/* F. Pharma Vendors Transaction Modal */}
       <VendorTransactionModal
         isOpen={isVendorTxModalOpen}
         onClose={() => setIsVendorTxModalOpen(false)}
@@ -734,7 +785,19 @@ export default function AccountsSystemView({
         onSaveTransaction={handleSaveVendorTransaction}
       />
 
-      {/* G. Payroll & HR 1-Click Accounting Integration Modal */}
+      {/* G. Add / Edit Pharma Vendor Modal (Item 4) */}
+      <AddEditVendorModal
+        isOpen={isAddEditVendorModalOpen}
+        onClose={() => {
+          setIsAddEditVendorModalOpen(false);
+          setVendorToEdit(null);
+        }}
+        vendorToEdit={vendorToEdit}
+        onSaveVendor={handleSaveVendor}
+        existingVendorsCount={vendors.length}
+      />
+
+      {/* H. Payroll & HR 1-Click Accounting Integration Modal */}
       <PayrollAccountingIntegrationModal
         isOpen={isPayrollModalOpen}
         onClose={() => setIsPayrollModalOpen(false)}
@@ -746,7 +809,7 @@ export default function AccountsSystemView({
         onPostPayrollEntry={handlePostPayrollEntry}
       />
 
-      {/* H. Natural Language AI Journal Prompt Modal */}
+      {/* I. Natural Language AI Journal Prompt Modal */}
       <AiJournalPromptModal
         isOpen={isAiPromptModalOpen}
         onClose={() => setIsAiPromptModalOpen(false)}
@@ -760,7 +823,7 @@ export default function AccountsSystemView({
         }}
       />
 
-      {/* I. AI Financial Audit Radar & 30-day Cash Flow Forecast Modal */}
+      {/* J. AI Financial Audit Radar & 30-day Cash Flow Forecast Modal */}
       <AiAuditRadarModal
         isOpen={isAiAuditRadarModalOpen}
         onClose={() => setIsAiAuditRadarModalOpen(false)}
@@ -770,11 +833,11 @@ export default function AccountsSystemView({
         vendorTransactions={vendorTransactions}
       />
 
-      {/* J. Educational Guide Modal Popup */}
+      {/* K. Educational Guide Modal Popup */}
       {isGuideModalOpen && (
         <div className="acc-modal-overlay" onClick={() => setIsGuideModalOpen(false)}>
           <div
-            className="acc-modal"
+            className="acc-modal hide-scrollbar"
             onClick={(e) => e.stopPropagation()}
             style={{ maxWidth: '1000px', maxHeight: '90vh', overflowY: 'auto', padding: '16px' }}
           >
