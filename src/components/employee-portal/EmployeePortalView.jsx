@@ -16,6 +16,7 @@ import BylawsModule from '../bylaws/BylawsModule';
 import EmployeeResignationModule from './EmployeeResignationModule';
 import EmployeeBiometricSection from './EmployeeBiometricSection';
 import EmployeeProfileModule from './EmployeeProfileModule';
+import EmployeeBranchAddressesTab from './EmployeeBranchAddressesTab';
 import FaceRegistrationModal from '../attendance/FaceRegistrationModal';
 import FaceTestModal from '../attendance/FaceTestModal';
 import { preWarmFaceModels } from '../../utils/faceApiHelper';
@@ -97,6 +98,7 @@ const NAV_ITEMS = [
   { id: 'evaluations', icon: '⭐', label: 'التقييمات والشكاوي' },
   { id: 'bylaws',      icon: '📜', label: 'لائحة العمل والجزاءات' },
   { id: 'resignations',icon: '🚪', label: 'طلبات الاستقالة' },
+  { id: 'addresses',   icon: '📍', label: 'عناوين الفروع' },
 ];
 
 // ─────────────────────────────────────────
@@ -1008,6 +1010,30 @@ export default function EmployeePortalView({
   const canSubmitComplaint = isPermActive('canSubmitComplaint', true);
   const canViewProfile = isPermActive('canViewProfile', true);
 
+  // 🛵 فحص مسمى أو قسم خدمة التوصيل والدليفري
+  const isDeliveryRole = useMemo(() => {
+    if (!emp) return false;
+    const title = String(emp.jobTitle || emp.job || '').trim().toLowerCase();
+    const dept = String(emp.department || '').trim().toLowerCase();
+
+    // فحص ما إذا كانت وظيفة الموظف تابعة لقسم التوصيل في قائمة الوظائف المعتمدة
+    const jobInfo = (state?.jobs || []).find(j =>
+      j.title && (j.title.trim().toLowerCase() === title || j.title.trim() === String(emp.jobTitle || '').trim())
+    );
+    const jobDept = String(jobInfo?.department || '').trim().toLowerCase();
+
+    const deliveryKeywords = ['دليفري', 'الدليفري', 'توصيل', 'طيار', 'سائق', 'delivery'];
+
+    const matchesTitle = deliveryKeywords.some(k => title.includes(k));
+    const matchesDept = deliveryKeywords.some(k => dept.includes(k));
+    const matchesJobDept = deliveryKeywords.some(k => jobDept.includes(k));
+
+    return matchesTitle || matchesDept || matchesJobDept;
+  }, [emp?.jobTitle, emp?.job, emp?.department, state?.jobs]);
+
+  const canViewBranchAddresses = isPermActive('canViewBranchAddresses', true);
+  const showDeliveryAddresses = Boolean(isDeliveryRole && canViewBranchAddresses);
+
   // Active Tab Security Guard: Redirect immediately to 'dashboard' if the employee is viewing a tab that gets turned off
   useEffect(() => {
     const tabPermMap = {
@@ -1023,7 +1049,8 @@ export default function EmployeePortalView({
       resignations: canApplyResignation,
       evaluations: canSubmitComplaint,
       bylaws: canViewBylaws,
-      profile: canViewProfile
+      profile: canViewProfile,
+      addresses: showDeliveryAddresses
     };
 
     if (tabPermMap[activeTab] === false) {
@@ -1043,7 +1070,8 @@ export default function EmployeePortalView({
     canApplyResignation,
     canSubmitComplaint,
     canViewBylaws,
-    canViewProfile
+    canViewProfile,
+    showDeliveryAddresses
   ]);
 
   const isCustomMode = filterMode === 'range' || filterMode === 'custom';
@@ -1819,6 +1847,14 @@ export default function EmployeePortalView({
         targetTab: 'profile'
       },
       {
+        id: 'addresses',
+        label: 'عناوين ومواقع الفروع',
+        icon: '📍',
+        isSingle: true,
+        targetTab: 'addresses',
+        visible: showDeliveryAddresses
+      },
+      {
         id: 'finance-group',
         label: 'الرواتب والمالية',
         icon: '💼',
@@ -1959,8 +1995,8 @@ export default function EmployeePortalView({
       }
     ];
 
-    // Filter out groups with no visible children to avoid empty dropdown headers
-    return rawGroups.filter(menu => menu.isSingle || (menu.children && menu.children.length > 0));
+    // Filter out groups with no visible children or hidden single items
+    return rawGroups.filter(menu => (menu.isSingle ? menu.visible !== false : (menu.children && menu.children.length > 0)));
   }, [
     emp,
     selectedBranchId,
@@ -1977,6 +2013,7 @@ export default function EmployeePortalView({
     canSubmitComplaint,
     canViewBylaws,
     canViewProfile,
+    showDeliveryAddresses,
     empAdjs.length,
     empShifts.length,
     resignationBadgeCount,
@@ -2019,6 +2056,7 @@ export default function EmployeePortalView({
   const getActiveBreadcrumb = () => {
     if (activeTab === 'dashboard') return { group: 'لوحة التحكم', item: 'الرئيسية', icon: '📊' };
     if (activeTab === 'profile') return { group: 'الملف الشخصي', item: 'بيانات الموظف والتعاقد', icon: '👤' };
+    if (activeTab === 'addresses') return { group: 'خدمة التوصيل', item: 'عناوين ومواقع الفروع', icon: '📍' };
     if (['salary', 'adjustments', 'loans'].includes(activeTab)) {
       const itemMap = {
         salary: { name: 'تفاصيل ومسير الراتب', icon: '💵' },
@@ -3492,6 +3530,35 @@ export default function EmployeePortalView({
             <span style={{ fontSize: '18px' }}>🏠</span>
             <span>الرئيسية</span>
           </button>
+
+          {showDeliveryAddresses && (
+            <button
+              type="button"
+              className={`ep-bottom-nav-btn ${activeTab === 'addresses' ? 'active' : ''}`}
+              onClick={() => setActiveTab('addresses')}
+              style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '2px',
+                height: '100%',
+                background: 'none',
+                border: 'none',
+                color: activeTab === 'addresses' ? 'var(--primary, #0d9488)' : 'var(--muted)',
+                fontSize: '11px',
+                fontWeight: activeTab === 'addresses' ? 800 : 600,
+                cursor: 'pointer',
+                padding: '4px 0',
+                fontFamily: 'inherit',
+                position: 'relative'
+              }}
+            >
+              <span style={{ fontSize: '18px' }}>📍</span>
+              <span>العناوين</span>
+            </button>
+          )}
 
           {canViewShifts && (
             <button
@@ -5371,6 +5438,16 @@ export default function EmployeePortalView({
               onRequestRegister={() => setShowBiometricRegisterModal(true)}
               onRequestTest={() => setShowBiometricTestModal(true)}
               onSubmitResetRequest={handleSubmitResetRequest}
+              showToast={showToast}
+            />
+          )}
+
+          {/* ── 14. Tab: Delivery Branch Addresses (عناوين ومواقع الفروع للدليفري) ── */}
+          {activeTab === 'addresses' && showDeliveryAddresses && (
+            <EmployeeBranchAddressesTab
+              branches={state.branches || []}
+              employees={state.employees || []}
+              currentEmp={emp}
               showToast={showToast}
             />
           )}

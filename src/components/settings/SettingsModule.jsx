@@ -906,6 +906,16 @@ export default function SettingsModule({
       defaultVal: true,
       icon: '🪪',
       desc: 'إتاحة صفحة بيانات الموظف والتعاقد والوثائق والمستندات الشخصية'
+    },
+
+    // 🛵 خدمة التوصيل والدليفري
+    {
+      key: 'canViewBranchAddresses',
+      label: '📍 دليل وعناوين ومواقع الفروع (خاص بالدليفري وخدمة التوصيل)',
+      category: 'خدمة التوصيل والدليفري',
+      defaultVal: true,
+      icon: '📍',
+      desc: 'إتاحة صفحة دليل الفروع، العناوين، أرقام التواصل، روابط Google Maps، ومواقع GPS لموظفي قسم التوصيل والدليفري'
     }
   ];
 

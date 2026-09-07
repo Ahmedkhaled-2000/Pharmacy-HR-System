@@ -20,6 +20,8 @@ export default function PermissionsCard({
   setPermAllowViewAdjustments,
   permAllowExportExcel,
   setPermAllowExportExcel,
+  permAllowBranchAddresses,
+  setPermAllowBranchAddresses,
   handleResetAllPermissions,
   handleResetSingleEmpPermissions
 }) {
@@ -79,6 +81,14 @@ export default function PermissionsCard({
       desc: 'السماح للموظف بتنزيل وتصدير كشف مفردات مرتبه بصيغة Excel.',
       checked: permAllowExportExcel,
       onChange: (e) => setPermAllowExportExcel(e.target.checked)
+    },
+    {
+      id: 'branchAddresses',
+      title: 'عرض عناوين ومواقع الفروع (الدليفري والتوصيل)',
+      badge: 'Branch Addresses (Delivery)',
+      desc: 'إتاحة دليل عناوين ومواقع الفروع وروابط الخرائط لموظفي التوصيل والدليفري.',
+      checked: permAllowBranchAddresses !== undefined ? permAllowBranchAddresses : true,
+      onChange: (e) => setPermAllowBranchAddresses && setPermAllowBranchAddresses(e.target.checked)
     }
   ];
 
