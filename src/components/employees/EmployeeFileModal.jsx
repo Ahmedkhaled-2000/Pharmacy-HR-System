@@ -979,7 +979,7 @@ export default function EmployeeFileModal({
 
   return (
     <div className="modal-overlay">
-      <div className="modal-card" style={{ maxWidth: '780px', width: '95%' }}>
+      <div className="modal-card" style={{ maxWidth: '780px', width: '95%', maxHeight: 'min(92vh, calc(100dvh - 28px))', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <h3 style={{ fontFamily: 'Cairo', textAlign: 'center', margin: '0 0 16px 0' }}>
           {editingEmp && editingEmp.isFromRecruitment
             ? `🎯 إضافة وتعيين موظف جديد معتمد: ${editingEmp.name}`
@@ -1008,7 +1008,7 @@ export default function EmployeeFileModal({
         )}
 
         {/* Tab Header Navigation */}
-        <div style={{ display: 'flex', gap: '8px', borderBottom: '2px solid var(--border)', marginBottom: '20px' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', borderBottom: '2px solid var(--border)', marginBottom: '16px', overflowX: 'hidden' }}>
           <button
             type="button"
             className={`btn ${activeTab === 'personal' ? 'btn-start' : 'btn-ghost'}`}
@@ -1110,7 +1110,7 @@ export default function EmployeeFileModal({
           </div>
         )}
 
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} style={{ overflowY: 'auto', overflowX: 'hidden', flex: 1, minHeight: 0, padding: '4px 4px 16px 4px' }}>
           {/* TAB 1: Personal Data */}
           {activeTab === 'personal' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
@@ -2222,7 +2222,7 @@ export default function EmployeeFileModal({
           )}
 
           {/* Actions */}
-          <div className="modal-actions" style={{ justifyContent: 'center', marginTop: '24px' }}>
+          <div className="modal-actions" style={{ justifyContent: 'center', marginTop: '20px', position: 'sticky', bottom: 0, background: 'var(--surface)', zIndex: 10, padding: '12px 0', borderTop: '1px solid var(--border)' }}>
             <button type="button" className="btn btn-ghost" onClick={onClose}>
               إلغاء
             </button>

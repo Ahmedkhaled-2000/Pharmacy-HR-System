@@ -1319,10 +1319,12 @@ tbody tr:hover {
 /* ══════════════════════════════════════════════════════════════════════ */
 .modal-overlay,
 .modal-backdrop,
-.central-modal-backdrop {
+.central-modal-backdrop,
+.acc-modal-overlay {
   position: fixed !important;
   inset: 0 !important;
   width: 100vw !important;
+  max-width: 100vw !important;
   height: 100vh !important;
   height: 100dvh !important;
   background: rgba(15, 23, 42, 0.78) !important;
@@ -1331,10 +1333,11 @@ tbody tr:hover {
   display: flex !important;
   align-items: flex-start !important; /* Safe start: never clips top or pushes content out */
   justify-content: center !important;
-  overflow-y: auto !important;
-  overflow-x: hidden !important;
+  overflow-y: auto !important; /* VERTICAL SCROLL ONLY */
+  overflow-x: hidden !important; /* STRICTLY NO HORIZONTAL SCROLL */
   -webkit-overflow-scrolling: touch !important;
-  padding: clamp(12px, 3vh, 28px) clamp(8px, 2vw, 20px) !important;
+  touch-action: pan-y !important;
+  padding: clamp(10px, 2.5vh, 24px) clamp(8px, 2vw, 18px) !important;
   z-index: 2500 !important;
   direction: rtl;
   box-sizing: border-box !important;
@@ -1345,7 +1348,9 @@ tbody tr:hover {
 
 .modal-card,
 .modal-content,
-.central-modal-card {
+.central-modal-card,
+.acc-modal,
+.acc-modal-card {
   margin: auto !important;
   background: var(--surface, #ffffff);
   border: 1px solid var(--border, #e2e8f0);
@@ -1355,7 +1360,8 @@ tbody tr:hover {
   max-height: calc(100dvh - 28px) !important;
   display: flex !important;
   flex-direction: column !important;
-  overflow: hidden !important; /* CRITICAL: prevent outer card double-scrolling and pushing footer */
+  overflow-x: hidden !important; /* STRICTLY NO HORIZONTAL SCROLL */
+  touch-action: pan-y !important;
   overscroll-behavior: contain !important;
   box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.25), 0 0 1px 1px rgba(15, 23, 42, 0.05) !important;
   direction: rtl;
@@ -1363,6 +1369,40 @@ tbody tr:hover {
   box-sizing: border-box !important;
   position: relative !important;
   animation: modalScaleUp 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Modals with dedicated internal scrollable bodies */
+.modal-card:has(.modal-card-body),
+.modal-card:has(.central-modal-body),
+.modal-card:has(.modal-body),
+.modal-card:has(> form),
+.central-modal-card {
+  overflow-y: hidden !important;
+}
+
+/* Modals WITHOUT internal body or form: the modal card itself scrolls vertically */
+.modal-card:not(:has(.modal-card-body)):not(:has(.central-modal-body)):not(:has(.modal-body)):not(:has(> form)),
+.modal-content:not(:has(.modal-card-body)):not(:has(.central-modal-body)):not(:has(.modal-body)):not(:has(> form)) {
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+}
+
+/* Forms inside modal cards: automatic smooth vertical scroll */
+.modal-card > form,
+.modal-content > form,
+.central-modal-card > form,
+.acc-modal > form {
+  display: flex !important;
+  flex-direction: column !important;
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  overscroll-behavior: contain !important;
+  touch-action: pan-y !important;
+  scrollbar-width: thin;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
 }
 
 .modal-header,
@@ -1378,21 +1418,25 @@ tbody tr:hover {
 
 .modal-card-body,
 .central-modal-body,
-.modal-body {
+.modal-body,
+.acc-modal-body {
   flex: 1 1 auto !important;
   min-height: 0 !important; /* CRITICAL: allow flex child to shrink and enable scrolling */
   overflow-y: auto !important;
   overflow-x: hidden !important;
   overscroll-behavior: contain !important;
+  touch-action: pan-y !important;
   padding: clamp(14px, 2.5vw, 24px) !important;
   box-sizing: border-box !important;
   scrollbar-width: thin;
+  max-width: 100% !important;
 }
 
 .modal-actions,
 .central-modal-footer,
 .modal-footer {
   display: flex !important;
+  flex-wrap: wrap !important;
   justify-content: flex-end !important;
   align-items: center !important;
   gap: 10px !important;
@@ -1405,6 +1449,92 @@ tbody tr:hover {
   background: var(--surface, #ffffff) !important;
   border-top: 1px solid var(--border, #f1f5f9) !important;
   box-sizing: border-box !important;
+  max-width: 100% !important;
+  overflow-x: hidden !important;
+}
+
+/* Universal scrollbars for all modals: vertical only, zero horizontal */
+.modal-overlay::-webkit-scrollbar,
+.modal-backdrop::-webkit-scrollbar,
+.central-modal-backdrop::-webkit-scrollbar,
+.acc-modal-overlay::-webkit-scrollbar,
+.modal-card::-webkit-scrollbar,
+.modal-content::-webkit-scrollbar,
+.central-modal-card::-webkit-scrollbar,
+.acc-modal::-webkit-scrollbar,
+.modal-card-body::-webkit-scrollbar,
+.central-modal-body::-webkit-scrollbar,
+.modal-body::-webkit-scrollbar,
+.acc-modal-body::-webkit-scrollbar,
+.modal-card > form::-webkit-scrollbar,
+.modal-content > form::-webkit-scrollbar {
+  width: 6px !important;
+  height: 0px !important; /* Absolutely no horizontal scrollbar */
+}
+
+.modal-overlay::-webkit-scrollbar-thumb,
+.modal-backdrop::-webkit-scrollbar-thumb,
+.central-modal-backdrop::-webkit-scrollbar-thumb,
+.acc-modal-overlay::-webkit-scrollbar-thumb,
+.modal-card::-webkit-scrollbar-thumb,
+.modal-content::-webkit-scrollbar-thumb,
+.central-modal-card::-webkit-scrollbar-thumb,
+.acc-modal::-webkit-scrollbar-thumb,
+.modal-card-body::-webkit-scrollbar-thumb,
+.central-modal-body::-webkit-scrollbar-thumb,
+.modal-body::-webkit-scrollbar-thumb,
+.acc-modal-body::-webkit-scrollbar-thumb,
+.modal-card > form::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.45) !important;
+  border-radius: 999px !important;
+}
+
+.modal-overlay::-webkit-scrollbar-thumb:hover,
+.modal-card-body::-webkit-scrollbar-thumb:hover,
+.central-modal-body::-webkit-scrollbar-thumb:hover,
+.modal-body::-webkit-scrollbar-thumb:hover,
+.modal-card > form::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.7) !important;
+}
+
+/* Strict containment to eliminate horizontal scrolling across all modals */
+.modal-card,
+.modal-content,
+.central-modal-card,
+.acc-modal,
+.acc-modal-card {
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.modal-card *,
+.modal-content *,
+.central-modal-card *,
+.acc-modal * {
+  box-sizing: border-box;
+}
+
+.modal-card input,
+.modal-card select,
+.modal-card textarea,
+.modal-content input,
+.modal-content select,
+.modal-content textarea,
+.central-modal-card input,
+.central-modal-card select,
+.central-modal-card textarea,
+.acc-modal input,
+.acc-modal select,
+.acc-modal textarea {
+  max-width: 100% !important;
+  min-width: 0 !important;
+}
+
+.modal-card table,
+.modal-content table,
+.central-modal-card table,
+.acc-modal table {
+  max-width: 100% !important;
 }
 
 @keyframes modalBackdropFadeIn {
@@ -1427,12 +1557,15 @@ tbody tr:hover {
 @media (max-height: 720px) {
   .modal-overlay,
   .modal-backdrop,
-  .central-modal-backdrop {
+  .central-modal-backdrop,
+  .acc-modal-overlay {
     padding: 8px !important;
   }
   .modal-card,
   .modal-content,
-  .central-modal-card {
+  .central-modal-card,
+  .acc-modal,
+  .acc-modal-card {
     max-height: calc(100dvh - 16px) !important;
     border-radius: 16px !important;
   }
