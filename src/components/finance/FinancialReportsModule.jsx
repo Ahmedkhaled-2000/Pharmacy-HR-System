@@ -4,6 +4,7 @@ import {
   exportComprehensiveFinancialToExcel
 } from '../../utils/financialReportsEngine';
 import { triggerDirectPrint } from '../../utils/printHelper';
+import { useData } from '../../context/DataContext';
 
 /**
  * FinancialReportsModule.jsx
@@ -36,7 +37,8 @@ export default function FinancialReportsModule({
   const [selectedBranchDetail, setSelectedBranchDetail] = useState(null);
 
   // Compute Emp Summary from context/state
-  const computeEmpSummary = state?.computeEmpSummary || null;
+  const dataContext = useData();
+  const computeEmpSummary = dataContext?.computeEmpSummary || state?.computeEmpSummary || null;
 
   // ── Compute Financial Report via Engine ──
   const report = useMemo(() => {
@@ -145,22 +147,22 @@ export default function FinancialReportsModule({
 
             <!-- Section 2 -->
             <tr style="background: #f1f5f9; font-weight: 900; color: #1e3a8a;">
-              <td colspan="3" style="padding: 8px 10px; border: 1px solid #cbd5e1;">ثانياً: تكاليف الأجور والرواتب ومستحقات الموظفين (Personnel Costs)</td>
+              <td colspan="3" style="padding: 8px 10px; border: 1px solid #cbd5e1;">ثانياً: تكاليف الأجور ومسير رواتب الموظفين الفعلية (Actual Personnel & Payroll)</td>
             </tr>
             <tr>
-              <td style="padding: 6px 10px; border: 1px solid #e2e8f0;">  • الأجور الأساسية وساعات العمل الفعلية (${report.totalHoursWorked} ساعة)</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0;">  • الأجور وساعات العمل الفعلية (${report.totalHoursWorked || 0} ساعة مسجلة بالبصمة)</td>
               <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: bold;">${report.totalBaseEarnings.toLocaleString('ar-EG', { minimumFractionDigits: 2 })}</td>
-              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; color: #64748b;">استحقاق الساعات التعاقدية</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; color: #64748b;">استحقاق الساعات الفعلية المنفذة</td>
             </tr>
             <tr>
               <td style="padding: 6px 10px; border: 1px solid #e2e8f0;">  • أجور الساعات الإضافية المعتمدة</td>
               <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: bold;">${report.totalOvertimeEarnings.toLocaleString('ar-EG', { minimumFractionDigits: 2 })}</td>
-              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; color: #64748b;">إضافي معتمد</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; color: #64748b;">إضافي فعلي معتمد</td>
             </tr>
             <tr>
-              <td style="padding: 6px 10px; border: 1px solid #e2e8f0;">  • البدلات التعاقدية واليومية</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0;">  • البدلات اليومية والتشغيلية الفعلية</td>
               <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: bold;">${report.totalAllowances.toLocaleString('ar-EG', { minimumFractionDigits: 2 })}</td>
-              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; color: #64748b;">بدلات إدارة وانتقال وحضور</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; color: #64748b;">بدلات حضور يومي وإدارة</td>
             </tr>
             <tr>
               <td style="padding: 6px 10px; border: 1px solid #e2e8f0;">  • المكافآت والحوافز التشغيلية</td>
@@ -173,7 +175,7 @@ export default function FinancialReportsModule({
               <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: center; color: #b91c1c;">استقطاعات وجزاءات</td>
             </tr>
             <tr style="background: #eff6ff; font-weight: 900; font-size: 13.5px;">
-              <td style="padding: 8px 10px; border: 1px solid #cbd5e1; color: #1e40af;">صافي مسير الرواتب والأجور المستحقة (Net Payroll)</td>
+              <td style="padding: 8px 10px; border: 1px solid #cbd5e1; color: #1e40af;">صافي مسير الرواتب الفعلية المستحقة (Net Actual Payroll)</td>
               <td style="padding: 8px 10px; border: 1px solid #cbd5e1; text-align: center; color: #1e40af;">${report.totalNetPayroll.toLocaleString('ar-EG', { minimumFractionDigits: 2 })}</td>
               <td style="padding: 8px 10px; border: 1px solid #cbd5e1; text-align: center; color: #1e40af;">تمثل ${report.payrollRatio}% من إجمالي المبيعات</td>
             </tr>
@@ -384,14 +386,14 @@ export default function FinancialReportsModule({
         {/* KPI 2: Total Net Payroll */}
         <div className="card settings-card" style={{ padding: '16px 20px', borderRadius: '14px', border: '1px solid #e2e8f0', background: '#ffffff' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <span style={{ fontSize: '13px', color: 'var(--muted)', fontWeight: '700' }}>كلفة الرواتب والأجور</span>
+            <span style={{ fontSize: '13px', color: 'var(--muted)', fontWeight: '700' }}>كلفة الرواتب الفعلية بالبصمة</span>
             <span style={{ fontSize: '20px', background: '#eff6ff', padding: '6px', borderRadius: '10px' }}>👥</span>
           </div>
           <div style={{ fontSize: '22px', fontWeight: '900', color: '#1e40af', marginTop: '6px' }}>
             {report.totalNetPayroll.toLocaleString('ar-EG', { minimumFractionDigits: 2 })} <span style={{ fontSize: '12.5px', fontWeight: 'normal' }}>ج.م</span>
           </div>
           <div style={{ fontSize: '11.5px', marginTop: '6px', color: report.payrollRatio > 25 ? '#dc2626' : '#15803d', fontWeight: '700' }}>
-            نسبة الرواتب للمبيعات: {report.payrollRatio}%
+            نسبة الرواتب الفعلية للمبيعات: {report.payrollRatio}%
           </div>
         </div>
 
@@ -708,12 +710,12 @@ export default function FinancialReportsModule({
                 {/* ── SECTION 2: PAYROLL & DIRECT STAFF COSTS ── */}
                 <tr style={{ background: '#f8fafc', fontWeight: '900', color: '#1e40af' }}>
                   <td colSpan="3" style={{ padding: '10px 14px', textAlign: 'right', fontSize: '13.5px', borderBottom: '1px solid #cbd5e1' }}>
-                    2. كلفة الأجور ومسير رواتب الموظفين (Personnel & Payroll)
+                    2. كلفة الأجور ومسير رواتب الموظفين الفعلية (Actual Personnel & Payroll)
                   </td>
                 </tr>
                 <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
                   <td style={{ padding: '8px 16px', textAlign: 'right', fontSize: '13px' }}>
-                    الأجور الأساسية والرواتب {report.totalHoursWorked > 0 ? `(${report.totalHoursWorked} ساعة عمل مسجلة)` : '(تقديري وفق عقود التعيين)'}
+                    الأجور وساعات العمل الفعلية ({report.totalHoursWorked || 0} ساعة عمل مسجلة بالبصمة)
                   </td>
                   <td style={{ padding: '8px', fontWeight: '700' }}>
                     {report.totalBaseEarnings.toLocaleString('ar-EG', { minimumFractionDigits: 2 })}
@@ -728,7 +730,7 @@ export default function FinancialReportsModule({
                   <td style={{ padding: '8px', color: 'var(--muted)' }}>—</td>
                 </tr>
                 <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
-                  <td style={{ padding: '8px 16px', textAlign: 'right', fontSize: '13px' }}>البدلات التعاقدية الثابتة واليومية</td>
+                  <td style={{ padding: '8px 16px', textAlign: 'right', fontSize: '13px' }}>البدلات اليومية والتشغيلية الفعلية</td>
                   <td style={{ padding: '8px', fontWeight: '700' }}>
                     {report.totalAllowances.toLocaleString('ar-EG', { minimumFractionDigits: 2 })}
                   </td>
@@ -750,7 +752,7 @@ export default function FinancialReportsModule({
                 </tr>
                 <tr style={{ background: '#eff6ff', fontWeight: '900', borderBottom: '2px solid #bfdbfe' }}>
                   <td style={{ padding: '10px 16px', textAlign: 'right', color: '#1e40af', fontSize: '14px' }}>
-                    صافي مسير الرواتب المستحقة (Net Payroll)
+                    صافي مسير الرواتب الفعلية المستحقة (Net Actual Payroll)
                   </td>
                   <td style={{ padding: '10px', color: '#1e40af' }}>—</td>
                   <td style={{ padding: '10px', color: '#1e40af', fontSize: '16px' }}>
@@ -849,7 +851,7 @@ export default function FinancialReportsModule({
                   <th style={{ padding: '10px 8px', fontSize: '12px' }}>الترتيب</th>
                   <th style={{ padding: '10px 12px', fontSize: '12px', textAlign: 'right' }}>الفرع والموظفين</th>
                   <th style={{ padding: '10px 8px', fontSize: '12px' }}>إجمالي المبيعات</th>
-                  <th style={{ padding: '10px 8px', fontSize: '12px' }}>مسير الرواتب والأجور</th>
+                  <th style={{ padding: '10px 8px', fontSize: '12px' }}>مسير الرواتب الفعلية</th>
                   <th style={{ padding: '10px 8px', fontSize: '12px' }}>المصروفات</th>
                   <th style={{ padding: '10px 8px', fontSize: '12px' }}>إجمالي التكاليف</th>
                   <th style={{ padding: '10px 8px', fontSize: '12px', background: '#115e59' }}>صافي الربح (ج.م)</th>
@@ -914,10 +916,10 @@ export default function FinancialReportsModule({
                               padding: '2px 6px',
                               borderRadius: '4px',
                               fontWeight: '700',
-                              background: b.payrollMode === 'actual' ? '#dcfce7' : (b.payrollMode === 'contractual' ? '#fef3c7' : '#e0f2fe'),
-                              color: b.payrollMode === 'actual' ? '#166534' : (b.payrollMode === 'contractual' ? '#92400e' : '#0369a1')
+                              background: b.payrollMode === 'actual' ? '#dcfce7' : '#f1f5f9',
+                              color: b.payrollMode === 'actual' ? '#166534' : '#64748b'
                             }}>
-                              {b.payrollMode === 'actual' ? 'من واقع البصمة' : (b.payrollMode === 'contractual' ? 'أساسي تعاقدي' : (b.payrollMode === 'mixed' ? 'مختلط' : 'لا رواتب'))}
+                              {b.payrollMode === 'actual' ? 'فعلي من واقع البصمة' : 'لا توجد ساعات مسجلة'}
                             </span>
                             {b.grossRevenue > 0 && (
                               <span style={{ fontSize: '10.5px', color: 'var(--muted)', marginRight: '4px' }}>
@@ -1072,12 +1074,12 @@ export default function FinancialReportsModule({
                       </div>
                     </div>
                     <div style={{ background: '#eff6ff', padding: '12px 14px', borderRadius: '12px', border: '1px solid #bfdbfe' }}>
-                      <div style={{ fontSize: '11.5px', color: '#1e40af', fontWeight: '700' }}>مسير الرواتب</div>
+                      <div style={{ fontSize: '11.5px', color: '#1e40af', fontWeight: '700' }}>مسير الرواتب الفعلية</div>
                       <div style={{ fontSize: '16px', fontWeight: '900', color: '#1d4ed8', marginTop: '2px' }}>
                         {selectedBranchDetail.payroll.toLocaleString('ar-EG', { minimumFractionDigits: 2 })} ج.م
                       </div>
                       <div style={{ fontSize: '11px', color: '#3b82f6', marginTop: '2px' }}>
-                        {selectedBranchDetail.payrollMode === 'actual' ? 'من واقع البصمة 🟢' : (selectedBranchDetail.payrollMode === 'contractual' ? 'أساسي تعاقدي 🟡' : 'مختلط 🔵')}
+                        {selectedBranchDetail.payrollMode === 'actual' ? 'من واقع البصمة الفعلي 🟢' : 'لا توجد ساعات مسجلة ⚪'}
                       </div>
                     </div>
                     <div style={{ background: '#fffbeb', padding: '12px 14px', borderRadius: '12px', border: '1px solid #fde68a' }}>
@@ -1110,7 +1112,7 @@ export default function FinancialReportsModule({
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                       <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '800', color: '#1e293b' }}>
-                        👥 كشف تفصيلي لمسير أجور موظفي الفرع ({selectedBranchDetail.employeesBreakdown?.length || 0} موظف)
+                        👥 كشف تفصيلي لمسير الرواتب والأجور الفعلية لموظفي الفرع ({selectedBranchDetail.employeesBreakdown?.length || 0} موظف)
                       </h4>
                       <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
                         إجمالي ساعات العمل: <strong>{selectedBranchDetail.totalHours || 0} ساعة</strong>
@@ -1123,20 +1125,21 @@ export default function FinancialReportsModule({
                           <tr style={{ background: '#f1f5f9', color: '#334155', fontWeight: '800' }}>
                             <th style={{ padding: '8px 10px', textAlign: 'right' }}>الموظف</th>
                             <th style={{ padding: '8px' }}>الوظيفة</th>
-                            <th style={{ padding: '8px' }}>ساعات العمل</th>
+                            <th style={{ padding: '8px' }}>ساعات العمل الفعلية</th>
                             <th style={{ padding: '8px' }}>أجر الساعة</th>
-                            <th style={{ padding: '8px' }}>الأساسي</th>
+                            <th style={{ padding: '8px' }}>الأساسي الفعلي</th>
                             <th style={{ padding: '8px' }}>الإضافي</th>
                             <th style={{ padding: '8px' }}>البدلات/الحوافز</th>
                             <th style={{ padding: '8px' }}>الاستقطاعات</th>
-                            <th style={{ padding: '8px', background: '#e0f2fe', color: '#0369a1' }}>صافي المستحق</th>
-                            <th style={{ padding: '8px' }}>الحالة</th>
+                            <th style={{ padding: '8px', background: '#e0f2fe', color: '#0369a1' }}>صافي الراتب الفعلي</th>
+                            <th style={{ padding: '8px', color: '#64748b' }}>الراتب بالعقد (مقارنة)</th>
+                            <th style={{ padding: '8px' }}>طريقة الاحتساب</th>
                           </tr>
                         </thead>
                         <tbody>
                           {(!selectedBranchDetail.employeesBreakdown || selectedBranchDetail.employeesBreakdown.length === 0) ? (
                             <tr>
-                              <td colSpan="10" style={{ padding: '24px', color: 'var(--muted)' }}>
+                              <td colSpan="11" style={{ padding: '24px', color: 'var(--muted)' }}>
                                 لا يوجد موظفون مسجلون أو مناوبات بهذا الفرع لهذه الفترة.
                               </td>
                             </tr>
@@ -1163,16 +1166,19 @@ export default function FinancialReportsModule({
                                 <td style={{ padding: '8px', fontWeight: '900', color: '#0369a1', background: '#f0f9ff' }}>
                                   {(emp.netSalary || 0).toLocaleString('ar-EG', { minimumFractionDigits: 2 })} ج.م
                                 </td>
+                                <td style={{ padding: '8px', color: '#64748b', fontSize: '11.5px' }}>
+                                  {((emp.contractSalary || emp.monthlySalary || 0)).toLocaleString('ar-EG', { minimumFractionDigits: 2 })} ج.م
+                                </td>
                                 <td style={{ padding: '8px' }}>
                                   <span style={{
                                     fontSize: '11px',
                                     fontWeight: '700',
                                     padding: '3px 7px',
                                     borderRadius: '6px',
-                                    background: emp.isContractualEstimate ? '#fef3c7' : (emp.isRoaming ? '#e0f2fe' : '#dcfce7'),
-                                    color: emp.isContractualEstimate ? '#92400e' : (emp.isRoaming ? '#0369a1' : '#166534')
+                                    background: emp.hasActualWork ? '#dcfce7' : (emp.isRoaming ? '#e0f2fe' : '#f1f5f9'),
+                                    color: emp.hasActualWork ? '#166534' : (emp.isRoaming ? '#0369a1' : '#64748b')
                                   }}>
-                                    {emp.isContractualEstimate ? 'أساسي تعاقدي' : (emp.isRoaming ? 'مناوبة فرع آخر' : 'فعلي بالبصمة')}
+                                    {emp.hasActualWork ? 'فعلي بالبصمة 🟢' : (emp.isRoaming ? 'مناوبة فرع آخر 🔵' : 'لم تسجل ساعات ⚪')}
                                   </span>
                                 </td>
                               </tr>

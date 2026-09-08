@@ -9,9 +9,11 @@ contextBridge.exposeInMainWorld('desktopAPI', {
   isDesktop: true,
   platform: process.platform,
 
-  // 1. معلومات التطبيق والنظام
+  // 1. معلومات التطبيق والنظام والصلاحيات
   getAppVersion: () => ipcRenderer.invoke('app:get-version'),
   getAppDataPath: () => ipcRenderer.invoke('app:get-path'),
+  isAdmin: () => ipcRenderer.invoke('app:is-admin'),
+  readModelBinary: (modelPath) => ipcRenderer.invoke('app:read-model-binary', modelPath),
 
   // 2. إدارة نافذة البرنامج
   minimizeWindow: () => ipcRenderer.send('window:minimize'),

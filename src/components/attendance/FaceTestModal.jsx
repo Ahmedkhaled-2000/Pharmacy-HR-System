@@ -101,7 +101,7 @@ export default function FaceTestModal({ employee, onClose, biometricType = 'face
     setModelError(null);
     try {
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('استغرق تحميل محرك الذكاء الاصطناعي وقتاً أطول من المتوقع.')), 15000)
+        setTimeout(() => reject(new Error('استغرق تجهيز محرك الذكاء الاصطناعي وقتاً أطول من المتوقع، يرجى إعادة المحاولة.')), 25000)
       );
 
       const initTask = async () => {
@@ -118,7 +118,11 @@ export default function FaceTestModal({ employee, onClose, biometricType = 'face
       return true;
     } catch (err) {
       console.error('Model error:', err);
-      setModelError(err.message || 'تعذر تحميل محرك الذكاء الاصطناعي.');
+      let errMsg = err.message || 'تعذر تحميل محرك الذكاء الاصطناعي.';
+      if (errMsg.includes('Failed to fetch') || errMsg.includes('fetch')) {
+        errMsg = 'تعذر الاتصال بملفات النماذج. جاري التهيئة عبر الذاكرة المحلية، اضغط زر إعادة المحاولة.';
+      }
+      setModelError(errMsg);
       setModelReady(false);
       return false;
     }

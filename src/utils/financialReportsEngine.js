@@ -5,6 +5,234 @@ import {
   calculateRatesAndSalaries
 } from './branchMatcher.js';
 import { isEmployeeActive } from './formatters.js';
+import { getEffectiveShiftHours } from './latePenaltyEngine.js';
+
+/**
+ * احتساب ملخص الراتب الفعلي للموظف من واقع الورديات وساعات البصمة والبدلات والخصومات
+ * يُستخدم كمرجع أساسي أو بديل مباشر في حال عدم تمرير دالة computeEmpSummary
+ */
+export function calculateEmployeeActualSummary({
+  emp,
+  state,
+  dateFilterFn,
+  targetMonthStr,
+  targetBranchId = null
+}) {
+  if (!emp) {
+    return {
+      hours: 0,
+      hourlyRate: 0,
+      baseEarnings: 0,
+      approvedOvertimeHours: 0,
+      overtimeEarnings: 0,
+      totalAllowances: 0,
+      totalBonus: 0,
+      totalDeduction: 0,
+      absenceDeduction: 0,
+      netSalary: 0,
+      contractualMonthlySalary: 0
+    };
+  }
+
+  const allBranchesList = state?.branches || [];
+  const targetBranchObj = targetBranchId
+    ? allBranchesList.find(b => isBranchMatch(targetBranchId, b)) || { id: targetBranchId }
+    : null;
+
+  let branches = [];
+  if (emp.branchesDetails && emp.branchesDetails.length > 0) {
+    branches = emp.branchesDetails;
+  } else {
+    branches = [{
+      branchId: emp.branchId || 'main',
+      salary: emp.salary || 0,
+      workHoursPerDay: emp.workHoursPerDay || emp.workHours || 8,
+      workDaysPerMonth: emp.workDaysPerMonth || emp.workDays || 26,
+      breakHours: emp.breakHours || emp.defaultBreakHours || 0
+    }];
+  }
+
+  const isTargetFilterActive = Boolean(targetBranchId);
+  if (isTargetFilterActive) {
+    const matchingBranches = branches.filter(b => isBranchMatch(b.branchId, targetBranchObj));
+    if (matchingBranches.length > 0) {
+      branches = matchingBranches;
+    } else {
+      const isPrimary = isBranchMatch(emp.branchId || emp.branchCode || emp.branchName, targetBranchObj);
+      if (isPrimary) {
+        branches = [{
+          branchId: targetBranchId,
+          salary: emp.salary || 0,
+          workHoursPerDay: emp.workHoursPerDay || emp.workHours || 8,
+          workDaysPerMonth: emp.workDaysPerMonth || emp.workDays || 26,
+          breakHours: emp.breakHours || emp.defaultBreakHours || 0
+        }];
+      } else {
+        const defaultDetail = branches[0] || {};
+        branches = [{
+          branchId: targetBranchId,
+          salary: defaultDetail.salary || emp.salary || 0,
+          workHoursPerDay: defaultDetail.workHoursPerDay || defaultDetail.workHours || 8,
+          workDaysPerMonth: defaultDetail.workDaysPerMonth || defaultDetail.workDays || 26,
+          breakHours: defaultDetail.breakHours || 0,
+          isRoaming: true
+        }];
+      }
+    }
+  }
+
+  let totalHours = 0;
+  let totalBaseEarnings = 0;
+  let totalApprovedOvertimeHours = 0;
+  let totalOvertimeEarnings = 0;
+  let mainHourlyRate = 0;
+  let contractualMonthlySalary = 0;
+
+  branches.forEach(b => {
+    const rates = calculateRatesAndSalaries({
+      salaryInput: b.salary,
+      workHoursPerDay: b.workHoursPerDay || b.workHours || 8,
+      workDaysPerMonth: b.workDaysPerMonth || b.workDays || 26,
+      breakHours: b.breakHours || 0
+    });
+
+    const rate = rates.hourlyRate || 0;
+    if (!mainHourlyRate) mainHourlyRate = rate;
+    if (!b.isRoaming) {
+      contractualMonthlySalary += (rates.monthlySalary || 0);
+    }
+
+    const bShifts = (state?.shifts || []).filter(s => {
+      if (String(s.employeeId) !== String(emp.id)) return false;
+      if (dateFilterFn && !dateFilterFn(s.date)) return false;
+      if (s.branchId) {
+        return isBranchMatch(s.branchId, targetBranchObj || b.branchId);
+      }
+      const primaryBId = emp.branchId || branches[0]?.branchId;
+      return isBranchMatch(primaryBId, targetBranchObj || b.branchId);
+    });
+
+    const hours = bShifts.reduce((acc, s) => acc + (getEffectiveShiftHours ? getEffectiveShiftHours(s, state) : (parseFloat(s.hours) || 0)), 0);
+    const baseEarnings = hours * rate;
+
+    const approvedOtHours = bShifts
+      .filter(s => s.overtimeStatus === 'approved' || (parseFloat(s.overtimeHours) > 0 && s.adminApproved))
+      .reduce((acc, s) => acc + (parseFloat(s.overtimeHours) || 0), 0);
+
+    const otEarnings = Math.round(approvedOtHours * rate * 100) / 100;
+
+    totalHours += hours;
+    totalBaseEarnings += baseEarnings;
+    totalApprovedOvertimeHours += approvedOtHours;
+    totalOvertimeEarnings += otEarnings;
+  });
+
+  const isPrimaryForAdjustments = !isTargetFilterActive || isBranchMatch(emp.branchId || (emp.branchesDetails && emp.branchesDetails[0]?.branchId), targetBranchObj);
+
+  // المكافآت والخصومات
+  const empAdjs = (state?.adjustments || []).filter(a => {
+    if (String(a.employeeId) !== String(emp.id)) return false;
+    if (dateFilterFn && !dateFilterFn(a.date)) return false;
+    if (isTargetFilterActive) {
+      if (a.branchId) return isBranchMatch(a.branchId, targetBranchObj);
+      return isPrimaryForAdjustments;
+    }
+    return true;
+  });
+
+  const totalBonus = empAdjs.filter(a => a.type === 'bonus' || a.type === 'مكافأة').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
+  const manualDeduction = empAdjs.filter(a => a.type === 'deduction' || a.type === 'penalty' || a.type === 'خصم').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
+
+  // الجزاءات والتأخيرات
+  const empLateIncidents = (state?.lateIncidents || []).filter(i => {
+    if (String(i.employeeId) !== String(emp.id)) return false;
+    if (dateFilterFn && !dateFilterFn(i.date)) return false;
+    if (i.status === 'cancelled') return false;
+    if (isTargetFilterActive) {
+      if (i.branchId) return isBranchMatch(i.branchId, targetBranchObj);
+      return isPrimaryForAdjustments;
+    }
+    return true;
+  });
+  const lateDeduction = empLateIncidents.reduce((acc, i) => acc + (parseFloat(i.penaltyAmount) || 0), 0);
+
+  // السلف
+  const empLoans = (state?.loans || []).filter(l => {
+    if (String(l.employeeId) !== String(emp.id)) return false;
+    if (l.status !== 'approved' && !l.adminApproved) return false;
+    if (isTargetFilterActive) {
+      if (l.branchId) return isBranchMatch(l.branchId, targetBranchObj);
+      return isPrimaryForAdjustments;
+    }
+    return true;
+  });
+  const loanDeduction = empLoans.reduce((acc, l) => {
+    const rem = parseFloat(l.remainingAmount ?? l.amount) || 0;
+    if (rem <= 0) return acc;
+    const isInstallment = l.type === 'installment_loan' || l.isInstallment === true;
+    const monthlyDeduction = parseFloat(l.monthlyDeduction || l.installmentAmount) || rem;
+    return isInstallment ? acc + Math.min(rem, monthlyDeduction) : acc + rem;
+  }, 0);
+
+  // البدلات (تُحتسب إذا كان الفرع هو الأساسي أو بدون فلترة فرع)
+  let managementAllowance = parseFloat(emp.managementAllowance) || 0;
+  let transportAllowance = parseFloat(emp.transportAllowance) || 0;
+  let extraAllowance = parseFloat(emp.extraAllowance) || 0;
+  if (Array.isArray(emp.extraAllowances) && emp.extraAllowances.length > 0) {
+    const sumList = emp.extraAllowances.reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
+    if (sumList > 0 || extraAllowance === 0) extraAllowance = sumList;
+  }
+  if (isTargetFilterActive && !isPrimaryForAdjustments) {
+    managementAllowance = 0;
+    transportAllowance = 0;
+    extraAllowance = 0;
+  }
+
+  // بدل الحضور اليومي
+  const allEmployeeShifts = (state?.shifts || []).filter(s =>
+    String(s.employeeId) === String(emp.id) &&
+    (dateFilterFn ? dateFilterFn(s.date) : true) &&
+    (s.timeIn || s.checkIn || (getEffectiveShiftHours ? getEffectiveShiftHours(s, state) > 0 : (parseFloat(s.hours) || 0) > 0))
+  );
+  const attendedDates = new Set();
+  allEmployeeShifts.forEach(s => {
+    if (!s.date || s.excludeDailyAllowance) return;
+    const sBranchId = s.branchId || branches[0]?.branchId;
+    if (isTargetFilterActive) {
+      if (isBranchMatch(sBranchId, targetBranchObj)) attendedDates.add(s.date);
+    } else {
+      attendedDates.add(s.date);
+    }
+  });
+  const attendedDaysCount = attendedDates.size;
+  const baseDailyAllowanceAmount = parseFloat(emp.dailyAllowanceAmount) || 0;
+  let dailyAllowancesList = Array.isArray(emp.dailyAllowances) && emp.dailyAllowances.length > 0
+    ? emp.dailyAllowances.filter(a => (parseFloat(a.amount) || 0) > 0)
+    : [];
+  if (dailyAllowancesList.length === 0 && baseDailyAllowanceAmount > 0) {
+    dailyAllowancesList = [{ id: 'default', amount: baseDailyAllowanceAmount }];
+  }
+  const totalDailyAllowanceRate = dailyAllowancesList.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0) || baseDailyAllowanceAmount;
+  const dailyAllowanceTotal = attendedDaysCount * totalDailyAllowanceRate;
+
+  const totalAllowances = managementAllowance + transportAllowance + extraAllowance + dailyAllowanceTotal;
+  const totalDeduction = manualDeduction + loanDeduction + lateDeduction;
+  const netSalary = Math.max(0, totalBaseEarnings + totalOvertimeEarnings + totalBonus + totalAllowances - totalDeduction);
+
+  return {
+    hours: totalHours,
+    hourlyRate: mainHourlyRate,
+    baseEarnings: totalBaseEarnings,
+    approvedOvertimeHours: totalApprovedOvertimeHours,
+    overtimeEarnings: totalOvertimeEarnings,
+    totalAllowances,
+    totalBonus,
+    totalDeduction,
+    absenceDeduction: 0,
+    netSalary,
+    contractualMonthlySalary
+  };
+}
 
 /**
  * financialReportsEngine.js
@@ -335,65 +563,80 @@ export function computeComprehensiveFinancialReport({
     const bExpenses = rawFinances.filter((f) => f && (f.type === 'expense' || f.type === 'مصروف') && dateFilterFn(f.date || f.createdAt) && isBranchMatch(f.branchId, b));
     const bTotalExpenses = bExpenses.reduce((acc, f) => acc + (parseFloat(f.amount) || 0), 0);
 
-    // Branch Employees & Payroll
+    // Branch Employees & Payroll (Actual Net Salaries based on shifts & biometric attendance)
     const employeesBreakdown = [];
     let bActualPayroll = 0;
-    let bContractualPayroll = 0;
     let bTotalHours = 0;
+    const targetMonthStr = selectedMonth || (startDate ? startDate.slice(0, 7) : new Date().toISOString().slice(0, 7));
 
     employees.forEach((emp) => {
       if (!emp) return;
       const isAssigned = isBranchMatch(emp.branchId, b) || !!getEmployeeBranchAssignment(emp, b);
 
       let sum = null;
-      if (computeEmpSummary) {
-        sum = computeEmpSummary(emp.id, dateFilterFn, periodMode === 'month' ? selectedMonth : null, b.id);
+      if (typeof computeEmpSummary === 'function') {
+        try {
+          sum = computeEmpSummary(emp.id, dateFilterFn, targetMonthStr, b.id);
+        } catch (err) {
+          console.warn('computeEmpSummary error:', err);
+        }
       }
-
-      const hasAttendance = sum && (sum.hours > 0 || (sum.shifts && sum.shifts.length > 0));
-      const active = isEmployeeActive(emp);
-
-      // Only include if assigned to branch OR worked actual shifts at this branch
-      if (!isAssigned && !hasAttendance) return;
+      if (!sum) {
+        sum = calculateEmployeeActualSummary({
+          emp,
+          state,
+          dateFilterFn,
+          targetMonthStr,
+          targetBranchId: b.id
+        });
+      }
 
       const rates = calculateRatesAndSalaries(emp);
       const monthlyContractual = sum?.contractualMonthlySalary || rates.monthlySalary || 0;
-      const contractualForPeriod = monthlyContractual * periodRatio;
 
-      let net = 0;
-      let isEstimate = false;
+      const actualHours = sum?.hours || 0;
+      const actualBaseEarnings = sum?.baseEarnings || 0;
+      const actualOtHours = sum?.approvedOvertimeHours || sum?.overtimeHours || 0;
+      const actualOtEarnings = sum?.overtimeEarnings || 0;
+      const actualAllowances = sum?.totalAllowances || 0;
+      const actualBonus = sum?.totalBonus || 0;
+      const actualDeductions = (sum?.totalDeduction || 0) + (sum?.absenceDeduction || 0);
+      const actualNetSalary = Math.max(0, sum?.netSalary || 0);
 
-      if (hasAttendance) {
-        net = Math.max(0, sum.netSalary || 0);
-        bActualPayroll += net;
-        bTotalHours += (sum.hours || 0);
-      } else if (active && isAssigned) {
-        // Staff assigned to this branch with no biometric records logged yet
-        net = Math.max(0, contractualForPeriod);
-        bContractualPayroll += net;
-        isEstimate = true;
-      }
+      const hasActualWork = actualHours > 0 || actualOtHours > 0 || actualBaseEarnings > 0 || actualNetSalary > 0;
+      const hasAnyActivity = hasActualWork || actualAllowances > 0 || actualBonus > 0 || actualDeductions > 0;
+
+      // Only include if assigned to branch OR worked actual shifts at this branch
+      if (!isAssigned && !hasActualWork) return;
+
+      // Actual net salary is used strictly. Absent employees with 0 worked hours get 0 actual base earnings, NEVER contract salary!
+      bActualPayroll += actualNetSalary;
+      bTotalHours += actualHours;
 
       employeesBreakdown.push({
         id: emp.id,
         name: emp.name || emp.fullName || 'موظف',
         code: emp.employeeCode || emp.code || '',
         jobTitle: emp.jobTitle || emp.role || 'موظف',
-        hours: sum?.hours || 0,
-        hourlyRate: sum?.rates?.hourlyRate || rates.hourlyRate || 0,
+        hours: actualHours,
+        hourlyRate: sum?.hourlyRate || sum?.rate || rates.hourlyRate || 0,
         monthlySalary: monthlyContractual,
-        baseEarnings: sum?.baseEarnings || (isEstimate ? net : 0),
-        overtimeEarnings: sum?.overtimeEarnings || 0,
-        totalAllowances: sum?.totalAllowances || 0,
-        totalBonus: sum?.totalBonus || 0,
-        totalDeduction: sum?.totalDeduction || 0,
-        netSalary: net,
-        isContractualEstimate: isEstimate,
-        isRoaming: !isAssigned && hasAttendance
+        contractSalary: monthlyContractual,
+        baseEarnings: actualBaseEarnings,
+        overtimeHours: actualOtHours,
+        overtimeEarnings: actualOtEarnings,
+        totalAllowances: actualAllowances,
+        totalBonus: actualBonus,
+        totalDeduction: actualDeductions,
+        netSalary: actualNetSalary,
+        hasActualWork,
+        isRoaming: !isAssigned && hasActualWork,
+        calculationStatus: hasActualWork ? 'فعلي من واقع البصمة' : (hasAnyActivity ? 'بدلات/تسويات مسجلة' : 'لم تسجل ساعات عمل')
       });
     });
 
-    const bPayroll = bActualPayroll + bContractualPayroll;
+    // كلفة الرواتب في تقارير الأرباح والخسائر والقوائم المالية هي حصرياً الرواتب الفعلية المستحقة
+    const bPayroll = bActualPayroll;
     const bSafePayroll = Math.max(0, bPayroll);
     const bSafeExpenses = Math.max(0, bTotalExpenses);
     const bTotalCosts = bSafePayroll + bSafeExpenses;
@@ -402,7 +645,7 @@ export function computeComprehensiveFinancialReport({
       ? ((bNetProfit / bGrossRevenue) * 100)
       : (bNetProfit < 0 ? -100 : 0);
     const bPayrollRatio = bGrossRevenue > 0 ? ((bSafePayroll / bGrossRevenue) * 100) : 0;
-    const bPayrollMode = bActualPayroll > 0 ? (bContractualPayroll > 0 ? 'mixed' : 'actual') : (bContractualPayroll > 0 ? 'contractual' : 'none');
+    const bPayrollMode = bActualPayroll > 0 ? 'actual' : (bTotalHours > 0 ? 'actual' : 'none');
     const bSalesPerEmployee = employeesBreakdown.length > 0 ? Math.round(bTotalSales / employeesBreakdown.length) : 0;
 
     return {
@@ -422,7 +665,7 @@ export function computeComprehensiveFinancialReport({
       operatingExpenses: bSafeExpenses,
       payroll: bSafePayroll,
       actualPayroll: bActualPayroll,
-      contractualPayroll: bContractualPayroll,
+      contractualPayroll: 0,
       payrollMode: bPayrollMode,
       employeesCount: employeesBreakdown.length,
       totalHours: bTotalHours,
@@ -705,7 +948,7 @@ export async function exportComprehensiveFinancialToExcel({
     t2.alignment = { horizontal: 'center', vertical: 'middle' };
     ws2.getRow(1).height = 32;
 
-    const headers2 = ['الترتيب', 'الفرع', 'عدد الموظفين', 'ساعات العمل', 'المبيعات (ج.م)', 'مسير الرواتب (ج.م)', 'طريقة الاحتساب', 'المصروفات (ج.م)', 'إجمالي التكاليف', 'صافي الربح (ج.م)', 'هامش الربح %'];
+    const headers2 = ['الترتيب', 'الفرع', 'عدد الموظفين', 'ساعات العمل الفعلية', 'المبيعات (ج.م)', 'مسير الرواتب الفعلية (ج.م)', 'طريقة الاحتساب', 'المصروفات (ج.م)', 'إجمالي التكاليف', 'صافي الربح (ج.م)', 'هامش الربح %'];
     const hRow2 = ws2.addRow(headers2);
     hRow2.height = 24;
     hRow2.eachCell((cell) => {
@@ -715,7 +958,7 @@ export async function exportComprehensiveFinancialToExcel({
     });
 
     branchBenchmarks.forEach((b, idx) => {
-      const modeLabel = b.payrollMode === 'actual' ? 'فعلي بالبصمة' : (b.payrollMode === 'contractual' ? 'تعاقدي تقديري' : (b.payrollMode === 'mixed' ? 'مختلط' : 'لا يوجد'));
+      const modeLabel = b.payrollMode === 'actual' ? 'فعلي بالبصمة' : 'لا توجد ساعات مسجلة';
       const r = ws2.addRow([
         idx + 1,
         b.branchName,
@@ -748,15 +991,29 @@ export async function exportComprehensiveFinancialToExcel({
       views: [{ rightToLeft: true }]
     });
 
-    ws3.mergeCells('A1:L1');
+    ws3.mergeCells('A1:M1');
     const t3 = ws3.getCell('A1');
-    t3.value = `تفصيل مسير أجور ومستحقات الموظفين بالصيدليات — ${periodLabel}`;
+    t3.value = `تفصيل مسير الرواتب الفعلية ومستحقات الموظفين بالصيدليات — ${periodLabel}`;
     t3.font = { name: 'Arial', bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
     t3.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0D9488' } };
     t3.alignment = { horizontal: 'center', vertical: 'middle' };
     ws3.getRow(1).height = 32;
 
-    const headers3 = ['الفرع', 'كود الموظف', 'اسم الموظف', 'الوظيفة', 'ساعات العمل', 'أجر الساعة', 'الأساسي', 'الإضافي', 'البدلات والمكافآت', 'الاستقطاعات', 'صافي المستحق (ج.م)', 'حالة الاحتساب'];
+    const headers3 = [
+      'الفرع',
+      'كود الموظف',
+      'اسم الموظف',
+      'الوظيفة',
+      'ساعات العمل الفعلية',
+      'أجر الساعة',
+      'الأساسي الفعلي',
+      'الإضافي',
+      'البدلات والمكافآت',
+      'الاستقطاعات',
+      'صافي الراتب الفعلي (ج.م)',
+      'الراتب بالعقد (للمقارنة)',
+      'طريقة الاحتساب'
+    ];
     const hRow3 = ws3.addRow(headers3);
     hRow3.height = 24;
     hRow3.eachCell((cell) => {
@@ -768,7 +1025,7 @@ export async function exportComprehensiveFinancialToExcel({
     branchBenchmarks.forEach((b) => {
       if (Array.isArray(b.employeesBreakdown) && b.employeesBreakdown.length > 0) {
         b.employeesBreakdown.forEach((emp) => {
-          const statusText = emp.isContractualEstimate ? 'أساسي تعاقدي (لم تسجل بصمة)' : (emp.isRoaming ? 'مناوبة فرع آخر' : 'فعلي من واقع البصمة');
+          const statusText = emp.hasActualWork ? 'فعلي من واقع البصمة' : (emp.isRoaming ? 'مناوبة فرع آخر' : 'لم تسجل ساعات عمل');
           const row = ws3.addRow([
             b.branchName,
             emp.code || '—',
@@ -781,23 +1038,38 @@ export async function exportComprehensiveFinancialToExcel({
             (emp.totalAllowances || 0) + (emp.totalBonus || 0),
             emp.totalDeduction || 0,
             emp.netSalary || 0,
+            emp.contractSalary || emp.monthlySalary || 0,
             statusText
           ]);
           row.height = 20;
           row.eachCell((cell, cIdx) => {
             cell.alignment = { horizontal: [1, 3, 4].includes(cIdx) ? 'right' : 'center', vertical: 'middle' };
-            if ([6, 7, 8, 9, 10, 11].includes(cIdx)) {
+            if ([6, 7, 8, 9, 10, 11, 12].includes(cIdx)) {
               cell.numFmt = '#,##0.00';
             }
             if (cIdx === 11) {
-              cell.font = { bold: true };
+              cell.font = { bold: true, color: { argb: 'FF0F766E' } };
             }
           });
         });
       }
     });
 
-    ws3.columns = [{ width: 22 }, { width: 14 }, { width: 26 }, { width: 18 }, { width: 14 }, { width: 14 }, { width: 16 }, { width: 16 }, { width: 18 }, { width: 16 }, { width: 18 }, { width: 26 }];
+    ws3.columns = [
+      { width: 22 },
+      { width: 14 },
+      { width: 26 },
+      { width: 18 },
+      { width: 16 },
+      { width: 14 },
+      { width: 16 },
+      { width: 16 },
+      { width: 18 },
+      { width: 16 },
+      { width: 22 },
+      { width: 20 },
+      { width: 24 }
+    ];
 
     // Download File
     const buffer = await wb.xlsx.writeBuffer();

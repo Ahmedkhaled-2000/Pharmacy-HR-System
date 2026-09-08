@@ -13,6 +13,10 @@ import DesktopSystemTitleBar from './components/layout/DesktopSystemTitleBar';
  * Inner Application shell
  */
 function AppContent() {
+  const [isDesktop] = React.useState(() => {
+    return typeof window !== 'undefined' && Boolean(window.desktopAPI?.isDesktop);
+  });
+
   React.useEffect(() => {
     if (typeof window !== 'undefined' && window.desktopAPI?.isDesktop) {
       document.body.classList.add('is-desktop-mode');
@@ -21,13 +25,15 @@ function AppContent() {
   }, []);
 
   return (
-    <>
+    <div className={`app-root-shell ${isDesktop ? 'is-desktop-environment' : ''}`}>
       <DesktopSystemTitleBar />
-      <AppRoutes />
+      <div className={`app-viewport-wrapper ${isDesktop ? 'desktop-viewport-fixed' : ''}`}>
+        <AppRoutes />
+      </div>
       <GlobalModalsContainer />
       <AppUpdateWatcher />
       <UniversalShortcutsController />
-    </>
+    </div>
   );
 }
 

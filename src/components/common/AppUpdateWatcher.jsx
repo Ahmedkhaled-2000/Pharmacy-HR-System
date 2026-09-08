@@ -50,8 +50,26 @@ export default function AppUpdateWatcher() {
         }
       });
 
+      // ── أ) فحص فوري للتحديثات بمجرد فتح البرنامج بعد تحميل الواجهة ──
+      const initialTimer = setTimeout(() => {
+        if (window.desktopAPI?.checkForUpdates) {
+          console.log('🖥️ [AppUpdateWatcher] 🚀 Auto-triggering startup update check...');
+          window.desktopAPI.checkForUpdates().catch(() => {});
+        }
+      }, 1500);
+
+      // ── ب) فحص دوري كل دقيقة (Watchdog Interval) لضمان الفحص المستمر ──
+      const periodicTimer = setInterval(() => {
+        if (window.desktopAPI?.checkForUpdates && document.visibilityState !== 'hidden') {
+          console.log('🖥️ [AppUpdateWatcher] ⏱️ Auto-triggering 1-minute periodic update check...');
+          window.desktopAPI.checkForUpdates().catch(() => {});
+        }
+      }, 60 * 1000);
+
       return () => {
         if (typeof unsubscribe === 'function') unsubscribe();
+        clearTimeout(initialTimer);
+        clearInterval(periodicTimer);
       };
     }
 

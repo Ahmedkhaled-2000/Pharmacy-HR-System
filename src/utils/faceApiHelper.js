@@ -44,36 +44,69 @@ export const isFaceEngineReady = () => {
  * تهيئة وتحميل محركات الذكاء الاصطناعي (MediaPipe + ONNX Runtime Web)
  * متوافقة 100% مع الهواتف الذكية (iOS Safari, Android Chrome) وكافة المتصفحات
  */
+// دالة مساعدة لتحديد المسار الأساسي للملفات بما يتوافق مع سطح المكتب Electron والويب والموبايل
+const getAssetBaseUrl = () => {
+  if (typeof window === 'undefined') return '';
+  if (window.location.origin && window.location.origin !== 'null' && !window.location.origin.startsWith('file:')) {
+    return window.location.origin;
+  }
+  return '';
+};
+
+/**
+ * تهيئة وتحميل محركات الذكاء الاصطناعي (MediaPipe + ONNX Runtime Web)
+ * متوافقة 100% مع بيئة الويندوز المكتبية (Electron)، الهواتف الذكية (iOS Safari, Android Chrome) وكافة المتصفحات
+ */
 export const initFaceRecognition = async () => {
   if (isFaceEngineReady()) return;
   if (initPromise) return initPromise;
 
   initPromise = (async () => {
     try {
-      console.log('⚡ [FaceEngine] جاري تهيئة محرك التعرف على الوجه مع دعم الهواتف والمتصفحات...');
+      console.log('⚡ [FaceEngine] جاري تهيئة محرك التعرف على الوجه مع دعم سطح المكتب والهواتف...');
 
-      // 1. إعداد مسارات تشغيل ONNX WebAssembly مع الكشف التلقائي عن دعم SIMD في الهاتف/المتصفح
+      const baseUrl = getAssetBaseUrl();
+
+      // 1. إعداد مسارات تشغيل ONNX WebAssembly مع الكشف التلقائي عن دعم SIMD في النظام
       const supportsSimd = isWasmSimdSupported();
       try {
         ort.env.wasm.numThreads = 1;
         ort.env.wasm.simd = supportsSimd;
-        ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.29.0/dist/';
+        // أولوية لمسار الملفات المحلية في المنظومة لتفادي الاعتماد على الإنترنت
+        ort.env.wasm.wasmPaths = baseUrl ? `${baseUrl}/onnx-wasm/` : '/onnx-wasm/';
       } catch (e) {
         console.warn('[FaceEngine] WASM path setup note:', e);
       }
 
-      // 2. تحميل نموذج MediaPipe FaceLandmarker مع الدعم المزدوج للمتصفحات والهواتف
+      // 2. تحميل نموذج MediaPipe FaceLandmarker مع الدعم المحلي لسطح المكتب وعبر الإنترنت
       const visionResolvers = [
-        { type: 'local', path: '/mediapipe-wasm' },
+        { type: 'local_base', path: baseUrl ? `${baseUrl}/mediapipe-wasm` : '/mediapipe-wasm' },
+        { type: 'root', path: '/mediapipe-wasm' },
+        { type: 'relative', path: './mediapipe-wasm' },
         { type: 'cdn', path: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm' }
       ];
 
       const modelPaths = [
+        baseUrl ? `${baseUrl}/models/face_landmarker.task` : '/models/face_landmarker.task',
         '/models/face_landmarker.task',
+        './models/face_landmarker.task',
         'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task'
       ];
-      // على الهواتف المتطورة يتم تجربة GPU أولاً، ثم CPU فوراً إذا تعذر WebGL
       const delegates = ['GPU', 'CPU'];
+
+      // قراءة الـ Binary Buffer محلياً في برنامج الويندوز إذا كان متاحاً
+      let faceModelBuffer = null;
+      if (typeof window !== 'undefined' && window.desktopAPI?.readModelBinary) {
+        try {
+          const buf = await window.desktopAPI.readModelBinary('models/face_landmarker.task');
+          if (buf && buf.byteLength > 0) {
+            faceModelBuffer = new Uint8Array(buf);
+            console.log('✅ [FaceEngine] Loaded face_landmarker.task from native disk buffer:', faceModelBuffer.byteLength);
+          }
+        } catch (bufErr) {
+          console.warn('[FaceEngine] Native face landmarker buffer read fallback:', bufErr);
+        }
+      }
 
       let landmarkerCreated = false;
       let lastLandmarkerErr = null;
@@ -88,6 +121,31 @@ export const initFaceRecognition = async () => {
           continue;
         }
 
+        // أولوية التحميل عبر الـ Buffer المحلي المباشر دون أي طلبات شبكة
+        if (faceModelBuffer) {
+          for (const dlg of delegates) {
+            try {
+              faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+                baseOptions: {
+                  modelAssetBuffer: faceModelBuffer,
+                  delegate: dlg
+                },
+                outputFaceBlendshapes: true,
+                runningMode: 'VIDEO',
+                numFaces: 1
+              });
+              landmarkerCreated = true;
+              console.log(`✅ [FaceEngine] FaceLandmarker loaded from native memory buffer (${dlg})`);
+              break;
+            } catch (bufLoadErr) {
+              console.warn(`[FaceEngine] FaceLandmarker buffer delegate failed (${dlg}):`, bufLoadErr);
+            }
+          }
+        }
+
+        if (landmarkerCreated) break;
+
+        // التحميل الاحتياطي عبر المسارات
         for (const mPath of modelPaths) {
           if (landmarkerCreated) break;
           for (const dlg of delegates) {
@@ -113,25 +171,44 @@ export const initFaceRecognition = async () => {
       }
 
       if (!landmarkerCreated || !faceLandmarker) {
-        throw new Error('تعذر تحميل نموذج معالم الوجه (FaceLandmarker): ' + (lastLandmarkerErr?.message || 'تأكد من الاتصال بالإنترنت'));
+        throw new Error('تعذر تحميل نموذج معالم الوجه (FaceLandmarker): ' + (lastLandmarkerErr?.message || 'تأكد من توفر ملفات النماذج محلياً'));
       }
 
-      // 3. تحميل نموذج MobileFaceNet (ArcFace 512D) عبر ONNX Runtime مع تعافي SIMD تلقائي
-      const modelUrl = '/models/w600k_mbf.onnx';
+      // 3. تحميل نموذج MobileFaceNet (ArcFace 512D) عبر ONNX Runtime
+      let onnxModelTarget = baseUrl ? `${baseUrl}/models/w600k_mbf.onnx` : '/models/w600k_mbf.onnx';
+      if (typeof window !== 'undefined' && window.desktopAPI?.readModelBinary) {
+        try {
+          const onnxBuf = await window.desktopAPI.readModelBinary('models/w600k_mbf.onnx');
+          if (onnxBuf && onnxBuf.byteLength > 0) {
+            onnxModelTarget = new Uint8Array(onnxBuf);
+            console.log('✅ [FaceEngine] Loaded w600k_mbf.onnx from native disk buffer:', onnxModelTarget.byteLength);
+          }
+        } catch (onnxBufErr) {
+          console.warn('[FaceEngine] Native ONNX buffer read fallback:', onnxBufErr);
+        }
+      }
+
       try {
-        onnxSession = await ort.InferenceSession.create(modelUrl, {
+        onnxSession = await ort.InferenceSession.create(onnxModelTarget, {
           executionProviders: ['wasm']
         });
       } catch (sessionErr) {
         console.warn('[FaceEngine] First session attempt failed, retrying with simd=false and basic config:', sessionErr);
         try {
           ort.env.wasm.simd = false;
-          onnxSession = await ort.InferenceSession.create(modelUrl, {
+          onnxSession = await ort.InferenceSession.create(onnxModelTarget, {
             executionProviders: ['wasm']
           });
         } catch (retryErr) {
-          console.warn('[FaceEngine] Second session attempt failed, final fallback:', retryErr);
-          onnxSession = await ort.InferenceSession.create(modelUrl);
+          console.warn('[FaceEngine] Second session attempt failed, trying CDN wasm fallback:', retryErr);
+          try {
+            ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.29.0/dist/';
+            onnxSession = await ort.InferenceSession.create(onnxModelTarget);
+          } catch (finalErr) {
+            console.warn('[FaceEngine] Final fallback to URL path:', finalErr);
+            const fallbackPath = '/models/w600k_mbf.onnx';
+            onnxSession = await ort.InferenceSession.create(fallbackPath);
+          }
         }
       }
 

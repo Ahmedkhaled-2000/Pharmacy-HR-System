@@ -4,34 +4,66 @@
  * مخصص لمنظومة إدارة الموارد البشرية والصيدليات
  */
 
-/* ── 1. أشرطة التمرير المكتبية الأنيقة (Windows 11 Fluent Scrollbars) ── */
-::-webkit-scrollbar {
-  width: 7px;
-  height: 7px;
+/* ── 1. نظام التمرير السلس غير المرئي (Universal Invisible Smooth Scroll Engine) ── */
+/* إخفاء شريط التمرير كلياً في كافة المتصفحات ونظام الويندوز مع الحفاظ الكامل على عمل التمرير */
+* {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
 }
 
-::-webkit-scrollbar-track {
-  background: transparent;
+*::-webkit-scrollbar,
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+div::-webkit-scrollbar,
+main::-webkit-scrollbar,
+section::-webkit-scrollbar,
+article::-webkit-scrollbar,
+nav::-webkit-scrollbar,
+header::-webkit-scrollbar,
+footer::-webkit-scrollbar,
+aside::-webkit-scrollbar,
+.modal-overlay::-webkit-scrollbar,
+.modal-card::-webkit-scrollbar,
+.modal-body::-webkit-scrollbar,
+.modal-card-body::-webkit-scrollbar,
+.table-responsive::-webkit-scrollbar {
+  display: none !important;
+  width: 0px !important;
+  height: 0px !important;
+  background: transparent !important;
 }
 
-::-webkit-scrollbar-thumb {
-  background: rgba(100, 116, 139, 0.28);
-  border-radius: 99px;
-  border: 1.5px solid transparent;
-  background-clip: padding-box;
-  transition: background-color 0.2s ease;
+html {
+  scroll-behavior: smooth;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(13, 148, 136, 0.65);
+/* ── تثبيت شاشة سطح المكتب وعزل شريط العنوان العلوي ── */
+html.is-desktop-app,
+body.is-desktop-mode {
+  height: 100vh !important;
+  max-height: 100vh !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+  padding: 0 !important;
 }
 
-[data-theme='dark'] ::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.22);
+.app-root-shell.is-desktop-environment {
+  height: 100vh;
+  width: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
-[data-theme='dark'] ::-webkit-scrollbar-thumb:hover {
-  background: rgba(20, 184, 166, 0.65);
+.app-viewport-wrapper.desktop-viewport-fixed {
+  flex: 1;
+  width: 100%;
+  height: calc(100vh - 32px);
+  margin-top: 32px; /* مسافة شريط العنوان الثابت بارتفاع 32px */
+  overflow-y: auto;
+  overflow-x: hidden;
+  position: relative;
+  scrollbar-width: none !important;
 }
 
 /* ── 2. تنعيم الخطوط العربية لشاشات الحواسيب (HiDPI ClearType) ── */

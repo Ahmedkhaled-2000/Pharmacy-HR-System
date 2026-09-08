@@ -11,6 +11,7 @@ import { RefreshCw, CheckCircle2, Download, Sparkles, AlertCircle, Info } from '
 export default function DesktopSystemTitleBar() {
   const isDesktop = typeof window !== 'undefined' && Boolean(window.desktopAPI?.isDesktop);
   const [isMaximized, setIsMaximized] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [appVersion, setAppVersion] = useState('');
   const [updateStatus, setUpdateStatus] = useState('idle'); // 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'not-available' | 'error' | 'dev_mode'
   const [updateInfo, setUpdateInfo] = useState(null);
@@ -19,6 +20,11 @@ export default function DesktopSystemTitleBar() {
 
   useEffect(() => {
     if (!isDesktop) return;
+
+    // استعلام عن امتلاك البرنامج لكامل الصلاحيات كمسؤول
+    if (window.desktopAPI?.isAdmin) {
+      window.desktopAPI.isAdmin().then(setIsAdmin).catch(() => {});
+    }
 
     // استعلام مبدئي عن رقم الإصدار الحالي للبرنامج
     if (window.desktopAPI?.getAppVersion) {
@@ -280,11 +286,11 @@ export default function DesktopSystemTitleBar() {
         margin: 0,
         userSelect: 'none',
         WebkitAppRegion: 'drag',
-        position: 'sticky',
+        position: 'fixed',
         top: 0,
         left: 0,
         right: 0,
-        zIndex: 999999,
+        zIndex: 9999999,
         borderBottom: '1px solid var(--titlebar-border, rgba(255, 255, 255, 0.08))',
         fontSize: '12px',
         boxSizing: 'border-box'
@@ -348,6 +354,29 @@ export default function DesktopSystemTitleBar() {
             v{appVersion}
           </span>
         )}
+
+        {/* شارة كامل الصلاحيات (Admin Privileges) */}
+        <span
+          className="app-no-drag"
+          style={{
+            fontSize: '10px',
+            padding: '1px 8px',
+            borderRadius: '10px',
+            background: isAdmin ? 'rgba(16, 185, 129, 0.16)' : 'rgba(14, 165, 233, 0.14)',
+            color: isAdmin ? '#34d399' : '#38bdf8',
+            border: `1px solid ${isAdmin ? 'rgba(16, 185, 129, 0.35)' : 'rgba(14, 165, 233, 0.3)'}`,
+            fontWeight: 700,
+            letterSpacing: '0.2px',
+            WebkitAppRegion: 'no-drag',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '4px'
+          }}
+          title={isAdmin ? 'البرنامج يعمل بكامل صلاحيات مدير النظام (Run as Administrator)' : 'البرنامج مفعل بكامل صلاحيات الوصول للأجهزة والكاميرا'}
+        >
+          <span style={{ fontSize: '10px' }}>🛡️</span>
+          <span>{isAdmin ? 'كامل الصلاحيات (مسؤول)' : 'صلاحيات كاملة'}</span>
+        </span>
 
         {/* زر الفحص اليدوي للتحديثات داخل شريط العنوان (Title Bar) */}
         <button

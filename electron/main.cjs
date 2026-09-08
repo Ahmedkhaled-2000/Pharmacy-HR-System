@@ -4,9 +4,32 @@
  * تشمل إدارة النوافذ، قاعدة البيانات المحلية المحمية، ومحرك التحديث التلقائي الصامت
  */
 
-const { app, BrowserWindow, ipcMain, Menu, dialog, powerMonitor, net } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, dialog, powerMonitor, net, protocol } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const url = require('url');
+
+// ── تهيئة سويتشات الكروميوم للصلاحيات الكاملة والـ WASM ومعالجة الذاكرة ──────
+app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer');
+app.commandLine.appendSwitch('allow-file-access-from-files');
+app.commandLine.appendSwitch('disable-site-isolation-trials');
+app.commandLine.appendSwitch('ignore-certificate-errors');
+
+// ── تسجيل بروتوكول app المخصص الآمن فائق السرعة لدعم نماذج الذكاء الاصطناعي و fetch محلياً ──
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'app',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      bypassCSP: true,
+      allowServiceWorkers: true,
+      stream: true
+    }
+  }
+]);
 
 // محاولة استيراد electron-updater بأمان
 let autoUpdater = null;
@@ -16,6 +39,8 @@ try {
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.allowPrerelease = false;
+  autoUpdater.forceDevUpdateConfig = true; // للسماح بالفحص التلقائي حتى في وضع التطوير
+  autoUpdater.logger = console; // طباعة سجلات التحديث في الكونسول للمتابعة الدقيقة
 } catch (e) {
   console.warn('[AutoUpdater] electron-updater is not yet available in dev mode:', e.message);
 }
@@ -89,10 +114,24 @@ function createMainWindow() {
     if (isDev) {
       // mainWindow.webContents.openDevTools();
     }
-    // فحص وجود تحديثات بعد 5 ثوانٍ من تشغيل البرنامج
+    // فحص فوري للتحديثات بعد ثانية واحدة من ظهور النافذة
     setTimeout(() => {
-      checkForAppUpdates();
-    }, 5000);
+      checkForAppUpdates(false);
+    }, 1200);
+  });
+
+  // فحص وجود تحديثات فور اكتمال تحميل محتوى الواجهة التفاعلية
+  mainWindow.webContents.on('did-finish-load', () => {
+    setTimeout(() => {
+      checkForAppUpdates(false);
+    }, 1500);
+  });
+
+  // فحص ذكي عند إعادة تركيز النافذة (Window Focus) إذا مضى أكثر من 30 ثانية
+  mainWindow.on('focus', () => {
+    if (Date.now() - lastUpdateCheckTime > 30 * 1000) {
+      checkForAppUpdates(false);
+    }
   });
 
   // إرسال حالة التكبير والاستعادة لواجهة المستخدم لتحديث الأيقونات بدقة
@@ -104,24 +143,25 @@ function createMainWindow() {
     try { mainWindow?.webContents?.send('window:maximized-change', false); } catch {}
   });
 
-  // السماح بالوصول للكاميرا ومكبر الصوت لالتقاط بصمة الوجه والصوت
-  mainWindow.webContents.session.setPermissionCheckHandler((webContents, permission) => {
-    if (permission === 'media' || permission === 'camera' || permission === 'microphone') {
-      return true;
-    }
+  // السماح بكامل الصلاحيات للكاميرا ومكبر الصوت وأجهزة الوسائط لالتقاط بصمة الوجه واليد دون قيود
+  mainWindow.webContents.session.setPermissionCheckHandler((_webContents, _permission) => {
     return true;
   });
 
-  mainWindow.webContents.session.setDevicePermissionHandler((details) => {
+  mainWindow.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => {
+    callback(true); // منح الصلاحيات تلقائياً وفورياً
+  });
+
+  mainWindow.webContents.session.setDevicePermissionHandler((_details) => {
     return true;
   });
 
-  // تحميل مسار الواجهة
+  // تحميل مسار الواجهة عبر البروتوكول الآمن أو خادم التطوير
   if (isDev) {
     const devUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
     mainWindow.loadURL(devUrl);
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+    mainWindow.loadURL('app://localhost/index.html');
   }
 
   mainWindow.on('closed', () => {
@@ -129,7 +169,11 @@ function createMainWindow() {
   });
 }
 
-// ── 4. محرك التحديثات التلقائية (In-App Auto-Updater Engine) ──────────────
+// ── 4. محرك التحديثات التلقائية فائق الدقة (In-App Auto-Updater Engine) ─────
+let isCheckingForUpdate = false;
+let isUpdateDownloading = false;
+let lastUpdateCheckTime = 0;
+
 function sendUpdateStatus(status, payload = {}) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('app-update:status', { status, ...payload });
@@ -140,12 +184,15 @@ function setupAutoUpdater() {
   if (!autoUpdater) return;
 
   autoUpdater.on('checking-for-update', () => {
-    console.log('[AutoUpdater] Checking for new updates...');
+    isCheckingForUpdate = true;
+    console.log('[AutoUpdater] 🔍 Checking for new updates on GitHub Releases...');
     sendUpdateStatus('checking');
   });
 
   autoUpdater.on('update-available', (info) => {
-    console.log('[AutoUpdater] Update available:', info.version);
+    isCheckingForUpdate = false;
+    isUpdateDownloading = true;
+    console.log('[AutoUpdater] 🎉 Update available:', info.version);
     sendUpdateStatus('available', {
       version: info.version,
       releaseDate: info.releaseDate,
@@ -154,12 +201,15 @@ function setupAutoUpdater() {
   });
 
   autoUpdater.on('update-not-available', (info) => {
-    console.log('[AutoUpdater] App is up to date.');
+    isCheckingForUpdate = false;
+    isUpdateDownloading = false;
+    console.log('[AutoUpdater] 🟢 App is up to date.');
     sendUpdateStatus('not-available', { currentVersion: app.getVersion() });
   });
 
   autoUpdater.on('download-progress', (progressObj) => {
-    console.log(`[AutoUpdater] Download progress: ${progressObj.percent.toFixed(1)}%`);
+    isUpdateDownloading = true;
+    console.log(`[AutoUpdater] ⬇️ Download progress: ${progressObj.percent.toFixed(1)}%`);
     sendUpdateStatus('progress', {
       percent: Math.round(progressObj.percent),
       bytesPerSecond: progressObj.bytesPerSecond,
@@ -169,7 +219,9 @@ function setupAutoUpdater() {
   });
 
   autoUpdater.on('update-downloaded', (info) => {
-    console.log('[AutoUpdater] Update downloaded successfully! Ready to install.');
+    isCheckingForUpdate = false;
+    isUpdateDownloading = false;
+    console.log('[AutoUpdater] ✅ Update downloaded successfully! Ready to install.');
     sendUpdateStatus('downloaded', {
       version: info.version,
       releaseDate: info.releaseDate,
@@ -177,25 +229,54 @@ function setupAutoUpdater() {
   });
 
   autoUpdater.on('error', (err) => {
+    isCheckingForUpdate = false;
+    isUpdateDownloading = false;
     console.error('[AutoUpdater Error]:', err.message);
     sendUpdateStatus('error', { error: err.message });
   });
 }
 
-function checkForAppUpdates() {
-  if (autoUpdater && !isDev) {
-    try {
-      autoUpdater.checkForUpdatesAndNotify();
-    } catch (e) {
-      console.warn('[AutoUpdater] Check failed:', e.message);
+async function checkForAppUpdates(isManual = false) {
+  if (!autoUpdater) {
+    console.warn('[AutoUpdater] autoUpdater module not available.');
+    return { status: 'unavailable', error: 'محرك التحديث غير متوفر.' };
+  }
+
+  // منع الفحص المتزامن أثناء تنزيل التحديث أو أثناء فحص جارٍ
+  if (isCheckingForUpdate || isUpdateDownloading) {
+    console.log('[AutoUpdater] ⏳ Update check/download already active. Skipping duplicate check.');
+    return { status: 'busy', message: 'جاري فحص أو تنزيل التحديث بالفعل.' };
+  }
+
+  // التحقق الذكي من الاتصال بالإنترنت لتفادي أخطاء الشبكة
+  try {
+    if (net && !net.isOnline()) {
+      console.log('[AutoUpdater] 📴 Offline: network unavailable, skipping update check.');
+      return { status: 'offline', message: 'لا يوجد اتصال بالإنترنت.' };
     }
+  } catch {}
+
+  try {
+    isCheckingForUpdate = true;
+    lastUpdateCheckTime = Date.now();
+    console.log(`[AutoUpdater] 🚀 Initiating update check (${isManual ? 'Manual User Trigger' : 'Automatic Trigger'})...`);
+    sendUpdateStatus('checking');
+    const result = await autoUpdater.checkForUpdates();
+    return { status: 'ok', updateInfo: result?.updateInfo };
+  } catch (err) {
+    console.warn('[AutoUpdater] Check failed:', err.message);
+    sendUpdateStatus('error', { error: err.message });
+    return { status: 'error', error: err.message };
+  } finally {
+    isCheckingForUpdate = false;
   }
 }
 
-// فحص دوري للتحديث كل 60 دقيقة
+// ── فحص دوري دقيق كل دقيقة واحدة (1 Minute Periodic Poll) ──
+const AUTO_UPDATE_INTERVAL_MS = 60 * 1000; // 60 ثانية = 1 دقيقة
 setInterval(() => {
-  checkForAppUpdates();
-}, 60 * 60 * 1000);
+  checkForAppUpdates(false);
+}, AUTO_UPDATE_INTERVAL_MS);
 
 // ── 5. معالجات الـ IPC للتواصل مع الواجهة ──────────────────────────────────
 
@@ -295,20 +376,9 @@ ipcMain.handle('local-db:clear', async () => {
   }
 });
 
-// محرك التحديثات عبر الواجهة
+// محرك التحديثات عبر الواجهة (الفحص اليدوي)
 ipcMain.handle('app-update:check', async () => {
-  if (isDev) {
-    return { status: 'dev_mode', message: 'التحديث التلقائي متاح في النسخة المثبتة المنتجة.' };
-  }
-  if (!autoUpdater) {
-    return { status: 'unavailable', error: 'محرك التحديث غير مفعل.' };
-  }
-  try {
-    const result = await autoUpdater.checkForUpdates();
-    return { status: 'ok', updateInfo: result?.updateInfo };
-  } catch (err) {
-    return { status: 'error', error: err.message };
-  }
+  return await checkForAppUpdates(true);
 });
 
 ipcMain.handle('app-update:download', async () => {
@@ -332,16 +402,92 @@ ipcMain.handle('app-update:quit-and-install', () => {
   }
 });
 
+// قراءة ملفات نماذج الذكاء الاصطناعي وبصمة الوجه واليد مباشرة من القرص الصلب كـ Binary Buffer
+ipcMain.handle('app:read-model-binary', async (_event, modelRelativePath) => {
+  try {
+    const cleanPath = String(modelRelativePath || '').replace(/^\/+/, '');
+    const possibleDirs = [
+      path.join(__dirname, '../dist'),
+      path.join(__dirname, '../public'),
+      path.join(process.resourcesPath || '', 'app', 'dist'),
+      path.join(process.resourcesPath || '', 'dist')
+    ];
+    for (const dir of possibleDirs) {
+      const fullPath = path.join(dir, cleanPath);
+      if (fs.existsSync(fullPath)) {
+        const fileBuffer = await fs.promises.readFile(fullPath);
+        return fileBuffer.buffer.slice(fileBuffer.byteOffset, fileBuffer.byteOffset + fileBuffer.byteLength);
+      }
+    }
+    console.warn('[IPC read-model-binary] Model file not found:', modelRelativePath);
+    return null;
+  } catch (err) {
+    console.error('[IPC read-model-binary error]:', err);
+    return null;
+  }
+});
+
+// التحقق من امتلاك البرنامج لكامل صلاحيات المسؤول (Administrator Execution Status)
+ipcMain.handle('app:is-admin', async () => {
+  try {
+    if (process.platform !== 'win32') return true;
+    const { execSync } = require('child_process');
+    execSync('net session', { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+});
+
 // ── 6. دورة حياة التطبيق (App Lifecycle) ──────────────────────────────────
 app.whenReady().then(() => {
+  // ── تفعيل معالج بروتوكول app المحلي لخدمة ملفات المنظومة ونماذج AI محلياً ──
+  try {
+    protocol.handle('app', (request) => {
+      try {
+        const reqUrl = new URL(request.url);
+        let pathname = decodeURIComponent(reqUrl.pathname);
+        if (pathname.startsWith('/')) pathname = pathname.slice(1);
+        if (!pathname || pathname === '/') pathname = 'index.html';
+
+        const distDir = path.normalize(path.join(__dirname, '../dist'));
+        const filePath = path.normalize(path.join(distDir, pathname));
+
+        if (!filePath.startsWith(distDir)) {
+          return new Response('Forbidden', { status: 403 });
+        }
+
+        if (fs.existsSync(filePath)) {
+          return net.fetch(url.pathToFileURL(filePath).toString());
+        }
+
+        // في حال المسارات الديناميكية للـ SPA، يتم التوجيه لـ index.html
+        const indexPath = path.join(distDir, 'index.html');
+        if (fs.existsSync(indexPath)) {
+          return net.fetch(url.pathToFileURL(indexPath).toString());
+        }
+
+        return new Response('File not found', { status: 404 });
+      } catch (e) {
+        console.error('[Protocol Handler Error]:', e);
+        return new Response('Internal Server Error', { status: 500 });
+      }
+    });
+  } catch (protoErr) {
+    console.warn('[Protocol Handler Init Warning]:', protoErr.message);
+  }
+
   createMainWindow();
   setupAutoUpdater();
 
-  // استشعار استيقاظ الحاسوب من السكون وتنبيه الواجهة للمزامنة الفورية
+  // استشعار استيقاظ الحاسوب من السكون وتنبيه الواجهة وفحص التحديثات الفورية
   try {
     powerMonitor.on('resume', () => {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('app:system-resume');
+        setTimeout(() => {
+          checkForAppUpdates(false);
+        }, 2000);
       }
     });
   } catch {}

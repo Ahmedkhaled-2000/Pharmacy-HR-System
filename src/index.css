@@ -1602,8 +1602,9 @@ tbody tr:hover {
 .acc-modal-body::-webkit-scrollbar,
 .modal-card > form::-webkit-scrollbar,
 .modal-content > form::-webkit-scrollbar {
-  width: 6px !important;
-  height: 0px !important; /* Absolutely no horizontal scrollbar */
+  display: none !important;
+  width: 0px !important;
+  height: 0px !important;
 }
 
 .modal-overlay::-webkit-scrollbar-thumb,
@@ -1619,16 +1620,7 @@ tbody tr:hover {
 .modal-body::-webkit-scrollbar-thumb,
 .acc-modal-body::-webkit-scrollbar-thumb,
 .modal-card > form::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.45) !important;
-  border-radius: 999px !important;
-}
-
-.modal-overlay::-webkit-scrollbar-thumb:hover,
-.modal-card-body::-webkit-scrollbar-thumb:hover,
-.central-modal-body::-webkit-scrollbar-thumb:hover,
-.modal-body::-webkit-scrollbar-thumb:hover,
-.modal-card > form::-webkit-scrollbar-thumb:hover {
-  background: rgba(100, 116, 139, 0.7) !important;
+  display: none !important;
 }
 
 /* Strict containment to eliminate horizontal scrolling across all modals */

@@ -19,10 +19,11 @@
     ],
     "icon": "assets/icon.ico",
     "artifactName": "${name}-Setup-${version}.${ext}",
-    "requestedExecutionLevel": "asInvoker"
+    "requestedExecutionLevel": "requireAdministrator"
   },
   "nsis": {
     "oneClick": false,
+    "perMachine": true,
     "allowToChangeInstallationDirectory": true,
     "createDesktopShortcut": true,
     "createStartMenuShortcut": true,

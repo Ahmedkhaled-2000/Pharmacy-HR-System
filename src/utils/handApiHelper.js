@@ -9,20 +9,48 @@ export const isHandEngineReady = () => {
   return isHandApiLoaded && Boolean(handLandmarker);
 };
 
+const getAssetBaseUrl = () => {
+  if (typeof window === 'undefined') return '';
+  if (window.location.origin && window.location.origin !== 'null' && !window.location.origin.startsWith('file:')) {
+    return window.location.origin;
+  }
+  return '';
+};
+
 export const initHandRecognition = async () => {
   if (isHandEngineReady()) return;
 
   try {
+    const baseUrl = getAssetBaseUrl();
+
     const visionResolvers = [
-      { type: 'local', path: '/mediapipe-wasm' },
+      { type: 'local_base', path: baseUrl ? `${baseUrl}/mediapipe-wasm` : '/mediapipe-wasm' },
+      { type: 'root', path: '/mediapipe-wasm' },
+      { type: 'relative', path: './mediapipe-wasm' },
       { type: 'cdn', path: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm' }
     ];
 
     const modelPaths = [
+      baseUrl ? `${baseUrl}/models/hand_landmarker.task` : '/models/hand_landmarker.task',
       '/models/hand_landmarker.task',
+      './models/hand_landmarker.task',
       'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task'
     ];
     const delegates = ['GPU', 'CPU'];
+
+    // محاولة قراءة ملف نموذج اليد من الـ Buffer المحلي المباشر في بيئة الويندوز
+    let handModelBuffer = null;
+    if (typeof window !== 'undefined' && window.desktopAPI?.readModelBinary) {
+      try {
+        const buf = await window.desktopAPI.readModelBinary('models/hand_landmarker.task');
+        if (buf && buf.byteLength > 0) {
+          handModelBuffer = new Uint8Array(buf);
+          console.log('✅ [HandEngine] Loaded hand_landmarker.task from native disk buffer:', handModelBuffer.byteLength);
+        }
+      } catch (bufErr) {
+        console.warn('[HandEngine] Native hand landmarker buffer read fallback:', bufErr);
+      }
+    }
 
     let landmarkerCreated = false;
     let lastHandErr = null;
@@ -37,6 +65,30 @@ export const initHandRecognition = async () => {
         continue;
       }
 
+      // أولوية التحميل عبر الـ Buffer المحلي المباشر
+      if (handModelBuffer) {
+        for (const dlg of delegates) {
+          try {
+            handLandmarker = await HandLandmarker.createFromOptions(vision, {
+              baseOptions: {
+                modelAssetBuffer: handModelBuffer,
+                delegate: dlg
+              },
+              runningMode: 'VIDEO',
+              numHands: 1
+            });
+            landmarkerCreated = true;
+            console.log(`✅ [HandEngine] HandLandmarker loaded from native memory buffer (${dlg})`);
+            break;
+          } catch (bufLoadErr) {
+            console.warn(`[HandEngine] HandLandmarker buffer delegate failed (${dlg}):`, bufLoadErr);
+          }
+        }
+      }
+
+      if (landmarkerCreated) break;
+
+      // التحميل عبر المسارات
       for (const mPath of modelPaths) {
         if (landmarkerCreated) break;
         for (const dlg of delegates) {
@@ -61,7 +113,7 @@ export const initHandRecognition = async () => {
     }
 
     if (!landmarkerCreated || !handLandmarker) {
-      throw new Error('تعذر تحميل نموذج معالم اليد (HandLandmarker): ' + (lastHandErr?.message || 'تأكد من الاتصال بالإنترنت'));
+      throw new Error('تعذر تحميل نموذج معالم اليد (HandLandmarker): ' + (lastHandErr?.message || 'تأكد من توفر ملفات النماذج محلياً'));
     }
     
     isHandApiLoaded = true;
