@@ -47,9 +47,11 @@ export default function DisciplinaryPenaltiesTab({
   const isBranch = userRole === 'branch' || (Boolean(currentBranchId || currentBranch) && !isEmployee && userRole !== 'admin' && userRole !== 'owner') || (typeof localStorage !== 'undefined' && localStorage.getItem('app_auth_role') === 'branch');
   const isAdmin = (userRole === 'admin' || userRole === 'owner') && !isEmployee && !isBranch;
 
-  const allEmployeesList = state.employees || [];
-  const branches = state.branches || [];
-  const policy = state.disciplinaryPolicy || DEFAULT_DISCIPLINARY_CATEGORIES;
+  const allEmployeesList = (state?.employees || []).filter((e) => e && e.id);
+  const branches = (state?.branches || []).filter((b) => b && b.id);
+  const policy = (Array.isArray(state?.disciplinaryPolicy) && state.disciplinaryPolicy.length > 0)
+    ? state.disciplinaryPolicy.filter(Boolean)
+    : DEFAULT_DISCIPLINARY_CATEGORIES;
 
   // Active Sub-Tab
   const [subTab, setSubTab] = useState('dashboard'); // 'dashboard' | 'matrix' | 'counters' | 'records' | 'report'
@@ -96,9 +98,11 @@ export default function DisciplinaryPenaltiesTab({
     }
     if (isBranch) {
       const bObj = currentBranch || (branches || []).find((b) => 
-        (currentBranchId && String(b.id) === String(currentBranchId)) ||
-        (currentBranchId && String(b.code) === String(currentBranchId)) ||
-        (currentBranchId && String(b.branchCode) === String(currentBranchId))
+        b && (
+          (currentBranchId && String(b.id) === String(currentBranchId)) ||
+          (currentBranchId && String(b.code) === String(currentBranchId)) ||
+          (currentBranchId && String(b.branchCode) === String(currentBranchId))
+        )
       );
       const branchIds = getBranchIdentifiers(bObj, branches);
 
@@ -128,7 +132,7 @@ export default function DisciplinaryPenaltiesTab({
 
   // Set of employee IDs within current user's scope
   const scopedEmpIds = useMemo(() => {
-    return new Set(employees.map((e) => String(e.id)));
+    return new Set(employees.filter((e) => e && e.id).map((e) => String(e.id)));
   }, [employees]);
 
   // 2. Extract Disciplinary Penalties Scoped strictly by Role (Requests + Late Incidents + Adjustments)
@@ -139,6 +143,7 @@ export default function DisciplinaryPenaltiesTab({
 
     // 1. Requests (Disciplinary Penalties, Direct Penalties, Violations, Deductions)
     (state.requests || []).forEach((r) => {
+      if (!r) return;
       if (
         r.type === 'disciplinary_penalty' ||
         r.subType === 'disciplinary_penalty' ||
@@ -168,8 +173,8 @@ export default function DisciplinaryPenaltiesTab({
           seenLateKeys.add(`${r.employeeId}_${r.date}`);
         }
 
-        const emp = allEmployeesList.find((e) => String(e.id) === String(r.employeeId));
-        const bObj = (state.branches || []).find((b) => String(b.id) === String(r.branchId || emp?.branchId));
+        const emp = allEmployeesList.find((e) => e && String(e.id) === String(r.employeeId));
+        const bObj = (state.branches || []).find((b) => b && String(b.id) === String(r.branchId || emp?.branchId));
 
         let amount = parseFloat(r.amount) || 0;
         if (!amount && (r.impactType || r.impactVal)) {
@@ -181,7 +186,8 @@ export default function DisciplinaryPenaltiesTab({
           }
         }
 
-        const cat = resolveDisciplinaryCategory(r, policy);
+        const defaultCat = policy?.[0] || DEFAULT_DISCIPLINARY_CATEGORIES[0];
+        const cat = resolveDisciplinaryCategory(r, policy) || defaultCat;
         const rawTitle = r.ruleTitle || r.actionTitle || (r.subType === 'lateness' ? `تأخير عن الشيفت (${r.latenessMinutes || ''} د)` : r.reason) || 'مخالفة لائحية';
         const cleanTitle = String(rawTitle).replace(/^CAT_ADMIN_PENALTY\s*/i, '').replace(/^late_[a-z0-9_]+\s*/i, '');
 
@@ -213,9 +219,9 @@ export default function DisciplinaryPenaltiesTab({
           employeeCode: r.employeeCode || emp?.code || '—',
           branchId: r.branchId || emp?.branchId,
           branchName: bObj?.name || 'الفرع الرئيسي',
-          categoryId: cat.id,
-          categoryCode: cat.code,
-          categoryName: cat.name,
+          categoryId: cat?.id || defaultCat.id,
+          categoryCode: cat?.code || defaultCat.code,
+          categoryName: cat?.name || defaultCat.name,
           ruleTitle: cleanTitle,
           actionTitle: r.actionTitle || (r.deductionDays ? `خصم ${r.deductionDays} يوم` : 'تنبيه موثق'),
           occurrenceNumber: r.occurrenceNumber || 1,
@@ -237,6 +243,7 @@ export default function DisciplinaryPenaltiesTab({
 
     // 2. Late Incidents (وقائع التأخير اللائحي التلقائية)
     (state.lateIncidents || []).forEach((inc) => {
+      if (!inc) return;
       if (
         inc.status === 'cancelled' ||
         inc.isCancelled ||
@@ -262,12 +269,13 @@ export default function DisciplinaryPenaltiesTab({
       seenIds.add(`req_${incIdStr}`);
       if (inc.employeeId && inc.date) seenLateKeys.add(`${inc.employeeId}_${inc.date}`);
 
-      const emp = allEmployeesList.find((e) => String(e.id) === String(inc.employeeId));
-      const bObj = (state.branches || []).find((b) => String(b.id) === String(inc.branchId || emp?.branchId));
+      const emp = allEmployeesList.find((e) => e && String(e.id) === String(inc.employeeId));
+      const bObj = (state.branches || []).find((b) => b && String(b.id) === String(inc.branchId || emp?.branchId));
       const dayAmt = computeLatenessFinancialAmount(inc.deductionMinutes || 0, emp, inc.branchId);
       const incAmount = dayAmt > 0 ? dayAmt : (parseFloat(inc.penaltyAmount) || 0);
 
-      const cat = resolveDisciplinaryCategory({ sourceType: 'late_incident', ...inc }, policy);
+      const defaultCat = policy?.[0] || DEFAULT_DISCIPLINARY_CATEGORIES[0];
+      const cat = resolveDisciplinaryCategory({ sourceType: 'late_incident', ...inc }, policy) || defaultCat;
       const isFromAdmin = inc.isAdminCreated || inc.createdBy === 'admin' || inc.creatorRole === 'admin' || inc.creatorRole === 'owner';
       const createdRole = isFromAdmin ? 'admin' : 'system';
       const createdByName = isFromAdmin ? 'الإدارة العليا (بصمة يدوية)' : 'النظام التلقائي (بصمة الحضور)';
@@ -279,9 +287,9 @@ export default function DisciplinaryPenaltiesTab({
         employeeCode: inc.employeeCode || emp?.code || '—',
         branchId: inc.branchId || emp?.branchId,
         branchName: inc.branchName || bObj?.name || 'الفرع الرئيسي',
-        categoryId: cat.id,
-        categoryCode: cat.code,
-        categoryName: cat.name,
+        categoryId: cat?.id || defaultCat.id,
+        categoryCode: cat?.code || defaultCat.code,
+        categoryName: cat?.name || defaultCat.name,
         ruleTitle: `تأخير عن موعد الوردية (${inc.lateMinutes || 0} دقيقة) - ${inc.tierName || 'لائحة التأخير'}`,
         actionTitle: inc.actionLabel || `خصم ${inc.deductionMinutes || 0} دقيقة`,
         occurrenceNumber: inc.occurrenceNumber || 1,
@@ -303,6 +311,7 @@ export default function DisciplinaryPenaltiesTab({
 
     // 3. Adjustments (الخصومات والجزاءات الإدارية المباشرة - مع استبعاد السلف والأدوية والأقساط)
     (state.adjustments || []).forEach((a) => {
+      if (!a) return;
       if (a.type !== 'penalty' && a.type !== 'deduction') return;
       
       const reasonLower = (a.reason || a.description || a.details || '').toLowerCase();
@@ -329,9 +338,10 @@ export default function DisciplinaryPenaltiesTab({
       );
       if (isLinked) return;
 
-      const emp = allEmployeesList.find((e) => String(e.id) === String(a.employeeId));
-      const bObj = (state.branches || []).find((b) => String(b.id) === String(a.branchId || emp?.branchId));
-      const cat = resolveDisciplinaryCategory(a, policy);
+      const emp = allEmployeesList.find((e) => e && String(e.id) === String(a.employeeId));
+      const bObj = (state.branches || []).find((b) => b && String(b.id) === String(a.branchId || emp?.branchId));
+      const defaultCat = policy?.[0] || DEFAULT_DISCIPLINARY_CATEGORIES[0];
+      const cat = resolveDisciplinaryCategory(a, policy) || defaultCat;
 
       const rawTitle = a.reason || a.description || 'خصم إداري مباشر';
       const cleanTitle = String(rawTitle).replace(/^CAT_ADMIN_PENALTY\s*/i, '').replace(/^late_[a-z0-9_]+\s*/i, '');
@@ -347,9 +357,9 @@ export default function DisciplinaryPenaltiesTab({
         employeeCode: a.employeeCode || emp?.code || '—',
         branchId: a.branchId || emp?.branchId,
         branchName: bObj?.name || 'الفرع الرئيسي',
-        categoryId: cat.id,
-        categoryCode: cat.code,
-        categoryName: cat.name,
+        categoryId: cat?.id || defaultCat.id,
+        categoryCode: cat?.code || defaultCat.code,
+        categoryName: cat?.name || defaultCat.name,
         ruleTitle: cleanTitle,
         actionTitle: 'خصم مالي مباشر',
         occurrenceNumber: 1,
@@ -394,7 +404,7 @@ export default function DisciplinaryPenaltiesTab({
       // Search Query
       if (searchQuery.trim()) {
         const q = searchQuery.trim().toLowerCase();
-        const emp = allEmployeesList.find((e) => String(e.id) === String(p.employeeId));
+        const emp = allEmployeesList.find((e) => e && String(e.id) === String(p.employeeId));
         const matchName = (p.employeeName || emp?.name || '').toLowerCase().includes(q);
         const matchNickname = (emp?.nickname || '').toLowerCase().includes(q);
         const matchCode = (p.employeeCode || emp?.code || '').toLowerCase().includes(q);
@@ -511,7 +521,7 @@ export default function DisciplinaryPenaltiesTab({
   // ── Actions ──
   const handleApprovePenalty = async (pen) => {
     const reqId = pen.id;
-    const emp = allEmployeesList.find((e) => String(e.id) === String(pen.employeeId));
+    const emp = allEmployeesList.find((e) => e && String(e.id) === String(pen.employeeId));
     const amount = parseFloat(pen.amount) || 0;
     const dailyRate = pen.dailyRate || getEmployeeDailyRate(emp, pen.branchId);
 
@@ -1162,7 +1172,7 @@ export default function DisciplinaryPenaltiesTab({
   };
 
   const handleResetCategoryToDefault = async (catId) => {
-    const defaultCat = DEFAULT_DISCIPLINARY_CATEGORIES.find((c) => c.id === catId);
+    const defaultCat = DEFAULT_DISCIPLINARY_CATEGORIES.find((c) => c && c.id === catId);
     if (!defaultCat) return;
 
     const isConfirmed = await showConfirm({
@@ -1327,8 +1337,9 @@ export default function DisciplinaryPenaltiesTab({
     csvContent += 'كود الموظف,اسم الموظف,الفرع,التاريخ,فئة المخالفة,نوع المخالفة,تكرار المخالفة,الإجراء المتخذ,أيام الخصم,قيمة الخصم (ج.م),الحالة,المسؤول\n';
 
     reportPenalties.forEach((p) => {
-      const emp = allEmployeesList.find((e) => String(e.id) === String(p.employeeId));
-      const bObj = branches.find((b) => String(b.id) === String(p.branchId));
+      if (!p) return;
+      const emp = allEmployeesList.find((e) => e && String(e.id) === String(p.employeeId));
+      const bObj = branches.find((b) => b && String(b.id) === String(p.branchId));
       const statusLabel = p.status === 'approved' ? 'معتمد' : p.status === 'rejected' ? 'مرفوض' : p.status === 'cancelled' ? 'ملغي' : 'معلق';
       
       const row = [
@@ -1584,7 +1595,7 @@ export default function DisciplinaryPenaltiesTab({
                   {allDisciplinaryPenalties
                     .filter((p) => p.status === 'pending_admin' || p.status === 'pending')
                     .map((pen) => {
-                      const bObj = branches.find((b) => String(b.id) === String(pen.branchId));
+                      const bObj = branches.find((b) => b && String(b.id) === String(pen.branchId));
                       return (
                         <tr key={pen.id}>
                           <td>{pen.date}</td>
@@ -1902,7 +1913,7 @@ export default function DisciplinaryPenaltiesTab({
                 return true;
               })
               .map((emp) => {
-                const bObj = branches.find((b) => String(b.id) === String(emp.branchId));
+                const bObj = branches.find((b) => b && String(b.id) === String(emp.branchId));
                 const dailyRate = getEmployeeDailyRate(emp, currentBranchId || emp.branchId);
                 const empPenalties = allDisciplinaryPenalties.filter((p) => String(p.employeeId) === String(emp.id));
                 const summary = getEmployeeDisciplinarySummary(emp.id, allDisciplinaryPenalties, policy);
@@ -2201,8 +2212,8 @@ export default function DisciplinaryPenaltiesTab({
                   </tr>
                 ) : (
                   filteredPenalties.map((pen) => {
-                    const emp = allEmployeesList.find((e) => String(e.id) === String(pen.employeeId));
-                    const bObj = branches.find((b) => String(b.id) === String(pen.branchId));
+                    const emp = allEmployeesList.find((e) => e && String(e.id) === String(pen.employeeId));
+                    const bObj = branches.find((b) => b && String(b.id) === String(pen.branchId));
                     const isApproved = pen.status === 'approved' || pen.adminApproved;
                     const isPending = pen.status === 'pending_admin' || pen.status === 'pending';
                     const isCancelled = pen.status === 'cancelled' || pen.isCancelled;
@@ -2210,7 +2221,8 @@ export default function DisciplinaryPenaltiesTab({
                     const hasObjection = Boolean(pen.objection);
                     const objStatus = pen.objection?.status;
 
-                    const cat = resolveDisciplinaryCategory(pen, policy);
+                    const defaultCat = policy?.[0] || DEFAULT_DISCIPLINARY_CATEGORIES[0];
+                    const cat = resolveDisciplinaryCategory(pen, policy) || defaultCat;
                     const cleanTitle = String(pen.ruleTitle || pen.reason || 'مخالفة لائحية')
                       .replace(/^CAT_ADMIN_PENALTY\s*/i, '')
                       .replace(/^late_[a-z0-9_]+\s*/i, '');
@@ -2229,7 +2241,7 @@ export default function DisciplinaryPenaltiesTab({
                           <span
                             className="badge badge-primary"
                             style={{
-                              background: cat.color || '#0284c7',
+                              background: cat?.color || '#0284c7',
                               color: '#ffffff',
                               fontSize: '11px',
                               fontWeight: 'bold',
@@ -2464,8 +2476,8 @@ export default function DisciplinaryPenaltiesTab({
                 {filteredPenalties
                   .filter((p) => (p.date || p.createdAt || '').startsWith(reportMonth))
                   .map((pen) => {
-                    const emp = allEmployeesList.find((e) => String(e.id) === String(pen.employeeId));
-                    const bObj = branches.find((b) => String(b.id) === String(pen.branchId));
+                    const emp = allEmployeesList.find((e) => e && String(e.id) === String(pen.employeeId));
+                    const bObj = branches.find((b) => b && String(b.id) === String(pen.branchId));
                     return (
                       <tr key={pen.id}>
                         <td><strong>{pen.employeeName || emp?.name}</strong> ({pen.employeeCode || emp?.code || '—'})</td>

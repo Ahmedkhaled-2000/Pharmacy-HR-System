@@ -32,13 +32,13 @@ export default function LatePenaltyPolicyModule({
   const isEmployee = userRole === 'employee';
   const isManagerOrAdmin = isAdmin || isBranchManager;
 
-  const employees = state.employees || [];
-  const branches = state.branches || [];
+  const employees = (state.employees || []).filter((e) => e && e.id);
+  const branches = (state.branches || []).filter((b) => b && b.id);
 
   // Scoped Employee for Employee Portal
   const loggedInEmp = useMemo(() => {
     if (!currentEmpId) return null;
-    return employees.find((e) => String(e.id) === String(currentEmpId));
+    return employees.find((e) => e && String(e.id) === String(currentEmpId));
   }, [employees, currentEmpId]);
 
   // Multi-branch check for employee
@@ -88,9 +88,11 @@ export default function LatePenaltyPolicyModule({
     }
     if (isBranchManager) {
       const bObj = (state.branches || []).find((b) => 
-        (currentBranchId && String(b.id) === String(currentBranchId)) ||
-        (currentBranchId && String(b.code) === String(currentBranchId)) ||
-        (currentBranchId && String(b.branchCode) === String(currentBranchId))
+        b && (
+          (currentBranchId && String(b.id) === String(currentBranchId)) ||
+          (currentBranchId && String(b.code) === String(currentBranchId)) ||
+          (currentBranchId && String(b.branchCode) === String(currentBranchId))
+        )
       );
       const branchIds = getBranchIdentifiers(bObj || { id: currentBranchId }, state.branches || []);
       return list.filter((e) => isEmployeeInBranch(e, branchIds));
@@ -98,9 +100,11 @@ export default function LatePenaltyPolicyModule({
     // Admin
     if (filterBranch) {
       const bObj = (state.branches || []).find((b) => 
-        String(b.id) === String(filterBranch) ||
-        String(b.code) === String(filterBranch) ||
-        String(b.branchCode) === String(filterBranch)
+        b && (
+          String(b.id) === String(filterBranch) ||
+          String(b.code) === String(filterBranch) ||
+          String(b.branchCode) === String(filterBranch)
+        )
       );
       const branchIds = getBranchIdentifiers(bObj || { id: filterBranch }, state.branches || []);
       return list.filter((e) => isEmployeeInBranch(e, branchIds));
@@ -259,7 +263,7 @@ export default function LatePenaltyPolicyModule({
     }
 
     const targetId = selectedIncidentForEdit.id;
-    const emp = employees.find((e) => e.id === selectedIncidentForEdit.employeeId);
+    const emp = employees.find((e) => e && String(e.id) === String(selectedIncidentForEdit.employeeId));
     const penaltyAmt = computeLatenessFinancialAmount(overrideDeductionMinutes, emp, selectedIncidentForEdit.branchId);
 
     const performSaveOverride = async () => {
@@ -442,7 +446,7 @@ export default function LatePenaltyPolicyModule({
   };
 
   // Branch name for display
-  const currentBranchObj = branches.find((b) => String(b.id) === String(currentBranchId || filterBranch));
+  const currentBranchObj = branches.find((b) => b && String(b.id) === String(currentBranchId || filterBranch));
   const currentBranchName = currentBranchObj ? currentBranchObj.name : '';
 
   return (
@@ -735,7 +739,7 @@ export default function LatePenaltyPolicyModule({
                 >
                   <option value="">جميع فروعي ({loggedInEmp.branchesDetails.length} فروع)</option>
                   {loggedInEmp.branchesDetails.map((bd) => {
-                    const bObj = branches.find((b) => b.id === bd.branchId);
+                    const bObj = branches.find((b) => b && String(b.id) === String(bd.branchId));
                     return (
                       <option key={bd.branchId} value={bd.branchId}>
                         {bObj ? bObj.name : bd.branchName || bd.branchId}

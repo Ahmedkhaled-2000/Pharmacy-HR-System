@@ -525,8 +525,8 @@ export default function BylawsModule({
   const [recordsCustomFrom, setRecordsCustomFrom] = useState(customFrom || '');
   const [recordsCustomTo, setRecordsCustomTo] = useState(customTo || '');
 
-  const employees = state.employees || [];
-  const branches = state.branches || [];
+  const employees = (state.employees || []).filter((e) => e && e.id);
+  const branches = (state.branches || []).filter((b) => b && b.id);
 
   const allPenalties = useMemo(() => {
     const list = [];
@@ -534,6 +534,7 @@ export default function BylawsModule({
     const seenLateKeys = new Set();
 
     (state.requests || []).forEach((r) => {
+      if (!r) return;
       if (
         r.type === 'penalty' ||
         r.type === 'early_exit' ||
@@ -559,8 +560,8 @@ export default function BylawsModule({
           seenLateKeys.add(`${r.employeeId}_${r.date}`);
         }
 
-        const emp = employees.find((e) => String(e.id) === String(r.employeeId));
-        const bObj = branches.find((b) => String(b.id) === String(r.branchId || emp?.branchId));
+        const emp = employees.find((e) => e && String(e.id) === String(r.employeeId));
+        const bObj = branches.find((b) => b && String(b.id) === String(r.branchId || emp?.branchId));
         
         let amount = parseFloat(r.amount) || 0;
         if (!amount && (r.impactType || r.impactVal)) {
@@ -635,6 +636,7 @@ export default function BylawsModule({
     });
 
     (state.lateIncidents || []).forEach((inc) => {
+      if (!inc) return;
       if (
         inc.status === 'cancelled' ||
         inc.isCancelled ||
@@ -658,8 +660,8 @@ export default function BylawsModule({
       seenReqIds.add(`req_${incIdStr}`);
       if (inc.employeeId && inc.date) seenLateKeys.add(`${inc.employeeId}_${inc.date}`);
 
-      const emp = employees.find((e) => String(e.id) === String(inc.employeeId));
-      const bObj = branches.find((b) => String(b.id) === String(inc.branchId || emp?.branchId));
+      const emp = employees.find((e) => e && String(e.id) === String(inc.employeeId));
+      const bObj = branches.find((b) => b && String(b.id) === String(inc.branchId || emp?.branchId));
       const dayAmt = computeLatenessFinancialAmount(inc.deductionMinutes || 0, emp, inc.branchId);
       const incAmount = dayAmt > 0 ? dayAmt : (parseFloat(inc.penaltyAmount) || 0);
 
@@ -700,12 +702,13 @@ export default function BylawsModule({
     });
 
     (state.adjustments || []).forEach((a) => {
+      if (!a) return;
       const isLinkedToReq = Array.from(seenReqIds).some(
         (reqId) => a.id === `adj_pen_${reqId}` || a.id === `adj_disc_${reqId}` || a.id === reqId || a.id === `adj_${reqId}` || a.requestId === reqId
       );
       if (!isLinkedToReq && (a.type === 'deduction' || a.type === 'penalty')) {
-        const emp = employees.find((e) => String(e.id) === String(a.employeeId));
-        const bObj = branches.find((b) => String(b.id) === String(a.branchId || emp?.branchId));
+        const emp = employees.find((e) => e && String(e.id) === String(a.employeeId));
+        const bObj = branches.find((b) => b && String(b.id) === String(a.branchId || emp?.branchId));
         
         list.push({
           id: a.id,
@@ -738,10 +741,11 @@ export default function BylawsModule({
     const targetBranchStr = currentBranchId ? String(currentBranchId) : null;
 
     return allPenalties.filter((p) => {
+      if (!p) return false;
       if (currentEmpId && String(p.employeeId) !== String(currentEmpId)) return false;
 
       if (targetBranchStr) {
-        const emp = employees.find((e) => String(e.id) === String(p.employeeId));
+        const emp = employees.find((e) => e && String(e.id) === String(p.employeeId));
         const isEmpInBranch = emp && (
           String(emp.branchId) === targetBranchStr ||
           (emp.branchesDetails && emp.branchesDetails.some((bd) => String(bd.branchId) === targetBranchStr))

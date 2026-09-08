@@ -36,9 +36,11 @@ export default function DisciplinaryViolationModal({
   const effectiveBranch = currentBranch || sessionBranch;
   const isBranchUser = isBranch || userRole === 'branch' || Boolean(effectiveBranch) || Boolean(currentBranchId) || (typeof localStorage !== 'undefined' && localStorage.getItem('app_auth_role') === 'branch');
 
-  const employees = state.employees || [];
-  const branches = state.branches || [];
-  const policy = state.disciplinaryPolicy || DEFAULT_DISCIPLINARY_CATEGORIES;
+  const employees = (state.employees || []).filter((e) => e && e.id);
+  const branches = (state.branches || []).filter((b) => b && b.id);
+  const policy = (Array.isArray(state.disciplinaryPolicy) && state.disciplinaryPolicy.length > 0)
+    ? state.disciplinaryPolicy.filter(Boolean)
+    : DEFAULT_DISCIPLINARY_CATEGORIES;
 
   // Filter employees if branch manager and filter active employees
   const availableEmployees = useMemo(() => {
@@ -47,9 +49,11 @@ export default function DisciplinaryViolationModal({
     // If branch manager mode or branch specified, strictly filter by this branch
     if (isBranchUser || currentBranchId || effectiveBranch) {
       const bObj = effectiveBranch || (branches || []).find((b) => 
-        (currentBranchId && String(b.id) === String(currentBranchId)) ||
-        (currentBranchId && String(b.code) === String(currentBranchId)) ||
-        (currentBranchId && String(b.branchCode) === String(currentBranchId))
+        b && (
+          (currentBranchId && String(b.id) === String(currentBranchId)) ||
+          (currentBranchId && String(b.code) === String(currentBranchId)) ||
+          (currentBranchId && String(b.branchCode) === String(currentBranchId))
+        )
       );
 
       const branchIds = getBranchIdentifiers(bObj, branches);
@@ -170,11 +174,11 @@ export default function DisciplinaryViolationModal({
   }, [preSelectedEmpId]);
 
   const selectedEmp = useMemo(() => {
-    return employees.find((e) => String(e.id) === String(selectedEmpId)) || null;
+    return (employees || []).find((e) => e && String(e.id) === String(selectedEmpId)) || null;
   }, [employees, selectedEmpId]);
 
   const selectedCategory = useMemo(() => {
-    return policy.find((c) => c.id === selectedCategoryId) || policy[0];
+    return (policy || []).find((c) => c && c.id === selectedCategoryId) || policy?.[0] || DEFAULT_DISCIPLINARY_CATEGORIES[0];
   }, [policy, selectedCategoryId]);
 
   // Default rule if category changes
@@ -300,8 +304,8 @@ export default function DisciplinaryViolationModal({
       return;
     }
 
-    const currentRule = (selectedCategory.rules || []).find((r) => r.id === selectedRuleId);
-    const ruleTitle = customRuleTitle.trim() || currentRule?.title || selectedCategory.name;
+    const currentRule = (selectedCategory?.rules || []).find((r) => r && r.id === selectedRuleId);
+    const ruleTitle = customRuleTitle.trim() || currentRule?.title || selectedCategory?.name || 'مخالفة لائحية';
 
     const reqId = 'disc_' + Date.now();
     const occurrenceNumber = isOverrideActive ? (counterResult ? counterResult.newCount : 1) : (counterResult ? counterResult.newCount : 1);
@@ -549,7 +553,7 @@ export default function DisciplinaryViolationModal({
               >
                 <option value="">-- اختر الموظف من القائمة --</option>
                 {availableEmployees.map((emp) => {
-                  const bObj = branches.find((b) => String(b.id) === String(emp.branchId));
+                  const bObj = branches.find((b) => b && String(b.id) === String(emp?.branchId));
                   return (
                     <option key={emp.id} value={emp.id}>
                       {getEmpDisplayName(emp)} ({emp.code || '—'}) - {bObj?.name || 'الفرع الرئيسي'}

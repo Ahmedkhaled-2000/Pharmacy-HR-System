@@ -232,8 +232,9 @@ export const DEFAULT_DISCIPLINARY_CATEGORIES = [
  * حل وتحديد الفئة التأديبية القياسية (A إلى J) لأي مخالفة أو واقعة تأخير أو جزاء إداري
  */
 export function resolveDisciplinaryCategory(pen, disciplinaryPolicy = DEFAULT_DISCIPLINARY_CATEGORIES) {
-  const policy = disciplinaryPolicy || DEFAULT_DISCIPLINARY_CATEGORIES;
-  if (!pen) return null;
+  const policy = (disciplinaryPolicy && disciplinaryPolicy.length > 0) ? disciplinaryPolicy : DEFAULT_DISCIPLINARY_CATEGORIES;
+  const defaultCat = policy[0] || DEFAULT_DISCIPLINARY_CATEGORIES[0];
+  if (!pen) return defaultCat;
 
   // Verify that pen is an actual disciplinary record / violation
   const isDisc = pen.type === 'disciplinary_penalty' ||
@@ -244,7 +245,7 @@ export function resolveDisciplinaryCategory(pen, disciplinaryPolicy = DEFAULT_DI
     String(pen.id || '').startsWith('disc_') ||
     Boolean(pen.categoryId || pen.categoryCode || pen.ruleTitle || pen.actionTitle || pen.penaltyAction);
 
-  if (!isDisc) return null;
+  if (!isDisc) return defaultCat;
 
   // 1. فحص الكود أو المعرف المباشر
   const rawCatId = String(pen.categoryId || pen.categoryCode || pen.tierId || pen.tierKey || '').trim();
@@ -321,7 +322,7 @@ export function resolveDisciplinaryCategory(pen, disciplinaryPolicy = DEFAULT_DI
     return policy[0] || DEFAULT_DISCIPLINARY_CATEGORIES[0];
   }
 
-  return null;
+  return defaultCat;
 }
 
 /**
@@ -473,10 +474,11 @@ export function calculateViolationCounter({
  * حساب ملخص العدادات لجميع الفئات لموظف معين
  */
 export function getEmployeeDisciplinarySummary(employeeId, allRequests = [], disciplinaryPolicy = DEFAULT_DISCIPLINARY_CATEGORIES) {
-  const policy = disciplinaryPolicy || DEFAULT_DISCIPLINARY_CATEGORIES;
+  const policy = (disciplinaryPolicy && disciplinaryPolicy.length > 0) ? disciplinaryPolicy : DEFAULT_DISCIPLINARY_CATEGORIES;
   const summary = {};
 
-  policy.forEach((cat) => {
+  (policy || []).filter(Boolean).forEach((cat) => {
+    if (!cat || !cat.id) return;
     const counterInfo = calculateViolationCounter({
       employeeId,
       categoryId: cat.id,
@@ -486,13 +488,13 @@ export function getEmployeeDisciplinarySummary(employeeId, allRequests = [], dis
 
     summary[cat.id] = {
       categoryId: cat.id,
-      categoryCode: cat.code,
-      categoryName: cat.name,
-      color: cat.color,
-      activeCount: counterInfo.previousCount,
-      lastViolationDate: counterInfo.lastViolationDate,
-      nextEscalationAction: counterInfo.suggestedAction,
-      totalRecorded: counterInfo.historyList.length
+      categoryCode: cat.code || '',
+      categoryName: cat.name || '',
+      color: cat.color || '#64748b',
+      activeCount: counterInfo?.previousCount || 0,
+      lastViolationDate: counterInfo?.lastViolationDate || null,
+      nextEscalationAction: counterInfo?.suggestedAction || 'تنبيه موثق',
+      totalRecorded: counterInfo?.historyList?.length || 0
     };
   });
 
@@ -519,8 +521,9 @@ export function getBranchIdentifiers(branchObj, allBranches = []) {
   const bUserFromObj = String(branchObj.username || '').trim().toLowerCase();
 
   const matched = (allBranches || []).find((b) => {
+    if (!b) return false;
     if (bIdFromObj && String(b.id) === String(bIdFromObj)) return true;
-    if (bCodeFromObj && (String(b.branchCode) === String(bCodeFromObj) || String(b.code) === String(bCodeFromObj))) return true;
+    if (bCodeFromObj && (String(b.branchCode || '') === String(bCodeFromObj) || String(b.code || '') === String(bCodeFromObj))) return true;
     if (bNameFromObj && String(b.name || '').trim().toLowerCase() === bNameFromObj) return true;
     if (bUserFromObj && String(b.username || '').trim().toLowerCase() === bUserFromObj) return true;
     return false;

@@ -33,9 +33,9 @@ export default function WorkBylawsModule({ state, onSaveBylaws }) {
   const [savedMsg, setSavedMsg] = useState('');
 
   const handleLateChange = (index, field, val) => {
-    const updated = [...bylaws.latePenalties];
+    const updated = [...(bylaws.latePenalties || [])];
     if (field === 'deductionFraction') {
-      const selectedOption = bylaws.deductionOptions.find(o => o.value === parseFloat(val));
+      const selectedOption = (bylaws.deductionOptions || []).find(o => o && o.value === parseFloat(val));
       updated[index].deductionFraction = parseFloat(val);
       updated[index].action = selectedOption ? selectedOption.label : 'خصم';
     } else {
@@ -45,9 +45,9 @@ export default function WorkBylawsModule({ state, onSaveBylaws }) {
   };
 
   const handleEarlyChange = (index, field, val) => {
-    const updated = [...bylaws.earlyExitPenalties];
+    const updated = [...(bylaws.earlyExitPenalties || [])];
     if (field === 'deductionFraction') {
-      const selectedOption = bylaws.deductionOptions.find(o => o.value === parseFloat(val));
+      const selectedOption = (bylaws.deductionOptions || []).find(o => o && o.value === parseFloat(val));
       updated[index].deductionFraction = parseFloat(val);
       updated[index].action = selectedOption ? selectedOption.label : 'خصم';
     } else {
