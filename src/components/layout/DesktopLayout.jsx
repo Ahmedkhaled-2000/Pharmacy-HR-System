@@ -1358,9 +1358,27 @@ export default function DesktopLayout({
     };
   }, [focusedTopMenuIndex, currentMenuItems]);
 
-  // Listen to system-wide navigation shortcuts (Alt+1 .. Alt+9) & dropdown close requests
+  // Listen to system-wide navigation shortcuts (Alt+1 .. Alt+9, Alt+0) & dropdown close requests
   useEffect(() => {
     const handleNavigateTab = (e) => {
+      const targetTab = e.detail?.targetTab;
+      const targetSubTab = e.detail?.targetSubTab;
+      if (targetTab) {
+        if (targetTab === 'accounts') {
+          window.open(window.location.origin + '/accounts', '_blank');
+        } else if (targetTab === 'pharmacy-archive') {
+          window.open(window.location.origin + '/archive', '_blank');
+        } else {
+          setActiveTab(targetTab);
+          if (targetSubTab && setActiveSubTab) {
+            setActiveSubTab(targetSubTab);
+          }
+        }
+        setOpenDropdown(null);
+        setHoveredFlyoutId(null);
+        setIsNotifDropdownOpen(false);
+        return;
+      }
       const tabIndex = e.detail?.tabIndex;
       if (tabIndex !== undefined && currentMenuItems[tabIndex]) {
         const targetMenu = currentMenuItems[tabIndex];
@@ -1372,15 +1390,20 @@ export default function DesktopLayout({
       setHoveredFlyoutId(null);
       setIsNotifDropdownOpen(false);
     };
+    const handleToggleNotif = () => {
+      setIsNotifDropdownOpen((prev) => !prev);
+    };
 
     window.addEventListener('app:navigate-tab', handleNavigateTab);
     window.addEventListener('app:dropdown-close-request', handleCloseDropdowns);
+    window.addEventListener('app:toggle-notifications', handleToggleNotif);
 
     return () => {
       window.removeEventListener('app:navigate-tab', handleNavigateTab);
       window.removeEventListener('app:dropdown-close-request', handleCloseDropdowns);
+      window.removeEventListener('app:toggle-notifications', handleToggleNotif);
     };
-  }, [currentMenuItems]);
+  }, [currentMenuItems, setActiveTab, setActiveSubTab]);
 
 const handleMenuClick = (menu) => {
 if (menu.isSingle) {

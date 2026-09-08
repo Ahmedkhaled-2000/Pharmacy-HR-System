@@ -4,6 +4,7 @@ import {
   STORAGE_SHORTCUTS_KEY,
   getActiveShortcuts,
   formatShortcutDisplay,
+  formatShortcutFallback,
   normalizeKeyFromEvent
 } from '../../utils/shortcutsConfig';
 
@@ -47,6 +48,8 @@ export default function KeyboardShortcutsSettingsCard({
 
     let key = normalizeKeyFromEvent(e) || e.key;
     if (key.toLowerCase() === 'escape') key = 'Escape';
+    else if (key.toLowerCase() === 'scrolllock') key = 'ScrollLock';
+    else if (key.toLowerCase() === 'enter') key = 'Enter';
     else if (/^f\d{1,2}$/i.test(key)) key = key.toUpperCase();
     else if (key.length === 1) key = key.toLowerCase();
 
@@ -266,7 +269,8 @@ export default function KeyboardShortcutsSettingsCard({
       >
         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
           {[
-            { id: 'all', label: 'الكل' },
+            { id: 'all', label: `الكل (${shortcuts.length})` },
+            { id: 'system', label: '🔒 أمان وتحكم النظام' },
             { id: 'general', label: '⚡ عامة وإغلاق' },
             { id: 'actions', label: '📝 إدخال وحفظ وطباعة' },
             { id: 'nav', label: '🧭 تنقل بين الأقسام' }
@@ -313,6 +317,7 @@ export default function KeyboardShortcutsSettingsCard({
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
         {filteredShortcuts.map((item) => {
           const isRecording = recordingId === item.id;
+          const fallbackDisplay = formatShortcutFallback(item);
           return (
             <div
               key={item.id}
@@ -353,6 +358,11 @@ export default function KeyboardShortcutsSettingsCard({
                 <div style={{ fontSize: '0.82rem', color: '#64748b', marginTop: '2px' }}>
                   {item.desc}
                 </div>
+                {fallbackDisplay && (
+                  <div style={{ fontSize: '0.74rem', color: '#0d9488', marginTop: '3px', fontWeight: '600' }}>
+                    💡 مفتاح بديل إضافي: <code>{fallbackDisplay}</code>
+                  </div>
+                )}
               </div>
 
               {/* Controls */}
@@ -369,7 +379,7 @@ export default function KeyboardShortcutsSettingsCard({
                       boxShadow: '0 2px 0 #64748b'
                     }}
                   >
-                    Esc
+                    {formatShortcutDisplay(item)}
                   </kbd>
                 ) : isRecording ? (
                   <div

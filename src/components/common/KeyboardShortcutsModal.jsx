@@ -1,16 +1,19 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   getActiveShortcuts,
-  formatShortcutDisplay
+  formatShortcutDisplay,
+  formatShortcutFallback
 } from '../../utils/shortcutsConfig';
 
 /**
  * دليل اختصارات لوحة المفاتيح الفاخر لنظام Pharmacy ERP
- * يظهر عند الضغط على F1 أو Alt+H أو Ctrl+/
- * ويعرض الاختصارات النشطة المخصصة لحظياً
+ * يظهر عند الضغط على F1 أو Alt+H أو زر الاختصارات العلوي
+ * ويعرض كافة اختصارات النظام النشطة مع إمكانية البحث والفلترة والانتقال للتخصيص
  */
 export default function KeyboardShortcutsModal({ isOpen, onClose, customShortcuts }) {
   const [activeList, setActiveList] = useState(() => getActiveShortcuts(customShortcuts));
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('all');
 
   useEffect(() => {
     setActiveList(getActiveShortcuts(customShortcuts));
@@ -29,17 +32,46 @@ export default function KeyboardShortcutsModal({ isOpen, onClose, customShortcut
     return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [isOpen, onClose]);
 
+  const filteredShortcuts = useMemo(() => {
+    return activeList.filter((item) => {
+      if (selectedCategory !== 'all' && item.category !== selectedCategory) {
+        return false;
+      }
+      if (!searchTerm.trim()) return true;
+      const q = searchTerm.trim().toLowerCase();
+      const primaryDisp = formatShortcutDisplay(item).toLowerCase();
+      const fallbackDisp = formatShortcutFallback(item).toLowerCase();
+      return (
+        item.name.toLowerCase().includes(q) ||
+        item.desc.toLowerCase().includes(q) ||
+        primaryDisp.includes(q) ||
+        fallbackDisp.includes(q)
+      );
+    });
+  }, [activeList, selectedCategory, searchTerm]);
+
   if (!isOpen) return null;
 
-  const generalItems = activeList.filter((s) => s.category === 'general');
-  const actionItems = activeList.filter((s) => s.category === 'actions');
-  const navItems = activeList.filter((s) => s.category === 'nav');
+  const systemItems = filteredShortcuts.filter((s) => s.category === 'system');
+  const generalItems = filteredShortcuts.filter((s) => s.category === 'general');
+  const actionItems = filteredShortcuts.filter((s) => s.category === 'actions');
+  const navItems = filteredShortcuts.filter((s) => s.category === 'nav');
 
   const shortcutGroups = [
-    { title: '⚡ اختصارات عامة والتحكم بالنوافذ', icon: '🪟', items: generalItems },
-    { title: '📝 الإدخال والعمليات وحفظ البيانات', icon: '💾', items: actionItems },
-    { title: '🧭 التنقل السريع بين الأقسام الرئيسية', icon: '🚀', items: navItems }
-  ];
+    { id: 'system', title: '🔒 أمان وقفل والتحكم بالنظام', icon: '🛡️', items: systemItems },
+    { id: 'general', title: '⚡ اختصارات عامة والتنقل بالقوائم والبحث', icon: '🪟', items: generalItems },
+    { id: 'actions', title: '📝 الإدخال والعمليات وحفظ البيانات', icon: '💾', items: actionItems },
+    { id: 'nav', title: '🧭 التنقل السريع بين الأقسام الرئيسية', icon: '🚀', items: navItems }
+  ].filter((g) => g.items.length > 0);
+
+  const handleOpenSettingsShortcuts = () => {
+    onClose?.();
+    window.dispatchEvent(
+      new CustomEvent('app:navigate-tab', {
+        detail: { targetTab: 'settings', targetSubTab: 'shortcuts' }
+      })
+    );
+  };
 
   return (
     <div
@@ -53,13 +85,14 @@ export default function KeyboardShortcutsModal({ isOpen, onClose, customShortcut
         backdropFilter: 'blur(10px)',
         padding: '16px'
       }}
+      onClick={onClose}
     >
       <div
         className="modal-card"
         style={{
-          maxWidth: '780px',
+          maxWidth: '840px',
           width: '100%',
-          maxHeight: '88vh',
+          maxHeight: '90vh',
           background: 'var(--surface, #ffffff)',
           borderRadius: '20px',
           boxShadow: '0 25px 60px -15px rgba(0,0,0,0.3)',
@@ -83,13 +116,27 @@ export default function KeyboardShortcutsModal({ isOpen, onClose, customShortcut
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <span style={{ fontSize: '26px' }}>⌨️</span>
+            <span style={{ fontSize: '28px' }}>⌨️</span>
             <div>
-              <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: '800' }}>
-                دليل اختصارات لوحة المفاتيح (Keyboard Shortcuts)
-              </h3>
-              <p style={{ margin: 0, fontSize: '0.82rem', opacity: 0.9 }}>
-                تحكم كامل وسريع بالنظام دون لمس الفأرة مع منع تداخل المتصفح
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <h3 style={{ margin: 0, fontSize: '1.22rem', fontWeight: '800' }}>
+                  دليل اختصارات لوحة المفاتيح (Keyboard Shortcuts)
+                </h3>
+                <span
+                  style={{
+                    background: 'rgba(255,255,255,0.22)',
+                    color: '#fff',
+                    fontSize: '0.75rem',
+                    fontWeight: '800',
+                    padding: '2px 8px',
+                    borderRadius: '99px'
+                  }}
+                >
+                  {activeList.length} اختصار نشط
+                </span>
+              </div>
+              <p style={{ margin: '2px 0 0', fontSize: '0.82rem', opacity: 0.9 }}>
+                تحكم كامل وسريع بالنظام دون لمس الفأرة مع حماية تامة من اعتراض المتصفح
               </p>
             </div>
           </div>
@@ -117,6 +164,71 @@ export default function KeyboardShortcutsModal({ isOpen, onClose, customShortcut
           </button>
         </div>
 
+        {/* Filter and Search Bar */}
+        <div
+          style={{
+            padding: '14px 24px 10px',
+            background: 'var(--surface-alt, #f8fafc)',
+            borderBottom: '1px solid var(--border, #e2e8f0)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '12px',
+            flexWrap: 'wrap'
+          }}
+        >
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            {[
+              { id: 'all', label: 'الكل' },
+              { id: 'system', label: '🔒 أمان وتحكم' },
+              { id: 'general', label: '⚡ عامة وبحث' },
+              { id: 'actions', label: '📝 إدخال وعمليات' },
+              { id: 'nav', label: '🧭 تنقل سريع' }
+            ].map((tab) => {
+              const active = selectedCategory === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setSelectedCategory(tab.id)}
+                  style={{
+                    padding: '5px 12px',
+                    borderRadius: '8px',
+                    border: active ? '1.5px solid #0f766e' : '1px solid #cbd5e1',
+                    background: active ? '#ccfbf1' : '#ffffff',
+                    color: active ? '#0f766e' : '#475569',
+                    fontSize: '0.82rem',
+                    fontWeight: active ? '800' : '600',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={{ minWidth: '220px', flex: '1 1 auto', maxWidth: '300px' }}>
+            <input
+              type="search"
+              placeholder="🔍 بحث في اسم الإجراء أو المفتاح..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '7px 12px',
+                borderRadius: '8px',
+                border: '1px solid #cbd5e1',
+                background: '#ffffff',
+                fontSize: '0.84rem',
+                outline: 'none',
+                boxSizing: 'border-box'
+              }}
+            />
+          </div>
+        </div>
+
         {/* Content */}
         <div
           style={{
@@ -124,95 +236,131 @@ export default function KeyboardShortcutsModal({ isOpen, onClose, customShortcut
             overflowY: 'auto',
             display: 'flex',
             flexDirection: 'column',
-            gap: '20px'
+            gap: '22px'
           }}
         >
-          {/* Pro Tip Banner */}
-          <div
-            style={{
-              background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)',
-              border: '1px solid #bfdbfe',
-              borderRadius: '12px',
-              padding: '12px 16px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px',
-              color: '#1e40af',
-              fontSize: '0.88rem',
-              lineHeight: 1.5
-            }}
-          >
-            <span style={{ fontSize: '22px' }}>💡</span>
-            <div>
-              <strong>تخصيص الاختصارات:</strong> يمكنك تعديل وتغيير أي اختصار من خلال شاشة <strong>الإعدادات ⚙️ › اختصارات لوحة المفاتيح</strong> بكل سهولة.
+          {shortcutGroups.length === 0 ? (
+            <div
+              style={{
+                padding: '36px 16px',
+                textAlign: 'center',
+                color: '#64748b',
+                fontSize: '0.95rem'
+              }}
+            >
+              لم يتم العثور على أي اختصار يطابق بحثك: &quot;{searchTerm}&quot;
             </div>
-          </div>
+          ) : (
+            shortcutGroups.map((group) => (
+              <div key={group.id} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <h4
+                  style={{
+                    margin: 0,
+                    fontSize: '0.95rem',
+                    fontWeight: '800',
+                    color: 'var(--primary, #0f766e)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    borderBottom: '1.5px solid var(--border, #e2e8f0)',
+                    paddingBottom: '6px'
+                  }}
+                >
+                  <span>{group.icon}</span>
+                  <span>{group.title}</span>
+                  <span style={{ fontSize: '0.76rem', color: '#64748b', fontWeight: 'normal' }}>
+                    ({group.items.length})
+                  </span>
+                </h4>
 
-          {/* Groups */}
-          {shortcutGroups.map((group, gIdx) => (
-            <div key={gIdx} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              <h4
-                style={{
-                  margin: 0,
-                  fontSize: '0.95rem',
-                  fontWeight: '800',
-                  color: 'var(--primary, #0f766e)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  borderBottom: '1.5px solid var(--border, #e2e8f0)',
-                  paddingBottom: '6px'
-                }}
-              >
-                <span>{group.icon}</span>
-                <span>{group.title}</span>
-              </h4>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {group.items.map((item, iIdx) => (
-                  <div
-                    key={iIdx}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '8px 12px',
-                      background: 'var(--bg, #f8fafc)',
-                      border: '1px solid var(--border, #f1f5f9)',
-                      borderRadius: '8px',
-                      gap: '16px'
-                    }}
-                  >
-                    <div>
-                      <span style={{ fontSize: '0.88rem', color: 'var(--text, #1e293b)', fontWeight: '700' }}>
-                        {item.name}
-                      </span>
-                      <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
-                        {item.desc}
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-                      <kbd
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {group.items.map((item) => {
+                    const fallbackDisplay = formatShortcutFallback(item);
+                    return (
+                      <div
+                        key={item.id}
                         style={{
-                          background: '#ffffff',
-                          border: '1.5px solid #cbd5e1',
-                          borderRadius: '6px',
-                          boxShadow: '0 2px 0 #94a3b8',
-                          padding: '3px 8px',
-                          fontSize: '0.82rem',
-                          fontWeight: '800',
-                          fontFamily: 'monospace',
-                          color: '#0f172a'
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '9px 14px',
+                          background: 'var(--bg, #f8fafc)',
+                          border: '1px solid var(--border, #f1f5f9)',
+                          borderRadius: '10px',
+                          gap: '16px',
+                          transition: 'background 0.15s ease'
                         }}
                       >
-                        {formatShortcutDisplay(item)}
-                      </kbd>
-                    </div>
-                  </div>
-                ))}
+                        <div style={{ flex: '1 1 auto' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontSize: '0.9rem', color: 'var(--text, #1e293b)', fontWeight: '700' }}>
+                              {item.name}
+                            </span>
+                            {item.isFixed && (
+                              <span
+                                style={{
+                                  background: '#e2e8f0',
+                                  color: '#475569',
+                                  fontSize: '0.68rem',
+                                  fontWeight: '700',
+                                  padding: '1px 6px',
+                                  borderRadius: '4px'
+                                }}
+                              >
+                                ثابت للنظام
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: '0.78rem', color: '#64748b', marginTop: '2px' }}>
+                            {item.desc}
+                          </div>
+                        </div>
+
+                        {/* Keys Display */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                          <kbd
+                            style={{
+                              background: '#ffffff',
+                              border: '1.5px solid #cbd5e1',
+                              borderRadius: '6px',
+                              boxShadow: '0 2px 0 #94a3b8',
+                              padding: '4px 9px',
+                              fontSize: '0.84rem',
+                              fontWeight: '800',
+                              fontFamily: 'monospace',
+                              color: '#0f172a'
+                            }}
+                          >
+                            {formatShortcutDisplay(item)}
+                          </kbd>
+
+                          {fallbackDisplay && (
+                            <>
+                              <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>أو</span>
+                              <kbd
+                                style={{
+                                  background: '#f8fafc',
+                                  border: '1px solid #cbd5e1',
+                                  borderRadius: '6px',
+                                  padding: '3px 8px',
+                                  fontSize: '0.78rem',
+                                  fontWeight: '700',
+                                  fontFamily: 'monospace',
+                                  color: '#475569'
+                                }}
+                              >
+                                {fallbackDisplay}
+                              </kbd>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
 
         {/* Footer */}
@@ -223,20 +371,42 @@ export default function KeyboardShortcutsModal({ isOpen, onClose, customShortcut
             borderTop: '1px solid var(--border, #e2e8f0)',
             display: 'flex',
             justifyContent: 'space-between',
-            alignItems: 'center'
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '12px'
           }}
         >
-          <span style={{ fontSize: '0.8rem', color: '#64748b' }}>
-            يمكنك إغلاق هذه النافذة في أي وقت بالضغط على <strong>Esc</strong> أو زر الإغلاق ✕.
-          </span>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={onClose}
-            style={{ minWidth: '100px' }}
-          >
-            فهمت ذلك
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '0.82rem', color: '#64748b' }}>
+              💡 يمكنك تعديل وتخصيص أي اختصار بحسب رغبتك من صفحة الإعدادات.
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={handleOpenSettingsShortcuts}
+              style={{
+                border: '1px solid var(--primary, #0f766e)',
+                color: '#0f766e',
+                fontSize: '0.84rem',
+                fontWeight: '700',
+                padding: '6px 14px',
+                borderRadius: '8px'
+              }}
+            >
+              ⚙️ تخصيص الاختصارات في الإعدادات
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={onClose}
+              style={{ minWidth: '100px', fontWeight: '800' }}
+            >
+              فهمت ذلك
+            </button>
+          </div>
         </div>
       </div>
     </div>

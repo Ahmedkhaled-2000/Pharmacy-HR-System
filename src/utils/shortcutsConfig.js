@@ -5,6 +5,37 @@
 export const STORAGE_SHORTCUTS_KEY = 'pharmacy_custom_shortcuts';
 
 export const DEFAULT_SHORTCUTS = [
+  // ── 1. أمان وتحكم النظام (System & Security) ───────────────────────────
+  {
+    id: 'lockSystem',
+    name: 'إيقاف وقفل النظام مؤقتاً',
+    desc: 'قفل النظام فوراً وطلب كلمة المرور لحماية الشاشة والبيانات عند مغادرة المكتب',
+    category: 'system',
+    key: 'ScrollLock',
+    modifiers: [],
+    fallbackKey: 'l',
+    fallbackModifiers: ['Alt']
+  },
+  {
+    id: 'toggleFullscreen',
+    name: 'تكبير وتصغير الشاشة (ملء الشاشة)',
+    desc: 'تبديل وضع ملء الشاشة أو استعادة حجم نافذة النظام',
+    category: 'system',
+    key: 'F11',
+    modifiers: []
+  },
+  {
+    id: 'refreshData',
+    name: 'تحديث ومزامنة البيانات الفورية',
+    desc: 'إعادة مزامنة وتحديث سجلات الحضور والبصمات والبيانات السحابية لحظياً',
+    category: 'system',
+    key: 'F5',
+    modifiers: [],
+    fallbackKey: 'r',
+    fallbackModifiers: ['Ctrl']
+  },
+
+  // ── 2. اختصارات عامة والتنقل بالقوائم والبحث (General & Menus) ─────────
   {
     id: 'closeModal',
     name: 'إغلاق النوافذ المنبثقة والقوائم',
@@ -17,7 +48,7 @@ export const DEFAULT_SHORTCUTS = [
   {
     id: 'help',
     name: 'دليل واختصارات النظام',
-    desc: 'فتح نافذة دليل وشرح اختصارات لوحة المفاتيح',
+    desc: 'فتح نافذة دليل وشرح اختصارات لوحة المفاتيح السريعة',
     category: 'general',
     key: 'F1',
     modifiers: [],
@@ -27,7 +58,7 @@ export const DEFAULT_SHORTCUTS = [
   {
     id: 'quickSearch',
     name: 'البحث السريع العام',
-    desc: 'التركيز على حقل البحث العام بالمؤسسة والحسابات',
+    desc: 'التركيز المباشر على حقل البحث العام بالمؤسسة والحسابات',
     category: 'general',
     key: 'k',
     modifiers: ['Ctrl'],
@@ -45,9 +76,40 @@ export const DEFAULT_SHORTCUTS = [
     fallbackModifiers: ['Alt']
   },
   {
+    id: 'focusMenuBar',
+    name: 'التركيز على شريط القوائم العلوي',
+    desc: 'تفعيل شريط القوائم للتنقل بين الأقسام والخيارات بالأسهم دون ماوس',
+    category: 'general',
+    key: 'F10',
+    modifiers: [],
+    fallbackKey: 'Alt',
+    fallbackModifiers: []
+  },
+  {
+    id: 'menuNavigation',
+    name: 'التنقل بالأسهم داخل القوائم',
+    desc: 'استخدام مفاتيح الأسهم للتبديل والتنقل السلس داخل القوائم والبنود المنسدلة',
+    category: 'general',
+    key: 'Arrows',
+    modifiers: [],
+    isFixed: true
+  },
+  {
+    id: 'toggleNotifications',
+    name: 'مركز الإشعارات والتنبيهات',
+    desc: 'فتح أو إغلاق قائمة الإشعارات والتنبيهات الإدارية اللحظية',
+    category: 'general',
+    key: 'i',
+    modifiers: ['Alt'],
+    fallbackKey: 'o',
+    fallbackModifiers: ['Alt']
+  },
+
+  // ── 3. الإدخال والعمليات وحفظ البيانات (Actions & Data) ─────────────────
+  {
     id: 'newEntry',
     name: 'إضافة جديدة سريعة',
-    desc: 'فتح نموذج إضافة موظف أو قيد يومية أو وردية جديدة بحسب الشاشة',
+    desc: 'فتح نموذج إضافة موظف أو قيد يومية أو وردية جديدة بحسب الشاشة المعروضة',
     category: 'actions',
     key: 'n',
     modifiers: ['Alt'],
@@ -57,7 +119,7 @@ export const DEFAULT_SHORTCUTS = [
   {
     id: 'saveForm',
     name: 'حفظ النموذج المفتوح',
-    desc: 'حفظ البيانات في النافذة المنبثقة النشطة ومنع نافذة حفظ المتصفح',
+    desc: 'حفظ البيانات في النافذة المنبثقة النشطة ومنع نافذة حفظ المتصفح الخام',
     category: 'actions',
     key: 's',
     modifiers: ['Ctrl'],
@@ -67,7 +129,7 @@ export const DEFAULT_SHORTCUTS = [
   {
     id: 'printView',
     name: 'طباعة التقرير أو السند',
-    desc: 'طباعة التقرير الحالي عبر محرك النظام المخصص ومنع طباعة المتصفح الخام',
+    desc: 'طباعة التقرير الحالي عبر محرك الطباعة المخصص ومنع طباعة المتصفح الخام',
     category: 'actions',
     key: 'p',
     modifiers: ['Ctrl'],
@@ -75,9 +137,30 @@ export const DEFAULT_SHORTCUTS = [
     fallbackModifiers: ['Alt']
   },
   {
+    id: 'exportExcel',
+    name: 'تصدير البيانات إلى Excel',
+    desc: 'تصدير بيانات الجدول أو الكشف المفتوح حالياً إلى ملف إكسيل فوري',
+    category: 'actions',
+    key: 'e',
+    modifiers: ['Alt'],
+    fallbackKey: 'x',
+    fallbackModifiers: ['Alt']
+  },
+  {
+    id: 'confirmAction',
+    name: 'تأكيد الحوارات والعمليات',
+    desc: 'تأكيد الرسائل التحذيرية ومربعات الحوار بزر Enter دون استخدام الماوس',
+    category: 'actions',
+    key: 'Enter',
+    modifiers: [],
+    isFixed: true
+  },
+
+  // ── 4. التنقل السريع بين الأقسام الرئيسية (Navigation) ──────────────────
+  {
     id: 'navDashboard',
     name: 'الانتقال إلى لوحة التحكم (1)',
-    desc: 'الانتقال المباشر إلى لوحة التحكم والإحصائيات العامة',
+    desc: 'الانتقال المباشر إلى لوحة التحكم والإحصائيات العامة للمؤسسة',
     category: 'nav',
     key: '1',
     modifiers: ['Alt']
@@ -85,7 +168,7 @@ export const DEFAULT_SHORTCUTS = [
   {
     id: 'navEmployees',
     name: 'الانتقال إلى شؤون الموظفين (2)',
-    desc: 'الانتقال إلى ملفات وبيانات الكادر الوظيفي',
+    desc: 'الانتقال إلى ملفات وبيانات وسجلات الكادر الوظيفي',
     category: 'nav',
     key: '2',
     modifiers: ['Alt']
@@ -93,7 +176,7 @@ export const DEFAULT_SHORTCUTS = [
   {
     id: 'navAttendance',
     name: 'الانتقال إلى الحضور والورديات (3)',
-    desc: 'الانتقال إلى شاشة الحضور والانصراف والورديات',
+    desc: 'الانتقال إلى شاشة الحضور والانصراف والورديات وسجلات البصمات',
     category: 'nav',
     key: '3',
     modifiers: ['Alt']
@@ -101,7 +184,7 @@ export const DEFAULT_SHORTCUTS = [
   {
     id: 'navPayroll',
     name: 'الانتقال إلى مسير الرواتب (4)',
-    desc: 'الانتقال إلى مسير الرواتب والمستحقات والبدلات',
+    desc: 'الانتقال إلى مسير الرواتب والمستحقات والبدلات الشهرية',
     category: 'nav',
     key: '4',
     modifiers: ['Alt']
@@ -109,7 +192,7 @@ export const DEFAULT_SHORTCUTS = [
   {
     id: 'navAccounts',
     name: 'الانتقال إلى الحسابات العامة (5)',
-    desc: 'الانتقال إلى منظومة الحسابات وشجرة الحسابات',
+    desc: 'الانتقال إلى منظومة الحسابات وشجرة الحسابات (ERP)',
     category: 'nav',
     key: '5',
     modifiers: ['Alt']
@@ -117,34 +200,50 @@ export const DEFAULT_SHORTCUTS = [
   {
     id: 'navBranches',
     name: 'الانتقال إلى الفروع والمبيعات (6)',
-    desc: 'الانتقال إلى إدارة الفروع والصيدليات والمبيعات',
+    desc: 'الانتقال إلى إدارة الفروع والصيدليات ومتابعة المبيعات',
     category: 'nav',
     key: '6',
     modifiers: ['Alt']
   },
   {
-    id: 'navLeaves',
-    name: 'الانتقال إلى الإجازات والأذونات (7)',
-    desc: 'الانتقال إلى مركز طلبات الإجازات والأذونات',
+    id: 'navRequests',
+    name: 'الانتقال إلى الطلبات والموافقات (7)',
+    desc: 'الانتقال المباشر إلى مركز اعتماد طلبات الإجازات والأذونات والسلف',
     category: 'nav',
     key: '7',
     modifiers: ['Alt']
   },
   {
-    id: 'navBylaws',
-    name: 'الانتقال إلى لائحة العمل (8)',
-    desc: 'الانتقال إلى لائحة الجزاءات والسياسات المعتمدة',
+    id: 'navLeaves',
+    name: 'الانتقال إلى سجل الإجازات والأذونات (8)',
+    desc: 'الانتقال إلى مركز تتبع أرصدة الإجازات وساعات الاستئذان',
     category: 'nav',
     key: '8',
     modifiers: ['Alt']
   },
   {
-    id: 'navSettings',
-    name: 'الانتقال إلى إعدادات النظام (9)',
-    desc: 'الانتقال إلى شاشة الإعدادات العامة والصلاحيات',
+    id: 'navBylaws',
+    name: 'الانتقال إلى لائحة العمل (9)',
+    desc: 'الانتقال إلى لائحة الجزاءات التأديبية والسياسات المعتمدة',
     category: 'nav',
     key: '9',
     modifiers: ['Alt']
+  },
+  {
+    id: 'navSettings',
+    name: 'الانتقال إلى إعدادات النظام (0)',
+    desc: 'الانتقال إلى شاشة الإعدادات العامة والصلاحيات والنسخ الاحتياطي',
+    category: 'nav',
+    key: '0',
+    modifiers: ['Alt']
+  },
+  {
+    id: 'kioskMode',
+    name: 'شاشة كشك البصمة السريعة',
+    desc: 'الانتقال المباشر لشاشة تسجيل البصمة والحضور الذاتي للموظفين',
+    category: 'nav',
+    key: 'k',
+    modifiers: ['Alt', 'Shift']
   }
 ];
 
@@ -174,12 +273,32 @@ export function getActiveShortcuts(customList) {
 }
 
 export function formatShortcutDisplay(item) {
+  if (!item) return '';
   const parts = [];
   if (item.modifiers && item.modifiers.length > 0) {
     item.modifiers.forEach((m) => parts.push(m));
   }
   let keyName = item.key;
   if (keyName === 'Escape') keyName = 'Esc';
+  else if (keyName === 'ScrollLock') keyName = 'Scroll Lock';
+  else if (keyName === 'Enter') keyName = 'Enter ↵';
+  else if (keyName === 'Arrows') keyName = '← ↑ → ↓';
+  else if (/^F\d{1,2}$/i.test(keyName)) keyName = keyName.toUpperCase();
+  else if (keyName) keyName = keyName.toUpperCase();
+  parts.push(keyName);
+  return parts.join(' + ');
+}
+
+export function formatShortcutFallback(item) {
+  if (!item || !item.fallbackKey) return '';
+  const parts = [];
+  if (item.fallbackModifiers && item.fallbackModifiers.length > 0) {
+    item.fallbackModifiers.forEach((m) => parts.push(m));
+  }
+  let keyName = item.fallbackKey;
+  if (keyName === 'Escape') keyName = 'Esc';
+  else if (keyName === 'ScrollLock') keyName = 'Scroll Lock';
+  else if (/^F\d{1,2}$/i.test(keyName)) keyName = keyName.toUpperCase();
   else if (keyName) keyName = keyName.toUpperCase();
   parts.push(keyName);
   return parts.join(' + ');
@@ -207,11 +326,15 @@ export function normalizeKeyFromEvent(e) {
       return e.code.toUpperCase(); // 'F1'
     }
     if (e.code === 'Escape') return 'Escape';
+    if (e.code === 'ScrollLock') return 'scrolllock';
+    if (e.code === 'Enter') return 'enter';
     if (e.code === 'Slash') return '/';
   }
 
   // 2. Direct key checks
   if (e.key === 'Escape') return 'Escape';
+  if (e.key === 'ScrollLock' || e.keyCode === 145) return 'scrolllock';
+  if (e.key === 'Enter') return 'enter';
   if (/^F\d{1,2}$/i.test(e.key)) return e.key.toUpperCase();
   if (e.key === '/' || e.key === '؟' || e.key === 'ظ') return '/';
 

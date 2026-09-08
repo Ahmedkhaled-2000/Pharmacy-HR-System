@@ -380,26 +380,155 @@ export default function UniversalShortcutsController() {
         return;
       }
 
-      // ── 8. Quick Navigation (Alt+1 .. Alt+9) ───────────────────────────────────
-      // STRICTLY PREVENTS BROWSER TAB SWITCHING
-      if (isAlt && !isCtrl && !isShift && /^[1-9]$/.test(normKey)) {
+      // ── 8. System Security: Lock Screen (ScrollLock / Alt+L) ───────────────────
+      const lockDef = getDef('lockSystem');
+      const isLock =
+        (lockDef && matchesShortcutEvent(lockDef, e)) ||
+        normKey === 'scrolllock' ||
+        e.key === 'ScrollLock' ||
+        e.code === 'ScrollLock' ||
+        e.keyCode === 145 ||
+        (isAlt && !isCtrl && normKey === 'l');
+
+      if (isLock) {
         consumeEvent();
-        const tabIndex = parseInt(normKey, 10) - 1;
+        window.dispatchEvent(new CustomEvent('app:lock-system'));
+        return;
+      }
+
+      // ── 9. Fullscreen Toggle (F11) ─────────────────────────────────────────────
+      const fsDef = getDef('toggleFullscreen');
+      const isFullscreen =
+        (fsDef && matchesShortcutEvent(fsDef, e)) ||
+        normKey === 'f11' ||
+        e.key === 'F11' ||
+        e.code === 'F11';
+
+      if (isFullscreen) {
+        consumeEvent();
+        if (window.desktopAPI?.maximizeWindow) {
+          window.desktopAPI.maximizeWindow();
+        } else if (document.fullscreenElement) {
+          document.exitFullscreen().catch(() => {});
+        } else {
+          document.documentElement.requestFullscreen().catch(() => {});
+        }
+        return;
+      }
+
+      // ── 10. Data Refresh & Fast Sync (F5 / Ctrl+R) ─────────────────────────────
+      const refDef = getDef('refreshData');
+      const isRefresh =
+        (refDef && matchesShortcutEvent(refDef, e)) ||
+        normKey === 'f5' ||
+        e.key === 'F5' ||
+        e.code === 'F5' ||
+        (isCtrl && !isAlt && normKey === 'r');
+
+      if (isRefresh) {
+        consumeEvent();
+        window.dispatchEvent(new CustomEvent('app:fast-sync-request'));
+        uiRef.current?.showToast?.('🔄 تم استدعاء مزامنة وتحديث البيانات لحظياً');
+        return;
+      }
+
+      // ── 11. Notifications Toggle (Alt+I / Alt+O) ───────────────────────────────
+      const notifDef = getDef('toggleNotifications');
+      const isNotif =
+        (notifDef && matchesShortcutEvent(notifDef, e)) ||
+        (isAlt && !isCtrl && (normKey === 'i' || normKey === 'o'));
+
+      if (isNotif) {
+        consumeEvent();
+        window.dispatchEvent(new CustomEvent('app:toggle-notifications'));
+        return;
+      }
+
+      // ── 12. Export Excel (Alt+E / Alt+X) ───────────────────────────────────────
+      const expDef = getDef('exportExcel');
+      const isExport =
+        (expDef && matchesShortcutEvent(expDef, e)) ||
+        (isAlt && !isCtrl && (normKey === 'e' || normKey === 'x'));
+
+      if (isExport) {
+        consumeEvent();
+        const exportBtn =
+          document.querySelector(
+            'button.btn-export, button[title*="تصدير"], button[title*="Excel"], [data-action="export"]'
+          ) ||
+          Array.from(document.querySelectorAll('button')).find((b) => {
+            const text = (b.textContent || '').trim();
+            return text.includes('تصدير') || text.includes('Excel') || text.includes('إكسيل');
+          });
+
+        if (exportBtn) {
+          exportBtn.click();
+          uiRef.current?.showToast?.('📊 تم استدعاء تصدير البيانات عبر الاختصار');
+        } else {
+          uiRef.current?.showToast?.('ℹ️ لا يوجد جدول قابل للتصدير في الشاشة الحالية');
+        }
+        return;
+      }
+
+      // ── 13. Kiosk Mode (Alt+Shift+K) ───────────────────────────────────────────
+      const kioskDef = getDef('kioskMode');
+      const isKiosk =
+        (kioskDef && matchesShortcutEvent(kioskDef, e)) ||
+        (isAlt && isShift && normKey === 'k');
+
+      if (isKiosk) {
+        consumeEvent();
         window.dispatchEvent(
-          new CustomEvent('app:navigate-tab', { detail: { tabIndex } })
+          new CustomEvent('app:navigate-tab', { detail: { targetTab: 'kiosk' } })
         );
         return;
       }
 
+      // ── 14. Quick Navigation (Alt+1 .. Alt+9, Alt+0) ───────────────────────────
+      // STRICTLY PREVENTS BROWSER TAB SWITCHING
+      if (isAlt && !isCtrl && !isShift && /^[0-9]$/.test(normKey)) {
+        consumeEvent();
+        const navMap = {
+          '1': { targetTab: 'dashboard', tabIndex: 0 },
+          '2': { targetTab: 'employees', tabIndex: 1 },
+          '3': { targetTab: 'emp-punches', targetSubTab: 'attendance', tabIndex: 2 },
+          '4': { targetTab: 'payroll', tabIndex: 4 },
+          '5': { targetTab: 'accounts', tabIndex: 6 },
+          '6': { targetTab: 'branches', tabIndex: 2 },
+          '7': { targetTab: 'requests', tabIndex: 3 },
+          '8': { targetTab: 'leaves', tabIndex: 3 },
+          '9': { targetTab: 'bylaws', tabIndex: 5 },
+          '0': { targetTab: 'settings', tabIndex: 7 }
+        };
+        const target = navMap[normKey];
+        if (target) {
+          window.dispatchEvent(
+            new CustomEvent('app:navigate-tab', { detail: target })
+          );
+        }
+        return;
+      }
+
       // Check custom nav shortcuts if configured differently
-      for (let i = 1; i <= 9; i++) {
-        const navDef = getDef(
-          `nav${['Dashboard', 'Employees', 'Attendance', 'Payroll', 'Accounts', 'Branches', 'Leaves', 'Bylaws', 'Settings'][i - 1]}`
-        );
+      const customNavList = [
+        { id: 'navDashboard', targetTab: 'dashboard', tabIndex: 0 },
+        { id: 'navEmployees', targetTab: 'employees', tabIndex: 1 },
+        { id: 'navAttendance', targetTab: 'emp-punches', tabIndex: 2 },
+        { id: 'navPayroll', targetTab: 'payroll', tabIndex: 4 },
+        { id: 'navAccounts', targetTab: 'accounts', tabIndex: 6 },
+        { id: 'navBranches', targetTab: 'branches', tabIndex: 2 },
+        { id: 'navRequests', targetTab: 'requests', tabIndex: 3 },
+        { id: 'navLeaves', targetTab: 'leaves', tabIndex: 3 },
+        { id: 'navBylaws', targetTab: 'bylaws', tabIndex: 5 },
+        { id: 'navSettings', targetTab: 'settings', tabIndex: 7 }
+      ];
+
+      for (const item of customNavList) {
+        const navDef = getDef(item.id);
         if (navDef && matchesShortcutEvent(navDef, e)) {
           consumeEvent();
           window.dispatchEvent(
-            new CustomEvent('app:navigate-tab', { detail: { tabIndex: i - 1 } })
+            new CustomEvent('app:navigate-tab', { detail: item })
           );
           return;
         }

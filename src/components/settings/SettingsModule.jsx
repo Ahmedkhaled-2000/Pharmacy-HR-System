@@ -1499,6 +1499,67 @@ export default function SettingsModule({
         </div>
       </div>
 
+      {/* Horizontal Sub-tabs Navigation Strip */}
+      <div
+        style={{
+          display: 'flex',
+          gap: '8px',
+          overflowX: 'auto',
+          paddingBottom: '8px',
+          marginBottom: '20px',
+          borderBottom: '1px solid var(--border, #e2e8f0)'
+        }}
+      >
+        {[
+          { id: 'general', label: '🏥 بيانات المؤسسة' },
+          { id: 'dates', label: '📅 التواريخ وفترات الرواتب' },
+          { id: 'permissions', label: '🔒 إدارة الصلاحيات' },
+          { id: 'rules', label: '🔐 قواعد الاعتماد' },
+          { id: 'gmail', label: '✉️ بريد Gmail' },
+          { id: 'drive', label: '📁 Google Drive' },
+          { id: 'ip', label: '🌐 راوترات الفروع' },
+          { id: 'backup', label: '💾 النسخ الاحتياطي' },
+          { id: 'shortcuts', label: '⌨️ اختصارات لوحة المفاتيح' },
+          { id: 'accounting_guide', label: '📖 دليل الحسابات ERP' },
+          { id: 'owner', label: '👑 صلاحيات المالك' }
+        ].map((tab) => {
+          const isActive =
+            activeTab === tab.id ||
+            (tab.id === 'shortcuts' && activeTab === 'keyboard_shortcuts') ||
+            (tab.id === 'dates' && activeTab === 'cutoff') ||
+            (tab.id === 'accounting_guide' && activeTab === 'accounting-guide');
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => {
+                setActiveTab(tab.id);
+                if (setActiveSubTab) setActiveSubTab(tab.id);
+              }}
+              style={{
+                padding: '7px 14px',
+                borderRadius: '10px',
+                border: isActive
+                  ? '1.5px solid var(--primary, #0f766e)'
+                  : '1px solid var(--border, #cbd5e1)',
+                background: isActive ? 'var(--primary, #0f766e)' : 'var(--surface, #ffffff)',
+                color: isActive ? '#ffffff' : 'var(--text, #334155)',
+                fontWeight: isActive ? '800' : '600',
+                fontSize: '0.84rem',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <span>{tab.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
       {/* Tab: Keyboard Shortcuts Management */}
       {(activeTab === 'shortcuts' || activeTab === 'keyboard_shortcuts') && (
         <KeyboardShortcutsSettingsCard
