@@ -10,6 +10,7 @@ import {
   filterEmployeeNotifications
 } from '../utils/notificationEngine';
 import { isApprovedPermissionForDate } from '../utils/latePenaltyEngine';
+import { shouldRouteDirectToAdmin } from '../utils/jobsHelper';
 import { useAuth } from './AuthContext';
 import { useData } from './DataContext';
 import { useUI } from './UIContext';
@@ -58,6 +59,8 @@ export function NotificationProvider({ children }) {
         if (!r || !r.id) return false;
         const idStr = String(r.id);
         if (deletedIdsSet.has(idStr)) return false;
+        // Resignations are managed exclusively in their dedicated module
+        if (r.type === 'resignation' || r.type === 'withdraw' || r.isResignation || idStr.startsWith('res_')) return false;
 
         if (!shouldShowRequestToBranch(r, state)) return false;
 
@@ -121,6 +124,8 @@ export function NotificationProvider({ children }) {
       if (!r || !r.id) return false;
       const idStr = String(r.id);
       if (deletedIdsSet.has(idStr)) return false;
+      // Resignations are managed exclusively in their dedicated module
+      if (r.type === 'resignation' || r.type === 'withdraw' || r.isResignation || idStr.startsWith('res_')) return false;
       if (r.hiddenFromAdmin) return false;
 
       if (r.status === 'approved' || r.status === 'rejected' || r.status === 'cancelled') return false;
@@ -137,6 +142,71 @@ export function NotificationProvider({ children }) {
         !r.requiresBranchManager;
 
       return r.status === 'pending_admin' || (r.status === 'pending' && isBranchDone);
+    }).length;
+  }, [state, authRole, currentBranch]);
+
+  // 2. حساب عدد طلبات الاستقالة (Resignation Count Badge)
+  const resignationCount = useMemo(() => {
+    if (!state) return 0;
+    const deletedIdsSet = new Set((state._deletedIds || []).map(String));
+    const allResignations = state.resignationRequests || [];
+
+    if (authRole === 'branch') {
+      const cIdStr = currentBranch?.id ? String(currentBranch.id) : null;
+      const cCodeStr = currentBranch?.code || currentBranch?.branchCode ? String(currentBranch.code || currentBranch.branchCode) : null;
+      const branchEmployees = (state.employees || []).filter((e) => {
+        if (!cIdStr && !cCodeStr) return true;
+        return (
+          (e.branchId && (String(e.branchId) === cIdStr || String(e.branchId) === cCodeStr)) ||
+          (e.branchesDetails && e.branchesDetails.some((bd) => String(bd.branchId) === cIdStr || String(bd.branchId) === cCodeStr))
+        );
+      });
+      const branchEmpIdSet = new Set(
+        branchEmployees.flatMap((e) => [String(e.id), String(e.code || '')]).filter(Boolean)
+      );
+
+      return allResignations.filter((r) => {
+        if (!r || !r.id) return false;
+        const idStr = String(r.id);
+        if (deletedIdsSet.has(idStr)) return false;
+
+        const matchesBranch =
+          (!cIdStr && !cCodeStr) ||
+          (r.branchId && (String(r.branchId) === cIdStr || String(r.branchId) === cCodeStr)) ||
+          (r.employeeId && branchEmpIdSet.has(String(r.employeeId))) ||
+          (r.employeeCode && branchEmpIdSet.has(String(r.employeeCode)));
+        if (!matchesBranch) return false;
+
+        // Direct to admin requests bypass branch manager review
+        if (r.isDirectToAdmin) return false;
+
+        // Pending branch manager review
+        const isBranchPending = (!r.managerStatus || r.managerStatus === 'pending') && !r.branchApproved;
+        const isOverallPending = r.status === 'pending' || !r.status;
+
+        return isBranchPending && isOverallPending;
+      }).length;
+    }
+
+    // Super Admin / Owner
+    return allResignations.filter((r) => {
+      if (!r || !r.id) return false;
+      const idStr = String(r.id);
+      if (deletedIdsSet.has(idStr)) return false;
+      if (r.hiddenFromAdmin) return false;
+
+      // Status must still be pending final decision
+      const isPendingDecision = r.status === 'pending' || r.status === 'pending_admin' || !r.status;
+      if (!isPendingDecision) return false;
+
+      // Ready for Admin only if Branch Manager reviewed OR direct to admin
+      const emp = (state.employees || []).find(
+        (e) => String(e.id) === String(r.employeeId) || (r.employeeCode && String(e.code) === String(r.employeeCode))
+      );
+      const isDirect = Boolean(r.isDirectToAdmin || (emp && shouldRouteDirectToAdmin(emp, r.branchId || emp?.branchId, state, r)));
+      const isBranchDone = r.managerStatus === 'approved' || r.managerStatus === 'rejected' || r.branchApproved;
+
+      return isDirect || isBranchDone;
     }).length;
   }, [state, authRole, currentBranch]);
 
@@ -353,6 +423,7 @@ export function NotificationProvider({ children }) {
   const value = {
     pendingRequestsCount,
     bylawsCount,
+    resignationCount,
     notifications: roleNotifications,
     handleMarkNotificationRead,
     handleMarkAllNotificationsRead,

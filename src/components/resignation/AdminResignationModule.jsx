@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { arabicWeekday, getRealTodayStr, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
+import { shouldRouteDirectToAdmin } from '../../utils/jobsHelper';
 
 export default function AdminResignationModule({
   state,
@@ -79,15 +80,20 @@ export default function AdminResignationModule({
 
   // Helpers for request state classification
   const isBranchResolved = (r) => {
-    return (
-      r.managerStatus === 'approved' || 
-      r.managerStatus === 'rejected' || 
-      r.isDirectToAdmin || 
-      r.branchNotRequired || 
-      r.createdRole === 'branch' || 
-      r.submittedByBranchManager ||
-      !r.branchId
-    );
+    if (!r) return false;
+    // 1. إذا رد مدير الفرع بالموافقة أو الرفض
+    if (r.managerStatus === 'approved' || r.managerStatus === 'rejected' || r.branchApproved === true || r.branchRejected === true) {
+      return true;
+    }
+    // 2. إذا كان الطلب موجهاً للإدارة مباشرة (إداري، مالك، أو مدير الفرع نفسه)
+    if (r.isDirectToAdmin === true || r.branchNotRequired === true || r.createdRole === 'admin') {
+      return true;
+    }
+    const emp = (state.employees || []).find(e => String(e.id) === String(r.employeeId) || (r.employeeCode && String(e.code) === String(r.employeeCode)));
+    if (emp && shouldRouteDirectToAdmin(emp, r.branchId || emp.branchId, state, r)) {
+      return true;
+    }
+    return false;
   };
 
   const isReadyForAdmin = (r) => {
@@ -409,11 +415,7 @@ export default function AdminResignationModule({
     }
   };
 
-  const readyCount = (state.resignationRequests || []).filter(r => 
-    (r.managerStatus === 'approved' || r.managerStatus === 'rejected') && 
-    (!r.adminStatus || r.adminStatus === 'pending') && 
-    !r.isAdminCreated
-  ).length;
+  const readyCount = rawList.filter(isReadyForAdmin).length;
   const totalCount = (state.resignationRequests || []).filter(r => 
     r.adminStatus === 'approved' || r.adminStatus === 'rejected' || r.adminStatus === 'cancelled' || r.isCancelled || r.isAdminCreated
   ).length;

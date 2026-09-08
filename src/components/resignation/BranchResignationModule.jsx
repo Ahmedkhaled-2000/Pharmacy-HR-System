@@ -130,8 +130,9 @@ export default function BranchResignationModule({
       id: 'notif_mgr_' + reqId + '_' + Date.now(),
       requestId: idStr,
       type: 'resignation',
+      linkTab: 'resignation',
       title: `👔 رد مدير الفرع على طلب ${targetReq?.type === 'resignation' ? 'الاستقالة' : 'التراجع'} (${status === 'approved' ? 'موافقة' : 'عدم موافقة'})`,
-      message: `قام مدير فرع ${branchName} بالرد (${status === 'approved' ? 'موافق' : 'غير موافق'}) على طلب ${emp?.name || 'الموظف'}. تم تحويل الطلب للإدارة العليا للبت النهائي. تعليق: ${comment}`,
+      message: `قام مدير فرع ${branchName} بالرد (${status === 'approved' ? 'موافق' : 'غير موافق'}) على طلب ${emp?.name || 'الموظف'}. تم تحويل الطلب للإدارة العليا للبت والقرار النهائي. تعليق مدير الفرع: ${comment}`,
       date: getRealTodayStr(),
       timestamp: new Date().toISOString(),
       read: false,
@@ -146,6 +147,7 @@ export default function BranchResignationModule({
       targetEmployeeId: String(targetReq?.employeeId || ''),
       targetRole: 'employee',
       type: 'resignation',
+      linkTab: 'resignations',
       action: status === 'approved' ? 'approved' : 'rejected',
       approverRole: 'branch',
       title: status === 'approved' ? '🟢 موافقة مدير الفرع على طلب الاستقالة' : '❌ عدم موافقة مدير الفرع (محال للإدارة العليا)',
@@ -235,7 +237,7 @@ export default function BranchResignationModule({
                   <span style={{ color: 'var(--muted)' }}>{req.employeeReason}</span>
                 </div>
 
-                {req.managerStatus === 'pending' ? (
+                {(!req.managerStatus || req.managerStatus === 'pending') ? (
                   <div style={{ background: 'var(--surface)', padding: '15px', borderRadius: '8px', border: '1px dashed var(--border)' }}>
                     <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold', fontSize: '14px' }}>إضافة تعليق مدير الفرع (مطلوب)</label>
                     <textarea 

@@ -422,12 +422,20 @@ export function filterAdminNotifications(notifications = [], state = null) {
 
       const isPending = r.status === 'pending' || r.status === 'pending_admin' || !r.status;
       if (isPending) {
+        const finalType = r.type || defaultType;
+
+        // Resignation requests must go to Branch Manager first; do not synthesize actionable admin notification until branch responds
+        if (finalType === 'resignation' || finalType === 'withdraw') {
+          const isBranchDone = r.isDirectToAdmin || r.managerStatus === 'approved' || r.managerStatus === 'rejected' || r.branchApproved;
+          if (!isBranchDone) return;
+        }
+
         const emp = (state.employees || []).find(
           (e) => String(e.id) === String(r.employeeId) || (r.employeeCode && String(e.code) === String(r.employeeCode))
         );
         const empName = emp?.name || r.employeeName || 'موظف';
-        const finalType = r.type || defaultType;
         const typeLabel = getRequestTypeArabicLabel(finalType);
+        const isResignation = finalType === 'resignation' || finalType === 'withdraw';
         const iconMap = {
           leave: '🏖️',
           leave_request: '🏖️',
@@ -448,9 +456,12 @@ export function filterAdminNotifications(notifications = [], state = null) {
             requestId: r.id,
             type: finalType,
             typeLabel,
+            linkTab: isResignation ? 'resignation' : undefined,
             icon: iconMap[finalType] || '📋',
-            title: `📋 طلب وارد ينتظر قرار الإدارة: ${empName}`,
-            message: `${typeLabel} للموظف (${empName}) ينتظر الاعتماد والمراجعة. ${r.reason || r.details || ''}`,
+            title: isResignation ? `🚪 استقالة بحاجة لقرار الإدارة النهائي: ${empName}` : `📋 طلب وارد ينتظر قرار الإدارة: ${empName}`,
+            message: isResignation
+              ? `طلب استقالة للموظف (${empName}) تمت مراجعته من مدير الفرع (${r.managerStatus === 'approved' ? 'موافقة' : r.managerStatus === 'rejected' ? 'رفض' : 'مراجعة'}) وينتظر قرار الإدارة النهائي. ${r.managerComment ? 'ملاحظة الفرع: ' + r.managerComment : ''}`
+              : `${typeLabel} للموظف (${empName}) ينتظر الاعتماد والمراجعة. ${r.reason || r.details || ''}`,
             employeeId: r.employeeId || emp?.id,
             employeeName: empName,
             employeeCode: r.employeeCode || emp?.code,
@@ -675,21 +686,28 @@ export function filterBranchManagerNotifications(notifications = [], currentBran
 
     allBranchRequests.forEach((r) => {
       const rId = String(r.id);
+      if (r.managerStatus === 'approved' || r.managerStatus === 'rejected' || r.branchApproved) return;
+      if (r.status === 'approved' || r.status === 'rejected' || r.status === 'cancelled') return;
+      if (r.isDirectToAdmin) return;
       if (!existingReqIds.has(rId) && !existingReqIds.has(`notif_pending_${rId}`)) {
         const emp = (state.employees || []).find((e) => String(e.id) === String(r.employeeId) || (r.employeeCode && String(e.code) === String(r.employeeCode)));
         const empName = emp?.name || r.employeeName || 'موظف';
         const finalType = r.type || 'request';
         const typeLabel = getRequestTypeArabicLabel(finalType);
         const iconMap = { leave: '🏖️', permission: '⏰', swap: '🔄', resignation: '🚪' };
+        const isResignation = finalType === 'resignation' || finalType === 'withdraw';
 
         synthesizedPendingNotifs.push({
           id: `notif_pending_${rId}`,
           requestId: r.id,
           type: finalType,
           typeLabel,
+          linkTab: isResignation ? 'resignation' : undefined,
           icon: iconMap[finalType] || '📋',
-          title: `📋 طلب جديد ينتظر موافقة الفرع: ${empName}`,
-          message: `${typeLabel} للموظف (${empName}) ينتظر مراجعتك واعتمادك في مركز الطلبات. ${r.reason || r.details || ''}`,
+          title: isResignation ? `🚪 طلب استقالة ينتظر رأي الفرع: ${empName}` : `📋 طلب جديد ينتظر موافقة الفرع: ${empName}`,
+          message: isResignation
+            ? `طلب استقالة للموظف (${empName}) ينتظر مراجعتك وإبداء الرأي في صفحة الاستقالات. ${r.reason || r.details || ''}`
+            : `${typeLabel} للموظف (${empName}) ينتظر مراجعتك واعتمادك في مركز الطلبات. ${r.reason || r.details || ''}`,
           employeeId: r.employeeId || emp?.id,
           employeeName: empName,
           employeeCode: r.employeeCode || emp?.code,
@@ -781,7 +799,7 @@ export function getNotificationTargetTab(notification, role = 'admin') {
   if (type.includes('perm') || reqId.startsWith('perm_') || title.includes('إذن') || title.includes('اذن') || title.includes('استئذان')) return 'requests';
   if (type.includes('loan') || type.includes('med') || type.includes('advance') || reqId.startsWith('loan_') || reqId.startsWith('medreq_') || title.includes('سلف') || title.includes('أدوي') || title.includes('ادوي') || title.includes('آجل')) return 'requests';
   if (type.includes('swap') || reqId.startsWith('swap_') || title.includes('تبديل')) return 'requests';
-  if (type.includes('resign') || reqId.startsWith('res_') || title.includes('استقال')) return 'requests';
+  if (type.includes('resign') || reqId.startsWith('res_') || title.includes('استقال')) return 'resignation';
   if (type.includes('request') || reqId.startsWith('req_') || title.includes('طلب ')) return 'requests';
 
   // التقييمات والشكاوى

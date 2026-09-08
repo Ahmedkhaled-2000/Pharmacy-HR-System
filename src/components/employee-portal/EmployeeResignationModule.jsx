@@ -183,6 +183,7 @@ export default function EmployeeResignationModule({
         id: 'notif_admin_' + newReq.id + '_' + Date.now(),
         requestId: newReq.id,
         type: 'resignation',
+        linkTab: 'resignation',
         title: `📝 طلب ${requestType === 'resignation' ? 'استقالة' : 'تراجع عن استقالة'} جديد (مباشر للإدارة)`,
         message: `قام الموظف ${emp.name} (${emp.code}) بتقديم طلب ${requestType === 'resignation' ? 'استقالة' : 'تراجع عن استقالة'} وموجّه مباشرة للإدارة العليا للبت والقرار.`,
         employeeId: emp.id,
@@ -200,6 +201,7 @@ export default function EmployeeResignationModule({
         id: 'notif_branch_' + newReq.id + '_' + Date.now(),
         requestId: newReq.id,
         type: 'resignation',
+        linkTab: 'resignation',
         title: `📝 طلب ${requestType === 'resignation' ? 'استقالة' : 'تراجع عن استقالة'} جديد (بانتظار مراجعتك)`,
         message: `قام الموظف ${emp.name} (${emp.code}) بتقديم طلب ${requestType === 'resignation' ? 'استقالة' : 'تراجع عن استقالة'}. يرجى مراجعة الطلب وإبداء الرأي والتعليق لإحالته للإدارة العليا.`,
         employeeId: emp.id,
@@ -212,13 +214,15 @@ export default function EmployeeResignationModule({
         branchId: reqBranchId,
       });
 
-      // 2. Informative notification to Super Admin
+      // 2. Informative notification to Super Admin (إشعار علم وإحاطة فقط)
       notificationsList.push({
         id: 'notif_admin_info_' + newReq.id + '_' + Date.now(),
         requestId: newReq.id,
         type: 'resignation',
-        title: `ℹ️ إشعار: موظف قدم طلب ${requestType === 'resignation' ? 'استقالة' : 'تراجع'} (قيد مراجعة مدير الفرع)`,
-        message: `قام الموظف ${emp.name} (${emp.code}) بتقديم طلب ${requestType === 'resignation' ? 'استقالة' : 'تراجع'}. تم إرسال الطلب لمدير الفرع لإبداء الرأي والتعليق أولاً، وسيتم تحويله للإدارة العليا للبت والقرار النهائي فور انتهاء المراجعة.`,
+        isInfoOnly: true,
+        linkTab: 'resignation',
+        title: `ℹ️ إشعار: موظف قدّم طلب ${requestType === 'resignation' ? 'استقالة' : 'تراجع'} (قيد مراجعة مدير الفرع أولاً)`,
+        message: `قام الموظف ${emp.name} (${emp.code}) بتقديم طلب ${requestType === 'resignation' ? 'استقالة' : 'تراجع'}. تم توجيه الطلب لمدير الفرع للمراجعة والرد أولاً، ولن يظهر في طلبات الإدارة العليا لاتخاذ القرار إلا بعد رد مدير الفرع.`,
         employeeId: emp.id,
         employeeName: emp.name,
         employeeCode: emp.code,
@@ -232,7 +236,6 @@ export default function EmployeeResignationModule({
 
     const updatedState = { 
       ...state, 
-      requests: [newReq, ...(state.requests || [])],
       resignationRequests: [newReq, ...(state.resignationRequests || [])],
       notifications: [...notificationsList, ...(state.notifications || [])]
     };

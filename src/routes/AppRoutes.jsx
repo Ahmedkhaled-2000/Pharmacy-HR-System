@@ -107,6 +107,7 @@ export default function AppRoutes() {
   const {
     pendingRequestsCount,
     bylawsCount,
+    resignationCount,
     notifications,
     handleMarkNotificationRead,
     handleMarkAllNotificationsRead,
@@ -630,6 +631,7 @@ export default function AppRoutes() {
             setActiveSubTab={setActiveSubTab}
             onLogout={handleLogout}
             pendingCount={pendingRequestsCount}
+            resignationCount={resignationCount}
             bylawsCount={bylawsCount}
             themeMode={themeMode}
             toggleTheme={toggleTheme}

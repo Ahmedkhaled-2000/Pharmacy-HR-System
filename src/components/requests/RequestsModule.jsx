@@ -198,7 +198,14 @@ export default function RequestsModule({
   }, [state._deletedIds]);
 
   const allRequests = useMemo(() => {
-    const list = [...(state.requests || [])];
+    const list = (state.requests || []).filter(
+      (r) =>
+        r &&
+        r.type !== 'resignation' &&
+        r.type !== 'withdraw' &&
+        r.type !== 'resignation_request' &&
+        !String(r.id || '').startsWith('res_')
+    );
     const existingIds = new Set(list.map((r) => String(r.id)));
 
     (state.leaveRequests || []).forEach((lr) => {
@@ -219,13 +226,6 @@ export default function RequestsModule({
       if (ln && !existingIds.has(String(ln.id))) {
         list.push({ ...ln, type: ln.type || 'loan' });
         existingIds.add(String(ln.id));
-      }
-    });
-
-    (state.resignationRequests || []).forEach((res) => {
-      if (res && !existingIds.has(String(res.id))) {
-        list.push({ ...res, type: 'resignation' });
-        existingIds.add(String(res.id));
       }
     });
 
