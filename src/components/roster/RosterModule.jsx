@@ -850,26 +850,26 @@ export default function RosterModule({
           <span style={{ fontSize: '24px' }}>👥</span>
         </div>
 
-        <div style={{ background: '#f0fdf4', border: '1px solid #86efac', borderRadius: '12px', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ background: 'var(--success-tint, rgba(16, 185, 129, 0.14))', border: '1px solid var(--success-border, rgba(16, 185, 129, 0.3))', borderRadius: '12px', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
-            <div style={{ fontSize: '12px', color: '#166534', fontWeight: 700 }}>جداول معتمدة</div>
-            <div style={{ fontSize: '20px', fontWeight: 800, color: '#15803d' }}>{rosterStats.approved}</div>
+            <div style={{ fontSize: '12px', color: 'var(--success)', fontWeight: 700 }}>جداول معتمدة</div>
+            <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--success)' }}>{rosterStats.approved}</div>
           </div>
           <span style={{ fontSize: '24px' }}>🟢</span>
         </div>
 
-        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '12px', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ background: 'var(--accent-tint, rgba(245, 158, 11, 0.14))', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '12px', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
-            <div style={{ fontSize: '12px', color: '#92400e', fontWeight: 700 }}>قيد المراجعة والاعتماد</div>
-            <div style={{ fontSize: '20px', fontWeight: 800, color: '#b45309' }}>{rosterStats.pending}</div>
+            <div style={{ fontSize: '12px', color: 'var(--accent)', fontWeight: 700 }}>قيد المراجعة والاعتماد</div>
+            <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--accent)' }}>{rosterStats.pending}</div>
           </div>
           <span style={{ fontSize: '24px' }}>⏳</span>
         </div>
 
-        <div style={{ background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '12px', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ background: 'var(--danger-tint, rgba(239, 68, 68, 0.14))', border: '1px solid var(--danger-border, rgba(239, 68, 68, 0.3))', borderRadius: '12px', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
-            <div style={{ fontSize: '12px', color: '#991b1b', fontWeight: 700 }}>عدم وجود جدول معتمد</div>
-            <div style={{ fontSize: '20px', fontWeight: 800, color: '#dc2626' }}>{rosterStats.none}</div>
+            <div style={{ fontSize: '12px', color: 'var(--danger)', fontWeight: 700 }}>عدم وجود جدول معتمد</div>
+            <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--danger)' }}>{rosterStats.none}</div>
           </div>
           <span style={{ fontSize: '24px' }}>❌</span>
         </div>

@@ -360,15 +360,17 @@ export default function BranchManagerView({
   // 0. Live Branch: Synchronize with state.branches to guarantee freshest data (managerId, managerCode, etc.)
   const liveBranch = useMemo(() => {
     if (!currentBranch) return null;
-    const cIdStr = String(currentBranch.id || '');
-    const cCodeStr = String(currentBranch.branchCode || currentBranch.code || '');
-    const cNameStr = String(currentBranch.name || '').trim().toLowerCase();
+    const cIdStr = String(currentBranch?.id || '');
+    const cCodeStr = String(currentBranch?.branchCode || currentBranch?.code || '');
+    const cNameStr = String(currentBranch?.name || '').trim().toLowerCase();
 
     const found = (state.branches || []).find((b) => 
-      (b.id && String(b.id) === cIdStr) ||
-      (b.branchCode && String(b.branchCode) === cCodeStr) ||
-      (b.code && String(b.code) === cCodeStr) ||
-      (b.name && String(b.name).trim().toLowerCase() === cNameStr)
+      b && (
+        (b.id && String(b.id) === cIdStr) ||
+        (b.branchCode && String(b.branchCode) === cCodeStr) ||
+        (b.code && String(b.code) === cCodeStr) ||
+        (b.name && String(b.name).trim().toLowerCase() === cNameStr)
+      )
     );
     return { ...currentBranch, ...(found || {}) };
   }, [currentBranch, state.branches]);
@@ -382,7 +384,7 @@ export default function BranchManagerView({
     const mgrId = branchToUse?.managerId || branchToUse?.manager_id || branchToUse?.managerEmpId;
     if (mgrId) {
       const mgrIdStr = String(mgrId).trim();
-      const found = (state.employees || []).find((e) => String(e.id) === mgrIdStr || String(e.code) === mgrIdStr);
+      const found = (state.employees || []).find((e) => e && (String(e.id) === mgrIdStr || String(e.code) === mgrIdStr));
       if (found) return found;
     }
 
@@ -390,7 +392,7 @@ export default function BranchManagerView({
     const mgrCode = branchToUse?.managerCode || branchToUse?.manager_code;
     if (mgrCode) {
       const mgrCodeStr = String(mgrCode).trim();
-      const found = (state.employees || []).find((e) => String(e.code) === mgrCodeStr || String(e.id) === mgrCodeStr);
+      const found = (state.employees || []).find((e) => e && (String(e.code) === mgrCodeStr || String(e.id) === mgrCodeStr));
       if (found) return found;
     }
 
@@ -398,21 +400,23 @@ export default function BranchManagerView({
     if (branchToUse?.manager && typeof branchToUse.manager === 'object') {
       const mObj = branchToUse.manager;
       const found = (state.employees || []).find((e) => 
-        (mObj.id && String(e.id) === String(mObj.id)) ||
-        (mObj.code && String(e.code) === String(mObj.code))
+        e && (
+          (mObj?.id && String(e.id) === String(mObj.id)) ||
+          (mObj?.code && String(e.code) === String(mObj.code))
+        )
       );
       if (found) return found;
     }
     if (branchToUse?.managerName) {
       const mName = String(branchToUse.managerName).trim().toLowerCase();
-      const found = (state.employees || []).find((e) => String(e.name || '').trim().toLowerCase() === mName);
+      const found = (state.employees || []).find((e) => e && String(e.name || '').trim().toLowerCase() === mName);
       if (found) return found;
     }
 
     // 4. Current logged in user
     if (state.currentUserId) {
       const curUserStr = String(state.currentUserId).trim();
-      const found = (state.employees || []).find((e) => String(e.id) === curUserStr || String(e.code) === curUserStr);
+      const found = (state.employees || []).find((e) => e && (String(e.id) === curUserStr || String(e.code) === curUserStr));
       if (found) return found;
     }
 
@@ -420,17 +424,20 @@ export default function BranchManagerView({
     const bUser = String(branchToUse?.username || '').trim().toLowerCase();
     if (bUser) {
       const found = (state.employees || []).find((e) => 
-        (e.username && String(e.username).trim().toLowerCase() === bUser) ||
-        (e.code && String(e.code).trim().toLowerCase() === bUser) ||
-        (e.phone && String(e.phone).trim() === bUser)
+        e && (
+          (e.username && String(e.username).trim().toLowerCase() === bUser) ||
+          (e.code && String(e.code).trim().toLowerCase() === bUser) ||
+          (e.phone && String(e.phone).trim() === bUser)
+        )
       );
       if (found) return found;
     }
 
     // 6. Employee with explicit manager title or role in this branch
     const mgrTitleEmp = (state.employees || []).find((e) => {
+      if (!e) return false;
       const inBranch = String(e.branchId || '') === cIdStr || 
-        (Array.isArray(e.branchesDetails) && e.branchesDetails.some((bd) => String(bd.branchId) === cIdStr));
+        (Array.isArray(e.branchesDetails) && e.branchesDetails.some((bd) => bd && String(bd.branchId) === cIdStr));
       if (!inBranch) return false;
       if (e.isBranchManager || e.isManager || e.role === 'branch_manager' || e.role === 'manager' || e.role === 'branch') return true;
       if (e.jobTitle) {
@@ -839,6 +846,23 @@ export default function BranchManagerView({
 
   // ── Calculate Manager Salary Metrics ──
   const managerSalaryMetrics = useMemo(() => {
+    if (!managerEmp || !managerEmp.id) {
+      return {
+        salary: 0,
+        workHoursPerDay: 8,
+        workDaysPerMonth: 26,
+        dailyRate: 0,
+        hourlyRate: 0,
+        totalHours: 0,
+        baseEarnings: 0,
+        totalBonus: 0,
+        totalDeduction: 0,
+        netSalary: 0,
+        shiftsCount: 0,
+        totalBreakHours: 0,
+        shiftsList: []
+      };
+    }
     const hourlyBase = parseFloat(managerEmp?.salary) || 0;
     const workHoursPerDay = parseFloat(managerEmp?.workHoursPerDay) || 8;
     const workDaysPerMonth = parseFloat(managerEmp?.workDaysPerMonth) || 26;
@@ -857,15 +881,15 @@ export default function BranchManagerView({
     const baseEarnings = Math.round(totalHours * rate * 100) / 100;
 
     const managerAdjs = (state.adjustments || []).filter(
-      (a) => (a.employeeId === managerEmp.id || a.employeeId === 'all') && matchesDateRange(a.date)
+      (a) => a && (a.employeeId === managerEmp?.id || a.employeeId === 'all') && matchesDateRange(a.date)
     );
 
     const totalBonus = managerAdjs
-      .filter((a) => a.type === 'bonus')
+      .filter((a) => a && a.type === 'bonus')
       .reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
 
     const totalDeduction = managerAdjs
-      .filter((a) => a.type === 'deduction' || a.type === 'penalty')
+      .filter((a) => a && (a.type === 'deduction' || a.type === 'penalty'))
       .reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
 
     const netSalary = Math.round((baseEarnings + totalBonus - totalDeduction) * 100) / 100;
@@ -889,10 +913,10 @@ export default function BranchManagerView({
 
   // ── Handlers ──
   const handleManagerApproveRequest = async (reqId) => {
-    let foundReq = (state.requests || []).find(r => r.id === reqId) ||
-                   (state.leaveRequests || []).find(r => r.id === reqId) ||
-                   (state.shiftSwaps || []).find(r => r.id === reqId) ||
-                   (state.loans || []).find(r => r.id === reqId);
+    let foundReq = (state.requests || []).find(r => r && r.id === reqId) ||
+                   (state.leaveRequests || []).find(r => r && r.id === reqId) ||
+                   (state.shiftSwaps || []).find(r => r && r.id === reqId) ||
+                   (state.loans || []).find(r => r && r.id === reqId);
 
     if (!foundReq) {
       showToast?.('لم يتم العثور على الطلب');
@@ -1070,10 +1094,10 @@ export default function BranchManagerView({
   };
 
   const handleManagerRejectRequest = async (reqId) => {
-    let foundReq = (state.requests || []).find(r => r.id === reqId) ||
-                   (state.leaveRequests || []).find(r => r.id === reqId) ||
-                   (state.shiftSwaps || []).find(r => r.id === reqId) ||
-                   (state.loans || []).find(r => r.id === reqId);
+    let foundReq = (state.requests || []).find(r => r && r.id === reqId) ||
+                   (state.leaveRequests || []).find(r => r && r.id === reqId) ||
+                   (state.shiftSwaps || []).find(r => r && r.id === reqId) ||
+                   (state.loans || []).find(r => r && r.id === reqId);
 
     if (!foundReq) {
       showToast?.('لم يتم العثور على الطلب');
@@ -1641,6 +1665,20 @@ export default function BranchManagerView({
     setBmEvalNotes('');
   };
 
+  if (!currentBranch) {
+    return (
+      <div className="card" style={{ padding: '36px 24px', textAlign: 'center', margin: '24px auto', maxWidth: '560px', borderRadius: '16px' }}>
+        <div style={{ fontSize: '48px', marginBottom: '12px' }}>🏢</div>
+        <h3 style={{ margin: '0 0 8px', color: 'var(--text)', fontSize: '18px' }}>لم يتم تحديد الفرع أو جاري تحميل البيانات</h3>
+        <p style={{ margin: '0 0 20px', color: 'var(--muted)', fontSize: '14px', lineHeight: '1.6' }}>
+          يرجى تسجيل الدخول بحساب الفرع أو إعادة تحميل الصفحة للوصول إلى لوحة مدير الفرع.
+        </p>
+        <button className="btn btn-primary" onClick={() => window.location.reload()} style={{ padding: '8px 20px', fontSize: '14px' }}>
+          🔄 تحديث الصفحة
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div style={{ fontFamily: "'Tajawal', sans-serif" }} className="fade-in-page">
@@ -1693,7 +1731,7 @@ export default function BranchManagerView({
               {(currentBranch?.phone || currentBranch?.phones?.[0]?.number) && (
                 <>
                   <span>•</span>
-                  <span>📞 {currentBranch.phone || currentBranch.phones[0].number}</span>
+                  <span>📞 {currentBranch.phone || currentBranch.phones?.[0]?.number}</span>
                 </>
               )}
             </p>
@@ -1846,7 +1884,8 @@ export default function BranchManagerView({
               <p style={{ color: 'var(--muted)', textAlign: 'center', padding: '20px' }}>لا يوجد موظفين مسجلين بهذا الفرع حتى الآن.</p>
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: isMobileScreen ? '1fr' : 'repeat(auto-fill, minmax(260px, 1fr))', gap: isMobileScreen ? '10px' : '14px' }}>
-                {branchEmployees.map((emp) => {
+                {branchEmployees.filter(Boolean).map((emp) => {
+                  if (!emp || !emp.id) return null;
                   const activeShift = state.activeShifts?.[emp.id];
                   const cIdStr = String(currentBranch?.id || '');
                   const activeInThisBranch = activeShift && (String(activeShift.branchId || emp.branchId) === cIdStr);
@@ -1854,11 +1893,11 @@ export default function BranchManagerView({
 
                   const todayStrVal = getRealTodayStr();
                   const todayShiftsInThisBranch = (state.shifts || []).filter(
-                    (s) => String(s.employeeId) === String(emp.id) && s.date === todayStrVal && (String(s.branchId || emp.branchId) === cIdStr)
+                    (s) => s && String(s.employeeId) === String(emp.id) && s.date === todayStrVal && (String(s.branchId || emp.branchId) === cIdStr)
                   );
                   const allLeaves = [...(state.leaveRequests || []), ...(state.requests || [])];
                   const onLeaveToday = allLeaves.some(
-                    (r) => String(r.employeeId) === String(emp.id) && (r.status === 'approved' || r.adminApproved) && (r.type === 'leave' || r.type === 'leave_request') && r.startDate <= todayStrVal && r.endDate >= todayStrVal
+                    (r) => r && String(r.employeeId) === String(emp.id) && (r.status === 'approved' || r.adminApproved) && (r.type === 'leave' || r.type === 'leave_request') && r.startDate <= todayStrVal && r.endDate >= todayStrVal
                   );
 
                   const daySched = getEmployeeDaySchedule(emp.id, todayStrVal, state);
@@ -1885,7 +1924,7 @@ export default function BranchManagerView({
                       statusDotClass = 'online';
                     }
                   } else if (activeInOtherBranch) {
-                    const otherBranch = (state.branches || []).find((b) => String(b.id) === String(activeShift.branchId));
+                    const otherBranch = (state.branches || []).find((b) => b && String(b.id) === String(activeShift.branchId));
                     statusLabel = `🏢 في وردية بفرع آخر (${otherBranch ? otherBranch.name : 'فرع آخر'})`;
                     statusBg = 'var(--surface-muted)';
                     statusColor = 'var(--muted)';
@@ -2252,9 +2291,9 @@ export default function BranchManagerView({
 
       {/* ── Request Details & Preview Modal for Branch Manager ── */}
       {previewModalReq && (() => {
-        const empObj = (state.employees || []).find(e => String(e.id) === String(previewModalReq.employeeId));
-        const branchObj = (state.branches || []).find(b => b.id === (previewModalReq.branchId || empObj?.branchId));
-        const targetEmpObj = (state.employees || []).find(e => String(e.id) === String(previewModalReq.targetEmpId || previewModalReq.targetEmployeeId || previewModalReq.peerEmployeeId));
+        const empObj = (state.employees || []).find(e => e && String(e.id) === String(previewModalReq.employeeId));
+        const branchObj = (state.branches || []).find(b => b && b.id === (previewModalReq.branchId || empObj?.branchId));
+        const targetEmpObj = (state.employees || []).find(e => e && String(e.id) === String(previewModalReq.targetEmpId || previewModalReq.targetEmployeeId || previewModalReq.peerEmployeeId));
 
         const calculateLeaveDays = () => {
           if (previewModalReq.daysCount) return previewModalReq.daysCount;
@@ -3465,7 +3504,7 @@ export default function BranchManagerView({
                 </div>
 
                 {(() => {
-                  const roster = (state.rosters || []).find((r) => r.employeeId === previewRosterEmp.id && r.month === selectedMonth);
+                  const roster = (state.rosters || []).find((r) => r && r.employeeId === previewRosterEmp?.id && r.month === selectedMonth);
                   if (!roster || !roster.schedule) {
                     return <p style={{ color: 'var(--muted)', textAlign: 'center', padding: '20px' }}>لم يتم إدخال جدول شهري لهذا الموظف عن شهر {selectedMonth}.</p>;
                   }
@@ -3566,15 +3605,15 @@ export default function BranchManagerView({
                 </tr>
               </thead>
               <tbody>
-                {(state.adjustments || []).filter((a) => a.employeeId === managerEmp.id && matchesDateRange(a.date)).length === 0 ? (
+                {(state.adjustments || []).filter((a) => a && a.employeeId === managerEmp?.id && matchesDateRange(a.date)).length === 0 ? (
                   <tr><td colSpan="4" style={{ textAlign: 'center', color: 'var(--muted)', padding: '20px' }}>لا توجد مكافآت أو خصومات مسجلة باسمك في هذه الفترة.</td></tr>
                 ) : (
-                  (state.adjustments || []).filter((a) => a.employeeId === managerEmp.id && matchesDateRange(a.date)).map((a) => (
-                    <tr key={a.id}>
-                      <td>{a.date}</td>
-                      <td><span className={`badge ${a.type === 'bonus' ? 'badge-success' : 'badge-danger'}`}>{a.type === 'bonus' ? 'مكافأة' : 'خصم'}</span></td>
-                      <td style={{ fontWeight: '700' }}>{a.amount} ج.م</td>
-                      <td>{a.reason || '—'}</td>
+                  (state.adjustments || []).filter((a) => a && a.employeeId === managerEmp?.id && matchesDateRange(a.date)).map((a) => (
+                    <tr key={a?.id || Math.random()}>
+                      <td>{a?.date}</td>
+                      <td><span className={`badge ${a?.type === 'bonus' ? 'badge-success' : 'badge-danger'}`}>{a?.type === 'bonus' ? 'مكافأة' : 'خصم'}</span></td>
+                      <td style={{ fontWeight: '700' }}>{a?.amount} ج.م</td>
+                      <td>{a?.reason || '—'}</td>
                     </tr>
                   ))
                 )}
@@ -4424,9 +4463,9 @@ export default function BranchManagerView({
             const map = new Map();
             allLeavesList.forEach(lr => {
               if (!lr) return;
-              const lrEmp = (state.employees || []).find(e => String(e.id) === String(lr.employeeId) || (lr.employeeCode && String(e.code) === String(lr.employeeCode)));
+              const lrEmp = (state.employees || []).find(e => e && (String(e.id) === String(lr.employeeId) || (lr.employeeCode && String(e.code) === String(lr.employeeCode))));
               if (isBranchManagerEmp(lrEmp) || (managerEmp?.id && String(lr.employeeId) === String(managerEmp.id))) return;
-              const isMatchBranch = branchEmployees.some(e => String(e.id) === String(lr.employeeId));
+              const isMatchBranch = branchEmployees.some(e => e && String(e.id) === String(lr.employeeId));
               if (!isMatchBranch) return;
               if (leaveEmpFilter !== 'all' && String(lr.employeeId) !== String(leaveEmpFilter)) return;
               if (leaveStatusFilter === 'approved' && !(lr.status === 'approved' || lr.adminApproved)) return;
@@ -4447,7 +4486,7 @@ export default function BranchManagerView({
                   </div>
                 ) : (
                   displayedLeaves.map((lr, idx) => {
-                    const empObj = branchEmployees.find(e => String(e.id) === String(lr.employeeId)) || (state.employees || []).find(e => String(e.id) === String(lr.employeeId));
+                    const empObj = branchEmployees.find(e => e && String(e.id) === String(lr.employeeId)) || (state.employees || []).find(e => e && String(e.id) === String(lr.employeeId));
                     const days = lr.daysCount || lr.days || 1;
                     const leaveTypeLabel = lr.leaveType === 'annual' ? 'إجازة سنوية' : lr.leaveType === 'sick' ? 'إجازة مرضية' : lr.leaveType === 'unpaid' ? 'بدون أجر' : lr.leaveType === 'casual' ? 'إجازة عارضة' : 'إجازة اعتيادية';
 
@@ -4538,7 +4577,7 @@ export default function BranchManagerView({
                       <tr><td colSpan="9" style={{ textAlign: 'center', padding: '24px', color: 'var(--muted)' }}>لا توجد طلبات إجازات مسجلة تطابق خيارات البحث.</td></tr>
                     ) : (
                       displayedLeaves.map((lr, idx) => {
-                        const empObj = branchEmployees.find(e => String(e.id) === String(lr.employeeId)) || (state.employees || []).find(e => String(e.id) === String(lr.employeeId));
+                        const empObj = branchEmployees.find(e => e && String(e.id) === String(lr.employeeId)) || (state.employees || []).find(e => e && String(e.id) === String(lr.employeeId));
                         const days = lr.daysCount || lr.days || 1;
                         const leaveTypeLabel = lr.leaveType === 'annual' ? 'إجازة سنوية' : lr.leaveType === 'sick' ? 'إجازة مرضية' : lr.leaveType === 'unpaid' ? 'بدون أجر' : lr.leaveType === 'casual' ? 'إجازة عارضة' : 'إجازة اعتيادية';
 
@@ -5365,6 +5404,7 @@ export default function BranchManagerView({
                   <option value="">-- اختر موظف من طاقم الفرع --</option>
                   {branchEmployees
                     .filter(e => {
+                      if (!e) return false;
                       if (currentBranch?.managerId && String(e.id) === String(currentBranch.managerId)) return false;
                       if (currentBranch?.managerCode && String(e.code) === String(currentBranch.managerCode)) return false;
                       if (state.currentUserId && String(e.id) === String(state.currentUserId)) return false;
@@ -5381,7 +5421,7 @@ export default function BranchManagerView({
 
               {/* Immediate Job Title & Employee Info Card (Requirement 28) */}
               {bmEvalEmpId && (() => {
-                const selEmp = branchEmployees.find((e) => String(e.id) === String(bmEvalEmpId)) || (state.employees || []).find((e) => String(e.id) === String(bmEvalEmpId));
+                const selEmp = branchEmployees.find((e) => e && String(e.id) === String(bmEvalEmpId)) || (state.employees || []).find((e) => e && String(e.id) === String(bmEvalEmpId));
                 const totalSc = bmEvalItems.reduce((acc, i) => acc + (parseFloat(i.score) || 0), 0);
                 const maxSc = bmEvalItems.reduce((acc, i) => acc + (parseFloat(i.maxScore) || 20), 0);
                 const pct = maxSc > 0 ? Math.round((totalSc / maxSc) * 100) : 0;

@@ -1036,17 +1036,17 @@ export default function Dashboard({
             style={{
               padding: '24px',
               marginBottom: '28px',
-              border: '1px solid #fed7aa',
-              background: 'linear-gradient(180deg, #fffaf5 0%, #ffffff 100%)',
+              border: '1px solid var(--border)',
+              background: 'var(--surface)',
               borderRadius: '18px',
-              boxShadow: '0 10px 30px -5px rgba(234, 88, 12, 0.08), 0 2px 6px rgba(0, 0, 0, 0.02)'
+              boxShadow: 'var(--shadow)'
             }}
           >
             
             {/* Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', flexWrap: 'wrap', gap: '12px' }}>
               <div>
-                <h4 style={{ margin: 0, fontSize: '17px', color: '#c2410c', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '800' }}>
+                <h4 style={{ margin: 0, fontSize: '17px', color: 'var(--accent, #ea580c)', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '800' }}>
                   🏃‍♂️ موظفو اليوم المتأخرون عن مواعيد العمل المجدولة ({todayDate})
                 </h4>
                 <div style={{ fontSize: '13px', color: 'var(--accent, #d97706)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>

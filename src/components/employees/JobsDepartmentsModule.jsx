@@ -114,37 +114,37 @@ export default function JobsDepartmentsModule({
 
         {/* Quick Statistics Banner */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '14px' }}>
-          <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '14px' }}>
+          <div style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)', borderRadius: '12px', padding: '14px' }}>
             <span style={{ fontSize: '12px', color: 'var(--muted)' }}>إجمالي الأقسام المعرفة</span>
-            <div style={{ fontSize: '20px', fontWeight: 'bold', color: 'var(--primary-dark)', marginTop: '4px' }}>
+            <div style={{ fontSize: '20px', fontWeight: 'bold', color: 'var(--primary)', marginTop: '4px' }}>
               🏢 {departmentsList.length} قسم
             </div>
           </div>
 
-          <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '14px' }}>
+          <div style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)', borderRadius: '12px', padding: '14px' }}>
             <span style={{ fontSize: '12px', color: 'var(--muted)' }}>إجمالي الوظائف المعرفة</span>
-            <div style={{ fontSize: '20px', fontWeight: 'bold', color: 'var(--primary-dark)', marginTop: '4px' }}>
+            <div style={{ fontSize: '20px', fontWeight: 'bold', color: 'var(--primary)', marginTop: '4px' }}>
               💼 {totalJobs} وظيفة
             </div>
           </div>
 
-          <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '12px', padding: '14px' }}>
-            <span style={{ fontSize: '12px', color: '#166534' }}>👔 وظائف إدارية (بدل إدارة)</span>
-            <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#15803d', marginTop: '4px' }}>
+          <div style={{ background: 'var(--success-tint, rgba(16, 185, 129, 0.14))', border: '1px solid var(--success-border, rgba(16, 185, 129, 0.3))', borderRadius: '12px', padding: '14px' }}>
+            <span style={{ fontSize: '12px', color: 'var(--success)' }}>👔 وظائف إدارية (بدل إدارة)</span>
+            <div style={{ fontSize: '20px', fontWeight: 'bold', color: 'var(--success)', marginTop: '4px' }}>
               {mgmtJobs} وظيفة
             </div>
           </div>
 
-          <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '12px', padding: '14px' }}>
-            <span style={{ fontSize: '12px', color: '#1e40af' }}>🏬 كوادر تشغيلية وفنية</span>
-            <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#1d4ed8', marginTop: '4px' }}>
+          <div style={{ background: 'var(--primary-light, rgba(59, 130, 246, 0.14))', border: '1px solid rgba(59, 130, 246, 0.3)', borderRadius: '12px', padding: '14px' }}>
+            <span style={{ fontSize: '12px', color: 'var(--primary)' }}>🏬 كوادر تشغيلية وفنية</span>
+            <div style={{ fontSize: '20px', fontWeight: 'bold', color: 'var(--primary)', marginTop: '4px' }}>
               {operationalJobs} كادر
             </div>
           </div>
 
-          <div style={{ background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: '12px', padding: '14px' }}>
-            <span style={{ fontSize: '12px', color: '#6b21a8' }}>👥 الموظفون المسجلون</span>
-            <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#7e22ce', marginTop: '4px' }}>
+          <div style={{ background: 'var(--accent-tint, rgba(245, 158, 11, 0.14))', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '12px', padding: '14px' }}>
+            <span style={{ fontSize: '12px', color: 'var(--accent)' }}>👥 الموظفون المسجلون</span>
+            <div style={{ fontSize: '20px', fontWeight: 'bold', color: 'var(--accent)', marginTop: '4px' }}>
               {allEmps.length} موظف
             </div>
           </div>
@@ -152,13 +152,13 @@ export default function JobsDepartmentsModule({
 
         {/* Collapsible Departments Management Card */}
         {showDeptSection && (
-          <div style={{ background: '#f0fdf4', border: '1.5px solid #86efac', borderRadius: '14px', padding: '18px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div style={{ background: 'var(--surface)', border: '1.5px solid var(--primary)', borderRadius: '14px', padding: '18px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
               <div>
-                <h4 style={{ margin: 0, color: '#166534', fontFamily: 'Cairo', fontSize: '16px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <h4 style={{ margin: 0, color: 'var(--primary)', fontFamily: 'Cairo', fontSize: '16px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <span>🏢</span> إدارة وهيكلة الأقسام بالصيدلية
                 </h4>
-                <p style={{ margin: '4px 0 0 0', color: '#15803d', fontSize: '12.5px' }}>
+                <p style={{ margin: '4px 0 0 0', color: 'var(--muted)', fontSize: '12.5px' }}>
                   أضف أو عدل أو احذف الأقسام لتظهر في القوائم المنسدلة عند تسجيل الوظائف وملفات الموظفين.
                 </p>
               </div>
@@ -170,7 +170,7 @@ export default function JobsDepartmentsModule({
                   placeholder="اسم القسم الجديد (مثال: التسويق)"
                   value={newDeptInput}
                   onChange={(e) => setNewDeptInput(e.target.value)}
-                  style={{ flex: 1, padding: '8px 12px', borderRadius: '8px', border: '1px solid #86efac', background: '#fff' }}
+                  style={{ flex: 1, padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface-muted)', color: 'var(--text)' }}
                 />
                 <button
                   type="button"
@@ -224,14 +224,14 @@ export default function JobsDepartmentsModule({
                   <div
                     key={dept}
                     style={{
-                      background: '#fff',
-                      border: '1px solid #cbd5e1',
+                      background: 'var(--surface)',
+                      border: '1px solid var(--border)',
                       borderRadius: '10px',
                       padding: '10px 14px',
                       display: 'flex',
                       flexDirection: 'column',
                       gap: '6px',
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                      boxShadow: 'var(--shadow-sm)'
                     }}
                   >
                     {isEditing ? (
@@ -427,23 +427,23 @@ export default function JobsDepartmentsModule({
                         💼 {j.title}
                       </td>
                       <td style={{ padding: '12px' }}>
-                        <span style={{ background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                        <span style={{ background: 'var(--primary-light, rgba(13, 148, 136, 0.15))', color: 'var(--primary)', border: '1px solid var(--border)', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                           🏢 {j.department || 'عام / غير محدد'}
                         </span>
                       </td>
                       <td style={{ padding: '12px' }}>
                         {isMgmt ? (
-                          <span style={{ background: '#dcfce7', color: '#166534', border: '1px solid #86efac', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                          <span style={{ background: 'var(--success-tint, rgba(16, 185, 129, 0.15))', color: 'var(--success)', border: '1px solid var(--success-border, rgba(16, 185, 129, 0.3))', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                             👔 وظيفة إدارية (تمنح بدل إدارة)
                           </span>
                         ) : (
-                          <span style={{ background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                          <span style={{ background: 'var(--surface-muted)', color: 'var(--text-muted)', border: '1px solid var(--border)', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                             🏬 كادر تشغيلي / فني
                           </span>
                         )}
                       </td>
                       <td style={{ padding: '12px', textAlign: 'center' }}>
-                        <span style={{ background: assignedEmps.length > 0 ? '#e0f2fe' : '#f1f5f9', color: assignedEmps.length > 0 ? '#0369a1' : '#94a3b8', padding: '3px 8px', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold' }}>
+                        <span style={{ background: assignedEmps.length > 0 ? 'var(--primary-light)' : 'var(--surface-muted)', color: assignedEmps.length > 0 ? 'var(--primary)' : 'var(--muted)', border: '1px solid var(--border)', padding: '3px 8px', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold' }}>
                           {assignedEmps.length} موظف
                         </span>
                       </td>

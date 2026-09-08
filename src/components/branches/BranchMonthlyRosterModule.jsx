@@ -738,13 +738,13 @@ export default function BranchMonthlyRosterModule({
 
   // Selected Branch Object
   const currentBranch = useMemo(() => {
-    return branches.find(b => String(b.id) === String(selectedBranchId)) || branches[0] || null;
+    return (branches || []).find(b => b && String(b.id) === String(selectedBranchId)) || (branches || [])[0] || null;
   }, [branches, selectedBranchId]);
 
   // Branch Employees (primary branch or secondary branchDetails, excluding Branch Manager when in branch manager mode)
   const branchEmployees = useMemo(() => {
     if (!currentBranch) return [];
-    const bIdStr = String(currentBranch.id);
+    const bIdStr = String(currentBranch?.id || '');
     return employees.filter(emp => {
       if (!isEmployeeActive(emp)) return false;
 
@@ -813,7 +813,7 @@ export default function BranchMonthlyRosterModule({
     if (!currentBranch) return new Map();
     const map = new Map();
     branchEmployees.forEach(emp => {
-      let r = getResolvedEmployeeRoster(emp, currentBranch.id, state, selectedMonth);
+      let r = getResolvedEmployeeRoster(emp, currentBranch?.id, state, selectedMonth);
 
       // Direct fallback matching: align with BranchManagerView's branch-roster tab logic
       if (!r || !r.schedule) {

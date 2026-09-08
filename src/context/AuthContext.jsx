@@ -99,7 +99,7 @@ export function AuthProvider({ children }) {
 
     // 2. إذا كان الفرع المسجل غير موجود في قائمة الفروع بعد التصفير
     if (currentBranch && latestState.branches) {
-      const exists = (latestState.branches || []).some(b => String(b.id) === String(currentBranch.id) || String(b.branchCode) === String(currentBranch.branchCode));
+      const exists = (latestState.branches || []).some(b => b && (String(b.id) === String(currentBranch?.id) || String(b.branchCode) === String(currentBranch?.branchCode)));
       if (!exists) {
         handleLogout();
         return;

@@ -164,20 +164,20 @@ export default function AppRoutes() {
   // Domain Handlers
   const handleSaveBranch = async (branchData) => {
     const currentBranches = state.branches || [];
-    const exists = currentBranches.some((b) => b.id === branchData.id);
+    const exists = currentBranches.some((b) => b && b.id === branchData.id);
 
     if (branchData.username && String(branchData.username).trim()) {
       const cleanUsername = String(branchData.username).trim().toLowerCase();
       const duplicateBranch = currentBranches.find(
-        (b) => b.id !== branchData.id && (b.username && String(b.username).trim().toLowerCase() === cleanUsername)
+        (b) => b && b.id !== branchData.id && (b.username && String(b.username).trim().toLowerCase() === cleanUsername)
       );
       if (duplicateBranch) {
         showToast(`⚠️ خطأ: اسم المستخدم (${branchData.username}) مستخدم بالفعل لفرع "${duplicateBranch.name}"!`);
         return;
       }
       const duplicateEmp = (state.employees || []).find(
-        (e) => (e.code && String(e.code).trim().toLowerCase() === cleanUsername) ||
-               (e.username && String(e.username).trim().toLowerCase() === cleanUsername)
+        (e) => e && ((e.code && String(e.code).trim().toLowerCase() === cleanUsername) ||
+               (e.username && String(e.username).trim().toLowerCase() === cleanUsername))
       );
       if (duplicateEmp) {
         showToast(`⚠️ خطأ: اسم المستخدم (${branchData.username}) مستخدم بالفعل ككود للموظف "${duplicateEmp.name}" (كود: ${duplicateEmp.code})!`);
@@ -188,7 +188,7 @@ export default function AppRoutes() {
     const performSaveBranch = async () => {
       let updatedBranches;
       if (exists) {
-        updatedBranches = currentBranches.map((b) => (b.id === branchData.id ? branchData : b));
+        updatedBranches = currentBranches.map((b) => (b && b.id === branchData.id ? branchData : b));
       } else {
         updatedBranches = [...currentBranches, branchData];
       }
@@ -599,10 +599,10 @@ export default function AppRoutes() {
                 ? { name: 'المالك (Owner)', jobTitle: 'مالك المنظومة والمشرف العام', code: 'OWNER', isOwner: true }
                 : authRole === 'branch'
                 ? {
-                    name: (state.employees || []).find((e) => e.id === currentBranch?.managerId)?.name || (currentBranch?.name ? `مدير فرع ${currentBranch.name}` : 'مدير الفرع'),
-                    jobTitle: (state.employees || []).find((e) => e.id === currentBranch?.managerId)?.jobTitle || 'مدير فرع',
-                    code: (state.employees || []).find((e) => e.id === currentBranch?.managerId)?.code || 'MGR',
-                    photoUrl: (state.employees || []).find((e) => e.id === currentBranch?.managerId)?.photoUrl || ''
+                    name: (state.employees || []).find((e) => e && e.id === currentBranch?.managerId)?.name || (currentBranch?.name ? `مدير فرع ${currentBranch.name}` : 'مدير الفرع'),
+                    jobTitle: (state.employees || []).find((e) => e && e.id === currentBranch?.managerId)?.jobTitle || 'مدير فرع',
+                    code: (state.employees || []).find((e) => e && e.id === currentBranch?.managerId)?.code || 'MGR',
+                    photoUrl: (state.employees || []).find((e) => e && e.id === currentBranch?.managerId)?.photoUrl || ''
                   }
                 : { name: 'الإدارة العليا', jobTitle: 'Super Admin', code: 'ADMIN' }
             }
@@ -616,7 +616,7 @@ export default function AppRoutes() {
             themeMode={themeMode}
             toggleTheme={toggleTheme}
             adminFilterMode={adminFilterMode}
-            setAdminFilterMode={setAdminFilterMode}
+            setFilterMode={setAdminFilterMode}
             monthPicker={monthPicker}
             setMonthPicker={setMonthPicker}
             adminCustomFrom={adminCustomFrom}
@@ -626,7 +626,7 @@ export default function AppRoutes() {
             onExportExcel={
               authRole === 'branch'
                 ? () => {
-                    const mgrEmp = (state.employees || []).find((e) => e.id === currentBranch?.managerId) || (state.employees || []).find((e) => e.branchId === currentBranch?.id);
+                    const mgrEmp = (state.employees || []).find((e) => e && e.id === currentBranch?.managerId) || (state.employees || []).find((e) => e && e.branchId === currentBranch?.id);
                     if (mgrEmp) exportEmpExcel(mgrEmp.id, 'month');
                     else exportAllPayrollExcel();
                   }
@@ -658,7 +658,7 @@ export default function AppRoutes() {
                   filterFn={currentFilterFn}
                   getEmpPermission={getEmpPermission}
                   onExportExcel={() => {
-                    const mgrEmp = (state.employees || []).find((e) => e.id === currentBranch?.managerId) || (state.employees || []).find((e) => e.branchId === currentBranch?.id);
+                    const mgrEmp = (state.employees || []).find((e) => e && e.id === currentBranch?.managerId) || (state.employees || []).find((e) => e && e.branchId === currentBranch?.id);
                     if (mgrEmp) exportEmpExcel(mgrEmp.id, 'month');
                     else exportAllPayrollExcel();
                   }}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import AttendancePunchesModal from './AttendancePunchesModal';
 import { recalculateEmployeeCycleLateness } from '../../utils/latePenaltyEngine';
 import { getEmpDisplayName, isEmployeeActive, getEmployeeManualPunchesCount } from '../../utils/formatters';
@@ -64,7 +64,7 @@ export default function AttendanceModule({
       if (emp.branchesDetails && emp.branchesDetails.some((bd) => String(bd.branchId) === String(manualFilterBranchId))) return true;
       return false;
     });
-  }, [employees, manualFilterBranchId]);
+  }, [state.employees, manualFilterBranchId]);
 
   const handleAddManualPunch = async (e) => {
     e.preventDefault();

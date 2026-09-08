@@ -345,3 +345,104 @@ body, button, input, select, textarea {
 body.is-desktop-mode, html.is-desktop-app {
   overflow-x: hidden;
 }
+
+/* ── 12. محرك التوافق الكامل للوضع الداكن المكتبي (Universal Windows 11 Dark Mode Adaptive Engine) ── */
+/* يضمن ضبط كافة البطاقات والحاويات والقوائم السفلية والفرعية تحت الوضع الداكن دون أي بقع بيضاء فاقعة */
+[data-theme='dark'] [style*="#f0fdf4"],
+[data-theme='dark'] [style*="#dcfce7"],
+[data-theme='dark'] [style*="#bbf7d0"] {
+  background: rgba(16, 185, 129, 0.14) !important;
+  color: #34d399 !important;
+  border-color: rgba(16, 185, 129, 0.28) !important;
+}
+
+[data-theme='dark'] [style*="#fffbeb"],
+[data-theme='dark'] [style*="#fef3c7"],
+[data-theme='dark'] [style*="#fde68a"] {
+  background: rgba(245, 158, 11, 0.14) !important;
+  color: #fbbf24 !important;
+  border-color: rgba(245, 158, 11, 0.28) !important;
+}
+
+[data-theme='dark'] [style*="#fef2f2"],
+[data-theme='dark'] [style*="#fee2e2"],
+[data-theme='dark'] [style*="#fca5a5"],
+[data-theme='dark'] [style*="#fecaca"] {
+  background: rgba(239, 68, 68, 0.15) !important;
+  color: #f87171 !important;
+  border-color: rgba(239, 68, 68, 0.28) !important;
+}
+
+[data-theme='dark'] [style*="#eff6ff"],
+[data-theme='dark'] [style*="#dbeafe"],
+[data-theme='dark'] [style*="#bfdbfe"],
+[data-theme='dark'] [style*="#e0f2fe"],
+[data-theme='dark'] [style*="#bae6fd"] {
+  background: rgba(59, 130, 246, 0.14) !important;
+  color: #60a5fa !important;
+  border-color: rgba(59, 130, 246, 0.28) !important;
+}
+
+[data-theme='dark'] [style*="#faf5ff"],
+[data-theme='dark'] [style*="#f3e8ff"],
+[data-theme='dark'] [style*="#e9d5ff"] {
+  background: rgba(168, 85, 247, 0.14) !important;
+  color: #c084fc !important;
+  border-color: rgba(168, 85, 247, 0.28) !important;
+}
+
+[data-theme='dark'] [style*="#f8fafc"],
+[data-theme='dark'] [style*="#f1f5f9"] {
+  background: var(--surface-muted) !important;
+  border-color: var(--border) !important;
+  color: var(--text) !important;
+}
+
+[data-theme='dark'] [style*="#fffaf5"] {
+  background: var(--surface) !important;
+  border-color: var(--border) !important;
+}
+
+/* تصحيح النصوص الداكنة لتكون عالية التباين ومريحة للعين في الوضع الداكن */
+[data-theme='dark'] [style*="color: #166534"],
+[data-theme='dark'] [style*="color: #15803d"],
+[data-theme='dark'] [style*="color:#166534"],
+[data-theme='dark'] [style*="color:#15803d"] {
+  color: #34d399 !important;
+}
+
+[data-theme='dark'] [style*="color: #92400e"],
+[data-theme='dark'] [style*="color: #b45309"],
+[data-theme='dark'] [style*="color:#92400e"],
+[data-theme='dark'] [style*="color:#b45309"] {
+  color: #fbbf24 !important;
+}
+
+[data-theme='dark'] [style*="color: #991b1b"],
+[data-theme='dark'] [style*="color: #dc2626"],
+[data-theme='dark'] [style*="color:#991b1b"],
+[data-theme='dark'] [style*="color:#dc2626"] {
+  color: #f87171 !important;
+}
+
+[data-theme='dark'] [style*="color: #1e40af"],
+[data-theme='dark'] [style*="color: #1d4ed8"],
+[data-theme='dark'] [style*="color:#1e40af"],
+[data-theme='dark'] [style*="color:#1d4ed8"],
+[data-theme='dark'] [style*="color: #0369a1"],
+[data-theme='dark'] [style*="color:#0369a1"] {
+  color: #60a5fa !important;
+}
+
+[data-theme='dark'] [style*="color: #6b21a8"],
+[data-theme='dark'] [style*="color: #7e22ce"],
+[data-theme='dark'] [style*="color:#6b21a8"],
+[data-theme='dark'] [style*="color:#7e22ce"] {
+  color: #c084fc !important;
+}
+
+[data-theme='dark'] [style*="color: #c2410c"],
+[data-theme='dark'] [style*="color:#c2410c"] {
+  color: #fb923c !important;
+}
+
