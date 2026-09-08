@@ -35,8 +35,7 @@
     {
       "provider": "github",
       "owner": "Ahmedkhaled-2000",
-      "repo": "Pharmacy-HR-System",
-      "releaseType": "release"
+      "repo": "Pharmacy-HR-System"
     }
   ]
 }

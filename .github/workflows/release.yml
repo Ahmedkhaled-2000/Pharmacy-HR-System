@@ -20,16 +20,20 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Build and Publish Electron App
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run release
+      - name: Build Web Assets
+        run: npm run build:electron
+
+      - name: Build Windows Installer
+        run: npx electron-builder --win
+
+      - name: Verify Build Output
+        run: dir release
 
       - name: Publish Release to GitHub
         uses: softprops/action-gh-release@v2
