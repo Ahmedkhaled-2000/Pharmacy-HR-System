@@ -34,6 +34,7 @@ const AccountsSystemView = lazy(() => import('../components/accounts/AccountsSys
 const PublicCandidateApplyPortal = lazy(() => import('../components/recruitment/PublicCandidateApplyPortal'));
 const InterviewerEvaluationPortal = lazy(() => import('../components/recruitment/InterviewerEvaluationPortal'));
 const ElectronicKioskView = lazy(() => import('../components/kiosk/ElectronicKioskView'));
+import SystemLockScreen from '../components/common/SystemLockScreen';
 
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
@@ -49,6 +50,15 @@ import { arabicMonthLabel, fmt } from '../utils/formatters';
 export default function AppRoutes() {
   const location = useLocation();
   const [selectedRosterBranchId, setSelectedRosterBranchId] = useState('');
+
+  // حالة إيقاف النظام مؤقتاً (Scroll Lock)
+  const [isSystemLocked, setIsSystemLocked] = useState(() => {
+    try {
+      return sessionStorage.getItem('app_system_locked') === 'true';
+    } catch {
+      return false;
+    }
+  });
 
   const {
     themeMode,
@@ -144,6 +154,33 @@ export default function AppRoutes() {
 
   // Run 23:59 Daily Digest Background Automated Cron
   useDailyDigestCron();
+
+  // تفعيل إيقاف وقفل النظام مؤقتاً عبر زر Scroll Lock أو حدث app:lock-system
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'ScrollLock' || e.code === 'ScrollLock' || e.keyCode === 145) {
+        e.preventDefault();
+        if (authRole && authRole !== 'none') {
+          setIsSystemLocked(true);
+          try { sessionStorage.setItem('app_system_locked', 'true'); } catch {}
+        }
+      }
+    };
+
+    const handleLockEvent = () => {
+      if (authRole && authRole !== 'none') {
+        setIsSystemLocked(true);
+        try { sessionStorage.setItem('app_system_locked', 'true'); } catch {}
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('app:lock-system', handleLockEvent);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('app:lock-system', handleLockEvent);
+    };
+  }, [authRole]);
 
   // Guarantee null-safe arrays for all child components and modules
   const sanitizedState = useMemo(() => {
@@ -519,6 +556,7 @@ export default function AppRoutes() {
               saveState={saveState}
               showToast={showToast}
               computeGrandPayroll={computeGrandPayroll}
+              authRole={authRole}
             />
           </Suspense>
         </ErrorBoundary>
@@ -1210,6 +1248,26 @@ export default function AppRoutes() {
             )}
           </DesktopLayout>
         )
+      )}
+
+      {/* ── System Temporary Lock Overlay (Scroll Lock) ── */}
+      {isSystemLocked && authRole && authRole !== 'none' && (
+        <SystemLockScreen
+          authRole={authRole}
+          currentBranch={currentBranch}
+          currentEmpUser={currentEmpUser}
+          state={state}
+          onUnlock={() => {
+            setIsSystemLocked(false);
+            try { sessionStorage.removeItem('app_system_locked'); } catch {}
+          }}
+          onLogout={() => {
+            setIsSystemLocked(false);
+            try { sessionStorage.removeItem('app_system_locked'); } catch {}
+            handleLogout();
+          }}
+          themeMode={themeMode}
+        />
       )}
     </div>
   );

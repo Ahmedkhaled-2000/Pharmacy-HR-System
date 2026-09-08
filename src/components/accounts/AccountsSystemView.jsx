@@ -24,6 +24,7 @@ import NewCashierShiftModal from './NewCashierShiftModal';
 import AiJournalPromptModal from './AiJournalPromptModal';
 import AiAuditRadarModal from './AiAuditRadarModal';
 import ZeroOutAccountsModal from './ZeroOutAccountsModal';
+import AccountsLoginScreen from './AccountsLoginScreen';
 
 // Default Seeds
 import {
@@ -53,7 +54,43 @@ export default function AccountsSystemView({
   themeMode = 'light',
   toggleTheme,
   computeGrandPayroll,
+  authRole = 'admin',
 }) {
+  // 1. فحص هل المستخدم الحالي هو المالك (Owner)
+  const isOwner = authRole === 'owner' ||
+    (typeof localStorage !== 'undefined' && localStorage.getItem('app_auth_role') === 'owner') ||
+    (typeof localStorage !== 'undefined' && localStorage.getItem('app_owner_authenticated') === 'true') ||
+    (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('app_owner_authenticated') === 'true');
+
+  // حالة تسجيل دخول منظومة الحسابات
+  const [isAccountsUnlocked, setIsAccountsUnlocked] = useState(() => {
+    // إذا كان المستخدم هو المالك: الدخول فوري ومباشر دون مطالبة بكلمة مرور الحسابات
+    if (isOwner) return true;
+    // إذا تم إلغاء تفعيل قفل الحسابات في إعدادات المؤسسة
+    if (state?.orgSettings?.accountsRequireLogin === false) return true;
+    // التحقق من فتح الجلسة مسبقاً في نفس جلسة التصفح
+    try {
+      return sessionStorage.getItem('accounts_session_unlocked') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  // تحديث حالة الفك تلقائياً إذا تحول المستخدم إلى مالك
+  useEffect(() => {
+    if (isOwner) {
+      setIsAccountsUnlocked(true);
+    }
+  }, [isOwner]);
+
+  const handleLockAccountsSession = () => {
+    try {
+      sessionStorage.removeItem('accounts_session_unlocked');
+    } catch {}
+    setIsAccountsUnlocked(false);
+    showToast?.('تم قفل جلسة الحسابات 🔒');
+  };
+
   // Active Navigation Tab: 'chart' | 'treasuries' | 'entries' | 'vendors' | 'cost-centers' | 'reports' | 'guide'
   const [activeTab, setActiveTab] = useState('chart');
   const [reportsSubtype, setReportsSubtype] = useState('trial-balance');
@@ -617,6 +654,29 @@ export default function AccountsSystemView({
     }
   };
 
+  // حماية صفحة الحسابات ببوابة تسجيل الدخول (مع استثناء المالك التلقائي)
+  if (!isAccountsUnlocked && !isOwner) {
+    return (
+      <AccountsLoginScreen
+        state={state}
+        onLoginSuccess={() => {
+          setIsAccountsUnlocked(true);
+          showToast?.('مرحباً بك في منظومة الحسابات العامة 📊');
+        }}
+        onBack={() => {
+          if (isStandalone) {
+            window.location.href = '/';
+          } else if (onNavigateTab) {
+            onNavigateTab('dashboard');
+          } else {
+            window.history.back();
+          }
+        }}
+        themeMode={themeMode}
+      />
+    );
+  }
+
   return (
     <div className="accounts-system-root">
       {/* ── 1. Desktop Layer & Professional ERP Dropdown Menu Bar ── */}
@@ -654,6 +714,7 @@ export default function AccountsSystemView({
         toggleTheme={toggleTheme}
         isStandalone={isStandalone}
         onBackToDashboard={handleBackToDashboard}
+        onLockAccounts={handleLockAccountsSession}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
       />

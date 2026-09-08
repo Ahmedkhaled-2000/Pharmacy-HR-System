@@ -30,6 +30,7 @@ export default function AccountsDesktopMenuBar({
   toggleTheme,
   isStandalone = false,
   onBackToDashboard,
+  onLockAccounts,
   searchQuery,
   onSearchChange,
 }) {
@@ -121,6 +122,18 @@ export default function AccountsDesktopMenuBar({
               </button>
             )}
 
+            {onLockAccounts && (
+              <button
+                type="button"
+                className="acc-menu-link-btn"
+                onClick={onLockAccounts}
+                title="قفل جلسة الحسابات ومغادرة الشاشة مؤقتاً"
+                style={{ color: '#ef4444', borderColor: '#fca5a5', background: 'rgba(239, 68, 68, 0.08)' }}
+              >
+                🔒 قفل الحسابات
+              </button>
+            )}
+
             {onBackToDashboard && (
               <button
                 type="button"
@@ -148,8 +161,33 @@ export default function AccountsDesktopMenuBar({
             <strong style={{ color: 'var(--text, #0f172a)' }}>شاشة الحسابات العامة وشجرة الحسابات (ERP)</strong>
             <span className="acc-connected-pill">● متصل لحظياً</span>
           </div>
-          <div style={{ fontSize: '11px', color: 'var(--muted, #64748b)' }}>
-            النطاق النشط: <strong>{selectedBranchName}</strong>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ fontSize: '11px', color: 'var(--muted, #64748b)' }}>
+              النطاق النشط: <strong>{selectedBranchName}</strong>
+            </div>
+            {onLockAccounts && (
+              <button
+                type="button"
+                onClick={onLockAccounts}
+                style={{
+                  background: 'none',
+                  border: '1px solid #fca5a5',
+                  borderRadius: '6px',
+                  padding: '2px 8px',
+                  color: '#dc2626',
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}
+                title="قفل جلسة الحسابات"
+              >
+                <span>🔒</span>
+                <span>قفل الحسابات</span>
+              </button>
+            )}
           </div>
         </div>
       )}

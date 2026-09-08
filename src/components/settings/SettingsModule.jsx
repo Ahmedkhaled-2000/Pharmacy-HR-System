@@ -96,6 +96,13 @@ export default function SettingsModule({
   const [ownerConfirmPasswordInput, setOwnerConfirmPasswordInput] = useState(orgSettings.ownerPassword || 'owner123');
   const [showOwnerPasswordText, setShowOwnerPasswordText] = useState(false);
 
+  // Accounts System Credentials (Managed by Owner)
+  const [accountsUsernameInput, setAccountsUsernameInput] = useState(orgSettings.accountsUsername || 'accounts');
+  const [accountsPasswordInput, setAccountsPasswordInput] = useState(orgSettings.accountsPassword || '123456');
+  const [accountsConfirmPasswordInput, setAccountsConfirmPasswordInput] = useState(orgSettings.accountsPassword || '123456');
+  const [showAccountsPasswordText, setShowAccountsPasswordText] = useState(false);
+  const [accountsRequireLoginInput, setAccountsRequireLoginInput] = useState(orgSettings.accountsRequireLogin !== false);
+
   const DEFAULT_OWNER_LOCKS = {
     // الرواتب والبدلات
     lockEditSalary: false,
@@ -240,6 +247,34 @@ export default function SettingsModule({
     setState(updatedState);
     if (saveState) await saveState(updatedState);
     showToast?.('👑 تم حفظ وتحديث بيانات دخول المالك بنجاح');
+  };
+
+  const handleSaveAccountsCredentials = async (e) => {
+    e.preventDefault();
+    if (!accountsUsernameInput.trim()) {
+      showToast?.('⚠️ يرجى إدخال اسم مستخدم الحسابات');
+      return;
+    }
+    if (!accountsPasswordInput.trim()) {
+      showToast?.('⚠️ يرجى إدخال كلمة مرور الحسابات');
+      return;
+    }
+    if (accountsPasswordInput !== accountsConfirmPasswordInput) {
+      showToast?.('⚠️ كلمة المرور وتأكيد كلمة المرور غير متطابقين لحساب الحسابات');
+      return;
+    }
+
+    const updatedOrgSettings = {
+      ...(state.orgSettings || {}),
+      accountsUsername: accountsUsernameInput.trim().toLowerCase(),
+      accountsPassword: accountsPasswordInput.trim(),
+      accountsRequireLogin: accountsRequireLoginInput,
+      updatedAt: Date.now()
+    };
+    const updatedState = { ...state, orgSettings: updatedOrgSettings };
+    setState(updatedState);
+    if (saveState) await saveState(updatedState);
+    showToast?.('📊 تم حفظ وتحديث بيانات حساب منظومة الحسابات بنجاح');
   };
 
   const handleToggleOwnerLock = async (lockKey) => {
@@ -3487,6 +3522,113 @@ export default function SettingsModule({
                   </div>
 
                 </div>
+              </div>
+
+              {/* Card 3: Accounts System Access & Credentials */}
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '16px', padding: '22px', boxShadow: 'var(--shadow-sm)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '10px' }}>
+                  <h4 style={{ margin: 0, fontFamily: 'Cairo', color: '#0284c7', fontSize: '16px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>📊</span>
+                    <span>بيانات دخول وصلاحيات منظومة الحسابات المالية (Accounts System Credentials)</span>
+                  </h4>
+                  <span style={{ fontSize: '12px', background: '#f0f9ff', color: '#0369a1', border: '1px solid #bae6fd', padding: '3px 10px', borderRadius: '8px', fontWeight: 700 }}>
+                    تحكم المالك 👑
+                  </span>
+                </div>
+
+                <p style={{ fontSize: '12.5px', color: 'var(--muted)', margin: '0 0 16px 0', lineHeight: '1.6' }}>
+                  تُستخدم هذه البيانات لتسجيل الدخول إلى صفحة الحسابات العامة وشجرة الحسابات (ERP). يتم التحكم بها وتغييرها حصراً من قِبل مالك المنظومة.
+                </p>
+
+                {/* Banner explaining Owner automatic bypass */}
+                <div style={{ background: 'linear-gradient(135deg, rgba(217, 119, 6, 0.1) 0%, rgba(245, 158, 11, 0.05) 100%)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '12px', padding: '12px 16px', marginBottom: '18px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ fontSize: '24px' }}>👑</span>
+                  <div style={{ fontSize: '12.5px', color: 'var(--text)', lineHeight: '1.5' }}>
+                    <strong style={{ color: '#d97706' }}>ميزة استثناء المالك التلقائي:</strong> عند تسجيل دخولك بحساب المالك (Owner)، يتم فتح صفحة الحسابات مباشرة وبشكل فوري وتلقائي دون مطالبتك بأي اسم مستخدم أو كلمة مرور خاصة بالحسابات!
+                  </div>
+                </div>
+
+                <form onSubmit={handleSaveAccountsCredentials}>
+                  <div style={{ marginBottom: '16px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 800, color: 'var(--text)' }}>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(accountsRequireLoginInput)}
+                        onChange={(e) => setAccountsRequireLoginInput(e.target.checked)}
+                        style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#0284c7' }}
+                      />
+                      <span>تفعيل قفل شاشة الحسابات والمطالبة بتسجيل الدخول عند فتحها</span>
+                    </label>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px', marginBottom: '16px' }}>
+                    <div className="field">
+                      <label style={{ fontWeight: 800 }}>اسم مستخدم الحسابات (Accounts Username)</label>
+                      <input
+                        type="text"
+                        value={accountsUsernameInput}
+                        onChange={(e) => setAccountsUsernameInput(e.target.value)}
+                        placeholder="accounts"
+                        required
+                        style={{ padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--border)', fontWeight: 700 }}
+                      />
+                    </div>
+
+                    <div className="field">
+                      <label style={{ fontWeight: 800 }}>كلمة مرور الحسابات (Accounts Password)</label>
+                      <div style={{ position: 'relative' }}>
+                        <input
+                          type={showAccountsPasswordText ? 'text' : 'password'}
+                          value={accountsPasswordInput}
+                          onChange={(e) => setAccountsPasswordInput(e.target.value)}
+                          placeholder="كلمة مرور الحسابات..."
+                          required
+                          style={{ width: '100%', padding: '10px 38px 10px 14px', borderRadius: '10px', border: '1px solid var(--border)', fontWeight: 700, boxSizing: 'border-box' }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowAccountsPasswordText(!showAccountsPasswordText)}
+                          style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'none', cursor: 'pointer', fontSize: '16px', color: 'var(--muted)' }}
+                        >
+                          {showAccountsPasswordText ? '👁️' : '🔒'}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="field">
+                      <label style={{ fontWeight: 800 }}>تأكيد كلمة المرور (Confirm Password)</label>
+                      <input
+                        type={showAccountsPasswordText ? 'text' : 'password'}
+                        value={accountsConfirmPasswordInput}
+                        onChange={(e) => setAccountsConfirmPasswordInput(e.target.value)}
+                        placeholder="أعد إدخال كلمة المرور..."
+                        required
+                        style={{ padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--border)', fontWeight: 700 }}
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="btn"
+                    style={{
+                      background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                      color: '#ffffff',
+                      fontWeight: 800,
+                      padding: '9px 20px',
+                      borderRadius: '10px',
+                      border: 'none',
+                      boxShadow: '0 4px 12px rgba(2, 132, 199, 0.25)',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px'
+                    }}
+                  >
+                    <span>💾</span>
+                    <span>حفظ وتحديث بيانات حساب الحسابات</span>
+                  </button>
+                </form>
               </div>
             </>
           )}

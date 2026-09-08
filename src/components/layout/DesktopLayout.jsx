@@ -1747,6 +1747,25 @@ return (
 
         <button
           type="button"
+          onClick={() => {
+            window.dispatchEvent(new CustomEvent('app:lock-system'));
+          }}
+          title="قفل وإيقاف النظام مؤقتاً"
+          style={{
+            border: '1px solid var(--border)',
+            background: 'var(--surface)',
+            padding: '4px 7px',
+            borderRadius: '7px',
+            cursor: 'pointer',
+            fontSize: '12px',
+            color: 'var(--text)'
+          }}
+        >
+          <span>🔒</span>
+        </button>
+
+        <button
+          type="button"
           onClick={onLogout}
           style={{
             border: '1px solid var(--danger-border, #fca5a5)',
@@ -2334,6 +2353,30 @@ return (
           }}
         >
           <span>{themeMode === 'dark' ? '☀️' : '🌙'}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            window.dispatchEvent(new CustomEvent('app:lock-system'));
+          }}
+          title="قفل وإيقاف النظام مؤقتاً (Scroll Lock)"
+          style={{
+            border: '1px solid var(--border)',
+            background: 'var(--surface)',
+            padding: '5px 9px',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            fontSize: '13px',
+            color: 'var(--text)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            transition: 'all 0.15s'
+          }}
+        >
+          <span>🔒</span>
+          <span style={{ fontSize: '11.5px', fontWeight: 700 }}>قفل</span>
         </button>
 
         <button
