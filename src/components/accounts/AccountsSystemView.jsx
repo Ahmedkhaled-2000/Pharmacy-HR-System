@@ -58,9 +58,7 @@ export default function AccountsSystemView({
 }) {
   // 1. فحص هل المستخدم الحالي هو المالك (Owner)
   const isOwner = authRole === 'owner' ||
-    (typeof localStorage !== 'undefined' && localStorage.getItem('app_auth_role') === 'owner') ||
-    (typeof localStorage !== 'undefined' && localStorage.getItem('app_owner_authenticated') === 'true') ||
-    (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('app_owner_authenticated') === 'true');
+    (typeof localStorage !== 'undefined' && localStorage.getItem('app_auth_role') === 'owner');
 
   // حالة تسجيل دخول منظومة الحسابات
   const [isAccountsUnlocked, setIsAccountsUnlocked] = useState(() => {

@@ -398,6 +398,7 @@ export default function AppRoutes() {
         localStorage.setItem('app_auth_role', 'admin');
         localStorage.removeItem('app_owner_authenticated');
         sessionStorage.removeItem('app_owner_authenticated');
+        sessionStorage.removeItem('app_settings_owner_tab_unlocked');
       } catch {}
       return { success: true, role: 'admin' };
     }

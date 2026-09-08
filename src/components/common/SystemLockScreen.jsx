@@ -334,7 +334,7 @@ export default function SystemLockScreen({
           }}
         >
           <span>⏸️</span>
-          <span>تم إيقاف النظام مؤقتاً بواسطة (Scroll Lock)</span>
+          <span>تم إيقاف النظام مؤقتاً</span>
         </div>
 
         {/* رسالة الخطأ */}
@@ -478,33 +478,6 @@ export default function SystemLockScreen({
         </div>
       </div>
 
-      {/* تلميح سفلي لزر الاختصار */}
-      <div
-        style={{
-          marginTop: '24px',
-          fontSize: '12px',
-          color: '#64748b',
-          fontWeight: 600,
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px'
-        }}
-      >
-        <span>💡 يمكن قفل أو إيقاف النظام في أي وقت بالضغط على مفتاح</span>
-        <kbd
-          style={{
-            background: 'rgba(255,255,255,0.1)',
-            padding: '2px 7px',
-            borderRadius: '6px',
-            fontSize: '11px',
-            color: '#e2e8f0',
-            fontFamily: 'monospace',
-            border: '1px solid rgba(255,255,255,0.15)'
-          }}
-        >
-          Scroll Lock
-        </kbd>
-      </div>
     </div>
   );
 }

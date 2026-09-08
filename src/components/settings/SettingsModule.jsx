@@ -79,11 +79,14 @@ export default function SettingsModule({
   const [biometricType, setBiometricType] = useState(orgSettings.biometricType || 'face');
 
   // ── Owner Role & Modification Locks State ──
+  // فتح شاشة المالك يتم فقط إذا كان المستخدم المسجل فعلياً هو المالك أو تم تصريح الشاشة في هذه الجلسة
   const isOwnerVerified = effectiveAuthRole === 'owner' || (() => {
     try {
-      return localStorage.getItem('app_auth_role') === 'owner' ||
-             localStorage.getItem('app_owner_authenticated') === 'true' ||
-             sessionStorage.getItem('app_owner_authenticated') === 'true';
+      if (localStorage.getItem('app_auth_role') === 'owner') return true;
+      if (effectiveAuthRole === 'admin') {
+        return sessionStorage.getItem('app_settings_owner_tab_unlocked') === 'true';
+      }
+      return false;
     } catch { return false; }
   })();
   const [isOwnerUnlocked, setIsOwnerUnlocked] = useState(() => isOwnerVerified);
@@ -179,9 +182,7 @@ export default function SettingsModule({
   useEffect(() => {
     const isOwnerUser = effectiveAuthRole === 'owner' || (() => {
       try {
-        return localStorage.getItem('app_auth_role') === 'owner' ||
-               localStorage.getItem('app_owner_authenticated') === 'true' ||
-               sessionStorage.getItem('app_owner_authenticated') === 'true';
+        return localStorage.getItem('app_auth_role') === 'owner';
       } catch { return false; }
     })();
     if (isOwnerUser) {
@@ -206,17 +207,15 @@ export default function SettingsModule({
       (inputPass === '123' && (validOwnerPass === 'owner123' || validOwnerPass === '123'));
 
     if (isUserValid && isPassValid) {
+      // فتح شاشة تحكم المالك مع البقاء التام على جلسة المستخدم الحالية (كالآدمن) دون تحويل الدور
       setIsOwnerUnlocked(true);
       try {
-        setAuthRole?.('owner');
-        localStorage.setItem('app_auth_role', 'owner');
-        localStorage.setItem('app_owner_authenticated', 'true');
-        sessionStorage.setItem('app_owner_authenticated', 'true');
+        sessionStorage.setItem('app_settings_owner_tab_unlocked', 'true');
       } catch {}
       setOwnerUnlockUser('');
       setOwnerUnlockPass('');
       setOwnerUnlockError('');
-      showToast?.('👑 تم فتح وتصريح شاشة تحكم المالك واعتماد جلسة المالك بنجاح');
+      showToast?.('👑 تم فتح وتصريح شاشة تحكم المالك بنجاح مع الحفاظ على جلستك الحالية');
     } else {
       setOwnerUnlockError('بيانات دخول المالك غير صحيحة.');
     }
@@ -2778,7 +2777,7 @@ export default function SettingsModule({
       {/* ══════════════════════════════════════════════════════════════════════ */}
       {activeTab === 'owner' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          {!isOwnerUnlocked && authRole !== 'owner' && (() => { try { return localStorage.getItem('app_auth_role') !== 'owner'; } catch { return true; } })() ? (
+          {!isOwnerUnlocked && effectiveAuthRole !== 'owner' && (() => { try { return localStorage.getItem('app_auth_role') !== 'owner'; } catch { return true; } })() ? (
             /* Owner Locked Gatekeeper Card */
             <div
               style={{
@@ -2936,9 +2935,24 @@ export default function SettingsModule({
                     👑
                   </div>
                   <div>
-                    <h3 style={{ margin: '0 0 4px 0', fontFamily: 'Cairo', fontSize: '18px', fontWeight: 800, color: '#f8fafc' }}>
-                      لوحة تحكم وصلاحيات المالك (Owner Control Panel)
-                    </h3>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <h3 style={{ margin: '0 0 4px 0', fontFamily: 'Cairo', fontSize: '18px', fontWeight: 800, color: '#f8fafc' }}>
+                        لوحة تحكم وصلاحيات المالك (Owner Control Panel)
+                      </h3>
+                      {effectiveAuthRole === 'admin' && (
+                        <span style={{
+                          background: 'rgba(59, 130, 246, 0.25)',
+                          color: '#93c5fd',
+                          border: '1px solid rgba(59, 130, 246, 0.5)',
+                          padding: '3px 9px',
+                          borderRadius: '8px',
+                          fontSize: '11px',
+                          fontWeight: 700
+                        }}>
+                          🛡️ الجلسة الحالية: الإدارة العليا (Admin)
+                        </span>
+                      )}
+                    </div>
                     <p style={{ margin: 0, fontSize: '13px', color: '#cbd5e1' }}>
                       إدارة حساب المالك وقفل أو تفعيل صلاحيات وتعديلات الإدارة العليا على مستوى المنظومة.
                     </p>
@@ -2952,17 +2966,18 @@ export default function SettingsModule({
                     onClick={() => {
                       setIsOwnerUnlocked(false);
                       try {
+                        sessionStorage.removeItem('app_settings_owner_tab_unlocked');
                         localStorage.removeItem('app_owner_authenticated');
                         sessionStorage.removeItem('app_owner_authenticated');
                       } catch {}
                       setOwnerUnlockUser('');
                       setOwnerUnlockPass('');
                       setOwnerUnlockError('');
-                      showToast?.('تم قفل جلسة المالك بنجاح 🔒');
+                      showToast?.('تم قفل شاشة تحكم المالك بنجاح 🔒');
                     }}
                     style={{ background: 'rgba(255,255,255,0.08)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.4)', padding: '7px 14px', fontSize: '12.5px', fontWeight: 700 }}
                   >
-                    🔒 قفل الجلسة
+                    🔒 قفل شاشة المالك
                   </button>
                 </div>
               </div>

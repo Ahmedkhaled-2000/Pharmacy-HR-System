@@ -132,6 +132,7 @@ export function AuthProvider({ children }) {
         localStorage.setItem('app_auth_role', 'admin');
         localStorage.removeItem('app_owner_authenticated');
         sessionStorage.removeItem('app_owner_authenticated');
+        sessionStorage.removeItem('app_settings_owner_tab_unlocked');
       } catch {}
     } else if (role === 'branch') {
       setIsAdminLoggedIn(false);
@@ -193,6 +194,7 @@ export function AuthProvider({ children }) {
       localStorage.removeItem('app_active_sub_tab');
       localStorage.removeItem('app_owner_authenticated');
       sessionStorage.removeItem('app_owner_authenticated');
+      sessionStorage.removeItem('app_settings_owner_tab_unlocked');
     } catch {}
 
     setAuthRole('none');
