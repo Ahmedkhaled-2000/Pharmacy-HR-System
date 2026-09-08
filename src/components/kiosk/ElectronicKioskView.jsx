@@ -72,6 +72,14 @@ export default function ElectronicKioskView({
       }
     };
 
+    // 0. للموظفين الإداريين: كسر القيد الجغرافي وإتاحة كافة فروع المؤسسة حصرياً
+    if (emp.isAdministrative || emp.canPunchAnyBranch) {
+      (state?.branches || []).forEach((b) => {
+        addBranch(b.id, b.name);
+      });
+      return Array.from(branchMap.values());
+    }
+
     // 1. Primary branch
     if (emp.branchId) {
       addBranch(emp.branchId, emp.branchName);
@@ -158,17 +166,21 @@ export default function ElectronicKioskView({
       }
 
       if (kioskBranchId) {
-        const cleanKioskBranch = String(kioskBranchId).trim().replace(/^branch_/, '');
-        const empBranchClean = String(emp.branchId || '').trim().replace(/^branch_/, '');
-        const hasSecondaryBranch = Array.isArray(emp.branchesDetails) && emp.branchesDetails.some(b => 
-          String(b?.branchId || '').trim().replace(/^branch_/, '') === cleanKioskBranch
-        );
-        const belongsToBranch = empBranchClean === cleanKioskBranch || hasSecondaryBranch;
-        if (!belongsToBranch) {
-          alert('هذا الموظف غير مسجل أو غير مسموح له بالدخول في هذا الفرع.');
-          setMatchedEmp(null);
-          setInputCode('');
-          return;
+        const isAdministrative = Boolean(emp.isAdministrative || emp.canPunchAnyBranch);
+        // يتم كسر قيد الفرع الجغرافي في كشك البصمة حصرياً على الموظفين الإداريين فقط
+        if (!isAdministrative) {
+          const cleanKioskBranch = String(kioskBranchId).trim().replace(/^branch_/, '');
+          const empBranchClean = String(emp.branchId || '').trim().replace(/^branch_/, '');
+          const hasSecondaryBranch = Array.isArray(emp.branchesDetails) && emp.branchesDetails.some(b => 
+            String(b?.branchId || '').trim().replace(/^branch_/, '') === cleanKioskBranch
+          );
+          const belongsToBranch = empBranchClean === cleanKioskBranch || hasSecondaryBranch;
+          if (!belongsToBranch) {
+            alert('هذا الموظف غير مسجل أو غير مسموح له بالدخول في هذا الفرع.');
+            setMatchedEmp(null);
+            setInputCode('');
+            return;
+          }
         }
       }
 
@@ -726,6 +738,11 @@ export default function ElectronicKioskView({
                 <div className="kiosk-user-info" style={{ flex: 1 }}>
                   <h3 className="kiosk-user-name" style={{ fontSize: '1.45rem', fontWeight: 800, fontFamily: 'Cairo, sans-serif', margin: 0, color: '#0f172a' }}>أهلاً بك، {matchedEmp.name}</h3>
                   <p className="kiosk-user-role" style={{ fontSize: '1rem', color: '#475569', margin: '4px 0 0 0', fontWeight: 600 }}>{matchedEmp.jobTitle}</p>
+                  {(matchedEmp.isAdministrative || matchedEmp.canPunchAnyBranch) && (
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: '#e0e7ff', color: '#3730a3', padding: '4px 10px', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 800, marginTop: '6px', border: '1px solid #c7d2fe' }}>
+                      <span>👔</span> موظف إداري معتمد · مصرح بالبصمة في كافة الفروع
+                    </div>
+                  )}
                 </div>
                 <button 
                   className="kiosk-logout-btn" 
