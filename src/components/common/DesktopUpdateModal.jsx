@@ -116,6 +116,13 @@ export default function DesktopUpdateModal({
               </div>
             )}
 
+            {updateStatus === 'not-available' && (
+              <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-emerald-300 text-xs flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                <span>أنت تستخدم أحدث إصدار متوفر للمنظومة بالفعل! لا توجد تحديثات جديدة حالياً.</span>
+              </div>
+            )}
+
             {updateStatus === 'error' && (
               <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-lg text-rose-300 text-xs">
                 ⚠️ حدث خطأ أثناء فحص أو تنزيل التحديث. يرجى التحقق من اتصال الإنترنت أو المحاولة لاحقاً.

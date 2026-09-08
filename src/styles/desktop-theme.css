@@ -282,6 +282,33 @@ body, button, input, select, textarea {
   color: #ffffff !important;
 }
 
+/* زر التحديث في شريط العنوان */
+.titlebar-update-btn {
+  -webkit-app-region: no-drag !important;
+}
+
+.titlebar-update-btn:hover:not(:disabled) {
+  filter: brightness(1.2);
+  transform: translateY(-0.5px);
+}
+
+.titlebar-update-btn:active:not(:disabled) {
+  transform: translateY(0.5px);
+}
+
+.titlebar-update-btn.downloaded {
+  animation: pulse-border 2s infinite;
+}
+
+@keyframes pulse-border {
+  0%, 100% {
+    box-shadow: 0 0 6px rgba(16, 185, 129, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 14px rgba(16, 185, 129, 0.8);
+  }
+}
+
 /* ── 11. ضبط المحاذاة الشاملة للديسكتوب لمنع أي خروج أو تشوه عرضي ── */
 body.is-desktop-mode, html.is-desktop-app {
   overflow-x: hidden;

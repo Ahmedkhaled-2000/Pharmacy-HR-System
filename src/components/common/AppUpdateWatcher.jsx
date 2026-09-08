@@ -45,6 +45,8 @@ export default function AppUpdateWatcher() {
           setIsModalOpen(true);
         } else if (status === 'error') {
           setUpdateStatus('error');
+        } else if (status === 'not-available') {
+          setUpdateStatus('not-available');
         }
       });
 
