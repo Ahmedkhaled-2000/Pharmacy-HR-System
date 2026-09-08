@@ -102,7 +102,7 @@ export function useRealtimeSync(props = {}) {
       setCurrentEmpUser((prevEmp) => {
         if (!prevEmp) return prevEmp;
         const fresh = (merged.employees || []).find(
-          (e) => e.id === prevEmp.id || (prevEmp.code && e.code === prevEmp.code)
+          (e) => e && (e.id === prevEmp.id || (prevEmp.code && e.code === prevEmp.code))
         );
         if (!fresh && (merged.employees || []).length === 0) {
           localStorage.removeItem('app_current_emp_user');
@@ -116,7 +116,7 @@ export function useRealtimeSync(props = {}) {
       // تحديث بيانات الفرع المسجل حالياً
       setCurrentBranch((prevBranch) => {
         if (!prevBranch) return prevBranch;
-        const fresh = (merged.branches || []).find((b) => b.id === prevBranch.id);
+        const fresh = (merged.branches || []).find((b) => b && b.id === prevBranch.id);
         if (!fresh && (merged.branches || []).length === 0) {
           localStorage.removeItem('app_current_branch');
           localStorage.removeItem('app_auth_role');
@@ -304,10 +304,11 @@ export function useRealtimeSync(props = {}) {
       const currentBranchId = currentBranch?.id;
       const branchEmployees = (state?.employees || []).filter(
         (e) =>
-          String(e.branchId) === String(currentBranchId) ||
-          (e.branchesDetails && e.branchesDetails.some((bd) => String(bd.branchId) === String(currentBranchId)))
+          e &&
+          (String(e.branchId) === String(currentBranchId) ||
+            (e.branchesDetails && e.branchesDetails.some((bd) => bd && String(bd.branchId) === String(currentBranchId))))
       );
-      const branchEmpIds = new Set(branchEmployees.map((e) => String(e.id)));
+      const branchEmpIds = new Set(branchEmployees.filter((e) => e && e.id).map((e) => String(e.id)));
 
       const branchPendingReqs = pendingNewRequests.filter((r) => {
         if (!shouldShowRequestToBranch(r, state)) return false;

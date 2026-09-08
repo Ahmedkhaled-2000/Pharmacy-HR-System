@@ -100,13 +100,14 @@ function DesktopNavDropdownItem({
         type="button"
         tabIndex={-1}
         onClick={() => handleSubItemClick(child)}
+        className={`desktop-menu-item-btn ${isFocused ? 'is-keyboard-focused' : ''}`}
         style={{
           display: 'flex',
           alignItems: 'flex-start',
           gap: '10px',
           padding: '9px 12px',
           borderRadius: '8px',
-          border: 'none',
+          border: isFocused ? '2px solid var(--primary, #0d9488)' : '2px solid transparent',
           background: isFocused
             ? 'var(--hover, rgba(13, 148, 136, 0.14))'
             : isChildActive
@@ -114,7 +115,7 @@ function DesktopNavDropdownItem({
             : isFlyoutOpen
             ? 'var(--hover)'
             : 'transparent',
-          boxShadow: isFocused ? 'inset 3px 0 0 var(--primary), 0 0 0 1px var(--primary)' : 'none',
+          boxShadow: isFocused ? '0 0 0 2.5px rgba(13, 148, 136, 0.22), 0 2px 8px rgba(13, 148, 136, 0.12)' : 'none',
           color: (isChildActive || isFocused) ? 'var(--primary-dark, var(--primary))' : 'var(--text)',
           cursor: 'pointer',
           textAlign: 'right',
@@ -263,19 +264,20 @@ function DesktopNavDropdownItem({
                 type="button"
                 tabIndex={-1}
                 onClick={() => handleSubItemClick(subChild)}
+                className={`desktop-menu-item-btn ${isSubFocused ? 'is-keyboard-focused' : ''}`}
                 style={{
                   display: 'flex',
                   alignItems: 'flex-start',
                   gap: '10px',
                   padding: '8px 12px',
                   borderRadius: '8px',
-                  border: 'none',
+                  border: isSubFocused ? '2px solid var(--primary, #0d9488)' : '2px solid transparent',
                   background: isSubFocused
                     ? 'var(--hover, rgba(13, 148, 136, 0.14))'
                     : isSubChildActive
                     ? 'var(--primary-light)'
                     : 'transparent',
-                  boxShadow: isSubFocused ? 'inset 3px 0 0 var(--primary), 0 0 0 1px var(--primary)' : 'none',
+                  boxShadow: isSubFocused ? '0 0 0 2.5px rgba(13, 148, 136, 0.22), 0 2px 8px rgba(13, 148, 136, 0.12)' : 'none',
                   color: (isSubChildActive || isSubFocused) ? 'var(--primary-dark, var(--primary))' : 'var(--text)',
                   cursor: 'pointer',
                   textAlign: 'right',
@@ -478,6 +480,10 @@ function DesktopNavDropdown({
         setHoveredFlyoutId(null);
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
+        if (focusedChildIndex === 0) {
+          onClose?.();
+          return;
+        }
         setFocusedChildIndex(prev => (prev - 1 + children.length) % children.length);
         setHoveredFlyoutId(null);
       } else if (e.key === 'Home') {
@@ -1286,7 +1292,24 @@ export default function DesktopLayout({
     return false;
   };
 
-  // Close dropdown on click outside or Escape
+  const activeMenuIndex = useMemo(() => {
+    const idx = currentMenuItems.findIndex(menu => isMenuGroupActive(menu));
+    return idx >= 0 ? idx : 0;
+  }, [currentMenuItems, activeTab, activeSubTab]);
+
+  const [focusedTopMenuIndex, setFocusedTopMenuIndex] = useState(0);
+
+  // Sync focusedTopMenuIndex when active tab or open dropdown changes
+  useEffect(() => {
+    if (openDropdown) {
+      const idx = currentMenuItems.findIndex(m => m.id === openDropdown);
+      if (idx !== -1) setFocusedTopMenuIndex(idx);
+    } else {
+      setFocusedTopMenuIndex(activeMenuIndex);
+    }
+  }, [openDropdown, activeMenuIndex, currentMenuItems]);
+
+  // Close dropdown on click outside or Escape, and support Alt/F10 to focus menubar
   useEffect(() => {
     const handleClickOutside = (e) => {
       if (menuContainerRef.current && !menuContainerRef.current.contains(e.target)) {
@@ -1302,6 +1325,24 @@ export default function DesktopLayout({
         setOpenDropdown(null);
         setHoveredFlyoutId(null);
         setIsNotifDropdownOpen(false);
+        return;
+      }
+
+      const activeEl = document.activeElement;
+      const isInput = activeEl && (
+        activeEl.tagName === 'INPUT' || 
+        activeEl.tagName === 'TEXTAREA' || 
+        activeEl.isContentEditable ||
+        activeEl.tagName === 'SELECT'
+      );
+      if (isInput) return;
+
+      // When pressing Alt or F10, focus the top menubar directly
+      if (e.key === 'Alt' || e.key === 'F10') {
+        e.preventDefault();
+        const targetIdx = (focusedTopMenuIndex >= 0 && focusedTopMenuIndex < currentMenuItems.length) ? focusedTopMenuIndex : 0;
+        topMenuRefs.current[targetIdx]?.focus();
+        setFocusedTopMenuIndex(targetIdx);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -1310,7 +1351,7 @@ export default function DesktopLayout({
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, []);
+  }, [focusedTopMenuIndex, currentMenuItems]);
 
   // Listen to system-wide navigation shortcuts (Alt+1 .. Alt+9) & dropdown close requests
   useEffect(() => {
@@ -1375,11 +1416,12 @@ setOpenDropdown(null);
 setHoveredFlyoutId(null);
 };
 
-const navigateNextMenu = (currentIndex) => {
+const navigateNextMenu = (currentIndex, keepDropdownOpen = false) => {
   const nextIdx = (currentIndex + 1) % currentMenuItems.length;
+  setFocusedTopMenuIndex(nextIdx);
   topMenuRefs.current[nextIdx]?.focus();
   const nextMenu = currentMenuItems[nextIdx];
-  if (nextMenu && !nextMenu.isSingle) {
+  if (keepDropdownOpen && nextMenu && !nextMenu.isSingle) {
     setOpenDropdown(nextMenu.id);
   } else {
     setOpenDropdown(null);
@@ -1387,11 +1429,12 @@ const navigateNextMenu = (currentIndex) => {
   setHoveredFlyoutId(null);
 };
 
-const navigatePrevMenu = (currentIndex) => {
+const navigatePrevMenu = (currentIndex, keepDropdownOpen = false) => {
   const prevIdx = (currentIndex - 1 + currentMenuItems.length) % currentMenuItems.length;
+  setFocusedTopMenuIndex(prevIdx);
   topMenuRefs.current[prevIdx]?.focus();
   const prevMenu = currentMenuItems[prevIdx];
-  if (prevMenu && !prevMenu.isSingle) {
+  if (keepDropdownOpen && prevMenu && !prevMenu.isSingle) {
     setOpenDropdown(prevMenu.id);
   } else {
     setOpenDropdown(null);
@@ -1405,21 +1448,20 @@ const handleTopMenuKeyDown = (e, menu, menuIndex) => {
     if (!menu.isSingle) {
       setOpenDropdown(menu.id);
       setHoveredFlyoutId(null);
+    } else {
+      handleMenuClick(menu);
     }
   } else if (e.key === 'ArrowLeft') {
     // In RTL, ArrowLeft moves to next item (towards left)
     e.preventDefault();
-    navigateNextMenu(menuIndex);
+    navigateNextMenu(menuIndex, false);
   } else if (e.key === 'ArrowRight') {
     // In RTL, ArrowRight moves to previous item (towards right)
     e.preventDefault();
-    navigatePrevMenu(menuIndex);
+    navigatePrevMenu(menuIndex, false);
   } else if (e.key === 'Enter' || e.key === ' ') {
-    if (!menu.isSingle) {
-      e.preventDefault();
-      setOpenDropdown(prev => (prev === menu.id ? null : menu.id));
-      setHoveredFlyoutId(null);
-    }
+    e.preventDefault();
+    handleMenuClick(menu);
   }
 };
 
@@ -2362,42 +2404,63 @@ return (
       {currentMenuItems.map((menu, menuIndex) => {
         const isActive = isMenuGroupActive(menu);
         const isOpen = openDropdown === menu.id;
+        const isTopFocused = focusedTopMenuIndex === menuIndex;
 
         return (
           <div key={menu.id} style={{ position: 'relative' }}>
             <button
               ref={(el) => (topMenuRefs.current[menuIndex] = el)}
               type="button"
-              onClick={() => handleMenuClick(menu)}
+              tabIndex={isTopFocused ? 0 : -1}
+              onClick={() => {
+                setFocusedTopMenuIndex(menuIndex);
+                handleMenuClick(menu);
+              }}
+              onFocus={() => setFocusedTopMenuIndex(menuIndex)}
               onKeyDown={(e) => handleTopMenuKeyDown(e, menu, menuIndex)}
+              className={`desktop-menubar-btn ${isActive ? 'active' : ''} ${isTopFocused ? 'is-keyboard-focused' : ''}`}
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: '7px',
                 padding: '8px 15px',
                 borderRadius: '10px',
-                border: 'none',
+                border: isTopFocused
+                  ? isActive
+                    ? '2px solid #ffffff'
+                    : '2px solid var(--primary, #0d9488)'
+                  : '2px solid transparent',
                 background: isActive
                   ? 'linear-gradient(135deg, #0f766e 0%, #0d9488 100%)'
-                  : isOpen
-                  ? 'var(--hover, rgba(13, 148, 136, 0.08))'
+                  : (isOpen || isTopFocused)
+                  ? 'var(--hover, rgba(13, 148, 136, 0.12))'
                   : 'transparent',
-                color: isActive ? '#ffffff' : 'var(--text-secondary, #334155)',
+                color: isActive
+                  ? '#ffffff'
+                  : isTopFocused
+                  ? 'var(--primary, #0d9488)'
+                  : 'var(--text-secondary, #334155)',
                 fontSize: '13.5px',
-                fontWeight: isActive ? 800 : 700,
+                fontWeight: isActive || isTopFocused ? 800 : 700,
                 cursor: 'pointer',
                 transition: 'all 0.15s cubic-bezier(0.4, 0, 0.2, 1)',
-                boxShadow: isActive ? '0 4px 12px rgba(13, 148, 136, 0.28)' : 'none',
+                boxShadow: isTopFocused
+                  ? isActive
+                    ? '0 0 0 3px var(--primary, #0d9488), 0 4px 14px rgba(13, 148, 136, 0.45)'
+                    : '0 0 0 3px rgba(13, 148, 136, 0.25), 0 2px 8px rgba(13, 148, 136, 0.15)'
+                  : isActive
+                  ? '0 4px 12px rgba(13, 148, 136, 0.28)'
+                  : 'none',
                 position: 'relative',
                 outline: 'none'
               }}
               onMouseEnter={(e) => {
-                if (!isActive && !isOpen) {
+                if (!isActive && !isOpen && !isTopFocused) {
                   e.currentTarget.style.background = 'var(--hover)';
                 }
               }}
               onMouseLeave={(e) => {
-                if (!isActive && !isOpen) {
+                if (!isActive && !isOpen && !isTopFocused) {
                   e.currentTarget.style.background = 'transparent';
                 }
               }}
@@ -2443,10 +2506,11 @@ return (
                 onClose={() => {
                   setOpenDropdown(null);
                   setHoveredFlyoutId(null);
+                  setFocusedTopMenuIndex(menuIndex);
                   topMenuRefs.current[menuIndex]?.focus();
                 }}
-                onNavigateNextMenu={() => navigateNextMenu(menuIndex)}
-                onNavigatePrevMenu={() => navigatePrevMenu(menuIndex)}
+                onNavigateNextMenu={() => navigateNextMenu(menuIndex, true)}
+                onNavigatePrevMenu={() => navigatePrevMenu(menuIndex, true)}
               />
             )}
           </div>

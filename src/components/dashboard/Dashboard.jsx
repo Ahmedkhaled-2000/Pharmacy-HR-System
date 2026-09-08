@@ -44,11 +44,11 @@ export default function Dashboard({
   const [lateEditDeductionMins, setLateEditDeductionMins] = useState(0);
   const [lateEditReason, setLateEditReason] = useState('');
 
-  const orgSettings = state.orgSettings || {};
-  const employees = state.employees || [];
-  const branches = state.branches || [];
-  const punches = state.shifts || [];
-  const transactions = state.finances || state.transactions || [];
+  const orgSettings = state?.orgSettings || {};
+  const employees = (state?.employees || []).filter((e) => e && e.id);
+  const branches = (state?.branches || []).filter((b) => b && b.id);
+  const punches = (state?.shifts || []).filter((p) => p && (p.id || p.date || p.timestamp));
+  const transactions = (state?.finances || state?.transactions || []).filter(Boolean);
 
   // General Manager Name fallback
   const gmName = orgSettings.generalManagerName || 'د. أحمد خالد - المدير العام للصيدليات';
@@ -57,20 +57,21 @@ export default function Dashboard({
 
   // Branch employee helper
   const empBelongsToBranch = (emp, branchId) => {
-    if (emp.branchId === branchId) return true;
+    if (!emp || !branchId) return false;
+    if (String(emp.branchId) === String(branchId)) return true;
     if (emp.branchesDetails && Array.isArray(emp.branchesDetails)) {
-      return emp.branchesDetails.some((bd) => bd.branchId === branchId);
+      return emp.branchesDetails.some((bd) => bd && String(bd.branchId) === String(branchId));
     }
     return false;
   };
 
   // Branch employee counts
   const branchCounts = branches.map((b) => {
-    const count = employees.filter((e) => empBelongsToBranch(e, b.id)).length;
+    const count = employees.filter((e) => empBelongsToBranch(e, b?.id)).length;
     return { ...b, count };
   });
 
-  const unassignedCount = employees.filter((e) => !e.branchId && (!e.branchesDetails || e.branchesDetails.length === 0)).length;
+  const unassignedCount = employees.filter((e) => e && !e.branchId && (!e.branchesDetails || e.branchesDetails.length === 0)).length;
 
   // Live Punches per Branch (Today)
   const todayDate = new Date().toISOString().slice(0, 10);
@@ -96,11 +97,12 @@ export default function Dashboard({
 
   // Dynamic Base Earnings Calculation based on Employee Hourly Rates
   const totalBaseEarnings = periodShifts.reduce((acc, p) => {
-    const emp = employees.find((e) => String(e.id) === String(p.employeeId));
+    if (!p) return acc;
+    const emp = employees.find((e) => e && String(e.id) === String(p.employeeId));
     let dailyHourlyRate = 0;
     if (emp) {
       if (emp.branchesDetails && emp.branchesDetails.length > 0) {
-        const bDetail = emp.branchesDetails.find((bd) => bd.branchId === p.branchId) || emp.branchesDetails[0];
+        const bDetail = emp.branchesDetails.find((bd) => bd && bd.branchId === p.branchId) || emp.branchesDetails[0];
         const salary = parseFloat(bDetail?.salary) || 0;
         const workHours = parseFloat(bDetail?.workHoursPerDay) || 8;
         const workDays = parseFloat(bDetail?.workDaysPerMonth) || 26;
@@ -286,16 +288,19 @@ export default function Dashboard({
       
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '18px', marginBottom: '28px' }}>
         {branches.map((b) => {
-          const branchEmps = employees.filter((e) => empBelongsToBranch(e, b.id));
+          if (!b || !b.id) return null;
+          const branchEmps = employees.filter((e) => e && empBelongsToBranch(e, b.id));
           const branchTodayPunches = todayPunches.filter((p) => {
+            if (!p) return false;
             if (p.branchId) return String(p.branchId) === String(b.id);
-            return String(branchEmps.find((e) => String(e.id) === String(p.employeeId))?.branchId || '') === String(b.id);
+            return String(branchEmps.find((e) => e && String(e.id) === String(p.employeeId))?.branchId || '') === String(b.id);
           });
           const branchActiveCount = branchEmps.filter((e) => {
-            const act = state.activeShifts?.[e.id];
+            if (!e || !e.id) return false;
+            const act = state?.activeShifts?.[e.id];
             return act && String(act.branchId || e.branchId) === String(b.id);
           }).length;
-          const allLeaves = [...(state.leaveRequests || []), ...(state.requests || [])];
+          const allLeaves = [...(state?.leaveRequests || []), ...(state?.requests || [])];
           const totalLiveCount = branchTodayPunches.length + branchActiveCount;
 
           return (
@@ -345,18 +350,20 @@ export default function Dashboard({
                   </span>
                 ) : (
                   branchEmps.map((emp) => {
-                    const activeShift = state.activeShifts?.[emp.id];
+                    if (!emp || !emp.id) return null;
+                    const activeShift = state?.activeShifts?.[emp.id];
                     const isActiveInThisBranch = activeShift && (String(activeShift.branchId || emp.branchId) === String(b.id));
                     const isActiveInOtherBranch = activeShift && !isActiveInThisBranch;
 
                     const empTodayPunchesInThisBranch = todayPunches.filter((p) => {
+                      if (!p) return false;
                       if (String(p.employeeId) !== String(emp.id)) return false;
                       if (p.branchId) return String(p.branchId) === String(b.id);
                       return String(emp.branchId) === String(b.id);
                     });
 
                     const onLeaveToday = allLeaves.some(
-                      (r) => String(r.employeeId) === String(emp.id) && (r.status === 'approved' || r.adminApproved) && (r.type === 'leave' || r.type === 'leave_request') && r.startDate <= todayDate && r.endDate >= todayDate
+                      (r) => r && String(r.employeeId) === String(emp.id) && (r.status === 'approved' || r.adminApproved) && (r.type === 'leave' || r.type === 'leave_request') && r.startDate <= todayDate && r.endDate >= todayDate
                     );
 
                     const daySched = getEmployeeDaySchedule(emp.id, todayDate, state);
@@ -381,7 +388,7 @@ export default function Dashboard({
                         badgeBorder = '#a7f3d0';
                       }
                     } else if (isActiveInOtherBranch) {
-                      const otherBranchObj = branches.find((br) => String(br.id) === String(activeShift.branchId));
+                      const otherBranchObj = branches.find((br) => br && String(br.id) === String(activeShift?.branchId));
                       statusText = `🏢 بوردية بفرع ${otherBranchObj ? otherBranchObj.name : 'آخر'}`;
                       badgeBg = '#f1f5f9';
                       badgeColor = '#475569';
@@ -449,14 +456,15 @@ export default function Dashboard({
 
       {/* ── 3.5 Absent Employees Card Today ── */}
       {(() => {
-        const allLeaves = [...(state.leaveRequests || []), ...(state.requests || [])];
+        const allLeaves = [...(state?.leaveRequests || []), ...(state?.requests || [])];
         const absentEmpsToday = employees.filter((emp) => {
-          const activeShift = state.activeShifts?.[emp.id];
+          if (!emp || !emp.id) return false;
+          const activeShift = state?.activeShifts?.[emp.id];
           if (activeShift) return false;
-          const hasPunchedToday = todayPunches.some((p) => String(p.employeeId) === String(emp.id));
+          const hasPunchedToday = todayPunches.some((p) => p && String(p.employeeId) === String(emp.id));
           if (hasPunchedToday) return false;
           const onLeaveToday = allLeaves.some(
-            (r) => String(r.employeeId) === String(emp.id) && (r.status === 'approved' || r.adminApproved) && (r.type === 'leave' || r.type === 'leave_request') && r.startDate <= todayDate && r.endDate >= todayDate
+            (r) => r && String(r.employeeId) === String(emp.id) && (r.status === 'approved' || r.adminApproved) && (r.type === 'leave' || r.type === 'leave_request') && r.startDate <= todayDate && r.endDate >= todayDate
           );
           if (onLeaveToday) return false;
           const daySched = getEmployeeDaySchedule(emp.id, todayDate, state);
@@ -509,7 +517,7 @@ export default function Dashboard({
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '14px' }}>
                 {absentEmpsToday.map((emp) => {
-                  const branchObj = branches.find((b) => empBelongsToBranch(emp, b.id));
+                  const branchObj = branches.find((b) => b && empBelongsToBranch(emp, b.id));
                   return (
                     <div
                       key={emp.id}
@@ -567,9 +575,10 @@ export default function Dashboard({
         const lateEmployeesToday = [];
 
         employees.forEach((emp) => {
+          if (!emp || !emp.id) return;
           // Check if employee punched in today or has active shift today
-          const punchToday = punches.find((p) => String(p.employeeId) === String(emp.id) && (p.date || p.timestamp || '').startsWith(todayDate));
-          const activeShiftToday = state.activeShifts?.[emp.id];
+          const punchToday = punches.find((p) => p && String(p.employeeId) === String(emp.id) && (p.date || p.timestamp || '').startsWith(todayDate));
+          const activeShiftToday = state?.activeShifts?.[emp.id];
           const timeIn = punchToday?.timeIn || activeShiftToday?.timeIn;
 
           if (!timeIn) return;
@@ -582,11 +591,13 @@ export default function Dashboard({
           if (diffMinutes <= 0) return; // حضر في الموعد أو مبكراً
 
           // Classify into Late Penalty Policy Tier
-          const tier = classifyLateTier(diffMinutes, latePolicy);
+          const tier = classifyLateTier(diffMinutes, latePolicy) || DEFAULT_LATE_PENALTY_POLICY.tiers[0];
+          if (!tier) return;
           const approvedPerm = isApprovedPermissionForDate(emp.id, todayDate, state);
 
           // Calculate occurrences in this tier for the current month
-          const pastCycleIncidents = (state.lateIncidents || []).filter((inc) => {
+          const pastCycleIncidents = (state?.lateIncidents || []).filter((inc) => {
+            if (!inc) return false;
             if (String(inc.employeeId) !== String(emp.id)) return false;
             if (inc.status === 'cancelled') return false;
             if (inc.date === todayDate) return false; // exclude today's current record
@@ -600,15 +611,15 @@ export default function Dashboard({
           const rule = getPenaltyForOccurrence(tier, occurrenceNumber);
 
           const effectiveBranchId = sched.branchId || emp.branchId;
-          const branchObj = branches.find((b) => String(b.id) === String(effectiveBranchId)) || branches.find((b) => empBelongsToBranch(emp, b.id));
+          const branchObj = branches.find((b) => b && String(b.id) === String(effectiveBranchId)) || branches.find((b) => b && empBelongsToBranch(emp, b.id));
           const branchName = branchObj ? branchObj.name : 'الفرع الرئيسي';
 
           const incId = `late_inc_${emp.id}_${todayDate}_${timeIn.replace(':', '')}`;
-          const existingInc = (state.lateIncidents || []).find((i) => i.id === incId || (String(i.employeeId) === String(emp.id) && i.date === todayDate));
+          const existingInc = (state?.lateIncidents || []).find((i) => i && (i.id === incId || (String(i.employeeId) === String(emp.id) && i.date === todayDate)));
 
           const reqId = `req_late_${emp.id}_${todayDate}`;
-          const penaltyReq = (state.requests || []).find(
-            (r) => r.id === reqId || r.id === `req_${incId}` || (String(r.employeeId) === String(emp.id) && r.date === todayDate && (r.subType === 'lateness' || r.type === 'penalty'))
+          const penaltyReq = (state?.requests || []).find(
+            (r) => r && (r.id === reqId || r.id === `req_${incId}` || (String(r.employeeId) === String(emp.id) && r.date === todayDate && (r.subType === 'lateness' || r.type === 'penalty')))
           );
 
           let actionType = 'grace';
@@ -636,9 +647,9 @@ export default function Dashboard({
             penaltyAmount = computeLatenessFinancialAmount(deductionMinutes, emp, effectiveBranchId);
             status = 'approved';
           } else if (penaltyReq && (penaltyReq.status === 'approved' || penaltyReq.adminApproved)) {
-            actionType = rule.action;
-            actionTitle = penaltyReq.suggestedAction || rule.label;
-            deductionMinutes = parseFloat(penaltyReq.deductionMinutes !== undefined ? penaltyReq.deductionMinutes : rule.deductionMinutes) || 0;
+            actionType = rule?.action || 'grace';
+            actionTitle = penaltyReq.suggestedAction || rule?.label || 'جزاء تأخير';
+            deductionMinutes = parseFloat(penaltyReq.deductionMinutes !== undefined ? penaltyReq.deductionMinutes : (rule?.deductionMinutes || 0)) || 0;
             penaltyAmount = computeLatenessFinancialAmount(deductionMinutes, emp, effectiveBranchId);
             status = 'approved';
           } else if (penaltyReq && (penaltyReq.status === 'rejected' || penaltyReq.status === 'waived')) {
@@ -647,22 +658,22 @@ export default function Dashboard({
             deductionMinutes = 0;
             penaltyAmount = 0;
             status = 'waived';
-          } else if (tier.id === 'tier_0_10' || rule.action === 'grace') {
+          } else if (tier?.id === 'tier_0_10' || rule?.action === 'grace') {
             actionType = 'grace';
-            actionTitle = tier.id === 'tier_0_10' ? 'سماح دائم باللائحة (بدون خصم)' : `سماح لائحي (المرة #${occurrenceNumber} في الفئة)`;
+            actionTitle = tier?.id === 'tier_0_10' ? 'سماح دائم باللائحة (بدون خصم)' : `سماح لائحي (المرة #${occurrenceNumber} في الفئة)`;
             deductionMinutes = 0;
             penaltyAmount = 0;
             status = 'grace_allowed';
           } else {
-            actionType = rule.action;
-            actionTitle = rule.label;
-            deductionMinutes = rule.deductionMinutes || 0;
+            actionType = rule?.action || 'grace';
+            actionTitle = rule?.label || 'سماح';
+            deductionMinutes = rule?.deductionMinutes || 0;
             penaltyAmount = computeLatenessFinancialAmount(deductionMinutes, emp, effectiveBranchId);
             status = 'pending';
           }
 
           // Allowed grace count in this tier
-          const graceCountInTier = (tier.penalties || []).filter((p) => p.action === 'grace').length;
+          const graceCountInTier = (tier?.penalties || []).filter((p) => p && p.action === 'grace').length;
 
           lateEmployeesToday.push({
             emp,
@@ -692,9 +703,9 @@ export default function Dashboard({
 
         // Summary Counts
         const totalLate = lateEmployeesToday.length;
-        const permanentGraceCount = lateEmployeesToday.filter((i) => i.tier.id === 'tier_0_10').length;
-        const conditionalGraceCount = lateEmployeesToday.filter((i) => i.tier.id !== 'tier_0_10' && (i.actionType === 'grace' || i.status === 'grace_allowed') && !i.approvedPerm).length;
-        const deductionCount = lateEmployeesToday.filter((i) => i.deductionMinutes > 0 && !i.approvedPerm && i.status !== 'waived').length;
+        const permanentGraceCount = lateEmployeesToday.filter((i) => i?.tier?.id === 'tier_0_10').length;
+        const conditionalGraceCount = lateEmployeesToday.filter((i) => i?.tier?.id !== 'tier_0_10' && (i.actionType === 'grace' || i.status === 'grace_allowed') && !i.approvedPerm).length;
+        const deductionCount = lateEmployeesToday.filter((i) => (i.deductionMinutes || 0) > 0 && !i.approvedPerm && i.status !== 'waived').length;
         const permissionCount = lateEmployeesToday.filter((i) => i.approvedPerm).length;
         const totalDeductionMinutes = lateEmployeesToday.reduce((acc, i) => acc + (i.status !== 'waived' && !i.approvedPerm ? (i.deductionMinutes || 0) : 0), 0);
         const totalPenaltyAmount = lateEmployeesToday.reduce((acc, i) => acc + (i.status !== 'waived' && !i.approvedPerm ? (i.penaltyAmount || 0) : 0), 0);
@@ -711,8 +722,8 @@ export default function Dashboard({
 
           if (lateSearchQuery.trim()) {
             const q = lateSearchQuery.toLowerCase().trim();
-            const matchesName = (item.emp.name || '').toLowerCase().includes(q);
-            const matchesCode = (item.emp.code || '').includes(q);
+            const matchesName = (item.emp?.name || '').toLowerCase().includes(q);
+            const matchesCode = (item.emp?.code || '').includes(q);
             if (!matchesName && !matchesCode) return false;
           }
 
@@ -723,7 +734,8 @@ export default function Dashboard({
         const handleApplyLatePenalty = async (item) => {
           const targetIncId = item.incId;
           const targetReqId = item.reqId;
-          const emp = item.emp;
+          const emp = item.emp || {};
+          if (!emp.id) return;
 
           const updatedInc = {
             id: targetIncId,
@@ -738,10 +750,10 @@ export default function Dashboard({
             scheduledStartTime: item.scheduledStart,
             actualPunchInTime: item.timeIn,
             lateMinutes: item.diffMinutes,
-            tierId: item.tier.id,
-            tierKey: item.tier.key || item.tier.id,
-            tierName: item.tier.name,
-            tierColor: item.tier.color,
+            tierId: item.tier?.id || 'tier_0_10',
+            tierKey: item.tier?.key || item.tier?.id || 'tier_0_10',
+            tierName: item.tier?.name || 'فئة التأخير',
+            tierColor: item.tier?.color || '#0d9488',
             occurrenceNumber: item.occurrenceNumber,
             actionType: item.rule.action,
             actionLabel: item.rule.label,
@@ -823,7 +835,8 @@ export default function Dashboard({
         const handleWaiveLatePenalty = async (item) => {
           const targetIncId = item.incId;
           const targetReqId = item.reqId;
-          const emp = item.emp;
+          const emp = item.emp || {};
+          if (!emp.id) return;
 
           const updatedInc = {
             id: targetIncId,
@@ -838,10 +851,10 @@ export default function Dashboard({
             scheduledStartTime: item.scheduledStart,
             actualPunchInTime: item.timeIn,
             lateMinutes: item.diffMinutes,
-            tierId: item.tier.id,
-            tierKey: item.tier.key || item.tier.id,
-            tierName: item.tier.name,
-            tierColor: item.tier.color,
+            tierId: item.tier?.id || 'tier_0_10',
+            tierKey: item.tier?.key || item.tier?.id || 'tier_0_10',
+            tierName: item.tier?.name || 'فئة التأخير',
+            tierColor: item.tier?.color || '#0d9488',
             occurrenceNumber: item.occurrenceNumber,
             actionType: 'grace',
             actionLabel: 'سماح (استثناء إداري)',
@@ -929,7 +942,8 @@ export default function Dashboard({
         const handleSaveCustomPenalty = async () => {
           if (!lateEditModalItem) return;
           const item = lateEditModalItem;
-          const emp = item.emp;
+          const emp = item.emp || {};
+          if (!emp.id) return;
           const mins = parseFloat(lateEditDeductionMins) || 0;
           const penaltyAmt = computeLatenessFinancialAmount(mins, emp, item.branchId);
 
@@ -949,10 +963,10 @@ export default function Dashboard({
             scheduledStartTime: item.scheduledStart,
             actualPunchInTime: item.timeIn,
             lateMinutes: item.diffMinutes,
-            tierId: item.tier.id,
-            tierKey: item.tier.key || item.tier.id,
-            tierName: item.tier.name,
-            tierColor: item.tier.color,
+            tierId: item.tier?.id || 'tier_0_10',
+            tierKey: item.tier?.key || item.tier?.id || 'tier_0_10',
+            tierName: item.tier?.name || 'فئة التأخير',
+            tierColor: item.tier?.color || '#0d9488',
             occurrenceNumber: item.occurrenceNumber,
             actionType: mins > 0 ? 'deduction' : 'grace',
             actionLabel: mins > 0 ? `خصم ${mins} دقيقة (تعديل إداري)` : 'سماح (استثناء إداري)',
@@ -1080,7 +1094,7 @@ export default function Dashboard({
               <div style={{ background: 'rgba(59, 130, 246, 0.12)', border: '1px solid rgba(59, 130, 246, 0.3)', borderRadius: '10px', padding: '10px 12px', borderRight: '4px solid #3b82f6' }}>
                 <div style={{ fontSize: '11.5px', color: '#3b82f6', fontWeight: '700' }}>🔵 11 – 15 دقيقة</div>
                 <div style={{ fontSize: '18px', fontWeight: '800', color: 'var(--text)', margin: '2px 0' }}>
-                  {lateEmployeesToday.filter((i) => i.tier.id === 'tier_11_15').length} <span style={{ fontSize: '11px', fontWeight: '500', color: 'var(--muted)' }}>حالة</span>
+                  {lateEmployeesToday.filter((i) => i?.tier?.id === 'tier_11_15').length} <span style={{ fontSize: '11px', fontWeight: '500', color: 'var(--muted)' }}>حالة</span>
                 </div>
                 <div style={{ fontSize: '11px', color: '#3b82f6' }}>سماح حتى 3 مرات</div>
               </div>
@@ -1088,7 +1102,7 @@ export default function Dashboard({
               <div style={{ background: 'rgba(245, 158, 11, 0.12)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '10px', padding: '10px 12px', borderRight: '4px solid #f59e0b' }}>
                 <div style={{ fontSize: '11.5px', color: '#f59e0b', fontWeight: '700' }}>🟠 16 – 30 دقيقة</div>
                 <div style={{ fontSize: '18px', fontWeight: '800', color: 'var(--text)', margin: '2px 0' }}>
-                  {lateEmployeesToday.filter((i) => i.tier.id === 'tier_16_30').length} <span style={{ fontSize: '11px', fontWeight: '500', color: 'var(--muted)' }}>حالة</span>
+                  {lateEmployeesToday.filter((i) => i?.tier?.id === 'tier_16_30').length} <span style={{ fontSize: '11px', fontWeight: '500', color: 'var(--muted)' }}>حالة</span>
                 </div>
                 <div style={{ fontSize: '11px', color: '#f59e0b' }}>سماح حتى مرتين</div>
               </div>
@@ -1096,7 +1110,7 @@ export default function Dashboard({
               <div style={{ background: 'rgba(234, 88, 12, 0.12)', border: '1px solid rgba(234, 88, 12, 0.3)', borderRadius: '10px', padding: '10px 12px', borderRight: '4px solid #ea580c' }}>
                 <div style={{ fontSize: '11.5px', color: '#ea580c', fontWeight: '700' }}>🔴 31 – 60 دقيقة</div>
                 <div style={{ fontSize: '18px', fontWeight: '800', color: 'var(--text)', margin: '2px 0' }}>
-                  {lateEmployeesToday.filter((i) => i.tier.id === 'tier_31_60').length} <span style={{ fontSize: '11px', fontWeight: '500', color: 'var(--muted)' }}>حالة</span>
+                  {lateEmployeesToday.filter((i) => i?.tier?.id === 'tier_31_60').length} <span style={{ fontSize: '11px', fontWeight: '500', color: 'var(--muted)' }}>حالة</span>
                 </div>
                 <div style={{ fontSize: '11px', color: '#ea580c' }}>سماح مرة واحدة</div>
               </div>
@@ -1104,7 +1118,7 @@ export default function Dashboard({
               <div style={{ background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '10px', padding: '10px 12px', borderRight: '4px solid #dc2626' }}>
                 <div style={{ fontSize: '11.5px', color: '#ef4444', fontWeight: '700' }}>🟣 أكثر من 60 دقيقة</div>
                 <div style={{ fontSize: '18px', fontWeight: '800', color: 'var(--text)', margin: '2px 0' }}>
-                  {lateEmployeesToday.filter((i) => i.tier.id === 'tier_over_60').length} <span style={{ fontSize: '11px', fontWeight: '500', color: 'var(--muted)' }}>حالة</span>
+                  {lateEmployeesToday.filter((i) => i?.tier?.id === 'tier_over_60').length} <span style={{ fontSize: '11px', fontWeight: '500', color: 'var(--muted)' }}>حالة</span>
                 </div>
                 <div style={{ fontSize: '11px', color: '#ef4444' }}>خصم فوري مباشر</div>
               </div>
@@ -1212,7 +1226,7 @@ export default function Dashboard({
                       const isPending = item.status === 'pending';
 
                       return (
-                        <tr key={item.emp.id} style={{ borderBottom: '1px solid var(--border)', background: isPending && item.deductionMinutes > 0 ? 'var(--primary-tint)' : undefined }}>
+                        <tr key={item.emp?.id || idx} style={{ borderBottom: '1px solid var(--border)', background: isPending && item.deductionMinutes > 0 ? 'var(--primary-tint)' : undefined }}>
                           <td style={{ padding: '12px 8px', color: 'var(--muted)', fontWeight: 'bold' }}>{idx + 1}</td>
                           
                           {/* Employee info with avatar */}
@@ -1222,8 +1236,8 @@ export default function Dashboard({
                                 width: '32px',
                                 height: '32px',
                                 borderRadius: '50%',
-                                background: item.tier.color ? `${item.tier.color}22` : 'var(--danger-tint)',
-                                color: item.tier.color || 'var(--danger)',
+                                background: item.tier?.color ? `${item.tier.color}22` : 'var(--danger-tint)',
+                                color: item.tier?.color || 'var(--danger)',
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
@@ -1231,15 +1245,15 @@ export default function Dashboard({
                                 fontSize: '13px',
                                 flexShrink: 0
                               }}>
-                                {item.emp.name.charAt(0)}
+                                {item.emp?.name?.charAt(0)}
                               </div>
                               <div>
                                 <div style={{ fontWeight: '800', color: 'var(--text)', fontSize: '13.5px' }}>
-                                  {item.emp.name}
+                                  {item.emp?.name}
                                 </div>
                                 <div style={{ fontSize: '11.5px', color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                  <span style={{ background: 'var(--surface-muted)', padding: '1px 5px', borderRadius: '4px', fontWeight: 'bold', border: '1px solid var(--border)' }}>#{item.emp.code}</span>
-                                  <span>{item.emp.jobTitle}</span>
+                                  <span style={{ background: 'var(--surface-muted)', padding: '1px 5px', borderRadius: '4px', fontWeight: 'bold', border: '1px solid var(--border)' }}>#{item.emp?.code}</span>
+                                  <span>{item.emp?.jobTitle}</span>
                                 </div>
                               </div>
                             </div>
@@ -1268,7 +1282,7 @@ export default function Dashboard({
 
                           {/* Lateness & Tier Badge */}
                           <td style={{ padding: '12px 8px' }}>
-                            <div style={{ fontWeight: '800', color: item.tier.color || 'var(--accent)', fontSize: '13.5px' }}>
+                            <div style={{ fontWeight: '800', color: item.tier?.color || 'var(--accent)', fontSize: '13.5px' }}>
                               +{item.diffMinutes} دقيقة
                             </div>
                             <span style={{
@@ -1280,15 +1294,15 @@ export default function Dashboard({
                               borderRadius: '12px',
                               background: 'var(--surface-muted)',
                               border: '1px solid var(--border)',
-                              color: item.tier.color || 'var(--text)'
+                              color: item.tier?.color || 'var(--text)'
                             }}>
-                              {item.tier.name}
+                              {item.tier?.name || 'فئة التأخير'}
                             </span>
                           </td>
 
                           {/* Tier Occurrence History */}
                           <td style={{ padding: '12px 8px' }}>
-                            {item.tier.id === 'tier_0_10' ? (
+                            {item.tier?.id === 'tier_0_10' ? (
                               <span style={{ background: 'var(--success-tint)', color: 'var(--success)', border: '1px solid var(--success)', padding: '3px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: '700' }}>
                                 🟢 سماح دائم
                               </span>

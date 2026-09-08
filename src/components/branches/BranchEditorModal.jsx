@@ -313,7 +313,7 @@ export default function BranchEditorModal({
   if (!isOpen) return null;
 
   // Selected manager object for preview
-  const selectedManager = employees.find((e) => String(e.id) === String(managerId));
+  const selectedManager = (employees || []).find((e) => e && String(e.id) === String(managerId));
 
   return (
     <div

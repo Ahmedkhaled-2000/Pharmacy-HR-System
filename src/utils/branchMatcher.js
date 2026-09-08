@@ -93,10 +93,10 @@ export function getEmployeeBranchAssignment(emp, branch) {
 
   // 1. البحث في مصفوفة الفروع المتعددة branchesDetails
   if (Array.isArray(emp.branchesDetails) && emp.branchesDetails.length > 0) {
-    const matchedDetail = emp.branchesDetails.find(bd => isBranchMatch(bd.branchId || bd.id || bd.code, branch));
+    const matchedDetail = emp.branchesDetails.find(bd => bd && isBranchMatch(bd.branchId || bd.id || bd.code, branch));
     if (matchedDetail) {
       return {
-        branchId: matchedDetail.branchId || branch.id,
+        branchId: matchedDetail.branchId || branch?.id,
         salary: parseFloat(matchedDetail.salary) || 0,
         workHours: parseFloat(matchedDetail.workHours || matchedDetail.workHoursPerDay) || 8,
         workDays: parseFloat(matchedDetail.workDays || matchedDetail.workDaysPerMonth) || 26,

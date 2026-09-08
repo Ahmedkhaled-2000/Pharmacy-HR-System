@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useState } from 'react';
+import React, { Suspense, lazy, useState, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 
 import ErrorBoundary from '../components/common/ErrorBoundary';
@@ -143,6 +143,24 @@ export default function AppRoutes() {
 
   // Run 23:59 Daily Digest Background Automated Cron
   useDailyDigestCron();
+
+  // Guarantee null-safe arrays for all child components and modules
+  const sanitizedState = useMemo(() => {
+    if (!state) return state;
+    return {
+      ...state,
+      employees: (state.employees || []).filter((e) => e && typeof e === 'object' && (e.id || e.code)),
+      branches: (state.branches || []).filter((b) => b && typeof b === 'object' && b.id),
+      shifts: (state.shifts || []).filter((s) => s && typeof s === 'object' && (s.id || s.date || s.timestamp)),
+      requests: (state.requests || []).filter((r) => r && typeof r === 'object' && r.id),
+      leaveRequests: (state.leaveRequests || []).filter((r) => r && typeof r === 'object' && r.id),
+      lateIncidents: (state.lateIncidents || []).filter((i) => i && typeof i === 'object' && i.id),
+      adjustments: (state.adjustments || []).filter((a) => a && typeof a === 'object' && a.id),
+      loans: (state.loans || []).filter((l) => l && typeof l === 'object' && l.id),
+      evaluations: (state.evaluations || []).filter((e) => e && typeof e === 'object' && e.id),
+      rosters: (state.rosters || []).filter((r) => r && typeof r === 'object' && r.id)
+    };
+  }, [state]);
 
   // Navigation mode via URL
   const viewMode = location.pathname.startsWith('/careers')
@@ -636,7 +654,7 @@ export default function AppRoutes() {
             {authRole === 'branch' ? (
               <ErrorBoundary fallbackTitle="حدث خطأ في عرض لوحة مدير الفرع">
                 <BranchManagerView
-                  state={state}
+                  state={sanitizedState}
                   setState={setState}
                   saveState={saveState}
                   currentBranch={currentBranch}
@@ -658,7 +676,7 @@ export default function AppRoutes() {
                   filterFn={currentFilterFn}
                   getEmpPermission={getEmpPermission}
                   onExportExcel={() => {
-                    const mgrEmp = (state.employees || []).find((e) => e && e.id === currentBranch?.managerId) || (state.employees || []).find((e) => e && e.branchId === currentBranch?.id);
+                    const mgrEmp = (sanitizedState.employees || []).find((e) => e && e.id === currentBranch?.managerId) || (sanitizedState.employees || []).find((e) => e && e.branchId === currentBranch?.id);
                     if (mgrEmp) exportEmpExcel(mgrEmp.id, 'month');
                     else exportAllPayrollExcel();
                   }}
@@ -669,7 +687,7 @@ export default function AppRoutes() {
                 {/* 1. Dashboard */}
                 {activeNavTab === 'dashboard' && (
                   <Dashboard
-                    state={state}
+                    state={sanitizedState}
                     setState={setState}
                     saveState={saveState}
                     monthPicker={monthPicker}
@@ -703,7 +721,7 @@ export default function AppRoutes() {
                         : activeSubTab
                     }
                     onSubTabChange={(sub) => setActiveSubTab(sub)}
-                    state={state}
+                    state={sanitizedState}
                     setState={setState}
                     saveState={saveState}
                     showToast={showToast}
@@ -749,7 +767,7 @@ export default function AppRoutes() {
                 {activeNavTab === 'branches' && (
                   activeSubTab === 'sales' ? (
                     <BranchSalesModule
-                      state={state}
+                      state={sanitizedState}
                       setState={setState}
                       saveState={saveState}
                       showToast={showToast}
@@ -757,14 +775,14 @@ export default function AppRoutes() {
                     />
                   ) : activeSubTab === 'roster' ? (
                     <BranchMonthlyRosterModule
-                      state={state}
+                      state={sanitizedState}
                       initialBranchId={selectedRosterBranchId}
                       onNavigateTab={setActiveNavTab}
                       onSwitchSubTab={setActiveSubTab}
                     />
                   ) : (
                     <BranchManagementModule
-                      state={state}
+                      state={sanitizedState}
                       onSaveBranch={handleSaveBranch}
                       onDeleteBranch={handleDeleteBranch}
                       onSwitchSubTab={setActiveSubTab}
@@ -780,7 +798,7 @@ export default function AppRoutes() {
                 {/* 4. Requests Center */}
                 {activeNavTab === 'requests' && (
                   <RequestsModule
-                    state={state}
+                    state={sanitizedState}
                     setState={setState}
                     saveState={saveState}
                     showToast={showToast}
@@ -803,7 +821,7 @@ export default function AppRoutes() {
                 {/* 5. Leaves Tracking */}
                 {activeNavTab === 'leaves-tracking' && (
                   <LeavesTrackingModule
-                    state={state}
+                    state={sanitizedState}
                     setState={setState}
                     saveState={saveState}
                     showToast={showToast}
@@ -818,7 +836,7 @@ export default function AppRoutes() {
                 {/* 6. Employee Permissions Management */}
                 {activeNavTab === 'permissions-management' && (
                   <EmployeePermissionsManagementModule
-                    state={state}
+                    state={sanitizedState}
                     setState={setState}
                     saveState={saveState}
                     currentBranch={currentBranch}
@@ -837,7 +855,7 @@ export default function AppRoutes() {
                 {/* 7. Payroll Summary */}
                 {activeNavTab === 'payroll' && (
                   <PayrollModule
-                    state={{ ...state, computeEmpSummary }}
+                    state={{ ...sanitizedState, computeEmpSummary }}
                     setState={setState}
                     saveState={saveState}
                     monthPicker={monthPicker}
@@ -858,7 +876,7 @@ export default function AppRoutes() {
                 {/* 8. Adjustments & Bonuses/Deductions */}
                 {activeNavTab === 'adjustments-module' && (
                   <AdjustmentsModule
-                    state={state}
+                    state={sanitizedState}
                     setState={setState}
                     saveState={saveState}
                     showToast={showToast}
@@ -874,7 +892,7 @@ export default function AppRoutes() {
                 {/* 8.5. Admin Directives */}
                 {activeNavTab === 'admin-directives' && (
                   <AdminDirectivesModule
-                    state={state}
+                    state={sanitizedState}
                     setState={setState}
                     saveState={saveState}
                     showToast={showToast}
@@ -883,7 +901,7 @@ export default function AppRoutes() {
 
                 {activeNavTab === 'branch-directives' && (
                   <AdminDirectivesModule
-                    state={state}
+                    state={sanitizedState}
                     setState={setState}
                     saveState={saveState}
                     showToast={showToast}
@@ -894,7 +912,7 @@ export default function AppRoutes() {
                 {/* 9. WhatsApp Center */}
                 {activeNavTab === 'whatsapp-center' && (
                   <WhatsAppCenterModule
-                    state={state}
+                    state={sanitizedState}
                     showToast={showToast}
                   />
                 )}
@@ -902,7 +920,7 @@ export default function AppRoutes() {
                 {/* 10. Work Bylaws */}
                 {activeNavTab === 'bylaws' && (
                   <BylawsModule
-                    state={state}
+                    state={sanitizedState}
                     setState={setState}
                     saveState={saveState}
                     showToast={showToast}
@@ -923,7 +941,7 @@ export default function AppRoutes() {
                 {/* 11. Resignation Module */}
                 {activeNavTab === 'resignation' && (
                   <AdminResignationModule
-                    state={state}
+                    state={sanitizedState}
                     setState={setState}
                     saveState={saveState}
                     showToast={showToast}
@@ -936,7 +954,7 @@ export default function AppRoutes() {
                   <EvaluationsModule
                     subTab={activeSubTab}
                     onSubTabChange={setActiveSubTab}
-                    state={state}
+                    state={sanitizedState}
                     setState={setState}
                     saveState={saveState}
                     currentRole={authRole === 'branch' ? 'branch' : 'admin'}
@@ -951,7 +969,7 @@ export default function AppRoutes() {
                 {/* 13. Loans & Credit Meds */}
                 {activeNavTab === 'loans-meds' && (
                   <LoansMedsModule
-                    state={state}
+                    state={sanitizedState}
                     setState={setState}
                     saveState={saveState}
                     showToast={showToast}
@@ -962,7 +980,7 @@ export default function AppRoutes() {
                 {/* 14. Income & Expenses */}
                 {activeNavTab === 'income-expenses' && (
                   <IncomeExpensesModule
-                    state={state}
+                    state={sanitizedState}
                     setState={setState}
                     saveState={saveState}
                     showToast={showToast}
@@ -978,7 +996,7 @@ export default function AppRoutes() {
                 {activeNavTab === 'financial-reports' && (
                   authRole !== 'branch' ? (
                     <FinancialReportsModule
-                      state={{ ...state, computeEmpSummary }}
+                      state={{ ...sanitizedState, computeEmpSummary }}
                       setState={setState}
                       saveState={saveState}
                       showToast={showToast}
@@ -1002,7 +1020,7 @@ export default function AppRoutes() {
                 {/* 15. System Settings */}
                 {activeNavTab === 'settings' && (
                   <SettingsModule
-                    state={state}
+                    state={sanitizedState}
                     setState={setState}
                     saveState={saveState}
                     showToast={showToast}
@@ -1016,7 +1034,7 @@ export default function AppRoutes() {
                 {/* 16. Notification Center */}
                 {activeNavTab === 'notifications' && (
                   <NotificationCenterModule
-                    state={state}
+                    state={sanitizedState}
                     setState={setState}
                     saveState={saveState}
                     showToast={showToast}
@@ -1040,7 +1058,7 @@ export default function AppRoutes() {
                 {/* 17. Dual Approval Rules */}
                 {(activeNavTab === 'approval-rules' || activeNavTab === 'approvals') && (
                   <ApprovalCenterModule
-                    state={state}
+                    state={sanitizedState}
                     setState={setState}
                     saveState={saveState}
                     showToast={showToast}

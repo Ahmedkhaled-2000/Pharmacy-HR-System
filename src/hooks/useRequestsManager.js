@@ -16,7 +16,7 @@ export function useRequestsManager() {
   const handleApproveRequest = useCallback(async (requestId, role = 'admin') => {
     if (!state) return;
     const currentRequests = state?.requests || [];
-    const target = currentRequests.find((r) => r.id === requestId);
+    const target = currentRequests.find((r) => r && r.id === requestId);
     if (!target) return;
 
     const performApprove = async () => {
@@ -117,7 +117,7 @@ export function useRequestsManager() {
 
         // 2. Penalty / Early Exit / Disciplinary Violation Integration
         if (target.type === 'penalty' || target.type === 'early_exit' || target.type === 'disciplinary_penalty' || target.type === 'violation' || String(target.id || '').startsWith('disc_')) {
-          const emp = (state.employees || []).find((e) => String(e.id) === String(target.employeeId));
+          const emp = (state.employees || []).find((e) => e && String(e.id) === String(target.employeeId));
           let amount = 0;
           if (target.impactType === 'deduction_days' || target.deductionDays) {
             const days = parseFloat(target.impactVal || target.deductionDays || target.penaltyDays) || 1;
@@ -158,7 +158,7 @@ export function useRequestsManager() {
 
           if (target.actionTitle === 'إنهاء خدمة / فصل تأديبي' || target.penaltyAction === 'إنهاء خدمة / فصل تأديبي') {
             updatedEmps = updatedEmps.map(e => {
-              if (String(e.id) === String(target.employeeId)) {
+              if (e && String(e.id) === String(target.employeeId)) {
                 return {
                   ...e,
                   status: 'تم الاستقالة',
@@ -183,7 +183,7 @@ export function useRequestsManager() {
             target.penaltyAction?.includes('تحقيق')
           ) {
             updatedEmps = updatedEmps.map(e => {
-              if (String(e.id) === String(target.employeeId)) {
+              if (e && String(e.id) === String(target.employeeId)) {
                 return {
                   ...e,
                   biometricSuspended: true,
@@ -283,7 +283,7 @@ export function useRequestsManager() {
 
         // 7. Roster Request Integration
         if (target.type === 'roster_update' || target.type === 'roster_edit' || target.type === 'roster_edit_request') {
-          const empObj = (state.employees || []).find(e => String(e.id) === String(target.employeeId) || (target.employeeCode && String(e.code) === String(target.employeeCode)));
+          const empObj = (state.employees || []).find(e => e && (String(e.id) === String(target.employeeId) || (target.employeeCode && String(e.code) === String(target.employeeCode))));
           const targetBranch = target.branchId || empObj?.branchesDetails?.[0]?.branchId || empObj?.branchId || null;
           const normalizedSch = normalizeSchedule(target.schedule || target.newSchedule);
 
@@ -318,7 +318,7 @@ export function useRequestsManager() {
         if (target.type === 'biometric_verification' || target.type === 'تأكيد بصمة الوجه' || target.type === 'تأكيد بصمة اليد') {
           const action = target.targetAction || target.actionType;
           const empId = target.employeeId;
-          const emp = (state.employees || []).find((e) => String(e.id) === String(empId));
+          const emp = (state.employees || []).find((e) => e && String(e.id) === String(empId));
           const reqDate = target.date || (target.createdAt ? target.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10));
           const reqTime = target.time || (target.createdAt ? new Date(target.createdAt).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }) : '09:00');
           const reqTimestamp = target.timestamp || target.createdAt || new Date().toISOString();
@@ -504,9 +504,9 @@ export function useRequestsManager() {
           const targetCode = target.employeeCode;
 
           updatedEmps = updatedEmps.map((e) => {
-            const isMatch = String(e.id) === String(empId) ||
+            const isMatch = e && (String(e.id) === String(empId) ||
               (targetCode && String(e.code) === String(targetCode)) ||
-              (e.code && String(e.code) === String(empId));
+              (e.code && String(e.code) === String(empId)));
 
             if (isMatch) {
               return {
@@ -537,9 +537,9 @@ export function useRequestsManager() {
           const targetCode = target.employeeCode;
 
           updatedEmps = updatedEmps.map((e) => {
-            const isMatch = String(e.id) === String(empId) ||
+            const isMatch = e && (String(e.id) === String(empId) ||
               (targetCode && String(e.code) === String(targetCode)) ||
-              (e.code && String(e.code) === String(empId));
+              (e.code && String(e.code) === String(empId)));
 
             if (isMatch) {
               return {
@@ -576,7 +576,7 @@ export function useRequestsManager() {
           });
 
           updatedEmps = updatedEmps.map((e) => {
-            if (String(e.id) === String(target.employeeId)) {
+            if (e && String(e.id) === String(target.employeeId)) {
               return {
                 ...e,
                 status: 'تم الاستقالة',
@@ -629,7 +629,7 @@ export function useRequestsManager() {
           const newMaritalStatus = proposed.maritalStatus || target.maritalStatus;
 
           updatedEmps = updatedEmps.map(e => {
-            const isMatch = String(e.id) === String(target.employeeId) || (target.employeeCode && String(e.code) === String(target.employeeCode));
+            const isMatch = e && (String(e.id) === String(target.employeeId) || (target.employeeCode && String(e.code) === String(target.employeeCode)));
             if (isMatch) {
               const cleanPhones = Array.isArray(newPhones) && newPhones.length > 0
                 ? newPhones.map(p => (typeof p === 'object' && p ? (p.number || '') : String(p))).filter(Boolean)
@@ -975,8 +975,8 @@ export function useRequestsManager() {
 
   const handleSendEarlyExitEmail = async (reqId) => {
     try {
-      const req = (state.requests || []).find((r) => r.id === reqId);
-      const emp = req ? (state.employees || []).find((e) => e.id === req.employeeId) : null;
+      const req = (state.requests || []).find((r) => r && r.id === reqId);
+      const emp = req ? (state.employees || []).find((e) => e && e.id === req.employeeId) : null;
       showToast(`📧 تم إرسال تنبيه الانصراف المبكر ${emp ? `للموظف (${emp.name})` : ''}`);
     } catch {
       showToast('❌ حدث خطأ أثناء إرسال التنبيه');

@@ -29,8 +29,8 @@ export default function BranchPhonesDirectoryModal({ isOpen, onClose, branches =
 
   // Prepare normalized list of branches with all their numbers
   const branchList = useMemo(() => {
-    return branches.map((b) => {
-      const manager = employees.find((e) => String(e.id) === String(b.managerId));
+    return (branches || []).filter(b => b && b.id).map((b) => {
+      const manager = (employees || []).find((e) => e && String(e.id) === String(b.managerId));
       
       // Build phone list from phones array or fallback to legacy single phone
       let phoneList = [];

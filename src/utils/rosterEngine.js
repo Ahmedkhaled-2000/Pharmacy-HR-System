@@ -89,7 +89,7 @@ function normalizeScheduleItem(item, jsDayIndex) {
 export function findEmployeeRoster(empId, monthOrDate, state, targetBranchId = null) {
   if (!empId || !state) return null;
   const empIdStr = String(empId);
-  const emp = (state.employees || []).find(e => String(e.id) === empIdStr || (e.code && String(e.code) === empIdStr));
+  const emp = (state.employees || []).find(e => e && (String(e.id) === empIdStr || (e.code && String(e.code) === empIdStr)));
   const empCodeStr = emp?.code ? String(emp.code) : '';
   const dateStr = monthOrDate && monthOrDate.length >= 10 ? String(monthOrDate).slice(0, 10) : null;
   const monthStr = monthOrDate ? (monthOrDate.length === 7 ? monthOrDate : monthOrDate.slice(0, 7)) : null;
@@ -193,7 +193,7 @@ export function getEmployeeDaySchedule(empId, dateStr, state) {
   }
 
   const empIdStr = String(empId);
-  const emp = (state?.employees || []).find(e => String(e.id) === empIdStr || (e.code && String(e.code) === empIdStr));
+  const emp = (state?.employees || []).find(e => e && (String(e.id) === empIdStr || (e.code && String(e.code) === empIdStr)));
   const empCodeStr = emp?.code ? String(emp.code) : '';
 
   // 1. فحص طلبات تبديل الشيفت المعتمدة التي يكون هذا الموظف طرفاً فيها وتخص هذا التاريخ
@@ -232,7 +232,7 @@ export function getEmployeeDaySchedule(empId, dateStr, state) {
 
     const isRequester = String(reqEmpId) === empIdStr || (empCodeStr && String(approvedSwap.employeeCode) === empCodeStr);
     const otherEmpId = isRequester ? tgtEmpId : reqEmpId;
-    const otherEmp = (state?.employees || []).find(e => String(e.id) === String(otherEmpId) || (e.code && String(e.code) === String(otherEmpId)));
+    const otherEmp = (state?.employees || []).find(e => e && (String(e.id) === String(otherEmpId) || (e.code && String(e.code) === String(otherEmpId))));
     const otherEmpName = otherEmp?.name || (isRequester ? approvedSwap.targetEmpName : approvedSwap.requesterEmpName) || 'الزميل';
 
     // الحالة الأولى: التبديل في نفس التاريخ (Same Date Swap)
@@ -370,7 +370,7 @@ export function applyShiftSwapToRosters(targetReq, currentRosters = [], employee
       ros = updatedRosters.find((r) => String(r.employeeId) === String(empId) && (r.month === monthKey || !r.month));
     }
     if (!ros) {
-      const empObj = employees.find((e) => String(e.id) === String(empId));
+      const empObj = (employees || []).find((e) => e && String(e.id) === String(empId));
       ros = {
         id: `ros_${empId}_${monthKey}_${Date.now()}`,
         employeeId: empId,
@@ -610,9 +610,11 @@ export function getResolvedEmployeeRoster(employee, targetBranchId, arg3, arg4 =
 
   // Find target branch object in state.branches if available
   const targetBObj = targetBIdStr ? (state.branches || []).find(b => 
-    String(b.id) === targetBIdStr || 
-    String(b.branchCode || '') === targetBIdStr || 
-    (b.name && String(b.name).trim().toLowerCase() === targetBIdStr.toLowerCase())
+    b && (
+      String(b.id) === targetBIdStr || 
+      String(b.branchCode || '') === targetBIdStr || 
+      (b.name && String(b.name).trim().toLowerCase() === targetBIdStr.toLowerCase())
+    )
   ) : null;
 
   const isMultiBranch = Array.isArray(employee.branchesDetails) && employee.branchesDetails.length > 1;

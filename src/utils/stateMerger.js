@@ -39,9 +39,11 @@ export function getItemTime(item) {
 }
 
 export function toSafeArray(val) {
-  if (Array.isArray(val)) return val;
+  if (Array.isArray(val)) {
+    return val.filter((item) => item !== null && item !== undefined);
+  }
   if (val && typeof val === 'object') {
-    return Object.values(val).filter((item) => item !== null && typeof item === 'object');
+    return Object.values(val).filter((item) => item !== null && item !== undefined);
   }
   return [];
 }

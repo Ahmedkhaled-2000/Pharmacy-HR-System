@@ -17,8 +17,8 @@ export default function BranchManagementModule({
   const [showAddressesModal, setShowAddressesModal] = useState(false);
   const [editingBranch, setEditingBranch] = useState(null);
 
-  const branches = state.branches || [];
-  const employees = state.employees || [];
+  const branches = (state?.branches || []).filter((b) => b && b.id);
+  const employees = (state?.employees || []).filter((e) => e && e.id);
 
   const handleOpenAdd = () => {
     setEditingBranch(null);
@@ -132,7 +132,8 @@ export default function BranchManagementModule({
               </tr>
             ) : (
               branches.map((b) => {
-                const manager = employees.find((e) => String(e.id) === String(b.managerId));
+                if (!b || !b.id) return null;
+                const manager = employees.find((e) => e && String(e.id) === String(b.managerId));
                 
                 // Get all phones
                 let branchPhones = [];

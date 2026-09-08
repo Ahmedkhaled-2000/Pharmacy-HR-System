@@ -133,9 +133,11 @@ export function getEffectiveLatePolicy(state) {
  */
 export function classifyLateTier(diffMinutes, policy = DEFAULT_LATE_PENALTY_POLICY) {
   const minutes = Math.max(0, Math.round(Number(diffMinutes) || 0));
-  const tiers = policy?.tiers || DEFAULT_LATE_PENALTY_POLICY.tiers;
+  const rawTiers = policy?.tiers?.length ? policy.tiers : DEFAULT_LATE_PENALTY_POLICY.tiers;
+  const tiers = (rawTiers || []).filter(Boolean);
 
   for (const tier of tiers) {
+    if (!tier) continue;
     const min = tier.minMinutes !== undefined ? tier.minMinutes : 0;
     const max = tier.maxMinutes !== undefined ? tier.maxMinutes : 9999;
     if (minutes >= min && minutes <= max) {
@@ -144,7 +146,7 @@ export function classifyLateTier(diffMinutes, policy = DEFAULT_LATE_PENALTY_POLI
   }
 
   // إذا تجاوزت كل الحدود، نرجع الفئة الأخيرة
-  return tiers[tiers.length - 1] || DEFAULT_LATE_PENALTY_POLICY.tiers[4];
+  return tiers[tiers.length - 1] || DEFAULT_LATE_PENALTY_POLICY.tiers[4] || DEFAULT_LATE_PENALTY_POLICY.tiers[0];
 }
 
 /**
@@ -156,11 +158,11 @@ export function getPenaltyForOccurrence(tier, occurrenceNumber) {
   }
 
   const occ = Math.max(1, parseInt(occurrenceNumber, 10) || 1);
-  const exact = tier.penalties.find((p) => p.occurrence === occ);
+  const exact = (tier.penalties || []).find((p) => p && p.occurrence === occ);
   if (exact) return exact;
 
   // جلب قاعدة التكرار الأخير (السادسة فأكثر أو أعلى تكرار معرف)
-  const defaultBeyond = tier.penalties.find((p) => p.isDefaultBeyond);
+  const defaultBeyond = (tier.penalties || []).find((p) => p && p.isDefaultBeyond);
   if (defaultBeyond) return defaultBeyond;
 
   return tier.penalties[tier.penalties.length - 1];
@@ -278,7 +280,7 @@ export function getScheduledShiftForDate(employeeId, dateStr, state) {
 
   const empIdStr = String(employeeId);
   const monthKey = String(dateStr).slice(0, 7);
-  const emp = (state.employees || []).find((e) => String(e.id) === empIdStr || (e.code && String(e.code) === empIdStr));
+  const emp = (state.employees || []).find((e) => e && (String(e.id) === empIdStr || (e.code && String(e.code) === empIdStr)));
   const empCodeStr = emp?.code ? String(emp.code) : '';
 
   // 1. فحص طلبات تبديل الورديات المعتمدة أولاً
@@ -489,7 +491,7 @@ export function recalculateEmployeeCycleLateness({
   if (!employeeId || !state) return { incidents: [], updatedRequests: state.requests || [] };
 
   const empIdStr = String(employeeId);
-  const emp = (state.employees || []).find((e) => String(e.id) === empIdStr);
+  const emp = (state.employees || []).find((e) => e && String(e.id) === empIdStr);
   if (!emp) return { incidents: [], updatedRequests: state.requests || [] };
 
   const policy = getEffectiveLatePolicy(state);
@@ -510,7 +512,7 @@ export function recalculateEmployeeCycleLateness({
   };
 
   const newIncidents = [];
-  const existingIncidentsMap = new Map((state.lateIncidents || []).map((inc) => [inc.id, inc]));
+  const existingIncidentsMap = new Map((state.lateIncidents || []).filter((inc) => inc && inc.id).map((inc) => [inc.id, inc]));
 
   // جلب كافة طلبات الأذونات المعتمدة للموظف (إذن تأخير / إذن خروج مبكر / إذن عام)
   const approvedPermissions = (state.requests || []).filter(
@@ -543,7 +545,7 @@ export function recalculateEmployeeCycleLateness({
     const prevInc = existingIncidentsMap.get(incId);
 
     const effectiveShiftBranchId = shift.branchId || sched.branchId || emp.branchId;
-    const branchObj = (state.branches || []).find((b) => b.id === effectiveShiftBranchId);
+    const branchObj = (state.branches || []).find((b) => b && b.id === effectiveShiftBranchId);
     const branchName = branchObj ? branchObj.name : 'الفرع الرئيسي';
 
     // فحص ما إذا كان هناك تظلم معتمد أو إلغاء رسمي للواقعة
@@ -743,7 +745,7 @@ export function getEffectiveShiftHours(shift, state) {
   
   // Find employee to check default break hours if shift.breakHours is not explicitly set
   const emp = (state?.employees || []).find(
-    (e) => String(e.id) === String(shift.employeeId) || (shift.employeeCode && String(e.code) === String(shift.employeeCode))
+    (e) => e && (String(e.id) === String(shift.employeeId) || (shift.employeeCode && String(e.code) === String(shift.employeeCode)))
   );
   const empBreak = emp?.breakHours || emp?.defaultBreakHours || (emp?.branchesDetails && emp.branchesDetails[0]?.breakHours) || 0;
   const breakHours = Math.max(0, parseFloat(shift.breakHours !== undefined && shift.breakHours !== null ? shift.breakHours : empBreak) || 0);
@@ -885,9 +887,10 @@ export function syncAllEmployeesPermissionsAndLateness(state) {
   const stateWithShifts = { ...state, shifts: updatedShifts };
 
   const allIncidents = [];
-  const employees = state.employees || [];
+  const employees = (state.employees || []).filter((e) => e && e.id);
 
   for (const emp of employees) {
+    if (!emp || !emp.id) continue;
     try {
       const { incidents } = recalculateEmployeeCycleLateness({
         employeeId: emp.id,
@@ -897,7 +900,7 @@ export function syncAllEmployeesPermissionsAndLateness(state) {
       });
       allIncidents.push(...incidents);
     } catch (e) {
-      console.error(`Error recalculating for emp ${emp.id}:`, e);
+      console.error(`Error recalculating for emp ${emp?.id}:`, e);
     }
   }
 

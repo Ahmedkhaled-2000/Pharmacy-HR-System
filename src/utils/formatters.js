@@ -84,9 +84,11 @@ export function getEmpOfficialName(emp) {
 }
 
 export function toSafeArray(val) {
-  if (Array.isArray(val)) return val;
+  if (Array.isArray(val)) {
+    return val.filter((item) => item !== null && item !== undefined);
+  }
   if (val && typeof val === 'object') {
-    return Object.values(val).filter((item) => item !== null && typeof item === 'object');
+    return Object.values(val).filter((item) => item !== null && item !== undefined);
   }
   return [];
 }
@@ -96,9 +98,10 @@ export function normalizeState(parsed) {
     return parsed;
   }
 
-  let rawEmployees = toSafeArray(parsed.employees);
+  let rawEmployees = toSafeArray(parsed.employees).filter((e) => e && typeof e === 'object' && (e.id || e.code));
   let employees = rawEmployees.map((e) => ({
     ...e,
+    id: e.id || e.code || uid(),
     nickname: e.nickname || '',
     phone: e.phone || '',
     username: e.username || e.code || ''
@@ -107,6 +110,7 @@ export function normalizeState(parsed) {
   // Ensure existing employees have devices array and normalized permissions
   const empPermOverrides = parsed.orgSettings?.empPermissions || {};
   employees = employees.map(emp => {
+    if (!emp) return emp;
     const customPerms = empPermOverrides[String(emp.id)] || empPermOverrides[String(emp.code)] || emp.permissions;
     let normalizedPerms = undefined;
     if (customPerms && typeof customPerms === 'object') {
@@ -238,24 +242,28 @@ export function normalizeState(parsed) {
     if (orgSettings.payrollCustomTo) localStorage.setItem('payroll_custom_to', orgSettings.payrollCustomTo);
   } catch {}
 
-  const shifts = toSafeArray(parsed.shifts).map((s) => ({
-    ...s,
-    employeeId: s.employeeId || s.jobId || (employees[0] ? employees[0].id : '')
-  }));
+  const shifts = toSafeArray(parsed.shifts)
+    .filter((s) => s && typeof s === 'object')
+    .map((s) => ({
+      ...s,
+      employeeId: s.employeeId || s.jobId || (employees[0] ? employees[0].id : '')
+    }));
 
-  const adjustments = toSafeArray(parsed.adjustments).map((a) => ({
-    ...a,
-    employeeId: a.employeeId || a.jobId || 'all'
-  }));
+  const adjustments = toSafeArray(parsed.adjustments)
+    .filter((a) => a && typeof a === 'object')
+    .map((a) => ({
+      ...a,
+      employeeId: a.employeeId || a.jobId || 'all'
+    }));
 
-  const branches = toSafeArray(parsed.branches);
-  let requests = toSafeArray(parsed.requests);
-  const resignationRequests = toSafeArray(parsed.resignationRequests);
-  const leaveRequests = toSafeArray(parsed.leaveRequests);
-  const permissionRequests = toSafeArray(parsed.permissionRequests);
-  const shiftSwaps = toSafeArray(parsed.shiftSwaps);
-  let loans = toSafeArray(parsed.loans);
-  const evaluations = toSafeArray(parsed.evaluations);
+  const branches = toSafeArray(parsed.branches).filter((b) => b && typeof b === 'object' && b.id);
+  let requests = toSafeArray(parsed.requests).filter((r) => r && typeof r === 'object');
+  const resignationRequests = toSafeArray(parsed.resignationRequests).filter((r) => r && typeof r === 'object');
+  const leaveRequests = toSafeArray(parsed.leaveRequests).filter((r) => r && typeof r === 'object');
+  const permissionRequests = toSafeArray(parsed.permissionRequests).filter((r) => r && typeof r === 'object');
+  const shiftSwaps = toSafeArray(parsed.shiftSwaps).filter((s) => s && typeof s === 'object');
+  let loans = toSafeArray(parsed.loans).filter((l) => l && typeof l === 'object');
+  const evaluations = toSafeArray(parsed.evaluations).filter((e) => e && typeof e === 'object');
   // ── Remove old automated cycle reminder spam and keep only management notifications ──
   const notifications = toSafeArray(parsed.notifications).filter((n) => {
     if (!n) return false;
@@ -265,12 +273,12 @@ export function normalizeState(parsed) {
     ) && n.createdBy !== 'admin';
     return !isOldAutoReminder;
   });
-  const employeeNotes = toSafeArray(parsed.employeeNotes);
-  const authorizedDevices = toSafeArray(parsed.authorizedDevices);
-  const logs = toSafeArray(parsed.logs);
-  const approvalRules = toSafeArray(parsed.approvalRules);
-  const rosters = toSafeArray(parsed.rosters);
-  let lateIncidents = toSafeArray(parsed.lateIncidents);
+  const employeeNotes = toSafeArray(parsed.employeeNotes).filter((n) => n && typeof n === 'object');
+  const authorizedDevices = toSafeArray(parsed.authorizedDevices).filter((d) => d && typeof d === 'object');
+  const logs = toSafeArray(parsed.logs).filter((l) => l && typeof l === 'object');
+  const approvalRules = toSafeArray(parsed.approvalRules).filter((r) => r && typeof r === 'object');
+  const rosters = toSafeArray(parsed.rosters).filter((r) => r && typeof r === 'object');
+  let lateIncidents = toSafeArray(parsed.lateIncidents).filter((i) => i && typeof i === 'object');
   let cleanAdjustments = adjustments;
 
   // ── Auto-synchronize loans and credit medicine requests ──
