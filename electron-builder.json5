@@ -18,7 +18,7 @@
       }
     ],
     "icon": "assets/icon.ico",
-    "artifactName": "${productName}-Setup-${version}.${ext}",
+    "artifactName": "${name}-Setup-${version}.${ext}",
     "requestedExecutionLevel": "asInvoker"
   },
   "nsis": {
@@ -35,7 +35,8 @@
     {
       "provider": "github",
       "owner": "Ahmedkhaled-2000",
-      "repo": "Pharmacy-HR-System"
+      "repo": "Pharmacy-HR-System",
+      "releaseType": "release"
     }
   ]
 }

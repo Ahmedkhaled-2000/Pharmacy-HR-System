@@ -26,7 +26,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build and Publish Electron App to GitHub Releases
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run release
+      - name: Build Electron App
+        run: npm run build:electron && npx electron-builder --win
+
+      - name: Publish Release to GitHub
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            release/*.exe
+            release/latest.yml
+            release/*.blockmap
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          name: "منظومة الموارد البشرية - الإصدار ${{ github.ref_name }}"
+
