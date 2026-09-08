@@ -159,7 +159,16 @@ export default function BranchSalesModule({
 
   // ── Handlers: Save Single Sale ──
   const handleSaveSale = async (newSale) => {
-    const existingIndex = branchSales.findIndex((s) => s.id === newSale.id);
+    // 🛡️ فحص ومنع تكرار تسجيل مبيعات الفرع لنفس التاريخ
+    const duplicate = branchSales.find(
+      (s) => s && String(s.id) !== String(newSale.id) && String(s.branchId) === String(newSale.branchId) && s.date === newSale.date
+    );
+    if (duplicate) {
+      alert(`⚠️ عذراً، تم تسجيل مبيعات فرع (${newSale.branchName || ''}) بالفعل بتاريخ (${newSale.date}) بقيمة (${(parseFloat(duplicate.totalSales) || 0).toLocaleString('ar-EG', { minimumFractionDigits: 2 })} ج.م).\n\nلا يمكن تسجيل مبيعات الفرع أكثر من مرة على نفس التاريخ منعاً لتكرار الإيرادات.`);
+      return;
+    }
+
+    const existingIndex = branchSales.findIndex((s) => String(s.id) === String(newSale.id));
     let updatedList;
     if (existingIndex >= 0) {
       updatedList = [...branchSales];
@@ -212,13 +221,20 @@ export default function BranchSalesModule({
       if (b && b.id) batchMap.set(String(b.id), b);
     });
 
-    // 3. Update existing records that match by id
+    // 3. Update existing records that match by id OR by (branchId + date)
     const updatedExisting = existingList.map((item) => {
       const key = String(item.id);
       if (batchMap.has(key)) {
         const replacement = batchMap.get(key);
         batchMap.delete(key); // Marked as consumed
         return replacement;
+      }
+      // Also match by same branchId and date to guarantee no duplication
+      for (const [batchKey, batchItem] of batchMap.entries()) {
+        if (String(batchItem.branchId) === String(item.branchId) && batchItem.date === item.date) {
+          batchMap.delete(batchKey);
+          return { ...batchItem, id: item.id };
+        }
       }
       return item;
     });
@@ -927,17 +943,36 @@ export default function BranchSalesModule({
                       مبيعات اليوم: <strong style={{ color: '#0f766e' }}>{b.dateTotal.toLocaleString('ar-EG')} ج.م</strong>
                     </span>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditingSale({ branchId: b.branchId, branchName: b.branchName });
-                        setIsEntryModalOpen(true);
-                      }}
-                      className="btn btn-ghost"
-                      style={{ fontSize: '12px', padding: '4px 10px', background: '#ecfdf5', color: '#065f46', border: '1px solid #a7f3d0', fontWeight: '800' }}
-                    >
-                      ➕ تسجيل مبيعات
-                    </button>
+                    {(() => {
+                      const todaySale = (branchSales || []).find(
+                        (s) => s && String(s.branchId) === String(b.branchId) && s.date === todayStr
+                      );
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (todaySale) {
+                              setEditingSale(todaySale);
+                            } else {
+                              setEditingSale(null);
+                              setSelectedBranchId(String(b.branchId));
+                            }
+                            setIsEntryModalOpen(true);
+                          }}
+                          className="btn btn-ghost"
+                          style={{
+                            fontSize: '12px',
+                            padding: '4px 10px',
+                            background: todaySale ? '#eff6ff' : '#ecfdf5',
+                            color: todaySale ? '#1d4ed8' : '#065f46',
+                            border: `1px solid ${todaySale ? '#bfdbfe' : '#a7f3d0'}`,
+                            fontWeight: '800'
+                          }}
+                        >
+                          {todaySale ? '✏️ تعديل مبيعات اليوم' : '➕ تسجيل مبيعات'}
+                        </button>
+                      );
+                    })()}
                   </div>
                 </div>
               );
@@ -1393,6 +1428,7 @@ export default function BranchSalesModule({
         }}
         onSave={handleSaveSale}
         branches={branches}
+        existingSales={branchSales}
         editingSale={editingSale}
         preselectedBranchId={editingSale?.branchId || (selectedBranchId !== 'all' ? selectedBranchId : null)}
       />

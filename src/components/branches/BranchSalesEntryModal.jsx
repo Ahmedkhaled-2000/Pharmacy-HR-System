@@ -9,10 +9,12 @@ export default function BranchSalesEntryModal({
   onClose,
   onSave,
   branches = [],
+  existingSales = [],
   editingSale = null,
   preselectedBranchId = null,
   isBranchManager = false
 }) {
+  const [activeEditingId, setActiveEditingId] = useState(null);
   const [branchId, setBranchId] = useState('');
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [cashSales, setCashSales] = useState('');
@@ -30,6 +32,7 @@ export default function BranchSalesEntryModal({
 
   useEffect(() => {
     if (editingSale) {
+      setActiveEditingId(editingSale.id || null);
       setBranchId(String(editingSale.branchId || ''));
       setDate(editingSale.date || new Date().toISOString().slice(0, 10));
       setCashSales(editingSale.cashSales !== undefined ? String(editingSale.cashSales) : '');
@@ -45,6 +48,7 @@ export default function BranchSalesEntryModal({
       setAttachment(editingSale.attachment || null);
       setIsManualTotal(Boolean(editingSale.isManualTotal));
     } else {
+      setActiveEditingId(null);
       const defaultBId = preselectedBranchId || (branches[0] ? String(branches[0].id) : '');
       setBranchId(defaultBId);
       setDate(new Date().toISOString().slice(0, 10));
@@ -64,6 +68,16 @@ export default function BranchSalesEntryModal({
   }, [editingSale, isOpen, preselectedBranchId, branches]);
 
   if (!isOpen) return null;
+
+  // 🛡️ فحص دقيق لمنع تكرار تسجيل مبيعات الفرع لنفس التاريخ
+  const duplicateSale = (existingSales || []).find((s) => {
+    if (!s || !s.date || !s.branchId) return false;
+    const isSameBranch = String(s.branchId) === String(branchId);
+    const isSameDate = s.date === date;
+    const currentId = activeEditingId || editingSale?.id;
+    const isDifferentRecord = currentId ? String(s.id) !== String(currentId) : true;
+    return isSameBranch && isSameDate && isDifferentRecord;
+  });
 
   // Calculate total automatically
   const calculatedTotal = (
@@ -110,6 +124,13 @@ export default function BranchSalesEntryModal({
       alert('يرجى تحديد تاريخ المبيعات');
       return;
     }
+
+    // 🛡️ منع تكرار التسجيل على نفس التاريخ بشكل قاطع
+    if (duplicateSale) {
+      alert(`⚠️ عفواً، تم تسجيل مبيعات هذا الفرع بالفعل بتاريخ (${date}) بقيمة (${(parseFloat(duplicateSale.totalSales) || 0).toLocaleString('ar-EG', { minimumFractionDigits: 2 })} ج.م).\n\nلا يمكن تسجيل مبيعات الفرع أكثر من مرة في نفس التاريخ منعاً لتكرار الإيرادات.`);
+      return;
+    }
+
     if (effectiveTotal <= 0) {
       const conf = window.confirm('⚠️ إجمالي المبيعات المدخل هو 0 ج.م، هل ترغب في الاستمرار؟');
       if (!conf) return;
@@ -118,8 +139,9 @@ export default function BranchSalesEntryModal({
     const selectedBranchObj = branches.find((b) => String(b.id) === String(branchId));
     const branchName = selectedBranchObj?.name || selectedBranchObj?.branchName || `فرع ${branchId}`;
 
+    const targetId = activeEditingId || editingSale?.id;
     const saleRecord = {
-      id: editingSale ? editingSale.id : `sale_${branchId}_${date}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      id: targetId || `sale_${branchId}_${date}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       branchId: String(branchId),
       branchName,
       date,
@@ -137,7 +159,7 @@ export default function BranchSalesEntryModal({
       shiftManager: shiftManager.trim(),
       notes: notes.trim(),
       attachment,
-      createdAt: editingSale ? editingSale.createdAt : new Date().toISOString(),
+      createdAt: targetId ? (editingSale?.createdAt || new Date().toISOString()) : new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       createdBy: isBranchManager ? 'branch_manager' : 'admin'
     };
@@ -240,6 +262,64 @@ export default function BranchSalesEntryModal({
               />
             </div>
           </div>
+
+          {/* Duplicate Sale Warning Banner */}
+          {duplicateSale && (
+            <div
+              style={{
+                background: '#fef2f2',
+                border: '1.5px solid #f87171',
+                borderRadius: '10px',
+                padding: '12px 16px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '10px',
+                boxShadow: '0 2px 6px rgba(239, 68, 68, 0.1)'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#991b1b', fontSize: '13px', fontWeight: '700' }}>
+                <span style={{ fontSize: '20px' }}>⚠️</span>
+                <div>
+                  <div>تم تسجيل مبيعات هذا الفرع مسبقاً بتاريخ ({date}) بإجمالي <strong>{(parseFloat(duplicateSale.totalSales) || 0).toLocaleString('ar-EG', { minimumFractionDigits: 2 })} ج.م</strong>.</div>
+                  <div style={{ fontSize: '12px', fontWeight: '500', color: '#b91c1c', marginTop: '2px' }}>
+                    لا يمكن تسجيل مبيعات مكررة لنفس الفرع في نفس اليوم. يمكنك تعديل الحركة المسجلة:
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveEditingId(duplicateSale.id);
+                  setCashSales(duplicateSale.cashSales !== undefined ? String(duplicateSale.cashSales) : '');
+                  setVisaSales(duplicateSale.visaSales !== undefined ? String(duplicateSale.visaSales) : '');
+                  setWalletSales(duplicateSale.walletSales !== undefined ? String(duplicateSale.walletSales) : (duplicateSale.electronicWalletSales !== undefined ? String(duplicateSale.electronicWalletSales) : ''));
+                  setInstapaySales(duplicateSale.instapaySales !== undefined ? String(duplicateSale.instapaySales) : '');
+                  setDeliverySales(duplicateSale.deliverySales !== undefined ? String(duplicateSale.deliverySales) : '');
+                  setCreditSales(duplicateSale.creditSales !== undefined ? String(duplicateSale.creditSales) : '');
+                  setManualTotal(duplicateSale.totalSales !== undefined ? String(duplicateSale.totalSales) : '');
+                  setReceiptsCount(duplicateSale.receiptsCount !== undefined ? String(duplicateSale.receiptsCount) : '');
+                  setShiftManager(duplicateSale.shiftManager || '');
+                  setNotes(duplicateSale.notes || '');
+                  setAttachment(duplicateSale.attachment || null);
+                  setIsManualTotal(Boolean(duplicateSale.isManualTotal));
+                }}
+                style={{
+                  background: '#dc2626',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '6px 14px',
+                  fontSize: '12.5px',
+                  fontWeight: '800',
+                  cursor: 'pointer'
+                }}
+              >
+                تعديل الحركة المسجلة بدلاً من التكرار ✏️
+              </button>
+            </div>
+          )}
 
           {/* Payment Breakdown Section */}
           <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
@@ -517,10 +597,20 @@ export default function BranchSalesEntryModal({
             </button>
             <button
               type="submit"
+              disabled={Boolean(duplicateSale)}
               className="btn btn-start"
-              style={{ padding: '9px 24px', fontSize: '14px', fontWeight: '800', background: '#0f766e' }}
+              style={{
+                padding: '9px 24px',
+                fontSize: '14px',
+                fontWeight: '800',
+                background: duplicateSale ? '#94a3b8' : '#0f766e',
+                cursor: duplicateSale ? 'not-allowed' : 'pointer',
+                opacity: duplicateSale ? 0.7 : 1
+              }}
             >
-              💾 {editingSale ? 'حفظ التعديلات' : 'تسجيل المبيعات اليومية'}
+              {duplicateSale
+                ? '⚠️ مبيعات مسجلة مسبقاً لهذا التاريخ'
+                : (activeEditingId || editingSale ? '💾 حفظ التعديلات' : '💾 تسجيل المبيعات اليومية')}
             </button>
           </div>
         </form>
