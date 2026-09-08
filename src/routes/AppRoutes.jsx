@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useState, useMemo } from 'react';
+import React, { Suspense, lazy, useState, useMemo, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 
 import ErrorBoundary from '../components/common/ErrorBoundary';
