@@ -3,6 +3,10 @@
   "productName": "منظومة الموارد البشرية",
   "version": "1.0.4",
   "description": "منظومة إدارة الموارد البشرية والرواتب - تطبيق ويندوز المكتبي",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Ahmedkhaled-2000/Pharmacy-HR-System.git"
+  },
   "author": "Pharmacy HR Team",
   "main": "electron/main.cjs",
   "type": "module",
