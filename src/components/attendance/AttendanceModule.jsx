@@ -30,9 +30,14 @@ export default function AttendanceModule({
   const isCustom = (filterMode === 'custom' || filterMode === 'range') && customFrom && customTo;
   const periodLabel = isCustom ? `الفترة المخصصة: من ${customFrom} إلى ${customTo}` : (monthPicker ? `دورة شهر (${monthPicker})` : '');
 
+  const getTodayDateStr = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+
   // Manual Punch Form State
   const [manualEmpId, setManualEmpId] = useState('');
-  const [manualDate, setManualDate] = useState(() => (customFrom ? customFrom : new Date().toISOString().slice(0, 10)));
+  const [manualDate, setManualDate] = useState(getTodayDateStr);
   const [manualInTime, setManualInTime] = useState('');
   const [manualOutTime, setManualOutTime] = useState('');
   const [manualBreakHours, setManualBreakHours] = useState('0');
@@ -158,6 +163,7 @@ export default function AttendanceModule({
       setManualNotes('');
       setManualBranchId('');
       setIncludeDailyAllowance(true);
+      setManualDate(getTodayDateStr());
 
       const lateInc = markedIncidents.find((inc) => (inc.shiftId === newPunch.id || inc.date === manualDate) && inc.lateMinutes > 0);
       if (lateInc && lateInc.deductionMinutes > 0) {
