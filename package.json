@@ -19,6 +19,7 @@
     "electron:dev": "concurrently -k \"cross-env BROWSER=none vite\" \"wait-on tcp:5173 && electron .\"",
     "electron:build": "npm run build:electron && electron-builder --win",
     "build:exe": "npm run build:electron && electron-builder --win",
+    "release": "npm run build:electron && electron-builder --win --publish always",
     "generate-ico": "node scripts/generate-ico.cjs"
   },
   "dependencies": {

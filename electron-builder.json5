@@ -33,8 +33,9 @@
   },
   "publish": [
     {
-      "provider": "generic",
-      "url": "https://nodejs-test.apexthunder.com/updates/"
+      "provider": "github",
+      "owner": "Ahmedkhaled-2000",
+      "repo": "Pharmacy-HR-System"
     }
   ]
 }
