@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { fetchCurrentIP, checkDeviceAuthorization } from '../../utils/deviceAuth';
 import FaceVerificationOverlay from '../attendance/FaceVerificationOverlay';
-import KioskConfirmModal from './KioskConfirmModal';
+
 import { useData } from '../../context/DataContext';
 import { useUI } from '../../context/UIContext';
 import { uploadBiometricAttendancePhoto } from '../../utils/googleDriveService';
@@ -33,7 +33,7 @@ export default function ElectronicKioskView({
   const [inputCode, setInputCode] = useState('');
   const [matchedEmp, setMatchedEmp] = useState(null);
   const [blockedStatusModal, setBlockedStatusModal] = useState(null);
-  const [confirmModalData, setConfirmModalData] = useState(null);
+
   const [pendingDirectiveModal, setPendingDirectiveModal] = useState(null);
   const [pendingDirectivesQueue, setPendingDirectivesQueue] = useState([]);
   
@@ -514,18 +514,7 @@ export default function ElectronicKioskView({
     setInputCode('');
     setSelectedBranchId(null);
 
-    // If global modal in GlobalModalsContainer was not already triggered, trigger local fallback
-    if (!kioskConfirmModal?.open) {
-      setConfirmModalData({
-        open: true,
-        actionType,
-        empName,
-        branchName,
-        timeStr,
-        dateStr,
-        autoCloseMs: 3500
-      });
-    }
+
   };
 
   if (!authStatus.isAuthorized) {
@@ -1253,17 +1242,7 @@ export default function ElectronicKioskView({
         </div>
       )}
 
-      {/* Kiosk Confirmation / Greeting Modal (Fallback only if global modal is not open) */}
-      {confirmModalData && !kioskConfirmModal?.open && (
-        <KioskConfirmModal
-          confirmData={confirmModalData}
-          onClose={() => {
-            setConfirmModalData(null);
-            setMatchedEmp(null);
-            setInputCode('');
-          }}
-        />
-      )}
+
     </div>
   );
 }

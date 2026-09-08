@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useUI } from '../../context/UIContext';
 
 export default function KioskConfirmModal({ confirmData, kioskConfirmModal: propKioskConfirmModal, onClose }) {
@@ -13,6 +13,7 @@ export default function KioskConfirmModal({ confirmData, kioskConfirmModal: prop
   const kioskConfirmModal = propKioskConfirmModal || uiContext?.kioskConfirmModal;
   const setKioskConfirmModal = uiContext?.setKioskConfirmModal;
 
+  const [isVisible, setIsVisible] = useState(true);
   const [progress, setProgress] = useState(100);
 
   // Normalize data from either local confirmData or UIContext kioskConfirmModal
@@ -72,8 +73,17 @@ export default function KioskConfirmModal({ confirmData, kioskConfirmModal: prop
     kioskConfirmModal?.autoCloseMs
   ]);
 
-  // Unified close handler that guarantees state clearance
+  // Whenever new confirmation data arrives, reset visible and progress
+  useEffect(() => {
+    if (effectiveData) {
+      setIsVisible(true);
+      setProgress(100);
+    }
+  }, [effectiveData]);
+
+  // Unified close handler that guarantees immediate local dismissal and parent state clearance
   const handleClose = useCallback(() => {
+    setIsVisible(false);
     if (typeof onClose === 'function') {
       try {
         onClose();
@@ -90,6 +100,12 @@ export default function KioskConfirmModal({ confirmData, kioskConfirmModal: prop
     }
   }, [onClose, setKioskConfirmModal]);
 
+  // Ref to always hold latest handleClose without causing effect re-triggers
+  const handleCloseRef = useRef(handleClose);
+  useEffect(() => {
+    handleCloseRef.current = handleClose;
+  }, [handleClose]);
+
   // Auto-dismiss countdown timer + smooth visual progress bar
   useEffect(() => {
     if (!effectiveData) {
@@ -100,27 +116,38 @@ export default function KioskConfirmModal({ confirmData, kioskConfirmModal: prop
     setProgress(100);
     const duration = effectiveData.autoCloseMs || 3500;
     const startTime = Date.now();
+    let isFinished = false;
+
+    const triggerClose = () => {
+      if (isFinished) return;
+      isFinished = true;
+      if (handleCloseRef.current) {
+        handleCloseRef.current();
+      }
+    };
 
     // 1. Guaranteed auto-close timeout
     const closeTimer = setTimeout(() => {
-      handleClose();
+      triggerClose();
     }, duration);
 
     // 2. Smooth progress bar decrement based on wall-clock elapsed time
-    const intervalTime = 35;
+    const intervalTime = 30;
     const progressTimer = setInterval(() => {
       const elapsed = Date.now() - startTime;
       const remainingPct = Math.max(0, 100 - (elapsed / duration) * 100);
       setProgress(remainingPct);
-      if (remainingPct <= 0) {
+      if (remainingPct <= 0 || elapsed >= duration) {
         clearInterval(progressTimer);
+        clearTimeout(closeTimer);
+        triggerClose();
       }
     }, intervalTime);
 
     // 3. Escape key listener to close
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
-        handleClose();
+        triggerClose();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -130,9 +157,9 @@ export default function KioskConfirmModal({ confirmData, kioskConfirmModal: prop
       clearInterval(progressTimer);
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [effectiveData, handleClose]);
+  }, [effectiveData]);
 
-  if (!effectiveData) return null;
+  if (!effectiveData || !isVisible) return null;
 
   const { actionType, empName, branchName, timeStr, dateStr, message } = effectiveData;
 
