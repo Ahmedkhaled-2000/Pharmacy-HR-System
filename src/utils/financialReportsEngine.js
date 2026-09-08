@@ -1,4 +1,10 @@
-import { loadExcelJS } from './excelExport';
+import { loadExcelJS } from './excelExport.js';
+import {
+  isBranchMatch,
+  getEmployeeBranchAssignment,
+  calculateRatesAndSalaries
+} from './branchMatcher.js';
+import { isEmployeeActive } from './formatters.js';
 
 /**
  * financialReportsEngine.js
@@ -147,21 +153,38 @@ export function computeComprehensiveFinancialReport({
   const rawAdjustments = state?.adjustments || [];
   const rawLoans = state?.loans || [];
 
+  // Determine days in period for contractual pro-ration if needed
+  let periodDays = 30;
+  if (startDate && endDate) {
+    const dStart = new Date(startDate);
+    const dEnd = new Date(endDate);
+    const diffTime = Math.abs(dEnd - dStart);
+    periodDays = Math.max(1, Math.round(diffTime / (1000 * 60 * 60 * 24)) + 1);
+  } else if (periodMode === 'today' || periodMode === 'yesterday') {
+    periodDays = 1;
+  } else if (periodMode === 'week') {
+    periodDays = 7;
+  } else {
+    periodDays = 30;
+  }
+  const periodRatio = Math.min(1, periodDays / 30);
+
   // Determine active target branches
   const targetBranches = filterBranchId === 'all'
     ? branches
-    : branches.filter((b) => String(b.id) === String(filterBranchId));
+    : branches.filter((b) => isBranchMatch(b.id, filterBranchId) || isBranchMatch(b.code, filterBranchId));
 
   const isSingleBranch = filterBranchId !== 'all';
+  const matchedSingleBranch = branches.find((b) => isBranchMatch(b.id, filterBranchId) || isBranchMatch(b.code, filterBranchId));
   const singleBranchName = isSingleBranch
-    ? (branches.find((b) => String(b.id) === String(filterBranchId))?.name || `فرع ${filterBranchId}`)
+    ? (matchedSingleBranch?.name || matchedSingleBranch?.branchName || `فرع ${filterBranchId}`)
     : 'كافة الفروع';
 
   // ── 1. تجميع المبيعات والإيرادات (Revenues) ──
   const filteredSales = rawSales.filter((s) => {
     if (!s || !s.date) return false;
     if (!dateFilterFn(s.date)) return false;
-    if (isSingleBranch && String(s.branchId) !== String(filterBranchId)) return false;
+    if (isSingleBranch && !isBranchMatch(s.branchId, filterBranchId) && !isBranchMatch(s.branch, filterBranchId)) return false;
     return true;
   });
 
@@ -199,7 +222,7 @@ export function computeComprehensiveFinancialReport({
     if (!f || f.type !== 'income') return false;
     const fDate = f.date || f.createdAt || '';
     if (!dateFilterFn(fDate)) return false;
-    if (isSingleBranch && f.branchId && String(f.branchId) !== String(filterBranchId)) return false;
+    if (isSingleBranch && f.branchId && !isBranchMatch(f.branchId, filterBranchId)) return false;
     return true;
   });
 
@@ -215,7 +238,7 @@ export function computeComprehensiveFinancialReport({
     if (!f || (f.type !== 'expense' && f.type !== 'مصروف')) return false;
     const fDate = f.date || f.createdAt || '';
     if (!dateFilterFn(fDate)) return false;
-    if (isSingleBranch && f.branchId && String(f.branchId) !== String(filterBranchId)) return false;
+    if (isSingleBranch && f.branchId && !isBranchMatch(f.branchId, filterBranchId)) return false;
     return true;
   });
 
@@ -235,63 +258,15 @@ export function computeComprehensiveFinancialReport({
     percentage: totalOperatingExpenses > 0 ? ((amount / totalOperatingExpenses) * 100).toFixed(1) : 0
   })).sort((a, b) => b.amount - a.amount);
 
-  // ── 3. تجميع كلفة الرواتب ومسير الأجور (Payroll & Wages) ──
-  let totalBaseEarnings = 0;
-  let totalOvertimeEarnings = 0;
-  let totalAllowances = 0;
-  let totalGrossPayroll = 0;
-  let totalNetPayroll = 0;
-  let totalHoursWorked = 0;
-  let empBonusesSum = 0;
-  let empDeductionsSum = 0;
-
-  const targetEmployees = employees.filter((emp) => {
-    if (!emp) return false;
-    if (!isSingleBranch) return true;
-    const hasBranch = emp.branchId === filterBranchId ||
-      (Array.isArray(emp.branchesDetails) && emp.branchesDetails.some((bd) => String(bd.branchId) === String(filterBranchId)));
-    return hasBranch;
-  });
-
-  targetEmployees.forEach((emp) => {
-    if (computeEmpSummary) {
-      const summary = computeEmpSummary(
-        emp.id,
-        dateFilterFn,
-        periodMode === 'month' ? selectedMonth : null,
-        isSingleBranch ? filterBranchId : null
-      );
-
-      const baseEarn = Math.max(0, summary.baseEarnings || 0);
-      const otEarn = Math.max(0, summary.overtimeEarnings || 0);
-      const allowEarn = Math.max(0, summary.totalAllowances || 0);
-      const hours = summary.hours || 0;
-
-      totalBaseEarnings += baseEarn;
-      totalOvertimeEarnings += otEarn;
-      totalAllowances += allowEarn;
-      totalHoursWorked += hours;
-      totalGrossPayroll += (baseEarn + otEarn + allowEarn);
-
-      empBonusesSum += Math.max(0, summary.totalBonus || 0);
-      empDeductionsSum += Math.max(0, summary.totalDeduction || 0);
-
-      // في الحسابات المالية للمنشأة، صافي الراتب المستحق للموظف لا يمكن أن يكون سالباً في مسير الأجور المنصرف:
-      // إذا لم يكن لدى الموظف ساعات عمل أو كانت الاستقطاعات أكبر من مستحقاته، يكون المستحق الصافي المنصرف = 0 ج.م
-      const payableSalary = Math.max(0, summary.netSalary || 0);
-      totalNetPayroll += payableSalary;
-    }
-  });
-
-  // ── 4. تجميع المكافآت والخصومات (Adjustments) ──
+  // ── 3. تجميع المكافآت والخصومات (Adjustments) ──
   const filteredAdjustments = rawAdjustments.filter((adj) => {
     if (!adj || !adj.date) return false;
     if (!dateFilterFn(adj.date)) return false;
     if (isSingleBranch) {
-      if (adj.branchId && String(adj.branchId) !== String(filterBranchId)) return false;
+      if (adj.branchId && !isBranchMatch(adj.branchId, filterBranchId)) return false;
       if (!adj.branchId && adj.employeeId && adj.employeeId !== 'all') {
         const emp = employees.find((e) => String(e.id) === String(adj.employeeId));
-        if (emp && String(emp.branchId) !== String(filterBranchId)) return false;
+        if (emp && !isBranchMatch(emp.branchId, filterBranchId) && !getEmployeeBranchAssignment(emp, filterBranchId)) return false;
       }
     }
     return true;
@@ -309,20 +284,16 @@ export function computeComprehensiveFinancialReport({
     }
   });
 
-  const totalBonuses = empBonusesSum > 0 ? empBonusesSum : rawBonusSum;
-  // إذا لم يكن هناك ساعات عمل مسجلة، لا تُحتسب استقطاعات الغياب كخصم مسير
-  const totalDeductions = totalHoursWorked > 0 ? (empDeductionsSum > 0 ? empDeductionsSum : rawDeductionSum) : rawDeductionSum;
-
-  // ── 5. حركة السلف والأجل (Loans Movement) ──
+  // ── 4. حركة السلف والأجل (Loans Movement) ──
   const filteredLoans = rawLoans.filter((l) => {
     if (!l) return false;
     const lDate = l.date || l.createdAt || '';
     if (!dateFilterFn(lDate)) return false;
     if (isSingleBranch) {
-      if (l.branchId && String(l.branchId) !== String(filterBranchId)) return false;
+      if (l.branchId && !isBranchMatch(l.branchId, filterBranchId)) return false;
       if (!l.branchId && l.employeeId) {
         const emp = employees.find((e) => String(e.id) === String(l.employeeId));
-        if (emp && String(emp.branchId) !== String(filterBranchId)) return false;
+        if (emp && !isBranchMatch(emp.branchId, filterBranchId) && !getEmployeeBranchAssignment(emp, filterBranchId)) return false;
       }
     }
     return true;
@@ -338,8 +309,176 @@ export function computeComprehensiveFinancialReport({
     totalLoansRepaid += paid;
   });
 
-  // ── 6. الحسابات الصافية وهوامش الربحية (Net Profit & Margins) ──
-  // التكاليف والمصروفات قيم موجبة دائماً في القوائم المالية
+  // ── 5. مقارنة الفروع المعيارية وتفاصيل مسير رواتب كل فرع (Branch Benchmark Breakdown) ──
+  const branchBenchmarks = branches.map((b) => {
+    const bId = String(b.id);
+    const bName = b.name || b.branchName || `فرع ${bId}`;
+    const bCode = b.code || b.branchCode || '';
+
+    // Branch Sales
+    const bSales = rawSales.filter((s) => s && s.date && dateFilterFn(s.date) && (isBranchMatch(s.branchId, b) || isBranchMatch(s.branch, b)));
+    const bTotalSales = bSales.reduce((acc, s) => acc + (parseFloat(s.totalSales) || 0), 0);
+    const bCash = bSales.reduce((acc, s) => acc + (parseFloat(s.cashSales) || 0), 0);
+    const bVisa = bSales.reduce((acc, s) => acc + (parseFloat(s.visaSales) || 0), 0);
+    const bWallet = bSales.reduce((acc, s) => acc + (parseFloat(s.walletSales ?? s.electronicWalletSales) || 0), 0);
+    const bInstapay = bSales.reduce((acc, s) => acc + (parseFloat(s.instapaySales) || 0), 0);
+    const bDelivery = bSales.reduce((acc, s) => acc + (parseFloat(s.deliverySales) || 0), 0);
+    const bCredit = bSales.reduce((acc, s) => acc + (parseFloat(s.creditSales) || 0), 0);
+    const bReceiptsCount = bSales.reduce((acc, s) => acc + (parseInt(s.receiptsCount, 10) || 0), 0);
+
+    // Branch Other Incomes
+    const bIncomes = rawFinances.filter((f) => f && f.type === 'income' && dateFilterFn(f.date || f.createdAt) && isBranchMatch(f.branchId, b));
+    const bOtherIncome = bIncomes.reduce((acc, f) => acc + (parseFloat(f.amount) || 0), 0);
+    const bGrossRevenue = bTotalSales + bOtherIncome;
+
+    // Branch Expenses
+    const bExpenses = rawFinances.filter((f) => f && (f.type === 'expense' || f.type === 'مصروف') && dateFilterFn(f.date || f.createdAt) && isBranchMatch(f.branchId, b));
+    const bTotalExpenses = bExpenses.reduce((acc, f) => acc + (parseFloat(f.amount) || 0), 0);
+
+    // Branch Employees & Payroll
+    const employeesBreakdown = [];
+    let bActualPayroll = 0;
+    let bContractualPayroll = 0;
+    let bTotalHours = 0;
+
+    employees.forEach((emp) => {
+      if (!emp) return;
+      const isAssigned = isBranchMatch(emp.branchId, b) || !!getEmployeeBranchAssignment(emp, b);
+
+      let sum = null;
+      if (computeEmpSummary) {
+        sum = computeEmpSummary(emp.id, dateFilterFn, periodMode === 'month' ? selectedMonth : null, b.id);
+      }
+
+      const hasAttendance = sum && (sum.hours > 0 || (sum.shifts && sum.shifts.length > 0));
+      const active = isEmployeeActive(emp);
+
+      // Only include if assigned to branch OR worked actual shifts at this branch
+      if (!isAssigned && !hasAttendance) return;
+
+      const rates = calculateRatesAndSalaries(emp);
+      const monthlyContractual = sum?.contractualMonthlySalary || rates.monthlySalary || 0;
+      const contractualForPeriod = monthlyContractual * periodRatio;
+
+      let net = 0;
+      let isEstimate = false;
+
+      if (hasAttendance) {
+        net = Math.max(0, sum.netSalary || 0);
+        bActualPayroll += net;
+        bTotalHours += (sum.hours || 0);
+      } else if (active && isAssigned) {
+        // Staff assigned to this branch with no biometric records logged yet
+        net = Math.max(0, contractualForPeriod);
+        bContractualPayroll += net;
+        isEstimate = true;
+      }
+
+      employeesBreakdown.push({
+        id: emp.id,
+        name: emp.name || emp.fullName || 'موظف',
+        code: emp.employeeCode || emp.code || '',
+        jobTitle: emp.jobTitle || emp.role || 'موظف',
+        hours: sum?.hours || 0,
+        hourlyRate: sum?.rates?.hourlyRate || rates.hourlyRate || 0,
+        monthlySalary: monthlyContractual,
+        baseEarnings: sum?.baseEarnings || (isEstimate ? net : 0),
+        overtimeEarnings: sum?.overtimeEarnings || 0,
+        totalAllowances: sum?.totalAllowances || 0,
+        totalBonus: sum?.totalBonus || 0,
+        totalDeduction: sum?.totalDeduction || 0,
+        netSalary: net,
+        isContractualEstimate: isEstimate,
+        isRoaming: !isAssigned && hasAttendance
+      });
+    });
+
+    const bPayroll = bActualPayroll + bContractualPayroll;
+    const bSafePayroll = Math.max(0, bPayroll);
+    const bSafeExpenses = Math.max(0, bTotalExpenses);
+    const bTotalCosts = bSafePayroll + bSafeExpenses;
+    const bNetProfit = bGrossRevenue - bTotalCosts;
+    const bMargin = bGrossRevenue > 0
+      ? ((bNetProfit / bGrossRevenue) * 100)
+      : (bNetProfit < 0 ? -100 : 0);
+    const bPayrollRatio = bGrossRevenue > 0 ? ((bSafePayroll / bGrossRevenue) * 100) : 0;
+    const bPayrollMode = bActualPayroll > 0 ? (bContractualPayroll > 0 ? 'mixed' : 'actual') : (bContractualPayroll > 0 ? 'contractual' : 'none');
+    const bSalesPerEmployee = employeesBreakdown.length > 0 ? Math.round(bTotalSales / employeesBreakdown.length) : 0;
+
+    return {
+      branchId: bId,
+      branchName: bName,
+      branchCode: bCode,
+      sales: bTotalSales,
+      cashSales: bCash,
+      visaSales: bVisa,
+      walletSales: bWallet,
+      instapaySales: bInstapay,
+      deliverySales: bDelivery,
+      creditSales: bCredit,
+      receiptsCount: bReceiptsCount,
+      otherIncome: bOtherIncome,
+      grossRevenue: bGrossRevenue,
+      operatingExpenses: bSafeExpenses,
+      payroll: bSafePayroll,
+      actualPayroll: bActualPayroll,
+      contractualPayroll: bContractualPayroll,
+      payrollMode: bPayrollMode,
+      employeesCount: employeesBreakdown.length,
+      totalHours: bTotalHours,
+      salesPerEmployee: bSalesPerEmployee,
+      employeesBreakdown,
+      totalCosts: bTotalCosts,
+      netProfit: bNetProfit,
+      profitMargin: parseFloat(bMargin.toFixed(1)),
+      payrollRatio: parseFloat(bPayrollRatio.toFixed(1)),
+      status: bNetProfit >= 0 ? (bMargin >= 15 ? 'healthy' : 'moderate') : 'loss'
+    };
+  }).sort((a, b) => b.netProfit - a.netProfit);
+
+  // ── 6. تجميع كلفة الرواتب ومسير الأجور للقوائم المالية (Payroll Consolidation) ──
+  let totalBaseEarnings = 0;
+  let totalOvertimeEarnings = 0;
+  let totalAllowances = 0;
+  let totalGrossPayroll = 0;
+  let totalNetPayroll = 0;
+  let totalHoursWorked = 0;
+  let empBonusesSum = 0;
+  let empDeductionsSum = 0;
+
+  if (isSingleBranch) {
+    const selectedBm = branchBenchmarks.find((b) => isBranchMatch(b.branchId, filterBranchId) || isBranchMatch(b.branchCode, filterBranchId));
+    if (selectedBm) {
+      totalNetPayroll = selectedBm.payroll;
+      totalHoursWorked = selectedBm.totalHours;
+      selectedBm.employeesBreakdown.forEach((e) => {
+        totalBaseEarnings += (e.baseEarnings || 0);
+        totalOvertimeEarnings += (e.overtimeEarnings || 0);
+        totalAllowances += (e.totalAllowances || 0);
+        empBonusesSum += (e.totalBonus || 0);
+        empDeductionsSum += (e.totalDeduction || 0);
+      });
+      totalGrossPayroll = totalBaseEarnings + totalOvertimeEarnings + totalAllowances;
+    }
+  } else {
+    branchBenchmarks.forEach((b) => {
+      totalNetPayroll += b.payroll;
+      totalHoursWorked += b.totalHours;
+      b.employeesBreakdown.forEach((e) => {
+        totalBaseEarnings += (e.baseEarnings || 0);
+        totalOvertimeEarnings += (e.overtimeEarnings || 0);
+        totalAllowances += (e.totalAllowances || 0);
+        empBonusesSum += (e.totalBonus || 0);
+        empDeductionsSum += (e.totalDeduction || 0);
+      });
+    });
+    totalGrossPayroll = totalBaseEarnings + totalOvertimeEarnings + totalAllowances;
+  }
+
+  const totalBonuses = empBonusesSum > 0 ? empBonusesSum : rawBonusSum;
+  const totalDeductions = totalHoursWorked > 0 ? (empDeductionsSum > 0 ? empDeductionsSum : rawDeductionSum) : rawDeductionSum;
+
+  // ── 7. الحسابات الصافية وهوامش الربحية (Net Profit & Margins) ──
   const safePayroll = Math.max(0, totalNetPayroll);
   const safeOperatingExpenses = Math.max(0, totalOperatingExpenses);
   const totalOperatingCosts = safePayroll + safeOperatingExpenses;
@@ -351,74 +490,6 @@ export function computeComprehensiveFinancialReport({
     : (netProfit < 0 ? -100 : 0);
   const payrollRatio = totalGrossRevenues > 0 ? ((safePayroll / totalGrossRevenues) * 100) : 0;
   const expensesRatio = totalGrossRevenues > 0 ? ((safeOperatingExpenses / totalGrossRevenues) * 100) : 0;
-
-  // ── 7. مقارنة الفروع المعيارية (Branch Benchmark Breakdown) ──
-  const branchBenchmarks = branches.map((b) => {
-    const bId = String(b.id);
-    const bName = b.name || b.branchName || `فرع ${bId}`;
-
-    // Branch Sales
-    const bSales = rawSales.filter((s) => s && s.date && dateFilterFn(s.date) && String(s.branchId) === bId);
-    const bTotalSales = bSales.reduce((acc, s) => acc + (parseFloat(s.totalSales) || 0), 0);
-    const bCash = bSales.reduce((acc, s) => acc + (parseFloat(s.cashSales) || 0), 0);
-    const bVisa = bSales.reduce((acc, s) => acc + (parseFloat(s.visaSales) || 0), 0);
-    const bWallet = bSales.reduce((acc, s) => acc + (parseFloat(s.walletSales ?? s.electronicWalletSales) || 0), 0);
-    const bInstapay = bSales.reduce((acc, s) => acc + (parseFloat(s.instapaySales) || 0), 0);
-    const bDelivery = bSales.reduce((acc, s) => acc + (parseFloat(s.deliverySales) || 0), 0);
-
-    // Branch Other Incomes
-    const bIncomes = rawFinances.filter((f) => f && f.type === 'income' && dateFilterFn(f.date || f.createdAt) && String(f.branchId) === bId);
-    const bOtherIncome = bIncomes.reduce((acc, f) => acc + (parseFloat(f.amount) || 0), 0);
-    const bGrossRevenue = bTotalSales + bOtherIncome;
-
-    // Branch Expenses
-    const bExpenses = rawFinances.filter((f) => f && (f.type === 'expense' || f.type === 'مصروف') && dateFilterFn(f.date || f.createdAt) && String(f.branchId) === bId);
-    const bTotalExpenses = bExpenses.reduce((acc, f) => acc + (parseFloat(f.amount) || 0), 0);
-
-    // Branch Payroll (always non-negative)
-    let bPayroll = 0;
-    const bEmployees = employees.filter((emp) => {
-      if (!emp) return false;
-      return emp.branchId === bId || (Array.isArray(emp.branchesDetails) && emp.branchesDetails.some((bd) => String(bd.branchId) === bId));
-    });
-
-    bEmployees.forEach((emp) => {
-      if (computeEmpSummary) {
-        const sum = computeEmpSummary(emp.id, dateFilterFn, periodMode === 'month' ? selectedMonth : null, bId);
-        bPayroll += Math.max(0, sum.netSalary || 0);
-      }
-    });
-
-    const bSafePayroll = Math.max(0, bPayroll);
-    const bSafeExpenses = Math.max(0, bTotalExpenses);
-    const bTotalCosts = bSafePayroll + bSafeExpenses;
-    const bNetProfit = bGrossRevenue - bTotalCosts;
-    const bMargin = bGrossRevenue > 0
-      ? ((bNetProfit / bGrossRevenue) * 100)
-      : (bNetProfit < 0 ? -100 : 0);
-    const bPayrollRatio = bGrossRevenue > 0 ? ((bSafePayroll / bGrossRevenue) * 100) : 0;
-
-    return {
-      branchId: bId,
-      branchName: bName,
-      branchCode: b.code || b.branchCode || '',
-      sales: bTotalSales,
-      cashSales: bCash,
-      visaSales: bVisa,
-      walletSales: bWallet,
-      instapaySales: bInstapay,
-      deliverySales: bDelivery,
-      otherIncome: bOtherIncome,
-      grossRevenue: bGrossRevenue,
-      operatingExpenses: bSafeExpenses,
-      payroll: bPayroll,
-      totalCosts: bTotalCosts,
-      netProfit: bNetProfit,
-      profitMargin: parseFloat(bMargin.toFixed(1)),
-      payrollRatio: parseFloat(bPayrollRatio.toFixed(1)),
-      status: bNetProfit >= 0 ? (bMargin >= 15 ? 'healthy' : 'moderate') : 'loss'
-    };
-  }).sort((a, b) => b.netProfit - a.netProfit);
 
   // ── 8. تقييم السلامة المالية والمؤشرات التنبيهية ──
   const healthAlerts = [];
@@ -626,7 +697,7 @@ export async function exportComprehensiveFinancialToExcel({
       views: [{ rightToLeft: true }]
     });
 
-    ws2.mergeCells('A1:H1');
+    ws2.mergeCells('A1:K1');
     const t2 = ws2.getCell('A1');
     t2.value = `تقرير المقارنة المالية والأرباح بين الصيدليات — ${periodLabel}`;
     t2.font = { name: 'Arial', bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
@@ -634,7 +705,7 @@ export async function exportComprehensiveFinancialToExcel({
     t2.alignment = { horizontal: 'center', vertical: 'middle' };
     ws2.getRow(1).height = 32;
 
-    const headers2 = ['الترتيب', 'الفرع', 'إجمالي المبيعات (ج.م)', 'مسير الرواتب (ج.م)', 'المصروفات (ج.م)', 'إجمالي التكاليف', 'صافي الربح (ج.م)', 'هامش الربح %'];
+    const headers2 = ['الترتيب', 'الفرع', 'عدد الموظفين', 'ساعات العمل', 'المبيعات (ج.م)', 'مسير الرواتب (ج.م)', 'طريقة الاحتساب', 'المصروفات (ج.م)', 'إجمالي التكاليف', 'صافي الربح (ج.م)', 'هامش الربح %'];
     const hRow2 = ws2.addRow(headers2);
     hRow2.height = 24;
     hRow2.eachCell((cell) => {
@@ -644,11 +715,15 @@ export async function exportComprehensiveFinancialToExcel({
     });
 
     branchBenchmarks.forEach((b, idx) => {
+      const modeLabel = b.payrollMode === 'actual' ? 'فعلي بالبصمة' : (b.payrollMode === 'contractual' ? 'تعاقدي تقديري' : (b.payrollMode === 'mixed' ? 'مختلط' : 'لا يوجد'));
       const r = ws2.addRow([
         idx + 1,
         b.branchName,
+        b.employeesCount || 0,
+        b.totalHours || 0,
         b.grossRevenue,
         b.payroll,
+        modeLabel,
         b.operatingExpenses,
         b.totalCosts,
         b.netProfit,
@@ -657,16 +732,72 @@ export async function exportComprehensiveFinancialToExcel({
       r.height = 20;
       r.eachCell((cell, cIdx) => {
         cell.alignment = { horizontal: cIdx === 2 ? 'right' : 'center', vertical: 'middle' };
-        if ([3, 4, 5, 6, 7].includes(cIdx)) {
+        if ([5, 6, 8, 9, 10].includes(cIdx)) {
           cell.numFmt = '#,##0.00';
         }
-        if (cIdx === 7) {
+        if (cIdx === 10 || cIdx === 11) {
           cell.font = { bold: true, color: { argb: b.netProfit >= 0 ? 'FF15803D' : 'FFDC2626' } };
         }
       });
     });
 
-    ws2.columns = [{ width: 8 }, { width: 26 }, { width: 20 }, { width: 18 }, { width: 18 }, { width: 18 }, { width: 20 }, { width: 16 }];
+    ws2.columns = [{ width: 8 }, { width: 24 }, { width: 14 }, { width: 14 }, { width: 20 }, { width: 20 }, { width: 16 }, { width: 18 }, { width: 18 }, { width: 20 }, { width: 16 }];
+
+    // ── ورقة 3: تفاصيل مسير رواتب الموظفين بالفروع ──
+    const ws3 = wb.addWorksheet('تفاصيل رواتب الموظفين بالفروع', {
+      views: [{ rightToLeft: true }]
+    });
+
+    ws3.mergeCells('A1:L1');
+    const t3 = ws3.getCell('A1');
+    t3.value = `تفصيل مسير أجور ومستحقات الموظفين بالصيدليات — ${periodLabel}`;
+    t3.font = { name: 'Arial', bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
+    t3.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0D9488' } };
+    t3.alignment = { horizontal: 'center', vertical: 'middle' };
+    ws3.getRow(1).height = 32;
+
+    const headers3 = ['الفرع', 'كود الموظف', 'اسم الموظف', 'الوظيفة', 'ساعات العمل', 'أجر الساعة', 'الأساسي', 'الإضافي', 'البدلات والمكافآت', 'الاستقطاعات', 'صافي المستحق (ج.م)', 'حالة الاحتساب'];
+    const hRow3 = ws3.addRow(headers3);
+    hRow3.height = 24;
+    hRow3.eachCell((cell) => {
+      cell.font = { name: 'Arial', bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F766E' } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    });
+
+    branchBenchmarks.forEach((b) => {
+      if (Array.isArray(b.employeesBreakdown) && b.employeesBreakdown.length > 0) {
+        b.employeesBreakdown.forEach((emp) => {
+          const statusText = emp.isContractualEstimate ? 'أساسي تعاقدي (لم تسجل بصمة)' : (emp.isRoaming ? 'مناوبة فرع آخر' : 'فعلي من واقع البصمة');
+          const row = ws3.addRow([
+            b.branchName,
+            emp.code || '—',
+            emp.name,
+            emp.jobTitle || '—',
+            emp.hours || 0,
+            emp.hourlyRate || 0,
+            emp.baseEarnings || 0,
+            emp.overtimeEarnings || 0,
+            (emp.totalAllowances || 0) + (emp.totalBonus || 0),
+            emp.totalDeduction || 0,
+            emp.netSalary || 0,
+            statusText
+          ]);
+          row.height = 20;
+          row.eachCell((cell, cIdx) => {
+            cell.alignment = { horizontal: [1, 3, 4].includes(cIdx) ? 'right' : 'center', vertical: 'middle' };
+            if ([6, 7, 8, 9, 10, 11].includes(cIdx)) {
+              cell.numFmt = '#,##0.00';
+            }
+            if (cIdx === 11) {
+              cell.font = { bold: true };
+            }
+          });
+        });
+      }
+    });
+
+    ws3.columns = [{ width: 22 }, { width: 14 }, { width: 26 }, { width: 18 }, { width: 14 }, { width: 14 }, { width: 16 }, { width: 16 }, { width: 18 }, { width: 16 }, { width: 18 }, { width: 26 }];
 
     // Download File
     const buffer = await wb.xlsx.writeBuffer();

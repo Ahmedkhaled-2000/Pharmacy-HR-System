@@ -33,6 +33,7 @@ export default function FinancialReportsModule({
   // ── Sub-view Tabs ──
   // 'pl' (قائمة الدخل) | 'benchmark' (مقارنة الفروع) | 'visual' (التحليل البصري) | 'drilldown' (السجلات المدققة)
   const [activeTab, setActiveTab] = useState('pl');
+  const [selectedBranchDetail, setSelectedBranchDetail] = useState(null);
 
   // Compute Emp Summary from context/state
   const computeEmpSummary = state?.computeEmpSummary || null;
@@ -712,7 +713,7 @@ export default function FinancialReportsModule({
                 </tr>
                 <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
                   <td style={{ padding: '8px 16px', textAlign: 'right', fontSize: '13px' }}>
-                    الأجور الأساسية وساعات العمل ({report.totalHoursWorked} ساعة)
+                    الأجور الأساسية والرواتب {report.totalHoursWorked > 0 ? `(${report.totalHoursWorked} ساعة عمل مسجلة)` : '(تقديري وفق عقود التعيين)'}
                   </td>
                   <td style={{ padding: '8px', fontWeight: '700' }}>
                     {report.totalBaseEarnings.toLocaleString('ar-EG', { minimumFractionDigits: 2 })}
@@ -845,21 +846,22 @@ export default function FinancialReportsModule({
             <table className="bylaws-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'center' }}>
               <thead>
                 <tr style={{ background: '#0f766e', color: '#ffffff', position: 'sticky', top: 0, zIndex: 2 }}>
-                  <th style={{ padding: '10px 8px', fontSize: '12.5px' }}>الترتيب</th>
-                  <th style={{ padding: '10px 12px', fontSize: '12.5px', textAlign: 'right' }}>الفرع</th>
-                  <th style={{ padding: '10px 8px', fontSize: '12.5px' }}>إجمالي المبيعات</th>
-                  <th style={{ padding: '10px 8px', fontSize: '12.5px' }}>مسير الرواتب</th>
-                  <th style={{ padding: '10px 8px', fontSize: '12.5px' }}>المصروفات</th>
-                  <th style={{ padding: '10px 8px', fontSize: '12.5px' }}>إجمالي التكاليف</th>
-                  <th style={{ padding: '10px 8px', fontSize: '12.5px', background: '#115e59' }}>صافي الربح (ج.م)</th>
-                  <th style={{ padding: '10px 8px', fontSize: '12.5px' }}>هامش الربح</th>
-                  <th style={{ padding: '10px 8px', fontSize: '12.5px' }}>التقييم</th>
+                  <th style={{ padding: '10px 8px', fontSize: '12px' }}>الترتيب</th>
+                  <th style={{ padding: '10px 12px', fontSize: '12px', textAlign: 'right' }}>الفرع والموظفين</th>
+                  <th style={{ padding: '10px 8px', fontSize: '12px' }}>إجمالي المبيعات</th>
+                  <th style={{ padding: '10px 8px', fontSize: '12px' }}>مسير الرواتب والأجور</th>
+                  <th style={{ padding: '10px 8px', fontSize: '12px' }}>المصروفات</th>
+                  <th style={{ padding: '10px 8px', fontSize: '12px' }}>إجمالي التكاليف</th>
+                  <th style={{ padding: '10px 8px', fontSize: '12px', background: '#115e59' }}>صافي الربح (ج.م)</th>
+                  <th style={{ padding: '10px 8px', fontSize: '12px' }}>هامش الربح</th>
+                  <th style={{ padding: '10px 8px', fontSize: '12px' }}>التقييم</th>
+                  <th style={{ padding: '10px 8px', fontSize: '12px' }}>التفاصيل</th>
                 </tr>
               </thead>
               <tbody>
                 {report.branchBenchmarks.length === 0 ? (
                   <tr>
-                    <td colSpan="9" style={{ padding: '30px', textAlign: 'center', color: 'var(--muted)' }}>
+                    <td colSpan="10" style={{ padding: '30px', textAlign: 'center', color: 'var(--muted)' }}>
                       لا توجد بيانات فروع مسجلة.
                     </td>
                   </tr>
@@ -867,19 +869,62 @@ export default function FinancialReportsModule({
                   report.branchBenchmarks.map((b, idx) => {
                     const isProfit = b.netProfit >= 0;
                     return (
-                      <tr key={b.branchId} style={{ background: idx % 2 === 0 ? '#ffffff' : '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                      <tr
+                        key={b.branchId}
+                        style={{
+                          background: idx % 2 === 0 ? '#ffffff' : '#f8fafc',
+                          borderBottom: '1px solid #e2e8f0',
+                          transition: 'background 0.2s'
+                        }}
+                      >
                         <td style={{ padding: '10px 8px', fontWeight: 'bold' }}>{idx + 1}</td>
                         <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '800', fontSize: '13px' }}>
-                          🏢 {b.branchName}
-                          {b.branchCode && (
-                            <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block', fontWeight: 'normal' }}>كود: {b.branchCode}</span>
-                          )}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span>🏢 {b.branchName}</span>
+                            {b.branchCode && (
+                              <span style={{ fontSize: '11px', color: '#64748b', background: '#f1f5f9', padding: '1px 6px', borderRadius: '4px', fontWeight: 'normal' }}>
+                                #{b.branchCode}
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ display: 'flex', gap: '6px', marginTop: '4px', fontSize: '11px', fontWeight: 'normal' }}>
+                            <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '1px 6px', borderRadius: '4px' }}>
+                              👥 {b.employeesCount || 0} موظفين
+                            </span>
+                            <span style={{ background: '#fef3c7', color: '#92400e', padding: '1px 6px', borderRadius: '4px' }}>
+                              ⏱️ {b.totalHours || 0} ساعة
+                            </span>
+                          </div>
                         </td>
                         <td style={{ padding: '10px 8px', fontWeight: '700', color: '#0f766e' }}>
                           {b.grossRevenue.toLocaleString('ar-EG', { minimumFractionDigits: 2 })}
+                          {b.employeesCount > 0 && b.grossRevenue > 0 && (
+                            <div style={{ fontSize: '10.5px', color: 'var(--muted)', fontWeight: 'normal', marginTop: '2px' }}>
+                              ~{Math.round(b.grossRevenue / b.employeesCount).toLocaleString('ar-EG')} ج.م / موظف
+                            </div>
+                          )}
                         </td>
-                        <td style={{ padding: '10px 8px', color: '#1e40af', fontWeight: '700' }}>
-                          {b.payroll.toLocaleString('ar-EG', { minimumFractionDigits: 2 })}
+                        <td style={{ padding: '10px 8px' }}>
+                          <div style={{ color: '#1e40af', fontWeight: '800', fontSize: '13px' }}>
+                            {b.payroll.toLocaleString('ar-EG', { minimumFractionDigits: 2 })}
+                          </div>
+                          <div style={{ marginTop: '3px' }}>
+                            <span style={{
+                              fontSize: '10.5px',
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              fontWeight: '700',
+                              background: b.payrollMode === 'actual' ? '#dcfce7' : (b.payrollMode === 'contractual' ? '#fef3c7' : '#e0f2fe'),
+                              color: b.payrollMode === 'actual' ? '#166534' : (b.payrollMode === 'contractual' ? '#92400e' : '#0369a1')
+                            }}>
+                              {b.payrollMode === 'actual' ? 'من واقع البصمة' : (b.payrollMode === 'contractual' ? 'أساسي تعاقدي' : (b.payrollMode === 'mixed' ? 'مختلط' : 'لا رواتب'))}
+                            </span>
+                            {b.grossRevenue > 0 && (
+                              <span style={{ fontSize: '10.5px', color: 'var(--muted)', marginRight: '4px' }}>
+                                ({b.payrollRatio}%)
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td style={{ padding: '10px 8px', color: '#b45309', fontWeight: '700' }}>
                           {b.operatingExpenses.toLocaleString('ar-EG', { minimumFractionDigits: 2 })}
@@ -903,13 +948,35 @@ export default function FinancialReportsModule({
                           <span style={{
                             padding: '3px 8px',
                             borderRadius: '6px',
-                            fontSize: '11.5px',
+                            fontSize: '11px',
                             fontWeight: '800',
                             background: b.status === 'healthy' ? '#dcfce7' : (b.status === 'moderate' ? '#fef3c7' : '#fee2e2'),
                             color: b.status === 'healthy' ? '#15803d' : (b.status === 'moderate' ? '#b45309' : '#b91c1c')
                           }}>
                             {b.status === 'healthy' ? 'ممتاز 🟢' : (b.status === 'moderate' ? 'متوازن 🟡' : 'عجز 🔴')}
                           </span>
+                        </td>
+                        <td style={{ padding: '10px 8px' }}>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedBranchDetail(b)}
+                            style={{
+                              background: '#f1f5f9',
+                              border: '1px solid #cbd5e1',
+                              borderRadius: '8px',
+                              padding: '5px 10px',
+                              fontSize: '11.5px',
+                              fontWeight: '700',
+                              color: '#0f766e',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}
+                            title="عرض كشف رواتب الموظفين ومبيعات الفرع بالتفصيل"
+                          >
+                            <span>🔍</span> تفاصيل
+                          </button>
                         </td>
                       </tr>
                     );
@@ -918,6 +985,279 @@ export default function FinancialReportsModule({
               </tbody>
             </table>
           </div>
+
+          {/* ── Branch Detailed Breakdown Modal ── */}
+          {selectedBranchDetail && (
+            <div style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(15, 23, 42, 0.65)',
+              zIndex: 9999,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '20px',
+              backdropFilter: 'blur(4px)'
+            }}>
+              <div style={{
+                background: '#ffffff',
+                borderRadius: '20px',
+                width: '100%',
+                maxWidth: '920px',
+                maxHeight: '90vh',
+                display: 'flex',
+                flexDirection: 'column',
+                boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+                overflow: 'hidden',
+                direction: 'rtl'
+              }}>
+                {/* Modal Header */}
+                <div style={{
+                  padding: '18px 24px',
+                  background: 'linear-gradient(135deg, #0f766e 0%, #115e59 100%)',
+                  color: '#ffffff',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center'
+                }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '22px' }}>🏢</span>
+                      <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '900' }}>
+                        التقرير المالي ومسير أجور: {selectedBranchDetail.branchName}
+                      </h3>
+                      {selectedBranchDetail.branchCode && (
+                        <span style={{ background: 'rgba(255,255,255,0.2)', padding: '2px 8px', borderRadius: '6px', fontSize: '12px' }}>
+                          كود: {selectedBranchDetail.branchCode}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: '12px', opacity: 0.9, marginTop: '4px' }}>
+                      📅 الفترة: {report.periodLabel}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedBranchDetail(null)}
+                    style={{
+                      background: 'rgba(255,255,255,0.2)',
+                      border: 'none',
+                      color: '#ffffff',
+                      borderRadius: '50%',
+                      width: '32px',
+                      height: '32px',
+                      cursor: 'pointer',
+                      fontSize: '16px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* Modal Body */}
+                <div style={{ padding: '20px 24px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+                  
+                  {/* Quick KPIs */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px' }}>
+                    <div style={{ background: '#f0fdf4', padding: '12px 14px', borderRadius: '12px', border: '1px solid #bbf7d0' }}>
+                      <div style={{ fontSize: '11.5px', color: '#166534', fontWeight: '700' }}>إجمالي المبيعات</div>
+                      <div style={{ fontSize: '16px', fontWeight: '900', color: '#15803d', marginTop: '2px' }}>
+                        {selectedBranchDetail.grossRevenue.toLocaleString('ar-EG', { minimumFractionDigits: 2 })} ج.م
+                      </div>
+                    </div>
+                    <div style={{ background: '#eff6ff', padding: '12px 14px', borderRadius: '12px', border: '1px solid #bfdbfe' }}>
+                      <div style={{ fontSize: '11.5px', color: '#1e40af', fontWeight: '700' }}>مسير الرواتب</div>
+                      <div style={{ fontSize: '16px', fontWeight: '900', color: '#1d4ed8', marginTop: '2px' }}>
+                        {selectedBranchDetail.payroll.toLocaleString('ar-EG', { minimumFractionDigits: 2 })} ج.م
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#3b82f6', marginTop: '2px' }}>
+                        {selectedBranchDetail.payrollMode === 'actual' ? 'من واقع البصمة 🟢' : (selectedBranchDetail.payrollMode === 'contractual' ? 'أساسي تعاقدي 🟡' : 'مختلط 🔵')}
+                      </div>
+                    </div>
+                    <div style={{ background: '#fffbeb', padding: '12px 14px', borderRadius: '12px', border: '1px solid #fde68a' }}>
+                      <div style={{ fontSize: '11.5px', color: '#92400e', fontWeight: '700' }}>المصروفات التشغيلية</div>
+                      <div style={{ fontSize: '16px', fontWeight: '900', color: '#b45309', marginTop: '2px' }}>
+                        {selectedBranchDetail.operatingExpenses.toLocaleString('ar-EG', { minimumFractionDigits: 2 })} ج.م
+                      </div>
+                    </div>
+                    <div style={{
+                      background: selectedBranchDetail.netProfit >= 0 ? '#ecfdf5' : '#fef2f2',
+                      padding: '12px 14px',
+                      borderRadius: '12px',
+                      border: `1px solid ${selectedBranchDetail.netProfit >= 0 ? '#a7f3d0' : '#fecaca'}`
+                    }}>
+                      <div style={{ fontSize: '11.5px', color: selectedBranchDetail.netProfit >= 0 ? '#065f46' : '#991b1b', fontWeight: '700' }}>
+                        صافي الربح ({selectedBranchDetail.profitMargin}%)
+                      </div>
+                      <div style={{
+                        fontSize: '16px',
+                        fontWeight: '900',
+                        color: selectedBranchDetail.netProfit >= 0 ? '#059669' : '#dc2626',
+                        marginTop: '2px'
+                      }}>
+                        {selectedBranchDetail.netProfit.toLocaleString('ar-EG', { minimumFractionDigits: 2 })} ج.م
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Section 1: Employees Breakdown */}
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '800', color: '#1e293b' }}>
+                        👥 كشف تفصيلي لمسير أجور موظفي الفرع ({selectedBranchDetail.employeesBreakdown?.length || 0} موظف)
+                      </h4>
+                      <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                        إجمالي ساعات العمل: <strong>{selectedBranchDetail.totalHours || 0} ساعة</strong>
+                      </span>
+                    </div>
+
+                    <div style={{ border: '1px solid #e2e8f0', borderRadius: '12px', overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'center', fontSize: '12px' }}>
+                        <thead>
+                          <tr style={{ background: '#f1f5f9', color: '#334155', fontWeight: '800' }}>
+                            <th style={{ padding: '8px 10px', textAlign: 'right' }}>الموظف</th>
+                            <th style={{ padding: '8px' }}>الوظيفة</th>
+                            <th style={{ padding: '8px' }}>ساعات العمل</th>
+                            <th style={{ padding: '8px' }}>أجر الساعة</th>
+                            <th style={{ padding: '8px' }}>الأساسي</th>
+                            <th style={{ padding: '8px' }}>الإضافي</th>
+                            <th style={{ padding: '8px' }}>البدلات/الحوافز</th>
+                            <th style={{ padding: '8px' }}>الاستقطاعات</th>
+                            <th style={{ padding: '8px', background: '#e0f2fe', color: '#0369a1' }}>صافي المستحق</th>
+                            <th style={{ padding: '8px' }}>الحالة</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(!selectedBranchDetail.employeesBreakdown || selectedBranchDetail.employeesBreakdown.length === 0) ? (
+                            <tr>
+                              <td colSpan="10" style={{ padding: '24px', color: 'var(--muted)' }}>
+                                لا يوجد موظفون مسجلون أو مناوبات بهذا الفرع لهذه الفترة.
+                              </td>
+                            </tr>
+                          ) : (
+                            selectedBranchDetail.employeesBreakdown.map((emp, eIdx) => (
+                              <tr key={emp.id || eIdx} style={{ borderBottom: '1px solid #f1f5f9', background: eIdx % 2 === 0 ? '#ffffff' : '#fbfcfd' }}>
+                                <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: '700' }}>
+                                  <div>{emp.name}</div>
+                                  {emp.code && <span style={{ fontSize: '11px', color: 'var(--muted)' }}>كود: {emp.code}</span>}
+                                </td>
+                                <td style={{ padding: '8px', color: 'var(--muted)' }}>{emp.jobTitle}</td>
+                                <td style={{ padding: '8px', fontWeight: '700' }}>{emp.hours || 0} س</td>
+                                <td style={{ padding: '8px' }}>{(emp.hourlyRate || 0).toFixed(2)}</td>
+                                <td style={{ padding: '8px' }}>{(emp.baseEarnings || 0).toLocaleString('ar-EG', { minimumFractionDigits: 2 })}</td>
+                                <td style={{ padding: '8px', color: emp.overtimeEarnings > 0 ? '#16a34a' : 'var(--muted)' }}>
+                                  {(emp.overtimeEarnings || 0).toLocaleString('ar-EG', { minimumFractionDigits: 2 })}
+                                </td>
+                                <td style={{ padding: '8px', color: (emp.totalAllowances + emp.totalBonus) > 0 ? '#16a34a' : 'var(--muted)' }}>
+                                  {((emp.totalAllowances || 0) + (emp.totalBonus || 0)).toLocaleString('ar-EG', { minimumFractionDigits: 2 })}
+                                </td>
+                                <td style={{ padding: '8px', color: emp.totalDeduction > 0 ? '#dc2626' : 'var(--muted)' }}>
+                                  {(emp.totalDeduction || 0).toLocaleString('ar-EG', { minimumFractionDigits: 2 })}
+                                </td>
+                                <td style={{ padding: '8px', fontWeight: '900', color: '#0369a1', background: '#f0f9ff' }}>
+                                  {(emp.netSalary || 0).toLocaleString('ar-EG', { minimumFractionDigits: 2 })} ج.م
+                                </td>
+                                <td style={{ padding: '8px' }}>
+                                  <span style={{
+                                    fontSize: '11px',
+                                    fontWeight: '700',
+                                    padding: '3px 7px',
+                                    borderRadius: '6px',
+                                    background: emp.isContractualEstimate ? '#fef3c7' : (emp.isRoaming ? '#e0f2fe' : '#dcfce7'),
+                                    color: emp.isContractualEstimate ? '#92400e' : (emp.isRoaming ? '#0369a1' : '#166534')
+                                  }}>
+                                    {emp.isContractualEstimate ? 'أساسي تعاقدي' : (emp.isRoaming ? 'مناوبة فرع آخر' : 'فعلي بالبصمة')}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Section 2: Sales Payment Methods */}
+                  <div>
+                    <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '800', color: '#1e293b' }}>
+                      💳 تفصيل مبيعات الفرع وطرق التحصيل
+                    </h4>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '8px' }}>
+                      <div style={{ background: '#f8fafc', padding: '10px 12px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ fontSize: '11px', color: 'var(--muted)' }}>💵 كاش نقدي</div>
+                        <div style={{ fontSize: '13.5px', fontWeight: '800', color: '#16a34a' }}>
+                          {(selectedBranchDetail.cashSales || 0).toLocaleString('ar-EG', { minimumFractionDigits: 2 })} ج.م
+                        </div>
+                      </div>
+                      <div style={{ background: '#f8fafc', padding: '10px 12px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ fontSize: '11px', color: 'var(--muted)' }}>💳 فيزا وبطاقات</div>
+                        <div style={{ fontSize: '13.5px', fontWeight: '800', color: '#1d4ed8' }}>
+                          {(selectedBranchDetail.visaSales || 0).toLocaleString('ar-EG', { minimumFractionDigits: 2 })} ج.م
+                        </div>
+                      </div>
+                      <div style={{ background: '#f8fafc', padding: '10px 12px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ fontSize: '11px', color: 'var(--muted)' }}>📱 محفظة ذكية</div>
+                        <div style={{ fontSize: '13.5px', fontWeight: '800', color: '#7c3aed' }}>
+                          {(selectedBranchDetail.walletSales || 0).toLocaleString('ar-EG', { minimumFractionDigits: 2 })} ج.م
+                        </div>
+                      </div>
+                      <div style={{ background: '#f8fafc', padding: '10px 12px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ fontSize: '11px', color: 'var(--muted)' }}>⚡ إنستاباي</div>
+                        <div style={{ fontSize: '13.5px', fontWeight: '800', color: '#0284c7' }}>
+                          {(selectedBranchDetail.instapaySales || 0).toLocaleString('ar-EG', { minimumFractionDigits: 2 })} ج.م
+                        </div>
+                      </div>
+                      <div style={{ background: '#f8fafc', padding: '10px 12px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ fontSize: '11px', color: 'var(--muted)' }}>🛵 دليفري</div>
+                        <div style={{ fontSize: '13.5px', fontWeight: '800', color: '#d97706' }}>
+                          {(selectedBranchDetail.deliverySales || 0).toLocaleString('ar-EG', { minimumFractionDigits: 2 })} ج.م
+                        </div>
+                      </div>
+                      <div style={{ background: '#f8fafc', padding: '10px 12px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ fontSize: '11px', color: 'var(--muted)' }}>📑 آجل وشركات</div>
+                        <div style={{ fontSize: '13.5px', fontWeight: '800', color: '#475569' }}>
+                          {(selectedBranchDetail.creditSales || 0).toLocaleString('ar-EG', { minimumFractionDigits: 2 })} ج.م
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* Modal Footer */}
+                <div style={{
+                  padding: '12px 24px',
+                  background: '#f8fafc',
+                  borderTop: '1px solid #e2e8f0',
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  gap: '10px'
+                }}>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedBranchDetail(null)}
+                    style={{
+                      padding: '8px 18px',
+                      borderRadius: '8px',
+                      border: '1px solid #cbd5e1',
+                      background: '#ffffff',
+                      color: '#475569',
+                      fontWeight: '700',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    إغلاق
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

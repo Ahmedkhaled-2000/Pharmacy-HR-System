@@ -45,6 +45,11 @@ import {
 } from '../utils/latePenaltyEngine';
 import { useAuth } from './AuthContext';
 import { useRealtimeSync } from '../hooks/useRealtimeSync';
+import {
+  isBranchMatch,
+  calculateRatesAndSalaries,
+  getEmployeeBranchAssignment
+} from '../utils/branchMatcher';
 
 const DataContext = createContext(null);
 
@@ -688,9 +693,14 @@ export function DataProvider({ children, showToast = () => {} }) {
 
   const computeEmpSummary = useCallback((empId, filterFn, monthStr = null, targetBranchId = null) => {
     const emp = getEmp(empId);
-    if (!emp) return { hours: 0, dailyRate: 0, rate: 0, hourlyRate: 0, monthlySalary: 0, salary: 0, baseEarnings: 0, totalBonus: 0, totalDeduction: 0, absenceDeduction: 0, netSalary: 0, absenceDaysCount: 0, perBranch: {} };
+    if (!emp) return { hours: 0, dailyRate: 0, rate: 0, hourlyRate: 0, monthlySalary: 0, contractualMonthlySalary: 0, salary: 0, baseEarnings: 0, totalBonus: 0, totalDeduction: 0, absenceDeduction: 0, netSalary: 0, absenceDaysCount: 0, perBranch: {} };
 
     let effectiveFilterFn = filterFn || (() => true);
+
+    const allBranchesList = state.branches || [];
+    const targetBranchObj = targetBranchId
+      ? allBranchesList.find(b => isBranchMatch(targetBranchId, b)) || { id: targetBranchId }
+      : null;
 
     let branches = [];
     if (emp.branchesDetails && emp.branchesDetails.length > 0) {
@@ -699,13 +709,42 @@ export function DataProvider({ children, showToast = () => {} }) {
       branches = [{
         branchId: emp.branchId || 'main',
         salary: emp.salary || 0,
-        workHoursPerDay: emp.workHoursPerDay || WORK_HOURS_PER_DAY,
-        workDaysPerMonth: emp.workDaysPerMonth || WORK_DAYS_PER_MONTH
+        workHoursPerDay: emp.workHoursPerDay || emp.workHours || WORK_HOURS_PER_DAY,
+        workDaysPerMonth: emp.workDaysPerMonth || emp.workDays || WORK_DAYS_PER_MONTH,
+        breakHours: emp.breakHours || emp.defaultBreakHours || 0
       }];
     }
 
-    if (targetBranchId) {
-      branches = branches.filter(b => b.branchId === targetBranchId);
+    const isTargetFilterActive = Boolean(targetBranchId);
+    if (isTargetFilterActive) {
+      // البحث عن الفرع المستهدف في قائمة فروع الموظف بمطابقة مرنة
+      const matchingBranches = branches.filter(b => isBranchMatch(b.branchId, targetBranchObj));
+      if (matchingBranches.length > 0) {
+        branches = matchingBranches;
+      } else {
+        // فحص ما إذا كان الفرع الأساسي للموظف يطابق الفرع المستهدف
+        const isPrimary = isBranchMatch(emp.branchId || emp.branchCode || emp.branchName, targetBranchObj);
+        if (isPrimary) {
+          branches = [{
+            branchId: targetBranchId,
+            salary: emp.salary || 0,
+            workHoursPerDay: emp.workHoursPerDay || emp.workHours || WORK_HOURS_PER_DAY,
+            workDaysPerMonth: emp.workDaysPerMonth || emp.workDays || WORK_DAYS_PER_MONTH,
+            breakHours: emp.breakHours || emp.defaultBreakHours || 0
+          }];
+        } else {
+          // الموظف غير معين أساسياً بهذا الفرع، ولكنه قد يمتلك بصمات/ورديات متنقلة (roaming) في هذا الفرع
+          const defaultDetail = branches[0] || {};
+          branches = [{
+            branchId: targetBranchId,
+            salary: defaultDetail.salary || emp.salary || 0,
+            workHoursPerDay: defaultDetail.workHoursPerDay || defaultDetail.workHours || WORK_HOURS_PER_DAY,
+            workDaysPerMonth: defaultDetail.workDaysPerMonth || defaultDetail.workDays || WORK_DAYS_PER_MONTH,
+            breakHours: defaultDetail.breakHours || 0,
+            isRoaming: true
+          }];
+        }
+      }
     }
 
     let totalHours = 0;
@@ -719,18 +758,29 @@ export function DataProvider({ children, showToast = () => {} }) {
 
     branches.forEach((b) => {
       const bId = b.branchId;
-      const hourlyBase = parseFloat(b.salary) || 0;
-      const workHoursPerDay = parseFloat(b.workHoursPerDay) || 8;
-      const workDaysPerMonth = parseFloat(b.workDaysPerMonth) || 26;
+      const bObj = allBranchesList.find(br => isBranchMatch(bId, br)) || { id: bId };
 
-      const dailyRate = workDaysPerMonth > 0 ? (hourlyBase * workHoursPerDay) / workDaysPerMonth : 0;
-      const rate = (hourlyBase > 0 && workDaysPerMonth > 0)
-        ? (hourlyBase >= 200 ? (hourlyBase / workDaysPerMonth) : ((hourlyBase * workHoursPerDay) / workDaysPerMonth))
-        : (workHoursPerDay > 0 ? dailyRate / workHoursPerDay : hourlyBase);
+      const rates = calculateRatesAndSalaries({
+        salaryInput: b.salary,
+        workHoursPerDay: b.workHoursPerDay || b.workHours || 8,
+        workDaysPerMonth: b.workDaysPerMonth || b.workDays || 26,
+        breakHours: b.breakHours || 0
+      });
 
-      const monthlySalary = rate * workHoursPerDay * workDaysPerMonth;
+      const { dailyRate, hourlyRate: rate, monthlySalary } = rates;
 
-      const bShifts = (state.shifts || []).filter(s => String(s.employeeId) === String(empId) && effectiveFilterFn(s.date) && (s.branchId === bId || !s.branchId || branches.length === 1));
+      // حصر ورديات هذا الفرع بدقة بالغة وبدون تسريب ورديات الفروع الأخرى
+      const bShifts = (state.shifts || []).filter(s => {
+        if (String(s.employeeId) !== String(empId)) return false;
+        if (!effectiveFilterFn(s.date)) return false;
+        if (s.branchId) {
+          return isBranchMatch(s.branchId, bObj);
+        }
+        // إذا لم يُسجل فرع في الوردية، تنسب للفرع الأساسي للموظف
+        const primaryBId = emp.branchId || branches[0]?.branchId;
+        return isBranchMatch(primaryBId, bObj);
+      });
+
       const hours = bShifts.reduce((acc, s) => acc + getEffectiveShiftHours(s, state), 0);
       const baseEarnings = hours * rate;
 
@@ -746,7 +796,9 @@ export function DataProvider({ children, showToast = () => {} }) {
 
       let absenceDaysCount = 0;
       let absenceDeduction = 0;
-      if (bId === branches[0].branchId) {
+      // استقطاع الغياب يُحسب على الفرع الأساسي فقط للموظف حتى لا يتكرر
+      const isPrimaryBranch = isBranchMatch(emp.branchId || (emp.branchesDetails && emp.branchesDetails[0]?.branchId), bObj);
+      if (isPrimaryBranch || (!isTargetFilterActive && bId === branches[0]?.branchId)) {
         absenceDaysCount = getAbsenceDaysCount(empId, monthStr);
         absenceDeduction = absenceDaysCount * dailyRate;
         totalAbsenceDaysCount += absenceDaysCount;
@@ -758,7 +810,9 @@ export function DataProvider({ children, showToast = () => {} }) {
         baseEarnings,
         rate,
         dailyRate,
-        monthlySalary,
+        hourlyRate: rate,
+        monthlySalary: b.isRoaming ? 0 : monthlySalary,
+        contractualMonthlySalary: b.isRoaming ? 0 : monthlySalary,
         absenceDaysCount,
         absenceDeduction,
         approvedOtHours,
@@ -773,16 +827,48 @@ export function DataProvider({ children, showToast = () => {} }) {
       totalOvertimeEarnings += otEarnings;
     });
 
-    const empAdjs = (state.adjustments || []).filter(a => String(a.employeeId) === String(empId) && effectiveFilterFn(a.date));
+    const isPrimaryForAdjustments = !isTargetFilterActive || isBranchMatch(emp.branchId || (emp.branchesDetails && emp.branchesDetails[0]?.branchId), targetBranchObj);
+
+    // المكافآت والخصومات
+    const empAdjs = (state.adjustments || []).filter(a => {
+      if (String(a.employeeId) !== String(empId)) return false;
+      if (!effectiveFilterFn(a.date)) return false;
+      if (isTargetFilterActive) {
+        if (a.branchId) return isBranchMatch(a.branchId, targetBranchObj);
+        return isPrimaryForAdjustments;
+      }
+      return true;
+    });
+
     const totalBonus = empAdjs.filter(a => a.type === 'bonus').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
     const manualDeduction = empAdjs.filter(a => a.type === 'deduction').reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
 
-    const empLateIncidents = (state.lateIncidents || []).filter(i => String(i.employeeId) === String(empId) && effectiveFilterFn(i.date) && i.status !== 'cancelled');
+    // الجزاءات والتأخيرات
+    const empLateIncidents = (state.lateIncidents || []).filter(i => {
+      if (String(i.employeeId) !== String(empId)) return false;
+      if (!effectiveFilterFn(i.date)) return false;
+      if (i.status === 'cancelled') return false;
+      if (isTargetFilterActive) {
+        if (i.branchId) return isBranchMatch(i.branchId, targetBranchObj);
+        return isPrimaryForAdjustments;
+      }
+      return true;
+    });
+
     const lateDeduction = empLateIncidents.reduce((acc, i) => acc + (parseFloat(i.penaltyAmount) || 0), 0);
     const lateDeductionMinutes = empLateIncidents.reduce((acc, i) => acc + (parseFloat(i.deductionMinutes) || 0), 0);
 
-    // Loans
-    const empLoans = (state.loans || []).filter(l => String(l.employeeId) === String(empId) && (l.status === 'approved' || l.adminApproved));
+    // السلف (تُخصم من الفرع الأساسي فقط للموظف حتى لا تتكرر إذا داوم بعدة فروع)
+    const empLoans = (state.loans || []).filter(l => {
+      if (String(l.employeeId) !== String(empId)) return false;
+      if (l.status !== 'approved' && !l.adminApproved) return false;
+      if (isTargetFilterActive) {
+        if (l.branchId) return isBranchMatch(l.branchId, targetBranchObj);
+        return isPrimaryForAdjustments;
+      }
+      return true;
+    });
+
     const loanDeduction = empLoans.reduce((acc, l) => {
       const rem = parseFloat(l.remainingAmount ?? l.amount) || 0;
       if (rem <= 0) return acc;
@@ -791,26 +877,33 @@ export function DataProvider({ children, showToast = () => {} }) {
       return isInstallment ? acc + Math.min(rem, monthlyDeduction) : acc + rem;
     }, 0);
 
-    // Approved Leaves
+    // الإجازات المعتمدة
     const empApprovedLeaves = getEmployeeApprovedLeaves(emp, state, effectiveFilterFn);
     let unpaidLeaveDaysCount = 0;
     let annualLeaveDaysCount = 0;
 
     empApprovedLeaves.forEach((l) => {
+      if (isTargetFilterActive) {
+        if (l.branchId && !isBranchMatch(l.branchId, targetBranchObj)) return;
+        if (!l.branchId && !isPrimaryForAdjustments) return;
+      }
       const isUnpaid = l.leaveType === 'unpaid' || l.type === 'unpaid_leave' || l.isUnpaid === true;
       const daysCount = parseFloat(l.daysCount || l.days || 1) || 1;
       if (isUnpaid) unpaidLeaveDaysCount += daysCount;
       else annualLeaveDaysCount += daysCount;
     });
 
-    let rate = branches.length === 1 ? perBranch[branches[0].branchId].rate : (totalHours > 0 ? totalBaseEarnings / totalHours : (parseFloat(branches[0]?.salary) || 0));
-    let dailyRate = branches.length === 1 ? perBranch[branches[0].branchId].dailyRate : (rate * (parseFloat(branches[0]?.workHoursPerDay) || WORK_HOURS_PER_DAY));
+    const primaryBranchId = branches[0]?.branchId;
+    const branchRateInfo = perBranch[primaryBranchId] || Object.values(perBranch)[0] || { rate: 0, dailyRate: 0 };
+    let rate = branches.length === 1 ? branchRateInfo.rate : (totalHours > 0 ? totalBaseEarnings / totalHours : branchRateInfo.rate);
+    let dailyRate = branches.length === 1 ? branchRateInfo.dailyRate : (rate * (parseFloat(branches[0]?.workHoursPerDay) || WORK_HOURS_PER_DAY));
     const unpaidLeaveDeduction = Math.round(unpaidLeaveDaysCount * dailyRate * 100) / 100;
 
     const totalDeduction = manualDeduction + loanDeduction + totalAbsenceDeduction + lateDeduction + unpaidLeaveDeduction;
+
     const isMgmt = isManagementJob(emp.jobTitle, getJobsList(state)) || Boolean(emp.isManagement) || (parseFloat(emp.managementAllowance) || 0) > 0;
-    const managementAllowance = parseFloat(emp.managementAllowance) || 0;
-    const transportAllowance = parseFloat(emp.transportAllowance) || 0;
+    let managementAllowance = parseFloat(emp.managementAllowance) || 0;
+    let transportAllowance = parseFloat(emp.transportAllowance) || 0;
     let extraAllowance = parseFloat(emp.extraAllowance) || 0;
     if (Array.isArray(emp.extraAllowances) && emp.extraAllowances.length > 0) {
       const sumList = emp.extraAllowances.reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
@@ -819,15 +912,20 @@ export function DataProvider({ children, showToast = () => {} }) {
       }
     }
 
-    // Daily Attendance Allowance (البدل اليومي المرتبط بالحضور وبصمة الدخول)
-    // القاعدة المعتمدة: إذا كان الموظف مسجلاً بأكثر من فرع، يُحسب له البدل اليومي عند تسجيل أول بصمة بالفرع الأول فقط من اليوم، وأي ورديات يسجلها بنفس اليوم بفروع أخرى لا يصرف لها بدل يومي
+    // إذا تم تحديد فرع، تُحتسب البدلات العامة مع الفرع الأساسي فقط
+    if (isTargetFilterActive && !isPrimaryForAdjustments) {
+      managementAllowance = 0;
+      transportAllowance = 0;
+      extraAllowance = 0;
+    }
+
+    // بدل الحضور اليومي
     const allEmployeeShifts = (state.shifts || []).filter(s =>
       String(s.employeeId) === String(empId) &&
       effectiveFilterFn(s.date) &&
       (s.timeIn || s.checkIn || getEffectiveShiftHours(s, state) > 0)
     );
 
-    // تحديد أول فرع حضر به الموظف في كل تاريخ (First branch of the day)
     const firstBranchByDate = {};
     allEmployeeShifts.forEach(s => {
       if (!s.date) return;
@@ -850,13 +948,11 @@ export function DataProvider({ children, showToast = () => {} }) {
       const firstBranch = firstBranchByDate[s.date];
       const sBranchId = s.branchId || (branches[0] ? branches[0].branchId : null);
 
-      if (targetBranchId) {
-        // حصر البدل اليومي على أول فرع داوم به الموظف في ذلك اليوم فقط
-        if (String(sBranchId) === String(targetBranchId) && firstBranch && String(firstBranch.branchId) === String(targetBranchId)) {
+      if (isTargetFilterActive) {
+        if (isBranchMatch(sBranchId, targetBranchObj) && firstBranch && isBranchMatch(firstBranch.branchId, targetBranchObj)) {
           attendedDatesSet.add(s.date);
         }
       } else {
-        // في الحساب الإجمالي للموظف، يُحتسب اليوم المستحق مرة واحدة فقط
         attendedDatesSet.add(s.date);
       }
     });
@@ -865,7 +961,6 @@ export function DataProvider({ children, showToast = () => {} }) {
     const baseDailyAllowanceAmount = parseFloat(emp.dailyAllowanceAmount) || 0;
     const dailyAllowanceTitle = emp.dailyAllowanceTitle?.trim() || 'بدل يومي';
 
-    // Support multiple daily allowances if configured
     let dailyAllowancesList = Array.isArray(emp.dailyAllowances) && emp.dailyAllowances.length > 0
       ? emp.dailyAllowances.filter(a => (parseFloat(a.amount) || 0) > 0)
       : [];
@@ -890,9 +985,10 @@ export function DataProvider({ children, showToast = () => {} }) {
     }));
 
     const totalAllowances = managementAllowance + transportAllowance + extraAllowance + dailyAllowanceTotal;
-
     const totalEarnings = totalBaseEarnings + totalOvertimeEarnings;
     const netSalary = totalBaseEarnings + totalOvertimeEarnings + totalBonus + totalAllowances - totalDeduction;
+
+    const contractualMonthlySalary = Object.values(perBranch).reduce((acc, b) => acc + (b.contractualMonthlySalary || 0), 0);
 
     return {
       hours: totalHours,
@@ -905,8 +1001,9 @@ export function DataProvider({ children, showToast = () => {} }) {
       dailyRate,
       rate,
       hourlyRate: rate,
-      monthlySalary: Object.values(perBranch).reduce((acc, b) => acc + (b.monthlySalary || 0), 0),
-      salary: Object.values(perBranch).reduce((acc, b) => acc + (b.monthlySalary || 0), 0),
+      monthlySalary: contractualMonthlySalary,
+      contractualMonthlySalary,
+      salary: contractualMonthlySalary,
       baseEarnings: totalBaseEarnings,
       totalEarnings,
       totalBonus,
@@ -918,7 +1015,6 @@ export function DataProvider({ children, showToast = () => {} }) {
         ? emp.extraAllowances
         : (extraAllowance > 0 ? [{ id: '1', title: emp.extraAllowanceTitle || 'أجر إضافي', amount: extraAllowance }] : []),
       extraAllowanceTitle: emp.extraAllowanceTitle || '',
-      // Daily Attendance Allowance fields
       dailyAllowanceAmount: totalDailyAllowanceRate,
       dailyAllowanceTitle,
       attendedDaysCount,

@@ -64,6 +64,16 @@
   AddType application/json .json
   AddType application/manifest+json .webmanifest
   AddType application/octet-stream .task .bin .onnx
+  AddType application/x-yaml .yml .yaml
+  AddType application/octet-stream .exe .blockmap
+</IfModule>
+
+<IfModule mod_headers.c>
+  # 5. ترويسات التحديثات التلقائية لتطبيق الويندوز
+  <FilesMatch "\.(yml|yaml|exe|blockmap)$">
+    Header set Access-Control-Allow-Origin "*"
+    Header set Cache-Control "no-cache, must-revalidate"
+  </FilesMatch>
 </IfModule>
 
 # ------------------------------------------------------------------------------
