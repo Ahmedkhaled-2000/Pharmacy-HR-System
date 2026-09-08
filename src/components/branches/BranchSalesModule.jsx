@@ -25,6 +25,7 @@ export default function BranchSalesModule({
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
   const [isTargetModalOpen, setIsTargetModalOpen] = useState(false);
   const [editingSale, setEditingSale] = useState(null);
+  const [entryModalBranchId, setEntryModalBranchId] = useState(null);
   const [previewAttachment, setPreviewAttachment] = useState(null);
 
   // ── Active View Tab ──
@@ -197,6 +198,7 @@ export default function BranchSalesModule({
       }
     }
 
+    setEntryModalBranchId(null);
     setState(updatedState);
     if (saveState) await saveState(updatedState);
     showToast?.(`✅ تم حفظ مبيعات ${newSale.branchName} (${newSale.date}) بنجاح`);
@@ -651,6 +653,7 @@ export default function BranchSalesModule({
               className="btn btn-start"
               onClick={() => {
                 setEditingSale(null);
+                setEntryModalBranchId(null);
                 setIsEntryModalOpen(true);
               }}
               style={{ padding: '8px 16px', fontSize: '13px', background: '#0f766e', display: 'flex', alignItems: 'center', gap: '6px' }}
@@ -953,9 +956,10 @@ export default function BranchSalesModule({
                           onClick={() => {
                             if (todaySale) {
                               setEditingSale(todaySale);
+                              setEntryModalBranchId(String(b.branchId));
                             } else {
                               setEditingSale(null);
-                              setSelectedBranchId(String(b.branchId));
+                              setEntryModalBranchId(String(b.branchId));
                             }
                             setIsEntryModalOpen(true);
                           }}
@@ -1107,6 +1111,7 @@ export default function BranchSalesModule({
                             type="button"
                             onClick={() => {
                               setEditingSale(sale);
+                              setEntryModalBranchId(String(sale.branchId));
                               setIsEntryModalOpen(true);
                             }}
                             className="btn btn-ghost"
@@ -1425,12 +1430,13 @@ export default function BranchSalesModule({
         onClose={() => {
           setIsEntryModalOpen(false);
           setEditingSale(null);
+          setEntryModalBranchId(null);
         }}
         onSave={handleSaveSale}
         branches={branches}
         existingSales={branchSales}
         editingSale={editingSale}
-        preselectedBranchId={editingSale?.branchId || (selectedBranchId !== 'all' ? selectedBranchId : null)}
+        preselectedBranchId={editingSale?.branchId || entryModalBranchId || (selectedBranchId !== 'all' ? selectedBranchId : null)}
       />
 
       {/* ── Batch Quick Entry Modal ── */}
