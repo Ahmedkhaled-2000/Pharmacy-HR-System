@@ -1584,54 +1584,42 @@ return (
         {/* Live Sync Status & Manual Sync Button */}
         <div
           className={`desktop-sync-pill ${isOffline ? 'offline' : isSyncing ? 'syncing' : 'synced'}`}
-          title={isOffline ? 'وضع عدم الاتصال: المنظومة تعمل محلياً ومسبار المزامنة يتأهب لعودة الإنترنت' : 'حالة المزامنة المباشرة مع السحابة'}
+          title={isOffline ? 'وضع عدم الاتصال: المنظومة تعمل محلياً وتتأهب لعودة الإنترنت' : `حالة المزامنة السحابية ${lastSyncTime ? `(آخر مزامنة: ${lastSyncTime})` : ''}`}
+          style={{ padding: '3px 8px', gap: '6px' }}
         >
           <span className={`status-pulse-dot ${isOffline ? 'offline' : isSyncing ? 'syncing' : 'online'}`} />
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', lineHeight: 1.2 }}>
-            {isOffline ? (
-              <span style={{ fontWeight: 800, fontSize: '11px' }}>
-                📴 أوف لاين
-                {pendingSyncCount > 0 && (
-                  <span style={{ marginRight: '4px', background: '#ef4444', color: '#fff', borderRadius: '10px', padding: '1px 6px', fontSize: '10px' }}>
-                    {pendingSyncCount} معلق
-                  </span>
-                )}
-              </span>
-            ) : isSyncing ? (
-              <span style={{ fontWeight: 800, fontSize: '11px' }}>
-                ☁️ جاري المزامنة...
-              </span>
-            ) : (
-              <span style={{ fontWeight: 700, fontSize: '11px' }}>
-                🟢 متزامن {lastSyncTime ? `(${lastSyncTime})` : ''}
-              </span>
-            )}
-          </div>
+          {isOffline ? (
+            <span style={{ fontWeight: 800, fontSize: '11px' }}>
+              📴 {pendingSyncCount > 0 && `(${pendingSyncCount})`}
+            </span>
+          ) : isSyncing ? (
+            <span style={{ fontWeight: 800, fontSize: '11px' }}>
+              ☁️
+            </span>
+          ) : null}
 
           {onTriggerSync && (
             <button
               type="button"
               onClick={onTriggerSync}
               disabled={isSyncing}
-              title="مزامنة لحظية فورية الآن"
+              title={`مزامنة لحظية فورية ${lastSyncTime ? `(آخر مزامنة: ${lastSyncTime})` : ''}`}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: '3px',
-                padding: '2px 7px',
+                justifyContent: 'center',
+                padding: '2px 4px',
                 borderRadius: '6px',
                 border: 'none',
-                background: 'rgba(0,0,0,0.06)',
+                background: 'transparent',
                 color: 'inherit',
-                fontSize: '10.5px',
-                fontWeight: 800,
+                fontSize: '12px',
                 cursor: isSyncing ? 'wait' : 'pointer',
                 transition: 'all 0.15s ease'
               }}
             >
-              <span style={{ fontSize: '11px' }}>🔄</span>
-              <span>مزامنة</span>
+              <span style={{ fontSize: '12px', display: 'inline-block', animation: isSyncing ? 'spin 1s linear infinite' : 'none' }}>🔄</span>
             </button>
           )}
         </div>

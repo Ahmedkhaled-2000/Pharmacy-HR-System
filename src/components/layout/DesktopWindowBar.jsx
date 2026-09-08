@@ -147,37 +147,35 @@ export default function DesktopWindowBar({
         {/* كبسولة المزامنة اللحظية الفورية */}
         <div
           className={`desktop-sync-pill ${isOffline ? 'offline' : isSyncing ? 'syncing' : 'synced'}`}
-          title={isOffline ? 'وضع العمل أوفلاين: المنظومة تحفظ على القرص المحلي وتترقب عودة الإنترنت للمزامنة التلقائية' : 'حالة المزامنة المباشرة مع السحابة'}
+          title={isOffline ? 'وضع العمل أوفلاين: المنظومة تحفظ على القرص المحلي وتترقب عودة الإنترنت للمزامنة التلقائية' : `حالة المزامنة السحابية ${lastSyncTime ? `(آخر مزامنة: ${lastSyncTime})` : ''}`}
+          style={{ padding: '3px 8px', gap: '6px' }}
         >
           <span className={`status-pulse-dot ${isOffline ? 'offline' : isSyncing ? 'syncing' : 'online'}`} />
-          <span>
-            {isOffline ? (
-              <>📴 أوف لاين {pendingSyncCount > 0 && `(${pendingSyncCount} معلق)`}</>
-            ) : isSyncing ? (
-              <>☁️ جاري المزامنة...</>
-            ) : (
-              <>🟢 متزامن {lastSyncTime ? `(${lastSyncTime})` : ''}</>
-            )}
-          </span>
+          {isOffline ? (
+            <span style={{ fontSize: '11px', fontWeight: 800 }}>📴 {pendingSyncCount > 0 && `(${pendingSyncCount})`}</span>
+          ) : isSyncing ? (
+            <span style={{ fontSize: '11px', fontWeight: 800 }}>☁️</span>
+          ) : null}
 
           {onTriggerSync && (
             <button
               type="button"
               onClick={onTriggerSync}
               disabled={isSyncing}
-              title="مزامنة فورية الآن"
+              title={`مزامنة فورية الآن ${lastSyncTime ? `(آخر مزامنة: ${lastSyncTime})` : ''}`}
               style={{
                 background: 'transparent',
                 border: 'none',
                 color: 'inherit',
                 cursor: isSyncing ? 'wait' : 'pointer',
                 padding: '0 2px',
-                fontSize: '11px',
+                fontSize: '12px',
                 display: 'inline-flex',
-                alignItems: 'center'
+                alignItems: 'center',
+                justifyContent: 'center'
               }}
             >
-              🔄
+              <span style={{ fontSize: '12px', display: 'inline-block', animation: isSyncing ? 'spin 1s linear infinite' : 'none' }}>🔄</span>
             </button>
           )}
         </div>

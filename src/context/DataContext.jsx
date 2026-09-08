@@ -303,7 +303,13 @@ export function DataProvider({ children, showToast = () => {} }) {
     ipRestrictions: { enabled: false, allowedIps: [] },
     authorizedDevices: [],
     branchDirectives: [],
-    adminDirectives: []
+    adminDirectives: [],
+    branchSales: [],
+    branchSalesTargets: {},
+    branchSalesSettings: {
+      allowBranchManagersEntry: false,
+      topN: 3
+    }
   });
 
   const [isLoading, setIsLoading] = useState(true);

@@ -119,7 +119,7 @@ export default function BranchSalesEntryModal({
     const branchName = selectedBranchObj?.name || selectedBranchObj?.branchName || `فرع ${branchId}`;
 
     const saleRecord = {
-      id: editingSale ? editingSale.id : `sale_${branchId}_${date}`,
+      id: editingSale ? editingSale.id : `sale_${branchId}_${date}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       branchId: String(branchId),
       branchName,
       date,

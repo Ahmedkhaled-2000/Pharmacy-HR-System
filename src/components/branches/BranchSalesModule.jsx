@@ -168,10 +168,26 @@ export default function BranchSalesModule({
       updatedList = [newSale, ...branchSales];
     }
 
+    // Clean _deletedIds so newly saved records are never suppressed by tombstone filtering
+    const currentDeletedIds = new Set(state._deletedIds || []);
+    currentDeletedIds.delete(String(newSale.id));
+    currentDeletedIds.delete(`sale_${newSale.branchId}_${newSale.date}`);
+
     const updatedState = {
       ...state,
-      branchSales: updatedList
+      branchSales: updatedList,
+      _deletedIds: Array.from(currentDeletedIds)
     };
+
+    // Ensure the saved sale is visible immediately in the selected month
+    if (newSale.date) {
+      const saleMonth = newSale.date.slice(0, 7);
+      if (selectedMonth !== saleMonth) setSelectedMonth(saleMonth);
+      if (dateFilterMode !== 'all' && dateFilterMode !== 'month') {
+        setDateFilterMode('month');
+      }
+    }
+
     setState(updatedState);
     if (saveState) await saveState(updatedState);
     showToast?.(`✅ تم حفظ مبيعات ${newSale.branchName} (${newSale.date}) بنجاح`);
@@ -179,19 +195,64 @@ export default function BranchSalesModule({
 
   // ── Handlers: Save Batch Sales ──
   const handleSaveBatchSales = async (batchList) => {
-    const map = {};
-    branchSales.forEach((s) => {
-      if (s && s.id) map[s.id] = s;
-    });
-    batchList.forEach((s) => {
-      map[s.id] = s;
+    if (!Array.isArray(batchList) || batchList.length === 0) return;
+
+    // 1. Build a clean copy of existing branchSales, ensuring every item has an ID
+    const existingList = (branchSales || []).map((s, idx) => {
+      if (s && s.id) return s;
+      return {
+        ...s,
+        id: s?.id || `sale_${s?.branchId || 'b'}_${s?.date || 'd'}_${Date.now()}_${idx}`
+      };
     });
 
-    const updatedList = Object.values(map);
+    // 2. Index batch sales by their IDs for fast lookup
+    const batchMap = new Map();
+    batchList.forEach((b) => {
+      if (b && b.id) batchMap.set(String(b.id), b);
+    });
+
+    // 3. Update existing records that match by id
+    const updatedExisting = existingList.map((item) => {
+      const key = String(item.id);
+      if (batchMap.has(key)) {
+        const replacement = batchMap.get(key);
+        batchMap.delete(key); // Marked as consumed
+        return replacement;
+      }
+      return item;
+    });
+
+    // 4. Any remaining batch items are brand-new records -> prepend them
+    const newlyAdded = Array.from(batchMap.values());
+    const updatedList = [...newlyAdded, ...updatedExisting];
+
+    // 5. Clean _deletedIds so newly saved records can never be suppressed by tombstone filtering
+    const savedIds = new Set(batchList.map((s) => String(s.id)));
+    batchList.forEach((s) => {
+      savedIds.add(`sale_${s.branchId}_${s.date}`);
+    });
+    const currentDeletedIds = new Set(state._deletedIds || []);
+    savedIds.forEach((id) => currentDeletedIds.delete(id));
+
     const updatedState = {
       ...state,
-      branchSales: updatedList
+      branchSales: updatedList,
+      _deletedIds: Array.from(currentDeletedIds)
     };
+
+    // 6. Ensure view displays the newly saved sales immediately
+    const savedDate = batchList[0]?.date;
+    if (savedDate) {
+      const savedMonth = savedDate.slice(0, 7);
+      if (selectedMonth !== savedMonth) {
+        setSelectedMonth(savedMonth);
+      }
+      if (dateFilterMode !== 'all' && dateFilterMode !== 'month') {
+        setDateFilterMode('month');
+      }
+    }
+
     setState(updatedState);
     if (saveState) await saveState(updatedState);
     showToast?.(`✅ تم حفظ مبيعات ${batchList.length} فرع بنجاح`);
@@ -347,55 +408,24 @@ export default function BranchSalesModule({
             </div>
           </div>
 
-          {/* Quick Subtab Switcher */}
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() => onSwitchSubTab && onSwitchSubTab('list')}
+          {/* Header Module Badge */}
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <span
               style={{
-                background: 'rgba(255,255,255,0.15)',
+                background: 'rgba(255,255,255,0.2)',
                 color: '#ffffff',
-                border: '1px solid rgba(255,255,255,0.3)',
+                border: '1px solid rgba(255,255,255,0.35)',
                 fontSize: '13px',
-                fontWeight: '700',
-                padding: '6px 14px',
-                borderRadius: '10px'
-              }}
-            >
-              🏢 بيانات الفروع
-            </button>
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() => onSwitchSubTab && onSwitchSubTab('roster')}
-              style={{
-                background: 'rgba(255,255,255,0.15)',
-                color: '#ffffff',
-                border: '1px solid rgba(255,255,255,0.3)',
-                fontSize: '13px',
-                fontWeight: '700',
-                padding: '6px 14px',
-                borderRadius: '10px'
-              }}
-            >
-              📅 الجداول الشهرية
-            </button>
-            <button
-              type="button"
-              style={{
-                background: '#ffffff',
-                color: '#0f766e',
-                border: 'none',
-                fontSize: '13px',
-                fontWeight: '900',
+                fontWeight: '800',
                 padding: '6px 14px',
                 borderRadius: '10px',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px'
               }}
             >
-              📈 مبيعات الفروع (الحالي)
-            </button>
+              📈 مبيعات الفروع والتارجت
+            </span>
           </div>
         </div>
 
@@ -697,6 +727,7 @@ export default function BranchSalesModule({
                   style={{ padding: '6px 10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '12.5px', fontWeight: '700' }}
                 >
                   <option value="month">📅 شهر كامل ({selectedMonth})</option>
+                  <option value="all">🌐 كافة التواريخ والحركات المسجلة</option>
                   <option value="today">اليوم ({todayStr})</option>
                   <option value="yesterday">أمس ({yesterdayStr})</option>
                   <option value="custom">📆 نطاق مخصص (من - إلى)</option>
@@ -920,13 +951,42 @@ export default function BranchSalesModule({
       {/* ───────────────────────────────────────────────────────────── */}
       {activeView === 'log' && (
         <div className="card settings-card" style={{ padding: '20px', borderRadius: '16px', border: '1px solid #e2e8f0', background: '#ffffff' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-            <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: '#1e293b' }}>
-              📝 سجل حركات المبيعات اليومية التفصيلي
-            </h3>
-            <span style={{ fontSize: '13px', color: 'var(--muted)' }}>
-              إجمالي الحركات المعروضة: <strong>{filteredSalesLog.length}</strong> حركة
-            </span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: '#1e293b' }}>
+                📝 سجل حركات المبيعات اليومية التفصيلي
+              </h3>
+              <span style={{ fontSize: '12.5px', color: '#64748b', background: '#f1f5f9', padding: '3px 10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                المعروض: <strong style={{ color: '#0f766e' }}>{filteredSalesLog.length}</strong> من إجمالي <strong style={{ color: '#0f172a' }}>{branchSales.length}</strong> حركة
+              </span>
+            </div>
+
+            {(dateFilterMode !== 'all' || selectedBranchId !== 'all' || searchQuery.trim() !== '') && (
+              <button
+                type="button"
+                onClick={() => {
+                  setDateFilterMode('all');
+                  setSelectedBranchId('all');
+                  setSearchQuery('');
+                }}
+                className="btn btn-ghost"
+                style={{
+                  fontSize: '12.5px',
+                  fontWeight: '800',
+                  color: '#2563eb',
+                  background: '#eff6ff',
+                  border: '1px solid #bfdbfe',
+                  padding: '5px 12px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <span>🔄</span> عرض كافة الحركات والتواريخ ({branchSales.length})
+              </button>
+            )}
           </div>
 
           <div className="table-responsive" style={{ maxHeight: '65vh', overflowY: 'auto' }}>
