@@ -46,9 +46,38 @@ export function listenToLiveBroadcasts(callback) {
   return () => syncChannel.removeEventListener('message', handler);
 }
 
-// ── حالة الاتصال ─────────────────────────────────────────────────────────
+// ── حالة الاتصال الحقيقية ومسبار النبض النشط (Active Reachability Engine) ───
+let isNetworkOffline = typeof navigator !== 'undefined' ? !navigator.onLine : false;
+let activeSyncPromise = null;
+let heartbeatTimerId = null;
+
 export function isOnline() {
-  return typeof navigator !== 'undefined' ? navigator.onLine : true;
+  // لا نعتمد بشكل أعمى على navigator.onLine وحده في ويندوز كروميوم
+  if (typeof navigator !== 'undefined' && navigator.onLine === false && isNetworkOffline) {
+    return false;
+  }
+  return true;
+}
+
+export function setConnectionStatus(online) {
+  isNetworkOffline = !online;
+}
+
+/**
+ * فحص الاتصال الفعلي الخفيف جداً (Fast Ping Probe < 50ms)
+ * يضمن التأكد من وصول الحزم للإنترنت وليس فقط الاتصال بالراوتر المحلي
+ */
+export async function verifyRealConnection(timeoutMs = 3000) {
+  try {
+    const vRes = await apiFetchVersion(STORAGE_KEY, { timeout: timeoutMs, isBackground: true });
+    if (vRes !== undefined && vRes !== null) {
+      isNetworkOffline = false;
+      return true;
+    }
+  } catch (e) {
+    // محاولة إضافية سريعة
+  }
+  return false;
 }
 
 // ── جلب أحدث نسخة سحابية من MariaDB عبر PHP API ──────────────────────────
@@ -90,108 +119,141 @@ export async function smartSaveState(updatedState, options = {}) {
     console.warn('[Sync] Local storage async write warning:', err);
   });
 
-  if (isOnline()) {
-    try {
-      // 3. إرسال النسخة النظيفة إلى السحابة مباشرة مع الدمج الخادمي
-      const res = await apiSaveSettings(STORAGE_KEY, cleanUpdated, { timeout: 25000 });
+  // نحاول الحفظ مباشرة حتى لو كان navigator.onLine يزعم الأوفلاين
+  try {
+    const res = await apiSaveSettings(STORAGE_KEY, cleanUpdated, { timeout: 15000 });
 
-      if (!res?.success) {
-        throw new Error(res?.error || 'Failed to save to Database');
-      }
-
-      // إذا أعاد الخادم حالة مدمجة، نعتمدها ونحدث التخزين المحلي
-      const finalState = res?.value && typeof res.value === 'object' ? normalizeState(res.value) : cleanUpdated;
-      saveStateLocally(finalState).catch(() => {});
-      clearPendingQueue().catch(() => {});
-      broadcastStateChange(finalState);
-
-      onSyncSuccess?.(finalState);
-      return { success: true, queued: false, mergedState: finalState };
-    } catch (e) {
-      console.error('[Sync] Network/Server error during save:', e);
-      await addToPendingQueue({ type: 'SAVE_STATE', state: updatedState }).catch(() => {});
-      onSyncFail?.(e.message);
-      return { success: false, queued: true, error: e.message, mergedState: updatedState };
+    if (!res?.success) {
+      throw new Error(res?.error || 'Failed to save to Database');
     }
-  } else {
-    // 4. غير متصل: جدولة المزامنة عند عودة الإنترنت
-    console.log('[Sync] Offline - state saved locally, will merge & sync when online');
+
+    isNetworkOffline = false;
+    const finalState = res?.value && typeof res.value === 'object' ? normalizeState(res.value) : cleanUpdated;
+    saveStateLocally(finalState).catch(() => {});
+    clearPendingQueue().catch(() => {});
+    broadcastStateChange(finalState);
+
+    onSyncSuccess?.(finalState);
+    return { success: true, queued: false, mergedState: finalState };
+  } catch (e) {
+    isNetworkOffline = true;
+    console.warn('[Sync] Network error during save, queued for auto-sync:', e.message);
     await addToPendingQueue({ type: 'SAVE_STATE', state: updatedState }).catch(() => {});
     onQueuedOffline?.();
-
-    if ('serviceWorker' in navigator && 'SyncManager' in window) {
-      try {
-        const registration = await navigator.serviceWorker.ready;
-        await registration.sync.register('sync-app-state');
-      } catch (e) {
-        console.warn('[Sync] Background sync registration failed:', e);
-      }
-    }
-
-    return { success: false, queued: true, mergedState: updatedState };
+    return { success: false, queued: true, error: e.message, mergedState: updatedState };
   }
 }
 
-// ── مزامنة يدوية مع دمج ذكي عند عودة الاتصال ────────────────────────────
+// ── مزامنة يدوية مع دمج ذكي عند عودة الاتصال مع قفل التزامن (Concurrency Mutex) ──
 export async function syncNow(onProgress) {
-  if (!isOnline()) {
-    return { success: false, reason: 'offline' };
+  // إذا كانت هناك عملية مزامنة جارية حالياً، نعيد نفس الوعد لمنع الازدواجية
+  if (activeSyncPromise) {
+    return activeSyncPromise;
   }
 
-  try {
-    onProgress?.('جاري المزامنة والدمج الذكي مع قاعدة البيانات...');
-    const localState = await loadStateLocally();
+  activeSyncPromise = (async () => {
+    try {
+      onProgress?.('جاري المزامنة والدمج الذكي مع قاعدة البيانات...');
+      const localState = await loadStateLocally();
 
-    if (!localState) {
-      const remote = await fetchRemoteState({ timeout: 10000, useETag: false });
-      if (remote && !remote.notModified) {
-        await saveStateLocally(remote);
-        return { success: true, mergedState: remote };
+      // محاولة مباشرة لجلب النسخة السحابية
+      const remoteState = await fetchRemoteState({ timeout: 10000, useETag: false });
+      
+      if (!remoteState && isNetworkOffline) {
+        return { success: false, reason: 'offline' };
       }
-      return { success: false, reason: 'no_data' };
+
+      isNetworkOffline = false;
+
+      if (!localState) {
+        if (remoteState && !remoteState.notModified) {
+          await saveStateLocally(remoteState);
+          return { success: true, mergedState: remoteState };
+        }
+        return { success: false, reason: 'no_data' };
+      }
+
+      const validRemote = remoteState && !remoteState.notModified ? remoteState : null;
+      const mergedState = validRemote ? smartMergeStates(localState, validRemote) : localState;
+
+      const res = await apiSaveSettings(STORAGE_KEY, mergedState, { timeout: 15000 });
+      if (!res?.success) {
+        throw new Error(res?.error || 'Manual sync save failed');
+      }
+
+      const finalState = res?.value && typeof res.value === 'object' ? normalizeState(res.value) : mergedState;
+      await saveStateLocally(finalState);
+      await clearPendingQueue();
+      broadcastStateChange(finalState);
+      onProgress?.('تمت المزامنة والدمج بنجاح ✅');
+      return { success: true, mergedState: finalState };
+    } catch (e) {
+      console.warn('[Sync] Sync attempt encountered network issue:', e.message);
+      isNetworkOffline = true;
+      return { success: false, reason: e.message };
+    } finally {
+      activeSyncPromise = null;
     }
+  })();
 
-    // جلب النسخة السحابية ودمجها مع المحلية
-    const remoteState = await fetchRemoteState({ timeout: 10000, useETag: false });
-    const validRemote = remoteState && !remoteState.notModified ? remoteState : null;
-    const mergedState = validRemote ? smartMergeStates(localState, validRemote) : localState;
-
-    const res = await apiSaveSettings(STORAGE_KEY, mergedState);
-    if (!res?.success) {
-      throw new Error(res?.error || 'Manual sync save failed');
-    }
-
-    const finalState = res?.value && typeof res.value === 'object' ? normalizeState(res.value) : mergedState;
-    await saveStateLocally(finalState);
-    await clearPendingQueue();
-    broadcastStateChange(finalState);
-    onProgress?.('تمت المزامنة والدمج بنجاح ✅');
-    return { success: true, mergedState: finalState };
-  } catch (e) {
-    console.error('[Sync] Manual sync failed:', e);
-    return { success: false, reason: e.message };
-  }
+  return activeSyncPromise;
 }
 
-// ── استماع لأحداث الاتصال ────────────────────────────────────────────────
+// ── استماع متطور لأحداث الاتصال ومسبار النبض السريع ───────────────────────
 export function listenToConnectionChanges(onOnline, onOffline) {
-  const handleOnline = async () => {
-    console.log('[Sync] Connection restored - merging & syncing...');
+  let isProbing = false;
+
+  const triggerInstantReconnection = async () => {
+    if (isProbing) return;
+    isProbing = true;
+    console.log('[Sync] Network connection detected, executing instant sync...');
     const syncRes = await syncNow();
-    onOnline?.(syncRes.mergedState);
+    if (syncRes.success) {
+      isNetworkOffline = false;
+      onOnline?.(syncRes.mergedState);
+    }
+    isProbing = false;
   };
 
-  const handleOffline = () => {
-    console.log('[Sync] Connection lost');
+  const handleOnlineEvent = () => {
+    triggerInstantReconnection();
+  };
+
+  const handleOfflineEvent = () => {
+    console.log('[Sync] Native offline event triggered');
+    isNetworkOffline = true;
     onOffline?.();
   };
 
-  window.addEventListener('online', handleOnline);
-  window.addEventListener('offline', handleOffline);
+  window.addEventListener('online', handleOnlineEvent);
+  window.addEventListener('offline', handleOfflineEvent);
+
+  // مسبار نبض نشط دوري كل 2.5 ثانية عند انقطاع الإنترنت (Fast Heartbeat Probe)
+  // يكتشف عودة الإنترنت فوراً حتى لو لم يطلق الويندوز حدث 'online'
+  const probeInterval = setInterval(async () => {
+    if (isNetworkOffline) {
+      const isActuallyOnline = await verifyRealConnection(2000);
+      if (isActuallyOnline) {
+        console.log('[Sync] Active probe discovered internet is back! Syncing now...');
+        await triggerInstantReconnection();
+      }
+    }
+  }, 2500);
+
+  // الاستماع لحدث استيقاظ الجهاز من السكون في سطح المكتب Electron
+  let unsubDesktopResume = null;
+  if (typeof window !== 'undefined' && window.desktopAPI?.onSystemResume) {
+    unsubDesktopResume = window.desktopAPI.onSystemResume(() => {
+      console.log('[Sync] Desktop OS resumed from sleep, checking connection...');
+      triggerInstantReconnection();
+    });
+  }
 
   return () => {
-    window.removeEventListener('online', handleOnline);
-    window.removeEventListener('offline', handleOffline);
+    window.removeEventListener('online', handleOnlineEvent);
+    window.removeEventListener('offline', handleOfflineEvent);
+    clearInterval(probeInterval);
+    if (unsubDesktopResume) unsubDesktopResume();
   };
 }
 

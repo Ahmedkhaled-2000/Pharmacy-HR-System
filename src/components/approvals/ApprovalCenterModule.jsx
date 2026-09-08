@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { shouldShowRequestToBranch } from '../../utils/formatters';
-import { shouldRouteDirectToAdmin, isBranchWithoutManager } from '../../utils/jobsHelper';
+import { shouldRouteDirectToAdmin, isBranchWithoutManager, isDualApprovalRequest } from '../../utils/jobsHelper';
 import { getFormattedRequestBadge } from '../requests/RequestsModule';
 
 export default function ApprovalCenterModule({
@@ -32,6 +32,13 @@ export default function ApprovalCenterModule({
     {
       id: 'rule_general',
       name: 'طلبات المكافآت والجزاءات وتعديل البصمات والأذون وتأخير/خروج وإجازات <= 3 أيام والإضافي وتبديل الشفتات',
+      requiresBranchManager: true,
+      requiresSuperAdmin: true,
+      autoExecuteOnBoth: true
+    },
+    {
+      id: 'rule_roster_edit',
+      name: 'طلبات تعديل الجدول الشهري والورديات والراحات الأسبوعية',
       requiresBranchManager: true,
       requiresSuperAdmin: true,
       autoExecuteOnBoth: true
@@ -333,25 +340,30 @@ export default function ApprovalCenterModule({
                     {/* Dual Approval Status Indicators */}
                     {(() => {
                       const effectiveBranchId = req.branchId || emp?.branchesDetails?.[0]?.branchId || emp?.branchId;
-                      const isBranchNotReq = req.targetApproval === 'admin_only' ||
+                      const isDual = isDualApprovalRequest(req);
+                      const isBranchNotReq = !isDual && (
+                        req.targetApproval === 'admin_only' ||
                         req.targetApproval === 'admin' ||
                         ['loan', 'advance', 'credit_medicine', 'eval_edit_request', 'complaint'].includes(req.type) ||
                         req.branchNotRequired ||
                         req.isDirectToAdmin ||
-                        shouldRouteDirectToAdmin(emp, effectiveBranchId, state) ||
-                        isBranchWithoutManager(effectiveBranchId, state);
+                        shouldRouteDirectToAdmin(emp, effectiveBranchId, state, req) ||
+                        isBranchWithoutManager(effectiveBranchId, state)
+                      );
 
                       return (
                         <div style={{ display: 'flex', gap: '12px', marginTop: '8px', flexWrap: 'wrap' }}>
-                          <div className={`approval-status-badge ${isBranchNotReq ? 'na' : isBranchApproved ? 'approved' : 'pending'}`}>
+                          <div className={`approval-status-badge ${isBranchNotReq ? 'na' : isBranchApproved ? 'approved' : req.branchRejected ? 'rejected' : 'pending'}`}>
                             {isBranchNotReq
                               ? '🔒 مدير الفرع: غير موجهة إليه (فرع بدون مدير / إدارة)'
                               : isBranchApproved
                                 ? '✅ مدير الفرع: معتمد'
-                                : '⏳ مدير الفرع: بانتظار الموافقة'}
+                                : req.branchRejected
+                                  ? '❌ مدير الفرع: تم الرفض'
+                                  : '⏳ مدير الفرع: بانتظار الموافقة'}
                           </div>
-                          <div className={`approval-status-badge ${isAdminApproved ? 'approved' : 'pending'}`}>
-                            {isAdminApproved ? '✅ الإدارة العليا: معتمدة' : '⏳ الإدارة العليا: بانتظار الموافقة'}
+                          <div className={`approval-status-badge ${isAdminApproved ? 'approved' : req.adminRejected || req.status === 'rejected' ? 'rejected' : 'pending'}`}>
+                            {isAdminApproved ? '✅ الإدارة العليا: معتمدة' : (req.adminRejected || req.status === 'rejected') ? '❌ الإدارة العليا: مرفوضة' : '⏳ الإدارة العليا: بانتظار الموافقة'}
                           </div>
                         </div>
                       );
@@ -359,31 +371,42 @@ export default function ApprovalCenterModule({
                   </div>
 
                   {/* Actions based on role */}
-                  {req.status !== 'rejected' && req.status !== 'cancelled' && (
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      {((currentRole === 'branch' && !isBranchApproved) ||
-                        ((currentRole === 'admin' || currentRole === 'owner') && !isAdminApproved)) && (
-                        <>
-                          <button
-                            type="button"
-                            className="btn btn-start"
-                            style={{ fontSize: '13px' }}
-                            onClick={() => onApproveRequest(req.id, currentRole)}
-                          >
-                            ✅ موافقة واعتماد
-                          </button>
-                          <button
-                            type="button"
-                            className="del-btn"
-                            style={{ fontSize: '13px' }}
-                            onClick={() => onRejectRequest(req.id, currentRole)}
-                          >
-                            ❌ رفض الطلب
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  )}
+                  {(() => {
+                    const isDecided = req.status === 'approved' ||
+                      req.status === 'paid' ||
+                      req.status === 'partial' ||
+                      req.status === 'rejected' ||
+                      req.status === 'cancelled' ||
+                      (currentRole === 'branch' ? (isBranchApproved || req.branchRejected) : (isAdminApproved || req.adminRejected));
+
+                    if (isDecided) return null;
+
+                    return (
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        {((currentRole === 'branch' && !isBranchApproved && !req.branchRejected) ||
+                          ((currentRole === 'admin' || currentRole === 'owner') && !isAdminApproved && !req.adminRejected)) && (
+                          <>
+                            <button
+                              type="button"
+                              className="btn btn-start"
+                              style={{ fontSize: '13px' }}
+                              onClick={() => onApproveRequest(req.id, currentRole)}
+                            >
+                              ✅ موافقة واعتماد
+                            </button>
+                            <button
+                              type="button"
+                              className="del-btn"
+                              style={{ fontSize: '13px' }}
+                              onClick={() => onRejectRequest(req.id, currentRole)}
+                            >
+                              ❌ رفض الطلب
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })

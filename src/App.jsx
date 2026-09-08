@@ -7,13 +7,22 @@ import AppRoutes from './routes/AppRoutes';
 import GlobalModalsContainer from './components/modals/GlobalModalsContainer';
 import AppUpdateWatcher from './components/common/AppUpdateWatcher';
 import UniversalShortcutsController from './components/common/UniversalShortcutsController';
+import DesktopSystemTitleBar from './components/layout/DesktopSystemTitleBar';
 
 /**
  * Inner Application shell
  */
 function AppContent() {
+  React.useEffect(() => {
+    if (typeof window !== 'undefined' && window.desktopAPI?.isDesktop) {
+      document.body.classList.add('is-desktop-mode');
+      document.documentElement.classList.add('is-desktop-app');
+    }
+  }, []);
+
   return (
     <>
+      <DesktopSystemTitleBar />
       <AppRoutes />
       <GlobalModalsContainer />
       <AppUpdateWatcher />

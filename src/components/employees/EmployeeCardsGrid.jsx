@@ -56,6 +56,15 @@ export default function EmployeeCardsGrid({
   const [rehireNotes, setRehireNotes] = useState('');
   const [isRehiring, setIsRehiring] = useState(false);
   const [previewPhotoEmp, setPreviewPhotoEmp] = useState(null);
+  // Branch Cards Collapse/Expand state (all collapsed by default, resets on reload)
+  const [expandedBranches, setExpandedBranches] = useState({});
+
+  const toggleBranchCollapse = (bKey) => {
+    setExpandedBranches((prev) => ({
+      ...prev,
+      [bKey]: !prev[bKey]
+    }));
+  };
 
   const branches = state.branches || [];
   const employees = state.employees || [];
@@ -538,11 +547,13 @@ export default function EmployeeCardsGrid({
           const branchEmps = groupedEmployees[branchKey];
           if (!branchEmps || branchEmps.length === 0) return null;
           const branchTitle = getBranchName(branchKey);
+          const isExpanded = Boolean(expandedBranches[branchKey]);
 
           return (
-            <div key={branchKey} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '16px', padding: '20px' }}>
-              {/* Branch Header Banner */}
+            <div key={branchKey} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '16px', padding: isExpanded ? '20px' : '12px 18px', transition: 'all 0.2s ease' }}>
+              {/* Branch Header Banner (Clickable to Expand / Collapse) */}
               <div
+                onClick={() => toggleBranchCollapse(branchKey)}
                 style={{
                   background: activeMainTab === 'active'
                     ? 'linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%)'
@@ -550,22 +561,38 @@ export default function EmployeeCardsGrid({
                   color: '#fff',
                   padding: '12px 20px',
                   borderRadius: '12px',
-                  marginBottom: '16px',
+                  marginBottom: isExpanded ? '16px' : '0',
                   display: 'flex',
                   justifyContent: 'space-between',
-                  alignItems: 'center'
+                  alignItems: 'center',
+                  cursor: 'pointer',
+                  userSelect: 'none',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                  transition: 'margin-bottom 0.2s ease, opacity 0.15s ease'
                 }}
+                title={isExpanded ? 'اضغط لطي الفرع' : 'اضغط لفتح وعرض موظفي هذا الفرع'}
               >
-                <h3 style={{ margin: 0, fontFamily: 'Cairo', fontSize: '16.5px', color: '#fff' }}>
-                  🏬 {branchTitle} {activeMainTab === 'resigned' ? '(المستقيلون)' : ''}
-                </h3>
-                <span style={{ background: 'rgba(255,255,255,0.2)', padding: '4px 12px', borderRadius: '20px', fontSize: '13px', fontWeight: 'bold' }}>
-                  {branchEmps.length} موظف
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ fontSize: '14px', display: 'inline-block', transition: 'transform 0.2s ease', transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}>
+                    {isExpanded ? '▲' : '▼'}
+                  </span>
+                  <h3 style={{ margin: 0, fontFamily: 'Cairo', fontSize: '16.5px', color: '#fff' }}>
+                    🏬 {branchTitle} {activeMainTab === 'resigned' ? '(المستقيلون)' : ''}
+                  </h3>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ background: 'rgba(255,255,255,0.2)', padding: '4px 12px', borderRadius: '20px', fontSize: '13px', fontWeight: 'bold' }}>
+                    {branchEmps.length} موظف
+                  </span>
+                  <span style={{ fontSize: '12px', opacity: 0.85, fontWeight: 'normal' }}>
+                    {isExpanded ? '(انقر للطي)' : '(انقر للعرض)'}
+                  </span>
+                </div>
               </div>
 
-              {/* Full Width Horizontal Rectangular Cards */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              {/* Full Width Horizontal Rectangular Cards (Only visible when expanded) */}
+              {isExpanded && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                 {branchEmps.map((emp) => {
                   const active = state.activeShifts?.[emp.id];
                   const empSum = computeEmpSummary ? computeEmpSummary(emp.id, filterFn) : { hours: 0, netSalary: 0 };
@@ -970,6 +997,7 @@ export default function EmployeeCardsGrid({
                   );
                 })}
               </div>
+              )}
             </div>
           );
         })}

@@ -38,6 +38,7 @@ export default function AttendanceModule({
   const [manualBreakHours, setManualBreakHours] = useState('0');
   const [manualNotes, setManualNotes] = useState('');
   const [manualBranchId, setManualBranchId] = useState('');
+  const [manualFilterBranchId, setManualFilterBranchId] = useState('all');
   const [includeDailyAllowance, setIncludeDailyAllowance] = useState(true);
 
   const employees = state.employees || [];
@@ -55,6 +56,15 @@ export default function AttendanceModule({
     }
     return true;
   });
+
+  const manualFilteredEmployees = useMemo(() => {
+    return employees.filter(isEmployeeActive).filter((emp) => {
+      if (manualFilterBranchId === 'all' || !manualFilterBranchId) return true;
+      if (String(emp.branchId) === String(manualFilterBranchId)) return true;
+      if (emp.branchesDetails && emp.branchesDetails.some((bd) => String(bd.branchId) === String(manualFilterBranchId))) return true;
+      return false;
+    });
+  }, [employees, manualFilterBranchId]);
 
   const handleAddManualPunch = async (e) => {
     e.preventDefault();
@@ -187,6 +197,28 @@ export default function AttendanceModule({
         </h4>
         <form onSubmit={handleAddManualPunch} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px' }}>
           <div className="field">
+            <label>فلتر حسب الفرع</label>
+            <select
+              value={manualFilterBranchId}
+              onChange={(e) => {
+                const bId = e.target.value;
+                setManualFilterBranchId(bId);
+                setManualEmpId('');
+                if (bId !== 'all') {
+                  setManualBranchId(bId);
+                } else {
+                  setManualBranchId('');
+                }
+              }}
+            >
+              <option value="all">🏬 جميع الفروع</option>
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="field">
             <label>اختر الموظف</label>
             <select
               value={manualEmpId}
@@ -197,6 +229,11 @@ export default function AttendanceModule({
                 if (emp) {
                   const bH = emp.breakHours || emp.defaultBreakHours || emp.branchesDetails?.[0]?.breakHours || '0';
                   setManualBreakHours(String(bH));
+                  if (manualFilterBranchId && manualFilterBranchId !== 'all') {
+                    setManualBranchId(manualFilterBranchId);
+                  } else if (emp.branchId) {
+                    setManualBranchId(emp.branchId);
+                  }
                 } else {
                   setManualBreakHours('0');
                 }
@@ -204,7 +241,7 @@ export default function AttendanceModule({
               required
             >
               <option value="">-- اختر الموظف --</option>
-              {employees.filter(isEmployeeActive).map((e) => {
+              {manualFilteredEmployees.map((e) => {
                 const count = getEmployeeManualPunchesCount(e.id, state, activePeriodFilter);
                 return (
                   <option key={e.id} value={e.id}>

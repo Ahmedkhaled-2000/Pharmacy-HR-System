@@ -10,7 +10,16 @@ export const WORK_HOURS_PER_DAY = 8;
 
 // تحديد رابط الـ API تلقائياً
 const getApiBaseUrl = () => {
-  // 1. في بيئة المتصفح الحية على الخادم (Apex Thunder أو أي نطاق/IP مباشر)
+  // 1. في بيئة تطبيق سطح المكتب (Windows Desktop Electron) أو تشغيل بروتوكول file://
+  if (typeof window !== 'undefined' && (window.location?.protocol === 'file:' || window.desktopAPI?.isDesktop)) {
+    try {
+      const customApi = localStorage.getItem('app_custom_cloud_api_url');
+      if (customApi && customApi.startsWith('http')) return customApi.replace(/\/+$/, '');
+    } catch {}
+    return 'https://nodejs-test.apexthunder.com/api';
+  }
+
+  // 2. في بيئة المتصفح الحية على الخادم (Apex Thunder أو أي نطاق/IP مباشر)
   if (typeof window !== 'undefined' && window.location) {
     const { origin, protocol, hostname } = window.location;
     if (origin && !hostname.includes('localhost') && !hostname.includes('127.0.0.1') && protocol.startsWith('http')) {
@@ -18,12 +27,12 @@ const getApiBaseUrl = () => {
     }
   }
 
-  // 2. إذا تم تحديد الرابط في متغيرات البيئة (.env) في بيئة التطوير المحلي
-  if (import.meta.env?.VITE_API_URL) {
+  // 3. إذا تم تحديد الرابط في متغيرات البيئة (.env) وكان رابطاً مطلقاً
+  if (import.meta.env?.VITE_API_URL && import.meta.env.VITE_API_URL.startsWith('http')) {
     return import.meta.env.VITE_API_URL.replace(/\/+$/, '');
   }
 
-  // 3. الرابط الافتراضي للتطوير والتجربة
+  // 4. الرابط الافتراضي للتطوير والتجربة
   return 'https://nodejs-test.apexthunder.com/api';
 };
 

@@ -357,7 +357,7 @@ export default function EmployeeRosterModule({
 
     const targetBranch = activeFormBranchId || selectedBranchId || primaryBranch;
 
-    const isDirectAdmin = shouldRouteDirectToAdmin(emp, targetBranch, state);
+    const isDirectAdmin = shouldRouteDirectToAdmin(emp, targetBranch, state, { type: 'roster_update' });
     const targetApproval = isDirectAdmin ? 'admin_only' : 'branch_and_admin';
 
     const newRosterReq = {

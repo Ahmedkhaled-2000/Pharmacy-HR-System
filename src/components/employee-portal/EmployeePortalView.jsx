@@ -67,14 +67,14 @@ const WEEKDAY_AR_MAP = {
 // ─────────────────────────────────────────
 function SummaryCard({ icon, label, value, colorVar, sub, isPrivacy = false }) {
   return (
-    <div className="ep-summary-card">
+    <div className="ep-summary-card fluent-card">
       <div className="ep-summary-icon">{icon}</div>
       <div className="ep-summary-body">
         <div className="ep-summary-label">{label}</div>
-        <div className={`ep-summary-value ${isPrivacy ? 'ep-privacy-blurred' : ''}`} style={colorVar ? { color: `var(${colorVar})` } : {}}>
+        <div className={`ep-summary-value ${isPrivacy ? 'ep-privacy-blurred privacy-blurred' : ''}`} style={colorVar ? { color: `var(${colorVar})` } : {}}>
           {value}
         </div>
-        {sub && <div className={`ep-summary-sub ${isPrivacy ? 'ep-privacy-blurred' : ''}`}>{sub}</div>}
+        {sub && <div className={`ep-summary-sub ${isPrivacy ? 'ep-privacy-blurred privacy-blurred' : ''}`}>{sub}</div>}
       </div>
     </div>
   );
@@ -208,6 +208,15 @@ export default function EmployeePortalView({
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  const isDesktop = typeof window !== 'undefined' && Boolean(window.desktopAPI?.isDesktop);
+  const [isWindowMaximized, setIsWindowMaximized] = useState(false);
+
+  useEffect(() => {
+    if (isDesktop && window.desktopAPI?.isMaximized) {
+      window.desktopAPI.isMaximized().then(setIsWindowMaximized).catch(() => {});
+    }
+  }, [isDesktop]);
 
   // التحميل الاستباقي في الخلفية لمحرك التعرف على الوجه ليعمل فورياً دون تأخير
   useEffect(() => {
@@ -2593,10 +2602,8 @@ export default function EmployeePortalView({
         </>
       ) : (
         /* 💻 Desktop Titlebar (Only on Desktop Screens) */
-        <header className="ep-titlebar" style={{
+        <header className="ep-titlebar fluent-acrylic-header app-draggable-region" style={{
           height: '52px',
-          background: 'var(--surface)',
-          borderBottom: '1px solid var(--border)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
@@ -2605,10 +2612,10 @@ export default function EmployeePortalView({
           zIndex: 100,
           width: '100%',
           boxSizing: 'border-box',
-          boxShadow: '0 1px 4px rgba(0,0,0,0.03)'
+          boxShadow: '0 2px 8px rgba(0,0,0,0.03)'
         }}>
           {/* Right Side: Brand, Profile Badge & Breadcrumb */}
-          <div className="ep-titlebar-right" style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <div className="ep-titlebar-right app-no-drag" style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             {(orgSettings?.logoUrl || state?.orgSettings?.logoUrl) ? (
               <img
                 src={orgSettings?.logoUrl || state?.orgSettings?.logoUrl}
@@ -2684,7 +2691,7 @@ export default function EmployeePortalView({
           </div>
 
           {/* Left Side: Live Synced Clock, Period Filter, Notifs, Theme, Logout */}
-          <div className="ep-titlebar-left" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div className="ep-titlebar-left app-no-drag" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             {/* Synced Real-time Live Clock */}
             <div className="ep-live-clock" title={liveTime.isServerSynced ? '🌐 التوقيت الفعلي الموثق من الخادم' : '⏱️ التوقيت المباشر'} style={{
               display: 'flex',
@@ -3032,6 +3039,30 @@ export default function EmployeePortalView({
                 <span>{themeMode === 'dark' ? '☀️' : '🌙'}</span>
               </button>
             )}
+
+            {/* Privacy Mode Toggle Button */}
+            <button
+              type="button"
+              onClick={togglePrivacyMode}
+              title={isPrivacyMode ? 'إلغاء وضع الخصوصية وإظهار الأرقام المالية' : 'تفعيل وضع الخصوصية وحجب الأرقام والرواتب'}
+              style={{
+                border: '1px solid var(--border)',
+                background: isPrivacyMode ? 'rgba(13, 148, 136, 0.15)' : 'var(--surface)',
+                padding: '5px 10px',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontSize: '12px',
+                fontWeight: 700,
+                color: isPrivacyMode ? 'var(--primary-dark, #0f766e)' : 'var(--text)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <span>{isPrivacyMode ? '👁️‍🗨️' : '👁️'}</span>
+              <span className="ep-btn-label">{isPrivacyMode ? 'محمي' : 'خصوصية'}</span>
+            </button>
 
             {/* Logout Button */}
             <button

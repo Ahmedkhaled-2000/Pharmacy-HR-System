@@ -1,0 +1,40 @@
+{
+  "appId": "com.pharmacy.hr.system",
+  "productName": "منظومة الموارد البشرية",
+  "directories": {
+    "output": "release",
+    "buildResources": "assets"
+  },
+  "files": [
+    "dist/**/*",
+    "electron/**/*",
+    "package.json"
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      }
+    ],
+    "icon": "assets/icon.ico",
+    "artifactName": "${productName}-Setup-${version}.${ext}",
+    "requestedExecutionLevel": "asInvoker"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "منظومة إدارة الموارد البشرية والرواتب",
+    "runAfterFinish": true,
+    "deleteAppDataOnUninstall": false,
+    "language": "1025"
+  },
+  "publish": [
+    {
+      "provider": "generic",
+      "url": "https://nodejs-test.apexthunder.com/updates/"
+    }
+  ]
+}

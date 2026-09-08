@@ -115,7 +115,7 @@
           }).catch(function() {});
         }
 
-        if ('serviceWorker' in navigator) {
+        if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
           let refreshing = false;
           navigator.serviceWorker.addEventListener('controllerchange', () => {
             if (refreshing) return;

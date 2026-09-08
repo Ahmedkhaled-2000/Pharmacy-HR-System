@@ -73,11 +73,20 @@ function openDB() {
   });
 }
 
-// ── حفظ حالة التطبيق محلياً (IndexedDB + LocalStorage Mirror) ───────────────
+// ── حفظ حالة التطبيق محلياً (IndexedDB + LocalStorage Mirror + Desktop File DB) ──
 export async function saveStateLocally(state) {
   if (!state) return false;
 
-  // 1. حفظ فوري في LocalStorage كمرآة أمان للمتصفحات المقيدة
+  // 1. حفظ فوري على قرص الويندوز الصلب في حال العمل عبر تطبيق سطح المكتب
+  try {
+    if (typeof window !== 'undefined' && window.desktopAPI?.saveStateLocally) {
+      window.desktopAPI.saveStateLocally(state).catch((err) => {
+        console.warn('[Desktop DB] Write warning:', err);
+      });
+    }
+  } catch {}
+
+  // 2. حفظ فوري في LocalStorage كمرآة أمان
   try {
     if (typeof localStorage !== 'undefined') {
       localStorage.setItem(LOCAL_STORAGE_MIRROR_KEY, JSON.stringify({
@@ -90,7 +99,7 @@ export async function saveStateLocally(state) {
     memoryStore.set('app_state', { value: state, updatedAt: Date.now() });
   }
 
-  // 2. حفظ في IndexedDB
+  // 3. حفظ في IndexedDB
   try {
     const db = await openDB();
     return await new Promise((resolve) => {
@@ -101,14 +110,23 @@ export async function saveStateLocally(state) {
       tx.onerror = () => resolve(false);
     });
   } catch (e) {
-    // IndexedDB فشل، ولكن تم الحفظ في LocalStorage كبديل
     return true;
   }
 }
 
 // ── قراءة الحالة المحفوظة محلياً مع التراجع التلقائي ───────────────────────
 export async function loadStateLocally() {
-  // 1. محاولة القراءة من IndexedDB أولاً
+  // 1. الأولوية لتطبيق سطح المكتب Windows لقراءة أحدث نسخة من القرص الصلب
+  try {
+    if (typeof window !== 'undefined' && window.desktopAPI?.loadStateLocally) {
+      const desktopState = await window.desktopAPI.loadStateLocally();
+      if (desktopState && typeof desktopState === 'object') {
+        return desktopState;
+      }
+    }
+  } catch {}
+
+  // 2. محاولة القراءة من IndexedDB
   try {
     const db = await openDB();
     const result = await new Promise((resolve) => {
@@ -304,6 +322,11 @@ export async function getPendingCount() {
 
 // ── تفريغ كامل لقاعدة البيانات المحلية المؤقتة (عند التصفير الشامل) ─────────
 export async function clearLocalDatabase() {
+  try {
+    if (typeof window !== 'undefined' && window.desktopAPI?.clearLocalCache) {
+      window.desktopAPI.clearLocalCache().catch(() => {});
+    }
+  } catch {}
   try {
     if (typeof localStorage !== 'undefined') {
       localStorage.removeItem(LOCAL_STORAGE_MIRROR_KEY);

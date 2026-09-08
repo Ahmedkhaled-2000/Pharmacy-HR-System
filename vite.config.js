@@ -2,14 +2,17 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
+const isElectron = process.env.ELECTRON === 'true';
+
 // https://vite.dev/config/
 export default defineConfig({
+  base: isElectron ? './' : '/',
   define: {
     __APP_BUILD_TIME__: JSON.stringify(new Date().toISOString()),
   },
   plugins: [
     react(),
-    VitePWA({
+    !isElectron && VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'icons/*.svg', 'offline.html'],
       manifest: {
@@ -91,7 +94,7 @@ export default defineConfig({
         enabled: false
       }
     })
-  ],
+  ].filter(Boolean),
   build: {
     cssMinify: false,
     chunkSizeWarningLimit: 3000,

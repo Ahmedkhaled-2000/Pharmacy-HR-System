@@ -41,4 +41,7 @@ deploy_package
 *.sqlite-wal
 supabase_extracted_data.json
 uploads/
-
+release/
+*.exe
+*.blockmap
+dist-electron/

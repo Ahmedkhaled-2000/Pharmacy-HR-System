@@ -151,7 +151,7 @@ export function useRealtimeSync(props = {}) {
       // انقطاع الإنترنت
       () => {
         setIsOffline(true);
-        showToast('📴 انقطع الإنترنت - سيتم حفظ البيانات محلياً حتى عودة الاتصال');
+        showToast('📴 انقطع الإنترنت - سيتم حفظ البيانات محلياً وتفعيل مسبار المزامنة الفوري');
       }
     );
     return unsubscribe;
@@ -167,7 +167,7 @@ export function useRealtimeSync(props = {}) {
     let timerId = null;
 
     const poll = async () => {
-      if (isPolling || !navigator.onLine || !isMountedRef.current) return;
+      if (isPolling || !isMountedRef.current) return;
       isPolling = true;
       try {
         const versionRes = await apiFetchVersion(STORAGE_KEY, { timeout: 3500, isBackground: true });
@@ -182,7 +182,8 @@ export function useRealtimeSync(props = {}) {
 
         lastKnownVersion = currentVer;
         lastKnownUpdatedAt = currentUpdated;
-        pollFailures = 0; // نجاح الاتصال -> تصفير الفشل
+        pollFailures = 0; // نجاح الاتصال -> تصفير الفشل فوراً
+        setIsOffline(false);
 
         if (hasChanged) {
           const remoteData = await apiFetchSettings(STORAGE_KEY, { timeout: 6000, useETag: true, isBackground: true });
@@ -199,16 +200,16 @@ export function useRealtimeSync(props = {}) {
     };
 
     // أ) Adaptive Polling مع تراجع أسي ذكي عند تعثر السيرفر لمنع تسريب الذاكرة
-    const scheduleNextPoll = () => {
+    const scheduleNextPoll = (customDelay = null) => {
       if (!isMountedRef.current) return;
       if (timerId) clearTimeout(timerId);
 
       const isVisible = typeof document !== 'undefined' ? document.visibilityState === 'visible' : true;
-      let delay = isVisible ? 8000 : 30000;
+      let delay = customDelay !== null ? customDelay : (isVisible ? 6000 : 25000);
 
-      // في حال تعثر السيرفر (500 أو انقطاع)، التراجع أسي (12ث -> 24ث -> 45ث) لمنع إرهاق المتصفح
-      if (pollFailures > 0) {
-        delay = Math.min(60000, 5000 * Math.pow(1.8, Math.min(pollFailures, 6)));
+      if (customDelay === null && pollFailures > 0) {
+        // فترات تراجع أسرع (3ث -> 6ث -> 12ث -> 20ث كحد أقصى) لتسريع التقاط عودة الإنترنت
+        delay = Math.min(20000, 3000 * Math.pow(1.5, Math.min(pollFailures, 4)));
       }
 
       timerId = setTimeout(async () => {
@@ -217,7 +218,7 @@ export function useRealtimeSync(props = {}) {
       }, delay);
     };
 
-    scheduleNextPoll();
+    scheduleNextPoll(100);
 
     // ب) Real-Time Server-Sent Events (SSE) Stream
     const eventSource = apiCreateEventSource(STORAGE_KEY, () => {
@@ -242,6 +243,7 @@ export function useRealtimeSync(props = {}) {
 
     const handleFocusOrVisible = () => {
       if (document.visibilityState === 'visible' || document.hasFocus()) {
+        pollFailures = 0; // تصفير الفشل فور تفاعل المستخدم
         if (timerId) clearTimeout(timerId);
         poll().then(() => scheduleNextPoll());
       }

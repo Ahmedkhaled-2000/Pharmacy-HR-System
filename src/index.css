@@ -1,3 +1,5 @@
+@import './styles/desktop-theme.css';
+
 /* Modern High-End Bespoke Design System */
 :root {
   --bg: #F1F5F9;
@@ -2062,6 +2064,7 @@ tbody tr:hover {
   padding:7px 14px;
   font-family:Tajawal,sans-serif;
   font-size:.85rem;
+}
 
 /* ═══ EMPLOYEE PORTAL STYLES ═══ */
 .emp-month-bar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 22px;margin:18px 0;box-shadow:var(--shadow)}

@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { applyShiftSwapToRosters, arabicWeekday, shouldShowRequestToBranch, getEmpDisplayName, isEmployeeActive, normalizeState, fmt } from '../../utils/formatters';
 import { notifyEmployeeEarlyExitWarning } from '../../utils/gmailService';
 import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
-import { shouldRouteDirectToAdmin, isBranchWithoutManager } from '../../utils/jobsHelper';
+import { shouldRouteDirectToAdmin, isBranchWithoutManager, isDualApprovalRequest, isEmployeeBranchManager, isUpperManagementEmp } from '../../utils/jobsHelper';
 import { normalizeSchedule } from '../roster/RosterModule';
 import { syncNow, fetchRemoteState } from '../../utils/offlineSync';
 import { createRequestDecisionNotification } from '../../utils/notificationEngine';
@@ -2179,13 +2179,17 @@ export default function RequestsModule({
                       {(() => {
                         const emp = employees.find(e => e.id === req.employeeId || e.code === req.employeeCode);
                         const effectiveBranchId = req.branchId || emp?.branchesDetails?.[0]?.branchId || emp?.branchId;
-                        const isDirectAdmin = req.targetApproval === 'admin_only' ||
-                          req.targetApproval === 'admin' ||
-                          ['loan', 'advance', 'credit_medicine', 'eval_edit_request', 'complaint', 'penalty_objection', 'objection'].includes(req.type) ||
-                          req.branchNotRequired ||
-                          req.isDirectToAdmin ||
-                          shouldRouteDirectToAdmin(emp, effectiveBranchId, state) ||
-                          isBranchWithoutManager(effectiveBranchId, state);
+                        const isDual = isDualApprovalRequest(req, state);
+                        const isDirectAdmin = isDual
+                          ? (emp && (isEmployeeBranchManager(emp, effectiveBranchId, state) || isUpperManagementEmp(emp)))
+                          : (
+                              req.targetApproval === 'admin_only' ||
+                              req.targetApproval === 'admin' ||
+                              ['loan', 'advance', 'credit_medicine', 'eval_edit_request', 'complaint', 'penalty_objection', 'objection', 'biometric_registration', 'biometric_reset'].includes(req.type) ||
+                              req.branchNotRequired ||
+                              req.isDirectToAdmin ||
+                              shouldRouteDirectToAdmin(emp, effectiveBranchId, state, req)
+                            );
 
                         if (req.type === 'disciplinary_penalty' || req.createdRole === 'branch' || req.createdRole === 'branch_manager' || req.submittedByBranchManager) {
                           return (
@@ -2245,24 +2249,24 @@ export default function RequestsModule({
                           👁️ معاينة الطلب
                         </button>
 
-                        {req.status !== 'approved' && req.status !== 'paid' && req.status !== 'partial' && !req.adminApproved && req.status !== 'cancelled' && (
-                          <button
-                            className="btn btn-start"
-                            style={{ padding: '4px 10px', fontSize: '12px' }}
-                            onClick={() => handleApprove(req.id)}
-                          >
-                            ✓ موافقة
-                          </button>
-                        )}
-
-                        {req.status !== 'rejected' && req.status !== 'cancelled' && !req.adminApproved && req.status !== 'approved' && req.status !== 'paid' && req.status !== 'partial' && (
-                          <button
-                            className="btn btn-ghost"
-                            style={{ padding: '4px 10px', fontSize: '12px', color: 'var(--danger)' }}
-                            onClick={() => handleReject(req.id)}
-                          >
-                            ✕ رفض
-                          </button>
+                        {/* Hide approve and reject buttons if request is already approved or rejected or cancelled */}
+                        {!(req.status === 'approved' || req.status === 'paid' || req.status === 'partial' || req.adminApproved || req.status === 'rejected' || req.status === 'cancelled') && (
+                          <>
+                            <button
+                              className="btn btn-start"
+                              style={{ padding: '4px 10px', fontSize: '12px' }}
+                              onClick={() => handleApprove(req.id)}
+                            >
+                              ✓ موافقة
+                            </button>
+                            <button
+                              className="btn btn-ghost"
+                              style={{ padding: '4px 10px', fontSize: '12px', color: 'var(--danger)' }}
+                              onClick={() => handleReject(req.id)}
+                            >
+                              ✕ رفض
+                            </button>
+                          </>
                         )}
 
                         <button
@@ -2325,16 +2329,20 @@ export default function RequestsModule({
         const isInstallment = previewModalReq.loanType === 'installments' || previewModalReq.isInstallment || (monthlyDed > 0 && monthlyDed < totalAmount) || (parseInt(previewModalReq.installmentsCount, 10) > 1);
         const installmentsCount = previewModalReq.installmentsCount || previewModalReq.monthsCount || (monthlyDed > 0 ? Math.ceil(totalAmount / monthlyDed) : 1);
 
-        const isBranchNotReq = previewModalReq.targetApproval === 'admin_only' ||
-          previewModalReq.targetApproval === 'admin' ||
-          isLoan ||
-          isComplaint ||
-          isPenaltyObjection ||
-          isProfileUpdate ||
-          previewModalReq.branchNotRequired ||
-          previewModalReq.isDirectToAdmin ||
-          shouldRouteDirectToAdmin(empObj, effectiveReqBranchId, state) ||
-          isBranchWithoutManager(effectiveReqBranchId, state);
+        const isDual = isDualApprovalRequest(previewModalReq, state);
+        const isBranchNotReq = isDual
+          ? (empObj && (isEmployeeBranchManager(empObj, effectiveReqBranchId, state) || isUpperManagementEmp(empObj)))
+          : (
+              previewModalReq.targetApproval === 'admin_only' ||
+              previewModalReq.targetApproval === 'admin' ||
+              isLoan ||
+              isComplaint ||
+              isPenaltyObjection ||
+              isProfileUpdate ||
+              previewModalReq.branchNotRequired ||
+              previewModalReq.isDirectToAdmin ||
+              shouldRouteDirectToAdmin(empObj, effectiveReqBranchId, state, previewModalReq)
+            );
 
         return (
           <div className="modal-overlay" onClick={() => setPreviewModalReq(null)} style={{ zIndex: 1100 }}>
@@ -3602,9 +3610,32 @@ export default function RequestsModule({
                       🛡️ عدم تطبيق الخصم (قبول العذر)
                     </button>
                   </div>
-                ) : (
-                  <>
-                    {previewModalReq.status !== 'rejected' && (
+                ) : (() => {
+                  const isDecided = previewModalReq.status === 'approved' ||
+                    previewModalReq.adminApproved ||
+                    previewModalReq.status === 'paid' ||
+                    previewModalReq.status === 'partial' ||
+                    previewModalReq.status === 'rejected' ||
+                    previewModalReq.status === 'cancelled';
+
+                  if (isDecided) {
+                    return (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        {(previewModalReq.status === 'approved' || previewModalReq.adminApproved) ? (
+                          <span className="approval-status-badge approved" style={{ padding: '8px 18px', fontSize: '13px', fontWeight: 'bold' }}>
+                            🟢 هذا الطلب معتمد وموافق عليه
+                          </span>
+                        ) : previewModalReq.status === 'rejected' ? (
+                          <span className="approval-status-badge rejected" style={{ padding: '8px 18px', fontSize: '13px', fontWeight: 'bold' }}>
+                            🔴 هذا الطلب تم رفضه
+                          </span>
+                        ) : null}
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <>
                       <button
                         type="button"
                         className="del-btn"
@@ -3616,9 +3647,7 @@ export default function RequestsModule({
                       >
                         ✕ رفض الطلب
                       </button>
-                    )}
 
-                    {previewModalReq.status !== 'approved' && (
                       <button
                         type="button"
                         className="btn btn-start"
@@ -3648,9 +3677,9 @@ export default function RequestsModule({
                           ? `✓ اعتماد السلفة بالمبلغ المعتمد (${loanCustomAmount || previewModalReq.amount} ج.م)`
                           : '✓ اعتماد وموافقة الطلب فوراً'}
                       </button>
-                    )}
-                  </>
-                )}
+                    </>
+                  );
+                })()}
               </div>
             </div>
           </div>

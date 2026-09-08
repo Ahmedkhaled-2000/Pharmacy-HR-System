@@ -1,4 +1,4 @@
-import { isManagementJob, isBranchWithoutManager, getJobsList, shouldRouteDirectToAdmin } from './jobsHelper';
+import { isManagementJob, isBranchWithoutManager, getJobsList, shouldRouteDirectToAdmin, isDualApprovalRequest, isEmployeeBranchManager, isUpperManagementEmp } from './jobsHelper';
 import { getActivePayrollMonth } from './periodEngine';
 export { getRealDate, getRealTodayStr, getRealNowTimeStr } from './timeEngine';
 import { getRealDate } from './timeEngine';
@@ -576,7 +576,8 @@ export { applyShiftSwapToRosters, getDayScheduleFromMap, getEmployeeDaySchedule,
 /**
  * Determines whether a request should be visible to and require approval from the Branch Manager,
  * adhering strictly to the Double Approval Rules configured by Higher Management (state.approvalRules).
- * Loans, advances, and credit medicines are strictly administrative and NEVER shown to branch managers.
+ * Loans, advances, credit medicines, and complaints are strictly administrative and NEVER shown to branch managers.
+ * Requests requiring Dual Approval (e.g. roster edits, leaves <= 3 days, swaps, permissions) MUST be shown to the Branch Manager.
  */
 export function shouldShowRequestToBranch(req, state) {
   if (!req) return false;
@@ -590,68 +591,33 @@ export function shouldShowRequestToBranch(req, state) {
     return false;
   }
 
-  // 3. Direct-to-admin flags
+  // 3. Evaluations, complaints, and biometric account resets are direct to upper management
+  if (['eval_edit_request', 'complaint', 'penalty_objection', 'objection', 'biometric_registration', 'biometric_reset'].includes(req.type)) {
+    return false;
+  }
+
+  // 4. Check if requesting employee is Upper Management or the Branch Manager of this branch
+  const emp = (state?.employees || []).find(
+    (e) => String(e.id) === String(req.employeeId) || (req.employeeCode && String(e.code) === String(req.employeeCode))
+  );
+  if (emp && isEmployeeBranchManager(emp, req.branchId, state)) {
+    return false;
+  }
+  if (emp && isUpperManagementEmp(emp)) {
+    return false;
+  }
+
+  // 5. Dual Approval requests (roster_edit/update, leave <= 3 days, swap, permission, bonus, overtime, biometric_verification)
+  // MUST ALWAYS be shown to the Branch Manager regardless of legacy flags.
+  if (isDualApprovalRequest(req, state)) {
+    return true;
+  }
+
+  // 6. Direct-to-admin flags (only for non-dual requests)
   if (req.targetApproval === 'admin_only' || req.targetApproval === 'admin' || req.branchNotRequired || req.isDirectToAdmin) {
     return false;
   }
 
-  // 4. Evaluations and complaints are direct to upper management
-  if (['eval_edit_request', 'complaint'].includes(req.type)) {
-    return false;
-  }
-
-  // 4. Check if requesting employee holds an administrative/management role (direct to Admin)
-  const emp = (state?.employees || []).find(
-    (e) => String(e.id) === String(req.employeeId) || (req.employeeCode && String(e.code) === String(req.employeeCode))
-  );
-  if (emp && shouldRouteDirectToAdmin(emp, req.branchId, state)) {
-    return false;
-  }
-
-  // 5. Check if the branch has no assigned manager (direct to Admin)
-  const targetBranchId = req.branchId || emp?.branchesDetails?.[0]?.branchId || emp?.branchId;
-  if (targetBranchId && isBranchWithoutManager(targetBranchId, state)) {
-    return false;
-  }
-
-  // 6. Check Double Approval Rules Configured by Higher Management (state.approvalRules)
-  const rules = state?.approvalRules || [];
-  if (Array.isArray(rules) && rules.length > 0) {
-    // A. Check by specific requestType match (e.g. { requestType: 'leave', reqBranch: false })
-    const matchedRule = rules.find((r) => {
-      if (r.requestType && r.requestType === req.type) return true;
-      if (r.id && r.id === `rule_${req.type}`) return true;
-      return false;
-    });
-
-    if (matchedRule) {
-      if (matchedRule.reqBranch === false || matchedRule.requiresBranchManager === false) {
-        return false;
-      }
-      if (matchedRule.reqBranch === true || matchedRule.requiresBranchManager === true) {
-        return true;
-      }
-    }
-
-    // B. Check category rules (like long leave rule vs short leave rule)
-    if (req.type === 'leave' || req.type === 'leave_request') {
-      const days = parseFloat(req.daysCount || req.days || 1);
-      if (days > 3) {
-        const longLeaveRule = rules.find((r) => r.id === 'rule_long_leave' || (r.name && r.name.includes('أكثر من ثلاث')));
-        if (longLeaveRule && (longLeaveRule.requiresBranchManager === false || longLeaveRule.reqBranch === false)) {
-          return false;
-        }
-      }
-    }
-
-    // C. Check general rule if present
-    const generalRule = rules.find((r) => r.id === 'rule_general');
-    if (generalRule && (generalRule.requiresBranchManager === false || generalRule.reqBranch === false)) {
-      return false;
-    }
-  }
-
-  // 5. Default behavior for standard operational requests (leave <= 3 days, permission, swap, roster_update)
   return true;
 }
 

@@ -71,7 +71,12 @@ export default function AppRoutes() {
     state,
     setState,
     saveState,
+    triggerManualSync,
     isLoading,
+    isSyncing,
+    lastSyncTime,
+    isOffline,
+    pendingSyncCount,
     getEmp,
     getEmpPermission,
     computeEmpSummary,
@@ -579,6 +584,11 @@ export default function AppRoutes() {
           <DesktopLayout
             currentRole={authRole}
             currentBranch={currentBranch}
+            isSyncing={isSyncing}
+            lastSyncTime={lastSyncTime}
+            isOffline={isOffline}
+            pendingSyncCount={pendingSyncCount}
+            onTriggerSync={triggerManualSync}
             notifications={notifications}
             onMarkNotificationRead={handleMarkNotificationRead}
             onMarkAllNotificationsRead={handleMarkAllNotificationsRead}

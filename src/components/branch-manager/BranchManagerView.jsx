@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { shouldRouteDirectToAdmin } from '../../utils/jobsHelper';
+import { shouldRouteDirectToAdmin, isDualApprovalRequest } from '../../utils/jobsHelper';
 import EmployeePermissionsModule from '../employee-portal/EmployeePermissionsModule';
 import EmployeeLoansModule from '../employee-portal/EmployeeLoansModule';
 import EmployeeEvaluationsModule from '../employee-portal/EmployeeEvaluationsModule';
@@ -604,7 +604,7 @@ export default function BranchManagerView({
       const empObj = (state.employees || []).find((e) => String(e.id) === String(r.employeeId) || (r.employeeCode && String(e.code) === String(r.employeeCode)));
       if (isBranchManagerEmp(empObj)) return false;
       if (managerEmp?.id && String(r.employeeId) === String(managerEmp.id)) return false;
-      if (empObj && shouldRouteDirectToAdmin(empObj, r.branchId || currentBranch?.id, state)) return false;
+      if (empObj && shouldRouteDirectToAdmin(empObj, r.branchId || currentBranch?.id, state, r)) return false;
       if (r.submittedByBranchManager || r.creatorRole === 'branch' || r.createdRole === 'branch' || r.createdRole === 'branch_manager') return false;
 
       if (!cIdStr) return true;
@@ -1772,10 +1772,74 @@ export default function BranchManagerView({
             </div>
           </div>
 
+          {/* Branch Operations KPI Metrics Bar */}
+          {(() => {
+            const todayStrVal = getRealTodayStr();
+            const cIdStr = String(currentBranch?.id || '');
+            const totalBranchStaff = branchEmployees.length;
+            const activeStaffCount = branchEmployees.filter(emp => {
+              const s = state.activeShifts?.[emp.id];
+              return s && !s.isOnBreak && !s.isPaused && (String(s.branchId || emp.branchId) === cIdStr);
+            }).length;
+            const breakStaffCount = branchEmployees.filter(emp => {
+              const s = state.activeShifts?.[emp.id];
+              return s && (s.isOnBreak || s.isPaused) && (String(s.branchId || emp.branchId) === cIdStr);
+            }).length;
+            const pendingBranchReqsCount = (branchRequests || []).filter(r => !r.branchApproved && r.status !== 'rejected').length;
+
+            return (
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: isMobileScreen ? 'repeat(2, 1fr)' : 'repeat(auto-fit, minmax(180px, 1fr))',
+                gap: '12px'
+              }}>
+                <div className="fluent-card" style={{ padding: '14px 16px', borderTop: '3px solid #16a34a' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '11.5px', fontWeight: 700, color: 'var(--muted)' }}>حاضرون على رأس العمل</span>
+                    <span className="status-pulse-dot online" />
+                  </div>
+                  <div style={{ fontSize: '22px', fontWeight: 800, color: '#16a34a', marginTop: '6px' }}>
+                    {activeStaffCount} <span style={{ fontSize: '12px', color: 'var(--muted)', fontWeight: 500 }}>/ {totalBranchStaff}</span>
+                  </div>
+                </div>
+
+                <div className="fluent-card" style={{ padding: '14px 16px', borderTop: '3px solid #f59e0b' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '11.5px', fontWeight: 700, color: 'var(--muted)' }}>في فترة استراحة (بريك)</span>
+                    <span className="status-pulse-dot syncing" />
+                  </div>
+                  <div style={{ fontSize: '22px', fontWeight: 800, color: '#d97706', marginTop: '6px' }}>
+                    {breakStaffCount}
+                  </div>
+                </div>
+
+                <div className="fluent-card" style={{ padding: '14px 16px', borderTop: '3px solid #0284c7' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '11.5px', fontWeight: 700, color: 'var(--muted)' }}>طلبات معلقة للفرع</span>
+                    <span style={{ fontSize: '14px' }}>📋</span>
+                  </div>
+                  <div style={{ fontSize: '22px', fontWeight: 800, color: '#0284c7', marginTop: '6px' }}>
+                    {pendingBranchReqsCount}
+                  </div>
+                </div>
+
+                <div className="fluent-card" style={{ padding: '14px 16px', borderTop: '3px solid #0d9488' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '11.5px', fontWeight: 700, color: 'var(--muted)' }}>إجمالي موظفي الفرع</span>
+                    <span style={{ fontSize: '14px' }}>👥</span>
+                  </div>
+                  <div style={{ fontSize: '22px', fontWeight: 800, color: 'var(--text)', marginTop: '6px' }}>
+                    {totalBranchStaff}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Branch Employees Live Punch Status Grid */}
-          <div className="card settings-card" style={{ padding: isMobileScreen ? '14px' : '20px' }}>
-            <h3 style={{ margin: '0 0 14px', fontSize: isMobileScreen ? '15px' : '16px', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              👥 موظفو الفرع وتتبع البصمة الحية اليوم
+          <div className="fluent-card" style={{ padding: isMobileScreen ? '14px' : '20px' }}>
+            <h3 style={{ margin: '0 0 14px', fontSize: isMobileScreen ? '15px' : '16px', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              👥 رادار الحضور وتتبع البصمة الحية لموظفي الفرع اليوم
             </h3>
             
             {branchEmployees.length === 0 ? (
@@ -1802,75 +1866,79 @@ export default function BranchManagerView({
                   const isSwappedToday = daySched?.isSwapped;
 
                   let statusLabel = '🔴 لم يبصم بهذا الفرع / خارج الوردية';
-                  let statusBg = '#fef2f2';
-                  let statusColor = '#b91c1c';
+                  let statusBg = 'rgba(239, 68, 68, 0.08)';
+                  let statusColor = '#dc2626';
+                  let statusDotClass = 'offline';
 
                   if (activeInThisBranch) {
                     if (activeShift.isOnBreak || activeShift.isPaused) {
                       const breakTime = getActiveBreakStr ? getActiveBreakStr(activeShift) : '';
-                      statusLabel = `⏸️ في استراحة ${breakTime ? `(منذ ${breakTime})` : ''}`;
-                      statusBg = '#fef3c7';
+                      statusLabel = `⏸️ في استراحة ${breakTime ? `(${breakTime})` : ''}`;
+                      statusBg = 'rgba(245, 158, 11, 0.1)';
                       statusColor = '#d97706';
+                      statusDotClass = 'syncing';
                     } else {
                       const workTime = getActiveElapsedStr ? getActiveElapsedStr(activeShift) : '';
-                      statusLabel = `🟢 حاضر وعلى رأس العمل ${workTime ? `(${workTime})` : ''}`;
-                      statusBg = '#dcfce7';
-                      statusColor = '#15803d';
+                      statusLabel = `🟢 على رأس العمل ${workTime ? `(${workTime})` : ''}`;
+                      statusBg = 'rgba(34, 197, 94, 0.1)';
+                      statusColor = '#16a34a';
+                      statusDotClass = 'online';
                     }
                   } else if (activeInOtherBranch) {
                     const otherBranch = (state.branches || []).find((b) => String(b.id) === String(activeShift.branchId));
                     statusLabel = `🏢 في وردية بفرع آخر (${otherBranch ? otherBranch.name : 'فرع آخر'})`;
-                    statusBg = '#f1f5f9';
-                    statusColor = '#475569';
+                    statusBg = 'var(--surface-muted)';
+                    statusColor = 'var(--muted)';
                   } else if (todayShiftsInThisBranch.length > 0) {
                     const totalHrs = todayShiftsInThisBranch.reduce((acc, s) => acc + (s.hours || 0), 0);
                     statusLabel = `🟢 تم الحضور بهذا الفرع (${totalHrs.toFixed(2)} س)`;
-                    statusBg = '#e0f2fe';
-                    statusColor = '#0369a1';
+                    statusBg = 'rgba(14, 165, 233, 0.1)';
+                    statusColor = '#0284c7';
+                    statusDotClass = 'online';
                   } else if (onLeaveToday) {
                     statusLabel = '🏖️ في إجازة معتمدة';
-                    statusBg = '#f0fdf4';
+                    statusBg = 'rgba(34, 197, 94, 0.08)';
                     statusColor = '#16a34a';
                   } else if (isSwappedToday && isOffToday) {
                     statusLabel = `🔄 🛋️ راحة متبدلة مع ${daySched.swappedWithName || 'الزميل'}`;
-                    statusBg = '#fef3c7';
+                    statusBg = 'rgba(245, 158, 11, 0.1)';
                     statusColor = '#b45309';
                   } else if (isOffToday) {
                     statusLabel = '🛋️ راحة أسبوعية (OFF)';
-                    statusBg = '#f8fafc';
-                    statusColor = '#64748b';
+                    statusBg = 'var(--surface-muted)';
+                    statusColor = 'var(--muted)';
                   } else if (isSwappedToday) {
                     statusLabel = `🔄 وردية متبدلة لتغطية ${daySched.swappedWithName || 'الزميل'} (${daySched.start} - ${daySched.end})`;
-                    statusBg = '#fef3c7';
+                    statusBg = 'rgba(245, 158, 11, 0.1)';
                     statusColor = '#b45309';
                   }
 
                   return (
                     <div
                       key={emp.id}
+                      className="fluent-card"
                       style={{
-                        border: '1px solid var(--border)',
-                        borderRadius: '12px',
                         padding: isMobileScreen ? '12px' : '16px',
-                        background: 'var(--surface)',
-                        cursor: 'pointer',
-                        transition: 'transform 0.15s, box-shadow 0.15s'
+                        cursor: 'pointer'
                       }}
                       onClick={() => {
                         setSelectedPunchEmpId(emp.id);
                         setActiveTab('emp-punches');
                       }}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-                        <div style={{ width: '38px', height: '38px', borderRadius: '50%', background: '#e6f7f5', color: '#0d9488', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '15px' }}>
-                          {emp.name.charAt(0)}
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', overflow: 'hidden' }}>
+                          <div style={{ width: '38px', height: '38px', borderRadius: '50%', background: 'var(--primary-light)', color: 'var(--primary-dark)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '15px', flexShrink: 0 }}>
+                            {emp.name.charAt(0)}
+                          </div>
+                          <div style={{ overflow: 'hidden' }}>
+                            <h4 style={{ margin: 0, fontSize: '13.5px', fontWeight: '700', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--text)' }}>{emp.name}</h4>
+                            <span style={{ fontSize: '11px', color: 'var(--muted)' }}>{emp.jobTitle} (كود: {emp.code})</span>
+                          </div>
                         </div>
-                        <div style={{ overflow: 'hidden', flex: 1 }}>
-                          <h4 style={{ margin: 0, fontSize: '13.5px', fontWeight: '700', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{emp.name}</h4>
-                          <span style={{ fontSize: '11px', color: 'var(--muted)' }}>{emp.jobTitle} (كود: {emp.code})</span>
-                        </div>
+                        {statusDotClass && <span className={`status-pulse-dot ${statusDotClass}`} />}
                       </div>
-                      <div style={{ background: statusBg, color: statusColor, padding: '5px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: '700', textAlign: 'center' }}>
+                      <div style={{ background: statusBg, color: statusColor, padding: '6px 10px', borderRadius: '8px', fontSize: '11.5px', fontWeight: '700', textAlign: 'center' }}>
                         {statusLabel}
                       </div>
                     </div>
@@ -2084,7 +2152,7 @@ export default function BranchManagerView({
                         <span>👁️</span>
                         <span>معاينة</span>
                       </button>
-                      {(!r.branchApproved && !r.branchRejected && r.status !== 'rejected') && (
+                      {!(r.branchApproved || r.branchRejected || r.status === 'approved' || r.status === 'paid' || r.status === 'partial' || r.adminApproved || r.status === 'rejected' || r.status === 'cancelled') && (
                         <>
                           <button
                             type="button"
@@ -2150,7 +2218,7 @@ export default function BranchManagerView({
                             >
                               👁️ معاينة الطلب
                             </button>
-                            {(!r.branchApproved && !r.branchRejected && r.status !== 'rejected') && (
+                            {!(r.branchApproved || r.branchRejected || r.status === 'approved' || r.status === 'paid' || r.status === 'partial' || r.adminApproved || r.status === 'rejected' || r.status === 'cancelled') && (
                               <>
                                 <button
                                   type="button"
@@ -2220,7 +2288,8 @@ export default function BranchManagerView({
         const monthlyDed = parseFloat(previewModalReq.monthlyDeduction || previewModalReq.installmentAmount) || 0;
         const isInstallment = previewModalReq.loanType === 'installments' || previewModalReq.isInstallment || (monthlyDed > 0 && monthlyDed < totalAmount) || (parseInt(previewModalReq.installmentsCount, 10) > 1);
         const installmentsCount = previewModalReq.installmentsCount || previewModalReq.monthsCount || (monthlyDed > 0 ? Math.ceil(totalAmount / monthlyDed) : 1);
-        const isBranchNotReq = previewModalReq.targetApproval === 'admin_only' || previewModalReq.targetApproval === 'admin' || isLoan || previewModalReq.branchNotRequired || previewModalReq.isDirectToAdmin;
+        const isDual = isDualApprovalRequest(previewModalReq);
+        const isBranchNotReq = !isDual && (previewModalReq.targetApproval === 'admin_only' || previewModalReq.targetApproval === 'admin' || isLoan || previewModalReq.branchNotRequired || previewModalReq.isDirectToAdmin);
 
         return (
           <div className="modal-overlay" onClick={() => setPreviewModalReq(null)} style={{ zIndex: 1100 }}>
@@ -2295,6 +2364,8 @@ export default function BranchManagerView({
                         <span style={{ color: '#475569' }}>🔒 موجهة للإدارة العليا مباشرة</span>
                       ) : previewModalReq.branchApproved ? (
                         <span style={{ color: '#16a34a' }}>🟢 معتمد وموافق عليه من طرفك</span>
+                      ) : (previewModalReq.branchRejected || previewModalReq.status === 'rejected') ? (
+                        <span style={{ color: '#dc2626' }}>❌ تم رفضه من طرفك</span>
                       ) : (
                         <span style={{ color: '#d97706' }}>⏳ بانتظار قرارك واعتمادك</span>
                       )}
@@ -3083,34 +3154,61 @@ export default function BranchManagerView({
                   إغلاق النافذة
                 </button>
 
-                {(!previewModalReq.branchApproved && previewModalReq.status !== 'rejected') && (
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    <button
-                      type="button"
-                      className="btn btn-start"
-                      style={{ padding: '8px 20px', fontSize: '13.5px' }}
-                      onClick={async () => {
-                        const id = previewModalReq.id;
-                        setPreviewModalReq(null);
-                        await handleManagerApproveRequest(id);
-                      }}
-                    >
-                      ✓ موافقة واعتماد مدير الفرع
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      style={{ padding: '8px 18px', fontSize: '13.5px', color: 'var(--danger)', border: '1px solid var(--danger)' }}
-                      onClick={async () => {
-                        const id = previewModalReq.id;
-                        setPreviewModalReq(null);
-                        await handleManagerRejectRequest(id);
-                      }}
-                    >
-                      ✕ رفض الطلب
-                    </button>
-                  </div>
-                )}
+                {(() => {
+                  const isModalDecided = previewModalReq.branchApproved ||
+                    previewModalReq.branchRejected ||
+                    previewModalReq.status === 'approved' ||
+                    previewModalReq.status === 'paid' ||
+                    previewModalReq.status === 'partial' ||
+                    previewModalReq.adminApproved ||
+                    previewModalReq.status === 'rejected' ||
+                    previewModalReq.status === 'cancelled';
+
+                  if (isModalDecided) {
+                    return (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        {(previewModalReq.status === 'rejected' || previewModalReq.branchRejected) ? (
+                          <span className="badge badge-danger" style={{ fontSize: '13px', padding: '6px 14px' }}>
+                            ✕ هذا الطلب تم رفضه
+                          </span>
+                        ) : (
+                          <span className="badge badge-success" style={{ fontSize: '13px', padding: '6px 14px' }}>
+                            ✓ هذا الطلب معتمد وموافق عليه
+                          </span>
+                        )}
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        className="btn btn-start"
+                        style={{ padding: '8px 20px', fontSize: '13.5px' }}
+                        onClick={async () => {
+                          const id = previewModalReq.id;
+                          setPreviewModalReq(null);
+                          await handleManagerApproveRequest(id);
+                        }}
+                      >
+                        ✓ موافقة واعتماد مدير الفرع
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        style={{ padding: '8px 18px', fontSize: '13.5px', color: 'var(--danger)', border: '1px solid var(--danger)' }}
+                        onClick={async () => {
+                          const id = previewModalReq.id;
+                          setPreviewModalReq(null);
+                          await handleManagerRejectRequest(id);
+                        }}
+                      >
+                        ✕ رفض الطلب
+                      </button>
+                    </div>
+                  );
+                })()}
               </div>
 
             </div>

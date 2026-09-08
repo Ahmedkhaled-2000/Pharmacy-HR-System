@@ -226,6 +226,17 @@ export function DataProvider({ children, showToast = () => {} }) {
         autoExecuteOnBoth: true
       },
       {
+        id: 'rule_roster_edit',
+        requestType: 'roster_update',
+        name: 'طلبات تعديل الجدول الشهري والورديات والراحات',
+        typeLabel: 'طلبات تعديل الجدول الشهري والورديات والراحات',
+        reqBranch: true,
+        reqAdmin: true,
+        requiresBranchManager: true,
+        requiresSuperAdmin: true,
+        autoExecuteOnBoth: true
+      },
+      {
         id: 'rule_permission',
         requestType: 'permission',
         name: 'طلبات أذونات وتأخيرات الموظفين',
@@ -498,6 +509,38 @@ export function DataProvider({ children, showToast = () => {} }) {
     });
 
     return result;
+  };
+
+  // Manual Live Sync Trigger with Instant Feedback
+  const triggerManualSync = async () => {
+    setIsSyncing(true);
+    try {
+      const res = await syncNow((msg) => console.log('[ManualSync]', msg));
+      if (res?.success) {
+        if (res.mergedState) {
+          const normalized = normalizeState(res.mergedState);
+          setState(normalized);
+        }
+        setLastSyncTime(nowTimeStr());
+        setPendingSyncCount(0);
+        setIsOffline(false);
+        showToast('✅ تمت المزامنة اللحظية مع السحابة بنجاح!');
+        return true;
+      } else {
+        if (res?.reason === 'offline') {
+          setIsOffline(true);
+          showToast('📴 وضع عدم الاتصال - المنظومة تعمل محلياً بكفاءة 100%');
+        } else {
+          showToast('⚠️ لم تكتمل المزامنة، تم الحفظ والتأمين محلياً');
+        }
+        return false;
+      }
+    } catch (e) {
+      showToast('⚠️ تعذر إتمام المزامنة: ' + (e?.message || 'خطأ اتصال'));
+      return false;
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   // Helper Methods
@@ -925,6 +968,7 @@ export function DataProvider({ children, showToast = () => {} }) {
     state,
     setState,
     saveState,
+    triggerManualSync,
     isLoading,
     setIsLoading,
     isSyncing,

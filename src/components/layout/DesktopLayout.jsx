@@ -407,6 +407,11 @@ export default function DesktopLayout({
   currentBranch,
   userProfile,
   orgSettings = {},
+  isSyncing = false,
+  lastSyncTime = 'الآن',
+  isOffline = false,
+  pendingSyncCount = 0,
+  onTriggerSync,
   activeTab,
   setActiveTab,
   activeSubTab = 'cards',
@@ -460,6 +465,26 @@ export default function DesktopLayout({
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  const isDesktop = typeof window !== 'undefined' && Boolean(window.desktopAPI?.isDesktop);
+  const [isWindowMaximized, setIsWindowMaximized] = useState(false);
+
+  useEffect(() => {
+    if (isDesktop && window.desktopAPI?.isMaximized) {
+      window.desktopAPI.isMaximized().then(setIsWindowMaximized).catch(() => {});
+    }
+  }, [isDesktop]);
+
+  const handleToggleMaximize = () => {
+    if (isDesktop && window.desktopAPI?.maximizeWindow) {
+      window.desktopAPI.maximizeWindow();
+      setTimeout(() => {
+        if (window.desktopAPI?.isMaximized) {
+          window.desktopAPI.isMaximized().then(setIsWindowMaximized).catch(() => {});
+        }
+      }, 120);
+    }
+  };
 
   const unreadNotificationsCount = (notifications || []).filter(n => !n.read).length + (bylawsCount || 0);
 
@@ -1438,19 +1463,17 @@ return (
       </div>
     </header>
   ) : (
-    <header className="desktop-titlebar" style={{
+    <header className="desktop-titlebar fluent-acrylic-header app-draggable-region" style={{
       height: '50px',
-      background: 'var(--surface)',
-      borderBottom: '1px solid var(--border)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
       padding: '0 18px',
       userSelect: 'none',
       zIndex: 100,
-      boxShadow: '0 1px 4px rgba(0,0,0,0.03)'
+      boxShadow: '0 2px 8px rgba(0,0,0,0.03)'
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }} className="app-no-drag">
         {orgSettings?.logoUrl ? (
           <img
             src={orgSettings.logoUrl}
@@ -1557,7 +1580,62 @@ return (
         </div>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }} className="app-no-drag">
+        {/* Live Sync Status & Manual Sync Button */}
+        <div
+          className={`desktop-sync-pill ${isOffline ? 'offline' : isSyncing ? 'syncing' : 'synced'}`}
+          title={isOffline ? 'وضع عدم الاتصال: المنظومة تعمل محلياً ومسبار المزامنة يتأهب لعودة الإنترنت' : 'حالة المزامنة المباشرة مع السحابة'}
+        >
+          <span className={`status-pulse-dot ${isOffline ? 'offline' : isSyncing ? 'syncing' : 'online'}`} />
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', lineHeight: 1.2 }}>
+            {isOffline ? (
+              <span style={{ fontWeight: 800, fontSize: '11px' }}>
+                📴 أوف لاين
+                {pendingSyncCount > 0 && (
+                  <span style={{ marginRight: '4px', background: '#ef4444', color: '#fff', borderRadius: '10px', padding: '1px 6px', fontSize: '10px' }}>
+                    {pendingSyncCount} معلق
+                  </span>
+                )}
+              </span>
+            ) : isSyncing ? (
+              <span style={{ fontWeight: 800, fontSize: '11px' }}>
+                ☁️ جاري المزامنة...
+              </span>
+            ) : (
+              <span style={{ fontWeight: 700, fontSize: '11px' }}>
+                🟢 متزامن {lastSyncTime ? `(${lastSyncTime})` : ''}
+              </span>
+            )}
+          </div>
+
+          {onTriggerSync && (
+            <button
+              type="button"
+              onClick={onTriggerSync}
+              disabled={isSyncing}
+              title="مزامنة لحظية فورية الآن"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '3px',
+                padding: '2px 7px',
+                borderRadius: '6px',
+                border: 'none',
+                background: 'rgba(0,0,0,0.06)',
+                color: 'inherit',
+                fontSize: '10.5px',
+                fontWeight: 800,
+                cursor: isSyncing ? 'wait' : 'pointer',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <span style={{ fontSize: '11px' }}>🔄</span>
+              <span>مزامنة</span>
+            </button>
+          )}
+        </div>
+
         <div style={{
           display: 'flex',
           alignItems: 'center',
