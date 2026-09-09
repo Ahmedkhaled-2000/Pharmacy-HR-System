@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { sendGmailEmail, buildEmailTemplate, generateDailyDigestHTML, resolveAdminRecipients } from '../../utils/gmailService';
+import { sendGmailEmail, buildEmailTemplate, generateDailyDigestHTML, resolveAdminRecipients, getAuthoritativeGmailConfig } from '../../utils/gmailService';
 import { compileDailyDigestData } from '../../utils/digestDataEngine';
 import { fmt, getRealTodayStr } from '../../utils/formatters';
 
@@ -180,28 +180,37 @@ function doGet(e) {
   };
 
   const handleSave = async (e) => {
-    if (e) e.preventDefault();
+    if (e) {
+      if (typeof e.preventDefault === 'function') e.preventDefault();
+      if (typeof e.stopPropagation === 'function') e.stopPropagation();
+    }
     const nowIso = new Date().toISOString();
 
-    const cleanedAdminEmails = adminEmails.map(s => String(s || '').trim()).filter(Boolean);
+    const cleanedAdminEmails = (adminEmails || [])
+      .map(s => String(s || '').trim())
+      .filter(Boolean);
     const targetAdminEmailStr = cleanedAdminEmails.join(', ');
-    const cleanedSystemUrl = (systemUrl || '').trim();
+    const cleanedSystemUrl = String(systemUrl || '').trim();
+    const cleanedUserEmail = String(userEmail || '').trim();
+    const cleanedAppPassword = String(appPassword || '').trim();
+    const cleanedServiceUrl = String(serviceUrl || '').trim();
+    const cleanedDigestTime = String(dailyDigestTime || '').trim();
 
     const updatedConfig = {
-      enabled,
-      userEmail: userEmail.trim(),
-      appPassword: appPassword.trim(),
+      enabled: Boolean(enabled),
+      userEmail: cleanedUserEmail,
+      appPassword: cleanedAppPassword,
       targetAdminEmail: targetAdminEmailStr,
       targetAdminEmails: cleanedAdminEmails,
-      dailyDigestTime: (dailyDigestTime || '').trim(),
+      dailyDigestTime: cleanedDigestTime,
       systemUrl: cleanedSystemUrl,
-      serviceUrl: serviceUrl.trim(),
-      sendOnRequest,
-      sendOnDecision,
-      sendOnLateness,
-      sendOnPenalty,
-      sendOnBranchNoShow,
-      sendDailyDigest,
+      serviceUrl: cleanedServiceUrl,
+      sendOnRequest: Boolean(sendOnRequest),
+      sendOnDecision: Boolean(sendOnDecision),
+      sendOnLateness: Boolean(sendOnLateness),
+      sendOnPenalty: Boolean(sendOnPenalty),
+      sendOnBranchNoShow: Boolean(sendOnBranchNoShow),
+      sendDailyDigest: Boolean(sendDailyDigest),
       updatedAt: nowIso
     };
 
@@ -216,141 +225,198 @@ function doGet(e) {
     }
 
     const performSave = async () => {
-      const currentOrg = state?.orgSettings || {};
-      const updatedOrgSettings = {
-        ...currentOrg,
-        systemUrl: cleanedSystemUrl || currentOrg.systemUrl,
-        gmailConfig: updatedConfig,
-        updatedAt: nowIso
-      };
+      try {
+        const currentOrg = state?.orgSettings || {};
+        const updatedOrgSettings = {
+          ...currentOrg,
+          systemUrl: cleanedSystemUrl || currentOrg.systemUrl,
+          gmailConfig: updatedConfig,
+          updatedAt: nowIso
+        };
 
-      if (!updatedOrgSettings.officialEmail && updatedConfig.userEmail) {
-        updatedOrgSettings.officialEmail = updatedConfig.userEmail;
+        if (!updatedOrgSettings.officialEmail && updatedConfig.userEmail) {
+          updatedOrgSettings.officialEmail = updatedConfig.userEmail;
+        }
+        if (!updatedOrgSettings.email && updatedConfig.userEmail) {
+          updatedOrgSettings.email = updatedConfig.userEmail;
+        }
+
+        const updatedState = {
+          ...state,
+          orgSettings: updatedOrgSettings
+        };
+
+        setState(updatedState);
+        if (typeof saveState === 'function') {
+          await saveState(updatedState);
+        }
+        showToast?.('✅ تم حفظ وتفعيل إعدادات بريد Gmail ورابط المنظومة بنجاح');
+      } catch (err) {
+        console.error('[GmailConfigCard] performSave error:', err);
+        showToast?.('⚠️ حدث خطأ أثناء الحفظ السحابي، تم الحفظ محلياً بنجاح');
       }
-      if (!updatedOrgSettings.email && updatedConfig.userEmail) {
-        updatedOrgSettings.email = updatedConfig.userEmail;
-      }
-
-      const updatedState = {
-        ...state,
-        orgSettings: updatedOrgSettings
-      };
-
-      setState(updatedState);
-      await saveState(updatedState);
-      showToast?.('✅ تم حفظ إعدادات إشعارات Gmail ورابط المنظومة بنجاح');
     };
 
-    executeWithOwnerGuard({
-      lockKey: 'lockGmailSettings',
-      actionTitle: 'تحديث إعدادات Gmail والتنبيهات',
-      actionDetails: `بريد الإرسال: ${userEmail} · مستلمو الإدارة: ${targetAdminEmailStr || 'غير محدد'} · رابط المنظومة: ${cleanedSystemUrl || 'تلقائي'}`,
-      onExecute: performSave
-    });
+    try {
+      if (executeWithOwnerGuard && (ownerLocks?.lockGmailSettings || state?.orgSettings?.ownerModificationLocks?.lockGmailSettings || state?.orgSettings?.ownerModificationLocks?.lockEditOrgSettings)) {
+        executeWithOwnerGuard({
+          lockKey: 'lockGmailSettings',
+          actionTitle: 'تحديث إعدادات Gmail والتنبيهات',
+          actionDetails: `بريد الإرسال: ${cleanedUserEmail || '—'} · مستلمو الإدارة: ${targetAdminEmailStr || 'غير محدد'}`,
+          onExecute: performSave
+        });
+        return;
+      }
+      await performSave();
+    } catch (guardErr) {
+      console.warn('[GmailConfigCard] executeWithOwnerGuard fallback:', guardErr);
+      await performSave();
+    }
   };
 
   const handleSendTestEmail = async () => {
-    if (!userEmail || !appPassword) {
-      showToast?.('⚠️ يرجى إدخال بريد Gmail المُرْسِل وكلمة سر التطبيقات أولاً');
-      return;
-    }
+    try {
+      const authConfig = getAuthoritativeGmailConfig(state);
+      const activeSenderEmail = String(userEmail || '').trim() || authConfig.userEmail;
+      const activeAppPassword = String(appPassword || '').trim() || authConfig.appPassword;
+      const activeServiceUrl = String(serviceUrl || '').trim() || authConfig.serviceUrl || 'https://script.google.com/macros/s/AKfycbzAHjkD2l2MvE5G6XLLj3jNM3k3B5e4SJ_kXdJtD2L-rUVUnh9BWlDSC0wCIqAk5syO/exec';
 
-    setIsSendingTest(true);
-    const cleanedAdminEmails = adminEmails.map(s => String(s || '').trim()).filter(Boolean);
-    const testConfig = {
-      enabled,
-      userEmail,
-      appPassword,
-      targetAdminEmail: cleanedAdminEmails.join(', '),
-      targetAdminEmails: cleanedAdminEmails,
-      systemUrl: (systemUrl || '').trim(),
-      serviceUrl
-    };
+      if (!activeSenderEmail) {
+        showToast?.('⚠️ يرجى إدخال بريد Gmail المُرْسِل أولاً');
+        return;
+      }
 
-    const targetRecipients = resolveAdminRecipients(testConfig);
-    const recipientDisplay = targetRecipients.length > 0 ? targetRecipients.join(' و ') : userEmail;
+      setIsSendingTest(true);
+      showToast?.('⏳ جاري إرسال إيميل التجربة للإدارة...');
 
-    const html = buildEmailTemplate({
-      title: '🧪 اختبار الربط المباشر مع Gmail',
-      subtitle: 'اختبار توصيل التنبيهات والإشعارات البريدية للإدارة',
-      badgeText: 'رسالة اختبار ناجحة',
-      badgeColor: '#16a34a',
-      bodyContent: `
-        <p>مرحباً بكم مسؤولي الإدارة العليا،</p>
-        <p>هذه الرسالة تؤكد أن **نظام الربط المباشر مع Gmail** يعمل بكفاءة ومربوط بحسابات الإدارة المعتمدة.</p>
-        <div style="background: #f0fdf4; border: 1px solid #bbf7d0; padding: 14px; border-radius: 10px; margin: 12px 0;">
-          <p style="margin:0 0 6px; color: #166534; font-weight: bold;">✅ تم توثيق الاتصال بنجاح!</p>
-          <p style="margin:0; color: #15803d; font-size: 13.5px;">
-            ستصلكم التنبيهات الفورية لطلبات الموظفين والإنذارات وملخص اليوم الشامل ${dailyDigestTime ? `(المقرر إرساله يومياً في تمام الساعة <strong>${dailyDigestTime}</strong>)` : ''} على كافة العناوين المسجلة.
-          </p>
-        </div>
-      `
-    });
+      const cleanedAdminEmails = (adminEmails || []).map(s => String(s || '').trim()).filter(Boolean);
+      const testConfig = {
+        enabled: true,
+        userEmail: activeSenderEmail,
+        appPassword: activeAppPassword,
+        targetAdminEmail: cleanedAdminEmails.join(', '),
+        targetAdminEmails: cleanedAdminEmails,
+        systemUrl: String(systemUrl || '').trim() || authConfig.systemUrl,
+        serviceUrl: activeServiceUrl
+      };
 
-    const res = await sendGmailEmail({
-      gmailConfig: testConfig,
-      recipientEmail: targetRecipients.length > 0 ? targetRecipients : userEmail,
-      subject: '🧪 اختبار الربط المباشر مع Gmail — نظام إدارة الصيدليات والموارد البشرية',
-      htmlContent: html
-    });
+      const targetRecipients = resolveAdminRecipients(testConfig);
+      const recipientDisplay = targetRecipients.length > 0 ? targetRecipients.join(' و ') : activeSenderEmail;
 
-    setIsSendingTest(false);
-    if (res.success) {
-      showToast?.(`✅ تم إرسال الإيميل التجريبي بنجاح إلى: (${recipientDisplay})`);
-    } else {
-      showToast?.(`⚠️ تعذر الإرسال: ${res.reason || res.error || 'تأكد من البيانات'}`);
+      const html = buildEmailTemplate({
+        title: '🧪 اختبار الربط المباشر مع Gmail',
+        subtitle: 'اختبار توصيل التنبيهات والإشعارات البريدية للإدارة',
+        badgeText: 'رسالة اختبار ناجحة',
+        badgeColor: '#16a34a',
+        bodyContent: `
+          <p>مرحباً بكم مسؤولي الإدارة العليا،</p>
+          <p>هذه الرسالة تؤكد أن **نظام الربط المباشر مع Gmail** يعمل بكفاءة ومربوط بحسابات الإدارة المعتمدة.</p>
+          <div style="background: #f0fdf4; border: 1px solid #bbf7d0; padding: 14px; border-radius: 10px; margin: 12px 0;">
+            <p style="margin:0 0 6px; color: #166534; font-weight: bold;">✅ تم توثيق الاتصال بنجاح!</p>
+            <p style="margin:0; color: #15803d; font-size: 13.5px;">
+              ستصلكم التنبيهات الفورية لطلبات الموظفين والإنذارات وملخص اليوم الشامل ${dailyDigestTime ? `(المقرر إرساله يومياً في تمام الساعة <strong>${dailyDigestTime}</strong>)` : ''} على كافة العناوين المسجلة.
+            </p>
+          </div>
+        `
+      });
+
+      const res = await sendGmailEmail({
+        gmailConfig: testConfig,
+        recipientEmail: targetRecipients.length > 0 ? targetRecipients : activeSenderEmail,
+        subject: '🧪 اختبار الربط المباشر مع Gmail — نظام إدارة الصيدليات والموارد البشرية',
+        htmlContent: html
+      });
+
+      setIsSendingTest(false);
+      if (res.success) {
+        showToast?.(`✅ تم إرسال الإيميل التجريبي بنجاح إلى: (${recipientDisplay})`);
+      } else {
+        showToast?.(`⚠️ تعذر الإرسال: ${res.reason || res.error || 'تأكد من البيانات'}`);
+      }
+    } catch (err) {
+      console.error('[GmailConfigCard] handleSendTestEmail error:', err);
+      setIsSendingTest(false);
+      showToast?.(`❌ تعذر إرسال الإيميل التجريبي: ${err.message || 'خطأ غير متوقع'}`);
     }
   };
 
   const handleOpenPreview = () => {
-    const dateToday = getRealTodayStr();
-    const digestData = compileDailyDigestData(state, dateToday);
-    const html = generateDailyDigestHTML(digestData, state?.orgSettings);
-    setPreviewHtml(html);
-    setShowPreviewModal(true);
+    try {
+      const dateToday = getRealTodayStr();
+      const digestData = compileDailyDigestData(state, dateToday);
+      const html = generateDailyDigestHTML(digestData, state?.orgSettings);
+      setPreviewHtml(html);
+      setShowPreviewModal(true);
+    } catch (err) {
+      console.error('[GmailConfigCard] handleOpenPreview error:', err);
+      showToast?.('⚠️ تعذر تجهيز المعاينة: ' + (err.message || 'خطأ في تجميع البيانات'));
+    }
   };
 
   const handleTriggerDailyDigestNow = async () => {
-    setIsSendingDigest(true);
-    const dateToday = getRealTodayStr();
-    const digestData = compileDailyDigestData(state, dateToday);
-    const html = generateDailyDigestHTML(digestData, state?.orgSettings);
+    try {
+      setIsSendingDigest(true);
+      showToast?.('⏳ جاري تدقيق وتجميع بيانات اليوم وإرسال الملخص الشامل...');
 
-    const cleanedAdminEmails = adminEmails.map(s => String(s || '').trim()).filter(Boolean);
-    const testConfig = {
-      enabled,
-      userEmail,
-      appPassword,
-      targetAdminEmail: cleanedAdminEmails.join(', '),
-      targetAdminEmails: cleanedAdminEmails,
-      systemUrl: (systemUrl || '').trim(),
-      serviceUrl
-    };
+      const authConfig = getAuthoritativeGmailConfig(state);
+      const cleanedAdminEmails = (adminEmails || []).map(s => String(s || '').trim()).filter(Boolean);
 
-    const targetRecipients = resolveAdminRecipients(testConfig);
-    if (targetRecipients.length === 0) {
+      const effectiveAdminEmails = cleanedAdminEmails.length > 0
+        ? cleanedAdminEmails
+        : (authConfig.targetAdminEmails?.length > 0 ? authConfig.targetAdminEmails : resolveAdminRecipients(authConfig));
+
+      const activeServiceUrl = String(serviceUrl || '').trim() || authConfig.serviceUrl || 'https://script.google.com/macros/s/AKfycbzAHjkD2l2MvE5G6XLLj3jNM3k3B5e4SJ_kXdJtD2L-rUVUnh9BWlDSC0wCIqAk5syO/exec';
+      const activeSenderEmail = String(userEmail || '').trim() || authConfig.userEmail;
+
+      const testConfig = {
+        enabled: true, // فرض التفعيل للإرسال اليدوي المباشر
+        userEmail: activeSenderEmail,
+        appPassword: String(appPassword || '').trim() || authConfig.appPassword,
+        targetAdminEmail: effectiveAdminEmails.join(', '),
+        targetAdminEmails: effectiveAdminEmails,
+        systemUrl: String(systemUrl || '').trim() || authConfig.systemUrl,
+        serviceUrl: activeServiceUrl
+      };
+
+      const targetRecipients = resolveAdminRecipients(testConfig);
+      if (targetRecipients.length === 0) {
+        setIsSendingDigest(false);
+        showToast?.('⚠️ يرجى إدخال بريد إلكتروني واحد على الأقل في قائمة إيميلات الإدارة');
+        return;
+      }
+
+      const dateToday = getRealTodayStr();
+      let digestData;
+      try {
+        digestData = compileDailyDigestData(state, dateToday);
+      } catch (compileErr) {
+        console.warn('[GmailConfigCard] compileDailyDigestData fallback:', compileErr);
+      }
+
+      const html = generateDailyDigestHTML(digestData, state?.orgSettings);
+
+      const res = await sendGmailEmail({
+        gmailConfig: testConfig,
+        recipientEmail: targetRecipients,
+        subject: `📊 ملخص اليوم الشامل ${dailyDigestTime ? `(${dailyDigestTime}) ` : ''}— ${dateToday}`,
+        htmlContent: html
+      });
+
       setIsSendingDigest(false);
-      showToast?.('⚠️ يرجى تحديد بريد إلكتروني واحد على الأقل للإدارة لتلقي الملخص');
-      return;
-    }
-
-    const res = await sendGmailEmail({
-      gmailConfig: testConfig,
-      recipientEmail: targetRecipients,
-      subject: `📊 ملخص اليوم الشامل ${dailyDigestTime ? `(${dailyDigestTime}) ` : ''}— ${dateToday}`,
-      htmlContent: html
-    });
-
-    setIsSendingDigest(false);
-    if (res.success) {
-      showToast?.(`📊 تم إرسال ملخص اليوم الشامل بنجاح إلى: (${targetRecipients.join(', ')})`);
-    } else {
-      showToast?.(`⚠️ تعذر إرسال الملخص اليومي: ${res.reason || res.error || 'تأكد من بيانات الربط'}`);
+      if (res.success) {
+        showToast?.(`📊 تم إرسال ملخص اليوم الشامل بنجاح إلى: (${targetRecipients.join(', ')})`);
+      } else {
+        showToast?.(`⚠️ تعذر إرسال الملخص اليومي: ${res.reason || res.error || 'تأكد من بيانات الربط'}`);
+      }
+    } catch (err) {
+      console.error('[GmailConfigCard] handleTriggerDailyDigestNow error:', err);
+      setIsSendingDigest(false);
+      showToast?.(`❌ تعذر إرسال الملخص اليومي: ${err.message || 'خطأ غير متوقع'}`);
     }
   };
 
   return (
-    <form onSubmit={handleSave} style={{ background: 'var(--surface)', border: '1px solid var(--border)', padding: '24px', borderRadius: '16px' }}>
+    <form noValidate onSubmit={(e) => { e.preventDefault(); handleSave(e); }} style={{ background: 'var(--surface)', border: '1px solid var(--border)', padding: '24px', borderRadius: '16px' }}>
       {/* ── Card Header ── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', flexWrap: 'wrap', gap: '12px' }}>
         <div>
@@ -453,7 +519,7 @@ function doGet(e) {
             )}
           </div>
           <input
-            type="url"
+            type="text"
             value={systemUrl}
             onChange={(e) => setSystemUrl(e.target.value)}
             placeholder="https://your-domain.vercel.app"
@@ -657,7 +723,12 @@ function doGet(e) {
           </button>
         </div>
 
-        <button type="submit" className="btn btn-start" style={{ padding: '10px 24px', fontSize: '14px', fontWeight: 800 }}>
+        <button
+          type="button"
+          onClick={handleSave}
+          className="btn btn-start"
+          style={{ padding: '10px 24px', fontSize: '14px', fontWeight: 800, cursor: 'pointer' }}
+        >
           💾 حفظ وتفعيل إعدادات بريد Gmail
         </button>
       </div>

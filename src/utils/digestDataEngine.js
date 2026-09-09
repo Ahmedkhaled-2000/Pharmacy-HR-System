@@ -56,7 +56,17 @@ export function compileDailyDigestData(state, targetDate = getRealTodayStr()) {
 
   const employees = (state.employees || []).filter((e) => e && typeof e === 'object' && (e.id || e.code) && !e.isTerminated && e.status !== 'تم الاستقالة');
   const branches = (state.branches || []).filter((b) => b && typeof b === 'object' && b.id);
-  const activeShiftsMap = state.activeShifts || {};
+  const activeShiftsRaw = state.activeShifts || {};
+  const activeShiftsMap = {};
+  if (Array.isArray(activeShiftsRaw)) {
+    activeShiftsRaw.forEach((s) => {
+      if (s && (s.employeeId || s.id)) {
+        activeShiftsMap[String(s.employeeId || s.id)] = s;
+      }
+    });
+  } else if (typeof activeShiftsRaw === 'object' && activeShiftsRaw !== null) {
+    Object.assign(activeShiftsMap, activeShiftsRaw);
+  }
 
   // 1. الشفتات المسجلة اليوم (تطابق التاريخ أو الطابع الزمني)
   const allShifts = state.shifts || [];

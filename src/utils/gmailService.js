@@ -198,6 +198,7 @@ export async function sendGmailEmail({ gmailConfig, recipientEmail, subject, htm
       try {
         await fetch(effectiveConfig.serviceUrl, {
           method: 'POST',
+          mode: 'no-cors',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify({
             sender: effectiveConfig.userEmail,

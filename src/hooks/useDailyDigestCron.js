@@ -92,7 +92,11 @@ export function useDailyDigestCron() {
                 return empBelongsToBranch(emp, branch.id);
               });
 
-              const branchActiveShifts = (state.activeShifts || []).filter((s) => {
+              const activeList = Array.isArray(state.activeShifts)
+                ? state.activeShifts
+                : Object.values(state.activeShifts || {});
+              const branchActiveShifts = activeList.filter((s) => {
+                if (!s) return false;
                 if (s.branchId && String(s.branchId) === String(branch.id)) return true;
                 const emp = (state.employees || []).find((e) => String(e.id) === String(s.employeeId));
                 return empBelongsToBranch(emp, branch.id);
