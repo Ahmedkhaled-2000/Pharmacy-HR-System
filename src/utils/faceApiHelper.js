@@ -281,8 +281,8 @@ export const getFaceEmbedding = async (videoElement, options = {}) => {
 
   const landmarks478 = results.faceLandmarks[0];
 
-  // 2. فحص مستوى الإضاءة
-  let lightingInfo = { isLowLight: false, isVeryDark: false, luminance: 100 };
+  // 2. فحص مستوى الإضاءة الشامل
+  let lightingInfo = { isLowLight: false, isVeryDark: false, isUneven: false, luminance: 100 };
   try {
     const checkCanvas = document.createElement('canvas');
     checkCanvas.width = 64;
@@ -302,60 +302,82 @@ export const getFaceEmbedding = async (videoElement, options = {}) => {
 
   alignAndCropFace(videoElement, fivePoints, alignCanvas);
 
-  // 4. تحسين الإضاءة والظلال في حال كانت البيئة معتمة
-  if (lightingInfo.isLowLight) {
-    enhanceLowLightCanvas(alignCanvas);
-    const ctx = alignCanvas.getContext('2d', { willReadFrequently: true });
-    const imgData = ctx.getImageData(0, 0, 112, 112);
-    applyFastCLAHE(imgData);
-    ctx.putImageData(imgData, 0, 0);
-  }
+  // فحص مستوى إضاءة منطقة الوجه المباشرة (Face ROI Luminance)
+  const faceLighting = evaluateLighting(alignCanvas);
+  const isChallengingLight = lightingInfo.isLowLight || faceLighting.isLowLight || faceLighting.isUneven || faceLighting.isVeryDark;
 
-  // 5. تجهيز التنسور (Input Tensor) بنمط NCHW [1, 3, 112, 112] وتطبيع القيم [-1, 1]
-  const ctx = alignCanvas.getContext('2d', { willReadFrequently: true });
-  const imgData = ctx.getImageData(0, 0, 112, 112);
-  const data = imgData.data;
+  // دالة مساعدة لتشغيل استخراج المتجه من Canvas بدقة
+  const extractEmbeddingFromCanvas = async (targetCanvas) => {
+    const tCtx = targetCanvas.getContext('2d', { willReadFrequently: true });
+    const imgData = tCtx.getImageData(0, 0, 112, 112);
+    const data = imgData.data;
 
-  const floatArray = new Float32Array(1 * 3 * 112 * 112);
-  const planeSize = 112 * 112;
+    const floatArray = new Float32Array(1 * 3 * 112 * 112);
+    const planeSize = 112 * 112;
 
-  // InsightFace معيار (BGR or RGB normalization): (v - 127.5) / 127.5
-  for (let i = 0; i < planeSize; i++) {
-    const r = data[i * 4];
-    const g = data[i * 4 + 1];
-    const b = data[i * 4 + 2];
+    for (let i = 0; i < planeSize; i++) {
+      const r = data[i * 4];
+      const g = data[i * 4 + 1];
+      const b = data[i * 4 + 2];
 
-    // Standard BGR normalization
-    floatArray[i] = (b - 127.5) / 127.5;                  // Channel 0 (B)
-    floatArray[planeSize + i] = (g - 127.5) / 127.5;      // Channel 1 (G)
-    floatArray[2 * planeSize + i] = (r - 127.5) / 127.5;  // Channel 2 (R)
-  }
+      floatArray[i] = (b - 127.5) / 127.5;                  // B
+      floatArray[planeSize + i] = (g - 127.5) / 127.5;      // G
+      floatArray[2 * planeSize + i] = (r - 127.5) / 127.5;  // R
+    }
 
-  const inputTensor = new ort.Tensor('float32', floatArray, [1, 3, 112, 112]);
-  const feeds = {};
-  feeds[onnxSession.inputNames[0]] = inputTensor;
+    const inputTensor = new ort.Tensor('float32', floatArray, [1, 3, 112, 112]);
+    const feeds = {};
+    feeds[onnxSession.inputNames[0]] = inputTensor;
 
-  // 6. استخراج البصمة عبر الشبكة العصبية
-  const runResults = await onnxSession.run(feeds);
-  const outputData = runResults[onnxSession.outputNames[0]].data;
+    const runResults = await onnxSession.run(feeds);
+    const outputData = runResults[onnxSession.outputNames[0]].data;
 
-  // 7. تطبيع المتجه L2-Norm لضمان دقة مسافة جيب التمام
-  let sumSq = 0;
-  for (let i = 0; i < outputData.length; i++) {
-    sumSq += outputData[i] * outputData[i];
-  }
-  const norm = Math.sqrt(sumSq) || 1e-6;
+    let sumSq = 0;
+    for (let i = 0; i < outputData.length; i++) {
+      sumSq += outputData[i] * outputData[i];
+    }
+    const norm = Math.sqrt(sumSq) || 1e-6;
 
-  const normalizedDescriptor = new Array(outputData.length);
-  for (let i = 0; i < outputData.length; i++) {
-    normalizedDescriptor[i] = Number((outputData[i] / norm).toFixed(6));
+    const desc = new Array(outputData.length);
+    for (let i = 0; i < outputData.length; i++) {
+      desc[i] = Number((outputData[i] / norm).toFixed(6));
+    }
+    return desc;
+  };
+
+  // 4. استخراج البصمة الأساسية من الوجه المحاذى
+  const primaryDescriptor = await extractEmbeddingFromCanvas(alignCanvas);
+  const collectedDescriptors = [primaryDescriptor];
+
+  // 5. في ظروف الإضاءة الخافتة أو المعقدة: توليد معالجة مزدوجة محسنة (Dual-Pass CLAHE)
+  if (isChallengingLight) {
+    try {
+      const enhancedCanvas = document.createElement('canvas');
+      enhancedCanvas.width = 112;
+      enhancedCanvas.height = 112;
+      const eCtx = enhancedCanvas.getContext('2d', { willReadFrequently: true });
+      eCtx.drawImage(alignCanvas, 0, 0);
+
+      enhanceLowLightCanvas(enhancedCanvas);
+      const eImgData = eCtx.getImageData(0, 0, 112, 112);
+      applyFastCLAHE(eImgData);
+      eCtx.putImageData(eImgData, 0, 0);
+
+      const enhancedDescriptor = await extractEmbeddingFromCanvas(enhancedCanvas);
+      if (enhancedDescriptor && enhancedDescriptor.length > 0) {
+        collectedDescriptors.push(enhancedDescriptor);
+      }
+    } catch (enhErr) {
+      console.warn('[FaceEngine] Dual-pass low-light enhancement note:', enhErr);
+    }
   }
 
   return {
-    descriptor: normalizedDescriptor,
-    luminance: lightingInfo.luminance,
-    isLowLight: lightingInfo.isLowLight,
-    isVeryDark: lightingInfo.isVeryDark
+    descriptor: primaryDescriptor,
+    descriptors: collectedDescriptors,
+    luminance: faceLighting.luminance,
+    isLowLight: isChallengingLight,
+    isVeryDark: faceLighting.isVeryDark || lightingInfo.isVeryDark
   };
 };
 
@@ -451,20 +473,27 @@ export const compareFaces = (savedDescriptor, liveDescriptor, threshold = 70) =>
   const isMulti = Array.isArray(savedDescriptor) && Array.isArray(savedDescriptor[0]);
   const descriptorsList = isMulti ? savedDescriptor : [savedDescriptor];
 
+  // دعم البصمات الحية المتعددة (مثل المعالجة المزدوجة الأصلية والمحسنة)
+  const isLiveMulti = Array.isArray(liveDescriptor) && Array.isArray(liveDescriptor[0]);
+  const liveList = isLiveMulti ? liveDescriptor : [liveDescriptor];
+
   let bestSimilarity = -1;
   let hasDimensionMismatch = false;
 
-  for (const desc of descriptorsList) {
-    if (!desc || desc.length === 0) continue;
+  for (const sDesc of descriptorsList) {
+    if (!sDesc || sDesc.length === 0) continue;
+    for (const lDesc of liveList) {
+      if (!lDesc || lDesc.length === 0) continue;
 
-    if (desc.length !== liveDescriptor.length) {
-      hasDimensionMismatch = true;
-      continue;
-    }
+      if (sDesc.length !== lDesc.length) {
+        hasDimensionMismatch = true;
+        continue;
+      }
 
-    const sim = calculateCosineSimilarity(desc, liveDescriptor);
-    if (sim > bestSimilarity) {
-      bestSimilarity = sim;
+      const sim = calculateCosineSimilarity(sDesc, lDesc);
+      if (sim > bestSimilarity) {
+        bestSimilarity = sim;
+      }
     }
   }
 
@@ -500,7 +529,7 @@ export const compareFaces = (savedDescriptor, liveDescriptor, threshold = 70) =>
     matchPercentage = Math.min(100, Math.round(60 + ((bestSimilarity - 0.50) / 0.30) * 40));
   }
 
-  // اعتماد عتبة الـ 70% المطلوبة (المطابقة لـ Cosine Similarity ~ 0.57+)
+  // اعتماد عتبة الـ 70% بدقة صارمة وفق طلب المؤسسة
   const isMatch = matchPercentage >= threshold;
 
   return {

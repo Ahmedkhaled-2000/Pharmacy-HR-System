@@ -853,6 +853,45 @@ export function useRequestsManager() {
       });
 
       let updatedShifts = [...(state.shifts || [])];
+      let updatedActiveShifts = { ...(state.activeShifts || {}) };
+
+      if (targetReq && (targetReq.type === 'biometric_verification' || targetReq.type === 'تأكيد بصمة الوجه' || targetReq.type === 'تأكيد بصمة اليد')) {
+        const empId = targetReq.employeeId;
+        const reqDate = targetReq.date || (targetReq.createdAt ? targetReq.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10));
+        const rejecterTitle = role === 'admin' ? 'الإدارة العليا' : 'مدير الفرع';
+
+        if (targetReq.targetAction === 'shift_start' || targetReq.actionType === 'shift_start') {
+          if (updatedActiveShifts[empId]) {
+            delete updatedActiveShifts[empId];
+          }
+          updatedShifts = updatedShifts.map(s => {
+            if (String(s.employeeId) === String(empId) && (s.date === reqDate || s.id === targetReq.shiftId)) {
+              return {
+                ...s,
+                statusLabel: 'حضور بالصورة (مرفوض)',
+                rejectedBy: rejecterTitle,
+                rejectedAt: new Date().toISOString(),
+                note: (s.note ? s.note + ' | ' : '') + `❌ تم رفض توثيق الحضور بالصورة من ${rejecterTitle}`
+              };
+            }
+            return s;
+          });
+        } else if (targetReq.targetAction === 'shift_end' || targetReq.actionType === 'shift_end') {
+          updatedShifts = updatedShifts.map(s => {
+            if (String(s.employeeId) === String(empId) && (s.date === reqDate || s.id === targetReq.shiftId)) {
+              return {
+                ...s,
+                statusLabel: 'انصراف بالصورة (مرفوض)',
+                rejectedBy: rejecterTitle,
+                rejectedAt: new Date().toISOString(),
+                note: (s.note ? s.note + ' | ' : '') + `❌ تم رفض توثيق الانصراف بالصورة من ${rejecterTitle}`
+              };
+            }
+            return s;
+          });
+        }
+      }
+
       if (targetReq && targetReq.type === 'overtime') {
         updatedShifts = updatedShifts.map((s) => {
           if (s.id === targetReq.shiftId || (String(s.employeeId) === String(targetReq.employeeId) && s.date === targetReq.date)) {
@@ -945,6 +984,7 @@ export function useRequestsManager() {
         employees: updatedEmps,
         requests: updatedRequests,
         shifts: updatedShifts,
+        activeShifts: updatedActiveShifts,
         leaveRequests: updatedLeaveRequests,
         permissionRequests: updatedPermRequests,
         loans: updatedLoans,

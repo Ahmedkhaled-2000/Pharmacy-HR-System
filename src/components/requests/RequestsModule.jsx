@@ -2311,9 +2311,9 @@ export default function RequestsModule({
 
         const isLeave = ['leave', 'leave_request', 'annual_leave', 'sick_leave', 'emergency_leave', 'unpaid_leave'].includes(previewModalReq.type);
         const isLoan = ['loan', 'advance', 'meds', 'credit_medicine'].includes(previewModalReq.type);
-        const isPermission = previewModalReq.type === 'permission';
         const isSwap = ['swap', 'shift_swap', 'shift_edit'].includes(previewModalReq.type);
-        const isPunch = ['punch_correction', 'تأكيد بصمة الوجه', 'تأكيد بصمة اليد'].includes(previewModalReq.type);
+        const isPunch = ['punch_correction', 'manual_punch', 'attendance_punch', 'تأكيد بصمة الوجه', 'تأكيد بصمة اليد', 'biometric_verification'].includes(previewModalReq.type);
+        const isBiometricVerification = previewModalReq.type === 'biometric_verification' || previewModalReq.type === 'تأكيد بصمة الوجه' || previewModalReq.type === 'تأكيد بصمة اليد';
         const isDisciplinaryViolation = previewModalReq.type === 'disciplinary_penalty' ||
           previewModalReq.type === 'violation' ||
           previewModalReq.subType === 'disciplinary_penalty' ||
@@ -2858,6 +2858,93 @@ export default function RequestsModule({
                           </div>
                         </div>
                       )}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── BIOMETRIC VERIFICATION / PHOTO PUNCH DETAILS ── */}
+                {isBiometricVerification && (
+                  <div style={{ background: '#f0fdfa', padding: '18px', borderRadius: '14px', border: '1.5px solid #2dd4bf', boxShadow: '0 4px 14px rgba(13, 148, 136, 0.1)', marginTop: '12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                      <h4 style={{ margin: 0, color: '#0f766e', fontSize: '15px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        📸 تفاصيل طلب اعتماد الحضور بالصورة الحية:
+                      </h4>
+                      <span style={{ background: '#ccfbf1', color: '#0f766e', border: '1px solid #99f6e4', padding: '3px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: 700 }}>
+                        {previewModalReq.actionBadge || previewModalReq.typeLabel || 'اعتماد بالصورة'}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#0f766e', fontWeight: 600 }}>نوع الإجراء المطلوب:</span>
+                        <div style={{ fontWeight: 800, color: '#115e59', fontSize: '14px' }}>
+                          {previewModalReq.targetAction === 'shift_start' ? '🟢 تسجيل دخول (بداية الوردية)' :
+                           previewModalReq.targetAction === 'shift_end' ? '🔴 تسجيل خروج (نهاية الوردية)' :
+                           previewModalReq.targetAction === 'break_start' ? '☕ بدء استراحة (بريك)' :
+                           previewModalReq.targetAction === 'break_end' ? '⏱️ انتهاء استراحة (بريك)' :
+                           (previewModalReq.actionLabel || previewModalReq.targetAction || 'بصمة حية')}
+                        </div>
+                      </div>
+
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#0f766e', fontWeight: 600 }}>وقت وتاريخ التوثيق بالكشك:</span>
+                        <div style={{ fontWeight: 800, color: '#115e59' }}>
+                          🕒 {previewModalReq.time || '—'} بتاريخ {previewModalReq.date || '—'}
+                        </div>
+                      </div>
+
+                      <div>
+                        <span style={{ fontSize: '12px', color: '#0f766e', fontWeight: 600 }}>فرع التوثيق:</span>
+                        <div style={{ fontWeight: 800, color: '#115e59' }}>
+                          🏢 {previewModalReq.branchName || branchObj?.name || 'الفرع'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Side-by-Side Face Comparison */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px', background: '#ffffff', padding: '14px', borderRadius: '12px', border: '1px solid #ccfbf1' }}>
+                      {/* Enrolled Profile Photo */}
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: '12.5px', fontWeight: 700, color: '#475569', marginBottom: '6px' }}>
+                          👤 الصورة الرسمية المسجلة للموظف:
+                        </div>
+                        {empObj?.photoUrl ? (
+                          <img
+                            src={empObj.photoUrl}
+                            alt="الصورة الرسمية"
+                            style={{ width: '130px', height: '130px', objectFit: 'cover', borderRadius: '12px', border: '2px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}
+                          />
+                        ) : (
+                          <div style={{ width: '130px', height: '130px', borderRadius: '12px', background: '#f1f5f9', color: '#94a3b8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '36px', margin: '0 auto', border: '2px dashed #cbd5e1' }}>
+                            👤
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Captured Kiosk Live Photo */}
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', padding: '0 8px' }}>
+                          <span style={{ fontSize: '12.5px', fontWeight: 700, color: '#0f766e' }}>
+                            📸 الصورة الملتقطة بالكشك:
+                          </span>
+                          {previewModalReq.drivePhotoUrl && (
+                            <a href={previewModalReq.drivePhotoUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: '12px', color: '#0284c7', textDecoration: 'none', fontWeight: 700 }}>
+                              ☁️ فتح الدرايف ↗
+                            </a>
+                          )}
+                        </div>
+                        {(previewModalReq.photoUrl || previewModalReq.drivePhotoUrl) ? (
+                          <img
+                            src={previewModalReq.photoUrl || previewModalReq.drivePhotoUrl}
+                            alt="صورة الكشك"
+                            style={{ width: '100%', maxHeight: '180px', objectFit: 'contain', borderRadius: '12px', border: '2px solid #0d9488', background: '#000' }}
+                          />
+                        ) : (
+                          <div style={{ height: '130px', borderRadius: '12px', background: '#f8fafc', color: '#94a3b8', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px dashed #cbd5e1' }}>
+                            لا توجد صورة متوفرة
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}

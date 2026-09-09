@@ -190,43 +190,75 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
         }
 
       } else {
-        const result = await getFaceEmbedding(videoRef.current);
-        
-        if (result.error) {
-          handleFailure(result.error);
-          return;
-        }
-
-        if (result.isVeryDark) {
-          setLightingStatus('dark');
-          setIsScreenFlashOn(true); // تفعيل الإضاءة المساعدة للشاشة تلقائياً في الظلام
-        } else if (result.isLowLight) {
-          setLightingStatus('low');
-        } else {
-          setLightingStatus('good');
-        }
-
-        setStatus('جاري مطابقة بصمة الوجه الذكية...');
+        setStatus('جاري مطابقة الوجه وفحص الإضاءة الدقيقة...');
         const savedDescriptor = employee.face_descriptor || await loadFaceDescriptor(employee.id);
         if (!savedDescriptor) {
           handleFailure('بصمة الوجه غير مسجلة لهذا الموظف.');
           return;
         }
 
-        const matchResult = compareFaces(savedDescriptor, result.descriptor);
-        
-        if (matchResult.isLegacy) {
-          handleFailure(matchResult.error || 'البصمة مسجلة بالنظام القديم، يرجى إعادة تسجيل البصمة من لوحة التحكم.');
+        // 🌟 فحص متعدد الإطارات المتتابعة (Multi-Frame Burst Matching):
+        // يتم التقاط 3 عينات متتالية مع معالجة التباين المزدوجة لاختيار أفضل لقطة مطابقة
+        let bestMatchResult = null;
+        let lastError = null;
+
+        for (let burstIdx = 0; burstIdx < 3; burstIdx++) {
+          try {
+            const result = await getFaceEmbedding(videoRef.current);
+            if (!result || result.error) {
+              lastError = result?.error;
+              continue;
+            }
+
+            if (result.isVeryDark) {
+              setLightingStatus('dark');
+              setIsScreenFlashOn(true);
+            } else if (result.isLowLight) {
+              setLightingStatus('low');
+              setIsScreenFlashOn(true);
+            } else {
+              setLightingStatus('good');
+            }
+
+            const liveDescs = result.descriptors || [result.descriptor];
+            // الحفاظ الصارم على نسبة الـ 70% المطلوبة للبصمة
+            const matchResult = compareFaces(savedDescriptor, liveDescs, 70);
+
+            if (matchResult.isLegacy) {
+              handleFailure(matchResult.error || 'البصمة مسجلة بالنظام القديم، يرجى إعادة تسجيل البصمة من لوحة التحكم.');
+              return;
+            }
+
+            if (!bestMatchResult || matchResult.matchPercentage > bestMatchResult.matchPercentage) {
+              bestMatchResult = matchResult;
+            }
+
+            // إذا تحققت المطابقة بنجاح (>= 70%) نكتفي فوراً دون الحاجة للقطات إضافية
+            if (bestMatchResult && bestMatchResult.isMatch) {
+              break;
+            }
+
+            // فاصل زمني بسيط بين اللقطات لتجاوز أي رمش أو حركة عابرة
+            await new Promise((resolve) => setTimeout(resolve, 90));
+          } catch (bErr) {
+            console.warn('[FaceMatch] Burst frame attempt note:', bErr);
+          }
+        }
+
+        if (!bestMatchResult) {
+          handleFailure(lastError || 'تعذر استخراج معالم الوجه بوضوح.');
           return;
         }
 
-        if (matchResult.isMatch) {
-          setStatus(`✅ تمت مطابقة الوجه بنجاح! (${Math.round(matchResult.matchPercentage)}%)`);
+        if (bestMatchResult.isMatch) {
+          setStatus(`✅ تمت مطابقة الوجه بنجاح! (${Math.round(bestMatchResult.matchPercentage)}%)`);
           setTimeout(() => {
             onVerifySuccess(actionType);
           }, 1200);
         } else {
-          handleFailure(`البصمة غير متطابقة (${Math.round(matchResult.matchPercentage)}%)`);
+          // تفعيل فلاش الشاشة المساعد تلقائياً للمحاولة التالية
+          setIsScreenFlashOn(true);
+          handleFailure(`البصمة غير متطابقة (${Math.round(bestMatchResult.matchPercentage)}%)`);
         }
       }
     } catch (err) {
@@ -363,7 +395,17 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
             </div>
           </div>
 
-          <div style={{ position: 'relative', width: '100%', maxWidth: '420px', borderRadius: '16px', overflow: 'hidden', backgroundColor: '#000', border: '3px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.15)' }}>
+          <div style={{
+            position: 'relative',
+            width: '100%',
+            maxWidth: '420px',
+            borderRadius: '16px',
+            overflow: 'hidden',
+            backgroundColor: '#000',
+            border: isScreenFlashOn ? '4px solid #ffffff' : '3px solid var(--border)',
+            boxShadow: isScreenFlashOn ? '0 0 50px 15px rgba(255, 255, 255, 0.95), 0 0 100px 30px rgba(59, 130, 246, 0.4)' : '0 8px 24px rgba(0,0,0,0.15)',
+            transition: 'all 0.3s ease'
+          }}>
             <video 
               ref={videoRef}
               autoPlay

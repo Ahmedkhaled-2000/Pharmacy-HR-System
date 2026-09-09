@@ -33,6 +33,20 @@ export default function ElectronicKioskView({
   const [inputCode, setInputCode] = useState('');
   const [matchedEmp, setMatchedEmp] = useState(null);
   const [blockedStatusModal, setBlockedStatusModal] = useState(null);
+  const [kioskAlertModal, setKioskAlertModal] = useState(null);
+
+  // Auto-countdown timer for Kiosk in-system notification modal
+  useEffect(() => {
+    if (!kioskAlertModal || !kioskAlertModal.isOpen || kioskAlertModal.countdown === undefined) return;
+    if (kioskAlertModal.countdown <= 0) {
+      if (kioskAlertModal.onClose) kioskAlertModal.onClose();
+      return;
+    }
+    const timer = setTimeout(() => {
+      setKioskAlertModal(prev => prev ? { ...prev, countdown: prev.countdown - 1 } : null);
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [kioskAlertModal]);
 
   const [pendingDirectiveModal, setPendingDirectiveModal] = useState(null);
   const [pendingDirectivesQueue, setPendingDirectivesQueue] = useState([]);
@@ -409,7 +423,7 @@ export default function ElectronicKioskView({
       branchApproved: false,
       adminApproved: false,
       details: `طلب اعتماد ${actionBadge} (${actionLabel}) بالصورة الحية. وقت التوثيق والطلب: ${timeStr} بتاريخ ${dateStr}.`,
-      notes: `تعذر التحقق من بصمة ${isHand ? 'اليد' : 'الوجه'} لـ 3 مرات متتالية عند محاولة (${actionLabel}). تم التقاط صورة حية للموظف في تمام ${timeStr} وإرسالها للاعتماد. لا تُعتمد الوردية إلا بموافقة الإدارة العليا وسيتم بدءها/إنهاؤها في نفس وقت إرسال الطلب (${timeStr}).`,
+      notes: `تم التقاط صورة حية للموظف في تمام ${timeStr} وإرسالها للإدارة ومدير الفرع للمطابقة والاعتماد. تم بدء/تسجيل الإجراء فورياً في نفس وقت التقاط الصورة.`,
       photoUrl: photoUrl || null,
       drivePhotoUrl: driveResult?.fileUrl || null,
       driveFileId: driveResult?.fileId || null
@@ -422,7 +436,7 @@ export default function ElectronicKioskView({
       targetRole: 'branch_and_admin',
       branchId: effectiveBranchId,
       title: `📸 طلب اعتماد [${actionBadge}]: ${matchedEmp.name}`,
-      message: `طلب اعتماد ${actionBadge} (${actionLabel}) بالصورة للموظف ${matchedEmp.name} في تمام الساعة ${timeStr} بتاريخ ${dateStr}. لن تُعتمد الوردية إلا بموافقة الإدارة العليا.`,
+      message: `طلب اعتماد ${actionBadge} (${actionLabel}) بالصورة للموظف ${matchedEmp.name} في تمام الساعة ${timeStr} بتاريخ ${dateStr}. تم بدء الإجراء وتسجيل الحضور بالصورة فورياً.`,
       requestId: requestId,
       employeeId: matchedEmp.id,
       employeeName: matchedEmp.name,
@@ -437,7 +451,7 @@ export default function ElectronicKioskView({
       readBy: []
     };
 
-    // 4. Save into state and Supabase / DB (SHIFT IS NOT STARTED/STOPPED UNTIL SUPER ADMIN APPROVAL)
+    // 4. Save into state and Supabase / DB
     const currentRequests = state?.requests || [];
     const currentNotifs = state?.notifications || [];
     const updatedState = {
@@ -471,9 +485,41 @@ export default function ElectronicKioskView({
       }).catch(err => console.warn('Gmail biometric notification failed:', err));
     }
 
-    alert(`📸 تم التقاط الصورة وإرسال طلب اعتماد [${actionBadge}] بنجاح!\n\nوقت المحاولة المحفوظ: ${timeStr} بتاريخ ${dateStr}.\n\n⚠️ ملاحظة: لن تُعتمد البصمة في السجلات إلا بعد موافقة الإدارة العليا، وعند الموافقة سيتم احتساب وقت الوردية بنفس وقت التوثيق أعلاه (${timeStr}).\n\n${driveResult?.success ? 'تم حفظ الصورة بمجلد الموظف على Google Drive ☁️' : 'تم إرسال الإشعار للإدارة بنجاح.'}`);
-    setMatchedEmp(null);
-    setInputCode('');
+    // 6. 🌟 بدء الوردية / تسجيل الإجراء فورياً من لحظة التقاط الصورة
+    let actionExecResult = null;
+    try {
+      if (actionType === 'shift_start') {
+        if (startShift) actionExecResult = await startShift(matchedEmp.id, 'kiosk', effectiveBranchId);
+      } else if (actionType === 'break_start') {
+        if (pauseShift) actionExecResult = await pauseShift(matchedEmp.id, 'kiosk');
+      } else if (actionType === 'break_end') {
+        if (resumeShift) actionExecResult = await resumeShift(matchedEmp.id, 'kiosk');
+      } else if (actionType === 'shift_end') {
+        if (stopShift) actionExecResult = await stopShift(matchedEmp.id, 'kiosk');
+      }
+    } catch (shiftErr) {
+      console.error('Error executing shift on photo punch:', shiftErr);
+    }
+
+    // 7. عرض نافذة نظام عصرية (In-System Modal) بدلاً من نافذة المتصفح مع عد تنازلي للإغلاق التلقائي
+    setKioskAlertModal({
+      isOpen: true,
+      type: 'success',
+      title: `تم توثيق ${actionBadge} وبدء الوردية بنجاح!`,
+      subtitle: `الموظف: ${matchedEmp.name} (كود: ${matchedEmp.code || matchedEmp.id}) · ${branchName}`,
+      timeStr,
+      dateStr,
+      actionBadge,
+      driveSaved: Boolean(driveResult?.success),
+      note: '✅ تم بدء الوردية وتسجيل موعد الحضور فورياً من لحظة التقاط الصورة. تم إرسال الصورة لمدير الفرع والإدارة العليا للتأكيد والمطابقة.',
+      countdown: 7,
+      onClose: () => {
+        setKioskAlertModal(null);
+        setMatchedEmp(null);
+        setInputCode('');
+        setSelectedBranchId(null);
+      }
+    });
   };
 
   const executeAction = async (actionType) => {
@@ -500,12 +546,28 @@ export default function ElectronicKioskView({
       }
 
       if (res && res.success === false) {
-        alert(res.reason || 'تعذر إتمام الإجراء بنجاح.');
+        setKioskAlertModal({
+          isOpen: true,
+          type: 'warning',
+          title: 'تنبيه تسجيل الوردية',
+          subtitle: `${empName} · ${branchName}`,
+          note: res.reason || 'تعذر إتمام الإجراء بنجاح.',
+          countdown: 6,
+          onClose: () => setKioskAlertModal(null)
+        });
         return;
       }
     } catch (err) {
       console.error('Kiosk punch execution error:', err);
-      alert('حدث خطأ أثناء حفظ الوردية. يرجى المحاولة مرة أخرى.');
+      setKioskAlertModal({
+        isOpen: true,
+        type: 'error',
+        title: 'خطأ في حفظ الوردية',
+        subtitle: `${empName} · ${branchName}`,
+        note: 'حدث خطأ أثناء حفظ الوردية. يرجى المحاولة مرة أخرى أو مراجعة الاتصال.',
+        countdown: 6,
+        onClose: () => setKioskAlertModal(null)
+      });
       return;
     }
 
@@ -513,8 +575,6 @@ export default function ElectronicKioskView({
     setMatchedEmp(null);
     setInputCode('');
     setSelectedBranchId(null);
-
-
   };
 
   if (!authStatus.isAuthorized) {
@@ -1242,6 +1302,137 @@ export default function ElectronicKioskView({
         </div>
       )}
 
+      {/* ── Modern In-System Kiosk Notification Modal ── */}
+      {kioskAlertModal && kioskAlertModal.isOpen && (
+        <div
+          className="kiosk-modal-backdrop fade-in"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.88)',
+            backdropFilter: 'blur(10px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 10000,
+            padding: '20px',
+            fontFamily: "'Tajawal', sans-serif"
+          }}
+        >
+          <div
+            className="kiosk-modal-content"
+            style={{
+              maxWidth: '520px',
+              width: '100%',
+              textAlign: 'center',
+              padding: '32px 26px',
+              borderRadius: '24px',
+              border: `2px solid ${kioskAlertModal.type === 'error' ? 'rgba(239, 68, 68, 0.6)' : kioskAlertModal.type === 'warning' ? 'rgba(245, 158, 11, 0.6)' : 'rgba(16, 185, 129, 0.6)'}`,
+              boxShadow: `0 25px 50px -12px rgba(0, 0, 0, 0.6), 0 0 35px ${kioskAlertModal.type === 'error' ? 'rgba(239, 68, 68, 0.25)' : kioskAlertModal.type === 'warning' ? 'rgba(245, 158, 11, 0.25)' : 'rgba(16, 185, 129, 0.25)'}`,
+              background: 'linear-gradient(145deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.99))',
+              color: '#ffffff',
+              position: 'relative'
+            }}
+          >
+            {/* Animated Status Icon */}
+            <div
+              style={{
+                width: '76px',
+                height: '76px',
+                borderRadius: '50%',
+                margin: '0 auto 16px',
+                background: kioskAlertModal.type === 'error' ? 'rgba(239, 68, 68, 0.18)' : kioskAlertModal.type === 'warning' ? 'rgba(245, 158, 11, 0.18)' : 'rgba(16, 185, 129, 0.18)',
+                border: `2px solid ${kioskAlertModal.type === 'error' ? '#ef4444' : kioskAlertModal.type === 'warning' ? '#f59e0b' : '#10b981'}`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '36px',
+                boxShadow: `0 0 24px ${kioskAlertModal.type === 'error' ? 'rgba(239, 68, 68, 0.4)' : kioskAlertModal.type === 'warning' ? 'rgba(245, 158, 11, 0.4)' : 'rgba(16, 185, 129, 0.4)'}`
+              }}
+            >
+              {kioskAlertModal.type === 'error' ? '❌' : kioskAlertModal.type === 'warning' ? '⚠️' : '📸'}
+            </div>
+
+            {/* Title */}
+            <h2
+              style={{
+                fontSize: '1.4rem',
+                fontFamily: 'Cairo',
+                fontWeight: 800,
+                margin: '0 0 8px',
+                color: kioskAlertModal.type === 'error' ? '#fca5a5' : kioskAlertModal.type === 'warning' ? '#fde047' : '#34d399'
+              }}
+            >
+              {kioskAlertModal.title}
+            </h2>
+
+            {kioskAlertModal.subtitle && (
+              <p style={{ color: '#cbd5e1', fontSize: '0.96rem', fontWeight: 600, margin: '0 0 16px' }}>
+                {kioskAlertModal.subtitle}
+              </p>
+            )}
+
+            {/* Details Box */}
+            <div
+              style={{
+                background: 'rgba(15, 23, 42, 0.65)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                borderRadius: '16px',
+                padding: '16px',
+                textAlign: 'right',
+                fontSize: '0.92rem',
+                lineHeight: '1.7',
+                marginBottom: '20px'
+              }}
+            >
+              {kioskAlertModal.timeStr && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '8px', marginBottom: '8px' }}>
+                  <span style={{ color: '#94a3b8' }}>وقت التوثيق المحفوظ:</span>
+                  <strong style={{ color: '#38bdf8' }}>{kioskAlertModal.timeStr} بتاريخ {kioskAlertModal.dateStr}</strong>
+                </div>
+              )}
+
+              {kioskAlertModal.driveSaved && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '8px', marginBottom: '8px' }}>
+                  <span style={{ color: '#94a3b8' }}>حفظ الصورة السحابي:</span>
+                  <span style={{ color: '#34d399', fontWeight: 'bold' }}>☁️ تم الحفظ بمجلد Google Drive</span>
+                </div>
+              )}
+
+              <div style={{ color: kioskAlertModal.type === 'error' ? '#fca5a5' : '#fcd34d', fontSize: '0.88rem', fontWeight: 600, display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                <span style={{ flexShrink: 0 }}>{kioskAlertModal.type === 'error' ? '📌' : 'ℹ️'}</span>
+                <span>{kioskAlertModal.note || kioskAlertModal.message}</span>
+              </div>
+            </div>
+
+            {/* Confirmation Button with Live Countdown */}
+            <button
+              type="button"
+              onClick={kioskAlertModal.onClose}
+              style={{
+                width: '100%',
+                padding: '13px',
+                fontSize: '1rem',
+                fontFamily: 'Cairo',
+                fontWeight: 800,
+                borderRadius: '12px',
+                border: 'none',
+                background: kioskAlertModal.type === 'error'
+                  ? 'linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)'
+                  : kioskAlertModal.type === 'warning'
+                  ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
+                  : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                color: '#ffffff',
+                cursor: 'pointer',
+                boxShadow: '0 4px 14px rgba(0, 0, 0, 0.3)',
+                transition: 'transform 0.15s ease'
+              }}
+            >
+              حسناً {kioskAlertModal.countdown !== undefined && `(${kioskAlertModal.countdown} ثانية)`}
+            </button>
+          </div>
+        </div>
+      )}
 
     </div>
   );

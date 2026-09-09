@@ -130,6 +130,12 @@ export function NotificationProvider({ children }) {
 
       if (r.status === 'approved' || r.status === 'rejected' || r.status === 'cancelled') return false;
 
+      // طلبات اعتماد الحضور بالصورة (تأكيد بصمة الوجه/اليد) تظهر فورياً في عداد الإدارة العليا للمطابقة والاعتماد
+      const isBiometricVerification = r.type === 'biometric_verification' || r.type === 'تأكيد بصمة الوجه' || r.type === 'تأكيد بصمة اليد';
+      if (isBiometricVerification) {
+        return !r.adminApproved;
+      }
+
       const isBranchDone =
         r.branchApproved ||
         r.branchApprovalStatus === 'approved' ||
