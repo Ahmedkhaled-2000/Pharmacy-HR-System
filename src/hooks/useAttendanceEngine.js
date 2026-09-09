@@ -398,7 +398,6 @@ export function useAttendanceEngine() {
     }
 
     setState(updatedState);
-    await saveState(updatedState);
 
     const bObj = (state.branches || []).find((b) => String(b.id) === String(effectiveBranchId));
     const branchNameStr = bObj ? ` (فرع ${bObj.name})` : '';
@@ -421,6 +420,10 @@ export function useAttendanceEngine() {
       });
     } else {
       showToast(msg);
+    }
+
+    if (saveState) {
+      saveState(updatedState).catch(err => console.error('[startShift] Background save error:', err));
     }
 
     return { success: true, punchTime, punchDate, branchName: bObj?.name || '' };
@@ -451,7 +454,6 @@ export function useAttendanceEngine() {
     };
     const updatedState = { ...state, activeShifts: updatedActive };
     setState(updatedState);
-    await saveState(updatedState);
 
     if (source === 'kiosk') {
       try {
@@ -470,6 +472,10 @@ export function useAttendanceEngine() {
       });
     } else {
       showToast(`تم إيقاف وردية ${emp ? emp.name : ''} مؤقتاً (بريك)`);
+    }
+
+    if (saveState) {
+      saveState(updatedState).catch(err => console.error('[pauseShift] Background save error:', err));
     }
 
     return { success: true, nowTime };
@@ -501,7 +507,6 @@ export function useAttendanceEngine() {
     };
     const updatedState = { ...state, activeShifts: updatedActive };
     setState(updatedState);
-    await saveState(updatedState);
 
     if (source === 'kiosk') {
       try {
@@ -520,6 +525,10 @@ export function useAttendanceEngine() {
       });
     } else {
       showToast(`تم استئناف وردية ${emp ? emp.name : ''}`);
+    }
+
+    if (saveState) {
+      saveState(updatedState).catch(err => console.error('[resumeShift] Background save error:', err));
     }
 
     return { success: true };
@@ -711,7 +720,6 @@ export function useAttendanceEngine() {
     }
 
     setState(updatedState);
-    await saveState(updatedState);
 
     const msg = `تم تسجيل انصراف ${emp ? emp.name : ''} بنجاح الساعة ${timeOut} (إجمالي الساعات: ${netHours} س)`;
     if (source === 'kiosk') {
@@ -731,6 +739,10 @@ export function useAttendanceEngine() {
       });
     } else {
       showToast(msg);
+    }
+
+    if (saveState) {
+      saveState(updatedState).catch(err => console.error('[stopShift] Background save error:', err));
     }
 
     return { success: true, netHours, timeOut, date: active.date };

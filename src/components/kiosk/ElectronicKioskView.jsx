@@ -353,10 +353,10 @@ export default function ElectronicKioskView({
     executeAction(actionType);
   };
 
-  const onVerifyFailed = async (actionType, photoUrl) => {
+  const onVerifyFailed = (actionType, photoUrl) => {
     setActiveAction(null);
-    const empBiometricType = matchedEmp?.preferred_biometric || orgSettings?.biometricType || 'face';
-    const isHand = empBiometricType === 'hand';
+    const currentEmp = matchedEmp;
+    if (!currentEmp) return;
 
     const actionLabels = {
       shift_start: 'تسجيل دخول (بداية الوردية)',
@@ -370,9 +370,25 @@ export default function ElectronicKioskView({
       break_start: '☕ بدء بريك',
       break_end: '⏱️ انتهاء بريك'
     };
+    const actionTitles = {
+      shift_start: 'تم توثيق 🟢 بصمة دخول وبدء الوردية بنجاح!',
+      shift_end: 'تم توثيق 🔴 بصمة خروج وإنهاء الوردية بنجاح!',
+      break_start: 'تم توثيق ☕ بدء الاستراحة (البريك) بنجاح!',
+      break_end: 'تم توثيق ⏱️ انتهاء الاستراحة واستئناف العمل بنجاح!'
+    };
+    const actionNotes = {
+      shift_start: '✅ تم بدء الوردية وتسجيل موعد الحضور فورياً من لحظة التقاط الصورة. تم إرسال الصورة لمدير الفرع والإدارة العليا للتأكيد والمطابقة.',
+      shift_end: '✅ تم إنهاء الوردية وتسجيل موعد الانصراف فورياً من لحظة التقاط الصورة. تم إرسال الصورة لمدير الفرع والإدارة العليا للتأكيد والمطابقة.',
+      break_start: '✅ تم تسجيل بدء الاستراحة (البريك) فورياً من لحظة التقاط الصورة. تم إرسال الصورة لمدير الفرع والإدارة العليا للتأكيد والمطابقة.',
+      break_end: '✅ تم تسجيل استئناف العمل فورياً من لحظة التقاط الصورة. تم إرسال الصورة لمدير الفرع والإدارة العليا للتأكيد والمطابقة.'
+    };
+
     const actionLabel = actionLabels[actionType] || actionType;
     const actionBadge = actionBadges[actionType] || '📸 بصمة بالصورة';
-    const effectiveBranchId = selectedBranchId || matchedEmp?.branchId || kioskBranchId;
+    const modalTitle = actionTitles[actionType] || `تم توثيق ${actionBadge} بنجاح!`;
+    const modalNote = actionNotes[actionType] || '✅ تم تسجيل الإجراء فورياً من لحظة التقاط الصورة. تم إرسال الصورة للإدارة للتأكيد والمطابقة.';
+
+    const effectiveBranchId = selectedBranchId || currentEmp?.branchId || kioskBranchId;
     const branchObj = (state?.branches || []).find(b => String(b.id) === String(effectiveBranchId));
     const branchName = branchObj ? branchObj.name : 'الفرع الرئيسي';
 
@@ -380,139 +396,18 @@ export default function ElectronicKioskView({
     const dateStr = now.toISOString().slice(0, 10);
     const timeStr = now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
 
-    // 1. Upload photo to employee's Google Drive folder if configured
-    let driveResult = null;
-    const driveConfig = orgSettings?.googleDrive || state?.orgSettings?.googleDrive;
-    if (driveConfig && driveConfig.serviceUrl && photoUrl) {
-      try {
-        driveResult = await uploadBiometricAttendancePhoto({
-          employee: matchedEmp,
-          photoDataUrl: photoUrl,
-          actionType,
-          driveConfig
-        });
-      } catch (driveErr) {
-        console.warn('Failed to upload attendance photo to Google Drive:', driveErr);
-      }
-    }
-
-    // 2. Build standardized Biometric Attendance Request with exact punch action & timestamp
-    const requestId = 'REQ-BIO-' + Date.now();
-    const requestData = {
-      id: requestId,
-      type: 'biometric_verification',
-      requestType: 'biometric_verification',
-      typeLabel: `اعتماد حضور بالصورة: ${actionBadge}`,
-      employeeId: matchedEmp.id,
-      employeeCode: matchedEmp.code,
-      employeeName: matchedEmp.name,
-      branchId: effectiveBranchId,
-      branchName: branchName,
-      targetAction: actionType,
-      actionType: actionType,
-      actionLabel: actionLabel,
-      actionBadge: actionBadge,
-      date: dateStr,
-      time: timeStr,
-      timestamp: now.toISOString(),
-      epoch: now.getTime(),
-      createdAt: now.toISOString(),
-      status: 'pending',
-      requiresBranchManager: true,
-      requiresSuperAdmin: true,
-      branchApproved: false,
-      adminApproved: false,
-      details: `طلب اعتماد ${actionBadge} (${actionLabel}) بالصورة الحية. وقت التوثيق والطلب: ${timeStr} بتاريخ ${dateStr}.`,
-      notes: `تم التقاط صورة حية للموظف في تمام ${timeStr} وإرسالها للإدارة ومدير الفرع للمطابقة والاعتماد. تم بدء/تسجيل الإجراء فورياً في نفس وقت التقاط الصورة.`,
-      photoUrl: photoUrl || null,
-      drivePhotoUrl: driveResult?.fileUrl || null,
-      driveFileId: driveResult?.fileId || null
-    };
-
-    // 3. Create Notification for Higher Management and Branch Manager
-    const newNotif = {
-      id: 'NOTIF-BIO-' + Date.now(),
-      type: 'biometric_verification',
-      targetRole: 'branch_and_admin',
-      branchId: effectiveBranchId,
-      title: `📸 طلب اعتماد [${actionBadge}]: ${matchedEmp.name}`,
-      message: `طلب اعتماد ${actionBadge} (${actionLabel}) بالصورة للموظف ${matchedEmp.name} في تمام الساعة ${timeStr} بتاريخ ${dateStr}. تم بدء الإجراء وتسجيل الحضور بالصورة فورياً.`,
-      requestId: requestId,
-      employeeId: matchedEmp.id,
-      employeeName: matchedEmp.name,
-      targetAction: actionType,
-      actionBadge: actionBadge,
-      time: timeStr,
-      date: dateStr,
-      photoUrl: photoUrl || null,
-      drivePhotoUrl: driveResult?.fileUrl || null,
-      createdAt: now.toISOString(),
-      read: false,
-      readBy: []
-    };
-
-    // 4. Save into state and Supabase / DB
-    const currentRequests = state?.requests || [];
-    const currentNotifs = state?.notifications || [];
-    const updatedState = {
-      ...state,
-      requests: [requestData, ...currentRequests],
-      notifications: [newNotif, ...currentNotifs],
-      _requestsUpdatedAt: now.toISOString(),
-      _notificationsUpdatedAt: now.toISOString()
-    };
-
-    if (setState) setState(updatedState);
-    if (saveState) await saveState(updatedState);
-
-    if (submitRequest) {
-      submitRequest(requestData);
-    }
-
-    // 5. Send Gmail Email Notification if configured
-    const gmailConfig = orgSettings?.gmailConfig || state?.orgSettings?.gmailConfig;
-    if (gmailConfig && gmailConfig.serviceUrl && (gmailConfig.notifyOnAttendanceAnomaly !== false || gmailConfig.notifyOnNewRequest !== false)) {
-      sendBiometricAttendanceEmail({
-        gmailConfig,
-        empName: matchedEmp.name,
-        empCode: matchedEmp.code,
-        branchName,
-        actionType,
-        timeStr,
-        dateStr,
-        drivePhotoUrl: driveResult?.fileUrl || null,
-        photoUrl: photoUrl || null
-      }).catch(err => console.warn('Gmail biometric notification failed:', err));
-    }
-
-    // 6. 🌟 بدء الوردية / تسجيل الإجراء فورياً من لحظة التقاط الصورة
-    let actionExecResult = null;
-    try {
-      if (actionType === 'shift_start') {
-        if (startShift) actionExecResult = await startShift(matchedEmp.id, 'kiosk', effectiveBranchId);
-      } else if (actionType === 'break_start') {
-        if (pauseShift) actionExecResult = await pauseShift(matchedEmp.id, 'kiosk');
-      } else if (actionType === 'break_end') {
-        if (resumeShift) actionExecResult = await resumeShift(matchedEmp.id, 'kiosk');
-      } else if (actionType === 'shift_end') {
-        if (stopShift) actionExecResult = await stopShift(matchedEmp.id, 'kiosk');
-      }
-    } catch (shiftErr) {
-      console.error('Error executing shift on photo punch:', shiftErr);
-    }
-
-    // 7. عرض نافذة نظام عصرية (In-System Modal) بدلاً من نافذة المتصفح مع عد تنازلي للإغلاق التلقائي
+    // ⚡ 1. استجابة فورية فائقة السرعة (0ms Delay): فتح نافذة التأكيد فورياً بمجرد الأمر
     setKioskAlertModal({
       isOpen: true,
       type: 'success',
-      title: `تم توثيق ${actionBadge} وبدء الوردية بنجاح!`,
-      subtitle: `الموظف: ${matchedEmp.name} (كود: ${matchedEmp.code || matchedEmp.id}) · ${branchName}`,
+      title: modalTitle,
+      subtitle: `الموظف: ${currentEmp.name} (كود: ${currentEmp.code || currentEmp.id}) · ${branchName}`,
       timeStr,
       dateStr,
       actionBadge,
-      driveSaved: Boolean(driveResult?.success),
-      note: '✅ تم بدء الوردية وتسجيل موعد الحضور فورياً من لحظة التقاط الصورة. تم إرسال الصورة لمدير الفرع والإدارة العليا للتأكيد والمطابقة.',
-      countdown: 7,
+      driveSaved: false,
+      note: modalNote,
+      countdown: 6,
       onClose: () => {
         setKioskAlertModal(null);
         setMatchedEmp(null);
@@ -520,6 +415,131 @@ export default function ElectronicKioskView({
         setSelectedBranchId(null);
       }
     });
+
+    // ⚡ 2. تنفيذ بدء/إنهاء الوردية والرفع في الخلفية دون أي تأخير لواجهة المستخدم
+    (async () => {
+      try {
+        if (actionType === 'shift_start') {
+          if (startShift) await startShift(currentEmp.id, 'kiosk', effectiveBranchId);
+        } else if (actionType === 'break_start') {
+          if (pauseShift) await pauseShift(currentEmp.id, 'kiosk');
+        } else if (actionType === 'break_end') {
+          if (resumeShift) await resumeShift(currentEmp.id, 'kiosk');
+        } else if (actionType === 'shift_end') {
+          if (stopShift) await stopShift(currentEmp.id, 'kiosk');
+        }
+      } catch (shiftErr) {
+        console.error('Error executing shift on photo punch:', shiftErr);
+      }
+
+      // رفع الصورة إلى Google Drive في الخلفية إن كانت الخدمة مفعلة
+      let driveResult = null;
+      const driveConfig = orgSettings?.googleDrive || state?.orgSettings?.googleDrive;
+      if (driveConfig && driveConfig.serviceUrl && photoUrl) {
+        try {
+          driveResult = await uploadBiometricAttendancePhoto({
+            employee: currentEmp,
+            photoDataUrl: photoUrl,
+            actionType,
+            driveConfig
+          });
+        } catch (driveErr) {
+          console.warn('Failed to upload attendance photo to Google Drive:', driveErr);
+        }
+      }
+
+      // حفظ طلب التحقق والإشعار في الحالة وقاعدة البيانات
+      const requestId = 'REQ-BIO-' + Date.now();
+      const requestData = {
+        id: requestId,
+        type: 'biometric_verification',
+        requestType: 'biometric_verification',
+        typeLabel: `اعتماد حضور بالصورة: ${actionBadge}`,
+        employeeId: currentEmp.id,
+        employeeCode: currentEmp.code,
+        employeeName: currentEmp.name,
+        branchId: effectiveBranchId,
+        branchName: branchName,
+        targetAction: actionType,
+        actionType: actionType,
+        actionLabel: actionLabel,
+        actionBadge: actionBadge,
+        date: dateStr,
+        time: timeStr,
+        timestamp: now.toISOString(),
+        epoch: now.getTime(),
+        createdAt: now.toISOString(),
+        status: 'pending',
+        requiresBranchManager: true,
+        requiresSuperAdmin: true,
+        branchApproved: false,
+        adminApproved: false,
+        details: `طلب اعتماد ${actionBadge} (${actionLabel}) بالصورة الحية. وقت التوثيق والطلب: ${timeStr} بتاريخ ${dateStr}.`,
+        notes: `تم التقاط صورة حية للموظف في تمام ${timeStr} وإرسالها للإدارة ومدير الفرع للمطابقة والاعتماد. تم بدء/تسجيل الإجراء فورياً في نفس وقت التقاط الصورة.`,
+        photoUrl: photoUrl || null,
+        drivePhotoUrl: driveResult?.fileUrl || null,
+        driveFileId: driveResult?.fileId || null
+      };
+
+      const newNotif = {
+        id: 'NOTIF-BIO-' + Date.now(),
+        type: 'biometric_verification',
+        targetRole: 'branch_and_admin',
+        branchId: effectiveBranchId,
+        title: `📸 طلب اعتماد [${actionBadge}]: ${currentEmp.name}`,
+        message: `طلب اعتماد ${actionBadge} (${actionLabel}) بالصورة للموظف ${currentEmp.name} في تمام الساعة ${timeStr} بتاريخ ${dateStr}. تم بدء الإجراء وتسجيل الحضور بالصورة فورياً.`,
+        requestId: requestId,
+        employeeId: currentEmp.id,
+        employeeName: currentEmp.name,
+        targetAction: actionType,
+        actionBadge: actionBadge,
+        time: timeStr,
+        date: dateStr,
+        photoUrl: photoUrl || null,
+        drivePhotoUrl: driveResult?.fileUrl || null,
+        createdAt: now.toISOString(),
+        read: false,
+        readBy: []
+      };
+
+      if (setState) {
+        setState(prev => ({
+          ...prev,
+          requests: [requestData, ...(prev?.requests || [])],
+          notifications: [newNotif, ...(prev?.notifications || [])],
+          _requestsUpdatedAt: now.toISOString(),
+          _notificationsUpdatedAt: now.toISOString()
+        }));
+      }
+
+      if (saveState) {
+        saveState({
+          ...state,
+          requests: [requestData, ...(state?.requests || [])],
+          notifications: [newNotif, ...(state?.notifications || [])]
+        }).catch(err => console.error('Background save error:', err));
+      }
+
+      if (submitRequest) {
+        submitRequest(requestData);
+      }
+
+      // إرسال إشعار Gmail إن كان مفعلاً
+      const gmailConfig = orgSettings?.gmailConfig || state?.orgSettings?.gmailConfig;
+      if (gmailConfig && gmailConfig.serviceUrl && (gmailConfig.notifyOnAttendanceAnomaly !== false || gmailConfig.notifyOnNewRequest !== false)) {
+        sendBiometricAttendanceEmail({
+          gmailConfig,
+          empName: currentEmp.name,
+          empCode: currentEmp.code,
+          branchName,
+          actionType,
+          timeStr,
+          dateStr,
+          drivePhotoUrl: driveResult?.fileUrl || null,
+          photoUrl: photoUrl || null
+        }).catch(err => console.warn('Gmail biometric notification failed:', err));
+      }
+    })();
   };
 
   const executeAction = async (actionType) => {
@@ -529,9 +549,11 @@ export default function ElectronicKioskView({
     const effectiveBranchId = selectedBranchId || matchedEmp.branchId || kioskBranchId;
     const branchObj = (state?.branches || []).find(b => String(b.id) === String(effectiveBranchId)) || state?.branches?.[0];
     const branchName = branchObj ? branchObj.name : 'الفرع';
-    const nowD = new Date();
-    const timeStr = nowD.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
-    const dateStr = nowD.toLocaleDateString('ar-EG');
+
+    // إعادة تهيئة المتغيرات فورياً حتى يكون الكشك جاهزاً للعملية التالية مباشرة
+    setMatchedEmp(null);
+    setInputCode('');
+    setSelectedBranchId(null);
 
     try {
       let res = null;
@@ -568,13 +590,7 @@ export default function ElectronicKioskView({
         countdown: 6,
         onClose: () => setKioskAlertModal(null)
       });
-      return;
     }
-
-    // Reset matched employee and input code so kiosk is immediately ready for next person
-    setMatchedEmp(null);
-    setInputCode('');
-    setSelectedBranchId(null);
   };
 
   if (!authStatus.isAuthorized) {

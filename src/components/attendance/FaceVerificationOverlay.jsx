@@ -254,7 +254,7 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
           setStatus(`✅ تمت مطابقة الوجه بنجاح! (${Math.round(bestMatchResult.matchPercentage)}%)`);
           setTimeout(() => {
             onVerifySuccess(actionType);
-          }, 1200);
+          }, 250);
         } else {
           // تفعيل فلاش الشاشة المساعد تلقائياً للمحاولة التالية
           setIsScreenFlashOn(true);
@@ -310,10 +310,8 @@ export default function FaceVerificationOverlay({ employee, actionType, onVerify
       ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
       const photoDataUrl = canvas.toDataURL('image/jpeg', 0.85);
 
-      setStatus('جاري إرسال الطلب للإدارة العليا ومدير الفرع ورفع الصورة...');
-      setTimeout(() => {
-        onVerifyFailed(actionType, photoDataUrl);
-      }, 600);
+      // إرسال وتأكيد الإجراء فورياً دون أي تأخير زمني
+      onVerifyFailed(actionType, photoDataUrl);
     } catch (err) {
       console.error('Error capturing frame:', err);
       setIsCapturing(false);
