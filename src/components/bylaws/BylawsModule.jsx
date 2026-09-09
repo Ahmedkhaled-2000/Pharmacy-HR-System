@@ -9,6 +9,7 @@ import {
   getBylawsSectionsFromState
 } from '../../utils/bylawsDefaults';
 import { useUI } from '../../context/UIContext';
+import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 
 export default function BylawsModule({
   state,
@@ -365,6 +366,15 @@ export default function BylawsModule({
     if (saveState) {
       saveState(updatedState).catch(err => console.error('Background save error on objection submit:', err));
     }
+
+    try {
+      notifyAdminOnNewRequest?.({
+        state: updatedState,
+        newRequest: objReq,
+        empName: objectionTargetReq?.employeeName,
+        branchName: objectionTargetReq?.branchName
+      })?.catch?.(() => {});
+    } catch {}
   };
 
   const handleAdminApproveObjection = async (reqId) => {

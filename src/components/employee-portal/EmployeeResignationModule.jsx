@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { uid } from '../../utils/formatters';
 import { getRealTodayStr } from '../../utils/timeEngine';
-import { notifyAdminOnResignationRequest } from '../../utils/gmailService';
+import { notifyAdminOnResignationRequest, notifyAdminOnNewRequest } from '../../utils/gmailService';
 import { shouldRouteDirectToAdmin } from '../../utils/jobsHelper';
 import { useUI } from '../../context/UIContext';
 
@@ -250,6 +250,15 @@ export default function EmployeeResignationModule({
         console.warn('[Resignation] Background sync warning:', err);
       });
     }
+
+    try {
+      notifyAdminOnNewRequest?.({
+        state: updatedState,
+        newRequest: newReq,
+        empName: emp?.name,
+        branchName: state?.branches?.find((b) => String(b.id) === String(reqBranchId))?.name
+      })?.catch?.(() => {});
+    } catch {}
   };
 
   const handleCancelRequest = async (reqId) => {

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { fmt, getEmpDisplayName } from '../../utils/formatters';
 import { getJobsList } from '../../utils/jobsHelper';
 import { compressImage } from '../../utils/imageCompressor';
+import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 
 export default function EmployeeProfileModule({
   emp,
@@ -127,6 +128,15 @@ export default function EmployeeProfileModule({
 
       showToast?.('✅ تم إرسال طلب التحديث بنجاح إلى الإدارة للمراجعة والاعتماد');
       setShowEditModal(false);
+
+      try {
+        notifyAdminOnNewRequest?.({
+          state: updatedState,
+          newRequest,
+          empName: emp?.name,
+          branchName: state?.branches?.find((b) => String(b.id) === String(emp?.branchId))?.name
+        })?.catch?.(() => {});
+      } catch {}
     } catch {
       showToast?.('❌ حدث خطأ أثناء إرسال الطلب');
     } finally {

@@ -50,7 +50,10 @@ export function AuthProvider({ children }) {
   });
 
   const [activeNavTab, setActiveNavTab] = useState(() => {
-    try { return localStorage.getItem('app_active_nav_tab') || 'dashboard'; } catch { return 'dashboard'; }
+    try {
+      const saved = localStorage.getItem('app_active_nav_tab');
+      return saved && saved !== 'kiosk' ? saved : 'dashboard';
+    } catch { return 'dashboard'; }
   });
 
   const [activeSubTab, setActiveSubTab] = useState(() => {

@@ -69,8 +69,16 @@ export function DataProvider({ children, showToast = () => {} }) {
     orgSettings: {
       orgName: 'منظومة إدارة الموارد البشرية والرواتب',
       logoUrl: '',
-      ownerUsername: 'owner',
-      ownerPassword: 'owner123',
+      ownerUsername: (() => {
+        try {
+          return localStorage.getItem('pharmacy_owner_username') || 'owner';
+        } catch { return 'owner'; }
+      })(),
+      ownerPassword: (() => {
+        try {
+          return localStorage.getItem('pharmacy_owner_password') || 'owner123';
+        } catch { return 'owner123'; }
+      })(),
       adminUsername: 'admin',
       adminPassword: '123',
       ownerModificationLocks: (() => {
@@ -134,17 +142,27 @@ export function DataProvider({ children, showToast = () => {} }) {
           return v !== null ? parseInt(v, 10) : 25;
         } catch { return 25; }
       })(),
-      gmailConfig: {
-        enabled: true,
-        userEmail: '',
-        appPassword: '',
-        targetAdminEmail: '',
-        serviceUrl: 'https://script.google.com/macros/s/AKfycbzAHjkD2l2MvE5G6XLLj3jNM3k3B5e4SJ_kXdJtD2L-rUVUnh9BWlDSC0wCIqAk5syO/exec',
-        sendOnRequest: true,
-        sendOnDecision: true,
-        sendOnPenalty: true,
-        sendDailyDigest: true
-      }
+      gmailConfig: (() => {
+        const defaultCfg = {
+          enabled: true,
+          userEmail: '',
+          appPassword: '',
+          targetAdminEmail: '',
+          serviceUrl: 'https://script.google.com/macros/s/AKfycbzAHjkD2l2MvE5G6XLLj3jNM3k3B5e4SJ_kXdJtD2L-rUVUnh9BWlDSC0wCIqAk5syO/exec',
+          sendOnRequest: true,
+          sendOnDecision: true,
+          sendOnLateness: true,
+          sendOnPenalty: true,
+          sendDailyDigest: true
+        };
+        try {
+          if (typeof localStorage !== 'undefined') {
+            const saved = localStorage.getItem('pharmacy_gmail_config');
+            if (saved) return { ...defaultCfg, ...JSON.parse(saved) };
+          }
+        } catch {}
+        return defaultCfg;
+      })()
     },
     jobs: DEFAULT_JOBS,
     branches: [],

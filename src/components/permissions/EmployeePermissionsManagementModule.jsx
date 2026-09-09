@@ -5,6 +5,7 @@ import {
   applyApprovedPermissionsToShifts,
   recalculateEmployeeCycleLateness
 } from '../../utils/latePenaltyEngine';
+import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 
 export default function EmployeePermissionsManagementModule({
   state,
@@ -447,6 +448,15 @@ export default function EmployeePermissionsManagementModule({
           if (saveState) await saveState(updatedState);
 
           showToast?.(`⏳ تم إرسال طلب الإذن الاستثنائي للموظف (${emp.name}) إلى الإدارة العليا للاعتماد`);
+
+          try {
+            notifyAdminOnNewRequest?.({
+              state: updatedState,
+              newRequest: newExcPerm,
+              empName: emp?.name,
+              branchName: currentBranch?.name
+            })?.catch?.(() => {});
+          } catch {}
         }
 
         setShowExceptionalModal(false);

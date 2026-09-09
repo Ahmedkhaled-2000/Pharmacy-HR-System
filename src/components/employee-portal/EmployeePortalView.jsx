@@ -1748,7 +1748,7 @@ export default function EmployeePortalView({
           }
 
           const gmailConfig = orgSettings?.gmailConfig || state?.orgSettings?.gmailConfig;
-          if (gmailConfig && gmailConfig.serviceUrl) {
+          if (gmailConfig && (gmailConfig.enabled || gmailConfig.serviceUrl)) {
             sendBiometricRegistrationRequestEmail({
               gmailConfig,
               empName,
@@ -1832,7 +1832,7 @@ export default function EmployeePortalView({
       }
 
       const gmailConfig = orgSettings?.gmailConfig || state?.orgSettings?.gmailConfig;
-      if (gmailConfig && gmailConfig.serviceUrl) {
+      if (gmailConfig && (gmailConfig.enabled || gmailConfig.serviceUrl)) {
         sendBiometricResetRequestEmail({
           gmailConfig,
           empName,

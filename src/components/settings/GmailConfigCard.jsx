@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { sendGmailEmail, buildEmailTemplate, generateDailyDigestHTML } from '../../utils/gmailService';
 import { fmt, getRealTodayStr } from '../../utils/formatters';
 
@@ -10,28 +10,54 @@ export default function GmailConfigCard({
   executeWithOwnerGuard,
   ownerLocks
 }) {
-  const orgSettings = state.orgSettings || {};
-  const currentConfig = orgSettings.gmailConfig || {
-    enabled: true,
-    userEmail: '',
-    appPassword: '',
-    targetAdminEmail: '',
-    serviceUrl: 'https://script.google.com/macros/s/AKfycbzAHjkD2l2MvE5G6XLLj3jNM3k3B5e4SJ_kXdJtD2L-rUVUnh9BWlDSC0wCIqAk5syO/exec',
-    sendOnRequest: true,
-    sendOnDecision: true,
-    sendOnPenalty: true,
-    sendDailyDigest: true
+  const getEffectiveConfig = () => {
+    let localSaved = null;
+    try {
+      const saved = localStorage.getItem('pharmacy_gmail_config');
+      if (saved) localSaved = JSON.parse(saved);
+    } catch {}
+
+    const stateCfg = state?.orgSettings?.gmailConfig || {};
+    return {
+      enabled: stateCfg.enabled !== undefined ? Boolean(stateCfg.enabled) : (localSaved?.enabled ?? true),
+      userEmail: stateCfg.userEmail || localSaved?.userEmail || '',
+      appPassword: stateCfg.appPassword || localSaved?.appPassword || '',
+      targetAdminEmail: stateCfg.targetAdminEmail || localSaved?.targetAdminEmail || '',
+      serviceUrl: stateCfg.serviceUrl || localSaved?.serviceUrl || 'https://script.google.com/macros/s/AKfycbzAHjkD2l2MvE5G6XLLj3jNM3k3B5e4SJ_kXdJtD2L-rUVUnh9BWlDSC0wCIqAk5syO/exec',
+      sendOnRequest: stateCfg.sendOnRequest !== undefined ? Boolean(stateCfg.sendOnRequest) : (localSaved?.sendOnRequest ?? true),
+      sendOnDecision: stateCfg.sendOnDecision !== undefined ? Boolean(stateCfg.sendOnDecision) : (localSaved?.sendOnDecision ?? true),
+      sendOnLateness: stateCfg.sendOnLateness !== undefined ? Boolean(stateCfg.sendOnLateness) : (localSaved?.sendOnLateness ?? true),
+      sendOnPenalty: stateCfg.sendOnPenalty !== undefined ? Boolean(stateCfg.sendOnPenalty) : (localSaved?.sendOnPenalty ?? true),
+      sendDailyDigest: stateCfg.sendDailyDigest !== undefined ? Boolean(stateCfg.sendDailyDigest) : (localSaved?.sendDailyDigest ?? true)
+    };
   };
 
-  const [enabled, setEnabled] = useState(currentConfig.enabled ?? true);
-  const [userEmail, setUserEmail] = useState(currentConfig.userEmail || '');
-  const [appPassword, setAppPassword] = useState(currentConfig.appPassword || '');
-  const [targetAdminEmail, setTargetAdminEmail] = useState(currentConfig.targetAdminEmail || '');
-  const [serviceUrl, setServiceUrl] = useState(currentConfig.serviceUrl || '');
-  const [sendOnRequest, setSendOnRequest] = useState(currentConfig.sendOnRequest ?? true);
-  const [sendOnDecision, setSendOnDecision] = useState(currentConfig.sendOnDecision ?? true);
-  const [sendOnPenalty, setSendOnPenalty] = useState(currentConfig.sendOnPenalty ?? true);
-  const [sendDailyDigest, setSendDailyDigest] = useState(currentConfig.sendDailyDigest ?? true);
+  const initialConfig = getEffectiveConfig();
+  const [enabled, setEnabled] = useState(initialConfig.enabled);
+  const [userEmail, setUserEmail] = useState(initialConfig.userEmail);
+  const [appPassword, setAppPassword] = useState(initialConfig.appPassword);
+  const [targetAdminEmail, setTargetAdminEmail] = useState(initialConfig.targetAdminEmail);
+  const [serviceUrl, setServiceUrl] = useState(initialConfig.serviceUrl);
+  const [sendOnRequest, setSendOnRequest] = useState(initialConfig.sendOnRequest);
+  const [sendOnDecision, setSendOnDecision] = useState(initialConfig.sendOnDecision);
+  const [sendOnLateness, setSendOnLateness] = useState(initialConfig.sendOnLateness);
+  const [sendOnPenalty, setSendOnPenalty] = useState(initialConfig.sendOnPenalty);
+  const [sendDailyDigest, setSendDailyDigest] = useState(initialConfig.sendDailyDigest);
+
+  // مزامنة حالة النموذج تلقائياً عند ورود أو تحديث الإعدادات من السحابة أو الكاش
+  useEffect(() => {
+    const effective = getEffectiveConfig();
+    if (effective.enabled !== undefined) setEnabled(effective.enabled);
+    if (effective.userEmail) setUserEmail(effective.userEmail);
+    if (effective.appPassword) setAppPassword(effective.appPassword);
+    if (effective.targetAdminEmail) setTargetAdminEmail(effective.targetAdminEmail);
+    if (effective.serviceUrl) setServiceUrl(effective.serviceUrl);
+    if (effective.sendOnRequest !== undefined) setSendOnRequest(effective.sendOnRequest);
+    if (effective.sendOnDecision !== undefined) setSendOnDecision(effective.sendOnDecision);
+    if (effective.sendOnLateness !== undefined) setSendOnLateness(effective.sendOnLateness);
+    if (effective.sendOnPenalty !== undefined) setSendOnPenalty(effective.sendOnPenalty);
+    if (effective.sendDailyDigest !== undefined) setSendDailyDigest(effective.sendDailyDigest);
+  }, [state?.orgSettings?.gmailConfig]);
 
   const [isSendingTest, setIsSendingTest] = useState(false);
   const [isSendingDigest, setIsSendingDigest] = useState(false);
@@ -105,7 +131,8 @@ function doGet(e) {
   };
 
   const handleSave = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
+    const nowIso = new Date().toISOString();
     const updatedConfig = {
       enabled,
       userEmail: userEmail.trim(),
@@ -114,19 +141,53 @@ function doGet(e) {
       serviceUrl: serviceUrl.trim(),
       sendOnRequest,
       sendOnDecision,
+      sendOnLateness,
       sendOnPenalty,
-      sendDailyDigest
+      sendDailyDigest,
+      updatedAt: nowIso
     };
+
+    // 1. حفظ فوري في LocalStorage لضمان بقاء البيانات حتى قبل أو أثناء المزامنة
+    try {
+      localStorage.setItem('pharmacy_gmail_config', JSON.stringify(updatedConfig));
+    } catch (lsErr) {
+      console.warn('[GmailConfig] LocalStorage write error:', lsErr);
+    }
 
     const performSave = async () => {
-      const updatedOrgSettings = { ...orgSettings, gmailConfig: updatedConfig };
-      const updatedState = { ...state, orgSettings: updatedOrgSettings };
+      const currentOrg = state?.orgSettings || {};
+      const updatedOrgSettings = {
+        ...currentOrg,
+        gmailConfig: updatedConfig,
+        updatedAt: nowIso
+      };
+
+      // إذا كان البريد الرسمي للمؤسسة غير محدد، نملؤه تلقائياً
+      if (!updatedOrgSettings.officialEmail && updatedConfig.userEmail) {
+        updatedOrgSettings.officialEmail = updatedConfig.userEmail;
+      }
+      if (!updatedOrgSettings.email && updatedConfig.userEmail) {
+        updatedOrgSettings.email = updatedConfig.userEmail;
+      }
+
+      const updatedState = {
+        ...state,
+        orgSettings: updatedOrgSettings,
+        updatedAt: nowIso
+      };
+
       if (setState) setState(updatedState);
-      if (saveState) await saveState(updatedState);
-      showToast?.('💾 تم حفظ وتفعيل إعدادات بريد Gmail والتنبيهات بنجاح');
+      if (saveState) {
+        try {
+          await saveState(updatedState);
+        } catch (saveErr) {
+          console.warn('[GmailConfig] Cloud save warning (saved locally):', saveErr);
+        }
+      }
+      showToast?.('💾 تم حفظ وتفعيل إعدادات بريد Gmail والتنبيهات بنجاح ✅');
     };
 
-    if (executeWithOwnerGuard && (ownerLocks?.lockEditGmailConfig || state.orgSettings?.ownerModificationLocks?.lockEditGmailConfig || state.orgSettings?.ownerModificationLocks?.lockEditOrgSettings)) {
+    if (executeWithOwnerGuard && (ownerLocks?.lockEditGmailConfig || state?.orgSettings?.ownerModificationLocks?.lockEditGmailConfig)) {
       executeWithOwnerGuard({
         lockKey: 'lockEditGmailConfig',
         actionTitle: 'تعديل إعدادات بريد Gmail والتنبيهات الفورية',
@@ -325,6 +386,11 @@ function doGet(e) {
         <label style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'var(--surface-muted)', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border)' }}>
           <input type="checkbox" checked={sendOnDecision} onChange={(e) => setSendOnDecision(e.target.checked)} />
           <span>✅ إرسال إيميل فوري للموظف عند اعتماد/رفض الطلب</span>
+        </label>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'var(--surface-muted)', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+          <input type="checkbox" checked={sendOnLateness} onChange={(e) => setSendOnLateness(e.target.checked)} />
+          <span>⏰ إرسال إيميل فوري عند تأخر الموظف عن موعد الوردية</span>
         </label>
 
         <label style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'var(--surface-muted)', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border)' }}>

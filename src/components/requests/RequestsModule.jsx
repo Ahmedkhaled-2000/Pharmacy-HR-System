@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { applyShiftSwapToRosters, arabicWeekday, shouldShowRequestToBranch, getEmpDisplayName, isEmployeeActive, normalizeState, fmt } from '../../utils/formatters';
-import { notifyEmployeeEarlyExitWarning } from '../../utils/gmailService';
+import { notifyEmployeeEarlyExitWarning, notifyOnPenaltyApplied } from '../../utils/gmailService';
 import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate } from '../../utils/latePenaltyEngine';
 import { shouldRouteDirectToAdmin, isBranchWithoutManager, isDualApprovalRequest, isEmployeeBranchManager, isUpperManagementEmp } from '../../utils/jobsHelper';
 import { normalizeSchedule } from '../roster/RosterModule';
@@ -1148,6 +1148,26 @@ export default function RequestsModule({
       showToast?.('✅ تم اعتماد موافقة الطلب وتطبيق التأثير فوراً على الأجور والجداول');
       if (saveState) {
         saveState(updatedState).catch(err => console.error('Background save error:', err));
+      }
+
+      // إشعار فوري عبر Gmail بتطبيق الجزاء / الخصم المعتمد
+      const cleanReqType = String(approvedTargetReq.type || '').trim().toLowerCase();
+      if (cleanReqType === 'penalty' || cleanReqType === 'early_exit' || cleanReqType === 'disciplinary_penalty' || cleanReqType === 'violation' || String(approvedTargetReq.id || '').startsWith('disc_')) {
+        const targetEmp = (state.employees || []).find((e) => e && String(e.id) === String(approvedTargetReq.employeeId));
+        notifyOnPenaltyApplied({
+          state: updatedState,
+          emp: targetEmp,
+          penalty: {
+            ...approvedTargetReq,
+            actionTitle: approvedTargetReq.actionTitle || approvedTargetReq.penaltyAction || 'جزاء تأديبي معتمد',
+            amount: parseFloat(approvedTargetReq.amount || approvedTargetReq.penaltyAmount) || 0,
+            deductionDays: parseFloat(approvedTargetReq.deductionDays || approvedTargetReq.penaltyDays || (approvedTargetReq.impactType === 'deduction_days' ? approvedTargetReq.impactVal : 0)) || 0,
+            date: approvedTargetReq.date || approvedTargetReq.startDate || new Date().toISOString().slice(0, 10),
+            reason: approvedTargetReq.ruleTitle || approvedTargetReq.violationTitle || approvedTargetReq.reason || approvedTargetReq.details || 'تطبيق سياسة لائحة العمل والجزاءات'
+          },
+          branchName: approvedTargetReq.branchName || targetEmp?.branchName,
+          source: cleanReqType === 'early_exit' ? 'late_penalty' : 'disciplinary'
+        }).catch((e) => console.warn('Penalty email dispatch error:', e));
       }
 
       if (approvedTargetReq.type === 'تأكيد بصمة الوجه' || approvedTargetReq.type === 'تأكيد بصمة اليد') {

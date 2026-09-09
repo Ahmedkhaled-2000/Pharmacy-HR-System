@@ -32,6 +32,24 @@ export default function KeyboardShortcutsModal({ isOpen, onClose, customShortcut
     return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [isOpen, onClose]);
 
+  const handleLaunchShortcut = (item) => {
+    if (item.id === 'kioskMode') {
+      onClose?.();
+      const targetUrl = window.location.origin + '/kiosk';
+      try {
+        const link = document.createElement('a');
+        link.href = targetUrl;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } catch {
+        window.open(targetUrl, '_blank', 'noopener,noreferrer');
+      }
+    }
+  };
+
   const filteredShortcuts = useMemo(() => {
     return activeList.filter((item) => {
       if (selectedCategory !== 'all' && item.category !== selectedCategory) {
@@ -279,16 +297,18 @@ export default function KeyboardShortcutsModal({ isOpen, onClose, customShortcut
                     return (
                       <div
                         key={item.id}
+                        onClick={() => item.id === 'kioskMode' && handleLaunchShortcut(item)}
                         style={{
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'space-between',
                           padding: '9px 14px',
-                          background: 'var(--bg, #f8fafc)',
-                          border: '1px solid var(--border, #f1f5f9)',
+                          background: item.id === 'kioskMode' ? '#f0fdf4' : 'var(--bg, #f8fafc)',
+                          border: item.id === 'kioskMode' ? '1.5px solid #86efac' : '1px solid var(--border, #f1f5f9)',
                           borderRadius: '10px',
                           gap: '16px',
-                          transition: 'background 0.15s ease'
+                          cursor: item.id === 'kioskMode' ? 'pointer' : 'default',
+                          transition: 'all 0.15s ease'
                         }}
                       >
                         <div style={{ flex: '1 1 auto' }}>
@@ -296,7 +316,21 @@ export default function KeyboardShortcutsModal({ isOpen, onClose, customShortcut
                             <span style={{ fontSize: '0.9rem', color: 'var(--text, #1e293b)', fontWeight: '700' }}>
                               {item.name}
                             </span>
-                            {item.isFixed && (
+                            {item.id === 'kioskMode' && (
+                              <span
+                                style={{
+                                  background: '#16a34a',
+                                  color: '#ffffff',
+                                  fontSize: '0.68rem',
+                                  fontWeight: '800',
+                                  padding: '2px 8px',
+                                  borderRadius: '6px'
+                                }}
+                              >
+                                نشط وشغال ⚡
+                              </span>
+                            )}
+                            {item.isFixed && item.id !== 'kioskMode' && (
                               <span
                                 style={{
                                   background: '#e2e8f0',
@@ -318,6 +352,34 @@ export default function KeyboardShortcutsModal({ isOpen, onClose, customShortcut
 
                         {/* Keys Display */}
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                          {item.id === 'kioskMode' && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleLaunchShortcut(item);
+                              }}
+                              style={{
+                                background: '#16a34a',
+                                color: '#ffffff',
+                                border: 'none',
+                                borderRadius: '6px',
+                                padding: '5px 12px',
+                                fontSize: '0.78rem',
+                                fontWeight: '800',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                boxShadow: '0 2px 4px rgba(22, 163, 74, 0.25)'
+                              }}
+                              title="فتح كشك البصمة السريع فوراً"
+                            >
+                              <span>فتح الآن</span>
+                              <span>↗</span>
+                            </button>
+                          )}
+
                           <kbd
                             style={{
                               background: '#ffffff',

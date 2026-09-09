@@ -43,8 +43,14 @@ export default function OwnerOverrideModal({
   if (!isOpen || isOwnerUser) return null;
 
   const orgSettings = state?.orgSettings || {};
-  const validOwnerUser = String(orgSettings.ownerUsername || 'owner').trim().toLowerCase();
-  const validOwnerPass = String(orgSettings.ownerPassword || 'owner123').trim();
+  let savedOwnerUser = '';
+  let savedOwnerPass = '';
+  try {
+    savedOwnerUser = localStorage.getItem('pharmacy_owner_username') || '';
+    savedOwnerPass = localStorage.getItem('pharmacy_owner_password') || '';
+  } catch {}
+  const validOwnerUser = String(orgSettings.ownerUsername || savedOwnerUser || 'owner').trim().toLowerCase();
+  const validOwnerPass = String(orgSettings.ownerPassword || savedOwnerPass || 'owner123').trim();
 
   const handleVerify = (e) => {
     e.preventDefault();
@@ -60,12 +66,9 @@ export default function OwnerOverrideModal({
 
     setIsVerifying(true);
 
-    // التحقق من بيانات المالك
-    const isUserValid = (inputUser === validOwnerUser) || 
-      (validOwnerUser === 'owner' && (inputUser === 'المالك' || inputUser === 'مالك' || inputUser === 'owner'));
-    const isPassValid = (inputPass === validOwnerPass) || 
-      (inputPass === 'owner123') ||
-      (inputPass === '123' && (validOwnerPass === 'owner123' || validOwnerPass === '123'));
+    // التحقق الصارم من بيانات المالك المحفوظة فقط
+    const isUserValid = inputUser === validOwnerUser;
+    const isPassValid = inputPass === validOwnerPass;
 
     if (isUserValid && isPassValid) {
       setIsVerifying(false);

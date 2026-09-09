@@ -202,6 +202,48 @@ export function normalizeState(parsed) {
   const effectiveCustomFrom = (savedCustomFrom !== null && savedCustomFrom !== undefined) ? savedCustomFrom : (parsed.orgSettings?.payrollCustomFrom || '');
   const effectiveCustomTo = (savedCustomTo !== null && savedCustomTo !== undefined) ? savedCustomTo : (parsed.orgSettings?.payrollCustomTo || '');
 
+  const savedGmailConfig = (() => {
+    try {
+      const v = localStorage.getItem('pharmacy_gmail_config');
+      if (v) return JSON.parse(v);
+    } catch {}
+    return null;
+  })();
+
+  const rawParsedGmail = parsed.orgSettings?.gmailConfig || {};
+  const effectiveGmailConfig = {
+    enabled: rawParsedGmail.enabled !== undefined ? Boolean(rawParsedGmail.enabled) : (savedGmailConfig?.enabled ?? true),
+    userEmail: rawParsedGmail.userEmail || savedGmailConfig?.userEmail || '',
+    appPassword: rawParsedGmail.appPassword || savedGmailConfig?.appPassword || '',
+    targetAdminEmail: rawParsedGmail.targetAdminEmail || savedGmailConfig?.targetAdminEmail || '',
+    serviceUrl: rawParsedGmail.serviceUrl || savedGmailConfig?.serviceUrl || 'https://script.google.com/macros/s/AKfycbzAHjkD2l2MvE5G6XLLj3jNM3k3B5e4SJ_kXdJtD2L-rUVUnh9BWlDSC0wCIqAk5syO/exec',
+    sendOnRequest: rawParsedGmail.sendOnRequest !== undefined ? Boolean(rawParsedGmail.sendOnRequest) : (savedGmailConfig?.sendOnRequest ?? true),
+    sendOnDecision: rawParsedGmail.sendOnDecision !== undefined ? Boolean(rawParsedGmail.sendOnDecision) : (savedGmailConfig?.sendOnDecision ?? true),
+    sendOnLateness: rawParsedGmail.sendOnLateness !== undefined ? Boolean(rawParsedGmail.sendOnLateness) : (savedGmailConfig?.sendOnLateness ?? true),
+    sendOnPenalty: rawParsedGmail.sendOnPenalty !== undefined ? Boolean(rawParsedGmail.sendOnPenalty) : (savedGmailConfig?.sendOnPenalty ?? true),
+    sendDailyDigest: rawParsedGmail.sendDailyDigest !== undefined ? Boolean(rawParsedGmail.sendDailyDigest) : (savedGmailConfig?.sendDailyDigest ?? true)
+  };
+
+  const savedOwnerUser = (() => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        return localStorage.getItem('pharmacy_owner_username') || '';
+      }
+    } catch {}
+    return '';
+  })();
+  const savedOwnerPass = (() => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        return localStorage.getItem('pharmacy_owner_password') || '';
+      }
+    } catch {}
+    return '';
+  })();
+
+  const effectiveOwnerUser = parsed.orgSettings?.ownerUsername || savedOwnerUser || 'owner';
+  const effectiveOwnerPass = parsed.orgSettings?.ownerPassword || savedOwnerPass || 'owner123';
+
   const orgSettings = {
     orgName: 'منظومة إدارة الموارد البشرية والرواتب',
     logoUrl: '',
@@ -211,6 +253,9 @@ export function normalizeState(parsed) {
     permissions: {},
     empPermissions: {},
     ...(parsed.orgSettings || {}),
+    ownerUsername: effectiveOwnerUser,
+    ownerPassword: effectiveOwnerPass,
+    gmailConfig: effectiveGmailConfig,
     ownerModificationLocks: effectiveOwnerLocks,
     payrollPeriodType: effectivePeriodType,
     rosterNotificationDay: parsed.orgSettings?.rosterNotificationDay !== undefined ? parseInt(parsed.orgSettings.rosterNotificationDay, 10) : 25,
@@ -234,6 +279,15 @@ export function normalizeState(parsed) {
   try {
     if (Object.keys(effectiveOwnerLocks).length > 0) {
       localStorage.setItem('pharmacy-owner-locks', JSON.stringify(effectiveOwnerLocks));
+    }
+    if (effectiveGmailConfig && (effectiveGmailConfig.userEmail || effectiveGmailConfig.targetAdminEmail)) {
+      localStorage.setItem('pharmacy_gmail_config', JSON.stringify(effectiveGmailConfig));
+    }
+    if (effectiveOwnerUser) {
+      localStorage.setItem('pharmacy_owner_username', effectiveOwnerUser);
+    }
+    if (effectiveOwnerPass) {
+      localStorage.setItem('pharmacy_owner_password', effectiveOwnerPass);
     }
     localStorage.setItem('payroll_payout_start_day', String(orgSettings.payrollPayoutStartDay));
     localStorage.setItem('payroll_payout_end_day', String(orgSettings.payrollPayoutEndDay));

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { fmt, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 import { useUI } from '../../context/UIContext';
+import { notifyOnPenaltyApplied } from '../../utils/gmailService';
 
 export default function AdjustmentsModule({
   state,
@@ -142,6 +143,22 @@ export default function AdjustmentsModule({
       setAdjAmount('');
       setAdjReason('');
       showToast?.(`✅ تم تسجيل ${adjType === 'bonus' ? 'المكافأة' : 'الخصم'} بنجاح للموظف ${empObj?.name}`);
+
+      if (adjType === 'deduction' || adjType === 'penalty') {
+        const branchObj = branches.find(b => b.id === (adjBranchId || empObj?.branchId));
+        notifyOnPenaltyApplied?.({
+          state: updatedState,
+          emp: empObj,
+          penalty: {
+            actionTitle: adjType === 'penalty' ? 'جزاء مالي مباشر' : 'خصم إداري مباشر',
+            amount,
+            date: adjDate,
+            reason: adjReason.trim()
+          },
+          branchName: branchObj?.name || empObj?.branchName,
+          source: 'adjustment'
+        })?.catch?.(() => {});
+      }
     };
 
     if (executeWithOwnerGuard) {

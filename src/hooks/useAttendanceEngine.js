@@ -14,7 +14,8 @@ import {
 import {
   notifyAdminOnLateness,
   notifyAdminOnEarlyExit,
-  notifyAdminOnOvertime
+  notifyAdminOnOvertime,
+  notifyOnPenaltyApplied
 } from '../utils/gmailService';
 import { shouldRouteDirectToAdmin } from '../utils/jobsHelper';
 import { apiArchiveDeleteEmployee } from '../utils/archiveApiClient';
@@ -143,6 +144,22 @@ export function useAttendanceEngine() {
       suggestedAction: actionTitle,
       suggestedAmount: penaltyAmount
     }).catch((e) => console.warn('Lateness email alert error:', e));
+
+    if (rule.action !== 'grace' && (penaltyAmount > 0 || (rule.deductionMinutes && rule.deductionMinutes > 0))) {
+      notifyOnPenaltyApplied({
+        state: currentState,
+        emp,
+        branchName,
+        source: 'late_penalty',
+        penalty: {
+          actionTitle: actionTitle,
+          amount: penaltyAmount,
+          deductionMinutes: rule.deductionMinutes || 0,
+          date: dateStr,
+          reason: `تأخير بمقدار ${diffMinutes} دقيقة عن موعد الوردية المجدولة (${sched.start}) - [${tier.name} / المرة #${occurrenceNumber}]`
+        }
+      }).catch((e) => console.warn('Late penalty email error:', e));
+    }
 
     return {
       ...currentState,

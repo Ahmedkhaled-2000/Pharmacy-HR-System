@@ -444,6 +444,50 @@ export function smartMergeStates(localState, remoteState) {
         };
       }
 
+      // حماية بيانات دخول المالك من التراجع للقيم الافتراضية عند المزامنة
+      if (localSettings.ownerUsername && localSettings.ownerUsername !== 'owner') {
+        mergedSettings.ownerUsername = localSettings.ownerUsername;
+      } else if (remoteSettings.ownerUsername && remoteSettings.ownerUsername !== 'owner') {
+        mergedSettings.ownerUsername = remoteSettings.ownerUsername;
+      }
+      if (localSettings.ownerPassword && localSettings.ownerPassword !== 'owner123') {
+        mergedSettings.ownerPassword = localSettings.ownerPassword;
+      } else if (remoteSettings.ownerPassword && remoteSettings.ownerPassword !== 'owner123') {
+        mergedSettings.ownerPassword = remoteSettings.ownerPassword;
+      }
+
+      // دمج عميق ومحمي لإعدادات بريد Gmail لضمان عدم فقدان بيانات الربط
+      const localGmail = localSettings.gmailConfig || {};
+      const remoteGmail = remoteSettings.gmailConfig || {};
+      const localGmailTime = getItemTime(localGmail) || localTime;
+      const remoteGmailTime = getItemTime(remoteGmail) || remoteTime;
+      let mergedGmail = {};
+      if (localGmailTime >= remoteGmailTime) {
+        mergedGmail = { ...remoteGmail, ...localGmail };
+      } else {
+        mergedGmail = { ...localGmail, ...remoteGmail };
+      }
+      if (!mergedGmail.userEmail) mergedGmail.userEmail = localGmail.userEmail || remoteGmail.userEmail || '';
+      if (!mergedGmail.appPassword) mergedGmail.appPassword = localGmail.appPassword || remoteGmail.appPassword || '';
+      if (!mergedGmail.targetAdminEmail) mergedGmail.targetAdminEmail = localGmail.targetAdminEmail || remoteGmail.targetAdminEmail || '';
+      if (!mergedGmail.serviceUrl) mergedGmail.serviceUrl = localGmail.serviceUrl || remoteGmail.serviceUrl || '';
+      mergedSettings.gmailConfig = mergedGmail;
+
+      // دمج عميق لإعدادات Google Drive
+      const localDrive = localSettings.driveConfig || {};
+      const remoteDrive = remoteSettings.driveConfig || {};
+      const localDriveTime = getItemTime(localDrive) || localTime;
+      const remoteDriveTime = getItemTime(remoteDrive) || remoteTime;
+      let mergedDrive = {};
+      if (localDriveTime >= remoteDriveTime) {
+        mergedDrive = { ...remoteDrive, ...localDrive };
+      } else {
+        mergedDrive = { ...localDrive, ...remoteDrive };
+      }
+      if (!mergedDrive.serviceUrl) mergedDrive.serviceUrl = localDrive.serviceUrl || remoteDrive.serviceUrl || '';
+      if (!mergedDrive.parentFolderId) mergedDrive.parentFolderId = localDrive.parentFolderId || remoteDrive.parentFolderId || '';
+      mergedSettings.driveConfig = mergedDrive;
+
       return mergedSettings;
     })(),
     bylaws: {

@@ -61,7 +61,7 @@ export async function sendGmailEmail({ gmailConfig, recipientEmail, subject, htm
     return { success: false, reason: 'الخدمة غير مفعلة' };
   }
 
-  const targetEmail = recipientEmail || gmailConfig.targetAdminEmail || gmailConfig.userEmail;
+  const targetEmail = recipientEmail || gmailConfig.targetAdminEmail || gmailConfig.adminEmail || gmailConfig.userEmail;
   if (!targetEmail) {
     return { success: false, reason: 'لم يتم تحديد بريد المستلم' };
   }
@@ -102,7 +102,7 @@ export async function notifyAdminOnResignationRequest({ state, emp, branchName, 
   const gmailConfig = state?.orgSettings?.gmailConfig;
   if (!gmailConfig || !gmailConfig.enabled) return { success: false, reason: 'خدمة البريد غير مفعلة' };
 
-  const targetEmail = gmailConfig.targetAdminEmail || gmailConfig.userEmail;
+  const targetEmail = gmailConfig.targetAdminEmail || gmailConfig.adminEmail || gmailConfig.userEmail;
   if (!targetEmail) return { success: false, reason: 'لم يتم تحديد بريد الإدارة' };
 
   const empName = emp?.name || 'موظف';
@@ -217,7 +217,7 @@ export async function notifyAdminOnNewRequest({ state, newRequest, empName, bran
     return;
   }
 
-  const targetEmail = gmailConfig.targetAdminEmail || gmailConfig.userEmail;
+  const targetEmail = gmailConfig.targetAdminEmail || gmailConfig.adminEmail || gmailConfig.userEmail;
   if (!targetEmail) return;
 
   // Resolve branch name if not explicitly passed
@@ -235,39 +235,118 @@ export async function notifyAdminOnNewRequest({ state, newRequest, empName, bran
   }
 
   const reqTypeLabelMap = {
+    // إجازات
     leave: 'طلب إجازة 🏖️',
+    leave_request: 'طلب إجازة 🏖️',
+    annual_leave: 'طلب إجازة سنوية اعتيادية 🏖️',
+    annual: 'طلب إجازة سنوية اعتيادية 🏖️',
+    sick_leave: 'طلب إجازة مرضية 🩺',
+    sick: 'طلب إجازة مرضية 🩺',
+    emergency_leave: 'طلب إجازة عارضة ⚠️',
+    casual: 'طلب إجازة عارضة ⚠️',
+    unpaid_leave: 'طلب إجازة بدون راتب ⏳',
+    unpaid: 'طلب إجازة بدون راتب ⏳',
+    long_leave: 'طلب إجازة طويلة / ممتدة 🗓️',
+
+    // أذونات
     permission: 'طلب إذن / خروج ⏰',
-    loan: 'طلب سلفة مالية 💳',
-    advance: 'طلب سلفة مالية 💳',
+    permission_request: 'طلب إذن استئذان ⏰',
+    early_exit: 'طلب إذن خروج مبكر ⏰',
+
+    // سلف ومشتريات
+    loan: 'طلب سلفة مالية نقدية 💳',
+    advance: 'طلب سلفة مالية نقدية 💳',
     meds: 'طلب أدوية آجل 💊',
     credit_medicine: 'طلب أدوية آجل 💊',
-    swap: 'طلب تبديل شيفت 🔄',
-    shift_swap: 'طلب تبديل شيفت 🔄',
+
+    // شيفتات وجداول
+    swap: 'طلب تبديل وردية 🔄',
+    shift_swap: 'طلب تبديل وردية 🔄',
+    shift_edit: 'طلب تعديل وردية 🔄',
+    roster: 'طلب الجدول الشهري 📅',
     roster_update: 'طلب تعديل جدول شهري 📅',
     roster_edit: 'طلب تعديل جدول شهري 📅',
     roster_edit_request: 'طلب تعديل جدول شهري 📅',
-    punch_correction: 'طلب تعديل بصمة 📸',
-    overtime: 'طلب ساعات إضافية ⏱️',
-    eval_edit_request: 'طلب تعديل تقييم ⭐️',
-    complaint: 'طلب شكوى / ملاحظة 📋',
+
+    // استقالات وتراجع
+    resignation: 'طلب استقالة 🚪',
+    resignation_request: 'طلب استقالة 🚪',
+    withdraw: 'طلب تراجع عن استقالة ↩️',
+
+    // تظلمات ومخالفات
+    penalty_objection: 'تظلم واعتراض على جزاء لائحى ✋',
+    objection: 'تظلم واعتراض على جزاء لائحى ✋',
+    penalty_appeal: 'تظلم واعتراض على جزاء ✋',
+    disciplinary_penalty: 'مقترح جزاء تأديبي ⚖️',
+    violation: 'تسجيل مخالفة تأديبية ⚠️',
     penalty: 'طلب خصم / جزاء ⚠️',
-    bonus: 'طلب مكافأة 🎁',
+    bonus: 'طلب مكافأة مالية 🎁',
+
+    // بصمة وحضور
+    punch_correction: 'طلب تعديل / تصحيح بصمة 📸',
+    manual_punch: 'طلب تسجيل بصمة يدوية 📸',
+    attendance_punch: 'تأكيد بصمة الحضور 📸',
+    biometric_verification: 'طلب اعتماد حضور بالصورة 📸',
+    biometric_registration: 'طلب تسجيل بصمة جديدة 🧬',
+    biometric_reset: 'طلب إعادة تسجيل ومسح البصمة 🔄',
+
+    // تقييمات وشكاوى وتحديث بيانات
+    eval_edit_request: 'طلب تعديل / مراجعة تقييم ⭐️',
+    evaluation: 'تقييم أداء وظيفي ⭐️',
+    emp_evaluation: 'تقييم أداء وظيفي ⭐️',
+    manager_eval: 'تقييم أداء الموظف ⭐️',
+    complaint: 'شكوى / ملاحظة للإدارة 📋',
+    profile_update: 'طلب تحديث بيانات شخصية 👤',
+    profile_update_request: 'طلب تحديث بيانات شخصية 👤',
+    overtime: 'طلب ساعات إضافية ⏱️',
+    recruitment: 'طلب توظيف جديد 💼',
+    recruitment_application: 'طلب توظيف جديد 💼',
+    job_application: 'طلب توظيف جديد 💼',
     general: 'طلب عام 📋'
   };
 
   const reqTypeTitle = reqTypeLabelMap[newRequest.type] || `طلب جديد (${newRequest.type || 'عام'})`;
 
   const details = [];
+  if (newRequest.subject) details.push(`<b>الموضوع:</b> ${newRequest.subject}`);
+  if (newRequest.category) details.push(`<b>التصنيف / القسم:</b> ${newRequest.category}`);
+  if (newRequest.permType) details.push(`<b>نوع الإذن:</b> ${newRequest.permType}`);
+  if (newRequest.leaveType) details.push(`<b>نوع الإجازة:</b> ${newRequest.leaveType}`);
   if (newRequest.month) details.push(`<b>الشهر المستهدف:</b> ${newRequest.month}`);
+  if (newRequest.date) details.push(`<b>التاريخ:</b> ${newRequest.date}`);
   if (newRequest.startDate) details.push(`<b>تاريخ البداية:</b> ${newRequest.startDate}`);
   if (newRequest.endDate) details.push(`<b>تاريخ النهاية:</b> ${newRequest.endDate}`);
   if (newRequest.daysCount) details.push(`<b>عدد الأيام:</b> ${newRequest.daysCount} أيام`);
   if (newRequest.amount) details.push(`<b>المبلغ المطلوب:</b> ${fmt(newRequest.amount)} ج.م`);
   if (newRequest.hours) details.push(`<b>عدد الساعات:</b> ${newRequest.hours} ساعة`);
-  if (newRequest.time) details.push(`<b>الوقت:</b> ${newRequest.time}`);
+  if (newRequest.durationText) details.push(`<b>المدة:</b> ${newRequest.durationText}`);
+  if (newRequest.startTime && newRequest.endTime) details.push(`<b>الفترة:</b> من ${newRequest.startTime} إلى ${newRequest.endTime}`);
+  else if (newRequest.time) details.push(`<b>الوقت:</b> ${newRequest.time}`);
+
+  // تفاصيل خاصة بتبديل الشيفتات
+  if (newRequest.targetEmpName) details.push(`<b>الزميل المطلوب التبديل معه:</b> ${newRequest.targetEmpName}`);
+  if (newRequest.requesterDate) details.push(`<b>تاريخ وردية مقدم الطلب:</b> ${newRequest.requesterDate}`);
+  if (newRequest.targetDate) details.push(`<b>تاريخ وردية الزميل:</b> ${newRequest.targetDate}`);
+  if (newRequest.peerApproved) details.push(`<b>موافقة الزميل:</b> <span style="color:#16a34a;font-weight:bold;">وافق الزميل وبانتظار الاعتماد النهائي</span>`);
+
+  // تفاصيل خاصة بالاستقالة
+  if (newRequest.requestedLastWorkingDate) details.push(`<b>آخر يوم عمل مقترح:</b> ${newRequest.requestedLastWorkingDate}`);
+  if (newRequest.noticeDaysProvided !== undefined && newRequest.noticeDaysProvided > 0) {
+    details.push(`<b>مهلة الإشعار المقدمة:</b> ${newRequest.noticeDaysProvided} يوم (المطلوب: ${newRequest.requiredNoticeDays || 30} يوم)`);
+  }
+
+  // تفاصيل خاصة بالتظلمات والجزاءات
+  if (newRequest.violationTitle) details.push(`<b>الواقعة المتظلم عليها:</b> ${newRequest.violationTitle}`);
+  if (newRequest.penaltyAmount) details.push(`<b>مبلغ الخصم:</b> ${fmt(newRequest.penaltyAmount)} ج.م`);
+  if (newRequest.deductionMinutes) details.push(`<b>دقائق الخصم:</b> ${newRequest.deductionMinutes} دقيقة`);
+
+  // تفاصيل خاصة بتحديث البيانات الشخصية
+  if (newRequest.summary) details.push(`<b>ملخص التحديثات:</b> ${newRequest.summary}`);
+
+  // الأسباب والملاحظات
   if (newRequest.reason) details.push(`<b>السبب والبيانات:</b> ${newRequest.reason}`);
-  if (newRequest.details && !newRequest.reason) details.push(`<b>التفاصيل:</b> ${newRequest.details}`);
-  if (newRequest.notes && !newRequest.reason && !newRequest.details) details.push(`<b>ملاحظات:</b> ${newRequest.notes}`);
+  if (newRequest.details && newRequest.details !== newRequest.reason) details.push(`<b>التفاصيل:</b> ${newRequest.details}`);
+  if (newRequest.notes && newRequest.notes !== newRequest.reason && newRequest.notes !== newRequest.details) details.push(`<b>ملاحظات:</b> ${newRequest.notes}`);
 
   const content = `
     <p>تم إرسال طلب جديد إلى المنظومة من قِبل الموظف <strong>${empName || newRequest.employeeName || 'موظف'}</strong>:</p>
@@ -461,14 +540,14 @@ export async function notifyAllEmployeesPayrollIssued({ state, monthStr }) {
 }
 
 /**
- * Send Immediate Late Check-in Email Alert to Top Management (HQ)
+ * Send Immediate Late Check-in Email Alert to Top Management (HQ) and Employee
  */
 export async function notifyAdminOnLateness({ state, emp, branchName, latenessMinutes, scheduledStart, timeIn, dateStr, suggestedAction, suggestedAmount }) {
   const gmailConfig = state?.orgSettings?.gmailConfig;
-  if (!gmailConfig || !gmailConfig.enabled) return { success: false, reason: 'خدمة البريد غير مفعلة' };
+  if (!gmailConfig || !gmailConfig.enabled || gmailConfig.sendOnLateness === false) return { success: false, reason: 'خدمة البريد غير مفعلة' };
 
-  const targetEmail = gmailConfig.targetAdminEmail || gmailConfig.userEmail;
-  if (!targetEmail) return { success: false, reason: 'لم يتم تحديد بريد الإدارة' };
+  const targetEmail = gmailConfig.targetAdminEmail || gmailConfig.adminEmail || gmailConfig.userEmail;
+  if (!targetEmail && !emp?.email) return { success: false, reason: 'لم يتم تحديد بريد المستلم' };
 
   const empName = emp?.name || 'موظف';
   const empCode = emp?.code ? `(كود: ${emp.code})` : '';
@@ -487,21 +566,17 @@ export async function notifyAdminOnLateness({ state, emp, branchName, latenessMi
         <tr><td style="padding: 6px 0; font-weight: bold;">⏰ موعد الوردية المجدول:</td><td><strong style="color: #1e293b;">${scheduledStart}</strong></td></tr>
         <tr><td style="padding: 6px 0; font-weight: bold;">📸 وقت تسجيل البصمة:</td><td><strong style="color: #dc2626;">${timeIn}</strong></td></tr>
         <tr><td style="padding: 6px 0; font-weight: bold;">⏱️ مدة التأخير:</td><td><span style="background: #fee2e2; color: #dc2626; padding: 2px 8px; border-radius: 6px; font-weight: bold;">${latenessMinutes} دقيقة تأخير</span></td></tr>
-        ${suggestedAction ? `<tr><td style="padding: 6px 0; font-weight: bold;">📜 الإجراء اللائحي المقترح:</td><td><strong style="color: #991b1b;">${suggestedAction} ${suggestedAmount ? `(${suggestedAmount} ج.م)` : ''}</strong></td></tr>` : ''}
+        ${suggestedAction ? `<tr><td style="padding: 6px 0; font-weight: bold;">📜 الإجراء اللائحي:</td><td><strong style="color: #991b1b;">${suggestedAction} ${suggestedAmount ? `(${suggestedAmount} ج.م)` : ''}</strong></td></tr>` : ''}
       </table>
     </div>
 
     <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; margin: 12px 0; font-size: 13px; color: #334155;">
-      💡 <strong>إجراء الإدارة العليا المطلوب:</strong> يرجى الدخول للمنظومة لاختيار أحد الإجراءين:
-      <ul style="margin: 6px 0 0 18px; padding: 0;">
-        <li><strong>⚖️ تطبيق الخصم الجزاء:</strong> لخصم قيمة الجزاء المحددة باللائحة من راتب الموظف.</li>
-        <li><strong>🛡️ عدم تطبيق الخصم (قبول العذر):</strong> لإعفاء الموظف دون خصم أي مبلغ.</li>
-      </ul>
+      💡 <strong>إجراء الإدارة العليا:</strong> يمكن الدخول للمنظومة للاطلاع أو التعديل أو قبول العذر أو تثبيت الجزاء اللائحي المطبق تلقائياً.
     </div>
 
     <p style="text-align: center; margin-top: 20px;">
       <a href="https://pharmacy-time-tracker.vercel.app" style="display: inline-block; background: #0d9488; color: #ffffff; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: bold;">
-        🔗 الدخول للمنظومة واتخاذ القرار اللائحي
+        🔗 الدخول للمنظومة ومراجعة التأخيرات
       </a>
     </p>
   `;
@@ -515,23 +590,73 @@ export async function notifyAdminOnLateness({ state, emp, branchName, latenessMi
     footerText: 'تم توجيه هذا الإشعار التلقائي للإدارة العليا فور رصد التأخير بالبصمة الحية'
   });
 
-  return sendGmailEmail({
-    gmailConfig,
-    recipientEmail: targetEmail,
-    subject: `🚨 تنبيه تأخير: ${empName} (${latenessMinutes} دقيقة) — فرع ${resolvedBranch}`,
-    htmlContent: html
-  });
+  // 1. Dispatch to Admin
+  if (targetEmail) {
+    sendGmailEmail({
+      gmailConfig,
+      recipientEmail: targetEmail,
+      subject: `🚨 تنبيه تأخير: ${empName} (${latenessMinutes} دقيقة) — فرع ${resolvedBranch}`,
+      htmlContent: html
+    }).catch((e) => console.warn('Admin lateness email warning:', e));
+  }
+
+  // 2. Dispatch to Employee (if email exists)
+  if (emp?.email) {
+    const empContent = `
+      <p>عزيزي الموظف <strong>${empName}</strong>،</p>
+      <p>نحيطك علماً بأنه تم تسجيل <strong>بصمة حضور متأخرة</strong> بتاريخ <strong>${dateStr || getRealTodayStr()}</strong> عن موعد ورديتك المقررة بالجدول الشهري:</p>
+      
+      <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 12px; padding: 16px; margin: 16px 0;">
+        <h3 style="margin: 0 0 10px; color: #991b1b; font-size: 16px;">⏱️ تفاصيل التأخير المسجل:</h3>
+        <table style="width: 100%; border-collapse: collapse; font-size: 13.5px;">
+          <tr><td style="padding: 6px 0; font-weight: bold; width: 140px;">🏢 الفرع:</td><td>${resolvedBranch}</td></tr>
+          <tr><td style="padding: 6px 0; font-weight: bold;">⏰ موعد الوردية المجدول:</td><td>${scheduledStart}</td></tr>
+          <tr><td style="padding: 6px 0; font-weight: bold;">📸 وقت تسجيل الحضور:</td><td><strong style="color: #dc2626;">${timeIn}</strong></td></tr>
+          <tr><td style="padding: 6px 0; font-weight: bold;">⏱️ مدة التأخير:</td><td><span style="background: #fee2e2; color: #dc2626; padding: 2px 8px; border-radius: 6px; font-weight: bold;">${latenessMinutes} دقيقة</span></td></tr>
+          ${suggestedAction ? `<tr><td style="padding: 6px 0; font-weight: bold;">📜 الإجراء اللائحي:</td><td><strong style="color: #991b1b;">${suggestedAction} ${suggestedAmount ? `(${suggestedAmount} ج.م)` : ''}</strong></td></tr>` : ''}
+        </table>
+      </div>
+
+      <p style="font-size: 13px; color: #64748b; line-height: 1.6;">
+        يرجى الالتزام التام بمواعيد الحضور الرسمية لضمان انتظام سير العمل بالصيدلية وتفادي تدرج الجزاءات اللائحية المعتمدة. يمكنك متابعة رصيدك وتفاصيل حضورك عبر بوابة الموظف.
+      </p>
+
+      <p style="text-align: center; margin-top: 18px;">
+        <a href="https://pharmacy-time-tracker.vercel.app" style="display: inline-block; background: #0d9488; color: #ffffff; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: bold;">
+          🔗 فتح بوابة الموظف الإلكترونية
+        </a>
+      </p>
+    `;
+
+    const empHtml = buildEmailTemplate({
+      title: `⏰ تنبيه تسجيل تأخير: ${latenessMinutes} دقيقة`,
+      subtitle: `إشعار إداري بتسجيل تأخير عن موعد الوردية`,
+      badgeText: `تأخير ${latenessMinutes} دقيقة`,
+      badgeColor: '#dc2626',
+      bodyContent: empContent,
+      footerText: 'تم توجيه هذا الإشعار تلقائياً من المنظومة فور تسجيل البصمة الحية'
+    });
+
+    sendGmailEmail({
+      gmailConfig,
+      recipientEmail: emp.email,
+      subject: `⏰ تنبيه تأخير عن موعد الوردية: ${latenessMinutes} دقيقة — ${dateStr || getRealTodayStr()}`,
+      htmlContent: empHtml
+    }).catch((e) => console.warn('Employee lateness email warning:', e));
+  }
+
+  return { success: true };
 }
 
 /**
- * Send Immediate Early Exit Email Alert to Top Management (HQ)
+ * Send Immediate Early Exit Email Alert to Top Management (HQ) and Employee
  */
 export async function notifyAdminOnEarlyExit({ state, emp, branchName, earlyMinutes, scheduledEnd, timeOut, dateStr, suggestedAction, suggestedAmount }) {
   const gmailConfig = state?.orgSettings?.gmailConfig;
   if (!gmailConfig || !gmailConfig.enabled) return { success: false, reason: 'خدمة البريد غير مفعلة' };
 
-  const targetEmail = gmailConfig.targetAdminEmail || gmailConfig.userEmail;
-  if (!targetEmail) return { success: false, reason: 'لم يتم تحديد بريد الإدارة' };
+  const targetEmail = gmailConfig.targetAdminEmail || gmailConfig.adminEmail || gmailConfig.userEmail;
+  if (!targetEmail && !emp?.email) return { success: false, reason: 'لم يتم تحديد بريد المستلم' };
 
   const empName = emp?.name || 'موظف';
   const empCode = emp?.code ? `(كود: ${emp.code})` : '';
@@ -549,33 +674,173 @@ export async function notifyAdminOnEarlyExit({ state, emp, branchName, earlyMinu
         <tr><td style="padding: 6px 0; font-weight: bold;">📅 تاريخ اليوم:</td><td>${dateStr || getRealTodayStr()}</td></tr>
         <tr><td style="padding: 6px 0; font-weight: bold;">⏰ موعد نهاية الوردية:</td><td><strong style="color: #1e293b;">${scheduledEnd}</strong></td></tr>
         <tr><td style="padding: 6px 0; font-weight: bold;">📸 وقت تسجيل الانصراف:</td><td><strong style="color: #d97706;">${timeOut}</strong></td></tr>
-        <tr><td style="padding: 6px 0; font-weight: bold;">⏱️ مدة الخروج المبكر:</td><td><span style="background: #fef3c7; color: #b45309; padding: 2px 8px; border-radius: 6px; font-weight: bold;">${earlyMinutes} دقيقة مبكراً</span></td></tr>
-        ${suggestedAction ? `<tr><td style="padding: 6px 0; font-weight: bold;">⚖️ الإجراء اللائحي المقترح:</td><td><strong style="color: #b91c1c;">${suggestedAction} ${suggestedAmount ? `(${fmt(suggestedAmount)} ج.م)` : ''}</strong></td></tr>` : ''}
+        <tr><td style="padding: 6px 0; font-weight: bold;">⏱️ مدة التبكير:</td><td><span style="background: #fef3c7; color: #b45309; padding: 2px 8px; border-radius: 6px; font-weight: bold;">${earlyMinutes} دقيقة مبكراً</span></td></tr>
+        ${suggestedAction ? `<tr><td style="padding: 6px 0; font-weight: bold;">📜 الإجراء اللائحي المقترح:</td><td><strong style="color: #b45309;">${suggestedAction} ${suggestedAmount ? `(${suggestedAmount} ج.م)` : ''}</strong></td></tr>` : ''}
       </table>
     </div>
 
     <p style="text-align: center; margin-top: 20px;">
       <a href="https://pharmacy-time-tracker.vercel.app" style="display: inline-block; background: #0d9488; color: #ffffff; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: bold;">
-        🔗 الدخول للمنظومة (تطبيق الخصم / إعفاء / توجيه إشعار)
+        🔗 الدخول للمنظومة واتخاذ القرار اللائحي
       </a>
     </p>
   `;
 
   const html = buildEmailTemplate({
     title: `⚠️ تنبيه انصراف مبكر: ${empName}`,
-    subtitle: `انصراف قبل موعد انتهاء الوردية المقرر في الجدول الشهري — ${resolvedBranch}`,
-    badgeText: `خروج مبكر ${earlyMinutes} دقيقة`,
+    subtitle: `انصراف قبل موعد الوردية المقرر في الجدول الشهري — ${resolvedBranch}`,
+    badgeText: `انصراف مبكر ${earlyMinutes} دقيقة`,
     badgeColor: '#d97706',
     bodyContent: content,
-    footerText: 'تم توجيه هذا الإشعار التلقائي للإدارة العليا لاتخاذ القرار المناسب'
+    footerText: 'تم توجيه هذا الإشعار التلقائي للإدارة فور رصد البصمة'
   });
 
-  return sendGmailEmail({
-    gmailConfig,
-    recipientEmail: targetEmail,
-    subject: `⚠️ تنبيه انصراف مبكر: ${empName} (${earlyMinutes} دقيقة مبكراً) — فرع ${resolvedBranch}`,
-    htmlContent: html
+  if (targetEmail) {
+    sendGmailEmail({
+      gmailConfig,
+      recipientEmail: targetEmail,
+      subject: `⚠️ تنبيه انصراف مبكر: ${empName} (${earlyMinutes} دقيقة) — فرع ${resolvedBranch}`,
+      htmlContent: html
+    }).catch((e) => console.warn('Admin early exit email warning:', e));
+  }
+
+  return { success: true };
+}
+
+/**
+ * Send Penalty Applied Notification Email (To both Admin and Employee)
+ * Triggers whenever the system applies any penalty: lateness penalty, disciplinary penalty, direct financial deduction, or absence penalty.
+ */
+export async function notifyOnPenaltyApplied({ state, emp, penalty, branchName, source = 'system' }) {
+  const gmailConfig = state?.orgSettings?.gmailConfig;
+  if (!gmailConfig || !gmailConfig.enabled || gmailConfig.sendOnPenalty === false) {
+    return { success: false, reason: 'خدمة بريد الجزاءات غير مفعلة' };
+  }
+
+  const targetAdminEmail = gmailConfig.targetAdminEmail || gmailConfig.adminEmail || gmailConfig.userEmail;
+  const empObj = emp || (state?.employees || []).find((e) => String(e.id) === String(penalty?.employeeId));
+  const empName = empObj?.name || penalty?.employeeName || 'موظف';
+  const empCode = empObj?.code || penalty?.employeeCode || '';
+  const empEmail = empObj?.email || penalty?.employeeEmail;
+  const resolvedBranch = branchName || empObj?.branchName || (penalty?.branchId && state?.branches?.find(b => String(b.id) === String(penalty.branchId))?.name) || 'الفرع الرئيسي';
+
+  const penaltyTitle = penalty?.actionTitle || penalty?.penaltyAction || penalty?.ruleTitle || penalty?.violationTitle || penalty?.title || penalty?.action || 'جزاء تأديبي / خصم مالي';
+  const penaltyReason = penalty?.reason || penalty?.details || penalty?.notes || penalty?.violationTitle || 'تطبيق سياسة لائحة العمل والجزاءات';
+  const penaltyAmount = parseFloat(penalty?.amount || penalty?.penaltyAmount || penalty?.deductionFixedAmount) || 0;
+  const deductionDays = parseFloat(penalty?.deductionDays || penalty?.penaltyDays) || 0;
+  const deductionMinutes = parseFloat(penalty?.deductionMinutes) || 0;
+  const penaltyDate = penalty?.date || penalty?.violationDate || getRealTodayStr();
+
+  const sourceMap = {
+    late_penalty: '⏱️ لائحة جزاءات التأخير والانصراف',
+    disciplinary: '⚖️ لائحة الجزاءات والمخالفات التأديبية',
+    adjustment: '📝 تسوية إدارية / خصم مباشر',
+    absence: '🚫 جزاء غياب بدون إذن',
+    system: '🏛️ نظام إدارة الموارد البشرية واللوائح'
+  };
+  const sourceLabel = sourceMap[source] || sourceMap.system;
+
+  let deductionSummary = [];
+  if (penaltyAmount > 0) deductionSummary.push(`خصم مالي: <strong>${fmt(penaltyAmount)} ج.م</strong>`);
+  if (deductionDays > 0) deductionSummary.push(`خصم مدة: <strong>${deductionDays} يوم</strong>`);
+  if (deductionMinutes > 0) deductionSummary.push(`خصم دقائق: <strong>${deductionMinutes} دقيقة</strong>`);
+  const deductionText = deductionSummary.length > 0 ? deductionSummary.join(' · ') : 'إجراء إداري / لفت نظر / إنذار رسمي';
+
+  // 1. Content for Admin Notification
+  const adminContent = `
+    <p>تم رسمياً <strong>تطبيق وتوثيق جزاء لائحي</strong> على أحد الموظفين بالمنظومة وفقاً للوائح المعتمدة:</p>
+    
+    <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 12px; padding: 16px; margin: 16px 0;">
+      <h3 style="margin: 0 0 10px; color: #991b1b; font-size: 16px;">⚖️ تفاصيل الجزاء المطبق:</h3>
+      <table style="width: 100%; border-collapse: collapse; font-size: 13.5px;">
+        <tr><td style="padding: 6px 0; font-weight: bold; width: 140px;">👤 الموظف:</td><td>${empName} ${empCode ? `(كود: ${empCode})` : ''}</td></tr>
+        <tr><td style="padding: 6px 0; font-weight: bold;">🏢 الفرع:</td><td>${resolvedBranch}</td></tr>
+        <tr><td style="padding: 6px 0; font-weight: bold;">📜 الإجراء والجزاء:</td><td><strong style="color: #dc2626;">${penaltyTitle}</strong></td></tr>
+        <tr><td style="padding: 6px 0; font-weight: bold;">💰 الأثر المالي / الزمني:</td><td>${deductionText}</td></tr>
+        <tr><td style="padding: 6px 0; font-weight: bold;">📅 تاريخ التطبيق:</td><td>${penaltyDate}</td></tr>
+        <tr><td style="padding: 6px 0; font-weight: bold;">🏛️ المرجع واللائحة:</td><td>${sourceLabel}</td></tr>
+      </table>
+      <div style="margin-top: 12px; background: #ffffff; padding: 10px; border-radius: 8px; border: 1px dashed #fca5a5;">
+        <strong style="color: #991b1b; display: block; margin-bottom: 4px;">السبب والمبرر:</strong>
+        <p style="margin: 0; color: #1e293b; font-size: 13.5px; line-height: 1.5;">${penaltyReason}</p>
+      </div>
+    </div>
+
+    <p style="text-align: center; margin-top: 20px;">
+      <a href="https://pharmacy-time-tracker.vercel.app" style="display: inline-block; background: #0d9488; color: #ffffff; text-decoration: none; padding: 10px 22px; border-radius: 8px; font-weight: bold;">
+        🔗 فتح سجل الجزاءات والتسويات بالمنظومة
+      </a>
+    </p>
+  `;
+
+  const adminHtml = buildEmailTemplate({
+    title: `⚖️ إشعار تطبيق جزاء: ${empName}`,
+    subtitle: `تم تطبيق جزاء لائحي وتوثيقه في ملف الموظف — فرع: ${resolvedBranch}`,
+    badgeText: 'تطبيق جزاء لائحي',
+    badgeColor: '#dc2626',
+    bodyContent: adminContent,
+    footerText: 'تم توجيه هذا الإشعار التلقائي للإدارة العليا عند تطبيق الجزاء من قِبل المنظومة'
   });
+
+  // Dispatch to Admin
+  if (targetAdminEmail) {
+    sendGmailEmail({
+      gmailConfig,
+      recipientEmail: targetAdminEmail,
+      subject: `⚖️ إشعار تطبيق جزاء: ${empName} (${penaltyTitle}) — فرع ${resolvedBranch}`,
+      htmlContent: adminHtml
+    }).catch((e) => console.warn('Admin penalty email dispatch error:', e));
+  }
+
+  // Dispatch to Employee (if email exists)
+  if (empEmail) {
+    const empContent = `
+      <p>عزيزي الموظف <strong>${empName}</strong>،</p>
+      <p>نحيطك علماً بأنه تم تطبيق <strong>إجراء لائحي / جزاء تأديبي</strong> في سجلك الوظيفي بتاريخ <strong>${penaltyDate}</strong>:</p>
+
+      <div style="background: #fff5f5; border: 1px solid #fed7d7; border-radius: 12px; padding: 16px; margin: 16px 0;">
+        <h3 style="margin: 0 0 10px; color: #c53030; font-size: 16px;">📋 تفاصيل الإجراء اللائحي:</h3>
+        <table style="width: 100%; border-collapse: collapse; font-size: 13.5px;">
+          <tr><td style="padding: 6px 0; font-weight: bold; width: 140px;">📜 الإجراء المطبق:</td><td><strong style="color: #e53e3e;">${penaltyTitle}</strong></td></tr>
+          <tr><td style="padding: 6px 0; font-weight: bold;">💰 الأثر المالي / الخصم:</td><td>${deductionText}</td></tr>
+          <tr><td style="padding: 6px 0; font-weight: bold;">📅 تاريخ الواقعة:</td><td>${penaltyDate}</td></tr>
+          <tr><td style="padding: 6px 0; font-weight: bold;">🏛️ المرجع:</td><td>${sourceLabel}</td></tr>
+        </table>
+        <div style="margin-top: 12px; background: #ffffff; padding: 10px; border-radius: 8px; border: 1px dashed #feb2b2;">
+          <strong style="color: #9b2c2c; display: block; margin-bottom: 4px;">سبب المخالفة:</strong>
+          <p style="margin: 0; color: #2d3748; font-size: 13.5px; line-height: 1.5;">${penaltyReason}</p>
+        </div>
+      </div>
+
+      <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; margin: 12px 0; font-size: 13px; color: #475569;">
+        ✋ <strong>حق التظلم والاعتراض:</strong> يحق لك تقديم تظلم رسمي مسبب عبر بوابة الموظف الإلكترونية خلال المدة المقررة باللائحة للنظر فيه وإعادة الفحص من قِبل الإدارة العليا.
+      </div>
+
+      <p style="text-align: center; margin-top: 18px;">
+        <a href="https://pharmacy-time-tracker.vercel.app" style="display: inline-block; background: #0d9488; color: #ffffff; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: bold;">
+          🔗 الدخول لبوابة الموظف للاطلاع أو تقديم تظلم
+        </a>
+      </p>
+    `;
+
+    const empHtml = buildEmailTemplate({
+      title: `⚠️ إشعار إداري بتطبيق جزاء: ${penaltyTitle}`,
+      subtitle: `إشعار إداري رسمي موثق في نظام الموارد البشرية`,
+      badgeText: 'إشعار جزاء تأديبي',
+      badgeColor: '#dc2626',
+      bodyContent: empContent,
+      footerText: 'تم توليد هذا الإشعار الإداري الرسمي تلقائياً من نظام إدارة الموارد البشرية'
+    });
+
+    sendGmailEmail({
+      gmailConfig,
+      recipientEmail: empEmail,
+      subject: `⚠️ إشعار إداري: تطبيق جزاء (${penaltyTitle}) — ${penaltyDate}`,
+      htmlContent: empHtml
+    }).catch((e) => console.warn('Employee penalty email dispatch error:', e));
+  }
+
+  return { success: true };
 }
 
 /**
@@ -619,7 +884,7 @@ export async function notifyEmployeeEarlyExitWarning({ state, emp, branchName, e
 
   return sendGmailEmail({
     gmailConfig,
-    recipientEmail: targetEmail,
+    recipientEmail: empEmail,
     subject: `⚠️ تنبيه ولفت نظر: انصراف مبكر عن موعد الوردية — ${emp.name}`,
     htmlContent: html
   });
@@ -766,7 +1031,7 @@ export async function sendBiometricRegistrationRequestEmail({
   drivePhotoUrl,
   targetEmail: customTargetEmail
 }) {
-  const targetEmail = customTargetEmail || gmailConfig?.adminEmail;
+  const targetEmail = customTargetEmail || gmailConfig?.targetAdminEmail || gmailConfig?.adminEmail || gmailConfig?.userEmail;
   if (!targetEmail) return { success: false, error: 'بريد الإدارة غير محدد' };
 
   const bioLabel = biometricType === 'hand' ? 'بصمة اليد الذكية' : 'بصمة الوجه الذكية';
@@ -825,7 +1090,7 @@ export async function sendBiometricResetRequestEmail({
   dateStr,
   targetEmail: customTargetEmail
 }) {
-  const targetEmail = customTargetEmail || gmailConfig?.adminEmail;
+  const targetEmail = customTargetEmail || gmailConfig?.targetAdminEmail || gmailConfig?.adminEmail || gmailConfig?.userEmail;
   if (!targetEmail) return { success: false, error: 'بريد الإدارة غير محدد' };
 
   const content = `

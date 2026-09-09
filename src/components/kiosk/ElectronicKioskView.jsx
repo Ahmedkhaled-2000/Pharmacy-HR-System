@@ -48,6 +48,24 @@ export default function ElectronicKioskView({
     return () => clearTimeout(timer);
   }, [kioskAlertModal]);
 
+  // Keyboard shortcut (Alt+Shift+K / Ctrl+Alt+K) to return to main ERP
+  useEffect(() => {
+    const handleKioskKey = (e) => {
+      const isAltShift = e.altKey && e.shiftKey;
+      const isCtrlAlt = e.ctrlKey && e.altKey;
+      const keyStr = (e.key || '').toLowerCase();
+      const isKeyK = e.code === 'KeyK' || keyStr === 'k' || keyStr === 'ن' || keyStr === '،';
+      
+      if ((isAltShift || isCtrlAlt) && isKeyK) {
+        e.preventDefault();
+        e.stopPropagation();
+        window.location.href = '/';
+      }
+    };
+    window.addEventListener('keydown', handleKioskKey, true);
+    return () => window.removeEventListener('keydown', handleKioskKey, true);
+  }, []);
+
   const [pendingDirectiveModal, setPendingDirectiveModal] = useState(null);
   const [pendingDirectivesQueue, setPendingDirectivesQueue] = useState([]);
   
@@ -793,7 +811,7 @@ export default function ElectronicKioskView({
       }
 
       const gmailConfig = orgSettings?.gmailConfig || state?.orgSettings?.gmailConfig;
-      if (gmailConfig && gmailConfig.serviceUrl && (gmailConfig.notifyOnAttendanceAnomaly !== false || gmailConfig.notifyOnNewRequest !== false)) {
+      if (gmailConfig && (gmailConfig.enabled || gmailConfig.serviceUrl) && (gmailConfig.notifyOnAttendanceAnomaly !== false || gmailConfig.notifyOnNewRequest !== false)) {
         sendBiometricAttendanceEmail({
           gmailConfig,
           empName: currentEmp.name,
@@ -930,6 +948,40 @@ export default function ElectronicKioskView({
             boxShadow: '0 20px 40px -15px rgba(0,0,0,0.25)'
           }}
         >
+          {/* Top Return / Status Bar */}
+          <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', paddingBottom: '6px', borderBottom: '1px solid rgba(15, 23, 42, 0.08)' }}>
+            <button
+              type="button"
+              onClick={() => { window.location.href = '/'; }}
+              title="العودة للنظام الرئيسي (Alt + Shift + K)"
+              style={{
+                background: 'rgba(15, 23, 42, 0.05)',
+                border: '1px solid rgba(15, 23, 42, 0.12)',
+                borderRadius: '8px',
+                padding: '4px 10px',
+                fontSize: '0.78rem',
+                fontWeight: 700,
+                color: '#334155',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(15, 23, 42, 0.1)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(15, 23, 42, 0.05)'; }}
+            >
+              <span>🏠 العودة للنظام</span>
+              <kbd style={{ background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '4px', padding: '1px 5px', fontSize: '0.68rem', color: '#64748b' }}>
+                Alt+Shift+K
+              </kbd>
+            </button>
+
+            <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 700 }}>
+              {isGeneralKioskLink ? '⚡ كشك البصمة العام' : '🏢 كشك فرع مخصص'}
+            </span>
+          </div>
+
           {orgSettings?.logoUrl && (
             <div style={{ marginBottom: '6px' }}>
               <img

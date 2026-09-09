@@ -143,6 +143,8 @@ export default function SidebarLayout({
                       window.open(window.location.origin + '/accounts', '_blank');
                     } else if (item.openInNewTab || item.id === 'pharmacy-archive') {
                       window.open(window.location.origin + '/archive', '_blank');
+                    } else if (item.id === 'kiosk') {
+                      window.open(window.location.origin + '/kiosk', '_blank');
                     } else {
                       setActiveTab(item.id);
                     }

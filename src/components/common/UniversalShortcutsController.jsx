@@ -483,17 +483,54 @@ export default function UniversalShortcutsController() {
         return;
       }
 
-      // ── 13. Kiosk Mode (Alt+Shift+K) ───────────────────────────────────────────
+      // ── 13. Kiosk Mode (Alt+Shift+K / Ctrl+Alt+K) ──────────────────────────────
       const kioskDef = getDef('kioskMode');
+      const isKioskKey =
+        normKey === 'k' ||
+        e.code === 'KeyK' ||
+        e.key === 'k' ||
+        e.key === 'K' ||
+        e.key === 'ن' ||
+        e.key === '،';
+
       const isKiosk =
         (kioskDef && matchesShortcutEvent(kioskDef, e)) ||
-        (isAlt && isShift && normKey === 'k');
+        (isAlt && isShift && isKioskKey) ||
+        (isCtrl && isAlt && isKioskKey);
 
       if (isKiosk) {
         consumeEvent();
-        window.dispatchEvent(
-          new CustomEvent('app:navigate-tab', { detail: { targetTab: 'kiosk' } })
-        );
+
+        // If already in Kiosk mode, toggle back to main system
+        if (window.location.pathname.startsWith('/kiosk')) {
+          uiRef.current?.showToast?.('🏠 جاري العودة إلى المنظومة الرئيسية...');
+          window.location.href = '/';
+          return;
+        }
+
+        uiRef.current?.showToast?.('⚡ جاري فتح كشك البصمة في صفحة جديدة...');
+
+        const kioskUrl = window.location.origin + '/kiosk';
+        let win = null;
+        try {
+          win = window.open(kioskUrl, '_blank');
+        } catch {}
+
+        if (!win || win.closed || typeof win.closed === 'undefined') {
+          try {
+            const link = document.createElement('a');
+            link.href = kioskUrl;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            document.body.appendChild(link);
+            link.click();
+            setTimeout(() => {
+              if (link.parentNode) link.parentNode.removeChild(link);
+            }, 100);
+          } catch {
+            window.location.href = kioskUrl;
+          }
+        }
         return;
       }
 

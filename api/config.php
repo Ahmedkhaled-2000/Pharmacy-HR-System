@@ -384,6 +384,55 @@ function mergeServerState(array $existing, array $incoming): array
         if (!empty($eLocks) || !empty($iLocks)) {
             $mergedOrg['ownerModificationLocks'] = array_merge($eLocks, $iLocks);
         }
+
+        // الحفاظ على بيانات دخول المالك المخصصة من التراجع للافتراضي
+        if (!empty($iOrg['ownerUsername']) && $iOrg['ownerUsername'] !== 'owner') {
+            $mergedOrg['ownerUsername'] = $iOrg['ownerUsername'];
+        } elseif (!empty($eOrg['ownerUsername']) && $eOrg['ownerUsername'] !== 'owner') {
+            $mergedOrg['ownerUsername'] = $eOrg['ownerUsername'];
+        }
+        if (!empty($iOrg['ownerPassword']) && $iOrg['ownerPassword'] !== 'owner123') {
+            $mergedOrg['ownerPassword'] = $iOrg['ownerPassword'];
+        } elseif (!empty($eOrg['ownerPassword']) && $eOrg['ownerPassword'] !== 'owner123') {
+            $mergedOrg['ownerPassword'] = $eOrg['ownerPassword'];
+        }
+
+        // الحفاظ الصارم على إعدادات بريد Gmail لضمان عدم مسح بيانات الربط
+        if (isset($iOrg['gmailConfig']) && is_array($iOrg['gmailConfig'])) {
+            $eGmail = is_array($eOrg['gmailConfig'] ?? null) ? $eOrg['gmailConfig'] : [];
+            $mergedGmail = array_merge($eGmail, $iOrg['gmailConfig']);
+            if (empty($mergedGmail['userEmail']) && !empty($eGmail['userEmail'])) {
+                $mergedGmail['userEmail'] = $eGmail['userEmail'];
+            }
+            if (empty($mergedGmail['appPassword']) && !empty($eGmail['appPassword'])) {
+                $mergedGmail['appPassword'] = $eGmail['appPassword'];
+            }
+            if (empty($mergedGmail['targetAdminEmail']) && !empty($eGmail['targetAdminEmail'])) {
+                $mergedGmail['targetAdminEmail'] = $eGmail['targetAdminEmail'];
+            }
+            if (empty($mergedGmail['serviceUrl']) && !empty($eGmail['serviceUrl'])) {
+                $mergedGmail['serviceUrl'] = $eGmail['serviceUrl'];
+            }
+            $mergedOrg['gmailConfig'] = $mergedGmail;
+        } elseif (isset($eOrg['gmailConfig']) && is_array($eOrg['gmailConfig'])) {
+            $mergedOrg['gmailConfig'] = $eOrg['gmailConfig'];
+        }
+
+        // الحفاظ الصارم على إعدادات Google Drive
+        if (isset($iOrg['driveConfig']) && is_array($iOrg['driveConfig'])) {
+            $eDrive = is_array($eOrg['driveConfig'] ?? null) ? $eOrg['driveConfig'] : [];
+            $mergedDrive = array_merge($eDrive, $iOrg['driveConfig']);
+            if (empty($mergedDrive['serviceUrl']) && !empty($eDrive['serviceUrl'])) {
+                $mergedDrive['serviceUrl'] = $eDrive['serviceUrl'];
+            }
+            if (empty($mergedDrive['parentFolderId']) && !empty($eDrive['parentFolderId'])) {
+                $mergedDrive['parentFolderId'] = $eDrive['parentFolderId'];
+            }
+            $mergedOrg['driveConfig'] = $mergedDrive;
+        } elseif (isset($eOrg['driveConfig']) && is_array($eOrg['driveConfig'])) {
+            $mergedOrg['driveConfig'] = $eOrg['driveConfig'];
+        }
+
         $merged['orgSettings'] = $mergedOrg;
     }
 

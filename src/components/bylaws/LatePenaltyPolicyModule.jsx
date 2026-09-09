@@ -11,6 +11,7 @@ import {
 import { fmt, isEmployeeActive } from '../../utils/formatters';
 import { getBranchIdentifiers, isEmployeeInBranch } from '../../utils/disciplinaryPenaltyEngine';
 import { useUI } from '../../context/UIContext';
+import { notifyOnPenaltyApplied } from '../../utils/gmailService';
 
 export default function LatePenaltyPolicyModule({
   state,
@@ -316,6 +317,22 @@ export default function LatePenaltyPolicyModule({
 
       setSelectedIncidentForEdit(null);
       showToast?.('✅ تم حفظ التعديل والاستثناء اللائحي بنجاح');
+
+      if (overrideStatus !== 'cancelled' && overrideAction !== 'grace' && (penaltyAmt > 0 || parseFloat(overrideDeductionMinutes) > 0)) {
+        notifyOnPenaltyApplied?.({
+          state: updatedState,
+          emp,
+          penalty: {
+            actionTitle: overrideAction || 'تعديل جزاء تأخير',
+            amount: penaltyAmt,
+            deductionMinutes: parseFloat(overrideDeductionMinutes) || 0,
+            date: selectedIncidentForEdit?.date || new Date().toISOString().slice(0, 10),
+            reason: `تعديل واستثناء إداري لجزاء التأخير: ${overrideReason.trim() || 'قرار إداري'}`
+          },
+          branchName: emp?.branchName,
+          source: 'late_penalty'
+        })?.catch?.(() => {});
+      }
     };
 
     if (executeWithOwnerGuard) {

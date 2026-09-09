@@ -724,6 +724,14 @@ export default function DesktopLayout({
           desc: 'إدارة وتدريب بصمة الوجه واليد بالذكاء الاصطناعي'
         },
         {
+          id: 'kiosk',
+          targetTab: null,
+          label: 'شاشة كشك البصمة السريعة (Alt+Shift+K)',
+          icon: '📱',
+          desc: 'الانتقال المباشر لشاشة تسجيل البصمة والحضور الذاتي للموظفين',
+          openInNewTab: true
+        },
+        {
           id: 'employees:roster',
           targetTab: 'employees',
           targetSubTab: 'roster',
@@ -1359,15 +1367,43 @@ export default function DesktopLayout({
   }, [focusedTopMenuIndex, currentMenuItems]);
 
   // Listen to system-wide navigation shortcuts (Alt+1 .. Alt+9, Alt+0) & dropdown close requests
+  const openKioskInNewTab = () => {
+    const kioskUrl = window.location.origin + '/kiosk';
+    let win = null;
+    try {
+      win = window.open(kioskUrl, '_blank');
+    } catch {}
+
+    if (!win || win.closed || typeof win.closed === 'undefined') {
+      try {
+        const link = document.createElement('a');
+        link.href = kioskUrl;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        document.body.appendChild(link);
+        link.click();
+        setTimeout(() => {
+          if (link.parentNode) link.parentNode.removeChild(link);
+        }, 100);
+      } catch {
+        window.location.href = kioskUrl;
+      }
+    }
+  };
+
+  // Listen to system-wide navigation shortcuts (Alt+1 .. Alt+9, Alt+0) & dropdown close requests
   useEffect(() => {
     const handleNavigateTab = (e) => {
       const targetTab = e.detail?.targetTab;
       const targetSubTab = e.detail?.targetSubTab;
-      if (targetTab) {
+      if (targetTab || e.detail?.id === 'kiosk') {
         if (targetTab === 'accounts') {
           window.open(window.location.origin + '/accounts', '_blank');
         } else if (targetTab === 'pharmacy-archive') {
           window.open(window.location.origin + '/archive', '_blank');
+        } else if (targetTab === 'kiosk' || targetTab === 'kioskMode' || e.detail?.id === 'kiosk') {
+          openKioskInNewTab();
+          return;
         } else {
           setActiveTab(targetTab);
           if (targetSubTab && setActiveSubTab) {
@@ -1411,6 +1447,8 @@ if (menu.isSingle) {
     window.open(window.location.origin + '/accounts', '_blank');
   } else if (menu.openInNewTab || menu.targetTab === 'pharmacy-archive') {
     window.open(window.location.origin + '/archive', '_blank');
+  } else if (menu.targetTab === 'kiosk' || menu.id === 'kiosk') {
+    openKioskInNewTab();
   } else {
     setActiveTab(menu.targetTab);
   }
@@ -1425,6 +1463,12 @@ if (menu.isSingle) {
 const handleSubItemClick = (subItem) => {
 if (subItem.targetTab === 'accounts' || subItem.navigateToAccounts || subItem.id === 'accounts') {
   window.open(window.location.origin + '/accounts', '_blank');
+  setOpenDropdown(null);
+  setHoveredFlyoutId(null);
+  return;
+}
+if (subItem.targetTab === 'kiosk' || subItem.id === 'kiosk') {
+  openKioskInNewTab();
   setOpenDropdown(null);
   setHoveredFlyoutId(null);
   return;

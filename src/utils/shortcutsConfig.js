@@ -253,7 +253,9 @@ export const DEFAULT_SHORTCUTS = [
     desc: 'الانتقال المباشر لشاشة تسجيل البصمة والحضور الذاتي للموظفين',
     category: 'nav',
     key: 'k',
-    modifiers: ['Alt', 'Shift']
+    modifiers: ['Alt', 'Shift'],
+    fallbackKey: 'k',
+    fallbackModifiers: ['Ctrl', 'Alt']
   }
 ];
 
@@ -361,6 +363,7 @@ export function normalizeKeyFromEvent(e) {
     'ه': 'i',
     'ت': 'j',
     'ن': 'k',
+    '،': 'k', // Shift + ن on Arabic keyboard
     'م': 'l',
     'ة': 'm',
     'ى': 'n',

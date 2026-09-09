@@ -8,6 +8,7 @@ import {
   isBranchManagerEmployee
 } from '../../utils/disciplinaryPenaltyEngine';
 import { getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
+import { notifyAdminOnNewRequest, notifyOnPenaltyApplied } from '../../utils/gmailService';
 
 export default function DisciplinaryViolationModal({
   isOpen,
@@ -471,8 +472,23 @@ export default function DisciplinaryViolationModal({
 
       if (isAdmin) {
         showToast?.(`⚖️ تم اعتماد وتطبيق الجزاء التأديبي بنجاح (${effectiveActionName})`);
+        notifyOnPenaltyApplied?.({
+          state: updatedState,
+          emp: selectedEmp,
+          penalty: newViolationRequest,
+          branchName: currentBranch?.name || selectedEmp?.branchName,
+          source: 'disciplinary'
+        })?.catch?.(() => {});
       } else {
         showToast?.('📤 تم إرسال المخالفة التأديبية بنجاح إلى الإدارة العليا للاعتماد والتطبيق');
+        try {
+          notifyAdminOnNewRequest?.({
+            state: updatedState,
+            newRequest: newViolationRequest,
+            empName: selectedEmp?.name,
+            branchName: currentBranch?.name
+          })?.catch?.(() => {});
+        } catch {}
       }
 
       if (onViolationSaved) onViolationSaved(newViolationRequest);

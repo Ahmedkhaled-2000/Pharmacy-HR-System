@@ -261,7 +261,11 @@ export default function EmployeeShiftSwapModule({
 
     if (action === 'accept' && targetSwapReq) {
       try {
-        notifyAdminOnNewRequest?.({ state: updatedState, newRequest: targetSwapReq, empName: emp?.name })?.catch?.(() => {});
+        notifyAdminOnNewRequest?.({
+          state: updatedState,
+          newRequest: { ...targetSwapReq, status: 'pending_admin', peerApproved: true, acceptedByPeer: emp?.name },
+          empName: targetSwapReq?.requesterEmpName || emp?.name
+        })?.catch?.(() => {});
       } catch {}
     }
   };

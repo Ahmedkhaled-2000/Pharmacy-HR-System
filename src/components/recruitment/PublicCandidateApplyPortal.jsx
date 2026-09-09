@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { compressImage } from '../../utils/imageCompressor';
 import { DEFAULT_JOBS, getJobsList, DEFAULT_DEPARTMENTS, getDepartmentsList } from '../../utils/jobsHelper';
 import { DEFAULT_VACANCIES, generateApplicationCode, APPLICATION_STATUSES } from '../../utils/recruitmentHelper';
+import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 
 export default function PublicCandidateApplyPortal({
   state,
@@ -281,6 +282,21 @@ export default function PublicCandidateApplyPortal({
           console.warn('[CareersPortal] Background sync warning:', err);
         });
       }
+
+      try {
+        notifyAdminOnNewRequest?.({
+          state: updatedState,
+          newRequest: {
+            type: 'recruitment',
+            employeeName: newApp.name,
+            subject: `طلب توظيف جديد: ${newApp.targetJobTitle || 'متقدم'} - قسم ${newApp.department || 'عام'}`,
+            category: newApp.department,
+            reason: `كود المتقدم: ${newApp.code} · الهاتف: ${newApp.phones?.[0]?.number || '—'}`,
+            details: `المؤهل: ${newApp.qualification || '—'} · سنوات الخبرة: ${newApp.experienceYears || 0} سنة · المدينة: ${newApp.city || '—'}`
+          },
+          empName: newApp.name
+        })?.catch?.(() => {});
+      } catch {}
     } catch (err) {
       console.error('Error submitting application:', err);
       showToast?.('حدث خطأ أثناء إرسال الطلب، يرجى المحاولة مرة أخرى');

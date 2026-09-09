@@ -13,6 +13,7 @@ import { computeLatenessFinancialAmount, isApprovedPermissionForDate } from '../
 import { getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 import { useUI } from '../../context/UIContext';
 import DisciplinaryViolationModal from './DisciplinaryViolationModal';
+import { notifyAdminOnNewRequest, notifyOnPenaltyApplied } from '../../utils/gmailService';
 
 export function formatCategoryResetPeriod(cat) {
   if (!cat) return '—';
@@ -630,6 +631,20 @@ export default function DisciplinaryPenaltiesTab({
       if (setState) setState(updatedState);
       if (saveState) await saveState(updatedState);
       showToast?.('✅ تم اعتماد وتطبيق الجزاء التأديبي وتحديث حالة الموظف بنجاح');
+
+      const empObj = (state.employees || []).find((e) => String(e.id) === String(pen.employeeId));
+      notifyOnPenaltyApplied?.({
+        state: updatedState,
+        emp: empObj,
+        penalty: {
+          ...pen,
+          amount: amount,
+          actionTitle: pen.actionTitle || 'جزاء تأديبي معتمد',
+          reason: pen.ruleTitle || pen.reason || pen.details || 'مخالفة تأديبية لائحية'
+        },
+        branchName: pen.branchName || empObj?.branchName,
+        source: 'disciplinary'
+      })?.catch?.(() => {});
     };
 
     if (executeWithOwnerGuard) {
@@ -932,6 +947,15 @@ export default function DisciplinaryPenaltiesTab({
     if (saveState) {
       saveState(updatedState).catch(err => console.error('Background save error on objection submit:', err));
     }
+
+    try {
+      notifyAdminOnNewRequest?.({
+        state: updatedState,
+        newRequest: objReq,
+        empName: objectionTargetPen?.employeeName,
+        branchName: objectionTargetPen?.branchName
+      })?.catch?.(() => {});
+    } catch {}
   };
 
   // ── Admin Objection Handlers ──

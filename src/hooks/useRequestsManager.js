@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import {
   createRequestDecisionNotification
 } from '../utils/notificationEngine';
+import { notifyOnPenaltyApplied } from '../utils/gmailService';
 import { applyApprovedPermissionsToShifts } from '../utils/latePenaltyEngine';
 import { applyShiftSwapToRosters } from '../utils/rosterEngine';
 import { normalizeSchedule } from '../components/roster/RosterModule';
@@ -684,6 +685,25 @@ export function useRequestsManager() {
       showToast('✅ تمت الموافقة على الطلب بنجاح');
       if (saveState) {
         saveState(updatedState).catch(err => console.error('Background save error:', err));
+      }
+
+      // إشعار فوري عبر Gmail بتطبيق الجزاء / الخصم المعتمد
+      if (target.type === 'penalty' || target.type === 'early_exit' || target.type === 'disciplinary_penalty' || target.type === 'violation' || String(target.id || '').startsWith('disc_')) {
+        const targetEmp = (state.employees || []).find((e) => e && String(e.id) === String(target.employeeId));
+        notifyOnPenaltyApplied({
+          state: updatedState,
+          emp: targetEmp,
+          penalty: {
+            ...target,
+            actionTitle: target.actionTitle || target.penaltyAction || 'جزاء تأديبي معتمد',
+            amount: parseFloat(target.amount || target.penaltyAmount) || 0,
+            deductionDays: parseFloat(target.deductionDays || target.penaltyDays || (target.impactType === 'deduction_days' ? target.impactVal : 0)) || 0,
+            date: target.date || target.startDate || new Date().toISOString().slice(0, 10),
+            reason: target.ruleTitle || target.violationTitle || target.reason || target.details || 'تطبيق سياسة لائحة العمل والجزاءات'
+          },
+          branchName: target.branchName || targetEmp?.branchName,
+          source: target.type === 'early_exit' ? 'late_penalty' : 'disciplinary'
+        }).catch((e) => console.warn('Penalty email dispatch error:', e));
       }
     };
 

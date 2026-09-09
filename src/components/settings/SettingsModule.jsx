@@ -95,10 +95,33 @@ export default function SettingsModule({
   const [ownerUnlockPass, setOwnerUnlockPass] = useState('');
   const [ownerUnlockError, setOwnerUnlockError] = useState('');
 
-  const [ownerUsernameInput, setOwnerUsernameInput] = useState(orgSettings.ownerUsername || 'owner');
-  const [ownerPasswordInput, setOwnerPasswordInput] = useState(orgSettings.ownerPassword || 'owner123');
-  const [ownerConfirmPasswordInput, setOwnerConfirmPasswordInput] = useState(orgSettings.ownerPassword || 'owner123');
+  const getSavedOwnerCreds = () => {
+    let savedUser = '';
+    let savedPass = '';
+    try {
+      savedUser = localStorage.getItem('pharmacy_owner_username') || '';
+      savedPass = localStorage.getItem('pharmacy_owner_password') || '';
+    } catch {}
+    return {
+      username: state?.orgSettings?.ownerUsername || orgSettings.ownerUsername || savedUser || 'owner',
+      password: state?.orgSettings?.ownerPassword || orgSettings.ownerPassword || savedPass || 'owner123'
+    };
+  };
+
+  const initialOwnerCreds = getSavedOwnerCreds();
+  const [ownerUsernameInput, setOwnerUsernameInput] = useState(initialOwnerCreds.username);
+  const [ownerPasswordInput, setOwnerPasswordInput] = useState(initialOwnerCreds.password);
+  const [ownerConfirmPasswordInput, setOwnerConfirmPasswordInput] = useState(initialOwnerCreds.password);
   const [showOwnerPasswordText, setShowOwnerPasswordText] = useState(false);
+
+  useEffect(() => {
+    const creds = getSavedOwnerCreds();
+    if (creds.username) setOwnerUsernameInput(creds.username);
+    if (creds.password) {
+      setOwnerPasswordInput(creds.password);
+      setOwnerConfirmPasswordInput(creds.password);
+    }
+  }, [state?.orgSettings?.ownerUsername, state?.orgSettings?.ownerPassword]);
 
   // Accounts System Credentials (Managed by Owner)
   const [accountsUsernameInput, setAccountsUsernameInput] = useState(orgSettings.accountsUsername || 'accounts');
@@ -195,18 +218,21 @@ export default function SettingsModule({
   const handleUnlockOwnerTab = (e) => {
     e.preventDefault();
     setOwnerUnlockError('');
-    const validOwnerUser = String(orgSettings.ownerUsername || state?.orgSettings?.ownerUsername || 'owner').trim().toLowerCase();
-    const validOwnerPass = String(orgSettings.ownerPassword || state?.orgSettings?.ownerPassword || 'owner123').trim();
+    let savedUser = '';
+    let savedPass = '';
+    try {
+      savedUser = localStorage.getItem('pharmacy_owner_username') || '';
+      savedPass = localStorage.getItem('pharmacy_owner_password') || '';
+    } catch {}
+    const validOwnerUser = String(state?.orgSettings?.ownerUsername || orgSettings.ownerUsername || savedUser || 'owner').trim().toLowerCase();
+    const validOwnerPass = String(state?.orgSettings?.ownerPassword || orgSettings.ownerPassword || savedPass || 'owner123').trim();
 
     const inputUser = ownerUnlockUser.trim().toLowerCase();
     const inputPass = ownerUnlockPass.trim();
 
-    // التحقق من بيانات المالك
-    const isUserValid = (inputUser === validOwnerUser) || 
-      (validOwnerUser === 'owner' && (inputUser === 'المالك' || inputUser === 'مالك' || inputUser === 'owner'));
-    const isPassValid = (inputPass === validOwnerPass) || 
-      (inputPass === 'owner123') || 
-      (inputPass === '123' && (validOwnerPass === 'owner123' || validOwnerPass === '123'));
+    // التحقق الصارم من يوزر وباسورد المالك المحفوظين فقط دون أي تساهل
+    const isUserValid = inputUser === validOwnerUser;
+    const isPassValid = inputPass === validOwnerPass;
 
     if (isUserValid && isPassValid) {
       // فتح شاشة تحكم المالك مع البقاء التام على جلسة المستخدم الحالية (كالآدمن) دون تحويل الدور
@@ -225,11 +251,13 @@ export default function SettingsModule({
 
   const handleSaveOwnerCredentials = async (e) => {
     e.preventDefault();
-    if (!ownerUsernameInput.trim()) {
+    const cleanUser = ownerUsernameInput.trim().toLowerCase();
+    const cleanPass = ownerPasswordInput.trim();
+    if (!cleanUser) {
       showToast?.('⚠️ يرجى إدخال اسم مستخدم المالك');
       return;
     }
-    if (!ownerPasswordInput.trim()) {
+    if (!cleanPass) {
       showToast?.('⚠️ يرجى إدخال كلمة مرور المالك');
       return;
     }
@@ -238,13 +266,19 @@ export default function SettingsModule({
       return;
     }
 
+    try {
+      localStorage.setItem('pharmacy_owner_username', cleanUser);
+      localStorage.setItem('pharmacy_owner_password', cleanPass);
+    } catch {}
+
+    const nowIso = new Date().toISOString();
     const updatedOrgSettings = {
       ...(state.orgSettings || {}),
-      ownerUsername: ownerUsernameInput.trim().toLowerCase(),
-      ownerPassword: ownerPasswordInput.trim(),
-      updatedAt: Date.now()
+      ownerUsername: cleanUser,
+      ownerPassword: cleanPass,
+      updatedAt: nowIso
     };
-    const updatedState = { ...state, orgSettings: updatedOrgSettings };
+    const updatedState = { ...state, orgSettings: updatedOrgSettings, updatedAt: nowIso };
     setState(updatedState);
     if (saveState) await saveState(updatedState);
     showToast?.('👑 تم حفظ وتحديث بيانات دخول المالك بنجاح');

@@ -182,6 +182,13 @@ export default function AppRoutes() {
     };
   }, [authRole]);
 
+  // Auto-heal activeNavTab if it was previously set to 'kiosk'
+  useEffect(() => {
+    if (activeNavTab === 'kiosk') {
+      setActiveNavTab('dashboard');
+    }
+  }, [activeNavTab, setActiveNavTab]);
+
   // Guarantee null-safe arrays for all child components and modules
   const sanitizedState = useMemo(() => {
     if (!state) return state;
@@ -369,17 +376,20 @@ export default function AppRoutes() {
     }
 
     const orgSettings = state?.orgSettings || {};
-    const ownerUser = String(orgSettings.ownerUsername || 'owner').trim().toLowerCase();
-    const ownerPass = String(orgSettings.ownerPassword || 'owner123').trim();
+    let savedOwnerUser = '';
+    let savedOwnerPass = '';
+    try {
+      savedOwnerUser = localStorage.getItem('pharmacy_owner_username') || '';
+      savedOwnerPass = localStorage.getItem('pharmacy_owner_password') || '';
+    } catch {}
+    const ownerUser = String(orgSettings.ownerUsername || savedOwnerUser || 'owner').trim().toLowerCase();
+    const ownerPass = String(orgSettings.ownerPassword || savedOwnerPass || 'owner123').trim();
     const adminUser = String(orgSettings.adminUsername || orgSettings.adminUser || 'admin').trim().toLowerCase();
     const adminPass = String(orgSettings.adminPassword || orgSettings.adminPass || '123').trim();
 
-    // 1. Check Owner (يوزر المالك) - صلاحيات كاملة بدون أقفال
-    const isOwnerUser = (cleanUser === ownerUser) || 
-      (cleanUser === 'owner' || cleanUser === 'المالك' || cleanUser === 'مالك');
-    const isOwnerPass = (cleanPass === ownerPass) || 
-      (cleanPass === 'owner123') || 
-      (cleanPass === '123' && (ownerPass === 'owner123' || ownerPass === '123'));
+    // 1. Check Owner (يوزر المالك) - التحقق الصارم من اليوزر والباسورد المحفوظ للمالك فقط
+    const isOwnerUser = cleanUser === ownerUser;
+    const isOwnerPass = cleanPass === ownerPass;
 
     if (isOwnerUser && isOwnerPass) {
       handleUnifiedLogin({ role: 'owner', redirectTab: 'dashboard' });
@@ -1191,6 +1201,83 @@ export default function AppRoutes() {
                   </div>
                 )}
 
+                {/* 20. Fingerprint Kiosk Mode System */}
+                {activeNavTab === 'kiosk' && (
+                  <div style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    minHeight: '65vh',
+                    padding: '40px 20px',
+                    textAlign: 'center',
+                    background: 'var(--surface, #ffffff)',
+                    borderRadius: '16px',
+                    border: '1px solid var(--border, #e2e8f0)',
+                    boxShadow: '0 4px 20px rgba(0,0,0,0.05)',
+                    maxWidth: '680px',
+                    margin: '30px auto',
+                  }}>
+                    <div style={{
+                      width: '64px',
+                      height: '64px',
+                      borderRadius: '16px',
+                      background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '32px',
+                      marginBottom: '16px',
+                      boxShadow: '0 8px 16px rgba(16, 185, 129, 0.25)',
+                    }}>
+                      📱
+                    </div>
+                    <h2 style={{ fontSize: '20px', fontWeight: '900', color: 'var(--text, #0f172a)', margin: '0 0 8px' }}>
+                      شاشة كشك البصمة السريعة (Kiosk Mode)
+                    </h2>
+                    <p style={{ fontSize: '13px', color: 'var(--muted, #64748b)', maxWidth: '480px', lineHeight: '1.6', margin: '0 0 20px' }}>
+                      تعمل شاشة كشك البصمة في صفحة مستقلة كاملة مخصصة للموظفين لتسجيل الحضور والانصراف بالوجه واليد، مع بقاء لوحة تحكم الإدارة قيد العمل في صفحتك الحالية دون مقاطعة.
+                    </p>
+                    <div style={{ display: 'flex', gap: '10px' }}>
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={() => {
+                          const link = document.createElement('a');
+                          link.href = window.location.origin + '/kiosk';
+                          link.target = '_blank';
+                          link.rel = 'noopener noreferrer';
+                          document.body.appendChild(link);
+                          link.click();
+                          document.body.removeChild(link);
+                          setActiveNavTab('dashboard');
+                        }}
+                        style={{
+                          padding: '10px 24px',
+                          fontSize: '14px',
+                          fontWeight: '800',
+                          borderRadius: '10px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          background: '#10b981',
+                          borderColor: '#059669',
+                        }}
+                      >
+                        🚀 فتح كشك البصمة في صفحة جديدة ↗
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => setActiveNavTab('dashboard')}
+                        style={{ padding: '10px 18px', fontSize: '13px', borderRadius: '10px' }}
+                      >
+                        العودة للوحة التحكم
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Fallback for Unknown Tab */}
                 {![
                   'dashboard',
@@ -1218,7 +1305,8 @@ export default function AppRoutes() {
                   'notifications',
                   'approval-rules',
                   'approvals',
-                  'resignation'
+                  'resignation',
+                  'kiosk'
                 ].includes(activeNavTab) && (
                   <div style={{
                     background: 'var(--surface)',

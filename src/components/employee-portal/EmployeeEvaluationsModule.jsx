@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { getRealTodayStr } from '../../utils/timeEngine';
+import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 
 export default function EmployeeEvaluationsModule({
   emp,
@@ -122,6 +123,24 @@ export default function EmployeeEvaluationsModule({
         ? 'تمت الموافقة على التقييم بنجاح وإحالته للإدارة العليا للاعتماد النهائي ✅'
         : 'تم تسجيل اعتراضك وملاحظاتك بنجاح وإحالتها للإدارة العليا للبت فيها 📝'
     );
+
+    try {
+      notifyAdminOnNewRequest?.({
+        state: updatedState,
+        newRequest: {
+          type: 'evaluation',
+          employeeId: emp?.id,
+          employeeName: emp?.name,
+          employeeCode: emp?.code,
+          branchId: targetEval?.branchId,
+          month: evalMonth,
+          subject: `رد الموظف على تقييم شهر ${evalMonth} (${responseType === 'approve' ? 'موافقة ✅' : 'اعتراض وتحفظ ⚠️'})`,
+          reason: comment ? `تعليق الموظف: "${comment}"` : (responseType === 'approve' ? 'موافق على نتيجة التقييم' : 'اعتراض وتحفظ على نتيجة التقييم'),
+          details: `المقيم: ${targetEval?.evaluatorName || 'مدير الفرع'} · النتيجة: ${targetEval?.totalScore || 0}% · رد الموظف: ${responseType === 'approve' ? 'موافق' : 'معترض'}`
+        },
+        empName: emp?.name
+      })?.catch?.(() => {});
+    } catch {}
   };
 
   // Submit Complaint / Note to High Management
@@ -169,6 +188,15 @@ export default function EmployeeEvaluationsModule({
     setComplaintDetails('');
     setComplaintBranchId('');
     showToast('تم إرسال الشكوى / الملاحظة إلى الإدارة العليا بنجاح 📥');
+
+    try {
+      notifyAdminOnNewRequest?.({
+        state: updatedState,
+        newRequest: newComplaint,
+        empName: emp?.name,
+        branchName: state?.branches?.find((b) => String(b.id) === String(newComplaint.branchId))?.name
+      })?.catch?.(() => {});
+    } catch {}
   };
 
   const renderEvalCard = (ev, branchName = '', isSideBySide = false) => {
