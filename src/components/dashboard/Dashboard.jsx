@@ -44,6 +44,38 @@ export default function Dashboard({
   const [lateEditDeductionMins, setLateEditDeductionMins] = useState(0);
   const [lateEditReason, setLateEditReason] = useState('');
 
+  // ── Cards Collapse State (Default: all collapsed, resets to collapsed on page reload) ──
+  const [expandedCards, setExpandedCards] = useState({});
+
+  const isCardExpanded = (cardKey) => Boolean(expandedCards[cardKey]);
+
+  const toggleCard = (cardKey) => {
+    setExpandedCards((prev) => ({
+      ...prev,
+      [cardKey]: !prev[cardKey]
+    }));
+  };
+
+  const expandAllCards = () => {
+    const all = {
+      empStats: true,
+      branchLive: true,
+      absentToday: true,
+      lateToday: true,
+      earlyExit: true,
+      overtime: true,
+      finances: true
+    };
+    (state?.branches || []).forEach((b) => {
+      if (b && b.id) all[`branch_${b.id}`] = true;
+    });
+    setExpandedCards(all);
+  };
+
+  const collapseAllCards = () => {
+    setExpandedCards({});
+  };
+
   const orgSettings = state?.orgSettings || {};
   const employees = (state?.employees || []).filter((e) => e && e.id);
   const branches = (state?.branches || []).filter((b) => b && b.id);
@@ -144,15 +176,135 @@ export default function Dashboard({
   return (
     <div style={{ fontFamily: "'Tajawal', 'Cairo', sans-serif" }} className="fade-in-page">
 
-      {/* ── 2. Employee Summary Cards Breakdown ── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
-        <span style={{ fontSize: '18px' }}>📊</span>
-        <h4 style={{ margin: 0, fontSize: '17px', fontWeight: '800', color: 'var(--text, #0f172a)' }}>
-          إحصائيات الموظفين وتوزيع الفروع والإدارات
-        </h4>
+      {/* ── 1. Top Dashboard Quick Collapse / Expand Action Bar ── */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '12px',
+          background: 'var(--surface, #ffffff)',
+          border: '1px solid var(--border, #e2e8f0)',
+          borderRadius: '16px',
+          padding: '12px 18px',
+          marginBottom: '20px',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ fontSize: '20px' }}>🗂️</span>
+          <div>
+            <div style={{ fontSize: '14.5px', fontWeight: '800', color: 'var(--text, #0f172a)' }}>
+              لوحة التحكم والعمليات الميدانية المباشرة
+            </div>
+            <div style={{ fontSize: '12px', color: 'var(--muted, #64748b)' }}>
+              جميع البطاقات مطوية افتراضياً لتوفير المساحة — انقر على أي بطاقة لعرض تفاصيلها
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <button
+            type="button"
+            onClick={expandAllCards}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 14px',
+              borderRadius: '9px',
+              border: '1px solid var(--primary, #0d9488)',
+              background: 'var(--primary-light, #f0fdfa)',
+              color: 'var(--primary-dark, #0f766e)',
+              fontSize: '12.5px',
+              fontWeight: '700',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease'
+            }}
+            title="فتح وتوسيع جميع البطاقات في لوحة التحكم"
+          >
+            <span>🔽</span>
+            <span>فتح الكل</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={collapseAllCards}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 14px',
+              borderRadius: '9px',
+              border: '1px solid var(--border, #cbd5e1)',
+              background: 'var(--surface-muted, #f8fafc)',
+              color: 'var(--text, #334155)',
+              fontSize: '12.5px',
+              fontWeight: '700',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease'
+            }}
+            title="طي جميع البطاقات وإخفاء تفاصيلها"
+          >
+            <span>🔼</span>
+            <span>طي الكل</span>
+          </button>
+        </div>
+      </div>
+
+      {/* ── 2. Employee Summary Cards Breakdown (Collapsible by Default) ── */}
+      <div 
+        onClick={() => toggleCard('empStats')}
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: '8px',
+          marginBottom: isCardExpanded('empStats') ? '14px' : '20px',
+          background: 'var(--surface, #ffffff)',
+          border: '1px solid var(--border, #e2e8f0)',
+          borderRadius: '14px',
+          padding: '14px 20px',
+          cursor: 'pointer',
+          userSelect: 'none',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.03)',
+          transition: 'all 0.2s ease'
+        }}
+        title={isCardExpanded('empStats') ? 'اضغط للطي' : 'اضغط لعرض إحصائيات الموظفين'}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '18px' }}>📊</span>
+          <h4 style={{ margin: 0, fontSize: '17px', fontWeight: '800', color: 'var(--text, #0f172a)' }}>
+            إحصائيات الموظفين وتوزيع الفروع والإدارات
+          </h4>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{
+            background: 'var(--primary-light, #f0fdfa)',
+            color: 'var(--primary-dark, #0f766e)',
+            border: '1px solid var(--primary-tint, #ccfbf1)',
+            padding: '4px 10px',
+            borderRadius: '99px',
+            fontSize: '12px',
+            fontWeight: '800'
+          }}>
+            👥 {employees.length} موظف ({branches.length} فرع)
+          </span>
+          <span style={{
+            fontSize: '13px',
+            color: 'var(--muted)',
+            display: 'inline-block',
+            transition: 'transform 0.2s ease',
+            transform: isCardExpanded('empStats') ? 'rotate(180deg)' : 'rotate(0deg)'
+          }}>
+            ▼
+          </span>
+        </div>
       </div>
       
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '28px' }}>
+      {isCardExpanded('empStats') && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '28px' }}>
         {/* Total Employees Hero Card */}
         <div style={{
           background: 'linear-gradient(135deg, #064e3b 0%, #0d9488 60%, #14b8a6 100%)',
@@ -277,182 +429,254 @@ export default function Dashboard({
           </div>
         )}
       </div>
+      )}
 
-      {/* ── 3. Separate Live Punch Cards for Every Branch ── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
-        <span style={{ fontSize: '18px' }}>⏱️</span>
-        <h4 style={{ margin: 0, fontSize: '17px', fontWeight: '800', color: 'var(--text, #0f172a)' }}>
-          بطاقات الحضور والبصمات الحية لكل فرع منفصل ({todayDate})
-        </h4>
+      {/* ── 3. Separate Live Punch Cards for Every Branch (Collapsible by Default) ── */}
+      <div 
+        onClick={() => toggleCard('branchLive')}
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: '8px',
+          marginBottom: isCardExpanded('branchLive') ? '14px' : '20px',
+          background: 'var(--surface, #ffffff)',
+          border: '1px solid var(--border, #e2e8f0)',
+          borderRadius: '14px',
+          padding: '14px 20px',
+          cursor: 'pointer',
+          userSelect: 'none',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.03)',
+          transition: 'all 0.2s ease'
+        }}
+        title={isCardExpanded('branchLive') ? 'اضغط لطي بطاقات الفروع' : 'اضغط لعرض بطاقات الفروع'}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '18px' }}>⏱️</span>
+          <h4 style={{ margin: 0, fontSize: '17px', fontWeight: '800', color: 'var(--text, #0f172a)' }}>
+            بطاقات الحضور والبصمات الحية لكل فرع منفصل ({todayDate})
+          </h4>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{
+            background: 'var(--primary-light, #f0fdfa)',
+            color: 'var(--primary-dark, #0f766e)',
+            border: '1px solid var(--primary-tint, #ccfbf1)',
+            padding: '4px 10px',
+            borderRadius: '99px',
+            fontSize: '12px',
+            fontWeight: '800'
+          }}>
+            🏢 {branches.length} فروع
+          </span>
+          <span style={{
+            fontSize: '13px',
+            color: 'var(--muted)',
+            display: 'inline-block',
+            transition: 'transform 0.2s ease',
+            transform: isCardExpanded('branchLive') ? 'rotate(180deg)' : 'rotate(0deg)'
+          }}>
+            ▼
+          </span>
+        </div>
       </div>
       
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '18px', marginBottom: '28px' }}>
-        {branches.map((b) => {
-          if (!b || !b.id) return null;
-          const branchEmps = employees.filter((e) => e && empBelongsToBranch(e, b.id));
-          const branchTodayPunches = todayPunches.filter((p) => {
-            if (!p) return false;
-            if (p.branchId) return String(p.branchId) === String(b.id);
-            return String(branchEmps.find((e) => e && String(e.id) === String(p.employeeId))?.branchId || '') === String(b.id);
-          });
-          const branchActiveCount = branchEmps.filter((e) => {
-            if (!e || !e.id) return false;
-            const act = state?.activeShifts?.[e.id];
-            return act && String(act.branchId || e.branchId) === String(b.id);
-          }).length;
-          const allLeaves = [...(state?.leaveRequests || []), ...(state?.requests || [])];
-          const totalLiveCount = branchTodayPunches.length + branchActiveCount;
+      {isCardExpanded('branchLive') && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '18px', marginBottom: '28px' }}>
+          {branches.map((b) => {
+            if (!b || !b.id) return null;
+            const branchEmps = employees.filter((e) => e && empBelongsToBranch(e, b.id));
+            const branchTodayPunches = todayPunches.filter((p) => {
+              if (!p) return false;
+              if (p.branchId) return String(p.branchId) === String(b.id);
+              return String(branchEmps.find((e) => e && String(e.id) === String(p.employeeId))?.branchId || '') === String(b.id);
+            });
+            const branchActiveCount = branchEmps.filter((e) => {
+              if (!e || !e.id) return false;
+              const act = state?.activeShifts?.[e.id];
+              return act && String(act.branchId || e.branchId) === String(b.id);
+            }).length;
+            const allLeaves = [...(state?.leaveRequests || []), ...(state?.requests || [])];
+            const totalLiveCount = branchTodayPunches.length + branchActiveCount;
+            const isBranchExpanded = isCardExpanded(`branch_${b.id}`);
 
-          return (
-            <div
-              key={b.id}
-              style={{
-                background: 'var(--surface, #ffffff)',
-                border: '1px solid var(--border, #e2e8f0)',
-                padding: '20px',
-                borderRadius: '16px',
-                boxShadow: '0 4px 20px -2px rgba(15, 23, 42, 0.05), 0 2px 6px rgba(0, 0, 0, 0.02)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '14px'
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '12px', borderBottom: '1px solid var(--border, #f1f5f9)' }}>
-                <h4 style={{ margin: 0, color: 'var(--primary-dark, #0f766e)', fontSize: '16px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  🏢 فرع {b.name}
-                </h4>
-                <span style={{
-                  background: totalLiveCount > 0 ? '#dcfce7' : '#f1f5f9',
-                  color: totalLiveCount > 0 ? '#15803d' : '#64748b',
-                  border: `1px solid ${totalLiveCount > 0 ? '#bbf7d0' : '#e2e8f0'}`,
-                  padding: '4px 10px',
-                  borderRadius: '99px',
-                  fontSize: '12px',
-                  fontWeight: '800',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '5px'
-                }}>
+            return (
+              <div
+                key={b.id}
+                style={{
+                  background: 'var(--surface, #ffffff)',
+                  border: '1px solid var(--border, #e2e8f0)',
+                  padding: isBranchExpanded ? '20px' : '14px 18px',
+                  borderRadius: '16px',
+                  boxShadow: '0 4px 20px -2px rgba(15, 23, 42, 0.05), 0 2px 6px rgba(0, 0, 0, 0.02)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: isBranchExpanded ? '14px' : '0',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                <div 
+                  onClick={() => toggleCard(`branch_${b.id}`)}
+                  style={{ 
+                    display: 'flex', 
+                    justifyContent: 'space-between', 
+                    alignItems: 'center', 
+                    paddingBottom: isBranchExpanded ? '12px' : '0', 
+                    borderBottom: isBranchExpanded ? '1px solid var(--border, #f1f5f9)' : 'none',
+                    cursor: 'pointer',
+                    userSelect: 'none'
+                  }}
+                  title={isBranchExpanded ? 'اضغط لطي موظفي هذا الفرع' : 'اضغط لعرض تفاصيل موظفي هذا الفرع'}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{
+                      fontSize: '12px',
+                      color: 'var(--muted)',
+                      display: 'inline-block',
+                      transition: 'transform 0.2s ease',
+                      transform: isBranchExpanded ? 'rotate(180deg)' : 'rotate(0deg)'
+                    }}>
+                      ▼
+                    </span>
+                    <h4 style={{ margin: 0, color: 'var(--primary-dark, #0f766e)', fontSize: '16px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      🏢 فرع {b.name}
+                    </h4>
+                  </div>
                   <span style={{
-                    width: '6px',
-                    height: '6px',
-                    borderRadius: '50%',
-                    background: totalLiveCount > 0 ? '#22c55e' : '#94a3b8'
-                  }} />
-                  {totalLiveCount} بصمة حية بالفرع
-                </span>
-              </div>
-
-              <div style={{ fontSize: '13px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {branchEmps.length === 0 ? (
-                  <span style={{ color: 'var(--muted, #94a3b8)', textAlign: 'center', padding: '12px 0' }}>
-                    لا يوجد موظفين مسجلين بهذا الفرع.
+                    background: totalLiveCount > 0 ? '#dcfce7' : '#f1f5f9',
+                    color: totalLiveCount > 0 ? '#15803d' : '#64748b',
+                    border: `1px solid ${totalLiveCount > 0 ? '#bbf7d0' : '#e2e8f0'}`,
+                    padding: '4px 10px',
+                    borderRadius: '99px',
+                    fontSize: '12px',
+                    fontWeight: '800',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px'
+                  }}>
+                    <span style={{
+                      width: '6px',
+                      height: '6px',
+                      borderRadius: '50%',
+                      background: totalLiveCount > 0 ? '#22c55e' : '#94a3b8'
+                    }} />
+                    {totalLiveCount} بصمة حية بالفرع
                   </span>
-                ) : (
-                  branchEmps.map((emp) => {
-                    if (!emp || !emp.id) return null;
-                    const activeShift = state?.activeShifts?.[emp.id];
-                    const isActiveInThisBranch = activeShift && (String(activeShift.branchId || emp.branchId) === String(b.id));
-                    const isActiveInOtherBranch = activeShift && !isActiveInThisBranch;
+                </div>
 
-                    const empTodayPunchesInThisBranch = todayPunches.filter((p) => {
-                      if (!p) return false;
-                      if (String(p.employeeId) !== String(emp.id)) return false;
-                      if (p.branchId) return String(p.branchId) === String(b.id);
-                      return String(emp.branchId) === String(b.id);
-                    });
+                {isBranchExpanded && (
+                  <div style={{ fontSize: '13px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {branchEmps.length === 0 ? (
+                      <span style={{ color: 'var(--muted, #94a3b8)', textAlign: 'center', padding: '12px 0' }}>
+                        لا يوجد موظفين مسجلين بهذا الفرع.
+                      </span>
+                    ) : (
+                      branchEmps.map((emp) => {
+                        if (!emp || !emp.id) return null;
+                        const activeShift = state?.activeShifts?.[emp.id];
+                        const isActiveInThisBranch = activeShift && (String(activeShift.branchId || emp.branchId) === String(b.id));
+                        const isActiveInOtherBranch = activeShift && !isActiveInThisBranch;
 
-                    const onLeaveToday = allLeaves.some(
-                      (r) => r && String(r.employeeId) === String(emp.id) && (r.status === 'approved' || r.adminApproved) && (r.type === 'leave' || r.type === 'leave_request') && r.startDate <= todayDate && r.endDate >= todayDate
-                    );
+                        const empTodayPunchesInThisBranch = todayPunches.filter((p) => {
+                          if (!p) return false;
+                          if (String(p.employeeId) !== String(emp.id)) return false;
+                          if (p.branchId) return String(p.branchId) === String(b.id);
+                          return String(emp.branchId) === String(b.id);
+                        });
 
-                    const daySched = getEmployeeDaySchedule(emp.id, todayDate, state);
-                    const isOffToday = daySched?.type === 'off' || daySched?.isOff === true;
-                    const isSwapped = Boolean(daySched?.isSwapped);
+                        const onLeaveToday = allLeaves.some(
+                          (r) => r && String(r.employeeId) === String(emp.id) && (r.status === 'approved' || r.adminApproved) && (r.type === 'leave' || r.type === 'leave_request') && r.startDate <= todayDate && r.endDate >= todayDate
+                        );
 
-                    let statusText = 'لم يبصم بهذا الفرع';
-                    let badgeBg = '#fff1f2';
-                    let badgeColor = '#e11d48';
-                    let badgeBorder = '#fecdd3';
+                        const daySched = getEmployeeDaySchedule(emp.id, todayDate, state);
+                        const isOffToday = daySched?.type === 'off' || daySched?.isOff === true;
+                        const isSwapped = Boolean(daySched?.isSwapped);
 
-                    if (isActiveInThisBranch) {
-                      if (activeShift.isOnBreak || activeShift.isPaused) {
-                        statusText = '⏸️ في استراحة';
-                        badgeBg = '#fffbeb';
-                        badgeColor = '#b45309';
-                        badgeBorder = '#fde68a';
-                      } else {
-                        statusText = '🟢 حاضر حالياً';
-                        badgeBg = '#ecfdf5';
-                        badgeColor = '#047857';
-                        badgeBorder = '#a7f3d0';
-                      }
-                    } else if (isActiveInOtherBranch) {
-                      const otherBranchObj = branches.find((br) => br && String(br.id) === String(activeShift?.branchId));
-                      statusText = `🏢 بوردية بفرع ${otherBranchObj ? otherBranchObj.name : 'آخر'}`;
-                      badgeBg = '#f1f5f9';
-                      badgeColor = '#475569';
-                      badgeBorder = '#e2e8f0';
-                    } else if (empTodayPunchesInThisBranch.length > 0) {
-                      statusText = '🟢 تم الحضور اليوم';
-                      badgeBg = '#f0f9ff';
-                      badgeColor = '#0284c7';
-                      badgeBorder = '#bae6fd';
-                    } else if (onLeaveToday) {
-                      statusText = '🏖️ إجازة معتمدة';
-                      badgeBg = '#f0fdf4';
-                      badgeColor = '#16a34a';
-                      badgeBorder = '#bbf7d0';
-                    } else if (isOffToday) {
-                      statusText = isSwapped
-                        ? `🔄 💤 راحة متبدلة`
-                        : '💤 راحة أسبوعية (OFF)';
-                      badgeBg = '#f8fafc';
-                      badgeColor = '#64748b';
-                      badgeBorder = '#e2e8f0';
-                    } else if (isSwapped && daySched?.start && daySched?.end) {
-                      statusText = `🔄 وردية متبدلة (${daySched.start})`;
-                      badgeBg = '#fffbeb';
-                      badgeColor = '#d97706';
-                      badgeBorder = '#fde68a';
-                    }
+                        let statusText = 'لم يبصم بهذا الفرع';
+                        let badgeBg = '#fff1f2';
+                        let badgeColor = '#e11d48';
+                        let badgeBorder = '#fecdd3';
 
-                    return (
-                      <div
-                        key={emp.id}
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          padding: '8px 12px',
-                          borderRadius: '10px',
-                          background: 'var(--surface-muted, #f8fafc)',
-                          border: '1px solid var(--border, #f1f5f9)'
-                        }}
-                      >
-                        <span style={{ fontWeight: '700', color: 'var(--text, #0f172a)', fontSize: '13.5px' }}>
-                          👤 {emp.name}
-                        </span>
-                        <span style={{
-                          background: badgeBg,
-                          color: badgeColor,
-                          border: `1px solid ${badgeBorder}`,
-                          padding: '3px 8px',
-                          borderRadius: '6px',
-                          fontSize: '11.5px',
-                          fontWeight: '800'
-                        }}>
-                          {statusText}
-                        </span>
-                      </div>
-                    );
-                  })
+                        if (isActiveInThisBranch) {
+                          if (activeShift.isOnBreak || activeShift.isPaused) {
+                            statusText = '⏸️ في استراحة';
+                            badgeBg = '#fffbeb';
+                            badgeColor = '#b45309';
+                            badgeBorder = '#fde68a';
+                          } else {
+                            statusText = '🟢 حاضر حالياً';
+                            badgeBg = '#ecfdf5';
+                            badgeColor = '#047857';
+                            badgeBorder = '#a7f3d0';
+                          }
+                        } else if (isActiveInOtherBranch) {
+                          const otherBranchObj = branches.find((br) => br && String(br.id) === String(activeShift?.branchId));
+                          statusText = `🏢 بوردية بفرع ${otherBranchObj ? otherBranchObj.name : 'آخر'}`;
+                          badgeBg = '#f1f5f9';
+                          badgeColor = '#475569';
+                          badgeBorder = '#e2e8f0';
+                        } else if (empTodayPunchesInThisBranch.length > 0) {
+                          statusText = '🟢 تم الحضور اليوم';
+                          badgeBg = '#f0f9ff';
+                          badgeColor = '#0284c7';
+                          badgeBorder = '#bae6fd';
+                        } else if (onLeaveToday) {
+                          statusText = '🏖️ إجازة معتمدة';
+                          badgeBg = '#f0fdf4';
+                          badgeColor = '#16a34a';
+                          badgeBorder = '#bbf7d0';
+                        } else if (isOffToday) {
+                          statusText = isSwapped
+                            ? `🔄 💤 راحة متبدلة`
+                            : '💤 راحة أسبوعية (OFF)';
+                          badgeBg = '#f8fafc';
+                          badgeColor = '#64748b';
+                          badgeBorder = '#e2e8f0';
+                        } else if (isSwapped && daySched?.start && daySched?.end) {
+                          statusText = `🔄 وردية متبدلة (${daySched.start})`;
+                          badgeBg = '#fffbeb';
+                          badgeColor = '#d97706';
+                          badgeBorder = '#fde68a';
+                        }
+
+                        return (
+                          <div
+                            key={emp.id}
+                            style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              padding: '8px 12px',
+                              borderRadius: '10px',
+                              background: 'var(--surface-muted, #f8fafc)',
+                              border: '1px solid var(--border, #f1f5f9)'
+                            }}
+                          >
+                            <span style={{ fontWeight: '700', color: 'var(--text, #0f172a)', fontSize: '13.5px' }}>
+                              👤 {emp.name}
+                            </span>
+                            <span style={{
+                              background: badgeBg,
+                              color: badgeColor,
+                              border: `1px solid ${badgeBorder}`,
+                              padding: '3px 8px',
+                              borderRadius: '6px',
+                              fontSize: '11.5px',
+                              fontWeight: '800'
+                            }}>
+                              {statusText}
+                            </span>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
                 )}
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* ── 3.5 Absent Employees Card Today ── */}
       {(() => {
@@ -475,19 +699,44 @@ export default function Dashboard({
         return (
           <div
             style={{
-              padding: '22px 24px',
-              marginBottom: '28px',
+              padding: isCardExpanded('absentToday') ? '22px 24px' : '14px 20px',
+              marginBottom: '22px',
               border: '1px solid rgba(239, 68, 68, 0.25)',
               borderTop: '3.5px solid var(--danger)',
               background: 'var(--surface)',
               borderRadius: '18px',
-              boxShadow: 'var(--shadow)'
+              boxShadow: 'var(--shadow)',
+              transition: 'all 0.2s ease'
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
-              <h4 style={{ margin: 0, fontSize: '17px', color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '800' }}>
-                🚨 الموظفون الغائبون / لم يبصموا اليوم ({todayDate})
-              </h4>
+            <div 
+              onClick={() => toggleCard('absentToday')}
+              style={{ 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center', 
+                marginBottom: isCardExpanded('absentToday') ? '16px' : '0', 
+                flexWrap: 'wrap', 
+                gap: '10px',
+                cursor: 'pointer',
+                userSelect: 'none'
+              }}
+              title={isCardExpanded('absentToday') ? 'اضغط لطي قائمة الغائبين' : 'اضغط لعرض قائمة الغائبين'}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{
+                  fontSize: '13px',
+                  color: 'var(--danger)',
+                  display: 'inline-block',
+                  transition: 'transform 0.2s ease',
+                  transform: isCardExpanded('absentToday') ? 'rotate(180deg)' : 'rotate(0deg)'
+                }}>
+                  ▼
+                </span>
+                <h4 style={{ margin: 0, fontSize: '17px', color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '800' }}>
+                  🚨 الموظفون الغائبون / لم يبصموا اليوم ({todayDate})
+                </h4>
+              </div>
               <span style={{
                 background: 'var(--danger)',
                 color: '#ffffff',
@@ -501,7 +750,8 @@ export default function Dashboard({
               </span>
             </div>
 
-            {absentEmpsToday.length === 0 ? (
+            {isCardExpanded('absentToday') && (
+              absentEmpsToday.length === 0 ? (
               <div style={{
                 background: 'var(--primary-tint)',
                 color: 'var(--primary-dark)',
@@ -559,7 +809,7 @@ export default function Dashboard({
                   );
                 })}
               </div>
-            )}
+            ))}
           </div>
         );
       })()}
@@ -1048,26 +1298,53 @@ export default function Dashboard({
         return (
           <div
             style={{
-              padding: '24px',
-              marginBottom: '28px',
+              padding: isCardExpanded('lateToday') ? '24px' : '14px 20px',
+              marginBottom: '22px',
               border: '1px solid var(--border)',
               background: 'var(--surface)',
               borderRadius: '18px',
-              boxShadow: 'var(--shadow)'
+              boxShadow: 'var(--shadow)',
+              transition: 'all 0.2s ease'
             }}
           >
             
             {/* Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', flexWrap: 'wrap', gap: '12px' }}>
-              <div>
-                <h4 style={{ margin: 0, fontSize: '17px', color: 'var(--accent, #ea580c)', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '800' }}>
-                  🏃‍♂️ موظفو اليوم المتأخرون عن مواعيد العمل المجدولة ({todayDate})
-                </h4>
-                <div style={{ fontSize: '13px', color: 'var(--accent, #d97706)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                  <span>⏱️ فترة السماح الدائم باللائحة: <strong>حتى {permanentGraceMax} دقائق</strong> (سماح دائم بدون أي خصم).</span>
-                  <span style={{ background: 'var(--accent-tint, rgba(245, 158, 11, 0.15))', color: 'var(--accent, #d97706)', padding: '2px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: '700', border: '1px solid rgba(245, 158, 11, 0.3)' }}>
-                    تكرارات الفئات الأعلى تخضع للسماح المشروط والخصم اللائحي (5 فئات)
-                  </span>
+            <div 
+              onClick={() => toggleCard('lateToday')}
+              style={{ 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center', 
+                marginBottom: isCardExpanded('lateToday') ? '18px' : '0', 
+                flexWrap: 'wrap', 
+                gap: '12px',
+                cursor: 'pointer',
+                userSelect: 'none'
+              }}
+              title={isCardExpanded('lateToday') ? 'اضغط لطي جدول المتأخرين' : 'اضغط لعرض جدول المتأخرين وتفاصيل الخصم'}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{
+                  fontSize: '13px',
+                  color: 'var(--accent, #ea580c)',
+                  display: 'inline-block',
+                  transition: 'transform 0.2s ease',
+                  transform: isCardExpanded('lateToday') ? 'rotate(180deg)' : 'rotate(0deg)'
+                }}>
+                  ▼
+                </span>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: '17px', color: 'var(--accent, #ea580c)', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '800' }}>
+                    🏃‍♂️ موظفو اليوم المتأخرون عن مواعيد العمل المجدولة ({todayDate})
+                  </h4>
+                  {isCardExpanded('lateToday') && (
+                    <div style={{ fontSize: '13px', color: 'var(--accent, #d97706)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <span>⏱️ فترة السماح الدائم باللائحة: <strong>حتى {permanentGraceMax} دقائق</strong> (سماح دائم بدون أي خصم).</span>
+                      <span style={{ background: 'var(--accent-tint, rgba(245, 158, 11, 0.15))', color: 'var(--accent, #d97706)', padding: '2px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: '700', border: '1px solid rgba(245, 158, 11, 0.3)' }}>
+                        تكرارات الفئات الأعلى تخضع للسماح المشروط والخصم اللائحي (5 فئات)
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1083,7 +1360,9 @@ export default function Dashboard({
               </div>
             </div>
 
-            {/* 5-Tier Policy Metrics Mini-Cards Banner */}
+            {isCardExpanded('lateToday') && (
+              <>
+                {/* 5-Tier Policy Metrics Mini-Cards Banner */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '10px', marginBottom: '18px' }}>
               <div style={{ background: 'rgba(16, 185, 129, 0.12)', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '10px', padding: '10px 12px', borderRight: '4px solid #10b981' }}>
                 <div style={{ fontSize: '11.5px', color: '#10b981', fontWeight: '700' }}>🟢 0 – 10 دقائق</div>
@@ -1506,6 +1785,8 @@ export default function Dashboard({
                 </div>
               </div>
             )}
+              </>
+            )}
 
           </div>
         );
@@ -1527,253 +1808,365 @@ export default function Dashboard({
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px', marginBottom: '24px' }}>
             {/* Early Exit Card */}
             {earlyExitRequests.length > 0 && (
-              <div className="card settings-card" style={{ padding: '20px', border: '1px solid rgba(220, 38, 38, 0.25)', borderTop: '3.5px solid var(--danger)', background: 'var(--surface)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-                  <h4 style={{ margin: 0, fontSize: '15px', color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '800' }}>
-                    🏃‍♂️ رصد الانصراف المبكر عن موعد الوردية ({earlyExitRequests.length})
-                  </h4>
+              <div 
+                className="card settings-card" 
+                style={{ 
+                  padding: isCardExpanded('earlyExit') ? '20px' : '14px 18px', 
+                  border: '1px solid rgba(220, 38, 38, 0.25)', 
+                  borderTop: '3.5px solid var(--danger)', 
+                  background: 'var(--surface)',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                <div 
+                  onClick={() => toggleCard('earlyExit')}
+                  style={{ 
+                    display: 'flex', 
+                    justifyContent: 'space-between', 
+                    alignItems: 'center', 
+                    marginBottom: isCardExpanded('earlyExit') ? '14px' : '0',
+                    cursor: 'pointer',
+                    userSelect: 'none'
+                  }}
+                  title={isCardExpanded('earlyExit') ? 'اضغط لطي طلبات الانصراف المبكر' : 'اضغط لعرض طلبات الانصراف المبكر'}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{
+                      fontSize: '12px',
+                      color: 'var(--danger)',
+                      display: 'inline-block',
+                      transition: 'transform 0.2s ease',
+                      transform: isCardExpanded('earlyExit') ? 'rotate(180deg)' : 'rotate(0deg)'
+                    }}>
+                      ▼
+                    </span>
+                    <h4 style={{ margin: 0, fontSize: '15px', color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '800' }}>
+                      🏃‍♂️ رصد الانصراف المبكر عن موعد الوردية ({earlyExitRequests.length})
+                    </h4>
+                  </div>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  {earlyExitRequests.map((req) => {
-                    const isApproved = req.status === 'approved' || req.adminApproved;
-                    const isWaived = req.status === 'waived';
-                    const isPending = req.status === 'pending';
 
-                    return (
-                      <div key={req.id} style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)', borderRadius: '12px', padding: '14px 16px', boxShadow: 'var(--shadow-sm)' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
-                          <div>
-                            <strong style={{ color: 'var(--danger)', fontSize: '14px', fontWeight: '800' }}>👤 {req.employeeName}</strong>
-                            <span style={{ fontSize: '12px', color: 'var(--muted)', marginRight: '6px' }}>• فرع {req.branchName}</span>
-                            <div style={{ fontSize: '12.5px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-                              {req.details || req.reason}
+                {isCardExpanded('earlyExit') && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {earlyExitRequests.map((req) => {
+                      const isApproved = req.status === 'approved' || req.adminApproved;
+                      const isWaived = req.status === 'waived';
+                      const isPending = req.status === 'pending';
+
+                      return (
+                        <div key={req.id} style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)', borderRadius: '12px', padding: '14px 16px', boxShadow: 'var(--shadow-sm)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
+                            <div>
+                              <strong style={{ color: 'var(--danger)', fontSize: '14px', fontWeight: '800' }}>👤 {req.employeeName}</strong>
+                              <span style={{ fontSize: '12px', color: 'var(--muted)', marginRight: '6px' }}>• فرع {req.branchName}</span>
+                              <div style={{ fontSize: '12.5px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                                {req.details || req.reason}
+                              </div>
                             </div>
+                            <span style={{ fontSize: '12px', color: 'var(--danger)', fontWeight: '800', background: 'var(--danger-tint)', padding: '2px 8px', borderRadius: '6px' }}>
+                              {req.earlyMinutes} دقيقة مبكراً
+                            </span>
                           </div>
-                          <span style={{ fontSize: '12px', color: 'var(--danger)', fontWeight: '800', background: 'var(--danger-tint)', padding: '2px 8px', borderRadius: '6px' }}>
-                            {req.earlyMinutes} دقيقة مبكراً
-                          </span>
-                        </div>
 
-                        <div style={{ marginTop: '12px', display: 'flex', gap: '6px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                          {isPending ? (
-                            <>
-                              <button
-                                className="btn btn-start"
-                                style={{ padding: '5px 12px', fontSize: '12px', background: 'var(--danger)' }}
-                                onClick={() => onApproveRequest?.(req.id)}
-                                title="تطبيق الجزاء والخصم المالي في حساب الراتب"
-                              >
-                                ⚖️ تطبيق الخصم اللائحي {req.amount ? `(${req.amount} ج.م)` : ''}
-                              </button>
-                              <button
-                                className="btn btn-ghost"
-                                style={{ padding: '5px 12px', fontSize: '12px', border: '1px solid var(--border)' }}
-                                onClick={() => onWaiveEarlyExit ? onWaiveEarlyExit(req.id) : onRejectRequest?.(req.id)}
-                                title="إعفاء الموظف بدون خصم مالي"
-                              >
-                                🛡️ إعفاء من الخصم
-                              </button>
-                              {onSendEarlyExitEmail && (
+                          <div style={{ marginTop: '12px', display: 'flex', gap: '6px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                            {isPending ? (
+                              <>
                                 <button
-                                  className="btn btn-outline"
-                                  style={{ padding: '5px 12px', fontSize: '12px', color: 'var(--accent)', borderColor: 'var(--accent)' }}
-                                  onClick={() => onSendEarlyExitEmail(req.id)}
-                                  title="إرسال تنبيه رسمي لبريد الموظف"
+                                  className="btn btn-start"
+                                  style={{ padding: '5px 12px', fontSize: '12px', background: 'var(--danger)' }}
+                                  onClick={() => onApproveRequest?.(req.id)}
+                                  title="تطبيق الجزاء والخصم المالي في حساب الراتب"
                                 >
-                                  📧 إرسال إشعار للموظف
+                                  ⚖️ تطبيق الخصم اللائحي {req.amount ? `(${req.amount} ج.م)` : ''}
                                 </button>
-                              )}
-                            </>
-                          ) : isApproved ? (
-                            <span style={{ color: 'var(--success)', fontSize: '12px', fontWeight: '800' }}>✅ تم تطبيق الخصم اللائحي</span>
-                          ) : isWaived ? (
-                            <span style={{ color: '#0284c7', fontSize: '12px', fontWeight: '800' }}>🛡️ معفى من الخصم المالي</span>
-                          ) : (
-                            <span style={{ color: 'var(--muted)', fontSize: '12px', fontWeight: '800' }}>❌ مرفوض</span>
-                          )}
+                                <button
+                                  className="btn btn-ghost"
+                                  style={{ padding: '5px 12px', fontSize: '12px', border: '1px solid var(--border)' }}
+                                  onClick={() => onWaiveEarlyExit ? onWaiveEarlyExit(req.id) : onRejectRequest?.(req.id)}
+                                  title="إعفاء الموظف بدون خصم مالي"
+                                >
+                                  🛡️ إعفاء من الخصم
+                                </button>
+                                {onSendEarlyExitEmail && (
+                                  <button
+                                    className="btn btn-outline"
+                                    style={{ padding: '5px 12px', fontSize: '12px', color: 'var(--accent)', borderColor: 'var(--accent)' }}
+                                    onClick={() => onSendEarlyExitEmail(req.id)}
+                                    title="إرسال تنبيه رسمي لبريد الموظف"
+                                  >
+                                    📧 إرسال إشعار للموظف
+                                  </button>
+                                )}
+                              </>
+                            ) : isApproved ? (
+                              <span style={{ color: 'var(--success)', fontSize: '12px', fontWeight: '800' }}>✅ تم تطبيق الخصم اللائحي</span>
+                            ) : isWaived ? (
+                              <span style={{ color: '#0284c7', fontSize: '12px', fontWeight: '800' }}>🛡️ معفى من الخصم المالي</span>
+                            ) : (
+                              <span style={{ color: 'var(--muted)', fontSize: '12px', fontWeight: '800' }}>❌ مرفوض</span>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
 
             {/* Overtime Card */}
             {overtimeRequests.length > 0 && (
-              <div className="card settings-card" style={{ padding: '20px', border: '1px solid rgba(5, 150, 105, 0.25)', borderTop: '3.5px solid var(--success)', background: 'var(--surface)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-                  <h4 style={{ margin: 0, fontSize: '15px', color: 'var(--success-dark)', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '800' }}>
-                    ⏱️ طلبات اعتماد الساعات الإضافية ({overtimeRequests.length})
-                  </h4>
+              <div 
+                className="card settings-card" 
+                style={{ 
+                  padding: isCardExpanded('overtime') ? '20px' : '14px 18px', 
+                  border: '1px solid rgba(5, 150, 105, 0.25)', 
+                  borderTop: '3.5px solid var(--success)', 
+                  background: 'var(--surface)',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                <div 
+                  onClick={() => toggleCard('overtime')}
+                  style={{ 
+                    display: 'flex', 
+                    justifyContent: 'space-between', 
+                    alignItems: 'center', 
+                    marginBottom: isCardExpanded('overtime') ? '14px' : '0',
+                    cursor: 'pointer',
+                    userSelect: 'none'
+                  }}
+                  title={isCardExpanded('overtime') ? 'اضغط لطي طلبات الساعات الإضافية' : 'اضغط لعرض طلبات الساعات الإضافية'}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{
+                      fontSize: '12px',
+                      color: 'var(--success-dark)',
+                      display: 'inline-block',
+                      transition: 'transform 0.2s ease',
+                      transform: isCardExpanded('overtime') ? 'rotate(180deg)' : 'rotate(0deg)'
+                    }}>
+                      ▼
+                    </span>
+                    <h4 style={{ margin: 0, fontSize: '15px', color: 'var(--success-dark)', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '800' }}>
+                      ⏱️ طلبات اعتماد الساعات الإضافية ({overtimeRequests.length})
+                    </h4>
+                  </div>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  {overtimeRequests.map((req) => {
-                    const isApproved = req.status === 'approved' || req.adminApproved;
-                    const isRejected = req.status === 'rejected';
-                    const isPending = req.status === 'pending';
 
-                    return (
-                      <div key={req.id} style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)', borderRadius: '12px', padding: '14px 16px', boxShadow: 'var(--shadow-sm)' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
-                          <div>
-                            <strong style={{ color: 'var(--success-dark)', fontSize: '14px', fontWeight: '800' }}>👤 {req.employeeName}</strong>
-                            <span style={{ fontSize: '12px', color: 'var(--muted)', marginRight: '6px' }}>• فرع {req.branchName}</span>
-                            <div style={{ fontSize: '12.5px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-                              {req.details || req.reason}
+                {isCardExpanded('overtime') && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {overtimeRequests.map((req) => {
+                      const isApproved = req.status === 'approved' || req.adminApproved;
+                      const isRejected = req.status === 'rejected';
+                      const isPending = req.status === 'pending';
+
+                      return (
+                        <div key={req.id} style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)', borderRadius: '12px', padding: '14px 16px', boxShadow: 'var(--shadow-sm)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
+                            <div>
+                              <strong style={{ color: 'var(--success-dark)', fontSize: '14px', fontWeight: '800' }}>👤 {req.employeeName}</strong>
+                              <span style={{ fontSize: '12px', color: 'var(--muted)', marginRight: '6px' }}>• فرع {req.branchName}</span>
+                              <div style={{ fontSize: '12.5px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                                {req.details || req.reason}
+                              </div>
                             </div>
+                            <span style={{ background: 'var(--success-tint)', color: 'var(--success-dark)', padding: '2px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: '800' }}>
+                              +{req.hours} س إضافي
+                            </span>
                           </div>
-                          <span style={{ background: 'var(--success-tint)', color: 'var(--success-dark)', padding: '2px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: '800' }}>
-                            +{req.hours} س إضافي
-                          </span>
-                        </div>
 
-                        <div style={{ marginTop: '12px', display: 'flex', gap: '6px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                          {isPending ? (
-                            <>
-                              <button
-                                className="btn btn-start"
-                                style={{ padding: '5px 14px', fontSize: '12px', background: 'var(--success)' }}
-                                onClick={() => onApproveRequest?.(req.id)}
-                                title="اعتماد الساعات الإضافية واحتسابها ضمن أجر الراتب"
-                              >
-                                ✅ اعتماد الساعات الإضافية (+{req.hours} س بالراتب)
-                              </button>
-                              <button
-                                className="btn btn-outline"
-                                style={{ padding: '5px 12px', fontSize: '12px', color: 'var(--danger)', borderColor: 'var(--danger)' }}
-                                onClick={() => onRejectRequest?.(req.id)}
-                                title="استبعاد الإضافي وعدم احتسابه بالأجر"
-                              >
-                                ❌ استبعاد الإضافي
-                              </button>
-                            </>
-                          ) : isApproved ? (
-                            <span style={{ color: 'var(--success)', fontSize: '12px', fontWeight: '800' }}>✅ تم اعتماد الساعات واحتسابها بالراتب</span>
-                          ) : (
-                            <span style={{ color: 'var(--muted)', fontSize: '12px', fontWeight: '800' }}>❌ تم استبعاد الساعات الإضافية من الأجر</span>
-                          )}
+                          <div style={{ marginTop: '12px', display: 'flex', gap: '6px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                            {isPending ? (
+                              <>
+                                <button
+                                  className="btn btn-start"
+                                  style={{ padding: '5px 14px', fontSize: '12px', background: 'var(--success)' }}
+                                  onClick={() => onApproveRequest?.(req.id)}
+                                  title="اعتماد الساعات الإضافية واحتسابها ضمن أجر الراتب"
+                                >
+                                  ✅ اعتماد الساعات الإضافية (+{req.hours} س بالراتب)
+                                </button>
+                                <button
+                                  className="btn btn-outline"
+                                  style={{ padding: '5px 12px', fontSize: '12px', color: 'var(--danger)', borderColor: 'var(--danger)' }}
+                                  onClick={() => onRejectRequest?.(req.id)}
+                                  title="استبعاد الإضافي وعدم احتسابه بالأجر"
+                                >
+                                  ❌ استبعاد الإضافي
+                                </button>
+                              </>
+                            ) : isApproved ? (
+                              <span style={{ color: 'var(--success)', fontSize: '12px', fontWeight: '800' }}>✅ تم اعتماد الساعات واحتسابها بالراتب</span>
+                            ) : (
+                              <span style={{ color: 'var(--muted)', fontSize: '12px', fontWeight: '800' }}>❌ تم استبعاد الساعات الإضافية من الأجر</span>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
           </div>
         );
       })()}
 
-      {/* ── 4. Financial Summary & Reports (Matching Image 1 Specifications) ── */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '12px' }}>
-        <div>
-          <h3 style={{ margin: 0, fontFamily: 'Cairo', fontSize: '18px', color: '#1e293b' }}>
-            إجمالي الرواتب والتقارير المالية لجميع الموظفين بالشركة
-          </h3>
-          <span style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '4px', display: 'block' }}>
-            {filterMode === 'custom' 
-              ? `📊 الفترة المخصصة المحددة: من ${customFrom || '...'} إلى ${customTo || '...'}`
-              : `📊 دورة تقفيل شهر (${monthPicker})`}
-          </span>
-        </div>
-
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-          <select value={filterMode === 'custom' ? 'custom' : 'month'} onChange={(e) => setFilterMode?.(e.target.value)} style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontWeight: 'bold' }}>
-            <option value="month">📅 الشهر الحالي ({monthPicker})</option>
-            <option value="custom">📅 تصفية الفترة المخصصة</option>
-          </select>
-
-          {filterMode === 'custom' && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--surface-muted)', padding: '4px 10px', borderRadius: '8px', border: '1px solid var(--border)' }}>
-              <input
-                type="date"
-                value={customFrom}
-                onChange={(e) => setCustomFrom?.(e.target.value)}
-                style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px' }}
-              />
-              <span style={{ fontSize: '12px', fontWeight: 'bold' }}>إلى</span>
-              <input
-                type="date"
-                value={customTo}
-                onChange={(e) => setCustomTo?.(e.target.value)}
-                style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px' }}
-              />
+      {/* ── 4. Financial Summary & Reports (Collapsible by Default) ── */}
+      <div
+        style={{
+          background: 'var(--surface, #ffffff)',
+          border: '1px solid var(--border, #e2e8f0)',
+          borderTop: '3.5px solid var(--primary, #0d9488)',
+          borderRadius: '18px',
+          padding: isCardExpanded('finances') ? '22px 24px' : '14px 20px',
+          marginBottom: '24px',
+          boxShadow: 'var(--shadow)',
+          transition: 'all 0.2s ease'
+        }}
+      >
+        <div 
+          onClick={() => toggleCard('finances')}
+          style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center', 
+            marginBottom: isCardExpanded('finances') ? '16px' : '0', 
+            flexWrap: 'wrap', 
+            gap: '12px',
+            cursor: 'pointer',
+            userSelect: 'none'
+          }}
+          title={isCardExpanded('finances') ? 'اضغط لطي التقارير المالية' : 'اضغط لعرض التقارير المالية'}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{
+              fontSize: '13px',
+              color: 'var(--primary)',
+              display: 'inline-block',
+              transition: 'transform 0.2s ease',
+              transform: isCardExpanded('finances') ? 'rotate(180deg)' : 'rotate(0deg)'
+            }}>
+              ▼
+            </span>
+            <div>
+              <h3 style={{ margin: 0, fontFamily: 'Cairo', fontSize: '18px', color: '#1e293b' }}>
+                💰 إجمالي الرواتب والتقارير المالية لجميع الموظفين بالشركة
+              </h3>
+              <span style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '4px', display: 'block' }}>
+                {filterMode === 'custom' 
+                  ? `📊 الفترة المخصصة المحددة: من ${customFrom || '...'} إلى ${customTo || '...'}`
+                  : `📊 دورة تقفيل شهر (${monthPicker})`}
+              </span>
             </div>
-          )}
+          </div>
 
-          <button className="btn btn-start" onClick={exportAllPayrollExcel} style={{ padding: '6px 14px', fontSize: '13px' }}>
-            📊 تصدير شيت إكسيل مخصص بالفترة
-          </button>
-        </div>
-      </div>
+          <div 
+            style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <select value={filterMode === 'custom' ? 'custom' : 'month'} onChange={(e) => setFilterMode?.(e.target.value)} style={{ padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontWeight: 'bold' }}>
+              <option value="month">📅 الشهر الحالي ({monthPicker})</option>
+              <option value="custom">📅 تصفية الفترة المخصصة</option>
+            </select>
 
-      {/* Financial Cards Grid (Modern High-End Bespoke Styling) */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '16px' }}>
-        {/* Card 1: Total Work Hours */}
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderTop: '3.5px solid var(--primary)', padding: '18px 20px', borderRadius: '16px', boxShadow: 'var(--shadow)', transition: 'all 0.2s ease' }}>
-          <span style={{ fontSize: '13px', color: 'var(--muted)', fontWeight: '700', display: 'block', textAlign: 'right' }}>⏱️ إجمالي ساعات العمل</span>
-          <h3 style={{ margin: '8px 0 0 0', fontSize: '26px', fontWeight: '900', color: 'var(--primary)', textAlign: 'right', fontFamily: "'Plus Jakarta Sans', 'Cairo', sans-serif" }}>
-            {totalWorkHours} <span style={{ fontSize: '15px', fontWeight: '700', color: 'var(--muted)' }}>ساعة</span>
-          </h3>
-        </div>
+            {filterMode === 'custom' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--surface-muted)', padding: '4px 10px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                <input
+                  type="date"
+                  value={customFrom}
+                  onChange={(e) => setCustomFrom?.(e.target.value)}
+                  style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px' }}
+                />
+                <span style={{ fontSize: '12px', fontWeight: 'bold' }}>إلى</span>
+                <input
+                  type="date"
+                  value={customTo}
+                  onChange={(e) => setCustomTo?.(e.target.value)}
+                  style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px' }}
+                />
+              </div>
+            )}
 
-        {/* Card 2: Total Base Earnings */}
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderTop: '3.5px solid #0284c7', padding: '18px 20px', borderRadius: '16px', boxShadow: 'var(--shadow)', transition: 'all 0.2s ease' }}>
-          <span style={{ fontSize: '13px', color: 'var(--muted)', fontWeight: '700', display: 'block', textAlign: 'right' }}>💼 إجمالي المستحقات الأساسية</span>
-          <h3 style={{ margin: '8px 0 0 0', fontSize: '26px', fontWeight: '900', color: '#0284c7', textAlign: 'right', fontFamily: "'Plus Jakarta Sans', 'Cairo', sans-serif" }}>
-            {totalBaseEarnings.toFixed(2)} <span style={{ fontSize: '15px', fontWeight: '700', color: 'var(--muted)' }}>ج.م</span>
-          </h3>
-        </div>
-
-        {/* Card 3: Total Bonuses */}
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderTop: '3.5px solid var(--success)', padding: '18px 20px', borderRadius: '16px', boxShadow: 'var(--shadow)', transition: 'all 0.2s ease' }}>
-          <span style={{ fontSize: '13px', color: 'var(--muted)', fontWeight: '700', display: 'block', textAlign: 'right' }}>🎁 إجمالي المكافآت</span>
-          <h3 style={{ margin: '8px 0 0 0', fontSize: '26px', fontWeight: '900', color: 'var(--success)', textAlign: 'right', fontFamily: "'Plus Jakarta Sans', 'Cairo', sans-serif" }}>
-            +{totalBonuses.toFixed(2)} <span style={{ fontSize: '15px', fontWeight: '700', color: 'var(--muted)' }}>ج.م</span>
-          </h3>
-        </div>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1.8fr 1fr', gap: '16px', marginBottom: '24px' }}>
-        {/* Card 4: Solid Teal Hero Banner - Total Paid Net Salaries */}
-        <div style={{
-          background: 'linear-gradient(135deg, var(--primary-dark) 0%, var(--primary) 100%)',
-          color: '#ffffff',
-          padding: '22px 26px',
-          borderRadius: '16px',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          boxShadow: '0 8px 24px -4px rgba(13, 148, 136, 0.35)',
-          border: '1px solid rgba(255, 255, 255, 0.15)'
-        }}>
-          <span style={{ fontSize: '13.5px', color: 'rgba(255, 255, 255, 0.95)', fontWeight: '700', textAlign: 'right' }}>
-            💳 إجمالي رواتب الشركة المدفوعة (صافي المرتبات)
-          </span>
-          <h2 style={{ margin: '8px 0 0 0', fontSize: '32px', fontWeight: '900', textAlign: 'right', color: '#ffffff', fontFamily: "'Plus Jakarta Sans', 'Cairo', sans-serif" }}>
-            {totalNetSalaries.toFixed(2)} <span style={{ fontSize: '18px', fontWeight: '700', color: 'rgba(255, 255, 255, 0.85)' }}>ج.م</span>
-          </h2>
+            <button className="btn btn-start" onClick={exportAllPayrollExcel} style={{ padding: '6px 14px', fontSize: '13px' }}>
+              📊 تصدير شيت إكسيل مخصص بالفترة
+            </button>
+          </div>
         </div>
 
-        {/* Card 5: Total Deductions */}
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderTop: '3.5px solid var(--danger)', padding: '18px 20px', borderRadius: '16px', boxShadow: 'var(--shadow)', transition: 'all 0.2s ease' }}>
-          <span style={{ fontSize: '13px', color: 'var(--muted)', fontWeight: '700', display: 'block', textAlign: 'right' }}>📉 إجمالي الخصومات والجزاءات</span>
-          <h3 style={{ margin: '8px 0 0 0', fontSize: '26px', fontWeight: '900', color: 'var(--danger)', textAlign: 'right', fontFamily: "'Plus Jakarta Sans', 'Cairo', sans-serif" }}>
-            -{totalDeductions.toFixed(2)} <span style={{ fontSize: '15px', fontWeight: '700', color: 'var(--muted)' }}>ج.م</span>
-          </h3>
-        </div>
-      </div>
+        {isCardExpanded('finances') && (
+          <>
+            {/* Financial Cards Grid (Modern High-End Bespoke Styling) */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '16px' }}>
+              {/* Card 1: Total Work Hours */}
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderTop: '3.5px solid var(--primary)', padding: '18px 20px', borderRadius: '16px', boxShadow: 'var(--shadow)', transition: 'all 0.2s ease' }}>
+                <span style={{ fontSize: '13px', color: 'var(--muted)', fontWeight: '700', display: 'block', textAlign: 'right' }}>⏱️ إجمالي ساعات العمل</span>
+                <h3 style={{ margin: '8px 0 0 0', fontSize: '26px', fontWeight: '900', color: 'var(--primary)', textAlign: 'right', fontFamily: "'Plus Jakarta Sans', 'Cairo', sans-serif" }}>
+                  {totalWorkHours} <span style={{ fontSize: '15px', fontWeight: '700', color: 'var(--muted)' }}>ساعة</span>
+                </h3>
+              </div>
 
-      {/* Income & Expenses Summary Bar */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRight: '4px solid var(--success)', padding: '16px 18px', borderRadius: '14px', boxShadow: 'var(--shadow-sm)' }}>
-          <span style={{ fontSize: '12.5px', color: 'var(--muted)', fontWeight: '700' }}>🟢 إجمالي الإيرادات المسجلة</span>
-          <h4 style={{ margin: '6px 0 0 0', color: 'var(--success)', fontWeight: '900', fontSize: '18px', fontFamily: "'Plus Jakarta Sans', 'Cairo', sans-serif" }}>{totalIncome.toLocaleString()} ج.م</h4>
-        </div>
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRight: '4px solid var(--danger)', padding: '16px 18px', borderRadius: '14px', boxShadow: 'var(--shadow-sm)' }}>
-          <span style={{ fontSize: '12.5px', color: 'var(--muted)', fontWeight: '700' }}>🔴 إجمالي المصروفات المسجلة</span>
-          <h4 style={{ margin: '6px 0 0 0', color: 'var(--danger)', fontWeight: '900', fontSize: '18px', fontFamily: "'Plus Jakarta Sans', 'Cairo', sans-serif" }}>{totalExpenses.toLocaleString()} ج.م</h4>
-        </div>
+              {/* Card 2: Total Base Earnings */}
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderTop: '3.5px solid #0284c7', padding: '18px 20px', borderRadius: '16px', boxShadow: 'var(--shadow)', transition: 'all 0.2s ease' }}>
+                <span style={{ fontSize: '13px', color: 'var(--muted)', fontWeight: '700', display: 'block', textAlign: 'right' }}>💼 إجمالي المستحقات الأساسية</span>
+                <h3 style={{ margin: '8px 0 0 0', fontSize: '26px', fontWeight: '900', color: '#0284c7', textAlign: 'right', fontFamily: "'Plus Jakarta Sans', 'Cairo', sans-serif" }}>
+                  {totalBaseEarnings.toFixed(2)} <span style={{ fontSize: '15px', fontWeight: '700', color: 'var(--muted)' }}>ج.م</span>
+                </h3>
+              </div>
+
+              {/* Card 3: Total Bonuses */}
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderTop: '3.5px solid var(--success)', padding: '18px 20px', borderRadius: '16px', boxShadow: 'var(--shadow)', transition: 'all 0.2s ease' }}>
+                <span style={{ fontSize: '13px', color: 'var(--muted)', fontWeight: '700', display: 'block', textAlign: 'right' }}>🎁 إجمالي المكافآت</span>
+                <h3 style={{ margin: '8px 0 0 0', fontSize: '26px', fontWeight: '900', color: 'var(--success)', textAlign: 'right', fontFamily: "'Plus Jakarta Sans', 'Cairo', sans-serif" }}>
+                  +{totalBonuses.toFixed(2)} <span style={{ fontSize: '15px', fontWeight: '700', color: 'var(--muted)' }}>ج.م</span>
+                </h3>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1.8fr 1fr', gap: '16px', marginBottom: '24px' }}>
+              {/* Card 4: Solid Teal Hero Banner - Total Paid Net Salaries */}
+              <div style={{
+                background: 'linear-gradient(135deg, var(--primary-dark) 0%, var(--primary) 100%)',
+                color: '#ffffff',
+                padding: '22px 26px',
+                borderRadius: '16px',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'center',
+                boxShadow: '0 8px 24px -4px rgba(13, 148, 136, 0.35)',
+                border: '1px solid rgba(255, 255, 255, 0.15)'
+              }}>
+                <span style={{ fontSize: '13.5px', color: 'rgba(255, 255, 255, 0.95)', fontWeight: '700', textAlign: 'right' }}>
+                  💳 إجمالي رواتب الشركة المدفوعة (صافي المرتبات)
+                </span>
+                <h2 style={{ margin: '8px 0 0 0', fontSize: '32px', fontWeight: '900', textAlign: 'right', color: '#ffffff', fontFamily: "'Plus Jakarta Sans', 'Cairo', sans-serif" }}>
+                  {totalNetSalaries.toFixed(2)} <span style={{ fontSize: '18px', fontWeight: '700', color: 'rgba(255, 255, 255, 0.85)' }}>ج.م</span>
+                </h2>
+              </div>
+
+              {/* Card 5: Total Deductions */}
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderTop: '3.5px solid var(--danger)', padding: '18px 20px', borderRadius: '16px', boxShadow: 'var(--shadow)', transition: 'all 0.2s ease' }}>
+                <span style={{ fontSize: '13px', color: 'var(--muted)', fontWeight: '700', display: 'block', textAlign: 'right' }}>📉 إجمالي الخصومات والجزاءات</span>
+                <h3 style={{ margin: '8px 0 0 0', fontSize: '26px', fontWeight: '900', color: 'var(--danger)', textAlign: 'right', fontFamily: "'Plus Jakarta Sans', 'Cairo', sans-serif" }}>
+                  -{totalDeductions.toFixed(2)} <span style={{ fontSize: '15px', fontWeight: '700', color: 'var(--muted)' }}>ج.م</span>
+                </h3>
+              </div>
+            </div>
+
+            {/* Income & Expenses Summary Bar */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRight: '4px solid var(--success)', padding: '16px 18px', borderRadius: '14px', boxShadow: 'var(--shadow-sm)' }}>
+                <span style={{ fontSize: '12.5px', color: 'var(--muted)', fontWeight: '700' }}>🟢 إجمالي الإيرادات المسجلة</span>
+                <h4 style={{ margin: '6px 0 0 0', color: 'var(--success)', fontWeight: '900', fontSize: '18px', fontFamily: "'Plus Jakarta Sans', 'Cairo', sans-serif" }}>{totalIncome.toLocaleString()} ج.م</h4>
+              </div>
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRight: '4px solid var(--danger)', padding: '16px 18px', borderRadius: '14px', boxShadow: 'var(--shadow-sm)' }}>
+                <span style={{ fontSize: '12.5px', color: 'var(--muted)', fontWeight: '700' }}>🔴 إجمالي المصروفات المسجلة</span>
+                <h4 style={{ margin: '6px 0 0 0', color: 'var(--danger)', fontWeight: '900', fontSize: '18px', fontFamily: "'Plus Jakarta Sans', 'Cairo', sans-serif" }}>{totalExpenses.toLocaleString()} ج.م</h4>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
