@@ -21,9 +21,10 @@ export default function BranchEditorModal({
   const [branchLongitude, setBranchLongitude] = useState(null);
   const [branchLogo, setBranchLogo] = useState('');
   const [managerId, setManagerId] = useState('');
-  const [phones, setPhones] = useState([{ id: '1', number: '', type: 'landline' }]);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [openingTime, setOpeningTime] = useState('09:00');
+  const [closingTime, setClosingTime] = useState('23:00');
 
   // UI / Validation States
   const [usernameError, setUsernameError] = useState('');
@@ -40,6 +41,8 @@ export default function BranchEditorModal({
       setBranchCode(editingBranch.branchCode || editingBranch.id || '');
       setBranchName(editingBranch.name || '');
       setBranchAddress(editingBranch.address || '');
+      setOpeningTime(editingBranch.openingTime || '09:00');
+      setClosingTime(editingBranch.closingTime || '23:00');
       setBranchLocationUrl(
         editingBranch.locationUrl ||
         (editingBranch.latitude && editingBranch.longitude
@@ -73,6 +76,8 @@ export default function BranchEditorModal({
       setBranchCode(`BR-${branches.length + 101}`);
       setBranchName('');
       setBranchAddress('');
+      setOpeningTime('09:00');
+      setClosingTime('23:00');
       setBranchLocationUrl('');
       setBranchLatitude(null);
       setBranchLongitude(null);
@@ -298,6 +303,8 @@ export default function BranchEditorModal({
       image: branchLogo,
       phone: primaryPhone,
       phones: validPhones,
+      openingTime: openingTime || '09:00',
+      closingTime: closingTime || '23:00',
       managerId,
       username: username.trim(),
       password,
@@ -563,6 +570,68 @@ export default function BranchEditorModal({
                   <span style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '4px', display: 'block' }}>
                     الاسم الذي يظهر للجمهور، الموظفين، وقوائم التقارير.
                   </span>
+                </div>
+              </div>
+
+              {/* مواعيد عمل الفرع وساعات الفتح والإغلاق */}
+              <div
+                style={{
+                  background: 'var(--surface-muted, #f8fafc)',
+                  border: '1px solid var(--border, #e2e8f0)',
+                  borderRadius: '12px',
+                  padding: '14px 16px'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                  <span style={{ fontSize: '18px' }}>⏰</span>
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: '13.5px', color: 'var(--text)' }}>
+                      مواعيد فتح وإغلاق الفرع المعتمدة
+                    </div>
+                    <div style={{ fontSize: '11.5px', color: 'var(--muted)' }}>
+                      تستخدم مواعيد الفتح لمراقبة انضباط الفرع وإطلاق إنذار عدم فتح الفرع (No-Show Alert) عبر Gmail بعد 30 دقيقة.
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px' }}>
+                  <div className="field" style={{ margin: 0 }}>
+                    <label style={{ fontWeight: 700, fontSize: '12.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span>🟢</span> موعد فتح الفرع (Opening Time)
+                    </label>
+                    <input
+                      type="time"
+                      value={openingTime}
+                      onChange={(e) => setOpeningTime(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border)',
+                        background: 'var(--surface)',
+                        fontWeight: 800
+                      }}
+                    />
+                  </div>
+
+                  <div className="field" style={{ margin: 0 }}>
+                    <label style={{ fontWeight: 700, fontSize: '12.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span>🌙</span> موعد إغلاق الفرع (Closing Time)
+                    </label>
+                    <input
+                      type="time"
+                      value={closingTime}
+                      onChange={(e) => setClosingTime(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border)',
+                        background: 'var(--surface)',
+                        fontWeight: 800
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
 

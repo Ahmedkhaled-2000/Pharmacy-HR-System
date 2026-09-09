@@ -159,7 +159,14 @@ export default function BranchManagementModule({
                         ) : (
                           <span style={{ width: '34px', height: '34px', borderRadius: '8px', background: 'var(--primary-light)', color: 'var(--primary-dark)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', flexShrink: 0 }}>🏢</span>
                         )}
-                        <span>{b.name}</span>
+                        <div>
+                          <div>{b.name}</div>
+                          <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            <span style={{ color: '#0d9488', fontWeight: 700 }}>⏰ الفتح: {b.openingTime || '09:00'}</span>
+                            <span>•</span>
+                            <span>الإغلاق: {b.closingTime || '23:00'}</span>
+                          </div>
+                        </div>
                       </div>
                     </td>
                     <td>

@@ -3,6 +3,75 @@
 // ─────────────────────────────────────────
 
 import { fmt, getRealTodayStr } from './formatters';
+import { compileDailyDigestData } from './digestDataEngine';
+
+/**
+ * دالة استخراج إعدادات الجيميل الموثقة بأعلى أولوية (LocalStorage أولاً ثم State)
+ */
+export function getAuthoritativeGmailConfig(state) {
+  let localConfig = null;
+  try {
+    const raw = localStorage.getItem('pharmacy_gmail_config');
+    if (raw) localConfig = JSON.parse(raw);
+  } catch {}
+
+  const stateConfig = state?.orgSettings?.gmailConfig || {};
+
+  return {
+    enabled: localConfig?.enabled !== undefined ? Boolean(localConfig.enabled) : (stateConfig.enabled ?? true),
+    userEmail: (localConfig?.userEmail || stateConfig.userEmail || '').trim(),
+    appPassword: (localConfig?.appPassword || stateConfig.appPassword || '').trim(),
+    targetAdminEmail: (localConfig?.targetAdminEmail || stateConfig.targetAdminEmail || '').trim(),
+    targetAdminEmails: (Array.isArray(localConfig?.targetAdminEmails) && localConfig.targetAdminEmails.length > 0)
+      ? localConfig.targetAdminEmails
+      : (Array.isArray(stateConfig.targetAdminEmails) && stateConfig.targetAdminEmails.length > 0)
+      ? stateConfig.targetAdminEmails
+      : [],
+    serviceUrl: (localConfig?.serviceUrl || stateConfig.serviceUrl || '').trim(),
+    dailyDigestTime: localConfig?.dailyDigestTime || stateConfig.dailyDigestTime || '23:59',
+    sendOnRequest: localConfig?.sendOnRequest !== undefined ? Boolean(localConfig.sendOnRequest) : (stateConfig.sendOnRequest ?? true),
+    sendOnDecision: localConfig?.sendOnDecision !== undefined ? Boolean(localConfig.sendOnDecision) : (stateConfig.sendOnDecision ?? true),
+    sendOnLateness: localConfig?.sendOnLateness !== undefined ? Boolean(localConfig.sendOnLateness) : (stateConfig.sendOnLateness ?? true),
+    sendOnPenalty: localConfig?.sendOnPenalty !== undefined ? Boolean(localConfig.sendOnPenalty) : (stateConfig.sendOnPenalty ?? true),
+    sendOnOvertime: localConfig?.sendOnOvertime !== undefined ? Boolean(localConfig.sendOnOvertime) : (stateConfig.sendOnOvertime ?? true),
+    sendOnBranchNoShow: localConfig?.sendOnBranchNoShow !== undefined ? Boolean(localConfig.sendOnBranchNoShow) : (stateConfig.sendOnBranchNoShow ?? true),
+    sendDailyDigest: localConfig?.sendDailyDigest !== undefined ? Boolean(localConfig.sendDailyDigest) : (stateConfig.sendDailyDigest ?? true),
+    updatedAt: localConfig?.updatedAt || stateConfig.updatedAt || new Date().toISOString()
+  };
+}
+
+/**
+ * استخراج قائمة المستلمين المعتمدين للإدارة (يدعم تعدد الإيميلات)
+ */
+export function resolveAdminRecipients(config) {
+  const recipients = new Set();
+
+  if (Array.isArray(config?.targetAdminEmails)) {
+    config.targetAdminEmails.forEach((e) => {
+      const trimmed = String(e || '').trim();
+      if (trimmed && trimmed.includes('@')) recipients.add(trimmed);
+    });
+  }
+
+  if (config?.targetAdminEmail) {
+    String(config.targetAdminEmail)
+      .split(/[,;\n]+/)
+      .forEach((e) => {
+        const trimmed = e.trim();
+        if (trimmed && trimmed.includes('@')) recipients.add(trimmed);
+      });
+  }
+
+  if (recipients.size === 0) {
+    if (config?.adminEmail && String(config.adminEmail).includes('@')) {
+      recipients.add(String(config.adminEmail).trim());
+    } else if (config?.userEmail && String(config.userEmail).includes('@')) {
+      recipients.add(String(config.userEmail).trim());
+    }
+  }
+
+  return Array.from(recipients);
+}
 
 /**
  * Construct responsive HTML layout for emails
@@ -17,7 +86,7 @@ export function buildEmailTemplate({ title, subtitle, badgeText, badgeColor = '#
   <title>${title}</title>
   <style>
     body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f1f5f9; margin: 0; padding: 20px; color: #1e293b; text-align: right; }
-    .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.08); border: 1px solid #e2e8f0; }
+    .container { max-width: 640px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.08); border: 1px solid #e2e8f0; }
     .header { background: linear-gradient(135deg, #0d9488, #0f766e); padding: 28px 24px; color: #ffffff; text-align: center; }
     .header h1 { margin: 0 0 6px; font-size: 22px; font-weight: 800; }
     .header p { margin: 0; opacity: 0.9; font-size: 14px; }
@@ -57,38 +126,55 @@ export function buildEmailTemplate({ title, subtitle, badgeText, badgeColor = '#
  * Send Gmail Email using standard fetch Webhook or Direct Apps Script Service
  */
 export async function sendGmailEmail({ gmailConfig, recipientEmail, subject, htmlContent, textContent }) {
-  if (!gmailConfig || !gmailConfig.enabled) {
+  const effectiveConfig = gmailConfig || getAuthoritativeGmailConfig();
+  if (!effectiveConfig || !effectiveConfig.enabled) {
     return { success: false, reason: 'الخدمة غير مفعلة' };
   }
 
-  const targetEmail = recipientEmail || gmailConfig.targetAdminEmail || gmailConfig.adminEmail || gmailConfig.userEmail;
-  if (!targetEmail) {
+  let targets = [];
+  if (recipientEmail) {
+    if (Array.isArray(recipientEmail)) {
+      targets = recipientEmail.map((e) => String(e).trim()).filter((e) => e && e.includes('@'));
+    } else {
+      targets = String(recipientEmail)
+        .split(/[,;\n]+/)
+        .map((e) => e.trim())
+        .filter((e) => e && e.includes('@'));
+    }
+  } else {
+    targets = resolveAdminRecipients(effectiveConfig);
+  }
+
+  if (targets.length === 0) {
     return { success: false, reason: 'لم يتم تحديد بريد المستلم' };
   }
 
+  const recipientString = targets.join(', ');
+
   try {
-    // If user provided a custom Webhook URL (Google Apps Script / Webhook Endpoint)
-    if (gmailConfig.serviceUrl) {
+    if (effectiveConfig.serviceUrl) {
       try {
-        await fetch(gmailConfig.serviceUrl, {
+        await fetch(effectiveConfig.serviceUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify({
-            sender: gmailConfig.userEmail,
-            recipient: targetEmail,
+            sender: effectiveConfig.userEmail,
+            recipient: recipientString,
+            to: recipientString,
             subject,
             htmlBody: htmlContent,
             textBody: textContent || subject
           })
         });
-        return { success: true };
+        console.info(`✉️ [GmailService] Dispatched email to [${recipientString}]: ${subject}`);
+        return { success: true, targets, target: recipientString };
       } catch (e) {
         console.warn('Apps Script Webhook fetch error fallback:', e);
       }
     }
 
-    console.log('✉️ Gmail Service Dispatching Email:', { to: targetEmail, subject });
-    return { success: true, target: targetEmail };
+    console.info('✉️ [GmailService] Direct logging dispatch:', { to: recipientString, subject });
+    return { success: true, targets, target: recipientString };
   } catch (err) {
     console.error('Gmail Email Dispatch Error:', err);
     return { success: false, error: err.message };
@@ -99,11 +185,11 @@ export async function sendGmailEmail({ gmailConfig, recipientEmail, subject, htm
  * Send Email Notification to Admin when a Resignation or Retraction request is forwarded after Branch Manager review
  */
 export async function notifyAdminOnResignationRequest({ state, emp, branchName, requestType, reason, managerStatus, managerComment, dateStr }) {
-  const gmailConfig = state?.orgSettings?.gmailConfig;
+  const gmailConfig = getAuthoritativeGmailConfig(state);
   if (!gmailConfig || !gmailConfig.enabled) return { success: false, reason: 'خدمة البريد غير مفعلة' };
 
-  const targetEmail = gmailConfig.targetAdminEmail || gmailConfig.adminEmail || gmailConfig.userEmail;
-  if (!targetEmail) return { success: false, reason: 'لم يتم تحديد بريد الإدارة' };
+  const targetRecipients = resolveAdminRecipients(gmailConfig);
+  if (targetRecipients.length === 0) return { success: false, reason: 'لم يتم تحديد بريد الإدارة' };
 
   const empName = emp?.name || 'موظف';
   const resolvedBranch = branchName || emp?.branchName || 'الفرع الرئيسي';
@@ -146,16 +232,231 @@ export async function notifyAdminOnResignationRequest({ state, emp, branchName, 
 
   return sendGmailEmail({
     gmailConfig,
-    recipientEmail: targetEmail,
+    recipientEmail: targetRecipients,
     subject: `🚪 طلب ${typeLabel} محال للإدارة العليا: ${empName} — فرع ${resolvedBranch}`,
     htmlContent: html
   });
 }
 
 /**
- * Generate End-of-Day Daily Digest Email (00:00 to 23:59 summary)
+ * Generate End-of-Day Daily Digest Email (Executive Dashboard Summary)
+ * يدعم كائن compileDailyDigestData الشامل أو المعاملات الفردية التوافقية
  */
-export function generateDailyDigestHTML({ dateStr, employeesCount, presentCount, absentCount, lateCount, totalHoursToday, pendingRequestsCount, approvedRequestsCount, bonusTotalToday, deductionTotalToday }) {
+export function generateDailyDigestHTML(digestDataOrParams, orgSettings = {}) {
+  // 1. إذا كان المدخل ناتج دالة compileDailyDigestData الشاملة
+  if (digestDataOrParams && digestDataOrParams.branchSummaries) {
+    const data = digestDataOrParams;
+    const dateStr = data.dateStr || getRealTodayStr();
+    const timeStr = data.timeGenerated || '23:59';
+    const emps = data.employeesCount || 0;
+    const present = data.presentCount || 0;
+    const absent = data.absentCount || 0;
+    const active = data.activeShiftsCount || 0;
+    const totalHours = data.totalHoursToday || 0;
+    const req = data.requestsSummary || {};
+    const fin = data.financeSummary || {};
+
+    const attendanceRate = emps > 0 ? Math.round((present / emps) * 100) : 0;
+
+    // Branches Attendance Cards HTML
+    const branchesHtml = (data.branchSummaries || []).map((b) => {
+      const presentList = b.presentEmployees || [];
+      const absentList = b.absentEmployees || [];
+      return `
+        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px; margin-bottom: 14px; box-shadow: 0 2px 5px rgba(0,0,0,0.02);">
+          <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px; margin-bottom: 10px;">
+            <div>
+              <strong style="font-size: 15px; color: #0f172a;">🏢 ${b.name}</strong>
+              <span style="font-size: 12px; color: #64748b; margin-right: 8px;">(مواعيد العمل: ${b.openingTime} - ${b.closingTime})</span>
+            </div>
+            <div>
+              <span style="background: #dcfce7; color: #166534; font-size: 12px; font-weight: bold; padding: 3px 8px; border-radius: 6px;">حضور: ${b.presentCount} من ${b.totalEmployees}</span>
+            </div>
+          </div>
+          
+          ${presentList.length > 0 ? `
+            <table style="width: 100%; border-collapse: collapse; font-size: 12.5px; margin-bottom: 8px;">
+              <thead>
+                <tr style="background: #f8fafc; color: #475569; text-align: right;">
+                  <th style="padding: 6px 8px;">الموظف</th>
+                  <th style="padding: 6px 8px;">الوظيفة</th>
+                  <th style="padding: 6px 8px;">الحالة</th>
+                  <th style="padding: 6px 8px;">وقت البصمة</th>
+                  <th style="padding: 6px 8px;">نوع التسجيل</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${presentList.map((p) => `
+                  <tr style="border-bottom: 1px solid #f1f5f9;">
+                    <td style="padding: 6px 8px; font-weight: 600;">${p.name} <span style="color: #94a3b8; font-size: 11px;">(${p.code})</span></td>
+                    <td style="padding: 6px 8px; color: #64748b;">${p.role}</td>
+                    <td style="padding: 6px 8px;"><span style="color: #16a34a; font-weight: bold;">${p.status}</span></td>
+                    <td style="padding: 6px 8px; direction: ltr; text-align: right;">${p.timeIn}</td>
+                    <td style="padding: 6px 8px; color: #0f766e;">${p.punchType}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          ` : '<p style="color: #94a3b8; font-size: 12.5px; margin: 6px 0;">لم يتم تسجيل أي بصمة حضور بهذا الفرع اليوم.</p>'}
+
+          ${absentList.length > 0 ? `
+            <div style="background: #fff1f2; border: 1px solid #ffe4e6; border-radius: 8px; padding: 8px 12px; font-size: 12px; color: #9f1239; margin-top: 6px;">
+              <strong>⚠️ الكوادر غير المسجل حضورهم اليوم (${absentList.length}):</strong>
+              ${absentList.map((a) => `${a.name} (${a.code || '—'})`).join(' · ')}
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }).join('');
+
+    // Requests badges & table
+    const reqTypesHtml = Object.entries(req.byType || {}).map(([typeLabel, count]) => `
+      <span style="display: inline-block; background: #e0f2fe; color: #0369a1; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; margin: 2px 4px;">
+        ${typeLabel}: ${count}
+      </span>
+    `).join('') || '<span style="color: #64748b; font-size: 12.5px;">لا توجد طلبات جديدة اليوم</span>';
+
+    const recentReqsHtml = (req.recentRequests || []).length > 0 ? `
+      <table style="width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 10px;">
+        <thead>
+          <tr style="background: #f8fafc; color: #475569; text-align: right;">
+            <th style="padding: 6px 8px;">الموظف</th>
+            <th style="padding: 6px 8px;">الفرع</th>
+            <th style="padding: 6px 8px;">النوع</th>
+            <th style="padding: 6px 8px;">التفاصيل والمبرر</th>
+            <th style="padding: 6px 8px;">الحالة</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${(req.recentRequests || []).map((r) => `
+            <tr style="border-bottom: 1px solid #f1f5f9;">
+              <td style="padding: 6px 8px; font-weight: 600;">${r.empName}</td>
+              <td style="padding: 6px 8px; color: #64748b;">${r.branchName}</td>
+              <td style="padding: 6px 8px; font-weight: bold; color: #0f766e;">${r.typeLabel}</td>
+              <td style="padding: 6px 8px; color: #334155;">${r.details}</td>
+              <td style="padding: 6px 8px;"><span style="color: ${r.statusColor}; font-weight: bold;">${r.statusLabel}</span></td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    ` : '<p style="color: #64748b; font-size: 13px;">لا توجد طلبات مسجلة اليوم.</p>';
+
+    // Finances Table
+    const financesByBranchHtml = (fin.byBranch || []).filter((b) => b.sales > 0 || b.income > 0 || b.expense > 0).map((b) => `
+      <tr style="border-bottom: 1px solid #f1f5f9;">
+        <td style="padding: 6px 8px; font-weight: 600;">${b.name}</td>
+        <td style="padding: 6px 8px; color: #16a34a; font-weight: bold;">${fmt(b.sales)} ج.م</td>
+        <td style="padding: 6px 8px; color: #0284c7;">+${fmt(b.income)} ج.م</td>
+        <td style="padding: 6px 8px; color: #dc2626;">-${fmt(b.expense)} ج.م</td>
+      </tr>
+    `).join('');
+
+    const bodyContent = `
+      <p style="font-size: 14.5px; line-height: 1.6; color: #334155; margin-top: 0;">
+        إليك التقرير التنفيذي الشامل والملخص الكامل لأداء وتشغيل الصيدليات ليوم <strong>${dateStr}</strong> حتى توقيت الرصد (<strong>${timeStr}</strong>):
+      </p>
+
+      <!-- 4 Top KPI Cards Grid -->
+      <table style="width: 100%; border-collapse: separate; border-spacing: 8px; margin: 16px 0;">
+        <tr>
+          <td style="width: 25%; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 12px; text-align: center;">
+            <div style="font-size: 11.5px; color: #166534; font-weight: bold; margin-bottom: 4px;">👥 نسبة الحضور اليومي</div>
+            <div style="font-size: 20px; font-weight: 900; color: #15803d;">${present} <span style="font-size: 13px; font-weight: 500; color: #4ade80;">/ ${emps}</span></div>
+            <div style="font-size: 11px; color: #166534; margin-top: 3px;">${attendanceRate}% (${active} بالوردية الآن)</div>
+          </td>
+          <td style="width: 25%; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 12px; padding: 12px; text-align: center;">
+            <div style="font-size: 11.5px; color: #1e40af; font-weight: bold; margin-bottom: 4px;">⏱️ ساعات العمل الفعلية</div>
+            <div style="font-size: 20px; font-weight: 900; color: #1d4ed8;">${fmt(totalHours)}</div>
+            <div style="font-size: 11px; color: #3b82f6; margin-top: 3px;">ساعة منجزة بالورديات</div>
+          </td>
+          <td style="width: 25%; background: #fefce8; border: 1px solid #fef08a; border-radius: 12px; padding: 12px; text-align: center;">
+            <div style="font-size: 11.5px; color: #854d0e; font-weight: bold; margin-bottom: 4px;">📋 طلبات بانتظار القرار</div>
+            <div style="font-size: 20px; font-weight: 900; color: #b45309;">${req.pendingCount || 0}</div>
+            <div style="font-size: 11px; color: #d97706; margin-top: 3px;">من إجمالي ${req.totalToday || 0} طلبات</div>
+          </td>
+          <td style="width: 25%; background: #faf5ff; border: 1px solid #e9d5ff; border-radius: 12px; padding: 12px; text-align: center;">
+            <div style="font-size: 11.5px; color: #6b21a8; font-weight: bold; margin-bottom: 4px;">💰 مبيعات وإيرادات اليوم</div>
+            <div style="font-size: 19px; font-weight: 900; color: #7e22ce;">${fmt(fin.totalSales || fin.totalIncome || 0)}</div>
+            <div style="font-size: 11px; color: #9333ea; margin-top: 3px;">ج.م عبر الفروع</div>
+          </td>
+        </tr>
+      </table>
+
+      <!-- Section 1: Attendance Details per Branch -->
+      <div style="margin: 24px 0;">
+        <h3 style="color: #0f766e; margin: 0 0 10px 0; font-size: 16px; border-bottom: 2px solid #ccfbf1; padding-bottom: 6px;">
+          🏢 1. متابعة حضور وبصمات الكوادر الطبية بالفروع
+        </h3>
+        ${branchesHtml || '<p style="color: #64748b; font-size: 13px;">لا توجد فروع مسجلة بالمنظومة.</p>'}
+      </div>
+
+      <!-- Section 2: Requests Details -->
+      <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin: 20px 0;">
+        <h3 style="color: #0f766e; margin: 0 0 10px 0; font-size: 16px; border-bottom: 2px solid #ccfbf1; padding-bottom: 6px;">
+          📋 2. تفاصيل وحركة طلبات الموظفين اليوم
+        </h3>
+        <div style="margin-bottom: 12px;">
+          ${reqTypesHtml}
+        </div>
+        ${recentReqsHtml}
+      </div>
+
+      <!-- Section 3: Finance and Adjustments -->
+      <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin: 20px 0;">
+        <h3 style="color: #0f766e; margin: 0 0 10px 0; font-size: 16px; border-bottom: 2px solid #ccfbf1; padding-bottom: 6px;">
+          💰 3. ملخص حركة المبيعات والخزينة والتسويات
+        </h3>
+        ${financesByBranchHtml ? `
+          <table style="width: 100%; border-collapse: collapse; font-size: 12.5px; margin-bottom: 14px;">
+            <thead>
+              <tr style="background: #f8fafc; color: #475569; text-align: right;">
+                <th style="padding: 6px 8px;">الفرع</th>
+                <th style="padding: 6px 8px;">المبيعات</th>
+                <th style="padding: 6px 8px;">إيرادات أخرى</th>
+                <th style="padding: 6px 8px;">المصروفات</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${financesByBranchHtml}
+            </tbody>
+          </table>
+        ` : '<p style="color: #64748b; font-size: 12.5px; margin: 6px 0;">لا توجد معاملات مبيعات مسجلة اليوم.</p>'}
+
+        <div style="display: flex; gap: 12px; margin-top: 10px;">
+          <div style="flex: 1; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 10px; text-align: center;">
+            <span style="font-size: 12px; color: #166534; font-weight: bold;">🎁 إجمالي المكافآت اليوم:</span>
+            <strong style="color: #16a34a; font-size: 15px; display: block; margin-top: 3px;">+${fmt(fin.bonusTotalToday || 0)} ج.م</strong>
+          </div>
+          <div style="flex: 1; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 10px; text-align: center;">
+            <span style="font-size: 12px; color: #991b1b; font-weight: bold;">⚠️ إجمالي الخصومات اليوم:</span>
+            <strong style="color: #dc2626; font-size: 15px; display: block; margin-top: 3px;">-${fmt(fin.deductionTotalToday || 0)} ج.م</strong>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section 4: Action Button -->
+      <p style="text-align: center; margin: 26px 0 10px;">
+        <a href="https://pharmacy-time-tracker.vercel.app" style="display: inline-block; background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%); color: #ffffff !important; text-decoration: none; padding: 12px 28px; border-radius: 10px; font-weight: bold; font-size: 14px; box-shadow: 0 4px 12px rgba(13,148,136,0.3);">
+          🔗 فتح لوحة تحكم المنظومة للبت في الطلبات والعمليات ↗
+        </a>
+      </p>
+    `;
+
+    return buildEmailTemplate({
+      title: `📊 التقرير اليومي الشامل — ${dateStr}`,
+      subtitle: `ملخص حركة المنظومة الحية حتى الساعة ${timeStr}`,
+      badgeText: `تقرير تنفيذي شامل (${dateStr})`,
+      badgeColor: '#0f766e',
+      bodyContent,
+      footerText: `تم إصدار هذا التقرير التلقائي الموثق بتاريخ ${dateStr} - ${timeStr}`,
+      logoUrl: orgSettings.logoUrl,
+      orgName: orgSettings.orgName
+    });
+  }
+
+  // 2. معالجة المعاملات الفردية التوافقية (Legacy Parameters)
+  const legacy = digestDataOrParams || {};
+  const dateStr = legacy.dateStr || getRealTodayStr();
   const content = `
     <p>إليك ملخص الأداء الشامل والنشاط الكامل للصيدليات اليوم <strong>${dateStr}</strong> (من الساعة 00:00 إلى الساعة 23:59):</p>
     
@@ -169,18 +470,18 @@ export function generateDailyDigestHTML({ dateStr, employeesCount, presentCount,
           <th style="padding: 8px; text-align: right;">إجمالي ساعات اليوم</th>
         </tr>
         <tr>
-          <td style="padding: 8px; border-bottom: 1px solid #e2e8f0;"><strong>${employeesCount} موظف</strong></td>
-          <td style="padding: 8px; border-bottom: 1px solid #e2e8f0;"><span style="color: #16a34a; font-weight: bold;">${presentCount} موظف</span></td>
-          <td style="padding: 8px; border-bottom: 1px solid #e2e8f0;"><span style="color: #dc2626; font-weight: bold;">${absentCount} موظف</span></td>
-          <td style="padding: 8px; border-bottom: 1px solid #e2e8f0;"><strong>${fmt(totalHoursToday)} ساعة</strong></td>
+          <td style="padding: 8px; border-bottom: 1px solid #e2e8f0;"><strong>${legacy.employeesCount || 0} موظف</strong></td>
+          <td style="padding: 8px; border-bottom: 1px solid #e2e8f0;"><span style="color: #16a34a; font-weight: bold;">${legacy.presentCount || 0} موظف</span></td>
+          <td style="padding: 8px; border-bottom: 1px solid #e2e8f0;"><span style="color: #dc2626; font-weight: bold;">${legacy.absentCount || 0} موظف</span></td>
+          <td style="padding: 8px; border-bottom: 1px solid #e2e8f0;"><strong>${fmt(legacy.totalHoursToday || 0)} ساعة</strong></td>
         </tr>
       </table>
     </div>
 
     <div style="background: #fefce8; border: 1px solid #fef08a; border-radius: 12px; padding: 16px; margin: 16px 0;">
       <h3 style="margin: 0 0 10px; color: #854d0e; font-size: 15px;">📋 ملخص طلبات الموظفين اليوم</h3>
-      <p style="margin: 4px 0;">• الطلبات المعلقة في انتظار الاعتماد: <strong style="color: #d97706;">${pendingRequestsCount} طلبات</strong></p>
-      <p style="margin: 4px 0;">• الطلبات المعتمدة اليوم: <strong style="color: #16a34a;">${approvedRequestsCount} طلبات</strong></p>
+      <p style="margin: 4px 0;">• الطلبات المعلقة في انتظار الاعتماد: <strong style="color: #d97706;">${legacy.pendingRequestsCount || 0} طلبات</strong></p>
+      <p style="margin: 4px 0;">• الطلبات المعتمدة اليوم: <strong style="color: #16a34a;">${legacy.approvedRequestsCount || 0} طلبات</strong></p>
     </div>
 
     <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 12px; padding: 16px; margin: 16px 0;">
@@ -191,8 +492,8 @@ export function generateDailyDigestHTML({ dateStr, employeesCount, presentCount,
           <th style="padding: 8px; text-align: right;">إجمالي الخصومات اليوم</th>
         </tr>
         <tr>
-          <td style="padding: 8px; border-bottom: 1px solid #e2e8f0;"><strong style="color: #16a34a;">+${fmt(bonusTotalToday)} ج.م</strong></td>
-          <td style="padding: 8px; border-bottom: 1px solid #e2e8f0;"><strong style="color: #dc2626;">-${fmt(deductionTotalToday)} ج.م</strong></td>
+          <td style="padding: 8px; border-bottom: 1px solid #e2e8f0;"><strong style="color: #16a34a;">+${fmt(legacy.bonusTotalToday || 0)} ج.م</strong></td>
+          <td style="padding: 8px; border-bottom: 1px solid #e2e8f0;"><strong style="color: #dc2626;">-${fmt(legacy.deductionTotalToday || 0)} ج.م</strong></td>
         </tr>
       </table>
     </div>
@@ -204,7 +505,61 @@ export function generateDailyDigestHTML({ dateStr, employeesCount, presentCount,
     badgeText: 'ملخص نهاية اليوم 23:59',
     badgeColor: '#0f766e',
     bodyContent: content,
-    footerText: 'تم توليد هذا التقرير التلقائي في نهاية اليوم الساعة 23:59'
+    footerText: 'تم توليد هذا التقرير التلقائي في نهاية اليوم الساعة 23:59',
+    logoUrl: orgSettings.logoUrl,
+    orgName: orgSettings.orgName
+  });
+}
+
+/**
+ * إرسال إنذار فوري للإدارة عند عدم فتح الفرع أو عدم تسجيل أي حضور بموعد الفتح
+ */
+export async function notifyAdminOnBranchNoShow({ state, branch, openingTime, minutesElapsed }) {
+  const gmailConfig = getAuthoritativeGmailConfig(state);
+  if (!gmailConfig || !gmailConfig.enabled || gmailConfig.sendOnBranchNoShow === false) return;
+
+  const targetRecipients = resolveAdminRecipients(gmailConfig);
+  if (targetRecipients.length === 0) return;
+
+  const branchName = branch.name || `فرع ${branch.id}`;
+  const todayStr = getRealTodayStr();
+
+  const content = `
+    <div style="background: #fef2f2; border: 2px solid #ef4444; border-radius: 12px; padding: 18px; margin: 16px 0;">
+      <h3 style="margin: 0 0 10px; color: #991b1b; font-size: 17px;">🚨 إنذار إداري عاجل: عدم تسجيل أي حضور في الفرع</h3>
+      <p style="margin: 0 0 12px; color: #7f1d1d; font-size: 14px; line-height: 1.6;">
+        نحيطكم علماً بأن موعد فتح <strong>${branchName}</strong> هو <strong>${openingTime || '09:00'}</strong>، وقد مضت <strong>${minutesElapsed || 30} دقيقة</strong> دون قيام أي موظف من طاقم الفرع بتسجيل بصمة حضور حتى الآن!
+      </p>
+
+      <table style="width: 100%; border-collapse: collapse; font-size: 13.5px; background: #ffffff; border-radius: 8px; border: 1px solid #fca5a5;">
+        <tr><td style="padding: 8px 12px; font-weight: bold; width: 140px;">🏢 الفرع المستهدف:</td><td><strong>${branchName}</strong></td></tr>
+        <tr><td style="padding: 8px 12px; font-weight: bold;">⏰ موعد الفتح المعتمد:</td><td><strong style="color: #b91c1c;">${openingTime || '09:00'}</strong></td></tr>
+        <tr><td style="padding: 8px 12px; font-weight: bold;">📅 تاريخ اليوم:</td><td>${todayStr}</td></tr>
+        <tr><td style="padding: 8px 12px; font-weight: bold;">⚠️ حالة البصمة الحية:</td><td><span style="color: #dc2626; font-weight: bold;">0 بصمة حضور مسجلة</span></td></tr>
+      </table>
+    </div>
+
+    <p style="text-align: center; margin-top: 20px;">
+      <a href="https://pharmacy-time-tracker.vercel.app" style="display: inline-block; background: #dc2626; color: #ffffff !important; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: bold;">
+        🔗 الدخول الفوري للتحقق من كاميرات وكشك الفرع
+      </a>
+    </p>
+  `;
+
+  const html = buildEmailTemplate({
+    title: `🚨 إنذار عدم فتح فرع: ${branchName}`,
+    subtitle: `مضت ${minutesElapsed || 30} دقيقة على موعد الفتح دون رصد حضور لطاقم الفرع`,
+    badgeText: 'إنذار فوري لعدم فتح الفرع',
+    badgeColor: '#dc2626',
+    bodyContent: content,
+    footerText: 'تم إطلاق هذا الإنذار التلقائي لحماية استمرارية العمل وخدمة الجمهور'
+  });
+
+  return sendGmailEmail({
+    gmailConfig,
+    recipientEmail: targetRecipients,
+    subject: `🚨 إنذار فوري: فرع (${branchName}) لم يسجل أي بصمة حضور! (تأخر ${minutesElapsed || 30} دقيقة عن الفتح)`,
+    htmlContent: html
   });
 }
 
@@ -212,13 +567,13 @@ export function generateDailyDigestHTML({ dateStr, employeesCount, presentCount,
  * Send New Request Notification Email to Super Admin
  */
 export async function notifyAdminOnNewRequest({ state, newRequest, empName, branchName }) {
-  const gmailConfig = state?.orgSettings?.gmailConfig;
+  const gmailConfig = getAuthoritativeGmailConfig(state);
   if (!gmailConfig || !gmailConfig.enabled || gmailConfig.sendOnRequest === false) {
     return;
   }
 
-  const targetEmail = gmailConfig.targetAdminEmail || gmailConfig.adminEmail || gmailConfig.userEmail;
-  if (!targetEmail) return;
+  const targetRecipients = resolveAdminRecipients(gmailConfig);
+  if (targetRecipients.length === 0) return;
 
   // Resolve branch name if not explicitly passed
   let resolvedBranchName = branchName;
@@ -388,7 +743,7 @@ export async function notifyAdminOnNewRequest({ state, newRequest, empName, bran
 
   return sendGmailEmail({
     gmailConfig,
-    recipientEmail: targetEmail,
+    recipientEmail: targetRecipients,
     subject: `📩 طلب جديد (${resolvedBranchName || 'فرع'}): ${reqTypeTitle} من الموظف ${empName || newRequest.employeeName || ''}`,
     htmlContent: html
   });
@@ -543,11 +898,11 @@ export async function notifyAllEmployeesPayrollIssued({ state, monthStr }) {
  * Send Immediate Late Check-in Email Alert to Top Management (HQ) and Employee
  */
 export async function notifyAdminOnLateness({ state, emp, branchName, latenessMinutes, scheduledStart, timeIn, dateStr, suggestedAction, suggestedAmount }) {
-  const gmailConfig = state?.orgSettings?.gmailConfig;
+  const gmailConfig = getAuthoritativeGmailConfig(state);
   if (!gmailConfig || !gmailConfig.enabled || gmailConfig.sendOnLateness === false) return { success: false, reason: 'خدمة البريد غير مفعلة' };
 
-  const targetEmail = gmailConfig.targetAdminEmail || gmailConfig.adminEmail || gmailConfig.userEmail;
-  if (!targetEmail && !emp?.email) return { success: false, reason: 'لم يتم تحديد بريد المستلم' };
+  const targetRecipients = resolveAdminRecipients(gmailConfig);
+  if (targetRecipients.length === 0 && !emp?.email) return { success: false, reason: 'لم يتم تحديد بريد المستلم' };
 
   const empName = emp?.name || 'موظف';
   const empCode = emp?.code ? `(كود: ${emp.code})` : '';
@@ -591,10 +946,10 @@ export async function notifyAdminOnLateness({ state, emp, branchName, latenessMi
   });
 
   // 1. Dispatch to Admin
-  if (targetEmail) {
+  if (targetRecipients.length > 0) {
     sendGmailEmail({
       gmailConfig,
-      recipientEmail: targetEmail,
+      recipientEmail: targetRecipients,
       subject: `🚨 تنبيه تأخير: ${empName} (${latenessMinutes} دقيقة) — فرع ${resolvedBranch}`,
       htmlContent: html
     }).catch((e) => console.warn('Admin lateness email warning:', e));
@@ -652,11 +1007,11 @@ export async function notifyAdminOnLateness({ state, emp, branchName, latenessMi
  * Send Immediate Early Exit Email Alert to Top Management (HQ) and Employee
  */
 export async function notifyAdminOnEarlyExit({ state, emp, branchName, earlyMinutes, scheduledEnd, timeOut, dateStr, suggestedAction, suggestedAmount }) {
-  const gmailConfig = state?.orgSettings?.gmailConfig;
+  const gmailConfig = getAuthoritativeGmailConfig(state);
   if (!gmailConfig || !gmailConfig.enabled) return { success: false, reason: 'خدمة البريد غير مفعلة' };
 
-  const targetEmail = gmailConfig.targetAdminEmail || gmailConfig.adminEmail || gmailConfig.userEmail;
-  if (!targetEmail && !emp?.email) return { success: false, reason: 'لم يتم تحديد بريد المستلم' };
+  const targetRecipients = resolveAdminRecipients(gmailConfig);
+  if (targetRecipients.length === 0 && !emp?.email) return { success: false, reason: 'لم يتم تحديد بريد المستلم' };
 
   const empName = emp?.name || 'موظف';
   const empCode = emp?.code ? `(كود: ${emp.code})` : '';
@@ -695,10 +1050,10 @@ export async function notifyAdminOnEarlyExit({ state, emp, branchName, earlyMinu
     footerText: 'تم توجيه هذا الإشعار التلقائي للإدارة فور رصد البصمة'
   });
 
-  if (targetEmail) {
+  if (targetRecipients.length > 0) {
     sendGmailEmail({
       gmailConfig,
-      recipientEmail: targetEmail,
+      recipientEmail: targetRecipients,
       subject: `⚠️ تنبيه انصراف مبكر: ${empName} (${earlyMinutes} دقيقة) — فرع ${resolvedBranch}`,
       htmlContent: html
     }).catch((e) => console.warn('Admin early exit email warning:', e));
@@ -712,12 +1067,12 @@ export async function notifyAdminOnEarlyExit({ state, emp, branchName, earlyMinu
  * Triggers whenever the system applies any penalty: lateness penalty, disciplinary penalty, direct financial deduction, or absence penalty.
  */
 export async function notifyOnPenaltyApplied({ state, emp, penalty, branchName, source = 'system' }) {
-  const gmailConfig = state?.orgSettings?.gmailConfig;
+  const gmailConfig = getAuthoritativeGmailConfig(state);
   if (!gmailConfig || !gmailConfig.enabled || gmailConfig.sendOnPenalty === false) {
     return { success: false, reason: 'خدمة بريد الجزاءات غير مفعلة' };
   }
 
-  const targetAdminEmail = gmailConfig.targetAdminEmail || gmailConfig.adminEmail || gmailConfig.userEmail;
+  const targetRecipients = resolveAdminRecipients(gmailConfig);
   const empObj = emp || (state?.employees || []).find((e) => String(e.id) === String(penalty?.employeeId));
   const empName = empObj?.name || penalty?.employeeName || 'موظف';
   const empCode = empObj?.code || penalty?.employeeCode || '';
@@ -783,10 +1138,10 @@ export async function notifyOnPenaltyApplied({ state, emp, penalty, branchName, 
   });
 
   // Dispatch to Admin
-  if (targetAdminEmail) {
+  if (targetRecipients.length > 0) {
     sendGmailEmail({
       gmailConfig,
-      recipientEmail: targetAdminEmail,
+      recipientEmail: targetRecipients,
       subject: `⚖️ إشعار تطبيق جزاء: ${empName} (${penaltyTitle}) — فرع ${resolvedBranch}`,
       htmlContent: adminHtml
     }).catch((e) => console.warn('Admin penalty email dispatch error:', e));
@@ -894,11 +1249,11 @@ export async function notifyEmployeeEarlyExitWarning({ state, emp, branchName, e
  * Send Overtime Approval Request Email to Super Admin / Branch Manager
  */
 export async function notifyAdminOnOvertime({ state, emp, branchName, overtimeHours, regularHours, totalHours, scheduledStart, scheduledEnd, actualIn, actualOut, dateStr }) {
-  const gmailConfig = state?.orgSettings?.gmailConfig;
+  const gmailConfig = getAuthoritativeGmailConfig(state);
   if (!gmailConfig || !gmailConfig.enabled) return { success: false, reason: 'خدمة البريد غير مفعلة' };
 
-  const targetEmail = gmailConfig.targetAdminEmail || gmailConfig.userEmail;
-  if (!targetEmail) return { success: false, reason: 'لم يتم تحديد بريد الإدارة' };
+  const targetRecipients = resolveAdminRecipients(gmailConfig);
+  if (targetRecipients.length === 0) return { success: false, reason: 'لم يتم تحديد بريد الإدارة' };
 
   const empName = emp?.name || 'موظف';
   const resolvedBranch = branchName || emp?.branchName || 'الفرع الرئيسي';
@@ -936,7 +1291,7 @@ export async function notifyAdminOnOvertime({ state, emp, branchName, overtimeHo
 
   return sendGmailEmail({
     gmailConfig,
-    recipientEmail: targetEmail,
+    recipientEmail: targetRecipients,
     subject: `⏱️ طلب اعتماد ساعات إضافية (+${overtimeHours} س): ${empName} — فرع ${resolvedBranch}`,
     htmlContent: html
   });
@@ -957,10 +1312,11 @@ export async function sendBiometricAttendanceEmail({
   photoUrl,
   targetEmail: customTargetEmail
 }) {
-  if (!gmailConfig || !gmailConfig.enabled) return { success: false, error: 'خدمة البريد غير مفعلة' };
+  const cfg = gmailConfig || getAuthoritativeGmailConfig();
+  if (!cfg || !cfg.enabled) return { success: false, error: 'خدمة البريد غير مفعلة' };
 
-  const targetEmail = customTargetEmail || gmailConfig.targetAdminEmail || gmailConfig.adminEmail || gmailConfig.userEmail;
-  if (!targetEmail) return { success: false, error: 'لم يتم تحديد بريد المستلم' };
+  const targetRecipients = customTargetEmail ? [customTargetEmail] : resolveAdminRecipients(cfg);
+  if (targetRecipients.length === 0) return { success: false, error: 'لم يتم تحديد بريد المستلم' };
 
   const actionMap = {
     shift_start: { label: 'تسجيل دخول (بداية الوردية)', badge: '🟢 بصمة دخول', color: '#059669' },
@@ -1011,8 +1367,8 @@ export async function sendBiometricAttendanceEmail({
   });
 
   return sendGmailEmail({
-    gmailConfig,
-    recipientEmail: targetEmail,
+    gmailConfig: cfg,
+    recipientEmail: targetRecipients,
     subject: `📸 طلب اعتماد [${actInfo.badge}]: ${empName} (كود: ${empCode || '—'}) — ${timeStr}`,
     htmlContent: html
   });
@@ -1031,8 +1387,11 @@ export async function sendBiometricRegistrationRequestEmail({
   drivePhotoUrl,
   targetEmail: customTargetEmail
 }) {
-  const targetEmail = customTargetEmail || gmailConfig?.targetAdminEmail || gmailConfig?.adminEmail || gmailConfig?.userEmail;
-  if (!targetEmail) return { success: false, error: 'بريد الإدارة غير محدد' };
+  const cfg = gmailConfig || getAuthoritativeGmailConfig();
+  if (!cfg || !cfg.enabled) return { success: false, error: 'خدمة البريد غير مفعلة' };
+
+  const targetRecipients = customTargetEmail ? [customTargetEmail] : resolveAdminRecipients(cfg);
+  if (targetRecipients.length === 0) return { success: false, error: 'بريد الإدارة غير محدد' };
 
   const bioLabel = biometricType === 'hand' ? 'بصمة اليد الذكية' : 'بصمة الوجه الذكية';
 
@@ -1071,8 +1430,8 @@ export async function sendBiometricRegistrationRequestEmail({
   });
 
   return sendGmailEmail({
-    gmailConfig,
-    recipientEmail: targetEmail,
+    gmailConfig: cfg,
+    recipientEmail: targetRecipients,
     subject: `📸 طلب اعتماد بصمة جديدة: ${empName} (كود: ${empCode || '—'}) — فرع ${branchName || 'العام'}`,
     htmlContent: html
   });
@@ -1090,8 +1449,11 @@ export async function sendBiometricResetRequestEmail({
   dateStr,
   targetEmail: customTargetEmail
 }) {
-  const targetEmail = customTargetEmail || gmailConfig?.targetAdminEmail || gmailConfig?.adminEmail || gmailConfig?.userEmail;
-  if (!targetEmail) return { success: false, error: 'بريد الإدارة غير محدد' };
+  const cfg = gmailConfig || getAuthoritativeGmailConfig();
+  if (!cfg || !cfg.enabled) return { success: false, error: 'خدمة البريد غير مفعلة' };
+
+  const targetRecipients = customTargetEmail ? [customTargetEmail] : resolveAdminRecipients(cfg);
+  if (targetRecipients.length === 0) return { success: false, error: 'بريد الإدارة غير محدد' };
 
   const content = `
     <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 14px; margin-bottom: 16px;">
@@ -1127,8 +1489,8 @@ export async function sendBiometricResetRequestEmail({
   });
 
   return sendGmailEmail({
-    gmailConfig,
-    recipientEmail: targetEmail,
+    gmailConfig: cfg,
+    recipientEmail: targetRecipients,
     subject: `🔄 طلب إعادة تسجيل بصمة: ${empName} (كود: ${empCode || '—'}) — فرع ${branchName || 'العام'}`,
     htmlContent: html
   });

@@ -1,6 +1,13 @@
 import { useEffect } from 'react';
-import { getRealTodayStr } from '../utils/timeEngine';
-import { sendGmailEmail, generateDailyDigestHTML } from '../utils/gmailService';
+import { getRealTodayStr } from '../utils/formatters';
+import {
+  getAuthoritativeGmailConfig,
+  resolveAdminRecipients,
+  sendGmailEmail,
+  generateDailyDigestHTML,
+  notifyAdminOnBranchNoShow
+} from '../utils/gmailService';
+import { compileDailyDigestData, empBelongsToBranch } from '../utils/digestDataEngine';
 import { useData } from '../context/DataContext';
 import { useUI } from '../context/UIContext';
 
@@ -9,72 +16,109 @@ export function useDailyDigestCron() {
   const { showToast } = useUI();
 
   useEffect(() => {
-    const checkDailyDigest2359 = async () => {
+    const runCronChecks = async () => {
+      if (!state) return;
+      const gmailConfig = getAuthoritativeGmailConfig(state);
+      if (!gmailConfig || !gmailConfig.enabled) return;
+
       const nowDate = new Date();
-      const h = nowDate.getHours();
-      const m = nowDate.getMinutes();
+      const currentH = nowDate.getHours();
+      const currentM = nowDate.getMinutes();
+      const todayKey = getRealTodayStr();
 
-      if (h === 23 && m >= 55) {
-        const todayKey = getRealTodayStr();
-        const lastSentKey = 'last_digest_sent_' + todayKey;
+      // ─────────────────────────────────────────────────────────────
+      // 1. فحص إرسال التقرير الشامل اليومي التلقائي
+      // ─────────────────────────────────────────────────────────────
+      if (gmailConfig.sendDailyDigest !== false) {
+        const [targetHStr, targetMStr] = (gmailConfig.dailyDigestTime || '23:59').split(':');
+        const targetH = parseInt(targetHStr, 10);
+        const targetM = parseInt(targetMStr, 10);
 
-        if (!sessionStorage.getItem(lastSentKey)) {
-          sessionStorage.setItem(lastSentKey, 'true');
+        // إذا تطابقت الساعة والدقيقة الحالية مع الموعد المجدول
+        if (currentH === targetH && Math.abs(currentM - targetM) <= 1) {
+          const lastSentKey = 'last_digest_sent_' + todayKey;
 
-          if (!state) return;
-          const gmailConfig = state.orgSettings?.gmailConfig;
-          if (gmailConfig && gmailConfig.enabled && gmailConfig.sendDailyDigest) {
-            const employees = state.employees || [];
-            const shifts = (state.shifts || []).filter((s) => s.date === todayKey);
-            const requests = (state.requests || []).filter(
-              (r) => r.date === todayKey || (r.createdAt && r.createdAt.startsWith(todayKey))
-            );
-            const adjustments = (state.adjustments || []).filter((a) => a.date === todayKey);
+          if (!sessionStorage.getItem(lastSentKey)) {
+            sessionStorage.setItem(lastSentKey, 'true');
 
-            const presentEmpIds = new Set(shifts.map((s) => s.employeeId));
-            const presentCount = presentEmpIds.size;
-            const absentCount = Math.max(0, employees.length - presentCount);
-            const totalHoursToday = shifts.reduce((acc, s) => acc + (s.hours || 0), 0);
+            try {
+              const digestData = compileDailyDigestData(state, todayKey);
+              const html = generateDailyDigestHTML(digestData, state?.orgSettings);
+              const targetRecipients = resolveAdminRecipients(gmailConfig);
 
-            const pendingRequests = (state.requests || []).filter((r) => r.status === 'pending_admin' || !r.branchApproved);
-            const approvedRequestsToday = requests.filter((r) => r.status === 'approved');
+              if (targetRecipients.length > 0) {
+                await sendGmailEmail({
+                  gmailConfig,
+                  recipientEmail: targetRecipients,
+                  subject: `📊 الملخص الشامل اليومي (${gmailConfig.dailyDigestTime || '23:59'}) — ${todayKey}`,
+                  htmlContent: html
+                });
+                showToast?.('📊 تم إرسال إيميل ملخص اليوم الشامل بنجاح إلى الإدارة');
+              }
+            } catch (err) {
+              console.warn('[DailyDigestCron] Digest delivery failed:', err);
+            }
+          }
+        }
+      }
 
-            const bonusTotalToday = adjustments
-              .filter((a) => a.type === 'bonus')
-              .reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
-            const deductionTotalToday = adjustments
-              .filter((a) => a.type === 'deduction')
-              .reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
+      // ─────────────────────────────────────────────────────────────
+      // 2. فحص إنذار عدم فتح الفرع (Branch No-Show Alert بعد 30 دقيقة)
+      // ─────────────────────────────────────────────────────────────
+      if (gmailConfig.sendOnBranchNoShow !== false) {
+        const branches = (state.branches || []).filter((b) => b && b.id);
+        const currentTotalMinutes = currentH * 60 + currentM;
 
-            const html = generateDailyDigestHTML({
-              dateStr: todayKey,
-              employeesCount: employees.length,
-              presentCount,
-              absentCount,
-              lateCount: 0,
-              totalHoursToday,
-              pendingRequestsCount: pendingRequests.length,
-              approvedRequestsCount: approvedRequestsToday.length,
-              bonusTotalToday,
-              deductionTotalToday
-            });
+        for (const branch of branches) {
+          const openingTime = branch.openingTime || '09:00';
+          const [openHStr, openMStr] = openingTime.split(':');
+          const openH = parseInt(openHStr, 10) || 9;
+          const openM = parseInt(openMStr, 10) || 0;
+          const openingTotalMinutes = openH * 60 + openM;
+          const thresholdMinutes = openingTotalMinutes + 30; // بعد 30 دقيقة من موعد الفتح
 
-            const targetEmail = gmailConfig.targetAdminEmail || gmailConfig.userEmail;
-            if (targetEmail) {
-              await sendGmailEmail({
-                gmailConfig,
-                recipientEmail: targetEmail,
-                subject: `📊 الملخص الشامل اليومي (23:59) — ${todayKey}`,
-                htmlContent: html
+          // إذا حان موعد الإنذار (بين 30 دقيقة و ساعتين بعد الفتح)
+          if (currentTotalMinutes >= thresholdMinutes && currentTotalMinutes <= thresholdMinutes + 120) {
+            const noShowKey = `noshow_alert_${branch.id}_${todayKey}`;
+
+            if (!sessionStorage.getItem(noShowKey)) {
+              // التحقق هل سُجل أي حضور لطاقم هذا الفرع اليوم
+              const branchShifts = (state.shifts || []).filter((s) => {
+                if (s.date !== todayKey) return false;
+                if (s.branchId && String(s.branchId) === String(branch.id)) return true;
+                const emp = (state.employees || []).find((e) => String(e.id) === String(s.employeeId));
+                return empBelongsToBranch(emp, branch.id);
               });
-              showToast('📊 تم إرسال إيميل ملخص نهاية اليوم (23:59) بنجاح تلقائياً');
+
+              const branchActiveShifts = (state.activeShifts || []).filter((s) => {
+                if (s.branchId && String(s.branchId) === String(branch.id)) return true;
+                const emp = (state.employees || []).find((e) => String(e.id) === String(s.employeeId));
+                return empBelongsToBranch(emp, branch.id);
+              });
+
+              // إذا لم يسجل أي موظف بصمة دخول حتى الآن
+              if (branchShifts.length === 0 && branchActiveShifts.length === 0) {
+                sessionStorage.setItem(noShowKey, 'true');
+                try {
+                  await notifyAdminOnBranchNoShow({
+                    state,
+                    branch,
+                    openingTime,
+                    minutesElapsed: currentTotalMinutes - openingTotalMinutes
+                  });
+                  console.log(`🚨 [Branch No-Show Alert] Sent for branch ${branch.name || branch.id}`);
+                } catch (err) {
+                  console.warn('[Branch No-Show Alert] Warning:', err);
+                }
+              }
             }
           }
         }
       }
     };
 
-    const timer = setInterval(checkDailyDigest2359, 30000);
+    // تشغيل الفحص كل 30 ثانية
+    const timer = setInterval(runCronChecks, 30000);
     return () => clearInterval(timer);
   }, [state, showToast]);
 }

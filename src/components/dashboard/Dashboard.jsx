@@ -106,7 +106,7 @@ export default function Dashboard({
   const unassignedCount = employees.filter((e) => e && !e.branchId && (!e.branchesDetails || e.branchesDetails.length === 0)).length;
 
   // Live Punches per Branch (Today)
-  const todayDate = new Date().toISOString().slice(0, 10);
+  const todayDate = getRealTodayStr();
   const todayPunches = punches.filter((p) => (p.date || p.timestamp || '').startsWith(todayDate));
 
   const predicate = createDatePredicate({
