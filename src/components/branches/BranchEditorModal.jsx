@@ -24,8 +24,8 @@ export default function BranchEditorModal({
   const [phones, setPhones] = useState([{ id: '1', number: '', type: 'landline' }]);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [openingTime, setOpeningTime] = useState('09:00');
-  const [closingTime, setClosingTime] = useState('23:00');
+  const [openingTime, setOpeningTime] = useState('');
+  const [closingTime, setClosingTime] = useState('');
 
   // UI / Validation States
   const [usernameError, setUsernameError] = useState('');
@@ -42,8 +42,8 @@ export default function BranchEditorModal({
       setBranchCode(editingBranch.branchCode || editingBranch.id || '');
       setBranchName(editingBranch.name || '');
       setBranchAddress(editingBranch.address || '');
-      setOpeningTime(editingBranch.openingTime || '09:00');
-      setClosingTime(editingBranch.closingTime || '23:00');
+      setOpeningTime(editingBranch.openingTime || '');
+      setClosingTime(editingBranch.closingTime || '');
       setBranchLocationUrl(
         editingBranch.locationUrl ||
         (editingBranch.latitude && editingBranch.longitude
@@ -74,11 +74,11 @@ export default function BranchEditorModal({
       setPassword(editingBranch.password || '');
     } else {
       // New Branch auto-defaults
-      setBranchCode(`BR-${branches.length + 101}`);
+      setBranchCode(`BR-${(branches || []).length + 101}`);
       setBranchName('');
       setBranchAddress('');
-      setOpeningTime('09:00');
-      setClosingTime('23:00');
+      setOpeningTime('');
+      setClosingTime('');
       setBranchLocationUrl('');
       setBranchLatitude(null);
       setBranchLongitude(null);
@@ -87,12 +87,12 @@ export default function BranchEditorModal({
       setManagerId('');
 
       // Auto-generate unique username
-      let bIndex = branches.length + 1;
+      let bIndex = (branches || []).length + 1;
       let candidateUser = `branch_${bIndex}`;
       const isUserTaken = (cand) => {
         const u = cand.toLowerCase();
-        const bTaken = branches.some((b) => b.username && b.username.trim().toLowerCase() === u);
-        const eTaken = employees.some(
+        const bTaken = (branches || []).some((b) => b.username && b.username.trim().toLowerCase() === u);
+        const eTaken = (employees || []).some(
           (e) =>
             (e.code && String(e.code).trim().toLowerCase() === u) ||
             (e.username && String(e.username).trim().toLowerCase() === u)
@@ -113,7 +113,7 @@ export default function BranchEditorModal({
     setIsGpsLoading(false);
     setGpsAccuracy(null);
     setActiveTab('general');
-  }, [isOpen, editingBranch, branches, employees]);
+  }, [isOpen, editingBranch?.id]);
 
   // Real-time username collision check
   const handleUsernameChange = (val) => {
@@ -304,8 +304,8 @@ export default function BranchEditorModal({
       image: branchLogo,
       phone: primaryPhone,
       phones: validPhones,
-      openingTime: openingTime || '09:00',
-      closingTime: closingTime || '23:00',
+      openingTime: (openingTime || '').trim(),
+      closingTime: (closingTime || '').trim(),
       managerId,
       username: username.trim(),
       password,
@@ -597,12 +597,32 @@ export default function BranchEditorModal({
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px' }}>
                   <div className="field" style={{ margin: 0 }}>
-                    <label style={{ fontWeight: 700, fontSize: '12.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span>🟢</span> موعد فتح الفرع (Opening Time)
-                    </label>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                      <label style={{ fontWeight: 700, fontSize: '12.5px', display: 'flex', alignItems: 'center', gap: '6px', margin: 0 }}>
+                        <span>🟢</span> موعد فتح الفرع (Opening Time)
+                      </label>
+                      {openingTime && (
+                        <button
+                          type="button"
+                          onClick={() => setOpeningTime('')}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#dc2626',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            padding: '0 4px'
+                          }}
+                          title="مسح موعد الفتح"
+                        >
+                          ✕ مسح
+                        </button>
+                      )}
+                    </div>
                     <input
                       type="time"
-                      value={openingTime}
+                      value={openingTime || ''}
                       onChange={(e) => setOpeningTime(e.target.value)}
                       style={{
                         width: '100%',
@@ -613,15 +633,38 @@ export default function BranchEditorModal({
                         fontWeight: 800
                       }}
                     />
+                    <span style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '4px', display: 'block' }}>
+                      {openingTime ? `يفتح الفرع في الساعة (${openingTime})` : 'اختياري: غير محدد (لن يتم إطلاق إنذار عدم فتح الفرع)'}
+                    </span>
                   </div>
 
                   <div className="field" style={{ margin: 0 }}>
-                    <label style={{ fontWeight: 700, fontSize: '12.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span>🌙</span> موعد إغلاق الفرع (Closing Time)
-                    </label>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                      <label style={{ fontWeight: 700, fontSize: '12.5px', display: 'flex', alignItems: 'center', gap: '6px', margin: 0 }}>
+                        <span>🌙</span> موعد إغلاق الفرع (Closing Time)
+                      </label>
+                      {closingTime && (
+                        <button
+                          type="button"
+                          onClick={() => setClosingTime('')}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#dc2626',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            padding: '0 4px'
+                          }}
+                          title="مسح موعد الإغلاق"
+                        >
+                          ✕ مسح
+                        </button>
+                      )}
+                    </div>
                     <input
                       type="time"
-                      value={closingTime}
+                      value={closingTime || ''}
                       onChange={(e) => setClosingTime(e.target.value)}
                       style={{
                         width: '100%',
@@ -632,6 +675,9 @@ export default function BranchEditorModal({
                         fontWeight: 800
                       }}
                     />
+                    <span style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '4px', display: 'block' }}>
+                      {closingTime ? `يغلق الفرع في الساعة (${closingTime})` : 'اختياري: غير محدد'}
+                    </span>
                   </div>
                 </div>
               </div>

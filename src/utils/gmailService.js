@@ -311,7 +311,7 @@ export function generateDailyDigestHTML(digestDataOrParams, orgSettings = {}) {
           <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px; margin-bottom: 10px;">
             <div>
               <strong style="font-size: 15px; color: #0f172a;">🏢 ${b.name}</strong>
-              <span style="font-size: 12px; color: #64748b; margin-right: 8px;">(مواعيد العمل: ${b.openingTime} - ${b.closingTime})</span>
+              ${b.openingTime && b.closingTime ? `<span style="font-size: 12px; color: #64748b; margin-right: 8px;">(مواعيد العمل: ${b.openingTime} - ${b.closingTime})</span>` : b.openingTime ? `<span style="font-size: 12px; color: #64748b; margin-right: 8px;">(الفتح: ${b.openingTime})</span>` : ''}
             </div>
             <div>
               <span style="background: #dcfce7; color: #166534; font-size: 12px; font-weight: bold; padding: 3px 8px; border-radius: 6px;">حضور: ${b.presentCount} من ${b.totalEmployees}</span>
@@ -579,12 +579,12 @@ export async function notifyAdminOnBranchNoShow({ state, branch, openingTime, mi
     <div style="background: #fef2f2; border: 2px solid #ef4444; border-radius: 12px; padding: 18px; margin: 16px 0;">
       <h3 style="margin: 0 0 10px; color: #991b1b; font-size: 17px;">🚨 إنذار إداري عاجل: عدم تسجيل أي حضور في الفرع</h3>
       <p style="margin: 0 0 12px; color: #7f1d1d; font-size: 14px; line-height: 1.6;">
-        نحيطكم علماً بأن موعد فتح <strong>${branchName}</strong> هو <strong>${openingTime || '09:00'}</strong>، وقد مضت <strong>${minutesElapsed || 30} دقيقة</strong> دون قيام أي موظف من طاقم الفرع بتسجيل بصمة حضور حتى الآن!
+        نحيطكم علماً بأن موعد فتح <strong>${branchName}</strong> هو <strong>${openingTime}</strong>، وقد مضت <strong>${minutesElapsed || 30} دقيقة</strong> دون قيام أي موظف من طاقم الفرع بتسجيل بصمة حضور حتى الآن!
       </p>
 
       <table style="width: 100%; border-collapse: collapse; font-size: 13.5px; background: #ffffff; border-radius: 8px; border: 1px solid #fca5a5;">
         <tr><td style="padding: 8px 12px; font-weight: bold; width: 140px;">🏢 الفرع المستهدف:</td><td><strong>${branchName}</strong></td></tr>
-        <tr><td style="padding: 8px 12px; font-weight: bold;">⏰ موعد الفتح المعتمد:</td><td><strong style="color: #b91c1c;">${openingTime || '09:00'}</strong></td></tr>
+        <tr><td style="padding: 8px 12px; font-weight: bold;">⏰ موعد الفتح المعتمد:</td><td><strong style="color: #b91c1c;">${openingTime}</strong></td></tr>
         <tr><td style="padding: 8px 12px; font-weight: bold;">📅 تاريخ اليوم:</td><td>${todayStr}</td></tr>
         <tr><td style="padding: 8px 12px; font-weight: bold;">⚠️ حالة البصمة الحية:</td><td><span style="color: #dc2626; font-weight: bold;">0 بصمة حضور مسجلة</span></td></tr>
       </table>

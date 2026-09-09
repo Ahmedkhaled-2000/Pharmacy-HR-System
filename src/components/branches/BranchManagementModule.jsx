@@ -161,11 +161,17 @@ export default function BranchManagementModule({
                         )}
                         <div>
                           <div>{b.name}</div>
-                          <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                            <span style={{ color: '#0d9488', fontWeight: 700 }}>⏰ الفتح: {b.openingTime || '09:00'}</span>
-                            <span>•</span>
-                            <span>الإغلاق: {b.closingTime || '23:00'}</span>
-                          </div>
+                          {b.openingTime || b.closingTime ? (
+                            <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                              {b.openingTime && <span style={{ color: '#0d9488', fontWeight: 700 }}>⏰ الفتح: {b.openingTime}</span>}
+                              {b.openingTime && b.closingTime && <span>•</span>}
+                              {b.closingTime && <span>الإغلاق: {b.closingTime}</span>}
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
+                              <span>⏰ المواعيد: غير محددة</span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </td>
@@ -238,7 +244,10 @@ export default function BranchManagementModule({
       {/* Professional Modal for Create/Edit Branch */}
       <BranchEditorModal
         isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
+        onClose={() => {
+          setIsModalOpen(false);
+          setEditingBranch(null);
+        }}
         editingBranch={editingBranch}
         branches={branches}
         employees={employees}

@@ -70,10 +70,12 @@ export function useDailyDigestCron() {
         const currentTotalMinutes = currentH * 60 + currentM;
 
         for (const branch of branches) {
-          const openingTime = branch.openingTime || '09:00';
-          const [openHStr, openMStr] = openingTime.split(':');
-          const openH = parseInt(openHStr, 10) || 9;
-          const openM = parseInt(openMStr, 10) || 0;
+          const openingTime = branch.openingTime;
+          if (!openingTime || !String(openingTime).trim()) continue;
+          const [openHStr, openMStr] = String(openingTime).trim().split(':');
+          const openH = parseInt(openHStr, 10);
+          const openM = parseInt(openMStr, 10);
+          if (isNaN(openH) || isNaN(openM)) continue;
           const openingTotalMinutes = openH * 60 + openM;
           const thresholdMinutes = openingTotalMinutes + 30; // بعد 30 دقيقة من موعد الفتح
 

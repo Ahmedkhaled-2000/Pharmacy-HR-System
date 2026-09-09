@@ -250,10 +250,12 @@ export default function AppRoutes() {
 
     const performSaveBranch = async () => {
       let updatedBranches;
-      if (exists) {
-        updatedBranches = currentBranches.map((b) => (b && b.id === branchData.id ? branchData : b));
+      const latestBranches = state?.branches || currentBranches;
+      const alreadyExists = latestBranches.some((b) => b && b.id === branchData.id);
+      if (alreadyExists) {
+        updatedBranches = latestBranches.map((b) => (b && b.id === branchData.id ? { ...b, ...branchData } : b));
       } else {
-        updatedBranches = [...currentBranches, branchData];
+        updatedBranches = [...latestBranches, branchData];
       }
       const updatedState = { ...state, branches: updatedBranches };
       setState(updatedState);
@@ -264,7 +266,7 @@ export default function AppRoutes() {
     executeWithOwnerGuard({
       lockKey: 'lockManageBranches',
       actionTitle: exists ? `تعديل بيانات فرع (${branchData.name})` : `إضافة فرع جديد (${branchData.name})`,
-      actionDetails: `اسم الفرع: ${branchData.name} · الكود: ${branchData.code || '—'}`,
+      actionDetails: `اسم الفرع: ${branchData.name} · الكود: ${branchData.branchCode || branchData.code || '—'}`,
       onExecute: performSaveBranch
     });
   };
