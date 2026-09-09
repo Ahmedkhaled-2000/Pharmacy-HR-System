@@ -483,55 +483,72 @@ export default function UniversalShortcutsController() {
         return;
       }
 
-      // ── 13. Kiosk Mode (Alt+Shift+K / Ctrl+Alt+K) ──────────────────────────────
-      const kioskDef = getDef('kioskMode');
-      const isKioskKey =
-        normKey === 'k' ||
-        e.code === 'KeyK' ||
-        e.key === 'k' ||
-        e.key === 'K' ||
-        e.key === 'ن' ||
-        e.key === '،';
+      // ── 13. Kiosk Mode & Return (Alt+Shift+K / Custom Shortcut) ───────────────
+      const isKioskRoute = window.location.pathname.startsWith('/kiosk');
 
-      const isKiosk =
-        (kioskDef && matchesShortcutEvent(kioskDef, e)) ||
-        (isAlt && isShift && isKioskKey) ||
-        (isCtrl && isAlt && isKioskKey);
+      if (isKioskRoute) {
+        // We are currently in Kiosk Mode: Check Return Shortcut
+        const kioskReturnDef = getDef('kioskReturn') || getDef('kioskMode');
+        const isReturnKey =
+          normKey === 'k' ||
+          e.code === 'KeyK' ||
+          e.key === 'k' ||
+          e.key === 'K' ||
+          e.key === 'ن' ||
+          e.key === '،';
 
-      if (isKiosk) {
-        consumeEvent();
+        const isReturnMatch =
+          (kioskReturnDef && matchesShortcutEvent(kioskReturnDef, e)) ||
+          (!kioskReturnDef && ((isAlt && isShift && isReturnKey) || (isCtrl && isAlt && isReturnKey)));
 
-        // If already in Kiosk mode, toggle back to main system
-        if (window.location.pathname.startsWith('/kiosk')) {
+        if (isReturnMatch) {
+          consumeEvent();
           uiRef.current?.showToast?.('🏠 جاري العودة إلى المنظومة الرئيسية...');
           window.location.href = '/';
           return;
         }
+      } else {
+        // Outside Kiosk: Check Open Kiosk Shortcut
+        const kioskDef = getDef('kioskMode');
+        const isKioskKey =
+          normKey === 'k' ||
+          e.code === 'KeyK' ||
+          e.key === 'k' ||
+          e.key === 'K' ||
+          e.key === 'ن' ||
+          e.key === '،';
 
-        uiRef.current?.showToast?.('⚡ جاري فتح كشك البصمة في صفحة جديدة...');
+        const isKiosk =
+          (kioskDef && matchesShortcutEvent(kioskDef, e)) ||
+          (!kioskDef && ((isAlt && isShift && isKioskKey) || (isCtrl && isAlt && isKioskKey)));
 
-        const kioskUrl = window.location.origin + '/kiosk';
-        let win = null;
-        try {
-          win = window.open(kioskUrl, '_blank');
-        } catch {}
+        if (isKiosk) {
+          consumeEvent();
+          uiRef.current?.showToast?.('⚡ جاري فتح كشك البصمة في صفحة جديدة...');
 
-        if (!win || win.closed || typeof win.closed === 'undefined') {
+          const kioskUrl = window.location.origin + '/kiosk';
+          let win = null;
           try {
-            const link = document.createElement('a');
-            link.href = kioskUrl;
-            link.target = '_blank';
-            link.rel = 'noopener noreferrer';
-            document.body.appendChild(link);
-            link.click();
-            setTimeout(() => {
-              if (link.parentNode) link.parentNode.removeChild(link);
-            }, 100);
-          } catch {
-            window.location.href = kioskUrl;
+            win = window.open(kioskUrl, '_blank');
+          } catch {}
+
+          if (!win || win.closed || typeof win.closed === 'undefined') {
+            try {
+              const link = document.createElement('a');
+              link.href = kioskUrl;
+              link.target = '_blank';
+              link.rel = 'noopener noreferrer';
+              document.body.appendChild(link);
+              link.click();
+              setTimeout(() => {
+                if (link.parentNode) link.parentNode.removeChild(link);
+              }, 100);
+            } catch {
+              window.location.href = kioskUrl;
+            }
           }
+          return;
         }
-        return;
       }
 
       // ── 14. Quick Navigation (Alt+1 .. Alt+9, Alt+0) ───────────────────────────

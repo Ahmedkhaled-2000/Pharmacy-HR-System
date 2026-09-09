@@ -8,6 +8,7 @@ import { uploadBiometricAttendancePhoto } from '../../utils/googleDriveService';
 import { sendBiometricAttendanceEmail } from '../../utils/gmailService';
 import { preWarmFaceModels } from '../../utils/faceApiHelper';
 import { normalizeDigits, getRealTodayStr } from '../../utils/formatters';
+import { getActiveShortcuts, matchesShortcutEvent } from '../../utils/shortcutsConfig';
 import '../../kiosk-modern.css';
 
 export default function ElectronicKioskView({
@@ -48,15 +49,24 @@ export default function ElectronicKioskView({
     return () => clearTimeout(timer);
   }, [kioskAlertModal]);
 
-  // Keyboard shortcut (Alt+Shift+K / Ctrl+Alt+K) to return to main ERP
+  // Keyboard shortcut to return to main ERP (configurable via shortcuts settings)
   useEffect(() => {
     const handleKioskKey = (e) => {
-      const isAltShift = e.altKey && e.shiftKey;
-      const isCtrlAlt = e.ctrlKey && e.altKey;
-      const keyStr = (e.key || '').toLowerCase();
-      const isKeyK = e.code === 'KeyK' || keyStr === 'k' || keyStr === 'ن' || keyStr === '،';
-      
-      if ((isAltShift || isCtrlAlt) && isKeyK) {
+      const activeList = getActiveShortcuts(state?.orgSettings?.customShortcuts);
+      const returnDef = activeList.find((s) => s.id === 'kioskReturn') || activeList.find((s) => s.id === 'kioskMode');
+
+      let isMatch = false;
+      if (returnDef && matchesShortcutEvent(returnDef, e)) {
+        isMatch = true;
+      } else {
+        const isAltShift = e.altKey && e.shiftKey;
+        const isCtrlAlt = e.ctrlKey && e.altKey;
+        const keyStr = (e.key || '').toLowerCase();
+        const isKeyK = e.code === 'KeyK' || keyStr === 'k' || keyStr === 'ن' || keyStr === '،';
+        if ((isAltShift || isCtrlAlt) && isKeyK) isMatch = true;
+      }
+
+      if (isMatch) {
         e.preventDefault();
         e.stopPropagation();
         window.location.href = '/';
@@ -64,7 +74,7 @@ export default function ElectronicKioskView({
     };
     window.addEventListener('keydown', handleKioskKey, true);
     return () => window.removeEventListener('keydown', handleKioskKey, true);
-  }, []);
+  }, [state?.orgSettings?.customShortcuts]);
 
   const [pendingDirectiveModal, setPendingDirectiveModal] = useState(null);
   const [pendingDirectivesQueue, setPendingDirectivesQueue] = useState([]);
@@ -948,36 +958,9 @@ export default function ElectronicKioskView({
             boxShadow: '0 20px 40px -15px rgba(0,0,0,0.25)'
           }}
         >
-          {/* Top Return / Status Bar */}
-          <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', paddingBottom: '6px', borderBottom: '1px solid rgba(15, 23, 42, 0.08)' }}>
-            <button
-              type="button"
-              onClick={() => { window.location.href = '/'; }}
-              title="العودة للنظام الرئيسي (Alt + Shift + K)"
-              style={{
-                background: 'rgba(15, 23, 42, 0.05)',
-                border: '1px solid rgba(15, 23, 42, 0.12)',
-                borderRadius: '8px',
-                padding: '4px 10px',
-                fontSize: '0.78rem',
-                fontWeight: 700,
-                color: '#334155',
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                transition: 'all 0.15s ease'
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(15, 23, 42, 0.1)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(15, 23, 42, 0.05)'; }}
-            >
-              <span>🏠 العودة للنظام</span>
-              <kbd style={{ background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '4px', padding: '1px 5px', fontSize: '0.68rem', color: '#64748b' }}>
-                Alt+Shift+K
-              </kbd>
-            </button>
-
-            <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 700 }}>
+          {/* Top Status Bar */}
+          <div style={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', marginBottom: '8px', paddingBottom: '6px', borderBottom: '1px solid rgba(15, 23, 42, 0.08)' }}>
+            <span style={{ fontSize: '0.78rem', color: '#475569', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(15, 23, 42, 0.04)', padding: '4px 14px', borderRadius: '20px' }}>
               {isGeneralKioskLink ? '⚡ كشك البصمة العام' : '🏢 كشك فرع مخصص'}
             </span>
           </div>

@@ -250,7 +250,17 @@ export const DEFAULT_SHORTCUTS = [
   {
     id: 'kioskMode',
     name: 'شاشة كشك البصمة السريعة',
-    desc: 'الانتقال المباشر لشاشة تسجيل البصمة والحضور الذاتي للموظفين',
+    desc: 'الانتقال المباشر لشاشة تسجيل البصمة والحضور الذاتي للموظفين (فتح الكشك)',
+    category: 'nav',
+    key: 'k',
+    modifiers: ['Alt', 'Shift'],
+    fallbackKey: 'k',
+    fallbackModifiers: ['Ctrl', 'Alt']
+  },
+  {
+    id: 'kioskReturn',
+    name: 'العودة للمنظومة من كشك البصمة',
+    desc: 'الخروج السري من شاشة كشك البصمة والعودة إلى المنظومة الرئيسية (يمكنك تخصيص هذا الاختصار لمنع خروج الموظفين)',
     category: 'nav',
     key: 'k',
     modifiers: ['Alt', 'Shift'],
