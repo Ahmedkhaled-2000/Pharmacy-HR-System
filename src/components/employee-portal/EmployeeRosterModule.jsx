@@ -566,6 +566,88 @@ export default function EmployeeRosterModule({
           </button>
         </div>
 
+        {/* Side-by-Side Dual Branch Roster Comparison Header Card */}
+        <div style={{
+          background: 'linear-gradient(135deg, #0f766e 0%, #115e59 100%)',
+          borderRadius: '16px',
+          padding: '20px 24px',
+          color: '#ffffff',
+          boxShadow: '0 4px 16px rgba(15, 118, 110, 0.2)',
+          marginTop: '16px',
+          marginBottom: '20px'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', borderBottom: '1px solid rgba(255,255,255,0.2)', paddingBottom: '12px', marginBottom: '14px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ fontSize: '26px' }}>⚖️</span>
+              <div>
+                <h4 style={{ margin: 0, fontSize: '17px', fontWeight: 900, color: '#ffffff' }}>
+                  المقارنة المزدوجة لجداول الشيفتات والـ Roster بين الفروع — لشهر {selectedMonth}
+                </h4>
+                <span style={{ fontSize: '12px', opacity: 0.9 }}>
+                  مقارنة ساعات الدوام المقررة، وأيام العمل والراحات، وحالة الاعتماد بكل فرع
+                </span>
+              </div>
+            </div>
+            <span style={{
+              background: 'rgba(255,255,255,0.2)',
+              padding: '6px 14px',
+              borderRadius: '99px',
+              fontSize: '12.5px',
+              fontWeight: 800
+            }}>
+              {emp.branchesDetails.length} فروع مجدولة
+            </span>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px' }}>
+            {emp.branchesDetails.map((bd) => {
+              const bId = bd.branchId;
+              const branchObj = (state.branches || []).find((b) => String(b.id) === String(bId) || b.name === bId);
+              const bName = branchObj ? branchObj.name : `فرع ${bId}`;
+              const bRoster = getResolvedEmployeeRoster(emp, bId, selectedMonth, state);
+              const bSchedule = bRoster?.schedule || null;
+              const bCalendar = buildMonthCalendar(selectedMonth, bSchedule, bRoster?.fromDate || fromDate, bRoster?.toDate || toDate, emp?.id, state);
+              const bWorkDays = bCalendar.filter((d) => d.daySchedule && d.daySchedule.type !== 'off' && !d.daySchedule.isOff).length;
+              const bOffDays = bCalendar.filter((d) => d.daySchedule && (d.daySchedule.type === 'off' || d.daySchedule.isOff)).length;
+              const bDailyHours = bd.workHoursPerDay || 8;
+              const bTotalTargetHours = bWorkDays * bDailyHours;
+
+              return (
+                <div key={bId} style={{ background: 'rgba(255,255,255,0.12)', borderRadius: '12px', padding: '14px 18px', border: '1px solid rgba(255,255,255,0.15)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                    <span style={{ fontWeight: 900, fontSize: '15px' }}>📍 {bName}</span>
+                    <span style={{
+                      background: bRoster?.status === 'approved' ? '#dcfce7' : 'rgba(255,255,255,0.2)',
+                      color: bRoster?.status === 'approved' ? '#166534' : '#ffffff',
+                      padding: '2px 10px',
+                      borderRadius: '99px',
+                      fontSize: '11.5px',
+                      fontWeight: 800
+                    }}>
+                      {bRoster?.status === 'approved' ? '🟢 معتمد' : '⚠️ غير محدد'}
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', textAlign: 'center', fontSize: '12px' }}>
+                    <div style={{ background: 'rgba(255,255,255,0.15)', padding: '6px 4px', borderRadius: '8px' }}>
+                      <div style={{ opacity: 0.85, fontSize: '10.5px' }}>أيام العمل</div>
+                      <div style={{ fontSize: '15px', fontWeight: 900, marginTop: '2px' }}>{bWorkDays} يوم</div>
+                    </div>
+                    <div style={{ background: 'rgba(255,255,255,0.15)', padding: '6px 4px', borderRadius: '8px' }}>
+                      <div style={{ opacity: 0.85, fontSize: '10.5px' }}>أيام الراحة</div>
+                      <div style={{ fontSize: '15px', fontWeight: 900, marginTop: '2px' }}>{bOffDays} يوم</div>
+                    </div>
+                    <div style={{ background: 'rgba(255,255,255,0.15)', padding: '6px 4px', borderRadius: '8px' }}>
+                      <div style={{ opacity: 0.85, fontSize: '10.5px' }}>الساعات المقررة</div>
+                      <div style={{ fontSize: '15px', fontWeight: 900, marginTop: '2px' }}>{bTotalTargetHours} س</div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
         {showRosterModal && renderRosterModal()}
 
         {emp.branchesDetails.map((bd) => {

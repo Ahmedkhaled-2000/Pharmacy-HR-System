@@ -19,6 +19,7 @@ import GoogleDriveConfigCard from './GoogleDriveConfigCard';
 import DatesPeriodsSettingsCard from './DatesPeriodsSettingsCard';
 import AccountingSystemGuideCard from './AccountingSystemGuideCard';
 import KeyboardShortcutsSettingsCard from './KeyboardShortcutsSettingsCard';
+import EnterpriseHeaderSettingsCard from './EnterpriseHeaderSettingsCard';
 import { DEFAULT_JOBS, getJobsList, DEFAULT_DEPARTMENTS, getDepartmentsList } from '../../utils/jobsHelper';
 import { DEFAULT_PHARMACY_BYLAWS_SECTIONS } from '../../utils/bylawsDefaults';
 import {
@@ -150,6 +151,7 @@ export default function SettingsModule({
     lockRestoreBackup: true,
     lockChangeAdminCredentials: true,
     lockEditOrgSettings: false,
+    lockEditEnterpriseHeader: true,
     lockEditGmailConfig: false,
     lockEditDriveConfig: false
   };
@@ -1617,117 +1619,61 @@ export default function SettingsModule({
 
       {/* Tab 1: General Org & Admin Settings */}
       {activeTab === 'general' && (
-        <form onSubmit={handleSaveGeneral} style={{ background: 'var(--surface)', border: '1px solid var(--border)', padding: '20px', borderRadius: '14px' }}>
-          <h4 style={{ margin: '0 0 16px', fontFamily: 'Cairo', color: 'var(--primary-dark)' }}>
-            🏥 إعدادات اسم المؤسسة واسم المدير العام والشعار
-          </h4>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <EnterpriseHeaderSettingsCard
+            state={state}
+            setState={setState}
+            saveState={saveState}
+            showToast={showToast}
+            executeWithOwnerGuard={executeWithOwnerGuard}
+            ownerLocks={ownerLocks}
+            authRole={effectiveAuthRole}
+            isOwner={isOwnerVerified}
+          />
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px', marginBottom: '16px' }}>
-            <div className="field">
-              <label>اسم الصيدلية / مجموعة الصيدليات</label>
-              <input type="text" value={orgName} onChange={(e) => setOrgName(e.target.value)} required />
-            </div>
-
-            <div className="field">
-              <label>اسم المدير العام للصيدليات</label>
-              <input type="text" value={gmName} onChange={(e) => setGmName(e.target.value)} required />
-            </div>
-
-            <div className="field grow" style={{ width: '100%' }}>
-              <label>طريقة البصمة الافتراضية للشركة (Biometric Type)</label>
-              <select
-                value={biometricType}
-                onChange={(e) => setBiometricType(e.target.value)}
-                style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)' }}
-              >
-                <option value="face">بصمة الوجه (Face Recognition & Liveness)</option>
-                <option value="hand">بصمة اليد (Hand Geometry 3D)</option>
-              </select>
-              <p style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '4px' }}>
-                اختر التقنية المعتمدة لتوثيق حضور الموظفين في المنصة.
-              </p>
-            </div>
-
-            <div className="field" style={{ gridColumn: '1 / -1' }}>
-              <label style={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span>🏢</span> شعار المؤسسة / الصيدلية (Logo)
-              </label>
-              <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-                <input
-                  type="text"
-                  value={logoUrl}
-                  onChange={(e) => setLogoUrl(e.target.value)}
-                  placeholder="رابط الشعار أو قم باختيار صورة مباشرة من جهازك..."
-                  style={{ flex: '1 1 280px' }}
-                />
-                <label
-                  className="btn btn-ghost"
-                  style={{
-                    cursor: 'pointer',
-                    whiteSpace: 'nowrap',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    padding: '9px 16px',
-                    background: 'var(--primary-light)',
-                    color: 'var(--primary-dark)',
-                    fontWeight: 'bold',
-                    border: '1px solid var(--primary)',
-                    borderRadius: '8px'
-                  }}
-                >
-                  📁 رفع شعار من الجهاز
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleLogoUpload}
-                    style={{ display: 'none' }}
-                  />
-                </label>
+          {/* Admin Credentials & Biometrics Setup Card */}
+          <form onSubmit={handleSaveGeneral} style={{ background: 'var(--surface)', border: '1px solid var(--border)', padding: '20px', borderRadius: '16px', boxShadow: '0 2px 12px rgba(0,0,0,0.03)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '12px' }}>
+              <span style={{ fontSize: '22px' }}>🔐</span>
+              <div>
+                <h4 style={{ margin: 0, fontFamily: 'Cairo', color: 'var(--primary-dark)', fontSize: '16px', fontWeight: 800 }}>
+                  بيانات تسجيل دخول المدير العام وتقنية البصمة
+                </h4>
+                <p style={{ margin: '2px 0 0', fontSize: '12px', color: 'var(--muted)' }}>
+                  إدارة حساب الإدارة العليا وحماية النظام وضبط التقنية المعتمدة للبصمة
+                </p>
               </div>
-              {logoUrl && (
-                <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '14px', background: 'var(--surface-muted)', padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--border)' }}>
-                  <img
-                    src={logoUrl}
-                    alt="Logo Preview"
-                    style={{ maxHeight: '60px', maxWidth: '140px', objectFit: 'contain', borderRadius: '8px', background: '#fff', padding: '4px', border: '1px solid var(--border)' }}
-                  />
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <span style={{ fontSize: '12.5px', color: 'var(--text)', fontWeight: 'bold' }}>✅ معاينة الشعار الحالي للمؤسسة</span>
-                    <button
-                      type="button"
-                      className="del-btn"
-                      style={{ width: 'fit-content', padding: '3px 10px', fontSize: '12px' }}
-                      onClick={() => setLogoUrl('')}
-                    >
-                      🗑️ حذف الشعار
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <h4 style={{ margin: '20px 0 16px', fontFamily: 'Cairo', color: 'var(--primary-dark)' }}>
-            🔐 بيانات دخول المدير العام وحماية اللوحة
-          </h4>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px', marginBottom: '20px' }}>
-            <div className="field">
-              <label>اسم المستخدم للأدمن (Admin Username)</label>
-              <input type="text" value={adminUser} onChange={(e) => setAdminUser(e.target.value)} required />
             </div>
 
-            <div className="field">
-              <label>كلمة سر الإدارة العليا</label>
-              <input type="text" value={adminPass} onChange={(e) => setAdminPass(e.target.value)} required />
-            </div>
-          </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px', marginBottom: '16px' }}>
+              <div className="field">
+                <label>اسم المستخدم للأدمن (Admin Username)</label>
+                <input type="text" value={adminUser} onChange={(e) => setAdminUser(e.target.value)} required />
+              </div>
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <button type="submit" className="btn btn-start">💾 حفظ كافة الإعدادات</button>
-          </div>
-        </form>
+              <div className="field">
+                <label>كلمة سر الإدارة العليا</label>
+                <input type="text" value={adminPass} onChange={(e) => setAdminPass(e.target.value)} required />
+              </div>
+
+              <div className="field grow" style={{ width: '100%' }}>
+                <label>طريقة البصمة الافتراضية للشركة (Biometric Type)</label>
+                <select
+                  value={biometricType}
+                  onChange={(e) => setBiometricType(e.target.value)}
+                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)' }}
+                >
+                  <option value="face">بصمة الوجه (Face Recognition & Liveness)</option>
+                  <option value="hand">بصمة اليد (Hand Geometry 3D)</option>
+                </select>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--border)', paddingTop: '14px' }}>
+              <button type="submit" className="btn btn-start">💾 حفظ بيانات الدخول والبصمة</button>
+            </div>
+          </form>
+        </div>
       )}
 
       {/* Tab: Permissions Management */}
@@ -3573,6 +3519,15 @@ export default function SettingsModule({
                           type="checkbox"
                           checked={Boolean(ownerLocks.lockEditOrgSettings)}
                           onChange={() => handleToggleOwnerLock('lockEditOrgSettings')}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#d97706' }}
+                        />
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '13px', fontWeight: 700, color: '#334155' }}>
+                        <span>🏥 قفل تعديل مركزة ترويسة الطباعة وبيانات المؤسسة الرسمية</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(ownerLocks.lockEditEnterpriseHeader !== false)}
+                          onChange={() => handleToggleOwnerLock('lockEditEnterpriseHeader')}
                           style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#d97706' }}
                         />
                       </label>

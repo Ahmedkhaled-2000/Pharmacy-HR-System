@@ -308,16 +308,19 @@ export default function EmployeePortalView({
     }
   }, [currentEmpUser?.id, emp?.branchesDetails, emp?.branchId]);
 
-  // When multi-branch employee is on "All Branches" (selectedBranchId === ''), only allowed tabs are accessible
+  const isMultiBranchEmp = Array.isArray(emp?.branchesDetails) && emp.branchesDetails.length > 1;
+  const isAllBranchesMode = isMultiBranchEmp && (!selectedBranchId || selectedBranchId === '');
+  const [shiftBranchFilter, setShiftBranchFilter] = useState('all');
+
+  // Blocked Request Tabs in All Branches Mode (Requests require directing to a specific branch/manager)
+  const BLOCKED_ALL_BRANCH_REQUEST_TABS = useMemo(() => ['leaves', 'permissions', 'resignations', 'swaps', 'loans'], []);
+
+  // When multi-branch employee is in "All Branches" mode, automatically redirect any blocked request tab to dashboard
   useEffect(() => {
-    const isMultiBranchEmp = emp?.branchesDetails && emp.branchesDetails.length > 1;
-    if (isMultiBranchEmp && !selectedBranchId) {
-      const allowedAllBranchTabs = ['dashboard', 'salary', 'evaluations', 'bylaws'];
-      if (!allowedAllBranchTabs.includes(activeTab)) {
-        setActiveTab('dashboard');
-      }
+    if (isAllBranchesMode && BLOCKED_ALL_BRANCH_REQUEST_TABS.includes(activeTab)) {
+      setActiveTab('dashboard');
     }
-  }, [selectedBranchId, emp?.branchesDetails, activeTab]);
+  }, [isAllBranchesMode, activeTab, BLOCKED_ALL_BRANCH_REQUEST_TABS]);
 
 
 
@@ -328,12 +331,14 @@ export default function EmployeePortalView({
   const [empManualOut, setEmpManualOut] = useState('');
   const [empManualBreak, setEmpManualBreak] = useState('0');
   const [empManualNote, setEmpManualNote] = useState('');
+  const [empManualBranchId, setEmpManualBranchId] = useState('');
 
   const [showAdjForm, setShowAdjForm] = useState(false);
   const [empAdjType, setEmpAdjType] = useState('bonus');
   const [empAdjAmount, setEmpAdjAmount] = useState('');
   const [empAdjDate, setEmpAdjDate] = useState(() => getRealTodayStr());
   const [empAdjDesc, setEmpAdjDesc] = useState('');
+  const [empAdjBranchId, setEmpAdjBranchId] = useState('');
 
   // ── Export Excel ──────────────────────────────
   const exportToExcel = async (rangeMode = 'month', customStart = '', customEnd = '') => {
@@ -895,9 +900,12 @@ export default function EmployeePortalView({
     const totalHours = (end - start) / 60;
     const netHours = Math.round(Math.max(0, totalHours - parsedBreak) * 100) / 100;
 
+    const targetBranchId = empManualBranchId || selectedBranchId || emp.branchesDetails?.[0]?.branchId || emp.branchId || null;
+
     const newShift = {
       id: 'shift_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
       employeeId: emp.id,
+      branchId: targetBranchId,
       date: empManualDate,
       timeIn: empManualIn,
       timeOut: empManualOut,
@@ -915,6 +923,7 @@ export default function EmployeePortalView({
     setEmpManualOut('');
     setEmpManualBreak('0');
     setEmpManualNote('');
+    setEmpManualBranchId('');
     showToast('تمت إضافة الوردية بنجاح ⏱️');
   };
 
@@ -925,10 +934,12 @@ export default function EmployeePortalView({
       return;
     }
     const emp = (state && state.employees && state.employees.find((e) => e.id === currentEmpUser?.id)) || currentEmpUser;
+    const targetBranchId = empAdjBranchId || selectedBranchId || emp.branchesDetails?.[0]?.branchId || emp.branchId || null;
     const newAdj = {
       id: 'adj_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
       type: empAdjType,
       employeeId: emp.id,
+      branchId: targetBranchId,
       date: empAdjDate || getRealTodayStr(),
       amount,
       description: empAdjDesc.trim()
@@ -1891,7 +1902,7 @@ export default function EmployeePortalView({
             label: 'السلف ومشتريات الأدوية الآجل',
             icon: '💳',
             desc: 'تقديم ومتابعة السلف النقدية والأقساط والأدوية',
-            visible: canApplyLoan !== false
+            visible: canApplyLoan !== false && !isAllBranchesMode
           },
           {
             id: 'payslip_action',
@@ -1940,7 +1951,7 @@ export default function EmployeePortalView({
             label: 'تبديل ونقل الشيفتات',
             icon: '🔄',
             desc: 'تقديم ومتابعة طلبات تبديل الورديات مع الزملاء',
-            visible: canApplySwap !== false
+            visible: canApplySwap !== false && !isAllBranchesMode
           }
         ].filter(item => item.visible !== false)
       },
@@ -1956,7 +1967,7 @@ export default function EmployeePortalView({
             label: 'رصيد وسجل الإجازات',
             icon: '🏖️',
             desc: 'تقديم ومتابعة الإجازات السنوية والرصيد المتبقي',
-            visible: canApplyLeave !== false
+            visible: canApplyLeave !== false && !isAllBranchesMode
           },
           {
             id: 'permissions',
@@ -1964,7 +1975,7 @@ export default function EmployeePortalView({
             label: 'أذونات وساعات الاستئذان',
             icon: '⏰',
             desc: 'طلب إذن استئذان رسمي وتتبع الساعات المعتمدة',
-            visible: canApplyPermission !== false
+            visible: canApplyPermission !== false && !isAllBranchesMode
           },
           {
             id: 'resignations',
@@ -1973,7 +1984,7 @@ export default function EmployeePortalView({
             icon: '🚪',
             badge: resignationBadgeCount,
             desc: 'تقديم طلب الاستقالة ومتابعة فترة الإشعار',
-            visible: canApplyResignation !== false
+            visible: canApplyResignation !== false && !isAllBranchesMode
           }
         ].filter(item => item.visible !== false)
       },
@@ -2009,6 +2020,7 @@ export default function EmployeePortalView({
   }, [
     emp,
     selectedBranchId,
+    isAllBranchesMode,
     canViewSalary,
     canViewAdjustments,
     canApplyLoan,
@@ -3988,6 +4000,83 @@ export default function EmployeePortalView({
             );
           })()}
 
+          {/* 🌐 All Branches Informative Sticky Banner */}
+          {isAllBranchesMode && (
+            <div
+              className="fade-in"
+              style={{
+                marginBottom: '20px',
+                background: 'linear-gradient(135deg, #f0fdfa 0%, #e6fffa 100%)',
+                border: '1.5px solid #5eead4',
+                borderRadius: '14px',
+                padding: '14px 18px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '12px',
+                boxShadow: '0 2px 10px rgba(15, 118, 110, 0.08)'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '10px',
+                  background: '#0d9488',
+                  color: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '22px',
+                  flexShrink: 0
+                }}>
+                  🌐
+                </div>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: '13.5px', color: '#0f766e', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    وضع المقارنة المتقابلة الشاملة لكافة الفروع
+                    <span style={{ fontSize: '11px', background: '#ccfbf1', color: '#0f766e', padding: '2px 8px', borderRadius: '99px', fontWeight: 700 }}>
+                      نشط حالياً
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '12.5px', color: '#334155', marginTop: '2px' }}>
+                    تم إخفاء صفحات تقديم الطلبات (الإجازات، الأذونات، السلف، تبديل الشيفتات، الاستقالات) لأن تقديم أي طلب يتطلب بطبيعته توجيهاً لفرع ومدير محدد.
+                    <strong> لتقديم أي طلب، يرجى اختيار فرع محدد من قائمة الفروع أعلى الشاشة.</strong>
+                  </div>
+                </div>
+              </div>
+
+              {/* Quick Branch Switcher Buttons */}
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '12px', color: '#0f766e', fontWeight: 700 }}>الانتقال لفرع لتقديم طلب:</span>
+                {emp.branchesDetails.map((bd) => {
+                  const br = state.branches?.find(b => String(b.id) === String(bd.branchId));
+                  return (
+                    <button
+                      key={bd.branchId}
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() => setSelectedBranchId(bd.branchId)}
+                      style={{
+                        padding: '5px 12px',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        background: '#ffffff',
+                        border: '1px solid #0d9488',
+                        color: '#0f766e',
+                        borderRadius: '8px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      📍 {br?.name || `فرع ${bd.branchId}`}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* ── 1. Tab: Dashboard ── */}
           {activeTab === 'dashboard' && (
             <div className="fade-in">
@@ -4038,7 +4127,7 @@ export default function EmployeePortalView({
                   <div>
                     <h2 style={{ margin: '0 0 4px', fontSize: '20px', fontWeight: '800', color: '#ffffff' }}>{emp.name}</h2>
                     <p style={{ margin: 0, opacity: 0.9, fontSize: '13.5px', fontWeight: '500' }}>
-                      🏢 {emp.jobTitle} &nbsp;|&nbsp; 🆔 كود: {emp.code} &nbsp;|&nbsp; 📍 {state.branches?.find(b => b.id === emp.branchId)?.name || 'الفرع الرئيسي'}
+                      🏢 {emp.jobTitle} &nbsp;|&nbsp; 🆔 كود: {emp.code} &nbsp;|&nbsp; 📍 {isAllBranchesMode ? '🌐 كافة الفروع المعتمدة' : (state.branches?.find(b => b.id === emp.branchId)?.name || 'الفرع الرئيسي')}
                     </p>
                   </div>
                 </div>
@@ -4214,80 +4303,268 @@ export default function EmployeePortalView({
                 </div>
               </div>
 
-              {/* Summary Cards Grid */}
-              {emp.branchesDetails && emp.branchesDetails.length > 1 && !selectedBranchId ? (
+              {/* Summary Cards Grid: Side-by-Side Comparison When in All Branches Mode */}
+              {isAllBranchesMode ? (
                 <div>
-                  <h4 style={{ margin: '16px 0 12px 0', fontSize: '16px', color: 'var(--primary-dark)' }}>
-                    🏢 تفاصيل رواتب وساعات العمل لكل فرع على حدة
-                  </h4>
-                  {emp.branchesDetails.map((bd) => {
-                    const bId = bd.branchId;
-                    const bObj = (state.branches || []).find((b) => String(b.id) === String(bId));
-                    const bName = bObj ? bObj.name : `فرع ${bId}`;
-                    const bSummary = computeEmpSummary(emp.id, filterFn, filterMode === 'month' ? selectedMonth : null, bId);
-                    const bSalary = parseFloat(bd.salary) || 0; // سعر الساعة الشهرية بالفرع
-                    const bHoursPerDay = parseFloat(bd.workHoursPerDay) || 8;
-                    const bDaysPerMonth = parseFloat(bd.workDaysPerMonth) || 26;
-                    const bReqHours = bDaysPerMonth * bHoursPerDay;
-                    const bMonthlySalary = bSummary.monthlySalary || (bSummary.dailyRate ? bSummary.dailyRate * bDaysPerMonth : bSalary * bHoursPerDay);
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+                    <h4 style={{ margin: 0, fontSize: '17px', fontWeight: 800, color: 'var(--primary-dark)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🏢</span> مقارنة متقابلة بين الفروع (Side-by-Side Branch Comparison)
+                    </h4>
+                    <span style={{ fontSize: '12px', background: 'var(--primary-tint)', color: 'var(--primary-dark)', padding: '4px 12px', borderRadius: '99px', fontWeight: 700 }}>
+                      عدد الفروع: {emp.branchesDetails.length} فروع
+                    </span>
+                  </div>
 
-                    const activeShift = state.activeShifts[emp.id];
-                    const isThisBranchActive = activeShift && String(activeShift.branchId || emp.branchId) === String(bId);
-                    const isOtherBranchActive = activeShift && !isThisBranchActive;
+                  {/* Dual Branch Comparison Grid (Side-by-Side Columns) */}
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
+                    gap: '20px',
+                    marginBottom: '24px'
+                  }}>
+                    {emp.branchesDetails.map((bd) => {
+                      const bId = bd.branchId;
+                      const bObj = (state.branches || []).find((b) => String(b.id) === String(bId));
+                      const bName = bObj ? bObj.name : `فرع ${bId}`;
+                      const bSummary = computeEmpSummary(emp.id, filterFn, filterMode === 'month' ? selectedMonth : null, bId);
+                      const bSalary = parseFloat(bd.salary) || 0; // سعر الساعة الشهري بالفرع
+                      const bHoursPerDay = parseFloat(bd.workHoursPerDay) || 8;
+                      const bDaysPerMonth = parseFloat(bd.workDaysPerMonth) || 26;
+                      const bReqHours = bDaysPerMonth * bHoursPerDay;
+                      const bMonthlySalary = bSummary.monthlySalary || (bSummary.dailyRate ? bSummary.dailyRate * bDaysPerMonth : bSalary * bHoursPerDay);
+                      const completionPct = Math.min(100, Math.round(((bSummary.hours || 0) / (bReqHours || 1)) * 100));
 
-                    return (
-                      <div key={bId} style={{ marginBottom: '24px', background: 'var(--surface)', border: isThisBranchActive ? '2px solid #10b981' : '1px solid var(--border)', borderRadius: '14px', padding: '18px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', borderBottom: '2px solid var(--primary)', paddingBottom: '6px', flexWrap: 'wrap', gap: '10px' }}>
-                          <h4 style={{ margin: 0, color: 'var(--primary-dark)', fontSize: '16px' }}>📍 فرع {bName}</h4>
-                          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      const activeShift = state.activeShifts[emp.id];
+                      const isThisBranchActive = activeShift && String(activeShift.branchId || emp.branchId) === String(bId);
+                      const isOtherBranchActive = activeShift && !isThisBranchActive;
+
+                      return (
+                        <div
+                          key={bId}
+                          style={{
+                            background: 'var(--surface)',
+                            border: isThisBranchActive ? '2px solid #10b981' : '1px solid var(--border)',
+                            borderRadius: '16px',
+                            padding: '20px',
+                            boxShadow: isThisBranchActive ? '0 6px 20px rgba(16,185,129,0.15)' : '0 4px 16px rgba(0,0,0,0.04)',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '16px',
+                            position: 'relative'
+                          }}
+                        >
+                          {/* Column Header */}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid var(--primary)', paddingBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+                            <div>
+                              <h4 style={{ margin: 0, color: 'var(--primary-dark)', fontSize: '17px', fontWeight: 800 }}>
+                                📍 فرع {bName}
+                              </h4>
+                              <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>
+                                كود: {bObj?.code || bd.branchId} &nbsp;|&nbsp; المدير: {bObj?.managerName || 'مدير الفرع'}
+                              </span>
+                            </div>
+
+                            {/* Live Badge */}
                             {isThisBranchActive ? (
-                              <span className="badge success" style={{ background: '#dcfce7', color: '#15803d', fontWeight: 'bold' }}>
-                                🟢 البصمة الحية نشطة حالياً بهذا الفرع {activeShift.isPaused ? '(بريك)' : ''}
+                              <span className="badge success" style={{ background: '#dcfce7', color: '#15803d', fontWeight: 'bold', padding: '4px 10px', borderRadius: '99px' }}>
+                                🟢 على رأس العمل {activeShift.isPaused ? '(بريك)' : ''}
                               </span>
                             ) : isOtherBranchActive ? (
-                              <span className="badge secondary" style={{ background: '#f1f5f9', color: '#64748b' }}>
-                                ⚪ خارج الشيفت بهذا الفرع (نشط بفرع آخر)
+                              <span className="badge secondary" style={{ background: '#f1f5f9', color: '#64748b', padding: '4px 10px', borderRadius: '99px' }}>
+                                ⚪ خارج الشيفت (نشط بفرع آخر)
                               </span>
                             ) : (
-                              <span className="badge secondary" style={{ background: '#f8fafc', color: '#64748b' }}>
-                                ⚪ خارج الشيفت بهذا الفرع
+                              <span className="badge secondary" style={{ background: '#f8fafc', color: '#64748b', padding: '4px 10px', borderRadius: '99px' }}>
+                                ⚪ خارج الشيفت
                               </span>
                             )}
-
-                            {canStartEnd && (
-                              <div>
-                                {isThisBranchActive ? (
-                                  <div style={{ display: 'flex', gap: '6px' }}>
-                                    {activeShift.isPaused ? (
-                                      <button className="btn btn-start" style={{ padding: '4px 10px', fontSize: '12px' }} onClick={() => resumeShift && resumeShift(emp.id)}>▶ استئناف</button>
-                                    ) : (
-                                      <button className="btn btn-pause" style={{ padding: '4px 10px', fontSize: '12px' }} onClick={() => pauseShift && pauseShift(emp.id)}>☕ بريك</button>
-                                    )}
-                                    <button className="btn btn-stop" style={{ padding: '4px 10px', fontSize: '12px' }} onClick={() => stopShift && stopShift(emp.id)}>⏹ إنهاء الوردية</button>
-                                  </div>
-                                ) : !activeShift && (
-                                  <button className="btn btn-start" style={{ padding: '4px 10px', fontSize: '12px' }} onClick={() => startShift && startShift(emp.id, 'employee', bId)}>
-                                    ▶ بدء الوردية بهذا الفرع
-                                  </button>
-                                )}
-                              </div>
-                            )}
                           </div>
-                        </div>
 
-                        <div className="ep-summary-grid">
-                          <SummaryCard icon="⏱️" label="إجمالي ساعات العمل" value={`${fmt(bSummary.hours)} ساعة`} sub={`من أصل ${bReqHours} ساعة مطلوبة بالفرع`} />
-                          <SummaryCard icon="💰" label="سعر الساعة الشهرية (المدخل)" value={canViewSalary ? `${fmt(bSalary)} ج.م / س` : '🔒 مقيد'} sub={canViewSalary ? `الراتب الشهري: ${fmt(bMonthlySalary)} ج.م` : '🔒 مقيد'} isPrivacy={isPrivacyMode} />
-                          <SummaryCard icon="📅" label="سعر اليوم (المحسوب)" value={canViewSalary ? `${fmt(bSummary.dailyRate)} ج.م / يوم` : '🔒 مقيد'} sub={canViewSalary ? `(الراتب الشهري ÷ ${bDaysPerMonth} يوم)` : '🔒 مقيد'} isPrivacy={isPrivacyMode} />
-                          <SummaryCard icon="💵" label="سعر الساعة اليومي" value={canViewSalary ? `${fmt(bSummary.rate || bSalary)} ج.م / س` : '🔒 مقيد'} sub={canViewSalary ? "المُدخل من الإدارة العليا" : '🔒 مقيد'} isPrivacy={isPrivacyMode} />
-                          <SummaryCard icon="💰" label="المستحقات الأساسية (أجر الساعات)" value={canViewSalary ? `${fmt(bSummary.baseEarnings)} ج.م` : '🔒 مقيد'} sub={canViewSalary ? `${fmt(bSummary.hours)} س × ${fmt(bSummary.rate || bSalary)} ج.م` : '🔒 مقيد'} isPrivacy={isPrivacyMode} />
-                          <SummaryCard icon="🎁" label="إجمالي المكافآت" value={canViewAdjustments ? `+${fmt(bSummary.totalBonus)} ج.م` : '🔒 مقيد'} colorVar="--success" isPrivacy={isPrivacyMode} />
-                          <SummaryCard icon="✂️" label="إجمالي الخصومات" value={canViewAdjustments ? `-${fmt(bSummary.totalDeduction)} ج.م` : '🔒 مقيد'} colorVar="--danger" isPrivacy={isPrivacyMode} />
-                          <SummaryCard icon="🏆" label={`صافي المرتب — فرع ${bName}`} value={canViewSalary ? `${fmt(bSummary.netSalary)} ج.م` : '🔒 مقيد'} colorVar="--primary" isPrivacy={isPrivacyMode} />
+                          {/* Hours Progress Bar */}
+                          <div style={{ background: 'var(--surface-muted)', padding: '12px 14px', borderRadius: '10px', border: '1px solid var(--border)' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12.5px', marginBottom: '6px' }}>
+                              <span style={{ fontWeight: 700 }}>⏱️ ساعات العمل الفعلية:</span>
+                              <span style={{ fontWeight: 800, color: 'var(--primary-dark)' }}>
+                                {fmt(bSummary.hours)} س / {bReqHours} س مطلوبة ({completionPct}%)
+                              </span>
+                            </div>
+                            <div style={{ width: '100%', height: '8px', background: 'rgba(0,0,0,0.08)', borderRadius: '99px', overflow: 'hidden' }}>
+                              <div
+                                style={{
+                                  width: `${completionPct}%`,
+                                  height: '100%',
+                                  background: completionPct >= 100 ? '#10b981' : completionPct >= 75 ? '#0d9488' : '#f59e0b',
+                                  borderRadius: '99px',
+                                  transition: 'width 0.4s ease'
+                                }}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Branch Metrics Grid */}
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px' }}>
+                            <div style={{ background: 'var(--surface-muted)', padding: '10px 12px', borderRadius: '10px', border: '1px solid var(--border)' }}>
+                              <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>سعر الساعة الشهري</span>
+                              <strong style={{ fontSize: '14px', color: 'var(--text)' }}>
+                                {canViewSalary ? `${fmt(bSalary)} ج.م/س` : '🔒 مقيد'}
+                              </strong>
+                            </div>
+
+                            <div style={{ background: 'var(--surface-muted)', padding: '10px 12px', borderRadius: '10px', border: '1px solid var(--border)' }}>
+                              <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>أجر اليوم المحسوب</span>
+                              <strong style={{ fontSize: '14px', color: 'var(--text)' }}>
+                                {canViewSalary ? `${fmt(bSummary.dailyRate)} ج.م/يوم` : '🔒 مقيد'}
+                              </strong>
+                            </div>
+
+                            <div style={{ background: 'var(--surface-muted)', padding: '10px 12px', borderRadius: '10px', border: '1px solid var(--border)' }}>
+                              <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>المستحقات الأساسية</span>
+                              <strong style={{ fontSize: '14px', color: '#047857' }}>
+                                {canViewSalary ? `${fmt(bSummary.baseEarnings)} ج.م` : '🔒 مقيد'}
+                              </strong>
+                            </div>
+
+                            <div style={{ background: 'var(--surface-muted)', padding: '10px 12px', borderRadius: '10px', border: '1px solid var(--border)' }}>
+                              <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>سعر الساعة الصافي</span>
+                              <strong style={{ fontSize: '14px', color: '#0369a1' }}>
+                                {canViewSalary ? `${fmt(bSummary.rate || bSalary)} ج.م/س` : '🔒 مقيد'}
+                              </strong>
+                            </div>
+
+                            <div style={{ background: '#f0fdf4', padding: '10px 12px', borderRadius: '10px', border: '1px solid #bbf7d0' }}>
+                              <span style={{ fontSize: '11px', color: '#166534', display: 'block' }}>🎁 مكافآت الفرع</span>
+                              <strong style={{ fontSize: '14px', color: '#15803d' }}>
+                                {canViewAdjustments ? `+${fmt(bSummary.totalBonus)} ج.م` : '🔒 مقيد'}
+                              </strong>
+                            </div>
+
+                            <div style={{ background: '#fef2f2', padding: '10px 12px', borderRadius: '10px', border: '1px solid #fecaca' }}>
+                              <span style={{ fontSize: '11px', color: '#991b1b', display: 'block' }}>✂️ خصومات الفرع</span>
+                              <strong style={{ fontSize: '14px', color: '#dc2626' }}>
+                                {canViewAdjustments ? `-${fmt(bSummary.totalDeduction)} ج.م` : '🔒 مقيد'}
+                              </strong>
+                            </div>
+                          </div>
+
+                          {/* Net Branch Contribution Banner */}
+                          <div style={{
+                            background: 'linear-gradient(135deg, #f0fdfa, #ccfbf1)',
+                            border: '1.5px solid #5eead4',
+                            borderRadius: '12px',
+                            padding: '12px 16px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center'
+                          }}>
+                            <div>
+                              <span style={{ fontSize: '11.5px', color: '#0f766e', fontWeight: 700, display: 'block' }}>
+                                صافي مساهمة الفرع في المرتب:
+                              </span>
+                              <strong style={{ fontSize: '18px', color: '#0f766e', fontWeight: 900 }}>
+                                {canViewSalary ? `${fmt(bSummary.netSalary)} ج.م` : '🔒 مقيد'}
+                              </strong>
+                            </div>
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              onClick={() => setSelectedBranchId(bId)}
+                              style={{ padding: '6px 12px', fontSize: '12px', background: '#fff', border: '1px solid #0d9488', color: '#0f766e', borderRadius: '8px', fontWeight: 700 }}
+                            >
+                              عرض كشف الفرع ◀
+                            </button>
+                          </div>
+
+                          {/* Shift Controls if allowed */}
+                          {canStartEnd && (
+                            <div style={{ borderTop: '1px dashed var(--border)', paddingTop: '10px', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                              {isThisBranchActive ? (
+                                <>
+                                  {activeShift.isPaused ? (
+                                    <button className="btn btn-start" style={{ padding: '5px 12px', fontSize: '12px' }} onClick={() => resumeShift && resumeShift(emp.id)}>▶ استئناف</button>
+                                  ) : (
+                                    <button className="btn btn-pause" style={{ padding: '5px 12px', fontSize: '12px' }} onClick={() => pauseShift && pauseShift(emp.id)}>☕ بريك</button>
+                                  )}
+                                  <button className="btn btn-stop" style={{ padding: '5px 12px', fontSize: '12px' }} onClick={() => stopShift && stopShift(emp.id)}>⏹ إنهاء الوردية</button>
+                                </>
+                              ) : !activeShift && (
+                                <button className="btn btn-start" style={{ padding: '5px 14px', fontSize: '12px' }} onClick={() => startShift && startShift(emp.id, 'employee', bId)}>
+                                  ▶ بدء الوردية بـ {bName}
+                                </button>
+                              )}
+                            </div>
+                          )}
+
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Combined Executive Summary Card (البطاقة الشاملة الموحدة) */}
+                  <div style={{
+                    background: 'linear-gradient(135deg, #064e3b 0%, #0f766e 100%)',
+                    borderRadius: '16px',
+                    padding: '22px 26px',
+                    color: '#ffffff',
+                    boxShadow: '0 8px 24px rgba(15, 118, 110, 0.25)',
+                    marginBottom: '24px'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px', borderBottom: '1px solid rgba(255,255,255,0.2)', paddingBottom: '14px', marginBottom: '16px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <span style={{ fontSize: '24px' }}>🏆</span>
+                        <div>
+                          <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 900, color: '#ffffff' }}>
+                            الملخص المالي والإداري الموحد لكافة الفروع — شهر {lbl.arabic}
+                          </h3>
+                          <span style={{ fontSize: '12px', opacity: 0.9 }}>
+                            تجميع تلقائي لساعات العمل والأجور والبدلات والتسويات المعتمدة بجميع الفروع
+                          </span>
                         </div>
                       </div>
-                    );
-                  })}
+                      <div style={{ background: 'rgba(255,255,255,0.2)', padding: '6px 14px', borderRadius: '99px', fontSize: '12.5px', fontWeight: 800 }}>
+                        {emp.branchesDetails.length} فروع مدمجة
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+                      <div>
+                        <span style={{ fontSize: '12px', opacity: 0.85, display: 'block' }}>إجمالي ساعات العمل بالفرعين</span>
+                        <div style={{ fontSize: '20px', fontWeight: 800, marginTop: '2px' }}>
+                          {fmt(summary.hours)} <span style={{ fontSize: '13px', fontWeight: 500 }}>ساعة</span>
+                        </div>
+                      </div>
+
+                      <div>
+                        <span style={{ fontSize: '12px', opacity: 0.85, display: 'block' }}>إجمالي المستحقات الأساسية</span>
+                        <div style={{ fontSize: '20px', fontWeight: 800, marginTop: '2px' }}>
+                          {canViewSalary ? `${fmt(summary.baseEarnings)} ج.م` : '🔒 مقيد'}
+                        </div>
+                      </div>
+
+                      <div>
+                        <span style={{ fontSize: '12px', opacity: 0.85, display: 'block' }}>إجمالي البدلات والمكافآت (+)</span>
+                        <div style={{ fontSize: '20px', fontWeight: 800, marginTop: '2px', color: '#a7f3d0' }}>
+                          {canViewSalary ? `+${fmt((summary.totalAllowances || 0) + (summary.totalBonus || 0))} ج.م` : '🔒 مقيد'}
+                        </div>
+                      </div>
+
+                      <div>
+                        <span style={{ fontSize: '12px', opacity: 0.85, display: 'block' }}>إجمالي الخصومات والسلف (-)</span>
+                        <div style={{ fontSize: '20px', fontWeight: 800, marginTop: '2px', color: '#fecaca' }}>
+                          {canViewSalary ? `-${fmt((summary.totalDeduction || 0) + (summary.loansDeduction || 0) + absenceDeduction)} ج.م` : '🔒 مقيد'}
+                        </div>
+                      </div>
+
+                      <div style={{ gridColumn: '1 / -1', background: 'rgba(255,255,255,0.15)', borderRadius: '12px', padding: '14px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                        <div>
+                          <span style={{ fontSize: '12.5px', opacity: 0.9, display: 'block' }}>صافي الراتب الإجمالي المستحق للصرف</span>
+                          <span style={{ fontSize: '11px', opacity: 0.8 }}>شاملاً كافة مساهمات الفروع بعد التسويات والسلف والبدلات</span>
+                        </div>
+                        <div style={{ fontSize: '26px', fontWeight: 900, color: '#ffffff' }}>
+                          {canViewSalary ? `${fmt(summary.netSalary)} ج.م` : '🔒 مقيد'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <div className="ep-summary-grid">
@@ -4405,6 +4682,24 @@ export default function EmployeePortalView({
                       <label>البريك (ساعات)</label>
                       <input type="number" step="0.25" min="0" value={empManualBreak} onChange={(e) => setEmpManualBreak(e.target.value)} />
                     </div>
+                    {isAllBranchesMode && (
+                      <div className="field" style={{ flex: '1 1 150px' }}>
+                        <label>الفرع المعني بالوردية *</label>
+                        <select
+                          value={empManualBranchId || emp.branchesDetails[0]?.branchId}
+                          onChange={(e) => setEmpManualBranchId(e.target.value)}
+                        >
+                          {emp.branchesDetails.map((bd) => {
+                            const b = (state.branches || []).find((br) => br.id === bd.branchId);
+                            return (
+                              <option key={bd.branchId} value={bd.branchId}>
+                                {b ? b.name : `فرع ${bd.branchId}`}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </div>
+                    )}
                     <div className="field grow" style={{ flex: '2 1 160px' }}>
                       <label>ملاحظات (اختياري)</label>
                       <input type="text" placeholder="مثال: وردية إضافية..." value={empManualNote} onChange={(e) => setEmpManualNote(e.target.value)} />
@@ -4500,8 +4795,131 @@ export default function EmployeePortalView({
 
               {/* Multi-Branch vs Single Branch Shifts */}
               {emp.branchesDetails && emp.branchesDetails.length > 1 && !selectedBranchId ? (
-                <div>
-                  {emp.branchesDetails.map((bd) => {
+                <div style={{ marginTop: '16px' }}>
+                  {/* Dual Branch Attendance Side-by-Side Comparison Cards */}
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                    gap: '14px',
+                    marginBottom: '18px'
+                  }}>
+                    {emp.branchesDetails.map((bd, idx) => {
+                      const bId = bd.branchId;
+                      const bObj = (state.branches || []).find((b) => b.id === bId);
+                      const bName = bObj ? bObj.name : `فرع ${bId}`;
+                      const bShifts = empShifts.filter((s) => s.branchId === bId || (!s.branchId && emp.branchesDetails[0].branchId === bId));
+                      const bHours = bShifts.reduce((acc, s) => acc + (getEffectiveShiftHours(s, state) || 0), 0);
+                      const avgShift = bShifts.length > 0 ? (bHours / bShifts.length).toFixed(1) : 0;
+                      const bManualCount = bShifts.filter(s => s.isManual || (s.note && s.note.includes('يدوي'))).length;
+                      const colors = [
+                        { border: '#99f6e4', bg: '#f0fdfa', title: '#0f766e', accent: '#0d9488' },
+                        { border: '#bfdbfe', bg: '#eff6ff', title: '#1e40af', accent: '#2563eb' },
+                        { border: '#ddd6fe', bg: '#f5f3ff', title: '#5b21b6', accent: '#7c3aed' }
+                      ];
+                      const theme = colors[idx % colors.length];
+
+                      return (
+                        <div
+                          key={bId}
+                          style={{
+                            background: theme.bg,
+                            border: `1.5px solid ${theme.border}`,
+                            borderRadius: '14px',
+                            padding: '16px',
+                            boxShadow: '0 2px 8px rgba(0,0,0,0.03)'
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ fontSize: '20px' }}>🏢</span>
+                              <h4 style={{ margin: 0, fontSize: '15.5px', fontWeight: 900, color: theme.title }}>
+                                {bName}
+                              </h4>
+                            </div>
+                            <span style={{
+                              background: '#ffffff',
+                              color: theme.title,
+                              border: `1px solid ${theme.border}`,
+                              padding: '2px 10px',
+                              borderRadius: '99px',
+                              fontSize: '11.5px',
+                              fontWeight: 800
+                            }}>
+                              {bShifts.length} وردية
+                            </span>
+                          </div>
+
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', textAlign: 'center' }}>
+                            <div style={{ background: '#ffffff', padding: '8px 6px', borderRadius: '10px', border: '1px solid rgba(0,0,0,0.05)' }}>
+                              <div style={{ fontSize: '11px', color: '#64748b' }}>إجمالي الساعات</div>
+                              <div style={{ fontSize: '16px', fontWeight: 900, color: theme.accent, marginTop: '2px' }}>
+                                {fmt(bHours)} س
+                              </div>
+                            </div>
+                            <div style={{ background: '#ffffff', padding: '8px 6px', borderRadius: '10px', border: '1px solid rgba(0,0,0,0.05)' }}>
+                              <div style={{ fontSize: '11px', color: '#64748b' }}>متوسط الوردية</div>
+                              <div style={{ fontSize: '16px', fontWeight: 900, color: '#334155', marginTop: '2px' }}>
+                                {avgShift} س
+                              </div>
+                            </div>
+                            <div style={{ background: '#ffffff', padding: '8px 6px', borderRadius: '10px', border: '1px solid rgba(0,0,0,0.05)' }}>
+                              <div style={{ fontSize: '11px', color: '#64748b' }}>بصمات يدوية</div>
+                              <div style={{ fontSize: '16px', fontWeight: 900, color: bManualCount > 0 ? '#b45309' : '#64748b', marginTop: '2px' }}>
+                                {bManualCount}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Branch Filter Tabs Toolbar */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    marginBottom: '16px',
+                    flexWrap: 'wrap',
+                    padding: '8px 12px',
+                    background: 'var(--surface)',
+                    borderRadius: '12px',
+                    border: '1px solid var(--border)'
+                  }}>
+                    <span style={{ fontSize: '12px', fontWeight: 800, color: 'var(--muted)', marginLeft: '4px' }}>
+                      🔍 تصفية عرض الورديات:
+                    </span>
+                    <button
+                      type="button"
+                      className={`btn ${shiftBranchFilter === 'all' ? 'btn-start' : 'btn-ghost'}`}
+                      onClick={() => setShiftBranchFilter('all')}
+                      style={{ fontSize: '12px', padding: '5px 12px', borderRadius: '8px' }}
+                    >
+                      🌐 كافة الفروع ({empShifts.length})
+                    </button>
+                    {emp.branchesDetails.map((bd) => {
+                      const bObj = (state.branches || []).find((b) => b.id === bd.branchId);
+                      const bName = bObj ? bObj.name : `فرع ${bd.branchId}`;
+                      const bShiftsCount = empShifts.filter((s) => s.branchId === bd.branchId || (!s.branchId && emp.branchesDetails[0].branchId === bd.branchId)).length;
+                      const isSelected = shiftBranchFilter === bd.branchId;
+                      return (
+                        <button
+                          key={bd.branchId}
+                          type="button"
+                          className={`btn ${isSelected ? 'btn-start' : 'btn-ghost'}`}
+                          onClick={() => setShiftBranchFilter(bd.branchId)}
+                          style={{ fontSize: '12px', padding: '5px 12px', borderRadius: '8px' }}
+                        >
+                          📍 {bName} ({bShiftsCount})
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Branch Shift Tables / Cards (Filtered by shiftBranchFilter) */}
+                  {emp.branchesDetails
+                    .filter((bd) => shiftBranchFilter === 'all' || bd.branchId === shiftBranchFilter)
+                    .map((bd) => {
                     const bId = bd.branchId;
                     const bObj = (state.branches || []).find((b) => b.id === bId);
                     const bName = bObj ? bObj.name : `فرع ${bId}`;
@@ -4983,54 +5401,333 @@ export default function EmployeePortalView({
                   </p>
                 </div>
               ) : emp.branchesDetails && emp.branchesDetails.length > 1 && !selectedBranchId ? (
-                /* Multi-branch breakdown when All Branches selected */
+                /* Multi-branch Side-by-Side Salary Comparison Table */
                 <div className="ep-salary-breakdown">
-                  {emp.branchesDetails.map((bd) => {
-                    const bId = bd.branchId;
-                    const bObj = (state.branches || []).find((b) => b.id === bId);
-                    const bName = bObj ? bObj.name : `فرع ${bId}`;
-                    const bSummary = summary.perBranch?.[bId] || { salary: bd.salary || 0, workHoursPerDay: bd.workHoursPerDay || 8, workDaysPerMonth: bd.workDaysPerMonth || 26, dailyRate: 0, rate: 0, hours: 0, baseEarnings: 0 };
-
-                    return (
-                      <div key={bId} style={{ marginBottom: '24px', border: '1px solid var(--border)', borderRadius: '12px', padding: '16px', background: 'var(--surface-muted)' }}>
-                        <h4 style={{ margin: '0 0 12px 0', color: 'var(--primary-dark)', fontSize: '16px' }}>
-                          📍 تفاصيل راتب فرع {bName}
+                  {/* Informative Header Banner */}
+                  <div style={{
+                    background: 'linear-gradient(135deg, #0f766e 0%, #065f46 100%)',
+                    borderRadius: '16px',
+                    padding: '18px 24px',
+                    color: '#ffffff',
+                    marginBottom: '20px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '12px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <span style={{ fontSize: '28px' }}>⚖️</span>
+                      <div>
+                        <h4 style={{ margin: 0, fontSize: '17px', fontWeight: 900, color: '#ffffff' }}>
+                          جدول المقارنة المالية والتعاقدية المزدوجة بين الفروع — لشهر {lbl.arabic}
                         </h4>
-                        <div className="ep-breakdown-section">
-                          <div className="ep-breakdown-title"><span className="ep-breakdown-icon">⚙️</span>احتساب سعر الساعة وأجر اليوم بالفرع</div>
-                          <div className="ep-breakdown-rows">
-                            <div className="ep-breakdown-row"><span className="ep-breakdown-label">1. سعر الساعة الشهري بالفرع (المدخل من الإدارة)</span><span className="ep-breakdown-value">{fmt(bd.salary)} ج.م</span></div>
-                            <div className="ep-breakdown-row"><span className="ep-breakdown-label">2. عدد ساعات عمل الموظف بالفرع</span><span className="ep-breakdown-value">{bd.workHoursPerDay || 8} ساعة / يوم</span></div>
-                            <div className="ep-breakdown-row"><span className="ep-breakdown-label">3. عدد أيام عمل الموظف بالفرع</span><span className="ep-breakdown-value">{bd.workDaysPerMonth || 26} يوم / شهر</span></div>
-                            <div className="ep-breakdown-row ep-breakdown-result"><span className="ep-breakdown-label">4. سعر اليوم = ({fmt(bd.salary)} × {bd.workHoursPerDay || 8}) ÷ {bd.workDaysPerMonth || 26}</span><span className="ep-breakdown-value highlight">{fmt(bSummary.dailyRate)} ج.م / يوم</span></div>
-                            <div className="ep-breakdown-row ep-breakdown-result"><span className="ep-breakdown-label">5. سعر الساعة اليومي = {fmt(bSummary.dailyRate)} ÷ {bd.workHoursPerDay || 8}</span><span className="ep-breakdown-value highlight">{fmt(bSummary.rate || bd.salary)} ج.م / ساعة</span></div>
-                            <div className="ep-breakdown-row"><span className="ep-breakdown-label">الراتب الأساسي الشهري بالفرع ({fmt(bSummary.dailyRate)} × {bd.workDaysPerMonth || 26} يوم)</span><span className="ep-breakdown-value">{fmt(bSummary.monthlySalary || ((parseFloat(bd.salary) || 0) * (parseFloat(bd.workHoursPerDay) || 8)))} ج.م</span></div>
-                          </div>
-                        </div>
-
-                        <div className="ep-breakdown-section" style={{ marginTop: '12px' }}>
-                          <div className="ep-breakdown-title"><span className="ep-breakdown-icon">⏱️</span>ساعات العمل والمستحقات بالفرع</div>
-                          <div className="ep-breakdown-rows">
-                            <div className="ep-breakdown-row"><span className="ep-breakdown-label">عدد ساعات العمل الفعلية بالفرع</span><span className="ep-breakdown-value">{fmt(bSummary.hours)} ساعة</span></div>
-                            <div className="ep-breakdown-row ep-breakdown-result"><span className="ep-breakdown-label">✅ المستحقات الأساسية للفرع</span><span className="ep-breakdown-value highlight">{fmt(bSummary.baseEarnings)} ج.م</span></div>
-                          </div>
-                        </div>
+                        <p style={{ margin: '3px 0 0', fontSize: '12.5px', opacity: 0.9 }}>
+                          مقارنة تفصيلية متقابلة لبنود العقد، وسعر الساعة، وساعات العمل الفعلية، والاستحقاقات المعتمدة بكل فرع
+                        </p>
                       </div>
-                    );
-                  })}
+                    </div>
+                    <span style={{
+                      background: 'rgba(255,255,255,0.2)',
+                      padding: '6px 14px',
+                      borderRadius: '99px',
+                      fontSize: '12.5px',
+                      fontWeight: 800
+                    }}>
+                      {emp.branchesDetails.length} فروع متعاقد معها
+                    </span>
+                  </div>
 
-                  <div className="ep-breakdown-section ep-breakdown-net-section">
-                    <div className="ep-breakdown-title"><span className="ep-breakdown-icon">🏆</span>الملخص المالي الكلي لجميع الفروع</div>
+                  {/* Side-by-Side Comparison Table */}
+                  <div className="table-responsive" style={{
+                    background: 'var(--surface)',
+                    borderRadius: '16px',
+                    border: '1.5px solid var(--border)',
+                    boxShadow: '0 4px 16px rgba(0,0,0,0.04)',
+                    overflow: 'hidden',
+                    marginBottom: '24px'
+                  }}>
+                    <table className="bylaws-table" style={{ fontSize: '13.5px', borderCollapse: 'separate', borderSpacing: 0, width: '100%' }}>
+                      <thead>
+                        <tr style={{ background: '#f1f5f9' }}>
+                          <th style={{ padding: '14px 18px', textAlign: 'right', fontWeight: 900, color: '#334155', width: '34%' }}>
+                            المؤشر المالي والتعاقدي
+                          </th>
+                          {emp.branchesDetails.map((bd, idx) => {
+                            const bObj = (state.branches || []).find((b) => b.id === bd.branchId);
+                            const bName = bObj ? bObj.name : `فرع ${bd.branchId}`;
+                            const colors = ['#0d9488', '#3b82f6', '#8b5cf6', '#ec4899'];
+                            const colColor = colors[idx % colors.length];
+                            return (
+                              <th key={bd.branchId} style={{
+                                padding: '14px 16px',
+                                textAlign: 'center',
+                                fontWeight: 900,
+                                color: colColor,
+                                borderRight: '1px solid var(--border)',
+                                background: idx === 0 ? 'rgba(13,148,136,0.05)' : 'rgba(59,130,246,0.05)'
+                              }}>
+                                📍 {bName}
+                              </th>
+                            );
+                          })}
+                          <th style={{
+                            padding: '14px 18px',
+                            textAlign: 'center',
+                            fontWeight: 900,
+                            color: '#047857',
+                            background: '#ecfdf5',
+                            borderRight: '2px solid #a7f3d0'
+                          }}>
+                            🌐 الإجمالي الموحد
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {/* 1. Monthly Hourly Rate */}
+                        <tr>
+                          <td style={{ fontWeight: 800, padding: '12px 18px', borderBottom: '1px solid var(--border)' }}>
+                            1. سعر الساعة الشهري (التعاقدي المدخل)
+                          </td>
+                          {emp.branchesDetails.map((bd) => (
+                            <td key={bd.branchId} style={{ textAlign: 'center', padding: '12px 16px', fontWeight: 700, borderRight: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }}>
+                              {fmt(bd.salary)} ج.م / س
+                            </td>
+                          ))}
+                          <td style={{ textAlign: 'center', padding: '12px 16px', fontWeight: 800, color: '#047857', background: '#f0fdf4', borderRight: '2px solid #a7f3d0', borderBottom: '1px solid var(--border)' }}>
+                            {fmt(summary.rate || 0)} ج.م / س (المتوسط)
+                          </td>
+                        </tr>
+
+                        {/* 2. Daily Hours */}
+                        <tr>
+                          <td style={{ fontWeight: 800, padding: '12px 18px', borderBottom: '1px solid var(--border)' }}>
+                            2. ساعات العمل المقررة يومياً
+                          </td>
+                          {emp.branchesDetails.map((bd) => (
+                            <td key={bd.branchId} style={{ textAlign: 'center', padding: '12px 16px', borderRight: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }}>
+                              {bd.workHoursPerDay || 8} ساعات / يوم
+                            </td>
+                          ))}
+                          <td style={{ textAlign: 'center', padding: '12px 16px', fontWeight: 700, color: '#047857', background: '#f0fdf4', borderRight: '2px solid #a7f3d0', borderBottom: '1px solid var(--border)' }}>
+                            {emp.branchesDetails.reduce((acc, bd) => acc + (parseFloat(bd.workHoursPerDay) || 8), 0)} س / يوم (مجموع الورديات)
+                          </td>
+                        </tr>
+
+                        {/* 3. Monthly Days */}
+                        <tr>
+                          <td style={{ fontWeight: 800, padding: '12px 18px', borderBottom: '1px solid var(--border)' }}>
+                            3. عدد أيام العمل المقررة شهرياً
+                          </td>
+                          {emp.branchesDetails.map((bd) => (
+                            <td key={bd.branchId} style={{ textAlign: 'center', padding: '12px 16px', borderRight: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }}>
+                              {bd.workDaysPerMonth || 26} يوم / شهر
+                            </td>
+                          ))}
+                          <td style={{ textAlign: 'center', padding: '12px 16px', fontWeight: 700, color: '#047857', background: '#f0fdf4', borderRight: '2px solid #a7f3d0', borderBottom: '1px solid var(--border)' }}>
+                            {Math.max(...emp.branchesDetails.map(bd => parseFloat(bd.workDaysPerMonth) || 26))} يوم / شهر
+                          </td>
+                        </tr>
+
+                        {/* 4. Daily Rate */}
+                        <tr style={{ background: '#fafafa' }}>
+                          <td style={{ fontWeight: 800, padding: '12px 18px', borderBottom: '1px solid var(--border)' }}>
+                            4. أجر اليوم المحسوب (المعادلة المعتمدة)
+                            <div style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 'normal' }}>
+                              (سعر الساعة × ساعات اليوم) ÷ أيام الشهر
+                            </div>
+                          </td>
+                          {emp.branchesDetails.map((bd) => {
+                            const bSummary = summary.perBranch?.[bd.branchId] || { dailyRate: 0 };
+                            return (
+                              <td key={bd.branchId} style={{ textAlign: 'center', padding: '12px 16px', fontWeight: 800, color: '#0f766e', borderRight: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }}>
+                                {fmt(bSummary.dailyRate)} ج.م / يوم
+                              </td>
+                            );
+                          })}
+                          <td style={{ textAlign: 'center', padding: '12px 16px', fontWeight: 900, color: '#047857', background: '#f0fdf4', borderRight: '2px solid #a7f3d0', borderBottom: '1px solid var(--border)' }}>
+                            {fmt(summary.dailyRate)} ج.م / يوم
+                          </td>
+                        </tr>
+
+                        {/* 5. Effective Hourly Rate */}
+                        <tr>
+                          <td style={{ fontWeight: 800, padding: '12px 18px', borderBottom: '1px solid var(--border)' }}>
+                            5. سعر الساعة اليومي الفعلي
+                          </td>
+                          {emp.branchesDetails.map((bd) => {
+                            const bSummary = summary.perBranch?.[bd.branchId] || { rate: bd.salary || 0 };
+                            return (
+                              <td key={bd.branchId} style={{ textAlign: 'center', padding: '12px 16px', fontWeight: 700, borderRight: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }}>
+                                {fmt(bSummary.rate || bd.salary)} ج.م / ساعة
+                              </td>
+                            );
+                          })}
+                          <td style={{ textAlign: 'center', padding: '12px 16px', fontWeight: 800, color: '#047857', background: '#f0fdf4', borderRight: '2px solid #a7f3d0', borderBottom: '1px solid var(--border)' }}>
+                            {fmt(summary.rate)} ج.م / ساعة
+                          </td>
+                        </tr>
+
+                        {/* 6. Base Estimated Monthly Salary */}
+                        <tr>
+                          <td style={{ fontWeight: 800, padding: '12px 18px', borderBottom: '1px solid var(--border)' }}>
+                            6. الراتب الأساسي الشهري المقدر بالفرع
+                          </td>
+                          {emp.branchesDetails.map((bd) => {
+                            const bSummary = summary.perBranch?.[bd.branchId] || {};
+                            const mSalary = bSummary.monthlySalary || ((parseFloat(bd.salary) || 0) * (parseFloat(bd.workHoursPerDay) || 8));
+                            return (
+                              <td key={bd.branchId} style={{ textAlign: 'center', padding: '12px 16px', fontWeight: 700, borderRight: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }}>
+                                {fmt(mSalary)} ج.م
+                              </td>
+                            );
+                          })}
+                          <td style={{ textAlign: 'center', padding: '12px 16px', fontWeight: 800, color: '#047857', background: '#f0fdf4', borderRight: '2px solid #a7f3d0', borderBottom: '1px solid var(--border)' }}>
+                            {fmt(currentMonthlySalary)} ج.م
+                          </td>
+                        </tr>
+
+                        {/* 7. Actual Logged Hours */}
+                        <tr style={{ background: '#f0fdfa' }}>
+                          <td style={{ fontWeight: 900, padding: '12px 18px', color: '#0f766e', borderBottom: '1px solid var(--border)' }}>
+                            ⏱️ ساعات العمل الفعلية المسجلة بالبصمة
+                          </td>
+                          {emp.branchesDetails.map((bd) => {
+                            const bSummary = summary.perBranch?.[bd.branchId] || { hours: 0 };
+                            return (
+                              <td key={bd.branchId} style={{ textAlign: 'center', padding: '12px 16px', fontWeight: 900, fontSize: '15px', color: '#0f766e', borderRight: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }}>
+                                {fmt(bSummary.hours)} ساعة
+                              </td>
+                            );
+                          })}
+                          <td style={{ textAlign: 'center', padding: '12px 16px', fontWeight: 900, fontSize: '16px', color: '#047857', background: '#dcfce7', borderRight: '2px solid #a7f3d0', borderBottom: '1px solid var(--border)' }}>
+                            {fmt(summary.hours)} ساعة
+                          </td>
+                        </tr>
+
+                        {/* 8. Base Earnings */}
+                        <tr style={{ background: '#fefce8' }}>
+                          <td style={{ fontWeight: 900, padding: '12px 18px', color: '#854d0e', borderBottom: '1px solid var(--border)' }}>
+                            💰 المستحقات الأساسية (أجر الساعات المعتمدة)
+                          </td>
+                          {emp.branchesDetails.map((bd) => {
+                            const bSummary = summary.perBranch?.[bd.branchId] || { baseEarnings: 0 };
+                            return (
+                              <td key={bd.branchId} style={{ textAlign: 'center', padding: '12px 16px', fontWeight: 900, fontSize: '15px', color: '#854d0e', borderRight: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }}>
+                                {fmt(bSummary.baseEarnings)} ج.م
+                              </td>
+                            );
+                          })}
+                          <td style={{ textAlign: 'center', padding: '12px 16px', fontWeight: 900, fontSize: '16px', color: '#047857', background: '#dcfce7', borderRight: '2px solid #a7f3d0', borderBottom: '1px solid var(--border)' }}>
+                            {fmt(summary.baseEarnings)} ج.م
+                          </td>
+                        </tr>
+
+                        {/* 9. Branch Bonuses */}
+                        <tr>
+                          <td style={{ fontWeight: 800, padding: '12px 18px', color: '#16a34a', borderBottom: '1px solid var(--border)' }}>
+                            🎁 مكافآت الفرع المعتمدة (+)
+                          </td>
+                          {emp.branchesDetails.map((bd) => {
+                            const bSummary = summary.perBranch?.[bd.branchId] || { totalBonus: 0 };
+                            return (
+                              <td key={bd.branchId} style={{ textAlign: 'center', padding: '12px 16px', fontWeight: 800, color: '#16a34a', borderRight: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }}>
+                                +{fmt(bSummary.totalBonus || 0)} ج.م
+                              </td>
+                            );
+                          })}
+                          <td style={{ textAlign: 'center', padding: '12px 16px', fontWeight: 900, color: '#16a34a', background: '#f0fdf4', borderRight: '2px solid #a7f3d0', borderBottom: '1px solid var(--border)' }}>
+                            +{fmt(summary.totalBonus || 0)} ج.م
+                          </td>
+                        </tr>
+
+                        {/* 10. Branch Deductions */}
+                        <tr>
+                          <td style={{ fontWeight: 800, padding: '12px 18px', color: '#dc2626', borderBottom: '1px solid var(--border)' }}>
+                            ✂️ خصومات وجزاءات الفرع (-)
+                          </td>
+                          {emp.branchesDetails.map((bd) => {
+                            const bSummary = summary.perBranch?.[bd.branchId] || { totalDeduction: 0 };
+                            return (
+                              <td key={bd.branchId} style={{ textAlign: 'center', padding: '12px 16px', fontWeight: 800, color: '#dc2626', borderRight: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }}>
+                                -{fmt(bSummary.totalDeduction || 0)} ج.م
+                              </td>
+                            );
+                          })}
+                          <td style={{ textAlign: 'center', padding: '12px 16px', fontWeight: 900, color: '#dc2626', background: '#fef2f2', borderRight: '2px solid #a7f3d0', borderBottom: '1px solid var(--border)' }}>
+                            -{fmt(summary.totalDeduction || 0)} ج.م
+                          </td>
+                        </tr>
+
+                        {/* 11. Net Branch Contribution */}
+                        <tr style={{ background: '#f8fafc', fontWeight: 900 }}>
+                          <td style={{ padding: '14px 18px', color: 'var(--primary-dark)', fontSize: '14px' }}>
+                            🏆 صافي مساهمة الفرع في الراتب
+                          </td>
+                          {emp.branchesDetails.map((bd) => {
+                            const bSummary = summary.perBranch?.[bd.branchId] || { netSalary: 0 };
+                            return (
+                              <td key={bd.branchId} style={{ textAlign: 'center', padding: '14px 16px', fontSize: '15px', color: '#0f766e', borderRight: '1px solid var(--border)' }}>
+                                {fmt(bSummary.netSalary)} ج.م
+                              </td>
+                            );
+                          })}
+                          <td style={{ textAlign: 'center', padding: '14px 16px', fontSize: '16px', color: '#047857', background: '#d1fae5', borderRight: '2px solid #a7f3d0' }}>
+                            {fmt(summary.baseEarnings + (summary.totalBonus || 0) - (summary.totalDeduction || 0))} ج.م
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Combined Unified Allowances, Deductions & Net Payout Card */}
+                  <div className="ep-breakdown-section ep-breakdown-net-section" style={{
+                    background: 'var(--surface)',
+                    border: '1.5px solid #a7f3d0',
+                    borderRadius: '16px',
+                    padding: '20px 24px',
+                    boxShadow: '0 4px 16px rgba(16, 185, 129, 0.08)'
+                  }}>
+                    <div className="ep-breakdown-title" style={{ fontSize: '16.5px', fontWeight: 900, color: '#0f766e', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px', marginBottom: '14px' }}>
+                      <span className="ep-breakdown-icon">🏆</span>
+                      الملخص المالي الشامل والتسويات المركزية لكافة الفروع
+                    </div>
                     <div className="ep-breakdown-rows">
-                      <div className="ep-breakdown-row"><span className="ep-breakdown-label">إجمالي المستحقات الأساسية لكافة الفروع</span><span className="ep-breakdown-value">{fmt(summary.baseEarnings)} ج.م</span></div>
+                      <div className="ep-breakdown-row">
+                        <span className="ep-breakdown-label">إجمالي المستحقات الأساسية لكافة الفروع</span>
+                        <span className="ep-breakdown-value" style={{ fontWeight: 800 }}>{fmt(summary.baseEarnings)} ج.م</span>
+                      </div>
+
+                      {/* Allowances breakdown if any */}
                       {summary.totalAllowances > 0 && (
                         <div className="ep-breakdown-row" style={{ color: '#166534', fontWeight: 'bold' }}>
                           <span className="ep-breakdown-label">+ إجمالي البدلات الثابتة والأجور الإضافية</span>
                           <span className="ep-breakdown-value">+{fmt(summary.totalAllowances)} ج.م</span>
                         </div>
                       )}
-                      <div className="ep-breakdown-row" style={{ color: 'var(--success)' }}><span className="ep-breakdown-label">+ إجمالي المكافآت ({bonuses.length} بند)</span><span className="ep-breakdown-value">+{fmt(summary.totalBonus)} ج.م</span></div>
-                      <div className="ep-breakdown-row" style={{ color: 'var(--danger)' }}><span className="ep-breakdown-label">- إجمالي الخصومات والجزاءات ({deductions.length} بند)</span><span className="ep-breakdown-value">-{fmt(summary.totalDeduction)} ج.م</span></div>
+                      {summary.managementAllowance > 0 && (
+                        <div className="ep-breakdown-row" style={{ color: '#15803d', fontSize: '12.5px', paddingRight: '16px' }}>
+                          <span className="ep-breakdown-label">• بدل إدارة شهري ({emp.jobTitle})</span>
+                          <span className="ep-breakdown-value">+{fmt(summary.managementAllowance)} ج.م</span>
+                        </div>
+                      )}
+                      {summary.transportAllowance > 0 && (
+                        <div className="ep-breakdown-row" style={{ color: '#15803d', fontSize: '12.5px', paddingRight: '16px' }}>
+                          <span className="ep-breakdown-label">• بدل انتقال ومواصلات</span>
+                          <span className="ep-breakdown-value">+{fmt(summary.transportAllowance)} ج.م</span>
+                        </div>
+                      )}
+
+                      <div className="ep-breakdown-row" style={{ color: 'var(--success)', fontWeight: 800 }}>
+                        <span className="ep-breakdown-label">+ إجمالي المكافآت المعتمدة بالفروع ({bonuses.length} بند)</span>
+                        <span className="ep-breakdown-value">+{fmt(summary.totalBonus)} ج.م</span>
+                      </div>
+
+                      <div className="ep-breakdown-row" style={{ color: 'var(--danger)', fontWeight: 800 }}>
+                        <span className="ep-breakdown-label">- إجمالي الخصومات والجزاءات بالفروع ({deductions.length} بند)</span>
+                        <span className="ep-breakdown-value">-{fmt(summary.totalDeduction)} ج.م</span>
+                      </div>
+
                       {summary.loansDeduction > 0 && (
                         <div className="ep-breakdown-row" style={{ color: '#b91c1c', fontWeight: 'bold' }}>
                           <span className="ep-breakdown-label">- إجمالي السلف وأقساط الشهر المعتمدة</span>
@@ -5038,12 +5735,29 @@ export default function EmployeePortalView({
                         </div>
                       )}
                       {absenceDays.length > 0 && (
-                        <div className="ep-breakdown-row" style={{ color: 'var(--danger)' }}><span className="ep-breakdown-label">- خصم الغياب الكلي ({absenceDays.length} يوم)</span><span className="ep-breakdown-value">-{fmt(absenceDeduction)} ج.م</span></div>
+                        <div className="ep-breakdown-row" style={{ color: 'var(--danger)', fontWeight: 'bold' }}>
+                          <span className="ep-breakdown-label">- خصم الغياب الكلي ({absenceDays.length} يوم)</span>
+                          <span className="ep-breakdown-value">-{fmt(absenceDeduction)} ج.م</span>
+                        </div>
                       )}
-                      <div className="ep-net-salary-box">
-                        <div className="ep-net-label">إجمالي صافي المرتب المستحق لكافة الفروع</div>
-                        <div className="ep-net-month">{lbl.arabic}</div>
-                        <div className="ep-net-amount">{fmt(summary.netSalary)}<span className="ep-net-currency"> ج.م</span></div>
+
+                      <div className="ep-net-salary-box" style={{
+                        marginTop: '18px',
+                        background: 'linear-gradient(135deg, #0f766e 0%, #115e59 100%)',
+                        color: '#ffffff',
+                        padding: '18px 24px',
+                        borderRadius: '14px',
+                        textAlign: 'center'
+                      }}>
+                        <div className="ep-net-label" style={{ color: 'rgba(255,255,255,0.9)', fontSize: '14px', fontWeight: 700 }}>
+                          صافي المرتب النهائي المستحق للصرف لكافة الفروع
+                        </div>
+                        <div className="ep-net-month" style={{ color: 'rgba(255,255,255,0.75)', fontSize: '12px', marginTop: '2px' }}>
+                          شهر {lbl.arabic}
+                        </div>
+                        <div className="ep-net-amount" style={{ fontSize: '32px', fontWeight: 900, marginTop: '8px', color: '#ffffff' }}>
+                          {fmt(summary.netSalary)}<span className="ep-net-currency" style={{ fontSize: '18px', fontWeight: 700, marginRight: '4px' }}> ج.م</span>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -5220,6 +5934,24 @@ export default function EmployeePortalView({
                           <label>التاريخ</label>
                           <input type="date" value={empAdjDate} onChange={(e) => setEmpAdjDate(e.target.value)} />
                         </div>
+                        {isAllBranchesMode && (
+                          <div className="field" style={{ flex: '1 1 150px' }}>
+                            <label>الفرع المعني *</label>
+                            <select
+                              value={empAdjBranchId || emp.branchesDetails[0]?.branchId}
+                              onChange={(e) => setEmpAdjBranchId(e.target.value)}
+                            >
+                              {emp.branchesDetails.map((bd) => {
+                                const b = (state.branches || []).find((br) => br.id === bd.branchId);
+                                return (
+                                  <option key={bd.branchId} value={bd.branchId}>
+                                    {b ? b.name : `فرع ${bd.branchId}`}
+                                  </option>
+                                );
+                              })}
+                            </select>
+                          </div>
+                        )}
                         <div className="field grow" style={{ flex: '2 1 160px' }}>
                           <label>البيان / السبب</label>
                           <input type="text" placeholder="مثال: مكافأة تميز..." value={empAdjDesc} onChange={(e) => setEmpAdjDesc(e.target.value)} />
@@ -5228,6 +5960,76 @@ export default function EmployeePortalView({
                           💾 إضافة التسوية
                         </button>
                       </div>
+                    </div>
+                  )}
+
+                  {/* Dual Branch Adjustments Comparison Cards */}
+                  {isAllBranchesMode && (
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                      gap: '14px',
+                      marginTop: '16px',
+                      marginBottom: '16px'
+                    }}>
+                      {emp.branchesDetails.map((bd) => {
+                        const bId = bd.branchId;
+                        const bObj = (state.branches || []).find((b) => b.id === bId);
+                        const bName = bObj ? bObj.name : `فرع ${bId}`;
+                        const bBonuses = (empAdjs || []).filter(a => a.type === 'bonus' && (a.branchId === bId || (!a.branchId && emp.branchesDetails[0].branchId === bId)));
+                        const bDeductions = (empAdjs || []).filter(a => a.type === 'deduction' && (a.branchId === bId || (!a.branchId && emp.branchesDetails[0].branchId === bId)));
+                        const bBonusSum = bBonuses.reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
+                        const bDeductSum = bDeductions.reduce((acc, a) => acc + (parseFloat(a.amount) || 0), 0);
+                        const netAdj = bBonusSum - bDeductSum;
+
+                        return (
+                          <div
+                            key={bId}
+                            style={{
+                              background: 'var(--surface-muted)',
+                              border: '1.5px solid var(--border)',
+                              borderRadius: '14px',
+                              padding: '16px',
+                              boxShadow: '0 2px 8px rgba(0,0,0,0.03)'
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span style={{ fontSize: '20px' }}>⚖️</span>
+                                <h4 style={{ margin: 0, fontSize: '15.5px', fontWeight: 900, color: 'var(--primary-dark)' }}>
+                                  تسويات {bName}
+                                </h4>
+                              </div>
+                              <span style={{
+                                padding: '2px 10px',
+                                borderRadius: '99px',
+                                fontSize: '11.5px',
+                                fontWeight: 800,
+                                background: netAdj >= 0 ? '#dcfce7' : '#fee2e2',
+                                color: netAdj >= 0 ? '#166534' : '#991b1b',
+                                border: `1px solid ${netAdj >= 0 ? '#86efac' : '#fca5a5'}`
+                              }}>
+                                الصافي: {netAdj >= 0 ? `+${fmt(netAdj)}` : `-${fmt(Math.abs(netAdj))}`} ج.م
+                              </span>
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px', textAlign: 'center' }}>
+                              <div style={{ background: 'var(--surface)', padding: '10px 8px', borderRadius: '10px', border: '1px solid #86efac' }}>
+                                <div style={{ fontSize: '11px', color: '#166534', fontWeight: 700 }}>🎁 المكافآت ({bBonuses.length})</div>
+                                <div style={{ fontSize: '16px', fontWeight: 900, color: '#15803d', marginTop: '2px' }}>
+                                  +{fmt(bBonusSum)} ج.م
+                                </div>
+                              </div>
+                              <div style={{ background: 'var(--surface)', padding: '10px 8px', borderRadius: '10px', border: '1px solid #fca5a5' }}>
+                                <div style={{ fontSize: '11px', color: '#991b1b', fontWeight: 700 }}>✂️ الخصومات ({bDeductions.length})</div>
+                                <div style={{ fontSize: '16px', fontWeight: 900, color: '#dc2626', marginTop: '2px' }}>
+                                  -{fmt(bDeductSum)} ج.م
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
 
