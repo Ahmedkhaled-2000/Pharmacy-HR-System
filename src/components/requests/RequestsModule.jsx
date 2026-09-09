@@ -663,6 +663,32 @@ export default function RequestsModule({
         }
       }
 
+      // 0.2 Biometric Photo Verification Approval
+      if (approvedTargetReq.type === 'biometric_verification' || approvedTargetReq.requestType === 'biometric_verification') {
+        const empId = approvedTargetReq.employeeId;
+        const reqDate = approvedTargetReq.date || (approvedTargetReq.createdAt ? approvedTargetReq.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10));
+        const actionType = approvedTargetReq.targetAction || approvedTargetReq.actionType;
+
+        updatedShifts = updatedShifts.map(s => {
+          const isMatch = (s.id === approvedTargetReq.shiftId) ||
+            ((String(s.employeeId) === String(empId) || (approvedTargetReq.employeeCode && String(s.employeeCode) === String(approvedTargetReq.employeeCode))) && s.date === reqDate);
+          if (isMatch) {
+            const isStart = actionType === 'shift_start';
+            return {
+              ...s,
+              statusLabel: isStart ? 'حضور بالصورة (معتمد)' : 'انصراف بالصورة (معتمد)',
+              adminApproved: true,
+              approvedBy: 'الإدارة العليا',
+              approvedAt: new Date().toISOString(),
+              photoUrl: approvedTargetReq.photoUrl || s.photoUrl,
+              drivePhotoUrl: approvedTargetReq.drivePhotoUrl || s.drivePhotoUrl,
+              note: (s.note ? s.note.replace('بانتظار اعتماد الإدارة', 'معتمد من الإدارة العليا') : '')
+            };
+          }
+          return s;
+        });
+      }
+
       if (approvedTargetReq.type === 'penalty' || approvedTargetReq.type === 'early_exit') {
         const emp = (state.employees || []).find((e) => String(e.id) === String(approvedTargetReq.employeeId));
         let amount = 0;

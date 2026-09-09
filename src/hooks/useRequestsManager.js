@@ -394,7 +394,7 @@ export function useRequestsManager() {
             }
 
             const openShiftIdx = updatedShifts.findIndex(
-              s => String(s.employeeId) === String(empId) && (s.date === reqDate || !s.timeOut || s.timeOut === '—' || !s.endTime || s.endTime === '—')
+              s => (s.id === target.shiftId) || (String(s.employeeId) === String(empId) && s.date === reqDate && (!s.timeOut || s.timeOut === '—' || s.timeOut === ''))
             );
 
             if (openShiftIdx >= 0) {

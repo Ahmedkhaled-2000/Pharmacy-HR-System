@@ -118,8 +118,17 @@ export default function ElectronicKioskView({
 
   const todayStr = getRealTodayStr ? getRealTodayStr() : new Date().toISOString().slice(0, 10);
   const rawActiveShift = matchedEmp ? (state.activeShifts?.[matchedEmp.id] || state.activeShifts?.[String(matchedEmp.id)]) : null;
-  const isStaleActiveShift = rawActiveShift && rawActiveShift.date && rawActiveShift.date !== todayStr;
-  const activeShift = rawActiveShift && !isStaleActiveShift ? rawActiveShift : null;
+  const isStaleActiveShift = Boolean(rawActiveShift && rawActiveShift.date && rawActiveShift.date !== todayStr);
+
+  // فحص سجلات اليوم لمعرفة ما إذا كانت هناك وردية مفتوحة حالياً (حضور مسجل بدون انصراف)
+  const empOpenShift = matchedEmp ? (state.shifts || []).find(s => 
+    (String(s.employeeId) === String(matchedEmp.id) || (matchedEmp.code && String(s.employeeCode) === String(matchedEmp.code))) &&
+    s.date === todayStr &&
+    Boolean(s.timeIn && s.timeIn !== '—' && (!s.timeOut || s.timeOut === '—' || s.timeOut === '') && (!s.endTime || s.endTime === '—' || s.endTime === ''))
+  ) : null;
+
+  // تحديد الوردية النشطة: إما من الوردية الحالية بالذاكرة (إذا كانت لليوم) أو من سجل الوردية المفتوحة اليوم
+  const activeShift = (rawActiveShift && !isStaleActiveShift) ? rawActiveShift : (empOpenShift || null);
 
   useEffect(() => {
     // التحميل الاستباقي لمحرك الوجه في الكشك ليعمل فورياً عند وقوف أي موظف
@@ -190,7 +199,15 @@ export default function ElectronicKioskView({
           );
           const belongsToBranch = empBranchClean === cleanKioskBranch || hasSecondaryBranch;
           if (!belongsToBranch) {
-            alert('هذا الموظف غير مسجل أو غير مسموح له بالدخول في هذا الفرع.');
+            setKioskAlertModal({
+              isOpen: true,
+              type: 'error',
+              title: 'غير مصرح بالدخول',
+              subtitle: emp.name,
+              note: 'هذا الموظف غير مسجل أو غير مسموح له بتسجيل البصمة في هذا الفرع.',
+              countdown: 5,
+              onClose: () => setKioskAlertModal(null)
+            });
             setMatchedEmp(null);
             setInputCode('');
             return;
@@ -203,12 +220,28 @@ export default function ElectronicKioskView({
 
       if (isHand) {
         if (!emp.has_hand_descriptor && !emp.hand_descriptor) {
-          alert('هذا الموظف ليس لديه بصمة يد مسجلة. يرجى مراجعة الإدارة.');
+          setKioskAlertModal({
+            isOpen: true,
+            type: 'warning',
+            title: 'بصمة اليد غير مسجلة',
+            subtitle: emp.name,
+            note: 'هذا الموظف ليس لديه بصمة يد مسجلة بالنظام. يرجى مراجعة إدارة الموارد البشرية.',
+            countdown: 5,
+            onClose: () => setKioskAlertModal(null)
+          });
           return;
         }
       } else {
         if (!emp.has_face_descriptor && !emp.face_descriptor) {
-          alert('هذا الموظف ليس لديه بصمة وجه مسجلة. يرجى مراجعة الإدارة.');
+          setKioskAlertModal({
+            isOpen: true,
+            type: 'warning',
+            title: 'بصمة الوجه غير مسجلة',
+            subtitle: emp.name,
+            note: 'هذا الموظف ليس لديه بصمة وجه مسجلة بالنظام. يرجى مراجعة إدارة الموارد البشرية.',
+            countdown: 5,
+            onClose: () => setKioskAlertModal(null)
+          });
           return;
         }
       }
@@ -321,7 +354,14 @@ export default function ElectronicKioskView({
         setPendingDirectivesQueue([]);
       }
     } else {
-      alert('كود الموظف غير صحيح.');
+      setKioskAlertModal({
+        isOpen: true,
+        type: 'error',
+        title: 'كود غير صحيح',
+        note: 'كود الموظف المدخل غير صحيح أو غير مسجل في قاعدة البيانات.',
+        countdown: 4,
+        onClose: () => setKioskAlertModal(null)
+      });
       setMatchedEmp(null);
       setPendingDirectiveModal(null);
       setPendingDirectivesQueue([]);
@@ -330,19 +370,51 @@ export default function ElectronicKioskView({
 
   const handleActionClick = (action) => {
     if (action === 'shift_start' && activeShift) {
-      alert('لديك وردية مفتوحة بالفعل. يرجى تسجيل الانصراف أولاً.');
+      setKioskAlertModal({
+        isOpen: true,
+        type: 'warning',
+        title: 'تنبيه بدء الوردية',
+        subtitle: `${matchedEmp?.name || ''}`,
+        note: 'لديك وردية عمل مفتوحة بالفعل لهذا اليوم. يرجى تسجيل الانصراف أولاً قبل بدء وردية جديدة.',
+        countdown: 5,
+        onClose: () => setKioskAlertModal(null)
+      });
       return;
     }
     if (action === 'shift_end' && !activeShift) {
-      alert('ليس لديك وردية مفتوحة لتسجيل الانصراف.');
+      setKioskAlertModal({
+        isOpen: true,
+        type: 'warning',
+        title: 'تنبيه تسجيل الانصراف',
+        subtitle: `${matchedEmp?.name || ''}`,
+        note: 'ليس لديك وردية عمل نشطة ومفتوحة لتسجيل الانصراف.',
+        countdown: 5,
+        onClose: () => setKioskAlertModal(null)
+      });
       return;
     }
     if (action === 'break_start' && (!activeShift || activeShift.isPaused)) {
-      alert('لا يمكنك بدء بريك الآن.');
+      setKioskAlertModal({
+        isOpen: true,
+        type: 'warning',
+        title: 'تنبيه فترة الاستراحة (البريك)',
+        subtitle: `${matchedEmp?.name || ''}`,
+        note: !activeShift ? 'يجب بدء الوردية أولاً قبل أخذ استراحة.' : 'أنت في فترة استراحة بالفعل.',
+        countdown: 5,
+        onClose: () => setKioskAlertModal(null)
+      });
       return;
     }
     if (action === 'break_end' && (!activeShift || !activeShift.isPaused)) {
-      alert('أنت لست في فترة بريك.');
+      setKioskAlertModal({
+        isOpen: true,
+        type: 'warning',
+        title: 'تنبيه العودة من الاستراحة',
+        subtitle: `${matchedEmp?.name || ''}`,
+        note: 'أنت لست في فترة استراحة حالياً.',
+        countdown: 5,
+        onClose: () => setKioskAlertModal(null)
+      });
       return;
     }
     setActiveAction(action);
@@ -379,8 +451,8 @@ export default function ElectronicKioskView({
     const actionNotes = {
       shift_start: '✅ تم بدء الوردية وتسجيل موعد الحضور فورياً من لحظة التقاط الصورة. تم إرسال الصورة لمدير الفرع والإدارة العليا للتأكيد والمطابقة.',
       shift_end: '✅ تم إنهاء الوردية وتسجيل موعد الانصراف فورياً من لحظة التقاط الصورة. تم إرسال الصورة لمدير الفرع والإدارة العليا للتأكيد والمطابقة.',
-      break_start: '✅ تم تسجيل بدء الاستراحة (البريك) فورياً من لحظة التقاط الصورة. تم إرسال الصورة لمدير الفرع والإدارة العليا للتأكيد والمطابقة.',
-      break_end: '✅ تم تسجيل استئناف العمل فورياً من لحظة التقاط الصورة. تم إرسال الصورة لمدير الفرع والإدارة العليا للتأكيد والمطابقة.'
+      break_start: '✅ تم تسجيل بدء الاستراحة (البريك) فورياً من لحظة التقاط الصورة. تم إرسال الصورة للإدارة ومدير الفرع.',
+      break_end: '✅ تم تسجيل استئناف العمل فورياً من لحظة التقاط الصورة. تم إرسال الصورة للإدارة ومدير الفرع.'
     };
 
     const actionLabel = actionLabels[actionType] || actionType;
@@ -389,20 +461,24 @@ export default function ElectronicKioskView({
     const modalNote = actionNotes[actionType] || '✅ تم تسجيل الإجراء فورياً من لحظة التقاط الصورة. تم إرسال الصورة للإدارة للتأكيد والمطابقة.';
 
     const effectiveBranchId = selectedBranchId || currentEmp?.branchId || kioskBranchId;
-    const branchObj = (state?.branches || []).find(b => String(b.id) === String(effectiveBranchId));
+    const branchObj = (state?.branches || []).find(b => String(b.id) === String(effectiveBranchId)) || state?.branches?.[0];
     const branchName = branchObj ? branchObj.name : 'الفرع الرئيسي';
 
     const now = new Date();
-    const dateStr = now.toISOString().slice(0, 10);
-    const timeStr = now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+    const dateStr = getRealTodayStr ? getRealTodayStr() : now.toISOString().slice(0, 10);
+    const punchTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const displayTime = now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
 
-    // ⚡ 1. استجابة فورية فائقة السرعة (0ms Delay): فتح نافذة التأكيد فورياً بمجرد الأمر
+    const requestId = 'REQ-BIO-' + now.getTime();
+    const shiftId = 'shift_bio_' + now.getTime() + '_' + Math.random().toString(36).substr(2, 4);
+
+    // ⚡ 1. إظهار نافذة التأكيد الفورية في النظام (0ms Delay)
     setKioskAlertModal({
       isOpen: true,
       type: 'success',
       title: modalTitle,
       subtitle: `الموظف: ${currentEmp.name} (كود: ${currentEmp.code || currentEmp.id}) · ${branchName}`,
-      timeStr,
+      timeStr: `${displayTime} (${punchTime})`,
       dateStr,
       actionBadge,
       driveSaved: false,
@@ -416,23 +492,280 @@ export default function ElectronicKioskView({
       }
     });
 
-    // ⚡ 2. تنفيذ بدء/إنهاء الوردية والرفع في الخلفية دون أي تأخير لواجهة المستخدم
-    (async () => {
-      try {
-        if (actionType === 'shift_start') {
-          if (startShift) await startShift(currentEmp.id, 'kiosk', effectiveBranchId);
-        } else if (actionType === 'break_start') {
-          if (pauseShift) await pauseShift(currentEmp.id, 'kiosk');
-        } else if (actionType === 'break_end') {
-          if (resumeShift) await resumeShift(currentEmp.id, 'kiosk');
-        } else if (actionType === 'shift_end') {
-          if (stopShift) await stopShift(currentEmp.id, 'kiosk');
-        }
-      } catch (shiftErr) {
-        console.error('Error executing shift on photo punch:', shiftErr);
+    // ⚡ 2. التنفيذ الفوري الذري الشامل لبدء/إنهاء الوردية وحفظ الطلب والإشعار معاً دون أي تعارض زمني
+    const requestData = {
+      id: requestId,
+      shiftId: shiftId,
+      type: 'biometric_verification',
+      requestType: 'biometric_verification',
+      typeLabel: `اعتماد حضور بالصورة: ${actionBadge}`,
+      employeeId: currentEmp.id,
+      employeeCode: currentEmp.code || '',
+      employeeName: currentEmp.name || '',
+      branchId: effectiveBranchId,
+      branchName: branchName,
+      targetAction: actionType,
+      actionType: actionType,
+      actionLabel: actionLabel,
+      actionBadge: actionBadge,
+      date: dateStr,
+      time: punchTime,
+      displayTime: displayTime,
+      timestamp: now.toISOString(),
+      epoch: now.getTime(),
+      createdAt: now.toISOString(),
+      status: 'pending',
+      requiresBranchManager: true,
+      requiresSuperAdmin: true,
+      branchApproved: false,
+      adminApproved: false,
+      details: `طلب اعتماد ${actionBadge} (${actionLabel}) بالصورة الحية. وقت التوثيق والتنفيذ: ${displayTime} (${punchTime}) بتاريخ ${dateStr}.`,
+      notes: `تم التقاط صورة حية للموظف في تمام ${displayTime} وإرسالها للإدارة ومدير الفرع للمطابقة والاعتماد. تم تنفيذ الإجراء فورياً في نفس لحظة إرسال الطلب.`,
+      photoUrl: photoUrl || null,
+      drivePhotoUrl: null,
+      driveFileId: null
+    };
+
+    const newNotif = {
+      id: 'NOTIF-BIO-' + now.getTime(),
+      type: 'biometric_verification',
+      targetRole: 'branch_and_admin',
+      branchId: effectiveBranchId,
+      title: `📸 طلب اعتماد [${actionBadge}]: ${currentEmp.name}`,
+      message: `طلب اعتماد ${actionBadge} (${actionLabel}) بالصورة للموظف ${currentEmp.name} في تمام الساعة ${displayTime} بتاريخ ${dateStr}. تم تسجيل وتنفيذ الإجراء فورياً.`,
+      requestId: requestId,
+      employeeId: currentEmp.id,
+      employeeName: currentEmp.name,
+      targetAction: actionType,
+      actionBadge: actionBadge,
+      time: punchTime,
+      date: dateStr,
+      photoUrl: photoUrl || null,
+      drivePhotoUrl: null,
+      createdAt: now.toISOString(),
+      read: false,
+      readBy: []
+    };
+
+    let updatedActiveShifts = { ...(state?.activeShifts || {}) };
+    let updatedShifts = [...(state?.shifts || [])];
+
+    if (actionType === 'shift_start') {
+      // إغلاق تلقائي لأي وردية نشطة قديمة معلقة من يوم سابق
+      const prevActive = updatedActiveShifts[currentEmp.id] || updatedActiveShifts[String(currentEmp.id)];
+      if (prevActive && prevActive.date && prevActive.date !== dateStr) {
+        const staleShiftId = 'stale_' + now.getTime();
+        const bObjOld = (state?.branches || []).find(b => String(b.id) === String(prevActive.branchId || effectiveBranchId));
+        updatedShifts = [
+          {
+            id: staleShiftId,
+            employeeId: currentEmp.id,
+            employeeCode: currentEmp.code || '',
+            employeeName: currentEmp.name || '',
+            branchId: prevActive.branchId || effectiveBranchId,
+            branchName: bObjOld?.name || '',
+            date: prevActive.date,
+            timeIn: prevActive.timeIn,
+            timeOut: '17:00',
+            hours: parseFloat(currentEmp.workHoursPerDay) || 8,
+            actualWorkedHours: parseFloat(currentEmp.workHoursPerDay) || 8,
+            scheduledHours: parseFloat(currentEmp.workHoursPerDay) || 8,
+            regularHours: parseFloat(currentEmp.workHoursPerDay) || 8,
+            overtimeHours: 0,
+            overtimeStatus: 'none',
+            breakHours: 0,
+            note: 'إغلاق تلقائي لوردية سابقة لم يتم تسجيل انصرافها',
+            statusLabel: 'حضور حي',
+            createdAt: now.toISOString()
+          },
+          ...updatedShifts
+        ];
       }
 
-      // رفع الصورة إلى Google Drive في الخلفية إن كانت الخدمة مفعلة
+      // 1. تسجيل الوردية النشطة
+      const newActiveShift = {
+        shiftId: shiftId,
+        branchId: effectiveBranchId,
+        branchName: branchName,
+        date: dateStr,
+        timeIn: punchTime,
+        startEpoch: now.getTime(),
+        isPaused: false,
+        isOnBreak: false,
+        breakStartTime: null,
+        pauseStartEpoch: null,
+        accumulatedPauseMs: 0,
+        updatedAt: now.getTime(),
+        punchType: 'photo_attendance',
+        photoUrl: photoUrl || null,
+        statusLabel: 'حضور بالصورة (بانتظار الاعتماد)',
+        requestId: requestId
+      };
+      updatedActiveShifts[currentEmp.id] = newActiveShift;
+      updatedActiveShifts[String(currentEmp.id)] = newActiveShift;
+
+      // 2. إدراج سجل الحضور فورياً في قائمة الحضور وشيت الورديات
+      const openShiftRecord = {
+        id: shiftId,
+        employeeId: currentEmp.id,
+        employeeCode: currentEmp.code || '',
+        employeeName: currentEmp.name || '',
+        branchId: effectiveBranchId,
+        branchName: branchName,
+        date: dateStr,
+        timeIn: punchTime,
+        timeOut: '—',
+        hours: 0,
+        actualWorkedHours: 0,
+        scheduledHours: parseFloat(currentEmp.workHoursPerDay) || 8,
+        regularHours: 0,
+        overtimeHours: 0,
+        overtimeStatus: 'none',
+        breakHours: 0,
+        punchType: 'photo_attendance',
+        photoUrl: photoUrl || null,
+        requestId: requestId,
+        statusLabel: 'حضور بالصورة (بانتظار الاعتماد)',
+        note: `تسجيل حضور بالصورة في تمام ${displayTime} (${punchTime}) بانتظار اعتماد الإدارة`,
+        createdAt: now.toISOString()
+      };
+      updatedShifts = [openShiftRecord, ...updatedShifts];
+
+    } else if (actionType === 'shift_end') {
+      const active = updatedActiveShifts[currentEmp.id] || updatedActiveShifts[String(currentEmp.id)];
+      
+      const openShiftIdx = updatedShifts.findIndex(s =>
+        (String(s.employeeId) === String(currentEmp.id) || (currentEmp.code && String(s.employeeCode) === String(currentEmp.code))) &&
+        s.date === (active?.date || dateStr) &&
+        (!s.timeOut || s.timeOut === '—' || s.timeOut === '')
+      );
+
+      const effectiveTimeIn = active?.timeIn || (openShiftIdx >= 0 ? updatedShifts[openShiftIdx].timeIn : '09:00');
+      const effectiveShiftDate = active?.date || (openShiftIdx >= 0 ? updatedShifts[openShiftIdx].date : dateStr);
+      const targetShiftId = active?.shiftId || (openShiftIdx >= 0 ? updatedShifts[openShiftIdx].id : shiftId);
+
+      // حساب ساعات العمل والبريك والإضافي بدقة
+      const [inH, inM] = effectiveTimeIn.split(':').map(Number);
+      const [outH, outM] = punchTime.split(':').map(Number);
+      let diffMinutes = ((outH || 0) * 60 + (outM || 0)) - ((inH || 0) * 60 + (inM || 0));
+      if (diffMinutes < 0) diffMinutes += 24 * 60;
+      const totalElapsedHours = Math.round((diffMinutes / 60) * 100) / 100;
+
+      let currentPauseMs = active?.accumulatedPauseMs || 0;
+      if (active?.isPaused && active?.pauseStartEpoch) {
+        currentPauseMs += (now.getTime() - active.pauseStartEpoch);
+      }
+      const trackedBreak = Math.round((currentPauseMs / 3600000) * 100) / 100;
+      const configuredBreak = parseFloat(currentEmp?.breakHours || currentEmp?.defaultBreakHours || currentEmp?.branchesDetails?.[0]?.breakHours) || 0;
+      const effectiveBreak = trackedBreak > 0 ? trackedBreak : (totalElapsedHours > configuredBreak ? configuredBreak : 0);
+      const netHours = Math.max(0, Math.round((totalElapsedHours - effectiveBreak) * 100) / 100);
+
+      let scheduledHours = parseFloat(currentEmp?.workHoursPerDay) || 8;
+      let regularHours = netHours;
+      let overtimeHours = 0;
+      let overtimeStatus = 'none';
+
+      if (netHours > scheduledHours) {
+        overtimeHours = Math.round((netHours - scheduledHours) * 100) / 100;
+        regularHours = scheduledHours;
+        overtimeStatus = 'pending';
+      }
+
+      // حذف الوردية من الورديات النشطة
+      delete updatedActiveShifts[currentEmp.id];
+      delete updatedActiveShifts[String(currentEmp.id)];
+
+      const closedShiftData = {
+        id: targetShiftId,
+        employeeId: currentEmp.id,
+        employeeCode: currentEmp.code || '',
+        employeeName: currentEmp.name || '',
+        branchId: effectiveBranchId,
+        branchName: branchName,
+        date: effectiveShiftDate,
+        timeIn: effectiveTimeIn,
+        timeOut: punchTime,
+        hours: overtimeStatus === 'pending' ? regularHours : netHours,
+        actualWorkedHours: netHours,
+        scheduledHours,
+        regularHours,
+        overtimeHours,
+        overtimeStatus,
+        breakHours: effectiveBreak,
+        punchType: 'photo_attendance',
+        photoUrl: photoUrl || null,
+        requestId: requestId,
+        statusLabel: 'انصراف بالصورة (بانتظار الاعتماد)',
+        note: `تسجيل انصراف بالصورة في تمام ${displayTime} (${punchTime}) - الساعات: ${netHours} س (بانتظار اعتماد الإدارة)`,
+        updatedAt: now.toISOString()
+      };
+
+      if (openShiftIdx >= 0) {
+        updatedShifts[openShiftIdx] = {
+          ...updatedShifts[openShiftIdx],
+          ...closedShiftData
+        };
+      } else {
+        updatedShifts = [{ ...closedShiftData, createdAt: now.toISOString() }, ...updatedShifts];
+      }
+
+      requestData.shiftId = targetShiftId;
+
+    } else if (actionType === 'break_start') {
+      const active = updatedActiveShifts[currentEmp.id] || updatedActiveShifts[String(currentEmp.id)];
+      if (active) {
+        const pausedShift = {
+          ...active,
+          isPaused: true,
+          isOnBreak: true,
+          breakStartTime: punchTime,
+          pauseStartEpoch: now.getTime(),
+          updatedAt: now.getTime()
+        };
+        updatedActiveShifts[currentEmp.id] = pausedShift;
+        updatedActiveShifts[String(currentEmp.id)] = pausedShift;
+      }
+    } else if (actionType === 'break_end') {
+      const active = updatedActiveShifts[currentEmp.id] || updatedActiveShifts[String(currentEmp.id)];
+      if (active) {
+        const pauseDuration = now.getTime() - (active.pauseStartEpoch || now.getTime());
+        const resumedShift = {
+          ...active,
+          isPaused: false,
+          isOnBreak: false,
+          breakStartTime: null,
+          pauseStartEpoch: null,
+          accumulatedPauseMs: (active.accumulatedPauseMs || 0) + pauseDuration,
+          updatedAt: now.getTime()
+        };
+        updatedActiveShifts[currentEmp.id] = resumedShift;
+        updatedActiveShifts[String(currentEmp.id)] = resumedShift;
+      }
+    }
+
+    // ⚡ 3. الحفظ الذري الموحد للحالة (Atomic State Update) يضمن عدم ضياع أي بيان
+    const finalState = {
+      ...state,
+      shifts: updatedShifts,
+      activeShifts: updatedActiveShifts,
+      requests: [requestData, ...(state?.requests || [])],
+      notifications: [newNotif, ...(state?.notifications || [])],
+      _requestsUpdatedAt: now.toISOString(),
+      _notificationsUpdatedAt: now.toISOString()
+    };
+
+    if (setState) {
+      setState(finalState);
+    }
+    if (saveState) {
+      saveState(finalState).catch(err => console.error('[Kiosk Photo Attendance] Save error:', err));
+    }
+    if (submitRequest) {
+      submitRequest(requestData);
+    }
+
+    // ⚡ 4. المهام الخلفية المستقلة تماماً (رفع Drive وإشعارات Gmail)
+    (async () => {
       let driveResult = null;
       const driveConfig = orgSettings?.googleDrive || state?.orgSettings?.googleDrive;
       if (driveConfig && driveConfig.serviceUrl && photoUrl) {
@@ -443,88 +776,22 @@ export default function ElectronicKioskView({
             actionType,
             driveConfig
           });
+          if (driveResult && driveResult.fileUrl) {
+            // تحديث رابط الصورة في الطلب والإشعار بالخلفية
+            if (setState) {
+              setState(prev => ({
+                ...prev,
+                requests: (prev?.requests || []).map(r => r.id === requestId ? { ...r, drivePhotoUrl: driveResult.fileUrl, driveFileId: driveResult.fileId } : r),
+                notifications: (prev?.notifications || []).map(n => n.requestId === requestId ? { ...n, drivePhotoUrl: driveResult.fileUrl } : n),
+                shifts: (prev?.shifts || []).map(s => s.requestId === requestId ? { ...s, drivePhotoUrl: driveResult.fileUrl } : s)
+              }));
+            }
+          }
         } catch (driveErr) {
           console.warn('Failed to upload attendance photo to Google Drive:', driveErr);
         }
       }
 
-      // حفظ طلب التحقق والإشعار في الحالة وقاعدة البيانات
-      const requestId = 'REQ-BIO-' + Date.now();
-      const requestData = {
-        id: requestId,
-        type: 'biometric_verification',
-        requestType: 'biometric_verification',
-        typeLabel: `اعتماد حضور بالصورة: ${actionBadge}`,
-        employeeId: currentEmp.id,
-        employeeCode: currentEmp.code,
-        employeeName: currentEmp.name,
-        branchId: effectiveBranchId,
-        branchName: branchName,
-        targetAction: actionType,
-        actionType: actionType,
-        actionLabel: actionLabel,
-        actionBadge: actionBadge,
-        date: dateStr,
-        time: timeStr,
-        timestamp: now.toISOString(),
-        epoch: now.getTime(),
-        createdAt: now.toISOString(),
-        status: 'pending',
-        requiresBranchManager: true,
-        requiresSuperAdmin: true,
-        branchApproved: false,
-        adminApproved: false,
-        details: `طلب اعتماد ${actionBadge} (${actionLabel}) بالصورة الحية. وقت التوثيق والطلب: ${timeStr} بتاريخ ${dateStr}.`,
-        notes: `تم التقاط صورة حية للموظف في تمام ${timeStr} وإرسالها للإدارة ومدير الفرع للمطابقة والاعتماد. تم بدء/تسجيل الإجراء فورياً في نفس وقت التقاط الصورة.`,
-        photoUrl: photoUrl || null,
-        drivePhotoUrl: driveResult?.fileUrl || null,
-        driveFileId: driveResult?.fileId || null
-      };
-
-      const newNotif = {
-        id: 'NOTIF-BIO-' + Date.now(),
-        type: 'biometric_verification',
-        targetRole: 'branch_and_admin',
-        branchId: effectiveBranchId,
-        title: `📸 طلب اعتماد [${actionBadge}]: ${currentEmp.name}`,
-        message: `طلب اعتماد ${actionBadge} (${actionLabel}) بالصورة للموظف ${currentEmp.name} في تمام الساعة ${timeStr} بتاريخ ${dateStr}. تم بدء الإجراء وتسجيل الحضور بالصورة فورياً.`,
-        requestId: requestId,
-        employeeId: currentEmp.id,
-        employeeName: currentEmp.name,
-        targetAction: actionType,
-        actionBadge: actionBadge,
-        time: timeStr,
-        date: dateStr,
-        photoUrl: photoUrl || null,
-        drivePhotoUrl: driveResult?.fileUrl || null,
-        createdAt: now.toISOString(),
-        read: false,
-        readBy: []
-      };
-
-      if (setState) {
-        setState(prev => ({
-          ...prev,
-          requests: [requestData, ...(prev?.requests || [])],
-          notifications: [newNotif, ...(prev?.notifications || [])],
-          _requestsUpdatedAt: now.toISOString(),
-          _notificationsUpdatedAt: now.toISOString()
-        }));
-      }
-
-      if (saveState) {
-        saveState({
-          ...state,
-          requests: [requestData, ...(state?.requests || [])],
-          notifications: [newNotif, ...(state?.notifications || [])]
-        }).catch(err => console.error('Background save error:', err));
-      }
-
-      if (submitRequest) {
-        submitRequest(requestData);
-      }
-
-      // إرسال إشعار Gmail إن كان مفعلاً
       const gmailConfig = orgSettings?.gmailConfig || state?.orgSettings?.gmailConfig;
       if (gmailConfig && gmailConfig.serviceUrl && (gmailConfig.notifyOnAttendanceAnomaly !== false || gmailConfig.notifyOnNewRequest !== false)) {
         sendBiometricAttendanceEmail({
@@ -533,10 +800,11 @@ export default function ElectronicKioskView({
           empCode: currentEmp.code,
           branchName,
           actionType,
-          timeStr,
+          actionLabel,
+          timeStr: `${displayTime} (${punchTime})`,
           dateStr,
-          drivePhotoUrl: driveResult?.fileUrl || null,
-          photoUrl: photoUrl || null
+          photoDataUrl: photoUrl,
+          driveUrl: driveResult?.fileUrl
         }).catch(err => console.warn('Gmail biometric notification failed:', err));
       }
     })();
