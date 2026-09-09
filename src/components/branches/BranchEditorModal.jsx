@@ -21,6 +21,7 @@ export default function BranchEditorModal({
   const [branchLongitude, setBranchLongitude] = useState(null);
   const [branchLogo, setBranchLogo] = useState('');
   const [managerId, setManagerId] = useState('');
+  const [phones, setPhones] = useState([{ id: '1', number: '', type: 'landline' }]);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [openingTime, setOpeningTime] = useState('09:00');
