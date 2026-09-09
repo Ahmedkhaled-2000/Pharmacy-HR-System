@@ -7,6 +7,7 @@ import {
   matchesShortcutEvent,
   normalizeKeyFromEvent
 } from '../../utils/shortcutsConfig';
+import { forceClearCacheAndReload } from '../../utils/cacheManager';
 
 /**
  * المتحكم المركزي الشامل باختصارات لوحة المفاتيح وإغلاق النوافذ في كامل النظام
@@ -416,14 +417,26 @@ export default function UniversalShortcutsController() {
         return;
       }
 
-      // ── 10. Data Refresh & Fast Sync (F5 / Ctrl+R) ─────────────────────────────
+      // ── 9.9. Force Clear Cache & Hard Reload (Ctrl+Shift+R / Ctrl+F5 / Shift+F5 / Ctrl+Alt+R) ────
+      const clearCacheDef = getDef('clearCacheReload');
+      const isHardReload =
+        (clearCacheDef && matchesShortcutEvent(clearCacheDef, e)) ||
+        (isCtrl && isShift && (normKey === 'r' || e.code === 'KeyR')) ||
+        ((isCtrl || isShift) && (normKey === 'f5' || e.key === 'F5' || e.code === 'F5')) ||
+        (isCtrl && isAlt && (normKey === 'r' || e.code === 'KeyR'));
+
+      if (isHardReload) {
+        consumeEvent();
+        forceClearCacheAndReload();
+        return;
+      }
+
+      // ── 10. Data Refresh & Fast Sync (F5 / Ctrl+R بدون Shift) ───────────────────
       const refDef = getDef('refreshData');
       const isRefresh =
         (refDef && matchesShortcutEvent(refDef, e)) ||
-        normKey === 'f5' ||
-        e.key === 'F5' ||
-        e.code === 'F5' ||
-        (isCtrl && !isAlt && normKey === 'r');
+        (!isShift && !isCtrl && (normKey === 'f5' || e.key === 'F5' || e.code === 'F5')) ||
+        (isCtrl && !isAlt && !isShift && (normKey === 'r' || e.code === 'KeyR'));
 
       if (isRefresh) {
         consumeEvent();

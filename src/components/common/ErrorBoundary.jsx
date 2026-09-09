@@ -1,4 +1,5 @@
 import React from 'react';
+import { forceClearCacheAndReload } from '../../utils/cacheManager';
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -24,24 +25,8 @@ class ErrorBoundary extends React.Component {
     }
   };
 
-  handleHardReload = async () => {
-    try {
-      if ('serviceWorker' in navigator) {
-        const registrations = await navigator.serviceWorker.getRegistrations();
-        for (const reg of registrations) {
-          await reg.unregister();
-        }
-      }
-      if ('caches' in window) {
-        const cacheKeys = await caches.keys();
-        for (const key of cacheKeys) {
-          await caches.delete(key);
-        }
-      }
-    } catch (e) {
-      console.error(e);
-    }
-    window.location.href = window.location.href.split('?')[0] + '?v=' + Date.now();
+  handleHardReload = () => {
+    forceClearCacheAndReload();
   };
 
   render() {

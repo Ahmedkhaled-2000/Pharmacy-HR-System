@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useLiveRealTime } from '../../hooks/useLiveRealTime';
 import { getCycleDateRange } from '../../utils/periodEngine';
 import { getNotificationTargetTab } from '../../utils/notificationEngine';
+import { forceClearCacheAndReload } from '../../utils/cacheManager';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 🌟 ADAPTIVE DROPDOWN ITEM WITH SMART BIDIRECTIONAL FLYOUT (Anti-Clipping Engine)
@@ -1771,6 +1772,27 @@ return (
         <button
           type="button"
           onClick={() => {
+            if (window.confirm('هل تريد مسح الكاش بالكامل وإعادة تحميل أحدث نسخة من التطبيق؟')) {
+              forceClearCacheAndReload({ notifyUser: true });
+            }
+          }}
+          title="مسح الكاش والتحديث القسري (Ctrl+Shift+R)"
+          style={{
+            border: '1px solid var(--border)',
+            background: 'var(--surface)',
+            padding: '4px 7px',
+            borderRadius: '7px',
+            cursor: 'pointer',
+            fontSize: '12px',
+            color: 'var(--text)'
+          }}
+        >
+          <span>🧹</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
             window.dispatchEvent(new CustomEvent('app:lock-system'));
           }}
           title="قفل وإيقاف النظام مؤقتاً"
@@ -2376,6 +2398,32 @@ return (
           }}
         >
           <span>{themeMode === 'dark' ? '☀️' : '🌙'}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            if (window.confirm('هل تريد مسح ملفات الكاش القديمة وإعادة تحميل الصفحة لجلب أحدث التحديثات؟\n(يمكنك أيضاً استخدام الاختصار Ctrl + Shift + R)')) {
+              forceClearCacheAndReload({ notifyUser: true });
+            }
+          }}
+          title="مسح الكاش وإعادة التحميل القسري (Ctrl + Shift + R أو Ctrl + F5)"
+          style={{
+            border: '1px solid var(--border)',
+            background: 'var(--surface)',
+            padding: '5px 9px',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            fontSize: '13px',
+            color: 'var(--text)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            transition: 'all 0.15s'
+          }}
+        >
+          <span>🧹</span>
+          <span style={{ fontSize: '11.5px', fontWeight: 600 }}>تحديث الكاش</span>
         </button>
 
         <button

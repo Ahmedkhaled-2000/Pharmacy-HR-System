@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { RefreshCw, Download, Sparkles } from 'lucide-react';
 import DesktopUpdateModal from './DesktopUpdateModal';
+import { forceClearCacheAndReload } from '../../utils/cacheManager';
 
 /**
  * AppUpdateWatcher
@@ -121,14 +122,9 @@ export default function AppUpdateWatcher() {
     }
   };
 
-  // تنفيذ تحديث المتصفح
+  // تنفيذ تحديث المتصفح ومسح الكاش إجبارياً
   const handleApplyWebUpdate = () => {
-    if ('caches' in window) {
-      caches.keys().then((keys) => {
-        keys.forEach((key) => caches.delete(key));
-      }).catch(() => {});
-    }
-    window.location.reload(true);
+    forceClearCacheAndReload();
   };
 
   return (

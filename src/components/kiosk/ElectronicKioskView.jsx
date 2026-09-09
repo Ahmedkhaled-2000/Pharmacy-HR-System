@@ -8,6 +8,7 @@ import { uploadBiometricAttendancePhoto } from '../../utils/googleDriveService';
 import { sendBiometricAttendanceEmail } from '../../utils/gmailService';
 import { preWarmFaceModels } from '../../utils/faceApiHelper';
 import { normalizeDigits, getRealTodayStr } from '../../utils/formatters';
+import { forceClearCacheAndReload } from '../../utils/cacheManager';
 import '../../kiosk-modern.css';
 
 export default function ElectronicKioskView({
@@ -916,6 +917,7 @@ export default function ElectronicKioskView({
         <div 
           className="kiosk-glass-header"
           style={{
+            position: 'relative',
             background: 'rgba(255, 255, 255, 0.95)',
             backdropFilter: 'blur(20px)',
             WebkitBackdropFilter: 'blur(20px)',
@@ -930,6 +932,37 @@ export default function ElectronicKioskView({
             boxShadow: '0 20px 40px -15px rgba(0,0,0,0.25)'
           }}
         >
+          {/* Quick Clear Cache & Hard Reload Button */}
+          <button
+            type="button"
+            onClick={() => {
+              if (window.confirm('هل تريد مسح كاش المتصفح وإعادة تحميل الكشك بالكامل لجلب أحدث التحديثات؟\n(Ctrl + Shift + R)')) {
+                forceClearCacheAndReload({ notifyUser: true });
+              }
+            }}
+            title="مسح الكاش وإعادة التحميل القسري (Ctrl+Shift+R أو Ctrl+F5)"
+            style={{
+              position: 'absolute',
+              top: '12px',
+              left: '14px',
+              background: 'rgba(241, 245, 249, 0.9)',
+              border: '1px solid #cbd5e1',
+              color: '#475569',
+              borderRadius: '10px',
+              padding: '5px 9px',
+              cursor: 'pointer',
+              fontSize: '11px',
+              fontWeight: 700,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              zIndex: 5,
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <span>🧹</span>
+            <span>تحديث الكاش</span>
+          </button>
           {orgSettings?.logoUrl && (
             <div style={{ marginBottom: '6px' }}>
               <img

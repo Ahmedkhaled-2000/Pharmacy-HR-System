@@ -34,6 +34,16 @@ export const DEFAULT_SHORTCUTS = [
     fallbackKey: 'r',
     fallbackModifiers: ['Ctrl']
   },
+  {
+    id: 'clearCacheReload',
+    name: 'مسح الكاش القديم وإعادة تحميل الصفحة إجبارياً',
+    desc: 'إلغاء برمجيات Service Worker وحذف ملفات التخزين المؤقت (CacheStorage) وإجبار المتصفح على تنزيل أحدث كود للنظام وإعادة التحميل بالكامل',
+    category: 'system',
+    key: 'r',
+    modifiers: ['Ctrl', 'Shift'],
+    fallbackKey: 'F5',
+    fallbackModifiers: ['Ctrl']
+  },
 
   // ── 2. اختصارات عامة والتنقل بالقوائم والبحث (General & Menus) ─────────
   {
