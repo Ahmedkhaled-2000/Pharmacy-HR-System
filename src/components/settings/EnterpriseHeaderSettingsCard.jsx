@@ -219,6 +219,25 @@ export default function EnterpriseHeaderSettingsCard({
               }}>
                 {canEdit ? '👑 صلاحيات المالك' : '🔒 محمي بالمالك'}
               </span>
+              {isUnlockedByOwnerGuard && !isSystemOwner && (
+                <button
+                  type="button"
+                  onClick={() => setIsUnlockedByOwnerGuard(false)}
+                  style={{
+                    background: 'none',
+                    border: '1px solid #fde68a',
+                    color: '#b45309',
+                    padding: '2px 8px',
+                    borderRadius: '6px',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                  title="إعادة قفل التعديل"
+                >
+                  🔒 قفل
+                </button>
+              )}
             </div>
             <p style={{ margin: '4px 0 0', fontSize: '13px', color: 'var(--muted)' }}>
               المصدر المركزي لكافة البيانات الرسمية، الشعار، السجل التجاري، والترويسة في جميع العقود، كشوف المرتبات، والمطبوعات الإدارية.
@@ -258,106 +277,7 @@ export default function EnterpriseHeaderSettingsCard({
         </div>
       </div>
 
-      {/* ── SECURITY / OWNER AUTHORITY BANNER ── */}
-      {!canEdit ? (
-        <div style={{
-          background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, rgba(217, 119, 6, 0.04) 100%)',
-          border: '1.5px solid #f59e0b',
-          borderRadius: '12px',
-          padding: '14px 18px',
-          marginBottom: '20px',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '12px'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div style={{
-              width: '40px',
-              height: '40px',
-              borderRadius: '10px',
-              background: '#fef3c7',
-              color: '#b45309',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '20px',
-              flexShrink: 0
-            }}>
-              🔒
-            </div>
-            <div>
-              <div style={{ fontSize: '14px', fontWeight: 800, color: '#92400e' }}>
-                تعديل بيانات المنشأة الرسمية وترويسة الطباعة محصور ضمن صلاحيات المالك (Owner Only)
-              </div>
-              <div style={{ fontSize: '12.5px', color: '#b45309', marginTop: '2px' }}>
-                لحماية الأوراق الرسمية والترويسة والسجل التجاري والرقم الضريبي من التعديل غير المصرح به، تكون هذه البيانات في وضع القراءة فقط لغير المالك.
-              </div>
-            </div>
-          </div>
 
-          <button
-            type="button"
-            className="btn btn-warning"
-            onClick={handleRequestOwnerUnlock}
-            style={{
-              background: 'linear-gradient(135deg, #d97706, #b45309)',
-              color: '#fff',
-              border: 'none',
-              padding: '8px 18px',
-              borderRadius: '8px',
-              fontWeight: 800,
-              fontSize: '13px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              boxShadow: '0 2px 8px rgba(217,119,6,0.25)'
-            }}
-          >
-            <span>🔑</span> فتح التعديل بتفويض المالك
-          </button>
-        </div>
-      ) : (
-        <div style={{
-          background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(5, 150, 105, 0.04) 100%)',
-          border: '1.5px solid #10b981',
-          borderRadius: '12px',
-          padding: '10px 16px',
-          marginBottom: '20px',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '10px'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '20px' }}>👑</span>
-            <span style={{ fontSize: '13px', fontWeight: 800, color: '#065f46' }}>
-              صلاحيات المالك مفعلة: تعديل وحفظ بيانات المؤسسة وترويسة الطباعة متاح ومصرح به
-            </span>
-          </div>
-          {isUnlockedByOwnerGuard && !isSystemOwner && (
-            <button
-              type="button"
-              onClick={() => setIsUnlockedByOwnerGuard(false)}
-              style={{
-                background: '#fff',
-                border: '1px solid #10b981',
-                color: '#065f46',
-                padding: '4px 10px',
-                borderRadius: '6px',
-                fontSize: '11.5px',
-                fontWeight: 700,
-                cursor: 'pointer'
-              }}
-            >
-              🔒 إعادة القفل
-            </button>
-          )}
-        </div>
-      )}
 
       {/* ── 1. LIVE PRINT HEADER PREVIEW (معاينة حية ومباشرة للترويسة) ── */}
       <div style={{ marginBottom: '24px' }}>
