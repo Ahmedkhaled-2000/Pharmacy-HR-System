@@ -6,7 +6,6 @@ import {
   parseBylawsIntoSections
 } from '../../utils/bylawsDefaults';
 import { useUI } from '../../context/UIContext';
-import EnterpriseHeaderSettingsCard from '../settings/EnterpriseHeaderSettingsCard';
 
 export default function EmploymentContractModule({
   state,
@@ -36,33 +35,6 @@ export default function EmploymentContractModule({
   const contractDept = orgSettings.contractDepartment || 'الإدارة العامة والشؤون القانونية والموارد البشرية';
   const contractTitle = orgSettings.contractTitle || 'عَقْدُ عَمَلٍ فَرْدِيّ مُوَحَّد';
   const contractPrefix = orgSettings.contractNumberPrefix !== undefined ? orgSettings.contractNumberPrefix : 'CNT-Modawa@kane-';
-
-  // Modal State for Editing Organization Contract Header Details
-  const [isOrgSettingsModalOpen, setIsOrgSettingsModalOpen] = useState(false);
-
-  const handleSaveOrgContractSettings = async (updatedOrgSettings) => {
-    const performSave = async () => {
-      const updatedState = {
-        ...state,
-        orgSettings: updatedOrgSettings
-      };
-      if (setState) setState(updatedState);
-      if (saveState) await saveState(updatedState);
-      setIsOrgSettingsModalOpen(false);
-      showToast?.('✅ تم حفظ وتحديث بيانات المؤسسة وترويسة عقد العمل بنجاح');
-    };
-
-    if (executeWithOwnerGuard) {
-      executeWithOwnerGuard({
-        lockKey: 'lockEditSystemPermissions',
-        actionTitle: 'تعديل بيانات وترويسة المنشأة بعقود العمل',
-        actionDetails: `المنشأة: ${editOrgName}`,
-        onExecute: performSave
-      });
-    } else {
-      await performSave();
-    }
-  };
 
   const getFormattedContractNo = (prefix, targetEmp) => {
     const year = new Date().getFullYear();
@@ -461,25 +433,6 @@ export default function EmploymentContractModule({
               <button
                 type="button"
                 className="btn btn-ghost"
-                onClick={() => setIsOrgSettingsModalOpen(true)}
-                style={{
-                  padding: '8px 14px',
-                  borderRadius: '8px',
-                  border: '1.5px solid #0f766e',
-                  color: '#0f766e',
-                  fontWeight: 'bold',
-                  background: '#f0fdfa',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px'
-                }}
-                title="تعديل بيانات وترويسة المنشأة بعقود العمل المطبوعة"
-              >
-                🏢 تعديل بيانات المنشأة بالعقد
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost"
                 onClick={() => setIsEditing(true)}
                 style={{ padding: '8px 14px', borderRadius: '8px', border: '1px solid var(--border)', fontWeight: 'bold' }}
               >
@@ -530,27 +483,6 @@ export default function EmploymentContractModule({
             </div>
           </div>
         </div>
-
-        <button
-          type="button"
-          onClick={() => setIsOrgSettingsModalOpen(true)}
-          style={{
-            background: '#ffffff',
-            border: '1.5px solid #0f766e',
-            color: '#0f766e',
-            borderRadius: '8px',
-            padding: '7px 16px',
-            fontSize: '12.5px',
-            fontWeight: 800,
-            cursor: 'pointer',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
-          }}
-        >
-          <span>⚙️</span> تعديل ترويسة وبيانات المنشأة
-        </button>
       </div>
 
       {/* ── 2. Employee Selector & Dossier Summary ── */}
@@ -768,81 +700,6 @@ export default function EmploymentContractModule({
         )}
 
       </div>
-
-      {/* ── 4. Modal: Edit Organization Contract Header & Details ── */}
-      {isOrgSettingsModalOpen && (
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          zIndex: 9999,
-          background: 'rgba(15, 23, 42, 0.7)',
-          backdropFilter: 'blur(4px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: '16px',
-          overflowY: 'auto'
-        }}>
-          <div style={{
-            background: '#ffffff',
-            borderRadius: '16px',
-            maxWidth: '1000px',
-            width: '100%',
-            maxHeight: '92vh',
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden',
-            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)'
-          }}>
-            <div style={{
-              background: 'linear-gradient(135deg, #0f766e, #0d9488)',
-              color: '#ffffff',
-              padding: '14px 20px',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center'
-            }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span>🏢</span> تعديل ترويسة وبيانات المنشأة (مركزياً للنظام بالكامل)
-                </h3>
-                <p style={{ margin: '2px 0 0', fontSize: '11.5px', opacity: 0.9 }}>
-                  البيانات المحفوظة هنا تنعكس فورياً ومركزياً على عقود العمل وكشوف المرتبات وكافة المطبوعات الرسمية
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsOrgSettingsModalOpen(false)}
-                style={{
-                  background: 'rgba(255, 255, 255, 0.2)',
-                  border: 'none',
-                  color: '#ffffff',
-                  width: '30px',
-                  height: '30px',
-                  borderRadius: '8px',
-                  fontSize: '15px',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-              >
-                ✕
-              </button>
-            </div>
-            <div style={{ padding: '16px', overflowY: 'auto', flex: 1 }}>
-              <EnterpriseHeaderSettingsCard
-                state={state}
-                setState={setState}
-                saveState={saveState}
-                showToast={showToast}
-                executeWithOwnerGuard={executeWithOwnerGuard}
-                ownerLocks={state?.orgSettings?.ownerModificationLocks}
-              />
-            </div>
-          </div>
-        </div>
-      )}
 
     </div>
   );
