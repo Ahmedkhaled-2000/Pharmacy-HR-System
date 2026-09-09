@@ -2310,6 +2310,7 @@ export default function RequestsModule({
         };
 
         const isLeave = ['leave', 'leave_request', 'annual_leave', 'sick_leave', 'emergency_leave', 'unpaid_leave'].includes(previewModalReq.type);
+        const isPermission = ['permission', 'permission_request', 'إذن', 'late_permission', 'early_leave'].includes(previewModalReq.type) || Boolean(previewModalReq.permType);
         const isLoan = ['loan', 'advance', 'meds', 'credit_medicine'].includes(previewModalReq.type);
         const isSwap = ['swap', 'shift_swap', 'shift_edit'].includes(previewModalReq.type);
         const isPunch = ['punch_correction', 'manual_punch', 'attendance_punch', 'تأكيد بصمة الوجه', 'تأكيد بصمة اليد', 'biometric_verification'].includes(previewModalReq.type);
