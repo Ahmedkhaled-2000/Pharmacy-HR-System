@@ -28,7 +28,8 @@ export function getAuthoritativeGmailConfig(state) {
       ? stateConfig.targetAdminEmails
       : [],
     serviceUrl: (localConfig?.serviceUrl || stateConfig.serviceUrl || '').trim(),
-    dailyDigestTime: localConfig?.dailyDigestTime || stateConfig.dailyDigestTime || '23:59',
+    dailyDigestTime: localConfig?.dailyDigestTime || stateConfig.dailyDigestTime || '',
+    systemUrl: (localConfig?.systemUrl || stateConfig.systemUrl || '').trim(),
     sendOnRequest: localConfig?.sendOnRequest !== undefined ? Boolean(localConfig.sendOnRequest) : (stateConfig.sendOnRequest ?? true),
     sendOnDecision: localConfig?.sendOnDecision !== undefined ? Boolean(localConfig.sendOnDecision) : (stateConfig.sendOnDecision ?? true),
     sendOnLateness: localConfig?.sendOnLateness !== undefined ? Boolean(localConfig.sendOnLateness) : (stateConfig.sendOnLateness ?? true),
@@ -38,6 +39,47 @@ export function getAuthoritativeGmailConfig(state) {
     sendDailyDigest: localConfig?.sendDailyDigest !== undefined ? Boolean(localConfig.sendDailyDigest) : (stateConfig.sendDailyDigest ?? true),
     updatedAt: localConfig?.updatedAt || stateConfig.updatedAt || new Date().toISOString()
   };
+}
+
+/**
+ * استخراج الرابط المعتمد للمنظومة (ديناميكي وفقاً للدومين الفعلي أو الإعدادات)
+ */
+export function getSystemAppUrl(stateOrConfig) {
+  // 1. فحص الإعدادات المباشرة أو داخل orgSettings
+  const cfg = stateOrConfig?.systemUrl
+    ? stateOrConfig
+    : (stateOrConfig?.orgSettings?.gmailConfig || stateOrConfig?.orgSettings || stateOrConfig || {});
+
+  if (cfg?.systemUrl && typeof cfg.systemUrl === 'string' && cfg.systemUrl.trim().startsWith('http')) {
+    return cfg.systemUrl.trim().replace(/\/+$/, '');
+  }
+
+  // 2. فحص LocalStorage
+  try {
+    const localCfg = JSON.parse(localStorage.getItem('pharmacy_gmail_config') || '{}');
+    if (localCfg?.systemUrl && typeof localCfg.systemUrl === 'string' && localCfg.systemUrl.trim().startsWith('http')) {
+      return localCfg.systemUrl.trim().replace(/\/+$/, '');
+    }
+    const savedUrl = localStorage.getItem('pharmacy_system_url');
+    if (savedUrl && typeof savedUrl === 'string' && savedUrl.trim().startsWith('http')) {
+      return savedUrl.trim().replace(/\/+$/, '');
+    }
+  } catch {}
+
+  // 3. قراءة النطاق الحي المباشر من المتصفح (window.location.origin)
+  if (typeof window !== 'undefined' && window.location && window.location.origin) {
+    const origin = window.location.origin;
+    if (origin && origin !== 'null' && !origin.startsWith('file:')) {
+      if (!origin.includes('localhost') && !origin.includes('127.0.0.1')) {
+        try { localStorage.setItem('pharmacy_system_url', origin); } catch {}
+        return origin;
+      }
+      return origin;
+    }
+  }
+
+  // 4. الدومين الرسمي المعتمد للمنظومة بدلاً من الروابط القديمة
+  return 'https://pharmacy-hr-system.vercel.app';
 }
 
 /**
@@ -195,6 +237,8 @@ export async function notifyAdminOnResignationRequest({ state, emp, branchName, 
   const resolvedBranch = branchName || emp?.branchName || 'الفرع الرئيسي';
   const typeLabel = requestType === 'resignation' ? 'استقالة' : 'تراجع عن استقالة';
 
+  const systemUrl = getSystemAppUrl(state);
+
   const content = `
     <p>تم إحالة طلب <strong>${typeLabel}</strong> الخاص بالموظف <strong>${empName}</strong> إلى الإدارة العليا بعد مراجعة مدير الفرع:</p>
     
@@ -215,7 +259,7 @@ export async function notifyAdminOnResignationRequest({ state, emp, branchName, 
     </div>
 
     <p style="text-align: center; margin-top: 20px;">
-      <a href="https://pharmacy-time-tracker.vercel.app" style="display: inline-block; background: #0f766e; color: #ffffff; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: bold;">
+      <a href="${systemUrl}/?tab=resignation" style="display: inline-block; background: #0f766e; color: #ffffff; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: bold;">
         🔗 الدخول لمراجعة الطلب والبت النهائي من صفحة الاستقالات
       </a>
     </p>
@@ -247,7 +291,7 @@ export function generateDailyDigestHTML(digestDataOrParams, orgSettings = {}) {
   if (digestDataOrParams && digestDataOrParams.branchSummaries) {
     const data = digestDataOrParams;
     const dateStr = data.dateStr || getRealTodayStr();
-    const timeStr = data.timeGenerated || '23:59';
+    const timeStr = data.timeGenerated || new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', hour12: false });
     const emps = data.employeesCount || 0;
     const present = data.presentCount || 0;
     const absent = data.absentCount || 0;
@@ -436,7 +480,7 @@ export function generateDailyDigestHTML(digestDataOrParams, orgSettings = {}) {
 
       <!-- Section 4: Action Button -->
       <p style="text-align: center; margin: 26px 0 10px;">
-        <a href="https://pharmacy-time-tracker.vercel.app" style="display: inline-block; background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%); color: #ffffff !important; text-decoration: none; padding: 12px 28px; border-radius: 10px; font-weight: bold; font-size: 14px; box-shadow: 0 4px 12px rgba(13,148,136,0.3);">
+        <a href="${getSystemAppUrl(orgSettings)}/?tab=dashboard" style="display: inline-block; background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%); color: #ffffff !important; text-decoration: none; padding: 12px 28px; border-radius: 10px; font-weight: bold; font-size: 14px; box-shadow: 0 4px 12px rgba(13,148,136,0.3);">
           🔗 فتح لوحة تحكم المنظومة للبت في الطلبات والعمليات ↗
         </a>
       </p>
@@ -444,11 +488,11 @@ export function generateDailyDigestHTML(digestDataOrParams, orgSettings = {}) {
 
     return buildEmailTemplate({
       title: `📊 التقرير اليومي الشامل — ${dateStr}`,
-      subtitle: `ملخص حركة المنظومة الحية حتى الساعة ${timeStr}`,
+      subtitle: `ملخص حركة المنظومة الحية ${timeStr ? `حتى الساعة ${timeStr}` : ''}`,
       badgeText: `تقرير تنفيذي شامل (${dateStr})`,
       badgeColor: '#0f766e',
       bodyContent,
-      footerText: `تم إصدار هذا التقرير التلقائي الموثق بتاريخ ${dateStr} - ${timeStr}`,
+      footerText: `تم إصدار هذا التقرير التلقائي الموثق بتاريخ ${dateStr} ${timeStr ? `- ${timeStr}` : ''}`,
       logoUrl: orgSettings.logoUrl,
       orgName: orgSettings.orgName
     });
@@ -458,7 +502,7 @@ export function generateDailyDigestHTML(digestDataOrParams, orgSettings = {}) {
   const legacy = digestDataOrParams || {};
   const dateStr = legacy.dateStr || getRealTodayStr();
   const content = `
-    <p>إليك ملخص الأداء الشامل والنشاط الكامل للصيدليات اليوم <strong>${dateStr}</strong> (من الساعة 00:00 إلى الساعة 23:59):</p>
+    <p>إليك ملخص الأداء الشامل والنشاط الكامل للصيدليات اليوم <strong>${dateStr}</strong>:</p>
     
     <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 16px; margin: 16px 0;">
       <h3 style="margin: 0 0 10px; color: #166534; font-size: 15px;">👥 ملخص الحضور والتشغيل اليومي</h3>
@@ -497,15 +541,21 @@ export function generateDailyDigestHTML(digestDataOrParams, orgSettings = {}) {
         </tr>
       </table>
     </div>
+
+    <p style="text-align: center; margin: 24px 0 10px;">
+      <a href="${getSystemAppUrl(orgSettings)}/?tab=dashboard" style="display: inline-block; background: #0d9488; color: #ffffff !important; text-decoration: none; padding: 10px 24px; border-radius: 8px; font-weight: bold;">
+        🔗 فتح لوحة تحكم المنظومة
+      </a>
+    </p>
   `;
 
   return buildEmailTemplate({
     title: `📊 التقرير اليومي الشامل — ${dateStr}`,
-    subtitle: `ملخص حركة المنظومة من الساعة 00:00 حتى 23:59`,
-    badgeText: 'ملخص نهاية اليوم 23:59',
+    subtitle: 'ملخص حركة ونشاط المنظومة اليومي',
+    badgeText: 'ملخص نهاية اليوم',
     badgeColor: '#0f766e',
     bodyContent: content,
-    footerText: 'تم توليد هذا التقرير التلقائي في نهاية اليوم الساعة 23:59',
+    footerText: `تم توليد هذا التقرير التوثيقي بتاريخ ${dateStr}`,
     logoUrl: orgSettings.logoUrl,
     orgName: orgSettings.orgName
   });
@@ -523,6 +573,7 @@ export async function notifyAdminOnBranchNoShow({ state, branch, openingTime, mi
 
   const branchName = branch.name || `فرع ${branch.id}`;
   const todayStr = getRealTodayStr();
+  const systemUrl = getSystemAppUrl(state);
 
   const content = `
     <div style="background: #fef2f2; border: 2px solid #ef4444; border-radius: 12px; padding: 18px; margin: 16px 0;">
@@ -540,7 +591,7 @@ export async function notifyAdminOnBranchNoShow({ state, branch, openingTime, mi
     </div>
 
     <p style="text-align: center; margin-top: 20px;">
-      <a href="https://pharmacy-time-tracker.vercel.app" style="display: inline-block; background: #dc2626; color: #ffffff !important; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: bold;">
+      <a href="${systemUrl}/?tab=branches" style="display: inline-block; background: #dc2626; color: #ffffff !important; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: bold;">
         🔗 الدخول الفوري للتحقق من كاميرات وكشك الفرع
       </a>
     </p>
@@ -703,6 +754,8 @@ export async function notifyAdminOnNewRequest({ state, newRequest, empName, bran
   if (newRequest.details && newRequest.details !== newRequest.reason) details.push(`<b>التفاصيل:</b> ${newRequest.details}`);
   if (newRequest.notes && newRequest.notes !== newRequest.reason && newRequest.notes !== newRequest.details) details.push(`<b>ملاحظات:</b> ${newRequest.notes}`);
 
+  const systemUrl = getSystemAppUrl(state);
+
   const content = `
     <p>تم إرسال طلب جديد إلى المنظومة من قِبل الموظف <strong>${empName || newRequest.employeeName || 'موظف'}</strong>:</p>
     
@@ -720,7 +773,7 @@ export async function notifyAdminOnNewRequest({ state, newRequest, empName, bran
     </div>
 
     <p style="text-align: center; margin-top: 20px;">
-      <a href="https://pharmacy-time-tracker.vercel.app" style="display: inline-block; background: #0d9488; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: bold;">
+      <a href="${systemUrl}/?tab=requests" style="display: inline-block; background: #0d9488; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: bold;">
         🔗 الدخول للمنظومة واتخاذ القرار
       </a>
     </p>
@@ -855,6 +908,8 @@ export async function notifyAllEmployeesPayrollIssued({ state, monthStr }) {
     return { success: false, reason: 'لا يوجد موظفون مضاف لهم بريد إلكتروني في البروفايل' };
   }
 
+  const systemUrl = getSystemAppUrl(state);
+
   let sentCount = 0;
   for (const emp of employees) {
     const content = `
@@ -867,7 +922,7 @@ export async function notifyAllEmployeesPayrollIssued({ state, monthStr }) {
       </div>
 
       <p style="text-align: center; margin-top: 16px;">
-        <a href="https://pharmacy-time-tracker.vercel.app" style="display: inline-block; background: #0d9488; color: #ffffff; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: bold;">
+        <a href="${systemUrl}/employee" style="display: inline-block; background: #0d9488; color: #ffffff; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: bold;">
           🌐 الدخول للبوابة واستعراض مفردات الراتب
         </a>
       </p>
@@ -908,6 +963,7 @@ export async function notifyAdminOnLateness({ state, emp, branchName, latenessMi
   const empCode = emp?.code ? `(كود: ${emp.code})` : '';
   const empJob = emp?.jobTitle || 'موظف';
   const resolvedBranch = branchName || emp?.branchName || 'الفرع الرئيسي';
+  const systemUrl = getSystemAppUrl(state);
 
   const content = `
     <p>نحيطكم علماً بأنه تم تسجيل <strong>بصمة حضور متأخرة</strong> لأحد الموظفين عن موعد ورديته المحدد في الجدول الشهري:</p>
@@ -930,7 +986,7 @@ export async function notifyAdminOnLateness({ state, emp, branchName, latenessMi
     </div>
 
     <p style="text-align: center; margin-top: 20px;">
-      <a href="https://pharmacy-time-tracker.vercel.app" style="display: inline-block; background: #0d9488; color: #ffffff; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: bold;">
+      <a href="${systemUrl}/?tab=adjustments" style="display: inline-block; background: #0d9488; color: #ffffff; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: bold;">
         🔗 الدخول للمنظومة ومراجعة التأخيرات
       </a>
     </p>
@@ -977,7 +1033,7 @@ export async function notifyAdminOnLateness({ state, emp, branchName, latenessMi
       </p>
 
       <p style="text-align: center; margin-top: 18px;">
-        <a href="https://pharmacy-time-tracker.vercel.app" style="display: inline-block; background: #0d9488; color: #ffffff; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: bold;">
+        <a href="${systemUrl}/employee" style="display: inline-block; background: #0d9488; color: #ffffff; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: bold;">
           🔗 فتح بوابة الموظف الإلكترونية
         </a>
       </p>
@@ -1017,6 +1073,7 @@ export async function notifyAdminOnEarlyExit({ state, emp, branchName, earlyMinu
   const empCode = emp?.code ? `(كود: ${emp.code})` : '';
   const empJob = emp?.jobTitle || 'موظف';
   const resolvedBranch = branchName || emp?.branchName || 'الفرع الرئيسي';
+  const systemUrl = getSystemAppUrl(state);
 
   const content = `
     <p>نحيطكم علماً بأنه تم تسجيل <strong>بصمة انصراف مبكر</strong> لموظف قبل موعد انتهاء ورديته المحدد بالجدول الشهري:</p>
@@ -1035,7 +1092,7 @@ export async function notifyAdminOnEarlyExit({ state, emp, branchName, earlyMinu
     </div>
 
     <p style="text-align: center; margin-top: 20px;">
-      <a href="https://pharmacy-time-tracker.vercel.app" style="display: inline-block; background: #0d9488; color: #ffffff; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: bold;">
+      <a href="${systemUrl}/?tab=adjustments" style="display: inline-block; background: #0d9488; color: #ffffff; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: bold;">
         🔗 الدخول للمنظومة واتخاذ القرار اللائحي
       </a>
     </p>
@@ -1078,6 +1135,7 @@ export async function notifyOnPenaltyApplied({ state, emp, penalty, branchName, 
   const empCode = empObj?.code || penalty?.employeeCode || '';
   const empEmail = empObj?.email || penalty?.employeeEmail;
   const resolvedBranch = branchName || empObj?.branchName || (penalty?.branchId && state?.branches?.find(b => String(b.id) === String(penalty.branchId))?.name) || 'الفرع الرئيسي';
+  const systemUrl = getSystemAppUrl(state);
 
   const penaltyTitle = penalty?.actionTitle || penalty?.penaltyAction || penalty?.ruleTitle || penalty?.violationTitle || penalty?.title || penalty?.action || 'جزاء تأديبي / خصم مالي';
   const penaltyReason = penalty?.reason || penalty?.details || penalty?.notes || penalty?.violationTitle || 'تطبيق سياسة لائحة العمل والجزاءات';
@@ -1122,7 +1180,7 @@ export async function notifyOnPenaltyApplied({ state, emp, penalty, branchName, 
     </div>
 
     <p style="text-align: center; margin-top: 20px;">
-      <a href="https://pharmacy-time-tracker.vercel.app" style="display: inline-block; background: #0d9488; color: #ffffff; text-decoration: none; padding: 10px 22px; border-radius: 8px; font-weight: bold;">
+      <a href="${systemUrl}/?tab=adjustments" style="display: inline-block; background: #0d9488; color: #ffffff; text-decoration: none; padding: 10px 22px; border-radius: 8px; font-weight: bold;">
         🔗 فتح سجل الجزاءات والتسويات بالمنظومة
       </a>
     </p>
@@ -1172,7 +1230,7 @@ export async function notifyOnPenaltyApplied({ state, emp, penalty, branchName, 
       </div>
 
       <p style="text-align: center; margin-top: 18px;">
-        <a href="https://pharmacy-time-tracker.vercel.app" style="display: inline-block; background: #0d9488; color: #ffffff; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: bold;">
+        <a href="${systemUrl}/employee" style="display: inline-block; background: #0d9488; color: #ffffff; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: bold;">
           🔗 الدخول لبوابة الموظف للاطلاع أو تقديم تظلم
         </a>
       </p>
@@ -1257,6 +1315,7 @@ export async function notifyAdminOnOvertime({ state, emp, branchName, overtimeHo
 
   const empName = emp?.name || 'موظف';
   const resolvedBranch = branchName || emp?.branchName || 'الفرع الرئيسي';
+  const systemUrl = getSystemAppUrl(state);
 
   const content = `
     <p>تم رصد عمل <strong>ساعات إضافية</strong> للموظف <strong>${empName}</strong> فوق ساعات العمل المقررة في الجدول الشهري وبانتظار اعتمادكم:</p>
@@ -1274,7 +1333,7 @@ export async function notifyAdminOnOvertime({ state, emp, branchName, overtimeHo
     </div>
 
     <p style="text-align: center; margin-top: 20px;">
-      <a href="https://pharmacy-time-tracker.vercel.app" style="display: inline-block; background: #0d9488; color: #ffffff; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: bold;">
+      <a href="${systemUrl}/?tab=dashboard" style="display: inline-block; background: #0d9488; color: #ffffff; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: bold;">
         🔗 اعتماد الساعات الإضافية أو رفضها
       </a>
     </p>
@@ -1318,6 +1377,8 @@ export async function sendBiometricAttendanceEmail({
   const targetRecipients = customTargetEmail ? [customTargetEmail] : resolveAdminRecipients(cfg);
   if (targetRecipients.length === 0) return { success: false, error: 'لم يتم تحديد بريد المستلم' };
 
+  const systemUrl = getSystemAppUrl(cfg);
+
   const actionMap = {
     shift_start: { label: 'تسجيل دخول (بداية الوردية)', badge: '🟢 بصمة دخول', color: '#059669' },
     shift_end: { label: 'تسجيل خروج (نهاية الوردية)', badge: '🔴 بصمة خروج', color: '#dc2626' },
@@ -1351,7 +1412,7 @@ export async function sendBiometricAttendanceEmail({
     </div>
 
     <p style="text-align: center; margin-top: 20px;">
-      <a href="https://pharmacy-time-tracker.vercel.app" style="display: inline-block; background: #059669; color: #ffffff; text-decoration: none; padding: 10px 22px; border-radius: 8px; font-weight: bold;">
+      <a href="${systemUrl}/?tab=approvals" style="display: inline-block; background: #059669; color: #ffffff; text-decoration: none; padding: 10px 22px; border-radius: 8px; font-weight: bold;">
         🔗 فتح مركز موافقات الإدارة العليا
       </a>
     </p>
@@ -1393,6 +1454,7 @@ export async function sendBiometricRegistrationRequestEmail({
   const targetRecipients = customTargetEmail ? [customTargetEmail] : resolveAdminRecipients(cfg);
   if (targetRecipients.length === 0) return { success: false, error: 'بريد الإدارة غير محدد' };
 
+  const systemUrl = getSystemAppUrl(cfg);
   const bioLabel = biometricType === 'hand' ? 'بصمة اليد الذكية' : 'بصمة الوجه الذكية';
 
   const content = `
@@ -1414,7 +1476,7 @@ export async function sendBiometricRegistrationRequestEmail({
     </div>
 
     <p style="text-align: center; margin-top: 20px;">
-      <a href="https://pharmacy-time-tracker.vercel.app" style="display: inline-block; background: #0d9488; color: #ffffff; text-decoration: none; padding: 10px 22px; border-radius: 8px; font-weight: bold;">
+      <a href="${systemUrl}/?tab=approvals" style="display: inline-block; background: #0d9488; color: #ffffff; text-decoration: none; padding: 10px 22px; border-radius: 8px; font-weight: bold;">
         🔗 الدخول لمراجعة واعتماد البصمة في مركز الموافقات
       </a>
     </p>
@@ -1455,6 +1517,8 @@ export async function sendBiometricResetRequestEmail({
   const targetRecipients = customTargetEmail ? [customTargetEmail] : resolveAdminRecipients(cfg);
   if (targetRecipients.length === 0) return { success: false, error: 'بريد الإدارة غير محدد' };
 
+  const systemUrl = getSystemAppUrl(cfg);
+
   const content = `
     <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 14px; margin-bottom: 16px;">
       <h3 style="color: #b45309; margin: 0 0 8px 0; font-size: 16px;">🔄 طلب إعادة تسجيل بصمة الموظف ومسح القديمة</h3>
@@ -1473,7 +1537,7 @@ export async function sendBiometricResetRequestEmail({
     </div>
 
     <p style="text-align: center; margin-top: 20px;">
-      <a href="https://pharmacy-time-tracker.vercel.app" style="display: inline-block; background: #d97706; color: #ffffff; text-decoration: none; padding: 10px 22px; border-radius: 8px; font-weight: bold;">
+      <a href="${systemUrl}/?tab=approvals" style="display: inline-block; background: #d97706; color: #ffffff; text-decoration: none; padding: 10px 22px; border-radius: 8px; font-weight: bold;">
         🔗 فتح مركز الموافقات لاتخاذ القرار
       </a>
     </p>

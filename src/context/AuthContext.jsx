@@ -51,10 +51,32 @@ export function AuthProvider({ children }) {
 
   const [activeNavTab, setActiveNavTab] = useState(() => {
     try {
+      if (typeof window !== 'undefined' && window.location?.search) {
+        const urlParams = new URLSearchParams(window.location.search);
+        const tabParam = urlParams.get('tab');
+        if (tabParam && tabParam !== 'kiosk') return tabParam;
+      }
       const saved = localStorage.getItem('app_active_nav_tab');
       return saved && saved !== 'kiosk' ? saved : 'dashboard';
     } catch { return 'dashboard'; }
   });
+
+  // مزامنة التبويب المباشر عند فتح روابط الإيميل التي تحتوي على ?tab=requests أو غيرها
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleCheckUrlTab = () => {
+      try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const tabParam = urlParams.get('tab');
+        if (tabParam && tabParam !== 'kiosk') {
+          setActiveNavTab(tabParam);
+        }
+      } catch {}
+    };
+    handleCheckUrlTab();
+    window.addEventListener('popstate', handleCheckUrlTab);
+    return () => window.removeEventListener('popstate', handleCheckUrlTab);
+  }, []);
 
   const [activeSubTab, setActiveSubTab] = useState(() => {
     try { return localStorage.getItem('app_active_sub_tab') || 'cards'; } catch { return 'cards'; }

@@ -29,13 +29,13 @@ export function useDailyDigestCron() {
       // ─────────────────────────────────────────────────────────────
       // 1. فحص إرسال التقرير الشامل اليومي التلقائي
       // ─────────────────────────────────────────────────────────────
-      if (gmailConfig.sendDailyDigest !== false) {
-        const [targetHStr, targetMStr] = (gmailConfig.dailyDigestTime || '23:59').split(':');
+      if (gmailConfig.sendDailyDigest !== false && gmailConfig.dailyDigestTime && String(gmailConfig.dailyDigestTime).trim()) {
+        const [targetHStr, targetMStr] = String(gmailConfig.dailyDigestTime).trim().split(':');
         const targetH = parseInt(targetHStr, 10);
         const targetM = parseInt(targetMStr, 10);
 
         // إذا تطابقت الساعة والدقيقة الحالية مع الموعد المجدول
-        if (currentH === targetH && Math.abs(currentM - targetM) <= 1) {
+        if (!isNaN(targetH) && !isNaN(targetM) && currentH === targetH && Math.abs(currentM - targetM) <= 1) {
           const lastSentKey = 'last_digest_sent_' + todayKey;
 
           if (!sessionStorage.getItem(lastSentKey)) {
@@ -50,7 +50,7 @@ export function useDailyDigestCron() {
                 await sendGmailEmail({
                   gmailConfig,
                   recipientEmail: targetRecipients,
-                  subject: `📊 الملخص الشامل اليومي (${gmailConfig.dailyDigestTime || '23:59'}) — ${todayKey}`,
+                  subject: `📊 الملخص الشامل اليومي (${gmailConfig.dailyDigestTime}) — ${todayKey}`,
                   htmlContent: html
                 });
                 showToast?.('📊 تم إرسال إيميل ملخص اليوم الشامل بنجاح إلى الإدارة');

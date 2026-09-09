@@ -41,7 +41,8 @@ export default function GmailConfigCard({
       userEmail: stateCfg.userEmail || localSaved?.userEmail || '',
       appPassword: stateCfg.appPassword || localSaved?.appPassword || '',
       adminEmails: parsedAdminEmails,
-      dailyDigestTime: stateCfg.dailyDigestTime || localSaved?.dailyDigestTime || '23:59',
+      dailyDigestTime: stateCfg.dailyDigestTime || localSaved?.dailyDigestTime || '',
+      systemUrl: stateCfg.systemUrl || localSaved?.systemUrl || (typeof window !== 'undefined' && window.location?.origin && !window.location.origin.startsWith('file:') && !window.location.origin.includes('localhost') ? window.location.origin : 'https://pharmacy-hr-system.vercel.app'),
       serviceUrl: stateCfg.serviceUrl || localSaved?.serviceUrl || 'https://script.google.com/macros/s/AKfycbzAHjkD2l2MvE5G6XLLj3jNM3k3B5e4SJ_kXdJtD2L-rUVUnh9BWlDSC0wCIqAk5syO/exec',
       sendOnRequest: stateCfg.sendOnRequest !== undefined ? Boolean(stateCfg.sendOnRequest) : (localSaved?.sendOnRequest ?? true),
       sendOnDecision: stateCfg.sendOnDecision !== undefined ? Boolean(stateCfg.sendOnDecision) : (localSaved?.sendOnDecision ?? true),
@@ -58,6 +59,7 @@ export default function GmailConfigCard({
   const [appPassword, setAppPassword] = useState(initialConfig.appPassword);
   const [adminEmails, setAdminEmails] = useState(initialConfig.adminEmails);
   const [dailyDigestTime, setDailyDigestTime] = useState(initialConfig.dailyDigestTime);
+  const [systemUrl, setSystemUrl] = useState(initialConfig.systemUrl);
   const [serviceUrl, setServiceUrl] = useState(initialConfig.serviceUrl);
   const [sendOnRequest, setSendOnRequest] = useState(initialConfig.sendOnRequest);
   const [sendOnDecision, setSendOnDecision] = useState(initialConfig.sendOnDecision);
@@ -73,7 +75,8 @@ export default function GmailConfigCard({
     if (effective.userEmail) setUserEmail(effective.userEmail);
     if (effective.appPassword) setAppPassword(effective.appPassword);
     if (effective.adminEmails && effective.adminEmails.length > 0) setAdminEmails(effective.adminEmails);
-    if (effective.dailyDigestTime) setDailyDigestTime(effective.dailyDigestTime);
+    if (effective.dailyDigestTime !== undefined) setDailyDigestTime(effective.dailyDigestTime);
+    if (effective.systemUrl) setSystemUrl(effective.systemUrl);
     if (effective.serviceUrl) setServiceUrl(effective.serviceUrl);
     if (effective.sendOnRequest !== undefined) setSendOnRequest(effective.sendOnRequest);
     if (effective.sendOnDecision !== undefined) setSendOnDecision(effective.sendOnDecision);
@@ -182,6 +185,7 @@ function doGet(e) {
 
     const cleanedAdminEmails = adminEmails.map(s => String(s || '').trim()).filter(Boolean);
     const targetAdminEmailStr = cleanedAdminEmails.join(', ');
+    const cleanedSystemUrl = (systemUrl || '').trim();
 
     const updatedConfig = {
       enabled,
@@ -189,7 +193,8 @@ function doGet(e) {
       appPassword: appPassword.trim(),
       targetAdminEmail: targetAdminEmailStr,
       targetAdminEmails: cleanedAdminEmails,
-      dailyDigestTime: dailyDigestTime.trim() || '23:59',
+      dailyDigestTime: (dailyDigestTime || '').trim(),
+      systemUrl: cleanedSystemUrl,
       serviceUrl: serviceUrl.trim(),
       sendOnRequest,
       sendOnDecision,
@@ -203,6 +208,9 @@ function doGet(e) {
     // 1. حفظ فوري في LocalStorage لضمان بقاء البيانات حتى قبل أو أثناء المزامنة
     try {
       localStorage.setItem('pharmacy_gmail_config', JSON.stringify(updatedConfig));
+      if (cleanedSystemUrl) {
+        localStorage.setItem('pharmacy_system_url', cleanedSystemUrl);
+      }
     } catch (lsErr) {
       console.warn('[GmailConfig] LocalStorage write error:', lsErr);
     }
@@ -211,6 +219,7 @@ function doGet(e) {
       const currentOrg = state?.orgSettings || {};
       const updatedOrgSettings = {
         ...currentOrg,
+        systemUrl: cleanedSystemUrl || currentOrg.systemUrl,
         gmailConfig: updatedConfig,
         updatedAt: nowIso
       };
@@ -224,48 +233,37 @@ function doGet(e) {
 
       const updatedState = {
         ...state,
-        orgSettings: updatedOrgSettings,
-        updatedAt: nowIso
+        orgSettings: updatedOrgSettings
       };
 
-      if (setState) setState(updatedState);
-      if (saveState) {
-        try {
-          await saveState(updatedState);
-        } catch (saveErr) {
-          console.warn('[GmailConfig] Cloud save warning (saved locally):', saveErr);
-        }
-      }
-      showToast?.('💾 تم حفظ وتفعيل إعدادات بريد Gmail والتنبيهات بنجاح ✅');
+      setState(updatedState);
+      await saveState(updatedState);
+      showToast?.('✅ تم حفظ إعدادات إشعارات Gmail ورابط المنظومة بنجاح');
     };
 
-    if (executeWithOwnerGuard && (ownerLocks?.lockEditGmailConfig || state?.orgSettings?.ownerModificationLocks?.lockEditGmailConfig)) {
-      executeWithOwnerGuard({
-        lockKey: 'lockEditGmailConfig',
-        actionTitle: 'تعديل إعدادات بريد Gmail والتنبيهات الفورية',
-        actionDetails: 'تحديث حساب بريد الإدارة أو رابط خدمة إرسال الإشعارات البريدية',
-        onExecute: performSave
-      });
-      return;
-    }
-
-    await performSave();
+    executeWithOwnerGuard({
+      lockKey: 'lockGmailSettings',
+      actionTitle: 'تحديث إعدادات Gmail والتنبيهات',
+      actionDetails: `بريد الإرسال: ${userEmail} · مستلمو الإدارة: ${targetAdminEmailStr || 'غير محدد'} · رابط المنظومة: ${cleanedSystemUrl || 'تلقائي'}`,
+      onExecute: performSave
+    });
   };
 
   const handleSendTestEmail = async () => {
-    const cleanedAdminEmails = adminEmails.map(s => String(s || '').trim()).filter(Boolean);
-    if (!userEmail.trim() && cleanedAdminEmails.length === 0) {
-      showToast?.('⚠️ يرجى إدخال بريد Gmail المُرسِل وبريد الإدارة أولاً');
+    if (!userEmail || !appPassword) {
+      showToast?.('⚠️ يرجى إدخال بريد Gmail المُرْسِل وكلمة سر التطبيقات أولاً');
       return;
     }
 
     setIsSendingTest(true);
+    const cleanedAdminEmails = adminEmails.map(s => String(s || '').trim()).filter(Boolean);
     const testConfig = {
       enabled,
       userEmail,
       appPassword,
       targetAdminEmail: cleanedAdminEmails.join(', '),
       targetAdminEmails: cleanedAdminEmails,
+      systemUrl: (systemUrl || '').trim(),
       serviceUrl
     };
 
@@ -283,7 +281,7 @@ function doGet(e) {
         <div style="background: #f0fdf4; border: 1px solid #bbf7d0; padding: 14px; border-radius: 10px; margin: 12px 0;">
           <p style="margin:0 0 6px; color: #166534; font-weight: bold;">✅ تم توثيق الاتصال بنجاح!</p>
           <p style="margin:0; color: #15803d; font-size: 13.5px;">
-            ستصلكم التنبيهات الفورية لطلبات الموظفين والإنذارات وملخص اليوم الشامل التلقائي (المقرر إرساله يومياً في تمام الساعة <strong>${dailyDigestTime || '23:59'}</strong>) على كافة العناوين المسجلة.
+            ستصلكم التنبيهات الفورية لطلبات الموظفين والإنذارات وملخص اليوم الشامل ${dailyDigestTime ? `(المقرر إرساله يومياً في تمام الساعة <strong>${dailyDigestTime}</strong>)` : ''} على كافة العناوين المسجلة.
           </p>
         </div>
       `
@@ -325,6 +323,7 @@ function doGet(e) {
       appPassword,
       targetAdminEmail: cleanedAdminEmails.join(', '),
       targetAdminEmails: cleanedAdminEmails,
+      systemUrl: (systemUrl || '').trim(),
       serviceUrl
     };
 
@@ -338,7 +337,7 @@ function doGet(e) {
     const res = await sendGmailEmail({
       gmailConfig: testConfig,
       recipientEmail: targetRecipients,
-      subject: `📊 ملخص اليوم الشامل (${dailyDigestTime || '23:59'}) — ${dateToday}`,
+      subject: `📊 ملخص اليوم الشامل ${dailyDigestTime ? `(${dailyDigestTime}) ` : ''}— ${dateToday}`,
       htmlContent: html
     });
 
@@ -429,9 +428,66 @@ function doGet(e) {
         </div>
 
         <div className="field" style={{ margin: 0 }}>
-          <label style={{ fontWeight: 800, fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span>⏰</span> موعد الإرسال التلقائي للملخص الشامل
-          </label>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+            <label style={{ fontWeight: 800, fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', margin: 0 }}>
+              <span>🔗</span> رابط المنظومة (أزرار الإيميلات)
+            </label>
+            {typeof window !== 'undefined' && window.location?.origin && (
+              <button
+                type="button"
+                onClick={() => setSystemUrl(window.location.origin)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--primary, #0284c7)',
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  padding: '0 4px',
+                  textDecoration: 'underline'
+                }}
+                title="استخدام رابط المتصفح الحالي"
+              >
+                🔄 الرابط الحالي
+              </button>
+            )}
+          </div>
+          <input
+            type="url"
+            value={systemUrl}
+            onChange={(e) => setSystemUrl(e.target.value)}
+            placeholder="https://your-domain.vercel.app"
+            style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--surface)' }}
+          />
+          <span style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '4px', display: 'block' }}>
+            الرابط الذي تفتح عليه أزرار الإيميل لاتخاذ القرار والدخول المباشر.
+          </span>
+        </div>
+
+        <div className="field" style={{ margin: 0 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+            <label style={{ fontWeight: 800, fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', margin: 0 }}>
+              <span>⏰</span> موعد الإرسال التلقائي للملخص الشامل
+            </label>
+            {dailyDigestTime && (
+              <button
+                type="button"
+                onClick={() => setDailyDigestTime('')}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#dc2626',
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  padding: '0 4px'
+                }}
+                title="مسح التوقيت وإلغاء الإرسال التلقائي اليومي"
+              >
+                ✕ مسح التوقيت
+              </button>
+            )}
+          </div>
           <input
             type="time"
             value={dailyDigestTime}
@@ -439,7 +495,9 @@ function doGet(e) {
             style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--surface)', fontWeight: 800 }}
           />
           <span style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '4px', display: 'block' }}>
-            يتم توليد وإرسال التقرير الشامل تلقائياً في هذا التوقيت يومياً (افتراضي 23:59).
+            {dailyDigestTime 
+              ? `يتم إرسال الملخص الشامل تلقائياً في الساعة (${dailyDigestTime}) يومياً.` 
+              : 'اتركه فارغاً للإرسال اليدوي فقط دون أي إرسال تلقائي.'}
           </span>
         </div>
 
@@ -577,7 +635,9 @@ function doGet(e) {
 
         <label style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#f0fdf4', padding: '12px 14px', borderRadius: '10px', border: '1px solid #bbf7d0', cursor: 'pointer' }}>
           <input type="checkbox" checked={sendDailyDigest} onChange={(e) => setSendDailyDigest(e.target.checked)} style={{ width: '16px', height: '16px' }} />
-          <span style={{ fontSize: '13px', fontWeight: 700, color: '#166534' }}>📊 إرسال إيميل الملخص الشامل التلقائي في موعده المحدد ({dailyDigestTime || '23:59'})</span>
+          <span style={{ fontSize: '13px', fontWeight: 700, color: '#166534' }}>
+            📊 إرسال إيميل الملخص الشامل التلقائي {dailyDigestTime ? `في موعده المحدد (${dailyDigestTime})` : '(إرسال يدوي فقط عند الطلب)'}
+          </span>
         </label>
       </div>
 

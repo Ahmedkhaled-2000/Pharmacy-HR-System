@@ -152,7 +152,7 @@ export default function AppRoutes() {
     exportEmployeesDirectoryExcel
   } = useExcelOperations();
 
-  // Run 23:59 Daily Digest Background Automated Cron
+  // Run Daily Digest & Alert Background Automated Cron
   useDailyDigestCron();
 
   // تفعيل إيقاف وقفل النظام مؤقتاً عبر زر Scroll Lock أو حدث app:lock-system
