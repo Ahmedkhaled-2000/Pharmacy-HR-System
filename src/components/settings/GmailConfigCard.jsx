@@ -43,25 +43,25 @@ export default function GmailConfigCard({
       adminEmails: parsedAdminEmails,
       dailyDigestTime: localSaved?.dailyDigestTime !== undefined ? localSaved.dailyDigestTime : (stateCfg.dailyDigestTime || ''),
       systemUrl: stateCfg.systemUrl || localSaved?.systemUrl || (typeof window !== 'undefined' && window.location?.origin && !window.location.origin.startsWith('file:') && !window.location.origin.includes('localhost') ? window.location.origin : 'https://pharmacy-hr-system.vercel.app'),
-      serviceUrl: stateCfg.serviceUrl || localSaved?.serviceUrl || 'https://script.google.com/macros/s/AKfycbzAHjkD2l2MvE5G6XLLj3jNM3k3B5e4SJ_kXdJtD2L-rUVUnh9BWlDSC0wCIqAk5syO/exec',
+      serviceUrl: stateCfg.serviceUrl || localSaved?.serviceUrl || '',
       sendOnRequest: stateCfg.sendOnRequest !== undefined ? Boolean(stateCfg.sendOnRequest) : (localSaved?.sendOnRequest ?? true),
       sendOnDecision: stateCfg.sendOnDecision !== undefined ? Boolean(stateCfg.sendOnDecision) : (localSaved?.sendOnDecision ?? true),
       sendOnLateness: stateCfg.sendOnLateness !== undefined ? Boolean(stateCfg.sendOnLateness) : (localSaved?.sendOnLateness ?? true),
       sendOnPenalty: stateCfg.sendOnPenalty !== undefined ? Boolean(stateCfg.sendOnPenalty) : (localSaved?.sendOnPenalty ?? true),
       sendOnBranchNoShow: stateCfg.sendOnBranchNoShow !== undefined ? Boolean(stateCfg.sendOnBranchNoShow) : (localSaved?.sendOnBranchNoShow ?? true),
-      branchNoShowGraceMinutes: localSaved?.branchNoShowGraceMinutes !== undefined && !isNaN(parseInt(localSaved.branchNoShowGraceMinutes, 10))
+      branchNoShowGraceMinutes: localSaved?.branchNoShowGraceMinutes !== undefined && localSaved?.branchNoShowGraceMinutes !== '' && !isNaN(parseInt(localSaved.branchNoShowGraceMinutes, 10))
         ? parseInt(localSaved.branchNoShowGraceMinutes, 10)
-        : (stateCfg.branchNoShowGraceMinutes !== undefined && !isNaN(parseInt(stateCfg.branchNoShowGraceMinutes, 10))
+        : (stateCfg.branchNoShowGraceMinutes !== undefined && stateCfg.branchNoShowGraceMinutes !== '' && !isNaN(parseInt(stateCfg.branchNoShowGraceMinutes, 10))
         ? parseInt(stateCfg.branchNoShowGraceMinutes, 10)
-        : 30),
+        : ''),
       sendOnEarlyDepartureBeforeClosing: localSaved?.sendOnEarlyDepartureBeforeClosing !== undefined
         ? Boolean(localSaved.sendOnEarlyDepartureBeforeClosing)
         : (stateCfg.sendOnEarlyDepartureBeforeClosing !== undefined ? Boolean(stateCfg.sendOnEarlyDepartureBeforeClosing) : true),
-      earlyDepartureBeforeClosingGraceMinutes: localSaved?.earlyDepartureBeforeClosingGraceMinutes !== undefined && !isNaN(parseInt(localSaved.earlyDepartureBeforeClosingGraceMinutes, 10))
+      earlyDepartureBeforeClosingGraceMinutes: localSaved?.earlyDepartureBeforeClosingGraceMinutes !== undefined && localSaved?.earlyDepartureBeforeClosingGraceMinutes !== '' && !isNaN(parseInt(localSaved.earlyDepartureBeforeClosingGraceMinutes, 10))
         ? parseInt(localSaved.earlyDepartureBeforeClosingGraceMinutes, 10)
-        : (stateCfg.earlyDepartureBeforeClosingGraceMinutes !== undefined && !isNaN(parseInt(stateCfg.earlyDepartureBeforeClosingGraceMinutes, 10))
+        : (stateCfg.earlyDepartureBeforeClosingGraceMinutes !== undefined && stateCfg.earlyDepartureBeforeClosingGraceMinutes !== '' && !isNaN(parseInt(stateCfg.earlyDepartureBeforeClosingGraceMinutes, 10))
         ? parseInt(stateCfg.earlyDepartureBeforeClosingGraceMinutes, 10)
-        : 15),
+        : ''),
       sendDailyDigest: stateCfg.sendDailyDigest !== undefined ? Boolean(stateCfg.sendDailyDigest) : (localSaved?.sendDailyDigest ?? true)
     };
   };
@@ -120,38 +120,36 @@ export default function GmailConfigCard({
     }
   };
 
-  // تحديث فوري لمهلة فتح الفرع وحفظها محلياً لمنع استعادتها
+  // تحديث فوري لمهلة فتح الفرع وحفظها محلياً وفق المدخل تماماً
   const handleBranchNoShowGraceMinutesChange = (newVal) => {
-    const parsed = parseInt(newVal, 10);
-    const cleanVal = isNaN(parsed) ? '' : Math.max(1, parsed);
-    setBranchNoShowGraceMinutes(cleanVal);
+    setBranchNoShowGraceMinutes(newVal);
     try {
       const raw = localStorage.getItem('pharmacy_gmail_config');
       const cfg = raw ? JSON.parse(raw) : {};
-      cfg.branchNoShowGraceMinutes = cleanVal || 30;
+      cfg.branchNoShowGraceMinutes = newVal !== '' && !isNaN(parseInt(newVal, 10)) ? parseInt(newVal, 10) : newVal;
       localStorage.setItem('pharmacy_gmail_config', JSON.stringify(cfg));
     } catch (err) {
       console.warn('[GmailConfig] Grace minutes write error:', err);
     }
   };
 
-  // تحديث فوري لمهلة الانصراف قبل الإغلاق وحفظها محلياً
+  // تحديث فوري لمهلة الانصراف قبل الإغلاق وحفظها محلياً وفق المدخل تماماً
   const handleEarlyDepartureGraceMinutesChange = (newVal) => {
-    const parsed = parseInt(newVal, 10);
-    const cleanVal = isNaN(parsed) ? '' : Math.max(1, parsed);
-    setEarlyDepartureBeforeClosingGraceMinutes(cleanVal);
+    setEarlyDepartureBeforeClosingGraceMinutes(newVal);
     try {
       const raw = localStorage.getItem('pharmacy_gmail_config');
       const cfg = raw ? JSON.parse(raw) : {};
-      cfg.earlyDepartureBeforeClosingGraceMinutes = cleanVal || 15;
+      cfg.earlyDepartureBeforeClosingGraceMinutes = newVal !== '' && !isNaN(parseInt(newVal, 10)) ? parseInt(newVal, 10) : newVal;
       localStorage.setItem('pharmacy_gmail_config', JSON.stringify(cfg));
     } catch (err) {
       console.warn('[GmailConfig] Early departure grace write error:', err);
     }
   };
 
+  const [isSaving, setIsSaving] = useState(false);
   const [isSendingTest, setIsSendingTest] = useState(false);
   const [isSendingDigest, setIsSendingDigest] = useState(false);
+  const [isSavedSuccess, setIsSavedSuccess] = useState(false);
   const [showScriptModal, setShowScriptModal] = useState(false);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [previewHtml, setPreviewHtml] = useState('');
@@ -277,12 +275,14 @@ function doGet(e) {
       sendOnLateness: Boolean(sendOnLateness),
       sendOnPenalty: Boolean(sendOnPenalty),
       sendOnBranchNoShow: Boolean(sendOnBranchNoShow),
-      branchNoShowGraceMinutes: Math.max(1, parseInt(branchNoShowGraceMinutes, 10) || 30),
+      branchNoShowGraceMinutes: branchNoShowGraceMinutes !== '' && !isNaN(parseInt(branchNoShowGraceMinutes, 10)) ? parseInt(branchNoShowGraceMinutes, 10) : 0,
       sendOnEarlyDepartureBeforeClosing: Boolean(sendOnEarlyDepartureBeforeClosing),
-      earlyDepartureBeforeClosingGraceMinutes: Math.max(1, parseInt(earlyDepartureBeforeClosingGraceMinutes, 10) || 15),
+      earlyDepartureBeforeClosingGraceMinutes: earlyDepartureBeforeClosingGraceMinutes !== '' && !isNaN(parseInt(earlyDepartureBeforeClosingGraceMinutes, 10)) ? parseInt(earlyDepartureBeforeClosingGraceMinutes, 10) : 0,
       sendDailyDigest: Boolean(sendDailyDigest),
       updatedAt: nowIso
     };
+
+    setIsSaving(true);
 
     // 1. حفظ فوري في LocalStorage لضمان بقاء البيانات حتى قبل أو أثناء المزامنة
     try {
@@ -294,7 +294,7 @@ function doGet(e) {
       console.warn('[GmailConfig] LocalStorage write error:', lsErr);
     }
 
-    const performSave = async () => {
+    const performSave = () => {
       try {
         const currentOrg = state?.orgSettings || {};
         const updatedOrgSettings = {
@@ -316,31 +316,41 @@ function doGet(e) {
           orgSettings: updatedOrgSettings
         };
 
+        // 1. تحديث الحالة المحلية والواجهة فورياً (0ms استجابة لحظية)
         setState(updatedState);
+        setIsSaving(false);
+        setIsSavedSuccess(true);
+        setTimeout(() => setIsSavedSuccess(false), 2500);
+        showToast?.('⚡ تم حفظ وتفعيل إعدادات بريد Gmail ورابط المنظومة بنجاح');
+
+        // 2. المزامنة السحابية في الخلفية دون تعطيل واجهة المستخدم
         if (typeof saveState === 'function') {
-          await saveState(updatedState);
+          saveState(updatedState).catch((err) => {
+            console.warn('[GmailConfigCard] Background sync warning:', err);
+          });
         }
-        showToast?.('✅ تم حفظ وتفعيل إعدادات بريد Gmail ورابط المنظومة بنجاح');
       } catch (err) {
         console.error('[GmailConfigCard] performSave error:', err);
-        showToast?.('⚠️ حدث خطأ أثناء الحفظ السحابي، تم الحفظ محلياً بنجاح');
+        setIsSaving(false);
+        showToast?.('⚠️ حدث خطأ أثناء الحفظ: ' + (err.message || 'خطأ غير متوقع'));
       }
     };
 
     try {
-      if (executeWithOwnerGuard && (ownerLocks?.lockGmailSettings || state?.orgSettings?.ownerModificationLocks?.lockGmailSettings || state?.orgSettings?.ownerModificationLocks?.lockEditOrgSettings)) {
+      if (executeWithOwnerGuard && (ownerLocks?.lockGmailSettings || state?.orgSettings?.ownerModificationLocks?.lockGmailSettings)) {
         executeWithOwnerGuard({
           lockKey: 'lockGmailSettings',
           actionTitle: 'تحديث إعدادات Gmail والتنبيهات',
           actionDetails: `بريد الإرسال: ${cleanedUserEmail || '—'} · مستلمو الإدارة: ${targetAdminEmailStr || 'غير محدد'}`,
           onExecute: performSave
         });
+        setIsSaving(false);
         return;
       }
-      await performSave();
+      performSave();
     } catch (guardErr) {
       console.warn('[GmailConfigCard] executeWithOwnerGuard fallback:', guardErr);
-      await performSave();
+      performSave();
     }
   };
 
@@ -430,8 +440,7 @@ function doGet(e) {
       return;
     }
     if (targetUrl.includes('AKfycbzAHjkD2l2MvE5G6XLLj3jNM3k3B5e4SJ_kXdJtD2L-rUVUnh9BWlDSC0wCIqAk5syO')) {
-      showToast?.('⚠️ هذا الرابط هو معرف افتراضي تجريبي غير منشور. يرجى نشر الكود من زر (طريقة التفعيل) بحسابك ولصق الرابط الجديد');
-      setShowScriptModal(true);
+      showToast?.('⚠️ هذا الرابط هو معرف تجريبي افتراضي غير منشور. يرجى نشر الكود بحسابك ولصق الرابط الجديد الخاص بك');
       return;
     }
 
@@ -489,8 +498,7 @@ function doGet(e) {
 
       if (activeServiceUrl.includes('AKfycbzAHjkD2l2MvE5G6XLLj3jNM3k3B5e4SJ_kXdJtD2L-rUVUnh9BWlDSC0wCIqAk5syO')) {
         setIsSendingDigest(false);
-        showToast?.('⚠️ رابط الخدمة الحالي هو معرف تجريبي غير منشور. اضغط على زر (طريقة التفعيل في دقيقة) لنشر السكربت بحسابك ولصق الرابط الجديد');
-        setShowScriptModal(true);
+        showToast?.('⚠️ رابط الخدمة الحالي هو معرف افتراضي تجريبي. يرجى لصق رابط السكربت الخاص بك بعد نشره من زر (طريقة التفعيل في دقيقة) أعلاه');
         return;
       }
 
@@ -865,7 +873,7 @@ function doGet(e) {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
                   <input
                     type="number"
-                    min="1"
+                    min="0"
                     max="240"
                     step="5"
                     value={branchNoShowGraceMinutes}
@@ -888,7 +896,7 @@ function doGet(e) {
 
               {/* أزرار سريعة لاختيار المهلة */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                {[15, 30, 45, 60].map((mins) => (
+                {[0, 15, 30, 45, 60].map((mins) => (
                   <button
                     key={mins}
                     type="button"
@@ -911,7 +919,7 @@ function doGet(e) {
               </div>
 
               <div style={{ width: '100%', fontSize: '11.5px', color: '#7f1d1d', lineHeight: 1.5 }}>
-                ℹ️ يتم إرسال إيميل إنذار طوارئ فوري للإدارة تلقائياً إذا مضت <strong>{branchNoShowGraceMinutes || 30} دقيقة</strong> من موعد فتح أي فرع دون قيام أي موظف من طاقمه بتسجيل بصمة حضور.
+                ℹ️ يتم إرسال إيميل إنذار طوارئ فوري للإدارة تلقائياً إذا مضت <strong>{branchNoShowGraceMinutes !== '' && branchNoShowGraceMinutes !== undefined ? branchNoShowGraceMinutes : 0} دقيقة</strong> من موعد فتح أي فرع دون قيام أي موظف من طاقمه بتسجيل بصمة حضور.
               </div>
             </div>
           )}
@@ -939,7 +947,7 @@ function doGet(e) {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
                   <input
                     type="number"
-                    min="1"
+                    min="0"
                     max="240"
                     step="5"
                     value={earlyDepartureBeforeClosingGraceMinutes}
@@ -962,7 +970,7 @@ function doGet(e) {
 
               {/* أزرار سريعة لاختيار المهلة */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                {[10, 15, 30, 45, 60].map((mins) => (
+                {[0, 10, 15, 30, 45, 60].map((mins) => (
                   <button
                     key={mins}
                     type="button"
@@ -985,7 +993,7 @@ function doGet(e) {
               </div>
 
               <div style={{ width: '100%', fontSize: '11.5px', color: '#9a3412', lineHeight: 1.5 }}>
-                ℹ️ يتم إرسال إيميل تنبيه فوري للإدارة تلقائياً إذا قام الموظف بتسجيل بصمة انصراف قبل موعد إغلاق الفرع بأكثر من <strong>{earlyDepartureBeforeClosingGraceMinutes || 15} دقيقة</strong>.
+                ℹ️ يتم إرسال إيميل تنبيه فوري للإدارة تلقائياً إذا قام الموظف بتسجيل بصمة انصراف قبل موعد إغلاق الفرع بأكثر من <strong>{earlyDepartureBeforeClosingGraceMinutes !== '' && earlyDepartureBeforeClosingGraceMinutes !== undefined ? earlyDepartureBeforeClosingGraceMinutes : 0} دقيقة</strong>.
               </div>
             </div>
           )}
@@ -1010,18 +1018,34 @@ function doGet(e) {
             👁️ معاينة شكل الملخص الشامل
           </button>
 
-          <button type="button" className="btn btn-ghost" onClick={handleTriggerDailyDigestNow} disabled={isSendingDigest} style={{ fontSize: '13px', fontWeight: 700, background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0' }}>
-            {isSendingDigest ? '⏳ جاري تدقيق وإرسال الملخص...' : '📊 إرسال ملخص اليوم الآن'}
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={handleTriggerDailyDigestNow}
+            disabled={isSendingDigest}
+            style={{ fontSize: '13px', fontWeight: 700, background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0' }}
+          >
+            {isSendingDigest ? '⏳ جاري تدقيق وإرسال الملخص الشامل...' : '📊 إرسال الملخص اليومي الشامل الآن'}
           </button>
         </div>
 
         <button
           type="button"
           onClick={handleSave}
+          disabled={isSaving}
           className="btn btn-start"
-          style={{ padding: '10px 24px', fontSize: '14px', fontWeight: 800, cursor: 'pointer' }}
+          style={{
+            padding: '10px 24px',
+            fontSize: '14px',
+            fontWeight: 800,
+            cursor: isSaving ? 'not-allowed' : 'pointer',
+            opacity: isSaving ? 0.85 : 1,
+            background: isSavedSuccess ? '#16a34a' : undefined,
+            boxShadow: isSavedSuccess ? '0 0 12px rgba(22, 163, 74, 0.4)' : undefined,
+            transition: 'all 0.25s ease'
+          }}
         >
-          💾 حفظ وتفعيل إعدادات بريد Gmail
+          {isSaving ? '⏳ جاري الحفظ والتأمين...' : (isSavedSuccess ? '✓ تم الحفظ والتفعيل فورياً' : '💾 حفظ وتفعيل إعدادات بريد Gmail')}
         </button>
       </div>
 
@@ -1053,13 +1077,27 @@ function doGet(e) {
               />
             </div>
 
-            <div style={{ padding: '12px 20px', background: '#ffffff', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ padding: '12px 20px', background: '#ffffff', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
               <span style={{ fontSize: '12.5px', color: '#64748b' }}>
                 💡 يتضمن التقرير الشامل: بطاقات الحضور الحية، مبيعات وحركة الخزينة بكل فرع، وجدول كافة طلبات اليوم بمختلف أنواعها.
               </span>
-              <button type="button" className="btn btn-ghost" onClick={() => setShowPreviewModal(false)} style={{ fontWeight: 700 }}>
-                إغلاق المعاينة
-              </button>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  className="btn btn-start"
+                  onClick={async () => {
+                    setShowPreviewModal(false);
+                    await handleTriggerDailyDigestNow();
+                  }}
+                  disabled={isSendingDigest}
+                  style={{ fontSize: '12.5px', padding: '7px 16px', fontWeight: 700 }}
+                >
+                  {isSendingDigest ? '⏳ جاري الإرسال...' : '📊 إرسال هذا الملخص الآن للإدارة'}
+                </button>
+                <button type="button" className="btn btn-ghost" onClick={() => setShowPreviewModal(false)} style={{ fontWeight: 700 }}>
+                  إغلاق المعاينة
+                </button>
+              </div>
             </div>
           </div>
         </div>

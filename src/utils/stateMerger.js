@@ -477,10 +477,16 @@ export function smartMergeStates(localState, remoteState) {
         mergedGmail.targetAdminEmails = (localGmail.targetAdminEmails?.length ? localGmail.targetAdminEmails : remoteGmail.targetAdminEmails) || [];
       }
       if (mergedGmail.branchNoShowGraceMinutes === undefined) {
-        mergedGmail.branchNoShowGraceMinutes = localGmail.branchNoShowGraceMinutes || remoteGmail.branchNoShowGraceMinutes || 30;
+        const val = (localGmail.branchNoShowGraceMinutes !== undefined && localGmail.branchNoShowGraceMinutes !== '')
+          ? localGmail.branchNoShowGraceMinutes
+          : remoteGmail.branchNoShowGraceMinutes;
+        mergedGmail.branchNoShowGraceMinutes = (val !== undefined && val !== null) ? val : '';
       }
       if (mergedGmail.earlyDepartureBeforeClosingGraceMinutes === undefined) {
-        mergedGmail.earlyDepartureBeforeClosingGraceMinutes = localGmail.earlyDepartureBeforeClosingGraceMinutes || remoteGmail.earlyDepartureBeforeClosingGraceMinutes || 15;
+        const val = (localGmail.earlyDepartureBeforeClosingGraceMinutes !== undefined && localGmail.earlyDepartureBeforeClosingGraceMinutes !== '')
+          ? localGmail.earlyDepartureBeforeClosingGraceMinutes
+          : remoteGmail.earlyDepartureBeforeClosingGraceMinutes;
+        mergedGmail.earlyDepartureBeforeClosingGraceMinutes = (val !== undefined && val !== null) ? val : '';
       }
       if (mergedGmail.sendOnEarlyDepartureBeforeClosing === undefined) {
         mergedGmail.sendOnEarlyDepartureBeforeClosing = localGmail.sendOnEarlyDepartureBeforeClosing !== undefined ? localGmail.sendOnEarlyDepartureBeforeClosing : (remoteGmail.sendOnEarlyDepartureBeforeClosing ?? true);
@@ -494,10 +500,10 @@ export function smartMergeStates(localState, remoteState) {
         if (!mergedGmail.userEmail && lsSaved?.userEmail) {
           mergedGmail.userEmail = lsSaved.userEmail;
         }
-        if (lsSaved?.branchNoShowGraceMinutes) {
+        if (lsSaved?.branchNoShowGraceMinutes !== undefined && lsSaved?.branchNoShowGraceMinutes !== '') {
           mergedGmail.branchNoShowGraceMinutes = lsSaved.branchNoShowGraceMinutes;
         }
-        if (lsSaved?.earlyDepartureBeforeClosingGraceMinutes) {
+        if (lsSaved?.earlyDepartureBeforeClosingGraceMinutes !== undefined && lsSaved?.earlyDepartureBeforeClosingGraceMinutes !== '') {
           mergedGmail.earlyDepartureBeforeClosingGraceMinutes = lsSaved.earlyDepartureBeforeClosingGraceMinutes;
         }
       } catch {}

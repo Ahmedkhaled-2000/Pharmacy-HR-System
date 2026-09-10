@@ -223,7 +223,7 @@ export function normalizeState(parsed) {
       : (Array.isArray(savedGmailConfig?.targetAdminEmails) && savedGmailConfig.targetAdminEmails.length > 0)
       ? savedGmailConfig.targetAdminEmails
       : [],
-    serviceUrl: rawParsedGmail.serviceUrl || savedGmailConfig?.serviceUrl || 'https://script.google.com/macros/s/AKfycbzAHjkD2l2MvE5G6XLLj3jNM3k3B5e4SJ_kXdJtD2L-rUVUnh9BWlDSC0wCIqAk5syO/exec',
+    serviceUrl: rawParsedGmail.serviceUrl || savedGmailConfig?.serviceUrl || '',
     systemUrl: rawParsedGmail.systemUrl || savedGmailConfig?.systemUrl || '',
     dailyDigestTime: rawParsedGmail.dailyDigestTime !== undefined && rawParsedGmail.dailyDigestTime !== null && String(rawParsedGmail.dailyDigestTime).trim()
       ? String(rawParsedGmail.dailyDigestTime).trim()
@@ -234,9 +234,17 @@ export function normalizeState(parsed) {
     sendOnPenalty: rawParsedGmail.sendOnPenalty !== undefined ? Boolean(rawParsedGmail.sendOnPenalty) : (savedGmailConfig?.sendOnPenalty ?? true),
     sendOnOvertime: rawParsedGmail.sendOnOvertime !== undefined ? Boolean(rawParsedGmail.sendOnOvertime) : (savedGmailConfig?.sendOnOvertime ?? true),
     sendOnBranchNoShow: rawParsedGmail.sendOnBranchNoShow !== undefined ? Boolean(rawParsedGmail.sendOnBranchNoShow) : (savedGmailConfig?.sendOnBranchNoShow ?? true),
-    branchNoShowGraceMinutes: rawParsedGmail.branchNoShowGraceMinutes !== undefined ? (parseInt(rawParsedGmail.branchNoShowGraceMinutes, 10) || 30) : (savedGmailConfig?.branchNoShowGraceMinutes || 30),
+    branchNoShowGraceMinutes: (savedGmailConfig?.branchNoShowGraceMinutes !== undefined && savedGmailConfig?.branchNoShowGraceMinutes !== '' && !isNaN(parseInt(savedGmailConfig.branchNoShowGraceMinutes, 10)))
+      ? parseInt(savedGmailConfig.branchNoShowGraceMinutes, 10)
+      : (rawParsedGmail.branchNoShowGraceMinutes !== undefined && rawParsedGmail.branchNoShowGraceMinutes !== '' && !isNaN(parseInt(rawParsedGmail.branchNoShowGraceMinutes, 10))
+        ? parseInt(rawParsedGmail.branchNoShowGraceMinutes, 10)
+        : (savedGmailConfig?.branchNoShowGraceMinutes !== undefined ? savedGmailConfig.branchNoShowGraceMinutes : '')),
     sendOnEarlyDepartureBeforeClosing: rawParsedGmail.sendOnEarlyDepartureBeforeClosing !== undefined ? Boolean(rawParsedGmail.sendOnEarlyDepartureBeforeClosing) : (savedGmailConfig?.sendOnEarlyDepartureBeforeClosing ?? true),
-    earlyDepartureBeforeClosingGraceMinutes: rawParsedGmail.earlyDepartureBeforeClosingGraceMinutes !== undefined ? (parseInt(rawParsedGmail.earlyDepartureBeforeClosingGraceMinutes, 10) || 15) : (savedGmailConfig?.earlyDepartureBeforeClosingGraceMinutes || 15),
+    earlyDepartureBeforeClosingGraceMinutes: (savedGmailConfig?.earlyDepartureBeforeClosingGraceMinutes !== undefined && savedGmailConfig?.earlyDepartureBeforeClosingGraceMinutes !== '' && !isNaN(parseInt(savedGmailConfig.earlyDepartureBeforeClosingGraceMinutes, 10)))
+      ? parseInt(savedGmailConfig.earlyDepartureBeforeClosingGraceMinutes, 10)
+      : (rawParsedGmail.earlyDepartureBeforeClosingGraceMinutes !== undefined && rawParsedGmail.earlyDepartureBeforeClosingGraceMinutes !== '' && !isNaN(parseInt(rawParsedGmail.earlyDepartureBeforeClosingGraceMinutes, 10))
+        ? parseInt(rawParsedGmail.earlyDepartureBeforeClosingGraceMinutes, 10)
+        : (savedGmailConfig?.earlyDepartureBeforeClosingGraceMinutes !== undefined ? savedGmailConfig.earlyDepartureBeforeClosingGraceMinutes : '')),
     sendDailyDigest: rawParsedGmail.sendDailyDigest !== undefined ? Boolean(rawParsedGmail.sendDailyDigest) : (savedGmailConfig?.sendDailyDigest ?? true)
   };
 

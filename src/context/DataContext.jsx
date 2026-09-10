@@ -148,7 +148,7 @@ export function DataProvider({ children, showToast = () => {} }) {
           userEmail: '',
           appPassword: '',
           targetAdminEmail: '',
-          serviceUrl: 'https://script.google.com/macros/s/AKfycbzAHjkD2l2MvE5G6XLLj3jNM3k3B5e4SJ_kXdJtD2L-rUVUnh9BWlDSC0wCIqAk5syO/exec',
+          serviceUrl: '',
           sendOnRequest: true,
           sendOnDecision: true,
           sendOnLateness: true,

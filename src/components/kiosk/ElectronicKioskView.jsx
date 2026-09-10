@@ -753,7 +753,9 @@ export default function ElectronicKioskView({
             const authGmail = getAuthoritativeGmailConfig(state);
             const branchGrace = (kioskBranchObj.earlyDepartureBeforeClosingGraceMinutes !== undefined && kioskBranchObj.earlyDepartureBeforeClosingGraceMinutes !== '' && !isNaN(parseInt(kioskBranchObj.earlyDepartureBeforeClosingGraceMinutes, 10)))
               ? parseInt(kioskBranchObj.earlyDepartureBeforeClosingGraceMinutes, 10)
-              : (parseInt(authGmail?.earlyDepartureBeforeClosingGraceMinutes, 10) || 15);
+              : (authGmail?.earlyDepartureBeforeClosingGraceMinutes !== undefined && authGmail?.earlyDepartureBeforeClosingGraceMinutes !== '' && !isNaN(parseInt(authGmail?.earlyDepartureBeforeClosingGraceMinutes, 10))
+                ? parseInt(authGmail.earlyDepartureBeforeClosingGraceMinutes, 10)
+                : 0);
 
             if (minutesBeforeClosing > branchGrace) {
               notifyAdminOnEarlyDepartureBeforeClosing({

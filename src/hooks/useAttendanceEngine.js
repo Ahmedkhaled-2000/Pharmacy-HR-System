@@ -342,7 +342,9 @@ export function useAttendanceEngine() {
       const authGmail = getAuthoritativeGmailConfig(currentState);
       const branchGrace = (branch.earlyDepartureBeforeClosingGraceMinutes !== undefined && branch.earlyDepartureBeforeClosingGraceMinutes !== '' && !isNaN(parseInt(branch.earlyDepartureBeforeClosingGraceMinutes, 10)))
         ? parseInt(branch.earlyDepartureBeforeClosingGraceMinutes, 10)
-        : (parseInt(authGmail?.earlyDepartureBeforeClosingGraceMinutes, 10) || 15);
+        : (authGmail?.earlyDepartureBeforeClosingGraceMinutes !== undefined && authGmail?.earlyDepartureBeforeClosingGraceMinutes !== '' && !isNaN(parseInt(authGmail?.earlyDepartureBeforeClosingGraceMinutes, 10))
+          ? parseInt(authGmail.earlyDepartureBeforeClosingGraceMinutes, 10)
+          : 0);
 
       if (minutesBeforeClosing > branchGrace) {
         const notifId = `notif_early_closing_${emp.id}_${dateStr}_${timeOutStr.replace(':', '')}`;

@@ -66,9 +66,9 @@ export function useDailyDigestCron() {
       // 2. فحص إنذار عدم فتح الفرع (Branch No-Show Alert بعد انتهاء مهلة السماح)
       // ─────────────────────────────────────────────────────────────
       if (gmailConfig.sendOnBranchNoShow !== false) {
-        const globalGraceMinutes = (!isNaN(parseInt(gmailConfig.branchNoShowGraceMinutes, 10)) && parseInt(gmailConfig.branchNoShowGraceMinutes, 10) > 0)
+        const globalGraceMinutes = (gmailConfig.branchNoShowGraceMinutes !== undefined && gmailConfig.branchNoShowGraceMinutes !== '' && !isNaN(parseInt(gmailConfig.branchNoShowGraceMinutes, 10)) && parseInt(gmailConfig.branchNoShowGraceMinutes, 10) >= 0)
           ? parseInt(gmailConfig.branchNoShowGraceMinutes, 10)
-          : 30;
+          : 0;
         const branches = (state.branches || []).filter((b) => b && b.id);
         const currentTotalMinutes = currentH * 60 + currentM;
 
@@ -81,7 +81,7 @@ export function useDailyDigestCron() {
           if (isNaN(openH) || isNaN(openM)) continue;
           const openingTotalMinutes = openH * 60 + openM;
 
-          const branchGrace = (branch.noShowGraceMinutes !== undefined && branch.noShowGraceMinutes !== '' && !isNaN(parseInt(branch.noShowGraceMinutes, 10)) && parseInt(branch.noShowGraceMinutes, 10) > 0)
+          const branchGrace = (branch.noShowGraceMinutes !== undefined && branch.noShowGraceMinutes !== '' && !isNaN(parseInt(branch.noShowGraceMinutes, 10)) && parseInt(branch.noShowGraceMinutes, 10) >= 0)
             ? parseInt(branch.noShowGraceMinutes, 10)
             : globalGraceMinutes;
 

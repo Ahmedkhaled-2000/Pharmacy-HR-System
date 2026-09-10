@@ -36,17 +36,17 @@ export function getAuthoritativeGmailConfig(state) {
     sendOnPenalty: localConfig?.sendOnPenalty !== undefined ? Boolean(localConfig.sendOnPenalty) : (stateConfig.sendOnPenalty ?? true),
     sendOnOvertime: localConfig?.sendOnOvertime !== undefined ? Boolean(localConfig.sendOnOvertime) : (stateConfig.sendOnOvertime ?? true),
     sendOnBranchNoShow: localConfig?.sendOnBranchNoShow !== undefined ? Boolean(localConfig.sendOnBranchNoShow) : (stateConfig.sendOnBranchNoShow ?? true),
-    branchNoShowGraceMinutes: (localConfig?.branchNoShowGraceMinutes !== undefined && !isNaN(parseInt(localConfig.branchNoShowGraceMinutes, 10)))
+    branchNoShowGraceMinutes: (localConfig?.branchNoShowGraceMinutes !== undefined && localConfig?.branchNoShowGraceMinutes !== '' && !isNaN(parseInt(localConfig.branchNoShowGraceMinutes, 10)))
       ? parseInt(localConfig.branchNoShowGraceMinutes, 10)
-      : (stateConfig?.branchNoShowGraceMinutes !== undefined && !isNaN(parseInt(stateConfig.branchNoShowGraceMinutes, 10)))
+      : (stateConfig?.branchNoShowGraceMinutes !== undefined && stateConfig?.branchNoShowGraceMinutes !== '' && !isNaN(parseInt(stateConfig.branchNoShowGraceMinutes, 10)))
       ? parseInt(stateConfig.branchNoShowGraceMinutes, 10)
-      : 30,
+      : '',
     sendOnEarlyDepartureBeforeClosing: localConfig?.sendOnEarlyDepartureBeforeClosing !== undefined ? Boolean(localConfig.sendOnEarlyDepartureBeforeClosing) : (stateConfig.sendOnEarlyDepartureBeforeClosing ?? true),
-    earlyDepartureBeforeClosingGraceMinutes: (localConfig?.earlyDepartureBeforeClosingGraceMinutes !== undefined && !isNaN(parseInt(localConfig.earlyDepartureBeforeClosingGraceMinutes, 10)))
+    earlyDepartureBeforeClosingGraceMinutes: (localConfig?.earlyDepartureBeforeClosingGraceMinutes !== undefined && localConfig?.earlyDepartureBeforeClosingGraceMinutes !== '' && !isNaN(parseInt(localConfig.earlyDepartureBeforeClosingGraceMinutes, 10)))
       ? parseInt(localConfig.earlyDepartureBeforeClosingGraceMinutes, 10)
-      : (stateConfig?.earlyDepartureBeforeClosingGraceMinutes !== undefined && !isNaN(parseInt(stateConfig.earlyDepartureBeforeClosingGraceMinutes, 10)))
+      : (stateConfig?.earlyDepartureBeforeClosingGraceMinutes !== undefined && stateConfig?.earlyDepartureBeforeClosingGraceMinutes !== '' && !isNaN(parseInt(stateConfig.earlyDepartureBeforeClosingGraceMinutes, 10)))
       ? parseInt(stateConfig.earlyDepartureBeforeClosingGraceMinutes, 10)
-      : 15,
+      : '',
     sendDailyDigest: localConfig?.sendDailyDigest !== undefined ? Boolean(localConfig.sendDailyDigest) : (stateConfig.sendDailyDigest ?? true),
     updatedAt: localConfig?.updatedAt || stateConfig.updatedAt || new Date().toISOString()
   };
@@ -646,7 +646,13 @@ export async function notifyAdminOnBranchNoShow({ state, branch, openingTime, mi
   const branchName = branch?.name || `فرع ${branch?.id || ''}`;
   const todayStr = getRealTodayStr();
   const systemUrl = getSystemAppUrl(state);
-  const effectiveGrace = graceMinutes || branch?.noShowGraceMinutes || gmailConfig.branchNoShowGraceMinutes || 30;
+  const effectiveGrace = (graceMinutes !== undefined && graceMinutes !== null && graceMinutes !== '')
+    ? Number(graceMinutes)
+    : (branch?.noShowGraceMinutes !== undefined && branch?.noShowGraceMinutes !== null && branch?.noShowGraceMinutes !== '')
+    ? Number(branch.noShowGraceMinutes)
+    : (gmailConfig.branchNoShowGraceMinutes !== undefined && gmailConfig.branchNoShowGraceMinutes !== null && gmailConfig.branchNoShowGraceMinutes !== '')
+    ? Number(gmailConfig.branchNoShowGraceMinutes)
+    : 0;
 
   const content = `
     <div style="background: #fef2f2; border: 2px solid #ef4444; border-radius: 12px; padding: 18px; margin: 16px 0;">
@@ -710,8 +716,13 @@ export async function notifyAdminOnEarlyDepartureBeforeClosing({
   if (targetRecipients.length === 0) return { success: false, reason: 'لم يتم تحديد بريد الإدارة' };
 
   const empName = emp?.name || 'موظف';
-  const branchName = branch?.name || `فرع ${branch?.id || ''}`;
-  const effectiveGrace = allowedGraceMinutes || branch?.earlyDepartureBeforeClosingGraceMinutes || gmailConfig.earlyDepartureBeforeClosingGraceMinutes || 15;
+  const effectiveGrace = (allowedGraceMinutes !== undefined && allowedGraceMinutes !== null && allowedGraceMinutes !== '')
+    ? Number(allowedGraceMinutes)
+    : (branch?.earlyDepartureBeforeClosingGraceMinutes !== undefined && branch?.earlyDepartureBeforeClosingGraceMinutes !== null && branch?.earlyDepartureBeforeClosingGraceMinutes !== '')
+    ? Number(branch.earlyDepartureBeforeClosingGraceMinutes)
+    : (gmailConfig.earlyDepartureBeforeClosingGraceMinutes !== undefined && gmailConfig.earlyDepartureBeforeClosingGraceMinutes !== null && gmailConfig.earlyDepartureBeforeClosingGraceMinutes !== '')
+    ? Number(gmailConfig.earlyDepartureBeforeClosingGraceMinutes)
+    : 0;
   const systemUrl = getSystemAppUrl(state);
   const todayStr = dateStr || getRealTodayStr();
 
