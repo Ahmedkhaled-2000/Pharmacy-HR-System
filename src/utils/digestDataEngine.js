@@ -8,6 +8,115 @@ import { getRealTodayStr, getRealNowTimeStr } from './timeEngine';
 import { fmt } from './formatters';
 
 /**
+ * قاموس تعريب وتوحيد مسميات كافة أنواع الطلبات في المنظومة لضمان عدم ظهور أي نصوص إنجليزية في التقارير
+ */
+export const DIGEST_REQUEST_TYPE_MAP = {
+  // إجازات
+  leave: '🏖️ طلب إجازة',
+  leave_request: '🏖️ طلب إجازة',
+  annual_leave: '🏖️ إجازة سنوية',
+  sick_leave: '🩺 إجازة مرضية',
+  emergency_leave: '🚨 إجازة عارضة',
+  unpaid_leave: '🏖️ إجازة بدون راتب',
+  casual_leave: '🌴 إجازة عارضة',
+  marriage_leave: '💍 إجازة زواج',
+  maternity_leave: '👶 إجازة وضع',
+  bereavement_leave: '🖤 إجازة وفاة',
+
+  // أذونات ومواعيد
+  permission: '⏰ أذونات وخروج',
+  permission_request: '⏰ أذونات وخروج',
+  early_exit: '⏰ خروج مبكر',
+  early_leave: '⏰ خروج مبكر',
+  late_permission: '⏰ إذن تأخير',
+  late_excuse: '⏰ عذر تأخير',
+  lateness: '⏱️ تأخير',
+
+  // ماليات وسلف
+  loan: '💳 سلف نقدية',
+  advance: '💳 سلف نقدية',
+  meds: '💊 سحب أدوية آجل',
+  credit_medicine: '💊 سحب أدوية آجل',
+  medicine_request: '💊 سحب أدوية آجل',
+  bonus: '🎁 مكافأة مالية',
+  reward: '🏆 مكافأة مالية',
+  deduction: '⚠️ خصم مالي',
+  adjustment: '⚖️ تسوية مالية',
+  overtime: '⏱️ ساعات إضافية',
+  overtime_request: '⏱️ ساعات إضافية',
+
+  // جزاءات وتأديب وتظلمات
+  penalty: '⚖️ جزاء تأديبي',
+  disciplinary_penalty: '⚖️ جزاء تأديبي',
+  violation: '⚠️ مخالفة تأديبية',
+  disciplinary_violation: '⚠️ مخالفة تأديبية',
+  penalty_objection: '⚖️ تظلم من جزاء',
+  objection: '⚖️ تظلم من جزاء',
+  late_penalty: '⏱️ جزاء تأخير',
+
+  // جداول وورديات
+  swap: '🔄 تبديل ورديات',
+  shift_swap: '🔄 تبديل ورديات',
+  shift_edit: '🔄 تعديل وردية',
+  roster: '📅 الجدول الشهري',
+  roster_update: '📅 تعديل الجدول الشهري',
+  roster_edit: '📅 تعديل الجدول الشهري',
+  roster_edit_request: '📅 طلب تعديل جدول',
+  schedule_edit: '📅 تعديل الجدول',
+
+  // بصمات
+  punch_correction: '📸 تعديل بصمة',
+  manual_punch: '📸 بصمة يدوية',
+  attendance_punch: '📸 تأكيد بصمة',
+  biometric_registration: '🔐 تسجيل بصمة',
+  biometric_reset: '🔄 إعادة ضبط بصمة',
+  biometric_verification: '📸 اعتماد بصمة وجه',
+
+  // بيانات وتقييم
+  profile_update: '👤 تحديث بيانات',
+  profile_edit: '👤 تحديث بيانات',
+  evaluation: '⭐ تقييم أداء',
+  emp_evaluation: '⭐ تقييم أداء',
+  manager_eval: '⭐ تقييم أداء',
+  eval_edit_request: '⭐ مراجعة تقييم',
+
+  // استقالات وشكاوى وتوظيف
+  resignation: '🚪 طلب استقالة',
+  resignation_request: '🚪 طلب استقالة',
+  withdraw: '↩️ تراجع عن استقالة',
+  resignation_withdraw: '↩️ تراجع عن استقالة',
+  complaint: '📨 شكاوى ومقترحات',
+  recruitment: '📝 طلب توظيف',
+  recruitment_application: '📝 طلب توظيف',
+  job_application: '📝 طلب توظيف'
+};
+
+export function getDigestRequestTypeLabel(type) {
+  if (!type) return '📋 طلب عام';
+  const clean = String(type).trim().toLowerCase();
+  if (DIGEST_REQUEST_TYPE_MAP[clean]) return DIGEST_REQUEST_TYPE_MAP[clean];
+
+  // Normalized fallback matching based on keywords
+  if (clean.includes('penalty') || clean.includes('disc') || clean.includes('violation')) return '⚖️ جزاء تأديبي';
+  if (clean.includes('meds') || clean.includes('medicine') || clean.includes('credit')) return '💊 سحب أدوية آجل';
+  if (clean.includes('loan') || clean.includes('advance') || clean.includes('سلف')) return '💳 سلف نقدية';
+  if (clean.includes('roster') || clean.includes('schedule')) return '📅 تعديل الجدول';
+  if (clean.includes('leave') || clean.includes('إجاز')) return '🏖️ طلب إجازة';
+  if (clean.includes('permis') || clean.includes('exit') || clean.includes('خروج') || clean.includes('إذن')) return '⏰ أذونات وخروج';
+  if (clean.includes('punch') || clean.includes('biometric') || clean.includes('بصم')) return '📸 تعديل بصمة';
+  if (clean.includes('swap') || clean.includes('shift') || clean.includes('ورد')) return '🔄 تبديل ورديات';
+  if (clean.includes('profile') || clean.includes('update') || clean.includes('بيان')) return '👤 تحديث بيانات';
+  if (clean.includes('bonus') || clean.includes('reward') || clean.includes('مكاف')) return '🎁 مكافأة مالية';
+  if (clean.includes('deduct') || clean.includes('خصم')) return '⚠️ خصم مالي';
+  if (clean.includes('overtime') || clean.includes('إضاف')) return '⏱️ ساعات إضافية';
+  if (clean.includes('resign') || clean.includes('استقال')) return '🚪 طلب استقالة';
+  if (clean.includes('eval') || clean.includes('تقييم')) return '⭐ تقييم أداء';
+  if (clean.includes('complaint') || clean.includes('شكو')) return '📨 شكاوى ومقترحات';
+
+  return `📋 ${String(type).replace(/[_-]/g, ' ')}`;
+}
+
+/**
  * فحص انتماء الموظف للفرع
  */
 export function empBelongsToBranch(emp, branchId) {
@@ -202,34 +311,15 @@ export function compileDailyDigestData(state, targetDate = getRealTodayStr()) {
     return isRejected && isToday;
   });
 
-  // تصنيف الطلبات بحسب النوع
-  const reqTypeLabels = {
-    leave: '🏖️ إجازات',
-    leave_request: '🏖️ إجازات',
-    permission: '⏰ أذونات وخروج',
-    permission_request: '⏰ أذونات وخروج',
-    early_exit: '⏰ خروج مبكر',
-    loan: '💳 سلف نقدية',
-    meds: '💊 أدوية آجل',
-    swap: '🔄 تبديل ورديات',
-    shift_swap: '🔄 تبديل ورديات',
-    resignation: '🚪 استقالات',
-    resignation_request: '🚪 استقالات',
-    penalty_objection: '⚖️ تظلمات وجزاءات',
-    objection: '⚖️ تظلمات وجزاءات',
-    punch_correction: '📸 تعديل بصمة',
-    profile_update: '👤 تحديث بيانات',
-    overtime: '⏱️ ساعات إضافية'
-  };
-
+  // 3. تصنيف وترجمة كافة الطلبات المتنوعة للغة العربية بدقة
   const requestsByType = {};
   allUniqueRequests.forEach((r) => {
-    const cat = reqTypeLabels[r.type] || '📋 طلبات عامة';
+    const cat = getDigestRequestTypeLabel(r.type || r.requestType);
     requestsByType[cat] = (requestsByType[cat] || 0) + 1;
   });
 
-  // تجهيز قائمة تفصيلية بأهم وأحدث الطلبات لعرضها في جدول التقرير
-  const detailedRequests = allUniqueRequests.slice(0, 20).map((r) => {
+  // تجهيز قائمة تفصيلية بأهم وأحدث الطلبات لعرضها في جدول التقرير بمسميات عربية صريحة
+  const detailedRequests = allUniqueRequests.slice(0, 25).map((r) => {
     const emp = employees.find((e) => String(e.id) === String(r.employeeId));
     let branchName = r.branchName || emp?.branchName || '';
     if (!branchName && (r.branchId || emp?.branchId)) {
@@ -260,7 +350,7 @@ export function compileDailyDigestData(state, targetDate = getRealTodayStr()) {
       empName: emp?.name || r.employeeName || 'موظف',
       empCode: emp?.code || '—',
       branchName: branchName || 'المركز الرئيسي',
-      typeLabel: reqTypeLabels[r.type] || r.type || 'طلب عام',
+      typeLabel: getDigestRequestTypeLabel(r.type || r.requestType),
       details: detailsText,
       statusLabel,
       statusColor,
@@ -268,7 +358,173 @@ export function compileDailyDigestData(state, targetDate = getRealTodayStr()) {
     };
   });
 
-  // 4. الحركة المالية ومبيعات الفروع
+  // 4. الحركة المالية ومبيعات الفروع الحية
+  const branchSales = state.branchSales || [];
+  const currentMonth = targetDate.slice(0, 7);
+  const monthTargets = (state.branchSalesTargets && typeof state.branchSalesTargets === 'object')
+    ? (state.branchSalesTargets[currentMonth] || {})
+    : {};
+
+  // مبيعات تاريخ التقرير (اليوم)
+  const todaySales = branchSales.filter((s) => s && s.date === targetDate);
+
+  // مبيعات الشهر الحالي
+  const monthSales = branchSales.filter((s) => s && s.date && s.date.slice(0, 7) === currentMonth);
+
+  // تحديد آخر تاريخ سُجلت فيه مبيعات في النظام إذا لم تسجل مبيعات اليوم بعد
+  let latestSalesDate = '';
+  if (branchSales.length > 0) {
+    const sortedDates = [...new Set(branchSales.map(s => s && s.date).filter(Boolean))].sort().reverse();
+    latestSalesDate = sortedDates[0] || '';
+  }
+
+  const latestDateSales = (latestSalesDate && latestSalesDate !== targetDate)
+    ? branchSales.filter(s => s && s.date === latestSalesDate)
+    : [];
+
+  let totalSalesToday = 0;
+  let totalCashToday = 0;
+  let totalVisaToday = 0;
+  let totalWalletToday = 0;
+  let totalInstapayToday = 0;
+  let totalDeliveryToday = 0;
+  let totalCreditToday = 0;
+  let totalReceiptsToday = 0;
+
+  let totalMonthSales = 0;
+  let totalMonthTarget = 0;
+
+  const branchFinanceMap = {};
+  branches.forEach((b) => {
+    const bId = String(b.id);
+    const bTarget = parseFloat(monthTargets[bId] || monthTargets[b.code] || 0) || 0;
+    totalMonthTarget += bTarget;
+
+    branchFinanceMap[bId] = {
+      id: bId,
+      code: b.code || '',
+      name: b.name || `فرع ${b.id}`,
+      // اليوم المستهدف
+      sales: 0,
+      cash: 0,
+      visa: 0,
+      wallet: 0,
+      instapay: 0,
+      delivery: 0,
+      credit: 0,
+      receiptsCount: 0,
+      hasRecordedSalesToday: false,
+      // الشهر الحالي
+      monthSales: 0,
+      monthTarget: bTarget,
+      achievementRate: 0,
+      // آخر مبيعات مسجلة في حال عدم وجود مبيعات اليوم
+      latestRecordedSale: null,
+      income: 0,
+      expense: 0
+    };
+  });
+
+  // تجميع مبيعات اليوم
+  todaySales.forEach((s) => {
+    const bId = String(s.branchId || '');
+    const c = parseFloat(s.cashSales) || 0;
+    const v = parseFloat(s.visaSales) || 0;
+    const w = parseFloat(s.walletSales ?? s.electronicWalletSales) || 0;
+    const ip = parseFloat(s.instapaySales) || 0;
+    const d = parseFloat(s.deliverySales) || 0;
+    const cr = parseFloat(s.creditSales) || 0;
+    const rc = parseInt(s.receiptsCount, 10) || 0;
+    const sTotal = parseFloat(s.totalSales) || (c + v + w + ip + d + cr);
+
+    totalSalesToday += sTotal;
+    totalCashToday += c;
+    totalVisaToday += v;
+    totalWalletToday += w;
+    totalInstapayToday += ip;
+    totalDeliveryToday += d;
+    totalCreditToday += cr;
+    totalReceiptsToday += rc;
+
+    let bEntry = branchFinanceMap[bId];
+    if (!bEntry) {
+      const foundB = branches.find(b => String(b.code || '') === bId || b.name === bId);
+      if (foundB) bEntry = branchFinanceMap[String(foundB.id)];
+    }
+
+    if (bEntry) {
+      bEntry.sales += sTotal;
+      bEntry.cash += c;
+      bEntry.visa += v;
+      bEntry.wallet += w;
+      bEntry.instapay += ip;
+      bEntry.delivery += d;
+      bEntry.credit += cr;
+      bEntry.receiptsCount += rc;
+      bEntry.hasRecordedSalesToday = true;
+    }
+  });
+
+  // تجميع مبيعات الشهر الحالي لكل فرع
+  monthSales.forEach((s) => {
+    const bId = String(s.branchId || '');
+    const c = parseFloat(s.cashSales) || 0;
+    const v = parseFloat(s.visaSales) || 0;
+    const w = parseFloat(s.walletSales ?? s.electronicWalletSales) || 0;
+    const ip = parseFloat(s.instapaySales) || 0;
+    const d = parseFloat(s.deliverySales) || 0;
+    const cr = parseFloat(s.creditSales) || 0;
+    const sTotal = parseFloat(s.totalSales) || (c + v + w + ip + d + cr);
+
+    totalMonthSales += sTotal;
+
+    let bEntry = branchFinanceMap[bId];
+    if (!bEntry) {
+      const foundB = branches.find(b => String(b.code || '') === bId || b.name === bId);
+      if (foundB) bEntry = branchFinanceMap[String(foundB.id)];
+    }
+
+    if (bEntry) {
+      bEntry.monthSales += sTotal;
+    }
+  });
+
+  // رصد آخر مبيعات مسجلة إذا لم تسجل مبيعات اليوم
+  if (latestDateSales.length > 0) {
+    latestDateSales.forEach((s) => {
+      const bId = String(s.branchId || '');
+      let bEntry = branchFinanceMap[bId];
+      if (!bEntry) {
+        const foundB = branches.find(b => String(b.code || '') === bId || b.name === bId);
+        if (foundB) bEntry = branchFinanceMap[String(foundB.id)];
+      }
+      if (bEntry && !bEntry.hasRecordedSalesToday) {
+        const c = parseFloat(s.cashSales) || 0;
+        const v = parseFloat(s.visaSales) || 0;
+        const w = parseFloat(s.walletSales ?? s.electronicWalletSales) || 0;
+        const ip = parseFloat(s.instapaySales) || 0;
+        const d = parseFloat(s.deliverySales) || 0;
+        const cr = parseFloat(s.creditSales) || 0;
+        const sTotal = parseFloat(s.totalSales) || (c + v + w + ip + d + cr);
+        bEntry.latestRecordedSale = {
+          date: s.date,
+          sales: sTotal,
+          cash: c,
+          electronic: v + w + ip,
+          receipts: parseInt(s.receiptsCount, 10) || 0
+        };
+      }
+    });
+  }
+
+  // حساب نسب الإنجاز
+  Object.values(branchFinanceMap).forEach((b) => {
+    if (b.monthTarget > 0) {
+      b.achievementRate = Math.round((b.monthSales / b.monthTarget) * 100);
+    }
+  });
+
+  // الحركات المالية الإضافية (finances/transactions) إن وجدت
   const finances = state.finances || state.transactions || [];
   const todayFinances = finances.filter((f) => {
     if (!f) return false;
@@ -276,31 +532,26 @@ export function compileDailyDigestData(state, targetDate = getRealTodayStr()) {
     return fDate === targetDate;
   });
 
-  let totalSales = 0;
   let totalIncome = 0;
   let totalExpense = 0;
 
-  const branchFinanceMap = {};
-  branches.forEach((b) => {
-    branchFinanceMap[b.id] = { name: b.name, sales: 0, income: 0, expense: 0 };
-  });
-
   todayFinances.forEach((item) => {
     const amount = parseFloat(item.amount) || 0;
-    const bId = item.branchId || 'main';
+    const bId = String(item.branchId || '');
+    const bEntry = branchFinanceMap[bId];
 
-    if (item.type === 'sale' || item.category === 'sales' || item.type === 'revenue') {
-      totalSales += amount;
-      if (branchFinanceMap[bId]) branchFinanceMap[bId].sales += amount;
-    } else if (item.type === 'income' || amount > 0) {
+    if (item.type === 'income' || (amount > 0 && item.type !== 'sale')) {
       totalIncome += amount;
-      if (branchFinanceMap[bId]) branchFinanceMap[bId].income += amount;
+      if (bEntry) bEntry.income += amount;
     } else if (item.type === 'expense' || amount < 0) {
       const posExp = Math.abs(amount);
       totalExpense += posExp;
-      if (branchFinanceMap[bId]) branchFinanceMap[bId].expense += posExp;
+      if (bEntry) bEntry.expense += posExp;
     }
   });
+
+  const branchesWithSalesCount = Object.values(branchFinanceMap).filter(b => b.hasRecordedSalesToday || b.sales > 0).length;
+  const overallAchievementRate = totalMonthTarget > 0 ? Math.round((totalMonthSales / totalMonthTarget) * 100) : 0;
 
   // التسويات والمكافآت والخصومات
   const adjustments = (state.adjustments || []).filter((a) => a && (a.date === targetDate || (a.createdAt && String(a.createdAt).startsWith(targetDate))));
@@ -326,10 +577,22 @@ export function compileDailyDigestData(state, targetDate = getRealTodayStr()) {
       recentRequests: detailedRequests
     },
     financeSummary: {
-      totalSales,
+      totalSales: totalSalesToday,
+      totalSalesToday,
+      totalCashToday,
+      totalElectronicToday: totalVisaToday + totalWalletToday + totalInstapayToday,
+      totalDeliveryToday,
+      totalCreditToday,
+      totalReceiptsToday,
+      totalMonthSales,
+      totalMonthTarget,
+      overallAchievementRate,
+      branchesWithSalesCount,
+      totalBranchesCount: branches.length,
+      latestSalesDate,
       totalIncome,
       totalExpense,
-      netCashFlow: totalSales + totalIncome - totalExpense,
+      netCashFlow: totalSalesToday + totalIncome - totalExpense,
       bonusTotalToday,
       deductionTotalToday,
       byBranch: Object.values(branchFinanceMap)

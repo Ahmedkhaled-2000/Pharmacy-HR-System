@@ -38,6 +38,9 @@ export function getFormattedRequestBadge(type, leaveType, targetAction) {
   if (cleanType === 'advance' || cleanType === 'loan' || cleanType === 'سلفة') {
     return <span className="badge badge-warning">💰 طلب سلفة</span>;
   }
+  if (cleanType === 'meds' || cleanType === 'credit_medicine' || cleanType === 'أدوية') {
+    return <span className="badge badge-warning" style={{ background: '#7c3aed', color: '#fff' }}>💊 سحب أدوية آجل</span>;
+  }
   if (cleanType === 'permission' || cleanType === 'إذن' || cleanType === 'late_permission' || cleanType === 'early_leave') {
     return <span className="badge badge-info">⏳ طلب إذن</span>;
   }

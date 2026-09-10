@@ -891,15 +891,24 @@ export function getRequestTypeArabicName(type, leaveType) {
   if (cleanType === 'withdraw' || cleanType === 'resignation_withdraw') {
     return '↩️ تراجع عن استقالة';
   }
-  if (cleanType === 'punch_correction' || cleanType === 'attendance_punch' || cleanType === 'تأكيد بصمة الوجه') {
-    return '📸 تأكيد بصمة الوجه';
+  if (cleanType === 'punch_correction' || cleanType === 'manual_punch' || cleanType === 'attendance_punch' || cleanType === 'تأكيد بصمة الوجه') {
+    return '📸 تأكيد / تعديل بصمة';
+  }
+  if (cleanType === 'biometric_registration') {
+    return '🔐 تسجيل بصمة جديدة';
+  }
+  if (cleanType === 'biometric_reset') {
+    return '🔄 إعادة ضبط بصمة';
+  }
+  if (cleanType === 'profile_update' || cleanType === 'profile_edit' || cleanType.includes('profile')) {
+    return '👤 تحديث بيانات شخصية';
   }
   if (cleanType === 'adjustment') {
     return '⚖️ تعديل إداري / مالي';
   }
 
   if (/[a-zA-Z]/.test(type)) {
-    return 'طلب إداري';
+    return '📋 طلب إداري';
   }
   return type || 'طلب إداري';
 }

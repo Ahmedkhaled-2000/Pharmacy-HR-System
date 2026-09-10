@@ -457,15 +457,83 @@ export function generateDailyDigestHTML(digestDataOrParams, orgSettings = {}) {
       </table>
     ` : '<p style="color: #64748b; font-size: 13px;">لا توجد طلبات مسجلة اليوم.</p>';
 
-    // Finances Table
-    const financesByBranchHtml = (fin.byBranch || []).filter((b) => b.sales > 0 || b.income > 0 || b.expense > 0).map((b) => `
-      <tr style="border-bottom: 1px solid #f1f5f9;">
-        <td style="padding: 6px 8px; font-weight: 600;">${b.name}</td>
-        <td style="padding: 6px 8px; color: #16a34a; font-weight: bold;">${fmt(b.sales)} ج.م</td>
-        <td style="padding: 6px 8px; color: #0284c7;">+${fmt(b.income)} ج.م</td>
-        <td style="padding: 6px 8px; color: #dc2626;">-${fmt(b.expense)} ج.م</td>
-      </tr>
-    `).join('');
+    // Branch Sales Table & Breakdown
+    const hasAnySalesToday = (fin.totalSalesToday || 0) > 0;
+    const hasAnyMonthSales = (fin.totalMonthSales || 0) > 0;
+    const hasAnyBranchSales = (fin.byBranch || []).some(b => b.sales > 0 || b.monthSales > 0 || b.latestRecordedSale);
+
+    const branchSalesRowsHtml = (fin.byBranch || []).map((b) => {
+      const electronic = (b.visa || 0) + (b.wallet || 0) + (b.instapay || 0);
+
+      // مبيعات اليوم
+      let todaySalesDisplay = '';
+      if (b.sales > 0) {
+        todaySalesDisplay = `<span style="color: #16a34a; font-weight: 800; font-size: 13.5px;">${fmt(b.sales)} ج.م</span>`;
+      } else if (b.latestRecordedSale) {
+        todaySalesDisplay = `
+          <div style="font-size: 10.5px; color: #64748b;">(لم يُسجل اليوم)</div>
+          <div style="font-weight: 700; color: #0284c7; font-size: 12px;">${fmt(b.latestRecordedSale.sales)} ج.م <span style="font-size: 10px; color: #94a3b8;">(${b.latestRecordedSale.date})</span></div>
+        `;
+      } else {
+        todaySalesDisplay = `<span style="color: #94a3b8; font-size: 12px;">—</span>`;
+      }
+
+      // تفصيل القنوات
+      let channelsDisplay = '';
+      if (b.sales > 0) {
+        const parts = [];
+        if (b.cash > 0) parts.push(`كاش: <strong>${fmt(b.cash)}</strong>`);
+        if (electronic > 0) parts.push(`إلكتروني: <strong>${fmt(electronic)}</strong>`);
+        if (b.credit > 0) parts.push(`آجل: <strong>${fmt(b.credit)}</strong>`);
+        channelsDisplay = parts.length > 0 ? parts.join(' · ') : '—';
+      } else if (b.latestRecordedSale) {
+        channelsDisplay = `<span style="color: #94a3b8; font-size: 11px;">آخر كاش: ${fmt(b.latestRecordedSale.cash)} · إلكتروني: ${fmt(b.latestRecordedSale.electronic)}</span>`;
+      } else {
+        channelsDisplay = '<span style="color: #94a3b8;">—</span>';
+      }
+
+      // الدليفري والفواتير
+      let deliveryReceiptsDisplay = '';
+      if (b.sales > 0) {
+        const parts = [];
+        if (b.delivery > 0) parts.push(`🛵 دليفري: <strong>${fmt(b.delivery)}</strong>`);
+        if (b.receiptsCount > 0) parts.push(`🧾 ${b.receiptsCount} فاتورة`);
+        deliveryReceiptsDisplay = parts.length > 0 ? parts.join(' | ') : '—';
+      } else if (b.latestRecordedSale && b.latestRecordedSale.receipts > 0) {
+        deliveryReceiptsDisplay = `<span style="color: #94a3b8; font-size: 11px;">🧾 ${b.latestRecordedSale.receipts} فاتورة</span>`;
+      } else {
+        deliveryReceiptsDisplay = '<span style="color: #94a3b8;">—</span>';
+      }
+
+      // إنجاز الشهر والتارجت
+      let targetDisplay = '';
+      if (b.monthTarget > 0) {
+        const rateColor = b.achievementRate >= 100 ? '#16a34a' : (b.achievementRate >= 70 ? '#0284c7' : '#d97706');
+        targetDisplay = `
+          <div><strong>${fmt(b.monthSales)}</strong> / ${fmt(b.monthTarget)} ج.م</div>
+          <div style="font-size: 11px; font-weight: 800; color: ${rateColor}; margin-top: 2px;">
+            ${b.achievementRate}% إنجاز التارجت
+          </div>
+        `;
+      } else if (b.monthSales > 0) {
+        targetDisplay = `<div style="font-weight: 700; color: #1e40af;">${fmt(b.monthSales)} ج.م</div><div style="font-size: 10.5px; color: #64748b;">إجمالي الشهر</div>`;
+      } else {
+        targetDisplay = '<span style="color: #94a3b8;">—</span>';
+      }
+
+      return `
+        <tr style="border-bottom: 1px solid #f1f5f9; text-align: right;">
+          <td style="padding: 9px 8px; font-weight: 700; color: #1e293b;">
+            🏢 ${b.name}
+            ${b.code ? `<div style="font-size: 10.5px; color: #64748b; font-weight: normal;">كود: ${b.code}</div>` : ''}
+          </td>
+          <td style="padding: 9px 8px;">${todaySalesDisplay}</td>
+          <td style="padding: 9px 8px; font-size: 12px; color: #334155;">${channelsDisplay}</td>
+          <td style="padding: 9px 8px; font-size: 12px; color: #475569;">${deliveryReceiptsDisplay}</td>
+          <td style="padding: 9px 8px; font-size: 12px;">${targetDisplay}</td>
+        </tr>
+      `;
+    }).join('');
 
     const bodyContent = `
       <p style="font-size: 14.5px; line-height: 1.6; color: #334155; margin-top: 0;">
@@ -491,9 +559,11 @@ export function generateDailyDigestHTML(digestDataOrParams, orgSettings = {}) {
             <div style="font-size: 11px; color: #d97706; margin-top: 3px;">من إجمالي ${req.totalToday || 0} طلبات</div>
           </td>
           <td style="width: 25%; background: #faf5ff; border: 1px solid #e9d5ff; border-radius: 12px; padding: 12px; text-align: center;">
-            <div style="font-size: 11.5px; color: #6b21a8; font-weight: bold; margin-bottom: 4px;">💰 مبيعات وإيرادات اليوم</div>
-            <div style="font-size: 19px; font-weight: 900; color: #7e22ce;">${fmt(fin.totalSales || fin.totalIncome || 0)}</div>
-            <div style="font-size: 11px; color: #9333ea; margin-top: 3px;">ج.م عبر الفروع</div>
+            <div style="font-size: 11.5px; color: #6b21a8; font-weight: bold; margin-bottom: 4px;">💰 مبيعات الفروع اليوم</div>
+            <div style="font-size: 19px; font-weight: 900; color: #7e22ce;">${fmt(fin.totalSalesToday || fin.totalSales || 0)}</div>
+            <div style="font-size: 11px; color: #9333ea; margin-top: 3px;">
+              ${hasAnySalesToday ? `ج.م (${fin.branchesWithSalesCount || 0} من ${fin.totalBranchesCount || 0} فروع)` : (hasAnyMonthSales ? `ج.م اليوم (${fmt(fin.totalMonthSales)} الشهر)` : 'ج.م عبر الفروع')}
+            </div>
           </td>
         </tr>
       </table>
@@ -517,34 +587,85 @@ export function generateDailyDigestHTML(digestDataOrParams, orgSettings = {}) {
         ${recentReqsHtml}
       </div>
 
-      <!-- Section 3: Finance and Adjustments -->
+      <!-- Section 3: Finance and Branch Sales -->
       <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin: 20px 0;">
-        <h3 style="color: #0f766e; margin: 0 0 10px 0; font-size: 16px; border-bottom: 2px solid #ccfbf1; padding-bottom: 6px;">
-          💰 3. ملخص حركة المبيعات والخزينة والتسويات
-        </h3>
-        ${financesByBranchHtml ? `
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #ccfbf1; padding-bottom: 6px; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+          <h3 style="color: #0f766e; margin: 0; font-size: 16px;">
+            💰 3. بيان مبيعات الفروع وحركة الخزينة والتسويات
+          </h3>
+          ${hasAnySalesToday ? `
+            <span style="background: #ecfdf5; color: #15803d; border: 1px solid #bbf7d0; border-radius: 16px; padding: 3px 10px; font-size: 12px; font-weight: 800;">
+              إجمالي مبيعات اليوم: ${fmt(fin.totalSalesToday)} ج.م
+            </span>
+          ` : ''}
+        </div>
+
+        ${hasAnyBranchSales ? `
           <table style="width: 100%; border-collapse: collapse; font-size: 12.5px; margin-bottom: 14px;">
             <thead>
               <tr style="background: #f8fafc; color: #475569; text-align: right;">
-                <th style="padding: 6px 8px;">الفرع</th>
-                <th style="padding: 6px 8px;">المبيعات</th>
-                <th style="padding: 6px 8px;">إيرادات أخرى</th>
-                <th style="padding: 6px 8px;">المصروفات</th>
+                <th style="padding: 8px;">🏢 الفرع</th>
+                <th style="padding: 8px;">💵 مبيعات اليوم</th>
+                <th style="padding: 8px;">💳 تفصيل القنوات</th>
+                <th style="padding: 8px;">🛵 دليفري وفواتير</th>
+                <th style="padding: 8px;">🎯 إنجاز الشهر</th>
               </tr>
             </thead>
             <tbody>
-              ${financesByBranchHtml}
+              ${branchSalesRowsHtml}
+              <tr style="background: #f0fdf4; border-top: 2px solid #86efac; font-weight: bold; text-align: right;">
+                <td style="padding: 10px 8px; color: #166534; font-size: 13px;">الإجمالي العام</td>
+                <td style="padding: 10px 8px; color: #15803d; font-size: 14px; font-weight: 900;">${fmt(fin.totalSalesToday || 0)} ج.م</td>
+                <td style="padding: 10px 8px; font-size: 11.5px; color: #166534;">
+                  كاش: ${fmt(fin.totalCashToday || 0)} · إلكتروني: ${fmt(fin.totalElectronicToday || 0)}
+                </td>
+                <td style="padding: 10px 8px; font-size: 11.5px; color: #166534;">
+                  دليفري: ${fmt(fin.totalDeliveryToday || 0)} | ${fin.totalReceiptsToday || 0} فاتورة
+                </td>
+                <td style="padding: 10px 8px; font-size: 12px; color: #1e40af;">
+                  ${fmt(fin.totalMonthSales || 0)} ج.م ${fin.totalMonthTarget > 0 ? `(${fin.overallAchievementRate}% تارجت)` : ''}
+                </td>
+              </tr>
             </tbody>
           </table>
-        ` : '<p style="color: #64748b; font-size: 12.5px; margin: 6px 0;">لا توجد معاملات مبيعات مسجلة اليوم.</p>'}
+        ` : `
+          <div style="background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px; padding: 14px; text-align: center; color: #64748b; font-size: 13px; margin: 8px 0;">
+            ℹ️ لم يتم تسجيل مبيعات للفروع عن تاريخ اليوم حتى الآن. يمكن تسجيل مبيعات الفروع من شاشة (مبيعات الفروع والتارجت) بالمنظومة.
+          </div>
+        `}
 
+        <!-- Mini Sales Channel Cards -->
+        ${hasAnySalesToday ? `
+          <table style="width: 100%; border-collapse: separate; border-spacing: 6px; margin: 10px 0;">
+            <tr>
+              <td style="width: 25%; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 8px; text-align: center;">
+                <div style="font-size: 11px; color: #166534;">💵 كاش ونقدي</div>
+                <div style="font-size: 15px; font-weight: 800; color: #15803d; margin-top: 2px;">${fmt(fin.totalCashToday || 0)} ج.م</div>
+              </td>
+              <td style="width: 25%; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 8px; text-align: center;">
+                <div style="font-size: 11px; color: #1e40af;">💳 فيزا ومحافظ</div>
+                <div style="font-size: 15px; font-weight: 800; color: #1d4ed8; margin-top: 2px;">${fmt(fin.totalElectronicToday || 0)} ج.م</div>
+              </td>
+              <td style="width: 25%; background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px; padding: 8px; text-align: center;">
+                <div style="font-size: 11px; color: #c2410c;">🛵 مبيعات دليفري</div>
+                <div style="font-size: 15px; font-weight: 800; color: #ea580c; margin-top: 2px;">${fmt(fin.totalDeliveryToday || 0)} ج.م</div>
+              </td>
+              <td style="width: 25%; background: #faf5ff; border: 1px solid #e9d5ff; border-radius: 8px; padding: 8px; text-align: center;">
+                <div style="font-size: 11px; color: #6b21a8;">🧾 فواتير مسجلة</div>
+                <div style="font-size: 15px; font-weight: 800; color: #7e22ce; margin-top: 2px;">${fin.totalReceiptsToday || 0} فاتورة</div>
+              </td>
+            </tr>
+          </table>
+        ` : ''}
+
+        <!-- Adjustments (Rewards and Deductions) -->
         <div style="display: flex; gap: 12px; margin-top: 10px;">
           <div style="flex: 1; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 10px; text-align: center;">
             <span style="font-size: 12px; color: #166534; font-weight: bold;">🎁 إجمالي المكافآت اليوم:</span>
             <strong style="color: #16a34a; font-size: 15px; display: block; margin-top: 3px;">+${fmt(fin.bonusTotalToday || 0)} ج.م</strong>
           </div>
           <div style="flex: 1; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 10px; text-align: center;">
-            <span style="font-size: 12px; color: #991b1b; font-weight: bold;">⚠️ إجمالي الخصومات اليوم:</span>
+            <span style="font-size: 12px; color: #991b1b; font-weight: bold;">⚠️ إجمالي الخصومات والجزاءات اليوم:</span>
             <strong style="color: #dc2626; font-size: 15px; display: block; margin-top: 3px;">-${fmt(fin.deductionTotalToday || 0)} ج.م</strong>
           </div>
         </div>
