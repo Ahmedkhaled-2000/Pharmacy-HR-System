@@ -5,6 +5,92 @@
 import { fmt, arabicWeekday } from './formatters';
 
 /**
+ * استخراج إعدادات Google Drive المعتمدة بأعلى أولوية (LocalStorage أولاً ثم State)
+ */
+export function getAuthoritativeDriveConfig(state) {
+  let localConfig = null;
+  try {
+    const raw = localStorage.getItem('pharmacy_drive_config');
+    if (raw) localConfig = JSON.parse(raw);
+  } catch {}
+
+  const stateConfig = state?.orgSettings?.driveConfig || state?.orgSettings?.googleDrive || {};
+
+  return {
+    enabled: localConfig?.enabled !== undefined ? Boolean(localConfig.enabled) : (stateConfig.enabled ?? true),
+    serviceUrl: (localConfig?.serviceUrl || stateConfig.serviceUrl || '').trim(),
+    parentFolderId: (localConfig?.parentFolderId || stateConfig.parentFolderId || '').trim(),
+    autoSyncOnEmployeeSave: localConfig?.autoSyncOnEmployeeSave !== undefined 
+      ? Boolean(localConfig.autoSyncOnEmployeeSave) 
+      : (stateConfig.autoSyncOnEmployeeSave ?? true),
+    lastCheckedAt: localConfig?.lastCheckedAt || stateConfig.lastCheckedAt || ''
+  };
+}
+
+/**
+ * إضافة ختم مائي رقمي ذكي لتوثيق بصمة الحضور اللحظية
+ */
+export async function addWatermarkToPunchPhoto(base64Image, { empName = '', empCode = '', branchName = '', actionLabel = 'حضور', dateStr = '', timeStr = '' } = {}) {
+  if (!base64Image || typeof base64Image !== 'string' || !base64Image.startsWith('data:image/')) {
+    return base64Image;
+  }
+  try {
+    return await new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+
+        // شريط التوثيق الذكي المزدوج بالأسفل
+        const bannerHeight = Math.max(42, Math.round(canvas.height * 0.095));
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+        ctx.fillRect(0, canvas.height - bannerHeight, canvas.width, bannerHeight);
+
+        // خط علوي مميز بلون مميز
+        ctx.fillStyle = '#0d9488';
+        ctx.fillRect(0, canvas.height - bannerHeight, canvas.width, 3);
+
+        // حجم الخط
+        const fontSize = Math.max(13, Math.round(bannerHeight * 0.32));
+        ctx.font = `bold ${fontSize}px "Segoe UI", Tahoma, Arial, sans-serif`;
+
+        // بيانات الموظف والفرع (يمين)
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'right';
+        ctx.direction = 'rtl';
+        const empText = `👤 ${empName || 'موظف'} (${empCode || '—'}) | 🏢 فرع ${branchName || 'الرئيسي'}`;
+        ctx.fillText(empText, canvas.width - 14, canvas.height - (bannerHeight * 0.58) + (fontSize / 3));
+
+        // نوع البصمة بارز بلون ذهبي/أخضر فسفوري
+        ctx.fillStyle = '#fde047';
+        const punchTypeText = `📌 نوع البصمة: [ ${actionLabel} ]`;
+        ctx.fillText(punchTypeText, canvas.width - 14, canvas.height - (bannerHeight * 0.2) + (fontSize / 3));
+
+        // التاريخ والتوقيت الدقيق بالثواني (يسار)
+        ctx.fillStyle = '#cbd5e1';
+        ctx.textAlign = 'left';
+        ctx.direction = 'ltr';
+        const timeText = `⏱️ ${timeStr} · 📅 ${dateStr}`;
+        ctx.fillText(timeText, 14, canvas.height - (bannerHeight * 0.58) + (fontSize / 3));
+
+        ctx.fillStyle = '#f87171';
+        const auditText = `⚠️ توثيق آلي: فشل التعرف على الوجه`;
+        ctx.fillText(auditText, 14, canvas.height - (bannerHeight * 0.2) + (fontSize / 3));
+
+        resolve(canvas.toDataURL('image/jpeg', 0.85));
+      };
+      img.onerror = () => resolve(base64Image);
+      img.src = base64Image;
+    });
+  } catch {
+    return base64Image;
+  }
+}
+
+/**
  * Test Google Drive Webhook or Service Account Connection
  */
 export async function testGoogleDriveConnection(driveConfig) {
@@ -565,14 +651,13 @@ export async function syncEmployeeEntireDrive(emp, orgSettings = {}, onProgress 
       driveConfig
     });
 
-    // 3. Upload Employee Personal Photo to Biometric Folder if exists
+    // 3. Upload Employee Personal Photo to Main Employee Folder (NOT in biometric folder!)
     if (emp.photoUrl && emp.photoUrl.startsWith('data:')) {
-      onProgress('جاري رفع صورة الموظف والبصمة إلى مجلد البصمات...');
-      const targetBioFolder = biometricFolderId || empFolderId;
+      onProgress('جاري رفع صورة الموظف الشخصية إلى ملفه الرئيسي...');
       try {
         await uploadFileToDrive({
-          folderId: targetBioFolder,
-          fileName: `صورة_البصمة_الشخصية_${emp.code || 'EMP'}.jpg`,
+          folderId: empFolderId,
+          fileName: `صورة_الموظف_الشخصية_${emp.code || 'EMP'}.jpg`,
           mimeType: 'image/jpeg',
           base64Content: emp.photoUrl,
           driveConfig
@@ -657,10 +742,12 @@ export async function syncEmployeeEntireDrive(emp, orgSettings = {}, onProgress 
 
 /**
  * Upload Biometric Attendance Photo to Employee's Drive Folder
- * Saved in the employee's '📸 صور البصمة الإلكترونية' subfolder
+ * (يتم رفع الصور حصراً في حالة عدم التعرف على وجه الموظف لتوثيق الحالة الاستثنائية والاعتماد)
+ * Saved in the employee's '📸 صور البصمة الإلكترونية' subfolder with watermark
  */
-export async function uploadBiometricAttendancePhoto({ employee, photoDataUrl, actionType, driveConfig }) {
-  if (!driveConfig || !driveConfig.serviceUrl || !photoDataUrl) {
+export async function uploadBiometricAttendancePhoto({ employee, photoDataUrl, actionType, branchName = '', driveConfig }) {
+  const effectiveConfig = driveConfig || getAuthoritativeDriveConfig();
+  if (!effectiveConfig || !effectiveConfig.serviceUrl || !photoDataUrl) {
     return { success: false, error: 'خدمة Google Drive غير مهيأة أو صورة البصمة مفقودة' };
   }
 
@@ -669,7 +756,7 @@ export async function uploadBiometricAttendancePhoto({ employee, photoDataUrl, a
 
     if (!targetFolderId) {
       // Create or get employee folder structure
-      const folderRes = await createOrGetEmployeeFolder(employee, driveConfig);
+      const folderRes = await createOrGetEmployeeFolder(employee, effectiveConfig);
       if (folderRes && (folderRes.biometricFolderId || folderRes.folderId)) {
         targetFolderId = folderRes.biometricFolderId || folderRes.folderId;
       }
@@ -679,24 +766,48 @@ export async function uploadBiometricAttendancePhoto({ employee, photoDataUrl, a
       throw new Error('تعذر العثور على مجلد البصمة الخاص بالموظف في Google Drive');
     }
 
-    const actionNames = {
-      shift_start: 'بداية_دوام',
-      shift_end: 'نهاية_دوام',
-      break_start: 'بدء_استراحة',
-      break_end: 'انتهاء_استراحة'
+    const actionLabels = {
+      shift_start: 'بصمة دخول (بداية وردية)',
+      shift_end: 'بصمة خروج (نهاية وردية)',
+      break_start: 'بصمة بدء استراحة (بريك)',
+      break_end: 'بصمة عودة من الاستراحة (نهاية بريك)'
     };
-    const actionLabel = actionNames[actionType] || actionType || 'حضور';
+    const actionSlugs = {
+      shift_start: 'دخول',
+      shift_end: 'خروج',
+      break_start: 'بدء_بريك',
+      break_end: 'عودة_بريك'
+    };
+
+    const actionLabel = actionLabels[actionType] || 'بصمة حضور';
+    const actionSlug = actionSlugs[actionType] || actionType || 'حضور';
     const now = new Date();
     const dateStr = now.toISOString().slice(0, 10);
     const timeStr = `${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}-${String(now.getSeconds()).padStart(2, '0')}`;
-    const fileName = `بصمة_حضور_${actionLabel}_${employee.code || 'EMP'}_${dateStr}_${timeStr}.jpg`;
+    const displayTimeStr = now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const fileName = `بصمة_غير_متطابقة_${actionSlug}_${employee?.code || 'EMP'}_${dateStr}_${timeStr}.jpg`;
+
+    // 🌟 إضافة الختم الرقمي الذكي المائي على الصورة يتضمن نوع البصمة وحالة عدم التطابق
+    let watermarkedPhoto = photoDataUrl;
+    try {
+      watermarkedPhoto = await addWatermarkToPunchPhoto(photoDataUrl, {
+        empName: employee?.name || 'موظف',
+        empCode: employee?.code || '—',
+        branchName: branchName || employee?.branchName || 'الفرع',
+        actionLabel,
+        dateStr,
+        timeStr: displayTimeStr
+      });
+    } catch (wmErr) {
+      console.warn('Failed to add watermark to punch photo:', wmErr);
+    }
 
     const uploadRes = await uploadFileToDrive({
       folderId: targetFolderId,
       fileName,
       mimeType: 'image/jpeg',
-      base64Content: photoDataUrl,
-      driveConfig
+      base64Content: watermarkedPhoto,
+      driveConfig: effectiveConfig
     });
 
     return {
@@ -714,10 +825,11 @@ export async function uploadBiometricAttendancePhoto({ employee, photoDataUrl, a
 
 /**
  * Create or Get Expenses Folder and Month Subfolder in Google Drive
- * Structure: [Parent] ➔ 📁 مصروفات ➔ 📁 YYYY-MM
+ * Structure: [Parent] ➔ 📁 مصروفات ➔ 📁 YYYY-MM (بدون أي مجلد بصمة نهائياً)
  */
 export async function createOrGetExpensesMonthFolder(monthStr, driveConfig) {
-  if (!driveConfig || !driveConfig.serviceUrl) {
+  const effectiveConfig = driveConfig || getAuthoritativeDriveConfig();
+  if (!effectiveConfig || !effectiveConfig.serviceUrl) {
     throw new Error('Google Drive service is not configured');
   }
 
@@ -725,13 +837,16 @@ export async function createOrGetExpensesMonthFolder(monthStr, driveConfig) {
 
   // 1. Attempt direct action 'create_or_get_expenses_folder'
   try {
-    const res = await fetch(driveConfig.serviceUrl, {
+    const res = await fetch(effectiveConfig.serviceUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({
         action: 'create_or_get_expenses_folder',
-        parentFolderId: driveConfig.parentFolderId || '',
-        month: targetMonth
+        parentFolderId: effectiveConfig.parentFolderId || '',
+        month: targetMonth,
+        isNotEmployee: true,
+        folderType: 'expenses',
+        createBiometricSubfolder: false
       })
     });
     const data = await res.json();
@@ -748,15 +863,61 @@ export async function createOrGetExpensesMonthFolder(monthStr, driveConfig) {
     console.warn('[GoogleDriveService] Direct create_or_get_expenses_folder failed, trying fallback...', err);
   }
 
-  // 2. Seamless Fallback (works even if Google Apps Script has not yet been redeployed)
-  // Step A: Create or get 'مصروفات' folder under root
-  const rootExpensesRes = await fetch(driveConfig.serviceUrl, {
+  // 2. Generic Folder Creation action: 'create_or_get_folder' (خالٍ تماماً من مجلد البصمات)
+  try {
+    const rootRes = await fetch(effectiveConfig.serviceUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: 'create_or_get_folder',
+        parentFolderId: effectiveConfig.parentFolderId || '',
+        folderName: 'مصروفات',
+        isNotEmployee: true,
+        folderType: 'expenses',
+        createBiometricSubfolder: false
+      })
+    });
+    const rootData = await rootRes.json();
+    const expensesFolderId = rootData?.folderId;
+    if (expensesFolderId) {
+      const monthRes = await fetch(effectiveConfig.serviceUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'create_or_get_folder',
+          parentFolderId: expensesFolderId,
+          folderName: targetMonth,
+          isNotEmployee: true,
+          folderType: 'expenses',
+          createBiometricSubfolder: false
+        })
+      });
+      const monthData = await monthRes.json();
+      if (monthData && (monthData.success || monthData.folderId)) {
+        return {
+          expensesFolderId,
+          expensesFolderUrl: rootData.folderUrl || `https://drive.google.com/drive/folders/${expensesFolderId}`,
+          folderId: monthData.folderId,
+          folderName: targetMonth,
+          folderUrl: monthData.folderUrl || `https://drive.google.com/drive/folders/${monthData.folderId}`
+        };
+      }
+    }
+  } catch (genErr) {
+    console.warn('[GoogleDriveService] Generic folder action failed, trying legacy fallback...', genErr);
+  }
+
+  // 3. Legacy Fallback (مع إرسال إشارات صريحة لمنع إنشاء مجلد البصمة)
+  const rootExpensesRes = await fetch(effectiveConfig.serviceUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     body: JSON.stringify({
       action: 'create_or_get_employee_folder',
-      parentFolderId: driveConfig.parentFolderId || '',
-      folderName: 'مصروفات'
+      parentFolderId: effectiveConfig.parentFolderId || '',
+      folderName: 'مصروفات',
+      isNotEmployee: true,
+      folderType: 'expenses',
+      createBiometricSubfolder: false
     })
   });
   const rootData = await rootExpensesRes.json();
@@ -765,14 +926,16 @@ export async function createOrGetExpensesMonthFolder(monthStr, driveConfig) {
     throw new Error(rootData?.error || 'تعذر إنشاء مجلد مصروفات في جوجل درايف');
   }
 
-  // Step B: Create or get month folder under 'مصروفات'
-  const monthRes = await fetch(driveConfig.serviceUrl, {
+  const monthRes = await fetch(effectiveConfig.serviceUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     body: JSON.stringify({
       action: 'create_or_get_employee_folder',
       parentFolderId: expensesFolderId,
-      folderName: targetMonth
+      folderName: targetMonth,
+      isNotEmployee: true,
+      folderType: 'expenses',
+      createBiometricSubfolder: false
     })
   });
   const monthData = await monthRes.json();

@@ -4,7 +4,7 @@ import FaceVerificationOverlay from '../attendance/FaceVerificationOverlay';
 
 import { useData } from '../../context/DataContext';
 import { useUI } from '../../context/UIContext';
-import { uploadBiometricAttendancePhoto } from '../../utils/googleDriveService';
+import { uploadBiometricAttendancePhoto, getAuthoritativeDriveConfig } from '../../utils/googleDriveService';
 import { sendBiometricAttendanceEmail } from '../../utils/gmailService';
 import { preWarmFaceModels } from '../../utils/faceApiHelper';
 import { normalizeDigits, getRealTodayStr } from '../../utils/formatters';
@@ -795,13 +795,14 @@ export default function ElectronicKioskView({
     // ⚡ 4. المهام الخلفية المستقلة تماماً (رفع Drive وإشعارات Gmail)
     (async () => {
       let driveResult = null;
-      const driveConfig = orgSettings?.googleDrive || state?.orgSettings?.googleDrive;
+      const driveConfig = orgSettings?.driveConfig || state?.orgSettings?.driveConfig || getAuthoritativeDriveConfig(state);
       if (driveConfig && driveConfig.serviceUrl && photoUrl) {
         try {
           driveResult = await uploadBiometricAttendancePhoto({
             employee: currentEmp,
             photoDataUrl: photoUrl,
             actionType,
+            branchName,
             driveConfig
           });
           if (driveResult && driveResult.fileUrl) {

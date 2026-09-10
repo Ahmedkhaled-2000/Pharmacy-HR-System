@@ -66,6 +66,10 @@ export default function GoogleDriveConfigCard({
     };
 
     const performSave = async () => {
+      try {
+        localStorage.setItem('pharmacy_drive_config', JSON.stringify(updatedDriveConfig));
+      } catch (e) {}
+
       const updatedOrgSettings = {
         ...orgSettings,
         driveConfig: updatedDriveConfig
@@ -105,6 +109,8 @@ function doPost(e) {
       return createJsonResponse({ success: true, folderId: rootFolder.getId(), folderName: rootFolder.getName(), folderUrl: rootFolder.getUrl() });
     } else if (action === 'create_or_get_employee_folder') {
       return handleEmployeeFolder(data);
+    } else if (action === 'create_or_get_folder' || action === 'create_or_get_expenses_folder') {
+      return handleGenericFolder(data);
     } else if (action === 'upload_file') {
       return handleUploadFile(data);
     }
@@ -124,6 +130,24 @@ function getOrCreateRootFolder(parentFolderId) {
   return f;
 }
 
+function handleGenericFolder(data) {
+  var parentFolder = null;
+  if (data.parentFolderId && data.parentFolderId.trim() !== '') {
+    try { parentFolder = DriveApp.getFolderById(data.parentFolderId.trim()); } catch(e){}
+  }
+  if (!parentFolder) parentFolder = getOrCreateRootFolder();
+  var folderName = data.folderName || data.month || 'مجلد_عام';
+  var search = parentFolder.getFoldersByName(folderName);
+  var targetFolder = search.hasNext() ? search.next() : parentFolder.createFolder(folderName);
+  targetFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  return createJsonResponse({
+    success: true,
+    folderId: targetFolder.getId(),
+    folderName: targetFolder.getName(),
+    folderUrl: targetFolder.getUrl()
+  });
+}
+
 function handleEmployeeFolder(data) {
   var root = getOrCreateRootFolder(data.parentFolderId);
   var folderName = data.folderName || 'EMP_' + data.employeeCode;
@@ -139,18 +163,24 @@ function handleEmployeeFolder(data) {
       empFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
     }
   }
-  var bioSub = '📸 صور البصمة الإلكترونية';
-  var bioSearch = empFolder.getFoldersByName(bioSub);
-  var bioFolder = bioSearch.hasNext() ? bioSearch.next() : empFolder.createFolder(bioSub);
-  bioFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+  // ⚠️ إنشاء مجلد البصمة مخصص حصراً للموظفين ولا يُنشأ في المصروفات أو المجلدات العامة
+  var isNotEmployee = data.isNotEmployee === true || data.folderType === 'expenses' || folderName === 'مصروفات' || /^\\d{4}-\\d{2}$/.test(folderName);
+  var bioFolder = null;
+  if (!isNotEmployee && (data.employeeCode || data.employeeId || data.createBiometricSubfolder !== false)) {
+    var bioSub = '📸 صور البصمة الإلكترونية';
+    var bioSearch = empFolder.getFoldersByName(bioSub);
+    bioFolder = bioSearch.hasNext() ? bioSearch.next() : empFolder.createFolder(bioSub);
+    bioFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  }
 
   return createJsonResponse({
     success: true,
     folderId: empFolder.getId(),
     folderName: empFolder.getName(),
     folderUrl: empFolder.getUrl(),
-    biometricFolderId: bioFolder.getId(),
-    biometricFolderUrl: bioFolder.getUrl()
+    biometricFolderId: bioFolder ? bioFolder.getId() : '',
+    biometricFolderUrl: bioFolder ? bioFolder.getUrl() : ''
   });
 }
 

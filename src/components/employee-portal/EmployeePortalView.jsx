@@ -20,7 +20,7 @@ import EmployeeBranchAddressesTab from './EmployeeBranchAddressesTab';
 import FaceRegistrationModal from '../attendance/FaceRegistrationModal';
 import FaceTestModal from '../attendance/FaceTestModal';
 import { preWarmFaceModels } from '../../utils/faceApiHelper';
-import { uploadBiometricAttendancePhoto } from '../../utils/googleDriveService';
+import { uploadBiometricAttendancePhoto, getAuthoritativeDriveConfig } from '../../utils/googleDriveService';
 import { sendBiometricRegistrationRequestEmail, sendBiometricResetRequestEmail } from '../../utils/gmailService';
 import { computeLatenessFinancialAmount, isApprovedPermissionForDate, getEffectiveShiftHours } from '../../utils/latePenaltyEngine';
 import { getEmployeeDaySchedule, getResolvedEmployeeRoster } from '../../utils/rosterEngine';
@@ -1726,12 +1726,13 @@ export default function EmployeePortalView({
       (async () => {
         try {
           let driveResult = null;
-          const driveConfig = orgSettings?.googleDrive || state?.orgSettings?.googleDrive;
+          const driveConfig = orgSettings?.driveConfig || state?.orgSettings?.driveConfig || getAuthoritativeDriveConfig(state);
           if (driveConfig && driveConfig.serviceUrl && photoUrl) {
             driveResult = await uploadBiometricAttendancePhoto({
               employee: activeEmp,
               photoDataUrl: photoUrl,
               actionType: 'تسجيل_بصمة',
+              branchName: activeEmp?.branchName || '',
               driveConfig
             });
           }
