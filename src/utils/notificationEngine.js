@@ -809,7 +809,7 @@ export function getNotificationTargetTab(notification, role = 'admin') {
   if (type.includes('roster') || title.includes('جدول')) return 'roster';
 
   // الحضور والبصمات
-  if (type.includes('punch') || type.includes('shift') || type.includes('biometric') || title.includes('بصم') || title.includes('حضور')) return 'attendance';
+  if (type.includes('punch') || type.includes('shift') || type.includes('biometric') || type.includes('early_departure') || title.includes('بصم') || title.includes('حضور') || title.includes('إغلاق الفرع')) return 'attendance';
 
   // لائحة العمل والجزاءات والتأخير
   if (type.includes('late') || type.includes('early_exit') || type.includes('bylaw') || title.includes('تأخير') || title.includes('خروج') || title.includes('لائح')) return 'bylaws';

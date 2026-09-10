@@ -27,6 +27,7 @@ export default function BranchEditorModal({
   const [openingTime, setOpeningTime] = useState('');
   const [closingTime, setClosingTime] = useState('');
   const [noShowGraceMinutes, setNoShowGraceMinutes] = useState('');
+  const [earlyDepartureBeforeClosingGraceMinutes, setEarlyDepartureBeforeClosingGraceMinutes] = useState('');
 
   // UI / Validation States
   const [usernameError, setUsernameError] = useState('');
@@ -46,6 +47,7 @@ export default function BranchEditorModal({
       setOpeningTime(editingBranch.openingTime || '');
       setClosingTime(editingBranch.closingTime || '');
       setNoShowGraceMinutes(editingBranch.noShowGraceMinutes !== undefined && editingBranch.noShowGraceMinutes !== null ? editingBranch.noShowGraceMinutes : '');
+      setEarlyDepartureBeforeClosingGraceMinutes(editingBranch.earlyDepartureBeforeClosingGraceMinutes !== undefined && editingBranch.earlyDepartureBeforeClosingGraceMinutes !== null ? editingBranch.earlyDepartureBeforeClosingGraceMinutes : '');
       setBranchLocationUrl(
         editingBranch.locationUrl ||
         (editingBranch.latitude && editingBranch.longitude
@@ -82,6 +84,7 @@ export default function BranchEditorModal({
       setOpeningTime('');
       setClosingTime('');
       setNoShowGraceMinutes('');
+      setEarlyDepartureBeforeClosingGraceMinutes('');
       setBranchLocationUrl('');
       setBranchLatitude(null);
       setBranchLongitude(null);
@@ -310,6 +313,7 @@ export default function BranchEditorModal({
       openingTime: (openingTime || '').trim(),
       closingTime: (closingTime || '').trim(),
       noShowGraceMinutes: noShowGraceMinutes !== '' && !isNaN(parseInt(noShowGraceMinutes, 10)) ? parseInt(noShowGraceMinutes, 10) : '',
+      earlyDepartureBeforeClosingGraceMinutes: earlyDepartureBeforeClosingGraceMinutes !== '' && !isNaN(parseInt(earlyDepartureBeforeClosingGraceMinutes, 10)) ? parseInt(earlyDepartureBeforeClosingGraceMinutes, 10) : '',
       managerId,
       username: username.trim(),
       password,
@@ -733,6 +737,58 @@ export default function BranchEditorModal({
                       {noShowGraceMinutes
                         ? `إطلاق إنذار عدم الفتح بعد (${noShowGraceMinutes} دقيقة) من موعد الفتح`
                         : 'افتراضي: استخدام مهلة المنظومة العامة المقررة بإعدادات البريد'}
+                    </span>
+                  </div>
+
+                  <div className="field" style={{ margin: 0 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                      <label style={{ fontWeight: 700, fontSize: '12.5px', display: 'flex', alignItems: 'center', gap: '6px', margin: 0 }}>
+                        <span>⚠️</span> سماح الانصراف قبل الإغلاق (بالدقائق)
+                      </label>
+                      {earlyDepartureBeforeClosingGraceMinutes && (
+                        <button
+                          type="button"
+                          onClick={() => setEarlyDepartureBeforeClosingGraceMinutes('')}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#dc2626',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            padding: '0 4px'
+                          }}
+                          title="استعادة الافتراضي"
+                        >
+                          ✕ افتراضي
+                        </button>
+                      )}
+                    </div>
+                    <input
+                      type="number"
+                      min="0"
+                      max="240"
+                      value={earlyDepartureBeforeClosingGraceMinutes}
+                      onChange={(e) => setEarlyDepartureBeforeClosingGraceMinutes(e.target.value)}
+                      placeholder={`افتراضي: (${(() => {
+                        try {
+                          const savedGmail = JSON.parse(localStorage.getItem('pharmacy_gmail_config') || '{}');
+                          return savedGmail?.earlyDepartureBeforeClosingGraceMinutes || 15;
+                        } catch { return 15; }
+                      })()} دقيقة)`}
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border)',
+                        background: 'var(--surface)',
+                        fontWeight: 800
+                      }}
+                    />
+                    <span style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '4px', display: 'block' }}>
+                      {earlyDepartureBeforeClosingGraceMinutes
+                        ? `إنذار إذا بصم الموظف انصراف قبل موعد الإغلاق بأكثر من (${earlyDepartureBeforeClosingGraceMinutes} دقيقة)`
+                        : 'افتراضي: استخدام مهلة الانصراف العامة المقررة بإعدادات البريد'}
                     </span>
                   </div>
                 </div>

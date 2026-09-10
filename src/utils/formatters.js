@@ -235,6 +235,8 @@ export function normalizeState(parsed) {
     sendOnOvertime: rawParsedGmail.sendOnOvertime !== undefined ? Boolean(rawParsedGmail.sendOnOvertime) : (savedGmailConfig?.sendOnOvertime ?? true),
     sendOnBranchNoShow: rawParsedGmail.sendOnBranchNoShow !== undefined ? Boolean(rawParsedGmail.sendOnBranchNoShow) : (savedGmailConfig?.sendOnBranchNoShow ?? true),
     branchNoShowGraceMinutes: rawParsedGmail.branchNoShowGraceMinutes !== undefined ? (parseInt(rawParsedGmail.branchNoShowGraceMinutes, 10) || 30) : (savedGmailConfig?.branchNoShowGraceMinutes || 30),
+    sendOnEarlyDepartureBeforeClosing: rawParsedGmail.sendOnEarlyDepartureBeforeClosing !== undefined ? Boolean(rawParsedGmail.sendOnEarlyDepartureBeforeClosing) : (savedGmailConfig?.sendOnEarlyDepartureBeforeClosing ?? true),
+    earlyDepartureBeforeClosingGraceMinutes: rawParsedGmail.earlyDepartureBeforeClosingGraceMinutes !== undefined ? (parseInt(rawParsedGmail.earlyDepartureBeforeClosingGraceMinutes, 10) || 15) : (savedGmailConfig?.earlyDepartureBeforeClosingGraceMinutes || 15),
     sendDailyDigest: rawParsedGmail.sendDailyDigest !== undefined ? Boolean(rawParsedGmail.sendDailyDigest) : (savedGmailConfig?.sendDailyDigest ?? true)
   };
 

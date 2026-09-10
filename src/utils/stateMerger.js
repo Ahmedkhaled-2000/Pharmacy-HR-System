@@ -479,7 +479,13 @@ export function smartMergeStates(localState, remoteState) {
       if (mergedGmail.branchNoShowGraceMinutes === undefined) {
         mergedGmail.branchNoShowGraceMinutes = localGmail.branchNoShowGraceMinutes || remoteGmail.branchNoShowGraceMinutes || 30;
       }
-      // فحص إضافي من localStorage لضمان عدم ضياع التوقيت إذا تم ضبطه محلياً
+      if (mergedGmail.earlyDepartureBeforeClosingGraceMinutes === undefined) {
+        mergedGmail.earlyDepartureBeforeClosingGraceMinutes = localGmail.earlyDepartureBeforeClosingGraceMinutes || remoteGmail.earlyDepartureBeforeClosingGraceMinutes || 15;
+      }
+      if (mergedGmail.sendOnEarlyDepartureBeforeClosing === undefined) {
+        mergedGmail.sendOnEarlyDepartureBeforeClosing = localGmail.sendOnEarlyDepartureBeforeClosing !== undefined ? localGmail.sendOnEarlyDepartureBeforeClosing : (remoteGmail.sendOnEarlyDepartureBeforeClosing ?? true);
+      }
+      // فحص إضافي من localStorage لضمان عدم ضياع التوقيت أو المهل إذا تم ضبطها محلياً
       try {
         const lsSaved = JSON.parse(localStorage.getItem('pharmacy_gmail_config') || '{}');
         if (!mergedGmail.dailyDigestTime && lsSaved?.dailyDigestTime) {
@@ -487,6 +493,12 @@ export function smartMergeStates(localState, remoteState) {
         }
         if (!mergedGmail.userEmail && lsSaved?.userEmail) {
           mergedGmail.userEmail = lsSaved.userEmail;
+        }
+        if (lsSaved?.branchNoShowGraceMinutes) {
+          mergedGmail.branchNoShowGraceMinutes = lsSaved.branchNoShowGraceMinutes;
+        }
+        if (lsSaved?.earlyDepartureBeforeClosingGraceMinutes) {
+          mergedGmail.earlyDepartureBeforeClosingGraceMinutes = lsSaved.earlyDepartureBeforeClosingGraceMinutes;
         }
       } catch {}
       mergedSettings.gmailConfig = mergedGmail;

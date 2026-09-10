@@ -14,8 +14,10 @@ import {
 import {
   notifyAdminOnLateness,
   notifyAdminOnEarlyExit,
+  notifyAdminOnEarlyDepartureBeforeClosing,
   notifyAdminOnOvertime,
-  notifyOnPenaltyApplied
+  notifyOnPenaltyApplied,
+  getAuthoritativeGmailConfig
 } from '../utils/gmailService';
 import { shouldRouteDirectToAdmin } from '../utils/jobsHelper';
 import { apiArchiveDeleteEmployee } from '../utils/archiveApiClient';
@@ -311,6 +313,77 @@ export function useAttendanceEngine() {
         requests: updatedReqs,
         notifications: updatedNotifs
       };
+    }
+
+    return currentState;
+  };
+
+  // 4.1 فحص وتسجيل إنذار الانصراف المبكر قبل موعد إغلاق الفرع
+  const checkAndRecordEarlyDepartureBeforeClosing = (empId, dateStr, timeOutStr, branchId, currentState) => {
+    if (!empId || !timeOutStr) return currentState;
+    const emp = (currentState.employees || []).find((e) => String(e.id) === String(empId));
+    if (!emp) return currentState;
+
+    const targetBranchId = branchId || emp.branchId || (emp.branchesDetails && emp.branchesDetails[0]?.branchId);
+    const branch = (currentState.branches || []).find((b) => String(b.id) === String(targetBranchId));
+    if (!branch || !branch.closingTime) return currentState;
+
+    try {
+      const [cH, cM] = branch.closingTime.split(':').map(Number);
+      const [oH, oM] = timeOutStr.split(':').map(Number);
+      let closingTotal = (cH || 0) * 60 + (cM || 0);
+      let outTotal = (oH || 0) * 60 + (oM || 0);
+      if (closingTotal < 720 && outTotal >= 720) {
+        closingTotal += 24 * 60;
+      }
+      const minutesBeforeClosing = closingTotal - outTotal;
+      if (minutesBeforeClosing <= 0) return currentState;
+
+      const authGmail = getAuthoritativeGmailConfig(currentState);
+      const branchGrace = (branch.earlyDepartureBeforeClosingGraceMinutes !== undefined && branch.earlyDepartureBeforeClosingGraceMinutes !== '' && !isNaN(parseInt(branch.earlyDepartureBeforeClosingGraceMinutes, 10)))
+        ? parseInt(branch.earlyDepartureBeforeClosingGraceMinutes, 10)
+        : (parseInt(authGmail?.earlyDepartureBeforeClosingGraceMinutes, 10) || 15);
+
+      if (minutesBeforeClosing > branchGrace) {
+        const notifId = `notif_early_closing_${emp.id}_${dateStr}_${timeOutStr.replace(':', '')}`;
+        const alreadyHasNotif = (currentState.notifications || []).some((n) => n.id === notifId);
+        let updatedNotifs = currentState.notifications || [];
+        if (!alreadyHasNotif) {
+          const newNotif = {
+            id: notifId,
+            type: 'early_departure_before_closing_alert',
+            title: `🚨 انصراف مبكر قبل إغلاق الفرع: ${emp.name} (${emp.jobTitle || 'موظف'})`,
+            message: `سجل الموظف ${emp.name} بصمة انصراف بفرع ${branch.name} الساعة ${timeOutStr} قبل موعد إغلاق الفرع (${branch.closingTime}) بـ ${minutesBeforeClosing} دقيقة (المهلة المسموح بها: ${branchGrace} دقيقة).`,
+            date: dateStr,
+            timestamp: new Date().toISOString(),
+            read: false,
+            targetRole: 'admin',
+            branchId: targetBranchId,
+            empId: emp.id,
+            minutesBeforeClosing,
+            allowedGraceMinutes: branchGrace
+          };
+          updatedNotifs = [newNotif, ...updatedNotifs];
+        }
+
+        notifyAdminOnEarlyDepartureBeforeClosing({
+          state: currentState,
+          emp,
+          branch,
+          closingTime: branch.closingTime,
+          punchTime: timeOutStr,
+          minutesBeforeClosing,
+          allowedGraceMinutes: branchGrace,
+          dateStr
+        }).catch((e) => console.warn('Early departure before closing email warning:', e));
+
+        return {
+          ...currentState,
+          notifications: updatedNotifs
+        };
+      }
+    } catch (err) {
+      console.warn('Error in checkAndRecordEarlyDepartureBeforeClosing:', err);
     }
 
     return currentState;
@@ -734,6 +807,12 @@ export function useAttendanceEngine() {
       updatedState = checkAndRecordEarlyExit(empId, active.date, timeOut, updatedState);
     } catch (earlyErr) {
       console.error('[stopShift] Error in checkAndRecordEarlyExit (safely ignored):', earlyErr);
+    }
+
+    try {
+      updatedState = checkAndRecordEarlyDepartureBeforeClosing(empId, active.date, timeOut, bId, updatedState);
+    } catch (earlyClosingErr) {
+      console.error('[stopShift] Error in checkAndRecordEarlyDepartureBeforeClosing (safely ignored):', earlyClosingErr);
     }
 
     setState(updatedState);

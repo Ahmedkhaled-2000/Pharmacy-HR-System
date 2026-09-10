@@ -5,7 +5,7 @@ import FaceVerificationOverlay from '../attendance/FaceVerificationOverlay';
 import { useData } from '../../context/DataContext';
 import { useUI } from '../../context/UIContext';
 import { uploadBiometricAttendancePhoto, getAuthoritativeDriveConfig } from '../../utils/googleDriveService';
-import { sendBiometricAttendanceEmail } from '../../utils/gmailService';
+import { sendBiometricAttendanceEmail, notifyAdminOnEarlyDepartureBeforeClosing, getAuthoritativeGmailConfig } from '../../utils/gmailService';
 import { preWarmFaceModels } from '../../utils/faceApiHelper';
 import { normalizeDigits, getRealTodayStr } from '../../utils/formatters';
 import { getActiveShortcuts, matchesShortcutEvent } from '../../utils/shortcutsConfig';
@@ -738,6 +738,40 @@ export default function ElectronicKioskView({
       }
 
       requestData.shiftId = targetShiftId;
+
+      // فحص الانصراف المبكر قبل موعد إغلاق الفرع
+      try {
+        const kioskBranchObj = (state.branches || []).find((b) => String(b.id) === String(effectiveBranchId));
+        if (kioskBranchObj && kioskBranchObj.closingTime) {
+          const [cH, cM] = kioskBranchObj.closingTime.split(':').map(Number);
+          const [oH, oM] = punchTime.split(':').map(Number);
+          let closingTotal = (cH || 0) * 60 + (cM || 0);
+          let outTotal = (oH || 0) * 60 + (oM || 0);
+          if (closingTotal < 720 && outTotal >= 720) closingTotal += 24 * 60;
+          const minutesBeforeClosing = closingTotal - outTotal;
+          if (minutesBeforeClosing > 0) {
+            const authGmail = getAuthoritativeGmailConfig(state);
+            const branchGrace = (kioskBranchObj.earlyDepartureBeforeClosingGraceMinutes !== undefined && kioskBranchObj.earlyDepartureBeforeClosingGraceMinutes !== '' && !isNaN(parseInt(kioskBranchObj.earlyDepartureBeforeClosingGraceMinutes, 10)))
+              ? parseInt(kioskBranchObj.earlyDepartureBeforeClosingGraceMinutes, 10)
+              : (parseInt(authGmail?.earlyDepartureBeforeClosingGraceMinutes, 10) || 15);
+
+            if (minutesBeforeClosing > branchGrace) {
+              notifyAdminOnEarlyDepartureBeforeClosing({
+                state,
+                emp: currentEmp,
+                branch: kioskBranchObj,
+                closingTime: kioskBranchObj.closingTime,
+                punchTime,
+                minutesBeforeClosing,
+                allowedGraceMinutes: branchGrace,
+                dateStr
+              }).catch((e) => console.warn('Kiosk early departure before closing alert error:', e));
+            }
+          }
+        }
+      } catch (closingErr) {
+        console.warn('Error checking early closing departure in kiosk:', closingErr);
+      }
 
     } else if (actionType === 'break_start') {
       const active = updatedActiveShifts[currentEmp.id] || updatedActiveShifts[String(currentEmp.id)];

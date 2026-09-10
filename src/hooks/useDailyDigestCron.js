@@ -38,8 +38,8 @@ export function useDailyDigestCron() {
         if (!isNaN(targetH) && !isNaN(targetM) && currentH === targetH && Math.abs(currentM - targetM) <= 1) {
           const lastSentKey = 'last_digest_sent_' + todayKey;
 
-          if (!sessionStorage.getItem(lastSentKey)) {
-            sessionStorage.setItem(lastSentKey, 'true');
+          if (!localStorage.getItem(lastSentKey)) {
+            localStorage.setItem(lastSentKey, 'true');
 
             try {
               const digestData = compileDailyDigestData(state, todayKey);
@@ -91,7 +91,7 @@ export function useDailyDigestCron() {
           if (currentTotalMinutes >= thresholdMinutes && currentTotalMinutes <= thresholdMinutes + 120) {
             const noShowKey = `noshow_alert_${branch.id}_${todayKey}`;
 
-            if (!sessionStorage.getItem(noShowKey)) {
+            if (!localStorage.getItem(noShowKey)) {
               // التحقق هل سُجل أي حضور لطاقم هذا الفرع اليوم
               const branchShifts = (state.shifts || []).filter((s) => {
                 if (s.date !== todayKey) return false;
@@ -112,7 +112,7 @@ export function useDailyDigestCron() {
 
               // إذا لم يسجل أي موظف بصمة دخول حتى الآن
               if (branchShifts.length === 0 && branchActiveShifts.length === 0) {
-                sessionStorage.setItem(noShowKey, 'true');
+                localStorage.setItem(noShowKey, 'true');
                 try {
                   await notifyAdminOnBranchNoShow({
                     state,

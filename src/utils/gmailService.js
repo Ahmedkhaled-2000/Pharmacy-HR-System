@@ -41,6 +41,12 @@ export function getAuthoritativeGmailConfig(state) {
       : (stateConfig?.branchNoShowGraceMinutes !== undefined && !isNaN(parseInt(stateConfig.branchNoShowGraceMinutes, 10)))
       ? parseInt(stateConfig.branchNoShowGraceMinutes, 10)
       : 30,
+    sendOnEarlyDepartureBeforeClosing: localConfig?.sendOnEarlyDepartureBeforeClosing !== undefined ? Boolean(localConfig.sendOnEarlyDepartureBeforeClosing) : (stateConfig.sendOnEarlyDepartureBeforeClosing ?? true),
+    earlyDepartureBeforeClosingGraceMinutes: (localConfig?.earlyDepartureBeforeClosingGraceMinutes !== undefined && !isNaN(parseInt(localConfig.earlyDepartureBeforeClosingGraceMinutes, 10)))
+      ? parseInt(localConfig.earlyDepartureBeforeClosingGraceMinutes, 10)
+      : (stateConfig?.earlyDepartureBeforeClosingGraceMinutes !== undefined && !isNaN(parseInt(stateConfig.earlyDepartureBeforeClosingGraceMinutes, 10)))
+      ? parseInt(stateConfig.earlyDepartureBeforeClosingGraceMinutes, 10)
+      : 15,
     sendDailyDigest: localConfig?.sendDailyDigest !== undefined ? Boolean(localConfig.sendDailyDigest) : (stateConfig.sendDailyDigest ?? true),
     updatedAt: localConfig?.updatedAt || stateConfig.updatedAt || new Date().toISOString()
   };
@@ -678,6 +684,75 @@ export async function notifyAdminOnBranchNoShow({ state, branch, openingTime, mi
     gmailConfig,
     recipientEmail: targetRecipients,
     subject: `🚨 إنذار فوري: فرع (${branchName}) لم يسجل أي بصمة حضور! (تجاوز مهلة السماح ${effectiveGrace} دقيقة)`,
+    htmlContent: html
+  });
+}
+
+/**
+ * إرسال إيميل إنذار للإدارة عند تسجيل بصمة انصراف الموظف قبل موعد إغلاق الفرع بمدة غير مسموح بها
+ */
+export async function notifyAdminOnEarlyDepartureBeforeClosing({
+  state,
+  emp,
+  branch,
+  closingTime,
+  punchTime,
+  minutesBeforeClosing,
+  allowedGraceMinutes,
+  dateStr
+}) {
+  const gmailConfig = getAuthoritativeGmailConfig(state);
+  if (!gmailConfig || !gmailConfig.enabled || gmailConfig.sendOnEarlyDepartureBeforeClosing === false) {
+    return { success: false, reason: 'الخدمة غير مفعلة' };
+  }
+
+  const targetRecipients = resolveAdminRecipients(gmailConfig);
+  if (targetRecipients.length === 0) return { success: false, reason: 'لم يتم تحديد بريد الإدارة' };
+
+  const empName = emp?.name || 'موظف';
+  const branchName = branch?.name || `فرع ${branch?.id || ''}`;
+  const effectiveGrace = allowedGraceMinutes || branch?.earlyDepartureBeforeClosingGraceMinutes || gmailConfig.earlyDepartureBeforeClosingGraceMinutes || 15;
+  const systemUrl = getSystemAppUrl(state);
+  const todayStr = dateStr || getRealTodayStr();
+
+  const content = `
+    <div style="background: #fff7ed; border: 2px solid #f97316; border-radius: 12px; padding: 18px; margin: 16px 0;">
+      <h3 style="margin: 0 0 10px; color: #c2410c; font-size: 17px;">⚠️ إنذار إداري: بصمة انصراف قبل موعد إغلاق الفرع بمدة غير مسموح بها</h3>
+      <p style="margin: 0 0 12px; color: #9a3412; font-size: 14px; line-height: 1.6;">
+        نحيطكم علماً بأن الموظف <strong>${empName}</strong> قام بتسجيل بصمة انصراف في <strong>${branchName}</strong> في تمام الساعة <strong>${punchTime}</strong>، وذلك قبل موعد إغلاق الفرع الرسمي (<strong>${closingTime}</strong>) بمقدار <strong>${minutesBeforeClosing} دقيقة</strong>، متجاوزاً مهلة السماح المقررة (<strong>${effectiveGrace} دقيقة</strong>).
+      </p>
+
+      <table style="width: 100%; border-collapse: collapse; font-size: 13.5px; background: #ffffff; border-radius: 8px; border: 1px solid #fdba74;">
+        <tr><td style="padding: 8px 12px; font-weight: bold; width: 150px;">👤 الموظف:</td><td><strong>${empName}</strong> (${emp?.code ? `كود: ${emp.code}` : ''} · ${emp?.jobTitle || 'موظف'})</td></tr>
+        <tr><td style="padding: 8px 12px; font-weight: bold;">🏢 الفرع:</td><td><strong>${branchName}</strong></td></tr>
+        <tr><td style="padding: 8px 12px; font-weight: bold;">🌙 موعد إغلاق الفرع:</td><td><strong style="color: #b91c1c;">${closingTime}</strong></td></tr>
+        <tr><td style="padding: 8px 12px; font-weight: bold;">⏱️ وقت تسجيل البصمة:</td><td><strong style="color: #ea580c;">${punchTime}</strong></td></tr>
+        <tr><td style="padding: 8px 12px; font-weight: bold;">⏳ الانصراف المبكر:</td><td><strong style="color: #c2410c;">قبل الإغلاق بـ ${minutesBeforeClosing} دقيقة</strong></td></tr>
+        <tr><td style="padding: 8px 12px; font-weight: bold;">⌛ المهلة المسموح بها:</td><td><strong>${effectiveGrace} دقيقة</strong></td></tr>
+        <tr><td style="padding: 8px 12px; font-weight: bold;">📅 تاريخ التوثيق:</td><td>${todayStr}</td></tr>
+      </table>
+    </div>
+
+    <p style="text-align: center; margin-top: 20px;">
+      <a href="${systemUrl}/?tab=dashboard" style="display: inline-block; background: #ea580c; color: #ffffff !important; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: bold;">
+        🔗 فتح لوحة التحكم لمراجعة كاميرات وحضور الفرع
+      </a>
+    </p>
+  `;
+
+  const html = buildEmailTemplate({
+    title: `⚠️ بصمة انصراف قبل إغلاق فرع: ${branchName}`,
+    subtitle: `انصرف الموظف (${empName}) قبل موعد إغلاق الفرع بـ ${minutesBeforeClosing} دقيقة (المسموح: ${effectiveGrace} دقيقة)`,
+    badgeText: 'إنذار انصراف مبكر قبل إغلاق الفرع',
+    badgeColor: '#ea580c',
+    bodyContent: content,
+    footerText: 'تم إطلاق هذا التنبيه التلقائي لمتابعة التزام الكوادر الطبية بمواعيد عمل الفروع'
+  });
+
+  return sendGmailEmail({
+    gmailConfig,
+    recipientEmail: targetRecipients,
+    subject: `⚠️ إنذار: الموظف (${empName}) سجل انصراف قبل موعد إغلاق فرع (${branchName}) بـ ${minutesBeforeClosing} دقيقة!`,
     htmlContent: html
   });
 }

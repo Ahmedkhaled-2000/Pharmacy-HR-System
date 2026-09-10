@@ -49,11 +49,19 @@ export default function GmailConfigCard({
       sendOnLateness: stateCfg.sendOnLateness !== undefined ? Boolean(stateCfg.sendOnLateness) : (localSaved?.sendOnLateness ?? true),
       sendOnPenalty: stateCfg.sendOnPenalty !== undefined ? Boolean(stateCfg.sendOnPenalty) : (localSaved?.sendOnPenalty ?? true),
       sendOnBranchNoShow: stateCfg.sendOnBranchNoShow !== undefined ? Boolean(stateCfg.sendOnBranchNoShow) : (localSaved?.sendOnBranchNoShow ?? true),
-      branchNoShowGraceMinutes: stateCfg.branchNoShowGraceMinutes !== undefined && !isNaN(parseInt(stateCfg.branchNoShowGraceMinutes, 10))
-        ? parseInt(stateCfg.branchNoShowGraceMinutes, 10)
-        : (localSaved?.branchNoShowGraceMinutes !== undefined && !isNaN(parseInt(localSaved.branchNoShowGraceMinutes, 10))
+      branchNoShowGraceMinutes: localSaved?.branchNoShowGraceMinutes !== undefined && !isNaN(parseInt(localSaved.branchNoShowGraceMinutes, 10))
         ? parseInt(localSaved.branchNoShowGraceMinutes, 10)
+        : (stateCfg.branchNoShowGraceMinutes !== undefined && !isNaN(parseInt(stateCfg.branchNoShowGraceMinutes, 10))
+        ? parseInt(stateCfg.branchNoShowGraceMinutes, 10)
         : 30),
+      sendOnEarlyDepartureBeforeClosing: localSaved?.sendOnEarlyDepartureBeforeClosing !== undefined
+        ? Boolean(localSaved.sendOnEarlyDepartureBeforeClosing)
+        : (stateCfg.sendOnEarlyDepartureBeforeClosing !== undefined ? Boolean(stateCfg.sendOnEarlyDepartureBeforeClosing) : true),
+      earlyDepartureBeforeClosingGraceMinutes: localSaved?.earlyDepartureBeforeClosingGraceMinutes !== undefined && !isNaN(parseInt(localSaved.earlyDepartureBeforeClosingGraceMinutes, 10))
+        ? parseInt(localSaved.earlyDepartureBeforeClosingGraceMinutes, 10)
+        : (stateCfg.earlyDepartureBeforeClosingGraceMinutes !== undefined && !isNaN(parseInt(stateCfg.earlyDepartureBeforeClosingGraceMinutes, 10))
+        ? parseInt(stateCfg.earlyDepartureBeforeClosingGraceMinutes, 10)
+        : 15),
       sendDailyDigest: stateCfg.sendDailyDigest !== undefined ? Boolean(stateCfg.sendDailyDigest) : (localSaved?.sendDailyDigest ?? true)
     };
   };
@@ -72,6 +80,8 @@ export default function GmailConfigCard({
   const [sendOnPenalty, setSendOnPenalty] = useState(initialConfig.sendOnPenalty);
   const [sendOnBranchNoShow, setSendOnBranchNoShow] = useState(initialConfig.sendOnBranchNoShow);
   const [branchNoShowGraceMinutes, setBranchNoShowGraceMinutes] = useState(initialConfig.branchNoShowGraceMinutes);
+  const [sendOnEarlyDepartureBeforeClosing, setSendOnEarlyDepartureBeforeClosing] = useState(initialConfig.sendOnEarlyDepartureBeforeClosing);
+  const [earlyDepartureBeforeClosingGraceMinutes, setEarlyDepartureBeforeClosingGraceMinutes] = useState(initialConfig.earlyDepartureBeforeClosingGraceMinutes);
   const [sendDailyDigest, setSendDailyDigest] = useState(initialConfig.sendDailyDigest);
   const [isTestingUrl, setIsTestingUrl] = useState(false);
 
@@ -91,6 +101,8 @@ export default function GmailConfigCard({
     if (effective.sendOnPenalty !== undefined) setSendOnPenalty(effective.sendOnPenalty);
     if (effective.sendOnBranchNoShow !== undefined) setSendOnBranchNoShow(effective.sendOnBranchNoShow);
     if (effective.branchNoShowGraceMinutes !== undefined) setBranchNoShowGraceMinutes(effective.branchNoShowGraceMinutes);
+    if (effective.sendOnEarlyDepartureBeforeClosing !== undefined) setSendOnEarlyDepartureBeforeClosing(effective.sendOnEarlyDepartureBeforeClosing);
+    if (effective.earlyDepartureBeforeClosingGraceMinutes !== undefined) setEarlyDepartureBeforeClosingGraceMinutes(effective.earlyDepartureBeforeClosingGraceMinutes);
     if (effective.sendDailyDigest !== undefined) setSendDailyDigest(effective.sendDailyDigest);
   }, [state?.orgSettings?.gmailConfig]);
 
@@ -105,6 +117,36 @@ export default function GmailConfigCard({
       localStorage.setItem('pharmacy_gmail_config', JSON.stringify(cfg));
     } catch (err) {
       console.warn('[GmailConfig] Time write error:', err);
+    }
+  };
+
+  // تحديث فوري لمهلة فتح الفرع وحفظها محلياً لمنع استعادتها
+  const handleBranchNoShowGraceMinutesChange = (newVal) => {
+    const parsed = parseInt(newVal, 10);
+    const cleanVal = isNaN(parsed) ? '' : Math.max(1, parsed);
+    setBranchNoShowGraceMinutes(cleanVal);
+    try {
+      const raw = localStorage.getItem('pharmacy_gmail_config');
+      const cfg = raw ? JSON.parse(raw) : {};
+      cfg.branchNoShowGraceMinutes = cleanVal || 30;
+      localStorage.setItem('pharmacy_gmail_config', JSON.stringify(cfg));
+    } catch (err) {
+      console.warn('[GmailConfig] Grace minutes write error:', err);
+    }
+  };
+
+  // تحديث فوري لمهلة الانصراف قبل الإغلاق وحفظها محلياً
+  const handleEarlyDepartureGraceMinutesChange = (newVal) => {
+    const parsed = parseInt(newVal, 10);
+    const cleanVal = isNaN(parsed) ? '' : Math.max(1, parsed);
+    setEarlyDepartureBeforeClosingGraceMinutes(cleanVal);
+    try {
+      const raw = localStorage.getItem('pharmacy_gmail_config');
+      const cfg = raw ? JSON.parse(raw) : {};
+      cfg.earlyDepartureBeforeClosingGraceMinutes = cleanVal || 15;
+      localStorage.setItem('pharmacy_gmail_config', JSON.stringify(cfg));
+    } catch (err) {
+      console.warn('[GmailConfig] Early departure grace write error:', err);
     }
   };
 
@@ -236,6 +278,8 @@ function doGet(e) {
       sendOnPenalty: Boolean(sendOnPenalty),
       sendOnBranchNoShow: Boolean(sendOnBranchNoShow),
       branchNoShowGraceMinutes: Math.max(1, parseInt(branchNoShowGraceMinutes, 10) || 30),
+      sendOnEarlyDepartureBeforeClosing: Boolean(sendOnEarlyDepartureBeforeClosing),
+      earlyDepartureBeforeClosingGraceMinutes: Math.max(1, parseInt(earlyDepartureBeforeClosingGraceMinutes, 10) || 15),
       sendDailyDigest: Boolean(sendDailyDigest),
       updatedAt: nowIso
     };
@@ -825,10 +869,7 @@ function doGet(e) {
                     max="240"
                     step="5"
                     value={branchNoShowGraceMinutes}
-                    onChange={(e) => {
-                      const val = parseInt(e.target.value, 10);
-                      setBranchNoShowGraceMinutes(isNaN(val) ? '' : Math.max(1, val));
-                    }}
+                    onChange={(e) => handleBranchNoShowGraceMinutesChange(e.target.value)}
                     style={{
                       width: '72px',
                       padding: '5px 8px',
@@ -851,7 +892,7 @@ function doGet(e) {
                   <button
                     key={mins}
                     type="button"
-                    onClick={() => setBranchNoShowGraceMinutes(mins)}
+                    onClick={() => handleBranchNoShowGraceMinutesChange(mins)}
                     style={{
                       padding: '4px 10px',
                       borderRadius: '6px',
@@ -871,6 +912,80 @@ function doGet(e) {
 
               <div style={{ width: '100%', fontSize: '11.5px', color: '#7f1d1d', lineHeight: 1.5 }}>
                 ℹ️ يتم إرسال إيميل إنذار طوارئ فوري للإدارة تلقائياً إذا مضت <strong>{branchNoShowGraceMinutes || 30} دقيقة</strong> من موعد فتح أي فرع دون قيام أي موظف من طاقمه بتسجيل بصمة حضور.
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div style={{ background: '#fff7ed', padding: '14px 16px', borderRadius: '12px', border: '1px solid #fdba74', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', margin: 0 }}>
+            <input
+              type="checkbox"
+              checked={sendOnEarlyDepartureBeforeClosing}
+              onChange={(e) => setSendOnEarlyDepartureBeforeClosing(e.target.checked)}
+              style={{ width: '17px', height: '17px', cursor: 'pointer' }}
+            />
+            <span style={{ fontSize: '13.5px', fontWeight: 800, color: '#c2410c' }}>
+              ⚠️ إنذار إداري: تسجيل بصمة انصراف الموظف قبل موعد إغلاق الفرع بمدة غير مسموح بها
+            </span>
+          </label>
+
+          {sendOnEarlyDepartureBeforeClosing && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', paddingRight: '27px', borderTop: '1px dashed #fdba74', paddingTop: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '12.5px', fontWeight: 700, color: '#9a3412' }}>
+                  ⏳ فترة السماح قبل موعد الإغلاق:
+                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  <input
+                    type="number"
+                    min="1"
+                    max="240"
+                    step="5"
+                    value={earlyDepartureBeforeClosingGraceMinutes}
+                    onChange={(e) => handleEarlyDepartureGraceMinutesChange(e.target.value)}
+                    style={{
+                      width: '72px',
+                      padding: '5px 8px',
+                      borderRadius: '8px',
+                      border: '1.5px solid #fb923c',
+                      background: '#ffffff',
+                      color: '#c2410c',
+                      fontSize: '13.5px',
+                      fontWeight: 800,
+                      textAlign: 'center'
+                    }}
+                  />
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: '#c2410c' }}>دقيقة</span>
+                </div>
+              </div>
+
+              {/* أزرار سريعة لاختيار المهلة */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                {[10, 15, 30, 45, 60].map((mins) => (
+                  <button
+                    key={mins}
+                    type="button"
+                    onClick={() => handleEarlyDepartureGraceMinutesChange(mins)}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      border: Number(earlyDepartureBeforeClosingGraceMinutes) === mins ? '1.5px solid #ea580c' : '1px solid #fdba74',
+                      background: Number(earlyDepartureBeforeClosingGraceMinutes) === mins ? '#ffedd5' : '#ffffff',
+                      color: Number(earlyDepartureBeforeClosingGraceMinutes) === mins ? '#c2410c' : '#9a3412',
+                      fontSize: '11.5px',
+                      fontWeight: Number(earlyDepartureBeforeClosingGraceMinutes) === mins ? 800 : 600,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s'
+                    }}
+                  >
+                    {mins} دقيقة
+                  </button>
+                ))}
+              </div>
+
+              <div style={{ width: '100%', fontSize: '11.5px', color: '#9a3412', lineHeight: 1.5 }}>
+                ℹ️ يتم إرسال إيميل تنبيه فوري للإدارة تلقائياً إذا قام الموظف بتسجيل بصمة انصراف قبل موعد إغلاق الفرع بأكثر من <strong>{earlyDepartureBeforeClosingGraceMinutes || 15} دقيقة</strong>.
               </div>
             </div>
           )}

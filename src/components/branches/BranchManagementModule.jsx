@@ -170,7 +170,17 @@ export default function BranchManagementModule({
                                 </span>
                               )}
                               {b.openingTime && b.closingTime && <span>•</span>}
-                              {b.closingTime && <span>الإغلاق: {b.closingTime}</span>}
+                              {b.closingTime && (
+                                <span>
+                                  الإغلاق: {b.closingTime}
+                                  {b.earlyDepartureBeforeClosingGraceMinutes ? (
+                                    <span style={{ color: '#c2410c', fontWeight: 600, marginRight: '3px' }}>
+                                      {' '}
+                                      (سماح {b.earlyDepartureBeforeClosingGraceMinutes}د)
+                                    </span>
+                                  ) : null}
+                                </span>
+                              )}
                             </div>
                           ) : (
                             <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
