@@ -125,7 +125,7 @@ export function compileDailyDigestData(state, targetDate = getRealTodayStr()) {
         code: e.code || '—',
         role: e.jobTitle || 'موظف',
         status: 'على رأس العمل حالياً 🟢',
-        timeIn: act.startTime ? act.startTime.slice(11, 16) || act.startTime : '—',
+        timeIn: act.startTime ? (typeof act.startTime === 'string' ? (act.startTime.slice(11, 16) || act.startTime) : String(act.startTime)) : '—',
         punchType: act.source || 'بصمة حية'
       });
     });

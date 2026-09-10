@@ -150,7 +150,7 @@ export function buildEmailTemplate({ title, subtitle, badgeText, badgeColor = '#
 <body>
   <div class="container">
     <div class="header">
-      ${logoUrl ? `<img src="${logoUrl}" alt="Logo" style="max-height: 52px; max-width: 160px; background: #ffffff; padding: 4px 10px; border-radius: 10px; margin-bottom: 10px; object-fit: contain; display: inline-block;" /><br/>` : ''}
+      ${logoUrl && !logoUrl.startsWith('data:') ? `<img src="${logoUrl}" alt="Logo" style="max-height: 52px; max-width: 160px; background: #ffffff; padding: 4px 10px; border-radius: 10px; margin-bottom: 10px; object-fit: contain; display: inline-block;" /><br/>` : ''}
       <h1>${orgName ? `🏥 ${orgName}` : '🏥 مجموعة الصيدليات الطبية'}</h1>
       <p>${subtitle || 'نظام إدارة الموارد البشرية والحضور والرواتب'}</p>
       ${badgeText ? `<span class="badge">${badgeText}</span>` : ''}
@@ -196,36 +196,96 @@ export async function sendGmailEmail({ gmailConfig, recipientEmail, subject, htm
     return { success: false, reason: 'لم يتم تحديد بريد المستلم' };
   }
 
+  const serviceUrl = String(effectiveConfig.serviceUrl || '').trim();
+  if (!serviceUrl) {
+    return { success: false, reason: 'لم يتم إدخال رابط Webhook الخدمة (Apps Script URL)' };
+  }
+
+  // إذا كان الرابط هو المعرف التجريبي الافتراضي المنتهي الصلاحية
+  if (serviceUrl.includes('AKfycbzAHjkD2l2MvE5G6XLLj3jNM3k3B5e4SJ_kXdJtD2L-rUVUnh9BWlDSC0wCIqAk5syO')) {
+    return {
+      success: false,
+      reason: 'رابط الخدمة الحالي هو رابط تجريبي افتراضي غير منشور. يرجى نشر كود السكربت من زر (طريقة التفعيل في دقيقة) بحسابك ولصق الرابط الجديد.'
+    };
+  }
+
   const recipientString = targets.join(', ');
 
   try {
-    if (effectiveConfig.serviceUrl) {
-      try {
-        await fetch(effectiveConfig.serviceUrl, {
-          method: 'POST',
-          mode: 'no-cors',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({
-            sender: effectiveConfig.userEmail,
-            recipient: recipientString,
-            to: recipientString,
-            subject,
-            htmlBody: htmlContent,
-            textBody: textContent || subject
-          })
-        });
-        console.info(`✉️ [GmailService] Dispatched email to [${recipientString}]: ${subject}`);
-        return { success: true, targets, target: recipientString };
-      } catch (e) {
-        console.warn('Apps Script Webhook fetch error fallback:', e);
+    const payload = JSON.stringify({
+      sender: effectiveConfig.userEmail || '',
+      recipient: recipientString,
+      to: recipientString,
+      subject,
+      htmlBody: htmlContent,
+      textBody: textContent || subject
+    });
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 18000);
+
+    let delivered = false;
+    let serverErr = '';
+
+    // 1. محاولة الإرسال القياسي لقراءة استجابة السكربت
+    try {
+      const resp = await fetch(serviceUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: payload,
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+
+      if (resp.ok) {
+        try {
+          const resJson = await resp.json();
+          if (resJson && resJson.success) {
+            delivered = true;
+          } else if (resJson && resJson.error) {
+            serverErr = resJson.error;
+          }
+        } catch {}
+      }
+    } catch (stdErr) {
+      clearTimeout(timeoutId);
+      if (stdErr.name === 'AbortError') {
+        return { success: false, reason: 'استغرقت عملية الإرسال وقتاً طويلاً (Timeout)، يرجى التحقق من اتصال الإنترنت أو رابط الخدمة' };
       }
     }
 
-    console.info('✉️ [GmailService] Direct logging dispatch:', { to: recipientString, subject });
+    // 2. إذا لم نتلق تأكيداً بسبب قيود CORS في المتصفح، نحاول الإرسال عبر no-cors
+    if (!delivered && !serverErr) {
+      try {
+        const noCorsController = new AbortController();
+        const noCorsTimeoutId = setTimeout(() => noCorsController.abort(), 15000);
+
+        await fetch(serviceUrl, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: payload,
+          signal: noCorsController.signal
+        });
+        clearTimeout(noCorsTimeoutId);
+        delivered = true;
+      } catch (ncErr) {
+        if (ncErr.name === 'AbortError') {
+          return { success: false, reason: 'مهلة الاتصال انتهت (Timeout)' };
+        }
+        console.warn('[GmailService] no-cors dispatch failed:', ncErr);
+      }
+    }
+
+    if (serverErr) {
+      return { success: false, reason: serverErr };
+    }
+
+    console.info(`✉️ [GmailService] Dispatched email to [${recipientString}]: ${subject}`);
     return { success: true, targets, target: recipientString };
   } catch (err) {
     console.error('Gmail Email Dispatch Error:', err);
-    return { success: false, error: err.message };
+    return { success: false, error: err.message || 'فشل الاتصال بخدمة البريد' };
   }
 }
 

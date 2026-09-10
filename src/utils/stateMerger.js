@@ -471,6 +471,24 @@ export function smartMergeStates(localState, remoteState) {
       if (!mergedGmail.appPassword) mergedGmail.appPassword = localGmail.appPassword || remoteGmail.appPassword || '';
       if (!mergedGmail.targetAdminEmail) mergedGmail.targetAdminEmail = localGmail.targetAdminEmail || remoteGmail.targetAdminEmail || '';
       if (!mergedGmail.serviceUrl) mergedGmail.serviceUrl = localGmail.serviceUrl || remoteGmail.serviceUrl || '';
+      if (!mergedGmail.dailyDigestTime) mergedGmail.dailyDigestTime = localGmail.dailyDigestTime || remoteGmail.dailyDigestTime || '';
+      if (!mergedGmail.systemUrl) mergedGmail.systemUrl = localGmail.systemUrl || remoteGmail.systemUrl || '';
+      if (!mergedGmail.targetAdminEmails || mergedGmail.targetAdminEmails.length === 0) {
+        mergedGmail.targetAdminEmails = (localGmail.targetAdminEmails?.length ? localGmail.targetAdminEmails : remoteGmail.targetAdminEmails) || [];
+      }
+      if (mergedGmail.branchNoShowGraceMinutes === undefined) {
+        mergedGmail.branchNoShowGraceMinutes = localGmail.branchNoShowGraceMinutes || remoteGmail.branchNoShowGraceMinutes || 30;
+      }
+      // فحص إضافي من localStorage لضمان عدم ضياع التوقيت إذا تم ضبطه محلياً
+      try {
+        const lsSaved = JSON.parse(localStorage.getItem('pharmacy_gmail_config') || '{}');
+        if (!mergedGmail.dailyDigestTime && lsSaved?.dailyDigestTime) {
+          mergedGmail.dailyDigestTime = lsSaved.dailyDigestTime;
+        }
+        if (!mergedGmail.userEmail && lsSaved?.userEmail) {
+          mergedGmail.userEmail = lsSaved.userEmail;
+        }
+      } catch {}
       mergedSettings.gmailConfig = mergedGmail;
 
       // دمج عميق لإعدادات Google Drive

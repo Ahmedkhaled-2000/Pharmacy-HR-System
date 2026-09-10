@@ -212,15 +212,29 @@ export function normalizeState(parsed) {
 
   const rawParsedGmail = parsed.orgSettings?.gmailConfig || {};
   const effectiveGmailConfig = {
+    ...(savedGmailConfig || {}),
+    ...(rawParsedGmail || {}),
     enabled: rawParsedGmail.enabled !== undefined ? Boolean(rawParsedGmail.enabled) : (savedGmailConfig?.enabled ?? true),
     userEmail: rawParsedGmail.userEmail || savedGmailConfig?.userEmail || '',
     appPassword: rawParsedGmail.appPassword || savedGmailConfig?.appPassword || '',
     targetAdminEmail: rawParsedGmail.targetAdminEmail || savedGmailConfig?.targetAdminEmail || '',
+    targetAdminEmails: (Array.isArray(rawParsedGmail.targetAdminEmails) && rawParsedGmail.targetAdminEmails.length > 0)
+      ? rawParsedGmail.targetAdminEmails
+      : (Array.isArray(savedGmailConfig?.targetAdminEmails) && savedGmailConfig.targetAdminEmails.length > 0)
+      ? savedGmailConfig.targetAdminEmails
+      : [],
     serviceUrl: rawParsedGmail.serviceUrl || savedGmailConfig?.serviceUrl || 'https://script.google.com/macros/s/AKfycbzAHjkD2l2MvE5G6XLLj3jNM3k3B5e4SJ_kXdJtD2L-rUVUnh9BWlDSC0wCIqAk5syO/exec',
+    systemUrl: rawParsedGmail.systemUrl || savedGmailConfig?.systemUrl || '',
+    dailyDigestTime: rawParsedGmail.dailyDigestTime !== undefined && rawParsedGmail.dailyDigestTime !== null && String(rawParsedGmail.dailyDigestTime).trim()
+      ? String(rawParsedGmail.dailyDigestTime).trim()
+      : (savedGmailConfig?.dailyDigestTime || ''),
     sendOnRequest: rawParsedGmail.sendOnRequest !== undefined ? Boolean(rawParsedGmail.sendOnRequest) : (savedGmailConfig?.sendOnRequest ?? true),
     sendOnDecision: rawParsedGmail.sendOnDecision !== undefined ? Boolean(rawParsedGmail.sendOnDecision) : (savedGmailConfig?.sendOnDecision ?? true),
     sendOnLateness: rawParsedGmail.sendOnLateness !== undefined ? Boolean(rawParsedGmail.sendOnLateness) : (savedGmailConfig?.sendOnLateness ?? true),
     sendOnPenalty: rawParsedGmail.sendOnPenalty !== undefined ? Boolean(rawParsedGmail.sendOnPenalty) : (savedGmailConfig?.sendOnPenalty ?? true),
+    sendOnOvertime: rawParsedGmail.sendOnOvertime !== undefined ? Boolean(rawParsedGmail.sendOnOvertime) : (savedGmailConfig?.sendOnOvertime ?? true),
+    sendOnBranchNoShow: rawParsedGmail.sendOnBranchNoShow !== undefined ? Boolean(rawParsedGmail.sendOnBranchNoShow) : (savedGmailConfig?.sendOnBranchNoShow ?? true),
+    branchNoShowGraceMinutes: rawParsedGmail.branchNoShowGraceMinutes !== undefined ? (parseInt(rawParsedGmail.branchNoShowGraceMinutes, 10) || 30) : (savedGmailConfig?.branchNoShowGraceMinutes || 30),
     sendDailyDigest: rawParsedGmail.sendDailyDigest !== undefined ? Boolean(rawParsedGmail.sendDailyDigest) : (savedGmailConfig?.sendDailyDigest ?? true)
   };
 
@@ -280,7 +294,7 @@ export function normalizeState(parsed) {
     if (Object.keys(effectiveOwnerLocks).length > 0) {
       localStorage.setItem('pharmacy-owner-locks', JSON.stringify(effectiveOwnerLocks));
     }
-    if (effectiveGmailConfig && (effectiveGmailConfig.userEmail || effectiveGmailConfig.targetAdminEmail)) {
+    if (effectiveGmailConfig && (effectiveGmailConfig.userEmail || effectiveGmailConfig.targetAdminEmail || effectiveGmailConfig.dailyDigestTime)) {
       localStorage.setItem('pharmacy_gmail_config', JSON.stringify(effectiveGmailConfig));
     }
     if (effectiveOwnerUser) {

@@ -41,7 +41,7 @@ export default function GmailConfigCard({
       userEmail: stateCfg.userEmail || localSaved?.userEmail || '',
       appPassword: stateCfg.appPassword || localSaved?.appPassword || '',
       adminEmails: parsedAdminEmails,
-      dailyDigestTime: stateCfg.dailyDigestTime || localSaved?.dailyDigestTime || '',
+      dailyDigestTime: localSaved?.dailyDigestTime !== undefined ? localSaved.dailyDigestTime : (stateCfg.dailyDigestTime || ''),
       systemUrl: stateCfg.systemUrl || localSaved?.systemUrl || (typeof window !== 'undefined' && window.location?.origin && !window.location.origin.startsWith('file:') && !window.location.origin.includes('localhost') ? window.location.origin : 'https://pharmacy-hr-system.vercel.app'),
       serviceUrl: stateCfg.serviceUrl || localSaved?.serviceUrl || 'https://script.google.com/macros/s/AKfycbzAHjkD2l2MvE5G6XLLj3jNM3k3B5e4SJ_kXdJtD2L-rUVUnh9BWlDSC0wCIqAk5syO/exec',
       sendOnRequest: stateCfg.sendOnRequest !== undefined ? Boolean(stateCfg.sendOnRequest) : (localSaved?.sendOnRequest ?? true),
@@ -73,6 +73,7 @@ export default function GmailConfigCard({
   const [sendOnBranchNoShow, setSendOnBranchNoShow] = useState(initialConfig.sendOnBranchNoShow);
   const [branchNoShowGraceMinutes, setBranchNoShowGraceMinutes] = useState(initialConfig.branchNoShowGraceMinutes);
   const [sendDailyDigest, setSendDailyDigest] = useState(initialConfig.sendDailyDigest);
+  const [isTestingUrl, setIsTestingUrl] = useState(false);
 
   // Sync state if external changes happen
   useEffect(() => {
@@ -81,7 +82,7 @@ export default function GmailConfigCard({
     if (effective.userEmail) setUserEmail(effective.userEmail);
     if (effective.appPassword) setAppPassword(effective.appPassword);
     if (effective.adminEmails && effective.adminEmails.length > 0) setAdminEmails(effective.adminEmails);
-    if (effective.dailyDigestTime !== undefined) setDailyDigestTime(effective.dailyDigestTime);
+    if (effective.dailyDigestTime) setDailyDigestTime(effective.dailyDigestTime);
     if (effective.systemUrl) setSystemUrl(effective.systemUrl);
     if (effective.serviceUrl) setServiceUrl(effective.serviceUrl);
     if (effective.sendOnRequest !== undefined) setSendOnRequest(effective.sendOnRequest);
@@ -92,6 +93,20 @@ export default function GmailConfigCard({
     if (effective.branchNoShowGraceMinutes !== undefined) setBranchNoShowGraceMinutes(effective.branchNoShowGraceMinutes);
     if (effective.sendDailyDigest !== undefined) setSendDailyDigest(effective.sendDailyDigest);
   }, [state?.orgSettings?.gmailConfig]);
+
+  // تحديث فوري لتوقيت الملخص وحفظه محلياً لمنع مسحه تلقائياً
+  const handleDailyDigestTimeChange = (newVal) => {
+    const cleanVal = String(newVal || '').trim();
+    setDailyDigestTime(cleanVal);
+    try {
+      const raw = localStorage.getItem('pharmacy_gmail_config');
+      const cfg = raw ? JSON.parse(raw) : {};
+      cfg.dailyDigestTime = cleanVal;
+      localStorage.setItem('pharmacy_gmail_config', JSON.stringify(cfg));
+    } catch (err) {
+      console.warn('[GmailConfig] Time write error:', err);
+    }
+  };
 
   const [isSendingTest, setIsSendingTest] = useState(false);
   const [isSendingDigest, setIsSendingDigest] = useState(false);
@@ -137,6 +152,9 @@ function doPost(e) {
     }
 
     var recipient = data.recipient || data.to || data.targetEmail;
+    if (Array.isArray(recipient)) {
+      recipient = recipient.join(',');
+    }
     var subject = data.subject || 'تنبيه من نظام الموارد البشرية للصيدليات';
     var htmlBody = data.htmlBody || data.htmlContent || data.html || data.body;
     var textBody = data.textBody || data.textContent || data.text || 'يرجى تفعيل عرض HTML لعرض تفاصيل الإشعار.';
@@ -361,6 +379,49 @@ function doGet(e) {
     }
   };
 
+  const handleTestServiceUrl = async () => {
+    const targetUrl = String(serviceUrl || '').trim();
+    if (!targetUrl) {
+      showToast?.('⚠️ يرجى إدخال رابط Webhook الخدمة أولاً لفحصه');
+      return;
+    }
+    if (targetUrl.includes('AKfycbzAHjkD2l2MvE5G6XLLj3jNM3k3B5e4SJ_kXdJtD2L-rUVUnh9BWlDSC0wCIqAk5syO')) {
+      showToast?.('⚠️ هذا الرابط هو معرف افتراضي تجريبي غير منشور. يرجى نشر الكود من زر (طريقة التفعيل) بحسابك ولصق الرابط الجديد');
+      setShowScriptModal(true);
+      return;
+    }
+
+    setIsTestingUrl(true);
+    showToast?.('🔍 جاري فحص الرابط واختبار الاتصال مع Google Apps Script...');
+    try {
+      const res = await fetch(targetUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'ping' })
+      });
+      const text = await res.text();
+      setIsTestingUrl(false);
+
+      if (text.includes('<!DOCTYPE') || text.includes('accounts.google.com')) {
+        showToast?.('⚠️ الرابط يتطلب تسجيل دخول Google! تأكد من اختيار "Anyone" في خانة (Who has access) عند نشر السكربت');
+      } else {
+        try {
+          const json = JSON.parse(text);
+          if (json.success) {
+            showToast?.('✅ ممتاز! رابط الخدمة يعمل بكفاءة والاتصال بـ Google Apps Script متصل بنجاح.');
+          } else {
+            showToast?.('⚠️ الرابط استجاب: ' + (json.error || json.message || 'فحص السكربت'));
+          }
+        } catch {
+          showToast?.('✅ تم الاتصال برابط السكربت بنجاح.');
+        }
+      }
+    } catch (err) {
+      setIsTestingUrl(false);
+      showToast?.('⚠️ تعذر قراءة الاستجابة مباشرة بسبب قيود CORS في المتصفح، ولكن قد يكون الرابط صالحاً.');
+    }
+  };
+
   const handleTriggerDailyDigestNow = async () => {
     try {
       setIsSendingDigest(true);
@@ -373,32 +434,48 @@ function doGet(e) {
         ? cleanedAdminEmails
         : (authConfig.targetAdminEmails?.length > 0 ? authConfig.targetAdminEmails : resolveAdminRecipients(authConfig));
 
-      const activeServiceUrl = String(serviceUrl || '').trim() || authConfig.serviceUrl || 'https://script.google.com/macros/s/AKfycbzAHjkD2l2MvE5G6XLLj3jNM3k3B5e4SJ_kXdJtD2L-rUVUnh9BWlDSC0wCIqAk5syO/exec';
+      const activeServiceUrl = String(serviceUrl || '').trim() || authConfig.serviceUrl;
       const activeSenderEmail = String(userEmail || '').trim() || authConfig.userEmail;
+
+      if (!activeServiceUrl) {
+        setIsSendingDigest(false);
+        showToast?.('⚠️ يرجى إدخال رابط Webhook الخدمة في الحقل المخصص أعلاه');
+        return;
+      }
+
+      if (activeServiceUrl.includes('AKfycbzAHjkD2l2MvE5G6XLLj3jNM3k3B5e4SJ_kXdJtD2L-rUVUnh9BWlDSC0wCIqAk5syO')) {
+        setIsSendingDigest(false);
+        showToast?.('⚠️ رابط الخدمة الحالي هو معرف تجريبي غير منشور. اضغط على زر (طريقة التفعيل في دقيقة) لنشر السكربت بحسابك ولصق الرابط الجديد');
+        setShowScriptModal(true);
+        return;
+      }
+
+      let targetRecipients = [...effectiveAdminEmails];
+      if (targetRecipients.length === 0 && activeSenderEmail && activeSenderEmail.includes('@')) {
+        targetRecipients = [activeSenderEmail];
+      }
+      if (targetRecipients.length === 0) {
+        setIsSendingDigest(false);
+        showToast?.('⚠️ يرجى إدخال بريد إلكتروني واحد على الأقل في قائمة إيميلات الإدارة أو بريد الإرسال');
+        return;
+      }
 
       const testConfig = {
         enabled: true, // فرض التفعيل للإرسال اليدوي المباشر
         userEmail: activeSenderEmail,
         appPassword: String(appPassword || '').trim() || authConfig.appPassword,
-        targetAdminEmail: effectiveAdminEmails.join(', '),
-        targetAdminEmails: effectiveAdminEmails,
+        targetAdminEmail: targetRecipients.join(', '),
+        targetAdminEmails: targetRecipients,
         systemUrl: String(systemUrl || '').trim() || authConfig.systemUrl,
         serviceUrl: activeServiceUrl
       };
 
-      const targetRecipients = resolveAdminRecipients(testConfig);
-      if (targetRecipients.length === 0) {
-        setIsSendingDigest(false);
-        showToast?.('⚠️ يرجى إدخال بريد إلكتروني واحد على الأقل في قائمة إيميلات الإدارة');
-        return;
-      }
-
       const dateToday = getRealTodayStr();
-      let digestData;
+      let digestData = null;
       try {
         digestData = compileDailyDigestData(state, dateToday);
       } catch (compileErr) {
-        console.warn('[GmailConfigCard] compileDailyDigestData fallback:', compileErr);
+        console.warn('[GmailConfigCard] compileDailyDigestData error:', compileErr);
       }
 
       const html = generateDailyDigestHTML(digestData, state?.orgSettings);
@@ -546,7 +623,7 @@ function doGet(e) {
             {dailyDigestTime && (
               <button
                 type="button"
-                onClick={() => setDailyDigestTime('')}
+                onClick={() => handleDailyDigestTimeChange('')}
                 style={{
                   background: 'none',
                   border: 'none',
@@ -564,8 +641,8 @@ function doGet(e) {
           </div>
           <input
             type="time"
-            value={dailyDigestTime}
-            onChange={(e) => setDailyDigestTime(e.target.value)}
+            value={dailyDigestTime || ''}
+            onChange={(e) => handleDailyDigestTimeChange(e.target.value)}
             style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--surface)', fontWeight: 800 }}
           />
           <span style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '4px', display: 'block' }}>
@@ -576,9 +653,29 @@ function doGet(e) {
         </div>
 
         <div className="field" style={{ margin: 0 }}>
-          <label style={{ fontWeight: 800, fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span>🌐</span> رابط Webhook الخدمة (Apps Script URL)
-          </label>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+            <label style={{ fontWeight: 800, fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', margin: 0 }}>
+              <span>🌐</span> رابط Webhook الخدمة (Apps Script URL)
+            </label>
+            <button
+              type="button"
+              onClick={handleTestServiceUrl}
+              disabled={isTestingUrl}
+              style={{
+                background: '#eff6ff',
+                border: '1px solid #bfdbfe',
+                color: '#1d4ed8',
+                borderRadius: '6px',
+                padding: '2px 8px',
+                fontSize: '11.5px',
+                fontWeight: 700,
+                cursor: 'pointer'
+              }}
+              title="اختبار الاتصال برابط Webhook للتأكد من أنه يعمل ومتاح للجميع"
+            >
+              {isTestingUrl ? '⏳ جاري الفحص...' : '🔍 فحص الرابط'}
+            </button>
+          </div>
           <input
             type="text"
             value={serviceUrl}
