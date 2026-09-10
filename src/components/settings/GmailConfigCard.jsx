@@ -49,6 +49,11 @@ export default function GmailConfigCard({
       sendOnLateness: stateCfg.sendOnLateness !== undefined ? Boolean(stateCfg.sendOnLateness) : (localSaved?.sendOnLateness ?? true),
       sendOnPenalty: stateCfg.sendOnPenalty !== undefined ? Boolean(stateCfg.sendOnPenalty) : (localSaved?.sendOnPenalty ?? true),
       sendOnBranchNoShow: stateCfg.sendOnBranchNoShow !== undefined ? Boolean(stateCfg.sendOnBranchNoShow) : (localSaved?.sendOnBranchNoShow ?? true),
+      branchNoShowGraceMinutes: stateCfg.branchNoShowGraceMinutes !== undefined && !isNaN(parseInt(stateCfg.branchNoShowGraceMinutes, 10))
+        ? parseInt(stateCfg.branchNoShowGraceMinutes, 10)
+        : (localSaved?.branchNoShowGraceMinutes !== undefined && !isNaN(parseInt(localSaved.branchNoShowGraceMinutes, 10))
+        ? parseInt(localSaved.branchNoShowGraceMinutes, 10)
+        : 30),
       sendDailyDigest: stateCfg.sendDailyDigest !== undefined ? Boolean(stateCfg.sendDailyDigest) : (localSaved?.sendDailyDigest ?? true)
     };
   };
@@ -66,6 +71,7 @@ export default function GmailConfigCard({
   const [sendOnLateness, setSendOnLateness] = useState(initialConfig.sendOnLateness);
   const [sendOnPenalty, setSendOnPenalty] = useState(initialConfig.sendOnPenalty);
   const [sendOnBranchNoShow, setSendOnBranchNoShow] = useState(initialConfig.sendOnBranchNoShow);
+  const [branchNoShowGraceMinutes, setBranchNoShowGraceMinutes] = useState(initialConfig.branchNoShowGraceMinutes);
   const [sendDailyDigest, setSendDailyDigest] = useState(initialConfig.sendDailyDigest);
 
   // Sync state if external changes happen
@@ -83,6 +89,7 @@ export default function GmailConfigCard({
     if (effective.sendOnLateness !== undefined) setSendOnLateness(effective.sendOnLateness);
     if (effective.sendOnPenalty !== undefined) setSendOnPenalty(effective.sendOnPenalty);
     if (effective.sendOnBranchNoShow !== undefined) setSendOnBranchNoShow(effective.sendOnBranchNoShow);
+    if (effective.branchNoShowGraceMinutes !== undefined) setBranchNoShowGraceMinutes(effective.branchNoShowGraceMinutes);
     if (effective.sendDailyDigest !== undefined) setSendDailyDigest(effective.sendDailyDigest);
   }, [state?.orgSettings?.gmailConfig]);
 
@@ -210,6 +217,7 @@ function doGet(e) {
       sendOnLateness: Boolean(sendOnLateness),
       sendOnPenalty: Boolean(sendOnPenalty),
       sendOnBranchNoShow: Boolean(sendOnBranchNoShow),
+      branchNoShowGraceMinutes: Math.max(1, parseInt(branchNoShowGraceMinutes, 10) || 30),
       sendDailyDigest: Boolean(sendDailyDigest),
       updatedAt: nowIso
     };
@@ -694,10 +702,82 @@ function doGet(e) {
           <span style={{ fontSize: '13px', fontWeight: 600 }}>⚠️ إرسال إيميل فوري عند تطبيق وتوثيق جزاء لائحي أو خصم</span>
         </label>
 
-        <label style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#fef2f2', padding: '12px 14px', borderRadius: '10px', border: '1px solid #fca5a5', cursor: 'pointer' }}>
-          <input type="checkbox" checked={sendOnBranchNoShow} onChange={(e) => setSendOnBranchNoShow(e.target.checked)} style={{ width: '16px', height: '16px' }} />
-          <span style={{ fontSize: '13px', fontWeight: 700, color: '#991b1b' }}>🚨 إنذار طوارئ: عدم تسجيل أي بصمة حضور بالفرع بعد 30 دقيقة من موعد فتحه</span>
-        </label>
+        <div style={{ background: '#fef2f2', padding: '14px 16px', borderRadius: '12px', border: '1px solid #fca5a5', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', margin: 0 }}>
+            <input
+              type="checkbox"
+              checked={sendOnBranchNoShow}
+              onChange={(e) => setSendOnBranchNoShow(e.target.checked)}
+              style={{ width: '17px', height: '17px', cursor: 'pointer' }}
+            />
+            <span style={{ fontSize: '13.5px', fontWeight: 800, color: '#991b1b' }}>
+              🚨 إنذار طوارئ: عدم تسجيل أي بصمة حضور بالفرع بعد موعد فتحه
+            </span>
+          </label>
+
+          {sendOnBranchNoShow && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', paddingRight: '27px', borderTop: '1px dashed #fca5a5', paddingTop: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '12.5px', fontWeight: 700, color: '#7f1d1d' }}>
+                  ⏳ مهلة السماح بعد موعد الفتح:
+                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  <input
+                    type="number"
+                    min="1"
+                    max="240"
+                    step="5"
+                    value={branchNoShowGraceMinutes}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      setBranchNoShowGraceMinutes(isNaN(val) ? '' : Math.max(1, val));
+                    }}
+                    style={{
+                      width: '72px',
+                      padding: '5px 8px',
+                      borderRadius: '8px',
+                      border: '1.5px solid #f87171',
+                      background: '#ffffff',
+                      color: '#991b1b',
+                      fontSize: '13.5px',
+                      fontWeight: 800,
+                      textAlign: 'center'
+                    }}
+                  />
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: '#991b1b' }}>دقيقة</span>
+                </div>
+              </div>
+
+              {/* أزرار سريعة لاختيار المهلة */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                {[15, 30, 45, 60].map((mins) => (
+                  <button
+                    key={mins}
+                    type="button"
+                    onClick={() => setBranchNoShowGraceMinutes(mins)}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      border: Number(branchNoShowGraceMinutes) === mins ? '1.5px solid #dc2626' : '1px solid #fca5a5',
+                      background: Number(branchNoShowGraceMinutes) === mins ? '#fee2e2' : '#ffffff',
+                      color: Number(branchNoShowGraceMinutes) === mins ? '#991b1b' : '#7f1d1d',
+                      fontSize: '11.5px',
+                      fontWeight: Number(branchNoShowGraceMinutes) === mins ? 800 : 600,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s'
+                    }}
+                  >
+                    {mins} دقيقة
+                  </button>
+                ))}
+              </div>
+
+              <div style={{ width: '100%', fontSize: '11.5px', color: '#7f1d1d', lineHeight: 1.5 }}>
+                ℹ️ يتم إرسال إيميل إنذار طوارئ فوري للإدارة تلقائياً إذا مضت <strong>{branchNoShowGraceMinutes || 30} دقيقة</strong> من موعد فتح أي فرع دون قيام أي موظف من طاقمه بتسجيل بصمة حضور.
+              </div>
+            </div>
+          )}
+        </div>
 
         <label style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#f0fdf4', padding: '12px 14px', borderRadius: '10px', border: '1px solid #bbf7d0', cursor: 'pointer' }}>
           <input type="checkbox" checked={sendDailyDigest} onChange={(e) => setSendDailyDigest(e.target.checked)} style={{ width: '16px', height: '16px' }} />

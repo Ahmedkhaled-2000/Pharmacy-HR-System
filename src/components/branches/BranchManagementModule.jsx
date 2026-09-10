@@ -163,7 +163,12 @@ export default function BranchManagementModule({
                           <div>{b.name}</div>
                           {b.openingTime || b.closingTime ? (
                             <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                              {b.openingTime && <span style={{ color: '#0d9488', fontWeight: 700 }}>⏰ الفتح: {b.openingTime}</span>}
+                              {b.openingTime && (
+                                <span style={{ color: '#0d9488', fontWeight: 700 }}>
+                                  ⏰ الفتح: {b.openingTime}
+                                  {b.noShowGraceMinutes ? <span style={{ color: '#b91c1c', fontWeight: 600, marginRight: '3px' }}> (سماح {b.noShowGraceMinutes}د)</span> : null}
+                                </span>
+                              )}
                               {b.openingTime && b.closingTime && <span>•</span>}
                               {b.closingTime && <span>الإغلاق: {b.closingTime}</span>}
                             </div>

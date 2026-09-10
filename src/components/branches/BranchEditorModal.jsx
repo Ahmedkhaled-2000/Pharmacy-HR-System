@@ -26,6 +26,7 @@ export default function BranchEditorModal({
   const [password, setPassword] = useState('');
   const [openingTime, setOpeningTime] = useState('');
   const [closingTime, setClosingTime] = useState('');
+  const [noShowGraceMinutes, setNoShowGraceMinutes] = useState('');
 
   // UI / Validation States
   const [usernameError, setUsernameError] = useState('');
@@ -44,6 +45,7 @@ export default function BranchEditorModal({
       setBranchAddress(editingBranch.address || '');
       setOpeningTime(editingBranch.openingTime || '');
       setClosingTime(editingBranch.closingTime || '');
+      setNoShowGraceMinutes(editingBranch.noShowGraceMinutes !== undefined && editingBranch.noShowGraceMinutes !== null ? editingBranch.noShowGraceMinutes : '');
       setBranchLocationUrl(
         editingBranch.locationUrl ||
         (editingBranch.latitude && editingBranch.longitude
@@ -79,6 +81,7 @@ export default function BranchEditorModal({
       setBranchAddress('');
       setOpeningTime('');
       setClosingTime('');
+      setNoShowGraceMinutes('');
       setBranchLocationUrl('');
       setBranchLatitude(null);
       setBranchLongitude(null);
@@ -306,6 +309,7 @@ export default function BranchEditorModal({
       phones: validPhones,
       openingTime: (openingTime || '').trim(),
       closingTime: (closingTime || '').trim(),
+      noShowGraceMinutes: noShowGraceMinutes !== '' && !isNaN(parseInt(noShowGraceMinutes, 10)) ? parseInt(noShowGraceMinutes, 10) : '',
       managerId,
       username: username.trim(),
       password,
@@ -590,12 +594,12 @@ export default function BranchEditorModal({
                       مواعيد فتح وإغلاق الفرع المعتمدة
                     </div>
                     <div style={{ fontSize: '11.5px', color: 'var(--muted)' }}>
-                      تستخدم مواعيد الفتح لمراقبة انضباط الفرع وإطلاق إنذار عدم فتح الفرع (No-Show Alert) عبر Gmail بعد 30 دقيقة.
+                      تستخدم مواعيد الفتح لمراقبة انضباط الفرع وإطلاق إنذار عدم فتح الفرع (No-Show Alert) عبر Gmail بعد انقضاء مهلة السماح.
                     </div>
                   </div>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px' }}>
                   <div className="field" style={{ margin: 0 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                       <label style={{ fontWeight: 700, fontSize: '12.5px', display: 'flex', alignItems: 'center', gap: '6px', margin: 0 }}>
@@ -677,6 +681,58 @@ export default function BranchEditorModal({
                     />
                     <span style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '4px', display: 'block' }}>
                       {closingTime ? `يغلق الفرع في الساعة (${closingTime})` : 'اختياري: غير محدد'}
+                    </span>
+                  </div>
+
+                  <div className="field" style={{ margin: 0 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                      <label style={{ fontWeight: 700, fontSize: '12.5px', display: 'flex', alignItems: 'center', gap: '6px', margin: 0 }}>
+                        <span>⏳</span> مهلة سماح الفتح (بالدقائق)
+                      </label>
+                      {noShowGraceMinutes && (
+                        <button
+                          type="button"
+                          onClick={() => setNoShowGraceMinutes('')}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#dc2626',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            padding: '0 4px'
+                          }}
+                          title="استعادة الافتراضي"
+                        >
+                          ✕ افتراضي
+                        </button>
+                      )}
+                    </div>
+                    <input
+                      type="number"
+                      min="1"
+                      max="240"
+                      value={noShowGraceMinutes}
+                      onChange={(e) => setNoShowGraceMinutes(e.target.value)}
+                      placeholder={`افتراضي: (${(() => {
+                        try {
+                          const savedGmail = JSON.parse(localStorage.getItem('pharmacy_gmail_config') || '{}');
+                          return savedGmail?.branchNoShowGraceMinutes || 30;
+                        } catch { return 30; }
+                      })()} دقيقة)`}
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border)',
+                        background: 'var(--surface)',
+                        fontWeight: 800
+                      }}
+                    />
+                    <span style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '4px', display: 'block' }}>
+                      {noShowGraceMinutes
+                        ? `إطلاق إنذار عدم الفتح بعد (${noShowGraceMinutes} دقيقة) من موعد الفتح`
+                        : 'افتراضي: استخدام مهلة المنظومة العامة المقررة بإعدادات البريد'}
                     </span>
                   </div>
                 </div>

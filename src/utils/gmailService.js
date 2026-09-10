@@ -36,6 +36,11 @@ export function getAuthoritativeGmailConfig(state) {
     sendOnPenalty: localConfig?.sendOnPenalty !== undefined ? Boolean(localConfig.sendOnPenalty) : (stateConfig.sendOnPenalty ?? true),
     sendOnOvertime: localConfig?.sendOnOvertime !== undefined ? Boolean(localConfig.sendOnOvertime) : (stateConfig.sendOnOvertime ?? true),
     sendOnBranchNoShow: localConfig?.sendOnBranchNoShow !== undefined ? Boolean(localConfig.sendOnBranchNoShow) : (stateConfig.sendOnBranchNoShow ?? true),
+    branchNoShowGraceMinutes: (localConfig?.branchNoShowGraceMinutes !== undefined && !isNaN(parseInt(localConfig.branchNoShowGraceMinutes, 10)))
+      ? parseInt(localConfig.branchNoShowGraceMinutes, 10)
+      : (stateConfig?.branchNoShowGraceMinutes !== undefined && !isNaN(parseInt(stateConfig.branchNoShowGraceMinutes, 10)))
+      ? parseInt(stateConfig.branchNoShowGraceMinutes, 10)
+      : 30,
     sendDailyDigest: localConfig?.sendDailyDigest !== undefined ? Boolean(localConfig.sendDailyDigest) : (stateConfig.sendDailyDigest ?? true),
     updatedAt: localConfig?.updatedAt || stateConfig.updatedAt || new Date().toISOString()
   };
@@ -565,27 +570,29 @@ export function generateDailyDigestHTML(digestDataOrParams, orgSettings = {}) {
 /**
  * إرسال إنذار فوري للإدارة عند عدم فتح الفرع أو عدم تسجيل أي حضور بموعد الفتح
  */
-export async function notifyAdminOnBranchNoShow({ state, branch, openingTime, minutesElapsed }) {
+export async function notifyAdminOnBranchNoShow({ state, branch, openingTime, minutesElapsed, graceMinutes }) {
   const gmailConfig = getAuthoritativeGmailConfig(state);
   if (!gmailConfig || !gmailConfig.enabled || gmailConfig.sendOnBranchNoShow === false) return;
 
   const targetRecipients = resolveAdminRecipients(gmailConfig);
   if (targetRecipients.length === 0) return;
 
-  const branchName = branch.name || `فرع ${branch.id}`;
+  const branchName = branch?.name || `فرع ${branch?.id || ''}`;
   const todayStr = getRealTodayStr();
   const systemUrl = getSystemAppUrl(state);
+  const effectiveGrace = graceMinutes || branch?.noShowGraceMinutes || gmailConfig.branchNoShowGraceMinutes || 30;
 
   const content = `
     <div style="background: #fef2f2; border: 2px solid #ef4444; border-radius: 12px; padding: 18px; margin: 16px 0;">
       <h3 style="margin: 0 0 10px; color: #991b1b; font-size: 17px;">🚨 إنذار إداري عاجل: عدم تسجيل أي حضور في الفرع</h3>
       <p style="margin: 0 0 12px; color: #7f1d1d; font-size: 14px; line-height: 1.6;">
-        نحيطكم علماً بأن موعد فتح <strong>${branchName}</strong> هو <strong>${openingTime}</strong>، وقد مضت <strong>${minutesElapsed || 30} دقيقة</strong> دون قيام أي موظف من طاقم الفرع بتسجيل بصمة حضور حتى الآن!
+        نحيطكم علماً بأن موعد فتح <strong>${branchName}</strong> هو <strong>${openingTime}</strong>، وقد انقضت مهلة السماح المعتمدة (<strong>${effectiveGrace} دقيقة</strong>) ومضت <strong>${minutesElapsed || effectiveGrace} دقيقة</strong> دون قيام أي موظف من طاقم الفرع بتسجيل بصمة حضور حتى الآن!
       </p>
 
       <table style="width: 100%; border-collapse: collapse; font-size: 13.5px; background: #ffffff; border-radius: 8px; border: 1px solid #fca5a5;">
         <tr><td style="padding: 8px 12px; font-weight: bold; width: 140px;">🏢 الفرع المستهدف:</td><td><strong>${branchName}</strong></td></tr>
         <tr><td style="padding: 8px 12px; font-weight: bold;">⏰ موعد الفتح المعتمد:</td><td><strong style="color: #b91c1c;">${openingTime}</strong></td></tr>
+        <tr><td style="padding: 8px 12px; font-weight: bold;">⏳ مهلة السماح المقررة:</td><td><strong>${effectiveGrace} دقيقة</strong></td></tr>
         <tr><td style="padding: 8px 12px; font-weight: bold;">📅 تاريخ اليوم:</td><td>${todayStr}</td></tr>
         <tr><td style="padding: 8px 12px; font-weight: bold;">⚠️ حالة البصمة الحية:</td><td><span style="color: #dc2626; font-weight: bold;">0 بصمة حضور مسجلة</span></td></tr>
       </table>
@@ -600,7 +607,7 @@ export async function notifyAdminOnBranchNoShow({ state, branch, openingTime, mi
 
   const html = buildEmailTemplate({
     title: `🚨 إنذار عدم فتح فرع: ${branchName}`,
-    subtitle: `مضت ${minutesElapsed || 30} دقيقة على موعد الفتح دون رصد حضور لطاقم الفرع`,
+    subtitle: `مضت ${minutesElapsed || effectiveGrace} دقيقة على موعد الفتح (مهلة السماح: ${effectiveGrace} دقيقة) دون رصد حضور لطاقم الفرع`,
     badgeText: 'إنذار فوري لعدم فتح الفرع',
     badgeColor: '#dc2626',
     bodyContent: content,
@@ -610,7 +617,7 @@ export async function notifyAdminOnBranchNoShow({ state, branch, openingTime, mi
   return sendGmailEmail({
     gmailConfig,
     recipientEmail: targetRecipients,
-    subject: `🚨 إنذار فوري: فرع (${branchName}) لم يسجل أي بصمة حضور! (تأخر ${minutesElapsed || 30} دقيقة عن الفتح)`,
+    subject: `🚨 إنذار فوري: فرع (${branchName}) لم يسجل أي بصمة حضور! (تجاوز مهلة السماح ${effectiveGrace} دقيقة)`,
     htmlContent: html
   });
 }

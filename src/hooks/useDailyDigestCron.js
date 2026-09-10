@@ -63,9 +63,12 @@ export function useDailyDigestCron() {
       }
 
       // ─────────────────────────────────────────────────────────────
-      // 2. فحص إنذار عدم فتح الفرع (Branch No-Show Alert بعد 30 دقيقة)
+      // 2. فحص إنذار عدم فتح الفرع (Branch No-Show Alert بعد انتهاء مهلة السماح)
       // ─────────────────────────────────────────────────────────────
       if (gmailConfig.sendOnBranchNoShow !== false) {
+        const globalGraceMinutes = (!isNaN(parseInt(gmailConfig.branchNoShowGraceMinutes, 10)) && parseInt(gmailConfig.branchNoShowGraceMinutes, 10) > 0)
+          ? parseInt(gmailConfig.branchNoShowGraceMinutes, 10)
+          : 30;
         const branches = (state.branches || []).filter((b) => b && b.id);
         const currentTotalMinutes = currentH * 60 + currentM;
 
@@ -77,9 +80,14 @@ export function useDailyDigestCron() {
           const openM = parseInt(openMStr, 10);
           if (isNaN(openH) || isNaN(openM)) continue;
           const openingTotalMinutes = openH * 60 + openM;
-          const thresholdMinutes = openingTotalMinutes + 30; // بعد 30 دقيقة من موعد الفتح
 
-          // إذا حان موعد الإنذار (بين 30 دقيقة و ساعتين بعد الفتح)
+          const branchGrace = (branch.noShowGraceMinutes !== undefined && branch.noShowGraceMinutes !== '' && !isNaN(parseInt(branch.noShowGraceMinutes, 10)) && parseInt(branch.noShowGraceMinutes, 10) > 0)
+            ? parseInt(branch.noShowGraceMinutes, 10)
+            : globalGraceMinutes;
+
+          const thresholdMinutes = openingTotalMinutes + branchGrace; // بعد انقضاء مهلة السماح المحددة
+
+          // إذا حان موعد الإنذار (بين مهلة السماح و ساعتين بعد الفتح)
           if (currentTotalMinutes >= thresholdMinutes && currentTotalMinutes <= thresholdMinutes + 120) {
             const noShowKey = `noshow_alert_${branch.id}_${todayKey}`;
 
@@ -110,9 +118,10 @@ export function useDailyDigestCron() {
                     state,
                     branch,
                     openingTime,
+                    graceMinutes: branchGrace,
                     minutesElapsed: currentTotalMinutes - openingTotalMinutes
                   });
-                  console.log(`🚨 [Branch No-Show Alert] Sent for branch ${branch.name || branch.id}`);
+                  console.log(`🚨 [Branch No-Show Alert] Sent for branch ${branch.name || branch.id} after ${branchGrace} mins grace`);
                 } catch (err) {
                   console.warn('[Branch No-Show Alert] Warning:', err);
                 }
