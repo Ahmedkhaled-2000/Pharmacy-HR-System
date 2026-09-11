@@ -154,21 +154,40 @@ export default function WhatsAppCenterModule({
     }, 2500);
   };
 
-  // توليد PDF Base64 لموظف معين إذا كان متاحاً في تطبيق الديسكتوب
-  const generateEmpPdfBase64 = async (emp, summary) => {
+  // توليد PDF Base64 لموظف معين سواء عبر تطبيق الديسكتوب أو خادم الواتساب المحلي
+  const generateEmpPdfBase64 = async (emp, summary, htmlInput) => {
     if (!attachPdfPayslip) return null;
-    if (typeof window === 'undefined' || !window.desktopAPI?.generatePdfBase64) return null;
 
-    try {
-      const branchObj = branches.find(b => b.id === emp.branchId);
-      const html = generatePayslipPrintHtml(emp, summary, orgSettings, monthLabel, branchObj?.name);
-      const res = await window.desktopAPI.generatePdfBase64(html);
-      if (res?.success && res.pdfBase64) {
-        return res.pdfBase64;
+    const branchObj = branches.find(b => b.id === emp.branchId);
+    const html = htmlInput || generatePayslipPrintHtml(emp, summary, orgSettings, monthLabel, branchObj?.name);
+
+    // 1. أولوية استخدام Electron IPC في تطبيق سطح المكتب
+    if (typeof window !== 'undefined' && window.desktopAPI?.generatePdfBase64) {
+      try {
+        const res = await window.desktopAPI.generatePdfBase64(html);
+        if (res?.success && res.pdfBase64) {
+          return res.pdfBase64;
+        }
+      } catch (err) {
+        console.warn('Desktop PDF generation error for emp:', emp.name, err);
       }
-    } catch (err) {
-      console.warn('PDF generation error for emp:', emp.name, err);
     }
+
+    // 2. التحويل السريع عبر خادم الواتساب المحلي المتاح على النظام (للمتصفح والديسكتوب)
+    try {
+      const res = await fetch(`${serverUrl.replace(/\/$/, '')}/api/render-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ html })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.success && data.pdfBase64) {
+          return data.pdfBase64;
+        }
+      }
+    } catch {}
+
     return null;
   };
 
@@ -218,9 +237,18 @@ export default function WhatsAppCenterModule({
 
         // إنشاء ملف الـ PDF المشفر إذا كان خيار الـ PDF مفعل
         let pdfBase64 = null;
+        let pdfHtml = null;
         if (attachPdfPayslip && selectedTemplate?.supportsPdf) {
+          pdfHtml = generatePayslipPrintHtml(
+            emp,
+            summary,
+            orgSettings,
+            monthLabel,
+            branchObj?.name
+          );
+
           setSendProgressText(`توليد كشف PDF معتمد (${i + 1}/${validRecipients.length}): ${getEmpDisplayName(emp)}...`);
-          pdfBase64 = await generateEmpPdfBase64(emp, summary);
+          pdfBase64 = await generateEmpPdfBase64(emp, summary, pdfHtml);
         }
 
         messagesPayload.push({
@@ -228,6 +256,7 @@ export default function WhatsAppCenterModule({
           message: msgBody,
           empName: getEmpDisplayName(emp),
           pdfBase64,
+          pdfHtml,
           fileName: `كشف_مرتب_${getEmpDisplayName(emp).replace(/\s+/g, '_')}_${activeMonth}.pdf`
         });
       }

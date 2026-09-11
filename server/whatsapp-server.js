@@ -3,6 +3,8 @@ import cors from 'cors';
 import QRCode from 'qrcode';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
+import { execFile } from 'child_process';
 import { fileURLToPath } from 'url';
 import makeWASocket, {
   DisconnectReason,
@@ -10,6 +12,70 @@ import makeWASocket, {
   Browsers
 } from '@whiskeysockets/baileys';
 import pino from 'pino';
+
+// محرك تحويل HTML إلى ملفات PDF احترافية باستخدام متصفح Chromium المتاح على النظام
+function findBrowserBinary() {
+  const candidates = [
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    path.join(process.env.LOCALAPPDATA || '', 'Microsoft\\Edge\\Application\\msedge.exe'),
+    path.join(process.env.LOCALAPPDATA || '', 'Google\\Chrome\\Application\\chrome.exe'),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+}
+
+export async function renderHtmlToPdfBuffer(htmlContent) {
+  const binary = findBrowserBinary();
+  if (!binary) {
+    throw new Error('لم يتم العثور على متصفح Chromium (Edge أو Chrome) على النظام لتوليد الـ PDF.');
+  }
+
+  const tmpDir = os.tmpdir();
+  const id = Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+  const htmlPath = path.join(tmpDir, `payslip_${id}.html`);
+  const pdfPath = path.join(tmpDir, `payslip_${id}.pdf`);
+
+  fs.writeFileSync(htmlPath, htmlContent, 'utf8');
+
+  return new Promise((resolve, reject) => {
+    execFile(binary, [
+      '--headless',
+      '--disable-gpu',
+      '--no-first-run',
+      '--no-pdf-header-footer',
+      '--print-to-pdf=' + pdfPath,
+      htmlPath
+    ], (err) => {
+      try {
+        if (fs.existsSync(htmlPath)) fs.unlinkSync(htmlPath);
+      } catch {}
+
+      if (err) {
+        try {
+          if (fs.existsSync(pdfPath)) fs.unlinkSync(pdfPath);
+        } catch {}
+        return reject(err);
+      }
+
+      if (!fs.existsSync(pdfPath)) {
+        return reject(new Error('PDF output file was not created.'));
+      }
+
+      try {
+        const buffer = fs.readFileSync(pdfPath);
+        fs.unlinkSync(pdfPath);
+        resolve(buffer);
+      } catch (readErr) {
+        reject(readErr);
+      }
+    });
+  });
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -190,11 +256,30 @@ app.get('/api/status', (req, res) => {
   });
 });
 
-// إرسال رسالة فردية مع محاكاة بشرية لمكافحة الحظر
-app.post('/api/send-message', async (req, res) => {
-  const { phone, message, pdfBase64, fileName } = req.body;
+// تحويل HTML إلى PDF Base64
+app.post('/api/render-pdf', async (req, res) => {
+  const { html } = req.body;
+  if (!html) {
+    return res.status(400).json({ success: false, error: 'كود HTML مطلوب للتحويل.' });
+  }
+  try {
+    const pdfBuffer = await renderHtmlToPdfBuffer(html);
+    res.json({
+      success: true,
+      pdfBase64: pdfBuffer.toString('base64'),
+      size: pdfBuffer.length
+    });
+  } catch (err) {
+    console.error('[Render PDF Error]:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
-  if (!phone || (!message && !pdfBase64)) {
+// إرسال رسالة فردية مع محاكاة بشرية لمكافحة الحظر ودعم PDF مباشر
+app.post('/api/send-message', async (req, res) => {
+  const { phone, message, pdfBase64, pdfHtml, fileName } = req.body;
+
+  if (!phone || (!message && !pdfBase64 && !pdfHtml)) {
     return res.status(400).json({ success: false, error: 'رقم الهاتف ونص الرسالة أو ملف PDF مطلوبان.' });
   }
 
@@ -211,6 +296,19 @@ app.post('/api/send-message', async (req, res) => {
   }
 
   try {
+    // تجهيز ملف الـ PDF إما من Base64 الجاهز أو بتحويل الـ HTML فوراً
+    let pdfBuffer = null;
+    if (pdfBase64) {
+      pdfBuffer = Buffer.from(pdfBase64, 'base64');
+    } else if (pdfHtml) {
+      try {
+        console.log(`[WhatsApp Gateway] 📄 Rendering PDF from HTML for +${jid}...`);
+        pdfBuffer = await renderHtmlToPdfBuffer(pdfHtml);
+      } catch (renderErr) {
+        console.error('[WhatsApp Gateway] PDF rendering error:', renderErr.message);
+      }
+    }
+
     // محاكاة كتابة بشرية (1.2 ثانية) لمنع خوارزميات الحظر
     try {
       await sock.sendPresenceUpdate('composing', jid);
@@ -219,8 +317,7 @@ app.post('/api/send-message', async (req, res) => {
     } catch {}
 
     let sent;
-    if (pdfBase64) {
-      const pdfBuffer = Buffer.from(pdfBase64, 'base64');
+    if (pdfBuffer) {
       sent = await sock.sendMessage(jid, {
         document: pdfBuffer,
         mimetype: 'application/pdf',
@@ -235,18 +332,20 @@ app.post('/api/send-message', async (req, res) => {
     const logEntry = {
       id: sent.key?.id || 'WAM_' + Date.now(),
       phone: jid.split('@')[0],
-      messageSnippet: (message || (pdfBase64 ? '📎 [ملف PDF مرفق]' : '')).slice(0, 60),
+      messageSnippet: (message || (pdfBuffer ? '📎 [ملف PDF مرفق]' : '')).slice(0, 60),
       timestamp: new Date().toLocaleTimeString('ar-EG'),
-      status: 'DELIVERED'
+      status: 'DELIVERED',
+      hasPdf: Boolean(pdfBuffer)
     };
     serverState.logs.push(logEntry);
 
-    console.log(`[WhatsApp Gateway] ✅ Sent to +${jid.split('@')[0]}`);
+    console.log(`[WhatsApp Gateway] ✅ Sent to +${jid.split('@')[0]} ${pdfBuffer ? '📎 [مع ملف PDF]' : ''}`);
     res.json({
       success: true,
       messageId: sent.key?.id,
       phone: jid.split('@')[0],
-      status: 'DELIVERED'
+      status: 'DELIVERED',
+      hasPdf: Boolean(pdfBuffer)
     });
   } catch (err) {
     console.error(`[WhatsApp Gateway] Error sending to +${jid}:`, err);
@@ -254,7 +353,7 @@ app.post('/api/send-message', async (req, res) => {
   }
 });
 
-// إرسال جماعي ذكي مع طابور زمني آمن ودعم إرفاق ملفات الـ PDF
+// إرسال جماعي ذكي مع طابور زمني آمن وتوليد وتضمين ملفات الـ PDF تلقائياً
 app.post('/api/send-bulk', async (req, res) => {
   const { messages } = req.body;
 
@@ -271,7 +370,7 @@ app.post('/api/send-bulk', async (req, res) => {
 
   res.json({
     success: true,
-    message: `بدأت عملية إرسال ${messages.length} رسالة بأمان في الخلفية مع فواصل مكافحة الحظر.`,
+    message: `بدأت عملية إرسال ${messages.length} رسالة بأمان في الخلفية مع توليد ملفات الـ PDF وفواصل مكافحة الحظر.`,
     totalCount: messages.length
   });
 
@@ -290,8 +389,20 @@ app.post('/api/send-bulk', async (req, res) => {
         await new Promise((resolve) => setTimeout(resolve, 800));
         await sock.sendPresenceUpdate('paused', jid);
 
+        // تجهيز ملف الـ PDF إما من Base64 أو عبر محرك Chromium
+        let pdfBuffer = null;
         if (item.pdfBase64) {
-          const pdfBuffer = Buffer.from(item.pdfBase64, 'base64');
+          pdfBuffer = Buffer.from(item.pdfBase64, 'base64');
+        } else if (item.pdfHtml) {
+          try {
+            console.log(`[WhatsApp Bulk] 📄 Rendering PDF for (${item.empName || jid})...`);
+            pdfBuffer = await renderHtmlToPdfBuffer(item.pdfHtml);
+          } catch (renderErr) {
+            console.error(`[WhatsApp Bulk PDF Render Error for ${item.empName}]:`, renderErr.message);
+          }
+        }
+
+        if (pdfBuffer) {
           await sock.sendMessage(jid, {
             document: pdfBuffer,
             mimetype: 'application/pdf',
@@ -307,12 +418,13 @@ app.post('/api/send-bulk', async (req, res) => {
           id: 'WAM_' + Date.now(),
           phone: jid.split('@')[0],
           empName: item.empName || '',
-          messageSnippet: (item.message || (item.pdfBase64 ? '📎 [ملف PDF مرفق]' : '')).slice(0, 50),
+          messageSnippet: (item.message || (pdfBuffer ? '📎 [ملف PDF مرفق]' : '')).slice(0, 50),
           timestamp: new Date().toLocaleTimeString('ar-EG'),
-          status: 'DELIVERED'
+          status: 'DELIVERED',
+          hasPdf: Boolean(pdfBuffer)
         });
 
-        console.log(`[WhatsApp Bulk] (${i + 1}/${messages.length}) Sent to ${item.empName || jid}`);
+        console.log(`[WhatsApp Bulk] (${i + 1}/${messages.length}) Sent to ${item.empName || jid} ${pdfBuffer ? '📎 [مع PDF]' : ''}`);
       } catch (err) {
         console.error(`[WhatsApp Bulk] Error sending to ${item.empName || jid}:`, err.message);
       }
