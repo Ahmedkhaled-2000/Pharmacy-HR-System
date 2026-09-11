@@ -45,3 +45,5 @@ release/
 *.exe
 *.blockmap
 dist-electron/
+server/whatsapp-auth/
+whatsapp-auth/

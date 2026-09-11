@@ -35,9 +35,42 @@ export default function WhatsAppStatusCard({
             </span>
           </div>
 
-          <button className="btn btn-ghost" style={{ fontSize: '13px', padding: '8px 16px' }} onClick={handleTestWaServerConnection}>
-            🔄 فحص الاتصال بالخادم
-          </button>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <button className="btn btn-ghost" style={{ fontSize: '13px', padding: '8px 16px' }} onClick={handleTestWaServerConnection}>
+              🔄 فحص الاتصال بالخادم
+            </button>
+            <button
+              className="btn btn-ghost"
+              style={{
+                fontSize: '13px',
+                padding: '8px 16px',
+                background: 'rgba(239, 68, 68, 0.08)',
+                color: '#dc2626',
+                borderColor: '#fca5a5',
+                fontWeight: '700'
+              }}
+              onClick={async () => {
+                showToast?.('⚡ جاري إعادة تشغيل خادم الواتساب في الخلفية...');
+                try {
+                  if (typeof window !== 'undefined' && window.desktopAPI?.restartWhatsAppServer) {
+                    const res = await window.desktopAPI.restartWhatsAppServer();
+                    showToast?.(res?.message || 'تمت إعادة تشغيل الخادم بنجاح');
+                  } else {
+                    const serverUrl = waServerUrlInput.trim() || 'http://127.0.0.1:3100';
+                    await fetch(`${serverUrl.replace(/\/$/, '')}/api/restart`, { method: 'POST' });
+                    showToast?.('تم إرسال أمر إعادة تشغيل الخادم بنجاح');
+                  }
+                  setTimeout(() => {
+                    handleTestWaServerConnection();
+                  }, 2500);
+                } catch {
+                  showToast?.('تعذر إرسال أمر إعادة التشغيل، تأكد من تشغيل النظام');
+                }
+              }}
+            >
+              ⚡ إعادة تشغيل الخادم
+            </button>
+          </div>
         </div>
 
         {/* QR Code Display Container */}
@@ -61,7 +94,7 @@ export default function WhatsAppStatusCard({
           style={{ marginTop: '14px', fontSize: '12.5px', padding: '6px 14px' }}
           onClick={async () => {
             setWaServerStatus('QR_READY');
-            const serverUrl = waServerUrlInput.trim() || 'http://localhost:3001';
+            const serverUrl = waServerUrlInput.trim() || 'http://127.0.0.1:3100';
             try {
               const res = await fetch(`${serverUrl.replace(/\/$/, '')}/api/reconnect`, { method: 'POST' });
               if (res.ok) {

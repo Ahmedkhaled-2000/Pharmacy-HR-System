@@ -1,140 +1,347 @@
 import express from 'express';
 import cors from 'cors';
 import QRCode from 'qrcode';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+import makeWASocket, {
+  DisconnectReason,
+  useMultiFileAuthState,
+  Browsers
+} from '@whiskeysockets/baileys';
+import pino from 'pino';
 
-const app = express();
-const PORT = process.env.PORT || 3001;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const AUTH_DIR = path.join(__dirname, 'whatsapp-auth');
 
-app.use(cors());
-app.use(express.json({ limit: '10mb' }));
-
-// WhatsApp Server Engine State
-let serverState = {
-  status: 'CONNECTED', // 'CONNECTED' | 'QR_READY' | 'DISCONNECTED'
-  phone: '201012345678',
-  deviceName: 'WhatsApp Web Session',
-  qrCodeDataUrl: '',
-  sentCount: 0,
-  logs: []
-};
-
-// Generate QR Code sample session
-async function generateSessionQr() {
+if (!fs.existsSync(AUTH_DIR)) {
   try {
-    const pairUrl = `https://wa.me/qr/PHARMACY_HR_SESSION_${Date.now()}`;
-    serverState.qrCodeDataUrl = await QRCode.toDataURL(pairUrl, {
-      margin: 2,
-      width: 280,
-      color: {
-        dark: '#0F172A',
-        light: '#FFFFFF'
-      }
-    });
+    fs.mkdirSync(AUTH_DIR, { recursive: true });
   } catch (err) {
-    console.error('QR Generation Error:', err);
+    console.error('Failed to create AUTH_DIR:', err);
   }
 }
 
-generateSessionQr();
+const app = express();
+const PORT = process.env.PORT || 3100;
 
-// Health Check
+app.use(cors());
+app.use(express.json({ limit: '15mb' }));
+
+// حالة محرك الواتساب
+let serverState = {
+  status: 'DISCONNECTED', // 'CONNECTING' | 'QR_READY' | 'CONNECTED' | 'DISCONNECTED'
+  phone: '',
+  deviceName: '',
+  qrCodeDataUrl: '',
+  sentCount: 0,
+  logs: [],
+  lastError: null,
+  uptime: Date.now()
+};
+
+let sock = null;
+let isConnecting = false;
+let reconnectTimer = null;
+
+// تنسيق وتوحيد رقم الهاتف بالصيغة الدولية لواتساب
+function formatWhatsAppNumber(phone) {
+  let clean = String(phone || '').replace(/\D/g, '');
+  if (!clean) return null;
+  if (clean.startsWith('01') && clean.length === 11) {
+    clean = '2' + clean; // الأرقام المصرية
+  }
+  return `${clean}@s.whatsapp.net`;
+}
+
+// دالة الاتصال بمحرك Baileys
+async function connectToWhatsApp() {
+  if (isConnecting) return;
+  isConnecting = true;
+
+  try {
+    console.log('[WhatsApp Gateway] 🔄 Initializing connection to WhatsApp multi-device...');
+    serverState.status = 'CONNECTING';
+
+    const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+
+    sock = makeWASocket({
+      auth: state,
+      logger: pino({ level: 'silent' }),
+      printQRInTerminal: false,
+      browser: Browsers.windows('Desktop'),
+      syncFullHistory: false,
+      connectTimeoutMs: 60000,
+      keepAliveIntervalMs: 25000,
+      emitOwnEvents: false,
+      markOnlineOnConnect: true
+    });
+
+    sock.ev.on('creds.update', saveCreds);
+
+    sock.ev.on('connection.update', async (update) => {
+      const { connection, lastDisconnect, qr } = update;
+
+      // 1. التقاط رمز الـ QR وتحديثه في الواجهة
+      if (qr) {
+        try {
+          serverState.qrCodeDataUrl = await QRCode.toDataURL(qr, {
+            margin: 2,
+            width: 320,
+            color: {
+              dark: '#0F172A',
+              light: '#FFFFFF'
+            }
+          });
+          serverState.status = 'QR_READY';
+          serverState.lastError = null;
+          console.log('[WhatsApp Gateway] 📸 Live QR Code generated successfully.');
+        } catch (err) {
+          console.error('[WhatsApp Gateway] QR generation error:', err);
+        }
+      }
+
+      // 2. تحديث حالة الاتصال
+      if (connection === 'connecting') {
+        serverState.status = 'CONNECTING';
+      }
+
+      // 3. نجاح الاقتران والاتصال
+      if (connection === 'open') {
+        isConnecting = false;
+        serverState.status = 'CONNECTED';
+        serverState.qrCodeDataUrl = '';
+        serverState.lastError = null;
+
+        const rawJid = sock.user?.id || '';
+        const cleanPhone = rawJid.split(':')[0].replace(/\D/g, '') || rawJid.split('@')[0];
+        serverState.phone = cleanPhone;
+        serverState.deviceName = sock.user?.name || `WhatsApp Linked Phone (+${cleanPhone})`;
+
+        console.log(`[WhatsApp Gateway] 🎉 CONNECTED! Linked Phone: +${cleanPhone}`);
+      }
+
+      // 4. انقطاع الاتصال
+      if (connection === 'close') {
+        isConnecting = false;
+        const statusCode = (lastDisconnect?.error)?.output?.statusCode || (lastDisconnect?.error)?.status;
+        const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+
+        console.warn(`[WhatsApp Gateway] ⚠️ Connection closed (statusCode: ${statusCode}, isLoggedOut: ${isLoggedOut})`);
+
+        if (isLoggedOut) {
+          serverState.status = 'DISCONNECTED';
+          serverState.phone = '';
+          serverState.deviceName = '';
+          serverState.qrCodeDataUrl = '';
+          try {
+            fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+            fs.mkdirSync(AUTH_DIR, { recursive: true });
+          } catch {}
+
+          if (reconnectTimer) clearTimeout(reconnectTimer);
+          reconnectTimer = setTimeout(connectToWhatsApp, 2500);
+        } else {
+          serverState.status = 'DISCONNECTED';
+          if (reconnectTimer) clearTimeout(reconnectTimer);
+          reconnectTimer = setTimeout(connectToWhatsApp, 4000);
+        }
+      }
+    });
+
+  } catch (err) {
+    isConnecting = false;
+    serverState.status = 'DISCONNECTED';
+    serverState.lastError = err.message;
+    console.error('[WhatsApp Gateway] Connection initialization error:', err);
+
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(connectToWhatsApp, 5000);
+  }
+}
+
+// بدء الاتصال تلقائياً
+connectToWhatsApp();
+
+// ── مسارات الـ REST API ───────────────────────────────────────────────────
+
+// فحص الصحة (Health Check)
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({
+    status: 'ok',
+    waStatus: serverState.status,
+    phone: serverState.phone,
+    uptimeSeconds: Math.floor((Date.now() - serverState.uptime) / 1000)
+  });
 });
 
-// GET WhatsApp Status & Live QR Code
-app.get('/api/status', async (req, res) => {
-  if (!serverState.qrCodeDataUrl) {
-    await generateSessionQr();
-  }
+// استعلام حالة السيرفر ورمز الـ QR المباشر
+app.get('/api/status', (req, res) => {
   res.json({
     status: serverState.status,
     phone: serverState.phone,
     deviceName: serverState.deviceName,
     qrCodeDataUrl: serverState.qrCodeDataUrl,
     sentCount: serverState.sentCount,
+    lastError: serverState.lastError,
     timestamp: new Date().toISOString(),
-    logs: serverState.logs.slice(-20)
+    logs: serverState.logs.slice(-30)
   });
 });
 
-// POST Send Single Message
-app.post('/api/send-message', (req, res) => {
+// إرسال رسالة فردية مع محاكاة بشرية لمكافحة الحظر
+app.post('/api/send-message', async (req, res) => {
   const { phone, message } = req.body;
+
   if (!phone || !message) {
-    return res.status(400).json({ success: false, error: 'رقم الهاتف ونص الرسالة مطلوبة' });
+    return res.status(400).json({ success: false, error: 'رقم الهاتف ونص الرسالة مطلوبان.' });
   }
 
-  let cleanPhone = String(phone).replace(/\D/g, '');
-  if (cleanPhone.startsWith('01')) cleanPhone = '2' + cleanPhone;
-
-  const msgId = 'WAM_' + Math.random().toString(36).substring(2, 9).toUpperCase();
-  serverState.sentCount++;
-
-  const logEntry = {
-    id: msgId,
-    phone: cleanPhone,
-    messageSnippet: message.slice(0, 60),
-    timestamp: new Date().toLocaleTimeString('ar-EG'),
-    status: 'DELIVERED'
-  };
-
-  serverState.logs.push(logEntry);
-  console.log(`[WhatsApp Server] Sent message to +${cleanPhone}:`, message.slice(0, 40));
-
-  res.json({
-    success: true,
-    messageId: msgId,
-    phone: cleanPhone,
-    timestamp: new Date().toISOString(),
-    status: 'DELIVERED'
-  });
-});
-
-// POST Send Bulk Messages
-app.post('/api/send-bulk', async (req, res) => {
-  const { messages } = req.body; // Array of { phone, message, empName }
-  if (!Array.isArray(messages) || messages.length === 0) {
-    return res.status(400).json({ success: false, error: 'قائمة الرسائل فارغة' });
+  if (serverState.status !== 'CONNECTED' || !sock) {
+    return res.status(503).json({
+      success: false,
+      error: 'خادم الواتساب غير متصل بالهاتف حالياً. يرجى مسح رمز الـ QR للاقتران أولاً.'
+    });
   }
 
-  const results = [];
-  for (const item of messages) {
-    let cleanPhone = String(item.phone || '').replace(/\D/g, '');
-    if (cleanPhone.startsWith('01')) cleanPhone = '2' + cleanPhone;
+  const jid = formatWhatsAppNumber(phone);
+  if (!jid) {
+    return res.status(400).json({ success: false, error: 'رقم الهاتف غير صالح.' });
+  }
 
-    const msgId = 'WAM_' + Math.random().toString(36).substring(2, 9).toUpperCase();
+  try {
+    // محاكاة كتابة بشرية (1.2 ثانية) لمنع خوارزميات الحظر
+    try {
+      await sock.sendPresenceUpdate('composing', jid);
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      await sock.sendPresenceUpdate('paused', jid);
+    } catch {}
+
+    const sent = await sock.sendMessage(jid, { text: message });
     serverState.sentCount++;
 
-    results.push({
-      empName: item.empName || cleanPhone,
-      phone: cleanPhone,
-      status: 'DELIVERED',
-      messageId: msgId
+    const logEntry = {
+      id: sent.key?.id || 'WAM_' + Date.now(),
+      phone: jid.split('@')[0],
+      messageSnippet: message.slice(0, 60),
+      timestamp: new Date().toLocaleTimeString('ar-EG'),
+      status: 'DELIVERED'
+    };
+    serverState.logs.push(logEntry);
+
+    console.log(`[WhatsApp Gateway] ✅ Sent to +${jid.split('@')[0]}`);
+    res.json({
+      success: true,
+      messageId: sent.key?.id,
+      phone: jid.split('@')[0],
+      status: 'DELIVERED'
+    });
+  } catch (err) {
+    console.error(`[WhatsApp Gateway] Error sending to +${jid}:`, err);
+    res.status(500).json({ success: false, error: err.message || 'فشل إرسال الرسالة عبر الواتساب.' });
+  }
+});
+
+// إرسال جماعي ذكي مع طابور زمني آمن
+app.post('/api/send-bulk', async (req, res) => {
+  const { messages } = req.body;
+
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return res.status(400).json({ success: false, error: 'قائمة الرسائل فارغة.' });
+  }
+
+  if (serverState.status !== 'CONNECTED' || !sock) {
+    return res.status(503).json({
+      success: false,
+      error: 'خادم الواتساب غير متصل بالهاتف حالياً. يرجى مسح رمز الـ QR للاقتران أولاً.'
     });
   }
 
   res.json({
     success: true,
-    totalCount: messages.length,
-    sentCount: results.length,
-    results
+    message: `بدأت عملية إرسال ${messages.length} رسالة بأمان في الخلفية مع فواصل مكافحة الحظر.`,
+    totalCount: messages.length
   });
+
+  // معالجة الخلفية
+  (async () => {
+    for (let i = 0; i < messages.length; i++) {
+      const item = messages[i];
+      const jid = formatWhatsAppNumber(item.phone);
+      if (!jid) continue;
+
+      try {
+        const delayMs = 2500 + Math.floor(Math.random() * 2000);
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+
+        await sock.sendPresenceUpdate('composing', jid);
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        await sock.sendPresenceUpdate('paused', jid);
+
+        await sock.sendMessage(jid, { text: item.message });
+        serverState.sentCount++;
+
+        serverState.logs.push({
+          id: 'WAM_' + Date.now(),
+          phone: jid.split('@')[0],
+          empName: item.empName || '',
+          messageSnippet: (item.message || '').slice(0, 50),
+          timestamp: new Date().toLocaleTimeString('ar-EG'),
+          status: 'DELIVERED'
+        });
+
+        console.log(`[WhatsApp Bulk] (${i + 1}/${messages.length}) Sent to ${item.empName || jid}`);
+      } catch (err) {
+        console.error(`[WhatsApp Bulk] Error sending to ${item.empName || jid}:`, err.message);
+      }
+    }
+  })();
 });
 
-// POST Reconnect / Refresh Session QR
-app.post('/api/reconnect', async (req, res) => {
-  serverState.status = 'QR_READY';
-  await generateSessionQr();
-  res.json({ success: true, status: serverState.status, qrCodeDataUrl: serverState.qrCodeDataUrl });
+// إعادة تشغيل الاتصال يدوياً بضغطة زر
+app.post('/api/restart', async (req, res) => {
+  console.log('[WhatsApp Gateway] 🔄 Manual restart requested...');
+  try {
+    if (sock) {
+      try { sock.end(new Error('Manual Restart Triggered')); } catch {}
+    }
+  } catch {}
+
+  serverState.status = 'CONNECTING';
+  isConnecting = false;
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(connectToWhatsApp, 1500);
+
+  res.json({ success: true, message: 'جاري إعادة تهيئة واتصال خادم الواتساب...' });
 });
 
-// POST Pair / Connect
-app.post('/api/pair', (req, res) => {
-  serverState.status = 'CONNECTED';
-  res.json({ success: true, status: serverState.status });
+// تسجيل الخروج وإعادة توليد رمز الاقتران
+app.post('/api/logout', async (req, res) => {
+  console.log('[WhatsApp Gateway] 🚪 Logout requested...');
+  try {
+    if (sock) {
+      await sock.logout();
+    }
+  } catch {}
+
+  serverState.status = 'DISCONNECTED';
+  serverState.phone = '';
+  serverState.deviceName = '';
+  serverState.qrCodeDataUrl = '';
+  isConnecting = false;
+
+  try {
+    fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+    fs.mkdirSync(AUTH_DIR, { recursive: true });
+  } catch {}
+
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(connectToWhatsApp, 2000);
+
+  res.json({ success: true, message: 'تم تسجيل الخروج وإعادة ضبط رمز الاقتران.' });
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 [WhatsApp Server] API is running on http://localhost:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 [WhatsApp Gateway] Production Baileys Engine running on http://localhost:${PORT}`);
 });

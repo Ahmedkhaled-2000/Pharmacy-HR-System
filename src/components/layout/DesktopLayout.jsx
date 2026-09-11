@@ -724,14 +724,6 @@ export default function DesktopLayout({
           desc: 'إدارة وتدريب بصمة الوجه واليد بالذكاء الاصطناعي'
         },
         {
-          id: 'kiosk',
-          targetTab: null,
-          label: 'شاشة كشك البصمة السريعة (Alt+Shift+K)',
-          icon: '📱',
-          desc: 'الانتقال المباشر لشاشة تسجيل البصمة والحضور الذاتي للموظفين',
-          openInNewTab: true
-        },
-        {
           id: 'employees:roster',
           targetTab: 'employees',
           targetSubTab: 'roster',

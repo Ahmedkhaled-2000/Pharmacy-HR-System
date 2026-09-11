@@ -439,8 +439,142 @@ ipcMain.handle('app:is-admin', async () => {
   }
 });
 
+// ── 5.5. إدارة خادم الواتساب التلقائي على مدار 24 ساعة (Auto 24/7 WhatsApp Gateway) ──
+const http = require('http');
+const { spawn, exec } = require('child_process');
+
+function checkWhatsAppServerHealth() {
+  return new Promise((resolve) => {
+    const req = http.get('http://127.0.0.1:3100/health', { timeout: 1500 }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          resolve({ online: res.statusCode === 200, ...json });
+        } catch {
+          resolve({ online: res.statusCode === 200 });
+        }
+      });
+    });
+    req.on('error', () => resolve({ online: false }));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve({ online: false });
+    });
+  });
+}
+
+function resolveWhatsAppServerScript() {
+  const possiblePaths = [
+    path.join(__dirname, '../server/whatsapp-server.js'),
+    path.join(process.resourcesPath || '', 'app', 'server', 'whatsapp-server.js'),
+    path.join(process.resourcesPath || '', 'server', 'whatsapp-server.js'),
+    path.join(app.getAppPath(), 'server', 'whatsapp-server.js')
+  ];
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) return p;
+  }
+  return path.join(__dirname, '../server/whatsapp-server.js');
+}
+
+function launchWhatsAppServerProcess() {
+  try {
+    const scriptPath = resolveWhatsAppServerScript();
+    if (!fs.existsSync(scriptPath)) {
+      console.warn('[WhatsApp Gateway] Script not found:', scriptPath);
+      return false;
+    }
+    console.log('[WhatsApp Gateway] 🚀 Auto-launching WhatsApp server:', scriptPath);
+
+    // تشغيل كعملية منفصلة ومستقلة 24/7 (Detached Background Process)
+    const child = spawn('node', [scriptPath], {
+      cwd: path.dirname(scriptPath),
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+      shell: false
+    });
+    child.unref();
+    return true;
+  } catch (err) {
+    console.error('[WhatsApp Gateway Auto-Launch Error]:', err);
+    return false;
+  }
+}
+
+async function ensureWhatsAppServerRunning() {
+  try {
+    const health = await checkWhatsAppServerHealth();
+    if (health.online) {
+      console.log('[WhatsApp Gateway] 🟢 WhatsApp Server is already running.');
+      return { success: true, alreadyRunning: true, health };
+    }
+    const started = launchWhatsAppServerProcess();
+    return { success: started, alreadyRunning: false };
+  } catch (err) {
+    console.error('[WhatsApp Gateway Check Error]:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+async function killAndRestartWhatsAppServer() {
+  console.log('[WhatsApp Gateway] 🔄 Killing and restarting WhatsApp server...');
+  return new Promise((resolve) => {
+    // محاولة ناعمة لإعادة التشغيل عبر HTTP أولاً
+    try {
+      const postReq = http.request('http://127.0.0.1:3100/api/restart', { method: 'POST', timeout: 2000 }, (res) => {
+        if (res.statusCode === 200) {
+          setTimeout(async () => {
+            const h = await checkWhatsAppServerHealth();
+            resolve({ success: true, message: 'تمت إعادة تشغيل وتحديث اتصال الواتساب بنجاح', health: h });
+          }, 1500);
+          return;
+        }
+        hardKillAndSpawn();
+      });
+      postReq.on('error', () => hardKillAndSpawn());
+      postReq.on('timeout', () => { postReq.destroy(); hardKillAndSpawn(); });
+      postReq.end();
+    } catch {
+      hardKillAndSpawn();
+    }
+
+    function hardKillAndSpawn() {
+      if (process.platform === 'win32') {
+        exec('powershell -Command "Get-NetTCPConnection -LocalPort 3100 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }"', () => {
+          setTimeout(() => {
+            launchWhatsAppServerProcess();
+            setTimeout(async () => {
+              const h = await checkWhatsAppServerHealth();
+              resolve({ success: true, message: 'تم إطلاق وتشغيل خادم الواتساب بنجاح', health: h });
+            }, 2000);
+          }, 1000);
+        });
+      } else {
+        launchWhatsAppServerProcess();
+        setTimeout(async () => {
+          const h = await checkWhatsAppServerHealth();
+          resolve({ success: true, health: h });
+        }, 1500);
+      }
+    }
+  });
+}
+
+// تسجيل معالجات الـ IPC لخادم الواتساب
+ipcMain.handle('whatsapp:get-health', async () => {
+  return await checkWhatsAppServerHealth();
+});
+
+ipcMain.handle('whatsapp:restart-server', async () => {
+  return await killAndRestartWhatsAppServer();
+});
+
 // ── 6. دورة حياة التطبيق (App Lifecycle) ──────────────────────────────────
 app.whenReady().then(() => {
+  // تشغيل خادم الواتساب تلقائياً في الخلفية فور إقلاع التطبيق
+  ensureWhatsAppServerRunning();
   // ── تفعيل معالج بروتوكول app المحلي لخدمة ملفات المنظومة ونماذج AI محلياً ──
   try {
     protocol.handle('app', (request) => {

@@ -1,7 +1,7 @@
 {
   "name": "pharmacy-hr-system",
   "productName": "منظومة الموارد البشرية",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "description": "منظومة إدارة الموارد البشرية والرواتب - تطبيق ويندوز المكتبي",
   "repository": {
     "type": "git",
@@ -27,7 +27,9 @@
     "generate-ico": "node scripts/generate-ico.cjs"
   },
   "dependencies": {
-    "electron-updater": "^6.8.9"
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
+    "electron-updater": "^6.8.9",
+    "pino": "^10.3.1"
   },
   "devDependencies": {
     "@aparajita/capacitor-biometric-auth": "^10.0.0",
