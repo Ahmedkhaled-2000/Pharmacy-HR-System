@@ -31,7 +31,18 @@ export function getItemKey(item, fallbackPrefix = 'item') {
 // استخراج أحدث وقت تعديل للعنصر
 export function getItemTime(item) {
   if (!item) return 0;
-  const timeVal = item.updatedAt || item.approvedAt || item.rejectedAt || item.createdAt || item.timestamp || item.date;
+  const timeVal =
+    item.updatedAt ||
+    item.updated_at ||
+    item.reinstatedAt ||
+    item.terminatedAt ||
+    item.approvedAt ||
+    item.rejectedAt ||
+    item.createdAt ||
+    item.created_at ||
+    item.timestamp ||
+    item.date ||
+    item.driveLastSyncAt;
   if (!timeVal) return 0;
   if (typeof timeVal === 'number') return timeVal;
   const parsed = new Date(timeVal).getTime();
@@ -116,13 +127,12 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
     const localTime = getItemTime(localItem);
     const remoteTime = getItemTime(remoteItem);
     let mergedEmp = {};
-    if (remoteTime > localTime) {
-      mergedEmp = { ...localItem, ...remoteItem };
-    } else if (localTime > remoteTime) {
+    if (localTime > remoteTime) {
       mergedEmp = { ...remoteItem, ...localItem };
     } else {
-      mergedEmp = { ...remoteItem, ...localItem };
-      if (localItem.permissions !== undefined) {
+      // عند تفوق وقت السحابة أو عند تساوي التوقيتين: السحابة هي المرجع المعتمد
+      mergedEmp = { ...localItem, ...remoteItem };
+      if (localItem.permissions !== undefined && remoteItem.permissions === undefined) {
         mergedEmp.permissions = localItem.permissions;
       } else if (remoteItem.permissions !== undefined) {
         mergedEmp.permissions = remoteItem.permissions;
@@ -220,7 +230,7 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
   const localTime = getItemTime(localItem);
   const remoteTime = getItemTime(remoteItem);
 
-  let mergedBase = localTime >= remoteTime
+  let mergedBase = localTime > remoteTime
     ? { ...remoteItem, ...localItem }
     : { ...localItem, ...remoteItem };
 

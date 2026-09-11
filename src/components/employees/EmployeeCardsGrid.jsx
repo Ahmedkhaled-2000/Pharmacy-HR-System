@@ -750,7 +750,7 @@ export default function EmployeeCardsGrid({
                             )}
                           </div>
                           <span style={{ color: 'var(--muted)', fontSize: '13px', display: 'block' }}>
-                            {emp.jobTitle} {emp.department ? ` · قسم: ${emp.department}` : ''} {emp.phone ? ` · 📞 ${emp.phone}` : ''}
+                            {emp.jobTitle} {emp.department ? ` · قسم: ${emp.department}` : ''} {(emp.phone || emp.phones?.[0]?.number) ? ` · 📞 ${emp.phone || emp.phones?.[0]?.number}` : ''}
                           </span>
                           {resStatusBadge}
                           {suspStatusBadge}
