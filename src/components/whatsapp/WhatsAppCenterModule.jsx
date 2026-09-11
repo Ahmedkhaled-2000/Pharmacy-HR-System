@@ -7,6 +7,7 @@ import {
   generatePayslipPrintHtml
 } from '../../utils/whatsappTemplates';
 import { Send, FileText, CheckCircle2, AlertCircle, RefreshCw, Sparkles, Filter, Users, UserCheck, LogOut } from 'lucide-react';
+import { useUI } from '../../context/UIContext';
 
 export default function WhatsAppCenterModule({
   state,
@@ -15,6 +16,7 @@ export default function WhatsAppCenterModule({
   computeEmpSummary,
   arabicMonthLabel
 }) {
+  const { showConfirm } = useUI();
   const [selectedBranch, setSelectedBranch] = useState('');
   const [targetEmpId, setTargetEmpId] = useState('');
   
@@ -158,10 +160,22 @@ export default function WhatsAppCenterModule({
   // تغيير رقم الواتساب المقترن وفك الارتباط لتوليد رمز QR جديد
   const handleChangeConnectedNumber = async () => {
     const currentPhoneDisplay = waPhone ? `(+${waPhone})` : '';
-    const isConfirmed = window.confirm(
-      `هل أنت متأكد من رغبتك في تغيير رقم الواتساب المقترن ${currentPhoneDisplay}؟\n\n` +
-      `سيتم إلغاء اقتران الهاتف الحالي وتوليد رمز QR جديد لربط الهاتف الجديد فوراً.`
-    );
+    let isConfirmed = false;
+    if (showConfirm) {
+      isConfirmed = await showConfirm({
+        title: 'تغيير رقم الواتساب المقترن',
+        message: `هل أنت متأكد من رغبتك في تغيير رقم الواتساب المقترن ${currentPhoneDisplay}؟\n\nسيتم إلغاء اقتران الهاتف الحالي وتوليد رمز QR جديد لربط الهاتف الجديد فوراً.`,
+        confirmText: 'نعم، فك الارتباط وتغيير الرقم',
+        cancelText: 'إلغاء وتراجع',
+        type: 'danger',
+        icon: '📱'
+      });
+    } else {
+      isConfirmed = window.confirm(
+        `هل أنت متأكد من رغبتك في تغيير رقم الواتساب المقترن ${currentPhoneDisplay}؟\n\n` +
+        `سيتم إلغاء اقتران الهاتف الحالي وتوليد رمز QR جديد لربط الهاتف الجديد فوراً.`
+      );
+    }
     if (!isConfirmed) return;
 
     setIsChangingNumber(true);

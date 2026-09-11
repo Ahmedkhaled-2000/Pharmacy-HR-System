@@ -66,9 +66,15 @@ export default function PayslipPrintModal({
     a.date <= endCutoff
   );
 
+  const cycleFilterFn = (d) => {
+    if (!d) return false;
+    const dStr = String(d).slice(0, 10);
+    return dStr >= startCutoff && dStr <= endCutoff;
+  };
+
   // Use computeEmpSummary for accurate calculations including branch selection
   const summary = computeEmpSummary
-    ? computeEmpSummary(emp.id, null, month, currentBranchId)
+    ? computeEmpSummary(emp.id, cycleFilterFn, month, currentBranchId)
     : { hours: 0, dailyRate: 0, rate: 0, baseEarnings: 0, totalBonus: 0, totalDeduction: 0, absenceDeduction: 0, netSalary: 0, perBranch: {} };
 
   const totalHours = summary.hours || 0;

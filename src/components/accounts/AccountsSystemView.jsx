@@ -37,6 +37,7 @@ import {
   DEFAULT_VENDOR_TRANSACTIONS,
 } from '../../utils/defaultPharmaVendors';
 import { DEFAULT_CASHIER_CLOSINGS } from '../../utils/defaultCashierClosings';
+import { getCycleDateRange } from '../../utils/periodEngine';
 
 /**
  * AccountsSystemView.jsx
@@ -486,6 +487,9 @@ export default function AccountsSystemView({
     const splitEach = Number((netShortage / bEmps.length).toFixed(2));
     const bName = branches.find((b) => b.id === branchId)?.name || 'الفرع';
 
+    const cycleRange = getCycleDateRange(month, state?.orgSettings);
+    const settleDate = cycleRange?.endDate || `${month}-20`;
+
     const newAdjs = bEmps.map((emp) => ({
       id: `adj-inv-shortage-${Date.now()}-${emp.id}`,
       employeeId: emp.id,
@@ -493,7 +497,7 @@ export default function AccountsSystemView({
       type: 'deduction',
       amount: splitEach,
       reason: `صافي عجز الجرد الشهري للأصناف بعد مقاصة أمانات الزيادة النقدية (${bName}) - شهر ${month}`,
-      date: `${month}-28`,
+      date: settleDate,
       createdAt: new Date().toISOString(),
       isInventoryShortage: true,
     }));

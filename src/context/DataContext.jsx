@@ -713,7 +713,24 @@ export function DataProvider({ children, showToast = () => {} }) {
     const emp = getEmp(empId);
     if (!emp) return { hours: 0, dailyRate: 0, rate: 0, hourlyRate: 0, monthlySalary: 0, contractualMonthlySalary: 0, salary: 0, baseEarnings: 0, totalBonus: 0, totalDeduction: 0, absenceDeduction: 0, netSalary: 0, absenceDaysCount: 0, perBranch: {} };
 
-    let effectiveFilterFn = filterFn || (() => true);
+    let effectiveFilterFn = filterFn;
+    if (!effectiveFilterFn) {
+      if (monthStr && typeof monthStr === 'string' && monthStr.length >= 7) {
+        const targetMonth = monthStr.slice(0, 7);
+        const range = getPayrollCutoffRange(targetMonth);
+        if (range && range.startDate && range.endDate) {
+          effectiveFilterFn = (d) => {
+            if (!d) return false;
+            const dStr = String(d).slice(0, 10);
+            return dStr >= range.startDate && dStr <= range.endDate;
+          };
+        } else {
+          effectiveFilterFn = (d) => d && String(d).startsWith(targetMonth);
+        }
+      } else {
+        effectiveFilterFn = () => true;
+      }
+    }
 
     const allBranchesList = state.branches || [];
     const targetBranchObj = targetBranchId
@@ -1044,6 +1061,7 @@ export function DataProvider({ children, showToast = () => {} }) {
       lateDeductionMinutes,
       manualDeduction,
       loanDeduction,
+      loansDeduction: loanDeduction,
       absenceDeduction: totalAbsenceDeduction,
       absenceDaysCount: totalAbsenceDaysCount,
       unpaidLeaveDaysCount,
@@ -1052,7 +1070,7 @@ export function DataProvider({ children, showToast = () => {} }) {
       netSalary,
       perBranch
     };
-  }, [state, getEmp, getAbsenceDaysCount]);
+  }, [state, getEmp, getAbsenceDaysCount, getPayrollCutoffRange]);
 
   const computeGrandPayroll = useCallback((filterFn, monthStr = null) => {
     const perEmp = {};

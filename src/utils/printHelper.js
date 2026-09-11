@@ -1534,7 +1534,8 @@ export function generateOfficialPayslipHTML({
           <div>المكافآت: <strong>+${fmt(totalBonus)} ج.م</strong></div>
           <div>تأخيرات: <strong>-${fmt(summary.lateDeduction || 0)} ج.م</strong></div>
           <div>غيابات: <strong>-${fmt(summary.absenceDeduction || 0)} ج.م</strong></div>
-          <div>سلف وأدوية: <strong>-${fmt(summary.loansDeduction || 0)} ج.م</strong></div>
+          <div>سلف وأدوية: <strong>-${fmt(summary.loansDeduction || summary.loanDeduction || 0)} ج.م</strong></div>
+          ${summary.manualDeduction > 0 ? `<div>جزاءات/عجز: <strong>-${fmt(summary.manualDeduction)} ج.م</strong></div>` : ''}
           <div>إجمالي الخصومات: <strong>-${fmt(totalDeduction)} ج.م</strong></div>
         </div>
       </div>
@@ -1606,10 +1607,15 @@ export function printEmployeePayslipDirect({
 
   // Compute summary if not provided
   let calculatedSummary = summary;
+  const cycleFilterFn = (d) => {
+    if (!d) return false;
+    const dStr = String(d).slice(0, 10);
+    return dStr >= startCutoff && dStr <= endCutoff;
+  };
   if (!calculatedSummary && typeof computeEmpSummary === 'function') {
-    calculatedSummary = computeEmpSummary(emp.id, null, targetMonth, selectedBranchId);
+    calculatedSummary = computeEmpSummary(emp.id, cycleFilterFn, targetMonth, selectedBranchId);
   } else if (!calculatedSummary && typeof state.computeEmpSummary === 'function') {
-    calculatedSummary = state.computeEmpSummary(emp.id, null, targetMonth, selectedBranchId);
+    calculatedSummary = state.computeEmpSummary(emp.id, cycleFilterFn, targetMonth, selectedBranchId);
   }
 
   if (!calculatedSummary) {

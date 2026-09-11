@@ -1,4 +1,5 @@
 import React from 'react';
+import { useUI } from '../../context/UIContext';
 
 export default function WhatsAppStatusCard({
   waServerStatus,
@@ -12,6 +13,7 @@ export default function WhatsAppStatusCard({
   handleSaveOrgSettings,
   showToast
 }) {
+  const { showConfirm } = useUI();
   return (
     <div className="whatsapp-sec-card settings-card">
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
@@ -49,7 +51,19 @@ export default function WhatsAppStatusCard({
                   borderRadius: '8px'
                 }}
                 onClick={async () => {
-                  const confirmed = window.confirm('هل أنت متأكد من رغبتك في تغيير رقم الواتساب المتصل وفك ارتباط الهاتف الحالي؟ سيتم توليد رمز QR جديد لربط الهاتف الجديد.');
+                  let confirmed = false;
+                  if (showConfirm) {
+                    confirmed = await showConfirm({
+                      title: 'تغيير رقم الواتساب المتصل',
+                      message: 'هل أنت متأكد من رغبتك في تغيير رقم الواتساب المتصل وفك ارتباط الهاتف الحالي؟\n\nسيتم توليد رمز QR جديد لربط الهاتف الجديد فوراً.',
+                      confirmText: 'نعم، فك الارتباط وتغيير الرقم',
+                      cancelText: 'إلغاء وتراجع',
+                      type: 'danger',
+                      icon: '📱'
+                    });
+                  } else {
+                    confirmed = window.confirm('هل أنت متأكد من رغبتك في تغيير رقم الواتساب المتصل وفك ارتباط الهاتف الحالي؟ سيتم توليد رمز QR جديد لربط الهاتف الجديد.');
+                  }
                   if (!confirmed) return;
                   showToast?.('⏳ جاري تسجيل الخروج وإلغاء اقتران الرقم الحالي...');
                   try {

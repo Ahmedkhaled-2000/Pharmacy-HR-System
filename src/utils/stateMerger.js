@@ -127,16 +127,24 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
     const localTime = getItemTime(localItem);
     const remoteTime = getItemTime(remoteItem);
     let mergedEmp = {};
-    if (localTime > remoteTime) {
+    if (localTime >= remoteTime) {
       mergedEmp = { ...remoteItem, ...localItem };
     } else {
-      // عند تفوق وقت السحابة أو عند تساوي التوقيتين: السحابة هي المرجع المعتمد
+      // عند تفوق وقت السحابة: السحابة هي المرجع المعتمد
       mergedEmp = { ...localItem, ...remoteItem };
       if (localItem.permissions !== undefined && remoteItem.permissions === undefined) {
         mergedEmp.permissions = localItem.permissions;
       } else if (remoteItem.permissions !== undefined) {
         mergedEmp.permissions = remoteItem.permissions;
       }
+    }
+
+    // صيانة وحماية أرقام الهواتف وتفاصيل الفروع إذا كانت موجودة في الطرف المحلي
+    if (Array.isArray(localItem.phones) && localItem.phones.length > 0 && (!Array.isArray(mergedEmp.phones) || mergedEmp.phones.length === 0)) {
+      mergedEmp.phones = localItem.phones;
+    }
+    if (Array.isArray(localItem.branchesDetails) && localItem.branchesDetails.length > 0 && (!Array.isArray(mergedEmp.branchesDetails) || mergedEmp.branchesDetails.length === 0)) {
+      mergedEmp.branchesDetails = localItem.branchesDetails;
     }
 
     // ── حماية وصيانة البصمة الإلكترونية من المسح العرضي أثناء الدمج ──
@@ -230,7 +238,7 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
   const localTime = getItemTime(localItem);
   const remoteTime = getItemTime(remoteItem);
 
-  let mergedBase = localTime > remoteTime
+  let mergedBase = localTime >= remoteTime
     ? { ...remoteItem, ...localItem }
     : { ...localItem, ...remoteItem };
 

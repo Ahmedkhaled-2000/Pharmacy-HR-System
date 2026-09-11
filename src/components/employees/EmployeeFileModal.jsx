@@ -276,6 +276,7 @@ export default function EmployeeFileModal({
   const [selectedDocType, setSelectedDocType] = useState('الرقم القومي');
   const [previewDoc, setPreviewDoc] = useState(null);
   const [codeError, setCodeError] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -283,10 +284,10 @@ export default function EmployeeFileModal({
     }
     if (editingEmp) {
       if (Array.isArray(editingEmp.phones) && editingEmp.phones.length > 0) {
-        setPhones(editingEmp.phones.map(p => ({
-          id: p.id || Math.random().toString(),
-          number: p.number ? String(p.number).replace(/\D/g, '') : '',
-          type: p.type || 'mobile'
+        setPhones(editingEmp.phones.map((p, idx) => ({
+          id: (typeof p === 'object' && p?.id) || String(idx + 1),
+          number: typeof p === 'string' ? String(p).replace(/\D/g, '') : (p?.number ? String(p.number).replace(/\D/g, '') : ''),
+          type: (typeof p === 'object' && p?.type) || 'mobile'
         })));
       } else if (editingEmp.phone && String(editingEmp.phone).trim()) {
         setPhones([
@@ -657,18 +658,21 @@ export default function EmployeeFileModal({
   const handleSubmit = (e) => {
     e.preventDefault();
     if (codeError) {
-      alert('يرجى تصحيح كود الموظف قبل الحفظ');
+      if (showToast) showToast('⚠️ يرجى تصحيح كود الموظف قبل الحفظ');
+      else alert('يرجى تصحيح كود الموظف قبل الحفظ');
       return;
     }
 
     if (!name.trim()) {
-      alert('يرجى إدخال اسم الموظف');
+      if (showToast) showToast('⚠️ يرجى إدخال اسم الموظف');
+      else alert('يرجى إدخال اسم الموظف');
       return;
     }
 
     const cleanCode = String(code || '').trim().toLowerCase();
     if (!cleanCode) {
-      alert('يرجى إدخال كود الموظف');
+      if (showToast) showToast('⚠️ يرجى إدخال كود الموظف');
+      else alert('يرجى إدخال كود الموظف');
       return;
     }
 
@@ -678,7 +682,8 @@ export default function EmployeeFileModal({
              e.id !== (editingEmp ? editingEmp.id : null)
     );
     if (isEmpDuplicate) {
-      alert('⚠️ كود الموظف مستخدم بالفعل لموظف آخر');
+      if (showToast) showToast('⚠️ كود الموظف مستخدم بالفعل لموظف آخر');
+      else alert('⚠️ كود الموظف مستخدم بالفعل لموظف آخر');
       return;
     }
 
@@ -687,7 +692,9 @@ export default function EmployeeFileModal({
       (b) => b.username && String(b.username).trim().toLowerCase() === cleanCode
     );
     if (branchConflict) {
-      alert(`⚠️ لا يمكن استخدام هذا الكود لأنه مستخدم كاسم مستخدم لفرع "${branchConflict.name}"`);
+      const msg = `⚠️ لا يمكن استخدام هذا الكود لأنه مستخدم كاسم مستخدم لفرع "${branchConflict.name}"`;
+      if (showToast) showToast(msg);
+      else alert(msg);
       return;
     }
 
@@ -732,12 +739,20 @@ export default function EmployeeFileModal({
 
     const isTerminated = status === 'تم الاستقالة';
     if (isTerminated && !terminationReason.trim()) {
-      alert('يرجى إدخال سبب الاستقالة / إنهاء الخدمة');
+      if (showToast) showToast('⚠️ يرجى إدخال سبب الاستقالة / إنهاء الخدمة');
+      else alert('يرجى إدخال سبب الاستقالة / إنهاء الخدمة');
       return;
     }
 
-    const validPhones = phones.filter(p => p.number && p.number.trim());
-    const primaryPhone = validPhones[0]?.number || '';
+    const validPhones = phones
+      .map((p, idx) => ({
+        id: p.id || String(idx + 1),
+        number: String(p.number || '').replace(/\D/g, '').trim(),
+        type: p.type || 'mobile'
+      }))
+      .filter(p => p.number.length > 0);
+
+    const primaryPhone = validPhones[0]?.number || (phone ? String(phone).replace(/\D/g, '').trim() : (editingEmp?.phone || ''));
 
     const isMgmt = isManagementJob(jobTitle, jobs);
 
@@ -752,13 +767,14 @@ export default function EmployeeFileModal({
     const combinedExtraTitle = validExtraAllowances.map(a => a.title).join(' + ');
 
     const employeeData = {
+      ...(editingEmp || {}),
       id: editingEmp && editingEmp.id && !editingEmp.isFromRecruitment ? editingEmp.id : `emp_${Date.now()}`,
       recruitmentApplicationId: editingEmp?.recruitmentApplicationId || editingEmp?.applicationId || undefined,
       isFromRecruitment: editingEmp?.isFromRecruitment || undefined,
       name: name.trim(),
       nickname: nickname.trim(),
       phone: primaryPhone,
-      phones: validPhones,
+      phones: validPhones.length > 0 ? validPhones : (primaryPhone ? [{ id: '1', type: 'mobile', number: primaryPhone }] : []),
       email: email.trim(),
       relativePhone: relativePhone.trim(),
       emergencyPhone: relativePhone.trim(),
@@ -818,44 +834,67 @@ export default function EmployeeFileModal({
       biometricFolderId,
       driveLastSyncAt,
       updatedAt: new Date().toISOString(),
-      createdAt: editingEmp ? editingEmp.createdAt : new Date().toISOString()
+      createdAt: editingEmp?.createdAt || new Date().toISOString()
     };
 
-    const performActualSave = () => {
-      if (onSave) {
-        onSave(employeeData);
-      } else if (setState && state) {
-        const isExisting = (state.employees || []).some(e => String(e.id) === String(employeeData.id));
-        let updatedEmps;
-        if (isExisting) {
-          updatedEmps = (state.employees || []).map(e => String(e.id) === String(employeeData.id) ? { ...e, ...employeeData } : e);
-        } else {
-          updatedEmps = [...(state.employees || []), employeeData];
-        }
-        const updatedState = { ...state, employees: updatedEmps };
-        setState(updatedState);
-        if (saveState) saveState(updatedState);
-      }
-
-      // Trigger auto background sync to Google Drive if configured
-      const driveConfig = state?.orgSettings?.driveConfig;
-      if (driveConfig && driveConfig.enabled && driveConfig.serviceUrl && driveConfig.autoSyncOnEmployeeSave !== false) {
-        syncEmployeeEntireDrive(employeeData, state.orgSettings)
-          .then((res) => {
-            if (res.success && res.updatedEmp && setState && state) {
-              const finalEmps = (state.employees || []).map(e => 
-                String(e.id) === String(res.updatedEmp.id) ? res.updatedEmp : e
-              );
-              const finalState = { ...state, employees: finalEmps };
-              setState(finalState);
-              if (saveState) saveState(finalState);
-              if (showToast) showToast(`☁️ تم إنشاء/تحديث مجلد الموظف (${employeeData.name}) على Google Drive بنجاح`);
+    const performActualSave = async () => {
+      if (isSaving) return;
+      setIsSaving(true);
+      try {
+        if (onSave) {
+          await onSave(employeeData);
+        } else if (setState) {
+          const currentState = state || {};
+          const isExisting = (currentState.employees || []).some(e => String(e.id) === String(employeeData.id));
+          let updatedEmps;
+          if (isExisting) {
+            updatedEmps = (currentState.employees || []).map(e => String(e.id) === String(employeeData.id) ? { ...e, ...employeeData } : e);
+          } else {
+            updatedEmps = [...(currentState.employees || []), employeeData];
+          }
+          const updatedState = { ...currentState, employees: updatedEmps };
+          setState(updatedState);
+          if (saveState) {
+            const saveRes = await saveState(updatedState);
+            if (saveRes && saveRes.success === false && saveRes.error) {
+              console.warn('[EmployeeSave] Save returned warning:', saveRes.error);
             }
-          })
-          .catch(err => console.warn('Background Google Drive sync error:', err));
-      }
+          }
+        }
 
-      onClose();
+        if (showToast) {
+          showToast(`✅ تم حفظ وتأمين ملف الموظف (${employeeData.name}) بنجاح`);
+        }
+
+        // Trigger auto background sync to Google Drive if configured
+        const driveConfig = state?.orgSettings?.driveConfig;
+        if (driveConfig && driveConfig.enabled && driveConfig.serviceUrl && driveConfig.autoSyncOnEmployeeSave !== false) {
+          syncEmployeeEntireDrive(employeeData, state.orgSettings)
+            .then((res) => {
+              if (res.success && res.updatedEmp && setState && state) {
+                const finalEmps = (state.employees || []).map(e => 
+                  String(e.id) === String(res.updatedEmp.id) ? res.updatedEmp : e
+                );
+                const finalState = { ...state, employees: finalEmps };
+                setState(finalState);
+                if (saveState) saveState(finalState);
+                if (showToast) showToast(`☁️ تم إنشاء/تحديث مجلد الموظف (${employeeData.name}) على Google Drive بنجاح`);
+              }
+            })
+            .catch(err => console.warn('Background Google Drive sync error:', err));
+        }
+
+        onClose();
+      } catch (err) {
+        console.error('Save error:', err);
+        if (showToast) {
+          showToast('❌ حدث خطأ أثناء حفظ بيانات الموظف: ' + (err.message || 'يرجى المحاولة مجدداً'));
+        } else {
+          alert('❌ حدث خطأ أثناء حفظ بيانات الموظف: ' + (err.message || ''));
+        }
+      } finally {
+        setIsSaving(false);
+      }
     };
 
     // ── فحص أقفال المالك للتعديلات المالية والإدارية الحساسة ──
@@ -2380,9 +2419,18 @@ export default function EmployeeFileModal({
               <button
                 type="submit"
                 className="btn btn-start"
-                style={{ minWidth: '165px', padding: '9px 24px', fontWeight: 800, borderRadius: '8px', fontSize: '13.5px' }}
+                disabled={isSaving}
+                style={{
+                  minWidth: '175px',
+                  padding: '9px 24px',
+                  fontWeight: 800,
+                  borderRadius: '8px',
+                  fontSize: '13.5px',
+                  opacity: isSaving ? 0.75 : 1,
+                  cursor: isSaving ? 'not-allowed' : 'pointer'
+                }}
               >
-                💾 حفظ ملف الموظف
+                {isSaving ? '⏳ جاري الحفظ والتأمين...' : '💾 حفظ ملف الموظف'}
               </button>
             </div>
           </div>

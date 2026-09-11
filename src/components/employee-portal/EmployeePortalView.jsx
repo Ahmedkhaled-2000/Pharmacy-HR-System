@@ -5875,13 +5875,22 @@ export default function EmployeePortalView({
                       {absenceDays.length > 0 && (
                         <div className="ep-breakdown-row" style={{ color: 'var(--danger)' }}><span className="ep-breakdown-label">- خصم الغياب ({absenceDays.length} يوم)</span><span className="ep-breakdown-value">-{fmt(absenceDeduction)} ج.م</span></div>
                       )}
-                      <div className="ep-breakdown-row" style={{ color: 'var(--danger)' }}><span className="ep-breakdown-label">- إجمالي الخصومات والجزاءات ({deductions.length} بند)</span><span className="ep-breakdown-value">-{fmt(summary.totalDeduction)} ج.م</span></div>
-                      {summary.loansDeduction > 0 && (
+                      {summary.manualDeduction > 0 && (
                         <div className="ep-breakdown-row" style={{ color: '#b91c1c', fontWeight: 'bold' }}>
-                          <span className="ep-breakdown-label">- إجمالي السلف وأقساط الشهر المعتمدة</span>
-                          <span className="ep-breakdown-value">-{fmt(summary.loansDeduction)} ج.م</span>
+                          <span className="ep-breakdown-label">- جزاءات واستقطاعات إدارية / عجز جرد</span>
+                          <span className="ep-breakdown-value">-{fmt(summary.manualDeduction)} ج.م</span>
                         </div>
                       )}
+                      {(summary.loansDeduction > 0 || summary.loanDeduction > 0) && (
+                        <div className="ep-breakdown-row" style={{ color: '#b91c1c', fontWeight: 'bold' }}>
+                          <span className="ep-breakdown-label">- إجمالي السلف وأقساط الشهر المعتمدة</span>
+                          <span className="ep-breakdown-value">-{fmt(summary.loansDeduction || summary.loanDeduction)} ج.م</span>
+                        </div>
+                      )}
+                      <div className="ep-breakdown-row" style={{ color: 'var(--danger)', fontWeight: '700', borderTop: '1px dashed var(--border)', paddingTop: '4px', marginTop: '4px' }}>
+                        <span className="ep-breakdown-label">📊 إجمالي الخصومات والجزاءات ({deductions.length} بند)</span>
+                        <span className="ep-breakdown-value">-{fmt(summary.totalDeduction)} ج.م</span>
+                      </div>
                       <div className="ep-net-salary-box">
                         <div className="ep-net-label">صافي المرتب المستحق</div>
                         <div className="ep-net-month">{lbl.arabic}</div>
