@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { calculateEmployeeLeaveStats, getEmployeeApprovedLeaves, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
+import { calculateEmployeeLeaveStats, getEmployeeApprovedLeaves, getEmpDisplayName, isEmployeeActive, parseAnnualLeaveBalance, normalizeState } from '../../utils/formatters';
 
 export default function LeavesTrackingModule({
   state,
@@ -10,6 +10,50 @@ export default function LeavesTrackingModule({
   const [selectedEmpModal, setSelectedEmpModal] = useState(null);
   const [filterBranch, setFilterBranch] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [editingLeaveBalanceEmp, setEditingLeaveBalanceEmp] = useState(null);
+  const [newBalanceInput, setNewBalanceInput] = useState('');
+
+  const handleOpenEditBalance = (emp, currentBalance) => {
+    setEditingLeaveBalanceEmp(emp);
+    setNewBalanceInput(String(currentBalance !== undefined && currentBalance !== null ? currentBalance : '21'));
+  };
+
+  const handleSaveLeaveBalance = async (e) => {
+    if (e) e.preventDefault();
+    if (!editingLeaveBalanceEmp) return;
+    const targetEmp = editingLeaveBalanceEmp;
+    const parsedVal = parseAnnualLeaveBalance(newBalanceInput, 21);
+
+    const updatedEmps = (state.employees || []).map((empItem) =>
+      String(empItem.id) === String(targetEmp.id) || (targetEmp.code && String(empItem.code) === String(targetEmp.code))
+        ? { ...empItem, annualLeaveBalance: parsedVal, updatedAt: new Date().toISOString() }
+        : empItem
+    );
+
+    const updatedState = normalizeState({
+      ...state,
+      employees: updatedEmps
+    });
+
+    if (setState) setState(updatedState);
+    if (saveState) {
+      try {
+        await saveState(updatedState);
+      } catch (err) {
+        console.warn('Error saving state on leave balance change:', err);
+      }
+    }
+
+    if (selectedEmpModal && (String(selectedEmpModal.id) === String(targetEmp.id) || selectedEmpModal.code === targetEmp.code)) {
+      setSelectedEmpModal({ ...selectedEmpModal, annualLeaveBalance: parsedVal });
+    }
+
+    if (showToast) {
+      showToast(`✅ تم تحديث رصيد إجازات الموظف (${getEmpDisplayName(targetEmp)}) إلى ${parsedVal} يوم بنجاح`);
+    }
+
+    setEditingLeaveBalanceEmp(null);
+  };
 
   const employees = state.employees || [];
   const branches = state.branches || [];
@@ -92,7 +136,19 @@ export default function LeavesTrackingModule({
                     <td style={{ fontWeight: '700' }}>{emp.code}</td>
                     <td style={{ fontWeight: '800' }}>{getEmpDisplayName(emp)}</td>
                     <td>{empBranch?.name || 'المركز الرئيسي'}</td>
-                    <td style={{ fontWeight: '800' }}>{annualTotal} يوم</td>
+                    <td style={{ fontWeight: '800' }}>
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                        <span>{annualTotal} يوم</span>
+                        <button
+                          className="btn btn-ghost"
+                          title="تعديل رصيد الإجازات السنوية للموظف"
+                          style={{ padding: '2px 8px', fontSize: '11.5px', border: '1px solid var(--border)', borderRadius: '6px', cursor: 'pointer', background: 'var(--surface-muted)' }}
+                          onClick={() => handleOpenEditBalance(emp, annualTotal)}
+                        >
+                          ✏️ تعديل
+                        </button>
+                      </div>
+                    </td>
                     <td style={{ color: '#d97706', fontWeight: '800' }}>{takenAnnualDays} يوم</td>
                     <td style={{ color: remainingAnnualDays > 0 ? '#16a34a' : '#dc2626', fontWeight: '900', fontSize: '15px' }}>
                       {remainingAnnualDays} يوم
@@ -139,7 +195,18 @@ export default function LeavesTrackingModule({
                   <span style={{ fontSize: '13px', color: 'var(--muted)' }}>
                     كود: {selectedEmpModal.code}
                     {selectedEmpModal.nickname && selectedEmpModal.nickname.trim() !== selectedEmpModal.name?.trim() && ` | الاسم الرسمي: ${selectedEmpModal.name}`}
-                    {' '}| الرصيد الكلي: <strong>{annualTotal} يوم</strong> | المأخوذ: <strong style={{ color: '#d97706' }}>{takenAnnualDays} يوم</strong> | المتبقي: <strong style={{ color: remainingAnnualDays > 0 ? '#16a34a' : '#dc2626' }}>{remainingAnnualDays} يوم</strong>
+                    {' '}| الرصيد الكلي:{' '}
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      <strong>{annualTotal} يوم</strong>
+                      <button
+                        className="btn btn-ghost"
+                        style={{ padding: '1px 6px', fontSize: '11px', border: '1px solid var(--border)', borderRadius: '4px', cursor: 'pointer' }}
+                        onClick={() => handleOpenEditBalance(selectedEmpModal, annualTotal)}
+                      >
+                        ✏️ تعديل
+                      </button>
+                    </span>
+                    {' '}| المأخوذ: <strong style={{ color: '#d97706' }}>{takenAnnualDays} يوم</strong> | المتبقي: <strong style={{ color: remainingAnnualDays > 0 ? '#16a34a' : '#dc2626' }}>{remainingAnnualDays} يوم</strong>
                   </span>
                 </div>
                 <button className="btn btn-ghost" onClick={() => setSelectedEmpModal(null)}>✕ إغلاق</button>
@@ -194,6 +261,72 @@ export default function LeavesTrackingModule({
           </div>
         );
       })()}
+
+      {/* Quick Edit Leave Balance Modal */}
+      {editingLeaveBalanceEmp && (
+        <div className="modal-backdrop" style={{ zIndex: 1200 }}>
+          <div className="modal-content card" style={{ maxWidth: '420px', width: '92%', padding: '24px', borderRadius: '16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+              <h3 style={{ margin: 0, color: '#0d9488', fontSize: '18px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                🏖️ تعديل رصيد الإجازات السنوية
+              </h3>
+              <button className="btn btn-ghost" onClick={() => setEditingLeaveBalanceEmp(null)} style={{ padding: '2px 8px' }}>✕</button>
+            </div>
+            
+            <p style={{ margin: '0 0 16px 0', fontSize: '14px', color: 'var(--text)' }}>
+              الموظف: <strong>{getEmpDisplayName(editingLeaveBalanceEmp)}</strong> (كود: {editingLeaveBalanceEmp.code})
+            </p>
+
+            <form onSubmit={handleSaveLeaveBalance}>
+              <div className="field" style={{ marginBottom: '20px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold', fontSize: '13.5px' }}>
+                  رصيد الإجازات السنوية الكلي (يوم):
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={newBalanceInput}
+                  onChange={(e) => setNewBalanceInput(e.target.value)}
+                  placeholder="21"
+                  style={{
+                    width: '100%',
+                    padding: '10px 14px',
+                    borderRadius: '8px',
+                    border: '1.5px solid #0d9488',
+                    fontSize: '18px',
+                    fontWeight: '800',
+                    color: '#0f766e',
+                    textAlign: 'center'
+                  }}
+                  autoFocus
+                  required
+                />
+                <span style={{ fontSize: '12px', color: 'var(--muted)', display: 'block', marginTop: '6px' }}>
+                  💡 يمكنك كتابة أي عدد أيام (مثلاً: 0، 15، 21، 30، أو كسر مثل 14.5).
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => setEditingLeaveBalanceEmp(null)}
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-start"
+                  style={{ fontWeight: '700', padding: '8px 20px' }}
+                >
+                  💾 حفظ وتحديث الرصيد
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
     </div>
   );

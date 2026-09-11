@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { fmt, arabicWeekday, parseArabicFloat, uid } from '../../utils/formatters';
+import { fmt, arabicWeekday, parseArabicFloat, parseAnnualLeaveBalance, uid } from '../../utils/formatters';
 import { getRealTodayStr } from '../../utils/timeEngine';
 import { compressImage } from '../../utils/imageCompressor';
 import { syncNow } from '../../utils/offlineSync';
@@ -118,7 +118,7 @@ export default function GlobalModalsContainer() {
       setEmpWorkHours(String(editingEmp.workHoursPerDay || 8));
       setEmpWorkDays(String(editingEmp.workDaysPerMonth || 26));
       setEmpPassword(editingEmp.password || '');
-      setEmpAnnualLeaveBalance(String(editingEmp.annualLeaveBalance !== undefined ? editingEmp.annualLeaveBalance : 21));
+      setEmpAnnualLeaveBalance(editingEmp.annualLeaveBalance !== undefined && editingEmp.annualLeaveBalance !== null && editingEmp.annualLeaveBalance !== '' ? String(editingEmp.annualLeaveBalance) : '21');
       setEmpPhotoUrl(editingEmp.photoUrl || '');
     } else {
       setEmpName('');
@@ -179,7 +179,7 @@ export default function GlobalModalsContainer() {
     const salary = parseArabicFloat(empSalary);
     const workHoursPerDay = parseArabicFloat(empWorkHours) || 8;
     const workDaysPerMonth = parseArabicFloat(empWorkDays) || 26;
-    const annualLeaveBalance = parseArabicFloat(empAnnualLeaveBalance) || 0;
+    const annualLeaveBalance = parseAnnualLeaveBalance(empAnnualLeaveBalance, 21);
 
     const isSalaryChanged = editingEmp && parseFloat(editingEmp.salary) !== salary;
     const isCutoffChanged = editingEmp && (

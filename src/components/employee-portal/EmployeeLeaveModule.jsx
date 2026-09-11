@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { fmt } from '../../utils/formatters';
+import { fmt, parseAnnualLeaveBalance } from '../../utils/formatters';
 import { getRealTodayStr } from '../../utils/timeEngine';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import { shouldRouteDirectToAdmin } from '../../utils/jobsHelper';
@@ -20,7 +20,7 @@ export default function EmployeeLeaveModule({
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const annualQuota = emp.annualLeaveBalance !== undefined ? Number(emp.annualLeaveBalance) : 21;
+  const annualQuota = parseAnnualLeaveBalance(emp.annualLeaveBalance, 21);
   const [leaveType, setLeaveType] = useState(annualQuota > 0 ? 'annual' : 'unpaid'); // 'annual' | 'unpaid'
   const [startDate, setStartDate] = useState(() => getRealTodayStr());
   const [endDate, setEndDate] = useState(() => getRealTodayStr());

@@ -3371,7 +3371,7 @@ export default function EmployeePortalView({
                     color: '#ffffff'
                   }}>
                     <span>🏖️ رصيد الإجازات:</span>
-                    <span>{emp.annualLeaveBalance !== undefined ? emp.annualLeaveBalance : 21} يوم</span>
+                    <span>{emp.annualLeaveBalance !== undefined && emp.annualLeaveBalance !== null && emp.annualLeaveBalance !== '' ? emp.annualLeaveBalance : 21} يوم</span>
                   </div>
                 </div>
               </div>
@@ -4134,7 +4134,7 @@ export default function EmployeePortalView({
                 </div>
                 <div style={{ background: 'rgba(255,255,255,0.15)', padding: '10px 18px', borderRadius: '12px', textAlign: 'center' }}>
                   <span style={{ fontSize: '12px', display: 'block', opacity: 0.85 }}>رصيد الإجازات السنوية</span>
-                  <span style={{ fontSize: '20px', fontWeight: '800' }}>{emp.annualLeaveBalance !== undefined ? emp.annualLeaveBalance : 21} يوم</span>
+                  <span style={{ fontSize: '20px', fontWeight: '800' }}>{emp.annualLeaveBalance !== undefined && emp.annualLeaveBalance !== null && emp.annualLeaveBalance !== '' ? emp.annualLeaveBalance : 21} يوم</span>
                 </div>
               </div>
 

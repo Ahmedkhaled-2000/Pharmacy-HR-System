@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { compressImage } from '../../utils/imageCompressor';
 import { DEFAULT_JOBS, isManagementJob, DEFAULT_DEPARTMENTS, getJobsList, getDepartmentsList } from '../../utils/jobsHelper';
 import { syncEmployeeEntireDrive } from '../../utils/googleDriveService';
-import { normalizeState } from '../../utils/formatters';
+import { normalizeState, parseAnnualLeaveBalance } from '../../utils/formatters';
 import { useUI } from '../../context/UIContext';
 import { useAuth } from '../../context/AuthContext';
 
@@ -416,7 +416,7 @@ export default function EmployeeFileModal({
       setTerminationReason(editingEmp.terminationReason || editingEmp.suspension_reason || '');
       setPassword(editingEmp.password || '');
 
-      setAnnualLeaveBalance(String(editingEmp.annualLeaveBalance !== undefined ? editingEmp.annualLeaveBalance : '21'));
+      setAnnualLeaveBalance(editingEmp.annualLeaveBalance !== undefined && editingEmp.annualLeaveBalance !== null && editingEmp.annualLeaveBalance !== '' ? String(editingEmp.annualLeaveBalance) : '21');
 
       setDocuments(Array.isArray(editingEmp.documents) ? editingEmp.documents.filter(d => d && d.fileUrl) : []);
 
@@ -576,7 +576,7 @@ export default function EmployeeFileModal({
       contractType,
       hireDate,
       status,
-      annualLeaveBalance: parseFloat(annualLeaveBalance) || 21,
+      annualLeaveBalance: parseAnnualLeaveBalance(annualLeaveBalance, 21),
       branchesDetails,
       documents,
       driveFolderId,
@@ -856,7 +856,7 @@ export default function EmployeeFileModal({
       suspension_reason: isTerminated ? terminationReason.trim() : '',
       terminationReason: isTerminated ? terminationReason.trim() : '',
       password,
-      annualLeaveBalance: parseFloat(annualLeaveBalance) || 21,
+      annualLeaveBalance: parseAnnualLeaveBalance(annualLeaveBalance, 21),
       documents,
       driveFolderId,
       driveFolderUrl,
@@ -1683,6 +1683,7 @@ export default function EmployeeFileModal({
                 <input
                   type="number"
                   min="0"
+                  step="any"
                   value={annualLeaveBalance}
                   onChange={(e) => setAnnualLeaveBalance(e.target.value)}
                   placeholder="21"

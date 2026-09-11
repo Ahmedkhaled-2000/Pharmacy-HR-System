@@ -141,7 +141,7 @@ export default function EmployeeModal({
             </div>
             <div className="field">
               <label>رصيد الإجازات السنوي (يوم)</label>
-              <input type="text" inputMode="numeric" value={empAnnualLeaveBalance} onChange={(e) => setEmpAnnualLeaveBalance(e.target.value)} placeholder="21" />
+              <input type="number" min="0" step="any" inputMode="decimal" value={empAnnualLeaveBalance} onChange={(e) => setEmpAnnualLeaveBalance(e.target.value)} placeholder="21" />
             </div>
             <div className="field">
               <label>كلمة السر (للدخول للبوابة)</label>

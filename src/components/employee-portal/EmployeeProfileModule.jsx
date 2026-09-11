@@ -403,7 +403,7 @@ export default function EmployeeProfileModule({
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: '#64748b' }}>رصيد الإجازات السنوية:</span>
-              <strong style={{ color: '#15803d' }}>🏖️ {emp.annualLeaveBalance || 21} يوم / سنة</strong>
+              <strong style={{ color: '#15803d' }}>🏖️ {emp.annualLeaveBalance !== undefined && emp.annualLeaveBalance !== null && emp.annualLeaveBalance !== '' ? emp.annualLeaveBalance : 21} يوم / سنة</strong>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #e2e8f0', paddingTop: '8px' }}>
               <span style={{ color: '#64748b' }}>الفروع المكلف بها:</span>

@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { uid, fmt, arabicWeekday, arabicMonthLabel, isEmployeeActive } from '../utils/formatters';
+import { uid, fmt, arabicWeekday, arabicMonthLabel, isEmployeeActive, parseAnnualLeaveBalance } from '../utils/formatters';
 import { getRealTodayStr } from '../utils/timeEngine';
 import { loadExcelJS, mergedTitle, tableHeaderRow, dataRow } from '../utils/excelExport';
 import { getJobsList, getDepartmentsList } from '../utils/jobsHelper';
@@ -187,12 +187,12 @@ export function useExcelOperations() {
         const department = getCellVal(row, colMap.department) || 'الصيدلية';
         const hireDate = getCellVal(row, colMap.hireDate);
         const contractType = getCellVal(row, colMap.contractType) || 'دوام كامل';
-        const annualLeaveBalance = parseFloat(getCellVal(row, colMap.annualLeaveBalance)) || 21;
+        const annualLeaveBalance = parseAnnualLeaveBalance(getCellVal(row, colMap.annualLeaveBalance), 21);
         const status = getCellVal(row, colMap.status) || 'على رأس العمل';
         const dob = getCellVal(row, colMap.dob);
         const maritalStatus = getCellVal(row, colMap.maritalStatus) || 'أعزب';
         const address = getCellVal(row, colMap.address);
-        const password = getCellVal(row, colMap.password) || '123';
+        const password = getCellVal(row, colMap.password) || '';
 
         // البحث عن الموظف إن كان مسجلاً بالكود أو الرقم القومي
         const existingIdx = currentEmps.findIndex(e => 
@@ -555,12 +555,12 @@ export function useExcelOperations() {
 
         r.getCell(21).value = emp.hireDate || '';
         r.getCell(22).value = emp.contractType || 'دوام كامل';
-        r.getCell(23).value = Number(emp.annualLeaveBalance) || 21;
+        r.getCell(23).value = parseAnnualLeaveBalance(emp.annualLeaveBalance, 21);
         r.getCell(24).value = emp.status || 'على رأس العمل';
         r.getCell(25).value = emp.dob || '';
         r.getCell(26).value = emp.maritalStatus || 'أعزب';
         r.getCell(27).value = emp.address || '';
-        r.getCell(28).value = String(emp.password || '123');
+        r.getCell(28).value = String(emp.password || '');
 
         // تنسيقات الخلايا
         r.getCell(1).numFmt = '@';

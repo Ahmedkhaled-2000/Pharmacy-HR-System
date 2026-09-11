@@ -486,7 +486,7 @@ export function generateEmployeeSummaryWord(emp, orgSettings = {}) {
     </tr>
     <tr>
       <td class="lbl">رصيد الإجازات السنوية:</td>
-      <td class="val"><strong>${emp.annualLeaveBalance !== undefined ? emp.annualLeaveBalance : 21}</strong> يوم</td>
+      <td class="val"><strong>${emp.annualLeaveBalance !== undefined && emp.annualLeaveBalance !== null && emp.annualLeaveBalance !== '' ? emp.annualLeaveBalance : 21}</strong> يوم</td>
       <td class="lbl">حالة البصمة الحيوية:</td>
       <td class="val">${emp.fingerprint_active !== false ? 'مفعلة بالنظام ✅' : 'معطلة مؤقتاً ❌'}</td>
     </tr>

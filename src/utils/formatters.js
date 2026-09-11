@@ -49,6 +49,25 @@ export function parseArabicFloat(val) {
   return parseFloat(str) || 0;
 }
 
+/**
+ * دالة قياسية لمعالجة وتحديد رصيد الإجازات السنوية للموظف.
+ * تدعم الأرقام الصفرية (0)، والكسور العشرية (مثل 15.5)، والأرقام العربية والإنجليزية.
+ * لا تعود للقيمة الافتراضية 21 إلا إذا كانت القيمة غير معرفة أو نصاً فارغاً تماماً.
+ */
+export function parseAnnualLeaveBalance(val, fallback = 21) {
+  if (val === undefined || val === null || String(val).trim() === '') {
+    return fallback;
+  }
+  const str = String(val)
+    .replace(/[٠١٢٣٤٥٦٧٨٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d))
+    .replace(/[۰۱۲۳۴۵۶۷۸۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d))
+    .replace(/,/g, '.')
+    .trim();
+  const num = parseFloat(str);
+  return !isNaN(num) ? Math.max(0, num) : fallback;
+}
+
+
 export function normalizeDigits(str) {
   if (str === null || str === undefined) return '';
   return String(str)
@@ -270,7 +289,8 @@ export function normalizeState(parsed) {
     id: e.id || e.code || uid(),
     nickname: e.nickname || '',
     phone: e.phone || '',
-    username: e.username || e.code || ''
+    username: e.username || e.code || '',
+    annualLeaveBalance: parseAnnualLeaveBalance(e.annualLeaveBalance, 21)
   }));
 
   // Ensure existing employees have devices array and normalized permissions
@@ -1024,7 +1044,7 @@ export const getUniqueApprovedLeavesForEmployee = getEmployeeApprovedLeaves;
 export function calculateEmployeeLeaveStats(emp, state, targetYear = '') {
   if (!emp) return { annualTotal: 21, takenAnnualDays: 0, remainingAnnualDays: 21, approvedLeaves: [] };
   const year = targetYear || todayStr().slice(0, 4);
-  const annualTotal = emp.annualLeaveBalance !== undefined ? parseInt(emp.annualLeaveBalance, 10) : 21;
+  const annualTotal = parseAnnualLeaveBalance(emp.annualLeaveBalance, 21);
   const allLeaves = getEmployeeApprovedLeaves(emp, state);
 
   const approvedAnnualLeaves = allLeaves.filter((r) => {
@@ -1035,10 +1055,10 @@ export function calculateEmployeeLeaveStats(emp, state, targetYear = '') {
     return isAnnual && isAppr && inYear;
   });
 
-  const leavesSum = approvedAnnualLeaves.reduce((acc, r) => acc + (parseInt(r.daysCount || r.days || 1, 10)), 0);
-  const manualTaken = parseInt(emp.manualTakenAnnualDays || emp.takenAnnualLeaves || emp.usedAnnualDays || 0, 10) || 0;
-  const takenAnnualDays = leavesSum + manualTaken;
-  const remainingAnnualDays = Math.max(0, annualTotal - takenAnnualDays);
+  const leavesSum = approvedAnnualLeaves.reduce((acc, r) => acc + (parseFloat(r.daysCount || r.days || 1) || 0), 0);
+  const manualTaken = parseFloat(emp.manualTakenAnnualDays || emp.takenAnnualLeaves || emp.usedAnnualDays || 0) || 0;
+  const takenAnnualDays = Math.round((leavesSum + manualTaken) * 10) / 10;
+  const remainingAnnualDays = Math.max(0, Math.round((annualTotal - takenAnnualDays) * 10) / 10);
 
   return {
     annualTotal,
