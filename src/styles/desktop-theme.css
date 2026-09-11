@@ -66,6 +66,33 @@ body.is-desktop-mode {
   scrollbar-width: none !important;
 }
 
+/* ── وضع الشاشة الكاملة (F11 Fullscreen Mode) ── */
+body.is-fullscreen-mode,
+html.is-fullscreen-mode {
+  height: 100vh !important;
+  max-height: 100vh !important;
+  overflow: hidden !important;
+}
+
+body.is-fullscreen-mode .desktop-system-titlebar,
+.is-fullscreen-mode .desktop-system-titlebar {
+  display: none !important;
+  height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+body.is-fullscreen-mode .app-viewport-wrapper.desktop-viewport-fixed,
+.is-fullscreen-mode .app-viewport-wrapper.desktop-viewport-fixed,
+.is-fullscreen-mode .desktop-viewport-fixed {
+  height: 100vh !important;
+  max-height: 100vh !important;
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+
 /* ── 2. تنعيم الخطوط العربية لشاشات الحواسيب (HiDPI ClearType) ── */
 body, button, input, select, textarea {
   font-family: 'Segoe UI Variable Text', 'Segoe UI', 'Cairo', 'Tajawal', -apple-system, BlinkMacSystemFont, sans-serif !important;

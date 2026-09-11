@@ -143,6 +143,25 @@ function createMainWindow() {
     try { mainWindow?.webContents?.send('window:maximized-change', false); } catch {}
   });
 
+  // إرسال أحداث وضع الشاشة الكاملة (F11) لإخفاء/إظهار شريط العنوان وشريط المهام
+  mainWindow.on('enter-full-screen', () => {
+    try { mainWindow?.webContents?.send('window:fullscreen-change', true); } catch {}
+  });
+
+  mainWindow.on('leave-full-screen', () => {
+    try { mainWindow?.webContents?.send('window:fullscreen-change', false); } catch {}
+  });
+
+  // اعتراض اختصار F11 لتحويل التطبيق لوضع ملء الشاشة الكاملة وإخفاء شريط العنوان وشريط المهام
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.type === 'keyDown' && (input.key === 'F11' || input.code === 'F11')) {
+      event.preventDefault();
+      if (mainWindow) {
+        mainWindow.setFullScreen(!mainWindow.isFullScreen());
+      }
+    }
+  });
+
   // السماح بكامل الصلاحيات للكاميرا ومكبر الصوت وأجهزة الوسائط لالتقاط بصمة الوجه واليد دون قيود
   mainWindow.webContents.session.setPermissionCheckHandler((_webContents, _permission) => {
     return true;
@@ -293,6 +312,17 @@ ipcMain.on('window:maximize', () => {
 });
 ipcMain.on('window:close', () => mainWindow?.close());
 ipcMain.handle('window:is-maximized', () => mainWindow ? mainWindow.isMaximized() : false);
+ipcMain.on('window:toggle-fullscreen', () => {
+  if (mainWindow) {
+    mainWindow.setFullScreen(!mainWindow.isFullScreen());
+  }
+});
+ipcMain.on('window:set-fullscreen', (_event, flag) => {
+  if (mainWindow) {
+    mainWindow.setFullScreen(Boolean(flag));
+  }
+});
+ipcMain.handle('window:is-fullscreen', () => mainWindow ? mainWindow.isFullScreen() : false);
 ipcMain.handle('app:check-online', () => {
   try {
     return net.isOnline();

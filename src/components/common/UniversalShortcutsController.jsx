@@ -137,6 +137,19 @@ export default function UniversalShortcutsController() {
         return;
       }
 
+      // ── 0.2 F11 Fullscreen Mode (تبديل وضع ملء الشاشة الكاملة وإخفاء شريط العنوان وشريط المهام) ──
+      if (e.key === 'F11' || e.code === 'F11') {
+        consumeEvent();
+        if (window.desktopAPI?.toggleFullScreen) {
+          window.desktopAPI.toggleFullScreen();
+        } else if (document.fullscreenElement) {
+          document.exitFullscreen?.().catch(() => {});
+        } else {
+          document.documentElement.requestFullscreen?.().catch(() => {});
+        }
+        return;
+      }
+
       // ── 1. Escape Key (Universal Modal & Popup Closer) ─────────────────────────
       const closeDef = getDef('closeModal');
       const isEscape =

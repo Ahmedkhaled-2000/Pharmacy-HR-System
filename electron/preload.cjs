@@ -26,6 +26,15 @@ contextBridge.exposeInMainWorld('desktopAPI', {
     ipcRenderer.on('window:maximized-change', listener);
     return () => ipcRenderer.removeListener('window:maximized-change', listener);
   },
+  toggleFullScreen: () => ipcRenderer.send('window:toggle-fullscreen'),
+  setFullScreen: (flag) => ipcRenderer.send('window:set-fullscreen', flag),
+  isFullScreen: () => ipcRenderer.invoke('window:is-fullscreen'),
+  onFullScreenChange: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, isFs) => callback(isFs);
+    ipcRenderer.on('window:fullscreen-change', listener);
+    return () => ipcRenderer.removeListener('window:fullscreen-change', listener);
+  },
 
   // 3. قاعدة البيانات المحلية على قرص الويندوز (Offline-First Persistent Storage)
   saveStateLocally: (state) => ipcRenderer.invoke('local-db:save-state', state),

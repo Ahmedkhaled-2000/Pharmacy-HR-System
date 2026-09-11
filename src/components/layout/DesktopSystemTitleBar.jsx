@@ -11,6 +11,7 @@ import { RefreshCw, CheckCircle2, Download, Sparkles, AlertCircle, Info } from '
 export default function DesktopSystemTitleBar() {
   const isDesktop = typeof window !== 'undefined' && Boolean(window.desktopAPI?.isDesktop);
   const [isMaximized, setIsMaximized] = useState(false);
+  const [isFullScreen, setIsFullScreen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [appVersion, setAppVersion] = useState('');
   const [updateStatus, setUpdateStatus] = useState('idle'); // 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'not-available' | 'error' | 'dev_mode'
@@ -20,6 +21,32 @@ export default function DesktopSystemTitleBar() {
 
   useEffect(() => {
     if (!isDesktop) return;
+
+    // استعلام عن وضع الشاشة الكاملة مبدئياً
+    if (window.desktopAPI?.isFullScreen) {
+      window.desktopAPI.isFullScreen().then((isFs) => {
+        setIsFullScreen(Boolean(isFs));
+        if (isFs) {
+          document.body.classList.add('is-fullscreen-mode');
+          document.documentElement.classList.add('is-fullscreen-mode');
+        }
+      }).catch(() => {});
+    }
+
+    // الاستماع لوضع الشاشة الكاملة (F11 Fullscreen)
+    let unsubscribeFullScreen = null;
+    if (window.desktopAPI?.onFullScreenChange) {
+      unsubscribeFullScreen = window.desktopAPI.onFullScreenChange((isFs) => {
+        setIsFullScreen(Boolean(isFs));
+        if (isFs) {
+          document.body.classList.add('is-fullscreen-mode');
+          document.documentElement.classList.add('is-fullscreen-mode');
+        } else {
+          document.body.classList.remove('is-fullscreen-mode');
+          document.documentElement.classList.remove('is-fullscreen-mode');
+        }
+      });
+    }
 
     // استعلام عن امتلاك البرنامج لكامل الصلاحيات كمسؤول
     if (window.desktopAPI?.isAdmin) {
@@ -91,10 +118,11 @@ export default function DesktopSystemTitleBar() {
       window.removeEventListener('resize', handleResize);
       if (unsubscribeMax) unsubscribeMax();
       if (unsubscribeUpdate) unsubscribeUpdate();
+      if (unsubscribeFullScreen) unsubscribeFullScreen();
     };
   }, [isDesktop]);
 
-  if (!isDesktop) return null;
+  if (!isDesktop || isFullScreen) return null;
 
   const handleMinimize = (e) => {
     e.stopPropagation();
@@ -401,6 +429,34 @@ export default function DesktopSystemTitleBar() {
           }}
         >
           {isMaximized ? '🗗' : '🗖'}
+        </button>
+
+        {/* زر ملء الشاشة الكاملة F11 */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            window.desktopAPI?.toggleFullScreen?.();
+          }}
+          className="native-win-btn"
+          title="ملء الشاشة الكاملة (F11)"
+          style={{
+            width: '40px',
+            height: '32px',
+            background: 'transparent',
+            border: 'none',
+            color: 'inherit',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            fontSize: '12px',
+            transition: 'background-color 0.15s ease',
+            outline: 'none',
+            padding: 0
+          }}
+        >
+          ⛶
         </button>
 
         {/* زر التصغير ― */}
