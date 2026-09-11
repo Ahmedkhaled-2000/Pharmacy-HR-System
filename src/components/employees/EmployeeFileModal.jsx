@@ -908,10 +908,62 @@ export default function EmployeeFileModal({
             });
           }
 
+          // ── تحديث ومزامنة حالة طلب التوظيف في حال تعيين المرشح ──
+          const recAppId = employeeData.recruitmentApplicationId;
+          const recAppCode = employeeData.recruitmentApplicationCode;
+          const empCleanName = String(employeeData.name || '').trim().toLowerCase();
+          const empCleanPhone = String(employeeData.phone || '').replace(/\D/g, '');
+
+          const updatedApplications = (currentState.recruitmentApplications || []).map(app => {
+            const isTargetApp = (recAppId && String(app.id) === String(recAppId)) ||
+                                (recAppCode && String(app.code) === String(recAppCode)) ||
+                                (cleanNid && app.nationalId && String(app.nationalId).replace(/\D/g, '') === cleanNid) ||
+                                (empCleanName && app.name && String(app.name).trim().toLowerCase() === empCleanName && (
+                                  (empCleanPhone && app.phone && String(app.phone).replace(/\D/g, '') === empCleanPhone) ||
+                                  (app.targetJobTitle && employeeData.jobTitle && app.targetJobTitle === employeeData.jobTitle)
+                                ));
+            if (isTargetApp) {
+              return {
+                ...app,
+                status: 'hired',
+                hiredAt: app.hiredAt || employeeData.hireDate || new Date().toISOString(),
+                hiredEmployeeId: employeeData.id,
+                hiredEmployeeCode: employeeData.code,
+                updatedAt: new Date().toISOString()
+              };
+            }
+            return app;
+          });
+
+          // ── تطهير سجل المحذوفات (_deletedIds) فوراً من أي كود أو معرف يخص هذا الموظف ──
+          const keysToUnblock = new Set([
+            String(employeeData.id),
+            String(employeeData.id).toLowerCase(),
+            `emp_${employeeData.id}`,
+            `emp_${String(employeeData.id).toLowerCase()}`,
+            cleanCode,
+            `emp_${cleanCode}`,
+            `emp_code_${cleanCode}`,
+            `code_${cleanCode}`,
+            cleanNid,
+            `emp_nid_${cleanNid}`
+          ]);
+          if (employeeData.username) {
+            const u = String(employeeData.username).trim().toLowerCase();
+            keysToUnblock.add(u);
+            keysToUnblock.add(`emp_${u}`);
+            keysToUnblock.add(`user_${u}`);
+          }
+          const cleanedDeletedIds = (currentState._deletedIds || []).filter(
+            d => d !== null && d !== undefined && !keysToUnblock.has(String(d).trim().toLowerCase())
+          );
+
           // تطبيع وضمان عدم وجود تكرار وإعادة توجيه أي علاقات
           const updatedState = normalizeState({
             ...currentState,
-            employees: updatedEmps
+            employees: updatedEmps,
+            recruitmentApplications: updatedApplications,
+            _deletedIds: cleanedDeletedIds
           });
 
           // ── Optimistic UI: تحديث الواجهة فوراً بلا تأخير ──

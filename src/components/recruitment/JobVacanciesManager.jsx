@@ -3,6 +3,7 @@ import QRCode from 'qrcode';
 import { DEFAULT_JOBS, getJobsList, DEFAULT_DEPARTMENTS, getDepartmentsList } from '../../utils/jobsHelper';
 import { DEFAULT_VACANCIES } from '../../utils/recruitmentHelper';
 import { useUI } from '../../context/UIContext';
+import { getPublicSystemUrl } from '../../utils/systemUrlHelper';
 
 export default function JobVacanciesManager({
   state,
@@ -40,15 +41,16 @@ export default function JobVacanciesManager({
   const [qrDataUrl, setQrDataUrl] = useState('');
 
   // Public Links
-  const publicApplyUrl = `${window.location.origin}/careers`;
-  const interviewerPortalUrl = `${window.location.origin}/interview`;
+  const publicApplyUrl = getPublicSystemUrl('/careers', state);
+  const interviewerPortalUrl = getPublicSystemUrl('/interview', state);
 
   // Open QR Code Modal
   const handleOpenQrModal = async (url, title) => {
     try {
-      const dataUrl = await QRCode.toDataURL(url, { width: 280, margin: 2 });
+      const publicUrl = getPublicSystemUrl(url, state);
+      const dataUrl = await QRCode.toDataURL(publicUrl, { width: 280, margin: 2 });
       setQrDataUrl(dataUrl);
-      setQrModal({ isOpen: true, url, title });
+      setQrModal({ isOpen: true, url: publicUrl, title });
     } catch (err) {
       console.error('QR code generation error:', err);
     }

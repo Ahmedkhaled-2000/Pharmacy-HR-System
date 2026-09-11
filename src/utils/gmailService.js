@@ -4,6 +4,7 @@
 
 import { fmt, getRealTodayStr } from './formatters';
 import { compileDailyDigestData } from './digestDataEngine';
+import { getPublicSystemOrigin } from './systemUrlHelper';
 
 /**
  * دالة استخراج إعدادات الجيميل الموثقة بأعلى أولوية (LocalStorage أولاً ثم State)
@@ -56,41 +57,7 @@ export function getAuthoritativeGmailConfig(state) {
  * استخراج الرابط المعتمد للمنظومة (ديناميكي وفقاً للدومين الفعلي أو الإعدادات)
  */
 export function getSystemAppUrl(stateOrConfig) {
-  // 1. فحص الإعدادات المباشرة أو داخل orgSettings
-  const cfg = stateOrConfig?.systemUrl
-    ? stateOrConfig
-    : (stateOrConfig?.orgSettings?.gmailConfig || stateOrConfig?.orgSettings || stateOrConfig || {});
-
-  if (cfg?.systemUrl && typeof cfg.systemUrl === 'string' && cfg.systemUrl.trim().startsWith('http')) {
-    return cfg.systemUrl.trim().replace(/\/+$/, '');
-  }
-
-  // 2. فحص LocalStorage
-  try {
-    const localCfg = JSON.parse(localStorage.getItem('pharmacy_gmail_config') || '{}');
-    if (localCfg?.systemUrl && typeof localCfg.systemUrl === 'string' && localCfg.systemUrl.trim().startsWith('http')) {
-      return localCfg.systemUrl.trim().replace(/\/+$/, '');
-    }
-    const savedUrl = localStorage.getItem('pharmacy_system_url');
-    if (savedUrl && typeof savedUrl === 'string' && savedUrl.trim().startsWith('http')) {
-      return savedUrl.trim().replace(/\/+$/, '');
-    }
-  } catch {}
-
-  // 3. قراءة النطاق الحي المباشر من المتصفح (window.location.origin)
-  if (typeof window !== 'undefined' && window.location && window.location.origin) {
-    const origin = window.location.origin;
-    if (origin && origin !== 'null' && !origin.startsWith('file:')) {
-      if (!origin.includes('localhost') && !origin.includes('127.0.0.1')) {
-        try { localStorage.setItem('pharmacy_system_url', origin); } catch {}
-        return origin;
-      }
-      return origin;
-    }
-  }
-
-  // 4. الدومين الرسمي المعتمد للمنظومة بدلاً من الروابط القديمة
-  return 'https://pharmacy-hr-system.vercel.app';
+  return getPublicSystemOrigin(stateOrConfig);
 }
 
 /**

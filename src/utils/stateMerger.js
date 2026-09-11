@@ -71,80 +71,82 @@ export function toSafeArray(val) {
 }
 
 /**
- * فحص ما إذا كان العنصر محذوفاً نهائياً بشكل دقيق لمنع الحذف الخاطئ للطلبات الجديدة
+ * فحص ما إذا كان العنصر محذوفاً نهائياً بشكل دقيق لمنع الحذف الخاطئ للطلبات الجديدة والموظفين النشطين
+ * يعتمد على عزل البادئات (Prefix Isolation) لمنع تداخل أرقام الحركات مع أكواد الموظفين
  */
-export function isItemDeleted(item, key, deletedIds) {
+export function isItemDeleted(item, key, deletedIds, options = {}) {
   if (!item || typeof item !== 'object') return true;
   if (!deletedIds || !(deletedIds instanceof Set) || deletedIds.size === 0) return false;
 
-  // 1. فحص مباشر للمفتاح المحدد
+  const prefix = options.prefix || '';
+
+  // 1. حماية قصوى وعزل تام للموظفين (Employee Prefix Isolation)
+  // لا يجوز إطلاقاً حذف موظف بسبب رقم مجرد مثل '1' أو '2' أو '103' قادم من حذف شفت أو حركة مالية
+  if (prefix === 'emp') {
+    const idStr = item.id ? String(item.id).trim() : '';
+    const idLower = idStr.toLowerCase();
+    if (idStr) {
+      if (idStr.startsWith('emp_') && (deletedIds.has(idStr) || deletedIds.has(idLower))) return true;
+      if (deletedIds.has(`emp_${idStr}`) || deletedIds.has(`emp_${idLower}`) || deletedIds.has(`emp_del_${idStr}`)) return true;
+    }
+    if (item._id) {
+      const _idStr = String(item._id).trim();
+      if (_idStr.startsWith('emp_') && (deletedIds.has(_idStr) || deletedIds.has(_idStr.toLowerCase()))) return true;
+      if (deletedIds.has(`emp_${_idStr}`)) return true;
+    }
+    if (item.code !== undefined && item.code !== null && item.code !== '') {
+      const codeStr = String(item.code).trim().toLowerCase();
+      if (deletedIds.has(`emp_code_${codeStr}`) || deletedIds.has(`emp_${codeStr}`)) return true;
+    }
+    if (item.username !== undefined && item.username !== null && item.username !== '') {
+      const uStr = String(item.username).trim().toLowerCase();
+      if (deletedIds.has(`emp_user_${uStr}`) || deletedIds.has(`emp_${uStr}`) || deletedIds.has(`user_${uStr}`)) return true;
+    }
+    if (item.nationalId !== undefined && item.nationalId !== null && item.nationalId !== '') {
+      const nid = String(item.nationalId).replace(/\D/g, '');
+      if (nid && (deletedIds.has(`emp_nid_${nid}`) || deletedIds.has(`nid_${nid}`))) return true;
+    }
+    // الحصانة الذاتية: الموظف لا يُحذف برقم مجرد إطلاقاً
+    return false;
+  }
+
+  // 2. فحص طلبات التوظيف (Recruitment Applications)
+  if (prefix === 'app') {
+    const idStr = item.id ? String(item.id).trim() : '';
+    const idLower = idStr.toLowerCase();
+    if (idStr && (deletedIds.has(idStr) || deletedIds.has(idLower) || deletedIds.has(`app_${idStr}`) || deletedIds.has(`app_${idLower}`))) return true;
+    if (item.code) {
+      const codeStr = String(item.code).trim().toLowerCase();
+      if (deletedIds.has(codeStr) || deletedIds.has(`app_${codeStr}`) || deletedIds.has(`app_code_${codeStr}`)) return true;
+    }
+    return false;
+  }
+
+  // 3. فحص مباشر للمفتاح المحدد
   if (key) {
     const kStr = String(key);
     if (deletedIds.has(kStr) || deletedIds.has(kStr.toLowerCase())) return true;
   }
 
-  // 2. فحص المعرف الأساسي id و _id
+  // 4. فحص المعرف الأساسي id و _id للكائنات العامة
   if (item.id !== undefined && item.id !== null && item.id !== '') {
     const idStr = String(item.id).trim();
     const idLower = idStr.toLowerCase();
-    if (
-      deletedIds.has(idStr) ||
-      deletedIds.has(idLower) ||
-      deletedIds.has(`emp_${idStr}`) ||
-      deletedIds.has(`emp_${idLower}`) ||
-      deletedIds.has(`emp_code_${idLower}`) ||
-      deletedIds.has(`code_${idLower}`)
-    ) return true;
+    if (deletedIds.has(idStr) || deletedIds.has(idLower)) return true;
+    if (prefix && (deletedIds.has(`${prefix}_${idStr}`) || deletedIds.has(`${prefix}_${idLower}`))) return true;
   }
   if (item._id !== undefined && item._id !== null && item._id !== '') {
     const idStr = String(item._id).trim();
     const idLower = idStr.toLowerCase();
-    if (
-      deletedIds.has(idStr) ||
-      deletedIds.has(idLower) ||
-      deletedIds.has(`emp_${idStr}`) ||
-      deletedIds.has(`emp_${idLower}`) ||
-      deletedIds.has(`emp_code_${idLower}`) ||
-      deletedIds.has(`code_${idLower}`)
-    ) return true;
+    if (deletedIds.has(idStr) || deletedIds.has(idLower)) return true;
+    if (prefix && (deletedIds.has(`${prefix}_${idStr}`) || deletedIds.has(`${prefix}_${idLower}`))) return true;
   }
 
-  // 3. فحص كود الموظف، اسم المستخدم، أو الرقم القومي
-  if (item.code !== undefined && item.code !== null && item.code !== '') {
-    const codeStr = String(item.code).trim().toLowerCase();
-    if (
-      deletedIds.has(codeStr) ||
-      deletedIds.has(`emp_${codeStr}`) ||
-      deletedIds.has(`emp_code_${codeStr}`) ||
-      deletedIds.has(`code_${codeStr}`)
-    ) return true;
-  }
-  if (item.username !== undefined && item.username !== null && item.username !== '') {
-    const uStr = String(item.username).trim().toLowerCase();
-    if (
-      deletedIds.has(uStr) ||
-      deletedIds.has(`emp_${uStr}`) ||
-      deletedIds.has(`user_${uStr}`)
-    ) return true;
-  }
-  if (item.nationalId !== undefined && item.nationalId !== null && item.nationalId !== '') {
-    const nid = String(item.nationalId).replace(/\D/g, '');
-    if (
-      nid && (
-        deletedIds.has(nid) ||
-        deletedIds.has(`emp_nid_${nid}`) ||
-        deletedIds.has(`nid_${nid}`)
-      )
-    ) return true;
-  }
-
-  // 4. فحص المعاملات التابعة لموظف محذوف (شفتات، إجازات، سلف، طلبات)
+  // 5. فحص المعاملات التابعة لموظف محذوف (شفتات، إجازات، سلف، طلبات)
   if (item.employeeId !== undefined && item.employeeId !== null && item.employeeId !== '') {
     const empIdStr = String(item.employeeId).trim();
     const empIdLower = empIdStr.toLowerCase();
     if (
-      deletedIds.has(empIdStr) ||
-      deletedIds.has(empIdLower) ||
       deletedIds.has(`emp_${empIdStr}`) ||
       deletedIds.has(`emp_${empIdLower}`) ||
       deletedIds.has(`emp_code_${empIdLower}`) ||
@@ -154,21 +156,20 @@ export function isItemDeleted(item, key, deletedIds) {
   if (item.employeeCode !== undefined && item.employeeCode !== null && item.employeeCode !== '') {
     const empCodeStr = String(item.employeeCode).trim().toLowerCase();
     if (
-      deletedIds.has(empCodeStr) ||
       deletedIds.has(`emp_${empCodeStr}`) ||
       deletedIds.has(`emp_code_${empCodeStr}`) ||
       deletedIds.has(`code_${empCodeStr}`)
     ) return true;
   }
 
-  // 5. فحص الأجهزة المحذوفة
+  // 6. فحص الأجهزة المحذوفة
   if (item.deviceId && (
     deletedIds.has(String(item.deviceId)) ||
     deletedIds.has(String(item.deviceId).toLowerCase()) ||
     deletedIds.has(`dev_${item.deviceId}`)
   )) return true;
 
-  // 6. فحص طلبات معينة
+  // 7. فحص طلبات معينة
   if (item.requestId && (
     deletedIds.has(String(item.requestId)) ||
     deletedIds.has(String(item.requestId).toLowerCase()) ||
@@ -199,7 +200,7 @@ export function mergeArrays(localArr = [], remoteArr = [], options = {}) {
   for (const item of remoteList) {
     if (!item || typeof item !== 'object') continue;
     const key = getItemKey(item, options.prefix || 'rem');
-    if (key && !isItemDeleted(item, key, deletedIds)) {
+    if (key && !isItemDeleted(item, key, deletedIds, options)) {
       map.set(key, item);
     }
   }
@@ -208,7 +209,7 @@ export function mergeArrays(localArr = [], remoteArr = [], options = {}) {
   for (const item of localList) {
     if (!item || typeof item !== 'object') continue;
     const key = getItemKey(item, options.prefix || 'loc');
-    if (!key || isItemDeleted(item, key, deletedIds)) continue;
+    if (!key || isItemDeleted(item, key, deletedIds, options)) continue;
 
     if (!map.has(key)) {
       // عنصر جديد غير موجود في السحابة أضيف محلياً -> الحفاظ عليه
@@ -519,15 +520,50 @@ export function smartMergeStates(localState, remoteState) {
     deletedIds.add(s.toLowerCase());
   }
 
+  // ── تطهير ذاتي وحصانة مطلقة للموظفين الفعليين (Self-Healing Active Employee Immunity) ──
+  // أي موظف موجود في أي من الطرفين له اسم ومعرف، يتم حمايته فوراً وإسقاط أي تومبستون قديم يعارضه
+  const allCurrentEmployees = [
+    ...toSafeArray(localState.employees),
+    ...toSafeArray(remoteState.employees)
+  ];
+  for (const emp of allCurrentEmployees) {
+    if (!emp || typeof emp !== 'object' || !emp.name) continue;
+    if (emp.id) {
+      const idStr = String(emp.id).trim();
+      deletedIds.delete(idStr);
+      deletedIds.delete(idStr.toLowerCase());
+      deletedIds.delete(`emp_${idStr}`);
+      deletedIds.delete(`emp_${idStr.toLowerCase()}`);
+      deletedIds.delete(`emp_del_${idStr}`);
+    }
+    if (emp.code !== undefined && emp.code !== null && emp.code !== '') {
+      const cStr = String(emp.code).trim();
+      deletedIds.delete(cStr);
+      deletedIds.delete(cStr.toLowerCase());
+      deletedIds.delete(`emp_${cStr}`);
+      deletedIds.delete(`emp_code_${cStr}`);
+      deletedIds.delete(`emp_code_${cStr.toLowerCase()}`);
+    }
+    if (emp.username) {
+      const uStr = String(emp.username).trim().toLowerCase();
+      deletedIds.delete(uStr);
+      deletedIds.delete(`emp_${uStr}`);
+      deletedIds.delete(`user_${uStr}`);
+    }
+  }
+
   // معالجة ومراعاة تاريخ التصفير الشامل _wipedAt إن وجد لمنع إعادة إحياء البيانات القديمة
   const remoteWipeTime = remoteState._wipedAt ? new Date(remoteState._wipedAt).getTime() : 0;
   const localWipeTime = localState._wipedAt ? new Date(localState._wipedAt).getTime() : 0;
   const isRemoteWipeNewer = remoteWipeTime > localWipeTime;
   const isLocalWipeNewer = localWipeTime > remoteWipeTime;
 
-  const filterPreWipe = (arr, wipeTime) => {
+  const filterPreWipe = (arr, wipeTime, isEmployeeArray = false) => {
     if (!wipeTime || wipeTime <= 0) return arr;
     return toSafeArray(arr).filter((item) => {
+      if (isEmployeeArray && item && item.name && item.status !== 'تم الاستقالة' && item.is_active !== false) {
+        return true; // الموظفون النشطون محصنون تماماً من التصفير العرضي
+      }
       const itemT = getItemTime(item);
       return itemT >= wipeTime;
     });
@@ -538,7 +574,7 @@ export function smartMergeStates(localState, remoteState) {
 
   if (isRemoteWipeNewer) {
     // السحابة قامت بعمل تصفير، نمنع الجهاز المحلي من إعادة إرسال الكيانات القديمة التي أنشئت قبل التصفير
-    effectiveLocal.employees = filterPreWipe(effectiveLocal.employees, remoteWipeTime);
+    effectiveLocal.employees = filterPreWipe(effectiveLocal.employees, remoteWipeTime, true);
     effectiveLocal.shifts = filterPreWipe(effectiveLocal.shifts, remoteWipeTime);
     effectiveLocal.requests = filterPreWipe(effectiveLocal.requests, remoteWipeTime);
     effectiveLocal.leaveRequests = filterPreWipe(effectiveLocal.leaveRequests, remoteWipeTime);
@@ -551,7 +587,7 @@ export function smartMergeStates(localState, remoteState) {
     effectiveLocal.activeShifts = {};
   } else if (isLocalWipeNewer) {
     // الجهاز المحلي قام بعمل تصفير حديث، نمنع السحابة من إعادة البيانات الممسوحة
-    effectiveRemote.employees = filterPreWipe(effectiveRemote.employees, localWipeTime);
+    effectiveRemote.employees = filterPreWipe(effectiveRemote.employees, localWipeTime, true);
     effectiveRemote.shifts = filterPreWipe(effectiveRemote.shifts, localWipeTime);
     effectiveRemote.requests = filterPreWipe(effectiveRemote.requests, localWipeTime);
     effectiveRemote.leaveRequests = filterPreWipe(effectiveRemote.leaveRequests, localWipeTime);

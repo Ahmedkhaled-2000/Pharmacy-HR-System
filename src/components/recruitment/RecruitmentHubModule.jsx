@@ -1,5 +1,6 @@
-import React, { useState, useMemo } from 'react';
-import { APPLICATION_STATUSES, convertApplicantToEmployeeDraft, calculateEvaluationScore } from '../../utils/recruitmentHelper';
+import React, { useState, useMemo, useEffect } from 'react';
+import { APPLICATION_STATUSES, convertApplicantToEmployeeDraft, calculateEvaluationScore, generateApplicationCode } from '../../utils/recruitmentHelper';
+import { getJobsList, getDepartmentsList } from '../../utils/jobsHelper';
 import JobVacanciesManager from './JobVacanciesManager';
 import ApplicantDetailsModal from './ApplicantDetailsModal';
 import ScheduleInterviewModal from './ScheduleInterviewModal';
@@ -27,6 +28,73 @@ export default function RecruitmentHubModule({
   const [selectedApplicant, setSelectedApplicant] = useState(null);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
+  const [isAddApplicantModalOpen, setIsAddApplicantModalOpen] = useState(false);
+
+  // Manual Applicant Form State
+  const availableJobs = getJobsList(state);
+  const availableDepts = getDepartmentsList(state);
+  const [manualForm, setManualForm] = useState({
+    name: '',
+    phone: '',
+    nationalId: '',
+    targetJobTitle: availableJobs[0]?.title || 'صيدلي',
+    department: availableDepts[0] || 'الصيدلية',
+    preferredBranchId: '',
+    qualification: '',
+    experienceYears: '0',
+    expectedSalary: '',
+    notes: ''
+  });
+
+  // ── مزامنة استرجاعية تلقائية: أي مرشح تم تعيينه وأصبح موظفاً نشطاً ينتقل فوراً لـ "تم القبول والتعيين" ──
+  useEffect(() => {
+    if (!state?.employees || !applications.length) return;
+    const employees = state.employees || [];
+
+    let hasChanges = false;
+    const updatedApps = applications.map(app => {
+      if (app.status === 'hired') return app;
+
+      const cleanAppNid = String(app.nationalId || '').replace(/\D/g, '');
+      const cleanAppName = String(app.name || '').trim().toLowerCase();
+      const cleanAppPhone = String(app.phone || '').replace(/\D/g, '');
+
+      const matchedEmp = employees.find(emp => {
+        if (!emp) return false;
+        if (emp.recruitmentApplicationId && String(emp.recruitmentApplicationId) === String(app.id)) return true;
+        if (emp.recruitmentApplicationCode && String(emp.recruitmentApplicationCode) === String(app.code)) return true;
+        const cleanEmpNid = String(emp.nationalId || '').replace(/\D/g, '');
+        if (cleanAppNid && cleanEmpNid && cleanAppNid === cleanEmpNid) return true;
+        const cleanEmpName = String(emp.name || '').trim().toLowerCase();
+        const cleanEmpPhone = String(emp.phone || '').replace(/\D/g, '');
+        if (cleanAppName && cleanEmpName && cleanAppName === cleanEmpName) {
+          if (cleanAppPhone && cleanEmpPhone && cleanAppPhone === cleanEmpPhone) return true;
+          if (emp.jobTitle && app.targetJobTitle && emp.jobTitle === app.targetJobTitle) return true;
+          return true;
+        }
+        return false;
+      });
+
+      if (matchedEmp) {
+        hasChanges = true;
+        return {
+          ...app,
+          status: 'hired',
+          hiredAt: app.hiredAt || matchedEmp.hireDate || matchedEmp.createdAt || new Date().toISOString(),
+          hiredEmployeeId: matchedEmp.id,
+          hiredEmployeeCode: matchedEmp.code,
+          updatedAt: new Date().toISOString()
+        };
+      }
+      return app;
+    });
+
+    if (hasChanges) {
+      const updatedState = { ...state, recruitmentApplications: updatedApps };
+      if (setState) setState(updatedState);
+      if (saveState) saveState(updatedState).catch(() => {});
+    }
+  }, [state?.employees, applications]);
 
   // Statistics counters
   const stats = useMemo(() => {
@@ -171,22 +239,104 @@ export default function RecruitmentHubModule({
 
   // Delete Application
   const handleDelete = async (appId) => {
+    const targetApp = applications.find(a => String(a.id) === String(appId));
+    const appDisplayName = targetApp?.name || targetApp?.code || 'هذا الطلب';
+
     const isConfirmed = await showConfirm({
-      title: 'حذف طلب التوظيف',
-      message: 'هل أنت متأكد من حذف طلب التعيين هذا نهائياً من سجلات التوظيف؟',
-      confirmText: 'تأكيد الحذف',
+      title: 'حذف طلب التوظيف نهائياً',
+      message: `هل أنت متأكد من حذف طلب التعيين الخاص بـ (${appDisplayName}) نهائياً؟ لن يتم استرجاعه حتى مع مزامنة السحابة.`,
+      confirmText: 'تأكيد الحذف نهائياً',
       cancelText: 'إلغاء وتراجع',
       type: 'danger',
       icon: '🗑️'
     });
     if (!isConfirmed) return;
 
-    const updatedApps = applications.filter(a => a.id !== appId);
-    const updatedState = { ...state, recruitmentApplications: updatedApps };
+    // تسجيل معرفات الكيان في قائمة المحذوفات نهائياً (Tombstones) لمنع قيام السحابة بإحيائه
+    const deletedKeys = [
+      String(appId),
+      String(appId).toLowerCase(),
+      `app_${appId}`,
+      `app_${String(appId).toLowerCase()}`
+    ];
+    if (targetApp?.code) {
+      const codeStr = String(targetApp.code).trim();
+      deletedKeys.push(codeStr);
+      deletedKeys.push(codeStr.toLowerCase());
+      deletedKeys.push(`app_${codeStr}`);
+      deletedKeys.push(`app_${codeStr.toLowerCase()}`);
+      deletedKeys.push(`app_code_${codeStr.toLowerCase()}`);
+    }
+
+    const updatedApps = applications.filter(a => String(a.id) !== String(appId) && (!targetApp?.code || String(a.code) !== String(targetApp.code)));
+    const updatedDeletedIds = Array.from(new Set([...(state._deletedIds || []), ...deletedKeys])).filter(Boolean).slice(-3000);
+
+    const updatedState = {
+      ...state,
+      recruitmentApplications: updatedApps,
+      _deletedIds: updatedDeletedIds
+    };
+
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
     setIsDetailsModalOpen(false);
-    showToast?.('🗑️ تم حذف طلب التعيين');
+    setSelectedApplicant(null);
+    showToast?.('🗑️ تم حذف طلب التعيين نهائياً وبنجاح');
+  };
+
+  // Manual Add Applicant Handler
+  const handleSaveManualApplicant = async (e) => {
+    e?.preventDefault();
+    const cleanName = (manualForm.name || '').trim();
+    if (!cleanName || /^\d+$/.test(cleanName) || cleanName.length < 3) {
+      showToast?.('يرجى إدخال اسم مرشح صحيح باللغة العربية (وليس أرقاماً فقط)');
+      return;
+    }
+    const cleanPhone = (manualForm.phone || '').replace(/\D/g, '');
+    if (!cleanPhone || cleanPhone.length < 9) {
+      showToast?.('يرجى إدخال رقم هاتف صحيح');
+      return;
+    }
+
+    const appCode = generateApplicationCode();
+    const newApp = {
+      id: `app_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+      code: appCode,
+      status: 'new',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      name: cleanName,
+      phone: cleanPhone,
+      nationalId: (manualForm.nationalId || '').replace(/\D/g, ''),
+      targetJobTitle: manualForm.targetJobTitle || 'صيدلي',
+      department: manualForm.department || 'الصيدلية',
+      preferredBranchId: manualForm.preferredBranchId || '',
+      qualification: (manualForm.qualification || '').trim() || 'مؤهل جامعي مناسب',
+      experienceYears: String(manualForm.experienceYears || '0'),
+      expectedSalary: (manualForm.expectedSalary || '').trim(),
+      notes: (manualForm.notes || '').trim()
+    };
+
+    const updatedApps = [newApp, ...applications];
+    const updatedState = { ...state, recruitmentApplications: updatedApps };
+
+    if (setState) setState(updatedState);
+    if (saveState) await saveState(updatedState);
+
+    setIsAddApplicantModalOpen(false);
+    setManualForm({
+      name: '',
+      phone: '',
+      nationalId: '',
+      targetJobTitle: availableJobs[0]?.title || 'صيدلي',
+      department: availableDepts[0] || 'الصيدلية',
+      preferredBranchId: '',
+      qualification: '',
+      experienceYears: '0',
+      expectedSalary: '',
+      notes: ''
+    });
+    showToast?.(`✅ تم تسجيل طلب التوظيف الجديد للمرشح (${cleanName}) بنجاح`);
   };
 
   // Update Internal HR Notes
@@ -452,14 +602,38 @@ export default function RecruitmentHubModule({
           </button>
         </div>
 
-        <button
-          type="button"
-          onClick={handleExportExcel}
-          style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '8px 16px', borderRadius: '10px', fontSize: '13px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
-        >
-          <span>📊</span>
-          <span>تصدير Excel</span>
-        </button>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={() => setIsAddApplicantModalOpen(true)}
+            style={{
+              background: 'linear-gradient(135deg, #0d9488, #0f766e)',
+              color: '#ffffff',
+              border: 'none',
+              padding: '8px 16px',
+              borderRadius: '10px',
+              fontSize: '13px',
+              fontWeight: 800,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: '0 2px 8px rgba(13, 148, 136, 0.25)'
+            }}
+          >
+            <span>➕</span>
+            <span>إضافة طلب توظيف يدوي</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleExportExcel}
+            style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '8px 16px', borderRadius: '10px', fontSize: '13px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <span>📊</span>
+            <span>تصدير Excel</span>
+          </button>
+        </div>
       </div>
 
       {/* ── Tab Content: Vacancies & Requirements ── */}
@@ -706,8 +880,27 @@ export default function RecruitmentHubModule({
                         👁️ استعراض الملف
                       </button>
 
-                      <div style={{ display: 'flex', gap: '6px' }}>
-                        {app.status !== 'hired' && (
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                        {app.status === 'hired' ? (
+                          <span
+                            style={{
+                              padding: '6px 12px',
+                              borderRadius: '8px',
+                              fontSize: '12px',
+                              fontWeight: 900,
+                              background: '#ecfdf5',
+                              color: '#059669',
+                              border: '1px solid #a7f3d0',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}
+                          >
+                            <span>✅</span>
+                            <span>تم التعيين كموظف</span>
+                            {app.hiredEmployeeCode && <span style={{ opacity: 0.85, fontSize: '11px' }}>({app.hiredEmployeeCode})</span>}
+                          </span>
+                        ) : (
                           <button
                             type="button"
                             onClick={() => handleApproveAndHire(app)}
@@ -736,6 +929,27 @@ export default function RecruitmentHubModule({
                         >
                           💬
                         </a>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(app.id)}
+                          style={{
+                            padding: '7px 10px',
+                            borderRadius: '8px',
+                            fontSize: '12px',
+                            background: '#fef2f2',
+                            border: '1px solid #fecaca',
+                            color: '#ef4444',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            transition: 'all 0.2s ease'
+                          }}
+                          title="حذف طلب التعيين نهائياً"
+                        >
+                          🗑️
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -796,6 +1010,243 @@ export default function RecruitmentHubModule({
           onSchedule={handleSaveSchedule}
           showToast={showToast}
         />
+      )}
+
+      {/* 3. Manual Add Applicant Modal */}
+      {isAddApplicantModalOpen && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(15, 23, 42, 0.65)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          padding: '16px'
+        }}>
+          <div style={{
+            background: '#ffffff',
+            borderRadius: '20px',
+            width: '100%',
+            maxWidth: '680px',
+            maxHeight: '90vh',
+            overflowY: 'auto',
+            padding: '24px',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)',
+            border: '1px solid #e2e8f0',
+            fontFamily: "'Cairo', 'Tajawal', sans-serif"
+          }}>
+            {/* Modal Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid #e2e8f0', paddingBottom: '14px' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 900, color: '#0f172a' }}>
+                  ➕ تسجيل طلب توظيف يدوي جديد
+                </h3>
+                <p style={{ margin: '4px 0 0', fontSize: '12.5px', color: '#64748b' }}>
+                  إدخال بيانات مرشح جديد مباشرة من داخل النظام وإضافته لسجل التوظيف
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAddApplicantModalOpen(false)}
+                style={{ background: '#f1f5f9', border: 'none', borderRadius: '50%', width: '34px', height: '34px', cursor: 'pointer', fontSize: '16px', color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Form */}
+            <form onSubmit={handleSaveManualApplicant} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '12px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
+                    اسم المرشح بالكامل *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    className="form-control"
+                    placeholder="مثال: أحمد محمد علي حسن"
+                    value={manualForm.name}
+                    onChange={e => setManualForm(prev => ({ ...prev, name: e.target.value }))}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a', fontSize: '13.5px' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
+                    رقم الهاتف المحمول *
+                  </label>
+                  <input
+                    type="tel"
+                    required
+                    className="form-control"
+                    placeholder="01xxxxxxxxx"
+                    value={manualForm.phone}
+                    onChange={e => setManualForm(prev => ({ ...prev, phone: e.target.value }))}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a', fontSize: '13.5px' }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
+                    الرقم القومي (اختياري - 14 رقم)
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={14}
+                    className="form-control"
+                    placeholder="2xxxxxxxxxxxxx"
+                    value={manualForm.nationalId}
+                    onChange={e => setManualForm(prev => ({ ...prev, nationalId: e.target.value }))}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a', fontSize: '13.5px' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
+                    الوظيفة المطلوبة *
+                  </label>
+                  <select
+                    className="form-control"
+                    value={manualForm.targetJobTitle}
+                    onChange={e => setManualForm(prev => ({ ...prev, targetJobTitle: e.target.value }))}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a', fontSize: '13px', fontWeight: 700 }}
+                  >
+                    {availableJobs.map(j => (
+                      <option key={j.id || j.title} value={j.title}>{j.title}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
+                    القسم
+                  </label>
+                  <select
+                    className="form-control"
+                    value={manualForm.department}
+                    onChange={e => setManualForm(prev => ({ ...prev, department: e.target.value }))}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a', fontSize: '13px', fontWeight: 600 }}
+                  >
+                    {availableDepts.map(d => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
+                    الفرع المفضل
+                  </label>
+                  <select
+                    className="form-control"
+                    value={manualForm.preferredBranchId}
+                    onChange={e => setManualForm(prev => ({ ...prev, preferredBranchId: e.target.value }))}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a', fontSize: '13px', fontWeight: 600 }}
+                  >
+                    <option value="">أي فرع متاح</option>
+                    {branches.map(b => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: '12px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
+                    المؤهل الدراسي والتخصص
+                  </label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="مثال: بكالوريوس صيدلة - جامعة الإسكندرية"
+                    value={manualForm.qualification}
+                    onChange={e => setManualForm(prev => ({ ...prev, qualification: e.target.value }))}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a', fontSize: '13px' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
+                    سنوات الخبرة السابقة
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="50"
+                    className="form-control"
+                    value={manualForm.experienceYears}
+                    onChange={e => setManualForm(prev => ({ ...prev, experienceYears: e.target.value }))}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a', fontSize: '13px' }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '12px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
+                    الراتب المتوقع (ج.م)
+                  </label>
+                  <input
+                    type="number"
+                    className="form-control"
+                    placeholder="مثال: 6500"
+                    value={manualForm.expectedSalary}
+                    onChange={e => setManualForm(prev => ({ ...prev, expectedSalary: e.target.value }))}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a', fontSize: '13px' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
+                    ملاحظات المقابلة أو الاستقبال
+                  </label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="أي ملاحظات مبدئية عن المرشح..."
+                    value={manualForm.notes}
+                    onChange={e => setManualForm(prev => ({ ...prev, notes: e.target.value }))}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', background: '#f8fafc', border: '1.5px solid #cbd5e1', color: '#0f172a', fontSize: '13px' }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '14px', borderTop: '1px solid #e2e8f0', paddingTop: '14px' }}>
+                <button
+                  type="button"
+                  onClick={() => setIsAddApplicantModalOpen(false)}
+                  style={{ padding: '9px 18px', borderRadius: '10px', fontSize: '13.5px', fontWeight: 700, background: '#f1f5f9', border: '1px solid #cbd5e1', color: '#475569', cursor: 'pointer' }}
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  style={{
+                    padding: '9px 24px',
+                    borderRadius: '10px',
+                    fontSize: '13.5px',
+                    fontWeight: 900,
+                    background: 'linear-gradient(135deg, #0d9488, #0f766e)',
+                    border: 'none',
+                    color: '#ffffff',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 12px rgba(13, 148, 136, 0.3)'
+                  }}
+                >
+                  💾 حفظ وتسجيل الطلب
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

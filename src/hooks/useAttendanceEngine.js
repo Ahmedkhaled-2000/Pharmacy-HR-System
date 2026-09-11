@@ -1153,17 +1153,20 @@ export function useAttendanceEngine() {
       const updatedEvals = (state.evaluations || []).filter((ev) => !isMatchingEmpItem(ev));
 
       const newDeleted = [
-        empIdStr,
-        `emp_${empIdStr}`
+        `emp_${empIdStr}`,
+        `emp_del_${empIdStr}`
       ];
+      if (empIdStr.startsWith('emp_')) {
+        newDeleted.push(empIdStr);
+      }
       if (empCodeStr) {
-        newDeleted.push(empCodeStr, `emp_${empCodeStr}`, `emp_code_${empCodeStr}`);
+        newDeleted.push(`emp_${empCodeStr}`, `emp_code_${empCodeStr}`);
       }
       if (empUserStr) {
-        newDeleted.push(empUserStr, `emp_${empUserStr}`);
+        newDeleted.push(`emp_${empUserStr}`, `user_${empUserStr}`);
       }
       if (empNid) {
-        newDeleted.push(empNid, `emp_nid_${empNid}`);
+        newDeleted.push(`emp_nid_${empNid}`, `nid_${empNid}`);
       }
 
       const updatedDeletedIds = Array.from(new Set([

@@ -1,4 +1,5 @@
 import React from 'react';
+import { getPublicSystemUrl } from '../../utils/systemUrlHelper';
 
 export default function OrgSettingsCard({
   orgNameInput,
@@ -7,7 +8,8 @@ export default function OrgSettingsCard({
   setOrgLogoUrlInput,
   handleFileUpload,
   biometricType,
-  setBiometricType
+  setBiometricType,
+  state
 }) {
   return (
     <div className="org-settings-card settings-card">
@@ -91,20 +93,25 @@ export default function OrgSettingsCard({
           <input
             type="text"
             readOnly
-            value={window.location.origin + '/kiosk'}
+            value={getPublicSystemUrl('/kiosk', state)}
             style={{ flex: '1 1 260px', background: 'var(--surface-muted)', fontWeight: 600, direction: 'ltr', textAlign: 'left' }}
           />
           <button
             type="button"
             className="btn btn-start"
             onClick={() => {
-              const link = window.location.origin + '/kiosk';
+              const link = getPublicSystemUrl('/kiosk', state);
               navigator.clipboard.writeText(link);
-              alert('✅ تم نسخ رابط البصمة الإلكترونية إلى الحافظة بنجاح!\n' + link);
+              alert('✅ تم نسخ رابط البصمة الإلكترونية العام إلى الحافظة بنجاح!\n' + link);
             }}
           >
             📋 نسخ رابط البصمة الإلكترونية
           </button>
+        </div>
+        <div style={{ marginTop: '8px' }}>
+          <span style={{ fontSize: '11.5px', color: '#0d9488', fontWeight: 700 }}>
+            🌐 رابط عام رسمي معتمد للفروع والشاشات الخارجية
+          </span>
         </div>
       </div>
     </div>

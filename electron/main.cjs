@@ -4,7 +4,7 @@
  * تشمل إدارة النوافذ، قاعدة البيانات المحلية المحمية، ومحرك التحديث التلقائي الصامت
  */
 
-const { app, BrowserWindow, ipcMain, Menu, dialog, powerMonitor, net, protocol } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, dialog, powerMonitor, net, protocol, utilityProcess } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const url = require('url');
@@ -495,8 +495,11 @@ function checkWhatsAppServerHealth() {
   });
 }
 
+let waChildProcess = null;
+
 function resolveWhatsAppServerScript() {
   const possiblePaths = [
+    path.join(process.resourcesPath || '', 'app.asar.unpacked', 'server', 'whatsapp-server.js'),
     path.join(__dirname, '../server/whatsapp-server.js'),
     path.join(process.resourcesPath || '', 'app', 'server', 'whatsapp-server.js'),
     path.join(process.resourcesPath || '', 'server', 'whatsapp-server.js'),
@@ -517,8 +520,76 @@ function launchWhatsAppServerProcess() {
     }
     console.log('[WhatsApp Gateway] 🚀 Auto-launching WhatsApp server:', scriptPath);
 
-    // تشغيل كعملية منفصلة ومستقلة 24/7 (Detached Background Process)
+    const waAuthDir = path.join(userDataPath, 'whatsapp-auth');
+    if (!fs.existsSync(waAuthDir)) {
+      try { fs.mkdirSync(waAuthDir, { recursive: true }); } catch {}
+    }
+
+    const env = {
+      ...process.env,
+      PORT: '3100',
+      WA_AUTH_PATH: waAuthDir,
+      NODE_ENV: 'production'
+    };
+
+    if (waChildProcess) {
+      try {
+        if (typeof waChildProcess.kill === 'function') waChildProcess.kill();
+      } catch {}
+      waChildProcess = null;
+    }
+
+    // 1. الأولوية الأولى: utilityProcess من Electron (محرك Node مدمج 100% ولا يحتاج Node.js على الويندوز)
+    if (utilityProcess && typeof utilityProcess.fork === 'function') {
+      try {
+        console.log('[WhatsApp Gateway] Spawning via Electron utilityProcess...');
+        waChildProcess = utilityProcess.fork(scriptPath, [], {
+          env,
+          cwd: path.dirname(scriptPath),
+          stdio: 'pipe',
+          serviceName: 'PharmacyHR-WhatsApp-Server'
+        });
+
+        waChildProcess.stdout?.on('data', (data) => {
+          console.log(`[WhatsApp Server]: ${data}`);
+        });
+
+        waChildProcess.stderr?.on('data', (data) => {
+          console.error(`[WhatsApp Server ERR]: ${data}`);
+        });
+
+        waChildProcess.on('exit', (code) => {
+          console.warn(`[WhatsApp Gateway] Child process exited with code ${code}`);
+          waChildProcess = null;
+        });
+
+        return true;
+      } catch (errUtility) {
+        console.warn('[WhatsApp Gateway] utilityProcess.fork failed, falling back to process.execPath:', errUtility.message);
+      }
+    }
+
+    // 2. الأولوية الثانية: تشغيل محرك Electron كـ Node عبر process.execPath مع ELECTRON_RUN_AS_NODE=1
+    try {
+      console.log('[WhatsApp Gateway] Spawning via process.execPath (ELECTRON_RUN_AS_NODE)...');
+      const child = spawn(process.execPath, [scriptPath], {
+        env: { ...env, ELECTRON_RUN_AS_NODE: '1' },
+        cwd: path.dirname(scriptPath),
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+        shell: false
+      });
+      child.unref();
+      waChildProcess = child;
+      return true;
+    } catch (errExec) {
+      console.warn('[WhatsApp Gateway] process.execPath spawn failed, falling back to node:', errExec.message);
+    }
+
+    // 3. الأولوية الثالثة: fallback على أمر node الخارجي (لبيئة التطوير)
     const child = spawn('node', [scriptPath], {
+      env,
       cwd: path.dirname(scriptPath),
       detached: true,
       stdio: 'ignore',
@@ -526,6 +597,7 @@ function launchWhatsAppServerProcess() {
       shell: false
     });
     child.unref();
+    waChildProcess = child;
     return true;
   } catch (err) {
     console.error('[WhatsApp Gateway Auto-Launch Error]:', err);
@@ -547,6 +619,17 @@ async function ensureWhatsAppServerRunning() {
     return { success: false, error: err.message };
   }
 }
+
+// مراقبة دورية كل 30 ثانية لضمان بقاء خادم الواتساب قيد التشغيل وإعادة إطلاقه تلقائياً عند أي سقوط مفاجئ
+setInterval(async () => {
+  try {
+    const health = await checkWhatsAppServerHealth();
+    if (!health.online) {
+      console.log('[WhatsApp Gateway Watchdog] ⚠️ Server is offline, auto-recovering...');
+      launchWhatsAppServerProcess();
+    }
+  } catch {}
+}, 30000);
 
 async function killAndRestartWhatsAppServer() {
   console.log('[WhatsApp Gateway] 🔄 Killing and restarting WhatsApp server...');
@@ -722,6 +805,18 @@ app.whenReady().then(() => {
       createMainWindow();
     }
   });
+});
+
+app.on('before-quit', () => {
+  if (waChildProcess) {
+    try {
+      console.log('[WhatsApp Gateway] Cleaning up child process before quit...');
+      if (typeof waChildProcess.kill === 'function') {
+        waChildProcess.kill();
+      }
+    } catch {}
+    waChildProcess = null;
+  }
 });
 
 app.on('window-all-closed', () => {

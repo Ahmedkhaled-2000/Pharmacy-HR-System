@@ -79,7 +79,7 @@ export async function renderHtmlToPdfBuffer(htmlContent) {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const AUTH_DIR = path.join(__dirname, 'whatsapp-auth');
+const AUTH_DIR = process.env.WA_AUTH_PATH || path.join(__dirname, 'whatsapp-auth');
 
 if (!fs.existsSync(AUTH_DIR)) {
   try {
@@ -526,11 +526,19 @@ app.post('/api/logout', async (req, res) => {
   res.json({ success: true, message: 'تم تسجيل الخروج وفك ارتباط الرقم بنجاح، وجاري توليد رمز الاقتران الجديد.' });
 });
 
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 [WhatsApp Gateway] Production Baileys Engine running on http://localhost:${PORT}`);
   const ips = getLocalNetworkIps();
   if (ips.length > 0) {
     console.log('🌐 [WhatsApp Gateway] Available on local network for other devices at:');
     ips.forEach(ip => console.log(`   👉 http://${ip.address}:${PORT}`));
+  }
+});
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.warn(`[WhatsApp Gateway] ⚠️ Port ${PORT} is already in use by an active instance. Gateway continues running.`);
+  } else {
+    console.error('[WhatsApp Gateway Server Error]:', err);
   }
 });

@@ -139,8 +139,9 @@ export default function PublicCandidateApplyPortal({
         return false;
       }
     } else if (step === 2) {
-      if (!name.trim()) {
-        showToast?.('يرجى إدخال الاسم الكامل رباعياً');
+      const cleanCandidateName = (name || '').trim();
+      if (!cleanCandidateName || /^\d+$/.test(cleanCandidateName) || cleanCandidateName.length < 3) {
+        showToast?.('يرجى إدخال الاسم الكامل رباعياً باللغة العربية (وليس أرقاماً فقط)');
         return false;
       }
       if (!nationalId.trim() || nationalId.trim().length < 10) {

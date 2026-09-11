@@ -15,9 +15,13 @@ export default function WhatsAppStatusCard({
 }) {
   const { showConfirm } = useUI();
   const getResolvedServerUrl = () => {
+    try {
+      const localDevice = (localStorage.getItem('PHARMACY_DEVICE_WA_URL') || '').trim();
+      if (localDevice) return localDevice.replace(/\/+$/, '');
+    } catch {}
     const custom = (waServerUrlInput || '').trim();
     if (custom) return custom.replace(/\/+$/, '');
-    if (typeof window !== 'undefined' && window.location?.hostname && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+    if (typeof window !== 'undefined' && window.location?.hostname && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1' && !window.location.hostname.includes('vercel.app')) {
       return `http://${window.location.hostname}:3100`;
     }
     return 'http://127.0.0.1:3100';
@@ -204,8 +208,25 @@ export default function WhatsAppStatusCard({
           <button className="btn btn-accent" style={{ padding: '10px 18px' }} onClick={handleTestWaServerConnection}>
             ⚡ اختبار
           </button>
-          <button className="btn btn-start" style={{ padding: '10px 22px' }} onClick={handleSaveOrgSettings}>
-            💾 حفظ
+          <button
+            type="button"
+            className="btn"
+            style={{ padding: '10px 16px', background: '#059669', color: '#fff', borderRadius: '8px', fontWeight: 700 }}
+            onClick={() => {
+              const clean = (waServerUrlInput || '').trim().replace(/\/+$/, '');
+              try {
+                if (clean) localStorage.setItem('PHARMACY_DEVICE_WA_URL', clean);
+                else localStorage.removeItem('PHARMACY_DEVICE_WA_URL');
+              } catch {}
+              showToast?.(clean ? `📌 تم حفظ رابط السيرفر (${clean}) لهذا الجهاز فقط` : '🔄 تم إلغاء الحفظ المحلي');
+              handleTestWaServerConnection?.();
+            }}
+            title="تثبيت هذا الرابط لهذا الجهاز / المتصفح فقط دون التأثير على بقية الأجهزة"
+          >
+            📌 حفظ للجهاز
+          </button>
+          <button className="btn btn-start" style={{ padding: '10px 22px' }} onClick={handleSaveOrgSettings} title="تعميم هذا الرابط على جميع أجهزة المنظومة">
+            💾 حفظ وتعميم
           </button>
         </div>
       </div>

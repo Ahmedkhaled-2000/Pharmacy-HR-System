@@ -1,7 +1,7 @@
 {
   "name": "pharmacy-hr-system",
   "productName": "منظومة الموارد البشرية",
-  "version": "1.2.6",
+  "version": "1.2.7",
   "description": "منظومة إدارة الموارد البشرية والرواتب - تطبيق ويندوز المكتبي",
   "repository": {
     "type": "git",
@@ -28,8 +28,11 @@
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc14",
+    "cors": "^2.8.6",
     "electron-updater": "^6.8.9",
-    "pino": "^10.3.1"
+    "express": "^5.2.1",
+    "pino": "^10.3.1",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "@aparajita/capacitor-biometric-auth": "^10.0.0",
@@ -42,13 +45,11 @@
     "@types/react-dom": "^19.2.5",
     "@vitejs/plugin-react": "^6.0.3",
     "concurrently": "^10.0.5",
-    "cors": "^2.8.6",
     "cross-env": "^10.1.0",
     "dotenv": "^17.4.2",
     "electron": "^44.2.0",
     "electron-builder": "^26.15.3",
     "exceljs": "^4.4.0",
-    "express": "^5.2.1",
     "face-api.js": "^0.22.2",
     "ioredis": "^6.0.0",
     "lucide-react": "^1.38.0",
@@ -57,7 +58,6 @@
     "papaparse": "^5.7.0",
     "pg": "^8.23.0",
     "png-to-ico": "^3.0.2",
-    "qrcode": "^1.5.4",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.3",

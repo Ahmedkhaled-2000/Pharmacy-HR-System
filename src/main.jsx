@@ -6,6 +6,10 @@ import './kiosk-modern.css'
 import './portal.css'
 import App from './App.jsx'
 import ErrorBoundary from './components/common/ErrorBoundary'
+import { installClipboardUrlSanitizer } from './utils/systemUrlHelper'
+
+// تثبيت حارس الحافظة التلقائي لضمان نسخ الروابط العامة دائماً
+installClipboardUrlSanitizer();
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { sendGmailEmail, buildEmailTemplate, generateDailyDigestHTML, resolveAdminRecipients, getAuthoritativeGmailConfig } from '../../utils/gmailService';
 import { compileDailyDigestData } from '../../utils/digestDataEngine';
 import { fmt, getRealTodayStr } from '../../utils/formatters';
+import { getPublicSystemOrigin } from '../../utils/systemUrlHelper';
 
 export default function GmailConfigCard({
   state,
@@ -42,7 +43,7 @@ export default function GmailConfigCard({
       appPassword: stateCfg.appPassword || localSaved?.appPassword || '',
       adminEmails: parsedAdminEmails,
       dailyDigestTime: localSaved?.dailyDigestTime !== undefined ? localSaved.dailyDigestTime : (stateCfg.dailyDigestTime || ''),
-      systemUrl: stateCfg.systemUrl || localSaved?.systemUrl || (typeof window !== 'undefined' && window.location?.origin && !window.location.origin.startsWith('file:') && !window.location.origin.includes('localhost') ? window.location.origin : 'https://pharmacy-hr-system.vercel.app'),
+      systemUrl: stateCfg.systemUrl || localSaved?.systemUrl || getPublicSystemOrigin(stateCfg),
       serviceUrl: stateCfg.serviceUrl || localSaved?.serviceUrl || '',
       sendOnRequest: stateCfg.sendOnRequest !== undefined ? Boolean(stateCfg.sendOnRequest) : (localSaved?.sendOnRequest ?? true),
       sendOnDecision: stateCfg.sendOnDecision !== undefined ? Boolean(stateCfg.sendOnDecision) : (localSaved?.sendOnDecision ?? true),
@@ -635,31 +636,29 @@ function doGet(e) {
             <label style={{ fontWeight: 800, fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', margin: 0 }}>
               <span>🔗</span> رابط المنظومة (أزرار الإيميلات)
             </label>
-            {typeof window !== 'undefined' && window.location?.origin && (
-              <button
-                type="button"
-                onClick={() => setSystemUrl(window.location.origin)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: 'var(--primary, #0284c7)',
-                  fontSize: '11px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  padding: '0 4px',
-                  textDecoration: 'underline'
-                }}
-                title="استخدام رابط المتصفح الحالي"
-              >
-                🔄 الرابط الحالي
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => setSystemUrl(getPublicSystemOrigin(state))}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--primary, #0284c7)',
+                fontSize: '11px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                padding: '0 4px',
+                textDecoration: 'underline'
+              }}
+              title="استخدام النطاق العام المعتمد للمنظومة"
+            >
+              🔄 النطاق الرسمي المعتمد
+            </button>
           </div>
           <input
             type="text"
             value={systemUrl}
             onChange={(e) => setSystemUrl(e.target.value)}
-            placeholder="https://your-domain.vercel.app"
+            placeholder="https://nodejs-test.apexthunder.com"
             style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--surface)' }}
           />
           <span style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '4px', display: 'block' }}>

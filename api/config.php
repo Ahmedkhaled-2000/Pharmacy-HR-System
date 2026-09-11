@@ -248,8 +248,35 @@ function mergeServerState(array $existing, array $incoming): array
                     $key = $prefix . '_' . md5(json_encode($item));
                 }
 
-                // فحص ما إذا كان العنصر محذوفاً
-                if (isset($deletedSet[$key]) || (isset($item['id']) && isset($deletedSet[(string)$item['id']]))) {
+                // فحص ما إذا كان العنصر محذوفاً مع عزل تام للموظفين والطلبات
+                $isDeleted = false;
+                if ($prefix === 'emp') {
+                    $empId = isset($item['id']) ? (string)$item['id'] : '';
+                    $empCode = isset($item['code']) ? strtolower(trim((string)$item['code'])) : '';
+                    if ($empId !== '' && isset($deletedSet[$empId]) && str_starts_with($empId, 'emp_')) {
+                        $isDeleted = true;
+                    } elseif ($empId !== '' && isset($deletedSet['emp_' . $empId])) {
+                        $isDeleted = true;
+                    } elseif ($empCode !== '' && (isset($deletedSet['emp_code_' . $empCode]) || isset($deletedSet['emp_' . $empCode]))) {
+                        $isDeleted = true;
+                    }
+                } elseif ($prefix === 'app') {
+                    $appId = isset($item['id']) ? (string)$item['id'] : '';
+                    $appCode = isset($item['code']) ? (string)$item['code'] : '';
+                    if (($appId !== '' && isset($deletedSet[$appId])) ||
+                        ($appId !== '' && isset($deletedSet['app_' . $appId])) ||
+                        ($appCode !== '' && isset($deletedSet[$appCode])) ||
+                        ($appCode !== '' && isset($deletedSet['app_' . $appCode])) ||
+                        isset($deletedSet[$key])) {
+                        $isDeleted = true;
+                    }
+                } else {
+                    if (isset($deletedSet[$key]) || (isset($item['id']) && isset($deletedSet[(string)$item['id']]))) {
+                        $isDeleted = true;
+                    }
+                }
+
+                if ($isDeleted) {
                     continue;
                 }
 
