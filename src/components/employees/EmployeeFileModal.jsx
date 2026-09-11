@@ -801,7 +801,14 @@ export default function EmployeeFileModal({
       recruitmentApplicationId: editingEmp?.recruitmentApplicationId || editingEmp?.applicationId || undefined,
       isFromRecruitment: editingEmp?.isFromRecruitment || undefined,
       name: name.trim(),
-      nickname: nickname.trim(),
+      nickname: (() => {
+        const cleanNick = nickname.trim();
+        if (!cleanNick) return name.trim();
+        if (editingEmp && editingEmp.nickname === editingEmp.name && editingEmp.name !== name.trim()) {
+          return name.trim();
+        }
+        return cleanNick;
+      })(),
       phone: primaryPhone,
       phones: validPhones.length > 0 ? validPhones : (primaryPhone ? [{ id: '1', type: 'mobile', number: primaryPhone }] : []),
       email: email.trim(),
@@ -837,13 +844,13 @@ export default function EmployeeFileModal({
           title: a.title?.trim() || 'بدل يومي',
           amount: parseFloat(a.amount) || 0
         })),
-      // For backwards compatibility and main branch logic, use the first branch's details
-      branchId: validBranchesDetails[0]?.branchId || '',
-      salary: validBranchesDetails[0]?.salary || '0',
-      workHoursPerDay: validBranchesDetails[0]?.workHoursPerDay || '8',
-      workDaysPerMonth: validBranchesDetails[0]?.workDaysPerMonth || '26',
-      breakHours: validBranchesDetails[0]?.breakHours || '0',
-      defaultBreakHours: validBranchesDetails[0]?.defaultBreakHours || 0,
+      // For backwards compatibility and main branch logic, use the first branch's details with safe fallbacks
+      branchId: validBranchesDetails[0]?.branchId || editingEmp?.branchId || '',
+      salary: validBranchesDetails[0]?.salary !== undefined ? validBranchesDetails[0].salary : (editingEmp?.salary !== undefined ? String(editingEmp.salary) : '0'),
+      workHoursPerDay: validBranchesDetails[0]?.workHoursPerDay || (editingEmp?.workHoursPerDay !== undefined ? String(editingEmp.workHoursPerDay) : '8'),
+      workDaysPerMonth: validBranchesDetails[0]?.workDaysPerMonth || (editingEmp?.workDaysPerMonth !== undefined ? String(editingEmp.workDaysPerMonth) : '26'),
+      breakHours: validBranchesDetails[0]?.breakHours !== undefined ? validBranchesDetails[0].breakHours : (editingEmp?.breakHours !== undefined ? String(editingEmp.breakHours) : '0'),
+      defaultBreakHours: validBranchesDetails[0]?.defaultBreakHours !== undefined ? validBranchesDetails[0].defaultBreakHours : (editingEmp?.defaultBreakHours !== undefined ? editingEmp.defaultBreakHours : 0),
       // Store all active branches details here
       branchesDetails: validBranchesDetails,
       // Store preserved/archived branch salaries here
@@ -890,7 +897,7 @@ export default function EmployeeFileModal({
                 updatedEmps.push({
                   ...e,
                   ...employeeData,
-                  id: employeeData.id,
+                  id: e.id || employeeData.id,
                   updatedAt: new Date().toISOString()
                 });
                 found = true;
@@ -917,7 +924,7 @@ export default function EmployeeFileModal({
           // ── Optimistic UI: تحديث الواجهة فوراً بلا تأخير ──
           setState(updatedState);
 
-          // ── حفظ في الخلفية بلا await مسدود (Non-blocking) ──
+          // ── حفظ فوري وتأمين الحالة في السحابة والقاعدة المحلية ──
           if (saveState) {
             saveState(updatedState).catch((err) => {
               console.warn('[EmployeeSave] Background save error:', err);

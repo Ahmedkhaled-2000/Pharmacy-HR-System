@@ -265,7 +265,11 @@ function mergeServerState(array $existing, array $incoming): array
                     $isOldApproved = in_array($old['status'] ?? '', ['approved', 'paid', 'partial'], true) || ($old['adminApproved'] ?? false);
                     $isNewApproved = in_array($item['status'] ?? '', ['approved', 'paid', 'partial'], true) || ($item['adminApproved'] ?? false);
 
-                    if ($isOldApproved && !$isNewApproved) {
+                    if ($prefix === 'emp') {
+                        // للموظفين: البيانات الواردة من التعديل الأخير للمستخدم هي المعتمدة دائماً
+                        $merged = array_merge($old, $item);
+                        $merged['updatedAt'] = !empty($item['updatedAt']) ? (string)$item['updatedAt'] : gmdate('Y-m-d\TH:i:s.v\Z');
+                    } elseif ($isOldApproved && !$isNewApproved) {
                         $merged = array_merge($item, $old);
                     } elseif ($tNew >= $tOld) {
                         $merged = array_merge($old, $item);

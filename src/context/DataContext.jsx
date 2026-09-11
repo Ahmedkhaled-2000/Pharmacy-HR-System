@@ -539,23 +539,47 @@ export function DataProvider({ children, showToast = () => {} }) {
         // ── دمج حذر: الموظفون في updatedState لهم الأولوية المطلقة ──
         const merged = normalizeState(smartMergeStates(prev, incoming));
 
-        // ── تأكيد أولوية الموظفين المُعدَّلين حديثاً ──
-        const updatedEmpMap = new Map();
-        (updatedState.employees || []).forEach((e) => {
-          if (e.id) updatedEmpMap.set(String(e.id), e);
-        });
+        // ── تأكيد أولوية الموظفين المُعدَّلين حديثاً وحمايتهم من الارتداد (ID + Code + NationalId) ──
+        const updatedEmployees = Array.isArray(updatedState.employees) ? updatedState.employees : [];
+        if (updatedEmployees.length > 0) {
+          const cleanMergedEmps = [];
+          const matchedUpdatedIndices = new Set();
 
-        if (updatedEmpMap.size > 0) {
-          const protectedEmps = (merged.employees || []).map((e) => {
-            const updatedVersion = updatedEmpMap.get(String(e.id));
-            if (updatedVersion) {
-              const updTime = updatedVersion.updatedAt ? new Date(updatedVersion.updatedAt).getTime() : 0;
-              const remTime = e.updatedAt ? new Date(e.updatedAt).getTime() : 0;
-              return updTime >= remTime ? updatedVersion : e;
+          for (const e of (merged.employees || [])) {
+            const cleanCode = e.code ? String(e.code).trim().toLowerCase() : null;
+            const cleanNid = e.nationalId ? String(e.nationalId).replace(/\D/g, '') : null;
+            const eId = e.id ? String(e.id) : null;
+
+            const matchIdx = updatedEmployees.findIndex((upd, idx) => {
+              if (matchedUpdatedIndices.has(idx)) return false;
+              if (eId && upd.id && String(upd.id) === eId) return true;
+              if (cleanCode && upd.code && String(upd.code).trim().toLowerCase() === cleanCode) return true;
+              if (cleanNid && upd.nationalId && String(upd.nationalId).replace(/\D/g, '') === cleanNid) return true;
+              if (e.recruitmentApplicationId && upd.recruitmentApplicationId && e.recruitmentApplicationId === upd.recruitmentApplicationId) return true;
+              return false;
+            });
+
+            if (matchIdx !== -1) {
+              matchedUpdatedIndices.add(matchIdx);
+              const upd = updatedEmployees[matchIdx];
+              cleanMergedEmps.push({
+                ...e,
+                ...upd,
+                id: e.id || upd.id,
+                updatedAt: upd.updatedAt || new Date().toISOString()
+              });
+            } else {
+              cleanMergedEmps.push(e);
             }
-            return e;
+          }
+
+          updatedEmployees.forEach((upd, idx) => {
+            if (!matchedUpdatedIndices.has(idx)) {
+              cleanMergedEmps.push(upd);
+            }
           });
-          return normalizeState({ ...merged, employees: protectedEmps });
+
+          return normalizeState({ ...merged, employees: cleanMergedEmps });
         }
 
         return normalizeState(merged);

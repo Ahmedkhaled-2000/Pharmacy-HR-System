@@ -218,7 +218,7 @@ export function deduplicateAndConsolidateEmployees(rawEmployees = [], stateObj =
       ...group.reduce((acc, curr) => ({ ...curr, ...acc }), {}),
       ...latestEmp,
       id: canonicalId,
-      updatedAt: new Date(Math.max(...group.map(getEmpTime), Date.now())).toISOString()
+      updatedAt: latestEmp.updatedAt || (Math.max(...group.map(getEmpTime), 0) > 0 ? new Date(Math.max(...group.map(getEmpTime))).toISOString() : new Date().toISOString())
     };
 
     // حماية الهواتف والفروع من الفقدان
