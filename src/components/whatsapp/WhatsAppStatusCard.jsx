@@ -14,6 +14,15 @@ export default function WhatsAppStatusCard({
   showToast
 }) {
   const { showConfirm } = useUI();
+  const getResolvedServerUrl = () => {
+    const custom = (waServerUrlInput || '').trim();
+    if (custom) return custom.replace(/\/+$/, '');
+    if (typeof window !== 'undefined' && window.location?.hostname && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      return `http://${window.location.hostname}:3100`;
+    }
+    return 'http://127.0.0.1:3100';
+  };
+
   return (
     <div className="whatsapp-sec-card settings-card">
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
@@ -67,11 +76,14 @@ export default function WhatsAppStatusCard({
                   if (!confirmed) return;
                   showToast?.('⏳ جاري تسجيل الخروج وإلغاء اقتران الرقم الحالي...');
                   try {
-                    const serverUrl = waServerUrlInput.trim() || 'http://127.0.0.1:3100';
+                    const serverUrl = getResolvedServerUrl();
                     if (typeof window !== 'undefined' && window.desktopAPI?.logoutWhatsAppServer) {
                       await window.desktopAPI.logoutWhatsAppServer();
                     } else {
-                      await fetch(`${serverUrl.replace(/\/$/, '')}/api/logout`, { method: 'POST' });
+                      await fetch(`${serverUrl.replace(/\/$/, '')}/api/logout`, {
+                        method: 'POST',
+                        headers: { 'bypass-tunnel-reminder': 'true' }
+                      });
                     }
                     setWaServerStatus('DISCONNECTED');
                     setWaLiveQr('');
@@ -107,8 +119,11 @@ export default function WhatsAppStatusCard({
                     const res = await window.desktopAPI.restartWhatsAppServer();
                     showToast?.(res?.message || 'تمت إعادة تشغيل الخادم بنجاح');
                   } else {
-                    const serverUrl = waServerUrlInput.trim() || 'http://127.0.0.1:3100';
-                    await fetch(`${serverUrl.replace(/\/$/, '')}/api/restart`, { method: 'POST' });
+                    const serverUrl = getResolvedServerUrl();
+                    await fetch(`${serverUrl.replace(/\/$/, '')}/api/restart`, {
+                      method: 'POST',
+                      headers: { 'bypass-tunnel-reminder': 'true' }
+                    });
                     showToast?.('تم إرسال أمر إعادة تشغيل الخادم بنجاح');
                   }
                   setTimeout(() => {
@@ -145,9 +160,12 @@ export default function WhatsAppStatusCard({
           style={{ marginTop: '14px', fontSize: '12.5px', padding: '6px 14px' }}
           onClick={async () => {
             setWaServerStatus('QR_READY');
-            const serverUrl = waServerUrlInput.trim() || 'http://127.0.0.1:3100';
+            const serverUrl = getResolvedServerUrl();
             try {
-              const res = await fetch(`${serverUrl.replace(/\/$/, '')}/api/reconnect`, { method: 'POST' });
+              const res = await fetch(`${serverUrl.replace(/\/$/, '')}/api/reconnect`, {
+                method: 'POST',
+                headers: { 'bypass-tunnel-reminder': 'true' }
+              });
               if (res.ok) {
                 const data = await res.json();
                 if (data.qrCodeDataUrl) setWaLiveQr(data.qrCodeDataUrl);
@@ -169,7 +187,7 @@ export default function WhatsAppStatusCard({
           <strong style={{ fontSize: '15px' }}>رابط سيرفر الواتساب العام (المحلي أو الإنترنت)</strong>
         </div>
         <p style={{ fontSize: '12.5px', color: 'var(--muted)', margin: '0 0 14px' }}>
-          ضع هنا رابط سيرفر الواتساب (مثال: <code>https://xxxx.loca.lt</code> للمشرفين خارج الشبكة أو <code>http://192.168.1.X:3001</code> للأجهزة المحلية).
+          ضع هنا رابط سيرفر الواتساب (مثال: <code>https://xxxx.loca.lt</code> للمشرفين خارج الشبكة أو <code>http://192.168.1.X:3100</code> للأجهزة المحلية).
         </p>
 
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', width: '100%' }}>

@@ -89,8 +89,33 @@ if (!fs.existsSync(AUTH_DIR)) {
   }
 }
 
+function getLocalNetworkIps() {
+  const interfaces = os.networkInterfaces();
+  const ips = [];
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name] || []) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        ips.push({ interface: name, address: iface.address });
+      }
+    }
+  }
+  return ips;
+}
+
 const app = express();
 const PORT = process.env.PORT || 3100;
+
+// سماح بالوصول الكامل لجميع الأجهزة على الشبكة المحلية وخارجها مع دعم Private Network Access
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, bypass-tunnel-reminder, accept, origin');
+  res.header('Access-Control-Allow-Private-Network', 'true');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
+});
 
 app.use(cors());
 app.use(express.json({ limit: '15mb' }));
@@ -253,6 +278,21 @@ app.get('/api/status', (req, res) => {
     lastError: serverState.lastError,
     timestamp: new Date().toISOString(),
     logs: serverState.logs.slice(-30)
+  });
+});
+
+// نقطة فحص عناوين الشبكة المحلية لربط الأجهزة الأخرى (الموبايلات وأجهزة الصيدلية)
+app.get('/api/network-info', (req, res) => {
+  const ips = getLocalNetworkIps();
+  const primaryIp = ips[0]?.address || '127.0.0.1';
+  res.json({
+    status: serverState.status,
+    port: PORT,
+    localIps: ips,
+    primaryIp,
+    suggestedLanUrl: `http://${primaryIp}:${PORT}`,
+    phone: serverState.phone,
+    deviceName: serverState.deviceName
   });
 });
 
@@ -488,4 +528,9 @@ app.post('/api/logout', async (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 [WhatsApp Gateway] Production Baileys Engine running on http://localhost:${PORT}`);
+  const ips = getLocalNetworkIps();
+  if (ips.length > 0) {
+    console.log('🌐 [WhatsApp Gateway] Available on local network for other devices at:');
+    ips.forEach(ip => console.log(`   👉 http://${ip.address}:${PORT}`));
+  }
 });

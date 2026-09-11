@@ -968,6 +968,8 @@ export default function AppRoutes() {
                 {activeNavTab === 'whatsapp-center' && (
                   <WhatsAppCenterModule
                     state={sanitizedState}
+                    setState={setState}
+                    saveState={saveState}
                     showToast={showToast}
                     monthPicker={monthPicker}
                     computeEmpSummary={computeEmpSummary}

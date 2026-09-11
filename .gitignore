@@ -38,6 +38,10 @@ deploy_package
 *.sqlite
 *.sqlite3
 *.sqlite-journal
+
+# Temporary scratch directory
+scratch/
+
 *.sqlite-wal
 supabase_extracted_data.json
 uploads/

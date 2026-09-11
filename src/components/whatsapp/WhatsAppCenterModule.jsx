@@ -6,11 +6,13 @@ import {
   populateWhatsAppTemplate,
   generatePayslipPrintHtml
 } from '../../utils/whatsappTemplates';
-import { Send, FileText, CheckCircle2, AlertCircle, RefreshCw, Sparkles, Filter, Users, UserCheck, LogOut } from 'lucide-react';
+import { Send, FileText, CheckCircle2, AlertCircle, RefreshCw, Sparkles, Filter, Users, UserCheck, LogOut, Globe, Network, Copy, Check, ExternalLink } from 'lucide-react';
 import { useUI } from '../../context/UIContext';
 
 export default function WhatsAppCenterModule({
   state,
+  setState,
+  saveState,
   showToast,
   monthPicker,
   computeEmpSummary,
@@ -35,7 +37,24 @@ export default function WhatsAppCenterModule({
   const [isSending, setIsSending] = useState(false);
   const [sendProgressText, setSendProgressText] = useState('');
 
-  const serverUrl = (state?.orgSettings?.waServerUrl || '').trim() || 'http://127.0.0.1:3100';
+  // استكشاف ومعلومات الشبكة للأجهزة الأخرى
+  const [networkInfo, setNetworkInfo] = useState(null);
+  const [showNetworkModal, setShowNetworkModal] = useState(false);
+  const [customServerUrl, setCustomServerUrl] = useState(state?.orgSettings?.waServerUrl || '');
+  const [copiedUrl, setCopiedUrl] = useState(false);
+
+  // احتساب رابط السيرفر ديناميكياً حسب موقع العميل (موبايل، جهاز بالصيدلية، أو السيرفر الرئيسي)
+  const serverUrl = useMemo(() => {
+    const configured = (state?.orgSettings?.waServerUrl || '').trim();
+    if (configured) return configured.replace(/\/+$/, '');
+    if (typeof window !== 'undefined' && window.location) {
+      const host = window.location.hostname;
+      if (host && host !== 'localhost' && host !== '127.0.0.1') {
+        return `http://${host}:3100`;
+      }
+    }
+    return 'http://127.0.0.1:3100';
+  }, [state?.orgSettings?.waServerUrl]);
   const orgSettings = state?.orgSettings || {};
   const employees = state.employees || [];
   const branches = state.branches || [];
@@ -98,10 +117,36 @@ export default function WhatsAppCenterModule({
     setAttachPdfPayslip(Boolean(selectedTemplate.supportsPdf));
   }, [selectedTemplateId, selectedTemplate, previewEmp, orgSettings, monthLabel, branches, getEmpSummaryData]);
 
+  // حفظ وتعميم رابط السيرفر لجميع الأجهزة
+  const handleSaveServerUrl = async (newUrl) => {
+    const cleanUrl = (newUrl || '').trim().replace(/\/+$/, '');
+    if (setState) {
+      setState(prev => {
+        const nextState = {
+          ...prev,
+          orgSettings: {
+            ...(prev?.orgSettings || {}),
+            waServerUrl: cleanUrl
+          }
+        };
+        if (saveState) {
+          saveState(nextState);
+        }
+        return nextState;
+      });
+    }
+    setCustomServerUrl(cleanUrl);
+    showToast?.(cleanUrl ? `✅ تم تعميم رابط السيرفر (${cleanUrl}) لجميع الأجهزة بالصيدلية` : '✅ تم ضبط السيرفر على الوضع التلقائي');
+    setTimeout(() => {
+      fetchWaStatus(false);
+    }, 500);
+  };
+
   // فحص حالة الخادم الحقيقية
   const fetchWaStatus = useCallback(async (silent = false) => {
     try {
       const res = await fetch(`${serverUrl.replace(/\/$/, '')}/api/status`, {
+        headers: { 'bypass-tunnel-reminder': 'true' },
         signal: AbortSignal.timeout(3500)
       });
       if (res.ok) {
@@ -118,9 +163,21 @@ export default function WhatsAppCenterModule({
     } catch {
       setWaStatus('DISCONNECTED');
       if (!silent) {
-        showToast?.('⚠️ تعذر الوصول لخادم الواتساب، يمكنك الضغط على "إعادة تشغيل الخادم"');
+        showToast?.('⚠️ تعذر الوصول لخادم الواتساب، اضغط "ربط الأجهزة والموبايلات" للتحقق من عنوان IP');
       }
     }
+
+    // استكشاف عناوين الشبكة المحلية في الخلفية لمساعدة الأجهزة الأخرى
+    try {
+      const netRes = await fetch(`${serverUrl.replace(/\/$/, '')}/api/network-info`, {
+        headers: { 'bypass-tunnel-reminder': 'true' },
+        signal: AbortSignal.timeout(2500)
+      });
+      if (netRes.ok) {
+        const netData = await netRes.json();
+        setNetworkInfo(netData);
+      }
+    } catch {}
   }, [serverUrl, showToast]);
 
   // فحص دوري
@@ -143,6 +200,7 @@ export default function WhatsAppCenterModule({
       } else {
         await fetch(`${serverUrl.replace(/\/$/, '')}/api/restart`, {
           method: 'POST',
+          headers: { 'bypass-tunnel-reminder': 'true' },
           signal: AbortSignal.timeout(3000)
         });
         showToast?.('تم إرسال أمر إعادة تشغيل الخادم بنجاح');
@@ -187,6 +245,7 @@ export default function WhatsAppCenterModule({
       } else {
         await fetch(`${serverUrl.replace(/\/$/, '')}/api/logout`, {
           method: 'POST',
+          headers: { 'bypass-tunnel-reminder': 'true' },
           signal: AbortSignal.timeout(4000)
         });
       }
@@ -206,6 +265,7 @@ export default function WhatsAppCenterModule({
       attempts++;
       try {
         const res = await fetch(`${serverUrl.replace(/\/$/, '')}/api/status`, {
+          headers: { 'bypass-tunnel-reminder': 'true' },
           signal: AbortSignal.timeout(2500)
         });
         if (res.ok) {
@@ -258,7 +318,7 @@ export default function WhatsAppCenterModule({
     try {
       const res = await fetch(`${serverUrl.replace(/\/$/, '')}/api/render-pdf`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'bypass-tunnel-reminder': 'true' },
         body: JSON.stringify({ html })
       });
       if (res.ok) {
@@ -351,7 +411,7 @@ export default function WhatsAppCenterModule({
 
       const res = await fetch(`${serverUrl.replace(/\/$/, '')}/api/send-bulk`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'bypass-tunnel-reminder': 'true' },
         body: JSON.stringify({ messages: messagesPayload })
       });
 
@@ -383,7 +443,160 @@ export default function WhatsAppCenterModule({
             كشوفات المرتبات التفصيلية مع ملف PDF معتمد، رسائل التهنئة، وإشعارات الدوام التلقائية على مدار 24 ساعة
           </p>
         </div>
+
+        <button
+          type="button"
+          className="btn"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            fontSize: '13px',
+            fontWeight: 700,
+            padding: '9px 16px',
+            borderRadius: '10px',
+            border: '1px solid var(--border)',
+            background: showNetworkModal ? '#2563eb' : 'var(--surface)',
+            color: showNetworkModal ? '#fff' : 'var(--text)',
+            cursor: 'pointer',
+            boxShadow: '0 2px 5px rgba(0,0,0,0.05)',
+            transition: 'all 0.2s ease'
+          }}
+          onClick={() => setShowNetworkModal(!showNetworkModal)}
+        >
+          <Network style={{ width: '16px', height: '16px', color: showNetworkModal ? '#fff' : '#2563eb' }} />
+          <span>🌐 ربط الأجهزة والموبايلات (IP الشبكة)</span>
+        </button>
       </div>
+
+      {/* ── لوحة معلومات وإعدادات ربط الأجهزة والموبايلات ──────────────────────── */}
+      {showNetworkModal && (
+        <div style={{
+          background: 'var(--surface)',
+          border: '1.5px solid #3b82f6',
+          borderRadius: '14px',
+          padding: '18px 20px',
+          marginBottom: '22px',
+          boxShadow: '0 8px 24px rgba(59, 130, 246, 0.08)'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '10px', marginBottom: '14px' }}>
+            <div>
+              <h4 style={{ margin: '0 0 4px 0', fontSize: '16px', fontWeight: 800, color: '#1d4ed8', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Globe style={{ width: '18px', height: '18px' }} />
+                إعدادات الربط وعناوين خادم الواتساب للأجهزة الأخرى
+              </h4>
+              <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
+                لكي تتمكن الهواتف والأجهزة الأخرى داخل الصيدلية من الاتصال بسيرفر الواتساب دون حظر
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ fontSize: '12.5px', padding: '4px 10px' }}
+              onClick={() => setShowNetworkModal(false)}
+            >
+              ✕ إغلاق
+            </button>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px', marginBottom: '16px' }}>
+            {/* بطاقة الرابط النشط حالياً */}
+            <div style={{ background: 'rgba(59, 130, 246, 0.04)', border: '1px solid rgba(59, 130, 246, 0.2)', padding: '12px 14px', borderRadius: '10px' }}>
+              <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--muted)', display: 'block', marginBottom: '4px' }}>
+                الرابط النشط حالياً على هذا الجهاز:
+              </span>
+              <code style={{ fontSize: '13.5px', fontWeight: 800, color: '#1e40af', direction: 'ltr', display: 'inline-block' }}>
+                {serverUrl}
+              </code>
+            </div>
+
+            {/* بطاقة العناوين المقترحة للشبكة المحلية */}
+            {networkInfo?.localIps && networkInfo.localIps.length > 0 && (
+              <div style={{ background: 'rgba(16, 185, 129, 0.05)', border: '1px solid rgba(16, 185, 129, 0.25)', padding: '12px 14px', borderRadius: '10px' }}>
+                <span style={{ fontSize: '12px', fontWeight: 700, color: '#047857', display: 'block', marginBottom: '4px' }}>
+                  عناوين IP المكتشفة في شبكة الصيدلية (LAN):
+                </span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  {networkInfo.localIps.map((net, idx) => {
+                    const lanUrl = `http://${net.address}:${networkInfo.port || 3100}`;
+                    return (
+                      <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                        <code style={{ fontSize: '13px', fontWeight: 700, color: '#065f46', direction: 'ltr' }}>
+                          {lanUrl}
+                        </code>
+                        <div style={{ display: 'flex', gap: '4px' }}>
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            style={{ fontSize: '11px', padding: '3px 8px' }}
+                            onClick={() => {
+                              navigator.clipboard?.writeText(lanUrl);
+                              showToast?.('تم نسخ الرابط بنجاح');
+                            }}
+                          >
+                            <Copy style={{ width: '12px', height: '12px' }} />
+                          </button>
+                          <button
+                            type="button"
+                            className="btn"
+                            style={{ background: '#059669', color: '#fff', fontSize: '11px', padding: '3px 10px', fontWeight: 700, borderRadius: '6px' }}
+                            onClick={() => handleSaveServerUrl(lanUrl)}
+                            title="تعميم هذا الرابط على كل أجهزة وموبايلات الصيدلية تلقائياً"
+                          >
+                            ⚡ تعميم كافتراضي
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* حقل تخصيص وحفظ الرابط */}
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '13px', fontWeight: 700 }}>رابط مخصص:</span>
+            <input
+              type="text"
+              value={customServerUrl}
+              onChange={(e) => setCustomServerUrl(e.target.value)}
+              placeholder="مثال: http://192.168.1.15:3100 أو https://xxxx.loca.lt"
+              style={{
+                flex: '1 1 240px',
+                padding: '8px 12px',
+                borderRadius: '8px',
+                border: '1px solid var(--border)',
+                direction: 'ltr',
+                textAlign: 'left',
+                fontSize: '13px'
+              }}
+            />
+            <button
+              type="button"
+              className="btn btn-primary"
+              style={{ padding: '8px 18px', fontSize: '13px', fontWeight: 700 }}
+              onClick={() => handleSaveServerUrl(customServerUrl)}
+            >
+              💾 حفظ وتعميم
+            </button>
+            {Boolean(state?.orgSettings?.waServerUrl) && (
+              <button
+                type="button"
+                className="btn btn-ghost"
+                style={{ padding: '8px 14px', fontSize: '12.5px', color: '#dc2626' }}
+                onClick={() => handleSaveServerUrl('')}
+              >
+                🔄 إعادة للاكتشاف التلقائي
+              </button>
+            )}
+          </div>
+
+          <div style={{ marginTop: '12px', fontSize: '12px', color: 'var(--muted)', background: 'var(--bg)', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+            💡 <strong>تلميح مهم لجدار الحماية (Windows Firewall):</strong> لكي تتمكن الأجهزة الأخرى من الوصول للمنفذ 3100، يرجى تشغيل ملف <code>scripts/allow_firewall_3100.bat</code> كمسؤول (Run as Administrator) مرة واحدة على جهاز السيرفر الرئيسي.
+          </div>
+        </div>
+      )}
 
       {/* ── شريط حالة خادم الواتساب الحية وزر إعادة التشغيل ─────────────────── */}
       <div style={{

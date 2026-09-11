@@ -4,7 +4,7 @@
  * يعالج دورات الرواتب عبر الشهور، والشهور الميلادية، والفترات المخصصة، واختلاف أطوال الشهور
  */
 
-import { getRealDate } from './timeEngine';
+import { getRealDate } from './timeEngine.js';
 
 export const AR_MONTHS_NAMES = [
   'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',

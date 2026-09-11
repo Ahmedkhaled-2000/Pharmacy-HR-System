@@ -4,7 +4,7 @@
  * يضمن عدم الاعتماد على ساعة جهاز المستخدم المحلية لمنع التلاعب وتوحيد الوقت
  */
 
-import { API_BASE_URL } from './apiClient';
+import { API_BASE_URL } from './apiClient.js';
 
 let serverTimeOffsetMs = 0;
 let isSyncedWithServer = false;

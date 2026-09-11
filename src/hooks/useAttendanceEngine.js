@@ -1112,31 +1112,64 @@ export function useAttendanceEngine() {
 
     const performDelete = async () => {
       const empIdStr = String(empId);
-      const empCodeStr = String(emp.code || '');
+      const empCodeStr = String(emp.code || '').trim().toLowerCase();
+      const empUserStr = String(emp.username || '').trim().toLowerCase();
+      const empNid = String(emp.nationalId || '').replace(/\D/g, '');
 
-      const updatedEmps = (state.employees || []).filter((e) => String(e.id) !== empIdStr && String(e.code) !== empCodeStr);
+      const isMatchingEmp = (e) => {
+        if (!e) return false;
+        if (String(e.id) === empIdStr) return true;
+        if (empCodeStr && String(e.code || '').trim().toLowerCase() === empCodeStr) return true;
+        if (empUserStr && String(e.username || '').trim().toLowerCase() === empUserStr) return true;
+        if (empNid && String(e.nationalId || '').replace(/\D/g, '') === empNid) return true;
+        return false;
+      };
+
+      const updatedEmps = (state.employees || []).filter((e) => !isMatchingEmp(e));
       const updatedActive = { ...state.activeShifts };
       delete updatedActive[empId];
       delete updatedActive[empIdStr];
+      if (empCodeStr) delete updatedActive[empCodeStr];
 
-      const updatedShifts = (state.shifts || []).filter((s) => String(s.employeeId) !== empIdStr);
-      const updatedRequests = (state.requests || []).filter((r) => String(r.employeeId) !== empIdStr);
-      const updatedResignations = (state.resignationRequests || []).filter((r) => String(r.employeeId) !== empIdStr);
-      const updatedLeaves = (state.leaveRequests || []).filter((l) => String(l.employeeId) !== empIdStr);
-      const updatedLoans = (state.loans || []).filter((l) => String(l.employeeId) !== empIdStr);
-      const updatedAdjs = (state.adjustments || []).filter((a) => String(a.employeeId) !== empIdStr);
-      const updatedRosters = (state.rosters || []).filter((r) => String(r.employeeId) !== empIdStr);
-      const updatedLateIncidents = (state.lateIncidents || []).filter((i) => String(i.employeeId) !== empIdStr);
-      const updatedNotes = (state.employeeNotes || []).filter((n) => String(n.employeeId) !== empIdStr);
-      const updatedEvals = (state.evaluations || []).filter((ev) => String(ev.employeeId) !== empIdStr);
+      const isMatchingEmpItem = (item) => {
+        if (!item) return false;
+        const eId = String(item.employeeId || '');
+        const eCode = String(item.employeeCode || '').trim().toLowerCase();
+        if (eId === empIdStr) return true;
+        if (empCodeStr && (eCode === empCodeStr || eId.toLowerCase() === empCodeStr)) return true;
+        if (empUserStr && (eCode === empUserStr || eId.toLowerCase() === empUserStr)) return true;
+        return false;
+      };
+
+      const updatedShifts = (state.shifts || []).filter((s) => !isMatchingEmpItem(s));
+      const updatedRequests = (state.requests || []).filter((r) => !isMatchingEmpItem(r));
+      const updatedResignations = (state.resignationRequests || []).filter((r) => !isMatchingEmpItem(r));
+      const updatedLeaves = (state.leaveRequests || []).filter((l) => !isMatchingEmpItem(l));
+      const updatedLoans = (state.loans || []).filter((l) => !isMatchingEmpItem(l));
+      const updatedAdjs = (state.adjustments || []).filter((a) => !isMatchingEmpItem(a));
+      const updatedRosters = (state.rosters || []).filter((r) => !isMatchingEmpItem(r));
+      const updatedLateIncidents = (state.lateIncidents || []).filter((i) => !isMatchingEmpItem(i));
+      const updatedNotes = (state.employeeNotes || []).filter((n) => !isMatchingEmpItem(n));
+      const updatedEvals = (state.evaluations || []).filter((ev) => !isMatchingEmpItem(ev));
+
+      const newDeleted = [
+        empIdStr,
+        `emp_${empIdStr}`
+      ];
+      if (empCodeStr) {
+        newDeleted.push(empCodeStr, `emp_${empCodeStr}`, `emp_code_${empCodeStr}`);
+      }
+      if (empUserStr) {
+        newDeleted.push(empUserStr, `emp_${empUserStr}`);
+      }
+      if (empNid) {
+        newDeleted.push(empNid, `emp_nid_${empNid}`);
+      }
 
       const updatedDeletedIds = Array.from(new Set([
         ...(state._deletedIds || []),
-        empIdStr,
-        empCodeStr,
-        `emp_${empIdStr}`,
-        `emp_${empCodeStr}`
-      ])).filter(Boolean).slice(-2000);
+        ...newDeleted
+      ])).filter(Boolean).slice(-3000);
 
       try {
         apiArchiveDeleteEmployee(empId).catch(() => {});

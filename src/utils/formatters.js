@@ -1,7 +1,7 @@
-import { isManagementJob, isBranchWithoutManager, getJobsList, shouldRouteDirectToAdmin, isDualApprovalRequest, isEmployeeBranchManager, isUpperManagementEmp } from './jobsHelper';
-import { getActivePayrollMonth } from './periodEngine';
-export { getRealDate, getRealTodayStr, getRealNowTimeStr } from './timeEngine';
-import { getRealDate } from './timeEngine';
+import { isManagementJob, isBranchWithoutManager, getJobsList, shouldRouteDirectToAdmin, isDualApprovalRequest, isEmployeeBranchManager, isUpperManagementEmp } from './jobsHelper.js';
+import { getActivePayrollMonth } from './periodEngine.js';
+export { getRealDate, getRealTodayStr, getRealNowTimeStr } from './timeEngine.js';
+import { getRealDate } from './timeEngine.js';
 
 export const AR_MONTHS = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
 export const AR_WEEKDAYS = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
@@ -232,32 +232,21 @@ export function deduplicateAndConsolidateEmployees(rawEmployees = [], stateObj =
       canonicalId = byCreation[0]?.id || latestEmp.id;
     }
 
-    // دمج السجل بذكاء: الأولوية لآخر التعديلات
+    // دمج السجل بذكاء: الأولوية المطلقة لآخر نسخة قام المستخدم بتعديلها أو حفظها
     const mergedEmp = {
-      ...group.reduce((acc, curr) => ({ ...curr, ...acc }), {}),
       ...latestEmp,
       id: canonicalId,
       updatedAt: latestEmp.updatedAt || (Math.max(...group.map(getEmpTime), 0) > 0 ? new Date(Math.max(...group.map(getEmpTime))).toISOString() : new Date().toISOString())
     };
 
-    // حماية الهواتف والفروع من الفقدان
-    if (!Array.isArray(mergedEmp.phones) || mergedEmp.phones.length === 0) {
-      const allPhones = group.find(e => Array.isArray(e.phones) && e.phones.length > 0)?.phones;
-      if (allPhones) mergedEmp.phones = allPhones;
-    }
-    if (!Array.isArray(mergedEmp.branchesDetails) || mergedEmp.branchesDetails.length === 0) {
-      const allBd = group.find(e => Array.isArray(e.branchesDetails) && e.branchesDetails.length > 0)?.branchesDetails;
-      if (allBd) mergedEmp.branchesDetails = allBd;
-    }
-
-    // حماية البصمات الحيوية
+    // حماية البصمات الحيوية من الفقدان العرضي ما لم يتم طلب تصفيرها
     const withFace = group.find(e => e.has_face_descriptor && e.face_descriptor);
-    if (withFace && !mergedEmp.face_descriptor) {
+    if (withFace && !mergedEmp.face_descriptor && !mergedEmp.biometricResetAt) {
       mergedEmp.has_face_descriptor = true;
       mergedEmp.face_descriptor = withFace.face_descriptor;
     }
     const withHand = group.find(e => e.has_hand_descriptor && e.hand_descriptor);
-    if (withHand && !mergedEmp.hand_descriptor) {
+    if (withHand && !mergedEmp.hand_descriptor && !mergedEmp.biometricResetAt) {
       mergedEmp.has_hand_descriptor = true;
       mergedEmp.hand_descriptor = withHand.hand_descriptor;
     }
@@ -907,7 +896,7 @@ export function normalizeState(parsed) {
   };
 }
 
-export { applyShiftSwapToRosters, getDayScheduleFromMap, getEmployeeDaySchedule, findEmployeeRoster, getEmployeeBaseDaySchedule } from './rosterEngine';
+export { applyShiftSwapToRosters, getDayScheduleFromMap, getEmployeeDaySchedule, findEmployeeRoster, getEmployeeBaseDaySchedule } from './rosterEngine.js';
 
 
 /**

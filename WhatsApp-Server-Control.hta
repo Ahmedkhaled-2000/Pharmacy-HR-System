@@ -153,13 +153,13 @@
     Sub CheckNetworkInfo
       Dim WshShell, IP
       Set WshShell = CreateObject("WScript.Shell")
-      MsgBox "عنوان الخادم المحلي: http://localhost:3001" & vbCrLf & "المنفذ المخصص: 3001" & vbCrLf & "حالة الخدمة: جاهز للاستقبال والإرسال 🟢", 64, "معلومات الشبكة"
+      MsgBox "عنوان الخادم المحلي: http://localhost:3100" & vbCrLf & "المنفذ المخصص: 3100" & vbCrLf & "حالة الخدمة: جاهز للاستقبال والإرسال على الشبكة المحلية 🟢", 64, "معلومات الشبكة"
     End Sub
 
     Sub StopServer
       Dim WshShell
       Set WshShell = CreateObject("WScript.Shell")
-      WshShell.Run "powershell -WindowStyle Hidden -Command ""Get-NetTCPConnection -LocalPort 3001 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }""", 0, True
+      WshShell.Run "powershell -WindowStyle Hidden -Command ""Get-NetTCPConnection -LocalPort 3100 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }""", 0, True
       MsgBox "تم إيقاف خادم الواتساب بنجاح! 🔴", 64, "إدارة الخادم"
       CheckServerStatus
     End Sub
@@ -173,22 +173,23 @@
     Sub AllowFirewall
       Dim WshShell
       Set WshShell = CreateObject("WScript.Shell")
-      WshShell.Run "cmd /c netsh advfirewall firewall add rule name=""WhatsApp_Server_3001"" dir=in action=allow protocol=TCP localport=3001", 0, True
-      MsgBox "تم السماح للمنفذ 3001 في جدار الحماية (Firewall) بنجاح! 🛡️", 64, "جدار الحماية"
+      WshShell.Run "cmd /c netsh advfirewall firewall add rule name=""WhatsApp_Server_3100"" dir=in action=allow protocol=TCP localport=3100", 0, True
+      MsgBox "تم السماح للمنفذ 3100 في جدار الحماية (Firewall) بنجاح! 🛡️", 64, "جدار الحماية"
     End Sub
 
     Sub StartTunnel
       Dim WshShell
       Set WshShell = CreateObject("WScript.Shell")
-      WshShell.Run "cmd /c npx localtunnel --port 3001 --subdomain funny-sloth-89 > tunnel.log 2>&1", 0, False
+      WshShell.Run "cmd /c npx localtunnel --port 3100 --subdomain funny-sloth-89 > tunnel.log 2>&1", 0, False
       document.getElementById("tunnelStatusText").innerText = "رابط الإنترنت: يعمل بنجاح 🟢"
-      MsgBox "تم تشغيل رابط الإنترنت العام بنجاح! 🌐", 64, "رابط الإنترنت"
+      MsgBox "تم تشغيل رابط الإنترنت العام بنجاح على منفذ 3100! 🌐", 64, "رابط الإنترنت"
     End Sub
 
     Sub StopTunnel
       Dim WshShell
       Set WshShell = CreateObject("WScript.Shell")
-      WshShell.Run "powershell -WindowStyle Hidden -Command ""Get-NetTCPConnection -LocalPort 3001 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }""", 0, True
+      ' Only kill node processes running localtunnel if needed, or close tunnel
+      WshShell.Run "powershell -WindowStyle Hidden -Command ""Get-CimInstance Win32_Process -Filter \""CommandLine LIKE '%localtunnel%'\"" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }""", 0, True
       document.getElementById("tunnelStatusText").innerText = "رابط الإنترنت: متوقف حالياً 🔴"
       MsgBox "تم إيقاف رابط الإنترنت بنجاح! 🔴", 64, "رابط الإنترنت"
     End Sub
@@ -204,7 +205,7 @@
       On Error Resume Next
       Dim xmlhttp
       Set xmlhttp = CreateObject("MSXML2.XMLHTTP")
-      xmlhttp.Open "GET", "http://localhost:3001/health", False
+      xmlhttp.Open "GET", "http://localhost:3100/health", False
       xmlhttp.Send
       If xmlhttp.Status = 200 Then
         document.getElementById("statusText").innerText = "الحالة: الخادم يعمل حالياً (RUNNING) 🟢"
@@ -222,11 +223,11 @@
   <div id="statusText" class="status-badge status-stopped">الحالة: الخادم متوقف حالياً (NOT RUNNING)</div>
 
   <div class="btn-stack">
-    <button className="btn-main btn-green" onclick="StartServer()">▶ 1. تشغيل خادم الواتساب (في الخلفية)</button>
-    <button className="btn-main btn-blue" onclick="CheckNetworkInfo()">📊 2. معرفة حالة الخادم وعنوان الشبكة</button>
-    <button className="btn-main btn-red" onclick="StopServer()">⏹ 3. إيقاف خادم الواتساب</button>
-    <button className="btn-main btn-gray" onclick="ViewLogs()">📋 4. عرض آخر السجلات (Logs)</button>
-    <button className="btn-main btn-purple" onclick="AllowFirewall()">🛡️ 5. السماح للمنفذ 3001 في جدار الحماية (Firewall)</button>
+    <button class="btn-main btn-green" onclick="StartServer()">▶ 1. تشغيل خادم الواتساب (في الخلفية)</button>
+    <button class="btn-main btn-blue" onclick="CheckNetworkInfo()">📊 2. معرفة حالة الخادم وعنوان الشبكة</button>
+    <button class="btn-main btn-red" onclick="StopServer()">⏹ 3. إيقاف خادم الواتساب</button>
+    <button class="btn-main btn-gray" onclick="ViewLogs()">📋 4. عرض آخر السجلات (Logs)</button>
+    <button class="btn-main btn-purple" onclick="AllowFirewall()">🛡️ 5. السماح للمنفذ 3100 في جدار الحماية (Firewall)</button>
   </div>
 
   <div class="tunnel-box">

@@ -1,6 +1,6 @@
-import { arabicWeekday } from './formatters';
-import { getRealTodayStr } from './timeEngine';
-import { getActivePayrollMonth, getCycleDateRange, extractPayrollSettings } from './periodEngine';
+import { arabicWeekday } from './formatters.js';
+import { getRealTodayStr } from './timeEngine.js';
+import { getActivePayrollMonth, getCycleDateRange, extractPayrollSettings } from './periodEngine.js';
 
 export const AR_WEEKDAYS_MAP = {
   0: ['sunday', ' الأحد', 'الأحد', 'الاحد'],

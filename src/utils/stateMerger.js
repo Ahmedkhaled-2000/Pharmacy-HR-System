@@ -77,16 +77,103 @@ export function isItemDeleted(item, key, deletedIds) {
   if (!item || typeof item !== 'object') return true;
   if (!deletedIds || !(deletedIds instanceof Set) || deletedIds.size === 0) return false;
 
-  // فحص مباشر للمفتاح المحدد
-  if (key && deletedIds.has(key)) return true;
-
-  if (item.id !== undefined && item.id !== null && item.id !== '') {
-    const idStr = String(item.id);
-    if (deletedIds.has(idStr)) return true;
+  // 1. فحص مباشر للمفتاح المحدد
+  if (key) {
+    const kStr = String(key);
+    if (deletedIds.has(kStr) || deletedIds.has(kStr.toLowerCase())) return true;
   }
 
-  // Device-specific deletion check
-  if (item.deviceId && (deletedIds.has(String(item.deviceId)) || deletedIds.has(`dev_${item.deviceId}`))) return true;
+  // 2. فحص المعرف الأساسي id و _id
+  if (item.id !== undefined && item.id !== null && item.id !== '') {
+    const idStr = String(item.id).trim();
+    const idLower = idStr.toLowerCase();
+    if (
+      deletedIds.has(idStr) ||
+      deletedIds.has(idLower) ||
+      deletedIds.has(`emp_${idStr}`) ||
+      deletedIds.has(`emp_${idLower}`) ||
+      deletedIds.has(`emp_code_${idLower}`) ||
+      deletedIds.has(`code_${idLower}`)
+    ) return true;
+  }
+  if (item._id !== undefined && item._id !== null && item._id !== '') {
+    const idStr = String(item._id).trim();
+    const idLower = idStr.toLowerCase();
+    if (
+      deletedIds.has(idStr) ||
+      deletedIds.has(idLower) ||
+      deletedIds.has(`emp_${idStr}`) ||
+      deletedIds.has(`emp_${idLower}`) ||
+      deletedIds.has(`emp_code_${idLower}`) ||
+      deletedIds.has(`code_${idLower}`)
+    ) return true;
+  }
+
+  // 3. فحص كود الموظف، اسم المستخدم، أو الرقم القومي
+  if (item.code !== undefined && item.code !== null && item.code !== '') {
+    const codeStr = String(item.code).trim().toLowerCase();
+    if (
+      deletedIds.has(codeStr) ||
+      deletedIds.has(`emp_${codeStr}`) ||
+      deletedIds.has(`emp_code_${codeStr}`) ||
+      deletedIds.has(`code_${codeStr}`)
+    ) return true;
+  }
+  if (item.username !== undefined && item.username !== null && item.username !== '') {
+    const uStr = String(item.username).trim().toLowerCase();
+    if (
+      deletedIds.has(uStr) ||
+      deletedIds.has(`emp_${uStr}`) ||
+      deletedIds.has(`user_${uStr}`)
+    ) return true;
+  }
+  if (item.nationalId !== undefined && item.nationalId !== null && item.nationalId !== '') {
+    const nid = String(item.nationalId).replace(/\D/g, '');
+    if (
+      nid && (
+        deletedIds.has(nid) ||
+        deletedIds.has(`emp_nid_${nid}`) ||
+        deletedIds.has(`nid_${nid}`)
+      )
+    ) return true;
+  }
+
+  // 4. فحص المعاملات التابعة لموظف محذوف (شفتات، إجازات، سلف، طلبات)
+  if (item.employeeId !== undefined && item.employeeId !== null && item.employeeId !== '') {
+    const empIdStr = String(item.employeeId).trim();
+    const empIdLower = empIdStr.toLowerCase();
+    if (
+      deletedIds.has(empIdStr) ||
+      deletedIds.has(empIdLower) ||
+      deletedIds.has(`emp_${empIdStr}`) ||
+      deletedIds.has(`emp_${empIdLower}`) ||
+      deletedIds.has(`emp_code_${empIdLower}`) ||
+      deletedIds.has(`code_${empIdLower}`)
+    ) return true;
+  }
+  if (item.employeeCode !== undefined && item.employeeCode !== null && item.employeeCode !== '') {
+    const empCodeStr = String(item.employeeCode).trim().toLowerCase();
+    if (
+      deletedIds.has(empCodeStr) ||
+      deletedIds.has(`emp_${empCodeStr}`) ||
+      deletedIds.has(`emp_code_${empCodeStr}`) ||
+      deletedIds.has(`code_${empCodeStr}`)
+    ) return true;
+  }
+
+  // 5. فحص الأجهزة المحذوفة
+  if (item.deviceId && (
+    deletedIds.has(String(item.deviceId)) ||
+    deletedIds.has(String(item.deviceId).toLowerCase()) ||
+    deletedIds.has(`dev_${item.deviceId}`)
+  )) return true;
+
+  // 6. فحص طلبات معينة
+  if (item.requestId && (
+    deletedIds.has(String(item.requestId)) ||
+    deletedIds.has(String(item.requestId).toLowerCase()) ||
+    deletedIds.has(`req_${item.requestId}`)
+  )) return true;
 
   return false;
 }
@@ -95,7 +182,16 @@ export function isItemDeleted(item, key, deletedIds) {
 export function mergeArrays(localArr = [], remoteArr = [], options = {}) {
   const localList = toSafeArray(localArr);
   const remoteList = toSafeArray(remoteArr);
-  const deletedIds = options.deletedIds instanceof Set ? options.deletedIds : new Set(toSafeArray(options.deletedIds).map(String));
+  
+  const rawDeleted = options.deletedIds instanceof Set ? Array.from(options.deletedIds) : toSafeArray(options.deletedIds);
+  const deletedIds = new Set();
+  for (const d of rawDeleted) {
+    if (d === null || d === undefined) continue;
+    const s = String(d).trim();
+    if (!s) continue;
+    deletedIds.add(s);
+    deletedIds.add(s.toLowerCase());
+  }
 
   const map = new Map();
 
@@ -150,7 +246,7 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
       }
     }
 
-    // الحفاظ على معرف مستقر لا يتغير عشوائياً (يفضل المعرف الأقدم أو المعرف المعتمد)
+    // صيانة المعرف المستقر
     if (localItem.id && remoteItem.id && String(localItem.id) !== String(remoteItem.id)) {
       const lCreated = localItem.createdAt ? new Date(localItem.createdAt).getTime() : 0;
       const rCreated = remoteItem.createdAt ? new Date(remoteItem.createdAt).getTime() : 0;
@@ -159,14 +255,6 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
       } else {
         mergedEmp.id = remoteItem.id || localItem.id;
       }
-    }
-
-    // صيانة وحماية أرقام الهواتف وتفاصيل الفروع إذا كانت موجودة في الطرف المحلي
-    if (Array.isArray(localItem.phones) && localItem.phones.length > 0 && (!Array.isArray(mergedEmp.phones) || mergedEmp.phones.length === 0)) {
-      mergedEmp.phones = localItem.phones;
-    }
-    if (Array.isArray(localItem.branchesDetails) && localItem.branchesDetails.length > 0 && (!Array.isArray(mergedEmp.branchesDetails) || mergedEmp.branchesDetails.length === 0)) {
-      mergedEmp.branchesDetails = localItem.branchesDetails;
     }
 
     // ── حماية وصيانة البصمة الإلكترونية من المسح العرضي أثناء الدمج ──
@@ -418,16 +506,69 @@ export function smartMergeStates(localState, remoteState) {
   if (!localState || typeof localState !== 'object') return remoteState;
 
   // تجميع كافة شواهد القبور والمعرفات المحذوفة صراحة من الطرفين
-  const deletedIds = new Set([
-    ...toSafeArray(localState._deletedIds || []).map(String),
-    ...toSafeArray(remoteState._deletedIds || []).map(String)
-  ]);
+  const deletedIds = new Set();
+  const rawDeleted = [
+    ...toSafeArray(localState._deletedIds || []),
+    ...toSafeArray(remoteState._deletedIds || [])
+  ];
+  for (const d of rawDeleted) {
+    if (d === null || d === undefined) continue;
+    const s = String(d).trim();
+    if (!s) continue;
+    deletedIds.add(s);
+    deletedIds.add(s.toLowerCase());
+  }
 
-  const mergedShifts = mergeArrays(localState.shifts, remoteState.shifts, { prefix: 'shift', deletedIds });
+  // معالجة ومراعاة تاريخ التصفير الشامل _wipedAt إن وجد لمنع إعادة إحياء البيانات القديمة
+  const remoteWipeTime = remoteState._wipedAt ? new Date(remoteState._wipedAt).getTime() : 0;
+  const localWipeTime = localState._wipedAt ? new Date(localState._wipedAt).getTime() : 0;
+  const isRemoteWipeNewer = remoteWipeTime > localWipeTime;
+  const isLocalWipeNewer = localWipeTime > remoteWipeTime;
+
+  const filterPreWipe = (arr, wipeTime) => {
+    if (!wipeTime || wipeTime <= 0) return arr;
+    return toSafeArray(arr).filter((item) => {
+      const itemT = getItemTime(item);
+      return itemT >= wipeTime;
+    });
+  };
+
+  const effectiveLocal = { ...localState };
+  const effectiveRemote = { ...remoteState };
+
+  if (isRemoteWipeNewer) {
+    // السحابة قامت بعمل تصفير، نمنع الجهاز المحلي من إعادة إرسال الكيانات القديمة التي أنشئت قبل التصفير
+    effectiveLocal.employees = filterPreWipe(effectiveLocal.employees, remoteWipeTime);
+    effectiveLocal.shifts = filterPreWipe(effectiveLocal.shifts, remoteWipeTime);
+    effectiveLocal.requests = filterPreWipe(effectiveLocal.requests, remoteWipeTime);
+    effectiveLocal.leaveRequests = filterPreWipe(effectiveLocal.leaveRequests, remoteWipeTime);
+    effectiveLocal.loans = filterPreWipe(effectiveLocal.loans, remoteWipeTime);
+    effectiveLocal.adjustments = filterPreWipe(effectiveLocal.adjustments, remoteWipeTime);
+    effectiveLocal.rosters = filterPreWipe(effectiveLocal.rosters, remoteWipeTime);
+    effectiveLocal.lateIncidents = filterPreWipe(effectiveLocal.lateIncidents, remoteWipeTime);
+    effectiveLocal.employeeNotes = filterPreWipe(effectiveLocal.employeeNotes, remoteWipeTime);
+    effectiveLocal.evaluations = filterPreWipe(effectiveLocal.evaluations, remoteWipeTime);
+    effectiveLocal.activeShifts = {};
+  } else if (isLocalWipeNewer) {
+    // الجهاز المحلي قام بعمل تصفير حديث، نمنع السحابة من إعادة البيانات الممسوحة
+    effectiveRemote.employees = filterPreWipe(effectiveRemote.employees, localWipeTime);
+    effectiveRemote.shifts = filterPreWipe(effectiveRemote.shifts, localWipeTime);
+    effectiveRemote.requests = filterPreWipe(effectiveRemote.requests, localWipeTime);
+    effectiveRemote.leaveRequests = filterPreWipe(effectiveRemote.leaveRequests, localWipeTime);
+    effectiveRemote.loans = filterPreWipe(effectiveRemote.loans, localWipeTime);
+    effectiveRemote.adjustments = filterPreWipe(effectiveRemote.adjustments, localWipeTime);
+    effectiveRemote.rosters = filterPreWipe(effectiveRemote.rosters, localWipeTime);
+    effectiveRemote.lateIncidents = filterPreWipe(effectiveRemote.lateIncidents, localWipeTime);
+    effectiveRemote.employeeNotes = filterPreWipe(effectiveRemote.employeeNotes, localWipeTime);
+    effectiveRemote.evaluations = filterPreWipe(effectiveRemote.evaluations, localWipeTime);
+    effectiveRemote.activeShifts = {};
+  }
+
+  const mergedShifts = mergeArrays(effectiveLocal.shifts, effectiveRemote.shifts, { prefix: 'shift', deletedIds });
 
   return {
-    ...remoteState,
-    ...localState,
+    ...effectiveRemote,
+    ...effectiveLocal,
 
     // 1. الإعدادات واللائحة
     orgSettings: (() => {
@@ -594,33 +735,33 @@ export function smartMergeStates(localState, remoteState) {
     },
 
     // 2. الكيانات والمصفوفات الأساسية
-    branches: mergeArrays(localState.branches, remoteState.branches, { prefix: 'branch', deletedIds }),
-    employees: mergeArrays(localState.employees, remoteState.employees, { prefix: 'emp', deletedIds }),
+    branches: mergeArrays(effectiveLocal.branches, effectiveRemote.branches, { prefix: 'branch', deletedIds }),
+    employees: mergeArrays(effectiveLocal.employees, effectiveRemote.employees, { prefix: 'emp', deletedIds }),
     shifts: mergedShifts,
     approvalRules: (() => {
-      if (localState._approvalRulesUpdatedAt || remoteState._approvalRulesUpdatedAt) {
-        const localT = new Date(localState._approvalRulesUpdatedAt || 0).getTime();
-        const remoteT = new Date(remoteState._approvalRulesUpdatedAt || 0).getTime();
-        return localT >= remoteT ? (localState.approvalRules || []) : (remoteState.approvalRules || []);
+      if (effectiveLocal._approvalRulesUpdatedAt || effectiveRemote._approvalRulesUpdatedAt) {
+        const localT = new Date(effectiveLocal._approvalRulesUpdatedAt || 0).getTime();
+        const remoteT = new Date(effectiveRemote._approvalRulesUpdatedAt || 0).getTime();
+        return localT >= remoteT ? (effectiveLocal.approvalRules || []) : (effectiveRemote.approvalRules || []);
       }
-      return localState.approvalRules && localState.approvalRules.length > 0 
-        ? localState.approvalRules 
-        : (remoteState.approvalRules || []);
+      return effectiveLocal.approvalRules && effectiveLocal.approvalRules.length > 0 
+        ? effectiveLocal.approvalRules 
+        : (effectiveRemote.approvalRules || []);
     })(),
-    authorizedDevices: mergeArrays(localState.authorizedDevices, remoteState.authorizedDevices, { prefix: 'dev', deletedIds }),
+    authorizedDevices: mergeArrays(effectiveLocal.authorizedDevices, effectiveRemote.authorizedDevices, { prefix: 'dev', deletedIds }),
 
-    requests: mergeArrays(localState.requests, remoteState.requests, { prefix: 'req', deletedIds }),
-    resignationRequests: mergeArrays(localState.resignationRequests, remoteState.resignationRequests, { prefix: 'res', deletedIds }),
-    leaveRequests: mergeArrays(localState.leaveRequests, remoteState.leaveRequests, { prefix: 'leave', deletedIds }),
-    permissionRequests: mergeArrays(localState.permissionRequests, remoteState.permissionRequests, { prefix: 'perm', deletedIds }),
-    leaveHistory: mergeArrays(localState.leaveHistory, remoteState.leaveHistory, { prefix: 'lhist', deletedIds }),
-    shiftSwaps: mergeArrays(localState.shiftSwaps, remoteState.shiftSwaps, { prefix: 'swap', deletedIds }),
-    loans: mergeArrays(localState.loans, remoteState.loans, { prefix: 'loan', deletedIds }),
-    logs: mergeArrays(localState.logs, remoteState.logs, { prefix: 'log', deletedIds }),
-    evaluations: mergeArrays(localState.evaluations, remoteState.evaluations, { prefix: 'eval', deletedIds }),
+    requests: mergeArrays(effectiveLocal.requests, effectiveRemote.requests, { prefix: 'req', deletedIds }),
+    resignationRequests: mergeArrays(effectiveLocal.resignationRequests, effectiveRemote.resignationRequests, { prefix: 'res', deletedIds }),
+    leaveRequests: mergeArrays(effectiveLocal.leaveRequests, effectiveRemote.leaveRequests, { prefix: 'leave', deletedIds }),
+    permissionRequests: mergeArrays(effectiveLocal.permissionRequests, effectiveRemote.permissionRequests, { prefix: 'perm', deletedIds }),
+    leaveHistory: mergeArrays(effectiveLocal.leaveHistory, effectiveRemote.leaveHistory, { prefix: 'lhist', deletedIds }),
+    shiftSwaps: mergeArrays(effectiveLocal.shiftSwaps, effectiveRemote.shiftSwaps, { prefix: 'swap', deletedIds }),
+    loans: mergeArrays(effectiveLocal.loans, effectiveRemote.loans, { prefix: 'loan', deletedIds }),
+    logs: mergeArrays(effectiveLocal.logs, effectiveRemote.logs, { prefix: 'log', deletedIds }),
+    evaluations: mergeArrays(effectiveLocal.evaluations, effectiveRemote.evaluations, { prefix: 'eval', deletedIds }),
     notifications: (() => {
-      let list = mergeArrays(localState.notifications, remoteState.notifications, { prefix: 'notif', deletedIds });
-      const clearedAt = localState._notificationsClearedAt || remoteState._notificationsClearedAt;
+      let list = mergeArrays(effectiveLocal.notifications, effectiveRemote.notifications, { prefix: 'notif', deletedIds });
+      const clearedAt = effectiveLocal._notificationsClearedAt || effectiveRemote._notificationsClearedAt;
       if (clearedAt) {
         const clearTime = new Date(clearedAt).getTime();
         list = list.filter((n) => {
@@ -632,18 +773,18 @@ export function smartMergeStates(localState, remoteState) {
       }
       return list;
     })(),
-    adjustments: mergeArrays(localState.adjustments, remoteState.adjustments, { prefix: 'adj', deletedIds }),
-    lateIncidents: mergeArrays(localState.lateIncidents, remoteState.lateIncidents, { prefix: 'late_inc', deletedIds }),
-    employeeNotes: mergeArrays(localState.employeeNotes, remoteState.employeeNotes, { prefix: 'note', deletedIds }),
-    finances: mergeArrays(localState.finances, remoteState.finances, { prefix: 'fin', deletedIds }),
-    transactions: mergeArrays(localState.transactions, remoteState.transactions, { prefix: 'tx', deletedIds }),
+    adjustments: mergeArrays(effectiveLocal.adjustments, effectiveRemote.adjustments, { prefix: 'adj', deletedIds }),
+    lateIncidents: mergeArrays(effectiveLocal.lateIncidents, effectiveRemote.lateIncidents, { prefix: 'late_inc', deletedIds }),
+    employeeNotes: mergeArrays(effectiveLocal.employeeNotes, effectiveRemote.employeeNotes, { prefix: 'note', deletedIds }),
+    finances: mergeArrays(effectiveLocal.finances, effectiveRemote.finances, { prefix: 'fin', deletedIds }),
+    transactions: mergeArrays(effectiveLocal.transactions, effectiveRemote.transactions, { prefix: 'tx', deletedIds }),
 
-    recruitmentApplications: mergeArrays(localState.recruitmentApplications, remoteState.recruitmentApplications, { prefix: 'app', deletedIds }),
-    jobVacancies: mergeArrays(localState.jobVacancies, remoteState.jobVacancies, { prefix: 'vac', deletedIds }),
-    branchSales: mergeArrays(localState.branchSales, remoteState.branchSales, { prefix: 'sale', deletedIds }),
+    recruitmentApplications: mergeArrays(effectiveLocal.recruitmentApplications, effectiveRemote.recruitmentApplications, { prefix: 'app', deletedIds }),
+    jobVacancies: mergeArrays(effectiveLocal.jobVacancies, effectiveRemote.jobVacancies, { prefix: 'vac', deletedIds }),
+    branchSales: mergeArrays(effectiveLocal.branchSales, effectiveRemote.branchSales, { prefix: 'sale', deletedIds }),
     branchSalesTargets: (() => {
-      const merged = { ...(remoteState.branchSalesTargets || {}) };
-      const localTargets = localState.branchSalesTargets || {};
+      const merged = { ...(effectiveRemote.branchSalesTargets || {}) };
+      const localTargets = effectiveLocal.branchSalesTargets || {};
       Object.keys(localTargets).forEach((mKey) => {
         merged[mKey] = {
           ...(merged[mKey] || {}),
@@ -655,14 +796,15 @@ export function smartMergeStates(localState, remoteState) {
     branchSalesSettings: {
       allowBranchManagersEntry: false,
       topN: 3,
-      ...(remoteState.branchSalesSettings || {}),
-      ...(localState.branchSalesSettings || {})
+      ...(effectiveRemote.branchSalesSettings || {}),
+      ...(effectiveLocal.branchSalesSettings || {})
     },
-    rosters: mergeRosters(localState.rosters, remoteState.rosters, { deletedIds }),
-    activeShifts: mergeActiveShifts(localState.activeShifts, remoteState.activeShifts, mergedShifts, { deletedIds }),
-    branchDirectives: mergeArrays(localState.branchDirectives, remoteState.branchDirectives, { prefix: 'bdir', deletedIds }),
-    adminDirectives: mergeArrays(localState.adminDirectives, remoteState.adminDirectives, { prefix: 'adir', deletedIds }),
-    _notificationsClearedAt: localState._notificationsClearedAt || remoteState._notificationsClearedAt || null,
+    rosters: mergeRosters(effectiveLocal.rosters, effectiveRemote.rosters, { deletedIds }),
+    activeShifts: mergeActiveShifts(effectiveLocal.activeShifts, effectiveRemote.activeShifts, mergedShifts, { deletedIds }),
+    branchDirectives: mergeArrays(effectiveLocal.branchDirectives, effectiveRemote.branchDirectives, { prefix: 'bdir', deletedIds }),
+    adminDirectives: mergeArrays(effectiveLocal.adminDirectives, effectiveRemote.adminDirectives, { prefix: 'adir', deletedIds }),
+    _notificationsClearedAt: effectiveLocal._notificationsClearedAt || effectiveRemote._notificationsClearedAt || null,
+    _wipedAt: isRemoteWipeNewer ? effectiveRemote._wipedAt : (isLocalWipeNewer ? effectiveLocal._wipedAt : (effectiveRemote._wipedAt || effectiveLocal._wipedAt || null)),
     _deletedIds: Array.from(deletedIds).slice(-3000)
   };
 }
