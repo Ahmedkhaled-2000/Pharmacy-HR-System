@@ -59,6 +59,7 @@ contextBridge.exposeInMainWorld('desktopAPI', {
 
   // 7. إدارة خادم الواتساب التلقائي (24/7 WhatsApp Gateway)
   restartWhatsAppServer: () => ipcRenderer.invoke('whatsapp:restart-server'),
+  logoutWhatsAppServer: () => ipcRenderer.invoke('whatsapp:logout'),
   getWhatsAppServerHealth: () => ipcRenderer.invoke('whatsapp:get-health'),
 
   // 8. توليد ملفات الـ PDF البرمجية

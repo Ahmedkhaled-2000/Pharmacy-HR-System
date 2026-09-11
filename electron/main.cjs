@@ -571,6 +571,29 @@ ipcMain.handle('whatsapp:restart-server', async () => {
   return await killAndRestartWhatsAppServer();
 });
 
+ipcMain.handle('whatsapp:logout', async () => {
+  return new Promise((resolve) => {
+    try {
+      const postReq = http.request('http://127.0.0.1:3100/api/logout', { method: 'POST', timeout: 3500 }, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(data));
+          } catch {
+            resolve({ success: true, message: 'تم تسجيل الخروج وإعادة ضبط رمز الاقتران' });
+          }
+        });
+      });
+      postReq.on('error', (err) => resolve({ success: false, error: err.message }));
+      postReq.on('timeout', () => { postReq.destroy(); resolve({ success: false, error: 'Timeout' }); });
+      postReq.end();
+    } catch (e) {
+      resolve({ success: false, error: e.message });
+    }
+  });
+});
+
 // توليد ملف PDF مشفر كـ Base64 من كود HTML لإرفاقه مباشرة عبر الواتساب
 ipcMain.handle('print:generate-pdf-base64', async (_event, htmlContent, printOptions = {}) => {
   let pdfWindow = null;

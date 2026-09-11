@@ -449,14 +449,21 @@ app.post('/api/restart', async (req, res) => {
   res.json({ success: true, message: 'جاري إعادة تهيئة واتصال خادم الواتساب...' });
 });
 
-// تسجيل الخروج وإعادة توليد رمز الاقتران
+// تسجيل الخروج وإعادة توليد رمز الاقتران لتبديل الرقم
 app.post('/api/logout', async (req, res) => {
-  console.log('[WhatsApp Gateway] 🚪 Logout requested...');
+  console.log('[WhatsApp Gateway] 🚪 Logout requested to change connected phone number...');
   try {
     if (sock) {
-      await sock.logout();
+      await Promise.race([
+        sock.logout().catch(() => {}),
+        new Promise((resolve) => setTimeout(resolve, 1500))
+      ]);
+      try { sock.end(new Error('Manual logout triggered')); } catch {}
     }
-  } catch {}
+  } catch (err) {
+    console.warn('[WhatsApp Gateway] Logout socket cleanup warning:', err.message);
+  }
+  sock = null;
 
   serverState.status = 'DISCONNECTED';
   serverState.phone = '';
@@ -465,14 +472,18 @@ app.post('/api/logout', async (req, res) => {
   isConnecting = false;
 
   try {
-    fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+    if (fs.existsSync(AUTH_DIR)) {
+      fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+    }
     fs.mkdirSync(AUTH_DIR, { recursive: true });
-  } catch {}
+  } catch (err) {
+    console.warn('[WhatsApp Gateway] Failed to reset AUTH_DIR:', err.message);
+  }
 
   if (reconnectTimer) clearTimeout(reconnectTimer);
-  reconnectTimer = setTimeout(connectToWhatsApp, 2000);
+  reconnectTimer = setTimeout(connectToWhatsApp, 1500);
 
-  res.json({ success: true, message: 'تم تسجيل الخروج وإعادة ضبط رمز الاقتران.' });
+  res.json({ success: true, message: 'تم تسجيل الخروج وفك ارتباط الرقم بنجاح، وجاري توليد رمز الاقتران الجديد.' });
 });
 
 app.listen(PORT, '0.0.0.0', () => {

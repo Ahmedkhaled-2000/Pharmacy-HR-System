@@ -6,7 +6,7 @@ import {
   populateWhatsAppTemplate,
   generatePayslipPrintHtml
 } from '../../utils/whatsappTemplates';
-import { Send, FileText, CheckCircle2, AlertCircle, RefreshCw, Sparkles, Filter, Users, UserCheck } from 'lucide-react';
+import { Send, FileText, CheckCircle2, AlertCircle, RefreshCw, Sparkles, Filter, Users, UserCheck, LogOut } from 'lucide-react';
 
 export default function WhatsAppCenterModule({
   state,
@@ -29,6 +29,7 @@ export default function WhatsAppCenterModule({
   const [waPhone, setWaPhone] = useState('');
   const [waLiveQr, setWaLiveQr] = useState('');
   const [isRestarting, setIsRestarting] = useState(false);
+  const [isChangingNumber, setIsChangingNumber] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [sendProgressText, setSendProgressText] = useState('');
 
@@ -152,6 +153,72 @@ export default function WhatsAppCenterModule({
       await fetchWaStatus(true);
       setIsRestarting(false);
     }, 2500);
+  };
+
+  // تغيير رقم الواتساب المقترن وفك الارتباط لتوليد رمز QR جديد
+  const handleChangeConnectedNumber = async () => {
+    const currentPhoneDisplay = waPhone ? `(+${waPhone})` : '';
+    const isConfirmed = window.confirm(
+      `هل أنت متأكد من رغبتك في تغيير رقم الواتساب المقترن ${currentPhoneDisplay}؟\n\n` +
+      `سيتم إلغاء اقتران الهاتف الحالي وتوليد رمز QR جديد لربط الهاتف الجديد فوراً.`
+    );
+    if (!isConfirmed) return;
+
+    setIsChangingNumber(true);
+    showToast?.('⏳ جاري تسجيل الخروج وفك ارتباط الرقم الحالي...');
+
+    try {
+      if (typeof window !== 'undefined' && window.desktopAPI?.logoutWhatsAppServer) {
+        await window.desktopAPI.logoutWhatsAppServer();
+      } else {
+        await fetch(`${serverUrl.replace(/\/$/, '')}/api/logout`, {
+          method: 'POST',
+          signal: AbortSignal.timeout(4000)
+        });
+      }
+
+      setWaStatus('DISCONNECTED');
+      setWaPhone('');
+      setWaLiveQr('');
+      showToast?.('🔄 تم فك الارتباط بنجاح، جاري توليد وتجهيز رمز الـ QR الجديد...');
+    } catch (err) {
+      console.warn('Logout WhatsApp error:', err);
+      showToast?.('⚠️ حدث خطأ أثناء فك الارتباط، جاري التحقق من الخادم...');
+    }
+
+    // استطلاع دوري وسريع للحصول على رمز الـ QR الجديد
+    let attempts = 0;
+    const pollInterval = setInterval(async () => {
+      attempts++;
+      try {
+        const res = await fetch(`${serverUrl.replace(/\/$/, '')}/api/status`, {
+          signal: AbortSignal.timeout(2500)
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setWaStatus(data.status || 'DISCONNECTED');
+          setWaPhone(data.phone || '');
+          setWaLiveQr(data.qrCodeDataUrl || '');
+
+          if (data.status === 'QR_READY' && data.qrCodeDataUrl) {
+            clearInterval(pollInterval);
+            setIsChangingNumber(false);
+            showToast?.('✨ رمز الـ QR الجديد جاهز الآن! امسح الرمز من هاتفك الجديد.');
+            return;
+          } else if (data.status === 'CONNECTED') {
+            clearInterval(pollInterval);
+            setIsChangingNumber(false);
+            return;
+          }
+        }
+      } catch {}
+
+      if (attempts >= 12) {
+        clearInterval(pollInterval);
+        setIsChangingNumber(false);
+        fetchWaStatus(true);
+      }
+    }, 1500);
   };
 
   // توليد PDF Base64 لموظف معين سواء عبر تطبيق الديسكتوب أو خادم الواتساب المحلي
@@ -332,7 +399,37 @@ export default function WhatsAppCenterModule({
           </span>
         </div>
 
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+          {/* زر تغيير الرقم المتصل (يظهر عند الاتصال أو وجود رقم مسجل) */}
+          {(waStatus === 'CONNECTED' || Boolean(waPhone)) && (
+            <button
+              type="button"
+              className="btn"
+              disabled={isChangingNumber || isRestarting}
+              title="تسجيل الخروج من الرقم الحالي وتوليد رمز QR جديد لربط رقم مختلف"
+              style={{
+                background: '#dc2626',
+                color: '#ffffff',
+                fontWeight: '800',
+                fontSize: '12.5px',
+                padding: '7px 15px',
+                borderRadius: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                border: '1px solid rgba(255, 255, 255, 0.3)',
+                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
+                cursor: isChangingNumber ? 'not-allowed' : 'pointer',
+                opacity: isChangingNumber ? 0.75 : 1,
+                transition: 'all 0.2s ease'
+              }}
+              onClick={handleChangeConnectedNumber}
+            >
+              <LogOut style={{ width: '13px', height: '13px' }} className={isChangingNumber ? 'animate-spin' : ''} />
+              <span>{isChangingNumber ? 'جاري فك الاقتران...' : '📱 تغيير الرقم المتصل'}</span>
+            </button>
+          )}
+
           <button
             type="button"
             className="btn"
@@ -345,7 +442,7 @@ export default function WhatsAppCenterModule({
           <button
             type="button"
             className="btn"
-            disabled={isRestarting}
+            disabled={isRestarting || isChangingNumber}
             style={{
               background: '#0f172a',
               color: '#ffffff',

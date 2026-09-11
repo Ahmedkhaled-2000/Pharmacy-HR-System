@@ -35,7 +35,44 @@ export default function WhatsAppStatusCard({
             </span>
           </div>
 
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+            {waServerStatus === 'CONNECTED' && (
+              <button
+                className="btn btn-ghost"
+                style={{
+                  fontSize: '13px',
+                  padding: '8px 16px',
+                  background: '#dc2626',
+                  color: '#ffffff',
+                  border: 'none',
+                  fontWeight: '700',
+                  borderRadius: '8px'
+                }}
+                onClick={async () => {
+                  const confirmed = window.confirm('هل أنت متأكد من رغبتك في تغيير رقم الواتساب المتصل وفك ارتباط الهاتف الحالي؟ سيتم توليد رمز QR جديد لربط الهاتف الجديد.');
+                  if (!confirmed) return;
+                  showToast?.('⏳ جاري تسجيل الخروج وإلغاء اقتران الرقم الحالي...');
+                  try {
+                    const serverUrl = waServerUrlInput.trim() || 'http://127.0.0.1:3100';
+                    if (typeof window !== 'undefined' && window.desktopAPI?.logoutWhatsAppServer) {
+                      await window.desktopAPI.logoutWhatsAppServer();
+                    } else {
+                      await fetch(`${serverUrl.replace(/\/$/, '')}/api/logout`, { method: 'POST' });
+                    }
+                    setWaServerStatus('DISCONNECTED');
+                    setWaLiveQr('');
+                    showToast?.('🔄 تم فك الارتباط بنجاح، جاري تجهيز رمز الـ QR الجديد...');
+                    setTimeout(() => {
+                      handleTestWaServerConnection();
+                    }, 2500);
+                  } catch {
+                    showToast?.('تعذر تسجيل الخروج من خادم الواتساب');
+                  }
+                }}
+              >
+                📱 تغيير الرقم المتصل
+              </button>
+            )}
             <button className="btn btn-ghost" style={{ fontSize: '13px', padding: '8px 16px' }} onClick={handleTestWaServerConnection}>
               🔄 فحص الاتصال بالخادم
             </button>
