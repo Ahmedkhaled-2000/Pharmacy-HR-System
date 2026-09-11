@@ -229,18 +229,16 @@ function mergeServerState(array $existing, array $incoming): array
             foreach ($list as $item) {
                 if (!is_array($item)) continue;
                 $key = null;
-                if ($prefix === 'emp') {
+                if (isset($item['id']) && $item['id'] !== '') {
+                    $key = (string)$item['id'];
+                } elseif ($prefix === 'emp') {
                     if (!empty($item['code'])) {
                         $key = 'emp_code_' . strtolower(trim((string)$item['code']));
                     } elseif (!empty($item['nationalId'])) {
                         $key = 'emp_nid_' . preg_replace('/\D/', '', (string)$item['nationalId']);
                     } elseif (!empty($item['recruitmentApplicationId'])) {
                         $key = 'emp_rec_' . (string)$item['recruitmentApplicationId'];
-                    } elseif (isset($item['id']) && $item['id'] !== '') {
-                        $key = (string)$item['id'];
                     }
-                } else {
-                    $key = isset($item['id']) && $item['id'] !== '' ? (string)$item['id'] : null;
                 }
 
                 if (!$key && isset($item['employeeId'], $item['date'])) {
@@ -356,30 +354,6 @@ function mergeServerState(array $existing, array $incoming): array
     foreach ($arrayKeys as $k => $p) {
         $eList = is_array($existing[$k] ?? null) ? $existing[$k] : [];
         $iList = is_array($incoming[$k] ?? null) ? $incoming[$k] : [];
-
-        // فلترة وحذف الموظفين الوهميين نهائياً (01000000000) لمنع إعادة إحيائهم
-        if ($k === 'employees') {
-            $eList = array_values(array_filter($eList, function($emp) {
-                if (!is_array($emp)) return false;
-                $phone = (string)($emp['phone'] ?? '');
-                $name = (string)($emp['name'] ?? '');
-                $code = (string)($emp['code'] ?? '');
-                if ($phone === '01000000000' && ($name === 'مساعد صيدلي' || in_array($code, ['101','102','103','104','105','106','107','108','109','110']))) {
-                    return false;
-                }
-                return true;
-            }));
-            $iList = array_values(array_filter($iList, function($emp) {
-                if (!is_array($emp)) return false;
-                $phone = (string)($emp['phone'] ?? '');
-                $name = (string)($emp['name'] ?? '');
-                $code = (string)($emp['code'] ?? '');
-                if ($phone === '01000000000' && ($name === 'مساعد صيدلي' || in_array($code, ['101','102','103','104','105','106','107','108','109','110']))) {
-                    return false;
-                }
-                return true;
-            }));
-        }
 
         $merged[$k] = $mergeArrayEntities($eList, $iList, $p);
     }

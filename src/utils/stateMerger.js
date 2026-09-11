@@ -7,7 +7,11 @@
 // استخراج مفتاح فريد للعنصر
 export function getItemKey(item, fallbackPrefix = 'item') {
   if (!item || typeof item !== 'object') return null;
-  // للموظفين: الكود أو الرقم القومي يحدد الشخص بشكل مطلق لمنع تكرار نفس الموظف بمعرفات مختلفة
+  // المعرف الأساسي id له الأولوية المطلقة لضمان ثبات هوية الكيان حتى عند تعديل الكود أو الاسم أو الهاتف
+  if (item.id !== undefined && item.id !== null && item.id !== '') return String(item.id);
+  if (item._id !== undefined && item._id !== null && item._id !== '') return String(item._id);
+
+  // للموظفين في حال غياب id: الكود أو الرقم القومي يحدد الشخص بشكل احتياطي
   if (fallbackPrefix === 'emp') {
     if (item.code) return `emp_code_${String(item.code).trim().toLowerCase()}`;
     if (item.nationalId) {
@@ -15,10 +19,7 @@ export function getItemKey(item, fallbackPrefix = 'item') {
       if (nid) return `emp_nid_${nid}`;
     }
     if (item.recruitmentApplicationId) return `emp_rec_${String(item.recruitmentApplicationId)}`;
-    if (item.id !== undefined && item.id !== null && item.id !== '') return String(item.id);
   }
-  if (item.id !== undefined && item.id !== null && item.id !== '') return String(item.id);
-  if (item._id !== undefined && item._id !== null && item._id !== '') return String(item._id);
   if (item.requestId !== undefined && item.requestId !== null && item.requestId !== '') {
     return fallbackPrefix === 'req' ? String(item.requestId) : `${fallbackPrefix}_req_${item.requestId}`;
   }

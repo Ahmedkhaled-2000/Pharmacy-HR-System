@@ -99,11 +99,11 @@ export default function GlobalModalsContainer() {
   const [empNickname, setEmpNickname] = useState('');
   const [empCode, setEmpCode] = useState('');
   const [empPhone, setEmpPhone] = useState('');
-  const [empJobTitle, setEmpJobTitle] = useState('مساعد صيدلي');
+  const [empJobTitle, setEmpJobTitle] = useState('');
   const [empSalary, setEmpSalary] = useState('');
   const [empWorkHours, setEmpWorkHours] = useState('');
   const [empWorkDays, setEmpWorkDays] = useState('');
-  const [empPassword, setEmpPassword] = useState('123');
+  const [empPassword, setEmpPassword] = useState('');
   const [empAnnualLeaveBalance, setEmpAnnualLeaveBalance] = useState('21');
   const [empPhotoUrl, setEmpPhotoUrl] = useState('');
 
@@ -113,23 +113,23 @@ export default function GlobalModalsContainer() {
       setEmpNickname(editingEmp.nickname || '');
       setEmpCode(editingEmp.code || '');
       setEmpPhone(editingEmp.phone || '');
-      setEmpJobTitle(editingEmp.jobTitle || 'مساعد صيدلي');
+      setEmpJobTitle(editingEmp.jobTitle || '');
       setEmpSalary(String(editingEmp.salary || 0));
       setEmpWorkHours(String(editingEmp.workHoursPerDay || 8));
       setEmpWorkDays(String(editingEmp.workDaysPerMonth || 26));
-      setEmpPassword(editingEmp.password || '123');
+      setEmpPassword(editingEmp.password || '');
       setEmpAnnualLeaveBalance(String(editingEmp.annualLeaveBalance !== undefined ? editingEmp.annualLeaveBalance : 21));
       setEmpPhotoUrl(editingEmp.photoUrl || '');
     } else {
       setEmpName('');
       setEmpNickname('');
-      setEmpCode(String(101 + (state.employees || []).length));
+      setEmpCode('');
       setEmpPhone('');
-      setEmpJobTitle('مساعد صيدلي');
+      setEmpJobTitle('');
       setEmpSalary('');
       setEmpWorkHours('');
       setEmpWorkDays('');
-      setEmpPassword('123');
+      setEmpPassword('');
       setEmpAnnualLeaveBalance('21');
       setEmpPhotoUrl('');
     }
@@ -434,6 +434,7 @@ export default function GlobalModalsContainer() {
           departments={getDepartmentsList(state)}
           handleFileUpload={handleFileUpload}
           executeWithOwnerGuard={executeWithOwnerGuard}
+          authRole={authRole}
           onClose={() => {
             setIsEmpFileModalOpen(false);
             setEditingEmpFile(null);

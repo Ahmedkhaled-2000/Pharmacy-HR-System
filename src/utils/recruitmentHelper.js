@@ -292,7 +292,7 @@ export function convertApplicantToEmployeeDraft(applicant, state = {}) {
     hireDate: applicant.availableStartDate || new Date().toISOString().slice(0, 10),
     contractType: applicant.contractTypePreference || 'دوام كامل',
     status: 'على رأس العمل',
-    password: '123',
+    password: '',
     annualLeaveBalance: '21',
     documents: documents,
     

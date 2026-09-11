@@ -40,7 +40,7 @@ export default function EmploymentContractModule({
     const year = new Date().getFullYear();
     const cleanPrefix = (prefix !== undefined ? prefix : 'CNT-Modawa@kane-').trim();
     if (!cleanPrefix) {
-      return `CNT-${targetEmp?.code || targetEmp?.id || '101'}-${year}`;
+      return `CNT-${targetEmp?.code || targetEmp?.id || ''}-${year}`;
     }
     if (cleanPrefix.endsWith('-') || cleanPrefix.endsWith('@') || cleanPrefix.endsWith('_')) {
       return `${cleanPrefix}${year}`;

@@ -268,7 +268,7 @@ export default function EmployeeFileModal({
   const [contractType, setContractType] = useState('دوام كامل');
   const [status, setStatus] = useState('على رأس العمل'); // 'على رأس العمل' | 'تم الاستقالة'
   const [terminationReason, setTerminationReason] = useState('');
-  const [password, setPassword] = useState('123');
+  const [password, setPassword] = useState('');
   const [annualLeaveBalance, setAnnualLeaveBalance] = useState('21');
 
   // 4. Documents Data (Array of { id, title, fileUrl, fileType, uploadedAt })
@@ -312,24 +312,6 @@ export default function EmployeeFileModal({
       setMaritalStatus(editingEmp.maritalStatus || 'أعزب');
 
       let initialEmpCode = editingEmp.code || '';
-      if (!initialEmpCode) {
-        let candidateNum = 100 + ((allEmployees || []).length + 1);
-        const isTaken = (cand) => {
-          const strCand = String(cand).toLowerCase();
-          const empTaken = (allEmployees || []).some(e => 
-            (e.code && String(e.code).trim().toLowerCase() === strCand) ||
-            (e.username && String(e.username).trim().toLowerCase() === strCand)
-          );
-          const branchTaken = (branches || []).some(b => 
-            b.username && String(b.username).trim().toLowerCase() === strCand
-          );
-          return empTaken || branchTaken;
-        };
-        while (isTaken(candidateNum)) {
-          candidateNum++;
-        }
-        initialEmpCode = String(candidateNum);
-      }
       setCode(initialEmpCode);
       setJobTitle(editingEmp.jobTitle || 'صيدلي');
       setDepartment(editingEmp.department || jobs.find(j => j.title === editingEmp.jobTitle)?.department || departments[0] || 'الصيدلية');
@@ -431,17 +413,12 @@ export default function EmployeeFileModal({
       const rawStatus = editingEmp.status || (editingEmp.is_active === false ? 'تم الاستقالة' : 'على رأس العمل');
       const isActuallyActive = editingEmp.is_active !== false && rawStatus === 'على رأس العمل';
       setStatus(isActuallyActive ? 'على رأس العمل' : 'تم الاستقالة');
-      setTerminationReason(editingEmp.suspension_reason || '');
-      setPassword(editingEmp.password || '123');
+      setTerminationReason(editingEmp.terminationReason || editingEmp.suspension_reason || '');
+      setPassword(editingEmp.password || '');
 
       setAnnualLeaveBalance(String(editingEmp.annualLeaveBalance !== undefined ? editingEmp.annualLeaveBalance : '21'));
 
-      setDocuments(editingEmp.documents || [
-        { id: 'doc_1', title: 'الرقم القومي', fileUrl: '', fileType: 'image' },
-        { id: 'doc_2', title: 'شهادة التخرج', fileUrl: '', fileType: 'image' },
-        { id: 'doc_3', title: 'كارنيه النقابة', fileUrl: '', fileType: 'image' },
-        { id: 'doc_4', title: 'العقد', fileUrl: '', fileType: 'image' }
-      ]);
+      setDocuments(Array.isArray(editingEmp.documents) ? editingEmp.documents.filter(d => d && d.fileUrl) : []);
 
       setDriveFolderId(editingEmp.driveFolderId || '');
       setDriveFolderUrl(editingEmp.driveFolderUrl || '');
@@ -465,25 +442,8 @@ export default function EmployeeFileModal({
       setBiometricFolderId('');
       setDriveLastSyncAt('');
 
-      // Auto-generate safe nextCode that doesn't conflict with any existing employee code or branch username
-      let candidateNum = 100 + (allEmployees.length + 1);
-      const isTaken = (cand) => {
-        const strCand = String(cand).toLowerCase();
-        const empTaken = allEmployees.some(e => 
-          (e.code && String(e.code).trim().toLowerCase() === strCand) ||
-          (e.username && String(e.username).trim().toLowerCase() === strCand)
-        );
-        const branchTaken = branches.some(b => 
-          b.username && String(b.username).trim().toLowerCase() === strCand
-        );
-        return empTaken || branchTaken;
-      };
-      while (isTaken(candidateNum)) {
-        candidateNum++;
-      }
-      const nextCode = String(candidateNum);
-      setCode(nextCode);
-      const defaultJob = jobs[0]?.title || 'صيدلي';
+      setCode('');
+      const defaultJob = jobs[0]?.title || '';
       setJobTitle(defaultJob);
       setDepartment(jobs[0]?.department || departments[0] || 'الصيدلية');
       
@@ -505,16 +465,11 @@ export default function EmployeeFileModal({
       setContractType('دوام كامل');
       setStatus('على رأس العمل');
       setTerminationReason('');
-      setPassword('123');
+      setPassword('');
 
       setAnnualLeaveBalance('21');
 
-      setDocuments([
-        { id: 'doc_1', title: 'الرقم القومي', fileUrl: '', fileType: 'image' },
-        { id: 'doc_2', title: 'شهادة التخرج', fileUrl: '', fileType: 'image' },
-        { id: 'doc_3', title: 'كارنيه النقابة', fileUrl: '', fileType: 'image' },
-        { id: 'doc_4', title: 'العقد', fileUrl: '', fileType: 'image' }
-      ]);
+      setDocuments([]);
     }
     setCodeError('');
   }, [editingEmp, isOpen]);
@@ -709,9 +664,24 @@ export default function EmployeeFileModal({
       return;
     }
 
+    // استخراج وتأمين المدخلات المالية الفعلية من البطاقة الأولى دائماً
+    const firstBd = branchesDetails[0] || {};
+    const enteredSalary = (firstBd.salary !== undefined && firstBd.salary !== '')
+      ? String(parseFloat(firstBd.salary) || 0)
+      : (editingEmp?.salary !== undefined ? String(editingEmp.salary) : '0');
+    const enteredWorkHours = (firstBd.workHours !== undefined && firstBd.workHours !== '')
+      ? String(parseFloat(firstBd.workHours) || 8)
+      : (editingEmp?.workHoursPerDay !== undefined ? String(editingEmp.workHoursPerDay) : '8');
+    const enteredWorkDays = (firstBd.workDays !== undefined && firstBd.workDays !== '')
+      ? String(parseFloat(firstBd.workDays) || 26)
+      : (editingEmp?.workDaysPerMonth !== undefined ? String(editingEmp.workDaysPerMonth) : '26');
+    const enteredBreakHours = (firstBd.breakHours !== undefined && firstBd.breakHours !== '')
+      ? String(parseFloat(firstBd.breakHours) || 0)
+      : (editingEmp?.breakHours !== undefined ? String(editingEmp.breakHours) : '0');
+
     // Clean valid branches details and deduplicate by branchId
-    const rawBranchesDetails = branchesDetails.filter(bd => bd.branchId && bd.branchId.trim()).map(bd => {
-      const branchObj = branches.find(b => b.id === bd.branchId);
+    const rawBranchesDetails = branchesDetails.filter(bd => bd.branchId && String(bd.branchId).trim()).map(bd => {
+      const branchObj = branches.find(b => String(b.id) === String(bd.branchId));
       const salary = parseFloat(bd.salary) || 0;
       const workHours = parseFloat(bd.workHours) || 8;
       const workDays = parseFloat(bd.workDays) || 26;
@@ -736,6 +706,28 @@ export default function EmployeeFileModal({
     });
 
     const activeBranchIdsSet = new Set(validBranchesDetails.map(b => String(b.branchId)));
+
+    const finalSalary = validBranchesDetails[0]?.salary !== undefined ? validBranchesDetails[0].salary : enteredSalary;
+    const finalWorkHours = validBranchesDetails[0]?.workHoursPerDay || enteredWorkHours;
+    const finalWorkDays = validBranchesDetails[0]?.workDaysPerMonth || enteredWorkDays;
+    const finalBreakHours = validBranchesDetails[0]?.breakHours !== undefined ? validBranchesDetails[0].breakHours : enteredBreakHours;
+    const finalDefaultBreak = validBranchesDetails[0]?.defaultBreakHours !== undefined ? validBranchesDetails[0].defaultBreakHours : (parseFloat(finalBreakHours) || 0);
+
+    const defaultBranchAssignmentId = firstBd.branchId || editingEmp?.branchId || branches[0]?.id || '';
+    const defaultBranchObj = branches.find(b => String(b.id) === String(defaultBranchAssignmentId));
+
+    const finalBranchesDetails = validBranchesDetails.length > 0
+      ? validBranchesDetails
+      : [{
+          branchId: defaultBranchAssignmentId,
+          branchName: defaultBranchObj ? defaultBranchObj.name : 'الفرع الرئيسي',
+          branchCode: defaultBranchObj ? defaultBranchObj.branchCode : '',
+          salary: finalSalary,
+          workHoursPerDay: finalWorkHours,
+          workDaysPerMonth: finalWorkDays,
+          breakHours: finalBreakHours,
+          defaultBreakHours: finalDefaultBreak
+        }];
 
     // Clean valid archived branch details (excluding any currently active branch)
     const validArchivedBranchesDetails = archivedBranchesDetails
@@ -845,14 +837,14 @@ export default function EmployeeFileModal({
           amount: parseFloat(a.amount) || 0
         })),
       // For backwards compatibility and main branch logic, use the first branch's details with safe fallbacks
-      branchId: validBranchesDetails[0]?.branchId || editingEmp?.branchId || '',
-      salary: validBranchesDetails[0]?.salary !== undefined ? validBranchesDetails[0].salary : (editingEmp?.salary !== undefined ? String(editingEmp.salary) : '0'),
-      workHoursPerDay: validBranchesDetails[0]?.workHoursPerDay || (editingEmp?.workHoursPerDay !== undefined ? String(editingEmp.workHoursPerDay) : '8'),
-      workDaysPerMonth: validBranchesDetails[0]?.workDaysPerMonth || (editingEmp?.workDaysPerMonth !== undefined ? String(editingEmp.workDaysPerMonth) : '26'),
-      breakHours: validBranchesDetails[0]?.breakHours !== undefined ? validBranchesDetails[0].breakHours : (editingEmp?.breakHours !== undefined ? String(editingEmp.breakHours) : '0'),
-      defaultBreakHours: validBranchesDetails[0]?.defaultBreakHours !== undefined ? validBranchesDetails[0].defaultBreakHours : (editingEmp?.defaultBreakHours !== undefined ? editingEmp.defaultBreakHours : 0),
+      branchId: finalBranchesDetails[0]?.branchId || editingEmp?.branchId || defaultBranchAssignmentId || '',
+      salary: finalSalary,
+      workHoursPerDay: finalWorkHours,
+      workDaysPerMonth: finalWorkDays,
+      breakHours: finalBreakHours,
+      defaultBreakHours: finalDefaultBreak,
       // Store all active branches details here
-      branchesDetails: validBranchesDetails,
+      branchesDetails: finalBranchesDetails,
       // Store preserved/archived branch salaries here
       archivedBranchesDetails: validArchivedBranchesDetails,
       
@@ -862,6 +854,7 @@ export default function EmployeeFileModal({
       is_active: !isTerminated,
       fingerprint_active: !isTerminated,
       suspension_reason: isTerminated ? terminationReason.trim() : '',
+      terminationReason: isTerminated ? terminationReason.trim() : '',
       password,
       annualLeaveBalance: parseFloat(annualLeaveBalance) || 21,
       documents,
@@ -897,7 +890,7 @@ export default function EmployeeFileModal({
                 updatedEmps.push({
                   ...e,
                   ...employeeData,
-                  id: e.id || employeeData.id,
+                  id: employeeData.id || e.id,
                   updatedAt: new Date().toISOString()
                 });
                 found = true;
@@ -971,9 +964,11 @@ export default function EmployeeFileModal({
     };
 
     // ── فحص أقفال المالك للتعديلات المالية والإدارية الحساسة ──
-    const isOwnerSession = authRole === 'owner' || (() => {
+    const isOwnerOrAdminSession = authRole === 'owner' || authRole === 'admin' || (() => {
       try {
         return localStorage.getItem('app_auth_role') === 'owner' ||
+               localStorage.getItem('app_auth_role') === 'admin' ||
+               localStorage.getItem('app_is_admin') === 'true' ||
                localStorage.getItem('app_owner_authenticated') === 'true' ||
                sessionStorage.getItem('app_owner_authenticated') === 'true';
       } catch {
@@ -981,7 +976,7 @@ export default function EmployeeFileModal({
       }
     })();
 
-    if (isOwnerSession) {
+    if (isOwnerOrAdminSession) {
       performActualSave();
       return;
     }
@@ -1433,7 +1428,7 @@ export default function EmployeeFileModal({
 
                         <input
                           type="text"
-                          placeholder="أرقام فقط (مثال: 01012345678)"
+                          placeholder="رقم الهاتف المحمول"
                           value={p.number}
                           onChange={(e) => handlePhoneChange(p.id, 'number', e.target.value)}
                           style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface)', fontSize: '13px', direction: 'ltr', textAlign: 'right' }}
@@ -1474,7 +1469,7 @@ export default function EmployeeFileModal({
                     type="text"
                     value={nationalId}
                     onChange={(e) => setNationalId(e.target.value.replace(/\D/g, ''))}
-                    placeholder="29901010123456 (أرقام فقط)"
+                    placeholder="الرقم القومي (14 رقم)"
                   />
                 </div>
 
@@ -1510,7 +1505,7 @@ export default function EmployeeFileModal({
                   value={code}
                   onChange={(e) => handleCodeChange(e.target.value)}
                   style={codeError ? { borderColor: 'var(--danger)', borderWidth: '2px' } : {}}
-                  placeholder="مثال: 101 أو emp_ahmed"
+                  placeholder="كود الموظف الفريد"
                   required
                 />
                 {codeError ? (
@@ -1729,7 +1724,7 @@ export default function EmployeeFileModal({
                       type="text"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      placeholder="123"
+                      placeholder="كلمة المرور الخاصة بالموظف"
                       required
                     />
                   </div>

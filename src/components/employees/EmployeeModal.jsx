@@ -109,7 +109,7 @@ export default function EmployeeModal({
             </div>
             <div className="field">
               <label>كود الموظف / البصمة الإلكترونية</label>
-              <input type="text" value={empCode} onChange={(e) => setEmpCode(e.target.value)} placeholder="101" />
+              <input type="text" value={empCode} onChange={(e) => setEmpCode(e.target.value)} placeholder="كود الموظف" />
             </div>
             <div className="field">
               <label>البريد الإلكتروني الشخصي (Gmail التنبيهات)</label>
@@ -117,23 +117,23 @@ export default function EmployeeModal({
             </div>
             <div className="field">
               <label>رقم الهاتف الشخصي / الجوال</label>
-              <input type="text" value={empPhone} onChange={(e) => setEmpPhone(e.target.value)} placeholder="01012345678" />
+              <input type="text" value={empPhone} onChange={(e) => setEmpPhone(e.target.value)} placeholder="رقم الهاتف المحمول" />
             </div>
             <div className="field">
               <label>رقم هاتف قريب من الدرجة الأولى (للطوارئ)</label>
-              <input type="text" value={empRelativePhone} onChange={(e) => setEmpRelativePhone?.(e.target.value)} placeholder="01112345678 (الأب / الزوجة / الأخ)" />
+              <input type="text" value={empRelativePhone} onChange={(e) => setEmpRelativePhone?.(e.target.value)} placeholder="رقم هاتف الطوارئ" />
             </div>
             <div className="field">
               <label>المسمى الوظيفي</label>
-              <input type="text" value={empJobTitle} onChange={(e) => setEmpJobTitle(e.target.value)} placeholder="مساعد صيدلي / مدخل بيانات" />
+              <input type="text" value={empJobTitle} onChange={(e) => setEmpJobTitle(e.target.value)} placeholder="المسمى الوظيفي" />
             </div>
             <div className="field">
               <label>سعر الساعة الشهري (الراتب الأساسي)</label>
-              <input type="text" inputMode="decimal" value={empSalary} onChange={(e) => setEmpSalary(e.target.value)} placeholder="650" />
+              <input type="text" inputMode="decimal" value={empSalary} onChange={(e) => setEmpSalary(e.target.value)} placeholder="الراتب الأساسي" />
             </div>
             <div className="field">
               <label>عدد ساعات العمل اليومية المدخلة (ساعة)</label>
-              <input type="text" inputMode="decimal" value={empWorkHours} onChange={(e) => setEmpWorkHours(e.target.value)} placeholder="10" />
+              <input type="text" inputMode="decimal" value={empWorkHours} onChange={(e) => setEmpWorkHours(e.target.value)} placeholder="8" />
             </div>
             <div className="field">
               <label>عدد أيام العمل الشهرية المدخلة (يوم)</label>
@@ -145,7 +145,7 @@ export default function EmployeeModal({
             </div>
             <div className="field">
               <label>كلمة السر (للدخول للبوابة)</label>
-              <input type="text" value={empPassword} onChange={(e) => setEmpPassword(e.target.value)} placeholder="123" />
+              <input type="text" value={empPassword} onChange={(e) => setEmpPassword(e.target.value)} placeholder="كلمة المرور" />
             </div>
           </div>
         </div>

@@ -1,7 +1,7 @@
 {
   "name": "pharmacy-hr-system",
   "productName": "منظومة الموارد البشرية",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "منظومة إدارة الموارد البشرية والرواتب - تطبيق ويندوز المكتبي",
   "repository": {
     "type": "git",
