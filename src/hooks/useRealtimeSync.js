@@ -96,7 +96,7 @@ export function useRealtimeSync(props = {}) {
 
     setState((prev) => {
       setLastSyncTime(nowTimeStr());
-      const merged = smartMergeStates(prev, normalized);
+      const merged = normalizeState(smartMergeStates(prev, normalized));
 
       // تحديث بيانات الموظف المسجل حالياً إذا طرأت تغييرات
       setCurrentEmpUser((prevEmp) => {

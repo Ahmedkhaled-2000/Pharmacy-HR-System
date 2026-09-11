@@ -460,7 +460,7 @@ export function DataProvider({ children, showToast = () => {} }) {
       }
 
       const synced = syncAllEmployeesPermissionsAndLateness(normalized);
-      setState((prev) => smartMergeStates(prev, synced));
+      setState((prev) => normalizeState(smartMergeStates(prev, synced)));
       setLastSyncTime(nowTimeStr());
       syncSessionWithFreshData(synced);
     }).catch((err) => {
@@ -528,17 +528,48 @@ export function DataProvider({ children, showToast = () => {} }) {
     });
     setIsSyncing(false);
 
-    const finalState = result?.mergedState || updatedState;
+    // ── تطبيق استجابة السحابة بأمان كامل بدون تضاعف البيانات ──
+    // نتجاهل mergedState من السحابة بعد الحفظ المباشر لأن:
+    // 1. الحالة المحدّثة (updatedState) تم تمريرها بالفعل لـ setState في المكوّن الذي طلب الحفظ
+    // 2. دمج mergedState مع prev عبر smartMergeStates قد يُعيد إدراج بيانات قديمة أو يُضاعف الموظفين
+    // الاستثناء الوحيد: إذا جاء mergedState من السحابة بموظفين إضافيين من أجهزة أخرى
     if (result?.mergedState) {
-      setState((prev) => smartMergeStates(prev, normalizeState(result.mergedState)));
+      setState((prev) => {
+        const incoming = normalizeState(result.mergedState);
+        // ── دمج حذر: الموظفون في updatedState لهم الأولوية المطلقة ──
+        const merged = normalizeState(smartMergeStates(prev, incoming));
+
+        // ── تأكيد أولوية الموظفين المُعدَّلين حديثاً ──
+        const updatedEmpMap = new Map();
+        (updatedState.employees || []).forEach((e) => {
+          if (e.id) updatedEmpMap.set(String(e.id), e);
+        });
+
+        if (updatedEmpMap.size > 0) {
+          const protectedEmps = (merged.employees || []).map((e) => {
+            const updatedVersion = updatedEmpMap.get(String(e.id));
+            if (updatedVersion) {
+              const updTime = updatedVersion.updatedAt ? new Date(updatedVersion.updatedAt).getTime() : 0;
+              const remTime = e.updatedAt ? new Date(e.updatedAt).getTime() : 0;
+              return updTime >= remTime ? updatedVersion : e;
+            }
+            return e;
+          });
+          return normalizeState({ ...merged, employees: protectedEmps });
+        }
+
+        return normalizeState(merged);
+      });
     }
 
+    const finalState = result?.mergedState || updatedState;
     saveAutoBackupOnModification(finalState, 'تعديل وحفظ بالمنظومة').catch((e) => {
       console.warn('[AutoBackup] Snapshot trigger skipped:', e);
     });
 
     return result;
   };
+
 
   // Manual Live Sync Trigger with Instant Feedback
   const triggerManualSync = async () => {

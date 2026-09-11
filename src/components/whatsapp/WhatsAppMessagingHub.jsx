@@ -1,5 +1,5 @@
 import React from 'react';
-import { fmt, getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
+import { fmt, getEmpDisplayName, isEmployeeActive, getEmpWhatsAppPhone } from '../../utils/formatters';
 
 export default function WhatsAppMessagingHub({
   state,
@@ -40,9 +40,16 @@ export default function WhatsAppMessagingHub({
               }
             }}>
               <option value="all">🚀 جميع الموظفين (إرسال جماعي دفعة واحدة)</option>
-              {(state.employees || []).filter(isEmployeeActive).map((e) => (
+               {(state.employees || []).filter(isEmployeeActive).map((e) => (
                 <option key={e.id} value={e.id}>
-                  👤 الموظف: {getEmpDisplayName(e)} (كود: {e.code}) {e.phone ? `· 📱 ${e.phone}` : '❌ بدون رقم'}
+                  👤 الموظف: {getEmpDisplayName(e)} (كود: {e.code}) {
+                    (() => {
+                      const wn = getEmpWhatsAppPhone(e);
+                      if (!wn) return '❌ بدون رقم';
+                      const isWa = Array.isArray(e.phones) && e.phones.some(p => typeof p === 'object' && p?.type === 'whatsapp' && String(p?.number||'').replace(/\D/g,'').length >= 10);
+                      return `· ${isWa ? '💬' : '📱'} ${wn}`;
+                    })()
+                  }
                 </option>
               ))}
             </select>
@@ -127,7 +134,14 @@ export default function WhatsAppMessagingHub({
                       <tr key={e.id}>
                         <td>{e.code}</td>
                         <td>{getEmpDisplayName(e)}</td>
-                        <td>{e.phone ? `📱 ${e.phone}` : '❌ لا يوجد رقم'}</td>
+                         <td>{
+                           (() => {
+                             const wn = getEmpWhatsAppPhone(e);
+                             if (!wn) return '❌ لا يوجد رقم';
+                             const isWa = Array.isArray(e.phones) && e.phones.some(p => typeof p === 'object' && p?.type === 'whatsapp' && String(p?.number||'').replace(/\D/g,'').length >= 10);
+                             return `${isWa ? '💬' : '📱'} ${wn}`;
+                           })()
+                         }</td>
                         <td className="money" style={{ color: 'var(--primary)' }}>{fmt(s.netSalary)} ج.م</td>
                         <td>
                           <button

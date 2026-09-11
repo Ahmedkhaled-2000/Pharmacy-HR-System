@@ -7,6 +7,16 @@
 // استخراج مفتاح فريد للعنصر
 export function getItemKey(item, fallbackPrefix = 'item') {
   if (!item || typeof item !== 'object') return null;
+  // للموظفين: الكود أو الرقم القومي يحدد الشخص بشكل مطلق لمنع تكرار نفس الموظف بمعرفات مختلفة
+  if (fallbackPrefix === 'emp') {
+    if (item.code) return `emp_code_${String(item.code).trim().toLowerCase()}`;
+    if (item.nationalId) {
+      const nid = String(item.nationalId).replace(/\D/g, '');
+      if (nid) return `emp_nid_${nid}`;
+    }
+    if (item.recruitmentApplicationId) return `emp_rec_${String(item.recruitmentApplicationId)}`;
+    if (item.id !== undefined && item.id !== null && item.id !== '') return String(item.id);
+  }
   if (item.id !== undefined && item.id !== null && item.id !== '') return String(item.id);
   if (item._id !== undefined && item._id !== null && item._id !== '') return String(item._id);
   if (item.requestId !== undefined && item.requestId !== null && item.requestId !== '') {
@@ -136,6 +146,17 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
         mergedEmp.permissions = localItem.permissions;
       } else if (remoteItem.permissions !== undefined) {
         mergedEmp.permissions = remoteItem.permissions;
+      }
+    }
+
+    // الحفاظ على معرف مستقر لا يتغير عشوائياً (يفضل المعرف الأقدم أو المعرف المعتمد)
+    if (localItem.id && remoteItem.id && String(localItem.id) !== String(remoteItem.id)) {
+      const lCreated = localItem.createdAt ? new Date(localItem.createdAt).getTime() : 0;
+      const rCreated = remoteItem.createdAt ? new Date(remoteItem.createdAt).getTime() : 0;
+      if (lCreated > 0 && rCreated > 0) {
+        mergedEmp.id = lCreated <= rCreated ? localItem.id : remoteItem.id;
+      } else {
+        mergedEmp.id = remoteItem.id || localItem.id;
       }
     }
 

@@ -111,7 +111,13 @@ export default function EmployeeCardsGrid({
   // Current list based on active tab and search filters
   const displayedEmployees = useMemo(() => {
     const baseList = activeMainTab === 'active' ? activeEmployeesList : resignedEmployeesList;
+    const seen = new Set();
     return baseList.filter((emp) => {
+      // حماية صارمة لمنع ظهور أي موظف مكرر في الواجهة
+      const empKey = emp.id || (emp.code ? `code_${emp.code}` : null);
+      if (empKey && seen.has(String(empKey))) return false;
+      if (empKey) seen.add(String(empKey));
+
       // Branch filter
       if (selectedBranchFilter !== 'all') {
         const matchesMain = String(emp.branchId) === String(selectedBranchFilter);

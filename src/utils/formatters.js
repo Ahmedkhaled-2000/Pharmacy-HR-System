@@ -83,6 +83,45 @@ export function getEmpOfficialName(emp) {
   return emp.name?.trim() || emp.fullName?.trim() || emp.nickname?.trim() || '—';
 }
 
+/**
+ * استخراج رقم واتساب الموظف المناسب لإرسال رسائل الواتساب
+ * الأولوية:
+ *   1. أول رقم من نوع 'whatsapp' في مصفوفة phones
+ *   2. أول رقم صالح (≥ 10 أرقام) في مصفوفة phones
+ *   3. الحقل التقليدي emp.phone
+ * يُرجع الرقم بالأرقام فقط (بدون مسافات أو رموز)
+ */
+export function getEmpWhatsAppPhone(emp) {
+  if (!emp) return '';
+
+  const normalize = (num) => String(num || '').replace(/\D/g, '').trim();
+
+  // 1. البحث في مصفوفة phones عن رقم مخصص للواتساب
+  if (Array.isArray(emp.phones) && emp.phones.length > 0) {
+    // أولاً: رقم من نوع whatsapp
+    const waPhone = emp.phones.find(p => {
+      const type = (typeof p === 'object' ? p?.type : '') || '';
+      const num = normalize(typeof p === 'string' ? p : p?.number);
+      return type === 'whatsapp' && num.length >= 10;
+    });
+    if (waPhone) {
+      return normalize(typeof waPhone === 'string' ? waPhone : waPhone?.number);
+    }
+
+    // ثانياً: أول رقم صالح في القائمة (محمول أو أي نوع آخر)
+    const firstValid = emp.phones.find(p => {
+      const num = normalize(typeof p === 'string' ? p : p?.number);
+      return num.length >= 10;
+    });
+    if (firstValid) {
+      return normalize(typeof firstValid === 'string' ? firstValid : firstValid?.number);
+    }
+  }
+
+  // 3. الحقل التقليدي phone
+  return normalize(emp.phone);
+}
+
 export function toSafeArray(val) {
   if (Array.isArray(val)) {
     return val.filter((item) => item !== null && item !== undefined);
@@ -93,12 +132,139 @@ export function toSafeArray(val) {
   return [];
 }
 
+/**
+ * فحص وتوحيد ودمج الموظفين المكررين لمنع التكرار وحماية المعرفات والسجلات التابعة
+ */
+export function deduplicateAndConsolidateEmployees(rawEmployees = [], stateObj = {}) {
+  const groups = new Map();
+  const idRemap = new Map();
+
+  const safeList = toSafeArray(rawEmployees).filter((e) => e && typeof e === 'object' && (e.id || e.code));
+
+  for (const emp of safeList) {
+    const cleanCode = emp.code ? String(emp.code).trim().toLowerCase() : null;
+    const cleanNid = emp.nationalId ? String(emp.nationalId).replace(/\D/g, '') : null;
+    const cleanRec = emp.recruitmentApplicationId ? String(emp.recruitmentApplicationId) : null;
+    const empId = emp.id ? String(emp.id) : null;
+
+    let groupKey = null;
+    if (cleanCode) groupKey = `code:${cleanCode}`;
+    else if (cleanNid) groupKey = `nid:${cleanNid}`;
+    else if (cleanRec) groupKey = `rec:${cleanRec}`;
+    else if (empId) groupKey = `id:${empId}`;
+    else groupKey = `rand:${Math.random()}`;
+
+    let matchedKey = null;
+    for (const [key, empsInGroup] of groups.entries()) {
+      const match = empsInGroup.some((e) => {
+        if (empId && e.id && String(e.id) === empId) return true;
+        if (cleanCode && e.code && String(e.code).trim().toLowerCase() === cleanCode) return true;
+        if (cleanNid && e.nationalId && String(e.nationalId).replace(/\D/g, '') === cleanNid) return true;
+        if (cleanRec && e.recruitmentApplicationId && String(e.recruitmentApplicationId) === cleanRec) return true;
+        return false;
+      });
+      if (match) {
+        matchedKey = key;
+        break;
+      }
+    }
+
+    const targetKey = matchedKey || groupKey;
+    if (!groups.has(targetKey)) {
+      groups.set(targetKey, []);
+    }
+    groups.get(targetKey).push(emp);
+  }
+
+  // المعرفات المسجلة بالفعل في الشفتات والطلبات للحفاظ عليها كمعرف أساسي
+  const referencedIds = new Set();
+  toSafeArray(stateObj.shifts).forEach(s => s?.employeeId && referencedIds.add(String(s.employeeId)));
+  toSafeArray(stateObj.requests).forEach(r => r?.employeeId && referencedIds.add(String(r.employeeId)));
+  if (stateObj.activeShifts && typeof stateObj.activeShifts === 'object' && !Array.isArray(stateObj.activeShifts)) {
+    Object.keys(stateObj.activeShifts).forEach(id => referencedIds.add(String(id)));
+  }
+
+  const result = [];
+  const getEmpTime = (e) => {
+    const t = e.updatedAt || e.updated_at || e.createdAt || e.created_at;
+    if (!t) return 0;
+    const ms = new Date(t).getTime();
+    return isNaN(ms) ? 0 : ms;
+  };
+
+  for (const [key, group] of groups.entries()) {
+    if (group.length === 1) {
+      result.push(group[0]);
+      continue;
+    }
+
+    // فرز حسب الأحدث تعديلاً
+    group.sort((a, b) => getEmpTime(b) - getEmpTime(a));
+    const latestEmp = group[0];
+
+    // تحديد المعرف الأساسي: الأفضلية للمعرف المرتبط بشفتات أو طلبات مسبقاً
+    let canonicalId = group.find(e => e.id && referencedIds.has(String(e.id)))?.id;
+    if (!canonicalId) {
+      const byCreation = [...group].sort((a, b) => {
+        const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return ta - tb;
+      });
+      canonicalId = byCreation[0]?.id || latestEmp.id;
+    }
+
+    // دمج السجل بذكاء: الأولوية لآخر التعديلات
+    const mergedEmp = {
+      ...group.reduce((acc, curr) => ({ ...curr, ...acc }), {}),
+      ...latestEmp,
+      id: canonicalId,
+      updatedAt: new Date(Math.max(...group.map(getEmpTime), Date.now())).toISOString()
+    };
+
+    // حماية الهواتف والفروع من الفقدان
+    if (!Array.isArray(mergedEmp.phones) || mergedEmp.phones.length === 0) {
+      const allPhones = group.find(e => Array.isArray(e.phones) && e.phones.length > 0)?.phones;
+      if (allPhones) mergedEmp.phones = allPhones;
+    }
+    if (!Array.isArray(mergedEmp.branchesDetails) || mergedEmp.branchesDetails.length === 0) {
+      const allBd = group.find(e => Array.isArray(e.branchesDetails) && e.branchesDetails.length > 0)?.branchesDetails;
+      if (allBd) mergedEmp.branchesDetails = allBd;
+    }
+
+    // حماية البصمات الحيوية
+    const withFace = group.find(e => e.has_face_descriptor && e.face_descriptor);
+    if (withFace && !mergedEmp.face_descriptor) {
+      mergedEmp.has_face_descriptor = true;
+      mergedEmp.face_descriptor = withFace.face_descriptor;
+    }
+    const withHand = group.find(e => e.has_hand_descriptor && e.hand_descriptor);
+    if (withHand && !mergedEmp.hand_descriptor) {
+      mergedEmp.has_hand_descriptor = true;
+      mergedEmp.hand_descriptor = withHand.hand_descriptor;
+    }
+
+    // تسجيل إعادة توجيه المعرفات المكررة للمعرف الأساسي
+    for (const e of group) {
+      if (e.id && String(e.id) !== String(canonicalId)) {
+        idRemap.set(String(e.id), String(canonicalId));
+      }
+    }
+
+    result.push(mergedEmp);
+  }
+
+  return { deduplicatedEmployees: result, idRemap };
+}
+
 export function normalizeState(parsed) {
   if (!parsed || typeof parsed !== 'object') {
     return parsed;
   }
 
-  let rawEmployees = toSafeArray(parsed.employees).filter((e) => e && typeof e === 'object' && (e.id || e.code));
+  // ── دمج وتوحيد الموظفين المكررين تلقائياً وحماية المعرفات ──
+  const { deduplicatedEmployees, idRemap } = deduplicateAndConsolidateEmployees(parsed.employees, parsed);
+
+  let rawEmployees = deduplicatedEmployees.filter((e) => e && typeof e === 'object' && (e.id || e.code));
   let employees = rawEmployees.map((e) => ({
     ...e,
     id: e.id || e.code || uid(),
@@ -129,6 +295,12 @@ export function normalizeState(parsed) {
       devices: toSafeArray(emp.devices)
     };
   });
+
+  const remapEmpId = (id) => {
+    if (!id || !idRemap || idRemap.size === 0) return id;
+    const str = String(id);
+    return idRemap.has(str) ? idRemap.get(str) : id;
+  };
 
   const savedStartDay = (() => {
     try {
@@ -324,24 +496,60 @@ export function normalizeState(parsed) {
     .filter((s) => s && typeof s === 'object')
     .map((s) => ({
       ...s,
-      employeeId: s.employeeId || s.jobId || (employees[0] ? employees[0].id : '')
+      employeeId: remapEmpId(s.employeeId || s.jobId || (employees[0] ? employees[0].id : ''))
     }));
 
   const adjustments = toSafeArray(parsed.adjustments)
     .filter((a) => a && typeof a === 'object')
     .map((a) => ({
       ...a,
-      employeeId: a.employeeId || a.jobId || 'all'
+      employeeId: a.employeeId === 'all' ? 'all' : remapEmpId(a.employeeId || a.jobId || 'all')
     }));
 
   const branches = toSafeArray(parsed.branches).filter((b) => b && typeof b === 'object' && b.id);
-  let requests = toSafeArray(parsed.requests).filter((r) => r && typeof r === 'object');
-  const resignationRequests = toSafeArray(parsed.resignationRequests).filter((r) => r && typeof r === 'object');
-  const leaveRequests = toSafeArray(parsed.leaveRequests).filter((r) => r && typeof r === 'object');
-  const permissionRequests = toSafeArray(parsed.permissionRequests).filter((r) => r && typeof r === 'object');
-  const shiftSwaps = toSafeArray(parsed.shiftSwaps).filter((s) => s && typeof s === 'object');
-  let loans = toSafeArray(parsed.loans).filter((l) => l && typeof l === 'object');
-  const evaluations = toSafeArray(parsed.evaluations).filter((e) => e && typeof e === 'object');
+  let requests = toSafeArray(parsed.requests)
+    .filter((r) => r && typeof r === 'object')
+    .map((r) => ({
+      ...r,
+      employeeId: remapEmpId(r.employeeId)
+    }));
+  const resignationRequests = toSafeArray(parsed.resignationRequests)
+    .filter((r) => r && typeof r === 'object')
+    .map((r) => ({
+      ...r,
+      employeeId: remapEmpId(r.employeeId)
+    }));
+  const leaveRequests = toSafeArray(parsed.leaveRequests)
+    .filter((r) => r && typeof r === 'object')
+    .map((r) => ({
+      ...r,
+      employeeId: remapEmpId(r.employeeId)
+    }));
+  const permissionRequests = toSafeArray(parsed.permissionRequests)
+    .filter((r) => r && typeof r === 'object')
+    .map((r) => ({
+      ...r,
+      employeeId: remapEmpId(r.employeeId)
+    }));
+  const shiftSwaps = toSafeArray(parsed.shiftSwaps)
+    .filter((s) => s && typeof s === 'object')
+    .map((s) => ({
+      ...s,
+      fromEmployeeId: remapEmpId(s.fromEmployeeId),
+      toEmployeeId: remapEmpId(s.toEmployeeId)
+    }));
+  let loans = toSafeArray(parsed.loans)
+    .filter((l) => l && typeof l === 'object')
+    .map((l) => ({
+      ...l,
+      employeeId: remapEmpId(l.employeeId)
+    }));
+  const evaluations = toSafeArray(parsed.evaluations)
+    .filter((e) => e && typeof e === 'object')
+    .map((e) => ({
+      ...e,
+      employeeId: remapEmpId(e.employeeId)
+    }));
   // ── Remove old automated cycle reminder spam and keep only management notifications ──
   const notifications = toSafeArray(parsed.notifications).filter((n) => {
     if (!n) return false;
@@ -351,12 +559,27 @@ export function normalizeState(parsed) {
     ) && n.createdBy !== 'admin';
     return !isOldAutoReminder;
   });
-  const employeeNotes = toSafeArray(parsed.employeeNotes).filter((n) => n && typeof n === 'object');
+  const employeeNotes = toSafeArray(parsed.employeeNotes)
+    .filter((n) => n && typeof n === 'object')
+    .map((n) => ({
+      ...n,
+      employeeId: remapEmpId(n.employeeId)
+    }));
   const authorizedDevices = toSafeArray(parsed.authorizedDevices).filter((d) => d && typeof d === 'object');
   const logs = toSafeArray(parsed.logs).filter((l) => l && typeof l === 'object');
   const approvalRules = toSafeArray(parsed.approvalRules).filter((r) => r && typeof r === 'object');
-  const rosters = toSafeArray(parsed.rosters).filter((r) => r && typeof r === 'object');
-  let lateIncidents = toSafeArray(parsed.lateIncidents).filter((i) => i && typeof i === 'object');
+  const rosters = toSafeArray(parsed.rosters)
+    .filter((r) => r && typeof r === 'object')
+    .map((r) => ({
+      ...r,
+      employeeId: remapEmpId(r.employeeId)
+    }));
+  let lateIncidents = toSafeArray(parsed.lateIncidents)
+    .filter((i) => i && typeof i === 'object')
+    .map((i) => ({
+      ...i,
+      employeeId: remapEmpId(i.employeeId)
+    }));
   let cleanAdjustments = adjustments;
 
   // ── Auto-synchronize loans and credit medicine requests ──
@@ -568,9 +791,17 @@ export function normalizeState(parsed) {
     });
   }
 
-  const activeShifts = (parsed.activeShifts && typeof parsed.activeShifts === 'object' && !Array.isArray(parsed.activeShifts))
+  let rawActiveShifts = (parsed.activeShifts && typeof parsed.activeShifts === 'object' && !Array.isArray(parsed.activeShifts))
     ? parsed.activeShifts
     : {};
+  let activeShifts = rawActiveShifts;
+  if (idRemap && idRemap.size > 0) {
+    activeShifts = {};
+    for (const [k, v] of Object.entries(rawActiveShifts)) {
+      const targetKey = remapEmpId(k);
+      activeShifts[targetKey] = v;
+    }
+  }
   const ipRestrictions = parsed.ipRestrictions || { enabled: false, allowedIps: [] };
   const bylaws = parsed.bylaws || {
     gracePeriodMinutes: 15,

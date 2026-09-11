@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { compressImage } from '../../utils/imageCompressor';
 import { DEFAULT_JOBS, isManagementJob, DEFAULT_DEPARTMENTS, getJobsList, getDepartmentsList } from '../../utils/jobsHelper';
 import { syncEmployeeEntireDrive } from '../../utils/googleDriveService';
+import { normalizeState } from '../../utils/formatters';
 import { useUI } from '../../context/UIContext';
 import { useAuth } from '../../context/AuthContext';
 
@@ -677,10 +678,20 @@ export default function EmployeeFileModal({
     }
 
     // Double check duplicate employee code
-    const isEmpDuplicate = allEmployees.some(
-      (e) => ((e.code && String(e.code).trim().toLowerCase() === cleanCode) || (e.username && String(e.username).trim().toLowerCase() === cleanCode)) &&
-             e.id !== (editingEmp ? editingEmp.id : null)
-    );
+    const isEmpDuplicate = allEmployees.some((e) => {
+      const isCodeMatch = (e.code && String(e.code).trim().toLowerCase() === cleanCode) ||
+                          (e.username && String(e.username).trim().toLowerCase() === cleanCode);
+      if (!isCodeMatch) return false;
+      // إذا كان هذا السجل هو نفس الموظف الجاري تعديله فليس تعارضاً
+      if (editingEmp) {
+        if (editingEmp.id && String(e.id) === String(editingEmp.id)) return false;
+        if (editingEmp.code && String(e.code).trim().toLowerCase() === String(editingEmp.code).trim().toLowerCase()) return false;
+        if (editingEmp.nationalId && e.nationalId && String(e.nationalId).replace(/\D/g, '') === String(editingEmp.nationalId).replace(/\D/g, '')) return false;
+        if (editingEmp.recruitmentApplicationId && e.recruitmentApplicationId === editingEmp.recruitmentApplicationId) return false;
+      }
+      return true;
+    });
+
     if (isEmpDuplicate) {
       if (showToast) showToast('⚠️ كود الموظف مستخدم بالفعل لموظف آخر');
       else alert('⚠️ كود الموظف مستخدم بالفعل لموظف آخر');
@@ -698,8 +709,8 @@ export default function EmployeeFileModal({
       return;
     }
 
-    // Clean valid branches details
-    const validBranchesDetails = branchesDetails.filter(bd => bd.branchId && bd.branchId.trim()).map(bd => {
+    // Clean valid branches details and deduplicate by branchId
+    const rawBranchesDetails = branchesDetails.filter(bd => bd.branchId && bd.branchId.trim()).map(bd => {
       const branchObj = branches.find(b => b.id === bd.branchId);
       const salary = parseFloat(bd.salary) || 0;
       const workHours = parseFloat(bd.workHours) || 8;
@@ -715,6 +726,13 @@ export default function EmployeeFileModal({
         breakHours: String(breakHours),
         defaultBreakHours: breakHours
       };
+    });
+
+    const seenBIds = new Set();
+    const validBranchesDetails = rawBranchesDetails.filter(bd => {
+      if (seenBIds.has(String(bd.branchId))) return false;
+      seenBIds.add(String(bd.branchId));
+      return true;
     });
 
     const activeBranchIdsSet = new Set(validBranchesDetails.map(b => String(b.branchId)));
@@ -768,7 +786,18 @@ export default function EmployeeFileModal({
 
     const employeeData = {
       ...(editingEmp || {}),
-      id: editingEmp && editingEmp.id && !editingEmp.isFromRecruitment ? editingEmp.id : `emp_${Date.now()}`,
+      // ── حماية صارمة لمعرف الموظف: منع توليد ID جديد لأي موظف موجود ──
+      id: (() => {
+        if (editingEmp?.id) return editingEmp.id;
+        const cleanEmpCode = String(code || '').trim().toLowerCase();
+        const cleanNid = String(nationalId || '').replace(/\D/g, '');
+        const matchInState = (allEmployees || state?.employees || []).find((e) =>
+          (cleanEmpCode && e.code && String(e.code).trim().toLowerCase() === cleanEmpCode) ||
+          (cleanNid && e.nationalId && String(e.nationalId).replace(/\D/g, '') === cleanNid) ||
+          (editingEmp?.recruitmentApplicationId && e.recruitmentApplicationId === editingEmp.recruitmentApplicationId)
+        );
+        return matchInState?.id || `emp_${Date.now()}`;
+      })(),
       recruitmentApplicationId: editingEmp?.recruitmentApplicationId || editingEmp?.applicationId || undefined,
       isFromRecruitment: editingEmp?.isFromRecruitment || undefined,
       name: name.trim(),
@@ -845,43 +874,80 @@ export default function EmployeeFileModal({
           await onSave(employeeData);
         } else if (setState) {
           const currentState = state || {};
-          const isExisting = (currentState.employees || []).some(e => String(e.id) === String(employeeData.id));
-          let updatedEmps;
-          if (isExisting) {
-            updatedEmps = (currentState.employees || []).map(e => String(e.id) === String(employeeData.id) ? { ...e, ...employeeData } : e);
-          } else {
-            updatedEmps = [...(currentState.employees || []), employeeData];
-          }
-          const updatedState = { ...currentState, employees: updatedEmps };
-          setState(updatedState);
-          if (saveState) {
-            const saveRes = await saveState(updatedState);
-            if (saveRes && saveRes.success === false && saveRes.error) {
-              console.warn('[EmployeeSave] Save returned warning:', saveRes.error);
+          const cleanCode = String(employeeData.code || '').trim().toLowerCase();
+          const cleanNid = String(employeeData.nationalId || '').replace(/\D/g, '');
+
+          // ── تحديث السجل القائم وتوحيد أي تكرار سابق لنفس الموظف في مصفوفة الموظفين ──
+          let found = false;
+          const updatedEmps = [];
+          for (const e of (currentState.employees || [])) {
+            const isMatch = String(e.id) === String(employeeData.id) ||
+                            (cleanCode && e.code && String(e.code).trim().toLowerCase() === cleanCode) ||
+                            (cleanNid && e.nationalId && String(e.nationalId).replace(/\D/g, '') === cleanNid) ||
+                            (employeeData.recruitmentApplicationId && e.recruitmentApplicationId === employeeData.recruitmentApplicationId);
+            if (isMatch) {
+              if (!found) {
+                updatedEmps.push({
+                  ...e,
+                  ...employeeData,
+                  id: employeeData.id,
+                  updatedAt: new Date().toISOString()
+                });
+                found = true;
+              }
+              // أي تكرار سابق لنفس الموظف يتم طيه وإلغاؤه فوراً
+            } else {
+              updatedEmps.push(e);
             }
+          }
+
+          if (!found) {
+            updatedEmps.push({
+              ...employeeData,
+              updatedAt: new Date().toISOString()
+            });
+          }
+
+          // تطبيع وضمان عدم وجود تكرار وإعادة توجيه أي علاقات
+          const updatedState = normalizeState({
+            ...currentState,
+            employees: updatedEmps
+          });
+
+          // ── Optimistic UI: تحديث الواجهة فوراً بلا تأخير ──
+          setState(updatedState);
+
+          // ── حفظ في الخلفية بلا await مسدود (Non-blocking) ──
+          if (saveState) {
+            saveState(updatedState).catch((err) => {
+              console.warn('[EmployeeSave] Background save error:', err);
+            });
+          }
+
+          // ── Google Drive Sync في الخلفية (يستخدم updatedState لا state القديمة) ──
+          const driveConfig = currentState?.orgSettings?.driveConfig;
+          if (driveConfig?.enabled && driveConfig?.serviceUrl && driveConfig?.autoSyncOnEmployeeSave !== false) {
+            syncEmployeeEntireDrive(employeeData, currentState.orgSettings)
+              .then((res) => {
+                if (res.success && res.updatedEmp) {
+                  // نستخدم functional setState لضمان أننا نعمل على أحدث state
+                  setState((latestState) => {
+                    const finalEmps = (latestState.employees || []).map((e) =>
+                      String(e.id) === String(res.updatedEmp.id) ? { ...e, ...res.updatedEmp } : e
+                    );
+                    const finalState = { ...latestState, employees: finalEmps };
+                    if (saveState) saveState(finalState).catch(() => {});
+                    return finalState;
+                  });
+                  if (showToast) showToast(`☁️ تم تحديث مجلد الموظف (${employeeData.name}) على Google Drive بنجاح`);
+                }
+              })
+              .catch((err) => console.warn('Background Google Drive sync error:', err));
           }
         }
 
         if (showToast) {
-          showToast(`✅ تم حفظ وتأمين ملف الموظف (${employeeData.name}) بنجاح`);
-        }
-
-        // Trigger auto background sync to Google Drive if configured
-        const driveConfig = state?.orgSettings?.driveConfig;
-        if (driveConfig && driveConfig.enabled && driveConfig.serviceUrl && driveConfig.autoSyncOnEmployeeSave !== false) {
-          syncEmployeeEntireDrive(employeeData, state.orgSettings)
-            .then((res) => {
-              if (res.success && res.updatedEmp && setState && state) {
-                const finalEmps = (state.employees || []).map(e => 
-                  String(e.id) === String(res.updatedEmp.id) ? res.updatedEmp : e
-                );
-                const finalState = { ...state, employees: finalEmps };
-                setState(finalState);
-                if (saveState) saveState(finalState);
-                if (showToast) showToast(`☁️ تم إنشاء/تحديث مجلد الموظف (${employeeData.name}) على Google Drive بنجاح`);
-              }
-            })
-            .catch(err => console.warn('Background Google Drive sync error:', err));
+          showToast(`✅ تم حفظ ملف الموظف (${employeeData.name}) بنجاح`);
         }
 
         onClose();

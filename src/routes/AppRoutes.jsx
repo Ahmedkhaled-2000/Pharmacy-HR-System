@@ -45,7 +45,7 @@ import { useRequestsManager } from '../hooks/useRequestsManager';
 import { useExcelOperations } from '../hooks/useExcelOperations';
 import { useDailyDigestCron } from '../hooks/useDailyDigestCron';
 import { getJobsList, getDepartmentsList } from '../utils/jobsHelper';
-import { arabicMonthLabel, fmt } from '../utils/formatters';
+import { arabicMonthLabel, fmt, getEmpWhatsAppPhone } from '../utils/formatters';
 
 export default function AppRoutes() {
   const location = useLocation();
@@ -347,11 +347,13 @@ export default function AppRoutes() {
   const sendWhatsAppMsg = (empId, text) => {
     const emp = getEmp(empId);
     if (!emp) return;
-    if (!emp.phone || !emp.phone.trim()) {
-      showToast('❌ لا يوجد رقم هاتف مسجل لهذا الموظف');
+    // استخدام رقم الواتساب المخصص أو أول رقم صالح في بيانات الموظف
+    const rawPhone = getEmpWhatsAppPhone(emp);
+    if (!rawPhone || rawPhone.length < 10) {
+      showToast('❌ لا يوجد رقم هاتف صالح مسجل لهذا الموظف');
       return;
     }
-    let cleanPhone = emp.phone.trim().replace(/\D/g, '');
+    let cleanPhone = rawPhone;
     if (cleanPhone.startsWith('01')) cleanPhone = '2' + cleanPhone;
 
     const url = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(text)}`;

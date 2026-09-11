@@ -228,7 +228,21 @@ function mergeServerState(array $existing, array $incoming): array
         $addOrMerge = function(array $list) use (&$map, $deletedSet, $prefix) {
             foreach ($list as $item) {
                 if (!is_array($item)) continue;
-                $key = isset($item['id']) && $item['id'] !== '' ? (string)$item['id'] : null;
+                $key = null;
+                if ($prefix === 'emp') {
+                    if (!empty($item['code'])) {
+                        $key = 'emp_code_' . strtolower(trim((string)$item['code']));
+                    } elseif (!empty($item['nationalId'])) {
+                        $key = 'emp_nid_' . preg_replace('/\D/', '', (string)$item['nationalId']);
+                    } elseif (!empty($item['recruitmentApplicationId'])) {
+                        $key = 'emp_rec_' . (string)$item['recruitmentApplicationId'];
+                    } elseif (isset($item['id']) && $item['id'] !== '') {
+                        $key = (string)$item['id'];
+                    }
+                } else {
+                    $key = isset($item['id']) && $item['id'] !== '' ? (string)$item['id'] : null;
+                }
+
                 if (!$key && isset($item['employeeId'], $item['date'])) {
                     $key = $item['employeeId'] . '_' . $item['date'] . '_' . ($item['type'] ?? '') . '_' . ($item['time'] ?? $item['timeIn'] ?? '');
                 }
@@ -257,6 +271,11 @@ function mergeServerState(array $existing, array $incoming): array
                         $merged = array_merge($old, $item);
                     } else {
                         $merged = array_merge($item, $old);
+                    }
+
+                    // الحفاظ على معرف مستقر لا يتغير للموظف
+                    if ($prefix === 'emp' && !empty($old['id']) && !empty($item['id']) && (string)$old['id'] !== (string)$item['id']) {
+                        $merged['id'] = $old['id'];
                     }
 
                     if (isset($old['paymentsHistory']) || isset($item['paymentsHistory'])) {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { getEmpDisplayName, isEmployeeActive, fmt } from '../../utils/formatters';
+import { getEmpDisplayName, isEmployeeActive, fmt, getEmpWhatsAppPhone } from '../../utils/formatters';
 import {
   WHATSAPP_TEMPLATE_CATEGORIES,
   READY_WHATSAPP_TEMPLATES,
@@ -285,7 +285,10 @@ export default function WhatsAppCenterModule({
       ? filteredEmployees.filter(emp => emp.id === targetEmpId)
       : filteredEmployees;
 
-    const validRecipients = targetList.filter(emp => emp.phone && emp.phone.trim().length >= 10);
+    const validRecipients = targetList.filter(emp => {
+      const waNum = getEmpWhatsAppPhone(emp);
+      return waNum && waNum.length >= 10;
+    });
 
     if (validRecipients.length === 0) {
       showToast?.('❌ لا يوجد موظفون محددون يمتلكون أرقام هواتف صالحة مسجلة للواتساب.');
@@ -332,8 +335,10 @@ export default function WhatsAppCenterModule({
           pdfBase64 = await generateEmpPdfBase64(emp, summary, pdfHtml);
         }
 
+        // استخدام رقم الواتساب المخصص للموظف أو أول رقم صالح في قائمة الأرقام
+        const empWaPhone = getEmpWhatsAppPhone(emp);
         messagesPayload.push({
-          phone: emp.phone,
+          phone: empWaPhone,
           message: msgBody,
           empName: getEmpDisplayName(emp),
           pdfBase64,
@@ -752,7 +757,15 @@ export default function WhatsAppCenterModule({
             ) : (
               filteredEmployees.map((emp) => {
                 const b = branches.find((br) => br.id === emp.branchId);
-                const hasPhone = emp.phone && emp.phone.trim().length >= 10;
+                const empWaNum = getEmpWhatsAppPhone(emp);
+                const hasPhone = empWaNum && empWaNum.length >= 10;
+                // تحديد نوع الرقم: هل هو رقم مخصص للواتساب أم رقم افتراضي
+                const waPhoneObj = Array.isArray(emp.phones)
+                  ? emp.phones.find(p => typeof p === 'object' && p?.type === 'whatsapp' && String(p?.number || '').replace(/\D/g,'').length >= 10)
+                  : null;
+                const phoneLabel = empWaNum
+                  ? (waPhoneObj ? `💬 ${empWaNum}` : `📱 ${empWaNum}`)
+                  : '❌ بدون رقم';
                 return (
                   <tr key={emp.id}>
                     <td style={{ fontWeight: '700' }}>{emp.code}</td>
@@ -760,7 +773,7 @@ export default function WhatsAppCenterModule({
                     <td>{b?.name || 'المركز الرئيسي'}</td>
                     <td>{emp.jobTitle || 'عضو كادر'}</td>
                     <td style={{ direction: 'ltr', textAlign: 'right', fontWeight: 700 }}>
-                      {emp.phone || '❌ بدون رقم'}
+                      {phoneLabel}
                     </td>
                     <td>
                       {hasPhone ? (
