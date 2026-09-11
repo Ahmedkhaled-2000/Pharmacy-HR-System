@@ -158,65 +158,12 @@ export default function DesktopSystemTitleBar() {
     }
   };
 
-  const getButtonBorder = () => {
-    switch (updateStatus) {
-      case 'checking':
-        return '1px solid rgba(59, 130, 246, 0.4)';
-      case 'not-available':
-        return '1px solid rgba(16, 185, 129, 0.4)';
-      case 'available':
-      case 'downloading':
-        return '1px solid rgba(245, 158, 11, 0.4)';
-      case 'downloaded':
-        return '1px solid #10b981';
-      case 'error':
-        return '1px solid rgba(239, 68, 68, 0.4)';
-      default:
-        return '1px solid var(--titlebar-border, rgba(255, 255, 255, 0.14))';
-    }
-  };
-
-  const getButtonBackground = () => {
-    switch (updateStatus) {
-      case 'checking':
-        return 'rgba(59, 130, 246, 0.15)';
-      case 'not-available':
-        return 'rgba(16, 185, 129, 0.15)';
-      case 'available':
-      case 'downloading':
-        return 'rgba(245, 158, 11, 0.15)';
-      case 'downloaded':
-        return 'linear-gradient(135deg, #059669, #10b981)';
-      case 'error':
-        return 'rgba(239, 68, 68, 0.15)';
-      default:
-        return 'rgba(255, 255, 255, 0.06)';
-    }
-  };
-
-  const getButtonColor = () => {
-    switch (updateStatus) {
-      case 'checking':
-        return '#93c5fd';
-      case 'not-available':
-        return '#6ee7b7';
-      case 'available':
-      case 'downloading':
-        return '#fde68a';
-      case 'downloaded':
-        return '#ffffff';
-      case 'error':
-        return '#fca5a5';
-      default:
-        return 'var(--titlebar-color, #e2e8f0)';
-    }
-  };
 
   const renderButtonContent = () => {
     if (updateStatus === 'checking') {
       return (
         <>
-          <RefreshCw className="w-3 h-3 animate-spin text-blue-400" />
+          <RefreshCw style={{ width: '12px', height: '12px', color: 'currentColor' }} className="animate-spin" />
           <span>جاري الفحص...</span>
         </>
       );
@@ -224,7 +171,7 @@ export default function DesktopSystemTitleBar() {
     if (updateStatus === 'not-available') {
       return (
         <>
-          <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+          <CheckCircle2 style={{ width: '13px', height: '13px', color: 'currentColor' }} />
           <span>{statusMessage || 'أنت على أحدث إصدار'}</span>
         </>
       );
@@ -232,7 +179,7 @@ export default function DesktopSystemTitleBar() {
     if (updateStatus === 'available' || updateStatus === 'downloading') {
       return (
         <>
-          <Download className="w-3 h-3 text-amber-400 animate-bounce" />
+          <Download style={{ width: '13px', height: '13px', color: 'currentColor' }} />
           <span>تنزيل التحديث {downloadPercent > 0 ? `(${downloadPercent}%)` : ''}</span>
         </>
       );
@@ -240,7 +187,7 @@ export default function DesktopSystemTitleBar() {
     if (updateStatus === 'downloaded') {
       return (
         <>
-          <Sparkles className="w-3 h-3 text-white animate-pulse" />
+          <Sparkles style={{ width: '13px', height: '13px', color: '#ffffff' }} />
           <span>تثبيت التحديث الآن</span>
         </>
       );
@@ -248,7 +195,7 @@ export default function DesktopSystemTitleBar() {
     if (updateStatus === 'dev_mode') {
       return (
         <>
-          <Info className="w-3 h-3 text-cyan-400" />
+          <Info style={{ width: '13px', height: '13px', color: 'currentColor' }} />
           <span>بيئة التطوير</span>
         </>
       );
@@ -256,14 +203,14 @@ export default function DesktopSystemTitleBar() {
     if (updateStatus === 'error') {
       return (
         <>
-          <AlertCircle className="w-3 h-3 text-rose-400" />
+          <AlertCircle style={{ width: '13px', height: '13px', color: 'currentColor' }} />
           <span>{statusMessage || 'خطأ فحص'}</span>
         </>
       );
     }
     return (
       <>
-        <RefreshCw className="w-3 h-3 opacity-80" />
+        <RefreshCw style={{ width: '12px', height: '12px', color: 'currentColor' }} />
         <span>فحص التحديثات</span>
       </>
     );
@@ -337,15 +284,12 @@ export default function DesktopSystemTitleBar() {
         {/* شارة الإصدار الحالي */}
         {appVersion && (
           <span
-            className="app-no-drag"
+            className="titlebar-ver-badge app-no-drag"
             style={{
-              fontSize: '10.5px',
+              fontSize: '11px',
               fontFamily: 'monospace',
-              padding: '1px 7px',
-              borderRadius: '10px',
-              background: 'rgba(255, 255, 255, 0.08)',
-              color: 'var(--titlebar-color, #94a3b8)',
-              border: '1px solid var(--titlebar-border, rgba(255, 255, 255, 0.1))',
+              padding: '2px 8px',
+              borderRadius: '8px',
               letterSpacing: '0.4px',
               WebkitAppRegion: 'no-drag'
             }}
@@ -357,15 +301,11 @@ export default function DesktopSystemTitleBar() {
 
         {/* شارة كامل الصلاحيات (Admin Privileges) */}
         <span
-          className="app-no-drag"
+          className={`titlebar-admin-badge app-no-drag ${isAdmin ? 'admin-yes' : 'admin-no'}`}
           style={{
-            fontSize: '10px',
-            padding: '1px 8px',
-            borderRadius: '10px',
-            background: isAdmin ? 'rgba(16, 185, 129, 0.16)' : 'rgba(14, 165, 233, 0.14)',
-            color: isAdmin ? '#34d399' : '#38bdf8',
-            border: `1px solid ${isAdmin ? 'rgba(16, 185, 129, 0.35)' : 'rgba(14, 165, 233, 0.3)'}`,
-            fontWeight: 700,
+            fontSize: '11px',
+            padding: '2px 9px',
+            borderRadius: '8px',
             letterSpacing: '0.2px',
             WebkitAppRegion: 'no-drag',
             display: 'inline-flex',
@@ -374,7 +314,7 @@ export default function DesktopSystemTitleBar() {
           }}
           title={isAdmin ? 'البرنامج يعمل بكامل صلاحيات مدير النظام (Run as Administrator)' : 'البرنامج مفعل بكامل صلاحيات الوصول للأجهزة والكاميرا'}
         >
-          <span style={{ fontSize: '10px' }}>🛡️</span>
+          <span style={{ fontSize: '11px' }}>🛡️</span>
           <span>{isAdmin ? 'كامل الصلاحيات (مسؤول)' : 'صلاحيات كاملة'}</span>
         </span>
 
@@ -383,7 +323,7 @@ export default function DesktopSystemTitleBar() {
           type="button"
           onClick={handleCheckUpdates}
           disabled={updateStatus === 'checking'}
-          className={`titlebar-update-btn app-no-drag ${updateStatus}`}
+          className={`titlebar-update-btn app-no-drag status-${updateStatus}`}
           title={
             updateStatus === 'downloaded'
               ? 'تم تنزيل التحديث بنجاح! اضغط لتثبيته وإعادة تشغيل المنظومة الآن'
@@ -394,21 +334,6 @@ export default function DesktopSystemTitleBar() {
               : 'التحقق يدوياً من وجود تحديثات جديدة للبرنامج عبر GitHub'
           }
           style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '5px',
-            height: '22px',
-            padding: '0 9px',
-            borderRadius: '6px',
-            fontSize: '11px',
-            fontWeight: 600,
-            cursor: updateStatus === 'checking' ? 'wait' : 'pointer',
-            border: getButtonBorder(),
-            background: getButtonBackground(),
-            color: getButtonColor(),
-            boxShadow: updateStatus === 'downloaded' ? '0 0 10px rgba(16, 185, 129, 0.4)' : 'none',
-            transition: 'all 0.2s ease',
-            outline: 'none',
             WebkitAppRegion: 'no-drag',
             marginRight: '6px'
           }}

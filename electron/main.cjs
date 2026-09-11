@@ -571,6 +571,44 @@ ipcMain.handle('whatsapp:restart-server', async () => {
   return await killAndRestartWhatsAppServer();
 });
 
+// توليد ملف PDF مشفر كـ Base64 من كود HTML لإرفاقه مباشرة عبر الواتساب
+ipcMain.handle('print:generate-pdf-base64', async (_event, htmlContent, printOptions = {}) => {
+  let pdfWindow = null;
+  try {
+    pdfWindow = new BrowserWindow({
+      show: false,
+      width: 800,
+      height: 1000,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true
+      }
+    });
+
+    await pdfWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+
+    const pdfBuffer = await pdfWindow.webContents.printToPDF({
+      marginsType: 0,
+      printBackground: true,
+      pageSize: 'A4',
+      landscape: false,
+      ...printOptions
+    });
+
+    return {
+      success: true,
+      pdfBase64: pdfBuffer.toString('base64')
+    };
+  } catch (err) {
+    console.error('[Generate PDF Base64 Error]:', err);
+    return { success: false, error: err.message };
+  } finally {
+    if (pdfWindow && !pdfWindow.isDestroyed()) {
+      pdfWindow.destroy();
+    }
+  }
+});
+
 // ── 6. دورة حياة التطبيق (App Lifecycle) ──────────────────────────────────
 app.whenReady().then(() => {
   // تشغيل خادم الواتساب تلقائياً في الخلفية فور إقلاع التطبيق

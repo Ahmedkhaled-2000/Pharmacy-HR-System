@@ -314,13 +314,69 @@ body, button, input, select, textarea {
   color: #ffffff !important;
 }
 
-/* زر التحديث في شريط العنوان */
+/* ── عناصر وشارات شريط العنوان (TitleBar Elements) ── */
+.titlebar-ver-badge {
+  background: rgba(255, 255, 255, 0.1);
+  color: #f1f5f9;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  font-weight: 700;
+}
+
+[data-theme='light'] .titlebar-ver-badge {
+  background: #f1f5f9 !important;
+  color: #0f172a !important;
+  border: 1px solid #cbd5e1 !important;
+  font-weight: 800 !important;
+}
+
+.titlebar-admin-badge.admin-yes {
+  background: rgba(16, 185, 129, 0.18);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  font-weight: 700;
+}
+
+[data-theme='light'] .titlebar-admin-badge.admin-yes {
+  background: #d1fae5 !important;
+  color: #065f46 !important;
+  border: 1.5px solid #10b981 !important;
+  font-weight: 800 !important;
+}
+
+.titlebar-admin-badge.admin-no {
+  background: rgba(14, 165, 233, 0.16);
+  color: #38bdf8;
+  border: 1px solid rgba(14, 165, 233, 0.35);
+  font-weight: 700;
+}
+
+[data-theme='light'] .titlebar-admin-badge.admin-no {
+  background: #e0f2fe !important;
+  color: #0369a1 !important;
+  border: 1.5px solid #38bdf8 !important;
+  font-weight: 800 !important;
+}
+
+/* ── زر فحص التحديثات في شريط العنوان (TitleBar Update Button) ── */
 .titlebar-update-btn {
   -webkit-app-region: no-drag !important;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 23px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  transition: all 0.2s ease;
+  outline: none;
+  cursor: pointer;
+  white-space: nowrap;
 }
 
 .titlebar-update-btn:hover:not(:disabled) {
-  filter: brightness(1.2);
+  filter: brightness(1.15);
   transform: translateY(-0.5px);
 }
 
@@ -328,8 +384,98 @@ body, button, input, select, textarea {
   transform: translateY(0.5px);
 }
 
-.titlebar-update-btn.downloaded {
-  animation: pulse-border 2s infinite;
+/* 1. الحالة العادية (Idle) */
+.titlebar-update-btn.status-idle {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f1f5f9;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+[data-theme='light'] .titlebar-update-btn.status-idle {
+  background: #f1f5f9 !important;
+  color: #0f172a !important;
+  border: 1px solid #cbd5e1 !important;
+  font-weight: 700 !important;
+}
+[data-theme='light'] .titlebar-update-btn.status-idle:hover {
+  background: #e2e8f0 !important;
+}
+
+/* 2. جاري الفحص (Checking) */
+.titlebar-update-btn.status-checking {
+  background: rgba(59, 130, 246, 0.22);
+  color: #93c5fd;
+  border: 1.5px solid #3b82f6;
+  cursor: wait;
+}
+[data-theme='light'] .titlebar-update-btn.status-checking {
+  background: #eff6ff !important;
+  color: #1e40af !important;
+  border: 1.5px solid #2563eb !important;
+  font-weight: 800 !important;
+}
+
+/* 3. أنت على أحدث إصدار (Not Available / Up to Date) - عالي التباين فائق الوضوح */
+.titlebar-update-btn.status-not-available {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  border: 1.5px solid #10b981;
+}
+[data-theme='light'] .titlebar-update-btn.status-not-available {
+  background: #ecfdf5 !important;
+  color: #065f46 !important;
+  border: 1.5px solid #10b981 !important;
+  font-weight: 800 !important;
+}
+
+/* 4. يوجد إصدار جديد / جاري التنزيل (Available / Downloading) */
+.titlebar-update-btn.status-available,
+.titlebar-update-btn.status-downloading {
+  background: rgba(245, 158, 11, 0.22);
+  color: #fde68a;
+  border: 1.5px solid #f59e0b;
+}
+[data-theme='light'] .titlebar-update-btn.status-available,
+[data-theme='light'] .titlebar-update-btn.status-downloading {
+  background: #fffbeb !important;
+  color: #92400e !important;
+  border: 1.5px solid #f59e0b !important;
+  font-weight: 800 !important;
+}
+
+/* 5. تم تنزيل التحديث وجاهز للتثبيت الفوري (Downloaded) */
+.titlebar-update-btn.status-downloaded {
+  background: linear-gradient(135deg, #059669, #10b981) !important;
+  color: #ffffff !important;
+  border: 1.5px solid #059669 !important;
+  font-weight: 800 !important;
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.6) !important;
+  animation: pulse-border 2s infinite !important;
+}
+
+/* 6. بيئة التطوير (Dev Mode) */
+.titlebar-update-btn.status-dev_mode {
+  background: rgba(6, 182, 212, 0.2);
+  color: #67e8f9;
+  border: 1.5px solid #06b6d4;
+}
+[data-theme='light'] .titlebar-update-btn.status-dev_mode {
+  background: #ecfeff !important;
+  color: #0e7490 !important;
+  border: 1.5px solid #06b6d4 !important;
+  font-weight: 800 !important;
+}
+
+/* 7. خطأ في الفحص (Error) */
+.titlebar-update-btn.status-error {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+  border: 1.5px solid #ef4444;
+}
+[data-theme='light'] .titlebar-update-btn.status-error {
+  background: #fef2f2 !important;
+  color: #991b1b !important;
+  border: 1.5px solid #ef4444 !important;
+  font-weight: 800 !important;
 }
 
 @keyframes pulse-border {
@@ -337,7 +483,27 @@ body, button, input, select, textarea {
     box-shadow: 0 0 6px rgba(16, 185, 129, 0.4);
   }
   50% {
-    box-shadow: 0 0 14px rgba(16, 185, 129, 0.8);
+    box-shadow: 0 0 14px rgba(16, 185, 129, 0.85);
+  }
+}
+
+@keyframes winModalFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes winFloatPulse {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
   }
 }
 

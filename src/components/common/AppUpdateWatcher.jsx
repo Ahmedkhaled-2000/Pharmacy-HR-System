@@ -144,18 +144,65 @@ export default function AppUpdateWatcher() {
 
       {/* 2. شريط عائم سفلي خفيف عند اكتمال تنزيل التحديث في سطح المكتب بعد إغلاق النافذة */}
       {isDesktop && updateStatus === 'downloaded' && !isModalOpen && (
-        <div className="fixed bottom-4 left-4 z-[99999] animate-bounce">
-          <div className="flex items-center gap-3 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white px-4 py-3 rounded-2xl shadow-2xl border border-white/20">
-            <Sparkles className="w-5 h-5 text-amber-300 animate-pulse" />
-            <div className="text-sm">
-              <p className="font-bold">تحديث جديد جاهز للتثبيت ({updateInfo?.version || 'v1.0.1'})</p>
-              <p className="text-xs text-emerald-100">تم تنزيل النسخة الجديدة بنجاح</p>
+        <div
+          dir="rtl"
+          style={{
+            position: 'fixed',
+            bottom: '20px',
+            left: '20px',
+            zIndex: 9999999,
+            animation: 'winFloatPulse 3s ease-in-out infinite'
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              background: 'linear-gradient(135deg, #065f46 0%, #047857 100%)',
+              color: '#ffffff',
+              padding: '12px 18px',
+              borderRadius: '16px',
+              boxShadow: '0 12px 35px -5px rgba(5, 150, 105, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.2)',
+              fontFamily: 'system-ui, sans-serif'
+            }}
+          >
+            <Sparkles style={{ width: '22px', height: '22px', color: '#fef08a' }} />
+            <div>
+              <p style={{ margin: 0, fontSize: '13px', fontWeight: 800 }}>
+                تحديث جديد جاهز للتثبيت ({updateInfo?.version ? `v${updateInfo.version}` : 'الإصدار الجديد'})
+              </p>
+              <p style={{ margin: '2px 0 0', fontSize: '11px', color: '#d1fae5' }}>
+                تم التنزيل بنجاح، اضغط للتطبيق الفوري
+              </p>
             </div>
             <button
+              type="button"
               onClick={handleInstallDesktopUpdate}
-              className="bg-white text-emerald-800 font-bold px-3 py-1.5 rounded-xl text-xs hover:bg-emerald-50 transition shadow active:scale-95 cursor-pointer mr-2 flex items-center gap-1.5"
+              style={{
+                marginRight: '8px',
+                padding: '8px 14px',
+                borderRadius: '10px',
+                background: '#ffffff',
+                color: '#065f46',
+                border: 'none',
+                fontSize: '12px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'scale(1.04)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'scale(1)';
+              }}
             >
-              <RefreshCw className="w-3.5 h-3.5" />
+              <RefreshCw style={{ width: '13px', height: '13px' }} />
               إعادة التشغيل الآن
             </button>
           </div>
@@ -164,16 +211,48 @@ export default function AppUpdateWatcher() {
 
       {/* 3. شريط عائم لبيئة المتصفح */}
       {!isDesktop && webUpdateAvailable && (
-        <div className="fixed bottom-4 left-4 z-[99999] animate-bounce">
-          <div className="flex items-center gap-3 bg-gradient-to-r from-emerald-600 to-teal-700 text-white px-4 py-3 rounded-xl shadow-2xl border border-white/20">
-            <RefreshCw className="w-5 h-5 animate-spin" />
-            <div className="text-sm">
-              <p className="font-bold">تحديث جديد متوفر للمنظومة</p>
-              <p className="text-xs text-emerald-100">تم نشر إصدار محدث من النظام</p>
+        <div
+          dir="rtl"
+          style={{
+            position: 'fixed',
+            bottom: '20px',
+            left: '20px',
+            zIndex: 9999999
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+              color: '#ffffff',
+              padding: '12px 18px',
+              borderRadius: '16px',
+              boxShadow: '0 12px 35px -5px rgba(2, 132, 199, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.2)',
+              fontFamily: 'system-ui, sans-serif'
+            }}
+          >
+            <RefreshCw style={{ width: '20px', height: '20px' }} className="animate-spin" />
+            <div>
+              <p style={{ margin: 0, fontSize: '13px', fontWeight: 800 }}>تحديث جديد متوفر للمنظومة</p>
+              <p style={{ margin: '2px 0 0', fontSize: '11px', color: '#e0f2fe' }}>تم نشر إصدار محدث من النظام</p>
             </div>
             <button
+              type="button"
               onClick={handleApplyWebUpdate}
-              className="bg-white text-emerald-800 font-bold px-3 py-1.5 rounded-lg text-xs hover:bg-emerald-50 transition shadow active:scale-95 cursor-pointer mr-2"
+              style={{
+                marginRight: '8px',
+                padding: '8px 14px',
+                borderRadius: '10px',
+                background: '#ffffff',
+                color: '#0369a1',
+                border: 'none',
+                fontSize: '12px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)'
+              }}
             >
               تطبيق الآن
             </button>

@@ -967,6 +967,9 @@ export default function AppRoutes() {
                   <WhatsAppCenterModule
                     state={sanitizedState}
                     showToast={showToast}
+                    monthPicker={monthPicker}
+                    computeEmpSummary={computeEmpSummary}
+                    arabicMonthLabel={arabicMonthLabel}
                   />
                 )}
 

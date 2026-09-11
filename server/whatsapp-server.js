@@ -192,10 +192,10 @@ app.get('/api/status', (req, res) => {
 
 // إرسال رسالة فردية مع محاكاة بشرية لمكافحة الحظر
 app.post('/api/send-message', async (req, res) => {
-  const { phone, message } = req.body;
+  const { phone, message, pdfBase64, fileName } = req.body;
 
-  if (!phone || !message) {
-    return res.status(400).json({ success: false, error: 'رقم الهاتف ونص الرسالة مطلوبان.' });
+  if (!phone || (!message && !pdfBase64)) {
+    return res.status(400).json({ success: false, error: 'رقم الهاتف ونص الرسالة أو ملف PDF مطلوبان.' });
   }
 
   if (serverState.status !== 'CONNECTED' || !sock) {
@@ -218,13 +218,24 @@ app.post('/api/send-message', async (req, res) => {
       await sock.sendPresenceUpdate('paused', jid);
     } catch {}
 
-    const sent = await sock.sendMessage(jid, { text: message });
+    let sent;
+    if (pdfBase64) {
+      const pdfBuffer = Buffer.from(pdfBase64, 'base64');
+      sent = await sock.sendMessage(jid, {
+        document: pdfBuffer,
+        mimetype: 'application/pdf',
+        fileName: fileName || 'كشف_المرتب.pdf',
+        caption: message || ''
+      });
+    } else {
+      sent = await sock.sendMessage(jid, { text: message });
+    }
     serverState.sentCount++;
 
     const logEntry = {
       id: sent.key?.id || 'WAM_' + Date.now(),
       phone: jid.split('@')[0],
-      messageSnippet: message.slice(0, 60),
+      messageSnippet: (message || (pdfBase64 ? '📎 [ملف PDF مرفق]' : '')).slice(0, 60),
       timestamp: new Date().toLocaleTimeString('ar-EG'),
       status: 'DELIVERED'
     };
@@ -243,7 +254,7 @@ app.post('/api/send-message', async (req, res) => {
   }
 });
 
-// إرسال جماعي ذكي مع طابور زمني آمن
+// إرسال جماعي ذكي مع طابور زمني آمن ودعم إرفاق ملفات الـ PDF
 app.post('/api/send-bulk', async (req, res) => {
   const { messages } = req.body;
 
@@ -279,14 +290,24 @@ app.post('/api/send-bulk', async (req, res) => {
         await new Promise((resolve) => setTimeout(resolve, 800));
         await sock.sendPresenceUpdate('paused', jid);
 
-        await sock.sendMessage(jid, { text: item.message });
+        if (item.pdfBase64) {
+          const pdfBuffer = Buffer.from(item.pdfBase64, 'base64');
+          await sock.sendMessage(jid, {
+            document: pdfBuffer,
+            mimetype: 'application/pdf',
+            fileName: item.fileName || `كشف_مرتب_${item.empName || 'موظف'}.pdf`,
+            caption: item.message || ''
+          });
+        } else {
+          await sock.sendMessage(jid, { text: item.message });
+        }
         serverState.sentCount++;
 
         serverState.logs.push({
           id: 'WAM_' + Date.now(),
           phone: jid.split('@')[0],
           empName: item.empName || '',
-          messageSnippet: (item.message || '').slice(0, 50),
+          messageSnippet: (item.message || (item.pdfBase64 ? '📎 [ملف PDF مرفق]' : '')).slice(0, 50),
           timestamp: new Date().toLocaleTimeString('ar-EG'),
           status: 'DELIVERED'
         });
