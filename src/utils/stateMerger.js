@@ -552,6 +552,33 @@ export function smartMergeStates(localState, remoteState) {
     }
   }
 
+  // ── حماية المرشحين المقبولين والمعينين في التوظيف من التومبستون ──
+  const allCurrentApps = [
+    ...toSafeArray(localState.recruitmentApplications),
+    ...toSafeArray(remoteState.recruitmentApplications)
+  ];
+  for (const app of allCurrentApps) {
+    if (!app || typeof app !== 'object') continue;
+    if (app.status === 'hired') {
+      if (app.hiredEmployeeId) {
+        const hId = String(app.hiredEmployeeId).trim();
+        deletedIds.delete(hId);
+        deletedIds.delete(hId.toLowerCase());
+        deletedIds.delete(`emp_${hId}`);
+        deletedIds.delete(`emp_${hId.toLowerCase()}`);
+        deletedIds.delete(`emp_del_${hId}`);
+      }
+      if (app.hiredEmployeeCode) {
+        const hCode = String(app.hiredEmployeeCode).trim();
+        deletedIds.delete(hCode);
+        deletedIds.delete(hCode.toLowerCase());
+        deletedIds.delete(`emp_${hCode}`);
+        deletedIds.delete(`emp_code_${hCode}`);
+        deletedIds.delete(`emp_code_${hCode.toLowerCase()}`);
+      }
+    }
+  }
+
   // معالجة ومراعاة تاريخ التصفير الشامل _wipedAt إن وجد لمنع إعادة إحياء البيانات القديمة
   const remoteWipeTime = remoteState._wipedAt ? new Date(remoteState._wipedAt).getTime() : 0;
   const localWipeTime = localState._wipedAt ? new Date(localState._wipedAt).getTime() : 0;

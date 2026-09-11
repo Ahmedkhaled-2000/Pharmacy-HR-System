@@ -223,6 +223,46 @@ function mergeServerState(array $existing, array $incoming): array
     ));
     $deletedSet = array_flip(array_map('strval', $deletedIds));
 
+    // ── تطهير ذاتي وحصانة مطلقة للموظفين الفعليين والنشطين لمنع أي تومبستون قديم من حذفهم ──
+    $allEmps = array_merge(
+        (array)($existing['employees'] ?? []),
+        (array)($incoming['employees'] ?? [])
+    );
+    foreach ($allEmps as $e) {
+        if (!is_array($e) || empty($e['name'])) continue;
+        if (!empty($e['id'])) {
+            $idStr = (string)$e['id'];
+            unset($deletedSet[$idStr], $deletedSet[strtolower($idStr)], $deletedSet['emp_' . $idStr], $deletedSet['emp_' . strtolower($idStr)], $deletedSet['emp_del_' . $idStr]);
+        }
+        if (isset($e['code']) && $e['code'] !== '') {
+            $codeStr = strtolower(trim((string)$e['code']));
+            unset($deletedSet[$codeStr], $deletedSet['emp_' . $codeStr], $deletedSet['emp_code_' . $codeStr]);
+        }
+        if (!empty($e['username'])) {
+            $uStr = strtolower(trim((string)$e['username']));
+            unset($deletedSet[$uStr], $deletedSet['emp_' . $uStr], $deletedSet['user_' . $uStr]);
+        }
+    }
+
+    // ── حماية المرشحين المقبولين والمعينين في التوظيف ──
+    $allApps = array_merge(
+        (array)($existing['recruitmentApplications'] ?? []),
+        (array)($incoming['recruitmentApplications'] ?? [])
+    );
+    foreach ($allApps as $app) {
+        if (!is_array($app)) continue;
+        if (($app['status'] ?? '') === 'hired') {
+            if (!empty($app['hiredEmployeeId'])) {
+                $hId = (string)$app['hiredEmployeeId'];
+                unset($deletedSet[$hId], $deletedSet[strtolower($hId)], $deletedSet['emp_' . $hId], $deletedSet['emp_' . strtolower($hId)], $deletedSet['emp_del_' . $hId]);
+            }
+            if (!empty($app['hiredEmployeeCode'])) {
+                $hCode = strtolower(trim((string)$app['hiredEmployeeCode']));
+                unset($deletedSet[$hCode], $deletedSet['emp_' . $hCode], $deletedSet['emp_code_' . $hCode]);
+            }
+        }
+    }
+
     $mergeArrayEntities = function(array $arr1, array $arr2, string $prefix = 'item') use ($deletedSet) {
         $map = [];
         $addOrMerge = function(array $list) use (&$map, $deletedSet, $prefix) {
@@ -466,6 +506,6 @@ function mergeServerState(array $existing, array $incoming): array
         $merged['bylaws'] = array_merge($eBylaws, $iBylaws);
     }
 
-    $merged['_deletedIds'] = array_slice($deletedIds, -3000);
+    $merged['_deletedIds'] = array_slice(array_keys($deletedSet), -3000);
     return $merged;
 }
