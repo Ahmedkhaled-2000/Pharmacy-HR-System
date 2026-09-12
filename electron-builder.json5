@@ -13,11 +13,7 @@
   ],
   "asarUnpack": [
     "server/**/*",
-    "node_modules/@whiskeysockets/**/*",
-    "node_modules/qrcode/**/*",
-    "node_modules/express/**/*",
-    "node_modules/cors/**/*",
-    "node_modules/pino/**/*"
+    "node_modules/**/*"
   ],
   "win": {
     "target": [

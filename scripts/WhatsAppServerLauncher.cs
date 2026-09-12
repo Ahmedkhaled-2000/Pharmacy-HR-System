@@ -8,6 +8,7 @@ using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Threading;
 using System.Windows.Forms;
+using Microsoft.Win32;
 
 namespace HrWhatsAppLauncher
 {
@@ -292,16 +293,17 @@ namespace HrWhatsAppLauncher
             string serverJs = FindServerJs();
             if (string.IsNullOrEmpty(serverJs) || !File.Exists(serverJs))
             {
-                MessageBox.Show("تعذر العثور على ملف whatsapp-server.js تلقائياً على هذا الجهاز.", "تنبيه", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
-            string nodeExe = FindNodeExe();
+            string nodeExe = FindNodeExe(serverJs);
             bool isElectronNode = nodeExe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && !nodeExe.ToLower().Contains("node.exe");
 
             try
             {
-                string appDir = Path.GetDirectoryName(Path.GetDirectoryName(serverJs));
+                string appDir = Path.GetDirectoryName(serverJs);
+                string nodeModulesDir = Path.Combine(Path.GetDirectoryName(appDir), "node_modules");
+
                 ProcessStartInfo psi = new ProcessStartInfo
                 {
                     FileName = nodeExe,
@@ -312,10 +314,18 @@ namespace HrWhatsAppLauncher
                     UseShellExecute = false
                 };
 
+                if (Directory.Exists(nodeModulesDir))
+                {
+                    psi.EnvironmentVariables["NODE_PATH"] = nodeModulesDir;
+                }
+
                 if (isElectronNode)
                 {
                     psi.EnvironmentVariables["ELECTRON_RUN_AS_NODE"] = "1";
                 }
+
+                psi.EnvironmentVariables["PORT"] = "3100";
+                psi.EnvironmentVariables["NODE_ENV"] = "production";
 
                 Process.Start(psi);
                 Thread.Sleep(2000);
@@ -360,46 +370,167 @@ namespace HrWhatsAppLauncher
 
         private string FindServerJs()
         {
-            string appBase = AppDomain.CurrentDomain.BaseDirectory;
-            string[] candidates = new string[]
+            // 1. فحص سجل الويندوز للبحث عن مسار التثبيت الفعلي
+            try
             {
+                string[] regKeys = new string[]
+                {
+                    @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\com.pharmacy.hr.system",
+                    @"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\com.pharmacy.hr.system",
+                    @"SOFTWARE\pharmacy-hr-system",
+                    @"SOFTWARE\منظومة الموارد البشرية"
+                };
+
+                foreach (string rk in regKeys)
+                {
+                    using (RegistryKey key = Registry.LocalMachine.OpenSubKey(rk))
+                    {
+                        if (key != null)
+                        {
+                            object loc = key.GetValue("InstallLocation");
+                            if (loc != null && !string.IsNullOrEmpty(loc.ToString()))
+                            {
+                                string p = Path.Combine(loc.ToString(), "resources", "app.asar.unpacked", "server", "whatsapp-server.js");
+                                if (File.Exists(p)) return p;
+                            }
+                        }
+                    }
+                    using (RegistryKey key = Registry.CurrentUser.OpenSubKey(rk))
+                    {
+                        if (key != null)
+                        {
+                            object loc = key.GetValue("InstallLocation");
+                            if (loc != null && !string.IsNullOrEmpty(loc.ToString()))
+                            {
+                                string p = Path.Combine(loc.ToString(), "resources", "app.asar.unpacked", "server", "whatsapp-server.js");
+                                if (File.Exists(p)) return p;
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            // 2. فحص مجلدات التثبيت التلقائية في النظام
+            string appBase = AppDomain.CurrentDomain.BaseDirectory;
+            string progFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+            string progFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+            string localApp = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+            List<string> candidates = new List<string>
+            {
+                // مسارات بجوار أداة التشغيل
                 Path.Combine(appBase, "server", "whatsapp-server.js"),
                 Path.Combine(appBase, "whatsapp-server.js"),
                 Path.Combine(appBase, "..", "server", "whatsapp-server.js"),
-                @"d:\Project\HR last\HR New\server\whatsapp-server.js",
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), @"منظومة الموارد البشرية\resources\app.asar.unpacked\server\whatsapp-server.js"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\منظومة الموارد البشرية\resources\app.asar.unpacked\server\whatsapp-server.js")
+                Path.Combine(appBase, "resources", "app.asar.unpacked", "server", "whatsapp-server.js"),
+
+                // مسار التثبيت الحقيقي الرئيسي (pharmacy-hr-system)
+                Path.Combine(progFiles, @"pharmacy-hr-system\resources\app.asar.unpacked\server\whatsapp-server.js"),
+                Path.Combine(progFilesX86, @"pharmacy-hr-system\resources\app.asar.unpacked\server\whatsapp-server.js"),
+                @"C:\Program Files\pharmacy-hr-system\resources\app.asar.unpacked\server\whatsapp-server.js",
+                @"C:\Program Files (x86)\pharmacy-hr-system\resources\app.asar.unpacked\server\whatsapp-server.js",
+                Path.Combine(localApp, @"Programs\pharmacy-hr-system\resources\app.asar.unpacked\server\whatsapp-server.js"),
+
+                // مسار التثبيت بالاسم التجاري (منظومة الموارد البشرية)
+                Path.Combine(progFiles, @"منظومة الموارد البشرية\resources\app.asar.unpacked\server\whatsapp-server.js"),
+                Path.Combine(progFilesX86, @"منظومة الموارد البشرية\resources\app.asar.unpacked\server\whatsapp-server.js"),
+                @"C:\Program Files\منظومة الموارد البشرية\resources\app.asar.unpacked\server\whatsapp-server.js",
+                Path.Combine(localApp, @"Programs\منظومة الموارد البشرية\resources\app.asar.unpacked\server\whatsapp-server.js"),
+
+                // مسار بيئة التطوير
+                @"d:\Project\HR last\HR New\server\whatsapp-server.js"
+            };
+
+            foreach (string c in candidates)
+            {
+                if (!string.IsNullOrEmpty(c) && File.Exists(c)) return c;
+            }
+
+            // فحص كافة الأقراص المتاحة (C, D, E, F...)
+            foreach (string drive in new string[] { "C:\\", "D:\\", "E:\\", "F:\\", "G:\\" })
+            {
+                string p1 = Path.Combine(drive, @"Program Files\pharmacy-hr-system\resources\app.asar.unpacked\server\whatsapp-server.js");
+                if (File.Exists(p1)) return p1;
+                string p2 = Path.Combine(drive, @"Program Files (x86)\pharmacy-hr-system\resources\app.asar.unpacked\server\whatsapp-server.js");
+                if (File.Exists(p2)) return p2;
+                string p3 = Path.Combine(drive, @"Project\HR last\HR New\server\whatsapp-server.js");
+                if (File.Exists(p3)) return p3;
+            }
+
+            // 3. خيار يدوي تفاعلي إذا تم تثبيت البرنامج في مجلد مخصص غير قياسي
+            DialogResult dr = MessageBox.Show(
+                "تعذر العثور على ملف whatsapp-server.js تلقائياً على هذا الجهاز.\n\nهل ترغب في تحديد مجلد تثبيت (منظومة الموارد البشرية) يدوياً؟",
+                "تحديد مسار المنظومة",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question
+            );
+            if (dr == DialogResult.Yes)
+            {
+                using (FolderBrowserDialog fbd = new FolderBrowserDialog())
+                {
+                    fbd.Description = "اختر مجلد تثبيت منظومة الموارد البشرية (مثال: C:\\Program Files\\pharmacy-hr-system)";
+                    if (fbd.ShowDialog() == DialogResult.OK)
+                    {
+                        string manualTarget = Path.Combine(fbd.SelectedPath, "resources", "app.asar.unpacked", "server", "whatsapp-server.js");
+                        if (File.Exists(manualTarget)) return manualTarget;
+                        string directTarget = Path.Combine(fbd.SelectedPath, "server", "whatsapp-server.js");
+                        if (File.Exists(directTarget)) return directTarget;
+                        string singleTarget = Path.Combine(fbd.SelectedPath, "whatsapp-server.js");
+                        if (File.Exists(singleTarget)) return singleTarget;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private string FindNodeExe(string serverJsPath)
+        {
+            // 1. استخدام محرك المنظومة التنفيذي المدمج في نفس مجلد التثبيت
+            if (!string.IsNullOrEmpty(serverJsPath))
+            {
+                try
+                {
+                    string dir = Path.GetDirectoryName(serverJsPath);
+                    for (int i = 0; i < 5; i++)
+                    {
+                        if (string.IsNullOrEmpty(dir)) break;
+                        string exe1 = Path.Combine(dir, "منظومة الموارد البشرية.exe");
+                        if (File.Exists(exe1)) return exe1;
+                        string exe2 = Path.Combine(dir, "pharmacy-hr-system.exe");
+                        if (File.Exists(exe2)) return exe2;
+                        dir = Path.GetDirectoryName(dir);
+                    }
+                }
+                catch { }
+            }
+
+            // 2. فحص مسارات التثبيت القياسية
+            string progFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+            string progFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+            string localApp = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+            string[] candidates = new string[]
+            {
+                Path.Combine(progFiles, @"pharmacy-hr-system\منظومة الموارد البشرية.exe"),
+                Path.Combine(progFilesX86, @"pharmacy-hr-system\منظومة الموارد البشرية.exe"),
+                @"C:\Program Files\pharmacy-hr-system\منظومة الموارد البشرية.exe",
+                @"C:\Program Files (x86)\pharmacy-hr-system\منظومة الموارد البشرية.exe",
+                Path.Combine(progFiles, @"منظومة الموارد البشرية\منظومة الموارد البشرية.exe"),
+                Path.Combine(progFilesX86, @"منظومة الموارد البشرية\منظومة الموارد البشرية.exe"),
+                Path.Combine(localApp, @"Programs\pharmacy-hr-system\منظومة الموارد البشرية.exe"),
+                Path.Combine(localApp, @"Programs\منظومة الموارد البشرية\منظومة الموارد البشرية.exe"),
+                Path.Combine(progFiles, @"nodejs\node.exe"),
+                Path.Combine(progFilesX86, @"nodejs\node.exe"),
+                @"C:\Program Files\nodejs\node.exe",
+                Path.Combine(localApp, @"Programs\node\node.exe")
             };
 
             foreach (string c in candidates)
             {
                 if (File.Exists(c)) return c;
             }
-
-            foreach (string drive in new string[] { "C:\\", "D:\\", "E:\\", "F:\\", "G:\\" })
-            {
-                string p = Path.Combine(drive, @"Project\HR last\HR New\server\whatsapp-server.js");
-                if (File.Exists(p)) return p;
-            }
-
-            return null;
-        }
-
-        private string FindNodeExe()
-        {
-            string progFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
-            string progFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
-            string localApp = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-
-            if (File.Exists(Path.Combine(progFiles, @"nodejs\node.exe"))) return Path.Combine(progFiles, @"nodejs\node.exe");
-            if (File.Exists(Path.Combine(progFilesX86, @"nodejs\node.exe"))) return Path.Combine(progFilesX86, @"nodejs\node.exe");
-            if (File.Exists(Path.Combine(localApp, @"Programs\node\node.exe"))) return Path.Combine(localApp, @"Programs\node\node.exe");
-
-            string electronApp1 = Path.Combine(progFiles, @"منظومة الموارد البشرية\منظومة الموارد البشرية.exe");
-            if (File.Exists(electronApp1)) return electronApp1;
-
-            string electronApp2 = Path.Combine(localApp, @"Programs\منظومة الموارد البشرية\منظومة الموارد البشرية.exe");
-            if (File.Exists(electronApp2)) return electronApp2;
 
             return "node";
         }

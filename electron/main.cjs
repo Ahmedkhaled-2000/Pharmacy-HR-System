@@ -531,7 +531,11 @@ function resolveWhatsAppServerScript() {
     path.join(__dirname, '../server/whatsapp-server.js'),
     path.join(process.resourcesPath || '', 'app', 'server', 'whatsapp-server.js'),
     path.join(process.resourcesPath || '', 'server', 'whatsapp-server.js'),
-    path.join(app.getAppPath(), 'server', 'whatsapp-server.js')
+    path.join(app.getAppPath(), 'server', 'whatsapp-server.js'),
+    path.join(process.env.ProgramFiles || 'C:\\Program Files', 'pharmacy-hr-system', 'resources', 'app.asar.unpacked', 'server', 'whatsapp-server.js'),
+    path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'pharmacy-hr-system', 'resources', 'app.asar.unpacked', 'server', 'whatsapp-server.js'),
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'pharmacy-hr-system', 'resources', 'app.asar.unpacked', 'server', 'whatsapp-server.js'),
+    path.join(process.env.ProgramFiles || 'C:\\Program Files', 'منظومة الموارد البشرية', 'resources', 'app.asar.unpacked', 'server', 'whatsapp-server.js')
   ];
   for (const p of possiblePaths) {
     if (fs.existsSync(p)) return p;
@@ -586,10 +590,16 @@ function launchWhatsAppServerProcess() {
       try { fs.mkdirSync(waAuthDir, { recursive: true }); } catch {}
     }
 
+    const unpackedNodeModules = path.join(process.resourcesPath || '', 'app.asar.unpacked', 'node_modules');
+    const localNodeModules = path.join(__dirname, '../node_modules');
+    const nodePathParts = [unpackedNodeModules, localNodeModules].filter(p => fs.existsSync(p));
+    if (process.env.NODE_PATH) nodePathParts.push(process.env.NODE_PATH);
+
     const env = {
       ...process.env,
       PORT: '3100',
       WA_AUTH_PATH: waAuthDir,
+      NODE_PATH: nodePathParts.join(path.delimiter),
       NODE_ENV: 'production'
     };
 
@@ -697,12 +707,12 @@ async function ensureWhatsAppServerRunning() {
     }
     isWhatsAppServerStarting = true;
 
-    // تشغيل كعملية فرعية مخصصة تحت إشراف تام
-    const started = launchWhatsAppServerProcess();
+    // 1. محاولة التشغيل كعملية فرعية مخصصة
+    launchWhatsAppServerProcess();
 
-    // فحص إتمام التشغيل مع مهلة ذكية
-    for (let i = 0; i < 6; i++) {
-      await new Promise(r => setTimeout(r, 1000));
+    // فحص إتمام التشغيل مع مهلة سريعة (3 ثوانٍ)
+    for (let i = 0; i < 4; i++) {
+      await new Promise(r => setTimeout(r, 800));
       const h = await checkWhatsAppServerHealth();
       if (h.online) {
         isWhatsAppServerStarting = false;
@@ -711,8 +721,23 @@ async function ensureWhatsAppServerRunning() {
       }
     }
 
+    // 2. صمام أمان فوري فائق القوة: تشغيل الخادم مباشرة داخل معالج Electron (In-Process Fallback)
+    console.log('[WhatsApp Gateway] ⚡ Child process not responding yet, attempting in-process server fallback...');
+    const inProcStarted = await startWhatsAppServerInProcess();
+    if (inProcStarted) {
+      for (let i = 0; i < 5; i++) {
+        await new Promise(r => setTimeout(r, 600));
+        const h = await checkWhatsAppServerHealth();
+        if (h.online) {
+          isWhatsAppServerStarting = false;
+          console.log('[WhatsApp Gateway] ✅ In-process WhatsApp server verified online on port 3100.');
+          return { success: true, health: h, inProcess: true };
+        }
+      }
+    }
+
     isWhatsAppServerStarting = false;
-    return { success: started, health: await checkWhatsAppServerHealth() };
+    return { success: false, health: await checkWhatsAppServerHealth() };
   } catch (err) {
     isWhatsAppServerStarting = false;
     console.error('[WhatsApp Gateway Check Error]:', err);
