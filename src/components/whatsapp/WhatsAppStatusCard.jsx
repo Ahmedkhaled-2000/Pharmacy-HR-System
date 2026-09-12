@@ -25,6 +25,9 @@ export default function WhatsAppStatusCard({
       const localDevice = (localStorage.getItem('PHARMACY_DEVICE_WA_URL') || '').trim();
       if (localDevice && !localDevice.includes('apexthunder.com')) return localDevice.replace(/\/+$/, '');
     } catch {}
+    if (typeof window !== 'undefined' && window.desktopAPI?.isDesktop) {
+      return 'http://127.0.0.1:3100';
+    }
     const custom = (waServerUrlInput || '').trim();
     if (custom && !custom.includes('apexthunder.com') && !custom.includes('localhost:3001')) return custom.replace(/\/+$/, '');
     if (typeof window !== 'undefined' && window.location?.hostname) {

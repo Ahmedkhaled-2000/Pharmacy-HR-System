@@ -120,10 +120,16 @@ function createMainWindow() {
     }, 1200);
   });
 
-  // فحص وجود تحديثات فور اكتمال تحميل محتوى الواجهة التفاعلية
+  // فحص وجود تحديثات وإرسال معلومات شبكة الواتساب فور اكتمال تحميل محتوى الواجهة التفاعلية
   mainWindow.webContents.on('did-finish-load', () => {
     setTimeout(() => {
       checkForAppUpdates(false);
+      try {
+        const netInfo = getSystemNetworkInfo();
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('whatsapp:network-info', netInfo);
+        }
+      } catch {}
     }, 1500);
   });
 

@@ -57,27 +57,36 @@ export default function WhatsAppCenterModule({
     return /^(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})$/.test(hostname);
   }, []);
 
-  // احتساب رابط السيرفر ديناميكياً (يدعم: ربط مستقل لكل جهاز أو متصفح، أو سيرفر عام للصيدلية)
+  const isDesktop = typeof window !== 'undefined' && Boolean(window.desktopAPI?.isDesktop);
+
+  // احتساب رابط السيرفر ديناميكياً:
+  // - في تطبيق الويندوز: يرتبط دائماً ومباشرة بالخادم الداخلي 127.0.0.1:3100 بصورة مستقلة ومحمية دون التأثر بتغير الـ IP أو انقطاع الشبكة
+  // - في متصفح الويب والموبايل: يرتبط بخادم الصيدلية عبر الـ IP المكتشف على الشبكة المحلية (مثل http://192.168.1.2:3100)
   const serverUrl = useMemo(() => {
-    // 1. رابط مخصص مثبت لهذا الجهاز/المتصفح فقط (يدعم رغبة: كل جهاز بربط واتساب مستقل)
+    // 1. رابط مخصص مثبت لهذا الجهاز/المتصفح فقط (يدعم رغبة: كل جهاز بربط واتساب مستقل إذا حدده يدوياً)
     const localOverride = (deviceServerUrl || '').trim();
     if (localOverride && !localOverride.includes('apexthunder.com')) {
       return localOverride.replace(/\/+$/, '');
     }
 
-    // 2. الرابط المعمم في إعدادات المنظومة
-    const configured = (state?.orgSettings?.waServerUrl || '').trim();
-    if (configured && !configured.includes('apexthunder.com') && !configured.includes('localhost:3001')) {
-      return configured.replace(/\/+$/, '');
+    // 2. في حالة تطبيق الويندوز: تشغيل مباشر ومحمي على 127.0.0.1:3100 بمعزل تام عن كروت الشبكة والـ IP
+    if (isDesktop) {
+      return 'http://127.0.0.1:3100';
     }
 
-    // 3. رابط شبكة الصيدلية (LAN) المعلن بواسطة تطبيق الويندوز
+    // 3. في حالة متصفح الويب / الموبايل: الأولوية لعنوان LAN المكتشف والمعلن من خادم الصيدلية (مثل http://192.168.1.2:3100)
     const lanUrl = (state?.orgSettings?.waServerLanUrl || '').trim();
     if (lanUrl && !lanUrl.includes('apexthunder.com')) {
       return lanUrl.replace(/\/+$/, '');
     }
 
-    // 4. إذا كان المتصفح يعمل عبر IP محلي بالصيدلية (LAN)
+    // 4. الرابط المعمم في إعدادات المنظومة
+    const configured = (state?.orgSettings?.waServerUrl || '').trim();
+    if (configured && !configured.includes('apexthunder.com') && !configured.includes('localhost:3001')) {
+      return configured.replace(/\/+$/, '');
+    }
+
+    // 5. إذا كان المتصفح يعمل مباشرة عبر IP محلي بالصيدلية (LAN)
     if (typeof window !== 'undefined' && window.location?.hostname) {
       const host = window.location.hostname;
       if (isPrivateLanIp(host) && host !== 'localhost' && host !== '127.0.0.1') {
@@ -85,7 +94,7 @@ export default function WhatsAppCenterModule({
       }
     }
     return 'http://127.0.0.1:3100';
-  }, [deviceServerUrl, state?.orgSettings?.waServerUrl, state?.orgSettings?.waServerLanUrl, isPrivateLanIp]);
+  }, [deviceServerUrl, isDesktop, state?.orgSettings?.waServerUrl, state?.orgSettings?.waServerLanUrl, isPrivateLanIp]);
   const orgSettings = state?.orgSettings || {};
   const employees = state.employees || [];
   const branches = state.branches || [];
@@ -330,55 +339,97 @@ export default function WhatsAppCenterModule({
       } catch {}
     }
 
-    const candidateUrls = new Set();
-    candidateUrls.add('http://127.0.0.1:3100');
-    candidateUrls.add('http://localhost:3100');
+    const candidateUrls = [];
+    const addCandidate = (url) => {
+      if (!url || typeof url !== 'string') return;
+      const clean = url.trim().replace(/\/+$/, '');
+      if (clean && !clean.includes('apexthunder.com') && !candidateUrls.includes(clean)) {
+        candidateUrls.push(clean);
+      }
+    };
 
-    if (deviceServerUrl && !deviceServerUrl.includes('apexthunder.com')) {
-      candidateUrls.add(deviceServerUrl.replace(/\/+$/, ''));
-    }
-    if (state?.orgSettings?.waServerUrl && !state.orgSettings.waServerUrl.includes('apexthunder.com')) {
-      candidateUrls.add(state.orgSettings.waServerUrl.replace(/\/+$/, ''));
-    }
-    if (state?.orgSettings?.waServerLanUrl && !state.orgSettings.waServerLanUrl.includes('apexthunder.com')) {
-      candidateUrls.add(state.orgSettings.waServerLanUrl.replace(/\/+$/, ''));
+    // في بيئة الويندوز: أولوية قصوى للـ Loopback المحلي الداخلي 127.0.0.1
+    if (isDesktop) {
+      addCandidate('http://127.0.0.1:3100');
+      addCandidate('http://localhost:3100');
     }
 
+    // 1. رابط LAN المعلن من تطبيق الويندوز في إعدادات المنظومة (المفضل فوراً لمتصفح الويب والموبايل)
+    if (state?.orgSettings?.waServerLanUrl) {
+      addCandidate(state.orgSettings.waServerLanUrl);
+    }
+
+    // 2. عناوين IP المحفوظة في قاعدة البيانات (مثل http://192.168.1.2:3100)
+    const savedIps = state?.orgSettings?.waServerLanIps;
+    if (Array.isArray(savedIps)) {
+      savedIps.forEach(ipItem => {
+        const ipAddr = typeof ipItem === 'string' ? ipItem : ipItem?.address;
+        if (ipAddr) {
+          addCandidate(ipAddr.startsWith('http') ? ipAddr : `http://${ipAddr}:3100`);
+        }
+      });
+    }
+
+    // 3. رابط مخصص مثبت يدوياً على هذا المتصفح/الجهاز
+    if (deviceServerUrl) {
+      addCandidate(deviceServerUrl);
+    }
+
+    // 4. الرابط المقترح من كروت الشبكة
+    if (networkInfo?.suggestedLanUrl) {
+      addCandidate(networkInfo.suggestedLanUrl);
+    }
+    if (networkInfo?.localIps) {
+      networkInfo.localIps.forEach(net => {
+        if (net?.address) addCandidate(`http://${net.address}:3100`);
+      });
+    }
+
+    // 5. إذا كان المتصفح يعمل مباشرة على IP الصيدلية المحلي
     if (typeof window !== 'undefined' && window.location?.hostname) {
       const host = window.location.hostname;
       if (isPrivateLanIp(host) && host !== 'localhost' && host !== '127.0.0.1') {
-        candidateUrls.add(`http://${host}:3100`);
+        addCandidate(`http://${host}:3100`);
       }
     }
 
-    if (networkInfo?.suggestedLanUrl) {
-      candidateUrls.add(networkInfo.suggestedLanUrl.replace(/\/+$/, ''));
-    }
-    if (networkInfo?.localIps) {
-      networkInfo.localIps.forEach(net => candidateUrls.add(`http://${net.address}:3100`));
+    // 6. الرابط المعمم في إعدادات المنظومة
+    if (state?.orgSettings?.waServerUrl) {
+      addCandidate(state.orgSettings.waServerUrl);
     }
 
-    // إضافة عناوين فرعية شائعة لراوترات الصيدليات
-    ['192.168.1.2', '192.168.1.10', '192.168.1.15', '192.168.1.100', '192.168.0.100'].forEach(ip => {
-      candidateUrls.add(`http://${ip}:3100`);
+    // 7. عناوين الـ IP الشائعة لراوترات الصيدليات للربط المباشر
+    ['192.168.1.2', '192.168.1.10', '192.168.1.15', '192.168.1.100', '192.168.0.100', '192.168.1.5', '192.168.1.20'].forEach(ip => {
+      addCandidate(`http://${ip}:3100`);
     });
+
+    // 8. في الويب: فحص 127.0.0.1 كاحتمال أخير
+    if (!isDesktop) {
+      addCandidate('http://127.0.0.1:3100');
+      addCandidate('http://localhost:3100');
+    }
+
+    // دالة فحص اتصال سريعة
+    const probeServer = async (cleanUrl) => {
+      const res = await fetch(`${cleanUrl}/health`, {
+        signal: AbortSignal.timeout(1800)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && (data.status === 'ok' || data.success || data.server)) {
+          return cleanUrl;
+        }
+      }
+      throw new Error('Unreachable');
+    };
 
     let foundUrl = null;
 
-    for (const url of Array.from(candidateUrls)) {
-      try {
-        const clean = url.replace(/\/+$/, '');
-        const res = await fetch(`${clean}/health`, {
-          signal: AbortSignal.timeout(1600)
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.status === 'ok') {
-            foundUrl = clean;
-            break;
-          }
-        }
-      } catch {}
+    // فحص متزامن وسريع لكافة العناوين المرشحة لاكتشاف السيرفر فوراً في ميلي ثانية
+    try {
+      foundUrl = await Promise.any(candidateUrls.map(u => probeServer(u)));
+    } catch {
+      foundUrl = null;
     }
 
     setIsDiscovering(false);
@@ -453,7 +504,25 @@ export default function WhatsAppCenterModule({
         }
       }).catch(() => {});
     }
+
+    if (typeof window !== 'undefined' && window.desktopAPI?.onWhatsAppNetworkInfo) {
+      window.desktopAPI.onWhatsAppNetworkInfo(info => {
+        if (info && info.localIps?.length > 0) {
+          setNetworkInfo(info);
+        }
+      });
+    }
   }, []);
+
+  // في متصفح الويب: استكشاف تلقائي لخادم الصيدلية على الشبكة المحلية في الخلفية فور التحميل
+  useEffect(() => {
+    if (!isDesktop && !deviceServerUrl) {
+      const timer = setTimeout(() => {
+        runLanAutoDiscovery(false);
+      }, 1200);
+      return () => clearTimeout(timer);
+    }
+  }, [isDesktop, deviceServerUrl, runLanAutoDiscovery]);
 
   // فحص دوري
   useEffect(() => {
@@ -838,26 +907,44 @@ export default function WhatsAppCenterModule({
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px', marginBottom: '16px' }}>
             {/* بطاقة الرابط النشط حالياً */}
             <div style={{ background: 'rgba(59, 130, 246, 0.04)', border: '1px solid rgba(59, 130, 246, 0.2)', padding: '12px 14px', borderRadius: '10px' }}>
-              <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--muted)', display: 'block', marginBottom: '4px' }}>
-                الرابط النشط حالياً على هذا الجهاز:
-              </span>
-              <code style={{ fontSize: '13.5px', fontWeight: 800, color: '#1e40af', direction: 'ltr', display: 'inline-block' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', flexWrap: 'wrap', gap: '6px' }}>
+                <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--muted)' }}>
+                  الرابط النشط حالياً على هذا الجهاز:
+                </span>
+                {isDesktop ? (
+                  <span style={{ fontSize: '11px', background: '#dbeafe', color: '#1e40af', padding: '3px 9px', borderRadius: '6px', fontWeight: 800 }}>
+                    🖥️ تطبيق الويندوز (اتصال محلي داخلي 127.0.0.1)
+                  </span>
+                ) : (
+                  <span style={{ fontSize: '11px', background: '#d1fae5', color: '#065f46', padding: '3px 9px', borderRadius: '6px', fontWeight: 800 }}>
+                    🌐 متصفح الويب (عبر شبكة الصيدلية LAN)
+                  </span>
+                )}
+              </div>
+              <code style={{ fontSize: '14px', fontWeight: 800, color: '#1e40af', direction: 'ltr', display: 'inline-block' }}>
                 {serverUrl}
               </code>
             </div>
 
             {/* بطاقة العناوين المقترحة للشبكة المحلية (دائمة الظهور ولا تختفي أبداً) */}
             {(() => {
-              const localIps = (networkInfo?.localIps && networkInfo.localIps.length > 0)
-                ? networkInfo.localIps
-                : (state?.orgSettings?.waServerLanIps || []);
+              let localIps = [];
+              if (networkInfo?.localIps && networkInfo.localIps.length > 0) {
+                localIps = networkInfo.localIps;
+              } else if (Array.isArray(state?.orgSettings?.waServerLanIps) && state.orgSettings.waServerLanIps.length > 0) {
+                localIps = state.orgSettings.waServerLanIps;
+              } else if (state?.orgSettings?.waServerLanUrl) {
+                localIps = [state.orgSettings.waServerLanUrl];
+              }
 
               if (localIps.length > 0) {
                 return (
                   <div style={{ background: 'rgba(16, 185, 129, 0.05)', border: '1px solid rgba(16, 185, 129, 0.25)', padding: '12px 14px', borderRadius: '10px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                       <span style={{ fontSize: '12px', fontWeight: 700, color: '#047857' }}>
-                        عناوين IP المكتشفة في شبكة الصيدلية (LAN):
+                        {isDesktop
+                          ? 'عناوين IP لهذا الجهاز لربط الموبايل والأجهزة الأخرى (LAN):'
+                          : 'عنوان خادم الصيدلية المكتشف على الشبكة المحلية (LAN):'}
                       </span>
                       <button
                         type="button"
@@ -872,7 +959,10 @@ export default function WhatsAppCenterModule({
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                       {localIps.map((net, idx) => {
-                        const lanUrl = `http://${net.address}:${networkInfo?.port || 3100}`;
+                        const lanUrl = typeof net === 'string'
+                          ? (net.startsWith('http') ? net : `http://${net}:3100`)
+                          : (net?.address ? `http://${net.address}:${networkInfo?.port || 3100}` : (net?.url || ''));
+                        if (!lanUrl) return null;
                         return (
                           <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
                             <code style={{ fontSize: '13px', fontWeight: 700, color: '#065f46', direction: 'ltr' }}>
@@ -921,10 +1011,12 @@ export default function WhatsAppCenterModule({
               return (
                 <div style={{ background: 'rgba(245, 158, 11, 0.05)', border: '1px dashed #f59e0b', padding: '12px 14px', borderRadius: '10px' }}>
                   <span style={{ fontSize: '12px', fontWeight: 700, color: '#b45309', display: 'block', marginBottom: '4px' }}>
-                    عناوين IP الشبكة المحلية (LAN):
+                    {isDesktop ? 'عناوين IP الشبكة المحلية (LAN):' : 'خادم الصيدلية على الشبكة المحلية (LAN):'}
                   </span>
                   <p style={{ margin: '0 0 8px', fontSize: '11.5px', color: 'var(--muted)' }}>
-                    لم يتم استكشاف عناوين IP الصيدلية تلقائياً بعد.
+                    {isDesktop
+                      ? 'لم يتم استكشاف كروت الشبكة تلقائياً بعد.'
+                      : 'لم يتم العثور على خادم الصيدلية تلقائياً بعد. تأكد من تشغيل تطبيق الصيدلية على جهاز السيرفر الرئيسي.'}
                   </p>
                   <button
                     type="button"
@@ -934,7 +1026,7 @@ export default function WhatsAppCenterModule({
                     disabled={isDiscovering}
                   >
                     <RefreshCw style={{ width: '12px', height: '12px', marginRight: '4px' }} className={isDiscovering ? 'animate-spin' : ''} />
-                    <span>{isDiscovering ? 'جاري الفحص...' : '🔍 فحص واستكشاف عناوين IP الشبكة الآن'}</span>
+                    <span>{isDiscovering ? 'جاري الفحص...' : '🔍 فحص واستكشاف خادم الصيدلية الآن'}</span>
                   </button>
                 </div>
               );
