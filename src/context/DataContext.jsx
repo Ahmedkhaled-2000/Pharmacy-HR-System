@@ -436,22 +436,52 @@ export function DataProvider({ children, showToast = () => {} }) {
         return;
       }
 
-      // التحقق من صلاحية جلسة الموظف أو الفرع
-      const activeRole = authRoleRef.current;
+      // التحقق من صلاحية الجلسات ومطابقتها لأحدث بيانات واعتمادات عند تحميل البيانات
+      const activeRole = localStorage.getItem('app_auth_role') || authRoleRef.current;
       const activeEmp = currentEmpUserRef.current;
       const activeBranch = currentBranchRef.current;
 
-      if (activeRole === 'employee' && activeEmp) {
-        const empExists = (normalized.employees || []).some(e => String(e.id) === String(activeEmp.id));
-        if (!empExists) {
+      if (activeRole === 'owner') {
+        const myOwnerPass = localStorage.getItem('app_owner_password_snapshot');
+        const myOwnerVer = Number(localStorage.getItem('app_owner_session_version') || 0);
+        const srvOwnerPass = normalized?.orgSettings?.ownerPassword;
+        const srvOwnerVer = Number(normalized?.orgSettings?.ownerSessionVersion || 0);
+        if ((myOwnerPass && srvOwnerPass && myOwnerPass !== srvOwnerPass) ||
+            (srvOwnerVer > 0 && myOwnerVer > 0 && srvOwnerVer > myOwnerVer)) {
+          localStorage.removeItem('app_auth_role');
+          localStorage.removeItem('app_owner_authenticated');
+          setAuthRole('none');
+          setIsAdminLoggedIn(false);
+        }
+      } else if (activeRole === 'admin') {
+        const myAdminPass = localStorage.getItem('app_admin_password_snapshot');
+        const myAdminVer = Number(localStorage.getItem('app_admin_session_version') || 0);
+        const srvAdminPass = normalized?.orgSettings?.adminPassword || normalized?.orgSettings?.adminPass;
+        const srvAdminVer = Number(normalized?.orgSettings?.adminSessionVersion || 0);
+        if ((myAdminPass && srvAdminPass && myAdminPass !== srvAdminPass) ||
+            (srvAdminVer > 0 && myAdminVer > 0 && srvAdminVer > myAdminVer)) {
+          localStorage.removeItem('app_auth_role');
+          localStorage.removeItem('app_is_admin');
+          setAuthRole('none');
+          setIsAdminLoggedIn(false);
+        }
+      } else if (activeRole === 'employee' && activeEmp) {
+        const liveEmp = (normalized.employees || []).find(e => String(e.id) === String(activeEmp.id) || String(e.code) === String(activeEmp.code));
+        const myEmpPass = localStorage.getItem('app_emp_password_snapshot');
+        const myEmpVer = Number(localStorage.getItem('app_emp_session_version') || 0);
+        if (!liveEmp || (myEmpPass && liveEmp.password && myEmpPass !== liveEmp.password) ||
+            (Number(liveEmp.sessionVersion || 0) > myEmpVer && myEmpVer > 0)) {
           localStorage.removeItem('app_auth_role');
           localStorage.removeItem('app_current_emp_user');
           setAuthRole('none');
           setCurrentEmpUser(null);
         }
       } else if (activeRole === 'branch' && activeBranch) {
-        const branchExists = (normalized.branches || []).some(b => String(b.id) === String(activeBranch.id));
-        if (!branchExists) {
+        const liveBranch = (normalized.branches || []).find(b => String(b.id) === String(activeBranch.id) || String(b.branchCode) === String(activeBranch.branchCode));
+        const myBranchPass = localStorage.getItem('app_branch_password_snapshot');
+        const myBranchVer = Number(localStorage.getItem('app_branch_session_version') || 0);
+        if (!liveBranch || (myBranchPass && liveBranch.password && myBranchPass !== liveBranch.password) ||
+            (Number(liveBranch.sessionVersion || 0) > myBranchVer && myBranchVer > 0)) {
           localStorage.removeItem('app_auth_role');
           localStorage.removeItem('app_current_branch');
           setAuthRole('none');

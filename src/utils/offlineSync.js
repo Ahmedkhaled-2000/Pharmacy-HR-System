@@ -18,7 +18,7 @@ import {
   getPendingCount,
   clearLocalDatabase,
 } from './offlineStorage';
-export { clearLocalDatabase };
+export { clearLocalDatabase, saveStateLocally };
 import { smartMergeStates } from './stateMerger';
 import { normalizeState } from './formatters';
 

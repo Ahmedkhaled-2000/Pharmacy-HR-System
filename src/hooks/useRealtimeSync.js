@@ -94,6 +94,90 @@ export function useRealtimeSync(props = {}) {
       return;
     }
 
+    // ── فحص إبطال الجلسات اللحظي عند تغيير كلمات المرور على أي جهاز ──
+    const currentActiveRole = localStorage.getItem('app_auth_role') || authRole;
+
+    if (currentActiveRole === 'owner') {
+      const myOwnerPass = localStorage.getItem('app_owner_password_snapshot');
+      const myOwnerVer = Number(localStorage.getItem('app_owner_session_version') || 0);
+      const srvOwnerPass = normalized?.orgSettings?.ownerPassword;
+      const srvOwnerVer = Number(normalized?.orgSettings?.ownerSessionVersion || 0);
+
+      const isRevoked = (myOwnerPass && srvOwnerPass && myOwnerPass !== srvOwnerPass) ||
+                        (srvOwnerVer > 0 && myOwnerVer > 0 && srvOwnerVer > myOwnerVer);
+
+      if (isRevoked) {
+        localStorage.removeItem('app_auth_role');
+        localStorage.removeItem('app_owner_authenticated');
+        localStorage.removeItem('app_owner_password_snapshot');
+        localStorage.removeItem('app_owner_session_version');
+        localStorage.removeItem('app_is_admin');
+        sessionStorage.clear();
+        setAuthRole('none');
+        setIsAdminLoggedIn(false);
+        showToast('🔒 تم تغيير كلمة مرور المالك من جهاز آخر. تم تسجيل الخروج تلقائياً لضمان الأمان.');
+        return;
+      }
+    } else if (currentActiveRole === 'admin') {
+      const myAdminPass = localStorage.getItem('app_admin_password_snapshot');
+      const myAdminVer = Number(localStorage.getItem('app_admin_session_version') || 0);
+      const srvAdminPass = normalized?.orgSettings?.adminPassword || normalized?.orgSettings?.adminPass;
+      const srvAdminVer = Number(normalized?.orgSettings?.adminSessionVersion || 0);
+
+      const isRevoked = (myAdminPass && srvAdminPass && myAdminPass !== srvAdminPass) ||
+                        (srvAdminVer > 0 && myAdminVer > 0 && srvAdminVer > myAdminVer);
+
+      if (isRevoked) {
+        localStorage.removeItem('app_auth_role');
+        localStorage.removeItem('app_is_admin');
+        localStorage.removeItem('app_admin_password_snapshot');
+        localStorage.removeItem('app_admin_session_version');
+        sessionStorage.clear();
+        setAuthRole('none');
+        setIsAdminLoggedIn(false);
+        showToast('🔒 تم تغيير كلمة مرور الإدارة من جهاز آخر. تم تسجيل الخروج تلقائياً لضمان الأمان.');
+        return;
+      }
+    } else if (currentActiveRole === 'branch' && currentBranch) {
+      const myBranchPass = localStorage.getItem('app_branch_password_snapshot');
+      const myBranchVer = Number(localStorage.getItem('app_branch_session_version') || 0);
+      const liveBranch = (normalized?.branches || []).find(b => b && (String(b.id) === String(currentBranch.id) || String(b.branchCode) === String(currentBranch.branchCode)));
+
+      if (liveBranch) {
+        const isRevoked = (myBranchPass && liveBranch.password && myBranchPass !== liveBranch.password) ||
+                          (Number(liveBranch.sessionVersion || 0) > myBranchVer && myBranchVer > 0);
+        if (isRevoked) {
+          localStorage.removeItem('app_auth_role');
+          localStorage.removeItem('app_current_branch');
+          localStorage.removeItem('app_branch_password_snapshot');
+          localStorage.removeItem('app_branch_session_version');
+          setAuthRole('none');
+          setCurrentBranch(null);
+          showToast(`🔒 تم تغيير كلمة مرور الفرع (${liveBranch.name || liveBranch.branchCode}). تم تسجيل الخروج لضمان الأمان.`);
+          return;
+        }
+      }
+    } else if (currentActiveRole === 'employee' && currentEmpUser) {
+      const myEmpPass = localStorage.getItem('app_emp_password_snapshot');
+      const myEmpVer = Number(localStorage.getItem('app_emp_session_version') || 0);
+      const liveEmp = (normalized?.employees || []).find(e => e && (String(e.id) === String(currentEmpUser.id) || String(e.code) === String(currentEmpUser.code)));
+
+      if (liveEmp) {
+        const isRevoked = (myEmpPass && liveEmp.password && myEmpPass !== liveEmp.password) ||
+                          (Number(liveEmp.sessionVersion || 0) > myEmpVer && myEmpVer > 0);
+        if (isRevoked) {
+          localStorage.removeItem('app_auth_role');
+          localStorage.removeItem('app_current_emp_user');
+          localStorage.removeItem('app_emp_password_snapshot');
+          localStorage.removeItem('app_emp_session_version');
+          setAuthRole('none');
+          setCurrentEmpUser(null);
+          showToast('🔒 تم تغيير كلمة المرور الخاصة بحسابك من الإدارة. تم تسجيل الخروج لضمان الأمان.');
+          return;
+        }
+      }
+    }
+
     setState((prev) => {
       setLastSyncTime(nowTimeStr());
       const merged = normalizeState(smartMergeStates(prev, normalized));

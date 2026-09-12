@@ -854,8 +854,13 @@ export default function EmployeeFileModal({
       is_active: !isTerminated,
       fingerprint_active: !isTerminated,
       suspension_reason: isTerminated ? terminationReason.trim() : '',
-      terminationReason: isTerminated ? terminationReason.trim() : '',
       password,
+      passwordChangedAt: (editingEmp && String(editingEmp.password || '').trim() !== String(password || '').trim())
+        ? new Date().toISOString()
+        : (editingEmp?.passwordChangedAt || null),
+      sessionVersion: (editingEmp && String(editingEmp.password || '').trim() !== String(password || '').trim())
+        ? (Number(editingEmp?.sessionVersion || 0)) + 1
+        : (Number(editingEmp?.sessionVersion || 0)),
       annualLeaveBalance: parseAnnualLeaveBalance(annualLeaveBalance, 21),
       documents,
       driveFolderId,

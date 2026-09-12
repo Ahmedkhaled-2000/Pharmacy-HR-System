@@ -297,6 +297,11 @@ export default function BranchEditorModal({
     const validPhones = phones.filter((p) => p.number && p.number.trim());
     const primaryPhone = validPhones[0]?.number || '';
 
+    const isPasswordChanged = editingBranch && String(editingBranch.password || '').trim() !== String(password || '').trim();
+    const nextBranchSessionVer = isPasswordChanged
+      ? (Number(editingBranch?.sessionVersion || 0)) + 1
+      : (Number(editingBranch?.sessionVersion || 0));
+
     const branchData = {
       id: editingBranch ? editingBranch.id : `branch_${Date.now()}`,
       branchCode: branchCode.trim(),
@@ -317,6 +322,8 @@ export default function BranchEditorModal({
       managerId,
       username: username.trim(),
       password,
+      passwordChangedAt: isPasswordChanged ? new Date().toISOString() : (editingBranch?.passwordChangedAt || null),
+      sessionVersion: nextBranchSessionVer,
       createdAt: editingBranch ? editingBranch.createdAt : new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };

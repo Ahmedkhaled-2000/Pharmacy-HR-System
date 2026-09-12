@@ -396,6 +396,20 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
     }
   }
 
+  // 6. مزامنة كلمات المرور وإصدار الجلسة للموظفين والفروع لطرد الأجهزة القديمة
+  if (options.prefix === 'emp' || options.prefix === 'branch') {
+    mergedBase.sessionVersion = Math.max(Number(localItem.sessionVersion || 0), Number(remoteItem.sessionVersion || 0));
+    const lPassTime = getItemTime(localItem.passwordChangedAt);
+    const rPassTime = getItemTime(remoteItem.passwordChangedAt);
+    if (lPassTime > rPassTime && localItem.password) {
+      mergedBase.password = localItem.password;
+      mergedBase.passwordChangedAt = localItem.passwordChangedAt;
+    } else if (rPassTime > lPassTime && remoteItem.password) {
+      mergedBase.password = remoteItem.password;
+      mergedBase.passwordChangedAt = remoteItem.passwordChangedAt;
+    }
+  }
+
   return mergedBase;
 }
 
@@ -688,17 +702,88 @@ export function smartMergeStates(localState, remoteState) {
         };
       }
 
-      // حماية بيانات دخول المالك من التراجع للقيم الافتراضية عند المزامنة
-      if (localSettings.ownerUsername && localSettings.ownerUsername !== 'owner') {
-        mergedSettings.ownerUsername = localSettings.ownerUsername;
-      } else if (remoteSettings.ownerUsername && remoteSettings.ownerUsername !== 'owner') {
-        mergedSettings.ownerUsername = remoteSettings.ownerUsername;
-      }
-      if (localSettings.ownerPassword && localSettings.ownerPassword !== 'owner123') {
+      // ── مزامنة ذكية لبيانات دخول المالك والأدمن عبر الطوابع الزمنية المستقلة ──
+      // 1. كلمة مرور المالك (Owner Password)
+      const localOwnerPassTime = getItemTime(localSettings.ownerPasswordUpdatedAt);
+      const remoteOwnerPassTime = getItemTime(remoteSettings.ownerPasswordUpdatedAt);
+
+      if (localOwnerPassTime > remoteOwnerPassTime) {
         mergedSettings.ownerPassword = localSettings.ownerPassword;
-      } else if (remoteSettings.ownerPassword && remoteSettings.ownerPassword !== 'owner123') {
+        mergedSettings.ownerPasswordUpdatedAt = localSettings.ownerPasswordUpdatedAt;
+      } else if (remoteOwnerPassTime > localOwnerPassTime) {
         mergedSettings.ownerPassword = remoteSettings.ownerPassword;
+        mergedSettings.ownerPasswordUpdatedAt = remoteSettings.ownerPasswordUpdatedAt;
+      } else {
+        const defaultOwnerPasses = ['owner123'];
+        const isLocalCustom = localSettings.ownerPassword && !defaultOwnerPasses.includes(localSettings.ownerPassword);
+        const isRemoteCustom = remoteSettings.ownerPassword && !defaultOwnerPasses.includes(remoteSettings.ownerPassword);
+
+        if (isRemoteCustom && !isLocalCustom) {
+          mergedSettings.ownerPassword = remoteSettings.ownerPassword;
+        } else if (isLocalCustom && !isRemoteCustom) {
+          mergedSettings.ownerPassword = localSettings.ownerPassword;
+        } else if (remoteTime >= localTime) {
+          mergedSettings.ownerPassword = remoteSettings.ownerPassword || localSettings.ownerPassword || 'owner123';
+        } else {
+          mergedSettings.ownerPassword = localSettings.ownerPassword || remoteSettings.ownerPassword || 'owner123';
+        }
       }
+
+      // 2. اسم مستخدم المالك (Owner Username)
+      const localOwnerUserTime = getItemTime(localSettings.ownerUsernameUpdatedAt);
+      const remoteOwnerUserTime = getItemTime(remoteSettings.ownerUsernameUpdatedAt);
+      if (localOwnerUserTime > remoteOwnerUserTime) {
+        mergedSettings.ownerUsername = localSettings.ownerUsername;
+        mergedSettings.ownerUsernameUpdatedAt = localSettings.ownerUsernameUpdatedAt;
+      } else if (remoteOwnerUserTime > localOwnerUserTime) {
+        mergedSettings.ownerUsername = remoteSettings.ownerUsername;
+        mergedSettings.ownerUsernameUpdatedAt = remoteSettings.ownerUsernameUpdatedAt;
+      } else {
+        mergedSettings.ownerUsername = (remoteTime >= localTime ? remoteSettings.ownerUsername : localSettings.ownerUsername) || 'owner';
+      }
+
+      // 3. كلمة مرور الأدمن والإدارة (Admin Password)
+      const localAdminPassTime = getItemTime(localSettings.adminPasswordUpdatedAt);
+      const remoteAdminPassTime = getItemTime(remoteSettings.adminPasswordUpdatedAt);
+
+      let chosenAdminPass = '';
+      let chosenAdminPassTime = null;
+      if (localAdminPassTime > remoteAdminPassTime) {
+        chosenAdminPass = localSettings.adminPassword || localSettings.adminPass;
+        chosenAdminPassTime = localSettings.adminPasswordUpdatedAt;
+      } else if (remoteAdminPassTime > localAdminPassTime) {
+        chosenAdminPass = remoteSettings.adminPassword || remoteSettings.adminPass;
+        chosenAdminPassTime = remoteSettings.adminPasswordUpdatedAt;
+      } else {
+        const defaultAdminPasses = ['123', 'admin123'];
+        const localAdminCandidate = localSettings.adminPassword || localSettings.adminPass;
+        const remoteAdminCandidate = remoteSettings.adminPassword || remoteSettings.adminPass;
+        const isLocalAdminCustom = localAdminCandidate && !defaultAdminPasses.includes(localAdminCandidate);
+        const isRemoteAdminCustom = remoteAdminCandidate && !defaultAdminPasses.includes(remoteAdminCandidate);
+
+        if (isRemoteAdminCustom && !isLocalAdminCustom) {
+          chosenAdminPass = remoteAdminCandidate;
+        } else if (isLocalAdminCustom && !isRemoteAdminCustom) {
+          chosenAdminPass = localAdminCandidate;
+        } else if (remoteTime >= localTime) {
+          chosenAdminPass = remoteAdminCandidate || localAdminCandidate;
+        } else {
+          chosenAdminPass = localAdminCandidate || remoteAdminCandidate;
+        }
+      }
+      if (chosenAdminPass) {
+        mergedSettings.adminPassword = chosenAdminPass;
+        mergedSettings.adminPass = chosenAdminPass;
+        if (chosenAdminPassTime) mergedSettings.adminPasswordUpdatedAt = chosenAdminPassTime;
+      }
+
+      // 4. اسم مستخدم الأدمن (Admin Username)
+      mergedSettings.adminUsername = (remoteTime >= localTime ? (remoteSettings.adminUsername || remoteSettings.adminUser) : (localSettings.adminUsername || localSettings.adminUser)) || 'admin';
+      mergedSettings.adminUser = mergedSettings.adminUsername;
+
+      // 5. إصدارات الجلسات (Session Versions) لطرد الأجهزة القديمة
+      mergedSettings.ownerSessionVersion = Math.max(Number(localSettings.ownerSessionVersion || 0), Number(remoteSettings.ownerSessionVersion || 0));
+      mergedSettings.adminSessionVersion = Math.max(Number(localSettings.adminSessionVersion || 0), Number(remoteSettings.adminSessionVersion || 0));
 
       // دمج عميق ومحمي لإعدادات بريد Gmail لضمان عدم فقدان بيانات الربط
       const localGmail = localSettings.gmailConfig || {};

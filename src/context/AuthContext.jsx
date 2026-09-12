@@ -109,23 +109,67 @@ export function AuthProvider({ children }) {
     } catch {}
   }, [authRole, currentBranch, currentEmpUser, activeNavTab, activeSubTab, isAdminLoggedIn]);
 
-  // التحقق من صحة الجلسة ومطابقتها لحالة البيانات الفعلية
+  // التحقق من صحة الجلسة ومطابقتها لحالة البيانات الفعلية وإنهاء الجلسات عند تغيير كلمات المرور
   const validateSessionAgainstData = (latestState) => {
     if (!latestState) return;
 
-    // 1. إذا كان الموظف المسجل غير موجود أو تم إيقاف حسابه أو إنهاء خدمته
+    const savedRole = localStorage.getItem('app_auth_role') || authRole;
+
+    // 0. فحص تغيير كلمة مرور المالك
+    if (savedRole === 'owner') {
+      const myOwnerPass = localStorage.getItem('app_owner_password_snapshot');
+      const myOwnerVer = Number(localStorage.getItem('app_owner_session_version') || 0);
+      const srvOwnerPass = latestState?.orgSettings?.ownerPassword;
+      const srvOwnerVer = Number(latestState?.orgSettings?.ownerSessionVersion || 0);
+
+      if ((myOwnerPass && srvOwnerPass && myOwnerPass !== srvOwnerPass) ||
+          (srvOwnerVer > 0 && myOwnerVer > 0 && srvOwnerVer > myOwnerVer)) {
+        handleLogout();
+        return;
+      }
+    }
+
+    // 0.5 فحص تغيير كلمة مرور الأدمن
+    if (savedRole === 'admin') {
+      const myAdminPass = localStorage.getItem('app_admin_password_snapshot');
+      const myAdminVer = Number(localStorage.getItem('app_admin_session_version') || 0);
+      const srvAdminPass = latestState?.orgSettings?.adminPassword || latestState?.orgSettings?.adminPass;
+      const srvAdminVer = Number(latestState?.orgSettings?.adminSessionVersion || 0);
+
+      if ((myAdminPass && srvAdminPass && myAdminPass !== srvAdminPass) ||
+          (srvAdminVer > 0 && myAdminVer > 0 && srvAdminVer > myAdminVer)) {
+        handleLogout();
+        return;
+      }
+    }
+
+    // 1. إذا كان الموظف المسجل غير موجود أو تم إيقاف حسابه أو إنهاء خدمته أو تغيير كلمة مروره
     if (currentEmpUser && latestState.employees) {
       const liveEmp = (latestState.employees || []).find(e => String(e.id) === String(currentEmpUser.id) || String(e.code) === String(currentEmpUser.code));
       if (!liveEmp || liveEmp.accountSuspended || liveEmp.status === 'معلق' || liveEmp.isTerminated || liveEmp.status === 'تم الاستقالة' || liveEmp.is_active === false) {
         handleLogout();
         return;
       }
+      const myEmpPass = localStorage.getItem('app_emp_password_snapshot');
+      const myEmpVer = Number(localStorage.getItem('app_emp_session_version') || 0);
+      if ((myEmpPass && liveEmp.password && myEmpPass !== liveEmp.password) ||
+          (Number(liveEmp.sessionVersion || 0) > myEmpVer && myEmpVer > 0)) {
+        handleLogout();
+        return;
+      }
     }
 
-    // 2. إذا كان الفرع المسجل غير موجود في قائمة الفروع بعد التصفير
+    // 2. إذا كان الفرع المسجل غير موجود في قائمة الفروع أو تم تغيير كلمة مروره
     if (currentBranch && latestState.branches) {
-      const exists = (latestState.branches || []).some(b => b && (String(b.id) === String(currentBranch?.id) || String(b.branchCode) === String(currentBranch?.branchCode)));
-      if (!exists) {
+      const liveBranch = (latestState.branches || []).find(b => b && (String(b.id) === String(currentBranch?.id) || String(b.branchCode) === String(currentBranch?.branchCode)));
+      if (!liveBranch) {
+        handleLogout();
+        return;
+      }
+      const myBranchPass = localStorage.getItem('app_branch_password_snapshot');
+      const myBranchVer = Number(localStorage.getItem('app_branch_session_version') || 0);
+      if ((myBranchPass && liveBranch.password && myBranchPass !== liveBranch.password) ||
+          (Number(liveBranch.sessionVersion || 0) > myBranchVer && myBranchVer > 0)) {
         handleLogout();
         return;
       }
@@ -218,6 +262,14 @@ export function AuthProvider({ children }) {
       localStorage.removeItem('app_active_nav_tab');
       localStorage.removeItem('app_active_sub_tab');
       localStorage.removeItem('app_owner_authenticated');
+      localStorage.removeItem('app_owner_password_snapshot');
+      localStorage.removeItem('app_owner_session_version');
+      localStorage.removeItem('app_admin_password_snapshot');
+      localStorage.removeItem('app_admin_session_version');
+      localStorage.removeItem('app_branch_password_snapshot');
+      localStorage.removeItem('app_branch_session_version');
+      localStorage.removeItem('app_emp_password_snapshot');
+      localStorage.removeItem('app_emp_session_version');
       sessionStorage.removeItem('app_owner_authenticated');
       sessionStorage.removeItem('app_settings_owner_tab_unlocked');
     } catch {}

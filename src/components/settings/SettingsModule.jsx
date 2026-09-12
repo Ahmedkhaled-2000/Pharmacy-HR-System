@@ -266,22 +266,30 @@ export default function SettingsModule({
       return;
     }
 
+    const nowIso = new Date().toISOString();
+    const nextOwnerSessionVer = (Number(state?.orgSettings?.ownerSessionVersion || 0)) + 1;
+
     try {
       localStorage.setItem('pharmacy_owner_username', cleanUser);
       localStorage.setItem('pharmacy_owner_password', cleanPass);
+      // تحديث بصمة الجلسة لهذا الجهاز الحالي ليبقى مسجلاً دون انقطاع (الخيار أ)
+      localStorage.setItem('app_owner_password_snapshot', cleanPass);
+      localStorage.setItem('app_owner_session_version', String(nextOwnerSessionVer));
     } catch {}
 
-    const nowIso = new Date().toISOString();
     const updatedOrgSettings = {
       ...(state.orgSettings || {}),
       ownerUsername: cleanUser,
       ownerPassword: cleanPass,
+      ownerPasswordUpdatedAt: nowIso,
+      ownerUsernameUpdatedAt: nowIso,
+      ownerSessionVersion: nextOwnerSessionVer,
       updatedAt: nowIso
     };
     const updatedState = { ...state, orgSettings: updatedOrgSettings, updatedAt: nowIso };
     setState(updatedState);
     if (saveState) await saveState(updatedState);
-    showToast?.('👑 تم حفظ وتحديث بيانات دخول المالك بنجاح');
+    showToast?.('👑 تم حفظ وتحديث بيانات دخول المالك بنجاح وتسجيل الخروج من كافة الأجهزة الأخرى فوراً');
   };
 
   const handleSaveAccountsCredentials = async (e) => {
@@ -699,6 +707,19 @@ export default function SettingsModule({
       (parseFloat(maxMonthlyLoanSalaryPercent) || 50) !== (orgSettings.maxMonthlyLoanSalaryPercent !== undefined ? orgSettings.maxMonthlyLoanSalaryPercent : 50);
 
     const performSaveGeneral = async () => {
+      const isAdminPassChanged = adminPass.trim() !== (orgSettings.adminPass || orgSettings.adminPassword || 'admin123');
+      const nowIso = new Date().toISOString();
+      const nextAdminSessionVer = isAdminPassChanged
+        ? (Number(state?.orgSettings?.adminSessionVersion || 0)) + 1
+        : (Number(state?.orgSettings?.adminSessionVersion || 0));
+
+      if (isAdminPassChanged) {
+        try {
+          localStorage.setItem('app_admin_password_snapshot', adminPass.trim());
+          localStorage.setItem('app_admin_session_version', String(nextAdminSessionVer));
+        } catch {}
+      }
+
       const updatedSettings = {
         ...(state.orgSettings || {}),
         ...orgSettings,
@@ -714,21 +735,26 @@ export default function SettingsModule({
         adminPass: adminPass.trim(),
         adminUsername: adminUser.trim(),
         adminPassword: adminPass.trim(),
+        adminPasswordUpdatedAt: isAdminPassChanged ? nowIso : (state.orgSettings?.adminPasswordUpdatedAt || nowIso),
+        adminUsernameUpdatedAt: nowIso,
+        adminSessionVersion: nextAdminSessionVer,
         biometricType,
         loanRequestStartDay: parseInt(loanRequestStartDay, 10) || 1,
         loanRequestEndDay: parseInt(loanRequestEndDay, 10) || 10,
         maxMonthlyLoanSalaryPercent: parseFloat(maxMonthlyLoanSalaryPercent) || 50,
         approvedIPs, // keeping this for legacy components
-        updatedAt: Date.now()
+        updatedAt: nowIso
       };
       const updatedIpRestrictions = {
         enabled: ipEnabled,
         allowedIps: approvedIPs.map(ip => ({ label: `راوتر`, ip }))
       };
-      const updatedState = { ...state, orgSettings: updatedSettings, ipRestrictions: updatedIpRestrictions };
+      const updatedState = { ...state, orgSettings: updatedSettings, ipRestrictions: updatedIpRestrictions, updatedAt: nowIso };
       if (setState) setState(updatedState);
       if (saveState) await saveState(updatedState);
-      showToast?.('✅ تم حفظ إعدادات المؤسسة وضوابط السلف وحماية النظام بنجاح');
+      showToast?.(isAdminPassChanged
+        ? '✅ تم حفظ إعدادات المؤسسة وتحديث بيانات دخول الأدمن وتسجيل الخروج من باقي الأجهزة'
+        : '✅ تم حفظ إعدادات المؤسسة وضوابط السلف وحماية النظام بنجاح');
     };
 
     if (isAdminCredsChanged && state.orgSettings?.ownerModificationLocks?.lockChangeAdminCredentials) {

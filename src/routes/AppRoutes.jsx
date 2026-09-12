@@ -44,8 +44,9 @@ import { useAttendanceEngine } from '../hooks/useAttendanceEngine';
 import { useRequestsManager } from '../hooks/useRequestsManager';
 import { useExcelOperations } from '../hooks/useExcelOperations';
 import { useDailyDigestCron } from '../hooks/useDailyDigestCron';
-import { getJobsList, getDepartmentsList } from '../utils/jobsHelper';
-import { arabicMonthLabel, fmt, getEmpWhatsAppPhone } from '../utils/formatters';
+import { arabicMonthLabel, fmt, getEmpWhatsAppPhone, normalizeState } from '../utils/formatters';
+import { fetchRemoteState, saveStateLocally } from '../utils/offlineSync';
+import { smartMergeStates } from '../utils/stateMerger';
 
 export default function AppRoutes() {
   const location = useLocation();
@@ -371,7 +372,7 @@ export default function AppRoutes() {
     return `السلام عليكم ورحمة الله وبركاته،\n\nعزيزي الموظف: ${emp.name} (كود: ${emp.code})\nإليك تفاصيل مرتب شهر ${monthLabel}:\n\n• ساعات العمل المسجلة: ${fmt(summary.hours)} ساعة\n• المستحقات الأساسية: ${fmt(summary.baseEarnings)} ج.م\n• إجمالي المكافآت (+): ${fmt(summary.totalBonus)} ج.م\n• إجمالي الخصومات (-): ${fmt(summary.totalDeduction)} ج.م\n-----------------------------------------\n★ صافي المرتب المستحق: ${fmt(summary.netSalary)} ج.م\n\nمع تحيات إدارة ${orgName}.`;
   };
 
-  const handleLogin = (username, password) => {
+  const handleLogin = async (username, password) => {
     const cleanUser = String(username || '').trim().toLowerCase();
     const cleanPass = String(password || '').trim();
 
@@ -379,69 +380,122 @@ export default function AppRoutes() {
       return { success: false, error: 'يرجى إدخال اسم المستخدم وكلمة المرور' };
     }
 
-    const orgSettings = state?.orgSettings || {};
-    let savedOwnerUser = '';
-    let savedOwnerPass = '';
-    try {
-      savedOwnerUser = localStorage.getItem('pharmacy_owner_username') || '';
-      savedOwnerPass = localStorage.getItem('pharmacy_owner_password') || '';
-    } catch {}
-    const ownerUser = String(orgSettings.ownerUsername || savedOwnerUser || 'owner').trim().toLowerCase();
-    const ownerPass = String(orgSettings.ownerPassword || savedOwnerPass || 'owner123').trim();
-    const adminUser = String(orgSettings.adminUsername || orgSettings.adminUser || 'admin').trim().toLowerCase();
-    const adminPass = String(orgSettings.adminPassword || orgSettings.adminPass || '123').trim();
-
-    // 1. Check Owner (يوزر المالك) - التحقق الصارم من اليوزر والباسورد المحفوظ للمالك فقط
-    const isOwnerUser = cleanUser === ownerUser;
-    const isOwnerPass = cleanPass === ownerPass;
-
-    if (isOwnerUser && isOwnerPass) {
-      handleUnifiedLogin({ role: 'owner', redirectTab: 'dashboard' });
+    const checkMatch = (currentState) => {
+      const org = currentState?.orgSettings || {};
+      let savedOwnerUser = '';
+      let savedOwnerPass = '';
       try {
-        localStorage.setItem('app_auth_role', 'owner');
-        localStorage.setItem('app_owner_authenticated', 'true');
-        sessionStorage.setItem('app_owner_authenticated', 'true');
+        savedOwnerUser = localStorage.getItem('pharmacy_owner_username') || '';
+        savedOwnerPass = localStorage.getItem('pharmacy_owner_password') || '';
       } catch {}
-      return { success: true, role: 'owner' };
-    }
 
-    // 2. Check Admin (يوزر الأدمن) - خاضع لتصريح المالك على الأجزاء المقفولة
-    if ((cleanUser === adminUser || cleanUser === 'admin') && (cleanPass === adminPass || cleanPass === '123')) {
-      handleUnifiedLogin({ role: 'admin', redirectTab: 'dashboard' });
+      const ownerUser = String(org.ownerUsername || savedOwnerUser || 'owner').trim().toLowerCase();
+      const ownerPass = String(org.ownerPassword || savedOwnerPass || 'owner123').trim();
+      const adminUser = String(org.adminUsername || org.adminUser || 'admin').trim().toLowerCase();
+      const adminPass = String(org.adminPassword || org.adminPass || 'admin123').trim();
+
+      // 1. Check Owner (يوزر المالك) - التحقق الصارم من اليوزر والباسورد المحفوظ للمالك فقط
+      if (cleanUser === ownerUser && cleanPass === ownerPass) {
+        return { role: 'owner', matched: true, org };
+      }
+
+      // 2. Check Admin (يوزر الأدمن) - مطابقة كلمة مرور الأدمن الحقيقية فقط دون أي باب خلفي
+      if (cleanUser === adminUser && cleanPass === adminPass) {
+        return { role: 'admin', matched: true, org };
+      }
+
+      // 3. Check Branch Manager
+      const branches = currentState?.branches || [];
+      const matchedBranch = branches.find((b) => {
+        const bUser = String(b.username || b.code || b.branchCode || '').trim().toLowerCase();
+        const bPass = String(b.password || '').trim();
+        return bUser === cleanUser && bPass === cleanPass;
+      });
+      if (matchedBranch) {
+        return { role: 'branch', matched: true, branch: matchedBranch };
+      }
+
+      // 4. Check Employee
+      const employees = currentState?.employees || [];
+      const matchedEmp = employees.find((e) => {
+        const eCode = String(e.code || '').trim().toLowerCase();
+        const eUser = String(e.username || '').trim().toLowerCase();
+        const ePhone = String(e.phone || '').trim();
+        const ePass = String(e.password || '').trim();
+        const isUserMatch = eCode === cleanUser || (eUser && eUser === cleanUser) || (ePhone && ePhone === cleanUser);
+        return isUserMatch && ePass === cleanPass;
+      });
+      if (matchedEmp) {
+        return { role: 'employee', matched: true, user: matchedEmp };
+      }
+
+      return { matched: false };
+    };
+
+    let authResult = checkMatch(state);
+
+    // إذا فشل الفحص وكان الجهاز متصلاً، نجلب أحدث نسخة من السحابة للتحقق من أي تغيير لباسورد المالك أو الأدمن
+    if (!authResult.matched && navigator.onLine) {
       try {
-        localStorage.setItem('app_auth_role', 'admin');
-        localStorage.removeItem('app_owner_authenticated');
-        sessionStorage.removeItem('app_owner_authenticated');
-        sessionStorage.removeItem('app_settings_owner_tab_unlocked');
-      } catch {}
-      return { success: true, role: 'admin' };
+        const freshCloud = await fetchRemoteState({ timeout: 4500, useETag: false, isBackground: true });
+        if (freshCloud) {
+          const freshNormalized = normalizeState(freshCloud);
+          const cloudAuthResult = checkMatch(freshNormalized);
+          if (cloudAuthResult.matched) {
+            authResult = cloudAuthResult;
+            setState((prev) => normalizeState(smartMergeStates(prev, freshNormalized)));
+            saveStateLocally(freshNormalized).catch(() => {});
+          }
+        }
+      } catch (e) {
+        console.warn('[Login Cloud Fetch Warning]:', e);
+      }
     }
 
-    // 3. Check Branch Manager
-    const branches = state?.branches || [];
-    const matchedBranch = branches.find((b) => {
-      const bUser = String(b.username || b.code || b.branchCode || '').trim().toLowerCase();
-      const bPass = String(b.password || '123').trim();
-      return bUser === cleanUser && bPass === cleanPass;
-    });
-    if (matchedBranch) {
-      handleUnifiedLogin({ role: 'branch', branch: matchedBranch, redirectTab: 'branch' });
-      return { success: true };
-    }
+    if (authResult.matched) {
+      const { role, org, branch, user } = authResult;
+      if (role === 'owner') {
+        handleUnifiedLogin({ role: 'owner', redirectTab: 'dashboard' });
+        try {
+          localStorage.setItem('app_auth_role', 'owner');
+          localStorage.setItem('app_owner_authenticated', 'true');
+          localStorage.setItem('app_owner_password_snapshot', cleanPass);
+          localStorage.setItem('app_owner_session_version', String(org?.ownerSessionVersion || 1));
+          sessionStorage.setItem('app_owner_authenticated', 'true');
+        } catch {}
+        return { success: true, role: 'owner' };
+      }
 
-    // 4. Check Employee
-    const employees = state?.employees || [];
-    const matchedEmp = employees.find((e) => {
-      const eCode = String(e.code || '').trim().toLowerCase();
-      const eUser = String(e.username || '').trim().toLowerCase();
-      const ePhone = String(e.phone || '').trim();
-      const ePass = String(e.password || '123').trim();
-      const isUserMatch = eCode === cleanUser || (eUser && eUser === cleanUser) || (ePhone && ePhone === cleanUser);
-      return isUserMatch && ePass === cleanPass;
-    });
-    if (matchedEmp) {
-      handleUnifiedLogin({ role: 'employee', user: matchedEmp, redirectTab: 'portal' });
-      return { success: true };
+      if (role === 'admin') {
+        handleUnifiedLogin({ role: 'admin', redirectTab: 'dashboard' });
+        try {
+          localStorage.setItem('app_auth_role', 'admin');
+          localStorage.setItem('app_admin_password_snapshot', cleanPass);
+          localStorage.setItem('app_admin_session_version', String(org?.adminSessionVersion || 1));
+          localStorage.removeItem('app_owner_authenticated');
+          sessionStorage.removeItem('app_owner_authenticated');
+          sessionStorage.removeItem('app_settings_owner_tab_unlocked');
+        } catch {}
+        return { success: true, role: 'admin' };
+      }
+
+      if (role === 'branch') {
+        handleUnifiedLogin({ role: 'branch', branch, redirectTab: 'branch' });
+        try {
+          localStorage.setItem('app_branch_password_snapshot', cleanPass);
+          localStorage.setItem('app_branch_session_version', String(branch?.sessionVersion || 1));
+        } catch {}
+        return { success: true };
+      }
+
+      if (role === 'employee') {
+        handleUnifiedLogin({ role: 'employee', user, redirectTab: 'portal' });
+        try {
+          localStorage.setItem('app_emp_password_snapshot', cleanPass);
+          localStorage.setItem('app_emp_session_version', String(user?.sessionVersion || 1));
+        } catch {}
+        return { success: true };
+      }
     }
 
     return { success: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة' };
