@@ -451,7 +451,7 @@ export default function WhatsAppCenterModule({
       }
       return null;
     }
-  }, [isDiscovering, deviceServerUrl, state?.orgSettings?.waServerUrl, state?.orgSettings?.waServerLanUrl, networkInfo, isPrivateLanIp, showToast, fetchWaStatus]);
+  }, [isDiscovering, deviceServerUrl, isDesktop, state?.orgSettings?.waServerUrl, state?.orgSettings?.waServerLanUrl, state?.orgSettings?.waServerLanIps, networkInfo, isPrivateLanIp, showToast, fetchWaStatus]);
 
   // 5. الإرسال المباشر واليدوي عبر WhatsApp Web (Fallback الذكي عند عدم توفر السيرفر)
   const handleDirectWhatsAppWeb = useCallback((emp, customText = '') => {
@@ -557,6 +557,50 @@ export default function WhatsAppCenterModule({
       await fetchWaStatus(true);
       setIsRestarting(false);
     }, 2500);
+  };
+
+  // تصفير جلسة الواتساب وتوليد رمز QR جديد فوراً بنقرة واحدة
+  const handleForceResetServer = async () => {
+    let isConfirmed = false;
+    if (showConfirm) {
+      isConfirmed = await showConfirm({
+        title: 'تصفير جلسة الواتساب وتوليد رمز اقتران جديد',
+        message: 'هل أنت متأكد من رغبتك في تصفير مفاتيح الجلسة وإعادة توليد رمز QR جديد فوراً؟\n\nيُستخدم هذا الزر في حال حدوث أي تعليق في الاتصال أو الرغبة في الاقتران من جديد.',
+        confirmText: 'نعم، تصفير الجلسة وتوليد QR',
+        cancelText: 'إلغاء',
+        type: 'danger',
+        icon: '⚡'
+      });
+    } else {
+      isConfirmed = window.confirm('هل أنت متأكد من رغبتك في تصفير مفاتيح الجلسة وإعادة توليد رمز QR جديد فوراً؟');
+    }
+    if (!isConfirmed) return;
+
+    setIsRestarting(true);
+    showToast?.('⚡ جاري تصفير الجلسة وتوليد رمز اقتران جديد في الخلفية...');
+    try {
+      if (typeof window !== 'undefined' && window.desktopAPI?.forceResetWhatsAppServer) {
+        const res = await window.desktopAPI.forceResetWhatsAppServer();
+        showToast?.(res?.message || 'تم تصفير الجلسة بنجاح');
+      } else {
+        await fetch(`${serverUrl.replace(/\/$/, '')}/api/force-reset`, {
+          method: 'POST',
+          headers: { 'bypass-tunnel-reminder': 'true' },
+          signal: AbortSignal.timeout(4000)
+        });
+        showToast?.('تم إرسال أمر التصفير وإعادة التوليد بنجاح');
+      }
+      setWaStatus('CONNECTING');
+      setWaPhone('');
+      setWaLiveQr('');
+    } catch (err) {
+      console.warn('Force reset error:', err);
+    }
+
+    setTimeout(async () => {
+      await fetchWaStatus(true);
+      setIsRestarting(false);
+    }, 1800);
   };
 
   // تغيير رقم الواتساب المقترن وفك الارتباط لتوليد رمز QR جديد
@@ -1157,6 +1201,31 @@ export default function WhatsAppCenterModule({
             onClick={() => fetchWaStatus(false)}
           >
             📲 فحص الاتصال
+          </button>
+
+          {/* زر تصفير الجلسة وتوليد QR جديد فوراً */}
+          <button
+            type="button"
+            className="btn"
+            disabled={isRestarting || isChangingNumber}
+            title="تصفير الجلسة وتوليد رمز QR جديد فوراً لحل أي تعليق بالاتصال"
+            style={{
+              background: '#fef08a',
+              color: '#854d0e',
+              fontWeight: '800',
+              fontSize: '12.5px',
+              padding: '7px 14px',
+              borderRadius: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              border: '1px solid #eab308',
+              cursor: (isRestarting || isChangingNumber) ? 'not-allowed' : 'pointer',
+              transition: 'all 0.2s ease'
+            }}
+            onClick={handleForceResetServer}
+          >
+            <span>⚡ تصفير وتوليد QR</span>
           </button>
 
           <button

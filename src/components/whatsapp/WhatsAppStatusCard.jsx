@@ -123,6 +123,56 @@ export default function WhatsAppStatusCard({
               style={{
                 fontSize: '13px',
                 padding: '8px 16px',
+                background: '#fef08a',
+                color: '#854d0e',
+                borderColor: '#eab308',
+                fontWeight: '700'
+              }}
+              onClick={async () => {
+                let confirmed = false;
+                if (showConfirm) {
+                  confirmed = await showConfirm({
+                    title: 'تصفير جلسة الواتساب وتوليد رمز اقتران جديد',
+                    message: 'هل أنت متأكد من رغبتك في تصفير مفاتيح الجلسة وتوليد رمز QR جديد فوراً؟',
+                    confirmText: 'نعم، تصفير الجلسة',
+                    cancelText: 'إلغاء',
+                    type: 'danger',
+                    icon: '⚡'
+                  });
+                } else {
+                  confirmed = window.confirm('هل أنت متأكد من رغبتك في تصفير مفاتيح الجلسة وتوليد رمز QR جديد فوراً؟');
+                }
+                if (!confirmed) return;
+                showToast?.('⚡ جاري تصفير الجلسة وتوليد رمز اقتران جديد...');
+                try {
+                  if (typeof window !== 'undefined' && window.desktopAPI?.forceResetWhatsAppServer) {
+                    const res = await window.desktopAPI.forceResetWhatsAppServer();
+                    showToast?.(res?.message || 'تم تصفير الجلسة بنجاح');
+                  } else {
+                    const serverUrl = getResolvedServerUrl();
+                    await fetch(`${serverUrl.replace(/\/$/, '')}/api/force-reset`, {
+                      method: 'POST',
+                      headers: { 'bypass-tunnel-reminder': 'true' }
+                    });
+                    showToast?.('تم إرسال أمر التصفير بنجاح');
+                  }
+                  setWaServerStatus('checking');
+                  setWaLiveQr('');
+                  setTimeout(() => {
+                    handleTestWaServerConnection();
+                  }, 2000);
+                } catch {
+                  showToast?.('تعذر إرسال أمر التصفير');
+                }
+              }}
+            >
+              ⚡ تصفير وتوليد QR
+            </button>
+            <button
+              className="btn btn-ghost"
+              style={{
+                fontSize: '13px',
+                padding: '8px 16px',
                 background: 'rgba(239, 68, 68, 0.08)',
                 color: '#dc2626',
                 borderColor: '#fca5a5',

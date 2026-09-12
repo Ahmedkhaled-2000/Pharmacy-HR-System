@@ -666,6 +666,24 @@ function launchWhatsAppServerProcess() {
   }
 }
 
+function ensureFirewallPortAllowed() {
+  if (process.platform !== 'win32') return;
+  try {
+    exec('netsh advfirewall firewall show rule name="WhatsApp_Server_3100"', (err, stdout) => {
+      if (err || !stdout || !stdout.includes('WhatsApp_Server_3100')) {
+        console.log('[Firewall] WhatsApp_Server_3100 rule not found. Attempting to add inbound rule for port 3100...');
+        exec('netsh advfirewall firewall add rule name="WhatsApp_Server_3100" dir=in action=allow protocol=TCP localport=3100 profile=any description="Allow incoming WhatsApp Gateway connections on port 3100"', (addErr) => {
+          if (!addErr) {
+            console.log('[Firewall] ✅ WhatsApp_Server_3100 inbound rule added successfully!');
+          }
+        });
+      } else {
+        console.log('[Firewall] ✅ WhatsApp_Server_3100 inbound rule is active.');
+      }
+    });
+  } catch {}
+}
+
 async function ensureWhatsAppServerRunning() {
   try {
     const health = await checkWhatsAppServerHealth();
@@ -674,20 +692,29 @@ async function ensureWhatsAppServerRunning() {
       return { success: true, alreadyRunning: true, health };
     }
 
-    // الأولوية 1: الإقلاع الداخلي السريع (In-Process Dynamic Import)
-    const inProcStarted = await startWhatsAppServerInProcess();
-    if (inProcStarted) {
-      await new Promise(r => setTimeout(r, 1200));
-      const inProcHealth = await checkWhatsAppServerHealth();
-      if (inProcHealth.online) {
-        return { success: true, inProcess: true, health: inProcHealth };
+    if (isWhatsAppServerStarting) {
+      return { success: false, busy: true };
+    }
+    isWhatsAppServerStarting = true;
+
+    // تشغيل كعملية فرعية مخصصة تحت إشراف تام
+    const started = launchWhatsAppServerProcess();
+
+    // فحص إتمام التشغيل مع مهلة ذكية
+    for (let i = 0; i < 6; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      const h = await checkWhatsAppServerHealth();
+      if (h.online) {
+        isWhatsAppServerStarting = false;
+        console.log('[WhatsApp Gateway] ✅ WhatsApp Server process successfully booted.');
+        return { success: true, health: h };
       }
     }
 
-    // الأولوية 2: الإطلاق كعملية فرعية (Sub-Process)
-    const started = launchWhatsAppServerProcess();
-    return { success: started, alreadyRunning: false };
+    isWhatsAppServerStarting = false;
+    return { success: started, health: await checkWhatsAppServerHealth() };
   } catch (err) {
+    isWhatsAppServerStarting = false;
     console.error('[WhatsApp Gateway Check Error]:', err);
     return { success: false, error: err.message };
   }
@@ -697,7 +724,7 @@ async function ensureWhatsAppServerRunning() {
 setInterval(async () => {
   try {
     const health = await checkWhatsAppServerHealth();
-    if (!health.online) {
+    if (!health.online && !isWhatsAppServerStarting) {
       console.log('[WhatsApp Gateway Watchdog] ⚠️ Server is offline, auto-recovering...');
       ensureWhatsAppServerRunning();
     }
@@ -804,6 +831,29 @@ ipcMain.handle('whatsapp:logout', async () => {
   });
 });
 
+ipcMain.handle('whatsapp:force-reset', async () => {
+  return new Promise((resolve) => {
+    try {
+      const postReq = http.request('http://127.0.0.1:3100/api/force-reset', { method: 'POST', timeout: 4000 }, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(data));
+          } catch {
+            resolve({ success: true, message: 'تم تصفير الجلسة وتوليد رمز الاقتران الجديد' });
+          }
+        });
+      });
+      postReq.on('error', (err) => resolve({ success: false, error: err.message }));
+      postReq.on('timeout', () => { postReq.destroy(); resolve({ success: false, error: 'Timeout' }); });
+      postReq.end();
+    } catch (e) {
+      resolve({ success: false, error: e.message });
+    }
+  });
+});
+
 // توليد ملف PDF مشفر كـ Base64 من كود HTML لإرفاقه مباشرة عبر الواتساب
 ipcMain.handle('print:generate-pdf-base64', async (_event, htmlContent, printOptions = {}) => {
   let pdfWindow = null;
@@ -844,6 +894,8 @@ ipcMain.handle('print:generate-pdf-base64', async (_event, htmlContent, printOpt
 
 // ── 6. دورة حياة التطبيق (App Lifecycle) ──────────────────────────────────
 app.whenReady().then(() => {
+  // فحص وإتاحة المنفذ 3100 في جدار حماية ويندوز لربط باقي الأجهزة بالصيدلية
+  ensureFirewallPortAllowed();
   // تشغيل خادم الواتساب تلقائياً في الخلفية فور إقلاع التطبيق
   ensureWhatsAppServerRunning();
   // ── تفعيل معالج بروتوكول app المحلي لخدمة ملفات المنظومة ونماذج AI محلياً ──

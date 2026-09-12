@@ -9,7 +9,8 @@ import { fileURLToPath } from 'url';
 import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
-  Browsers
+  Browsers,
+  fetchLatestBaileysVersion
 } from '@whiskeysockets/baileys';
 import pino from 'pino';
 
@@ -120,7 +121,7 @@ const PORT = process.env.PORT || 3100;
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, bypass-tunnel-reminder, accept, origin');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, bypass-tunnel-reminder, ngrok-skip-browser-warning, accept, origin');
   res.header('Access-Control-Allow-Private-Network', 'true');
   if (req.method === 'OPTIONS') {
     return res.sendStatus(204);
@@ -146,6 +147,20 @@ let serverState = {
 let sock = null;
 let isConnecting = false;
 let reconnectTimer = null;
+let consecutiveFailures = 0;
+
+// تنظيف مجلد الجلسة بشكل آمن
+function purgeAuthDir() {
+  try {
+    if (fs.existsSync(AUTH_DIR)) {
+      fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+    }
+    fs.mkdirSync(AUTH_DIR, { recursive: true });
+    console.log('[WhatsApp Gateway] 🧹 Auth directory purged and recreated successfully.');
+  } catch (err) {
+    console.warn('[WhatsApp Gateway] Warning purging AUTH_DIR:', err.message);
+  }
+}
 
 // تنسيق وتوحيد رقم الهاتف بالصيغة الدولية لواتساب
 function formatWhatsAppNumber(phone) {
@@ -169,16 +184,40 @@ async function connectToWhatsApp() {
       sock = null;
     }
 
+    // 1. فحص سلامة الجلسة المخزنة: لو كان creds.json موجوداً ولكن مسجل كـ registered: false أو تالف، يتم تنظيفه فوراً
+    const credsFile = path.join(AUTH_DIR, 'creds.json');
+    if (fs.existsSync(credsFile)) {
+      try {
+        const credsData = JSON.parse(fs.readFileSync(credsFile, 'utf8'));
+        if (credsData && credsData.registered === false) {
+          console.warn('[WhatsApp Gateway] ⚠️ Stale unregistered credentials detected, auto-purging session...');
+          purgeAuthDir();
+        }
+      } catch {
+        console.warn('[WhatsApp Gateway] ⚠️ Corrupted creds.json, purging session...');
+        purgeAuthDir();
+      }
+    }
+
     console.log('[WhatsApp Gateway] 🔄 Initializing connection to WhatsApp multi-device...');
     serverState.status = 'CONNECTING';
 
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
 
+    // مزامنة النسخة الأحدث لبروتوكول واتساب
+    let waVersion = [2, 3000, 1043857760];
+    try {
+      const fetched = await fetchLatestBaileysVersion();
+      if (fetched?.version) waVersion = fetched.version;
+    } catch {}
+
     sock = makeWASocket({
+      version: waVersion,
       auth: state,
       logger: pino({ level: 'silent' }),
       printQRInTerminal: false,
-      browser: Browsers.windows('Desktop'),
+      // ملف تعريف متصفح Chrome حديث على ويندوز معتمد 100% لتفادي خطأ 428
+      browser: ['Windows', 'Chrome', '131.0.0.0'],
       syncFullHistory: false,
       connectTimeoutMs: 60000,
       keepAliveIntervalMs: 25000,
@@ -204,6 +243,7 @@ async function connectToWhatsApp() {
           });
           serverState.status = 'QR_READY';
           serverState.lastError = null;
+          consecutiveFailures = 0; // تم توليد QR بنجاح
           console.log('[WhatsApp Gateway] 📸 Live QR Code generated successfully.');
         } catch (err) {
           console.error('[WhatsApp Gateway] QR generation error:', err);
@@ -218,6 +258,7 @@ async function connectToWhatsApp() {
       // 3. نجاح الاقتران والاتصال
       if (connection === 'open') {
         isConnecting = false;
+        consecutiveFailures = 0;
         serverState.status = 'CONNECTED';
         serverState.qrCodeDataUrl = '';
         serverState.lastError = null;
@@ -234,38 +275,57 @@ async function connectToWhatsApp() {
       if (connection === 'close') {
         isConnecting = false;
         const statusCode = (lastDisconnect?.error)?.output?.statusCode || (lastDisconnect?.error)?.status;
-        const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+        const errorMessage = lastDisconnect?.error?.message || '';
 
-        console.warn(`[WhatsApp Gateway] ⚠️ Connection closed (statusCode: ${statusCode}, isLoggedOut: ${isLoggedOut})`);
+        // تشخيص حالات الفشل النهائي للجلسة التي تتطلب تصفير المفاتيح وتوليد QR جديد
+        const isTerminalFailure = 
+          statusCode === DisconnectReason.loggedOut || // 401
+          statusCode === 428 || // Precondition Required / Connection Terminated
+          statusCode === 403 || // Forbidden
+          statusCode === 405 || // Method Not Allowed
+          statusCode === 440 || // Connection Replaced
+          statusCode === 411 || // Multidevice Mismatch
+          statusCode === 500 || // Bad Session
+          consecutiveFailures >= 3;
 
-        if (isLoggedOut) {
+        console.warn(`[WhatsApp Gateway] ⚠️ Connection closed (statusCode: ${statusCode}, message: ${errorMessage}, isTerminalFailure: ${isTerminalFailure})`);
+
+        if (isTerminalFailure) {
+          console.warn('[WhatsApp Gateway] 🔄 Session terminated or corrupted. Auto-purging session for fresh QR pairing...');
           serverState.status = 'DISCONNECTED';
           serverState.phone = '';
           serverState.deviceName = '';
           serverState.qrCodeDataUrl = '';
-          try {
-            fs.rmSync(AUTH_DIR, { recursive: true, force: true });
-            fs.mkdirSync(AUTH_DIR, { recursive: true });
-          } catch {}
+          consecutiveFailures = 0;
+          purgeAuthDir();
 
           if (reconnectTimer) clearTimeout(reconnectTimer);
-          reconnectTimer = setTimeout(connectToWhatsApp, 2500);
+          reconnectTimer = setTimeout(connectToWhatsApp, 2000);
         } else {
+          consecutiveFailures++;
           serverState.status = 'DISCONNECTED';
           if (reconnectTimer) clearTimeout(reconnectTimer);
-          reconnectTimer = setTimeout(connectToWhatsApp, 4000);
+          const delay = Math.min(3000 * consecutiveFailures, 10000);
+          reconnectTimer = setTimeout(connectToWhatsApp, delay);
         }
       }
     });
 
   } catch (err) {
     isConnecting = false;
+    consecutiveFailures++;
     serverState.status = 'DISCONNECTED';
     serverState.lastError = err.message;
     console.error('[WhatsApp Gateway] Connection initialization error:', err);
 
+    if (consecutiveFailures >= 3) {
+      console.warn('[WhatsApp Gateway] ⚠️ Multiple consecutive initialization errors, resetting auth directory...');
+      purgeAuthDir();
+      consecutiveFailures = 0;
+    }
+
     if (reconnectTimer) clearTimeout(reconnectTimer);
-    reconnectTimer = setTimeout(connectToWhatsApp, 5000);
+    reconnectTimer = setTimeout(connectToWhatsApp, 4000);
   }
 }
 
@@ -546,6 +606,33 @@ app.post('/api/logout', async (req, res) => {
   res.json({ success: true, message: 'تم تسجيل الخروج وفك ارتباط الرقم بنجاح، وجاري توليد رمز الاقتران الجديد.' });
 });
 
+// تصفير الجلسة تماماً وتوليد رمز QR جديد فوري بنقرة زر
+app.post('/api/force-reset', async (req, res) => {
+  console.log('[WhatsApp Gateway] ⚡ Force reset requested from client...');
+  try {
+    if (sock) {
+      try { sock.ev.removeAllListeners(); } catch {}
+      try { sock.end(undefined); } catch {}
+    }
+  } catch {}
+  sock = null;
+
+  serverState.status = 'CONNECTING';
+  serverState.phone = '';
+  serverState.deviceName = '';
+  serverState.qrCodeDataUrl = '';
+  serverState.lastError = null;
+  consecutiveFailures = 0;
+  isConnecting = false;
+
+  purgeAuthDir();
+
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(connectToWhatsApp, 800);
+
+  res.json({ success: true, message: 'تم تصفير جلسة الواتساب بنجاح، وجاري توليد رمز الاقتران الجديد فوراً.' });
+});
+
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 [WhatsApp Gateway] Production Baileys Engine running on http://localhost:${PORT}`);
   const ips = getLocalNetworkIps();
@@ -555,9 +642,19 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   }
 });
 
-server.on('error', (err) => {
+server.on('error', async (err) => {
   if (err.code === 'EADDRINUSE') {
-    console.warn(`[WhatsApp Gateway] ⚠️ Port ${PORT} is already in use by an active instance. Gateway continues running.`);
+    console.warn(`[WhatsApp Gateway] ⚠️ Port ${PORT} is already in use by another instance.`);
+    try {
+      const httpModule = await import('http');
+      const testReq = httpModule.default.get(`http://127.0.0.1:${PORT}/health`, { timeout: 1500 }, (testRes) => {
+        if (testRes.statusCode === 200) {
+          console.log(`[WhatsApp Gateway] Active healthy instance already running on port ${PORT}. Cleanly exiting duplicate instance.`);
+          process.exit(0);
+        }
+      });
+      testReq.on('error', () => {});
+    } catch {}
   } else {
     console.error('[WhatsApp Gateway Server Error]:', err);
   }
