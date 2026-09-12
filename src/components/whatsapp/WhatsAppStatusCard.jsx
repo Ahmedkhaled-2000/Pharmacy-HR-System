@@ -14,15 +14,24 @@ export default function WhatsAppStatusCard({
   showToast
 }) {
   const { showConfirm } = useUI();
+  const isPrivateLanIp = (hostname) => {
+    if (!hostname) return false;
+    if (hostname === 'localhost' || hostname === '127.0.0.1') return true;
+    return /^(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})$/.test(hostname);
+  };
+
   const getResolvedServerUrl = () => {
     try {
       const localDevice = (localStorage.getItem('PHARMACY_DEVICE_WA_URL') || '').trim();
-      if (localDevice) return localDevice.replace(/\/+$/, '');
+      if (localDevice && !localDevice.includes('apexthunder.com')) return localDevice.replace(/\/+$/, '');
     } catch {}
     const custom = (waServerUrlInput || '').trim();
-    if (custom) return custom.replace(/\/+$/, '');
-    if (typeof window !== 'undefined' && window.location?.hostname && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1' && !window.location.hostname.includes('vercel.app')) {
-      return `http://${window.location.hostname}:3100`;
+    if (custom && !custom.includes('apexthunder.com') && !custom.includes('localhost:3001')) return custom.replace(/\/+$/, '');
+    if (typeof window !== 'undefined' && window.location?.hostname) {
+      const host = window.location.hostname;
+      if (isPrivateLanIp(host) && host !== 'localhost' && host !== '127.0.0.1') {
+        return `http://${host}:3100`;
+      }
     }
     return 'http://127.0.0.1:3100';
   };

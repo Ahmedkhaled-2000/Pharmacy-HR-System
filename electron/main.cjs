@@ -471,7 +471,27 @@ ipcMain.handle('app:is-admin', async () => {
 
 // ── 5.5. إدارة خادم الواتساب التلقائي على مدار 24 ساعة (Auto 24/7 WhatsApp Gateway) ──
 const http = require('http');
+const os = require('os');
 const { spawn, exec } = require('child_process');
+
+function getSystemNetworkInfo() {
+  const interfaces = os.networkInterfaces();
+  const ips = [];
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name] || []) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        ips.push({ interface: name, address: iface.address });
+      }
+    }
+  }
+  const primaryIp = ips[0]?.address || '127.0.0.1';
+  return {
+    port: 3100,
+    localIps: ips,
+    primaryIp,
+    suggestedLanUrl: `http://${primaryIp}:3100`
+  };
+}
 
 function checkWhatsAppServerHealth() {
   return new Promise((resolve) => {
@@ -496,6 +516,8 @@ function checkWhatsAppServerHealth() {
 }
 
 let waChildProcess = null;
+let isWhatsAppServerStarting = false;
+let isWhatsAppServerStarted = false;
 
 function resolveWhatsAppServerScript() {
   const possiblePaths = [
@@ -511,6 +533,39 @@ function resolveWhatsAppServerScript() {
   return path.join(__dirname, '../server/whatsapp-server.js');
 }
 
+async function startWhatsAppServerInProcess() {
+  if (isWhatsAppServerStarted) return true;
+  if (isWhatsAppServerStarting) return false;
+  try {
+    isWhatsAppServerStarting = true;
+    const scriptPath = resolveWhatsAppServerScript();
+    if (!fs.existsSync(scriptPath)) {
+      console.warn('[WhatsApp Gateway] Script file not found for in-process start:', scriptPath);
+      isWhatsAppServerStarting = false;
+      return false;
+    }
+    const waAuthDir = path.join(userDataPath, 'whatsapp-auth');
+    if (!fs.existsSync(waAuthDir)) {
+      try { fs.mkdirSync(waAuthDir, { recursive: true }); } catch {}
+    }
+    process.env.PORT = process.env.PORT || '3100';
+    process.env.WA_AUTH_PATH = process.env.WA_AUTH_PATH || waAuthDir;
+    process.env.NODE_ENV = process.env.NODE_ENV || 'production';
+
+    const scriptUrl = url.pathToFileURL(scriptPath).href;
+    console.log('[WhatsApp Gateway] 🚀 Starting in-process via dynamic import:', scriptUrl);
+    await import(scriptUrl);
+    isWhatsAppServerStarted = true;
+    isWhatsAppServerStarting = false;
+    console.log('[WhatsApp Gateway] ✅ In-process WhatsApp server active on port 3100.');
+    return true;
+  } catch (err) {
+    isWhatsAppServerStarting = false;
+    console.warn('[WhatsApp Gateway] In-process start failed or fell back:', err.message);
+    return false;
+  }
+}
+
 function launchWhatsAppServerProcess() {
   try {
     const scriptPath = resolveWhatsAppServerScript();
@@ -518,7 +573,7 @@ function launchWhatsAppServerProcess() {
       console.warn('[WhatsApp Gateway] Script not found:', scriptPath);
       return false;
     }
-    console.log('[WhatsApp Gateway] 🚀 Auto-launching WhatsApp server:', scriptPath);
+    console.log('[WhatsApp Gateway] 🚀 Auto-launching WhatsApp server process:', scriptPath);
 
     const waAuthDir = path.join(userDataPath, 'whatsapp-auth');
     if (!fs.existsSync(waAuthDir)) {
@@ -612,6 +667,18 @@ async function ensureWhatsAppServerRunning() {
       console.log('[WhatsApp Gateway] 🟢 WhatsApp Server is already running.');
       return { success: true, alreadyRunning: true, health };
     }
+
+    // الأولوية 1: الإقلاع الداخلي السريع (In-Process Dynamic Import)
+    const inProcStarted = await startWhatsAppServerInProcess();
+    if (inProcStarted) {
+      await new Promise(r => setTimeout(r, 1200));
+      const inProcHealth = await checkWhatsAppServerHealth();
+      if (inProcHealth.online) {
+        return { success: true, inProcess: true, health: inProcHealth };
+      }
+    }
+
+    // الأولوية 2: الإطلاق كعملية فرعية (Sub-Process)
     const started = launchWhatsAppServerProcess();
     return { success: started, alreadyRunning: false };
   } catch (err) {
@@ -626,7 +693,7 @@ setInterval(async () => {
     const health = await checkWhatsAppServerHealth();
     if (!health.online) {
       console.log('[WhatsApp Gateway Watchdog] ⚠️ Server is offline, auto-recovering...');
-      launchWhatsAppServerProcess();
+      ensureWhatsAppServerRunning();
     }
   } catch {}
 }, 30000);
@@ -636,7 +703,7 @@ async function killAndRestartWhatsAppServer() {
   return new Promise((resolve) => {
     // محاولة ناعمة لإعادة التشغيل عبر HTTP أولاً
     try {
-      const postReq = http.request('http://127.0.0.1:3100/api/restart', { method: 'POST', timeout: 2000 }, (res) => {
+      const postReq = http.request('http://127.0.0.1:3100/api/restart', { method: 'POST', timeout: 2500 }, (res) => {
         if (res.statusCode === 200) {
           setTimeout(async () => {
             const h = await checkWhatsAppServerHealth();
@@ -656,16 +723,18 @@ async function killAndRestartWhatsAppServer() {
     function hardKillAndSpawn() {
       if (process.platform === 'win32') {
         exec('powershell -Command "Get-NetTCPConnection -LocalPort 3100 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }"', () => {
-          setTimeout(() => {
-            launchWhatsAppServerProcess();
+          setTimeout(async () => {
+            isWhatsAppServerStarted = false;
+            await ensureWhatsAppServerRunning();
             setTimeout(async () => {
               const h = await checkWhatsAppServerHealth();
               resolve({ success: true, message: 'تم إطلاق وتشغيل خادم الواتساب بنجاح', health: h });
-            }, 2000);
-          }, 1000);
+            }, 1800);
+          }, 800);
         });
       } else {
-        launchWhatsAppServerProcess();
+        isWhatsAppServerStarted = false;
+        ensureWhatsAppServerRunning();
         setTimeout(async () => {
           const h = await checkWhatsAppServerHealth();
           resolve({ success: true, health: h });
@@ -675,9 +744,31 @@ async function killAndRestartWhatsAppServer() {
   });
 }
 
-// تسجيل معالجات الـ IPC لخادم الواتساب
+// تسجيل معالجات الـ IPC لخادم الواتساب ومعلومات الشبكة
+ipcMain.handle('whatsapp:get-network-info', async () => {
+  return getSystemNetworkInfo();
+});
+
 ipcMain.handle('whatsapp:get-health', async () => {
   return await checkWhatsAppServerHealth();
+});
+
+ipcMain.handle('whatsapp:get-status', async () => {
+  return new Promise((resolve) => {
+    const req = http.get('http://127.0.0.1:3100/api/status', { timeout: 2500 }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(data));
+        } catch {
+          resolve({ status: 'DISCONNECTED' });
+        }
+      });
+    });
+    req.on('error', () => resolve({ status: 'DISCONNECTED' }));
+    req.on('timeout', () => { req.destroy(); resolve({ status: 'DISCONNECTED' }); });
+  });
 });
 
 ipcMain.handle('whatsapp:restart-server', async () => {

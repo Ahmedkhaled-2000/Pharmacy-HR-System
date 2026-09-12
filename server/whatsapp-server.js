@@ -562,3 +562,6 @@ server.on('error', (err) => {
     console.error('[WhatsApp Gateway Server Error]:', err);
   }
 });
+
+export { app, server, serverState };
+

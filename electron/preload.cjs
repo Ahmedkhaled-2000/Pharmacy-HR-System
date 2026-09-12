@@ -70,6 +70,8 @@ contextBridge.exposeInMainWorld('desktopAPI', {
   restartWhatsAppServer: () => ipcRenderer.invoke('whatsapp:restart-server'),
   logoutWhatsAppServer: () => ipcRenderer.invoke('whatsapp:logout'),
   getWhatsAppServerHealth: () => ipcRenderer.invoke('whatsapp:get-health'),
+  getWhatsAppServerStatus: () => ipcRenderer.invoke('whatsapp:get-status'),
+  getNetworkInfo: () => ipcRenderer.invoke('whatsapp:get-network-info'),
 
   // 8. توليد ملفات الـ PDF البرمجية
   generatePdfBase64: (htmlContent, printOptions) => ipcRenderer.invoke('print:generate-pdf-base64', htmlContent, printOptions)
