@@ -16,6 +16,11 @@ import { clearPendingQueue, saveStateLocally, clearLocalDatabase } from '../../u
 import { broadcastStateChange } from '../../utils/offlineSync';
 import GmailConfigCard from './GmailConfigCard';
 import GoogleDriveConfigCard from './GoogleDriveConfigCard';
+import {
+  uploadSystemBackupToDrive,
+  listSystemBackupsFromDrive,
+  getAuthoritativeDriveConfig
+} from '../../utils/googleDriveService';
 import DatesPeriodsSettingsCard from './DatesPeriodsSettingsCard';
 import AccountingSystemGuideCard from './AccountingSystemGuideCard';
 import KeyboardShortcutsSettingsCard from './KeyboardShortcutsSettingsCard';
@@ -424,6 +429,61 @@ export default function SettingsModule({
     window.addEventListener('auto-backup-updated', handleUpdate);
     return () => window.removeEventListener('auto-backup-updated', handleUpdate);
   }, []);
+
+  // Google Drive Cloud Backup State
+  const [isDriveBackingUp, setIsDriveBackingUp] = useState(false);
+  const [driveBackupsList, setDriveBackupsList] = useState([]);
+  const [isLoadingDriveBackups, setIsLoadingDriveBackups] = useState(false);
+  const [lastDriveBackupInfo, setLastDriveBackupInfo] = useState(null);
+  const driveConfig = getAuthoritativeDriveConfig(state);
+
+  const handleUploadDriveBackup = async () => {
+    if (!driveConfig || !driveConfig.serviceUrl) {
+      showToast?.('⚠️ يرجى تفعيل وإعداد رابط Google Drive أولاً في تبويب Google Drive');
+      return;
+    }
+    try {
+      setIsDriveBackingUp(true);
+      showToast?.('☁️ جاري رفع النسخة الاحتياطية إلى Google Drive...');
+      const res = await uploadSystemBackupToDrive(state, driveConfig, (msg) => {
+        showToast?.(msg);
+      });
+      if (res.success) {
+        setLastDriveBackupInfo(res);
+        showToast?.('✅ ' + (res.message || 'تم حفظ النسخة الاحتياطية في Google Drive بنجاح!'));
+        handleFetchDriveBackups();
+      } else {
+        showToast?.('❌ حدث خطأ: ' + res.error);
+      }
+    } catch (e) {
+      showToast?.('❌ خطأ: ' + (e.message || e));
+    } finally {
+      setIsDriveBackingUp(false);
+    }
+  };
+
+  const handleFetchDriveBackups = async () => {
+    if (!driveConfig || !driveConfig.serviceUrl) return;
+    setIsLoadingDriveBackups(true);
+    try {
+      const res = await listSystemBackupsFromDrive(driveConfig);
+      if (res.success) {
+        setDriveBackupsList(res.backups || []);
+        if (res.folderUrl && !lastDriveBackupInfo) {
+          setLastDriveBackupInfo(prev => ({ ...prev, folderUrl: res.folderUrl }));
+        }
+      }
+    } catch {}
+    finally {
+      setIsLoadingDriveBackups(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'backup' && driveConfig?.serviceUrl) {
+      handleFetchDriveBackups();
+    }
+  }, [activeTab]);
 
   // Factory Reset / Data Wipe States
   const [showWipeModal, setShowWipeModal] = useState(false);
@@ -2657,6 +2717,155 @@ export default function SettingsModule({
                 </button>
               </div>
             </div>
+          </div>
+
+          {/* Card 2.5: Google Drive Decoupled Cloud Backups */}
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', padding: '22px', borderRadius: '14px', boxShadow: 'var(--shadow-sm)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '14px' }}>
+              <div>
+                <h4 style={{ margin: 0, fontFamily: 'Cairo', color: 'var(--primary-dark)', fontSize: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  ☁️ التخزين السحابي المنفصل للنسخ الاحتياطية (Google Drive Decoupled Storage)
+                </h4>
+                <p style={{ margin: '4px 0 0', fontSize: '13px', color: 'var(--muted)' }}>
+                  تطبيق معمارية التخزين المنفصل: حفظ النسخ السحابية الثقيلة في مساحة Google Drive المجانية (15GB) لحماية كوتة Supabase وسرعة المنظومة.
+                </p>
+              </div>
+              <span style={{
+                background: driveConfig?.serviceUrl ? '#ecfdf5' : '#fffbeb',
+                color: driveConfig?.serviceUrl ? '#065f46' : '#b45309',
+                border: `1px solid ${driveConfig?.serviceUrl ? '#a7f3d0' : '#fde68a'}`,
+                padding: '4px 12px',
+                borderRadius: '20px',
+                fontSize: '12px',
+                fontWeight: 'bold'
+              }}>
+                {driveConfig?.serviceUrl ? '🟢 مساحة Drive متصلة (15GB مجاناً)' : '⚪ Drive غير مفعل'}
+              </span>
+            </div>
+
+            <div style={{ background: 'var(--surface-muted)', border: '1px solid var(--border)', borderRadius: '12px', padding: '16px', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+                <div style={{ fontSize: '13.5px', color: 'var(--text)' }}>
+                  {driveConfig?.serviceUrl ? (
+                    <span>
+                      ✅ خدمة جوجل درايف مهيأة. يتم إنشاء مجلد مخصص <strong>💾 النسخ الاحتياطية للمنظومة</strong> وتدوير أقدم النسخ تلقائياً بعد 20 نسخة.
+                    </span>
+                  ) : (
+                    <span>
+                      ⚠️ لم يتم إدخال رابط Webhook الخاص بـ Google Drive بعد. يمكنك إعداده من تبويب <strong>Google Drive</strong> بالأعلى.
+                    </span>
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="btn btn-start"
+                    style={{ padding: '8px 16px', fontSize: '13px', background: '#0284c7', color: '#fff', border: 'none', display: 'flex', alignItems: 'center', gap: '6px' }}
+                    disabled={isDriveBackingUp || !driveConfig?.serviceUrl}
+                    onClick={handleUploadDriveBackup}
+                  >
+                    {isDriveBackingUp ? '⏳ جاري الرفع للسحابة...' : '☁️ حفظ نسخة سحابية فورية في Google Drive'}
+                  </button>
+
+                  {driveConfig?.serviceUrl && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      style={{ padding: '8px 14px', fontSize: '13px', border: '1px solid var(--border)' }}
+                      disabled={isLoadingDriveBackups}
+                      onClick={handleFetchDriveBackups}
+                    >
+                      {isLoadingDriveBackups ? '⏳...' : '🔄 تحديث النسخ'}
+                    </button>
+                  )}
+
+                  {lastDriveBackupInfo?.folderUrl && (
+                    <a
+                      href={lastDriveBackupInfo.folderUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btn btn-ghost"
+                      style={{ padding: '8px 14px', fontSize: '13px', border: '1px solid var(--border)', color: 'var(--primary)', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px' }}
+                    >
+                      📂 فتح مجلد Drive
+                    </a>
+                  )}
+                </div>
+              </div>
+
+              {lastDriveBackupInfo?.fileName && (
+                <div style={{ marginTop: '12px', padding: '10px 14px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', fontSize: '12.5px', color: '#166534', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                  <span>🎉 أحدث نسخة مرفوعة: <strong>{lastDriveBackupInfo.fileName}</strong></span>
+                  {lastDriveBackupInfo.downloadUrl && (
+                    <a href={lastDriveBackupInfo.downloadUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#0369a1', fontWeight: 'bold' }}>
+                      📥 تنزيل الملف من Drive
+                    </a>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* List of Drive Backups */}
+            {driveConfig?.serviceUrl && (
+              <div>
+                <h5 style={{ margin: '0 0 10px', fontSize: '14px', color: 'var(--text)' }}>
+                  📁 النسخ الاحتياطية المتوفرة في Google Drive ({driveBackupsList.length})
+                </h5>
+                {isLoadingDriveBackups ? (
+                  <div style={{ padding: '16px', textAlign: 'center', color: 'var(--muted)', fontSize: '13px' }}>
+                    ⏳ جاري استعراض النسخ من Google Drive...
+                  </div>
+                ) : driveBackupsList.length === 0 ? (
+                  <div style={{ padding: '16px', textAlign: 'center', color: 'var(--muted)', fontSize: '12.5px', background: 'var(--surface-muted)', borderRadius: '8px' }}>
+                    لم يتم تسجيل أي نسخ سحابية في Google Drive بعد. اضغط على زر "حفظ نسخة سحابية فورية" لإنشاء أول نسخة.
+                  </div>
+                ) : (
+                  <div className="table-responsive" style={{ maxHeight: '240px', overflowY: 'auto' }}>
+                    <table className="table" style={{ fontSize: '12.5px' }}>
+                      <thead>
+                        <tr>
+                          <th>اسم النسخة</th>
+                          <th>تاريخ الحفظ</th>
+                          <th>الحجم</th>
+                          <th>الإجراءات</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {driveBackupsList.map((b) => (
+                          <tr key={b.id}>
+                            <td><strong>{b.name}</strong></td>
+                            <td>{new Date(b.created).toLocaleString('ar-EG')}</td>
+                            <td>{(b.size / 1024).toFixed(1)} KB</td>
+                            <td>
+                              <div style={{ display: 'flex', gap: '8px' }}>
+                                <a
+                                  href={b.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="btn btn-ghost"
+                                  style={{ padding: '3px 8px', fontSize: '11.5px', border: '1px solid var(--border)', textDecoration: 'none' }}
+                                >
+                                  🔗 معاينة
+                                </a>
+                                <a
+                                  href={b.downloadUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="btn btn-start"
+                                  style={{ padding: '3px 8px', fontSize: '11.5px', textDecoration: 'none' }}
+                                >
+                                  📥 تنزيل
+                                </a>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Card 3: Live Automatic Snapshots Archive */}

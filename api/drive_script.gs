@@ -31,6 +31,12 @@ function doPost(e) {
       return handleCreateOrGetExpensesFolder(data);
     } else if (action === 'upload_file') {
       return handleUploadFile(data);
+    } else if (action === 'create_or_get_backups_folder') {
+      return handleCreateOrGetBackupsFolder(data);
+    } else if (action === 'upload_system_backup') {
+      return handleUploadSystemBackup(data);
+    } else if (action === 'list_system_backups') {
+      return handleListSystemBackups(data);
     } else {
       return createJsonResponse({ success: false, error: 'إجراء غير معروف: ' + action });
     }
@@ -264,6 +270,142 @@ function handleUploadFile(data) {
     });
   } catch (err) {
     return createJsonResponse({ success: false, error: 'فشل معالجة الملف في جوجل درايف: ' + err.toString() });
+  }
+}
+
+/**
+ * 5. إنشاء أو جلب مجلد النسخ الاحتياطية المخصصة للمنظومة HR_System_Backups
+ */
+function handleCreateOrGetBackupsFolder(data) {
+  var parentFolderId = data.parentFolderId;
+  var rootFolder;
+
+  if (parentFolderId && parentFolderId.trim() !== '') {
+    rootFolder = DriveApp.getFolderById(parentFolderId.trim());
+  } else {
+    var rootFolders = DriveApp.getFoldersByName('HR_Employees_Archive');
+    if (rootFolders.hasNext()) {
+      rootFolder = rootFolders.next();
+    } else {
+      rootFolder = DriveApp.createFolder('HR_Employees_Archive');
+      rootFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    }
+  }
+
+  var backupsFolderName = '💾 النسخ الاحتياطية للمنظومة (Backups)';
+  var bFolders = rootFolder.getFoldersByName(backupsFolderName);
+  var backupsFolder = null;
+  if (bFolders.hasNext()) {
+    backupsFolder = bFolders.next();
+  } else {
+    backupsFolder = rootFolder.createFolder(backupsFolderName);
+    backupsFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  }
+
+  return createJsonResponse({
+    success: true,
+    folderId: backupsFolder.getId(),
+    folderName: backupsFolder.getName(),
+    folderUrl: backupsFolder.getUrl()
+  });
+}
+
+/**
+ * 6. رفع نسخة احتياطية كاملة للمنظومة إلى Google Drive مع تدوير تلقائي للملفات القديمة
+ */
+function handleUploadSystemBackup(data) {
+  try {
+    var parentFolderId = data.parentFolderId;
+    var fileName = data.fileName || ('Backup_' + Utilities.formatDate(new Date(), 'Africa/Cairo', 'yyyy-MM-dd_HH-mm') + '.json');
+    var backupJson = data.backupJson || data.content;
+
+    if (!backupJson) {
+      return createJsonResponse({ success: false, error: 'محتوى النسخة الاحتياطية مفقود' });
+    }
+
+    // جلب مجلد النسخ الاحتياطية
+    var folderRes = JSON.parse(handleCreateOrGetBackupsFolder(data).getContent());
+    if (!folderRes.success || !folderRes.folderId) {
+      return createJsonResponse({ success: false, error: 'تعذر الوصول لمجلد النسخ الاحتياطية في Drive' });
+    }
+
+    var targetFolder = DriveApp.getFolderById(folderRes.folderId);
+    var blob = Utilities.newBlob(backupJson, 'application/json', fileName);
+    var newFile = targetFolder.createFile(blob);
+    newFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+    // تدوير تلقائي: مسح أي نسخ احتياطية أقدم من 30 يوماً أو الاحتفاظ بأحدث 30 نسخة فقط
+    var purgedCount = 0;
+    var allBackups = [];
+    var files = targetFolder.getFiles();
+    while (files.hasNext()) {
+      var f = files.next();
+      allBackups.push({ file: f, date: f.getDateCreated().getTime() });
+    }
+
+    // فرز من الأحدث إلى الأقدم
+    allBackups.sort(function(a, b) { return b.date - a.date; });
+
+    // الاحتفاظ بأحدث 20 نسخة فقط كحد أقصى لحماية مساحة الـ 15GB
+    var MAX_KEPT_BACKUPS = 20;
+    if (allBackups.length > MAX_KEPT_BACKUPS) {
+      for (var i = MAX_KEPT_BACKUPS; i < allBackups.length; i++) {
+        allBackups[i].file.setTrashed(true);
+        purgedCount++;
+      }
+    }
+
+    return createJsonResponse({
+      success: true,
+      fileId: newFile.getId(),
+      fileName: newFile.getName(),
+      fileUrl: newFile.getUrl(),
+      webViewLink: newFile.getUrl(),
+      downloadUrl: newFile.getDownloadUrl(),
+      folderUrl: targetFolder.getUrl(),
+      purgedOldBackups: purgedCount
+    });
+  } catch (err) {
+    return createJsonResponse({ success: false, error: 'فشل حفظ النسخة في جوجل درايف: ' + err.toString() });
+  }
+}
+
+/**
+ * 7. سرد قائمة النسخ الاحتياطية الموجودة في Google Drive
+ */
+function handleListSystemBackups(data) {
+  try {
+    var folderRes = JSON.parse(handleCreateOrGetBackupsFolder(data).getContent());
+    if (!folderRes.success || !folderRes.folderId) {
+      return createJsonResponse({ success: false, error: 'تعذر الوصول لمجلد النسخ الاحتياطية' });
+    }
+
+    var targetFolder = DriveApp.getFolderById(folderRes.folderId);
+    var list = [];
+    var files = targetFolder.getFiles();
+    while (files.hasNext()) {
+      var f = files.next();
+      list.push({
+        id: f.getId(),
+        name: f.getName(),
+        size: f.getSize(),
+        created: f.getDateCreated().toISOString(),
+        url: f.getUrl(),
+        downloadUrl: f.getDownloadUrl()
+      });
+    }
+
+    list.sort(function(a, b) {
+      return new Date(b.created).getTime() - new Date(a.created).getTime();
+    });
+
+    return createJsonResponse({
+      success: true,
+      folderUrl: targetFolder.getUrl(),
+      backups: list
+    });
+  } catch (err) {
+    return createJsonResponse({ success: false, error: err.toString() });
   }
 }
 

@@ -267,13 +267,24 @@ try {
                     $finalValueData = mergeServerState($existingDecoded, $decodedIncoming);
                 }
 
-                // 5. حفظ نسخة احتياطية لقطية فورية في Supabase
-                if (is_array($existingDecoded) && !empty($existingDecoded)) {
+                // 5. حماية معمارية التخزين المنفصل: منع تراكم اللقطات في Supabase وتدوير النسخ (FIFO Max 2)
+                // يتم الاحتفاظ بنسختين فقط كحد أقصى للطوارئ مع تقنين الحفظ لمنع تضخم قاعدة البيانات
+                $shouldCreateDbSnapshot = !empty($isExplicitReset) || !empty($payload['createSnapshot']);
+                if (is_array($existingDecoded) && !empty($existingDecoded) && $shouldCreateDbSnapshot) {
                     try {
                         $jsonBackup = json_encode($existingDecoded, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
                         Database::execute(
                             "INSERT INTO app_settings_backups (key_name, value_data, version, client_ip, created_at) VALUES (?, ?::jsonb, ?, ?, NOW())",
                             [$targetKey, $jsonBackup, (int)($existingRow['version'] ?? 1), getClientIp()]
+                        );
+
+                        // سياسة التدوير الصارمة: حذف أي لقطات أقدم من أحدث نسختين فورياً
+                        Database::execute(
+                            "DELETE FROM app_settings_backups 
+                             WHERE key_name = ? AND id NOT IN (
+                                 SELECT id FROM app_settings_backups WHERE key_name = ? ORDER BY id DESC LIMIT 2
+                             )",
+                            [$targetKey, $targetKey]
                         );
                     } catch (Throwable) {}
                 }

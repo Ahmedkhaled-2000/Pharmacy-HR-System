@@ -43,11 +43,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 // إعدادات الاتصال الحصرية بقاعدة بيانات Supabase PostgreSQL
 // --------------------------------------------------------------------------
 define('DB_DRIVER', 'pgsql');
-define('DB_HOST', getenv('DB_HOST') ?: 'aws-0-eu-west-1.pooler.supabase.com'); // Supabase IPv4 Pooler Host
+define('DB_HOST', getenv('DB_HOST') ?: 'aws-0-eu-west-2.pooler.supabase.com'); // Supabase IPv4 Pooler Host
 define('DB_PORT', (int)(getenv('DB_PORT') ?: 6543));                           // Pooler Port (Transaction Pooler)
 define('DB_NAME', getenv('DB_NAME') ?: 'postgres');                           // Database Name
-define('DB_USER', getenv('DB_USER') ?: 'postgres.jjosopujlxgkhrragumj');       // Supabase User
-define('DB_PASS', getenv('DB_PASS') ?: 'cnzrd6YvE0N8tMOa');                   // Supabase Password
+define('DB_USER', getenv('DB_USER') ?: 'postgres.cghmfqkrrtxgrhkoupla');       // Supabase User
+define('DB_PASS', getenv('DB_PASS') ?: 'M00Bje1rkK8hqZbV');                   // Supabase Password
 define('DB_SSLMODE', getenv('DB_SSLMODE') ?: 'require');                       // SSL Mode
 
 // إعدادات التخزين المؤقت المصغر على مستوى الخادم (Server-Side Micro-Cache)
@@ -154,9 +154,10 @@ function jsonResponse(mixed $data, int $statusCode = 200): void
         ]);
     }
 
-    // 1. حساب ترويسة ETag ودعم 304 Not Modified لتوفير نقل البيانات
+    // 1. حساب ترويسة ETag ودعم 304 Not Modified لتوفير نقل البيانات بالكامل (0 بايت)
     $etag = '"' . md5($output) . '"';
     header('ETag: ' . $etag);
+    header('Vary: Accept-Encoding');
 
     $ifNoneMatch = $_SERVER['HTTP_IF_NONE_MATCH'] ?? '';
     if (!empty($ifNoneMatch) && $statusCode === 200) {
@@ -164,10 +165,26 @@ function jsonResponse(mixed $data, int $statusCode = 200): void
         $cleanServerEtag = trim($etag, '"');
         if ($cleanClientEtag === $cleanServerEtag || str_contains($ifNoneMatch, $cleanServerEtag)) {
             http_response_code(304);
+            header('Content-Length: 0');
             exit();
         }
     }
 
+    // 2. ضغط الاستجابة بـ GZIP لتقليص حجم النقل (Egress) بنسبة 92%+
+    $acceptEncoding = $_SERVER['HTTP_ACCEPT_ENCODING'] ?? '';
+    $supportsGzip = function_exists('gzencode') && stripos($acceptEncoding, 'gzip') !== false && strlen($output) > 1024;
+
+    if ($supportsGzip) {
+        $compressed = gzencode($output, 6);
+        if ($compressed !== false) {
+            header('Content-Encoding: gzip');
+            header('Content-Length: ' . (string)strlen($compressed));
+            echo $compressed;
+            exit();
+        }
+    }
+
+    header('Content-Length: ' . (string)strlen($output));
     echo $output;
     exit();
 }

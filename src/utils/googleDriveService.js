@@ -1036,3 +1036,111 @@ export async function uploadExpenseAttachmentToDrive({
   };
 }
 
+/**
+ * إنشاء أو جلب مجلد النسخ الاحتياطية في Google Drive
+ */
+export async function createOrGetBackupsFolder(driveConfig) {
+  if (!driveConfig || !driveConfig.serviceUrl) {
+    throw new Error('Google Drive service is not configured');
+  }
+  const res = await fetch(driveConfig.serviceUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({
+      action: 'create_or_get_backups_folder',
+      parentFolderId: driveConfig.parentFolderId || ''
+    })
+  });
+  const data = await res.json();
+  if (data?.success && data.folderId) {
+    return data;
+  }
+  throw new Error(data?.error || 'فشل جلب مجلد النسخ الاحتياطية في Google Drive');
+}
+
+/**
+ * رفع نسخة احتياطية كاملة للمنظومة إلى Google Drive
+ */
+export async function uploadSystemBackupToDrive(systemState, driveConfig, onProgress = () => {}) {
+  if (!driveConfig || !driveConfig.serviceUrl) {
+    return { success: false, error: 'خدمة Google Drive غير مفعلة أو لم يتم إدخال الرابط' };
+  }
+
+  try {
+    onProgress('جاري تجهيز بيانات النسخة الاحتياطية...');
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10);
+    const timeStr = now.toTimeString().slice(0, 5).replace(':', '-');
+    const version = systemState?.version || systemState?._version || 1;
+    const fileName = `Backup_${dateStr}_${timeStr}_v${version}.json`;
+
+    const payload = {
+      export_date: now.toISOString(),
+      version,
+      state: systemState
+    };
+    const jsonString = JSON.stringify(payload);
+
+    onProgress('جاري رفع النسخة الاحتياطية إلى Google Drive...');
+    const res = await fetch(driveConfig.serviceUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: 'upload_system_backup',
+        parentFolderId: driveConfig.parentFolderId || '',
+        fileName,
+        backupJson: jsonString
+      })
+    });
+
+    const data = await res.json();
+    if (data && data.success) {
+      return {
+        success: true,
+        fileId: data.fileId,
+        fileName: data.fileName,
+        fileUrl: data.fileUrl || data.webViewLink,
+        downloadUrl: data.downloadUrl,
+        folderUrl: data.folderUrl,
+        purgedOldBackups: data.purgedOldBackups || 0,
+        message: 'تم حفظ النسخة الاحتياطية في Google Drive بنجاح ✅'
+      };
+    } else {
+      return { success: false, error: data?.error || 'فشل رفع النسخة الاحتياطية إلى Google Drive' };
+    }
+  } catch (err) {
+    console.error('Drive Backup Upload Error:', err);
+    return { success: false, error: err.message || 'حدث خطأ أثناء الاتصال بـ Google Drive' };
+  }
+}
+
+/**
+ * استعراض قائمة النسخ الاحتياطية المخزنة في Google Drive
+ */
+export async function listSystemBackupsFromDrive(driveConfig) {
+  if (!driveConfig || !driveConfig.serviceUrl) {
+    return { success: false, error: 'Google Drive service is not configured' };
+  }
+  try {
+    const res = await fetch(driveConfig.serviceUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: 'list_system_backups',
+        parentFolderId: driveConfig.parentFolderId || ''
+      })
+    });
+    const data = await res.json();
+    if (data && data.success) {
+      return {
+        success: true,
+        backups: data.backups || [],
+        folderUrl: data.folderUrl
+      };
+    }
+    return { success: false, error: data?.error || 'فشل جلب قائمة النسخ' };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+

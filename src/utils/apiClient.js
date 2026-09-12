@@ -98,6 +98,7 @@ async function request(endpoint, options = {}) {
     const headers = {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
+      'Accept-Encoding': 'gzip, deflate, br',
       'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
       'Pragma': 'no-cache',
       'Expires': '0',
@@ -189,8 +190,8 @@ export async function apiFetchSettings(key = STORAGE_KEY, options = {}) {
     method: 'GET',
     timeout: options.timeout || 15000,
     retries: options.retries !== undefined ? options.retries : 1,
-    useETag: options.useETag || false,
-    noCache: true,
+    useETag: options.useETag !== undefined ? options.useETag : true,
+    noCache: options.noCache !== undefined ? options.noCache : false,
     isBackground: options.isBackground !== undefined ? options.isBackground : true
   });
   if (res?.notModified) return { notModified: true };
