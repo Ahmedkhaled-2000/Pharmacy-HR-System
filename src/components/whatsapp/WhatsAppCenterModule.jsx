@@ -50,6 +50,7 @@ export default function WhatsAppCenterModule({
     }
   });
   const [copiedUrl, setCopiedUrl] = useState(false);
+  const autoWakeupAttempted = React.useRef(false);
 
   const isPrivateLanIp = useCallback((hostname) => {
     if (!hostname) return false;
@@ -255,7 +256,26 @@ export default function WhatsAppCenterModule({
 
     if (!statusFound) {
       setWaStatus('DISCONNECTED');
-      if (!silent) {
+      // محاولة الإيقاظ التلقائي الذكي لمرة واحدة عند تحميل الصفحة في حال كان الخادم محلياً
+      if (!autoWakeupAttempted.current && (activeUrl.includes('localhost') || activeUrl.includes('127.0.0.1'))) {
+        autoWakeupAttempted.current = true;
+        try {
+          if (isDesktop && window.desktopAPI?.restartWhatsAppServer) {
+            window.desktopAPI.restartWhatsAppServer();
+          } else if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+            const iframe = document.createElement('iframe');
+            iframe.style.display = 'none';
+            iframe.src = 'hr-whatsapp://start';
+            document.body.appendChild(iframe);
+            setTimeout(() => {
+              try { document.body.removeChild(iframe); } catch {}
+            }, 3000);
+          }
+          setTimeout(() => {
+            fetchWaStatus(true);
+          }, 3000);
+        } catch {}
+      } else if (!silent) {
         showToast?.('⚠️ تعذر الوصول لخادم الواتساب، يرجى التأكد من تشغيله أو الضغط على "استكشاف تلقائي للشبكة".');
       }
     }

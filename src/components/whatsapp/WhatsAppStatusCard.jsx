@@ -39,6 +39,29 @@ export default function WhatsAppStatusCard({
     return 'http://127.0.0.1:3100';
   };
 
+  const triggerServerWakeup = () => {
+    showToast?.('⚡ جاري إيقاظ وتشغيل خادم الواتساب في الخلفية تلقائياً...');
+    try {
+      if (typeof window !== 'undefined' && window.desktopAPI?.restartWhatsAppServer) {
+        window.desktopAPI.restartWhatsAppServer();
+      } else {
+        const iframe = document.createElement('iframe');
+        iframe.style.display = 'none';
+        iframe.src = 'hr-whatsapp://start';
+        document.body.appendChild(iframe);
+        setTimeout(() => {
+          try { document.body.removeChild(iframe); } catch {}
+        }, 4000);
+      }
+      setWaServerStatus('checking');
+      setTimeout(() => {
+        handleTestWaServerConnection();
+      }, 3000);
+    } catch {
+      showToast?.('تعذر إرسال إشارة الإيقاظ');
+    }
+  };
+
   return (
     <div className="whatsapp-sec-card settings-card">
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
@@ -63,6 +86,22 @@ export default function WhatsAppStatusCard({
           </div>
 
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+            {waServerStatus === 'DISCONNECTED' && (
+              <button
+                className="btn btn-ghost"
+                style={{
+                  fontSize: '13px',
+                  padding: '8px 16px',
+                  background: '#dcfce7',
+                  color: '#15803d',
+                  borderColor: '#86efac',
+                  fontWeight: '700'
+                }}
+                onClick={triggerServerWakeup}
+              >
+                🚀 إيقاظ وتشغيل السيرفر تلقائياً
+              </button>
+            )}
             {waServerStatus === 'CONNECTED' && (
               <button
                 className="btn btn-ghost"

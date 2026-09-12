@@ -1,7 +1,7 @@
 ' =========================================================================
-' WhatsApp Gateway Silent Background Starter
-' Used by Browser Protocol (hr-whatsapp://start) and local auto-launchers.
-' Checks if server is already running, and if not, starts it silently.
+' 24/7 WhatsApp Gateway Silent Background Daemon & Watchdog
+' Starts WhatsApp server completely silently and monitors it continuously.
+' Restarts automatically if closed or crashed.
 ' =========================================================================
 
 Option Explicit
@@ -12,8 +12,12 @@ Set WshShell = CreateObject("WScript.Shell")
 Set FSO = CreateObject("Scripting.FileSystemObject")
 
 ' 1. Resolve Project Root Directory
-ScriptDir = FSO.GetParentFolderName(WScript.ScriptFullName)
-ProjectDir = FSO.GetParentFolderName(ScriptDir)
+If WScript.Arguments.Count > 0 Then
+    ProjectDir = WScript.Arguments(0)
+Else
+    ScriptDir = FSO.GetParentFolderName(WScript.ScriptFullName)
+    ProjectDir = FSO.GetParentFolderName(ScriptDir)
+End If
 
 If Not FSO.FileExists(ProjectDir & "\server\whatsapp-server.js") Then
     ProjectDir = "d:\Project\HR last\HR New"
@@ -21,7 +25,7 @@ End If
 
 ServerScript = ProjectDir & "\server\whatsapp-server.js"
 
-' 2. Check if Server is Already Responding on Port 3100
+' 2. Function to Check if Server is Healthy on Port 3100
 Function IsServerHealthy()
     IsServerHealthy = False
     On Error Resume Next
@@ -37,9 +41,25 @@ Function IsServerHealthy()
     On Error GoTo 0
 End Function
 
-' 3. Launch Silently if not already healthy
-If Not IsServerHealthy() Then
+' 3. Function to Start the Server Process Silently
+Sub StartServerProcess()
+    If Not FSO.FileExists(ServerScript) Then Exit Sub
     WshShell.CurrentDirectory = ProjectDir
     ExecCmd = "cmd.exe /c cd /d """ & ProjectDir & """ && node server\whatsapp-server.js > server.log 2>&1"
     WshShell.Run ExecCmd, 0, False
+End Sub
+
+' 4. Initial Startup Check
+If Not IsServerHealthy() Then
+    StartServerProcess
+    WScript.Sleep 4000
 End If
+
+' 5. 24/7 Watchdog Supervisor Loop (Checks every 25 seconds)
+Do
+    WScript.Sleep 25000
+    If Not IsServerHealthy() Then
+        StartServerProcess
+        WScript.Sleep 5000
+    End If
+Loop
