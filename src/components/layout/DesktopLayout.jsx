@@ -1116,7 +1116,7 @@ export default function DesktopLayout({
           downloadAction: 'windows-app',
           label: '💻 تنزيل تطبيق الويندوز (أحدث نسخة)',
           icon: '📥',
-          badge: 'v1.2.15',
+          badge: 'v1.2.16',
           desc: 'تحميل برنامج سطح المكتب لويندوز مباشرة مع المزامنة التلقائية'
         }
       ]
