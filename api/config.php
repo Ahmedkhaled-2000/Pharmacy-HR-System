@@ -8,10 +8,11 @@
 
 declare(strict_types=1);
 
-// ضبط تقرير الأخطاء والذاكرة للبيئة الإنتاجية
+// ضبط تقرير الأخطاء والذاكرة والمهل الزمنية للبيئة الإنتاجية
 error_reporting(E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED & ~E_NOTICE);
-@ini_set('memory_limit', '512M');
-@ini_set('max_execution_time', '60');
+@ini_set('memory_limit', '256M');
+@ini_set('max_execution_time', '15');
+@ini_set('default_socket_timeout', '10');
 @ini_set('display_errors', '0');
 ini_set('log_errors', '1');
 

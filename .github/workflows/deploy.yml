@@ -13,6 +13,12 @@ jobs:
       - name: 📥 Checkout Source Code
         uses: actions/checkout@v4
 
+      - name: 🐘 Verify PHP Syntax
+        run: |
+          for f in api/*.php; do
+            [ -f "$f" ] && php -l "$f"
+          done
+
       - name: 🟢 Setup Node.js
         uses: actions/setup-node@v4
         with:

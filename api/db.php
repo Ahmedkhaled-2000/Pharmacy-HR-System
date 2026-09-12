@@ -23,7 +23,10 @@ class MicroCache
     {
         $dir = defined('MICRO_CACHE_DIR') ? MICRO_CACHE_DIR : sys_get_temp_dir() . '/pharmacy_hr_cache';
         if (!is_dir($dir)) {
-            @mkdir($dir, 0775, true);
+            if (!@mkdir($dir, 0777, true)) {
+                $dir = __DIR__ . '/cache';
+                if (!is_dir($dir)) @mkdir($dir, 0777, true);
+            }
         }
         return $dir;
     }
@@ -76,7 +79,10 @@ class MicroCache
         $cached = ['exp' => $exp, 'mtime' => $now, 'data' => $data];
 
         $filePath = self::getCacheDir() . '/' . md5($key) . '.cache';
-        @file_put_contents($filePath, serialize($cached), LOCK_EX);
+        $tempFile = $filePath . '.' . bin2hex(random_bytes(4)) . '.tmp';
+        if (@file_put_contents($tempFile, serialize($cached)) !== false) {
+            @rename($tempFile, $filePath);
+        }
         $cached['mtime'] = @filemtime($filePath) ?: $now;
         self::$memoryCache[$key] = $cached;
     }
