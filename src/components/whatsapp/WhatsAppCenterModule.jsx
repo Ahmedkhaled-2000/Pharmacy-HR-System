@@ -1297,52 +1297,6 @@ export default function WhatsAppCenterModule({
             <span>{isLanActive ? '⚡ تحديث وتعميم IP الهواتف' : '⚡ تفعيل وتعميم هذا الـ IP للهواتف الآن'}</span>
           </button>
 
-          <button
-            type="button"
-            className="btn"
-            style={{
-              background: 'var(--surface)',
-              color: 'var(--text)',
-              border: '1px solid var(--border)',
-              fontWeight: 700,
-              fontSize: '12.5px',
-              padding: '8px 14px',
-              borderRadius: '8px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px'
-            }}
-            onClick={() => {
-              navigator.clipboard?.writeText(primaryLanUrl);
-              showToast?.(`📋 تم نسخ رابط الهواتف: ${primaryLanUrl}`);
-            }}
-            title="نسخ رابط الخادم المخصص للهواتف"
-          >
-            <Copy style={{ width: '13px', height: '13px' }} />
-            <span>نسخ الرابط</span>
-          </button>
-
-          <button
-            type="button"
-            className="btn"
-            style={{
-              background: '#8b5cf6',
-              color: '#ffffff',
-              fontWeight: 700,
-              fontSize: '12.5px',
-              padding: '8px 14px',
-              borderRadius: '8px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              boxShadow: '0 2px 8px rgba(139, 92, 246, 0.25)'
-            }}
-            onClick={handleOpenMobileQr}
-            title="إظهار باركود QR لمسحه بكاميرا الهاتف والاتصال مباشرة"
-          >
-            <QrCode style={{ width: '14px', height: '14px' }} />
-            <span>📱 باركود الموبايل</span>
-          </button>
 
           <button
             type="button"
