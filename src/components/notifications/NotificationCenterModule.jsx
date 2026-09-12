@@ -5,6 +5,7 @@ import { getEmployeeDaySchedule } from '../../utils/rosterEngine';
 import {
   filterAdminNotifications,
   filterBranchManagerNotifications,
+  getNotificationTarget,
   getNotificationTargetTab,
   getNotificationTabLabel,
   isNotificationReadForAdmin,
@@ -18,6 +19,8 @@ export default function NotificationCenterModule({
   saveState,
   showToast,
   onNavigateTab,
+  onNavigateSubTab,
+  setActiveSubTab,
   onApproveRequest,
   onRejectRequest,
   onApproveLoan,
@@ -1268,13 +1271,26 @@ export default function NotificationCenterModule({
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {notifications.map((item) => {
                 const isUnread = !item.read;
-                const targetTab = getNotificationTargetTab(item, authRole);
-                const tabLabel = getNotificationTabLabel(targetTab, authRole);
+                const target = getNotificationTarget(item, authRole);
+                const tabLabel = getNotificationTabLabel(target, authRole);
 
                 const handleNavigateToItem = () => {
                   if (isUnread) handleMarkAsRead(item.id);
                   if (onNavigateTab) {
-                    onNavigateTab(targetTab);
+                    onNavigateTab(target.tab);
+                    const subFn = onNavigateSubTab || setActiveSubTab;
+                    if (subFn && target.subTab) subFn(target.subTab);
+                    if (target.subTab === 'recruitment') {
+                      setTimeout(() => {
+                        window.dispatchEvent(new CustomEvent('recruitment:open-applicant', {
+                          detail: {
+                            applicationId: item.applicationId,
+                            applicantCode: item.applicantCode,
+                            applicantName: item.employeeName
+                          }
+                        }));
+                      }, 50);
+                    }
                     showToast?.(`الانتقال إلى: ${tabLabel}`);
                   }
                 };
@@ -1442,13 +1458,26 @@ export default function NotificationCenterModule({
 
               {/* 2. Unread General Notifications */}
               {notifications.filter((n) => !n.read).map((item) => {
-                const targetTab = getNotificationTargetTab(item, authRole);
-                const tabLabel = getNotificationTabLabel(targetTab, authRole);
+                const target = getNotificationTarget(item, authRole);
+                const tabLabel = getNotificationTabLabel(target, authRole);
 
                 const handleNavigateUnread = () => {
                   handleMarkAsRead(item.id);
                   if (onNavigateTab) {
-                    onNavigateTab(targetTab);
+                    onNavigateTab(target.tab);
+                    const subFn = onNavigateSubTab || setActiveSubTab;
+                    if (subFn && target.subTab) subFn(target.subTab);
+                    if (target.subTab === 'recruitment') {
+                      setTimeout(() => {
+                        window.dispatchEvent(new CustomEvent('recruitment:open-applicant', {
+                          detail: {
+                            applicationId: item.applicationId,
+                            applicantCode: item.applicantCode,
+                            applicantName: item.employeeName
+                          }
+                        }));
+                      }, 50);
+                    }
                     showToast?.(`الانتقال إلى: ${tabLabel}`);
                   }
                 };

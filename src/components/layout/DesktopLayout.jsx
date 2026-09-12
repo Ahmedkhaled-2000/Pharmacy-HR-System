@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useLiveRealTime } from '../../hooks/useLiveRealTime';
 import { getCycleDateRange } from '../../utils/periodEngine';
-import { getNotificationTargetTab } from '../../utils/notificationEngine';
+import { getNotificationTarget, getNotificationTargetTab } from '../../utils/notificationEngine';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 🌟 ADAPTIVE DROPDOWN ITEM WITH SMART BIDIRECTIONAL FLYOUT (Anti-Clipping Engine)
@@ -1116,7 +1116,7 @@ export default function DesktopLayout({
           downloadAction: 'windows-app',
           label: '💻 تنزيل تطبيق الويندوز (أحدث نسخة)',
           icon: '📥',
-          badge: 'v1.2.16',
+          badge: 'v1.2.17',
           desc: 'تحميل برنامج سطح المكتب لويندوز مباشرة مع المزامنة التلقائية'
         }
       ]
@@ -1792,8 +1792,22 @@ return (
                     const handleItemClick = () => {
                       if (isUnread && onMarkNotificationRead) onMarkNotificationRead(n.id);
                       setIsNotifDropdownOpen(false);
-                      const target = getNotificationTargetTab(n, currentRole);
-                      if (setActiveTab) setActiveTab(target);
+                      const target = getNotificationTarget(n, currentRole);
+                      if (setActiveTab) setActiveTab(target.tab);
+                      if (setActiveSubTab && target.subTab) {
+                        setActiveSubTab(target.subTab);
+                      }
+                      if (target.subTab === 'recruitment') {
+                        setTimeout(() => {
+                          window.dispatchEvent(new CustomEvent('recruitment:open-applicant', {
+                            detail: {
+                              applicationId: n.applicationId,
+                              applicantCode: n.applicantCode,
+                              applicantName: n.employeeName
+                            }
+                          }));
+                        }, 50);
+                      }
                     };
 
                     return (
@@ -2327,8 +2341,22 @@ return (
                     const handleDesktopItemClick = () => {
                       if (isUnread && onMarkNotificationRead) onMarkNotificationRead(n.id);
                       setIsNotifDropdownOpen(false);
-                      const target = getNotificationTargetTab(n, currentRole);
-                      if (setActiveTab) setActiveTab(target);
+                      const target = getNotificationTarget(n, currentRole);
+                      if (setActiveTab) setActiveTab(target.tab);
+                      if (setActiveSubTab && target.subTab) {
+                        setActiveSubTab(target.subTab);
+                      }
+                      if (target.subTab === 'recruitment') {
+                        setTimeout(() => {
+                          window.dispatchEvent(new CustomEvent('recruitment:open-applicant', {
+                            detail: {
+                              applicationId: n.applicationId,
+                              applicantCode: n.applicantCode,
+                              applicantName: n.employeeName
+                            }
+                          }));
+                        }, 50);
+                      }
                     };
 
                     return (

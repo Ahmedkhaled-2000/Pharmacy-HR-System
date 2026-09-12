@@ -1099,6 +1099,8 @@ export default function AppRoutes() {
                     saveState={saveState}
                     showToast={showToast}
                     onNavigateTab={setActiveNavTab}
+                    onNavigateSubTab={setActiveSubTab}
+                    setActiveSubTab={setActiveSubTab}
                     onApproveRequest={(id) => handleApproveRequest(id, authRole === 'branch' ? 'branch' : 'admin')}
                     onRejectRequest={(id) => handleRejectRequest(id, authRole === 'branch' ? 'branch' : 'admin')}
                     onApproveLoan={handleApproveLoan}

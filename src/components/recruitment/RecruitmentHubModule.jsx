@@ -96,6 +96,26 @@ export default function RecruitmentHubModule({
     }
   }, [state?.employees, applications]);
 
+  // الاستماع لحدث فتح تفاصيل مرشح أو الانتقال التلقائي من الإشعارات
+  useEffect(() => {
+    const handleSelectApplicant = (e) => {
+      const { applicationId, applicantCode, applicantName } = e.detail || {};
+      if (!applications || !applications.length) return;
+      const targetApp = applications.find(a => 
+        (applicationId && String(a.id) === String(applicationId)) ||
+        (applicantCode && String(a.code) === String(applicantCode)) ||
+        (applicantName && a.name && String(a.name).trim().toLowerCase() === String(applicantName).trim().toLowerCase())
+      );
+      if (targetApp) {
+        setSelectedApplicant(targetApp);
+        setIsDetailsModalOpen(true);
+        setActiveTab('pipeline');
+      }
+    };
+    window.addEventListener('recruitment:open-applicant', handleSelectApplicant);
+    return () => window.removeEventListener('recruitment:open-applicant', handleSelectApplicant);
+  }, [applications]);
+
   // Statistics counters
   const stats = useMemo(() => {
     const total = applications.length;

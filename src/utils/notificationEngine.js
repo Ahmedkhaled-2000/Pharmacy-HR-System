@@ -747,94 +747,129 @@ export function countUnreadBranchManagerNotifications(notifications = [], curren
 }
 
 /**
- * دالة ذكية لتحديد الصفحة / التبويب المستهدف عند الضغط على أي إشعار
+ * دالة ذكية لتحديد الصفحة والتبويب الفرعي المستهدف عند الضغط على أي إشعار
  * تدعم الإدارة العليا، مدير الفرع، وبوابة الموظف
  */
-export function getNotificationTargetTab(notification, role = 'admin') {
+export function getNotificationTarget(notification, role = 'admin') {
   if (!notification) {
-    return role === 'employee' ? 'dashboard' : 'requests';
+    return { tab: role === 'employee' ? 'dashboard' : 'requests', subTab: null };
   }
 
   const type = String(notification.type || '').toLowerCase();
-  const reqId = String(notification.requestId || '').toLowerCase();
+  const reqId = String(notification.requestId || notification.id || '').toLowerCase();
   const title = String(notification.title || '').toLowerCase();
-  const msg = String(notification.message || notification.body || '').toLowerCase();
+  const msg = String(notification.message || notification.body || notification.details || '').toLowerCase();
 
   // 1. بوابة الموظف (Employee Portal)
   if (role === 'employee') {
     if (notification.linkTab && ['leaves', 'permissions', 'loans', 'swaps', 'resignations', 'evaluations', 'salary', 'adjustments', 'shifts', 'roster', 'bylaws', 'dashboard'].includes(notification.linkTab)) {
-      return notification.linkTab;
+      return { tab: notification.linkTab, subTab: null };
     }
-    if (type.includes('leave') || reqId.startsWith('leave_') || title.includes('إجاز') || title.includes('اجاز')) return 'leaves';
-    if (type.includes('perm') || reqId.startsWith('perm_') || title.includes('إذن') || title.includes('اذن') || title.includes('استئذان')) return 'permissions';
-    if (type.includes('loan') || type.includes('med') || type.includes('advance') || reqId.startsWith('loan_') || reqId.startsWith('medreq_') || title.includes('سلف') || title.includes('أدوي') || title.includes('ادوي') || title.includes('آجل')) return 'loans';
-    if (type.includes('swap') || reqId.startsWith('swap_') || title.includes('تبديل') || title.includes('شفت') || title.includes('ورد')) return 'swaps';
-    if (type.includes('resign') || reqId.startsWith('res_') || title.includes('استقال')) return 'resignations';
-    if (type.includes('eval') || type.includes('complaint') || title.includes('تقييم') || title.includes('شكو')) return 'evaluations';
-    if (type.includes('salary') || type.includes('payroll') || type.includes('payslip') || title.includes('مرتب') || title.includes('راتب') || title.includes('أجر') || title.includes('مفردات')) return 'salary';
-    if (type.includes('adj') || type.includes('penalty') || type.includes('bonus') || type.includes('deduct') || type.includes('late') || type.includes('early_exit') || type.includes('overtime') || title.includes('مكافأ') || title.includes('خصم') || title.includes('جزاء') || title.includes('تأخير') || title.includes('خروج') || title.includes('إضافي')) return 'adjustments';
-    if (type.includes('punch') || type.includes('shift') || title.includes('بصم') || title.includes('حضور')) return 'shifts';
-    if (type.includes('roster') || title.includes('جدول')) return 'roster';
-    if (type.includes('bylaw') || title.includes('لائح')) return 'bylaws';
-    return 'dashboard';
+    if (type.includes('leave') || reqId.startsWith('leave_') || title.includes('إجاز') || title.includes('اجاز')) return { tab: 'leaves', subTab: null };
+    if (type.includes('perm') || reqId.startsWith('perm_') || title.includes('إذن') || title.includes('اذن') || title.includes('استئذان')) return { tab: 'permissions', subTab: null };
+    if (type.includes('loan') || type.includes('med') || type.includes('advance') || reqId.startsWith('loan_') || reqId.startsWith('medreq_') || title.includes('سلف') || title.includes('أدوي') || title.includes('ادوي') || title.includes('آجل')) return { tab: 'loans', subTab: null };
+    if (type.includes('swap') || reqId.startsWith('swap_') || title.includes('تبديل') || title.includes('شفت') || title.includes('ورد')) return { tab: 'swaps', subTab: null };
+    if (type.includes('resign') || reqId.startsWith('res_') || title.includes('استقال')) return { tab: 'resignations', subTab: null };
+    if (type.includes('eval') || type.includes('complaint') || title.includes('تقييم') || title.includes('شكو')) return { tab: 'evaluations', subTab: null };
+    if (type.includes('salary') || type.includes('payroll') || type.includes('payslip') || title.includes('مرتب') || title.includes('راتب') || title.includes('أجر') || title.includes('مفردات')) return { tab: 'salary', subTab: null };
+    if (type.includes('adj') || type.includes('penalty') || type.includes('bonus') || type.includes('deduct') || type.includes('late') || type.includes('early_exit') || type.includes('overtime') || title.includes('مكافأ') || title.includes('خصم') || title.includes('جزاء') || title.includes('تأخير') || title.includes('خروج') || title.includes('إضافي')) return { tab: 'adjustments', subTab: null };
+    if (type.includes('punch') || type.includes('shift') || title.includes('بصم') || title.includes('حضور')) return { tab: 'shifts', subTab: null };
+    if (type.includes('roster') || title.includes('جدول')) return { tab: 'roster', subTab: null };
+    if (type.includes('bylaw') || title.includes('لائح')) return { tab: 'bylaws', subTab: null };
+    return { tab: 'dashboard', subTab: null };
   }
 
   // 2. الإدارة العليا ومدير الفرع (Admin & Branch Manager)
+  
+  // ── الأولوية القصوى (أ): طلبات التوظيف والتعيينات والمقابلات الشخصية ──
+  if (
+    type.includes('recruit') ||
+    type.includes('applicant') ||
+    type.includes('job_app') ||
+    reqId.startsWith('notif_app_') ||
+    reqId.startsWith('app_') ||
+    notification.targetSubTab === 'recruitment' ||
+    notification.applicationId ||
+    title.includes('توظيف') ||
+    title.includes('تعيين') ||
+    title.includes('مرشح') ||
+    msg.includes('طلب توظيف') ||
+    msg.includes('المرشح')
+  ) {
+    return { tab: 'employees', subTab: 'recruitment' };
+  }
+
+  // دعم الأهداف الصريحة المحددة داخل كائن الإشعار نفسه
+  if (notification.targetTab) {
+    return { tab: notification.targetTab, subTab: notification.targetSubTab || null };
+  }
   if (notification.linkTab) {
-    return notification.linkTab;
+    return { tab: notification.linkTab, subTab: notification.linkSubTab || null };
   }
 
   // طلبات المكافآت والحوافز والجزاءات والخصومات والتسويات -> مركز موافقات الطلبات
   if (type.includes('bonus') || type.includes('penalty') || type.includes('adj') || type.includes('reward') || title.includes('مكافأ') || title.includes('مكافأة') || title.includes('حافز') || title.includes('خصم') || title.includes('جزاء') || reqId.startsWith('adj_') || reqId.startsWith('pen_') || reqId.startsWith('bonus_')) {
-    return 'requests';
+    return { tab: 'requests', subTab: null };
   }
 
   // طلبات البصمات وتصحيح البصمة اليدوية
   if (type.includes('manual_punch') || type.includes('punch_correction') || title.includes('طلب بصمة') || title.includes('بصمة يدوي')) {
-    return 'requests';
+    return { tab: 'requests', subTab: null };
   }
 
   // طلبات الموظفين العامة (إجازات، أذونات، سلف، تبديل، استقالة) -> توجيه لمركز موافقات الطلبات
-  if (type.includes('leave') || reqId.startsWith('leave_') || title.includes('إجاز') || title.includes('اجاز')) return 'requests';
-  if (type.includes('perm') || reqId.startsWith('perm_') || title.includes('إذن') || title.includes('اذن') || title.includes('استئذان')) return 'requests';
-  if (type.includes('loan') || type.includes('med') || type.includes('advance') || reqId.startsWith('loan_') || reqId.startsWith('medreq_') || title.includes('سلف') || title.includes('أدوي') || title.includes('ادوي') || title.includes('آجل')) return 'requests';
-  if (type.includes('swap') || reqId.startsWith('swap_') || title.includes('تبديل')) return 'requests';
-  if (type.includes('resign') || reqId.startsWith('res_') || title.includes('استقال')) return 'resignation';
-  if (type.includes('request') || reqId.startsWith('req_') || title.includes('طلب ')) return 'requests';
+  if (type.includes('leave') || reqId.startsWith('leave_') || title.includes('إجاز') || title.includes('اجاز')) return { tab: 'requests', subTab: null };
+  if (type.includes('perm') || reqId.startsWith('perm_') || title.includes('إذن') || title.includes('اذن') || title.includes('استئذان')) return { tab: 'requests', subTab: null };
+  if (type.includes('loan') || type.includes('med') || type.includes('advance') || reqId.startsWith('loan_') || reqId.startsWith('medreq_') || title.includes('سلف') || title.includes('أدوي') || title.includes('ادوي') || title.includes('آجل')) return { tab: 'requests', subTab: null };
+  if (type.includes('swap') || reqId.startsWith('swap_') || title.includes('تبديل')) return { tab: 'requests', subTab: null };
+  if (type.includes('resign') || reqId.startsWith('res_') || title.includes('استقال')) return { tab: 'resignation', subTab: null };
+  if (type.includes('request') || reqId.startsWith('req_') || title.includes('طلب ')) return { tab: 'requests', subTab: null };
 
   // التقييمات والشكاوى
-  if (type.includes('eval') || type.includes('complaint') || title.includes('تقييم') || title.includes('شكو')) return 'evaluations';
+  if (type.includes('eval') || type.includes('complaint') || title.includes('تقييم') || title.includes('شكو')) return { tab: 'evaluations', subTab: null };
 
   // الجداول والورديات
-  if (type.includes('roster') || title.includes('جدول')) return 'roster';
+  if (type.includes('roster') || title.includes('جدول')) return { tab: 'roster', subTab: null };
 
   // الحضور والبصمات
-  if (type.includes('punch') || type.includes('shift') || type.includes('biometric') || type.includes('early_departure') || title.includes('بصم') || title.includes('حضور') || title.includes('إغلاق الفرع')) return 'attendance';
+  if (type.includes('punch') || type.includes('shift') || type.includes('biometric') || type.includes('early_departure') || title.includes('بصم') || title.includes('حضور') || title.includes('إغلاق الفرع')) return { tab: 'attendance', subTab: null };
 
   // لائحة العمل والجزاءات والتأخير
-  if (type.includes('late') || type.includes('early_exit') || type.includes('bylaw') || title.includes('تأخير') || title.includes('خروج') || title.includes('لائح')) return 'bylaws';
+  if (type.includes('late') || type.includes('early_exit') || type.includes('bylaw') || title.includes('تأخير') || title.includes('خروج') || title.includes('لائح')) return { tab: 'bylaws', subTab: null };
 
   // الرواتب
-  if (type.includes('payroll') || type.includes('salary') || title.includes('مرتب') || title.includes('راتب')) return 'payroll';
+  if (type.includes('payroll') || type.includes('salary') || title.includes('مرتب') || title.includes('راتب')) return { tab: 'payroll', subTab: null };
 
   // الفروع
-  if (type.includes('branch') || title.includes('فرع')) return 'branches';
+  if (type.includes('branch') || title.includes('فرع')) return { tab: 'branches', subTab: null };
 
-  // شؤون الموظفين والتوظيف
-  if (type.includes('recruit') || type.includes('applicant') || title.includes('توظيف') || title.includes('تعيين') || reqId.startsWith('notif_app_') || reqId.startsWith('app_') || type.includes('employee_profile') || title.includes('إضافة موظف') || title.includes('ملف الموظف')) {
-    return 'employees';
+  // شؤون الموظفين العامة
+  if (type.includes('employee_profile') || title.includes('إضافة موظف') || title.includes('ملف الموظف')) {
+    return { tab: 'employees', subTab: 'cards' };
   }
 
   // الأرشيف
-  if (type.includes('archive') || title.includes('أرشيف') || title.includes('فاتورة')) return 'pharmacy-archive';
+  if (type.includes('archive') || title.includes('أرشيف') || title.includes('فاتورة')) return { tab: 'pharmacy-archive', subTab: null };
 
-  return 'requests';
+  return { tab: 'requests', subTab: null };
+}
+
+/**
+ * دالة متوافقة لتحديد اسم التبويب الرئيسي فقط
+ */
+export function getNotificationTargetTab(notification, role = 'admin') {
+  const target = getNotificationTarget(notification, role);
+  return target.tab;
 }
 
 /**
  * الحصول على اسم التبويب بالعربية لرسائل التوجيه
  */
 export function getNotificationTabLabel(targetTab, role = 'admin') {
+  const tabKey = typeof targetTab === 'object' && targetTab !== null 
+    ? (targetTab.subTab || targetTab.tab) 
+    : targetTab;
+
   const labels = {
     leaves: 'قسم الإجازات 🏖️',
     permissions: 'قسم الأذونات ⏰',
@@ -858,10 +893,11 @@ export function getNotificationTabLabel(targetTab, role = 'admin') {
     requests: 'مركز موافقات الطلبات 📋',
     branches: 'إدارة الفروع 🏢',
     employees: 'شؤون الموظفين 👥',
+    recruitment: 'التعيينات والتوظيف 🎯',
     'pharmacy-archive': 'أرشيف الصيدلية 🗄️',
     dashboard: 'لوحة التحكم 📊'
   };
 
-  return labels[targetTab] || 'القسم المطلوب 🔗';
+  return labels[tabKey] || 'القسم المطلوب 🔗';
 }
 
