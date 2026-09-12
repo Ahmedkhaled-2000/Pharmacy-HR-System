@@ -86,13 +86,14 @@ export function isItemDeleted(item, key, deletedIds, options = {}) {
     const idStr = item.id ? String(item.id).trim() : '';
     const idLower = idStr.toLowerCase();
     if (idStr) {
-      if (idStr.startsWith('emp_') && (deletedIds.has(idStr) || deletedIds.has(idLower))) return true;
+      if ((idStr.startsWith('emp_') || /[a-z_-]/i.test(idStr)) && (deletedIds.has(idStr) || deletedIds.has(idLower))) return true;
       if (deletedIds.has(`emp_${idStr}`) || deletedIds.has(`emp_${idLower}`) || deletedIds.has(`emp_del_${idStr}`)) return true;
     }
     if (item._id) {
       const _idStr = String(item._id).trim();
-      if (_idStr.startsWith('emp_') && (deletedIds.has(_idStr) || deletedIds.has(_idStr.toLowerCase()))) return true;
-      if (deletedIds.has(`emp_${_idStr}`)) return true;
+      const _idLower = _idStr.toLowerCase();
+      if ((_idStr.startsWith('emp_') || /[a-z_-]/i.test(_idStr)) && (deletedIds.has(_idStr) || deletedIds.has(_idLower))) return true;
+      if (deletedIds.has(`emp_${_idStr}`) || deletedIds.has(`emp_${_idLower}`)) return true;
     }
     if (item.code !== undefined && item.code !== null && item.code !== '') {
       const codeStr = String(item.code).trim().toLowerCase();
@@ -534,37 +535,9 @@ export function smartMergeStates(localState, remoteState) {
     deletedIds.add(s.toLowerCase());
   }
 
-  // ── تطهير ذاتي وحصانة مطلقة للموظفين الفعليين (Self-Healing Active Employee Immunity) ──
-  // أي موظف موجود في أي من الطرفين له اسم ومعرف، يتم حمايته فوراً وإسقاط أي تومبستون قديم يعارضه
-  const allCurrentEmployees = [
-    ...toSafeArray(localState.employees),
-    ...toSafeArray(remoteState.employees)
-  ];
-  for (const emp of allCurrentEmployees) {
-    if (!emp || typeof emp !== 'object' || !emp.name) continue;
-    if (emp.id) {
-      const idStr = String(emp.id).trim();
-      deletedIds.delete(idStr);
-      deletedIds.delete(idStr.toLowerCase());
-      deletedIds.delete(`emp_${idStr}`);
-      deletedIds.delete(`emp_${idStr.toLowerCase()}`);
-      deletedIds.delete(`emp_del_${idStr}`);
-    }
-    if (emp.code !== undefined && emp.code !== null && emp.code !== '') {
-      const cStr = String(emp.code).trim();
-      deletedIds.delete(cStr);
-      deletedIds.delete(cStr.toLowerCase());
-      deletedIds.delete(`emp_${cStr}`);
-      deletedIds.delete(`emp_code_${cStr}`);
-      deletedIds.delete(`emp_code_${cStr.toLowerCase()}`);
-    }
-    if (emp.username) {
-      const uStr = String(emp.username).trim().toLowerCase();
-      deletedIds.delete(uStr);
-      deletedIds.delete(`emp_${uStr}`);
-      deletedIds.delete(`user_${uStr}`);
-    }
-  }
+  // ── صرامة شواهد القبور (Tombstone Priority) ──
+  // شواهد القبور المحذوفة صراحة لها الأولوية المطلقة على أي بيانات مخزنة محلياً في الكاش القديم
+  // لمنع عودة الموظفين والكيانات المحذوفة (Zombie Entities) عند مزامنة أجهزة مختلفة.
 
   // ── حماية المرشحين المقبولين والمعينين في التوظيف من التومبستون ──
   const allCurrentApps = [

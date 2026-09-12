@@ -223,26 +223,8 @@ function mergeServerState(array $existing, array $incoming): array
     ));
     $deletedSet = array_flip(array_map('strval', $deletedIds));
 
-    // ── تطهير ذاتي وحصانة مطلقة للموظفين الفعليين والنشطين لمنع أي تومبستون قديم من حذفهم ──
-    $allEmps = array_merge(
-        (array)($existing['employees'] ?? []),
-        (array)($incoming['employees'] ?? [])
-    );
-    foreach ($allEmps as $e) {
-        if (!is_array($e) || empty($e['name'])) continue;
-        if (!empty($e['id'])) {
-            $idStr = (string)$e['id'];
-            unset($deletedSet[$idStr], $deletedSet[strtolower($idStr)], $deletedSet['emp_' . $idStr], $deletedSet['emp_' . strtolower($idStr)], $deletedSet['emp_del_' . $idStr]);
-        }
-        if (isset($e['code']) && $e['code'] !== '') {
-            $codeStr = strtolower(trim((string)$e['code']));
-            unset($deletedSet[$codeStr], $deletedSet['emp_' . $codeStr], $deletedSet['emp_code_' . $codeStr]);
-        }
-        if (!empty($e['username'])) {
-            $uStr = strtolower(trim((string)$e['username']));
-            unset($deletedSet[$uStr], $deletedSet['emp_' . $uStr], $deletedSet['user_' . $uStr]);
-        }
-    }
+    // ── صرامة شواهد القبور على السيرفر (Server Tombstone Priority) ──
+    // شواهد القبور في _deletedIds لها الأولوية المطلقة لمنع إعادة إحياء الموظفين المحذوفين
 
     // ── حماية المرشحين المقبولين والمعينين في التوظيف ──
     $allApps = array_merge(

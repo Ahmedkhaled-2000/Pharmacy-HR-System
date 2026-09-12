@@ -262,7 +262,8 @@ try {
 
                 // 4. دمج البيانات بذكاء مع السيرفر للحفاظ على اللوائح والإعدادات والطلبات
                 $finalValueData = $decodedIncoming;
-                if (is_array($existingDecoded)) {
+                $isForceReplace = !empty($payload['replaceDirectly']) || !empty($decodedIncoming['_forceOverride']);
+                if (is_array($existingDecoded) && !$isForceReplace) {
                     $finalValueData = mergeServerState($existingDecoded, $decodedIncoming);
                 }
 

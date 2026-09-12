@@ -305,6 +305,40 @@ export function normalizeState(parsed) {
     };
   });
 
+  // ── 1. تصفية الموظفين المحذوفين وفق شواهد القبور (_deletedIds) ──
+  const rawDeletedIds = toSafeArray(parsed._deletedIds || []);
+  const deletedSet = new Set(rawDeletedIds.map((d) => String(d).trim().toLowerCase()));
+  if (deletedSet.size > 0) {
+    employees = employees.filter((emp) => {
+      if (!emp) return false;
+      const idStr = String(emp.id || '').trim().toLowerCase();
+      const codeStr = String(emp.code || '').trim().toLowerCase();
+      const userStr = String(emp.username || '').trim().toLowerCase();
+      const nidStr = String(emp.nationalId || '').replace(/\D/g, '');
+
+      if (idStr) {
+        if ((idStr.startsWith('emp_') || /[a-z_-]/i.test(idStr)) && (deletedSet.has(idStr) || deletedSet.has(`emp_${idStr}`))) return false;
+        if (deletedSet.has(`emp_${idStr}`) || deletedSet.has(`emp_del_${idStr}`)) return false;
+      }
+      if (codeStr && (deletedSet.has(`emp_${codeStr}`) || deletedSet.has(`emp_code_${codeStr}`))) return false;
+      if (userStr && (deletedSet.has(`emp_${userStr}`) || deletedSet.has(`user_${userStr}`))) return false;
+      if (nidStr && (deletedSet.has(`emp_nid_${nidStr}`) || deletedSet.has(`nid_${nidStr}`))) return false;
+      return true;
+    });
+  }
+
+  // ── 2. تطهير معرفات الفروع المحذوفة وتسكين موظفيها على المركز الرئيسي تلقائياً ──
+  const validBranchIds = new Set(toSafeArray(parsed.branches || []).map((b) => String(b.id)));
+  employees = employees.map((emp) => {
+    if (!emp) return emp;
+    const bId = emp.branchId ? String(emp.branchId) : '';
+    const isBranchValid = bId && validBranchIds.has(bId);
+    return {
+      ...emp,
+      branchId: isBranchValid ? bId : ''
+    };
+  });
+
   const remapEmpId = (id) => {
     if (!id || !idRemap || idRemap.size === 0) return id;
     const str = String(id);

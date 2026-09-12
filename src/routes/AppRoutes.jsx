@@ -277,10 +277,19 @@ export default function AppRoutes() {
     const performDeleteBranch = async () => {
       const updatedBranches = (state.branches || []).filter((b) => b.id !== branchId);
       const updatedDeletedIds = Array.from(new Set([...(state._deletedIds || []), String(branchId), `branch_${branchId}`])).slice(-2000);
-      const updatedState = { ...state, branches: updatedBranches, _deletedIds: updatedDeletedIds };
+      // تسكين أي موظف كان تابعاً للفرع المحذوف على المركز الرئيسي تلقائياً
+      const updatedEmployees = (state.employees || []).map((emp) => {
+        if (!emp) return emp;
+        const bId = emp.branchId ? String(emp.branchId) : '';
+        if (bId === String(branchId)) {
+          return { ...emp, branchId: '' };
+        }
+        return emp;
+      });
+      const updatedState = { ...state, branches: updatedBranches, employees: updatedEmployees, _deletedIds: updatedDeletedIds };
       setState(updatedState);
       await saveState(updatedState);
-      showToast('🗑️ تم حذف الفرع نهائياً');
+      showToast('🗑️ تم حذف الفرع ونقل موظفيه للمركز الرئيسي بنجاح');
     };
 
     executeWithOwnerGuard({

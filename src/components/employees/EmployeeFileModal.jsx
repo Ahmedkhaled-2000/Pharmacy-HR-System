@@ -959,26 +959,7 @@ export default function EmployeeFileModal({
             keysToUnblock.add(`emp_${u}`);
             keysToUnblock.add(`user_${u}`);
           }
-          // فك الحظر عن كافة الموظفين الحاليين لمنع أي تضارب
-          for (const otherEmp of (currentState.employees || [])) {
-            if (!otherEmp) continue;
-            if (otherEmp.id) {
-              const oId = String(otherEmp.id).trim();
-              keysToUnblock.add(oId);
-              keysToUnblock.add(oId.toLowerCase());
-              keysToUnblock.add(`emp_${oId}`);
-              keysToUnblock.add(`emp_${oId.toLowerCase()}`);
-              keysToUnblock.add(`emp_del_${oId}`);
-            }
-            if (otherEmp.code !== undefined && otherEmp.code !== null && otherEmp.code !== '') {
-              const oCode = String(otherEmp.code).trim();
-              keysToUnblock.add(oCode);
-              keysToUnblock.add(oCode.toLowerCase());
-              keysToUnblock.add(`emp_${oCode}`);
-              keysToUnblock.add(`emp_code_${oCode}`);
-              keysToUnblock.add(`emp_code_${oCode.toLowerCase()}`);
-            }
-          }
+          // فك الحظر مقتصر حصراً على الموظف الجاري حفظه أو تعديله فقط لمنع إحياء المحذوفين
           for (const app of (currentState.recruitmentApplications || [])) {
             if (app && app.status === 'hired') {
               if (app.hiredEmployeeId) {
