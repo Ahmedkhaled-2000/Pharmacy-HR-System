@@ -6,7 +6,7 @@ import {
   populateWhatsAppTemplate,
   generatePayslipPrintHtml
 } from '../../utils/whatsappTemplates';
-import { Send, FileText, CheckCircle2, AlertCircle, RefreshCw, Sparkles, Filter, Users, UserCheck, LogOut, Globe, Network, Copy, Check, ExternalLink, HelpCircle, Smartphone, Wifi, ShieldCheck } from 'lucide-react';
+import { Send, FileText, CheckCircle2, AlertCircle, RefreshCw, Sparkles, Filter, Users, UserCheck, LogOut, Globe, Network, Copy, Check, ExternalLink, Smartphone, Wifi, ShieldCheck } from 'lucide-react';
 import { useUI } from '../../context/UIContext';
 
 export default function WhatsAppCenterModule({
