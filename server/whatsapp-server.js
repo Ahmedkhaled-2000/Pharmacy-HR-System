@@ -13,6 +13,17 @@ import makeWASocket, {
 } from '@whiskeysockets/baileys';
 import pino from 'pino';
 
+// منع انهيار خادم Node بسبب أي استثناءات غير متوقعة في مكتبة Baileys أو اتصالات الشبكة
+process.on('uncaughtException', (err) => {
+  console.error('[WhatsApp Gateway UncaughtException]:', err?.stack || err?.message || err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[WhatsApp Gateway UnhandledRejection]:', reason?.stack || reason?.message || reason);
+});
+process.on('exit', (code) => {
+  console.error('[WhatsApp Gateway Process Exited]: Code =', code);
+});
+
 // محرك تحويل HTML إلى ملفات PDF احترافية باستخدام متصفح Chromium المتاح على النظام
 function findBrowserBinary() {
   const candidates = [
@@ -152,6 +163,12 @@ async function connectToWhatsApp() {
   isConnecting = true;
 
   try {
+    if (sock) {
+      try { sock.ev.removeAllListeners(); } catch {}
+      try { sock.end(undefined); } catch {}
+      sock = null;
+    }
+
     console.log('[WhatsApp Gateway] 🔄 Initializing connection to WhatsApp multi-device...');
     serverState.status = 'CONNECTING';
 
@@ -477,9 +494,11 @@ app.post('/api/restart', async (req, res) => {
   console.log('[WhatsApp Gateway] 🔄 Manual restart requested...');
   try {
     if (sock) {
-      try { sock.end(new Error('Manual Restart Triggered')); } catch {}
+      try { sock.ev.removeAllListeners(); } catch {}
+      try { sock.end(undefined); } catch {}
     }
   } catch {}
+  sock = null;
 
   serverState.status = 'CONNECTING';
   isConnecting = false;
@@ -494,11 +513,12 @@ app.post('/api/logout', async (req, res) => {
   console.log('[WhatsApp Gateway] 🚪 Logout requested to change connected phone number...');
   try {
     if (sock) {
+      try { sock.ev.removeAllListeners(); } catch {}
       await Promise.race([
         sock.logout().catch(() => {}),
         new Promise((resolve) => setTimeout(resolve, 1500))
       ]);
-      try { sock.end(new Error('Manual logout triggered')); } catch {}
+      try { sock.end(undefined); } catch {}
     }
   } catch (err) {
     console.warn('[WhatsApp Gateway] Logout socket cleanup warning:', err.message);

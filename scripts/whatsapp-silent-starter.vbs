@@ -19,9 +19,13 @@ Else
 End If
 
 ServerScript = ProjectDir & "\server\whatsapp-server.js"
+NodeExe = "C:\Program Files\nodejs\node.exe"
+If Not FSO.FileExists(NodeExe) Then
+    NodeExe = "node"
+End If
 
 If FSO.FileExists(ServerScript) Then
     WshShell.CurrentDirectory = ProjectDir
     ' Run silently (0 = hidden window, False = don't wait for completion)
-    WshShell.Run "node """ & ServerScript & """", 0, False
+    WshShell.Run "cmd /c node server\whatsapp-server.js > server_debug.log 2>&1", 0, False
 End If
