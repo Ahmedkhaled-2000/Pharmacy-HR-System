@@ -43,6 +43,12 @@ if ($LASTEXITCODE -eq 0) {
     Write-Host "  [INFO] Startup shortcut will serve as primary launcher." -ForegroundColor Cyan
 }
 
+# 2.1 Register Windows Registry Run Key for Current User
+try {
+    Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "Pharmacy_WhatsApp_Gateway" -Value "wscript.exe `"$DaemonVbs`" `"$ProjectDir`"" -Force | Out-Null
+    Write-Host "  [OK] Registry Run key registered successfully." -ForegroundColor Green
+} catch {}
+
 # 3. Register Browser Protocol hr-whatsapp://
 Write-Host "`n[3/5] Registering Browser Protocol (hr-whatsapp://)..." -ForegroundColor Yellow
 try {

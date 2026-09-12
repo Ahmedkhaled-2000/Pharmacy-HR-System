@@ -73,6 +73,7 @@ contextBridge.exposeInMainWorld('desktopAPI', {
   getWhatsAppServerHealth: () => ipcRenderer.invoke('whatsapp:get-health'),
   getWhatsAppServerStatus: () => ipcRenderer.invoke('whatsapp:get-status'),
   getNetworkInfo: () => ipcRenderer.invoke('whatsapp:get-network-info'),
+  allowFirewall: () => ipcRenderer.invoke('whatsapp:allow-firewall'),
   onWhatsAppNetworkInfo: (listener) => {
     ipcRenderer.on('whatsapp:network-info', (e, data) => listener(data));
   },

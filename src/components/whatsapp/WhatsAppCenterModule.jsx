@@ -6,7 +6,8 @@ import {
   populateWhatsAppTemplate,
   generatePayslipPrintHtml
 } from '../../utils/whatsappTemplates';
-import { Send, FileText, CheckCircle2, AlertCircle, RefreshCw, Sparkles, Filter, Users, UserCheck, LogOut, Globe, Network, Copy, Check, ExternalLink, Smartphone, Wifi, ShieldCheck } from 'lucide-react';
+import { Send, FileText, CheckCircle2, AlertCircle, RefreshCw, Sparkles, Filter, Users, UserCheck, LogOut, Globe, Network, Copy, Check, ExternalLink, Smartphone, Wifi, ShieldCheck, QrCode, Download } from 'lucide-react';
+import QRCode from 'qrcode';
 import { useUI } from '../../context/UIContext';
 
 export default function WhatsAppCenterModule({
@@ -50,6 +51,8 @@ export default function WhatsAppCenterModule({
     }
   });
   const [copiedUrl, setCopiedUrl] = useState(false);
+  const [showMobileQrModal, setShowMobileQrModal] = useState(false);
+  const [mobileQrDataUrl, setMobileQrDataUrl] = useState('');
   const autoWakeupAttempted = React.useRef(false);
 
   const isPrivateLanIp = useCallback((hostname) => {
@@ -96,6 +99,62 @@ export default function WhatsAppCenterModule({
     }
     return 'http://127.0.0.1:3100';
   }, [deviceServerUrl, isDesktop, state?.orgSettings?.waServerUrl, state?.orgSettings?.waServerLanUrl, isPrivateLanIp]);
+
+  // احتساب عنوان IP الخاص بالشبكة المحلية والمقترح لربط الهواتف والموبايلات
+  const primaryLanUrl = useMemo(() => {
+    if (networkInfo?.suggestedLanUrl) return networkInfo.suggestedLanUrl;
+    if (networkInfo?.localIps?.[0]?.address) return `http://${networkInfo.localIps[0].address}:${networkInfo?.port || 3100}`;
+    if (state?.orgSettings?.waServerLanUrl) return state.orgSettings.waServerLanUrl;
+    return 'http://192.168.1.2:3100';
+  }, [networkInfo, state?.orgSettings?.waServerLanUrl]);
+
+  // هل خدمة الـ IP معلنة ومفعلة حالياً للهواتف والأجهزة الأخرى؟
+  const isLanActive = useMemo(() => {
+    const current = (state?.orgSettings?.waServerLanUrl || state?.orgSettings?.waServerUrl || '').trim().replace(/\/+$/, '');
+    const cleanPrimary = (primaryLanUrl || '').trim().replace(/\/+$/, '');
+    return Boolean(current && cleanPrimary && (current === cleanPrimary || current.includes(cleanPrimary.split('://')[1] || '')));
+  }, [state?.orgSettings?.waServerLanUrl, state?.orgSettings?.waServerUrl, primaryLanUrl]);
+
+  // تفعيل وتعميم الـ IP لجميع الهواتف بنقرة واحدة
+  const handleActivateMobileIp = async () => {
+    if (!primaryLanUrl) return;
+    try {
+      if (isDesktop && window.desktopAPI?.allowFirewall) {
+        window.desktopAPI.allowFirewall().catch(() => {});
+      }
+    } catch {}
+    await handleSaveServerUrl(primaryLanUrl);
+    showToast?.(`📱 تم تفعيل وتعميم IP السيرفر (${primaryLanUrl}) لجميع الهواتف والموبايلات بنجاح!`);
+  };
+
+  // إظهار باركود QR للهواتف لربط الموبايل بنقرة واحدة
+  const handleOpenMobileQr = async () => {
+    try {
+      const origin = typeof window !== 'undefined' && window.location?.origin ? window.location.origin : 'http://nodejs-test.apexthunder.com';
+      const connectUrl = `${origin}?wa_url=${encodeURIComponent(primaryLanUrl)}`;
+      const qr = await QRCode.toDataURL(connectUrl, { width: 280, margin: 2 });
+      setMobileQrDataUrl(qr);
+      setShowMobileQrModal(true);
+    } catch {
+      showToast?.('تعذر توليد رمز الـ QR');
+    }
+  };
+
+  // التقاط رابط السيرفر تلقائياً عند فتح الرابط من الهاتف عبر الباركود (?wa_url=...)
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.location?.search) {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const waParam = params.get('wa_url');
+        if (waParam && waParam.startsWith('http')) {
+          const cleanWa = decodeURIComponent(waParam).trim().replace(/\/+$/, '');
+          handleSaveDeviceServerUrl(cleanWa);
+          showToast?.(`📲 تم التعرف على خادم الصيدلية وضبطه للهاتف تلقائياً: ${cleanWa}`);
+        }
+      } catch {}
+    }
+  }, []);
+
   const orgSettings = state?.orgSettings || {};
   const employees = state.employees || [];
   const branches = state.branches || [];
@@ -176,7 +235,7 @@ export default function WhatsAppCenterModule({
     }, 400);
   };
 
-  // 2. حفظ وتعميم رابط السيرفر لجميع أجهزة المنظومة
+  // 2. حفظ وتعميم رابط السيرفر لجميع أجهزة المنظومة (المكتبي، الهواتف، والويب)
   const handleSaveServerUrl = async (newUrl) => {
     const cleanUrl = (newUrl || '').trim().replace(/\/+$/, '');
     if (setState) {
@@ -185,7 +244,8 @@ export default function WhatsAppCenterModule({
           ...prev,
           orgSettings: {
             ...(prev?.orgSettings || {}),
-            waServerUrl: cleanUrl
+            waServerUrl: cleanUrl,
+            waServerLanUrl: cleanUrl
           }
         };
         if (saveState) {
@@ -195,7 +255,7 @@ export default function WhatsAppCenterModule({
       });
     }
     setCustomServerUrl(cleanUrl);
-    showToast?.(cleanUrl ? `🌐 تم تعميم رابط السيرفر (${cleanUrl}) لجميع الأجهزة بالصيدلية` : '✅ تم ضبط السيرفر على الوضع التلقائي');
+    showToast?.(cleanUrl ? `🌐 تم تعميم وتفعيل رابط السيرفر (${cleanUrl}) للهواتف وجميع الأجهزة بالصيدلية` : '✅ تم ضبط السيرفر على الوضع التلقائي');
     setTimeout(() => {
       fetchWaStatus(false, cleanUrl);
     }, 500);
@@ -256,8 +316,8 @@ export default function WhatsAppCenterModule({
 
     if (!statusFound) {
       setWaStatus('DISCONNECTED');
-      // محاولة الإيقاظ التلقائي الذكي لمرة واحدة عند تحميل الصفحة في حال كان الخادم محلياً
-      if (!autoWakeupAttempted.current && (activeUrl.includes('localhost') || activeUrl.includes('127.0.0.1'))) {
+      // محاولة الإيقاظ التلقائي الذكي الصامت لمرة واحدة عند تحميل الصفحة في حال تعذر الوصول
+      if (!autoWakeupAttempted.current) {
         autoWakeupAttempted.current = true;
         try {
           if (isDesktop && window.desktopAPI?.restartWhatsAppServer) {
@@ -273,7 +333,7 @@ export default function WhatsAppCenterModule({
           }
           setTimeout(() => {
             fetchWaStatus(true);
-          }, 3000);
+          }, 3500);
         } catch {}
       } else if (!silent) {
         showToast?.('⚠️ تعذر الوصول لخادم الواتساب، يرجى التأكد من تشغيله أو الضغط على "استكشاف تلقائي للشبكة".');
@@ -703,6 +763,152 @@ export default function WhatsAppCenterModule({
     }, 1500);
   };
 
+  // ── تحميل اسكربت تشغيل خادم الواتساب احتياطياً (يعمل بنقرة واحدة بدون تطبيق الويندوز) ──
+  const handleDownloadBackupScript = useCallback(() => {
+    try {
+      const scriptLines = [
+        '@echo off',
+        ':: =========================================================================',
+        ':: أداة التشغيل الاحتياطية المباشرة لخادم الواتساب (منظومة إدارة الموارد البشرية)',
+        ':: تعمل تلقائياً دون الحاجة لتطبيق الويندوز، وتفتح جدار الحماية، وتكشف الشبكة',
+        ':: =========================================================================',
+        'chcp 65001 >nul',
+        'title خادم الواتساب الاحتياطي - منظومة الموارد البشرية',
+        '',
+        'echo ======================================================================',
+        'echo    خادم الواتساب الاحتياطي - منظومة الموارد البشرية والرواتب',
+        'echo ======================================================================',
+        'echo.',
+        '',
+        ':: 1. التحقق من صلاحيات المدير (Run as Administrator) لفتح جدار الحماية وضبط المنفذ',
+        'net session >nul 2>&1',
+        'if %errorLevel% neq 0 (',
+        '    echo [!] جاري طلب صلاحيات المدير تلقائياً لفتح جدار الحماية وتشغيل الخادم...',
+        '    powershell -Command "Start-Process cmd -ArgumentList \'/c \"\"%~f0\"\"\' -Verb RunAs"',
+        '    exit /b',
+        ')',
+        '',
+        ':: 2. فتح منفذ 3100 في جدار الحماية (Windows Defender Firewall) تلقائياً',
+        'echo [+] فحص وتأمين منفذ خادم الواتساب (3100) في جدار حماية الويندوز...',
+        'netsh advfirewall firewall delete rule name="WhatsApp_Server_3100" >nul 2>&1',
+        'netsh advfirewall firewall add rule name="WhatsApp_Server_3100" dir=in action=allow protocol=TCP localport=3100 profile=any description="Allow incoming WhatsApp Gateway connections on port 3100" >nul 2>&1',
+        'echo [✓] تم تفعيل منفذ الواتساب 3100 في جدار الحماية بنجاح.',
+        'echo.',
+        '',
+        ':: 3. تنظيف وإنهاء أي عملية معلقة على المنفذ 3100',
+        'echo [+] فحص العمليات المعلقة وتحرير المنفذ 3100...',
+        'powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 3100 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }" >nul 2>&1',
+        '',
+        ':: 4. البحث عن محرك Node.js أو محرك تطبيق الويندوز المدمج',
+        'set "NODE_CMD="',
+        'if exist "C:\\Program Files\\nodejs\\node.exe" (',
+        '    set "NODE_CMD=C:\\Program Files\\nodejs\\node.exe"',
+        ') else if exist "C:\\Program Files (x86)\\nodejs\\node.exe" (',
+        '    set "NODE_CMD=C:\\Program Files (x86)\\nodejs\\node.exe"',
+        ') else if exist "%LocalAppData%\\Programs\\node\\node.exe" (',
+        '    set "NODE_CMD=%LocalAppData%\\Programs\\node\\node.exe"',
+        ') else (',
+        '    where node >nul 2>&1',
+        '    if %errorLevel% equ 0 (',
+        '        set "NODE_CMD=node"',
+        '    )',
+        ')',
+        '',
+        'if "%NODE_CMD%"=="" (',
+        '    if exist "C:\\Program Files\\منظومة الموارد البشرية\\منظومة الموارد البشرية.exe" (',
+        '        set "NODE_CMD=C:\\Program Files\\منظومة الموارد البشرية\\منظومة الموارد البشرية.exe"',
+        '        set "ELECTRON_RUN_AS_NODE=1"',
+        '    ) else if exist "%LocalAppData%\\Programs\\منظومة الموارد البشرية\\منظومة الموارد البشرية.exe" (',
+        '        set "NODE_CMD=%LocalAppData%\\Programs\\منظومة الموارد البشرية\\منظومة الموارد البشرية.exe"',
+        '        set "ELECTRON_RUN_AS_NODE=1"',
+        '    )',
+        ')',
+        '',
+        ':: 5. البحث عن ملف السيرفر whatsapp-server.js',
+        'set "SERVER_JS="',
+        'set "APP_DIR="',
+        'if exist "%~dp0server\\whatsapp-server.js" (',
+        '    set "SERVER_JS=%~dp0server\\whatsapp-server.js"',
+        '    set "APP_DIR=%~dp0"',
+        ') else if exist "%~dp0whatsapp-server.js" (',
+        '    set "SERVER_JS=%~dp0whatsapp-server.js"',
+        '    set "APP_DIR=%~dp0"',
+        ') else if exist "%~dp0..\\server\\whatsapp-server.js" (',
+        '    set "SERVER_JS=%~dp0..\\server\\whatsapp-server.js"',
+        '    set "APP_DIR=%~dp0..\\"',
+        ') else if exist "d:\\Project\\HR last\\HR New\\server\\whatsapp-server.js" (',
+        '    set "SERVER_JS=d:\\Project\\HR last\\HR New\\server\\whatsapp-server.js"',
+        '    set "APP_DIR=d:\\Project\\HR last\\HR New"',
+        ') else if exist "C:\\Program Files\\منظومة الموارد البشرية\\resources\\app.asar.unpacked\\server\\whatsapp-server.js" (',
+        '    set "SERVER_JS=C:\\Program Files\\منظومة الموارد البشرية\\resources\\app.asar.unpacked\\server\\whatsapp-server.js"',
+        '    set "APP_DIR=C:\\Program Files\\منظومة الموارد البشرية\\resources\\app.asar.unpacked"',
+        ') else if exist "%LocalAppData%\\Programs\\منظومة الموارد البشرية\\resources\\app.asar.unpacked\\server\\whatsapp-server.js" (',
+        '    set "SERVER_JS=%LocalAppData%\\Programs\\منظومة الموارد البشرية\\resources\\app.asar.unpacked\\server\\whatsapp-server.js"',
+        '    set "APP_DIR=%LocalAppData%\\Programs\\منظومة الموارد البشرية\\resources\\app.asar.unpacked"',
+        ')',
+        '',
+        'if "%NODE_CMD%"=="" (',
+        '    echo [X] تعذر العثور على محرك Node.js أو تطبيق المنظومة على هذا الجهاز!',
+        '    echo.',
+        '    echo يرجى التأكد من تثبيت Node.js من الموقع الرسمي: https://nodejs.org',
+        '    echo أو تثبيت تطبيق المنظومة لسطح المكتب.',
+        '    echo.',
+        '    pause',
+        '    exit /b',
+        ')',
+        '',
+        'if "%SERVER_JS%"=="" (',
+        '    for %%D in (C D E F) do (',
+        '        if exist "%%D:\\Project\\HR last\\HR New\\server\\whatsapp-server.js" (',
+        '            set "SERVER_JS=%%D:\\Project\\HR last\\HR New\\server\\whatsapp-server.js"',
+        '            set "APP_DIR=%%D:\\Project\\HR last\\HR New"',
+        '        )',
+        '    )',
+        ')',
+        '',
+        'if "%SERVER_JS%"=="" (',
+        '    echo [X] تعذر العثور على ملف السيرفر whatsapp-server.js تلقائياً.',
+        '    echo يرجى وضع هذا الملف داخل مجلد المنظومة الرئيسي وتشغيله من هناك.',
+        '    echo.',
+        '    pause',
+        '    exit /b',
+        ')',
+        '',
+        ':: 6. إطلاق خادم الواتساب الاحتياطي وعرض عناوين الشبكة',
+        'cd /d "%APP_DIR%"',
+        'echo ======================================================================',
+        'echo  [✓] جاهز لإطلاق خادم الواتساب الاحتياطي:',
+        'echo   - محرك التشغيل: %NODE_CMD%',
+        'echo   - ملف الخادم: %SERVER_JS%',
+        'echo   - المنفذ: 3100 (مفتوح بجدار الحماية)',
+        'echo.',
+        'echo  عناوين الربط للهواتف والأجهزة على الشبكة:',
+        'powershell -NoProfile -Command "Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike \'127.*\' -and $_.IPAddress -notlike \'169.254.*\' } | ForEach-Object { Write-Host (\'   📱 رابط الهاتف: http://\' + $_.IPAddress + \':3100\') -ForegroundColor Green }"',
+        'echo   💻 رابط الجهاز الحالي: http://127.0.0.1:3100',
+        'echo ======================================================================',
+        'echo.',
+        'echo  الخادم يعمل الآن بشكل مستمر. لا تغلق هذه النافذة طالما أنك تستخدم الواتساب.',
+        'echo ======================================================================',
+        'echo.',
+        '"%NODE_CMD%" "%SERVER_JS%"',
+        'pause'
+      ].join('\r\n');
+
+      const blob = new Blob(['\uFEFF' + scriptLines], { type: 'application/x-bat;charset=utf-8' });
+      const downloadUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = 'تشغيل_خادم_الواتساب_احتياطي.bat';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(downloadUrl);
+      showToast?.('📥 تم تنزيل أداة تشغيل خادم الواتساب الاحتياطية بنجاح!');
+    } catch (e) {
+      showToast?.('تعذر التنزيل: ' + (e?.message || 'خطأ غير معروف'));
+    }
+  }, [showToast]);
+
   // توليد PDF Base64 لموظف معين سواء عبر تطبيق الديسكتوب أو خادم الواتساب المحلي
   const generateEmpPdfBase64 = async (emp, summary, htmlInput) => {
     if (!attachPdfPayslip) return null;
@@ -906,7 +1112,206 @@ export default function WhatsAppCenterModule({
         </div>
       </div>
 
+      {/* ── بطاقة تفعيل وتعميم خدمة الواتساب للهواتف المحمولة (Mobile LAN Gateway) ── */}
+      <div style={{
+        background: isLanActive
+          ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(5, 150, 105, 0.03) 100%)'
+          : 'linear-gradient(135deg, rgba(59, 130, 246, 0.08) 0%, rgba(37, 99, 235, 0.03) 100%)',
+        border: `1.5px solid ${isLanActive ? '#10b981' : '#3b82f6'}`,
+        borderRadius: '14px',
+        padding: '16px 20px',
+        marginBottom: '20px',
+        boxShadow: '0 4px 15px rgba(0,0,0,0.04)',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: '14px'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <div style={{
+            width: '46px',
+            height: '46px',
+            borderRadius: '12px',
+            background: isLanActive ? 'linear-gradient(135deg, #10b981, #059669)' : 'linear-gradient(135deg, #3b82f6, #2563eb)',
+            color: '#fff',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '22px',
+            boxShadow: isLanActive ? '0 4px 12px rgba(16, 185, 129, 0.3)' : '0 4px 12px rgba(59, 130, 246, 0.3)'
+          }}>
+            <Smartphone style={{ width: '22px', height: '22px' }} />
+          </div>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <h4 style={{ margin: 0, fontSize: '15.5px', fontWeight: 800, color: 'var(--text)' }}>
+                بوابة تشغيل الواتساب على الهواتف والموبايلات (IP الشبكة)
+              </h4>
+              {isLanActive ? (
+                <span style={{ fontSize: '11.5px', background: '#d1fae5', color: '#065f46', padding: '3px 9px', borderRadius: '6px', fontWeight: 800 }}>
+                  🟢 مفعل ومعمم للهواتف بالصيدلية
+                </span>
+              ) : (
+                <span style={{ fontSize: '11.5px', background: '#fef3c7', color: '#92400e', padding: '3px 9px', borderRadius: '6px', fontWeight: 800 }}>
+                  🟡 بحاجة للتفعيل لربط الموبايلات
+                </span>
+              )}
+            </div>
+            <div style={{ fontSize: '12.5px', color: 'var(--muted)', marginTop: '5px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <span>عنوان الخادم المخصص للهواتف:</span>
+              <code style={{ background: 'rgba(37, 99, 235, 0.08)', color: '#1d4ed8', padding: '2px 8px', borderRadius: '6px', fontWeight: 800, direction: 'ltr', fontSize: '13px' }}>
+                {primaryLanUrl}
+              </code>
+              <span style={{ opacity: 0.8 }}>(يتصل به أي موبايل أو جهاز على نفس راوتر الصيدلية)</span>
+            </div>
+          </div>
+        </div>
 
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <button
+            type="button"
+            className="btn"
+            style={{
+              background: isLanActive ? '#059669' : '#2563eb',
+              color: '#ffffff',
+              fontWeight: '800',
+              fontSize: '13px',
+              padding: '8px 16px',
+              borderRadius: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+              cursor: 'pointer'
+            }}
+            onClick={handleActivateMobileIp}
+            title="تثبيت وتعميم هذا الـ IP لكي تتعرف عليه جميع الهواتف تلقائياً بدون كتابة"
+          >
+            <Wifi style={{ width: '15px', height: '15px' }} />
+            <span>{isLanActive ? '⚡ تحديث وتعميم IP الهواتف' : '⚡ تفعيل وتعميم هذا الـ IP للهواتف الآن'}</span>
+          </button>
+
+          <button
+            type="button"
+            className="btn"
+            style={{
+              background: 'var(--surface)',
+              color: 'var(--text)',
+              border: '1px solid var(--border)',
+              fontWeight: 700,
+              fontSize: '12.5px',
+              padding: '8px 14px',
+              borderRadius: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+            onClick={() => {
+              navigator.clipboard?.writeText(primaryLanUrl);
+              showToast?.(`📋 تم نسخ رابط الهواتف: ${primaryLanUrl}`);
+            }}
+            title="نسخ رابط الخادم المخصص للهواتف"
+          >
+            <Copy style={{ width: '13px', height: '13px' }} />
+            <span>نسخ الرابط</span>
+          </button>
+
+          <button
+            type="button"
+            className="btn"
+            style={{
+              background: '#8b5cf6',
+              color: '#ffffff',
+              fontWeight: 700,
+              fontSize: '12.5px',
+              padding: '8px 14px',
+              borderRadius: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: '0 2px 8px rgba(139, 92, 246, 0.25)'
+            }}
+            onClick={handleOpenMobileQr}
+            title="إظهار باركود QR لمسحه بكاميرا الهاتف والاتصال مباشرة"
+          >
+            <QrCode style={{ width: '14px', height: '14px' }} />
+            <span>📱 باركود الموبايل</span>
+          </button>
+
+          <button
+            type="button"
+            className="btn"
+            style={{
+              background: '#0284c7',
+              color: '#ffffff',
+              fontWeight: 700,
+              fontSize: '12.5px',
+              padding: '8px 14px',
+              borderRadius: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: '0 2px 8px rgba(2, 132, 199, 0.25)',
+              cursor: 'pointer'
+            }}
+            onClick={handleDownloadBackupScript}
+            title="تنزيل أداة تشغيل خادم الواتساب احتياطياً لتشغيله بنقرة واحدة على أي جهاز لا يتوفر به تطبيق الويندوز"
+          >
+            <Download style={{ width: '14px', height: '14px' }} />
+            <span>📥 تنزيل أداة تشغيل السيرفر (احتياطي)</span>
+          </button>
+        </div>
+      </div>
+
+      {/* مودال باركود الربط المباشر للهواتف */}
+      {showMobileQrModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.6)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 99999,
+          padding: '20px'
+        }} onClick={() => setShowMobileQrModal(false)}>
+          <div style={{
+            background: 'var(--surface)',
+            borderRadius: '16px',
+            padding: '24px',
+            maxWidth: '420px',
+            width: '100%',
+            textAlign: 'center',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.3)',
+            border: '1px solid var(--border)'
+          }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: 800, color: 'var(--text)' }}>
+              📱 مسح كود الاتصال بالهاتف
+            </h3>
+            <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: 'var(--muted)' }}>
+              افتح كاميرا الهاتف أو قارئ الباركود وامسح الرمز لفتح المنظومة وربط خادم الواتساب فوراً
+            </p>
+            {mobileQrDataUrl && (
+              <div style={{ background: '#fff', padding: '16px', borderRadius: '12px', display: 'inline-block', marginBottom: '14px', boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}>
+                <img src={mobileQrDataUrl} alt="Mobile Connect QR" style={{ width: '220px', height: '220px', display: 'block' }} />
+              </div>
+            )}
+            <div style={{ fontSize: '12.5px', color: 'var(--muted)', wordBreak: 'break-all', direction: 'ltr', background: 'var(--bg)', padding: '8px 12px', borderRadius: '8px', marginBottom: '16px' }}>
+              <code>{primaryLanUrl}</code>
+            </div>
+            <button
+              type="button"
+              className="btn btn-primary"
+              style={{ width: '100%', padding: '10px', fontSize: '14px', fontWeight: 800, borderRadius: '8px' }}
+              onClick={() => setShowMobileQrModal(false)}
+            >
+              تم، إغلاق
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── لوحة معلومات وإعدادات ربط الأجهزة والموبايلات ──────────────────────── */}
       {showNetworkModal && (
@@ -1147,6 +1552,51 @@ export default function WhatsAppCenterModule({
               </button>
             )}
           </div>
+
+          {/* بطاقة تنزيل أداة التشغيل الاحتياطية للخادم */}
+          <div style={{
+            background: 'rgba(2, 132, 199, 0.06)',
+            border: '1px solid rgba(2, 132, 199, 0.25)',
+            borderRadius: '10px',
+            padding: '12px 14px',
+            marginTop: '14px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '10px'
+          }}>
+            <div>
+              <h5 style={{ margin: '0 0 4px 0', fontSize: '13px', fontWeight: 800, color: '#0369a1', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Download style={{ width: '15px', height: '15px' }} />
+                أداة تشغيل خادم الواتساب الاحتياطية (للمتصفح والأجهزة بدون تطبيق الويندوز)
+              </h5>
+              <p style={{ margin: 0, fontSize: '12px', color: 'var(--muted)' }}>
+                ملف تشغيل فوري بصيغة (.bat) يقوم بفتح جدار الحماية للويندوز وإطلاق خادم الواتساب في الخلفية بنقرة واحدة لخدمة هواتف الصيدلية.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn"
+              style={{
+                background: '#0284c7',
+                color: '#fff',
+                fontSize: '12px',
+                fontWeight: 800,
+                padding: '7px 14px',
+                borderRadius: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                cursor: 'pointer',
+                boxShadow: '0 2px 8px rgba(2, 132, 199, 0.25)'
+              }}
+              onClick={handleDownloadBackupScript}
+            >
+              <Download style={{ width: '13px', height: '13px' }} />
+              <span>تحميل الأداة الآن (.bat)</span>
+            </button>
+          </div>
         </div>
       )}
 
@@ -1181,6 +1631,19 @@ export default function WhatsAppCenterModule({
             {waStatus === 'DISCONNECTED' && 'اضغط على زر "إعادة تشغيل الخادم" لتشغيله في الخلفية وحل أي تعليق تلقائياً.'}
             {waStatus === 'checking' && 'يتم التحقق من استجابة المقبس الخلفي للواتساب...'}
           </span>
+          {typeof window !== 'undefined' && window.location?.protocol === 'https:' && waStatus === 'DISCONNECTED' && (
+            <div style={{ marginTop: '8px', padding: '6px 12px', background: 'rgba(0,0,0,0.25)', borderRadius: '6px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <span>⚠️ إذا حظر المتصفح الاتصال بالخادم المحلي (Mixed Content):</span>
+              <a
+                href="http://nodejs-test.apexthunder.com"
+                target="_blank"
+                rel="noreferrer"
+                style={{ color: '#fef08a', fontWeight: 800, textDecoration: 'underline' }}
+              >
+                🌐 اضغط هنا لفتح المنظومة عبر رابط HTTP المباشر بدون حظر أمني
+              </a>
+            </div>
+          )}
         </div>
 
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1246,6 +1709,29 @@ export default function WhatsAppCenterModule({
             onClick={handleForceResetServer}
           >
             <span>⚡ تصفير وتوليد QR</span>
+          </button>
+
+          <button
+            type="button"
+            className="btn"
+            style={{
+              background: '#0284c7',
+              color: '#ffffff',
+              fontWeight: '800',
+              fontSize: '12.5px',
+              padding: '7px 14px',
+              borderRadius: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: '0 2px 8px rgba(2, 132, 199, 0.25)',
+              cursor: 'pointer'
+            }}
+            onClick={handleDownloadBackupScript}
+            title="تنزيل أداة تشغيل خادم الواتساب احتياطياً لتشغيله بنقرة واحدة على أي جهاز لا يتوفر به تطبيق الويندوز"
+          >
+            <Download style={{ width: '13px', height: '13px' }} />
+            <span>📥 تنزيل أداة التشغيل الاحتياطية</span>
           </button>
 
           <button

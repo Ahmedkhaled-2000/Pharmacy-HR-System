@@ -180,13 +180,13 @@ function DesktopNavDropdownItem({
             </span>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              {child.badge > 0 && (
+              {Boolean(child.badge) && (
                 <span style={{
-                  background: 'var(--danger)',
+                  background: typeof child.badge === 'string' ? '#059669' : 'var(--danger)',
                   color: '#ffffff',
                   fontSize: '10px',
                   fontWeight: 800,
-                  padding: '1px 5px',
+                  padding: '1px 6px',
                   borderRadius: '99px'
                 }}>
                   {child.badge}
@@ -1110,6 +1110,14 @@ export default function DesktopLayout({
           label: '👑 صلاحيات وتحكم المالك',
           icon: '👑',
           desc: 'إدارة أقفال تعديلات الإدارة العليا وبيانات المالك'
+        },
+        {
+          id: 'download-windows-app',
+          downloadAction: 'windows-app',
+          label: '💻 تنزيل تطبيق الويندوز (أحدث نسخة)',
+          icon: '📥',
+          badge: 'v1.2.15',
+          desc: 'تحميل برنامج سطح المكتب لويندوز مباشرة مع المزامنة التلقائية'
         }
       ]
     }
@@ -1258,6 +1266,13 @@ export default function DesktopLayout({
       icon: '📜',
       isSingle: true,
       targetTab: 'bylaws'
+    },
+    {
+      id: 'download-windows-app-branch',
+      label: 'تحميل برنامج الويندوز',
+      icon: '💻',
+      isSingle: true,
+      downloadAction: 'windows-app'
     }
   ];
 
@@ -1433,7 +1448,40 @@ export default function DesktopLayout({
     };
   }, [currentMenuItems, setActiveTab, setActiveSubTab]);
 
+  // دالة تحميل وتنزيل تطبيق سطح المكتب للويندوز مباشرة بأحدث إصدار
+  const handleDownloadWindowsApp = useCallback(async () => {
+    try {
+      // 1. محاولة جلب رابط التنزيل المباشر لملف .exe من GitHub API
+      const res = await fetch('https://api.github.com/repos/Ahmedkhaled-2000/Pharmacy-HR-System/releases/latest', {
+        headers: { 'Accept': 'application/vnd.github.v3+json' }
+      });
+      if (res.ok) {
+        const release = await res.json();
+        const exeAsset = (release.assets || []).find(a => a.name && a.name.toLowerCase().endsWith('.exe'));
+        if (exeAsset?.browser_download_url) {
+          const a = document.createElement('a');
+          a.href = exeAsset.browser_download_url;
+          a.download = exeAsset.name;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn('Error fetching latest release from GitHub API:', e);
+    }
+    // Fallback: الانتقال لصفحة أحدث إصدار على GitHub
+    window.open('https://github.com/Ahmedkhaled-2000/Pharmacy-HR-System/releases/latest', '_blank');
+  }, []);
+
 const handleMenuClick = (menu) => {
+  if (menu.downloadAction === 'windows-app' || menu.id === 'download-windows-app-branch') {
+    handleDownloadWindowsApp();
+    setOpenDropdown(null);
+    setHoveredFlyoutId(null);
+    return;
+  }
 if (menu.isSingle) {
   if (menu.targetTab === 'accounts' || menu.navigateToAccounts || menu.id === 'accounts') {
     window.open(window.location.origin + '/accounts', '_blank');
@@ -1453,6 +1501,12 @@ if (menu.isSingle) {
 };
 
 const handleSubItemClick = (subItem) => {
+  if (subItem.downloadAction === 'windows-app' || subItem.id === 'download-windows-app') {
+    handleDownloadWindowsApp();
+    setOpenDropdown(null);
+    setHoveredFlyoutId(null);
+    return;
+  }
 if (subItem.targetTab === 'accounts' || subItem.navigateToAccounts || subItem.id === 'accounts') {
   window.open(window.location.origin + '/accounts', '_blank');
   setOpenDropdown(null);

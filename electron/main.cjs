@@ -782,6 +782,11 @@ ipcMain.handle('whatsapp:get-network-info', async () => {
   return getSystemNetworkInfo();
 });
 
+ipcMain.handle('whatsapp:allow-firewall', async () => {
+  ensureFirewallPortAllowed();
+  return true;
+});
+
 ipcMain.handle('whatsapp:get-health', async () => {
   return await checkWhatsAppServerHealth();
 });
@@ -957,15 +962,9 @@ app.whenReady().then(() => {
 });
 
 app.on('before-quit', () => {
-  if (waChildProcess) {
-    try {
-      console.log('[WhatsApp Gateway] Cleaning up child process before quit...');
-      if (typeof waChildProcess.kill === 'function') {
-        waChildProcess.kill();
-      }
-    } catch {}
-    waChildProcess = null;
-  }
+  // الحفاظ على خادم الواتساب قيد التشغيل في الخلفية لخدمة الهواتف الذكية ومتصفحات الويب 24/7
+  console.log('[WhatsApp Gateway] Electron app closing, leaving 24/7 background WhatsApp gateway active.');
+  waChildProcess = null;
 });
 
 app.on('window-all-closed', () => {

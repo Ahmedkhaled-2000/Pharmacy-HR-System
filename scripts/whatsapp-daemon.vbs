@@ -45,7 +45,15 @@ End Function
 Sub StartServerProcess()
     If Not FSO.FileExists(ServerScript) Then Exit Sub
     WshShell.CurrentDirectory = ProjectDir
-    ExecCmd = "cmd.exe /c cd /d """ & ProjectDir & """ && node server\whatsapp-server.js > server.log 2>&1"
+    Dim NodeExe
+    If FSO.FileExists("C:\Program Files\nodejs\node.exe") Then
+        NodeExe = """C:\Program Files\nodejs\node.exe"""
+    ElseIf FSO.FileExists("C:\Program Files (x86)\nodejs\node.exe") Then
+        NodeExe = """C:\Program Files (x86)\nodejs\node.exe"""
+    Else
+        NodeExe = "node"
+    End If
+    ExecCmd = "cmd.exe /c cd /d """ & ProjectDir & """ && " & NodeExe & " server\whatsapp-server.js > server.log 2>&1"
     WshShell.Run ExecCmd, 0, False
 End Sub
 
