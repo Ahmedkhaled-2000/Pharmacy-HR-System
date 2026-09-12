@@ -47,6 +47,8 @@ supabase_extracted_data.json
 uploads/
 release/
 *.exe
+!public/scripts/*.exe
+!scripts/*.exe
 *.blockmap
 dist-electron/
 server/whatsapp-auth/
