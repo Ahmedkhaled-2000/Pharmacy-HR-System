@@ -40,7 +40,6 @@ export default function WhatsAppCenterModule({
   // استكشاف ومعلومات الشبكة للأجهزة الأخرى
   const [networkInfo, setNetworkInfo] = useState(null);
   const [showNetworkModal, setShowNetworkModal] = useState(false);
-  const [showInstructionsModal, setShowInstructionsModal] = useState(false);
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [customServerUrl, setCustomServerUrl] = useState(state?.orgSettings?.waServerUrl || '');
   const [deviceServerUrl, setDeviceServerUrl] = useState(() => {
@@ -618,30 +617,6 @@ export default function WhatsAppCenterModule({
             <span>{isDiscovering ? 'جاري الفحص...' : '🔍 استكشاف تلقائي للشبكة'}</span>
           </button>
 
-          {/* زر دليل وتعليمات الربط */}
-          <button
-            type="button"
-            className="btn"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              fontSize: '13px',
-              fontWeight: 700,
-              padding: '9px 14px',
-              borderRadius: '10px',
-              border: '1px solid #3b82f6',
-              background: showInstructionsModal ? '#2563eb' : 'var(--surface)',
-              color: showInstructionsModal ? '#fff' : '#1d4ed8',
-              cursor: 'pointer',
-              transition: 'all 0.2s ease'
-            }}
-            onClick={() => setShowInstructionsModal(!showInstructionsModal)}
-          >
-            <HelpCircle style={{ width: '15px', height: '15px', color: showInstructionsModal ? '#fff' : '#2563eb' }} />
-            <span>📖 دليل وتعليمات الربط</span>
-          </button>
-
           {/* زر إعدادات ربط الأجهزة والموبايلات */}
           <button
             type="button"
@@ -669,80 +644,7 @@ export default function WhatsAppCenterModule({
         </div>
       </div>
 
-      {/* ── لوحة دليل وتعليمات تشغيل وربط خادم الواتساب للمتصفح والأجهزة ────── */}
-      {showInstructionsModal && (
-        <div style={{
-          background: 'var(--surface)',
-          border: '2px solid #10b981',
-          borderRadius: '16px',
-          padding: '22px 24px',
-          marginBottom: '22px',
-          boxShadow: '0 10px 30px rgba(16, 185, 129, 0.12)'
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <span style={{ fontSize: '24px' }}>📖</span>
-              <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 800, color: '#065f46' }}>
-                دليل المهندس: كيفية تشغيل وربط خادم الواتساب على أي متصفح أو جهاز
-              </h3>
-            </div>
-            <button
-              type="button"
-              className="btn btn-ghost"
-              style={{ fontSize: '13px', padding: '4px 10px' }}
-              onClick={() => setShowInstructionsModal(false)}
-            >
-              ✕ إغلاق الدليل
-            </button>
-          </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px' }}>
-            {/* الخطوة 1 */}
-            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                <span style={{ background: '#059669', color: '#fff', width: '24px', height: '24px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 800 }}>1</span>
-                <strong style={{ fontSize: '14px', color: '#0f172a' }}>سيرفر الويندوز مدمج وتلقائي 100%</strong>
-              </div>
-              <p style={{ fontSize: '12.5px', color: '#475569', lineHeight: 1.6, margin: 0 }}>
-                سيرفر الواتساب <strong>مدمج كلياً داخل تطبيق الويندوز</strong>. بمجرد فتح البرنامج على أي جهاز كمبيوتر بالصيدلية، ينطلق السيرفر ذاتياً في الخلفية على المنفذ <code>3100</code> ويحفظ جلسة الاقتران بشكل دائم في بيانات التطبيق دون الحاجة لتثبيت أي برامج خارجية.
-              </p>
-            </div>
-
-            {/* الخطوة 2 */}
-            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                <span style={{ background: '#2563eb', color: '#fff', width: '24px', height: '24px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 800 }}>2</span>
-                <strong style={{ fontSize: '14px', color: '#0f172a' }}>فك حظر جدار الحماية (Firewall)</strong>
-              </div>
-              <p style={{ fontSize: '12.5px', color: '#475569', lineHeight: 1.6, margin: 0 }}>
-                لكي تسمح للأجهزة الأخرى (الهواتف واللابتوبات على شبكة Wi-Fi الصيدلية) بالوصول لسيرفر الواتساب، شغل ملف <code>scripts/allow_firewall_3100.bat</code> كمسؤول (Run as Administrator) مرة واحدة فقط على جهاز السيرفر الرئيسي.
-              </p>
-            </div>
-
-            {/* الخطوة 3 */}
-            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                <span style={{ background: '#7c3aed', color: '#fff', width: '24px', height: '24px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 800 }}>3</span>
-                <strong style={{ fontSize: '14px', color: '#0f172a' }}>ربط مستقل لكل جهاز أو متصفح</strong>
-              </div>
-              <p style={{ fontSize: '12.5px', color: '#475569', lineHeight: 1.6, margin: 0 }}>
-                يدعم النظام <strong>ربط كل جهاز بواتساب مستقل</strong>! يمكنك الضغط على <strong>"🔍 استكشاف تلقائي للشبكة"</strong>، أو كتابة عنوان الـ IP والضغط على <strong>"📌 حفظ لهذا الجهاز فقط"</strong> ليظل هذا المتصفح مرتبطاً برقمه الخاص دون التأثير على بقية الأجهزة.
-              </p>
-            </div>
-
-            {/* الخطوة 4 */}
-            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                <span style={{ background: '#d97706', color: '#fff', width: '24px', height: '24px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 800 }}>4</span>
-                <strong style={{ fontSize: '14px', color: '#0f172a' }}>إرسال مباشر بدون سيرفر (Fallback)</strong>
-              </div>
-              <p style={{ fontSize: '12.5px', color: '#475569', lineHeight: 1.6, margin: 0 }}>
-                إذا كنت خارج الصيدلية وتستخدم المتصفح من شبكة خارجية، يمكنك دائماً الضغط على <strong>"📲 إرسال مباشر عبر WhatsApp Web"</strong> لإرسال قسيمة الراتب فوراً للموظف مع تنزيل كشف الـ PDF تلقائياً دون الحاجة لأي سيرفر محلي!
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ── لوحة معلومات وإعدادات ربط الأجهزة والموبايلات ──────────────────────── */}
       {showNetworkModal && (
@@ -878,10 +780,6 @@ export default function WhatsAppCenterModule({
                 🔄 إلغاء التثبيت والعودة للتلقائي
               </button>
             )}
-          </div>
-
-          <div style={{ marginTop: '12px', fontSize: '12px', color: 'var(--muted)', background: 'var(--bg)', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border)' }}>
-            💡 <strong>تلميح مهم لجدار الحماية (Windows Firewall):</strong> لكي تتمكن الأجهزة الأخرى من الوصول للمنفذ 3100، يرجى تشغيل ملف <code>scripts/allow_firewall_3100.bat</code> كمسؤول (Run as Administrator) مرة واحدة على جهاز السيرفر الرئيسي.
           </div>
         </div>
       )}
