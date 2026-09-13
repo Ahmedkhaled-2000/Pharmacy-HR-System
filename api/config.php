@@ -480,7 +480,32 @@ function mergeServerState(array $existing, array $incoming): array
                     $isOldApproved = in_array($old['status'] ?? '', ['approved', 'paid', 'partial'], true) || ($old['adminApproved'] ?? false);
                     $isNewApproved = in_array($item['status'] ?? '', ['approved', 'paid', 'partial'], true) || ($item['adminApproved'] ?? false);
 
-                    if ($prefix === 'emp') {
+                    if ($prefix === 'app') {
+                        // لطلبات التوظيف: إذا تم قبول وتعيين المرشح كموظف (hired) فله الأولوية المطلقة الدائمة لمنع ارتداده إلى جديد
+                        $isItemHired = ($item['status'] ?? '') === 'hired';
+                        $isOldHired = ($old['status'] ?? '') === 'hired';
+
+                        if ($isItemHired && !$isOldHired) {
+                            $merged = array_merge($old, $item);
+                        } elseif ($isOldHired && !$isItemHired) {
+                            $merged = array_merge($item, $old);
+                        } elseif ($tNew >= $tOld) {
+                            $merged = array_merge($old, $item);
+                        } else {
+                            $merged = array_merge($item, $old);
+                        }
+
+                        // الحفاظ الدائم على بيانات التعيين متى ما تم تسجيلها
+                        if (!empty($item['hiredEmployeeId']) || !empty($old['hiredEmployeeId'])) {
+                            $merged['hiredEmployeeId'] = !empty($item['hiredEmployeeId']) ? $item['hiredEmployeeId'] : $old['hiredEmployeeId'];
+                        }
+                        if (!empty($item['hiredEmployeeCode']) || !empty($old['hiredEmployeeCode'])) {
+                            $merged['hiredEmployeeCode'] = !empty($item['hiredEmployeeCode']) ? $item['hiredEmployeeCode'] : $old['hiredEmployeeCode'];
+                        }
+                        if (!empty($item['hiredAt']) || !empty($old['hiredAt'])) {
+                            $merged['hiredAt'] = !empty($item['hiredAt']) ? $item['hiredAt'] : $old['hiredAt'];
+                        }
+                    } elseif ($prefix === 'emp') {
                         // للموظفين: اعتماد التعديل الأحدث زمنياً فقط (True Last-Write-Wins)
                         // لمنع الأجهزة ذات الكاش القديم من إعادة الموظف لفرعه السابق عند إجراء أي مزامنة
                         if ($tOld > $tNew) {

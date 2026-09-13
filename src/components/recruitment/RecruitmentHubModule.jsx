@@ -88,9 +88,15 @@ export default function RecruitmentHubModule({
     });
 
     if (hasChanges) {
-      const updatedState = { ...state, recruitmentApplications: updatedApps };
-      if (setState) setState(updatedState);
-      if (saveState) saveState(updatedState).catch(() => {});
+      if (setState) {
+        setState((latest) => ({
+          ...latest,
+          recruitmentApplications: (latest.recruitmentApplications || []).map(app => {
+            const updated = updatedApps.find(u => String(u.id) === String(app.id));
+            return updated || app;
+          })
+        }));
+      }
     }
   }, [state?.employees, applications]);
 

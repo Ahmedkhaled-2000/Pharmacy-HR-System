@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { getValidAuthToken } from '../utils/apiClient';
 
 const AuthContext = createContext(null);
 
@@ -14,6 +15,11 @@ export function AuthProvider({ children }) {
       localStorage.setItem('app-theme', themeMode);
     } catch {}
   }, [themeMode]);
+
+  // ضمان توفر توكن مصادقة سحابي صالح فور فتح التطبيق
+  useEffect(() => {
+    getValidAuthToken().catch(() => {});
+  }, []);
 
   const toggleTheme = () => {
     setThemeMode((prev) => (prev === 'light' ? 'dark' : 'light'));

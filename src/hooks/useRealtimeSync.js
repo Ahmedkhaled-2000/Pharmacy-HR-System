@@ -184,11 +184,35 @@ export function useRealtimeSync(props = {}) {
 
     setState((prev) => {
       setLastSyncTime(nowTimeStr());
-      const pendingCount = Number(localStorage.getItem('app_pending_sync_count') || 0);
-      // إذا لم تكن هناك تعديلات محلية معلقة، فإن البيانات السحابية هي المرجع النهائي لمنع إحياء المحذوفات
-      const merged = (pendingCount === 0)
-        ? normalized
-        : normalizeState(smartMergeStates(prev, normalized));
+      // دمج ذكي دائم بين الحالة المحلية والحالة السحابية لحماية الموظفين والطلبات من المسح العرضي
+      const merged = normalizeState(smartMergeStates(prev, normalized));
+
+      // تأمين أولوية الموظفين المضافين أو المحدثين محلياً حديثاً (خلال آخر 120 ثانية) من ارتداد الكاش السحابي
+      const now = Date.now();
+      const localRecentEmps = (prev.employees || []).filter(e => {
+        if (!e) return false;
+        const eTime = new Date(e.updatedAt || e.createdAt || 0).getTime();
+        return (now - eTime) < 120000;
+      });
+
+      if (localRecentEmps.length > 0) {
+        const remoteEmpIds = new Set((merged.employees || []).map(e => String(e.id)));
+        const remoteEmpCodes = new Set((merged.employees || []).map(e => String(e.code || '').trim().toLowerCase()).filter(Boolean));
+        const missingEmps = [];
+
+        for (const le of localRecentEmps) {
+          const leId = String(le.id);
+          const leCode = String(le.code || '').trim().toLowerCase();
+          const exists = remoteEmpIds.has(leId) || (leCode && remoteEmpCodes.has(leCode));
+          if (!exists) {
+            missingEmps.push(le);
+          }
+        }
+
+        if (missingEmps.length > 0) {
+          merged.employees = [...(merged.employees || []), ...missingEmps];
+        }
+      }
 
       // تحديث بيانات الموظف المسجل حالياً إذا طرأت تغييرات
       setCurrentEmpUser((prevEmp) => {

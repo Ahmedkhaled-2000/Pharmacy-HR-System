@@ -312,6 +312,12 @@ export default function EmployeeFileModal({
       setMaritalStatus(editingEmp.maritalStatus || 'أعزب');
 
       let initialEmpCode = editingEmp.code || '';
+      if (!initialEmpCode || editingEmp.isFromRecruitment) {
+        const existingCodes = (allEmployees || [])
+          .map(e => parseInt(String(e.code || '').replace(/\D/g, ''), 10))
+          .filter(n => !isNaN(n) && n > 0 && n < 99999);
+        initialEmpCode = existingCodes.length > 0 ? String(Math.max(...existingCodes) + 1) : '101';
+      }
       setCode(initialEmpCode);
       setJobTitle(editingEmp.jobTitle || 'صيدلي');
       setDepartment(editingEmp.department || jobs.find(j => j.title === editingEmp.jobTitle)?.department || departments[0] || 'الصيدلية');
@@ -442,7 +448,11 @@ export default function EmployeeFileModal({
       setBiometricFolderId('');
       setDriveLastSyncAt('');
 
-      setCode('');
+      const existingCodes = (allEmployees || [])
+        .map(e => parseInt(String(e.code || '').replace(/\D/g, ''), 10))
+        .filter(n => !isNaN(n) && n > 0 && n < 99999);
+      const nextSuggestedCode = existingCodes.length > 0 ? String(Math.max(...existingCodes) + 1) : '101';
+      setCode(nextSuggestedCode);
       const defaultJob = jobs[0]?.title || '';
       setJobTitle(defaultJob);
       setDepartment(jobs[0]?.department || departments[0] || 'الصيدلية');
@@ -879,7 +889,9 @@ export default function EmployeeFileModal({
           let found = false;
           const updatedEmps = [];
 
-          if (editingEmp) {
+          const isExistingEmpEdit = Boolean(editingEmp && !editingEmp.isFromRecruitment && editingEmp.id);
+
+          if (isExistingEmpEdit) {
             // حالة تعديل موظف قائم: نستهدف فقط الموظف المحدد بمعرفه الأصلي
             const targetId = String(editingEmp.id);
             for (const e of (currentState.employees || [])) {
@@ -902,8 +914,12 @@ export default function EmployeeFileModal({
               });
             }
           } else {
-            // حالة إضافة موظف جديد: نحتفظ بكافة الموظفين القائمين 100% ونضيف الموظف الجديد
+            // حالة إضافة موظف جديد أو تعيين مرشح توظيف: نحتفظ بكافة الموظفين القائمين 100% ونضيف الموظف الجديد
             for (const e of (currentState.employees || [])) {
+              // تجنب التكرار إذا كان الموظف أضيف مسبقاً بنفس المعرف أو الكود
+              if (String(e.id) === String(employeeData.id) || (cleanCode && e.code && String(e.code).trim().toLowerCase() === cleanCode)) {
+                continue;
+              }
               updatedEmps.push(e);
             }
             updatedEmps.push({
@@ -993,11 +1009,12 @@ export default function EmployeeFileModal({
           // ── Optimistic UI: تحديث الواجهة فوراً بلا تأخير ──
           setState(updatedState);
 
-          // ── حفظ فوري وتأمين الحالة في السحابة والقاعدة المحلية ──
+          // ── حفظ وتأمين الحالة في السحابة والقاعدة المحلية مع التحقق الصارم ──
           if (saveState) {
-            saveState(updatedState).catch((err) => {
-              console.warn('[EmployeeSave] Background save error:', err);
-            });
+            const saveRes = await saveState(updatedState);
+            if (saveRes && saveRes.success === false && !saveRes.queued) {
+              throw new Error(saveRes.error || 'تعذر حفظ وتأمين البيانات في السحابة');
+            }
           }
 
           // ── Google Drive Sync في الخلفية (يستخدم updatedState لا state القديمة) ──
