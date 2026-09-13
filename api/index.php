@@ -770,6 +770,26 @@ try {
                     $rId = (string)($n['requestId'] ?? '');
                     return $nId !== $entityId && $nId !== $rawReqId && $rId !== $entityId && $rId !== $rawReqId;
                 }));
+            } elseif (in_array($entityType, ['recruitment', 'recruitment_application', 'application', 'applicant'], true)) {
+                $rawAppId = preg_replace('/^app_/', '', $entityId);
+                $deletedKeys[] = $rawAppId;
+                $deletedKeys[] = "app_{$rawAppId}";
+
+                $appState['recruitmentApplications'] = array_values(array_filter((array)($appState['recruitmentApplications'] ?? []), function($a) use ($entityId, $rawAppId) {
+                    if (!is_array($a)) return false;
+                    $aId = (string)($a['id'] ?? '');
+                    $aCode = (string)($a['code'] ?? '');
+                    $clean = preg_replace('/^app_/', '', $aId);
+                    return $aId !== $entityId && $aId !== $rawAppId && $clean !== $rawAppId && $aCode !== $entityId;
+                }));
+
+                // مسح الإشعار المرتبط
+                $appState['notifications'] = array_values(array_filter((array)($appState['notifications'] ?? []), function($n) use ($entityId, $rawAppId) {
+                    if (!is_array($n)) return false;
+                    $nId = (string)($n['id'] ?? '');
+                    $appId = (string)($n['applicationId'] ?? '');
+                    return $nId !== $entityId && $nId !== "notif_{$entityId}" && $appId !== $entityId && $appId !== $rawAppId;
+                }));
             }
 
             // تحديث سجل شواهد القبور _deletedIds
