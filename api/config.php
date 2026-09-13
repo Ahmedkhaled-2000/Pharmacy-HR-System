@@ -264,6 +264,32 @@ function mergeServerState(array $existing, array $incoming): array
         }
     }
 
+    // ── حماية الموظفين الفعليين على رأس العمل من شواهد القبور القديمة ──
+    $allIncomingEmps = (array)($incoming['employees'] ?? []);
+    foreach ($allIncomingEmps as $emp) {
+        if (!is_array($emp)) continue;
+        $isActive = ($emp['is_active'] ?? true) !== false && ($emp['status'] ?? '') !== 'تم الاستقالة' && ($emp['status'] ?? '') !== 'resigned';
+        if ($isActive) {
+            $eId = isset($emp['id']) ? (string)$emp['id'] : '';
+            $eCode = isset($emp['code']) ? strtolower(trim((string)$emp['code'])) : '';
+            $eUser = isset($emp['username']) ? strtolower(trim((string)$emp['username'])) : '';
+            $eNid = isset($emp['nationalId']) ? preg_replace('/\D/', '', (string)$emp['nationalId']) : '';
+
+            if ($eId !== '') {
+                unset($deletedSet[$eId], $deletedSet[strtolower($eId)], $deletedSet['emp_' . $eId], $deletedSet['emp_' . strtolower($eId)], $deletedSet['emp_del_' . $eId]);
+            }
+            if ($eCode !== '') {
+                unset($deletedSet[$eCode], $deletedSet['emp_' . $eCode], $deletedSet['emp_code_' . $eCode], $deletedSet['code_' . $eCode]);
+            }
+            if ($eUser !== '') {
+                unset($deletedSet[$eUser], $deletedSet['user_' . $eUser], $deletedSet['emp_user_' . $eUser], $deletedSet['emp_' . $eUser]);
+            }
+            if ($eNid !== '') {
+                unset($deletedSet['emp_nid_' . $eNid], $deletedSet['nid_' . $eNid]);
+            }
+        }
+    }
+
     $mergeArrayEntities = function(array $arr1, array $arr2, string $prefix = 'item') use ($deletedSet) {
         $map = [];
         $addOrMerge = function(array $list) use (&$map, $deletedSet, $prefix) {
@@ -296,9 +322,9 @@ function mergeServerState(array $existing, array $incoming): array
                     $empCode = isset($item['code']) ? strtolower(trim((string)$item['code'])) : '';
                     $empUser = isset($item['username']) ? strtolower(trim((string)$item['username'])) : '';
                     $empNid = isset($item['nationalId']) ? preg_replace('/\D/', '', (string)$item['nationalId']) : '';
-                    if ($empId !== '' && (isset($deletedSet[$empId]) || isset($deletedSet[strtolower($empId)]) || isset($deletedSet['emp_' . $empId]) || isset($deletedSet['emp_del_' . $empId]))) {
+                    if ($empId !== '' && (isset($deletedSet['emp_' . $empId]) || isset($deletedSet['emp_del_' . $empId]) || (strpos($empId, 'emp_') === 0 && (isset($deletedSet[$empId]) || isset($deletedSet[strtolower($empId)]))))) {
                         $isDeleted = true;
-                    } elseif ($empCode !== '' && (isset($deletedSet['emp_code_' . $empCode]) || isset($deletedSet['emp_' . $empCode]) || isset($deletedSet[$empCode]))) {
+                    } elseif ($empCode !== '' && (isset($deletedSet['emp_code_' . $empCode]) || isset($deletedSet['emp_' . $empCode]))) {
                         $isDeleted = true;
                     } elseif ($empUser !== '' && (isset($deletedSet['emp_user_' . $empUser]) || isset($deletedSet['user_' . $empUser]))) {
                         $isDeleted = true;

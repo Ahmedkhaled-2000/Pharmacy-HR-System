@@ -834,7 +834,7 @@ export function useAttendanceEngine() {
         photoUrl: emp ? emp.photoUrl : '',
         message: `تم تسجيل الانصراف بنجاح! إجمالي ساعات الشيفت: ${netHours} ساعة.`,
         timestamp: `${getRealTodayStr()} · ${timeOut}`,
-        branchName: branches?.find(b => String(b.id) === String(active?.branchId))?.name || ''
+        branchName: bObj?.name || (state.branches || []).find(b => String(b.id) === String(active?.branchId))?.name || ''
       });
     } else {
       showToast(msg);

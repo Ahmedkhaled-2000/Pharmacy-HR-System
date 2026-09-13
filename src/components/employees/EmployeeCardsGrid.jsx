@@ -56,14 +56,17 @@ export default function EmployeeCardsGrid({
   const [rehireNotes, setRehireNotes] = useState('');
   const [isRehiring, setIsRehiring] = useState(false);
   const [previewPhotoEmp, setPreviewPhotoEmp] = useState(null);
-  // Branch Cards Collapse/Expand state (all collapsed by default, resets on reload)
+  // Branch Cards Collapse/Expand state (all branches expanded by default so added/active employees are immediately visible)
   const [expandedBranches, setExpandedBranches] = useState({});
 
   const toggleBranchCollapse = (bKey) => {
-    setExpandedBranches((prev) => ({
-      ...prev,
-      [bKey]: !prev[bKey]
-    }));
+    setExpandedBranches((prev) => {
+      const current = prev[bKey] !== undefined ? prev[bKey] : true;
+      return {
+        ...prev,
+        [bKey]: !current
+      };
+    });
   };
 
   const branches = state.branches || [];
@@ -559,7 +562,7 @@ export default function EmployeeCardsGrid({
           const branchEmps = groupedEmployees[branchKey];
           if (!branchEmps || branchEmps.length === 0) return null;
           const branchTitle = getBranchName(branchKey);
-          const isExpanded = Boolean(expandedBranches[branchKey]);
+          const isExpanded = expandedBranches[branchKey] !== undefined ? Boolean(expandedBranches[branchKey]) : true;
 
           return (
             <div key={branchKey} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '16px', padding: isExpanded ? '20px' : '12px 18px', transition: 'all 0.2s ease' }}>

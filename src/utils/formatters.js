@@ -305,9 +305,43 @@ export function normalizeState(parsed) {
     };
   });
 
-  // ── 1. تصفية الموظفين المحذوفين وفق شواهد القبور (_deletedIds) ──
+  // ── 1. تصفية الموظفين المحذوفين وفق شواهد القبور (_deletedIds) مع حصانة الموظفين النشطين الصريحين ──
   const rawDeletedIds = toSafeArray(parsed._deletedIds || []);
   const deletedSet = new Set(rawDeletedIds.map((d) => String(d).trim().toLowerCase()));
+
+  // فك الحظر عن أي موظف نشط موجود صراحة في مصفوفة الموظفين الحالية لمنع حذفه بشواهد قبور قديمة
+  for (const emp of employees) {
+    if (emp && emp.is_active !== false && emp.status !== 'تم الاستقالة' && emp.status !== 'resigned') {
+      if (emp.id) {
+        const idLower = String(emp.id).trim().toLowerCase();
+        deletedSet.delete(idLower);
+        deletedSet.delete(`emp_${idLower}`);
+        deletedSet.delete(`emp_del_${idLower}`);
+      }
+      if (emp.code) {
+        const codeLower = String(emp.code).trim().toLowerCase();
+        deletedSet.delete(codeLower);
+        deletedSet.delete(`emp_${codeLower}`);
+        deletedSet.delete(`emp_code_${codeLower}`);
+        deletedSet.delete(`code_${codeLower}`);
+      }
+      if (emp.username) {
+        const userLower = String(emp.username).trim().toLowerCase();
+        deletedSet.delete(userLower);
+        deletedSet.delete(`emp_${userLower}`);
+        deletedSet.delete(`emp_user_${userLower}`);
+        deletedSet.delete(`user_${userLower}`);
+      }
+      if (emp.nationalId) {
+        const nid = String(emp.nationalId).replace(/\D/g, '');
+        if (nid) {
+          deletedSet.delete(`emp_nid_${nid}`);
+          deletedSet.delete(`nid_${nid}`);
+        }
+      }
+    }
+  }
+
   if (deletedSet.size > 0) {
     employees = employees.filter((emp) => {
       if (!emp) return false;
@@ -926,7 +960,7 @@ export function normalizeState(parsed) {
     },
     branchDirectives: toSafeArray(parsed.branchDirectives),
     adminDirectives: toSafeArray(parsed.adminDirectives),
-    _deletedIds: toSafeArray(parsed._deletedIds || [])
+    _deletedIds: Array.from(deletedSet).slice(-3000)
   };
 }
 

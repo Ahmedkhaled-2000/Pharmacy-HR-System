@@ -778,17 +778,10 @@ export default function EmployeeFileModal({
 
     const employeeData = {
       ...(editingEmp || {}),
-      // ── حماية صارمة لمعرف الموظف: منع توليد ID جديد لأي موظف موجود ──
+      // ── حماية صارمة لمعرف الموظف: منع استعارة ID موظف آخر وتوليد ID فريد للجديد ──
       id: (() => {
         if (editingEmp?.id) return editingEmp.id;
-        const cleanEmpCode = String(code || '').trim().toLowerCase();
-        const cleanNid = String(nationalId || '').replace(/\D/g, '');
-        const matchInState = (allEmployees || state?.employees || []).find((e) =>
-          (cleanEmpCode && e.code && String(e.code).trim().toLowerCase() === cleanEmpCode) ||
-          (cleanNid && e.nationalId && String(e.nationalId).replace(/\D/g, '') === cleanNid) ||
-          (editingEmp?.recruitmentApplicationId && e.recruitmentApplicationId === editingEmp.recruitmentApplicationId)
-        );
-        return matchInState?.id || `emp_${Date.now()}`;
+        return `emp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
       })(),
       recruitmentApplicationId: editingEmp?.recruitmentApplicationId || editingEmp?.applicationId || undefined,
       isFromRecruitment: editingEmp?.isFromRecruitment || undefined,
@@ -882,31 +875,37 @@ export default function EmployeeFileModal({
           const cleanCode = String(employeeData.code || '').trim().toLowerCase();
           const cleanNid = String(employeeData.nationalId || '').replace(/\D/g, '');
 
-          // ── تحديث السجل القائم وتوحيد أي تكرار سابق لنفس الموظف في مصفوفة الموظفين ──
+          // ── تحديث مصفوفة الموظفين بدقة: عزل تام بين الإضافة والتعديل لمنع مسح أي موظف قائم ──
           let found = false;
           const updatedEmps = [];
-          for (const e of (currentState.employees || [])) {
-            const isMatch = String(e.id) === String(employeeData.id) ||
-                            (cleanCode && e.code && String(e.code).trim().toLowerCase() === cleanCode) ||
-                            (cleanNid && e.nationalId && String(e.nationalId).replace(/\D/g, '') === cleanNid) ||
-                            (employeeData.recruitmentApplicationId && e.recruitmentApplicationId === employeeData.recruitmentApplicationId);
-            if (isMatch) {
-              if (!found) {
+
+          if (editingEmp) {
+            // حالة تعديل موظف قائم: نستهدف فقط الموظف المحدد بمعرفه الأصلي
+            const targetId = String(editingEmp.id);
+            for (const e of (currentState.employees || [])) {
+              if (String(e.id) === targetId) {
                 updatedEmps.push({
                   ...e,
                   ...employeeData,
-                  id: employeeData.id || e.id,
+                  id: e.id,
                   updatedAt: new Date().toISOString()
                 });
                 found = true;
+              } else {
+                updatedEmps.push(e);
               }
-              // أي تكرار سابق لنفس الموظف يتم طيه وإلغاؤه فوراً
-            } else {
+            }
+            if (!found) {
+              updatedEmps.push({
+                ...employeeData,
+                updatedAt: new Date().toISOString()
+              });
+            }
+          } else {
+            // حالة إضافة موظف جديد: نحتفظ بكافة الموظفين القائمين 100% ونضيف الموظف الجديد
+            for (const e of (currentState.employees || [])) {
               updatedEmps.push(e);
             }
-          }
-
-          if (!found) {
             updatedEmps.push({
               ...employeeData,
               updatedAt: new Date().toISOString()
@@ -946,12 +945,15 @@ export default function EmployeeFileModal({
             String(employeeData.id).toLowerCase(),
             `emp_${employeeData.id}`,
             `emp_${String(employeeData.id).toLowerCase()}`,
+            `emp_del_${employeeData.id}`,
+            `emp_del_${String(employeeData.id).toLowerCase()}`,
             cleanCode,
             `emp_${cleanCode}`,
             `emp_code_${cleanCode}`,
             `code_${cleanCode}`,
             cleanNid,
-            `emp_nid_${cleanNid}`
+            `emp_nid_${cleanNid}`,
+            `nid_${cleanNid}`
           ]);
           if (employeeData.username) {
             const u = String(employeeData.username).trim().toLowerCase();

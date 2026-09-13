@@ -594,6 +594,47 @@ export function smartMergeStates(localState, remoteState) {
     }
   }
 
+  // ── حماية الموظفين الفعليين على رأس العمل من شواهد القبور القديمة ──
+  const allCurrentEmps = [
+    ...toSafeArray(localState.employees),
+    ...toSafeArray(remoteState.employees)
+  ];
+  for (const emp of allCurrentEmps) {
+    if (!emp || typeof emp !== 'object') continue;
+    const isActive = emp.is_active !== false && emp.status !== 'تم الاستقالة' && emp.status !== 'resigned';
+    if (isActive) {
+      if (emp.id) {
+        const eId = String(emp.id).trim();
+        deletedIds.delete(eId);
+        deletedIds.delete(eId.toLowerCase());
+        deletedIds.delete(`emp_${eId}`);
+        deletedIds.delete(`emp_${eId.toLowerCase()}`);
+        deletedIds.delete(`emp_del_${eId}`);
+      }
+      if (emp.code) {
+        const eCode = String(emp.code).trim().toLowerCase();
+        deletedIds.delete(eCode);
+        deletedIds.delete(`emp_${eCode}`);
+        deletedIds.delete(`emp_code_${eCode}`);
+        deletedIds.delete(`code_${eCode}`);
+      }
+      if (emp.username) {
+        const u = String(emp.username).trim().toLowerCase();
+        deletedIds.delete(u);
+        deletedIds.delete(`emp_${u}`);
+        deletedIds.delete(`emp_user_${u}`);
+        deletedIds.delete(`user_${u}`);
+      }
+      if (emp.nationalId) {
+        const nid = String(emp.nationalId).replace(/\D/g, '');
+        if (nid) {
+          deletedIds.delete(`emp_nid_${nid}`);
+          deletedIds.delete(`nid_${nid}`);
+        }
+      }
+    }
+  }
+
   // معالجة ومراعاة تاريخ التصفير الشامل _wipedAt إن وجد لمنع إعادة إحياء البيانات القديمة
   const remoteWipeTime = remoteState._wipedAt ? new Date(remoteState._wipedAt).getTime() : 0;
   const localWipeTime = localState._wipedAt ? new Date(localState._wipedAt).getTime() : 0;

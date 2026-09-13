@@ -583,9 +583,7 @@ export function DataProvider({ children, showToast = () => {} }) {
             const matchIdx = updatedEmployees.findIndex((upd, idx) => {
               if (matchedUpdatedIndices.has(idx)) return false;
               if (eId && upd.id && String(upd.id) === eId) return true;
-              if (cleanCode && upd.code && String(upd.code).trim().toLowerCase() === cleanCode) return true;
-              if (cleanNid && upd.nationalId && String(upd.nationalId).replace(/\D/g, '') === cleanNid) return true;
-              if (e.recruitmentApplicationId && upd.recruitmentApplicationId && e.recruitmentApplicationId === upd.recruitmentApplicationId) return true;
+              if ((!eId || !upd.id) && cleanCode && upd.code && String(upd.code).trim().toLowerCase() === cleanCode) return true;
               return false;
             });
 
