@@ -8,13 +8,14 @@ require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/db.php';
 
 // حماية السكريبت برمز أمان
+$configuredSecret = getenv('RESET_SECRET') ?: 'reset_pharmacy_2026';
 $secret = $_GET['secret'] ?? $_POST['secret'] ?? '';
 $isCli = (php_sapi_name() === 'cli');
 
-if (!$isCli && $secret !== 'reset_pharmacy_2026') {
+if (!$isCli && (!is_string($secret) || !hash_equals($configuredSecret, $secret))) {
     jsonResponse([
         'success' => false,
-        'error' => 'Access denied. Provide valid secret parameter ?secret=reset_pharmacy_2026'
+        'error' => 'Access denied: Unauthorized maintenance request.'
     ], 403);
 }
 
@@ -194,6 +195,6 @@ try {
     error_log('[Reset Database Error] ' . $e->getMessage());
     jsonResponse([
         'success' => false,
-        'error' => 'فشل تصفير قاعدة البيانات: ' . $e->getMessage()
+        'error' => 'فشل تصفير قاعدة البيانات. يرجى مراجعة سجلات الخادم.'
     ], 500);
 }

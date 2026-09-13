@@ -285,3 +285,9 @@ export function useUI() {
   }
   return context;
 }
+
+export function useOptionalUI() {
+  return useContext(UIContext);
+}
+
+export { UIContext };

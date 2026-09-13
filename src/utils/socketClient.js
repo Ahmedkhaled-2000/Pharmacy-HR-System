@@ -114,3 +114,35 @@ export function emitSaveState(state, key = 'pharmacy-tracker-data') {
   }
   return false;
 }
+
+/**
+ * الاشتراك في إشارات المزامنة التزايدية الخفيفة جداً (Sync Hints < 50 bytes)
+ */
+export function subscribeToSyncHints(callback) {
+  const s = getSocket();
+  if (!s || typeof callback !== 'function') return () => {};
+
+  const handler = (payload) => {
+    try {
+      callback(payload);
+    } catch (err) {
+      console.warn('[Socket.io] Error in sync hint callback:', err);
+    }
+  };
+
+  s.on('sync:hint', handler);
+
+  return () => {
+    s.off('sync:hint', handler);
+  };
+}
+
+export function emitSyncHint(payload) {
+  const s = getSocket();
+  if (s && s.connected) {
+    s.emit('sync:hint', payload);
+    return true;
+  }
+  return false;
+}
+

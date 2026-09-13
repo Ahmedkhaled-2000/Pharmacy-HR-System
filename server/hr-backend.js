@@ -14,6 +14,7 @@ import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import crypto from 'crypto';
 
 dotenv.config();
 
@@ -22,6 +23,43 @@ const __dirname = path.dirname(__filename);
 
 const PORT = process.env.PORT || 5000;
 const STORAGE_KEY = 'pharmacy-tracker-data';
+const JWT_SECRET = process.env.JWT_SECRET || process.env.AUTH_SECRET || 'pharmacy_jwt_secret_key_2026_super_secure';
+
+function timingSafeMatch(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+function verifyJwtToken(token) {
+  if (!token || typeof token !== 'string') return null;
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const [headerB64, payloadB64, signatureB64] = parts;
+    const expectedSig = crypto
+      .createHmac('sha256', JWT_SECRET)
+      .update(`${headerB64}.${payloadB64}`)
+      .digest('base64url');
+    if (!timingSafeMatch(signatureB64, expectedSig)) return null;
+    const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function getAuthFromReq(req) {
+  const authHeader = req.headers['authorization'] || '';
+  if (authHeader.startsWith('Bearer ')) {
+    const token = authHeader.substring(7).trim();
+    return verifyJwtToken(token);
+  }
+  return null;
+}
 
 // ── 1. إعداد تطبيق Express وخادم الـ WebSockets (Socket.io) ─────────────────
 const app = express();
@@ -62,8 +100,8 @@ const pgConfig = connectionString ? {
   host: process.env.DB_HOST || process.env.POSTGRES_HOST || 'aws-0-eu-west-2.pooler.supabase.com',
   port: parseInt(process.env.DB_PORT || process.env.POSTGRES_PORT || '6543', 10),
   database: process.env.DB_NAME || process.env.POSTGRES_DB || 'postgres',
-  user: process.env.DB_USER || process.env.POSTGRES_USER || 'postgres.cghmfqkrrtxgrhkoupla',
-  password: process.env.DB_PASS || process.env.POSTGRES_PASSWORD || 'M00Bje1rkK8hqZbV',
+  user: process.env.DB_USER || process.env.POSTGRES_USER || '',
+  password: process.env.DB_PASS || process.env.POSTGRES_PASSWORD || '',
   ssl: { rejectUnauthorized: false },
   max: 20,
   idleTimeoutMillis: 30000,
@@ -111,13 +149,13 @@ async function initDatabaseTables() {
     const schemaSql = `
       -- 1. جدول إعدادات وحالة التطبيق (JSONB)
       CREATE TABLE IF NOT EXISTS public.app_settings (
-          key VARCHAR(191) PRIMARY KEY,
-          value JSONB NOT NULL,
+          key_name VARCHAR(191) PRIMARY KEY,
+          value_data JSONB NOT NULL,
           version INTEGER NOT NULL DEFAULT 1,
           updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
       CREATE INDEX IF NOT EXISTS idx_app_settings_updated ON public.app_settings (updated_at);
-      CREATE INDEX IF NOT EXISTS idx_app_settings_val_gin ON public.app_settings USING GIN (value);
+      CREATE INDEX IF NOT EXISTS idx_app_settings_val_gin ON public.app_settings USING GIN (value_data);
 
       -- 2. جدول البصمات الحيوية
       CREATE TABLE IF NOT EXISTS public.employee_faces (
@@ -350,12 +388,30 @@ app.post('/api/settings', async (req, res) => {
     if (value === undefined) {
       return res.status(400).json({ success: false, error: 'Missing value field' });
     }
+
+    // حماية حساب المالك من التعديل العرضي أو غير المصرح به
+    let stateValue = value;
+    if (typeof stateValue === 'string') {
+      try { stateValue = JSON.parse(stateValue); } catch {}
+    }
+
+    const authUser = getAuthFromReq(req);
+    const isOwner = authUser?.role === 'owner';
+
+    if (stateValue && stateValue.orgSettings && !isOwner) {
+      const existing = await getSettingsFromStorage(key);
+      if (existing?.orgSettings) {
+        stateValue.orgSettings.ownerPassword = existing.orgSettings.ownerPassword || 'owner123';
+        stateValue.orgSettings.ownerUsername = existing.orgSettings.ownerUsername || 'owner';
+      }
+    }
+
     const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-    const result = await saveSettingsToStorage(key, value, clientIp);
+    const result = await saveSettingsToStorage(key, stateValue, clientIp);
     res.json(result);
   } catch (err) {
     console.error('[API POST /settings Error]:', err);
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: 'Failed to update settings' });
   }
 });
 
@@ -371,7 +427,7 @@ app.get('/api/sync/version', async (req, res) => {
       }
     }
 
-    const r = await db.query('SELECT version, updated_at FROM public.app_settings WHERE key = $1', [key]);
+    const r = await db.query('SELECT version, updated_at FROM public.app_settings WHERE key_name = $1', [key]);
     if (r.rows.length > 0) {
       return res.json({ version: r.rows[0].version, updated_at: r.rows[0].updated_at });
     }
@@ -379,6 +435,228 @@ app.get('/api/sync/version', async (req, res) => {
     res.json({ version: 0, updated_at: null });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ── 6.5 مسارات المزامنة التزايدية الذرية (Delta Sync & Outbox Engine) ───────────
+app.post('/api/sync/push', async (req, res) => {
+  try {
+    const { device_id = 'device_unknown', user_id = 'user_unknown', branch_id = '', operations = [] } = req.body;
+    if (!Array.isArray(operations)) {
+      return res.status(400).json({ success: false, error: 'operations must be an array' });
+    }
+
+    const acks = [];
+    const conflicts = [];
+    let maxSequence = 0;
+
+    try {
+      const seqRow = await db.query('SELECT MAX(sequence) as max_seq FROM public.change_log');
+      maxSequence = parseInt(seqRow.rows[0]?.max_seq || 0, 10);
+    } catch {}
+
+    for (const op of operations) {
+      if (!op || typeof op !== 'object') continue;
+      const opId = String(op.operation_id || op.id || '');
+      let idempKey = String(op.idempotency_key || '');
+      const opType = String(op.type || '').toUpperCase();
+      const opPayload = op.payload || {};
+
+      if (!idempKey) {
+        idempKey = opId ? `op_${opId}` : `idemp_${Date.now()}_${Math.random().toString(36).substring(2)}`;
+      }
+
+      // 1. فحص عدم التكرار (Idempotency)
+      try {
+        const inboxCheck = await db.query('SELECT id, status, processed_at FROM public.server_inbox WHERE idempotency_key = $1 LIMIT 1', [idempKey]);
+        if (inboxCheck.rows.length > 0) {
+          acks.push({
+            operation_id: opId,
+            idempotency_key: idempKey,
+            status: inboxCheck.rows[0].status || 'PROCESSED',
+            replayed: true,
+            processed_at: inboxCheck.rows[0].processed_at,
+          });
+          continue;
+        }
+      } catch (inboxErr) {
+        console.warn('[Sync Push Inbox Check Warn]:', inboxErr.message);
+      }
+
+      // 2. تنفيذ العملية
+      try {
+        let serverSeq = maxSequence;
+        let entityId = null;
+
+        if (opType === 'CREATE_REQUEST' || opType === 'SUBMIT_REQUEST') {
+          const reqData = opPayload.request || opPayload;
+          const reqId = String(reqData.id || `req_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`);
+          entityId = reqId;
+          const reqType = String(reqData.request_type || reqData.type || 'general');
+          const empId = String(reqData.employee_id || reqData.empId || user_id);
+          const empName = String(reqData.employee_name || reqData.empName || '');
+          const empCode = String(reqData.employee_code || reqData.empCode || '');
+          const bId = String(reqData.branch_id || branch_id || 'BR01');
+          const deptId = reqData.department_id ? String(reqData.department_id) : null;
+          const targetRole = String(reqData.target_role || reqData.targetRole || 'admin');
+          const priority = String(reqData.priority || 'NORMAL').toUpperCase();
+          const status = String(reqData.status || 'PENDING').toUpperCase();
+
+          const insertSql = `
+            INSERT INTO public.requests (
+              id, idempotency_key, request_type, employee_id, employee_name, employee_code,
+              branch_id, department_id, target_role, priority, status, payload,
+              queued_at, sent_at, delivered_at, created_at, updated_at
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6,
+              $7, $8, $9, $10, $11, $12::jsonb,
+              NOW(), NOW(), NOW(), NOW(), NOW()
+            )
+            ON CONFLICT (idempotency_key) DO UPDATE SET updated_at = NOW()
+            RETURNING change_sequence;
+          `;
+          const r = await db.query(insertSql, [
+            reqId, idempKey, reqType, empId, empName, empCode,
+            bId, deptId, targetRole, priority, status, JSON.stringify(reqData)
+          ]);
+          serverSeq = parseInt(r.rows[0]?.change_sequence || maxSequence, 10);
+        } else if (opType === 'UPDATE_STATUS' || opType === 'APPROVE_REQUEST' || opType === 'REJECT_REQUEST') {
+          const reqId = String(opPayload.request_id || opPayload.id || '');
+          entityId = reqId;
+          const newStatus = String(opPayload.status || (opType === 'APPROVE_REQUEST' ? 'APPROVED' : 'REJECTED')).toUpperCase();
+          const comment = String(opPayload.comment || '');
+          const actorRole = String(opPayload.actor_role || 'admin');
+          const actorName = String(opPayload.actor_name || 'الإدارة');
+
+          if (reqId) {
+            const curReq = await db.query('SELECT status, branch_id FROM public.requests WHERE id = $1 LIMIT 1', [reqId]);
+            const fromStatus = curReq.rows[0]?.status || 'PENDING';
+            const bId = curReq.rows[0]?.branch_id || branch_id;
+
+            await db.query(
+              `UPDATE public.requests 
+               SET status = $1, 
+                   completed_at = CASE WHEN $1 IN ('APPROVED', 'REJECTED', 'COMPLETED') THEN NOW() ELSE completed_at END,
+                   updated_at = NOW()
+               WHERE id = $2`,
+              [newStatus, reqId]
+            );
+
+            await db.query(
+              `INSERT INTO public.request_status_history (request_id, from_status, to_status, actor_id, actor_name, actor_role, comment)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+              [reqId, fromStatus, newStatus, user_id, actorName, actorRole, comment]
+            );
+          }
+        } else if (opType === 'ACKNOWLEDGE_REQUEST' || opType === 'READ_REQUEST') {
+          const reqId = String(opPayload.request_id || opPayload.id || '');
+          entityId = reqId;
+          const ackType = String(opPayload.ack_type || (opType === 'READ_REQUEST' ? 'READ' : 'ACKNOWLEDGED')).toUpperCase();
+
+          if (reqId) {
+            await db.query(
+              `INSERT INTO public.request_acknowledgements (request_id, user_id, device_id, ack_type)
+               VALUES ($1, $2, $3, $4)`,
+              [reqId, user_id, device_id, ackType]
+            );
+            if (ackType === 'READ') {
+              await db.query('UPDATE public.requests SET read_at = NOW() WHERE id = $1 AND read_at IS NULL', [reqId]);
+            } else if (ackType === 'ACKNOWLEDGED') {
+              await db.query('UPDATE public.requests SET acknowledged_at = NOW() WHERE id = $1 AND acknowledged_at IS NULL', [reqId]);
+            }
+          }
+        }
+
+        // تسجيل في server_inbox
+        await db.query(
+          `INSERT INTO public.server_inbox (client_operation_id, idempotency_key, device_id, user_id, operation_type, payload, status)
+           VALUES ($1, $2, $3, $4, $5, $6::jsonb, 'PROCESSED')
+           ON CONFLICT (idempotency_key) DO NOTHING`,
+          [opId, idempKey, device_id, user_id, opType, JSON.stringify(opPayload)]
+        );
+
+        if (serverSeq > maxSequence) maxSequence = serverSeq;
+        acks.push({
+          operation_id: opId,
+          idempotency_key: idempKey,
+          entity_id: entityId,
+          status: 'PROCESSED',
+          server_sequence: serverSeq,
+        });
+
+      } catch (opErr) {
+        console.error(`[Sync Op Err] ${opType}:`, opErr.message);
+        conflicts.push({
+          operation_id: opId,
+          idempotency_key: idempKey,
+          status: 'FAILED',
+          error: opErr.message,
+        });
+      }
+    }
+
+    // بث إشارة استيقاظ خفيفة جداً للأجهزة المتصلة عبر Socket.io
+    io.emit('sync:hint', { sequence: maxSequence, branch_id: branch_id });
+
+    res.json({
+      success: true,
+      message: 'Batch push processed successfully',
+      processed_count: acks.length,
+      failed_count: conflicts.length,
+      acks,
+      conflicts,
+      latest_cursor: maxSequence,
+    });
+  } catch (err) {
+    console.error('[API /sync/push Error]:', err);
+    res.status(500).json({ success: false, error: 'Sync push failed' });
+  }
+});
+
+app.get('/api/sync/delta', async (req, res) => {
+  try {
+    const sinceSeq = parseInt(req.query.since_sequence || req.query.cursor || '0', 10);
+    const branchId = String(req.query.branch_id || '').trim();
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit || '100', 10)));
+
+    let sql = 'SELECT sequence, entity_type, entity_id, branch_id, operation, delta_payload, timestamp FROM public.change_log WHERE sequence > $1';
+    const params = [sinceSeq];
+
+    if (branchId) {
+      sql += ' AND (branch_id = $2 OR branch_id IS NULL OR branch_id = \'\') ORDER BY sequence ASC LIMIT $3';
+      params.push(branchId, limit);
+    } else {
+      sql += ' ORDER BY sequence ASC LIMIT $2';
+      params.push(limit);
+    }
+
+    const r = await db.query(sql, params);
+    let newCursor = sinceSeq;
+
+    const changes = r.rows.map((row) => {
+      const seq = parseInt(row.sequence, 10);
+      if (seq > newCursor) newCursor = seq;
+      return {
+        sequence: seq,
+        entity_type: row.entity_type,
+        entity_id: row.entity_id,
+        branch_id: row.branch_id,
+        operation: row.operation,
+        data: row.delta_payload,
+        timestamp: row.timestamp,
+      };
+    });
+
+    res.json({
+      success: true,
+      cursor: newCursor,
+      count: changes.length,
+      changes,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('[API /sync/delta Error]:', err);
+    res.status(500).json({ success: false, error: 'Sync delta failed' });
   }
 });
 
@@ -433,6 +711,10 @@ app.post('/api/faces', async (req, res) => {
 
 app.delete('/api/faces', async (req, res) => {
   try {
+    const authUser = getAuthFromReq(req);
+    if (!authUser || !['admin', 'owner'].includes(authUser.role)) {
+      return res.status(403).json({ success: false, error: 'Unauthorized: Admin or owner role required to delete biometric records' });
+    }
     const { employee_id } = req.query;
     if (!employee_id) {
       return res.status(400).json({ success: false, error: 'Missing employee_id' });
@@ -441,13 +723,34 @@ app.delete('/api/faces', async (req, res) => {
     io.emit('face:deleted', { employee_id });
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.error('[Delete Face Error]:', err);
+    res.status(500).json({ success: false, error: 'Failed to delete biometric record' });
   }
 });
 
 // ── 8. مسارات النسخ الاحتياطي وإعادة الضبط (Backup / Reset) ───────────────────
 app.post('/api/backup/export', async (req, res) => {
   try {
+    const authUser = getAuthFromReq(req);
+    const backupSecret = process.env.BACKUP_SECRET || process.env.RESET_SECRET;
+    const providedSecret = req.headers['x-admin-secret'] || req.body?.secret;
+    const isSecretMatch = Boolean(backupSecret && providedSecret && timingSafeMatch(providedSecret, backupSecret));
+
+    if (!isSecretMatch && (!authUser || !['owner', 'admin'].includes(authUser.role))) {
+      const { password } = req.body || {};
+      let passMatch = false;
+      if (password) {
+        const stored = await getSettingsFromStorage(STORAGE_KEY);
+        const org = stored?.orgSettings || {};
+        if (timingSafeMatch(password, org.ownerPassword || 'owner123') || timingSafeMatch(password, org.adminPassword || '123')) {
+          passMatch = true;
+        }
+      }
+      if (!passMatch) {
+        return res.status(403).json({ success: false, error: 'Unauthorized: Admin or owner authorization required for backup export' });
+      }
+    }
+
     const settingsRes = await db.query('SELECT * FROM public.app_settings');
     const facesRes = await db.query('SELECT * FROM public.employee_faces');
     res.json({
@@ -456,16 +759,37 @@ app.post('/api/backup/export', async (req, res) => {
       employee_faces: facesRes.rows,
     });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.error('[Backup Export Error]:', err);
+    res.status(500).json({ success: false, error: 'Backup export failed' });
   }
 });
 
 app.post('/api/backup/import', async (req, res) => {
   try {
+    const authUser = getAuthFromReq(req);
+    const backupSecret = process.env.BACKUP_SECRET || process.env.RESET_SECRET;
+    const providedSecret = req.headers['x-admin-secret'] || req.body?.secret;
+    const isSecretMatch = Boolean(backupSecret && providedSecret && timingSafeMatch(providedSecret, backupSecret));
+
+    if (!isSecretMatch && (!authUser || !['owner', 'admin'].includes(authUser.role))) {
+      const { password } = req.body || {};
+      let passMatch = false;
+      if (password) {
+        const stored = await getSettingsFromStorage(STORAGE_KEY);
+        const org = stored?.orgSettings || {};
+        if (timingSafeMatch(password, org.ownerPassword || 'owner123') || timingSafeMatch(password, org.adminPassword || '123')) {
+          passMatch = true;
+        }
+      }
+      if (!passMatch) {
+        return res.status(403).json({ success: false, error: 'Unauthorized: Admin or owner authorization required for backup import' });
+      }
+    }
+
     const { app_settings, employee_faces } = req.body;
     if (app_settings && Array.isArray(app_settings)) {
       for (const item of app_settings) {
-        await saveSettingsToStorage(item.key, item.value);
+        await saveSettingsToStorage(item.key_name || item.key, item.value_data || item.value);
       }
     }
     if (employee_faces && Array.isArray(employee_faces)) {
@@ -480,13 +804,42 @@ app.post('/api/backup/import', async (req, res) => {
     }
     res.json({ success: true, message: 'Backup imported successfully' });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.error('[Backup Import Error]:', err);
+    res.status(500).json({ success: false, error: 'Backup import failed' });
   }
 });
 
 app.post('/api/system/reset', async (req, res) => {
   try {
-    const { key = STORAGE_KEY, state } = req.body;
+    const { key = STORAGE_KEY, state, confirm, ownerPassword, secret } = req.body;
+
+    if (confirm !== 'CONFIRM_RESET') {
+      return res.status(400).json({ success: false, error: 'Confirmation token CONFIRM_RESET required' });
+    }
+
+    const authUser = getAuthFromReq(req);
+    const resetSecret = process.env.RESET_SECRET || 'reset_pharmacy_2026';
+    const isSecretValid = typeof secret === 'string' && timingSafeMatch(secret, resetSecret);
+
+    let isOwnerValid = false;
+    if (authUser && (authUser.role === 'owner' || authUser.role === 'admin')) {
+      isOwnerValid = true;
+    } else {
+      try {
+        const stored = await getSettingsFromStorage(key);
+        const currentOwnerPass = stored?.orgSettings?.ownerPassword || 'owner123';
+        if (typeof ownerPassword === 'string' && timingSafeMatch(ownerPassword, currentOwnerPass)) {
+          isOwnerValid = true;
+        }
+      } catch (e) {
+        console.warn('[Reset Auth Check Error]:', e.message);
+      }
+    }
+
+    if (!isSecretValid && !isOwnerValid) {
+      return res.status(403).json({ success: false, error: 'Access denied: Valid owner credentials or reset authorization required' });
+    }
+
     await db.query('TRUNCATE TABLE public.app_settings, public.employee_faces, public.sync_logs CASCADE');
     try {
       await db.query('TRUNCATE TABLE public.acc_journal_entries, public.acc_journal_lines, public.acc_cashier_closings, public.acc_vendor_transactions CASCADE');
@@ -505,7 +858,8 @@ app.post('/api/system/reset', async (req, res) => {
     io.emit('system:reset', { key, timestamp: new Date().toISOString() });
     res.json({ success: true, message: 'System reset completed' });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.error('[API Reset Error]:', err);
+    res.status(500).json({ success: false, error: 'System reset failed' });
   }
 });
 

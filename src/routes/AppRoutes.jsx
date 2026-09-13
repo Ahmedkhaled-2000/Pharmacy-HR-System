@@ -47,6 +47,7 @@ import { useDailyDigestCron } from '../hooks/useDailyDigestCron';
 import { arabicMonthLabel, fmt, getEmpWhatsAppPhone, normalizeState } from '../utils/formatters';
 import { fetchRemoteState, saveStateLocally } from '../utils/offlineSync';
 import { smartMergeStates } from '../utils/stateMerger';
+import { apiLogin } from '../utils/apiClient';
 
 export default function AppRoutes() {
   const location = useLocation();
@@ -554,6 +555,20 @@ export default function AppRoutes() {
       }
 
       const { role, org, branch, user } = authResult;
+
+      // إصدار وحفظ توكن JWT رسمي من السيرفر للمصادقة وتفويض العمليات الحساسة
+      try {
+        apiLogin({ username: cleanUser, password: cleanPass })
+          .then((res) => {
+            if (res && res.token) {
+              localStorage.setItem('app_auth_token', res.token);
+            }
+          })
+          .catch(() => {
+            // صامت في حالة عدم توفر الاتصال للحفاظ على ميزة العمل دون اتصال
+          });
+      } catch {}
+
       if (role === 'owner') {
         handleUnifiedLogin({ role: 'owner', redirectTab: 'dashboard' });
         try {

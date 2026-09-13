@@ -278,6 +278,7 @@ export function AuthProvider({ children }) {
       localStorage.removeItem('app_branch_session_version');
       localStorage.removeItem('app_emp_password_snapshot');
       localStorage.removeItem('app_emp_session_version');
+      localStorage.removeItem('app_auth_token');
       sessionStorage.removeItem('app_owner_authenticated');
       sessionStorage.removeItem('app_settings_owner_tab_unlocked');
     } catch {}

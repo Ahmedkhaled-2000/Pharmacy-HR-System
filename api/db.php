@@ -229,6 +229,101 @@ class Database
                 client_ip TEXT,
                 created_at TEXT
             );
+            CREATE TABLE IF NOT EXISTS requests (
+                id TEXT PRIMARY KEY,
+                idempotency_key TEXT UNIQUE,
+                request_type TEXT NOT NULL,
+                employee_id TEXT NOT NULL,
+                employee_name TEXT,
+                employee_code TEXT,
+                branch_id TEXT NOT NULL,
+                department_id TEXT,
+                target_role TEXT DEFAULT 'admin',
+                priority TEXT DEFAULT 'NORMAL',
+                status TEXT DEFAULT 'PENDING',
+                payload TEXT NOT NULL,
+                change_sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                version INTEGER DEFAULT 1,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                queued_at TEXT,
+                sent_at TEXT,
+                delivered_at TEXT,
+                received_at TEXT,
+                read_at TEXT,
+                acknowledged_at TEXT,
+                completed_at TEXT,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                deleted_at TEXT,
+                deleted_by TEXT
+            );
+            CREATE TABLE IF NOT EXISTS request_status_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                request_id TEXT NOT NULL,
+                from_status TEXT,
+                to_status TEXT NOT NULL,
+                actor_id TEXT NOT NULL,
+                actor_name TEXT,
+                actor_role TEXT NOT NULL,
+                comment TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS request_acknowledgements (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                request_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                device_id TEXT NOT NULL,
+                ack_type TEXT NOT NULL,
+                timestamp TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS change_log (
+                sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                entity_type TEXT NOT NULL,
+                entity_id TEXT NOT NULL,
+                branch_id TEXT,
+                operation TEXT NOT NULL,
+                delta_payload TEXT,
+                actor_id TEXT,
+                correlation_id TEXT,
+                timestamp TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS server_inbox (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_operation_id TEXT NOT NULL,
+                idempotency_key TEXT UNIQUE NOT NULL,
+                device_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                operation_type TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                received_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                processed_at TEXT,
+                status TEXT DEFAULT 'PROCESSED',
+                error_message TEXT
+            );
+            CREATE TABLE IF NOT EXISTS sync_state (
+                device_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                branch_id TEXT,
+                last_server_cursor INTEGER DEFAULT 0,
+                last_successful_sync TEXT,
+                last_attempted_sync TEXT,
+                sync_status TEXT DEFAULT 'IDLE',
+                error_count INTEGER DEFAULT 0,
+                last_error TEXT,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (device_id, user_id)
+            );
+            CREATE TABLE IF NOT EXISTS dead_letter_operations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                operation_id TEXT NOT NULL,
+                device_id TEXT,
+                user_id TEXT,
+                operation_type TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                attempt_count INTEGER DEFAULT 1,
+                last_error TEXT NOT NULL,
+                first_failed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                last_failed_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
         ");
 
         // استرجاع البيانات الأولية إذا كان الجدول فارغاً

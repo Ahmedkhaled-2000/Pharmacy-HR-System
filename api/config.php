@@ -110,6 +110,12 @@ function verifyApiToken(?string $token): ?array
     return $data;
 }
 
+// ترويسات الأمان والدفاع في العمق (HTTP Defense Headers)
+header('X-Content-Type-Options: nosniff');
+header('X-Frame-Options: SAMEORIGIN');
+header('X-XSS-Protection: 1; mode=block');
+header('Referrer-Policy: strict-origin-when-cross-origin');
+
 /**
  * جلب بيانات المستخدم الموثق من ترويسة الطلب
  *
@@ -124,6 +130,86 @@ function getAuthenticatedUser(): ?array
     }
     return verifyApiToken($authHeader);
 }
+
+/**
+ * التحقق من صلاحيات ودور المستخدم الموثق
+ *
+ * @param array<string> $allowedRoles
+ * @return array<string, mixed>
+ */
+function requireAuth(array $allowedRoles = []): array
+{
+    $user = getAuthenticatedUser();
+    if (!$user) {
+        jsonResponse([
+            'success' => false,
+            'error' => 'غير مصرح: يلزم تسجيل الدخول وتوفير توكن صالح لإجراء هذه العملية (Unauthorized)'
+        ], 401);
+    }
+
+    if (!empty($allowedRoles)) {
+        $userRole = (string)($user['role'] ?? 'guest');
+        if (!in_array($userRole, $allowedRoles, true)) {
+            jsonResponse([
+                'success' => false,
+                'error' => 'تم رفض الوصول: لا تمتلك الصلاحيات الكافية لتنفيذ هذا الإجراء (Forbidden)'
+            ], 403);
+        }
+    }
+
+    return $user;
+}
+
+/**
+ * فحص وتطبيق تحديد معدل الطلبات (High-Speed Server-Side Rate Limiter)
+ *
+ * @param string $action
+ * @param int $maxRequests
+ * @param int $windowSeconds
+ * @param int|null $retryAfter
+ * @return bool
+ */
+function checkRateLimit(string $action, int $maxRequests = 60, int $windowSeconds = 60, ?int &$retryAfter = null): bool
+{
+    $cacheDir = defined('MICRO_CACHE_DIR') ? MICRO_CACHE_DIR : __DIR__ . '/cache';
+    if (!is_dir($cacheDir)) {
+        @mkdir($cacheDir, 0755, true);
+    }
+
+    $hash = md5($action . '_' . getClientIp());
+    $file = $cacheDir . '/rl_' . $hash . '.tmp';
+    $now = time();
+
+    $data = ['start' => $now, 'count' => 0];
+    if (file_exists($file)) {
+        $raw = @file_get_contents($file);
+        if ($raw) {
+            $dec = json_decode($raw, true);
+            if (is_array($dec) && isset($dec['start'], $dec['count'])) {
+                $data = $dec;
+            }
+        }
+    }
+
+    if (($now - $data['start']) > $windowSeconds) {
+        $data['start'] = $now;
+        $data['count'] = 1;
+        @file_put_contents($file, json_encode($data), LOCK_EX);
+        return true;
+    }
+
+    $data['count']++;
+    $retryAfter = max(1, $windowSeconds - ($now - $data['start']));
+
+    if ($data['count'] > $maxRequests) {
+        @file_put_contents($file, json_encode($data), LOCK_EX);
+        return false;
+    }
+
+    @file_put_contents($file, json_encode($data), LOCK_EX);
+    return true;
+}
+
 
 /**
  * إرسال استجابة JSON موحدة خالية من أي كاش متصفح مع ضغط GZIP ودعم ETag / 304 Not Modified
@@ -213,19 +299,24 @@ function getRequestData(): array
 }
 
 /**
- * الحصول على عنوان IP الخاص بالعميل
+ * الحصول على عنوان IP الحقيقي الموثوق والمطهر للعميل
  */
 function getClientIp(): string
 {
+    $rawIp = '';
     if (!empty($_SERVER['HTTP_CF_CONNECTING_IP'])) {
-        return (string)$_SERVER['HTTP_CF_CONNECTING_IP'];
-    }
-    if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+        $rawIp = trim((string)$_SERVER['HTTP_CF_CONNECTING_IP']);
+    } elseif (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
         $ips = explode(',', (string)$_SERVER['HTTP_X_FORWARDED_FOR']);
-        return trim($ips[0]);
+        $rawIp = trim($ips[0]);
+    } else {
+        $rawIp = trim((string)($_SERVER['REMOTE_ADDR'] ?? '127.0.0.1'));
     }
-    return (string)($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0');
+
+    $filtered = filter_var($rawIp, FILTER_VALIDATE_IP);
+    return $filtered !== false ? $filtered : '127.0.0.1';
 }
+
 
 /**
  * دمج ذكي لبيانات النظام على الخادم لمنع مسح أو تداخل طلبات الموظفين بين الأجهزة

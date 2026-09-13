@@ -23,6 +23,7 @@ import {
 export { clearLocalDatabase, saveStateLocally };
 import { smartMergeStates } from './stateMerger';
 import { normalizeState } from './formatters';
+import { enqueueNewRequest, executeFullSync } from './syncEngine';
 
 // ── قناة البث للمزامنة الفورية بين التبويبات والأجهزة ─────────────────────
 const syncChannel = typeof window !== 'undefined' && 'BroadcastChannel' in window
@@ -187,6 +188,7 @@ export async function syncNow(onProgress) {
       await saveStateLocally(finalState);
       await clearPendingQueue();
       broadcastStateChange(finalState);
+      executeFullSync().catch(() => {});
       onProgress?.('تمت المزامنة والدمج بنجاح ✅');
       return { success: true, mergedState: finalState };
     } catch (e) {
@@ -331,14 +333,13 @@ export async function submitRequestFast(requestObj, notificationObj = null, opti
   onOptimisticUpdate?.();
 
   try {
-    const res = await apiSubmitRequestAtomic(requestObj, notificationObj, STORAGE_KEY);
-    if (res?.success) {
-      console.log('⚡ [AtomicSubmit] تم إرسال الطلب بنجاح فوري لقاعدة البيانات:', requestObj.id);
-      return { success: true, mode: 'atomic', requestId: requestObj.id };
-    }
-    throw new Error(res?.error || 'Atomic submit returned unsuccessful');
+    // إدراج مباشر في محرك المزامنة التزايدية والـ Transactional Outbox
+    const bId = requestObj.branchId || requestObj.branch_id || null;
+    const enqueued = await enqueueNewRequest(requestObj, bId);
+    console.log('⚡ [SyncEngine] تم إدراج وحفظ الطلب في المتجر المحلي وصندوق الإرسال:', enqueued.id);
+    return { success: true, mode: 'outbox', requestId: enqueued.id };
   } catch (err) {
-    console.warn('[AtomicSubmit] تعثر الإرسال الذري، جاري الإدراج بطابور المزامنة:', err.message);
+    console.warn('[SyncEngine] تعثر الإدراج المباشر، جاري الإدراج بطابور المزامنة الاحتياطي:', err.message);
     await addToPendingQueue({
       type: 'SUBMIT_REQUEST',
       request: requestObj,

@@ -1,7 +1,8 @@
-# حماية مجلد التخزين المؤقت المحلي ومنع الوصول المباشر عبر المتصفح
+# Deny all direct web access to cache directory
 <IfModule mod_authz_core.c>
-    Require all denied
+  Require all denied
 </IfModule>
 <IfModule !mod_authz_core.c>
-    Deny from all
+  Order Allow,Deny
+  Deny from all
 </IfModule>

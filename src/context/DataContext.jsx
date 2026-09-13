@@ -50,6 +50,18 @@ import {
   calculateRatesAndSalaries,
   getEmployeeBranchAssignment
 } from '../utils/branchMatcher';
+import {
+  initSyncEngine,
+  subscribeToSyncEngine,
+  enqueueNewRequest,
+  enqueueRequestDecision,
+  pullDeltaSync,
+  processOutbox
+} from '../utils/syncEngine';
+import {
+  getAllLocalRequests,
+  putRequestsBatch
+} from '../utils/localDatabase';
 
 const DataContext = createContext(null);
 
@@ -493,6 +505,26 @@ export function DataProvider({ children, showToast = () => {} }) {
       setState((prev) => normalizeState(smartMergeStates(prev, synced)));
       setLastSyncTime(nowTimeStr());
       syncSessionWithFreshData(synced);
+
+      // ترقية وتغذية متجر IndexedDB بالطلبات السابقة تلقائياً لدعم العمل دون اتصال
+      if (Array.isArray(normalized.requests) && normalized.requests.length > 0) {
+        putRequestsBatch(normalized.requests).catch(() => {});
+      }
+
+      // دمج أي طلبات محلية تم إنشاؤها أوفلاين في الـ State
+      getAllLocalRequests().then((localReqs) => {
+        if (localReqs && localReqs.length > 0) {
+          setState((prev) => {
+            const map = new Map((prev.requests || []).map((r) => [String(r.id), r]));
+            localReqs.forEach((lr) => {
+              if (lr && lr.id) {
+                map.set(String(lr.id), { ...(map.get(String(lr.id)) || {}), ...lr });
+              }
+            });
+            return { ...prev, requests: Array.from(map.values()) };
+          });
+        }
+      }).catch(() => {});
     }).catch((err) => {
       if (isMounted) setIsLoading(false);
       console.error('Load error:', err);
@@ -521,6 +553,52 @@ export function DataProvider({ children, showToast = () => {} }) {
       link.href = logoUrl;
     }
   }, [state.orgSettings?.orgName, state.orgSettings?.logoUrl]);
+
+  // تفعيل محرك المزامنة التزايدية الذكي والـ Transactional Outbox
+  useEffect(() => {
+    initSyncEngine(() => currentBranch?.id);
+
+    const unsubscribe = subscribeToSyncEngine((event) => {
+      if (!event) return;
+
+      if (event.type === 'REQUEST_CREATED_OPTIMISTIC' || event.type === 'CROSS_TAB_REQUEST_SYNC') {
+        setState((prev) => {
+          const existing = prev.requests || [];
+          const idx = existing.findIndex((r) => r && String(r.id) === String(event.request.id));
+          if (idx >= 0) {
+            const updated = [...existing];
+            updated[idx] = { ...updated[idx], ...event.request };
+            return { ...prev, requests: updated };
+          }
+          return { ...prev, requests: [event.request, ...existing] };
+        });
+      } else if (event.type === 'REQUEST_UPDATED_OPTIMISTIC' || event.type === 'REQUEST_SENT_CONFIRMED') {
+        setState((prev) => ({
+          ...prev,
+          requests: (prev.requests || []).map((r) =>
+            r && String(r.id) === String(event.request.id) ? { ...r, ...event.request } : r
+          )
+        }));
+      } else if (event.type === 'DELTA_CHANGES_APPLIED') {
+        // تحديث تزايدي فائق الخفة (< 2KB) تم تطبيقه على IndexedDB
+        getAllLocalRequests().then((localReqs) => {
+          if (localReqs && localReqs.length > 0) {
+            setState((prev) => {
+              const map = new Map((prev.requests || []).map((r) => [String(r.id), r]));
+              localReqs.forEach((lr) => {
+                if (lr && lr.id) {
+                  map.set(String(lr.id), { ...(map.get(String(lr.id)) || {}), ...lr });
+                }
+              });
+              return { ...prev, requests: Array.from(map.values()) };
+            });
+          }
+        }).catch(() => {});
+      }
+    });
+
+    return unsubscribe;
+  }, [currentBranch]);
 
   // Real-Time Push Stream & Adaptive Polling Hook
   useRealtimeSync({
@@ -1212,7 +1290,11 @@ export function DataProvider({ children, showToast = () => {} }) {
     getAbsenceDaysCount,
     getPayrollCutoffRange,
     computeEmpSummary,
-    computeGrandPayroll
+    computeGrandPayroll,
+    enqueueNewRequest,
+    enqueueRequestDecision,
+    pullDeltaSync,
+    processOutbox
   };
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;

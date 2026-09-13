@@ -23,25 +23,23 @@ export default function PendingRosterModal({
   selectedMonth,
   cycleRange
 }) {
-  if (!isOpen || !pendingReq) return null;
-
-  const branchId = pendingReq.branchId || emp?.branchId;
+  const branchId = pendingReq?.branchId || emp?.branchId;
   const branchObj = (state?.branches || []).find(b => String(b.id) === String(branchId) || b.name === branchId);
   const branchName = branchObj ? branchObj.name : (branchId ? `فرع ${branchId}` : 'الفرع الرئيسي');
 
   // Normalize submitted schedule
   const submittedSchedule = useMemo(() => {
-    return normalizeSchedule(pendingReq.schedule);
-  }, [pendingReq.schedule]);
+    return normalizeSchedule(pendingReq?.schedule);
+  }, [pendingReq?.schedule]);
 
   // Check if there was an existing approved roster to offer comparison
   const existingRoster = useMemo(() => {
     return (state?.rosters || []).find(r =>
       (String(r.employeeId) === String(emp?.id) || (emp?.code && String(r.employeeCode) === String(emp?.code))) &&
-      (!pendingReq.month || r.month === pendingReq.month || r.month === selectedMonth) &&
+      (!pendingReq?.month || r.month === pendingReq?.month || r.month === selectedMonth) &&
       (String(r.branchId || '') === String(branchId || '') || !r.branchId)
     );
-  }, [state?.rosters, emp, pendingReq, selectedMonth, branchId]);
+  }, [state?.rosters, emp, pendingReq?.month, selectedMonth, branchId]);
 
   // Compute stats for submitted schedule
   const stats = useMemo(() => {
@@ -72,6 +70,8 @@ export default function PendingRosterModal({
       offDays
     };
   }, [submittedSchedule]);
+
+  if (!isOpen || !pendingReq) return null;
 
   const isDirectAdmin = pendingReq.isDirectToAdmin || pendingReq.branchNotRequired || pendingReq.targetApproval === 'admin_only';
   const branchApproved = Boolean(pendingReq.branchApproved);

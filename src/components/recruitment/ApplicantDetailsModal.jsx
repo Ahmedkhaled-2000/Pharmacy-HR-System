@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { APPLICATION_STATUSES, calculateEvaluationScore } from '../../utils/recruitmentHelper';
 import { openDocumentSafely, downloadDocument } from '../../utils/documentViewer';
 
@@ -15,12 +15,20 @@ export default function ApplicantDetailsModal({
   onUpdateNotes,
   showToast
 }) {
-  if (!isOpen || !applicant) return null;
-
   const [activeTab, setActiveTab] = useState('profile'); // 'profile' | 'education' | 'documents' | 'evaluation'
-  const [internalNotes, setInternalNotes] = useState(applicant.notes || '');
+  const [internalNotes, setInternalNotes] = useState(applicant?.notes || '');
   const [isEditingNotes, setIsEditingNotes] = useState(false);
   const [previewDoc, setPreviewDoc] = useState(null); // { url, title, fileName }
+
+  useEffect(() => {
+    if (isOpen && applicant) {
+      setInternalNotes(applicant.notes || '');
+      setIsEditingNotes(false);
+      setPreviewDoc(null);
+    }
+  }, [isOpen, applicant]);
+
+  if (!isOpen || !applicant) return null;
 
   const statusConfig = APPLICATION_STATUSES[applicant.status] || APPLICATION_STATUSES.new;
   const evaluation = applicant.interviewEvaluation;

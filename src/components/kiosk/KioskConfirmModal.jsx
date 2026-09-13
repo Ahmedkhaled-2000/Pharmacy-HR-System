@@ -1,15 +1,8 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
-import { useUI } from '../../context/UIContext';
+import { useOptionalUI } from '../../context/UIContext';
 
 export default function KioskConfirmModal({ confirmData, kioskConfirmModal: propKioskConfirmModal, onClose }) {
-  let uiContext = null;
-  try {
-    // Safely attempt to read UIContext if inside UIProvider
-    uiContext = useUI();
-  } catch (e) {
-    uiContext = null;
-  }
-
+  const uiContext = useOptionalUI();
   const kioskConfirmModal = propKioskConfirmModal || uiContext?.kioskConfirmModal;
   const setKioskConfirmModal = uiContext?.setKioskConfirmModal;
 

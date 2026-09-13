@@ -8,6 +8,8 @@ import { syncNow, fetchRemoteState, hardDeleteEntityFast } from '../../utils/off
 import { createRequestDecisionNotification } from '../../utils/notificationEngine';
 import { useUI } from '../../context/UIContext';
 import { saveFaceDescriptor, saveHandDescriptor, deleteFaceDescriptor, deleteHandDescriptor } from '../../utils/faceStorage';
+import { enqueueRequestDecision, executeFullSync } from '../../utils/syncEngine';
+import { getLifecycleBadge, REQUEST_STATES } from '../../utils/requestLifecycle';
 
 export function getFormattedRequestBadge(type, leaveType, targetAction) {
   let resolvedType = type;
@@ -128,8 +130,9 @@ export default function RequestsModule({
 }) {
   const effectiveRole = currentRole || authRole || 'admin';
   const { showConfirm } = useUI();
+  const [inboxTab, setInboxTab] = useState('all'); // 'all' | 'pending' | 'urgent' | 'completed' | 'rejected' | 'outbox'
   const [filterType, setFilterType] = useState('all');
-  const [filterStatus, setFilterStatus] = useState('pending'); // الافتراضي قيد الاعتماد
+  const [filterStatus, setFilterStatus] = useState('all'); // يتم ضبطه بالتوافق مع التبويب
   const [filterEmp, setFilterEmp] = useState('all');
   const [filterDate, setFilterDate] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -156,15 +159,15 @@ export default function RequestsModule({
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
     try {
-      const res = await syncNow();
-      if (res.success && res.mergedState) {
-        if (setState) setState(normalizeState(res.mergedState));
-        showToast?.('✅ تم تحديث وجلب أحدث الطلبات بنجاح');
+      // 1. مزامنة تزايدية خفيفة فورية عبر Delta Sync + Outbox
+      const syncRes = await executeFullSync(currentBranch?.id);
+      if (syncRes?.pull?.count > 0 || syncRes?.push?.count > 0) {
+        showToast?.(`✅ تمت المزامنة التزايدية: ${syncRes.push.count || 0} مرسل، ${syncRes.pull.count || 0} تحديث وارد`);
       } else {
-        const remote = await fetchRemoteState();
-        if (remote && !remote.notModified) {
-          if (setState) setState(normalizeState(remote));
-          showToast?.('✅ تم تحديث وجلب أحدث الطلبات من السحابة بنجاح');
+        const res = await syncNow();
+        if (res.success && res.mergedState) {
+          if (setState) setState(normalizeState(res.mergedState));
+          showToast?.('✅ تم تحديث وجلب أحدث الطلبات بنجاح');
         } else {
           showToast?.('ℹ️ السجل محدث بالفعل مع أحدث بيانات السحابة');
         }
@@ -483,6 +486,22 @@ export default function RequestsModule({
 
   const filteredRequests = requests.filter((r) => {
     if (!r) return false;
+
+    // Filter by Modern Inbox Tab
+    if (inboxTab !== 'all') {
+      const isPending = !r.status || r.status === 'pending' || r.status === 'pending_admin' || r.status === 'pending_target' || r.status === 'pending_local' || r.status === 'queued' || r.status === 'syncing';
+      const isApproved = r.status === 'approved' || r.status === 'paid' || r.status === 'partial' || r.adminApproved === true;
+      const isRejected = r.status === 'rejected';
+      const isUrgent = r.type === 'complaint' || r.type === 'penalty_objection' || r.type === 'biometric_verification' || r.urgent;
+      const isOutbox = r.status === 'pending_local' || r.status === 'queued' || r.status === 'syncing';
+
+      if (inboxTab === 'pending' && !isPending) return false;
+      if (inboxTab === 'completed' && !isApproved) return false;
+      if (inboxTab === 'rejected' && !isRejected) return false;
+      if (inboxTab === 'urgent' && !isUrgent) return false;
+      if (inboxTab === 'outbox' && !isOutbox) return false;
+    }
+
     if (filterType !== 'all') {
       if (filterType === 'long_leave') {
         if (r.type !== 'long_leave' && !r.isLongLeave && parseFloat(r.daysCount || r.days || 0) <= 3) return false;
@@ -559,20 +578,31 @@ export default function RequestsModule({
     let approvedMonthCount = 0;
     let todayLeavePermCount = 0;
     let pendingLoansCount = 0;
+    let urgentCount = 0;
+    let completedCount = 0;
+    let rejectedCount = 0;
+    let outboxCount = 0;
 
     const todayStr = new Date().toISOString().slice(0, 10);
     const thisMonthStr = todayStr.slice(0, 7);
 
     (allRequests || []).forEach((r) => {
       if (!r) return;
-      const isPending = !r.status || r.status === 'pending' || r.status === 'pending_admin' || r.status === 'pending_target';
+      const isPending = !r.status || r.status === 'pending' || r.status === 'pending_admin' || r.status === 'pending_target' || r.status === 'pending_local' || r.status === 'queued' || r.status === 'syncing';
       const isApproved = r.status === 'approved' || r.status === 'paid' || r.status === 'partial' || r.adminApproved;
+      const isRejected = r.status === 'rejected';
+      const isUrgent = r.type === 'complaint' || r.type === 'penalty_objection' || r.type === 'biometric_verification' || r.urgent;
+      const isOutbox = r.status === 'pending_local' || r.status === 'queued' || r.status === 'syncing';
       const rDate = getRequestDate(r);
       const isBio = r.type === 'biometric_verification' || r.type === 'biometric_registration' || r.type === 'تأكيد بصمة الوجه' || r.type === 'تأكيد بصمة اليد';
 
       if (isPending) pendingCount++;
       if (isBio && isPending) biometricCount++;
       if (isApproved && rDate && rDate.startsWith(thisMonthStr)) approvedMonthCount++;
+      if (isApproved) completedCount++;
+      if (isRejected) rejectedCount++;
+      if (isUrgent && isPending) urgentCount++;
+      if (isOutbox) outboxCount++;
       if ((r.type === 'leave' || r.type === 'permission' || r.type === 'late_permission') && (r.startDate === todayStr || r.date === todayStr)) todayLeavePermCount++;
       if ((r.type === 'loan' || r.type === 'advance' || r.type === 'meds') && isPending) pendingLoansCount++;
     });
@@ -582,7 +612,12 @@ export default function RequestsModule({
       biometricCount,
       approvedMonthCount,
       todayLeavePermCount,
-      pendingLoansCount
+      pendingLoansCount,
+      urgentCount,
+      completedCount,
+      rejectedCount,
+      outboxCount,
+      totalCount: (allRequests || []).length
     };
   }, [allRequests]);
 
@@ -1249,6 +1284,13 @@ export default function RequestsModule({
       if (saveState) {
         saveState(updatedState).catch(err => console.error('Background save error:', err));
       }
+      enqueueRequestDecision({
+        requestId: reqId,
+        decision: 'approve',
+        newStatus: 'approved',
+        reviewer: { role: effectiveRole, id: state.currentUser?.id || 'admin' },
+        branchId: approvedTargetReq.branchId || approvedTargetReq.branch_id
+      }).catch(err => console.warn('Outbox enqueue decision error:', err));
 
       // إشعار فوري عبر Gmail بتطبيق الجزاء / الخصم المعتمد
       const cleanReqType = String(approvedTargetReq.type || '').trim().toLowerCase();
@@ -1606,6 +1648,13 @@ export default function RequestsModule({
     };
       if (setState) setState(updatedState);
       if (saveState) await saveState(updatedState);
+      enqueueRequestDecision({
+        requestId: reqId,
+        decision: 'reject',
+        newStatus: 'rejected',
+        reviewer: { role: effectiveRole, id: state.currentUser?.id || 'admin' },
+        branchId: rejectedTargetReq?.branchId || rejectedTargetReq?.branch_id
+      }).catch(err => console.warn('Outbox enqueue decision error:', err));
       showToast?.('❌ تم رفض الطلب واستبعاد الإجراء');
     };
 
@@ -2292,6 +2341,73 @@ export default function RequestsModule({
         </div>
       </div>
 
+      {/* ── Modern Inbox Tabs Navigation Bar ── */}
+      <div
+        style={{
+          display: 'flex',
+          gap: '8px',
+          marginBottom: '18px',
+          overflowX: 'auto',
+          paddingBottom: '4px',
+          scrollbarWidth: 'thin'
+        }}
+      >
+        {[
+          { id: 'all', label: 'كافة الطلبات', icon: '📋', count: kpis.totalCount, color: '#3b82f6' },
+          { id: 'pending', label: 'قيد الاعتماد', icon: '⏳', count: kpis.pendingCount, color: '#f59e0b' },
+          { id: 'urgent', label: 'عاجل وتظلمات', icon: '🚨', count: kpis.urgentCount, color: '#ef4444' },
+          { id: 'completed', label: 'المعتمدة والمكتملة', icon: '✅', count: kpis.completedCount, color: '#10b981' },
+          { id: 'rejected', label: 'المرفوضة', icon: '❌', count: kpis.rejectedCount, color: '#6b7280' },
+          { id: 'outbox', label: 'طابور الأوفلاين والمزامنة', icon: '💾', count: kpis.outboxCount, color: '#8b5cf6' }
+        ].map((tab) => {
+          const isActive = inboxTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => {
+                setInboxTab(tab.id);
+                if (tab.id === 'pending') setFilterStatus('pending');
+                else if (tab.id === 'completed') setFilterStatus('approved');
+                else if (tab.id === 'rejected') setFilterStatus('rejected');
+                else setFilterStatus('all');
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '9px 16px',
+                borderRadius: '10px',
+                border: isActive ? `2px solid ${tab.color}` : '1.5px solid var(--border)',
+                background: isActive ? `${tab.color}15` : 'var(--surface)',
+                color: isActive ? tab.color : 'var(--text)',
+                fontWeight: isActive ? '800' : '600',
+                fontSize: '13px',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                whiteSpace: 'nowrap',
+                boxShadow: isActive ? `0 2px 8px ${tab.color}25` : 'none'
+              }}
+            >
+              <span>{tab.icon}</span>
+              <span>{tab.label}</span>
+              <span
+                style={{
+                  background: isActive ? tab.color : 'var(--surface-muted)',
+                  color: isActive ? '#fff' : 'var(--muted)',
+                  padding: '2px 8px',
+                  borderRadius: '12px',
+                  fontSize: '11px',
+                  fontWeight: '800'
+                }}
+              >
+                {tab.count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
       {/* ── Executive KPI Stats Ribbon ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px', marginBottom: '22px' }}>
         {/* KPI 1: Pending Requests */}
@@ -2684,29 +2800,46 @@ export default function RequestsModule({
                       })()}
                     </td>
                     <td>
-                      {(req.status === 'approved' || req.adminApproved === true || req.status === 'paid' || req.status === 'partial') ? (
-                        <span className="approval-status-badge approved" style={{ background: '#dcfce7', color: '#15803d', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px' }}>
-                          {parseFloat(req.paidAmount) >= (parseFloat(req.amount || req.totalAmount) || 0) && (parseFloat(req.amount || req.totalAmount) || 0) > 0
-                            ? '🟢 مسدد بالكامل'
-                            : (parseFloat(req.paidAmount) > 0 ? '🟢 سلفة معتمدة (سداد جزئي)' : '🟢 معتمد نهائياً')}
-                        </span>
-                      ) : req.status === 'rejected' ? (
-                        <span className="approval-status-badge rejected" style={{ background: '#fee2e2', color: '#b91c1c', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px' }}>
-                          🔴 مرفوض نهائياً
-                        </span>
-                      ) : req.status === 'cancelled' ? (
-                        <span className="approval-status-badge cancelled">⚪ ملغي</span>
-                      ) : (req.branchRejected || req.branchApprovalStatus === 'rejected' || req.managerStatus === 'rejected' || req.branchDecision === 'rejected') ? (
-                        <span className="approval-status-badge pending" style={{ background: '#ffedd5', color: '#c2410c', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px' }}>
-                          ⏳ قيد نظر الإدارة (لم يوافق الفرع)
-                        </span>
-                      ) : (req.branchApproved || req.branchApprovalStatus === 'approved') ? (
-                        <span className="approval-status-badge pending" style={{ background: '#fef3c7', color: '#b45309', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px' }}>
-                          🟡 بانتظار الإدارة العليا (وافق الفرع)
-                        </span>
-                      ) : (
-                        <span className="approval-status-badge pending" style={{ background: '#fef9c3', color: '#a16207', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px' }}>⏳ قيد المراجعة</span>
-                      )}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
+                        {(req.status === 'approved' || req.adminApproved === true || req.status === 'paid' || req.status === 'partial') ? (
+                          <span className="approval-status-badge approved" style={{ background: '#dcfce7', color: '#15803d', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px' }}>
+                            {parseFloat(req.paidAmount) >= (parseFloat(req.amount || req.totalAmount) || 0) && (parseFloat(req.amount || req.totalAmount) || 0) > 0
+                              ? '🟢 مسدد بالكامل'
+                              : (parseFloat(req.paidAmount) > 0 ? '🟢 سلفة معتمدة (سداد جزئي)' : '🟢 معتمد نهائياً')}
+                          </span>
+                        ) : req.status === 'rejected' ? (
+                          <span className="approval-status-badge rejected" style={{ background: '#fee2e2', color: '#b91c1c', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px' }}>
+                            🔴 مرفوض نهائياً
+                          </span>
+                        ) : req.status === 'cancelled' ? (
+                          <span className="approval-status-badge cancelled">⚪ ملغي</span>
+                        ) : (req.branchRejected || req.branchApprovalStatus === 'rejected' || req.managerStatus === 'rejected' || req.branchDecision === 'rejected') ? (
+                          <span className="approval-status-badge pending" style={{ background: '#ffedd5', color: '#c2410c', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px' }}>
+                            ⏳ قيد نظر الإدارة (لم يوافق الفرع)
+                          </span>
+                        ) : (req.branchApproved || req.branchApprovalStatus === 'approved') ? (
+                          <span className="approval-status-badge pending" style={{ background: '#fef3c7', color: '#b45309', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px' }}>
+                            🟡 بانتظار الإدارة العليا (وافق الفرع)
+                          </span>
+                        ) : (
+                          <span className="approval-status-badge pending" style={{ background: '#fef9c3', color: '#a16207', padding: '4px 10px', borderRadius: '8px', fontWeight: 'bold', fontSize: '12px' }}>⏳ قيد المراجعة</span>
+                        )}
+
+                        {/* Delivery / Outbox Receipt Indicator */}
+                        {req.status === 'pending_local' ? (
+                          <span style={{ fontSize: '10.5px', background: '#fef3c7', color: '#b45309', border: '1px solid #fde68a', padding: '2px 6px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '3px', fontWeight: '700' }}>
+                            💾 أوفلاين (محفوظ محلياً)
+                          </span>
+                        ) : (req.status === 'queued' || req.status === 'syncing') ? (
+                          <span style={{ fontSize: '10.5px', background: '#dbeafe', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '2px 6px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '3px', fontWeight: '700' }}>
+                            🔄 جارٍ المزامنة
+                          </span>
+                        ) : req.sent_at ? (
+                          <span style={{ fontSize: '10px', background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', padding: '2px 6px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '3px', fontWeight: '600' }}>
+                            📤 متزامن سحابياً
+                          </span>
+                        ) : null}
+                      </div>
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>

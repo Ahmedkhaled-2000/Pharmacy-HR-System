@@ -3,7 +3,7 @@ import { fetchCurrentIP, checkDeviceAuthorization } from '../../utils/deviceAuth
 import FaceVerificationOverlay from '../attendance/FaceVerificationOverlay';
 
 import { useData } from '../../context/DataContext';
-import { useUI } from '../../context/UIContext';
+import { useOptionalUI } from '../../context/UIContext';
 import { uploadBiometricAttendancePhoto, getAuthoritativeDriveConfig } from '../../utils/googleDriveService';
 import { sendBiometricAttendanceEmail, notifyAdminOnEarlyDepartureBeforeClosing, getAuthoritativeGmailConfig } from '../../utils/gmailService';
 import { preWarmFaceModels } from '../../utils/faceApiHelper';
@@ -21,10 +21,7 @@ export default function ElectronicKioskView({
   kioskBranchId
 }) {
   const { setState, saveState } = useData();
-  let uiContext = null;
-  try {
-    uiContext = useUI();
-  } catch (e) {}
+  const uiContext = useOptionalUI();
   const { kioskConfirmModal } = uiContext || {};
   const { orgSettings, employees, ipRestrictions } = state;
   const [now, setNow] = useState(Date.now());

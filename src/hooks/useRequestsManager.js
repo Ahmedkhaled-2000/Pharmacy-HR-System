@@ -7,6 +7,7 @@ import { applyApprovedPermissionsToShifts } from '../utils/latePenaltyEngine';
 import { applyShiftSwapToRosters } from '../utils/rosterEngine';
 import { normalizeSchedule } from '../components/roster/RosterModule';
 import { saveFaceDescriptor, saveHandDescriptor, deleteFaceDescriptor, deleteHandDescriptor } from '../utils/faceStorage';
+import { enqueueRequestDecision } from '../utils/syncEngine';
 import { useData } from '../context/DataContext';
 import { useUI } from '../context/UIContext';
 
@@ -686,6 +687,13 @@ export function useRequestsManager() {
       if (saveState) {
         saveState(updatedState).catch(err => console.error('Background save error:', err));
       }
+      enqueueRequestDecision({
+        requestId,
+        decision: 'approve',
+        newStatus: isFullyApproved ? 'approved' : 'pending_admin',
+        reviewer: { role },
+        branchId: target.branchId || target.branch_id
+      }).catch(err => console.warn('Outbox enqueue decision error:', err));
 
       // إشعار فوري عبر Gmail بتطبيق الجزاء / الخصم المعتمد
       if (target.type === 'penalty' || target.type === 'early_exit' || target.type === 'disciplinary_penalty' || target.type === 'violation' || String(target.id || '').startsWith('disc_')) {
@@ -1017,6 +1025,13 @@ export function useRequestsManager() {
       if (saveState) {
         saveState(updatedState).catch(err => console.error('Background save error:', err));
       }
+      enqueueRequestDecision({
+        requestId,
+        decision: 'reject',
+        newStatus: 'rejected',
+        reviewer: { role },
+        branchId: targetReq?.branchId || targetReq?.branch_id
+      }).catch(err => console.warn('Outbox enqueue decision error:', err));
     };
 
     if ((role === 'admin' || role === 'owner') && state.orgSettings?.ownerModificationLocks?.lockRejectRequests) {

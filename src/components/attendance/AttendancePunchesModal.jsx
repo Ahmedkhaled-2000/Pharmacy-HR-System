@@ -18,7 +18,6 @@ export default function AttendancePunchesModal({
   onClose
 }) {
   const { showConfirm } = useUI();
-  if (!employee) return null;
 
   const [editingPunch, setEditingPunch] = useState(null);
   const [editDate, setEditDate] = useState('');
@@ -27,6 +26,8 @@ export default function AttendancePunchesModal({
   const [editBreakHours, setEditBreakHours] = useState('0');
   const [editBranchId, setEditBranchId] = useState('');
   const [editNotes, setEditNotes] = useState('');
+
+  if (!employee) return null;
 
   const activePeriodFilter = (d) => {
     if (!d) return false;

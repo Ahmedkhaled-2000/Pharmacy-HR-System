@@ -1,7 +1,7 @@
 {
   "name": "pharmacy-hr-system",
   "productName": "منظومة الموارد البشرية",
-  "version": "1.2.27",
+  "version": "1.2.28",
   "description": "منظومة إدارة الموارد البشرية والرواتب - تطبيق ويندوز المكتبي",
   "repository": {
     "type": "git",
@@ -17,7 +17,7 @@
     "whatsapp-manager": "wscript whatsapp-manager.vbs",
     "whatsapp-server": "node server/whatsapp-server.js",
     "build": "node --max-old-space-size=4096 ./node_modules/vite/bin/vite.js build",
-    "lint": "oxlint",
+    "lint": "oxlint src",
     "preview": "vite preview",
     "build:electron": "cross-env ELECTRON=true node --max-old-space-size=4096 ./node_modules/vite/bin/vite.js build",
     "electron:dev": "concurrently -k \"cross-env BROWSER=none vite\" \"wait-on tcp:5173 && electron .\"",

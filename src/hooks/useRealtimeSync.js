@@ -6,8 +6,12 @@ import {
   apiCreateEventSource
 } from '../utils/apiClient';
 import {
-  subscribeToLiveState
+  subscribeToLiveState,
+  subscribeToSyncHints
 } from '../utils/socketClient';
+import {
+  pullDeltaSync
+} from '../utils/syncEngine';
 import {
   smartMergeStates
 } from '../utils/stateMerger';
@@ -274,6 +278,9 @@ export function useRealtimeSync(props = {}) {
         setIsOffline(false);
 
         if (hasChanged) {
+          // جلب التغييرات التزايدية الخفيفة أولاً
+          pullDeltaSync(currentBranch?.id).catch(() => {});
+
           const remoteData = await apiFetchSettings(STORAGE_KEY, { timeout: 6000, useETag: true, isBackground: true });
           if (remoteData && !remoteData.notModified) {
             applyRemoteData(remoteData);
@@ -287,17 +294,16 @@ export function useRealtimeSync(props = {}) {
       }
     };
 
-    // أ) Adaptive Polling مع تراجع أسي ذكي عند تعثر السيرفر لمنع تسريب الذاكرة
+    // أ) Adaptive Polling مع فترات متكيفة خفيفة لحماية الكوتا (30 ثانية في العرض، 60 ثانية في الخلفية)
     const scheduleNextPoll = (customDelay = null) => {
       if (!isMountedRef.current) return;
       if (timerId) clearTimeout(timerId);
 
       const isVisible = typeof document !== 'undefined' ? document.visibilityState === 'visible' : true;
-      let delay = customDelay !== null ? customDelay : (isVisible ? 10000 : 30000);
+      let delay = customDelay !== null ? customDelay : (isVisible ? 30000 : 60000);
 
       if (customDelay === null && pollFailures > 0) {
-        // فترات تراجع ذكية عند تعثر السيرفر (10ث -> 20ث -> 30ث كحد أقصى)
-        delay = Math.min(30000, 10000 * Math.pow(1.5, Math.min(pollFailures, 3)));
+        delay = Math.min(60000, 20000 * Math.pow(1.5, Math.min(pollFailures, 3)));
       }
 
       timerId = setTimeout(async () => {
@@ -329,6 +335,13 @@ export function useRealtimeSync(props = {}) {
       }
     }, STORAGE_KEY);
 
+    // هـ) إشارات المزامنة التزايدية الذرية السريعة (< 50 bytes)
+    const unsubSyncHint = subscribeToSyncHints((hint) => {
+      if (!hint || !hint.branch_id || !currentBranch?.id || String(hint.branch_id) === String(currentBranch.id)) {
+        pullDeltaSync(currentBranch?.id).catch(() => {});
+      }
+    });
+
     const handleFocusOrVisible = () => {
       if (document.visibilityState === 'visible' || document.hasFocus()) {
         pollFailures = 0; // تصفير الفشل فور تفاعل المستخدم
@@ -346,6 +359,7 @@ export function useRealtimeSync(props = {}) {
       if (timerId) clearTimeout(timerId);
       if (eventSource) eventSource.close();
       if (unsubSocket) unsubSocket();
+      if (unsubSyncHint) unsubSyncHint();
       unsubBroadcast();
       window.removeEventListener('focus', handleFocusOrVisible);
       window.removeEventListener('online', handleFocusOrVisible);

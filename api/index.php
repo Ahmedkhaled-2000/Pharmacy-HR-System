@@ -33,6 +33,18 @@ if (str_starts_with($endpoint, 'archive/') || $endpoint === 'archive') {
     exit();
 }
 
+// توجيه مسارات محرك المزامنة التزايدية الذرية (Delta Sync & Outbox Engine)
+if ($endpoint === 'sync/push') {
+    require_once __DIR__ . '/sync_api.php';
+    handleSyncPush();
+    exit();
+}
+if ($endpoint === 'sync/delta') {
+    require_once __DIR__ . '/sync_api.php';
+    handleSyncDelta();
+    exit();
+}
+
 try {
     switch ($endpoint) {
         // ==================================================================
@@ -72,10 +84,25 @@ try {
                 jsonResponse(['success' => false, 'error' => 'Method not allowed'], 405);
             }
 
+            // تحديد معدل الطلبات لمنع هجمات القوة الغاشمة (10 محاولات لكل 5 دقائق لكل IP)
+            $retryAfter = null;
+            if (!checkRateLimit('login_' . getClientIp(), 10, 300, $retryAfter)) {
+                http_response_code(429);
+                header("Retry-After: {$retryAfter}");
+                jsonResponse([
+                    'success' => false,
+                    'error' => "تم تجاوز الحد الأقصى لمحاولات تسجيل الدخول. يرجى الانتظار {$retryAfter} ثانية قبل المحاولة مجدداً."
+                ], 429);
+            }
+
             $payload = getRequestData();
             $username = trim((string)($payload['username'] ?? $payload['code'] ?? ''));
             $password = (string)($payload['password'] ?? '');
             $role = (string)($payload['role'] ?? 'admin');
+
+            if (empty($username) || empty($password)) {
+                jsonResponse(['success' => false, 'error' => 'يرجى إدخال اسم المستخدم وكلمة المرور'], 400);
+            }
 
             // جلب إعدادات المنشأة للتحقق من كلمات المرور (مع دعم MicroCache واسترجاع آمن)
             $cachedSettings = MicroCache::get('settings_' . DEFAULT_STORAGE_KEY);
@@ -88,7 +115,8 @@ try {
                     : [];
                 $orgSettings = is_array($fullVal['orgSettings'] ?? null) ? $fullVal['orgSettings'] : [];
                 $branches = is_array($fullVal['branches'] ?? null) ? $fullVal['branches'] : [];
-                $appState = ['orgSettings' => $orgSettings, 'branches' => $branches];
+                $employees = is_array($fullVal['employees'] ?? null) ? $fullVal['employees'] : [];
+                $appState = ['orgSettings' => $orgSettings, 'branches' => $branches, 'employees' => $employees];
             }
 
             $orgSettings = is_array($appState['orgSettings'] ?? null) ? $appState['orgSettings'] : [];
@@ -99,24 +127,39 @@ try {
             $userRole = 'guest';
             $userData = ['username' => $username];
 
-            if ($role === 'owner' && $password === $ownerPass) {
+            if ($role === 'owner' && (hash_equals($ownerPass, $password) || ($password === 'owner123' && $ownerPass === 'owner123'))) {
                 $authenticated = true;
                 $userRole = 'owner';
                 $userData['name'] = 'المالك / الإدارة العليا';
-            } elseif (($role === 'admin' || $username === 'admin') && ($password === $adminPass || $password === $ownerPass)) {
+            } elseif (($role === 'admin' || $username === 'admin') && (hash_equals($adminPass, $password) || hash_equals($ownerPass, $password))) {
                 $authenticated = true;
                 $userRole = 'admin';
                 $userData['name'] = 'مدير النظام';
             } elseif ($role === 'branch') {
                 $branches = is_array($appState['branches'] ?? null) ? $appState['branches'] : [];
                 foreach ($branches as $b) {
-                    if (is_array($b) && ((string)($b['id'] ?? '') === $username || (string)($b['name'] ?? '') === $username)) {
+                    if (is_array($b) && ((string)($b['id'] ?? '') === $username || (string)($b['name'] ?? '') === $username || (string)($b['code'] ?? '') === $username)) {
                         $bPass = (string)($b['managerPin'] ?? $b['password'] ?? '1234');
-                        if ($password === $bPass || $password === $adminPass) {
+                        if (hash_equals($bPass, $password) || hash_equals($adminPass, $password)) {
                             $authenticated = true;
                             $userRole = 'branch';
                             $userData['branchId'] = $b['id'] ?? '';
                             $userData['name'] = $b['name'] ?? 'مدير فرع';
+                        }
+                        break;
+                    }
+                }
+            } elseif ($role === 'employee' || $role === 'kiosk') {
+                $employees = is_array($appState['employees'] ?? null) ? $appState['employees'] : [];
+                foreach ($employees as $e) {
+                    if (is_array($e) && ((string)($e['code'] ?? '') === $username || (string)($e['id'] ?? '') === $username || (string)($e['phone'] ?? '') === $username)) {
+                        $ePass = (string)($e['password'] ?? '123');
+                        if (hash_equals($ePass, $password) || hash_equals($adminPass, $password)) {
+                            $authenticated = true;
+                            $userRole = 'employee';
+                            $userData['id'] = $e['id'] ?? '';
+                            $userData['code'] = $e['code'] ?? '';
+                            $userData['name'] = $e['name'] ?? 'موظف';
                         }
                         break;
                     }
@@ -222,9 +265,32 @@ try {
                     jsonResponse($response);
                 }
             } elseif ($method === 'POST') {
+                // فحص معدل طلبات الحفظ (120 طلب في الدقيقة كحد أقصى لكل IP)
+                $retryAfter = null;
+                if (!checkRateLimit('settings_save_' . getClientIp(), 120, 60, $retryAfter)) {
+                    http_response_code(429);
+                    header("Retry-After: {$retryAfter}");
+                    jsonResponse([
+                        'success' => false,
+                        'error' => "تجاوزت معدل الحفظ المسموح به. يرجى الانتظار {$retryAfter} ثانية."
+                    ], 429);
+                }
+
                 $payload = getRequestData();
                 $targetKey = (string)($payload['key'] ?? $key);
                 $value = $payload['value'] ?? null;
+
+                // التحقق الأمني من هوية وصلاحيات المرسل (Authentication & Role Verification)
+                $authUser = getAuthenticatedUser();
+                if (!$authUser) {
+                    $hasExisting = Database::queryOne("SELECT 1 FROM app_settings WHERE key_name = ? LIMIT 1", [$targetKey]);
+                    if ($hasExisting) {
+                        jsonResponse([
+                            'success' => false,
+                            'error' => 'غير مصرح: يلزم توفر جلسة تسجيل دخول نشطة لحفظ ومزامنة البيانات (Unauthorized)'
+                        ], 401);
+                    }
+                }
 
                 // 1. حماية قصوى: منع مسح قاعدة البيانات بقيم فارغة أو Null
                 if ($value === null || $value === 'null' || $value === '') {
@@ -241,6 +307,23 @@ try {
                         'error' => 'حماية البيانات: صيغة البيانات المرسلة غير صالحة'
                     ], 400);
                 }
+
+                // حماية الصلاحيات: منع الموظفين ومدراء الفروع من التلاعب ببيانات دخول المالك أو الأدمن
+                if ($authUser) {
+                    $userRole = (string)($authUser['role'] ?? 'guest');
+                    if (!in_array($userRole, ['owner', 'admin'], true)) {
+                        if (isset($decodedIncoming['orgSettings']) && is_array($decodedIncoming['orgSettings'])) {
+                            unset(
+                                $decodedIncoming['orgSettings']['ownerPassword'],
+                                $decodedIncoming['orgSettings']['ownerUsername'],
+                                $decodedIncoming['orgSettings']['adminPassword'],
+                                $decodedIncoming['orgSettings']['adminUsername'],
+                                $decodedIncoming['orgSettings']['ownerModificationLocks']
+                            );
+                        }
+                    }
+                }
+
 
                 // 2. جلب الحالة السابقة إن وجدت من قاعدة البيانات مباشرة
                 $existingRow = Database::queryOne(
@@ -419,6 +502,7 @@ try {
                     jsonResponse($facesRes);
                 }
             } elseif ($method === 'POST') {
+                requireAuth(['admin', 'owner', 'branch']);
                 $payload = getRequestData();
                 $employeeId = (string)($payload['employee_id'] ?? $empId ?? '');
                 
@@ -447,6 +531,7 @@ try {
                     'employee_id' => $employeeId
                 ]);
             } elseif ($method === 'DELETE') {
+                requireAuth(['admin', 'owner']);
                 $deleteId = (string)($_GET['employee_id'] ?? getRequestData()['employee_id'] ?? '');
                 if (empty($deleteId)) {
                     jsonResponse(['success' => false, 'error' => 'Missing employee_id for deletion'], 400);
@@ -465,6 +550,17 @@ try {
         case 'request/submit':
             if ($method !== 'POST') {
                 jsonResponse(['success' => false, 'error' => 'Method not allowed'], 405);
+            }
+
+            // فحص معدل إرسال الطلبات (30 طلب في الدقيقة كحد أقصى لمنع الإغراق)
+            $retryAfter = null;
+            if (!checkRateLimit('req_submit_' . getClientIp(), 30, 60, $retryAfter)) {
+                http_response_code(429);
+                header("Retry-After: {$retryAfter}");
+                jsonResponse([
+                    'success' => false,
+                    'error' => "تم تجاوز الحد الأقصى لإرسال الطلبات. يرجى الانتظار {$retryAfter} ثانية."
+                ], 429);
             }
 
             $payload = getRequestData();
@@ -563,6 +659,17 @@ try {
                 jsonResponse(['success' => false, 'error' => 'Method not allowed'], 405);
             }
 
+            // فحص معدل إرسال طلبات التوظيف (10 طلبات لكل 15 دقيقة لكل IP لمنع السبام)
+            $retryAfter = null;
+            if (!checkRateLimit('recruitment_apply_' . getClientIp(), 10, 900, $retryAfter)) {
+                http_response_code(429);
+                header("Retry-After: {$retryAfter}");
+                jsonResponse([
+                    'success' => false,
+                    'error' => "تم تسجيل عدة طلبات من هذا الجهاز مؤخراً. يرجى الانتظار {$retryAfter} ثانية قبل المحاولة مجدداً."
+                ], 429);
+            }
+
             $payload = getRequestData();
             $targetKey = (string)($payload['key'] ?? DEFAULT_STORAGE_KEY);
             $appData = $payload['application'] ?? $payload['request'] ?? null;
@@ -571,6 +678,7 @@ try {
             if (!is_array($appData)) {
                 jsonResponse(['success' => false, 'error' => 'بيانات طلب التعيين غير مكتملة (Missing application data)'], 400);
             }
+
 
             $candName = trim((string)($appData['name'] ?? ''));
             $candPhone = preg_replace('/\D/', '', (string)($appData['phone'] ?? ''));
@@ -692,6 +800,9 @@ try {
             if ($method !== 'POST' && $method !== 'DELETE') {
                 jsonResponse(['success' => false, 'error' => 'Method not allowed'], 405);
             }
+
+            // قصر الحذف النهائي للكيانات على الأدمن والمالك فقط
+            requireAuth(['admin', 'owner']);
 
             $payload = getRequestData();
             $targetKey = (string)($payload['key'] ?? DEFAULT_STORAGE_KEY);
@@ -818,6 +929,7 @@ try {
         // 7. النسخ الاحتياطي والاستعادة الكاملة (Full Backup & Restore)
         // ==================================================================
         case 'backup/export':
+            requireAuth(['admin', 'owner']);
             $settings = Database::query("SELECT * FROM app_settings");
             $faces = Database::query("SELECT * FROM employee_faces");
 
@@ -844,6 +956,9 @@ try {
             if ($method !== 'POST') {
                 jsonResponse(['success' => false, 'error' => 'Method not allowed'], 405);
             }
+
+            requireAuth(['admin', 'owner']);
+
 
             $payload = getRequestData();
             $stateToRestore = $payload['value'] ?? $payload['data'] ?? $payload;
@@ -890,6 +1005,20 @@ try {
                 jsonResponse(['success' => false, 'error' => 'Method not allowed'], 405);
             }
 
+            // فحص معدل محاولات التصفير لمنع أي عبث (3 محاولات كحد أقصى في الساعة)
+            $retryAfter = null;
+            if (!checkRateLimit('sys_reset_' . getClientIp(), 3, 3600, $retryAfter)) {
+                http_response_code(429);
+                header("Retry-After: {$retryAfter}");
+                jsonResponse([
+                    'success' => false,
+                    'error' => "تم تجاوز الحد الأقصى لمحاولات إعادة ضبط النظام. يرجى الانتظار {$retryAfter} ثانية."
+                ], 429);
+            }
+
+            // اشتراط جلسة مالك أو أدمن موثقة حصراً
+            requireAuth(['owner', 'admin']);
+
             $payload = getRequestData();
             $confirmation = (string)($payload['confirm'] ?? $payload['confirm_wipe'] ?? '');
             if ($confirmation !== 'CONFIRM_RESET' && $confirmation !== 'CONFIRM_FACTORY_RESET') {
@@ -903,7 +1032,7 @@ try {
             $wipedState = $payload['state'] ?? null;
             $ownerPassInput = (string)($payload['ownerPassword'] ?? '');
 
-            // التحقق من كلمة مرور المالك من قاعدة البيانات
+            // التحقق الصارم من كلمة مرور المالك من قاعدة البيانات
             $currentSettings = Database::queryOne("SELECT value_data FROM app_settings WHERE key_name = ? LIMIT 1", [$targetKey]);
             $existingOwnerPass = 'owner123';
             if ($currentSettings && !empty($currentSettings['value_data'])) {
@@ -913,8 +1042,8 @@ try {
                 }
             }
 
-            if (!empty($ownerPassInput) && $ownerPassInput !== $existingOwnerPass && $ownerPassInput !== 'owner123') {
-                jsonResponse(['success' => false, 'error' => 'كلمة مرور المالك غير صحيحة'], 403);
+            if (empty($ownerPassInput) || (!hash_equals($existingOwnerPass, $ownerPassInput) && !hash_equals('owner123', $ownerPassInput))) {
+                jsonResponse(['success' => false, 'error' => 'كلمة مرور المالك غير صحيحة ومطلوبة لإتمام التصفير'], 403);
             }
 
             // 1. تصفير ومسح كافة جداول العمليات والأرشيف والبصمات والنسخ والقيود المحاسبية
@@ -988,10 +1117,10 @@ try {
     }
 } catch (Throwable $e) {
     error_log('[API Error] ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+    $isDev = (getenv('APP_DEBUG') === 'true' || getenv('APP_ENV') === 'development');
     jsonResponse([
         'success' => false,
-        'error' => $e->getMessage() ?: 'حدث خطأ غير متوقع أثناء معالجة الطلب في الخادم',
-        'file' => basename($e->getFile()),
-        'line' => $e->getLine()
+        'error' => $isDev ? $e->getMessage() : 'حدث خطأ غير متوقع أثناء معالجة الطلب في الخادم'
     ], 500);
 }
+

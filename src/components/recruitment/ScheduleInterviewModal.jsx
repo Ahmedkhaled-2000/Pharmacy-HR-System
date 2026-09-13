@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 export default function ScheduleInterviewModal({
   isOpen,
@@ -8,25 +8,37 @@ export default function ScheduleInterviewModal({
   onSchedule,
   showToast
 }) {
-  if (!isOpen || !applicant) return null;
-
   const [date, setDate] = useState(
-    applicant.interviewSchedule?.date || new Date().toISOString().slice(0, 10)
+    applicant?.interviewSchedule?.date || new Date().toISOString().slice(0, 10)
   );
-  const [time, setTime] = useState(applicant.interviewSchedule?.time || '14:00');
+  const [time, setTime] = useState(applicant?.interviewSchedule?.time || '14:00');
   const [locationType, setLocationType] = useState(
-    applicant.interviewSchedule?.locationType || 'branch'
+    applicant?.interviewSchedule?.locationType || 'branch'
   );
   const [branchId, setBranchId] = useState(
-    applicant.interviewSchedule?.branchId || applicant.preferredBranchId || branches[0]?.id || ''
+    applicant?.interviewSchedule?.branchId || applicant?.preferredBranchId || branches[0]?.id || ''
   );
   const [customLocation, setCustomLocation] = useState(
-    applicant.interviewSchedule?.customLocation || ''
+    applicant?.interviewSchedule?.customLocation || ''
   );
   const [interviewerName, setInterviewerName] = useState(
-    applicant.interviewSchedule?.interviewerName || ''
+    applicant?.interviewSchedule?.interviewerName || ''
   );
-  const [notes, setNotes] = useState(applicant.interviewSchedule?.notes || '');
+  const [notes, setNotes] = useState(applicant?.interviewSchedule?.notes || '');
+
+  useEffect(() => {
+    if (isOpen && applicant) {
+      setDate(applicant.interviewSchedule?.date || new Date().toISOString().slice(0, 10));
+      setTime(applicant.interviewSchedule?.time || '14:00');
+      setLocationType(applicant.interviewSchedule?.locationType || 'branch');
+      setBranchId(applicant.interviewSchedule?.branchId || applicant.preferredBranchId || branches[0]?.id || '');
+      setCustomLocation(applicant.interviewSchedule?.customLocation || '');
+      setInterviewerName(applicant.interviewSchedule?.interviewerName || '');
+      setNotes(applicant.interviewSchedule?.notes || '');
+    }
+  }, [isOpen, applicant, branches]);
+
+  if (!isOpen || !applicant) return null;
 
   const selectedBranch = branches.find(b => String(b.id) === String(branchId));
   const locationLabel = locationType === 'branch'

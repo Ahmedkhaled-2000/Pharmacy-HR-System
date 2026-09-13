@@ -245,6 +245,33 @@ export async function apiHardDeleteEntity(type, id, key = STORAGE_KEY) {
   });
 }
 
+// ── 1.3 المزامنة التزايدية الذكية للطلبات (Incremental Delta Sync & Batch Push) ──
+export async function apiPushSyncBatch(operationsBatch) {
+  return await request('sync/push', {
+    method: 'POST',
+    body: JSON.stringify({ operations: operationsBatch }),
+    timeout: 15000,
+    retries: 2,
+    noCache: true,
+    isBackground: false
+  });
+}
+
+export async function apiFetchDeltaSync(sinceSequence = 0, branchId = null) {
+  const params = new URLSearchParams();
+  if (sinceSequence) params.append('since_sequence', String(sinceSequence));
+  if (branchId) params.append('branch_id', String(branchId));
+  const qs = params.toString() ? `?${params.toString()}` : '';
+
+  return await request(`sync/delta${qs}`, {
+    method: 'GET',
+    timeout: 10000,
+    retries: 2,
+    noCache: true,
+    isBackground: true
+  });
+}
+
 // ── 2. فحص الإصدار للمزامنة الخفيفة (Ultra-Fast Smart Polling & Realtime SSE) ────
 export async function apiFetchVersion(key = STORAGE_KEY, options = {}) {
   return await request(`sync/version?key=${encodeURIComponent(key)}`, {

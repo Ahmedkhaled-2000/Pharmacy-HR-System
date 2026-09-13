@@ -19,6 +19,20 @@ export default function PayslipPrintModal({
   selectedBranchId = null,
   state
 }) {
+  const [activeBranchFilter, setActiveBranchFilter] = useState(selectedBranchId || 'all');
+  const [printFitMode, setPrintFitMode] = useState('single_page');
+  const scrollRef = useRef(null);
+
+  useEffect(() => {
+    setActiveBranchFilter(selectedBranchId || 'all');
+  }, [selectedBranchId, isOpen, emp?.id]);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = 0;
+    }
+  }, [isOpen, activeBranchFilter, printFitMode]);
+
   if (!isOpen || !emp) return null;
 
   const orgName = orgSettings.orgName || 'مجموعة الصيدليات الطبية';
@@ -32,7 +46,6 @@ export default function PayslipPrintModal({
 
   // Branches list for multi-branch employee
   const isMultiBranch = (emp.branchesDetails && emp.branchesDetails.length > 1);
-  const [activeBranchFilter, setActiveBranchFilter] = useState(selectedBranchId || 'all');
   const currentBranchId = activeBranchFilter === 'all' ? null : activeBranchFilter;
 
   const assignedBranches = (emp.branchesDetails && emp.branchesDetails.length > 0)
@@ -100,16 +113,6 @@ export default function PayslipPrintModal({
   const dailyAllowancesBreakdown = summary.dailyAllowancesBreakdown || [];
 
   const totalAllowances = summary.totalAllowances !== undefined ? summary.totalAllowances : (mgmtAllowance + transAllowance + extAllowance + dailyAllowanceTotal);
-
-  // Page Scale Fit Mode: 'single_page' (Compact Single A4) vs 'full' (Normal Extended)
-  const [printFitMode, setPrintFitMode] = useState('single_page');
-  const scrollRef = useRef(null);
-
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = 0;
-    }
-  }, [isOpen, activeBranchFilter, printFitMode]);
 
   const getBranchName = (bId) => {
     if (!bId || bId === 'undefined' || bId === 'null') return emp?.branchName || 'الفرع الرئيسي';

@@ -10,9 +10,12 @@ require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/db.php';
 
 // Security token check
+$configuredSecret = getenv('RESTORE_SECRET') ?: 'restore_pharmacy_2026_auth';
 $secret = $_GET['secret'] ?? $_POST['secret'] ?? '';
-if ($secret !== 'restore_pharmacy_2026_auth') {
-    jsonResponse(['success' => false, 'error' => 'Unauthorized access'], 403);
+$isCli = (php_sapi_name() === 'cli');
+
+if (!$isCli && (!is_string($secret) || !hash_equals($configuredSecret, $secret))) {
+    jsonResponse(['success' => false, 'error' => 'Access denied: Unauthorized restore request.'], 403);
 }
 
 try {
@@ -98,8 +101,9 @@ try {
     ]);
 
 } catch (Throwable $e) {
+    error_log('[Restore Error] ' . $e->getMessage());
     jsonResponse([
         'success' => false,
-        'error' => 'Restore failed: ' . $e->getMessage()
+        'error' => 'Restore operation failed. Please consult server logs.'
     ], 500);
 }
