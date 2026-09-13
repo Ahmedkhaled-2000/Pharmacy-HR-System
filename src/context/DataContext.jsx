@@ -747,7 +747,9 @@ export function DataProvider({ children, showToast = () => {} }) {
 
   const getAbsenceDaysCount = useCallback((empId, monthStr) => {
     if (!monthStr || monthStr.length !== 7) return 0;
+    const emp = getEmp(empId);
     const empIdStr = String(empId);
+    const empCodeStr = emp?.code ? String(emp.code) : '';
     const range = getPayrollCutoffRange(monthStr);
     let dates = [];
 
@@ -780,7 +782,7 @@ export function DataProvider({ children, showToast = () => {} }) {
       if (!daySchedule || daySchedule.type === 'off' || daySchedule.isOff) continue;
       const hasShift = (state.shifts || []).some(s => {
         if (!s || s.date !== dateStr) return false;
-        const matchEmp = String(s.employeeId) === empIdStr || (emp.code && String(s.employeeCode || s.employeeId) === String(emp.code));
+        const matchEmp = String(s.employeeId) === empIdStr || (empCodeStr && String(s.employeeCode || s.employeeId) === empCodeStr);
         if (!matchEmp) return false;
         const effHours = getEffectiveShiftHours(s, state);
         return effHours > 0 || (s.timeIn && s.timeOut);
@@ -789,14 +791,15 @@ export function DataProvider({ children, showToast = () => {} }) {
 
       const allLeaveRequests = [...(state.leaveRequests || []), ...(state.requests || [])];
       const hasLeave = allLeaveRequests.some(
-        r => String(r.employeeId) === empIdStr && (r.status === 'approved' || r.adminApproved) &&
+        r => (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode || r.employeeId) === empCodeStr)) &&
+        (r.status === 'approved' || r.adminApproved) &&
         r.startDate <= dateStr && r.endDate >= dateStr
       );
       if (hasLeave) continue;
       count++;
     }
     return count;
-  }, [state, getPayrollCutoffRange]);
+  }, [state, getPayrollCutoffRange, getEmp]);
 
   const computeEmpSummary = useCallback((empId, filterFn, monthStr = null, targetBranchId = null) => {
     const emp = getEmp(empId);
