@@ -600,7 +600,7 @@ export function computeComprehensiveFinancialReport({
       const actualOtEarnings = sum?.overtimeEarnings || 0;
       const actualAllowances = sum?.totalAllowances || 0;
       const actualBonus = sum?.totalBonus || 0;
-      const actualDeductions = (sum?.totalDeduction || 0) + (sum?.absenceDeduction || 0);
+      const actualDeductions = sum?.totalDeduction !== undefined ? sum.totalDeduction : (sum?.absenceDeduction || 0);
       const actualNetSalary = Math.max(0, sum?.netSalary || 0);
 
       const hasActualWork = actualHours > 0 || actualOtHours > 0 || actualBaseEarnings > 0 || actualNetSalary > 0;

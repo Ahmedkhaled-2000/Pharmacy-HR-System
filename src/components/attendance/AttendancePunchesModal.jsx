@@ -105,7 +105,7 @@ export default function AttendancePunchesModal({
       const calculatedHours = Math.max(0, Math.round((diff - bH) * 100) / 100);
 
       const updatedShifts = (state.shifts || []).map((s) => {
-        if (s.id === editingPunch.id) {
+        if (String(s.id) === String(editingPunch.id)) {
           return {
             ...s,
             date: editDate,
@@ -122,7 +122,8 @@ export default function AttendancePunchesModal({
             isManual: true,
             manualPunch: true,
             editedByAdmin: true,
-            editedAt: new Date().toISOString()
+            editedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
           };
         }
         return s;
@@ -146,7 +147,7 @@ export default function AttendancePunchesModal({
       if (saveState) await saveState(updatedState);
 
       setEditingPunch(null);
-      const lateInc = (recRes.incidents || []).find((inc) => (inc.shiftId === editingPunch.id || inc.date === editDate) && inc.lateMinutes > 0);
+      const lateInc = (recRes.incidents || []).find((inc) => (String(inc.shiftId) === String(editingPunch.id) || inc.date === editDate) && inc.lateMinutes > 0);
       if (lateInc && lateInc.deductionMinutes > 0) {
         showToast?.(`✅ تم حفظ التعديل وتطبيق لائحة الجزاءات تلقائياً: تأخير (${lateInc.lateMinutes} دقيقة) - ${lateInc.tierName} (${lateInc.actionLabel} - خصم ${lateInc.penaltyAmount} ج.م)`);
       } else if (lateInc && lateInc.lateMinutes > 0) {
@@ -170,10 +171,95 @@ export default function AttendancePunchesModal({
 
   const handleDeletePunch = async (punch) => {
     const performDelete = async () => {
-      const updatedShifts = (state.shifts || []).filter((s) => s.id !== punch.id);
-      let updatedState = { ...state, shifts: updatedShifts };
+      const punchIdStr = String(punch.id || '');
+      const cleanRaw = punchIdStr.replace(/^(shift_|punch_)/, '');
+      const punchDate = punch.date || '';
+      const empIdStr = String(employee.id || punch.employeeId || '');
+      const empCodeStr = employee.code ? String(employee.code) : '';
 
-      // Auto recalculate late incidents
+      // 1. فلترة الشفتات وحذف البصمة بدقة وبلا عودة
+      const updatedShifts = (state.shifts || []).filter((s) => {
+        if (!s) return false;
+        if (punchIdStr && String(s.id) === punchIdStr) return false;
+        if (cleanRaw && String(s.id) === cleanRaw) return false;
+        if (punchDate && (String(s.employeeId) === empIdStr || (empCodeStr && String(s.employeeCode || s.employeeId) === empCodeStr)) && s.date === punchDate && s.timeIn === punch.timeIn) {
+          return false;
+        }
+        return true;
+      });
+
+      // 2. إعداد شواهد القبور الصارمة لحظر استرجاع البصمة عند التزامن مع السحابة
+      const tombstonesToAdd = [];
+      if (punchIdStr) {
+        tombstonesToAdd.push(punchIdStr);
+        tombstonesToAdd.push(`shift_${punchIdStr}`);
+        tombstonesToAdd.push(`punch_${punchIdStr}`);
+      }
+      if (cleanRaw) {
+        tombstonesToAdd.push(cleanRaw);
+        tombstonesToAdd.push(`shift_${cleanRaw}`);
+        tombstonesToAdd.push(`punch_${cleanRaw}`);
+      }
+      if (punchDate && punch.timeIn) {
+        tombstonesToAdd.push(`shift_${empIdStr}_${punchDate}_${punch.timeIn}`);
+        tombstonesToAdd.push(`${empIdStr}_${punchDate}_${punch.timeIn}`);
+        if (empCodeStr) {
+          tombstonesToAdd.push(`shift_${empCodeStr}_${punchDate}_${punch.timeIn}`);
+          tombstonesToAdd.push(`${empCodeStr}_${punchDate}_${punch.timeIn}`);
+        }
+      }
+
+      // 3. حذف أي طلبات إضافي أو اعتمادات حضور مرتبطة بهذه البصمة
+      const associatedReqIds = [];
+      const updatedRequests = (state.requests || []).filter((r) => {
+        if (!r) return false;
+        const matchShiftId = (punchIdStr && String(r.shiftId) === punchIdStr) || (cleanRaw && String(r.shiftId) === cleanRaw) || (punchIdStr && String(r.id).includes(punchIdStr));
+        const matchOtReq = r.type === 'overtime' && (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode) === empCodeStr)) && r.date === punchDate;
+        if (matchShiftId || matchOtReq) {
+          if (r.id) {
+            const cleanReqId = String(r.id).replace(/^req_/, '');
+            associatedReqIds.push(String(r.id));
+            associatedReqIds.push(`req_${cleanReqId}`);
+            associatedReqIds.push(cleanReqId);
+          }
+          return false;
+        }
+        return true;
+      });
+
+      // 4. حذف الشفت النشط إذا كان مسجلاً لهذا اليوم أو البصمة
+      let updatedActiveShifts = { ...(state.activeShifts || {}) };
+      if (updatedActiveShifts[empIdStr]) {
+        const act = updatedActiveShifts[empIdStr];
+        if (String(act.id) === punchIdStr || String(act.id) === cleanRaw || act.date === punchDate) {
+          delete updatedActiveShifts[empIdStr];
+        }
+      }
+      if (empCodeStr && updatedActiveShifts[empCodeStr]) {
+        const act = updatedActiveShifts[empCodeStr];
+        if (String(act.id) === punchIdStr || String(act.id) === cleanRaw || act.date === punchDate) {
+          delete updatedActiveShifts[empCodeStr];
+        }
+      }
+
+      // 5. دمج شواهد القبور في _deletedIds
+      const updatedDeletedIds = Array.from(
+        new Set([
+          ...(state._deletedIds || []),
+          ...tombstonesToAdd,
+          ...associatedReqIds
+        ])
+      ).slice(-2000);
+
+      let updatedState = {
+        ...state,
+        shifts: updatedShifts,
+        requests: updatedRequests,
+        activeShifts: updatedActiveShifts,
+        _deletedIds: updatedDeletedIds
+      };
+
+      // 6. إعادة احتساب وقائع التأخير للدورة المحاسبية
       const recRes = recalculateEmployeeCycleLateness({
         employeeId: employee.id,
         state: updatedState,
@@ -188,7 +274,7 @@ export default function AttendancePunchesModal({
       if (setState) setState(updatedState);
       if (saveState) await saveState(updatedState);
 
-      showToast?.('🗑️ تم حذف البصمة بنجاح!');
+      showToast?.('🗑️ تم حذف البصمة بنجاح واستبعاد هذا اليوم بالكامل من كشف المرتبات ونظام الأجور');
     };
 
     if (executeWithOwnerGuard) {
@@ -201,8 +287,8 @@ export default function AttendancePunchesModal({
     } else {
       const isConfirmed = await showConfirm({
         title: 'حذف بصمة الحضور',
-        message: `هل أنت متأكد من حذف بصمة يوم ${punch.date} للموظف (${employee.name})؟`,
-        confirmText: 'تأكيد الحذف',
+        message: `هل أنت متأكد من حذف بصمة يوم ${punch.date} للموظف (${employee.name})؟ سيتم استبعاد هذا اليوم تماماً من كشف المرتبات والأجور.`,
+        confirmText: 'تأكيد الحذف واستبعاد اليوم',
         cancelText: 'إلغاء وتراجع',
         type: 'danger',
         icon: '🗑️'

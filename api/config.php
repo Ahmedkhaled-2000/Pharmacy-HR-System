@@ -343,7 +343,7 @@ function mergeServerState(array $existing, array $incoming): array
                     }
                 } else {
                     $rawId = isset($item['id']) ? (string)$item['id'] : '';
-                    $cleanRaw = preg_replace('/^(req_|leave_|swap_|res_|loan_|notif_)/', '', $rawId);
+                    $cleanRaw = preg_replace('/^(req_|leave_|swap_|res_|loan_|notif_|shift_|punch_)/', '', $rawId);
                     if (
                         isset($deletedSet[$key]) ||
                         ($rawId !== '' && (isset($deletedSet[$rawId]) || isset($deletedSet[strtolower($rawId)]) || isset($deletedSet["{$prefix}_{$rawId}"]))) ||
@@ -353,7 +353,9 @@ function mergeServerState(array $existing, array $incoming): array
                             isset($deletedSet["leave_{$cleanRaw}"]) ||
                             isset($deletedSet["swap_{$cleanRaw}"]) ||
                             isset($deletedSet["loan_{$cleanRaw}"]) ||
-                            isset($deletedSet["notif_{$cleanRaw}"])
+                            isset($deletedSet["notif_{$cleanRaw}"]) ||
+                            isset($deletedSet["shift_{$cleanRaw}"]) ||
+                            isset($deletedSet["punch_{$cleanRaw}"])
                         ))
                     ) {
                         $isDeleted = true;

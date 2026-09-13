@@ -778,7 +778,13 @@ export function DataProvider({ children, showToast = () => {} }) {
       if (dateStr >= today) continue;
       const daySchedule = getEmployeeDaySchedule(empIdStr, dateStr, state);
       if (!daySchedule || daySchedule.type === 'off' || daySchedule.isOff) continue;
-      const hasShift = (state.shifts || []).some(s => String(s.employeeId) === empIdStr && s.date === dateStr);
+      const hasShift = (state.shifts || []).some(s => {
+        if (!s || s.date !== dateStr) return false;
+        const matchEmp = String(s.employeeId) === empIdStr || (emp.code && String(s.employeeCode || s.employeeId) === String(emp.code));
+        if (!matchEmp) return false;
+        const effHours = getEffectiveShiftHours(s, state);
+        return effHours > 0 || (s.timeIn && s.timeOut);
+      });
       if (hasShift) continue;
 
       const allLeaveRequests = [...(state.leaveRequests || []), ...(state.requests || [])];
@@ -1039,7 +1045,8 @@ export function DataProvider({ children, showToast = () => {} }) {
 
     // بدل الحضور اليومي
     const allEmployeeShifts = (state.shifts || []).filter(s =>
-      String(s.employeeId) === String(empId) &&
+      s &&
+      (String(s.employeeId) === String(empId) || (emp.code && String(s.employeeCode || s.employeeId) === String(emp.code))) &&
       effectiveFilterFn(s.date) &&
       (s.timeIn || s.checkIn || getEffectiveShiftHours(s, state) > 0)
     );

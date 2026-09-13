@@ -474,7 +474,7 @@ export default function PayrollModule({
                   ? state.computeEmpSummary(emp.id, payrollFilterFn, monthPicker, filterBranch || null)
                   : { hours: 0, baseEarnings: 0, totalBonus: 0, totalDeduction: 0, absenceDeduction: 0, netSalary: 0, approvedOvertimeHours: 0, overtimeEarnings: 0 };
 
-                const totalDed = (empSum.totalDeduction || 0) + (empSum.absenceDeduction || 0);
+                const totalDed = empSum.totalDeduction || 0;
 
                 return (
                   <tr key={emp.id}>
@@ -553,7 +553,7 @@ export default function PayrollModule({
           ? state.computeEmpSummary(selectedEmpModal.id, payrollFilterFn, monthPicker, filterBranch || null)
           : { hours: 0, baseEarnings: 0, totalBonus: 0, totalDeduction: 0, absenceDeduction: 0, netSalary: 0, absenceDaysCount: 0, approvedOvertimeHours: 0, pendingOvertimeHours: 0, overtimeEarnings: 0 };
 
-        const totalDed = (empSum.totalDeduction || 0) + (empSum.absenceDeduction || 0);
+        const totalDed = empSum.totalDeduction || 0;
 
         return (
           <div className="modal-backdrop">

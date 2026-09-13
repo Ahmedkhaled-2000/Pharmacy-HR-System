@@ -969,16 +969,78 @@ export function useAttendanceEngine() {
 
   // 11. حذف وردية (Delete Shift)
   const deleteShift = async (id) => {
-    const shift = (state.shifts || []).find((s) => s.id === id);
+    const shift = (state.shifts || []).find((s) => String(s.id) === String(id));
     if (shift && !getEmpPermission(shift.employeeId, 'allowEditShift')) {
       showToast('❌ تم تقييد الصلاحيات: ليس لديك صلاحية لحذف الورديات المحفوظة');
       return;
     }
 
     const performDelete = async () => {
-      const updatedShifts = (state.shifts || []).filter((s) => s.id !== id);
-      const updatedDeletedIds = Array.from(new Set([...(state._deletedIds || []), String(id), `shift_${id}`])).slice(-2000);
-      let updatedState = { ...state, shifts: updatedShifts, _deletedIds: updatedDeletedIds };
+      const shiftIdStr = String(id);
+      const cleanRaw = shiftIdStr.replace(/^(shift_|punch_)/, '');
+      const empIdStr = shift?.employeeId ? String(shift.employeeId) : '';
+      const shiftDate = shift?.date || '';
+
+      const updatedShifts = (state.shifts || []).filter((s) => {
+        if (!s) return false;
+        if (String(s.id) === shiftIdStr || (cleanRaw && String(s.id) === cleanRaw)) return false;
+        if (shiftDate && empIdStr && String(s.employeeId) === empIdStr && s.date === shiftDate && s.timeIn === shift?.timeIn) return false;
+        return true;
+      });
+
+      const tombstonesToAdd = [
+        shiftIdStr,
+        `shift_${shiftIdStr}`,
+        `punch_${shiftIdStr}`
+      ];
+      if (cleanRaw) {
+        tombstonesToAdd.push(cleanRaw, `shift_${cleanRaw}`, `punch_${cleanRaw}`);
+      }
+      if (empIdStr && shiftDate && shift?.timeIn) {
+        tombstonesToAdd.push(`shift_${empIdStr}_${shiftDate}_${shift.timeIn}`);
+        tombstonesToAdd.push(`${empIdStr}_${shiftDate}_${shift.timeIn}`);
+      }
+
+      // حذف طلبات الإضافي أو اعتمادات الحضور المرتبطة بهذه الوردية
+      const associatedReqIds = [];
+      const updatedRequests = (state.requests || []).filter((r) => {
+        if (!r) return false;
+        const matchShiftId = String(r.shiftId) === shiftIdStr || (cleanRaw && String(r.shiftId) === cleanRaw) || String(r.id).includes(shiftIdStr);
+        const matchOtReq = r.type === 'overtime' && empIdStr && String(r.employeeId) === empIdStr && r.date === shiftDate;
+        if (matchShiftId || matchOtReq) {
+          if (r.id) {
+            const cleanReqId = String(r.id).replace(/^req_/, '');
+            associatedReqIds.push(String(r.id), `req_${cleanReqId}`, cleanReqId);
+          }
+          return false;
+        }
+        return true;
+      });
+
+      let updatedActiveShifts = { ...(state.activeShifts || {}) };
+      if (empIdStr && updatedActiveShifts[empIdStr]) {
+        const act = updatedActiveShifts[empIdStr];
+        if (String(act.id) === shiftIdStr || String(act.id) === cleanRaw || act.date === shiftDate) {
+          delete updatedActiveShifts[empIdStr];
+        }
+      }
+
+      const updatedDeletedIds = Array.from(
+        new Set([
+          ...(state._deletedIds || []),
+          ...tombstonesToAdd,
+          ...associatedReqIds
+        ])
+      ).slice(-2000);
+
+      let updatedState = {
+        ...state,
+        shifts: updatedShifts,
+        requests: updatedRequests,
+        activeShifts: updatedActiveShifts,
+        _deletedIds: updatedDeletedIds
+      };
+
       if (shift?.employeeId) {
         const recRes = recalculateEmployeeCycleLateness({
           employeeId: shift.employeeId,
@@ -994,7 +1056,7 @@ export function useAttendanceEngine() {
       }
       setState(updatedState);
       await saveState(updatedState);
-      showToast('تم حذف الوردية وتحديث وقائع التأخير');
+      showToast('🗑️ تم حذف الوردية بنجاح وتحديث مسير الرواتب ووقائع التأخير');
     };
 
     executeWithOwnerGuard({

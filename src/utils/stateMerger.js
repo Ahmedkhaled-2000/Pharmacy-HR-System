@@ -133,19 +133,31 @@ export function isItemDeleted(item, key, deletedIds, options = {}) {
   if (item.id !== undefined && item.id !== null && item.id !== '') {
     const idStr = String(item.id).trim();
     const idLower = idStr.toLowerCase();
-    const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
+    const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_|shift_|punch_)/, '');
     if (deletedIds.has(idStr) || deletedIds.has(idLower)) return true;
     if (rawId && (deletedIds.has(rawId) || deletedIds.has(rawId.toLowerCase()))) return true;
     if (prefix && (deletedIds.has(`${prefix}_${idStr}`) || deletedIds.has(`${prefix}_${idLower}`))) return true;
-    if (rawId && (deletedIds.has(`req_${rawId}`) || deletedIds.has(`leave_${rawId}`) || deletedIds.has(`loan_${rawId}`) || deletedIds.has(`swap_${rawId}`) || deletedIds.has(`notif_${rawId}`))) return true;
+    if (rawId && (
+      deletedIds.has(`req_${rawId}`) ||
+      deletedIds.has(`leave_${rawId}`) ||
+      deletedIds.has(`loan_${rawId}`) ||
+      deletedIds.has(`swap_${rawId}`) ||
+      deletedIds.has(`notif_${rawId}`) ||
+      deletedIds.has(`shift_${rawId}`) ||
+      deletedIds.has(`punch_${rawId}`)
+    )) return true;
   }
   if (item._id !== undefined && item._id !== null && item._id !== '') {
     const idStr = String(item._id).trim();
     const idLower = idStr.toLowerCase();
-    const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
+    const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_|shift_|punch_)/, '');
     if (deletedIds.has(idStr) || deletedIds.has(idLower)) return true;
     if (rawId && (deletedIds.has(rawId) || deletedIds.has(rawId.toLowerCase()))) return true;
     if (prefix && (deletedIds.has(`${prefix}_${idStr}`) || deletedIds.has(`${prefix}_${idLower}`))) return true;
+    if (rawId && (
+      deletedIds.has(`shift_${rawId}`) ||
+      deletedIds.has(`punch_${rawId}`)
+    )) return true;
   }
 
   // 5. فحص المعاملات التابعة لموظف محذوف (شفتات، إجازات، سلف، طلبات)
