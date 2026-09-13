@@ -38,9 +38,37 @@ export default function AttendancePunchesModal({
   const isCustom = (filterMode === 'custom' || filterMode === 'range') && customFrom && customTo;
   const periodLabel = isCustom ? `الفترة المخصصة: من ${customFrom} إلى ${customTo}` : (monthPicker ? `دورة شهر (${monthPicker})` : '');
 
-  const monthPunches = (state.shifts || []).filter(
+  // فحص بصمة الحضور النشطة الحالية للموظف (Live Active Shift)
+  const activeShift = state.activeShifts?.[employee.id] || state.activeShifts?.[String(employee.id)];
+  const hasActiveShift = Boolean(activeShift && activePeriodFilter(activeShift.date));
+  const activeElapsedHours = hasActiveShift
+    ? Math.max(0, Math.round(((Date.now() - (activeShift.startEpoch || Date.now())) / 3600000) * 10) / 10)
+    : 0;
+
+  const livePunch = hasActiveShift ? {
+    id: activeShift.id || `active_${employee.id}_${activeShift.date}`,
+    employeeId: employee.id,
+    employeeCode: employee.code || '',
+    employeeName: employee.name || '',
+    branchId: activeShift.branchId || employee.branchId || '',
+    date: activeShift.date,
+    timeIn: activeShift.timeIn,
+    timeOut: 'قيد العمل الآن',
+    isLiveActive: true,
+    hours: activeElapsedHours,
+    netHours: activeElapsedHours,
+    workHours: activeElapsedHours,
+    breakHours: activeShift.breakHours || 0,
+    note: '🟢 وردية نشطة مستمرة حالياً (حضور حي)',
+    statusLabel: 'حضور حي',
+    source: activeShift.source || 'kiosk'
+  } : null;
+
+  const rawMonthPunches = (state.shifts || []).filter(
     (p) => (String(p.employeeId) === String(employee.id) || String(p.employeeCode) === String(employee.code)) && activePeriodFilter(p.date)
   );
+
+  const monthPunches = livePunch ? [livePunch, ...rawMonthPunches] : rawMonthPunches;
 
   // Group or process punches into rows
   const shiftsCount = monthPunches.length;
@@ -317,6 +345,23 @@ export default function AttendancePunchesModal({
           <button className="btn btn-ghost" onClick={onClose}>✕ إغلاق Window</button>
         </div>
 
+        {livePunch && (
+          <div style={{ background: '#ecfdf5', border: '1px solid #6ee7b7', borderRadius: '12px', padding: '14px 18px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span style={{ fontSize: '26px' }}>🟢</span>
+              <div>
+                <strong style={{ color: '#065f46', fontSize: '15px' }}>الموظف على رأس العمل حالياً (حضور حي نشط)</strong>
+                <div style={{ fontSize: '13px', color: '#047857', marginTop: '3px' }}>
+                  تاريخ اليوم: {livePunch.date} | وقت تسجيل الحضور: <strong>{livePunch.timeIn}</strong> | المنقضي حتى الآن: <strong>{activeElapsedHours} ساعة</strong>
+                </div>
+              </div>
+            </div>
+            <span style={{ background: '#10b981', color: '#fff', padding: '5px 14px', borderRadius: '20px', fontWeight: '800', fontSize: '12px' }}>
+              {activeShift?.source === 'kiosk' ? 'بصمة كشك الفرع' : 'تسجيل حي'}
+            </span>
+          </div>
+        )}
+
         {isMultiBranch ? (
           <div>
             {employee.branchesDetails.map((bd) => {
@@ -404,9 +449,15 @@ export default function AttendancePunchesModal({
                                   </span>
                                 </td>
                                 <td style={{ textAlign: 'center' }}>
-                                  <span style={{ background: '#fee2e2', color: '#b91c1c', padding: '4px 10px', borderRadius: '12px', fontWeight: '800', fontSize: '12.5px', display: 'inline-block' }}>
-                                    {p.timeOut || p.checkOut || p.outTime || '17:00'}
-                                  </span>
+                                  {p.isLiveActive ? (
+                                    <span style={{ background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', padding: '4px 10px', borderRadius: '12px', fontWeight: '800', fontSize: '11.5px', display: 'inline-block' }}>
+                                      🟢 قيد العمل الآن
+                                    </span>
+                                  ) : (
+                                    <span style={{ background: '#fee2e2', color: '#b91c1c', padding: '4px 10px', borderRadius: '12px', fontWeight: '800', fontSize: '12.5px', display: 'inline-block' }}>
+                                      {p.timeOut || p.checkOut || p.outTime || '17:00'}
+                                    </span>
+                                  )}
                                 </td>
                                 <td style={{ textAlign: 'center' }}>
                                   {breakH ? <span style={{ background: '#fef3c7', color: '#b45309', padding: '4px 8px', borderRadius: '10px', fontWeight: '700', fontSize: '12px' }}>{breakH} س</span> : <span style={{ color: 'var(--muted)' }}>—</span>}
@@ -433,24 +484,30 @@ export default function AttendancePunchesModal({
                                   )}
                                 </td>
                                 <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
-                                  <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
-                                    <button
-                                      className="btn btn-ghost"
-                                      style={{ padding: '3px 8px', fontSize: '11.5px', color: '#0284c7', border: '1px solid #bae6fd', background: '#f0f9ff' }}
-                                      title="تعديل البصمة"
-                                      onClick={() => handleOpenEdit(p)}
-                                    >
-                                      ✏️ تعديل
-                                    </button>
-                                    <button
-                                      className="del-btn"
-                                      style={{ padding: '3px 6px', fontSize: '11px' }}
-                                      title="حذف البصمة"
-                                      onClick={() => handleDeletePunch(p)}
-                                    >
-                                      🗑️
-                                    </button>
-                                  </div>
+                                  {p.isLiveActive ? (
+                                    <span style={{ color: '#059669', fontSize: '12px', fontWeight: '800', background: '#ecfdf5', padding: '4px 10px', borderRadius: '8px', border: '1px solid #a7f3d0' }}>
+                                      🟢 جاري الآن
+                                    </span>
+                                  ) : (
+                                    <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
+                                      <button
+                                        className="btn btn-ghost"
+                                        style={{ padding: '3px 8px', fontSize: '11.5px', color: '#0284c7', border: '1px solid #bae6fd', background: '#f0f9ff' }}
+                                        title="تعديل البصمة"
+                                        onClick={() => handleOpenEdit(p)}
+                                      >
+                                        ✏️ تعديل
+                                      </button>
+                                      <button
+                                        className="del-btn"
+                                        style={{ padding: '3px 6px', fontSize: '11px' }}
+                                        title="حذف البصمة"
+                                        onClick={() => handleDeletePunch(p)}
+                                      >
+                                        🗑️
+                                      </button>
+                                    </div>
+                                  )}
                                 </td>
                               </tr>
                             );
@@ -553,17 +610,23 @@ export default function AttendancePunchesModal({
 
                         {/* Exit Time Pill */}
                         <td style={{ textAlign: 'center' }}>
-                          <span style={{
-                            background: '#fee2e2',
-                            color: '#b91c1c',
-                            padding: '4px 10px',
-                            borderRadius: '12px',
-                            fontWeight: '800',
-                            fontSize: '12.5px',
-                            display: 'inline-block'
-                          }}>
-                            {p.timeOut || p.checkOut || p.outTime || '17:00'}
-                          </span>
+                          {p.isLiveActive ? (
+                            <span style={{ background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', padding: '4px 10px', borderRadius: '12px', fontWeight: '800', fontSize: '11.5px', display: 'inline-block' }}>
+                              🟢 قيد العمل الآن
+                            </span>
+                          ) : (
+                            <span style={{
+                              background: '#fee2e2',
+                              color: '#b91c1c',
+                              padding: '4px 10px',
+                              borderRadius: '12px',
+                              fontWeight: '800',
+                              fontSize: '12.5px',
+                              display: 'inline-block'
+                            }}>
+                              {p.timeOut || p.checkOut || p.outTime || '17:00'}
+                            </span>
+                          )}
                         </td>
 
                         {/* Break Hours Pill */}
@@ -613,24 +676,30 @@ export default function AttendancePunchesModal({
 
                         {/* Actions */}
                         <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
-                          <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
-                            <button
-                              className="btn btn-ghost"
-                              style={{ padding: '3px 8px', fontSize: '11.5px', color: '#0284c7', border: '1px solid #bae6fd', background: '#f0f9ff' }}
-                              title="تعديل البصمة"
-                              onClick={() => handleOpenEdit(p)}
-                            >
-                              ✏️ تعديل
-                            </button>
-                            <button
-                              className="del-btn"
-                              style={{ padding: '3px 6px', fontSize: '11px' }}
-                              title="حذف البصمة"
-                              onClick={() => handleDeletePunch(p)}
-                            >
-                              🗑️
-                            </button>
-                          </div>
+                          {p.isLiveActive ? (
+                            <span style={{ color: '#059669', fontSize: '12px', fontWeight: '800', background: '#ecfdf5', padding: '4px 10px', borderRadius: '8px', border: '1px solid #a7f3d0' }}>
+                              🟢 جاري الآن
+                            </span>
+                          ) : (
+                            <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
+                              <button
+                                className="btn btn-ghost"
+                                style={{ padding: '3px 8px', fontSize: '11.5px', color: '#0284c7', border: '1px solid #bae6fd', background: '#f0f9ff' }}
+                                title="تعديل البصمة"
+                                onClick={() => handleOpenEdit(p)}
+                              >
+                                ✏️ تعديل
+                              </button>
+                              <button
+                                className="del-btn"
+                                style={{ padding: '3px 6px', fontSize: '11px' }}
+                                title="حذف البصمة"
+                                onClick={() => handleDeletePunch(p)}
+                              >
+                                🗑️
+                              </button>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     );

@@ -271,21 +271,40 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
   if (!localItem) return remoteItem;
   if (!remoteItem) return localItem;
 
-  // 0. معالجة وحسم الموظفين والصلاحيات الصارمة وحماية البصمات الحيوية
+  // 0. معالجة وحسم الموظفين والصلاحيات الصارمة وحماية البصمات الحيوية ونقل الفروع
   if (options.prefix === 'emp') {
     const localTime = getItemTime(localItem);
     const remoteTime = getItemTime(remoteItem);
     let mergedEmp = {};
     if (localTime >= remoteTime) {
       mergedEmp = { ...remoteItem, ...localItem };
+      mergedEmp.branchId = localItem.branchId || (localItem.branchesDetails?.[0]?.branchId) || remoteItem.branchId || '';
+      mergedEmp.branchesDetails = (Array.isArray(localItem.branchesDetails) && localItem.branchesDetails.length > 0)
+        ? localItem.branchesDetails
+        : (remoteItem.branchesDetails || []);
+      if (localItem.archivedBranchesDetails) {
+        mergedEmp.archivedBranchesDetails = localItem.archivedBranchesDetails;
+      }
     } else {
       // عند تفوق وقت السحابة: السحابة هي المرجع المعتمد
       mergedEmp = { ...localItem, ...remoteItem };
+      mergedEmp.branchId = remoteItem.branchId || (remoteItem.branchesDetails?.[0]?.branchId) || localItem.branchId || '';
+      mergedEmp.branchesDetails = (Array.isArray(remoteItem.branchesDetails) && remoteItem.branchesDetails.length > 0)
+        ? remoteItem.branchesDetails
+        : (localItem.branchesDetails || []);
+      if (remoteItem.archivedBranchesDetails) {
+        mergedEmp.archivedBranchesDetails = remoteItem.archivedBranchesDetails;
+      }
       if (localItem.permissions !== undefined && remoteItem.permissions === undefined) {
         mergedEmp.permissions = localItem.permissions;
       } else if (remoteItem.permissions !== undefined) {
         mergedEmp.permissions = remoteItem.permissions;
       }
+    }
+
+    // مزامنة الفرع الأساسي إذا كان متاحاً في تفاصيل الفروع
+    if (!mergedEmp.branchId && Array.isArray(mergedEmp.branchesDetails) && mergedEmp.branchesDetails[0]?.branchId) {
+      mergedEmp.branchId = mergedEmp.branchesDetails[0].branchId;
     }
 
     // صيانة المعرف المستقر

@@ -390,9 +390,27 @@ function mergeServerState(array $existing, array $incoming): array
                     $isNewApproved = in_array($item['status'] ?? '', ['approved', 'paid', 'partial'], true) || ($item['adminApproved'] ?? false);
 
                     if ($prefix === 'emp') {
-                        // للموظفين: البيانات الواردة من التعديل الأخير للمستخدم هي المعتمدة دائماً
-                        $merged = array_merge($old, $item);
-                        $merged['updatedAt'] = !empty($item['updatedAt']) ? (string)$item['updatedAt'] : gmdate('Y-m-d\TH:i:s.v\Z');
+                        // للموظفين: اعتماد التعديل الأحدث زمنياً فقط (True Last-Write-Wins)
+                        // لمنع الأجهزة ذات الكاش القديم من إعادة الموظف لفرعه السابق عند إجراء أي مزامنة
+                        if ($tOld > $tNew) {
+                            // السيرفر لديه تعديل أحدث (نقل فرع أو تحديث بيانات) -> السيرفر هو المعتمد
+                            $merged = array_merge($item, $old);
+                            $merged['updatedAt'] = !empty($old['updatedAt']) ? (string)$old['updatedAt'] : gmdate('Y-m-d\TH:i:s.v\Z');
+                            $merged['branchId'] = !empty($old['branchId']) ? $old['branchId'] : ($item['branchId'] ?? '');
+                            $merged['branchesDetails'] = !empty($old['branchesDetails']) ? $old['branchesDetails'] : ($item['branchesDetails'] ?? []);
+                            if (isset($old['archivedBranchesDetails'])) {
+                                $merged['archivedBranchesDetails'] = $old['archivedBranchesDetails'];
+                            }
+                        } else {
+                            // البيانات الواردة أحدث أو مساوية -> اعتماد البيانات الواردة
+                            $merged = array_merge($old, $item);
+                            $merged['updatedAt'] = !empty($item['updatedAt']) ? (string)$item['updatedAt'] : gmdate('Y-m-d\TH:i:s.v\Z');
+                            $merged['branchId'] = !empty($item['branchId']) ? $item['branchId'] : ($old['branchId'] ?? '');
+                            $merged['branchesDetails'] = !empty($item['branchesDetails']) ? $item['branchesDetails'] : ($old['branchesDetails'] ?? []);
+                            if (isset($item['archivedBranchesDetails'])) {
+                                $merged['archivedBranchesDetails'] = $item['archivedBranchesDetails'];
+                            }
+                        }
                     } elseif ($isOldApproved && !$isNewApproved) {
                         $merged = array_merge($item, $old);
                     } elseif ($tNew >= $tOld) {

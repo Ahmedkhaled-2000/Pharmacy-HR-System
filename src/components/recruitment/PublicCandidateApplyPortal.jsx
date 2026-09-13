@@ -3,6 +3,7 @@ import { compressImage } from '../../utils/imageCompressor';
 import { DEFAULT_JOBS, getJobsList, DEFAULT_DEPARTMENTS, getDepartmentsList } from '../../utils/jobsHelper';
 import { DEFAULT_VACANCIES, generateApplicationCode, APPLICATION_STATUSES } from '../../utils/recruitmentHelper';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
+import { apiSubmitRecruitmentApplication } from '../../utils/apiClient';
 
 export default function PublicCandidateApplyPortal({
   state,
@@ -107,6 +108,12 @@ export default function PublicCandidateApplyPortal({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // منع الملفات الضخمة التي تتجاوز 3 ميجابايت لحماية نقل البيانات
+    if (file.size > 3 * 1024 * 1024) {
+      showToast?.('⚠️ حجم الملف يتجاوز 3 ميجابايت، يرجى اختيار ملف أصغر حجماً');
+      return;
+    }
+
     try {
       if (type === 'cv') {
         setCvFileName(file.name);
@@ -115,11 +122,11 @@ export default function PublicCandidateApplyPortal({
           reader.onload = (event) => setCvUrl(event.target.result);
           reader.readAsDataURL(file);
         } else {
-          const compressed = await compressImage(file, 1200, 0.85);
+          const compressed = await compressImage(file, 1000, 0.75);
           setCvUrl(compressed);
         }
       } else {
-        const compressed = await compressImage(file, 1000, 0.8);
+        const compressed = await compressImage(file, 900, 0.75);
         if (type === 'photo') setPhotoUrl(compressed);
         else if (type === 'nationalId') setNationalIdPhotoUrl(compressed);
         else if (type === 'gradCert') setGraduationCertUrl(compressed);
@@ -259,10 +266,26 @@ export default function PublicCandidateApplyPortal({
         read: false
       };
 
+      // ── 1. الإرسال الذري المباشر للخادم السحابي لضمان الوصول الفوري ──
+      let serverConfirmed = false;
+      try {
+        const serverRes = await apiSubmitRecruitmentApplication(newApp, newNotif);
+        if (serverRes?.success) {
+          serverConfirmed = true;
+          if (serverRes.applicationId) newApp.id = serverRes.applicationId;
+          if (serverRes.code) newApp.code = serverRes.code;
+        } else {
+          console.warn('[CareersPortal] Dedicated submit returned notice:', serverRes?.error);
+        }
+      } catch (submitErr) {
+        console.warn('[CareersPortal] Network submit warning:', submitErr);
+      }
+
+      // ── 2. تحديث الحالة محلياً ──
       const existingApps = state?.recruitmentApplications || [];
-      const updatedApps = [newApp, ...existingApps];
+      const updatedApps = [newApp, ...existingApps.filter(a => a.id !== newApp.id && a.code !== newApp.code)];
       const existingNotifs = state?.notifications || [];
-      const updatedNotifs = [newNotif, ...existingNotifs];
+      const updatedNotifs = [newNotif, ...existingNotifs.filter(n => n.id !== newNotif.id)];
 
       const updatedState = {
         ...state,
@@ -272,17 +295,17 @@ export default function PublicCandidateApplyPortal({
 
       if (setState) setState(updatedState);
 
-      // Instant optimistic UI update
-      setSubmittedReceipt(newApp);
-      setIsSubmitting(false);
-      showToast?.(`✅ تم تقديم طلب التعيين بنجاح! كود الطلب: ${newApp.code}`);
-
-      // Background asynchronous non-blocking persistence
-      if (saveState) {
+      // في حال تعذر المسار الذري المخصص، نحفظ عبر saveState الاحتياطي
+      if (!serverConfirmed && saveState) {
         saveState(updatedState).catch(err => {
-          console.warn('[CareersPortal] Background sync warning:', err);
+          console.warn('[CareersPortal] Background fallback sync warning:', err);
         });
       }
+
+      // ── 3. عرض إيصال التقديم المعتمد ──
+      setSubmittedReceipt({ ...newApp, serverConfirmed });
+      setIsSubmitting(false);
+      showToast?.(`✅ تم تقديم طلب التعيين بنجاح! كود الطلب: ${newApp.code}`);
 
       try {
         notifyAdminOnNewRequest?.({

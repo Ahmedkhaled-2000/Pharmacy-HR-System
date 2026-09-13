@@ -64,13 +64,11 @@ export default function RecruitmentHubModule({
         if (emp.recruitmentApplicationId && String(emp.recruitmentApplicationId) === String(app.id)) return true;
         if (emp.recruitmentApplicationCode && String(emp.recruitmentApplicationCode) === String(app.code)) return true;
         const cleanEmpNid = String(emp.nationalId || '').replace(/\D/g, '');
-        if (cleanAppNid && cleanEmpNid && cleanAppNid === cleanEmpNid) return true;
+        if (cleanAppNid && cleanEmpNid && cleanAppNid.length >= 10 && cleanAppNid === cleanEmpNid) return true;
         const cleanEmpName = String(emp.name || '').trim().toLowerCase();
         const cleanEmpPhone = String(emp.phone || '').replace(/\D/g, '');
-        if (cleanAppName && cleanEmpName && cleanAppName === cleanEmpName) {
-          if (cleanAppPhone && cleanEmpPhone && cleanAppPhone === cleanEmpPhone) return true;
-          if (emp.jobTitle && app.targetJobTitle && emp.jobTitle === app.targetJobTitle) return true;
-          return true;
+        if (cleanAppName && cleanEmpName && cleanAppName === cleanEmpName && cleanAppName.length >= 6) {
+          if (cleanAppPhone && cleanEmpPhone && cleanAppPhone.length >= 10 && cleanAppPhone === cleanEmpPhone) return true;
         }
         return false;
       });

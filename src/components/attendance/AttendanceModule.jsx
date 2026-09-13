@@ -415,16 +415,42 @@ export default function AttendanceModule({
                   const isMatch = String(p.employeeId) === String(emp.id) || String(p.employeeCode) === String(emp.code);
                   return isMatch && activePeriodFilter(p.date);
                 });
-                const totalHours = empPunches.reduce((acc, p) => acc + (parseFloat(p.hours) || parseFloat(p.workHours) || 8), 0).toFixed(1);
+
+                // فحص ما إذا كان الموظف لديه بصمة حضور نشطة اليوم (Live Active Shift)
+                const activeShift = state.activeShifts?.[emp.id] || state.activeShifts?.[String(emp.id)];
+                const hasLiveShift = Boolean(activeShift && activePeriodFilter(activeShift.date));
+                const liveElapsedHours = hasLiveShift
+                  ? Math.max(0, Math.round(((Date.now() - (activeShift.startEpoch || Date.now())) / 3600000) * 10) / 10)
+                  : 0;
+
+                const totalCompletedHours = empPunches.reduce((acc, p) => acc + (parseFloat(p.hours) || parseFloat(p.workHours) || 8), 0);
+                const totalHours = (totalCompletedHours + liveElapsedHours).toFixed(1);
+                const totalShiftsCount = empPunches.length + (hasLiveShift ? 1 : 0);
                 const manualCount = getEmployeeManualPunchesCount(emp.id, state, activePeriodFilter);
 
                 return (
-                  <tr key={emp.id}>
+                  <tr key={emp.id} style={{ background: hasLiveShift ? 'rgba(236, 253, 245, 0.45)' : 'transparent' }}>
                     <td style={{ fontWeight: '700' }}>{emp.code}</td>
-                    <td style={{ fontWeight: '800' }}>{getEmpDisplayName(emp)}</td>
+                    <td style={{ fontWeight: '800' }}>
+                      {getEmpDisplayName(emp)}
+                      {hasLiveShift && (
+                        <span style={{ display: 'block', marginTop: '2px', fontSize: '11px', color: '#059669', fontWeight: '800' }}>
+                          🟢 متواجد الآن ({activeShift.timeIn})
+                        </span>
+                      )}
+                    </td>
                     <td>{b?.name || 'المركز الرئيسي'}</td>
                     <td>{emp.jobTitle}</td>
-                    <td><span className="badge badge-primary">{empPunches.length} وردية</span></td>
+                    <td>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                        <span className="badge badge-primary">{totalShiftsCount} وردية</span>
+                        {hasLiveShift && (
+                          <span style={{ background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', padding: '1px 6px', borderRadius: '6px', fontSize: '10.5px', fontWeight: '800', textAlign: 'center' }}>
+                            حضور حي
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td>
                       {manualCount > 0 ? (
                         <span style={{ background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d', padding: '3px 10px', borderRadius: '8px', fontWeight: '800', fontSize: '12px' }}>
@@ -434,7 +460,14 @@ export default function AttendanceModule({
                         <span style={{ color: 'var(--muted)', fontSize: '12px' }}>0</span>
                       )}
                     </td>
-                    <td style={{ color: '#0d9488', fontWeight: '800' }}>{totalHours} ساعة</td>
+                    <td style={{ color: '#0d9488', fontWeight: '800' }}>
+                      {totalHours} ساعة
+                      {hasLiveShift && (
+                        <span style={{ display: 'block', fontSize: '10.5px', color: '#16a34a', fontWeight: 'normal' }}>
+                          (+{liveElapsedHours} س جارية)
+                        </span>
+                      )}
+                    </td>
                     <td>
                       <button
                         className="btn btn-start"

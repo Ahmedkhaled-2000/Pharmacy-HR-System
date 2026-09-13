@@ -36,22 +36,28 @@ if (str_starts_with($endpoint, 'archive/') || $endpoint === 'archive') {
 try {
     switch ($endpoint) {
         // ==================================================================
-        // 1. فحص سلامة الخادم وقاعدة بيانات Supabase (Health Check)
+        // 1. فحص سلامة الخادم وقاعدة البيانات (Health Check)
         // ==================================================================
         case 'health':
         case 'status':
             $dbVersion = 'Unknown';
+            $driverUsed = Database::getDriver();
+            $dbConnected = false;
             try {
                 $vRow = Database::queryOne("SELECT version() AS ver");
                 $dbVersion = $vRow['ver'] ?? 'Unknown';
-            } catch (Throwable) {}
+                $dbConnected = true;
+            } catch (Throwable $e) {
+                $dbVersion = 'Error: ' . $e->getMessage();
+            }
 
             jsonResponse([
                 'success' => true,
                 'status' => 'online',
-                'service' => 'Pharmacy HR System API (Supabase PostgreSQL Dedicated)',
+                'service' => 'Pharmacy HR System API',
                 'php_version' => PHP_VERSION,
-                'db_driver' => 'pgsql',
+                'db_driver' => $driverUsed,
+                'db_connected' => $dbConnected,
                 'db_version' => $dbVersion,
                 'server_time' => date('Y-m-d H:i:s'),
                 'timezone' => date_default_timezone_get()
@@ -71,18 +77,17 @@ try {
             $password = (string)($payload['password'] ?? '');
             $role = (string)($payload['role'] ?? 'admin');
 
-            // جلب إعدادات المنشأة للتحقق من كلمات المرور (مع دعم MicroCache وفحص خفيف الحجم)
+            // جلب إعدادات المنشأة للتحقق من كلمات المرور (مع دعم MicroCache واسترجاع آمن)
             $cachedSettings = MicroCache::get('settings_' . DEFAULT_STORAGE_KEY);
-            if ($cachedSettings && isset($cachedSettings['value'])) {
+            if ($cachedSettings && isset($cachedSettings['value']) && is_array($cachedSettings['value'])) {
                 $appState = $cachedSettings['value'];
             } else {
-                $settingsRow = Database::queryOne("SELECT value_data->'orgSettings' AS org_settings, value_data->'branches' AS branches FROM app_settings WHERE key_name = ? LIMIT 1", [DEFAULT_STORAGE_KEY]);
-                $orgSettings = $settingsRow && !empty($settingsRow['org_settings'])
-                    ? (is_string($settingsRow['org_settings']) ? json_decode($settingsRow['org_settings'], true) : $settingsRow['org_settings'])
+                $settingsRow = Database::queryOne("SELECT value_data FROM app_settings WHERE key_name = ? LIMIT 1", [DEFAULT_STORAGE_KEY]);
+                $fullVal = $settingsRow && !empty($settingsRow['value_data'])
+                    ? (is_string($settingsRow['value_data']) ? json_decode($settingsRow['value_data'], true) : $settingsRow['value_data'])
                     : [];
-                $branches = $settingsRow && !empty($settingsRow['branches'])
-                    ? (is_string($settingsRow['branches']) ? json_decode($settingsRow['branches'], true) : $settingsRow['branches'])
-                    : [];
+                $orgSettings = is_array($fullVal['orgSettings'] ?? null) ? $fullVal['orgSettings'] : [];
+                $branches = is_array($fullVal['branches'] ?? null) ? $fullVal['branches'] : [];
                 $appState = ['orgSettings' => $orgSettings, 'branches' => $branches];
             }
 
@@ -514,6 +519,10 @@ try {
                     $perms = is_array($appState['permissionRequests'] ?? null) ? $appState['permissionRequests'] : [];
                     array_unshift($perms, $newReq);
                     $appState['permissionRequests'] = array_values($perms);
+                } elseif (in_array($reqType, ['recruitment', 'job_application', 'applicant'], true)) {
+                    $rApps = is_array($appState['recruitmentApplications'] ?? null) ? $appState['recruitmentApplications'] : [];
+                    array_unshift($rApps, $newReq);
+                    $appState['recruitmentApplications'] = array_values($rApps);
                 }
 
                 // إضافة الإشعار
@@ -540,6 +549,136 @@ try {
                 'success' => true,
                 'message' => 'تم استلام وحفظ الطلب بنجاح في قاعدة البيانات',
                 'requestId' => $reqIdStr,
+                'version' => $newVer,
+                'updated_at' => $freshRow['updated_at'] ?? date('Y-m-d H:i:s')
+            ]);
+            break;
+
+        // ==================================================================
+        // 6.1.1 الإرسال الذري لطلبات التعيين والتوظيف العامة (Careers & Recruitment Application)
+        // ==================================================================
+        case 'recruitment/apply':
+        case 'careers/apply':
+            if ($method !== 'POST') {
+                jsonResponse(['success' => false, 'error' => 'Method not allowed'], 405);
+            }
+
+            $payload = getRequestData();
+            $targetKey = (string)($payload['key'] ?? DEFAULT_STORAGE_KEY);
+            $appData = $payload['application'] ?? $payload['request'] ?? null;
+            $newNotif = $payload['notification'] ?? null;
+
+            if (!is_array($appData)) {
+                jsonResponse(['success' => false, 'error' => 'بيانات طلب التعيين غير مكتملة (Missing application data)'], 400);
+            }
+
+            $candName = trim((string)($appData['name'] ?? ''));
+            $candPhone = preg_replace('/\D/', '', (string)($appData['phone'] ?? ''));
+            $candJob = trim((string)($appData['targetJobTitle'] ?? ''));
+
+            if (mb_strlen($candName, 'UTF-8') < 3) {
+                jsonResponse(['success' => false, 'error' => 'يرجى إدخال اسم صحيح لا يقل عن 3 أحرف'], 422);
+            }
+            if (strlen($candPhone) < 10) {
+                jsonResponse(['success' => false, 'error' => 'يرجى إدخال رقم هاتف صحيح لا يقل عن 10 أرقام'], 422);
+            }
+
+            // توليد معرف وكود للطلب في حال عدم وجودهما
+            if (empty($appData['id'])) {
+                $appData['id'] = 'app_' . round(microtime(true) * 1000) . '_' . substr(bin2hex(random_bytes(3)), 0, 5);
+            }
+            if (empty($appData['code'])) {
+                $appData['code'] = 'APP-' . date('Ym') . '-' . rand(1000, 9999);
+            }
+            if (empty($appData['status'])) {
+                $appData['status'] = 'new';
+            }
+            if (empty($appData['createdAt'])) {
+                $appData['createdAt'] = date('Y-m-d\TH:i:s.v\Z');
+            }
+            $appData['updatedAt'] = date('Y-m-d\TH:i:s.v\Z');
+
+            $row = Database::queryOne("SELECT value_data, version FROM app_settings WHERE key_name = ? LIMIT 1", [$targetKey]);
+            if (!$row || empty($row['value_data'])) {
+                jsonResponse(['success' => false, 'error' => 'قاعدة البيانات غير مهيأة'], 500);
+            }
+
+            $appState = is_string($row['value_data']) ? json_decode($row['value_data'], true) : $row['value_data'];
+            if (!is_array($appState)) $appState = [];
+
+            $appIdStr = (string)$appData['id'];
+            $appCodeStr = (string)$appData['code'];
+
+            // منع التكرار: فحص بالمعرف أو الكود أو (الهاتف + الاسم خلال آخر 15 دقيقة)
+            $existingApps = is_array($appState['recruitmentApplications'] ?? null) ? $appState['recruitmentApplications'] : [];
+            $alreadyExists = false;
+            $nowTime = time();
+
+            foreach ($existingApps as $ex) {
+                if (!is_array($ex)) continue;
+                if ((string)($ex['id'] ?? '') === $appIdStr || (string)($ex['code'] ?? '') === $appCodeStr) {
+                    $alreadyExists = true;
+                    break;
+                }
+                $exPhone = preg_replace('/\D/', '', (string)($ex['phone'] ?? ''));
+                $exName = trim((string)($ex['name'] ?? ''));
+                $exCreated = strtotime((string)($ex['createdAt'] ?? '1970-01-01'));
+                if ($exPhone === $candPhone && $exName === $candName && ($nowTime - $exCreated) < 900) {
+                    $alreadyExists = true;
+                    $appIdStr = (string)($ex['id'] ?? $appIdStr);
+                    $appCodeStr = (string)($ex['code'] ?? $appCodeStr);
+                    break;
+                }
+            }
+
+            if (!$alreadyExists) {
+                // إدراج الطلب في بداية مصفوفة طلبات التعيين
+                array_unshift($existingApps, $appData);
+                $appState['recruitmentApplications'] = array_values($existingApps);
+
+                // إدراج إشعار للإدارة
+                if (!is_array($newNotif) || empty($newNotif['id'])) {
+                    $newNotif = [
+                        'id' => 'notif_' . $appIdStr,
+                        'title' => '📥 طلب توظيف جديد: ' . $candName,
+                        'message' => 'تم استلام طلب توظيف جديد من المرشح (' . $candName . ') لوظيفة (' . ($candJob ?: 'طلب عام') . ') - كود الطلب: ' . $appCodeStr,
+                        'type' => 'recruitment',
+                        'icon' => '📥',
+                        'typeLabel' => 'طلب توظيف جديد',
+                        'employeeName' => $candName,
+                        'targetTab' => 'employees',
+                        'targetSubTab' => 'recruitment',
+                        'applicationId' => $appIdStr,
+                        'date' => date('Y-m-d'),
+                        'createdAt' => date('Y-m-d\TH:i:s.v\Z'),
+                        'timestamp' => date('Y-m-d\TH:i:s.v\Z'),
+                        'read' => false
+                    ];
+                }
+
+                $notifs = is_array($appState['notifications'] ?? null) ? $appState['notifications'] : [];
+                array_unshift($notifs, $newNotif);
+                $appState['notifications'] = array_values(array_slice($notifs, 0, 300));
+
+                $appState['_recruitmentUpdatedAt'] = date('Y-m-d\TH:i:s.v\Z');
+                $appState['_requestsUpdatedAt'] = date('Y-m-d\TH:i:s.v\Z');
+
+                $jsonString = json_encode($appState, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+                $updateSql = "UPDATE app_settings SET value_data = ?::jsonb, version = version + 1, updated_at = NOW() WHERE key_name = ?";
+                Database::execute($updateSql, [$jsonString, $targetKey]);
+
+                MicroCache::invalidate('settings_' . $targetKey);
+                MicroCache::invalidate('version_' . $targetKey);
+            }
+
+            $freshRow = Database::queryOne("SELECT version, updated_at FROM app_settings WHERE key_name = ?", [$targetKey]);
+            $newVer = (int)($freshRow['version'] ?? ($row['version'] + 1));
+
+            jsonResponse([
+                'success' => true,
+                'message' => 'تم استلام وحفظ طلب التعيين بنجاح وتنبيه الإدارة',
+                'applicationId' => $appIdStr,
+                'code' => $appCodeStr,
                 'version' => $newVer,
                 'updated_at' => $freshRow['updated_at'] ?? date('Y-m-d H:i:s')
             ]);

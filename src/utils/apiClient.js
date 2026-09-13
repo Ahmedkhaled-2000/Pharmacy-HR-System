@@ -221,6 +221,18 @@ export async function apiSubmitRequestAtomic(requestObj, notificationObj = null,
   });
 }
 
+// ── 1.1.1 الإرسال الذري لطلبات التعيين والتوظيف العامة من بوابة الوظائف ──
+export async function apiSubmitRecruitmentApplication(applicationObj, notificationObj = null, key = STORAGE_KEY) {
+  return await request('recruitment/apply', {
+    method: 'POST',
+    body: JSON.stringify({ key, application: applicationObj, notification: notificationObj }),
+    timeout: 15000,
+    retries: 2,
+    noCache: true,
+    isBackground: false
+  });
+}
+
 // ── 1.2 الحذف النهائي البات للكيانات (موظف / طلب) من قاعدة البيانات السحابية ──
 export async function apiHardDeleteEntity(type, id, key = STORAGE_KEY) {
   return await request('entity/delete', {
