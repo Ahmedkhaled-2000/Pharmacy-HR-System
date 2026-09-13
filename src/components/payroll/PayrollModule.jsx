@@ -442,7 +442,6 @@ export default function PayrollModule({
             <tr>
               <th>كود الموظف</th>
               <th>اسم الموظف</th>
-              <th>الفرع</th>
               <th>ساعات العمل بالفترة</th>
               <th>المكافآت</th>
               <th>الخصومات والغيابات</th>
@@ -452,7 +451,7 @@ export default function PayrollModule({
           </thead>
           <tbody>
             {filteredEmployees.length === 0 ? (
-              <tr><td colSpan="8" style={{ textAlign: 'center', color: 'var(--muted)', padding: '24px' }}>لا يوجد موظفين يطابقون خيارات البحث.</td></tr>
+              <tr><td colSpan="7" style={{ textAlign: 'center', color: 'var(--muted)', padding: '24px' }}>لا يوجد موظفين يطابقون خيارات البحث.</td></tr>
             ) : (
               filteredEmployees.map((emp) => {
                 const isMultiBranch = emp.branchesDetails && emp.branchesDetails.length > 1;
@@ -479,15 +478,31 @@ export default function PayrollModule({
                 return (
                   <tr key={emp.id}>
                     <td style={{ fontWeight: '700' }}>{emp.code}</td>
-                    <td style={{ fontWeight: '800' }}>
-                      <div>{getEmpDisplayName(emp)}</div>
+                    <td>
+                      <div style={{ fontWeight: '800', fontSize: '13.5px', color: 'var(--text)' }}>
+                        {getEmpDisplayName(emp)}
+                      </div>
                       {emp.nickname && emp.nickname.trim() !== emp.name?.trim() && (
-                        <div style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 'normal' }}>
+                        <div style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 'normal', marginTop: '1px' }}>
                           الاسم الرسمي: {emp.name}
                         </div>
                       )}
+                      <div style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        marginTop: '3px',
+                        background: 'rgba(13, 148, 136, 0.08)',
+                        color: '#0d9488',
+                        padding: '1px 7px',
+                        borderRadius: '6px',
+                        fontSize: '11.5px',
+                        fontWeight: 600,
+                        border: '1px solid rgba(13, 148, 136, 0.2)'
+                      }}>
+                        <span>🏬 {branchNameDisplay}</span>
+                      </div>
                     </td>
-                    <td>{branchNameDisplay}</td>
                     <td>
                       <strong style={{ color: '#0f766e' }}>{empSum.hours || 0} س أساسي</strong>
                       {empSum.approvedOvertimeHours > 0 && (

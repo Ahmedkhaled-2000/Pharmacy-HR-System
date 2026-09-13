@@ -56,12 +56,12 @@ export default function EmployeeCardsGrid({
   const [rehireNotes, setRehireNotes] = useState('');
   const [isRehiring, setIsRehiring] = useState(false);
   const [previewPhotoEmp, setPreviewPhotoEmp] = useState(null);
-  // Branch Cards Collapse/Expand state (all branches expanded by default so added/active employees are immediately visible)
+  // Branch Cards Collapse/Expand state (Default is collapsed as requested by user)
   const [expandedBranches, setExpandedBranches] = useState({});
 
   const toggleBranchCollapse = (bKey) => {
     setExpandedBranches((prev) => {
-      const current = prev[bKey] !== undefined ? prev[bKey] : true;
+      const current = prev[bKey] !== undefined ? prev[bKey] : false;
       return {
         ...prev,
         [bKey]: !current
@@ -539,6 +539,36 @@ export default function EmployeeCardsGrid({
             ))}
           </select>
         </div>
+
+        {/* Quick Collapse / Expand All Buttons */}
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => {
+              const allCollapsed = {};
+              Object.keys(groupedEmployees).forEach((k) => { allCollapsed[k] = false; });
+              setExpandedBranches(allCollapsed);
+            }}
+            style={{ padding: '9px 13px', fontSize: '12.5px', borderRadius: '10px', border: '1px solid var(--border)' }}
+            title="طي جميع الفروع"
+          >
+            📁 طي الكل
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => {
+              const allExpanded = {};
+              Object.keys(groupedEmployees).forEach((k) => { allExpanded[k] = true; });
+              setExpandedBranches(allExpanded);
+            }}
+            style={{ padding: '9px 13px', fontSize: '12.5px', borderRadius: '10px', border: '1px solid var(--border)' }}
+            title="فتح وعرض جميع الفروع"
+          >
+            📂 فتح الكل
+          </button>
+        </div>
       </div>
 
       {/* ── NO RESULTS ALERT ── */}
@@ -562,7 +592,7 @@ export default function EmployeeCardsGrid({
           const branchEmps = groupedEmployees[branchKey];
           if (!branchEmps || branchEmps.length === 0) return null;
           const branchTitle = getBranchName(branchKey);
-          const isExpanded = expandedBranches[branchKey] !== undefined ? Boolean(expandedBranches[branchKey]) : true;
+          const isExpanded = searchTerm ? true : (expandedBranches[branchKey] !== undefined ? Boolean(expandedBranches[branchKey]) : false);
 
           return (
             <div key={branchKey} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '16px', padding: isExpanded ? '20px' : '12px 18px', transition: 'all 0.2s ease' }}>

@@ -278,19 +278,20 @@ export async function loadLocalStateFast() {
         }
       } catch {}
 
+      // تنقية الطلبات والموظفين فقط بالمعرف الصريح أو البادئة المخصصة لمنع التداخل مع أرقام الإشعارات أو الحركات الأخرى
       if (deletedSet.size > 0) {
         normalized.requests = (normalized.requests || []).filter(r => {
           if (!r || !r.id) return false;
           const idStr = String(r.id);
-          const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
-          return !deletedSet.has(idStr) && !deletedSet.has(rawId) && !deletedSet.has(`req_${rawId}`);
+          const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_)/, '');
+          return !deletedSet.has(idStr) && !deletedSet.has(`req_${rawId}`);
         });
 
         normalized.leaveRequests = (normalized.leaveRequests || []).filter(r => {
           if (!r || !r.id) return false;
           const idStr = String(r.id);
-          const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
-          return !deletedSet.has(idStr) && !deletedSet.has(rawId) && !deletedSet.has(`leave_${rawId}`);
+          const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_)/, '');
+          return !deletedSet.has(idStr) && !deletedSet.has(`leave_${rawId}`);
         });
 
         normalized.employees = (normalized.employees || []).filter(e => {
@@ -352,13 +353,27 @@ export async function submitRequestFast(requestObj, notificationObj = null, opti
 
 // ── تنفيذ الحذف النهائي البات للكيان من قاعدة البيانات السحابية والمحلية ──────
 export async function hardDeleteEntityFast(type, id) {
-  // 1. تسجيل فوري في localStorage لمنع أي وميض محلي
+  // 1. تسجيل فوري في localStorage لمنع أي وميض محلي مع عزل تام لكل صنف
   try {
     const rawLocalDeleted = localStorage.getItem('app_deleted_ids_snapshot');
     const list = rawLocalDeleted ? JSON.parse(rawLocalDeleted) : [];
     const idStr = String(id);
     const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_|emp_)/, '');
-    const set = new Set([...list, idStr, rawId, `req_${rawId}`, `leave_${rawId}`, `emp_${rawId}`, `emp_del_${rawId}`]);
+    const set = new Set(list);
+    set.add(idStr);
+
+    const normType = String(type || '').toLowerCase();
+    if (normType.includes('req') || normType === 'request') {
+      set.add(`req_${rawId}`);
+    } else if (normType.includes('leave')) {
+      set.add(`leave_${rawId}`);
+    } else if (normType.includes('emp')) {
+      set.add(`emp_${rawId}`);
+      set.add(`emp_del_${rawId}`);
+    } else if (normType.includes('notif')) {
+      set.add(`notif_${rawId}`);
+    }
+
     localStorage.setItem('app_deleted_ids_snapshot', JSON.stringify(Array.from(set).slice(-3000)));
   } catch {}
 

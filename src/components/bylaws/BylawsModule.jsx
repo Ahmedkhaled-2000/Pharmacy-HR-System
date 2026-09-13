@@ -1552,18 +1552,18 @@ export default function BylawsModule({
               )}
             </div>
           ) : (
-            <div className="table-responsive">
-              <table className="bylaws-table">
+            <div className="table-responsive" style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', border: '1px solid var(--border)', borderRadius: '12px' }}>
+              <table className="bylaws-table" style={{ width: '100%', minWidth: '1150px', borderCollapse: 'collapse', textAlign: 'right' }}>
                 <thead>
-                  <tr>
-                    <th>التاريخ</th>
-                    <th>الموظف</th>
-                    <th>الفرع</th>
-                    <th>بند ونوع الجزاء</th>
-                    <th>المقدار المالي</th>
-                    <th>البيان والتفاصيل</th>
-                    <th>الحالة</th>
-                    <th>الاعتراضات والإجراءات</th>
+                  <tr style={{ background: 'var(--background)', borderBottom: '2px solid var(--border)' }}>
+                    <th style={{ padding: '12px 14px', width: '95px' }}>التاريخ</th>
+                    <th style={{ padding: '12px 14px', width: '160px' }}>الموظف</th>
+                    <th style={{ padding: '12px 14px', width: '130px' }}>الفرع</th>
+                    <th style={{ padding: '12px 14px', width: '170px' }}>بند ونوع الجزاء</th>
+                    <th style={{ padding: '12px 14px', width: '110px' }}>المقدار المالي</th>
+                    <th style={{ padding: '12px 14px', width: '240px' }}>البيان والتفاصيل</th>
+                    <th style={{ padding: '12px 14px', width: '135px' }}>الحالة</th>
+                    <th style={{ padding: '12px 14px', width: '160px', textAlign: 'center' }}>الاعتراضات والإجراءات</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1578,44 +1578,51 @@ export default function BylawsModule({
                       const isApproved = p.status === 'approved' || p.adminApproved;
                       const isRejected = p.status === 'rejected';
                       const isCancelled = p.status === 'cancelled';
+                      const isGrace = p.amount === 0 || p.actionType === 'grace' || (p.ruleTitle && p.ruleTitle.includes('سماح')) || (p.category && p.category.includes('سماح'));
                       const hasObjection = Boolean(p.objection);
                       const objStatus = p.objection?.status;
 
                       return (
-                        <tr key={p.id}>
-                          <td>{p.date}</td>
-                          <td>
+                        <tr key={p.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                          <td style={{ padding: '12px 14px', fontWeight: 600 }}>{p.date}</td>
+                          <td style={{ padding: '12px 14px' }}>
                             <strong>{p.employeeName}</strong>
                             <span style={{ display: 'block', fontSize: '11px', color: 'var(--muted)' }}>
                               {p.employeeCode}
                             </span>
                           </td>
-                          <td>{p.branchName}</td>
-                          <td>
+                          <td style={{ padding: '12px 14px' }}>{p.branchName}</td>
+                          <td style={{ padding: '12px 14px' }}>
                             <span className="badge badge-primary">{p.category}</span>
                             <strong style={{ display: 'block', fontSize: '13px', marginTop: '2px' }}>{p.ruleTitle}</strong>
                           </td>
-                          <td style={{ fontWeight: '800', color: p.amount > 0 ? '#dc2626' : 'var(--muted)' }}>
+                          <td style={{ padding: '12px 14px', fontWeight: '800', color: p.amount > 0 ? '#dc2626' : 'var(--muted)' }}>
                             {p.amount > 0 ? `${p.amount} ج.م` : 'بدون خصم مالي'}
                           </td>
-                          <td style={{ maxWidth: '240px', fontSize: '12.5px' }}>
-                            <div>{p.reason}</div>
+                          <td style={{ padding: '12px 14px', width: '240px', maxWidth: '240px', wordBreak: 'break-word', fontSize: '12.5px' }}>
+                            <div style={{ fontWeight: 600, color: 'var(--text)' }}>{p.reason}</div>
                             {p.details && p.details !== p.reason && (
-                              <span style={{ fontSize: '11px', color: 'var(--muted)' }}>{p.details}</span>
+                              <span style={{ display: 'block', marginTop: '3px', fontSize: '11px', color: 'var(--muted)', lineHeight: '1.4' }}>{p.details}</span>
                             )}
                           </td>
-                          <td>
+                          <td style={{ padding: '12px 14px' }}>
                             {isCancelled ? (
                               <span className="badge badge-danger">ملغي ومسترد</span>
                             ) : isRejected ? (
                               <span className="badge badge-danger">مرفوض</span>
                             ) : isApproved ? (
-                              <span className="badge badge-success">معتمد ومخصوم</span>
+                              isGrace ? (
+                                <span className="badge" style={{ background: 'rgba(16,185,129,0.15)', color: '#047857', border: '1px solid rgba(16,185,129,0.3)', padding: '3px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700 }}>
+                                  سماح (بدون خصم)
+                                </span>
+                              ) : (
+                                <span className="badge badge-success">معتمد ومخصوم</span>
+                              )
                             ) : (
                               <span className="badge badge-warning">معلق بانتظار الإدارة</span>
                             )}
                           </td>
-                          <td>
+                          <td style={{ padding: '12px 14px', textAlign: 'center' }}>
                             {isAdmin ? (
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                                 {hasObjection && objStatus === 'pending' && (
@@ -1624,6 +1631,7 @@ export default function BylawsModule({
                                     <span style={{ display: 'block', margin: '2px 0' }}>"{p.objection.reason}"</span>
                                     <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
                                       <button
+                                        type="button"
                                         className="btn btn-start"
                                         style={{ fontSize: '10.5px', padding: '2px 6px', background: '#16a34a' }}
                                         onClick={() => handleAdminApproveObjection(p.id)}
@@ -1632,6 +1640,7 @@ export default function BylawsModule({
                                         قبول وإلغاء
                                       </button>
                                       <button
+                                        type="button"
                                         className="btn btn-ghost"
                                         style={{ fontSize: '10.5px', padding: '2px 6px', color: '#dc2626' }}
                                         onClick={() => { setAdminRejectReplyReq(p); setAdminRejectReplyText(''); }}
@@ -1662,6 +1671,7 @@ export default function BylawsModule({
                                   </div>
                                 ) : !isCancelled ? (
                                   <button
+                                    type="button"
                                     className="btn btn-outline"
                                     style={{ color: '#dc2626', borderColor: '#dc2626', fontSize: '11.5px', padding: '4px 8px' }}
                                     onClick={() => { setObjectionTargetReq(p); setObjectionReason(''); }}
@@ -1672,7 +1682,7 @@ export default function BylawsModule({
                                   <span style={{ color: 'var(--muted)', fontSize: '12px' }}>—</span>
                                 )
                               ) : (
-                                <span style={{ color: 'var(--muted)', fontSize: '12px' }}>{isApproved ? 'معتمد' : isRejected ? 'مرفوض' : 'معلق'}</span>
+                                <span style={{ color: 'var(--muted)', fontSize: '12px' }}>{isApproved ? (isGrace ? 'سماح' : 'معتمد') : isRejected ? 'مرفوض' : 'معلق'}</span>
                               )
                             )}
                           </td>

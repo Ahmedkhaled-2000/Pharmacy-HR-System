@@ -72,6 +72,21 @@ export default function LatePenaltyPolicyModule({
   const [overrideReason, setOverrideReason] = useState('');
   const [overrideStatus, setOverrideStatus] = useState('modified');
 
+  // Pagination State
+  const [pageSize, setPageSize] = useState(25);
+  const [currentPage, setCurrentPage] = useState(1);
+
+  // Close modal on Escape key
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && selectedIncidentForEdit) {
+        setSelectedIncidentForEdit(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedIncidentForEdit]);
+
   // Policy Editor State
   const effectivePolicy = useMemo(() => getEffectiveLatePolicy(state), [state.latePenaltyPolicy, state.bylaws, state.orgSettings]);
   const [policyDraft, setPolicyDraft] = useState(() => JSON.parse(JSON.stringify(effectivePolicy)));
@@ -185,6 +200,19 @@ export default function LatePenaltyPolicyModule({
       return true;
     });
   }, [allIncidents, filterTier, filterStatus, searchQuery]);
+
+  // Reset pagination when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterTier, filterStatus, searchQuery, filterBranch, filterEmpId]);
+
+  const totalPages = pageSize === 'all' ? 1 : Math.max(1, Math.ceil(filteredIncidents.length / (parseInt(pageSize, 10) || 25)));
+  const paginatedIncidents = useMemo(() => {
+    if (pageSize === 'all') return filteredIncidents;
+    const size = parseInt(pageSize, 10) || 25;
+    const start = (currentPage - 1) * size;
+    return filteredIncidents.slice(start, start + size);
+  }, [filteredIncidents, currentPage, pageSize]);
 
   // Summary Metrics
   const metrics = useMemo(() => {
@@ -826,22 +854,22 @@ export default function LatePenaltyPolicyModule({
             overflow: 'hidden',
             boxShadow: '0 2px 10px rgba(0,0,0,0.03)'
           }}>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'right' }}>
+            <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', maxHeight: '720px' }}>
+              <table style={{ width: '100%', minWidth: '1250px', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'right' }}>
                 <thead>
-                  <tr style={{ background: 'var(--background)', borderBottom: '2px solid var(--border)', color: 'var(--muted)', fontFamily: 'Cairo' }}>
-                    <th style={{ padding: '12px 14px' }}>التاريخ</th>
-                    {!isEmployee && <th style={{ padding: '12px 14px' }}>الموظف والفرع</th>}
-                    {isEmployee && isMultiBranchEmp && <th style={{ padding: '12px 14px' }}>الفرع</th>}
-                    <th style={{ padding: '12px 14px' }}>موعد الشيفت (المجدول)</th>
-                    <th style={{ padding: '12px 14px' }}>الحضور الفعلي</th>
-                    <th style={{ padding: '12px 14px' }}>دقائق التأخير</th>
-                    <th style={{ padding: '12px 14px' }}>الفئة اللائحية</th>
-                    <th style={{ padding: '12px 14px' }}>التكرار بالدورة</th>
-                    <th style={{ padding: '12px 14px' }}>الجزاء اللائحي</th>
-                    <th style={{ padding: '12px 14px' }}>الخصم المالي</th>
-                    <th style={{ padding: '12px 14px' }}>الحالة</th>
-                    {isManagerOrAdmin && <th style={{ padding: '12px 14px', textAlign: 'center' }}>الإجراءات</th>}
+                  <tr style={{ background: 'var(--background)', borderBottom: '2px solid var(--border)', color: 'var(--muted)', fontFamily: 'Cairo', position: 'sticky', top: 0, zIndex: 3, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                    <th style={{ padding: '12px 14px', width: '95px' }}>التاريخ</th>
+                    {!isEmployee && <th style={{ padding: '12px 14px', width: '180px' }}>الموظف والفرع</th>}
+                    {isEmployee && isMultiBranchEmp && <th style={{ padding: '12px 14px', width: '130px' }}>الفرع</th>}
+                    <th style={{ padding: '12px 14px', width: '120px' }}>موعد الشيفت (المجدول)</th>
+                    <th style={{ padding: '12px 14px', width: '110px' }}>الحضور الفعلي</th>
+                    <th style={{ padding: '12px 14px', width: '110px' }}>دقائق التأخير</th>
+                    <th style={{ padding: '12px 14px', width: '110px' }}>الفئة اللائحية</th>
+                    <th style={{ padding: '12px 14px', width: '95px', textAlign: 'center' }}>التكرار بالدورة</th>
+                    <th style={{ padding: '12px 14px', width: '160px' }}>الجزاء اللائحي</th>
+                    <th style={{ padding: '12px 14px', width: '100px' }}>الخصم المالي</th>
+                    <th style={{ padding: '12px 14px', width: '115px' }}>الحالة</th>
+                    {isManagerOrAdmin && <th style={{ padding: '12px 14px', width: '125px', textAlign: 'center' }}>الإجراءات</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -855,7 +883,7 @@ export default function LatePenaltyPolicyModule({
                       </td>
                     </tr>
                   ) : (
-                    filteredIncidents.map((inc) => (
+                    paginatedIncidents.map((inc) => (
                       <tr
                         key={inc.id}
                         style={{
@@ -969,8 +997,10 @@ export default function LatePenaltyPolicyModule({
                         {isManagerOrAdmin && (
                           <td style={{ padding: '12px 14px', textAlign: 'center' }}>
                             <button
+                              type="button"
                               className="btn btn-ghost"
-                              onClick={() => {
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 setSelectedIncidentForEdit(inc);
                                 setOverrideAction(inc.actionType || 'grace');
                                 setOverrideDeductionMinutes(inc.deductionMinutes || 0);
@@ -978,10 +1008,11 @@ export default function LatePenaltyPolicyModule({
                                 setOverrideStatus(inc.status || 'approved');
                               }}
                               style={{
-                                padding: '4px 10px',
+                                padding: '5px 12px',
                                 fontSize: '12px',
                                 borderRadius: '6px',
-                                border: '1px solid var(--border)'
+                                border: '1px solid var(--border)',
+                                cursor: 'pointer'
                               }}
                               title="تعديل أو استثناء الجزاء مع كتابة مبرر"
                             >
@@ -995,6 +1026,71 @@ export default function LatePenaltyPolicyModule({
                 </tbody>
               </table>
             </div>
+
+            {/* Pagination & Footer Controls */}
+            {filteredIncidents.length > 0 && (
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '12px 18px',
+                background: 'var(--background)',
+                borderTop: '1px solid var(--border)',
+                flexWrap: 'wrap',
+                gap: '12px',
+                fontSize: '13px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ color: 'var(--muted)' }}>
+                    عرض {paginatedIncidents.length} من إجمالي {filteredIncidents.length} واقعة تأخير
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontSize: '12px', color: 'var(--muted)' }}>لكل صفحة:</span>
+                    <select
+                      value={pageSize}
+                      onChange={(e) => {
+                        setPageSize(e.target.value === 'all' ? 'all' : parseInt(e.target.value, 10));
+                        setCurrentPage(1);
+                      }}
+                      style={{ padding: '3px 8px', borderRadius: '6px', fontSize: '12px', border: '1px solid var(--border)' }}
+                    >
+                      <option value={15}>15</option>
+                      <option value={25}>25</option>
+                      <option value={50}>50</option>
+                      <option value="all">عرض الكل</option>
+                    </select>
+                  </div>
+                </div>
+
+                {pageSize !== 'all' && totalPages > 1 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      disabled={currentPage <= 1}
+                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                      style={{ padding: '4px 10px', fontSize: '12px', borderRadius: '6px' }}
+                    >
+                      ◀ السابق
+                    </button>
+
+                    <span style={{ padding: '0 8px', fontWeight: 700, color: 'var(--primary-dark)' }}>
+                      صفحة {currentPage} من {totalPages}
+                    </span>
+
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      disabled={currentPage >= totalPages}
+                      onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                      style={{ padding: '4px 10px', fontSize: '12px', borderRadius: '6px' }}
+                    >
+                      التالي ▶
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1171,30 +1267,50 @@ export default function LatePenaltyPolicyModule({
 
       {/* ── Exception / Override Modal ── */}
       {selectedIncidentForEdit && (
-        <div className="modal-overlay" style={{
-          position: 'fixed',
-          inset: 0,
-          background: 'rgba(0,0,0,0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000,
-          backdropFilter: 'blur(3px)'
-        }}>
-          <div style={{
-            background: 'var(--surface)',
-            border: '1px solid var(--border)',
-            borderRadius: '16px',
-            width: '90%',
-            maxWidth: '520px',
-            padding: '24px',
-            boxShadow: '0 20px 40px rgba(0,0,0,0.2)'
-          }}>
+        <div
+          className="modal-overlay"
+          onClick={() => setSelectedIncidentForEdit(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            backdropFilter: 'blur(3px)'
+          }}
+        >
+          <div
+            className="modal-card"
+            role="document"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'var(--surface)',
+              border: '1px solid var(--border)',
+              borderRadius: '16px',
+              width: '90%',
+              maxWidth: '520px',
+              padding: '24px',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.2)'
+            }}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <h3 style={{ fontFamily: 'Cairo', margin: 0, color: 'var(--primary-dark)' }}>
                 ⚙️ تعديل أو استثناء واقعة تأخير
               </h3>
-              <button className="btn btn-ghost" onClick={() => setSelectedIncidentForEdit(null)}>✕</button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedIncidentForEdit(null);
+                }}
+                style={{ cursor: 'pointer', fontSize: '16px', padding: '4px 10px', borderRadius: '8px' }}
+                title="إغلاق النافذة"
+              >
+                ✕
+              </button>
             </div>
 
             <div style={{ background: 'var(--background)', padding: '12px', borderRadius: '10px', marginBottom: '16px', fontSize: '13px' }}>
@@ -1252,10 +1368,23 @@ export default function LatePenaltyPolicyModule({
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
-                <button className="btn btn-ghost" onClick={() => setSelectedIncidentForEdit(null)}>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedIncidentForEdit(null);
+                  }}
+                  style={{ cursor: 'pointer' }}
+                >
                   إلغاء
                 </button>
-                <button className="btn btn-primary" onClick={handleSaveIncidentOverride}>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleSaveIncidentOverride}
+                  style={{ cursor: 'pointer' }}
+                >
                   💾 حفظ وتوثيق التعديل
                 </button>
               </div>

@@ -42,11 +42,12 @@ const persistDeletedNotifId = (id) => {
   try {
     if (!id) return;
     persistReadNotifId(id);
-    const raw = localStorage.getItem('app_deleted_ids_snapshot');
+    const raw = localStorage.getItem('app_deleted_notif_ids');
     const set = new Set(raw ? JSON.parse(raw) : []);
-    set.add(String(id));
-    set.add(`notif_${id}`);
-    localStorage.setItem('app_deleted_ids_snapshot', JSON.stringify(Array.from(set).slice(-500)));
+    const idStr = String(id);
+    set.add(idStr);
+    set.add(`notif_${idStr}`);
+    localStorage.setItem('app_deleted_notif_ids', JSON.stringify(Array.from(set).slice(-500)));
   } catch (_) {}
 };
 
@@ -398,7 +399,6 @@ export function NotificationProvider({ children }) {
       notifIdStr,
       `notif_${notifIdStr}`,
       `notif_pending_${notifIdStr}`,
-      cleanReqId,
       `notif_${cleanReqId}`,
       `notif_pending_${cleanReqId}`
     ];
@@ -406,38 +406,20 @@ export function NotificationProvider({ children }) {
     const currentDeleted = state._deletedIds || [];
     const updatedDeletedIds = Array.from(new Set([...currentDeleted, ...tombstoneIds]));
 
-    const dismissRequest = (r) => {
-      if (!r) return r;
-      if (String(r.id) === notifIdStr || String(r.id) === cleanReqId) {
-        return { ...r, notifDismissedByAdmin: true, clearedByAdmin: true, hiddenFromAdmin: true };
-      }
-      return r;
-    };
-
     const updatedNotifs = (state.notifications || []).filter((n) => {
       const nId = String(n.id || '');
-      const rId = String(n.requestId || '');
-      return nId !== notifIdStr && nId !== cleanReqId && rId !== notifIdStr && rId !== cleanReqId;
+      return nId !== notifIdStr && nId !== `notif_${notifIdStr}` && nId !== `notif_pending_${cleanReqId}`;
     });
 
     const updatedState = {
       ...state,
       notifications: updatedNotifs,
-      requests: (state.requests || []).map(dismissRequest),
-      leaveRequests: (state.leaveRequests || []).map(dismissRequest),
-      permissions: (state.permissions || []).map(dismissRequest),
-      shiftSwaps: (state.shiftSwaps || []).map(dismissRequest),
-      loans: (state.loans || []).map(dismissRequest),
-      resignationRequests: (state.resignationRequests || []).map(dismissRequest),
       _deletedIds: updatedDeletedIds
     };
 
     setState(updatedState);
     saveState(updatedState).catch(() => {});
     hardDeleteEntityFast('notification', notifIdStr).catch(() => {});
-    if (cleanReqId !== notifIdStr) {
-      hardDeleteEntityFast('notification', cleanReqId).catch(() => {});
-    }
     showToast('🗑️ تم حذف الإشعار');
   };
 
@@ -456,8 +438,8 @@ export function NotificationProvider({ children }) {
       if (isRead) {
         readIdsToRecord.push(n.id);
         tombstoneIds.push(String(n.id));
+        tombstoneIds.push(`notif_${n.id}`);
         if (n.requestId) {
-          tombstoneIds.push(String(n.requestId));
           tombstoneIds.push(`notif_${n.requestId}`);
           tombstoneIds.push(`notif_pending_${n.requestId}`);
         }

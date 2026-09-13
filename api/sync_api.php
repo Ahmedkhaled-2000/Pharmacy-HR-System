@@ -284,6 +284,14 @@ function handleSyncPush(): void
         }
     } catch (Throwable) {}
 
+    // إبطال الكاش الدقيق فورياً عند معالجة أي عمليات لضمان اتساق البيانات
+    if (count($acks) > 0 && class_exists('MicroCache')) {
+        try {
+            MicroCache::invalidate('settings_' . DEFAULT_STORAGE_KEY);
+            MicroCache::invalidate('version_' . DEFAULT_STORAGE_KEY);
+        } catch (Throwable) {}
+    }
+
     jsonResponse([
         'success' => true,
         'message' => 'تم استلام ومعالجة دفعة العمليات بنجاح وبأمان تام',

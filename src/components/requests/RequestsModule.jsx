@@ -215,10 +215,9 @@ export default function RequestsModule({
     const isIdDeleted = (id) => {
       if (!id) return false;
       const s = String(id);
-      const raw = s.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
+      const raw = s.replace(/^(req_|leave_|swap_|res_|loan_)/, '');
       return (
         deletedIdsSet.has(s) ||
-        deletedIdsSet.has(raw) ||
         deletedIdsSet.has(`req_${s}`) ||
         deletedIdsSet.has(`req_${raw}`) ||
         deletedIdsSet.has(`leave_${raw}`) ||
@@ -234,10 +233,10 @@ export default function RequestsModule({
     const addIfUnique = (r, defaultType = null) => {
       if (!r || !r.id) return;
       const idStr = String(r.id);
-      const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_|notif_)/, '');
+      const rawId = idStr.replace(/^(req_|leave_|swap_|res_|loan_)/, '');
 
-      if (isIdDeleted(idStr) || isIdDeleted(rawId)) return;
-      if (existingIds.has(idStr) || existingIds.has(rawId)) return;
+      if (isIdDeleted(idStr) || isIdDeleted(`req_${rawId}`)) return;
+      if (existingIds.has(idStr) || existingIds.has(`req_${rawId}`)) return;
 
       // Resignations are managed exclusively in their dedicated module
       if (r.type === 'resignation' || r.type === 'withdraw' || r.type === 'resignation_request' || idStr.startsWith('res_')) return;

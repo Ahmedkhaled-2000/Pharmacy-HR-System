@@ -542,7 +542,6 @@ export default function NotificationCenterModule({
       notifIdStr,
       `notif_${notifIdStr}`,
       `notif_pending_${notifIdStr}`,
-      cleanReqId,
       `notif_${cleanReqId}`,
       `notif_pending_${cleanReqId}`
     ];
@@ -550,38 +549,20 @@ export default function NotificationCenterModule({
     const currentDeleted = state._deletedIds || [];
     const updatedDeletedIds = Array.from(new Set([...currentDeleted, ...tombstoneIds]));
 
-    const dismissRequest = (r) => {
-      if (!r) return r;
-      if (String(r.id) === notifIdStr || String(r.id) === cleanReqId) {
-        return { ...r, notifDismissedByAdmin: true, clearedByAdmin: true, hiddenFromAdmin: true };
-      }
-      return r;
-    };
-
     const updatedNotifs = (state.notifications || []).filter((n) => {
       const nId = String(n.id || '');
-      const rId = String(n.requestId || '');
-      return nId !== notifIdStr && nId !== cleanReqId && rId !== notifIdStr && rId !== cleanReqId;
+      return nId !== notifIdStr && nId !== `notif_${notifIdStr}` && nId !== `notif_pending_${cleanReqId}`;
     });
 
     const updatedState = {
       ...state,
       notifications: updatedNotifs,
-      requests: (state.requests || []).map(dismissRequest),
-      leaveRequests: (state.leaveRequests || []).map(dismissRequest),
-      permissions: (state.permissions || []).map(dismissRequest),
-      shiftSwaps: (state.shiftSwaps || []).map(dismissRequest),
-      loans: (state.loans || []).map(dismissRequest),
-      resignationRequests: (state.resignationRequests || []).map(dismissRequest),
       _deletedIds: updatedDeletedIds
     };
 
     if (setState) setState(updatedState);
     if (saveState) await saveState(updatedState);
     hardDeleteEntityFast('notification', notifIdStr).catch(() => {});
-    if (cleanReqId !== notifIdStr) {
-      hardDeleteEntityFast('notification', cleanReqId).catch(() => {});
-    }
     showToast?.('🗑️ تم حذف الإشعار نهائياً');
   };
 
@@ -603,8 +584,8 @@ export default function NotificationCenterModule({
     (state.notifications || []).forEach((n) => {
       if (n && n.id) {
         notifIdsToDelete.push(String(n.id));
+        notifIdsToDelete.push(`notif_${n.id}`);
         if (n.requestId) {
-          notifIdsToDelete.push(String(n.requestId));
           notifIdsToDelete.push(`notif_${n.requestId}`);
           notifIdsToDelete.push(`notif_pending_${n.requestId}`);
         }
@@ -612,17 +593,10 @@ export default function NotificationCenterModule({
     });
 
     const updatedDeletedIds = Array.from(new Set([...existingDeleted, ...notifIdsToDelete]));
-    const markDismissed = (arr) => (arr || []).map((r) => ({ ...r, notifDismissedByAdmin: true, clearedByAdmin: true }));
 
     const updatedState = {
       ...state,
       notifications: [],
-      requests: markDismissed(state.requests),
-      leaveRequests: markDismissed(state.leaveRequests),
-      permissions: markDismissed(state.permissions),
-      shiftSwaps: markDismissed(state.shiftSwaps),
-      loans: markDismissed(state.loans),
-      resignationRequests: markDismissed(state.resignationRequests),
       _deletedIds: updatedDeletedIds,
       _notificationsClearedAt: nowIso
     };

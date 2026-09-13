@@ -81,17 +81,24 @@ export default function UniversalShortcutsController() {
     // The user explicitly requested: "عدم اغلاق النوافذ المنبثقة في كامل النظام عند الضغط خارج النافذة منع ذلك"
     const handlePreventBackdropClick = (e) => {
       const clickTarget = e.target;
+      if (!clickTarget) return;
+
+      // Never intercept clicks on interactive elements (buttons, inputs, selects, textareas, links, labels)
+      if (clickTarget.closest('button, input, select, textarea, a, [role="button"], label, svg')) {
+        return;
+      }
+
       const backdrop = clickTarget.closest(
         '.modal-overlay, .modal-backdrop, .central-modal-backdrop, .acc-modal-overlay, .portal-modal-overlay'
       );
 
       if (backdrop) {
         const cardSelectors =
-          '.modal-card, .modal-content, .central-modal-card, .acc-modal, .acc-modal-card, .portal-modal-card, [role="document"]';
+          '.modal-card, .modal-content, .modal-body, .central-modal-card, .acc-modal, .acc-modal-card, .portal-modal-card, [role="document"], [role="dialog"]';
         const isClickInsideCard = Boolean(clickTarget.closest(cardSelectors));
 
-        // If the click is on the backdrop itself outside any modal card, intercept and stop it completely!
-        if (!isClickInsideCard) {
+        // If the click is strictly on the backdrop itself outside any modal card, intercept and stop it completely!
+        if (!isClickInsideCard && clickTarget === backdrop) {
           e.preventDefault();
           e.stopPropagation();
           if (e.stopImmediatePropagation) e.stopImmediatePropagation();
