@@ -13,27 +13,33 @@ export default function LoginPage({ onLogin, state, themeMode = 'light', toggleT
   const orgLogo = state?.orgSettings?.logoUrl;
   const generalManager = state?.orgSettings?.generalManagerName;
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    if (isSubmitting) return;
+
     setErrorMsg('');
-    if (!username.trim() || !password.trim()) {
+    const cleanU = String(username || '').trim();
+    const cleanP = String(password || '').trim();
+
+    if (!cleanU || !cleanP) {
       setErrorMsg('يرجى إدخال اسم المستخدم / الكود وكلمة المرور');
       return;
     }
+
     setIsSubmitting(true);
     try {
-      const res = onLogin(username.trim(), password.trim());
+      const res = await onLogin(cleanU, cleanP);
       if (res && typeof res === 'object') {
         if (!res.success) {
           setErrorMsg(res.error || 'اسم المستخدم أو كلمة المرور غير صحيحة');
-          setIsSubmitting(false);
         }
       } else if (!res) {
         setErrorMsg('اسم المستخدم أو كلمة المرور غير صحيحة');
-        setIsSubmitting(false);
       }
     } catch (err) {
-      setErrorMsg('حدث خطأ أثناء تسجيل الدخول، يرجى المحاولة ثانية');
+      console.error('[LoginPage Error]:', err);
+      setErrorMsg('حدث خطأ أثناء تسجيل الدخول، يرجى التحقق من الاتصال والمحاولة ثانية');
+    } finally {
       setIsSubmitting(false);
     }
   };

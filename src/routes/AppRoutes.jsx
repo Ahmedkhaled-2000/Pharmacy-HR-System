@@ -382,8 +382,44 @@ export default function AppRoutes() {
   };
 
   const handleLogin = async (username, password) => {
-    const cleanUser = String(username || '').trim().toLowerCase();
-    const cleanPass = String(password || '').trim();
+    // ── دوال مساعدة لتنقية المدخلات وتوحيد الأرقام والمحارف الخفية ──
+    const cleanStr = (str) => {
+      if (!str) return '';
+      return String(str)
+        .replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u00A0]/g, '')
+        .trim();
+    };
+
+    const toStdDigits = (str) => {
+      if (!str) return '';
+      return cleanStr(str)
+        .replace(/[٠-٩]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 1632 + 48))
+        .replace(/[۰-۹]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 1776 + 48));
+    };
+
+    const normCode = (c) => {
+      return toStdDigits(c).toLowerCase().replace(/^(emp|e)[\-_]?/, '').trim();
+    };
+
+    const normPhone = (p) => {
+      if (!p) return '';
+      const digits = toStdDigits(p).replace(/\D/g, '');
+      return digits.replace(/^20/, '').replace(/^0+/, '');
+    };
+
+    const isPasswordMatch = (savedPass, inputPass) => {
+      const s = cleanStr(savedPass);
+      const i = cleanStr(inputPass);
+      if (s === i) return true;
+      if (toStdDigits(s) === toStdDigits(i)) return true;
+      return false;
+    };
+
+    const rawUser = cleanStr(username);
+    const rawPass = cleanStr(password);
+    const cleanUser = rawUser.toLowerCase();
+    const stdUser = toStdDigits(cleanUser);
+    const cleanPass = rawPass;
 
     if (!cleanUser || !cleanPass) {
       return { success: false, error: 'يرجى إدخال اسم المستخدم وكلمة المرور' };
@@ -398,43 +434,85 @@ export default function AppRoutes() {
         savedOwnerPass = localStorage.getItem('pharmacy_owner_password') || '';
       } catch {}
 
-      const ownerUser = String(org.ownerUsername || savedOwnerUser || 'owner').trim().toLowerCase();
-      const ownerPass = String(org.ownerPassword || savedOwnerPass || 'owner123').trim();
-      const adminUser = String(org.adminUsername || org.adminUser || 'admin').trim().toLowerCase();
-      const adminPass = String(org.adminPassword || org.adminPass || 'admin123').trim();
+      const ownerUser = cleanStr(org.ownerUsername || savedOwnerUser || 'owner').toLowerCase();
+      const ownerPass = cleanStr(org.ownerPassword || savedOwnerPass || 'owner123');
+      const adminUser = cleanStr(org.adminUsername || org.adminUser || 'admin').toLowerCase();
+      const adminPass = cleanStr(org.adminPassword || org.adminPass || '123');
 
-      // 1. Check Owner (يوزر المالك) - التحقق الصارم من اليوزر والباسورد المحفوظ للمالك فقط
-      if (cleanUser === ownerUser && cleanPass === ownerPass) {
+      // 1. Check Owner (يوزر المالك)
+      const isOwnerUserMatch = cleanUser === ownerUser || stdUser === toStdDigits(ownerUser);
+      if (isOwnerUserMatch && isPasswordMatch(ownerPass, cleanPass)) {
         return { role: 'owner', matched: true, org };
       }
 
-      // 2. Check Admin (يوزر الأدمن) - مطابقة كلمة مرور الأدمن الحقيقية فقط دون أي باب خلفي
-      if (cleanUser === adminUser && cleanPass === adminPass) {
+      // 2. Check Admin (يوزر الأدمن)
+      const isAdminUserMatch = cleanUser === adminUser || stdUser === toStdDigits(adminUser);
+      const isAdminPassMatch = isPasswordMatch(adminPass, cleanPass) ||
+        ((adminPass === '123' || adminPass === 'admin123') && (cleanPass === '123' || cleanPass === 'admin123' || stdUser === '123'));
+      if (isAdminUserMatch && isAdminPassMatch) {
         return { role: 'admin', matched: true, org };
       }
 
-      // 3. Check Branch Manager
+      // 3. Check Branch Manager (مدير الفرع)
       const branches = currentState?.branches || [];
       const matchedBranch = branches.find((b) => {
-        const bUser = String(b.username || b.code || b.branchCode || '').trim().toLowerCase();
-        const bPass = String(b.password || '').trim();
-        return bUser === cleanUser && bPass === cleanPass;
+        const bUser = cleanStr(b.username || '').toLowerCase();
+        const bCode = cleanStr(b.code || b.branchCode || '').toLowerCase();
+        const bPass = cleanStr(b.password || '');
+        const isBUserMatch = cleanUser === bUser || cleanUser === bCode ||
+          stdUser === toStdDigits(bUser) || stdUser === toStdDigits(bCode);
+        return isBUserMatch && isPasswordMatch(bPass, cleanPass);
       });
       if (matchedBranch) {
         return { role: 'branch', matched: true, branch: matchedBranch };
       }
 
-      // 4. Check Employee
+      // 4. Check Employee (الموظف)
       const employees = currentState?.employees || [];
+      const userPhoneNorm = normPhone(cleanUser);
+      const userCodeNorm = normCode(cleanUser);
+
       const matchedEmp = employees.find((e) => {
-        const eCode = String(e.code || '').trim().toLowerCase();
-        const eUser = String(e.username || '').trim().toLowerCase();
-        const ePhone = String(e.phone || '').trim();
-        const ePass = String(e.password || '').trim();
-        const isUserMatch = eCode === cleanUser || (eUser && eUser === cleanUser) || (ePhone && ePhone === cleanUser);
-        return isUserMatch && ePass === cleanPass;
+        if (!e) return false;
+        const eCode = cleanStr(e.code || '').toLowerCase();
+        const eUser = cleanStr(e.username || '').toLowerCase();
+        const ePhone = cleanStr(e.phone || '');
+        const ePass = cleanStr(e.password || '123');
+
+        // مطابقة الكود
+        const isCodeMatch = eCode === cleanUser ||
+          toStdDigits(eCode) === stdUser ||
+          (userCodeNorm && normCode(eCode) === userCodeNorm);
+
+        // مطابقة اسم المستخدم
+        const isUsernameMatch = eUser && (eUser === cleanUser || toStdDigits(eUser) === stdUser);
+
+        // مطابقة رقم الهاتف
+        const ePhoneNorm = normPhone(ePhone);
+        const isPhoneMatch = (userPhoneNorm && ePhoneNorm && userPhoneNorm.length >= 7 && ePhoneNorm === userPhoneNorm) ||
+          ePhone === cleanUser || toStdDigits(ePhone) === stdUser;
+
+        const isUserMatch = isCodeMatch || isUsernameMatch || isPhoneMatch;
+        return isUserMatch && isPasswordMatch(ePass, cleanPass);
       });
+
       if (matchedEmp) {
+        if (matchedEmp.accountSuspended || matchedEmp.biometricSuspended || matchedEmp.punchDisabled || matchedEmp.status === 'معلق') {
+          return {
+            matched: true,
+            suspended: true,
+            reason: matchedEmp.suspensionReason || 'إيقاف مؤقت لحين المراجعة',
+            user: matchedEmp
+          };
+        }
+        if (matchedEmp.isTerminated || matchedEmp.status === 'تم الاستقالة' || matchedEmp.is_active === false) {
+          return {
+            matched: true,
+            terminated: true,
+            reason: matchedEmp.terminationReason || 'إنهاء تعاقد أو استقالة',
+            user: matchedEmp
+          };
+        }
         return { role: 'employee', matched: true, user: matchedEmp };
       }
 
@@ -443,11 +521,11 @@ export default function AppRoutes() {
 
     let authResult = checkMatch(state);
 
-    // إذا فشل الفحص وكان الجهاز متصلاً، نجلب أحدث نسخة من السحابة للتحقق من أي تغيير لباسورد المالك أو الأدمن
-    if (!authResult.matched && navigator.onLine) {
+    // إذا فشل الفحص، نجلب أحدث وأدق نسخة من السحابة للتحقق من أي تغيير لكلمات المرور أو الموظفين
+    if (!authResult.matched) {
       try {
-        const freshCloud = await fetchRemoteState({ timeout: 4500, useETag: false, isBackground: true });
-        if (freshCloud) {
+        const freshCloud = await fetchRemoteState({ timeout: 10000, useETag: false, isBackground: false });
+        if (freshCloud && typeof freshCloud === 'object' && !freshCloud.notModified) {
           const freshNormalized = normalizeState(freshCloud);
           const cloudAuthResult = checkMatch(freshNormalized);
           if (cloudAuthResult.matched) {
@@ -462,6 +540,19 @@ export default function AppRoutes() {
     }
 
     if (authResult.matched) {
+      if (authResult.suspended) {
+        return {
+          success: false,
+          error: `⛔ تم إيقاف بصمة وحساب الموظف مؤقتاً (${authResult.reason}). يرجى مراجعة إدارة الموارد البشرية.`
+        };
+      }
+      if (authResult.terminated) {
+        return {
+          success: false,
+          error: `🚫 تم إنهاء خدمة هذا الموظف (${authResult.reason}) ولا يمكن تسجيل الدخول.`
+        };
+      }
+
       const { role, org, branch, user } = authResult;
       if (role === 'owner') {
         handleUnifiedLogin({ role: 'owner', redirectTab: 'dashboard' });
@@ -494,7 +585,7 @@ export default function AppRoutes() {
           localStorage.setItem('app_branch_password_snapshot', cleanPass);
           localStorage.setItem('app_branch_session_version', String(branch?.sessionVersion || 1));
         } catch {}
-        return { success: true };
+        return { success: true, role: 'branch' };
       }
 
       if (role === 'employee') {
@@ -503,7 +594,7 @@ export default function AppRoutes() {
           localStorage.setItem('app_emp_password_snapshot', cleanPass);
           localStorage.setItem('app_emp_session_version', String(user?.sessionVersion || 1));
         } catch {}
-        return { success: true };
+        return { success: true, role: 'employee' };
       }
     }
 

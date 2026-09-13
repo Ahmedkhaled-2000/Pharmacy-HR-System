@@ -47,16 +47,27 @@ export default function AccountsLoginScreen({
     setIsSubmitting(true);
     setErrorMsg('');
 
+    const cleanStr = (s) => String(s || '').replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u00A0]/g, '').trim();
+    const toStdDigits = (s) => cleanStr(s)
+      .replace(/[٠-٩]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 1632 + 48))
+      .replace(/[۰-۹]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 1776 + 48));
+
     // بيانات الحسابات المحددة في إعدادات المؤسسة
-    const expectedAccountsUser = String(orgSettings.accountsUsername || 'accounts').trim().toLowerCase();
-    const expectedAccountsPass = String(orgSettings.accountsPassword || '123456').trim();
+    const expectedAccountsUser = cleanStr(orgSettings.accountsUsername || 'accounts').toLowerCase();
+    const expectedAccountsPass = cleanStr(orgSettings.accountsPassword || '123456');
 
     // بيانات المالك (Master Credentials)
-    const ownerUser = String(orgSettings.ownerUsername || 'owner').trim().toLowerCase();
-    const ownerPass = String(orgSettings.ownerPassword || 'owner123').trim();
+    const ownerUser = cleanStr(orgSettings.ownerUsername || 'owner').toLowerCase();
+    const ownerPass = cleanStr(orgSettings.ownerPassword || 'owner123');
 
-    const isAccountsMatch = trimmedUser === expectedAccountsUser && trimmedPass === expectedAccountsPass;
-    const isOwnerMatch = trimmedUser === ownerUser && trimmedPass === ownerPass;
+    const cleanInputUser = cleanStr(trimmedUser).toLowerCase();
+    const cleanInputPass = cleanStr(trimmedPass);
+
+    const isPassMatch = (expected, input) => expected === input || toStdDigits(expected) === toStdDigits(input);
+    const isUserMatch = (expected, input) => expected === input || toStdDigits(expected) === toStdDigits(input);
+
+    const isAccountsMatch = isUserMatch(expectedAccountsUser, cleanInputUser) && isPassMatch(expectedAccountsPass, cleanInputPass);
+    const isOwnerMatch = isUserMatch(ownerUser, cleanInputUser) && isPassMatch(ownerPass, cleanInputPass);
 
     if (isAccountsMatch || isOwnerMatch) {
       try {

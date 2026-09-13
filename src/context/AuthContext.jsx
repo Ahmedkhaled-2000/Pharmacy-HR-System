@@ -244,8 +244,16 @@ export function AuthProvider({ children }) {
       };
     }
 
-    const empPass = String(emp.password || '123').trim();
-    if (String(passwordInput || '').trim() !== empPass) {
+    const cleanStr = (s) => String(s || '').replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u00A0]/g, '').trim();
+    const toStdDigits = (s) => cleanStr(s)
+      .replace(/[٠-٩]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 1632 + 48))
+      .replace(/[۰-۹]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 1776 + 48));
+
+    const empPass = cleanStr(emp.password || '123');
+    const inputPass = cleanStr(passwordInput);
+
+    const isMatch = empPass === inputPass || toStdDigits(empPass) === toStdDigits(inputPass);
+    if (!isMatch) {
       return { success: false, message: 'كلمة المرور غير صحيحة' };
     }
     handleUnifiedLogin({ role: 'employee', user: emp, redirectTab: 'portal' });
