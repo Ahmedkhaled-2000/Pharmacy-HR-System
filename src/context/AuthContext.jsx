@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { getValidAuthToken } from '../utils/apiClient';
+import { getValidAuthToken, apiLogin } from '../utils/apiClient';
 
 const AuthContext = createContext(null);
 
@@ -262,6 +262,23 @@ export function AuthProvider({ children }) {
     if (!isMatch) {
       return { success: false, message: 'كلمة المرور غير صحيحة' };
     }
+
+    try {
+      localStorage.setItem('app_auth_role', 'employee');
+      localStorage.setItem('app_emp_code_snapshot', String(emp.code || ''));
+      localStorage.setItem('app_emp_id_snapshot', String(emp.id || ''));
+      localStorage.setItem('app_emp_password_snapshot', String(passwordInput || '123'));
+    } catch {}
+
+    // استدعاء مصادقة السيرفر للحصول على JWT token رسمي للموظف فورياً
+    apiLogin(emp.code || emp.id, passwordInput || '123', 'employee').then((res) => {
+      if (res?.token) {
+        try { localStorage.setItem('app_auth_token', res.token); } catch {}
+      }
+    }).catch((e) => {
+      console.warn('[AuthContext] Silent employee token fetch notice:', e);
+    });
+
     handleUnifiedLogin({ role: 'employee', user: emp, redirectTab: 'portal' });
     return { success: true };
   };
@@ -281,7 +298,10 @@ export function AuthProvider({ children }) {
       localStorage.removeItem('app_admin_password_snapshot');
       localStorage.removeItem('app_admin_session_version');
       localStorage.removeItem('app_branch_password_snapshot');
+      localStorage.removeItem('app_branch_id_snapshot');
       localStorage.removeItem('app_branch_session_version');
+      localStorage.removeItem('app_emp_code_snapshot');
+      localStorage.removeItem('app_emp_id_snapshot');
       localStorage.removeItem('app_emp_password_snapshot');
       localStorage.removeItem('app_emp_session_version');
       localStorage.removeItem('app_auth_token');

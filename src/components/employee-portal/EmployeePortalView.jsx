@@ -26,6 +26,8 @@ import { computeLatenessFinancialAmount, isApprovedPermissionForDate, getEffecti
 import { getEmployeeDaySchedule, getResolvedEmployeeRoster } from '../../utils/rosterEngine';
 import { printEmployeePayslipDirect } from '../../utils/printHelper';
 import { useLiveRealTime } from '../../hooks/useLiveRealTime';
+import { apiSubmitRequestAtomic } from '../../utils/apiClient';
+import { broadcastStateChange } from '../../utils/offlineSync';
 import '../../portal.css';
 
 // ─────────────────────────────────────────
@@ -1713,9 +1715,14 @@ export default function EmployeePortalView({
       };
 
       setState(updatedState);
+      try {
+        broadcastStateChange(updatedState);
+      } catch {}
       if (showToast) {
         showToast('🎉 تم التقاط البصمة بنجاح وإرسالها للإدارة العليا للاعتماد!');
       }
+
+      apiSubmitRequestAtomic(requestData, newNotif).catch(err => console.warn('Atomic request sync warning:', err));
 
       if (saveState) {
         saveState(updatedState).catch(err => console.warn('Save state background warning:', err));
@@ -1826,7 +1833,13 @@ export default function EmployeePortalView({
       };
 
       setState(updatedState);
+      try {
+        broadcastStateChange(updatedState);
+      } catch {}
       if (showToast) showToast('✅ تم إرسال طلب إعادة تسجيل البصمة للإدارة العليا بنجاح');
+
+      apiSubmitRequestAtomic(requestData, newNotif).catch(err => console.warn('Atomic request sync warning:', err));
+
       if (saveState) {
         saveState(updatedState).catch(err => console.warn('Save state warning:', err));
       }
@@ -4205,7 +4218,7 @@ export default function EmployeePortalView({
                                     return;
                                   }
                                   const targetBId = punchTargetBranchId || (isMultiBranch ? emp.branchesDetails[0]?.branchId : emp.branchId);
-                                  startShift && startShift(emp.id, 'employee', targetBId);
+                                  if (startShift) startShift(emp.id, 'employee', targetBId);
                                 }}
                               >
                                 ▶ بدء الوردية الآن
@@ -4214,15 +4227,15 @@ export default function EmployeePortalView({
                           ) : (
                             <>
                               {activeShift.isPaused || activeShift.isOnBreak ? (
-                                <button className="btn btn-start" onClick={() => resumeShift && resumeShift(emp.id)}>
+                                <button className="btn btn-start" onClick={() => { if (resumeShift) resumeShift(emp.id); }}>
                                   ▶ استئناف العمل
                                 </button>
                               ) : (
-                                <button className="btn btn-pause" onClick={() => pauseShift && pauseShift(emp.id)}>
+                                <button className="btn btn-pause" onClick={() => { if (pauseShift) pauseShift(emp.id); }}>
                                   ☕ بريك
                                 </button>
                               )}
-                              <button className="btn btn-stop" onClick={() => stopShift && stopShift(emp.id)}>
+                              <button className="btn btn-stop" onClick={() => { if (stopShift) stopShift(emp.id); }}>
                                 ⏹ إنهاء الوردية {isMultiBranch ? `(فرع ${activeBranchName})` : ''}
                               </button>
                             </>

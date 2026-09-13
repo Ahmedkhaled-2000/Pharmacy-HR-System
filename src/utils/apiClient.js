@@ -73,14 +73,28 @@ export async function getValidAuthToken() {
       } catch {}
     }
 
-    // محاولة تجديد أو إنشاء توكن صامت بناءً على بيانات جلسة المالك أو الأدمن المخزنة
+    // محاولة تجديد أو إنشاء توكن صامت بناءً على بيانات جلسة المالك أو الأدمن أو الموظف أو الفرع
     const role = localStorage.getItem('app_auth_role') || (localStorage.getItem('app_is_admin') === 'true' ? 'admin' : 'owner');
-    if (role === 'owner' || role === 'admin') {
-      const ownerPass = localStorage.getItem('app_owner_password_snapshot') || 'owner123';
-      const adminPass = localStorage.getItem('app_admin_password_snapshot') || '123';
-      const password = role === 'owner' ? ownerPass : adminPass;
-      const username = role;
+    let username = role;
+    let password = '123';
 
+    if (role === 'owner') {
+      password = localStorage.getItem('app_owner_password_snapshot') || 'owner123';
+      username = 'owner';
+    } else if (role === 'admin') {
+      password = localStorage.getItem('app_admin_password_snapshot') || '123';
+      username = 'admin';
+    } else if (role === 'branch') {
+      const bObj = (() => { try { return JSON.parse(localStorage.getItem('app_current_branch') || '{}'); } catch { return {}; } })();
+      username = localStorage.getItem('app_branch_id_snapshot') || bObj.id || bObj.branchCode || 'branch';
+      password = localStorage.getItem('app_branch_password_snapshot') || bObj.password || bObj.managerPin || '1234';
+    } else if (role === 'employee' || role === 'kiosk') {
+      const eObj = (() => { try { return JSON.parse(localStorage.getItem('app_current_emp_user') || '{}'); } catch { return {}; } })();
+      username = localStorage.getItem('app_emp_code_snapshot') || eObj.code || eObj.id || '';
+      password = localStorage.getItem('app_emp_password_snapshot') || eObj.password || '123';
+    }
+
+    if (username) {
       const cleanUrl = `${API_BASE_URL}/auth/login`;
       const res = await fetch(cleanUrl, {
         method: 'POST',
@@ -144,7 +158,25 @@ async function request(endpoint, options = {}) {
     } catch {}
 
     const appRole = (typeof localStorage !== 'undefined' && localStorage.getItem('app_auth_role')) || 'owner';
-    const appPass = (typeof localStorage !== 'undefined' && (localStorage.getItem('app_owner_password_snapshot') || localStorage.getItem('app_admin_password_snapshot'))) || '123';
+    let appPass = '123';
+    let appEmpCode = '';
+    let appBranchId = '';
+
+    if (typeof localStorage !== 'undefined') {
+      if (appRole === 'owner') {
+        appPass = localStorage.getItem('app_owner_password_snapshot') || 'owner123';
+      } else if (appRole === 'admin') {
+        appPass = localStorage.getItem('app_admin_password_snapshot') || '123';
+      } else if (appRole === 'branch') {
+        const bObj = (() => { try { return JSON.parse(localStorage.getItem('app_current_branch') || '{}'); } catch { return {}; } })();
+        appBranchId = localStorage.getItem('app_branch_id_snapshot') || bObj.id || '';
+        appPass = localStorage.getItem('app_branch_password_snapshot') || bObj.password || bObj.managerPin || '1234';
+      } else if (appRole === 'employee' || appRole === 'kiosk') {
+        const eObj = (() => { try { return JSON.parse(localStorage.getItem('app_current_emp_user') || '{}'); } catch { return {}; } })();
+        appEmpCode = localStorage.getItem('app_emp_code_snapshot') || eObj.code || eObj.id || '';
+        appPass = localStorage.getItem('app_emp_password_snapshot') || eObj.password || '123';
+      }
+    }
 
     const headers = {
       'Content-Type': 'application/json',
@@ -156,6 +188,8 @@ async function request(endpoint, options = {}) {
       ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
       'X-App-Role': appRole,
       'X-App-Password': appPass,
+      ...(appEmpCode ? { 'X-App-Emp-Code': appEmpCode } : {}),
+      ...(appBranchId ? { 'X-App-Branch-Id': appBranchId } : {}),
       ...options.headers,
     };
 
@@ -244,6 +278,39 @@ async function request(endpoint, options = {}) {
   }
 
   return reqPromise;
+}
+
+// ── 0. مصادقة وتسجيل الدخول السحابي ─────────────────────────────────────────
+export async function apiLogin(usernameOrCreds, password = '', role = 'admin') {
+  let payload;
+  if (typeof usernameOrCreds === 'object' && usernameOrCreds !== null) {
+    payload = {
+      username: usernameOrCreds.username || '',
+      password: usernameOrCreds.password || '',
+      role: usernameOrCreds.role || role
+    };
+  } else {
+    payload = {
+      username: usernameOrCreds,
+      password,
+      role
+    };
+  }
+
+  const cleanUrl = `${API_BASE_URL}/auth/login`;
+  const res = await fetch(cleanUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    cache: 'no-store'
+  });
+  const data = await res.json();
+  if (data?.token) {
+    try {
+      localStorage.setItem('app_auth_token', data.token);
+    } catch {}
+  }
+  return data;
 }
 
 // ── 1. دوال إعدادات وبيانات التطبيق الرئيسية (Settings / State) ────────────────
@@ -402,12 +469,6 @@ export async function apiHealthCheck() {
   return await request('health', { method: 'GET' });
 }
 
-export async function apiLogin(credentials) {
-  return await request('auth/login', {
-    method: 'POST',
-    body: JSON.stringify(credentials),
-  });
-}
 
 export async function apiVerifySession() {
   return await request('auth/session', { method: 'GET' });

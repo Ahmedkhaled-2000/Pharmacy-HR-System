@@ -4,6 +4,7 @@ import { getRealTodayStr } from '../../utils/timeEngine';
 import { notifyAdminOnResignationRequest, notifyAdminOnNewRequest } from '../../utils/gmailService';
 import { shouldRouteDirectToAdmin } from '../../utils/jobsHelper';
 import { useUI } from '../../context/UIContext';
+import { dispatchEmployeeRequest } from '../../utils/requestSubmissionHelper';
 
 export default function EmployeeResignationModule({
   emp,
@@ -234,31 +235,29 @@ export default function EmployeeResignationModule({
       });
     }
 
-    const updatedState = { 
-      ...state, 
-      resignationRequests: [newReq, ...(state.resignationRequests || [])],
-      notifications: [...notificationsList, ...(state.notifications || [])]
-    };
-    setState(updatedState);
     setShowForm(false);
     setReason('');
-    showToast(isDirectAdmin ? 'تم إرسال الطلب للإدارة العليا مباشرة ✅' : 'تم إرسال الطلب لمدير الفرع للمراجعة أولاً وإشعار الإدارة العليا ✅');
 
-    // مزامنة خلفية فورية دون تأخير استجابة الزر
-    if (saveState) {
-      saveState(updatedState).catch((err) => {
-        console.warn('[Resignation] Background sync warning:', err);
-      });
-    }
-
-    try {
-      notifyAdminOnNewRequest?.({
-        state: updatedState,
-        newRequest: newReq,
-        empName: emp?.name,
-        branchName: state?.branches?.find((b) => String(b.id) === String(reqBranchId))?.name
-      })?.catch?.(() => {});
-    } catch {}
+    await dispatchEmployeeRequest({
+      request: newReq,
+      notification: notificationsList,
+      specificArrayKey: 'resignationRequests',
+      state,
+      setState,
+      saveState,
+      showToast,
+      successMessage: isDirectAdmin ? 'تم إرسال الطلب للإدارة العليا مباشرة ✅' : 'تم إرسال الطلب لمدير الفرع للمراجعة أولاً وإشعار الإدارة العليا ✅',
+      notifyAdmin: (s) => {
+        try {
+          notifyAdminOnNewRequest?.({
+            state: s,
+            newRequest: newReq,
+            empName: emp?.name,
+            branchName: state?.branches?.find((b) => String(b.id) === String(reqBranchId))?.name
+          })?.catch?.(() => {});
+        } catch {}
+      }
+    });
   };
 
   const handleCancelRequest = async (reqId) => {

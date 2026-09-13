@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { fmt } from '../../utils/formatters';
 import { getRealTodayStr } from '../../utils/timeEngine';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
+import { dispatchEmployeeRequest } from '../../utils/requestSubmissionHelper';
 
 export default function EmployeeLoansModule({
   emp,
@@ -235,29 +236,23 @@ export default function EmployeeLoansModule({
       read: false
     };
 
-    const updatedRequests = [newLoanReq, ...(state.requests || [])];
-    const updatedLoans = [newLoanReq, ...(state.loans || [])];
-    const updatedState = {
-      ...state,
-      requests: updatedRequests,
-      loans: updatedLoans,
-      notifications: [newLoanNotif, ...(state.notifications || [])]
-    };
-
-    setState(updatedState);
     setShowLoanForm(false);
     setLoanAmount('');
     setLoanReason('');
-    showToast('تم إرسال طلب السلفة إلى الإدارة العليا فقط 💳');
 
-    // مزامنة فورية في السحابة
-    if (saveState) {
-      saveState(updatedState).catch((err) => {
-        console.warn('[Loan] Background sync warning:', err);
-      });
-    }
+    await dispatchEmployeeRequest({
+      request: newLoanReq,
+      notification: newLoanNotif,
+      specificArrayKey: 'loans',
+      state,
+      setState,
+      saveState,
+      showToast,
+      successMessage: 'تم إرسال طلب السلفة إلى الإدارة العليا فقط 💳'
+    });
+
     try {
-      notifyAdminOnNewRequest?.({ state: updatedState, newRequest: newLoanReq, empName: emp?.name })?.catch?.(() => {});
+      notifyAdminOnNewRequest?.({ state: { ...state, requests: [newLoanReq, ...(state.requests || [])] }, newRequest: newLoanReq, empName: emp?.name })?.catch?.(() => {});
     } catch {}
   };
 
@@ -317,29 +312,23 @@ export default function EmployeeLoansModule({
       read: false
     };
 
-    const updatedRequests = [newMedReq, ...(state.requests || [])];
-    const updatedLoans = [newMedReq, ...(state.loans || [])];
-    const updatedState = {
-      ...state,
-      requests: updatedRequests,
-      loans: updatedLoans,
-      notifications: [newMedNotif, ...(state.notifications || [])]
-    };
-
-    setState(updatedState);
     setShowMedForm(false);
     setMedItems([{ id: 'med_1', name: '', price: '', qty: '1' }]);
     setMedNotes('');
-    showToast('تم إرسال طلب الأدوية بالآجل إلى الإدارة العليا فقط 💊');
 
-    // مزامنة فورية في السحابة
-    if (saveState) {
-      saveState(updatedState).catch((err) => {
-        console.warn('[MedRequest] Background sync warning:', err);
-      });
-    }
+    await dispatchEmployeeRequest({
+      request: newMedReq,
+      notification: newMedNotif,
+      specificArrayKey: 'loans',
+      state,
+      setState,
+      saveState,
+      showToast,
+      successMessage: 'تم إرسال طلب الأدوية بالآجل إلى الإدارة العليا فقط 💊'
+    });
+
     try {
-      notifyAdminOnNewRequest?.({ state: updatedState, newRequest: newMedReq, empName: emp?.name })?.catch?.(() => {});
+      notifyAdminOnNewRequest?.({ state: { ...state, requests: [newMedReq, ...(state.requests || [])] }, newRequest: newMedReq, empName: emp?.name })?.catch?.(() => {});
     } catch {}
   };
 

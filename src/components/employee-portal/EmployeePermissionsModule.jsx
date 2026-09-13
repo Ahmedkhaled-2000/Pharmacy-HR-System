@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { fmt } from '../../utils/formatters';
 import { getRealTodayStr } from '../../utils/timeEngine';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import { shouldRouteDirectToAdmin } from '../../utils/jobsHelper';
 import { useUI } from '../../context/UIContext';
+import { dispatchEmployeeRequest } from '../../utils/requestSubmissionHelper';
 
 export default function EmployeePermissionsModule({
   emp,
@@ -208,28 +208,26 @@ export default function EmployeePermissionsModule({
       read: false
     };
 
-    const updatedRequests = [newPermReq, ...(state.requests || [])];
-    const updatedPermRequests = [newPermReq, ...(state.permissionRequests || [])];
-    const updatedState = {
-      ...state,
-      requests: updatedRequests,
-      permissionRequests: updatedPermRequests,
-      notifications: [newPermNotif, ...(state.notifications || [])]
-    };
+    const successMsg = isDirectAdmin
+      ? 'تم إرسال طلب الإذن مباشرة إلى الإدارة العليا للاعتماد ⏰'
+      : 'تم إرسال طلب الإذن للاعتماد (لا يؤثر على الراتب وتحتسب وردية كاملة عند الموافقة) ⏰';
 
-    setState(updatedState);
     setShowForm(false);
     setReason('');
-    showToast(isDirectAdmin ? 'تم إرسال طلب الإذن مباشرة إلى الإدارة العليا للاعتماد ⏰' : 'تم إرسال طلب الإذن للاعتماد (لا يؤثر على الراتب وتحتسب وردية كاملة عند الموافقة) ⏰');
 
-    // مزامنة فورية في السحابة
-    if (saveState) {
-      saveState(updatedState).catch((err) => {
-        console.warn('[Permission] Background sync warning:', err);
-      });
-    }
+    await dispatchEmployeeRequest({
+      request: newPermReq,
+      notification: newPermNotif,
+      specificArrayKey: 'permissionRequests',
+      state,
+      setState,
+      saveState,
+      showToast,
+      successMessage: successMsg
+    });
+
     try {
-      notifyAdminOnNewRequest?.({ state: updatedState, newRequest: newPermReq, empName: emp?.name })?.catch?.(() => {});
+      notifyAdminOnNewRequest?.({ state: { ...state, requests: [newPermReq, ...(state.requests || [])] }, newRequest: newPermReq, empName: emp?.name })?.catch?.(() => {});
     } catch {}
   };
 

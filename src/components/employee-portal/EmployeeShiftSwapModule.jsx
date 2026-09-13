@@ -3,6 +3,8 @@ import { getEmpDisplayName, isEmployeeActive } from '../../utils/formatters';
 import { getRealTodayStr } from '../../utils/timeEngine';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import { shouldRouteDirectToAdmin } from '../../utils/jobsHelper';
+import { dispatchEmployeeRequest } from '../../utils/requestSubmissionHelper';
+import { apiSubmitRequestAtomic } from '../../utils/apiClient';
 
 export default function EmployeeShiftSwapModule({
   emp,
@@ -164,30 +166,21 @@ export default function EmployeeShiftSwapModule({
       read: false
     };
 
-    const updatedSwaps = [newSwapReq, ...(state.shiftSwaps || [])];
-    const updatedRequests = [newSwapReq, ...(state.requests || [])];
-    const updatedState = {
-      ...state,
-      shiftSwaps: updatedSwaps,
-      requests: updatedRequests,
-      notifications: [newSwapNotif, ...(state.notifications || [])]
-    };
-
-    setState(updatedState);
     setShowSwapModal(false);
     setSwapNotes('');
     setTargetEmpId('');
-    showToast(`تم إرسال طلب التبديل إلى الزميل ${targetEmpObj ? targetEmpObj.name : ''} للموافقة المبدئية 🔄`);
 
-    // مزامنة فورية في السحابة
-    if (saveState) {
-      saveState(updatedState).catch((err) => {
-        console.warn('[ShiftSwap] Background sync warning:', err);
-      });
-    }
-    try {
-      notifyAdminOnNewRequest?.({ state: updatedState, newRequest: newSwapReq, empName: emp?.name })?.catch?.(() => {});
-    } catch {}
+    await dispatchEmployeeRequest({
+      request: newSwapReq,
+      state,
+      setState,
+      saveState,
+      collectionKey: 'shiftSwaps',
+      notification: newSwapNotif,
+      successToastMessage: `تم إرسال طلب التبديل إلى الزميل ${targetEmpObj ? targetEmpObj.name : ''} للموافقة المبدئية 🔄`,
+      showToast,
+      notifyAdmin: (s) => notifyAdminOnNewRequest?.({ state: s, newRequest: newSwapReq, empName: emp?.name })
+    });
   };
 
   // Handle Employee B Action (Accept/Reject incoming swap request)
@@ -252,7 +245,14 @@ export default function EmployeeShiftSwapModule({
         : 'تم رفض طلب تبديل الشيفت ❌'
     );
 
-    // مزامنة خلفية فورية دون تأخير استجابة الزر
+    // تحديث ذري وسحابي
+    const updatedReqItem = updatedRequests.find(r => r.id === swapId);
+    if (updatedReqItem) {
+      apiSubmitRequestAtomic(updatedReqItem).catch((err) => {
+        console.warn('[ShiftSwap] Atomic sync warning:', err);
+      });
+    }
+
     if (saveState) {
       saveState(updatedState).catch((err) => {
         console.warn('[ShiftSwap] Background sync warning:', err);

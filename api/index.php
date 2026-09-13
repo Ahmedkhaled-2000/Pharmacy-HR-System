@@ -283,11 +283,13 @@ try {
                 // التحقق الأمني من هوية وصلاحيات المرسل (Authentication & Role Verification)
                 $authUser = getAuthenticatedUser();
                 if (!$authUser) {
-                    // فحص المصادقة المباشرة عبر ترويسات التطبيق المكتبي والويب (X-App-Role & X-App-Password)
+                    // فحص المصادقة المباشرة عبر ترويسات التطبيق المكتبي والويب (X-App-Role & X-App-Password & X-App-Emp-Code)
                     $clientRole = (string)($_SERVER['HTTP_X_APP_ROLE'] ?? '');
                     $clientPass = (string)($_SERVER['HTTP_X_APP_PASSWORD'] ?? '');
+                    $clientEmpCode = trim((string)($_SERVER['HTTP_X_APP_EMP_CODE'] ?? ''));
+                    $clientBranchId = trim((string)($_SERVER['HTTP_X_APP_BRANCH_ID'] ?? ''));
 
-                    if (!empty($clientRole) && !empty($clientPass)) {
+                    if (!empty($clientRole)) {
                         $cachedSettings = MicroCache::get('settings_' . DEFAULT_STORAGE_KEY);
                         $appState = ($cachedSettings && isset($cachedSettings['value']) && is_array($cachedSettings['value'])) ? $cachedSettings['value'] : null;
                         if (!$appState) {
@@ -306,6 +308,40 @@ try {
                                 'username' => $clientRole,
                                 'role' => $clientRole,
                                 'userData' => ['name' => $clientRole === 'owner' ? 'المالك' : 'مدير النظام']
+                            ];
+                        } elseif ($clientRole === 'branch') {
+                            $branches = is_array($appState['branches'] ?? null) ? $appState['branches'] : [];
+                            $matchedBranch = null;
+                            foreach ($branches as $b) {
+                                if (is_array($b) && (!empty($clientBranchId) && ((string)($b['id'] ?? '') === $clientBranchId || (string)($b['branchCode'] ?? '') === $clientBranchId))) {
+                                    $matchedBranch = $b;
+                                    break;
+                                }
+                            }
+                            $authUser = [
+                                'username' => $matchedBranch['id'] ?? ($clientBranchId ?: 'branch'),
+                                'role' => 'branch',
+                                'userData' => ['branchId' => $matchedBranch['id'] ?? $clientBranchId, 'name' => $matchedBranch['name'] ?? 'فرع']
+                            ];
+                        } elseif ($clientRole === 'employee' || $clientRole === 'kiosk') {
+                            $employees = is_array($appState['employees'] ?? null) ? $appState['employees'] : [];
+                            $matchedEmp = null;
+                            if (!empty($clientEmpCode)) {
+                                foreach ($employees as $e) {
+                                    if (is_array($e) && ((string)($e['code'] ?? '') === $clientEmpCode || (string)($e['id'] ?? '') === $clientEmpCode)) {
+                                        $matchedEmp = $e;
+                                        break;
+                                    }
+                                }
+                            }
+                            $authUser = [
+                                'username' => $matchedEmp['code'] ?? ($clientEmpCode ?: 'employee'),
+                                'role' => 'employee',
+                                'userData' => [
+                                    'id' => $matchedEmp['id'] ?? '',
+                                    'code' => $matchedEmp['code'] ?? $clientEmpCode,
+                                    'name' => $matchedEmp['name'] ?? 'موظف'
+                                ]
                             ];
                         }
                     }
@@ -627,24 +663,36 @@ try {
                 array_unshift($existingReqs, $newReq);
                 $appState['requests'] = array_values($existingReqs);
 
-                // إضافة للمصفوفات التخصصية إن وجدت
-                if (in_array($reqType, ['leave', 'leave_request', 'annual_leave', 'sick_leave', 'unpaid_leave'], true)) {
+                // إضافة للمصفوفات التخصصية إن وجدت مع دعم التسميات العربية والإنجليزية
+                $cleanTypeLower = strtolower($reqType);
+                $isLeave = in_array($cleanTypeLower, ['leave', 'leave_request', 'annual_leave', 'sick_leave', 'unpaid_leave', 'casual_leave', 'annual', 'sick', 'unpaid', 'إجازة'], true) || isset($newReq['leaveType']);
+                $isLoan = in_array($cleanTypeLower, ['loan', 'advance', 'meds', 'credit_medicine', 'سلفة', 'أدوية'], true);
+                $isSwap = in_array($cleanTypeLower, ['swap', 'shift_swap', 'تبديل'], true);
+                $isPerm = in_array($cleanTypeLower, ['permission', 'late_permission', 'early_leave', 'late', 'early', 'إذن'], true);
+                $isResign = in_array($cleanTypeLower, ['resignation', 'resignation_request', 'withdraw', 'resignation_withdraw', 'استقالة'], true);
+                $isRecruit = in_array($cleanTypeLower, ['recruitment', 'job_application', 'applicant', 'توظيف'], true);
+
+                if ($isLeave) {
                     $lReqs = is_array($appState['leaveRequests'] ?? null) ? $appState['leaveRequests'] : [];
                     array_unshift($lReqs, $newReq);
                     $appState['leaveRequests'] = array_values($lReqs);
-                } elseif (in_array($reqType, ['loan', 'advance', 'meds', 'credit_medicine'], true)) {
+                } elseif ($isLoan) {
                     $loans = is_array($appState['loans'] ?? null) ? $appState['loans'] : [];
                     array_unshift($loans, $newReq);
                     $appState['loans'] = array_values($loans);
-                } elseif (in_array($reqType, ['swap', 'shift_swap'], true)) {
+                } elseif ($isSwap) {
                     $swaps = is_array($appState['shiftSwaps'] ?? null) ? $appState['shiftSwaps'] : [];
                     array_unshift($swaps, $newReq);
                     $appState['shiftSwaps'] = array_values($swaps);
-                } elseif (in_array($reqType, ['permission', 'late_permission', 'early_leave'], true)) {
+                } elseif ($isPerm) {
                     $perms = is_array($appState['permissionRequests'] ?? null) ? $appState['permissionRequests'] : [];
                     array_unshift($perms, $newReq);
                     $appState['permissionRequests'] = array_values($perms);
-                } elseif (in_array($reqType, ['recruitment', 'job_application', 'applicant'], true)) {
+                } elseif ($isResign) {
+                    $resigns = is_array($appState['resignationRequests'] ?? null) ? $appState['resignationRequests'] : [];
+                    array_unshift($resigns, $newReq);
+                    $appState['resignationRequests'] = array_values($resigns);
+                } elseif ($isRecruit) {
                     $rApps = is_array($appState['recruitmentApplications'] ?? null) ? $appState['recruitmentApplications'] : [];
                     array_unshift($rApps, $newReq);
                     $appState['recruitmentApplications'] = array_values($rApps);
@@ -665,6 +713,43 @@ try {
 
                 MicroCache::invalidate('settings_' . $targetKey);
                 MicroCache::invalidate('version_' . $targetKey);
+
+                // إدراج تزامني في جدول public.requests وجدول change_log إن وُجدت
+                try {
+                    $driver = Database::getDriver();
+                    $idempKey = !empty($newReq['idempotency_key']) ? (string)$newReq['idempotency_key'] : ('submit_' . $reqIdStr);
+                    $empId = (string)($newReq['employeeId'] ?? $newReq['employee_id'] ?? '');
+                    $empName = (string)($newReq['employeeName'] ?? $newReq['employee_name'] ?? '');
+                    $empCode = (string)($newReq['employeeCode'] ?? $newReq['employee_code'] ?? '');
+                    $bId = (string)($newReq['branchId'] ?? $newReq['branch_id'] ?? 'BR01');
+                    $targetRole = (string)($newReq['targetRole'] ?? $newReq['target_role'] ?? 'admin');
+                    $priority = strtoupper((string)($newReq['priority'] ?? 'NORMAL'));
+                    $status = strtoupper((string)($newReq['status'] ?? 'PENDING'));
+                    $reqJson = json_encode($newReq, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+                    if ($driver === 'pgsql') {
+                        Database::execute("
+                            INSERT INTO public.requests (
+                                id, idempotency_key, request_type, employee_id, employee_name, employee_code,
+                                branch_id, target_role, priority, status, payload,
+                                queued_at, sent_at, delivered_at, created_at, updated_at
+                            ) VALUES (
+                                ?, ?, ?, ?, ?, ?,
+                                ?, ?, ?, ?, ?::jsonb,
+                                NOW(), NOW(), NOW(), NOW(), NOW()
+                            )
+                            ON CONFLICT (id) DO UPDATE
+                            SET updated_at = NOW(), payload = EXCLUDED.payload, status = EXCLUDED.status
+                        ", [$reqIdStr, $idempKey, $reqType, $empId, $empName, $empCode, $bId, $targetRole, $priority, $status, $reqJson]);
+
+                        Database::execute("
+                            INSERT INTO change_log (entity_type, entity_id, branch_id, operation, delta_payload)
+                            VALUES ('request', ?, ?, 'INSERT', ?)
+                        ", [$reqIdStr, $bId, $reqJson]);
+                    }
+                } catch (Throwable $e) {
+                    error_log('[Submit Relational Dual-Write Warning]: ' . $e->getMessage());
+                }
             }
 
             $freshRow = Database::queryOne("SELECT version, updated_at FROM app_settings WHERE key_name = ?", [$targetKey]);

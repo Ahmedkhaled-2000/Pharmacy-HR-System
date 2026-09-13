@@ -3,6 +3,7 @@ import { fmt, parseAnnualLeaveBalance } from '../../utils/formatters';
 import { getRealTodayStr } from '../../utils/timeEngine';
 import { notifyAdminOnNewRequest } from '../../utils/gmailService';
 import { shouldRouteDirectToAdmin } from '../../utils/jobsHelper';
+import { dispatchEmployeeRequest } from '../../utils/requestSubmissionHelper';
 
 export default function EmployeeLeaveModule({
   emp,
@@ -210,32 +211,28 @@ export default function EmployeeLeaveModule({
       read: false
     };
 
-    const updatedState = {
-      ...state,
-      leaveRequests: updatedLeaveRequests,
-      requests: updatedRequests,
-      notifications: [newNotif, ...(state.notifications || [])]
-    };
+    const successMsg = isDirectAdmin
+      ? 'تم إرسال طلب الإجازة مباشرة إلى الإدارة العليا للاعتماد 🏖️'
+      : willExceedThreeDays
+      ? 'تم إرسال طلب الإجازة للإدارة العليا فقط (لتجاوزه 3 أيام في الشهر) 🏖️'
+      : 'تم إرسال طلب الإجازة لمدير الفرع والإدارة العليا للاعتماد 🏖️';
 
-    setState(updatedState);
     setShowForm(false);
     setReason('');
-    showToast(
-      isDirectAdmin
-        ? 'تم إرسال طلب الإجازة مباشرة إلى الإدارة العليا للاعتماد 🏖️'
-        : willExceedThreeDays
-        ? 'تم إرسال طلب الإجازة للإدارة العليا فقط (لتجاوزه 3 أيام في الشهر) 🏖️'
-        : 'تم إرسال طلب الإجازة لمدير الفرع والإدارة العليا للاعتماد 🏖️'
-    );
 
-    // مزامنة فورية في السحابة
-    if (saveState) {
-      saveState(updatedState).catch((err) => {
-        console.warn('[Leave] Background sync warning:', err);
-      });
-    }
+    await dispatchEmployeeRequest({
+      request: newRequest,
+      notification: newNotif,
+      specificArrayKey: 'leaveRequests',
+      state,
+      setState,
+      saveState,
+      showToast,
+      successMessage: successMsg
+    });
+
     try {
-      notifyAdminOnNewRequest?.({ state: updatedState, newRequest, empName: emp?.name })?.catch?.(() => {});
+      notifyAdminOnNewRequest?.({ state: { ...state, requests: [newRequest, ...(state.requests || [])] }, newRequest, empName: emp?.name })?.catch?.(() => {});
     } catch {}
   };
 
