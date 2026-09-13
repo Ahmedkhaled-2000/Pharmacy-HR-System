@@ -27,6 +27,7 @@ export default function EmployeeFileModal({
   const { authRole } = useAuth?.() || {};
   const executeWithOwnerGuard = propExecuteWithOwnerGuard || contextExecuteWithOwnerGuard;
   const currentEmp = editingEmp || emp;
+  const isRecruitmentDraft = Boolean(currentEmp && currentEmp.isFromRecruitment && !currentEmp.id);
 
   // Reactively derive jobs and departments from state if custom ones exist
   const effectiveJobs = (jobs && jobs !== DEFAULT_JOBS && jobs.length > 0)
@@ -311,8 +312,8 @@ export default function EmployeeFileModal({
       setPhotoUrl(editingEmp.photoUrl || '');
       setMaritalStatus(editingEmp.maritalStatus || 'أعزب');
 
-      let initialEmpCode = editingEmp.code || '';
-      if (!initialEmpCode || editingEmp.isFromRecruitment) {
+      let initialEmpCode = String(editingEmp.code || editingEmp.username || '').trim();
+      if (!initialEmpCode) {
         const existingCodes = (allEmployees || [])
           .map(e => parseInt(String(e.code || '').replace(/\D/g, ''), 10))
           .filter(n => !isNaN(n) && n > 0 && n < 99999);
@@ -794,7 +795,7 @@ export default function EmployeeFileModal({
         return `emp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
       })(),
       recruitmentApplicationId: editingEmp?.recruitmentApplicationId || editingEmp?.applicationId || undefined,
-      isFromRecruitment: editingEmp?.isFromRecruitment || undefined,
+      isFromRecruitment: undefined,
       name: name.trim(),
       nickname: (() => {
         const cleanNick = nickname.trim();
@@ -889,7 +890,7 @@ export default function EmployeeFileModal({
           let found = false;
           const updatedEmps = [];
 
-          const isExistingEmpEdit = Boolean(editingEmp && !editingEmp.isFromRecruitment && editingEmp.id);
+          const isExistingEmpEdit = Boolean(editingEmp && editingEmp.id);
 
           if (isExistingEmpEdit) {
             // حالة تعديل موظف قائم: نستهدف فقط الموظف المحدد بمعرفه الأصلي
@@ -1081,7 +1082,7 @@ export default function EmployeeFileModal({
     let isAllowancesChanged = false;
     let isCutoffChanged = false;
 
-    if (targetEmp && targetEmp.id && !targetEmp.isFromRecruitment) {
+    if (targetEmp && targetEmp.id && !isRecruitmentDraft) {
       // 1. فحص تغير الراتب الأساسي وسعر الساعة
       const oldSal = parseFloat(targetEmp.salary) || 0;
       const newSal = parseFloat(employeeData.salary) || 0;
@@ -1226,7 +1227,7 @@ export default function EmployeeFileModal({
               {photoUrl ? (
                 <img src={photoUrl} alt="Avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
               ) : (
-                editingEmp?.isFromRecruitment ? '🎯' : (editingEmp?.id ? '📄' : '👤')
+                isRecruitmentDraft ? '🎯' : (editingEmp?.id ? '📄' : '👤')
               )}
             </div>
 
@@ -1244,7 +1245,7 @@ export default function EmployeeFileModal({
                     textOverflow: 'ellipsis'
                   }}
                 >
-                  {editingEmp && editingEmp.isFromRecruitment
+                  {isRecruitmentDraft
                     ? `إضافة وتعيين موظف: ${editingEmp.name}`
                     : editingEmp && editingEmp.id
                     ? `ملف الموظف: ${editingEmp.name}`
@@ -1301,7 +1302,7 @@ export default function EmployeeFileModal({
 
         {/* Header Top Sub-Bar (Recruitment Banner + Tabs + Drive Sync) - NEVER SCROLLS */}
         <div style={{ padding: '14px 20px 0 20px', flexShrink: 0, overflow: 'visible' }}>
-          {editingEmp && editingEmp.isFromRecruitment && (
+          {isRecruitmentDraft && (
             <div
               style={{
                 background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(5, 150, 105, 0.08))',

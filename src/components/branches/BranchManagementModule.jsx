@@ -183,8 +183,8 @@ export default function BranchManagementModule({
                               )}
                             </div>
                           ) : (
-                            <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
-                              <span>⏰ المواعيد: غير محددة</span>
+                            <div style={{ fontSize: '11px', color: '#059669', marginTop: '2px', display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#ecfdf5', padding: '1px 6px', borderRadius: '4px', fontWeight: 600, border: '1px solid #a7f3d0' }}>
+                              <span>⏰ يعمل 24 ساعة</span>
                             </div>
                           )}
                         </div>
